@@ -1,0 +1,68 @@
+# Dependencies
+node_modules/
+*.pyc
+__pycache__/
+.Python
+*.egg-info/
+dist/
+build/
+
+# CDK
+cdk.out/
+.cdk.staging/
+cdk.context.json
+
+# Lambda layer
+lambda/layer/python/
+lambda/crawler-layer/python/
+
+# Web build
+web-deploy/
+web/dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.DS_Store
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Testing
+coverage/
+.nyc_output/
+.hypothesis/
+
+# Temporary files
+*.tmp
+.deps/
+scripts/cleanup-orphaned-resources.sh
+scripts/demo-setup.sh
+scripts/demo-guide.md
+
+# Internal documentation (not for public release)
+.kiro/
+KIRO_DEMO_SCRIPT.md
+SKYSCANNER_SESSION_PLAN.md
+DEPLOYMENT.md
+SECURITY_AUDIT.md
+cloudformation-template.yaml
+aws_blog_citation_analysis*.md
+aws_blog_citation_analysis*.pdf
+blog_preview.html
+blog_template.html
+amazon-ospo-ruleset.json
+architecture-diagram.drawio
+# Keep architecture-diagram.png - it's used in README and blog
+*.twopager.html
+*twopager*.html
+Generative Engine Optimisation*.html
+kiro-workshop-qa.md
+INCIDENT_REPORT.md

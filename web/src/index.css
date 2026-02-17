@@ -1,0 +1,339 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* Light mode (default) */
+  :root {
+    --color-bg-primary: 249 250 251;    /* gray-50 */
+    --color-text-primary: 17 24 39;     /* gray-900 */
+  }
+
+  /* Dark mode */
+  .dark {
+    --color-bg-primary: 17 24 39;       /* gray-900 */
+    --color-text-primary: 249 250 251;  /* gray-50 */
+  }
+
+  body {
+    @apply bg-skin-primary text-skin-primary transition-colors duration-200;
+  }
+}
+
+/* Global dark mode overrides - using raw CSS to avoid circular @apply */
+.dark .bg-white {
+  background-color: rgb(31 41 55); /* gray-800 */
+}
+
+.dark .bg-gray-50 {
+  background-color: rgb(17 24 39); /* gray-900 */
+}
+
+.dark .bg-gray-100 {
+  background-color: rgb(55 65 81); /* gray-700 */
+}
+
+.dark .border-gray-200 {
+  border-color: rgb(55 65 81); /* gray-700 */
+}
+
+.dark .border-gray-100 {
+  border-color: rgb(55 65 81); /* gray-700 */
+}
+
+.dark .text-gray-900 {
+  color: rgb(249 250 251); /* gray-50 */
+}
+
+.dark .text-gray-700 {
+  color: rgb(209 213 219); /* gray-300 */
+}
+
+.dark .text-gray-600 {
+  color: rgb(209 213 219); /* gray-300 */
+}
+
+.dark .text-gray-500 {
+  color: rgb(156 163 175); /* gray-400 */
+}
+
+.dark .text-gray-400 {
+  color: rgb(107 114 128); /* gray-500 */
+}
+
+.dark .text-gray-300 {
+  color: rgb(156 163 175); /* gray-400 */
+}
+
+.dark .hover\:bg-gray-50:hover {
+  background-color: rgb(55 65 81); /* gray-700 */
+}
+
+.dark .hover\:bg-gray-100:hover {
+  background-color: rgb(75 85 99); /* gray-600 */
+}
+
+.dark .hover\:bg-gray-200:hover {
+  background-color: rgb(75 85 99); /* gray-600 */
+}
+
+/* Input fields in dark mode */
+.dark input:not([type="checkbox"]):not([type="radio"]),
+.dark textarea,
+.dark select {
+  background-color: rgb(55 65 81); /* gray-700 */
+  border-color: rgb(75 85 99); /* gray-600 */
+  color: rgb(243 244 246); /* gray-100 */
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: rgb(156 163 175); /* gray-400 */
+}
+
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+  --tw-ring-color: rgb(107 114 128); /* gray-500 */
+  border-color: rgb(107 114 128); /* gray-500 */
+}
+
+@layer components {
+  /* Semantic color classes - only used for body element */
+  .bg-skin-primary {
+    background-color: rgb(var(--color-bg-primary));
+  }
+  .text-skin-primary {
+    color: rgb(var(--color-text-primary));
+  }
+}
+
+@layer utilities {
+  .animate-fadeIn {
+    animation: fadeIn 0.2s ease-out;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Markdown prose styles */
+.prose-markdown h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: rgb(17 24 39);
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+.prose-markdown h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: rgb(17 24 39);
+  margin-top: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+.prose-markdown h3 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: rgb(17 24 39);
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.prose-markdown h4 {
+  font-size: 1rem;
+  font-weight: 600;
+  color: rgb(17 24 39);
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.prose-markdown p {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  line-height: 1.625;
+}
+
+.prose-markdown ul {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  margin-left: 1.5rem;
+  list-style-type: disc;
+}
+
+.prose-markdown ol {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  margin-left: 1.5rem;
+  list-style-type: decimal;
+}
+
+.prose-markdown li {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.prose-markdown strong {
+  font-weight: 600;
+  color: rgb(17 24 39);
+}
+
+.prose-markdown em {
+  font-style: italic;
+}
+
+.prose-markdown blockquote {
+  border-left-width: 4px;
+  border-color: rgb(209 213 219);
+  padding-left: 1rem;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  font-style: italic;
+  color: rgb(75 85 99);
+}
+
+.prose-markdown code {
+  background-color: rgb(243 244 246);
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.875rem;
+  font-family: ui-monospace, monospace;
+  color: rgb(31 41 55);
+}
+
+.prose-markdown pre {
+  background-color: rgb(17 24 39);
+  color: rgb(243 244 246);
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+}
+
+.prose-markdown pre code {
+  background-color: transparent;
+  padding: 0;
+  color: inherit;
+}
+
+.prose-markdown hr {
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+  border-color: rgb(229 231 235);
+}
+
+.prose-markdown a {
+  color: rgb(37 99 235);
+}
+
+.prose-markdown a:hover {
+  text-decoration: underline;
+}
+
+.prose-markdown table {
+  width: 100%;
+  margin-top: 1rem;
+  margin-bottom: 1rem;
+  border-collapse: collapse;
+}
+
+.prose-markdown th {
+  border: 1px solid rgb(209 213 219);
+  padding: 0.5rem 0.75rem;
+  background-color: rgb(249 250 251);
+  text-align: left;
+  font-weight: 600;
+}
+
+.prose-markdown td {
+  border: 1px solid rgb(209 213 219);
+  padding: 0.5rem 0.75rem;
+}
+
+/* Dark mode prose styles */
+.dark .prose-markdown h1,
+.dark .prose-markdown h2,
+.dark .prose-markdown h3,
+.dark .prose-markdown h4,
+.dark .prose-markdown strong {
+  color: rgb(243 244 246);
+}
+
+.dark .prose-markdown blockquote {
+  border-color: rgb(75 85 99);
+  color: rgb(156 163 175);
+}
+
+.dark .prose-markdown code {
+  background-color: rgb(55 65 81);
+  color: rgb(229 231 235);
+}
+
+.dark .prose-markdown hr {
+  border-color: rgb(55 65 81);
+}
+
+.dark .prose-markdown a {
+  color: rgb(96 165 250);
+}
+
+.dark .prose-markdown th {
+  border-color: rgb(75 85 99);
+  background-color: rgb(31 41 55);
+}
+
+.dark .prose-markdown td {
+  border-color: rgb(75 85 99);
+}
+
+/* AWS Amplify Authenticator Dark Mode Overrides */
+.dark [data-amplify-authenticator] {
+  --amplify-colors-background-primary: rgb(17 24 39); /* gray-900 */
+  --amplify-colors-background-secondary: rgb(31 41 55); /* gray-800 */
+  --amplify-colors-background-tertiary: rgb(55 65 81); /* gray-700 */
+  --amplify-colors-font-primary: rgb(249 250 251); /* gray-50 */
+  --amplify-colors-font-secondary: rgb(209 213 219); /* gray-300 */
+  --amplify-colors-font-tertiary: rgb(156 163 175); /* gray-400 */
+  --amplify-colors-border-primary: rgb(75 85 99); /* gray-600 */
+  --amplify-colors-border-secondary: rgb(55 65 81); /* gray-700 */
+  --amplify-colors-border-tertiary: rgb(55 65 81); /* gray-700 */
+}
+
+.dark [data-amplify-authenticator] [data-amplify-container] {
+  background-color: rgb(31 41 55); /* gray-800 */
+  border-color: rgb(75 85 99); /* gray-600 */
+}
+
+.dark [data-amplify-authenticator] input {
+  background-color: rgb(55 65 81); /* gray-700 */
+  border-color: rgb(75 85 99); /* gray-600 */
+  color: rgb(243 244 246); /* gray-100 */
+}
+
+.dark [data-amplify-authenticator] input::placeholder {
+  color: rgb(156 163 175); /* gray-400 */
+}
+
+.dark [data-amplify-authenticator] button[type="submit"] {
+  background-color: rgb(17 24 39); /* gray-900 */
+  color: rgb(255 255 255);
+}
+
+.dark [data-amplify-authenticator] button[type="submit"]:hover {
+  background-color: rgb(31 41 55); /* gray-800 */
+}
+
+.dark [data-amplify-authenticator] [data-amplify-router-content] {
+  background-color: rgb(31 41 55); /* gray-800 */
+}

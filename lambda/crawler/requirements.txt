@@ -1,0 +1,7 @@
+# Crawler Lambda dependencies
+# All dependencies come from the crawler-layer:
+# - bedrock-agentcore (browser automation)
+# - playwright (CDP client for AgentCore)
+# - shared modules (config, browser_tools, etc.)
+#
+# boto3 is provided by Lambda runtime

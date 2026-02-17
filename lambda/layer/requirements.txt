@@ -1,0 +1,16 @@
+# Shared dependencies for all Lambda functions
+# Note: boto3/botocore are provided by Lambda runtime - DO NOT include here
+
+# HTTP requests and HTML parsing
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Async HTTP client (used by Search function for AI provider clients)
+httpx>=0.28.0
+anyio>=4.0.0
+
+# OpenAI SDK (for Search Lambda - uses Responses API)
+openai>=1.10.0
+
+# NOTE: google-generativeai SDK removed - we use direct REST API calls instead
+# This saves ~130MB (googleapiclient, grpc, protobuf, etc.)

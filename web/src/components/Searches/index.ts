@@ -1,0 +1,1 @@
+export { SearchesView } from './SearchesView';

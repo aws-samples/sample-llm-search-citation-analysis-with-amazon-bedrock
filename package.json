@@ -1,0 +1,52 @@
+{
+  "name": "citation-analysis-system",
+  "version": "1.0.0",
+  "description": "Serverless citation analysis system using AWS CDK",
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "lint": "npx eslint .",
+    "lint:fix": "npx eslint . --fix",
+    "cdk": "cdk",
+    "deploy": "./scripts/deploy.sh",
+    "deploy:cdk": "cdk deploy --require-approval never",
+    "deploy:full": "npm run deploy:cdk && npm run clear-cache",
+    "clear-cache": "bash scripts/clear-cloudfront-cache.sh",
+    "synth": "cdk synth"
+  },
+  "keywords": [
+    "cdk",
+    "aws",
+    "citation-analysis"
+  ],
+  "author": "",
+  "license": "MIT-0",
+  "devDependencies": {
+    "@eslint-community/eslint-plugin-eslint-comments": "^4.6.0",
+    "@nx/eslint-plugin": "^22.4.0",
+    "@stylistic/eslint-plugin": "^5.7.0",
+    "@types/node": "^20.17.0",
+    "@vitest/eslint-plugin": "^1.6.6",
+    "aws-cdk": "^2.235.0",
+    "eslint": "^9.39.2",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-jsdoc": "^62.3.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-sonarjs": "^3.0.5",
+    "eslint-plugin-unicorn": "^62.0.0",
+    "eslint-plugin-unused-imports": "^4.3.0",
+    "source-map-support": "^0.5.21",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.53.1"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.235.0",
+    "constructs": "^10.4.0"
+  },
+  "overrides": {
+    "diff": "^8.0.3"
+  }
+}

@@ -1,0 +1,1 @@
+export { CitationsView } from './CitationsView';

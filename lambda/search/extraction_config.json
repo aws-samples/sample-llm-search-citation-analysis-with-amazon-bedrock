@@ -1,0 +1,34 @@
+{
+  "brand_extraction": {
+    "enabled": true,
+    "model_id": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "config": {
+      "industry": "retail",
+      "extract_brands": true,
+      "include_sentiment": true,
+      "include_ranking_context": true,
+      "max_brands": 20,
+      "tracked_brands": {
+        "first_party": [],
+        "competitors": []
+      },
+      "custom_entity_types": [],
+      "custom_prompt_additions": ""
+    },
+    "notes": "Using Claude Sonnet for brand extraction. Configure industry and tracked brands via API."
+  },
+  "custom_extractions": {
+    "amenities": {
+      "enabled": false,
+      "description": "Extract mentioned amenities (pool, spa, gym, etc.)"
+    },
+    "price_mentions": {
+      "enabled": false,
+      "description": "Extract any price or value mentions"
+    },
+    "location_details": {
+      "enabled": false,
+      "description": "Extract location descriptions (beach, city center, etc.)"
+    }
+  }
+}

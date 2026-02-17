@@ -1,0 +1,16 @@
+# Browser automation layer for Crawler Lambda
+# Uses Bedrock AgentCore managed browsers (no local Chromium needed)
+
+# NOTE: boto3/botocore are provided by Lambda runtime - DO NOT include here
+# This saves ~27MB
+
+# Bedrock AgentCore SDK for managed browser sessions
+bedrock-agentcore>=0.1.0
+
+# Playwright as CDP client only (connects to AgentCore's remote Chrome)
+# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 must be set during install
+playwright>=1.40.0
+
+# NOTE: Nova Act SDK is too large for Lambda layers (475MB+ with dependencies)
+# The crawler uses Web Bot Auth + Playwright for verification handling instead
+# Nova Act is better suited for local development or container-based Lambdas
