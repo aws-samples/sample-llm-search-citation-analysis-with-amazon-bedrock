@@ -42,7 +42,7 @@ _count_cache_ttl = 300  # 5 minutes
 
 
 def _get_table_item_count(table, cache_key: str) -> int:
-    """Get approximate item count using describe_table instead of scan."""
+    """Get item count using scan with COUNT select for accuracy."""
     now = time.time()
     cached = _count_cache.get(cache_key)
     
@@ -50,9 +50,13 @@ def _get_table_item_count(table, cache_key: str) -> int:
         return cached['count']
     
     try:
-        client = boto3.client('dynamodb')
-        response = client.describe_table(TableName=table.table_name)
-        count = response['Table'].get('ItemCount', 0)
+        response = table.scan(Select='COUNT')
+        count = response.get('Count', 0)
+        
+        # Handle pagination for large tables
+        while 'LastEvaluatedKey' in response:
+            response = table.scan(Select='COUNT', ExclusiveStartKey=response['LastEvaluatedKey'])
+            count += response.get('Count', 0)
         
         _count_cache[cache_key] = {'count': count, 'timestamp': now}
         return count
