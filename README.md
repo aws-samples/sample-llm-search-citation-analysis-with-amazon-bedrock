@@ -152,12 +152,20 @@ aws cloudformation describe-stacks \
 
 ### Dashboard Features
 
+![Dashboard overview](docs/dashboard.png)
+
 - **Real-time Statistics**: Auto-refreshes every 30 seconds
 - **Provider Comparison**: Bar chart showing citation counts by AI provider
 - **Brand Analysis**: Pie chart of brand mentions across AI providers
 - **Top Citations**: Table of most frequently cited URLs
 - **Recent Searches**: Latest search results with timestamps
 - **Filtering**: Filter by keyword or provider
+
+![Brand mentions with sentiment analysis](docs/brandmentions.png)
+
+![Citation gap analysis](docs/citationgapanalysis.png)
+
+![Content Studio with AI-generated recommendations](docs/contentstudio.png)
 
 The dashboard is a static React application hosted on S3 and served via CloudFront, with data fetched from API Gateway endpoints backed by Lambda functions.
 
