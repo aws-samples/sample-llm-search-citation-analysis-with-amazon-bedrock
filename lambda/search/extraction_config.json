@@ -15,7 +15,7 @@
       "custom_entity_types": [],
       "custom_prompt_additions": ""
     },
-    "notes": "Using Claude Sonnet for brand extraction. Configure industry and tracked brands via API."
+    "notes": "Using Claude Haiku 4.5 for brand extraction. Configure industry and tracked brands via API."
   },
   "custom_extractions": {
     "amenities": {
