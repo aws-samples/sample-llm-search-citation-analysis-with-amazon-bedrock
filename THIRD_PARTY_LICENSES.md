@@ -74,7 +74,7 @@ This document lists all third-party open source software used in the Citation An
 
 | Library | Version | License | Purpose |
 |---------|---------|---------|---------|
-| [openai](https://github.com/openai/openai-python) | ≥1.10.0 | Apache-2.0 | OpenAI API client for GPT-4o with web search |
+| [openai](https://github.com/openai/openai-python) | ≥1.10.0 | Apache-2.0 | OpenAI API client for GPT-5 mini with web search |
 | [google-generativeai](https://github.com/google/generative-ai-python) | ≥0.3.0 | Apache-2.0 | Google Gemini API client with grounding |
 
 ### HTTP and Web Scraping
