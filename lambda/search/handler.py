@@ -144,6 +144,8 @@ def store_raw_response_to_s3(
 def get_secret(secret_name: str) -> Optional[str]:
     """Retrieve a secret from AWS Secrets Manager with TTL-based caching."""
     current_time = time.time()
+    # Derive provider label from secret path (e.g. "citation-analysis/openai-key" -> "OpenAI")
+    provider_label = secret_name.rsplit('/', 1)[-1].replace('-key', '').title()
     
     # Check if cached and not expired
     if secret_name in _secrets_cache:
@@ -151,8 +153,7 @@ def get_secret(secret_name: str) -> Optional[str]:
         if current_time - cache_time < SECRETS_CACHE_TTL:
             return _secrets_cache[secret_name]
         else:
-            # Cache expired, remove stale entries
-            logger.info(f"Secret cache expired for {secret_name}, refreshing")
+            logger.info(f"Cache expired for {provider_label}, refreshing")
             del _secrets_cache[secret_name]
             del _secrets_cache_time[secret_name]
     
@@ -166,7 +167,7 @@ def get_secret(secret_name: str) -> Optional[str]:
                 _secrets_cache_time[secret_name] = current_time
                 return api_key
     except Exception as e:
-        logger.error(f"Error retrieving secret {secret_name}: {str(e)}")
+        logger.error(f"No secret found for {provider_label}: {str(e)}")
     
     return None
 
