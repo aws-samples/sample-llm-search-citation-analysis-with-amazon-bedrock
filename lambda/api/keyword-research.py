@@ -55,6 +55,7 @@ def get_secret(secret_name: str) -> Optional[str]:
     """Retrieve secret from Secrets Manager with caching."""
     current_time = time.time()
     full_name = f"{SECRETS_PREFIX}{secret_name}"
+    provider_label = secret_name.replace('-key', '').title()
     
     # Check cache
     if full_name in _secrets_cache:
@@ -75,7 +76,7 @@ def get_secret(secret_name: str) -> Optional[str]:
         _secrets_cache_time[full_name] = current_time
         return api_key
     except Exception as e:
-        logger.warning(f"Secret {secret_name} not found: {e}")
+        logger.warning(f"No secret found for {provider_label}: {e}")
         return None
 
 

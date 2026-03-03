@@ -134,7 +134,7 @@ def get_secret_status(secret_name: str) -> dict:
     except ClientError as e:
         if e.response['Error']['Code'] == 'ResourceNotFoundException':
             return {'exists': False, 'has_value': False, 'masked_key': None}
-        logger.error(f"Error checking secret {secret_name}: {str(e)}")
+        logger.error(f"Error checking provider status: {str(e)}")
         return {'exists': False, 'has_value': False}
 
 
