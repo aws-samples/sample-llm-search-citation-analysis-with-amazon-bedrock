@@ -122,10 +122,11 @@ def aggregate_brand_mentions(results: List[Dict[str, Any]], config: Dict[str, An
     'keyword': require_keyword(),
     'timestamp': {'type': str, 'max_length': 50},
     'provider': optional_provider(),
-    'classification': {'type': str, 'choices': ['first_party', 'competitor', 'other']}
+    'classification': {'type': str, 'choices': ['first_party', 'competitor', 'other']},
+    'query_prompt_id': {'type': str, 'max_length': 100},
 })
 def handler(event: Dict[str, Any], context: Any, keyword: str, timestamp: str = None, 
-            provider: str = None, classification: str = None) -> Dict[str, Any]:
+            provider: str = None, classification: str = None, query_prompt_id: str = None) -> Dict[str, Any]:
     """
     API handler to get brand mentions for a keyword.
     
@@ -169,6 +170,10 @@ def handler(event: Dict[str, Any], context: Any, keyword: str, timestamp: str = 
     
     if not items:
         return not_found_response('Results for keyword', event)
+    
+    # Filter by persona if specified
+    if query_prompt_id:
+        items = [item for item in items if item.get('query_prompt_id', 'default') == query_prompt_id]
     
     # Filter by provider if specified
     if provider:

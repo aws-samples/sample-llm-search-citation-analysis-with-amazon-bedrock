@@ -178,3 +178,60 @@ export interface HistoricalTrendsResponse {
     avg_score: number;
   };
 }
+
+export interface PersonaBrandRanking {
+  name: string;
+  rank: number;
+  mention_count: number;
+  sentiment: string;
+  visibility_score: number;
+  classification: BrandClassification;
+}
+
+export interface PersonaRankingGroup {
+  persona_id: string;
+  persona_name: string;
+  brands: PersonaBrandRanking[];
+}
+
+export interface CrossPersonaBrandSummary {
+  name: string;
+  avg_rank: number;
+  best_rank: number;
+  worst_rank: number;
+  best_persona: string;
+  classification: BrandClassification;
+}
+
+export interface PersonaRankingsResponse {
+  keyword: string;
+  personas: PersonaRankingGroup[];
+  cross_persona_summary: {
+    brands: CrossPersonaBrandSummary[];
+  };
+}
+
+export interface ContentRecommendation {
+  title: string;
+  description: string;
+  priority: 'high' | 'medium' | 'low';
+  content_type: string;
+  gap_reference: string;
+}
+
+export interface SelfReflectionResult {
+  keyword: string;
+  brand: string;
+  query_prompt_id: string;
+  query_prompt_name: string;
+  current_rank: number | null;
+  explanation: string;
+  content_contributions: string;
+  competitor_advantages: string;
+  missing_data_points: string;
+  recommendations: ContentRecommendation[];
+  industry: string;
+  created_at: string;
+}
+
+export type SelfReflectionResponse = SelfReflectionResult;

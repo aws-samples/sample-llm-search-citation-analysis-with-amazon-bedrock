@@ -325,6 +325,25 @@ export class CitationAnalysisStack extends cdk.Stack {
       projectionType: dynamodb.ProjectionType.ALL,
     });
 
+    // DynamoDB Table: SelfReflection
+    // Stores LLM self-reflection analysis results with 24-hour TTL caching
+    const selfReflectionTable = new dynamodb.Table(this, 'SelfReflectionTable', {
+      tableName: 'CitationAnalysis-SelfReflection',
+      partitionKey: {
+        name: 'keyword_brand',
+        type: dynamodb.AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'persona_timestamp',
+        type: dynamodb.AttributeType.STRING,
+      },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      timeToLiveAttribute: 'ttl',
+    });
+
     // ========================================
     // Secrets Manager - API Keys
     // ========================================
@@ -1363,6 +1382,64 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     searchResultsTable.grantReadData(getBrandMentionsFunction);
     brandConfigTable.grantReadData(getBrandMentionsFunction);
+
+    // ========================================
+    // Persona Rankings API
+    // ========================================
+
+    const getPersonaRankingsFunction = new lambda.Function(this, 'GetPersonaRankingsFunction', {
+      functionName: 'CitationAnalysis-API-GetPersonaRankings',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'get-persona-rankings.handler',
+      code: createApiLambdaCode('get-persona-rankings.py'),
+      layers: [sharedLayer],
+      timeout: cdk.Duration.seconds(30),
+      memorySize: 256,
+      description: 'API: Get per-persona brand ranking breakdowns',
+      environment: {
+        DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
+        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
+      },
+    });
+    searchResultsTable.grantReadData(getPersonaRankingsFunction);
+    queryPromptsTable.grantReadData(getPersonaRankingsFunction);
+
+    // ========================================
+    // Self-Reflection API
+    // ========================================
+
+    const selfReflectionFunction = new lambda.Function(this, 'SelfReflectionFunction', {
+      functionName: 'CitationAnalysis-API-SelfReflection',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'self-reflection.handler',
+      code: createApiLambdaCode('self-reflection.py'),
+      layers: [sharedLayer],
+      timeout: cdk.Duration.seconds(60),
+      memorySize: 256,
+      description: 'API: LLM self-reflection analysis for brand rankings',
+      environment: {
+        DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
+        DYNAMODB_TABLE_SELF_REFLECTION: selfReflectionTable.tableName,
+        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
+        BEDROCK_MODEL_ID: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+      },
+    });
+    searchResultsTable.grantReadData(selfReflectionFunction);
+    brandConfigTable.grantReadData(selfReflectionFunction);
+    queryPromptsTable.grantReadData(selfReflectionFunction);
+    selfReflectionTable.grantReadWriteData(selfReflectionFunction);
+    selfReflectionFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'bedrock:InvokeModel',
+      ],
+      resources: [
+        `arn:aws:bedrock:*:${this.account}:inference-profile/global.anthropic.claude-*`,
+        `arn:aws:bedrock:*::foundation-model/anthropic.claude-*`,
+        `arn:aws:bedrock:::foundation-model/anthropic.claude-*`,
+      ],
+    }));
+
     brandConfigTable.grantReadWriteData(manageBrandConfigFunction);
     
     // Grant Bedrock access for brand expansion feature
@@ -1661,6 +1738,15 @@ export class CitationAnalysisStack extends cdk.Stack {
     const trendsResource = apiResource.addResource('trends');
     trendsResource.addMethod('GET', new apigateway.LambdaIntegration(statsInsightsFunction, integrationOptions), methodOptions);
 
+    // Persona Rankings API Route
+    const personaRankingsResource = apiResource.addResource('persona-rankings');
+    personaRankingsResource.addMethod('GET', new apigateway.LambdaIntegration(getPersonaRankingsFunction, integrationOptions), methodOptions);
+
+    // Self-Reflection API Routes
+    const selfReflectionResource = apiResource.addResource('self-reflection');
+    selfReflectionResource.addMethod('POST', new apigateway.LambdaIntegration(selfReflectionFunction, integrationOptions), methodOptions);
+    selfReflectionResource.addMethod('GET', new apigateway.LambdaIntegration(selfReflectionFunction, integrationOptions), methodOptions);
+
     // ========================================
     // Content Studio API
     // ========================================
@@ -1682,6 +1768,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
         DYNAMODB_TABLE_CONTENT_STUDIO: contentStudioTable.tableName,
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
+        DYNAMODB_TABLE_SELF_REFLECTION: selfReflectionTable.tableName,
         GENERATION_TIMEOUT_SECONDS: '240',
       },
     });
@@ -1691,6 +1778,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     brandConfigTable.grantReadData(contentStudioFunction);
     contentStudioTable.grantReadWriteData(contentStudioFunction);
     keywordsTable.grantReadData(contentStudioFunction);
+    selfReflectionTable.grantReadData(contentStudioFunction);
     // Grant Bedrock access for content generation using Converse API
     // Uses global.anthropic.claude-* inference profiles (Haiku 4.5 for speed)
     // Note: Converse API requires bedrock:InvokeModel permission (not bedrock:Converse)
@@ -2113,7 +2201,8 @@ def delete_waf(waf, arn):
       statsInsightsFunction, citationsContentFunction,
       keywordMgmtFunction, configMgmtFunction, executionMgmtFunction,
       getBrandMentionsFunction, manageBrandConfigFunction,
-      contentStudioFunction, manageUsersFunction
+      contentStudioFunction, manageUsersFunction,
+      getPersonaRankingsFunction, selfReflectionFunction
     ];
     
     for (const fn of apiLambdaFunctions) {

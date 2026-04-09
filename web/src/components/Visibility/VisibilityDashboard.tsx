@@ -3,20 +3,27 @@ import {
 } from 'react';
 import { useVisibilityMetrics } from '../../hooks/useVisibilityMetrics';
 import { useHistoricalTrends } from '../../hooks/useHistoricalTrends';
+import { usePersonaRankings } from '../../hooks/usePersonaRankings';
 import {
   BrandRow, SummaryCards, TrendChart 
 } from './VisibilityComponents';
+import { PersonaSelector } from '../shared/PersonaSelector';
+import { PersonaComparisonChart } from './PersonaComparisonChart';
 
 interface Props { readonly keywords: Array<{ keyword: string }>; }
 
 export function VisibilityDashboard({ keywords }: Props) {
   const [selectedKeyword, setSelectedKeyword] = useState<string>('');
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   const {
     data: visibility, loading: visLoading, fetchVisibilityMetrics 
   } = useVisibilityMetrics();
   const {
     data: trends, loading: trendsLoading, fetchHistoricalTrends 
   } = useHistoricalTrends();
+  const {
+    data: personaRankings, fetchPersonaRankings 
+  } = usePersonaRankings();
 
   useEffect(() => {
     if (keywords.length > 0 && !selectedKeyword) setSelectedKeyword(keywords[0].keyword);
@@ -24,10 +31,16 @@ export function VisibilityDashboard({ keywords }: Props) {
 
   useEffect(() => {
     if (selectedKeyword) {
-      fetchVisibilityMetrics(selectedKeyword);
+      fetchVisibilityMetrics(selectedKeyword, undefined, selectedPersonaId ?? undefined);
       fetchHistoricalTrends(selectedKeyword, 'day', 30);
     }
-  }, [selectedKeyword, fetchVisibilityMetrics, fetchHistoricalTrends]);
+  }, [selectedKeyword, selectedPersonaId, fetchVisibilityMetrics, fetchHistoricalTrends]);
+
+  useEffect(() => {
+    if (selectedKeyword) {
+      fetchPersonaRankings(selectedKeyword);
+    }
+  }, [selectedKeyword, fetchPersonaRankings]);
 
   const hasTrendData = trends?.trend_data && trends.trend_data.length > 0;
 
@@ -45,6 +58,7 @@ export function VisibilityDashboard({ keywords }: Props) {
               {keywords.map(k => <option key={k.keyword} value={k.keyword}>{k.keyword}</option>)}
             </select>
           </div>
+          <PersonaSelector selectedPersonaId={selectedPersonaId} onPersonaChange={setSelectedPersonaId} />
         </div>
       </div>
 
@@ -87,6 +101,8 @@ export function VisibilityDashboard({ keywords }: Props) {
               </table>
             </div>
           </div>
+
+          <PersonaComparisonChart data={personaRankings} />
         </>
       )}
     </div>

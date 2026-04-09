@@ -11,11 +11,15 @@ vi.mock('../../hooks/useVisibilityMetrics', () => ({useVisibilityMetrics: vi.fn(
 
 vi.mock('../../hooks/useHistoricalTrends', () => ({useHistoricalTrends: vi.fn(),}));
 
+vi.mock('../../hooks/usePersonaRankings', () => ({usePersonaRankings: vi.fn(),}));
+
 import { useVisibilityMetrics } from '../../hooks/useVisibilityMetrics';
 import { useHistoricalTrends } from '../../hooks/useHistoricalTrends';
+import { usePersonaRankings } from '../../hooks/usePersonaRankings';
 
 const mockUseVisibilityMetrics = useVisibilityMetrics as ReturnType<typeof vi.fn>;
 const mockUseHistoricalTrends = useHistoricalTrends as ReturnType<typeof vi.fn>;
+const mockUsePersonaRankings = usePersonaRankings as ReturnType<typeof vi.fn>;
 
 function buildProps(overrides = {}) {
   return {
@@ -40,6 +44,12 @@ describe('VisibilityDashboard', () => {
       loading: false,
       fetchHistoricalTrends: vi.fn(),
     });
+    mockUsePersonaRankings.mockReturnValue({
+      data: null,
+      loading: false,
+      error: null,
+      fetchPersonaRankings: vi.fn(),
+    });
   });
 
   describe('initial render', () => {
@@ -53,8 +63,8 @@ describe('VisibilityDashboard', () => {
     it('renders keyword selector with all keywords', () => {
       render(<VisibilityDashboard {...buildProps()} />);
 
-      const select = screen.getByRole('combobox');
-      expect(select).toBeInTheDocument();
+      const selects = screen.getAllByRole('combobox');
+      expect(selects[0]).toBeInTheDocument();
       expect(screen.getByText('hotels')).toBeInTheDocument();
       expect(screen.getByText('resorts')).toBeInTheDocument();
     });
@@ -69,7 +79,7 @@ describe('VisibilityDashboard', () => {
 
       render(<VisibilityDashboard {...buildProps()} />);
 
-      expect(fetchVisibilityMetrics).toHaveBeenCalledWith('hotels');
+      expect(fetchVisibilityMetrics).toHaveBeenCalledWith('hotels', undefined, undefined);
     });
   });
 
@@ -162,10 +172,10 @@ describe('VisibilityDashboard', () => {
 
       render(<VisibilityDashboard {...buildProps()} />);
 
-      const select = screen.getByRole('combobox');
-      await userEvent.selectOptions(select, 'resorts');
+      const selects = screen.getAllByRole('combobox');
+      await userEvent.selectOptions(selects[0], 'resorts');
 
-      expect(fetchVisibilityMetrics).toHaveBeenCalledWith('resorts');
+      expect(fetchVisibilityMetrics).toHaveBeenCalledWith('resorts', undefined, undefined);
       expect(fetchHistoricalTrends).toHaveBeenCalledWith('resorts', 'day', 30);
     });
   });

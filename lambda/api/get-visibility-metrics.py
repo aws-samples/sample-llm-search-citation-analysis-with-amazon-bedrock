@@ -124,8 +124,8 @@ def calculate_share_of_voice(brand_mentions: Dict[str, int], total_mentions: int
     }
 
 
-def get_visibility_metrics(keyword: str, config: Dict[str, Any]) -> Dict[str, Any]:
-    """Calculate visibility metrics for a keyword."""
+def get_visibility_metrics(keyword: str, config: Dict[str, Any], query_prompt_id: str = None) -> Dict[str, Any]:
+    """Calculate visibility metrics for a keyword, optionally filtered by persona."""
     table = dynamodb.Table(SEARCH_RESULTS_TABLE)
     
     # Query all results for this keyword
@@ -149,6 +149,10 @@ def get_visibility_metrics(keyword: str, config: Dict[str, Any]) -> Dict[str, An
     # Get latest timestamp for current metrics
     latest_timestamp = max(item.get('timestamp', '') for item in items)
     latest_items = [item for item in items if item.get('timestamp') == latest_timestamp]
+    
+    # Filter by persona if specified
+    if query_prompt_id:
+        latest_items = [item for item in latest_items if item.get('query_prompt_id', 'default') == query_prompt_id]
     
     for item in latest_items:
         provider = item.get('provider', 'unknown')
@@ -253,18 +257,20 @@ def get_visibility_metrics(keyword: str, config: Dict[str, Any]) -> Dict[str, An
 @api_handler
 @validate({
     'keyword': require_keyword(),
-    'brand': {'type': str, 'max_length': 200}
+    'brand': {'type': str, 'max_length': 200},
+    'query_prompt_id': {'type': str, 'max_length': 100},
 })
-def handler(event, context, keyword, brand=None):
+def handler(event, context, keyword, brand=None, query_prompt_id=None):
     """
     API handler for visibility metrics.
     
     Query params:
         - keyword: Search keyword (required)
         - brand: Filter to specific brand (optional)
+        - query_prompt_id: Filter to specific persona (optional)
     """
     config = get_brand_config()
-    metrics = get_visibility_metrics(keyword, config)
+    metrics = get_visibility_metrics(keyword, config, query_prompt_id=query_prompt_id)
     
     # Filter to specific brand if requested
     if brand and 'brands' in metrics:

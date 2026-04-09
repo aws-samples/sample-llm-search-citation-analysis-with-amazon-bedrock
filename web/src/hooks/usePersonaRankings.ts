@@ -4,12 +4,12 @@ import {
 import {
   API_BASE_URL, authenticatedFetch, getErrorMessage 
 } from '../infrastructure';
-import type { VisibilityMetricsResponse } from '../types';
+import type { PersonaRankingsResponse } from '../types';
 
-class VisibilityFetchError extends Error {
-  constructor(message = 'Failed to fetch visibility metrics') {
+class PersonaRankingsFetchError extends Error {
+  constructor(message = 'Failed to fetch persona rankings') {
     super(message);
-    this.name = 'VisibilityFetchError';
+    this.name = 'PersonaRankingsFetchError';
   }
 }
 
@@ -19,45 +19,41 @@ function isBackendErrorResponse(data: unknown): data is BackendErrorResponse {
   return typeof data === 'object' && data !== null && 'error' in data && typeof (data as BackendErrorResponse).error === 'string';
 }
 
-function isVisibilityMetricsResponse(data: unknown): data is VisibilityMetricsResponse {
+function isPersonaRankingsResponse(data: unknown): data is PersonaRankingsResponse {
   if (typeof data !== 'object' || data === null) return false;
-  
-  // Check for error response from backend
   if ('error' in data) return false;
-  
-  return 'keyword' in data && 'brands' in data;
+  return 'keyword' in data && 'personas' in data && 'cross_persona_summary' in data;
 }
 
-export function useVisibilityMetrics() {
-  const [data, setData] = useState<VisibilityMetricsResponse | null>(null);
+export function usePersonaRankings() {
+  const [data, setData] = useState<PersonaRankingsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchVisibilityMetrics = useCallback(async (keyword: string, brand?: string, queryPromptId?: string) => {
+  const fetchPersonaRankings = useCallback(async (keyword: string, queryPromptId?: string) => {
     setLoading(true);
     setError(null);
-    
+
     try {
       const params = new URLSearchParams({ keyword });
-      if (brand) params.append('brand', brand);
       if (queryPromptId) params.append('query_prompt_id', queryPromptId);
-      
-      const response = await authenticatedFetch(`${API_BASE_URL}/visibility?${params}`);
-      if (!response.ok) throw new VisibilityFetchError();
-      
+
+      const response = await authenticatedFetch(`${API_BASE_URL}/persona-rankings?${params}`);
+      if (!response.ok) throw new PersonaRankingsFetchError();
+
       const json: unknown = await response.json();
       if (isBackendErrorResponse(json)) {
-        throw new VisibilityFetchError(json.error);
+        throw new PersonaRankingsFetchError(json.error);
       }
-      if (!isVisibilityMetricsResponse(json)) {
-        throw new VisibilityFetchError('Invalid response format');
+      if (!isPersonaRankingsResponse(json)) {
+        throw new PersonaRankingsFetchError('Invalid response format');
       }
       setData(json);
       return json;
     } catch (err) {
       const message = getErrorMessage(err, 'visibility');
       setError(message);
-      console.error('[visibility] Error fetching metrics:', err);
+      console.error('[persona-rankings] Error fetching rankings:', err);
       return null;
     } finally {
       setLoading(false);
@@ -68,6 +64,6 @@ export function useVisibilityMetrics() {
     data,
     loading,
     error,
-    fetchVisibilityMetrics 
+    fetchPersonaRankings 
   };
 }

@@ -225,6 +225,7 @@ Go to **Settings > Query Prompts**. Define persona-based search templates that s
 - Create multiple personas to see how different traveler types get different AI recommendations
 - Enable/disable individual prompts to control which run during analysis
 - Each analysis run executes all enabled prompts × all keywords × all providers
+- After analysis, use the persona filter on the Visibility and Brand Mentions pages to compare how your brand ranks under each persona
 
 ### Step 5: Run Analysis
 
@@ -243,8 +244,8 @@ After analysis completes, explore your data:
 
 **Insights Section:**
 - **Dashboard** – Overview stats: total searches, citations, pages crawled
-- **Visibility** – Your visibility score vs competitors, with 30-day trends. Shows share of voice by provider.
-- **Brand Mentions** – Every mention of your brand and competitors with sentiment (positive/negative/neutral) and ranking context
+- **Visibility** – Your visibility score vs competitors, with 30-day trends. Shows share of voice by provider. Filter by persona to see how rankings change for different audience segments. The persona comparison chart plots your brand's average rank across personas side by side with competitors.
+- **Brand Mentions** – Every mention of your brand and competitors with sentiment (positive/negative/neutral) and ranking context. Filter by persona to see which brands appear under each audience segment.
 - **Citations** – All URLs cited by AI models, ranked by frequency. Click any URL to see breakdown by keyword and provider.
 - **Prompt Insights** – How AI models frame their responses to your keywords
 - **Citation Gaps** – Sources that cite competitors but not you. This is your PR/content target list.
@@ -254,7 +255,8 @@ After analysis completes, explore your data:
 - **Keyword Research** – Expand your keyword list using AI with live web search. Analyze competitor websites to discover keywords they target. Both operations run asynchronously — results appear after 30-60 seconds.
 
 **Content Section:**
-- **Content Studio** – Generate content briefs and outlines based on citation gap analysis, with output language selection (English, Spanish, French, or any language). Helps you create content that AI models are more likely to cite.
+- **Content Studio** – Generate content briefs and outlines based on citation gap analysis, with output language selection (English, Spanish, French, or any language). Helps you create content that AI models are more likely to cite. Self-reflection recommendations from the ranking analysis also appear here as actionable content ideas, labelled with the originating persona.
+- **Ranking Analysis (Self-Reflection)** – For any brand and persona combination, ask the AI to explain why it ranked the brand where it did. Returns a structured breakdown: what the brand's content contributed, what competitors showed, what data points were missing, and prioritised content recommendations to improve ranking. Results are cached for 24 hours. This is industry-agnostic and works with whatever industry you have configured.
 
 **Data Section:**
 - **Recent Searches** – Your analysis history with full AI responses
@@ -270,7 +272,7 @@ The default OpenAI model is `gpt-5-mini` (cost-effective, supports web search). 
 2. The model can be overridden per provider via the ProviderConfig DynamoDB table
 3. Set the `model` field for any provider to change the default (e.g., `gpt-5.2` for higher quality)
 
-Content generation (Content Studio) uses Amazon Bedrock Claude Haiku 4.5 — this runs on your AWS account and doesn't require an external API key.
+Content generation (Content Studio) and ranking self-reflection both use Amazon Bedrock Claude Haiku 4.5. This runs on your AWS account and does not require an external API key. Self-reflection results are cached in a dedicated DynamoDB table with a 24-hour TTL to avoid repeated LLM calls for the same keyword, brand, and persona combination.
 
 ### Retry Logic
 - All API clients implement exponential backoff (5 retries, ~35s max wait)

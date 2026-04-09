@@ -20,7 +20,7 @@ import logging
 from boto3.dynamodb.conditions import Key
 from typing import Dict, Any, List
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 # Add shared module to path
@@ -429,7 +429,37 @@ def generate_content_ideas(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     # Add seasonal/trending content ideas based on keywords
     seasonal_keywords = _get_seasonal_suggestions(list(keyword_data.keys()), config)
     ideas.extend(seasonal_keywords)
-    
+
+    # Add self-reflection recommendations as content ideas
+    try:
+        self_reflection_table_name = os.environ.get('DYNAMODB_TABLE_SELF_REFLECTION')
+        if self_reflection_table_name:
+            sr_table = dynamodb.Table(self_reflection_table_name)
+            seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat() + 'Z'
+            sr_response = sr_table.scan(
+                FilterExpression='created_at >= :since',
+                ExpressionAttributeValues={':since': seven_days_ago},
+                Limit=100
+            )
+            for sr_item in sr_response.get('Items', []):
+                for rec in sr_item.get('recommendations', []):
+                    ideas.append({
+                        'id': str(uuid.uuid4()),
+                        'type': 'self_reflection',
+                        'priority': rec.get('priority', 'medium'),
+                        'title': rec.get('title', 'Self-Reflection Recommendation'),
+                        'description': rec.get('description', ''),
+                        'keyword': sr_item.get('keyword', ''),
+                        'source': 'self_reflection',
+                        'persona_name': sr_item.get('query_prompt_name', ''),
+                        'persona_id': sr_item.get('query_prompt_id', ''),
+                        'gap_reference': rec.get('gap_reference', ''),
+                        'content_angle': rec.get('content_type', 'comprehensive_guide'),
+                        'actionable': True,
+                    })
+    except Exception as e:
+        logger.warning(f"Failed to fetch self-reflection recommendations: {e}")
+
     priority_order = {'high': 0, 'medium': 1, 'low': 2}
     ideas.sort(key=lambda x: (priority_order.get(x.get('priority', 'low'), 2), x.get('keyword', '')))
     return ideas[:50]  # Increased from 30 to 50

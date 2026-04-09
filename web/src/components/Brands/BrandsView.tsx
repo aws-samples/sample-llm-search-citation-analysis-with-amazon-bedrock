@@ -4,6 +4,7 @@ import { useBrandConfig } from '../../hooks/useBrandConfig';
 import { BrandMentionsTable } from './BrandMentionsTable';
 import { BrandDetailModal } from './BrandDetailModal';
 import { BrandConfigPanel } from './BrandConfigPanel';
+import { PersonaSelector } from '../shared/PersonaSelector';
 import { Spinner } from '../ui/Spinner';
 import type {
   Keyword, AggregatedBrand, BrandMentionsResponse, BrandConfig 
@@ -169,6 +170,7 @@ const useViewState = () => {
   const [selectedBrand, setSelectedBrand] = useState<AggregatedBrand | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [classificationFilter, setClassificationFilter] = useState<string | null>(null);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   
   return {
     selectedKeyword,
@@ -178,7 +180,9 @@ const useViewState = () => {
     showConfig,
     setShowConfig,
     classificationFilter,
-    setClassificationFilter
+    setClassificationFilter,
+    selectedPersonaId,
+    setSelectedPersonaId
   };
 };
 
@@ -194,6 +198,7 @@ const renderModals = (props: {
   setShowConfig: (show: boolean) => void;
   expandAllBrands: ReturnType<typeof useBrandConfig>['expandAllBrands'];
   findCompetitors: ReturnType<typeof useBrandConfig>['findCompetitors'];
+  selectedPersonaId: string | null;
 }) => (
   <>
     {props.selectedBrand && props.data && (
@@ -201,6 +206,7 @@ const renderModals = (props: {
         brand={props.selectedBrand} 
         providerData={props.data.by_provider} 
         keyword={props.data.keyword} 
+        queryPromptId={props.selectedPersonaId}
         onClose={() => props.setSelectedBrand(null)} 
       />
     )}
@@ -221,12 +227,13 @@ const renderModals = (props: {
 export const BrandsView = ({ keywords }: BrandsViewProps) => {
   const {
     selectedKeyword, setSelectedKeyword, selectedBrand, setSelectedBrand,
-    showConfig, setShowConfig, classificationFilter, setClassificationFilter
+    showConfig, setShowConfig, classificationFilter, setClassificationFilter,
+    selectedPersonaId, setSelectedPersonaId
   } = useViewState();
 
   const {
     data, loading, error 
-  } = useBrandMentions(selectedKeyword, classificationFilter);
+  } = useBrandMentions(selectedKeyword, classificationFilter, selectedPersonaId);
   const {
     config, presets, loading: configLoading, saveConfig, expandAllBrands, findCompetitors 
   } = useBrandConfig();
@@ -242,6 +249,10 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
         onConfigClick={() => setShowConfig(true)}
       />
       <KeywordSelector keywords={keywords} selectedKeyword={selectedKeyword} onSelect={setSelectedKeyword} />
+      <PersonaSelector selectedPersonaId={selectedPersonaId} onPersonaChange={setSelectedPersonaId} />
+      {selectedPersonaId && (
+        <div className="text-xs text-gray-500 px-1">Filtering by persona</div>
+      )}
       <BrandContent
         data={data}
         loading={loading}
@@ -263,7 +274,8 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
         saveConfig,
         setShowConfig,
         expandAllBrands,
-        findCompetitors
+        findCompetitors,
+        selectedPersonaId
       })}
     </div>
   );

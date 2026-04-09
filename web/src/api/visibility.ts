@@ -13,6 +13,7 @@ import type {
 interface FetchVisibilityOptions {
   keyword: string;
   brand?: string;
+  queryPromptId?: string;
   signal?: AbortSignal;
 }
 
@@ -23,10 +24,11 @@ export function fetchVisibilityMetrics(
   options: FetchVisibilityOptions
 ): Promise<VisibilityMetricsResponse> {
   const {
-    keyword, brand, signal 
+    keyword, brand, queryPromptId, signal 
   } = options;
   const params: Record<string, string> = { keyword };
   if (brand) params.brand = brand;
+  if (queryPromptId) params.query_prompt_id = queryPromptId;
   return apiGet<VisibilityMetricsResponse>('/visibility', {
     params,
     signal 

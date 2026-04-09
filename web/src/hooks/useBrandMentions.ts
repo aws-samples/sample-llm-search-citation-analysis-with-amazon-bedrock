@@ -35,7 +35,7 @@ function isBrandMentionsResponse(data: unknown): data is BrandMentionsResponse {
  * return <BrandTable brands={data?.aggregated.brands} />;
  * ```
  */
-export const useBrandMentions = (keyword: string | null, classificationFilter: string | null = null) => {
+export const useBrandMentions = (keyword: string | null, classificationFilter: string | null = null, queryPromptId: string | null = null) => {
   const [data, setData] = useState<BrandMentionsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,9 +54,12 @@ export const useBrandMentions = (keyword: string | null, classificationFilter: s
 
       try {
         const baseUrl = `${API_BASE_URL}/brand-mentions?keyword=${encodeURIComponent(keyword)}`;
-        const url = classificationFilter
+        const classificationUrl = classificationFilter
           ? `${baseUrl}&classification=${encodeURIComponent(classificationFilter)}`
           : baseUrl;
+        const url = queryPromptId
+          ? `${classificationUrl}&query_prompt_id=${encodeURIComponent(queryPromptId)}`
+          : classificationUrl;
 
         const response = await authenticatedFetch(url, { signal: controller.signal });
 
@@ -84,7 +87,7 @@ export const useBrandMentions = (keyword: string | null, classificationFilter: s
     fetchBrandMentions();
 
     return () => controller.abort();
-  }, [keyword, classificationFilter]);
+  }, [keyword, classificationFilter, queryPromptId]);
 
   return {
     data,

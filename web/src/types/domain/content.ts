@@ -1,4 +1,4 @@
-export type ContentIdeaType = 'visibility_gap' | 'ranking_improvement' | 'provider_gap' | 'configuration' | 'data';
+export type ContentIdeaType = 'visibility_gap' | 'ranking_improvement' | 'provider_gap' | 'configuration' | 'data' | 'self_reflection';
 export type ContentPriority = 'high' | 'medium' | 'low';
 export type ContentAngle = 'comprehensive_guide' | 'differentiation' | 'provider_optimization';
 export type ContentStatus = 'pending' | 'generating' | 'generated' | 'failed';
@@ -18,6 +18,9 @@ export interface ContentIdea {
   current_rank?: number;
   actionable: boolean;
   content_angle?: ContentAngle;
+  persona_name?: string;
+  persona_id?: string;
+  gap_reference?: string;
 }
 
 export interface GeneratedContent {
