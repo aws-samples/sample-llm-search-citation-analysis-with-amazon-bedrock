@@ -1343,7 +1343,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     configMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['scheduler:CreateSchedule', 'scheduler:GetSchedule', 'scheduler:DeleteSchedule', 'scheduler:UpdateSchedule'],
-      resources: [`arn:aws:scheduler:${this.region}:${this.account}:schedule/default/CitationAnalysis-*`],
+      resources: [`arn:aws:scheduler:${this.region}:${this.account}:schedule/citation-analysis-schedules/*`],
     }));
     configMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
@@ -1353,7 +1353,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     configMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['scheduler:CreateScheduleGroup', 'scheduler:GetScheduleGroup'],
-      resources: [`arn:aws:scheduler:${this.region}:${this.account}:schedule-group/default`],
+      resources: [`arn:aws:scheduler:${this.region}:${this.account}:schedule-group/citation-analysis-schedules`],
     }));
     configMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
