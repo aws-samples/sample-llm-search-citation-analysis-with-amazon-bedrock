@@ -45,7 +45,7 @@
     "vitest": "^4.1.2"
   },
   "dependencies": {
-    "aws-cdk-lib": "^2.245.0",
+    "aws-cdk-lib": "^2.250.0",
     "constructs": "^10.6.0"
   },
   "overrides": {
@@ -54,6 +54,8 @@
     "yaml@^1.0.0": "^1.10.3",
     "picomatch": "^4.0.4",
     "brace-expansion": "^5.0.5",
-    "minimatch": "^10.2.3"
+    "minimatch": "^10.2.3",
+    "axios": "^1.15.0",
+    "follow-redirects": "^1.16.0"
   }
 }
