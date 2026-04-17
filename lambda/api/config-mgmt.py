@@ -7,10 +7,14 @@ Routes:
 - GET/PUT/POST /api/providers/* -> manage-providers handler
 """
 
-import importlib.util
-import os
-import sys
 import logging
+import sys
+
+# Shared layer path (populated by the Lambda layer at /opt/python)
+sys.path.insert(0, '/opt/python')
+
+from shared.api_response import not_found_response
+from shared.router import HandlerLoader
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -21,20 +25,7 @@ ROUTE_MAP = {
     '/api/providers': 'manage-providers.py',
 }
 
-_handler_cache = {}
-_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-def _get_handler(filename):
-    if filename not in _handler_cache:
-        filepath = os.path.join(_THIS_DIR, filename)
-        module_name = filename.replace('-', '_').replace('.py', '')
-        spec = importlib.util.spec_from_file_location(module_name, filepath)
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = mod
-        spec.loader.exec_module(mod)
-        _handler_cache[filename] = mod.handler
-    return _handler_cache[filename]
+_handlers = HandlerLoader(__file__)
 
 
 def handler(event, context):
@@ -45,11 +36,7 @@ def handler(event, context):
 
     for route_path, filename in ROUTE_MAP.items():
         if resource.startswith(route_path) or path.startswith(route_path):
-            return _get_handler(filename)(event, context)
+            return _handlers.get(filename)(event, context)
 
     logger.error(f"No route matched for resource={resource}, path={path}")
-    return {
-        'statusCode': 404,
-        'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-        'body': '{"error": "Route not found"}'
-    }
+    return not_found_response(resource='Route', event=event)
