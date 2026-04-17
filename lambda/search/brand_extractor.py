@@ -9,69 +9,15 @@ not exact string matching. This allows the LLM to understand brand hierarchies
 (e.g., sub-brands belonging to parent companies).
 """
 
-import json
 import logging
-import os
-import time
-import boto3
 from typing import List, Dict, Any, Optional
 
 # Import shared utilities from Lambda layer
 from shared.utils import get_brand_config
+from shared.models import ModelRole, invoke_bedrock
+from shared.llm_json import parse_llm_json
 
 logger = logging.getLogger(__name__)
-
-# Initialize AWS clients - no region needed for global inference profiles
-bedrock = boto3.client('bedrock-runtime')
-
-# Use Haiku 4.5 for brand extraction - same model used in content-studio
-DEFAULT_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-
-
-def invoke_converse(prompt: str, model_id: str = DEFAULT_MODEL_ID, max_tokens: int = 2000, temperature: float = 0, max_retries: int = 3) -> str:
-    """
-    Invoke Bedrock using the Converse API with retry logic.
-    
-    Args:
-        prompt: The prompt to send
-        model_id: Model ID to use
-        max_tokens: Maximum tokens in response
-        temperature: Temperature for generation
-        max_retries: Maximum number of retry attempts for throttling errors
-        
-    Returns:
-        Response text from the model
-    """
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"Invoking Bedrock Converse API with model: {model_id} (attempt {attempt + 1}/{max_retries})")
-            response = bedrock.converse(
-                modelId=model_id,
-                messages=[
-                    {'role': 'user', 'content': [{'text': prompt}]}
-                ],
-                inferenceConfig={
-                    'maxTokens': max_tokens,
-                    'temperature': temperature
-                }
-            )
-            
-            output = response.get('output', {})
-            message = output.get('message', {})
-            content_blocks = message.get('content', [])
-            result = content_blocks[0].get('text', '') if content_blocks else ''
-            logger.info(f"Bedrock response received, length: {len(result)} chars")
-            return result
-        except Exception as e:
-            error_str = str(e)
-            is_throttle = 'ThrottlingException' in error_str or 'TooManyRequestsException' in error_str or 'ServiceUnavailableException' in error_str
-            if is_throttle and attempt < max_retries - 1:
-                wait_time = (2 ** attempt) + 1
-                logger.warning(f"Bedrock throttled (attempt {attempt + 1}/{max_retries}), retrying in {wait_time}s: {error_str}")
-                time.sleep(wait_time)
-                continue
-            logger.error(f"Bedrock Converse API call failed: {error_str}")
-            raise
 
 # Industry presets with pre-built extraction prompts
 INDUSTRY_PRESETS = {
@@ -79,7 +25,7 @@ INDUSTRY_PRESETS = {
         "name": "Hotels & Hospitality",
         "description": "Track hotel brands, chains, and individual properties",
         "entity_types": ["hotel chains", "hotel brands", "individual properties", "resorts", "boutique hotels"],
-        "example_brands": ["Brand A", "Brand B", "Brand C", "Brand D", "Brand E"],
+        "example_brands": ["Marriott", "Hilton", "Hyatt", "InterContinental", "Four Seasons"],
         "extraction_focus": "hotel and accommodation recommendations"
     },
     "restaurants": {
@@ -159,8 +105,12 @@ DEFAULT_EXTRACTION_CONFIG = {
 class LLMBrandExtractor:
     """Extract brand mentions using LLM for intelligent parsing and classification."""
     
-    def __init__(self, model_id: str = DEFAULT_MODEL_ID, config: Optional[Dict] = None):
-        self.model_id = model_id
+    def __init__(self, model_id: Optional[str] = None, config: Optional[Dict] = None):
+        # model_id is accepted for backward compatibility but ignored.
+        # Model resolution now flows through shared.models.ModelRole.EXTRACTION.
+        if model_id is not None:
+            logger.debug("model_id argument to LLMBrandExtractor is ignored; "
+                         "models are resolved via shared.models.ModelRole.EXTRACTION")
         # Use default config if None or empty dict
         self.config = config if config else DEFAULT_EXTRACTION_CONFIG
         self.industry = self.config.get("industry", "hotels")
@@ -182,8 +132,8 @@ class LLMBrandExtractor:
         prompt = self._build_extraction_prompt(text)
         
         try:
-            # Call Bedrock using Converse API
-            response_text = invoke_converse(prompt, self.model_id, max_tokens=4000, temperature=0)
+            # Call shared Bedrock client with EXTRACTION role
+            response_text = invoke_bedrock(prompt, ModelRole.EXTRACTION, max_tokens=4000, temperature=0)
             
             if not response_text:
                 logger.warning("Empty response from Bedrock")
@@ -331,66 +281,15 @@ JSON OUTPUT:"""
         return brands
     
     def _parse_llm_response(self, response_text: str) -> List[Dict[str, Any]]:
-        """Parse the LLM's JSON response."""
-        try:
-            cleaned_text = response_text.strip()
-            
-            # Handle markdown code blocks (with or without language specifier)
-            if '```' in cleaned_text:
-                # Find content between first ``` and last ```
-                start_fence = cleaned_text.find('```')
-                if start_fence != -1:
-                    newline_after_fence = cleaned_text.find('\n', start_fence)
-                    if newline_after_fence != -1:
-                        after_fence = cleaned_text[newline_after_fence + 1:]
-                    else:
-                        after_fence = cleaned_text[start_fence + 3:]
-                    # Remove closing fence if present
-                    end_fence = after_fence.rfind('```')
-                    if end_fence != -1:
-                        cleaned_text = after_fence[:end_fence].strip()
-                    else:
-                        # No closing fence (truncated response) — use everything after opening fence
-                        cleaned_text = after_fence.strip()
-            
-            # Try to extract JSON array from response
-            start_idx = cleaned_text.find('[')
-            end_idx = cleaned_text.rfind(']') + 1
-            
-            if start_idx == -1:
-                logger.warning(f"No JSON array found in LLM response. Cleaned text preview: {cleaned_text[:300]}")
-                logger.warning(f"Original response preview: {response_text[:300]}")
-                return []
-            
-            if end_idx == 0:
-                # No closing bracket — response was likely truncated by max_tokens
-                # Try to salvage by finding the last complete JSON object
-                logger.warning("JSON array not closed (likely truncated). Attempting to salvage partial response.")
-                partial = cleaned_text[start_idx:]
-                # Find the last complete object (ends with })
-                last_brace = partial.rfind('}')
-                if last_brace != -1:
-                    json_str = partial[:last_brace + 1] + ']'
-                    logger.info(f"Salvaged partial JSON: {len(json_str)} chars")
-                else:
-                    logger.warning("Could not salvage truncated JSON response")
-                    return []
-            else:
-                json_str = cleaned_text[start_idx:end_idx]
-            
-            brands = json.loads(json_str)
-            
-            # Validate structure
-            if not isinstance(brands, list):
-                logger.warning("LLM response is not a list")
-                return []
-            
-            return brands
-            
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to parse LLM JSON response: {str(e)}")
-            logger.error(f"Response text preview: {response_text[:500]}")
+        """Parse the LLM's JSON array response via the shared helper."""
+        brands = parse_llm_json(response_text, expect="array")
+        if brands is None:
+            logger.warning(
+                "brand_extraction_parse_failed preview=%r",
+                response_text[:300],
+            )
             return []
+        return brands
 
 
 def get_industry_presets() -> Dict[str, Any]:
@@ -435,102 +334,3 @@ def extract_brands_from_response(response_text: str, config: Optional[Dict] = No
         'other_count': len(others),
         'extraction_config': config or DEFAULT_EXTRACTION_CONFIG
     }
-
-
-def expand_brand_names(brand_name: str, industry: str = "hotels") -> Dict[str, Any]:
-    """
-    Use LLM to expand a brand name into related sub-brands, variations, and owned properties.
-    
-    This helps users configure comprehensive brand tracking by suggesting all the
-    brand variations that should be tracked together.
-    
-    Args:
-        brand_name: The main brand name to expand
-        industry: The industry context for better suggestions
-    
-    Returns:
-        Dict with 'suggestions' (list of related brand names) and metadata
-    """
-    industry_preset = INDUSTRY_PRESETS.get(industry, INDUSTRY_PRESETS.get("custom", {}))
-    industry_name = industry_preset.get("name", "General")
-    
-    prompt = f"""You are a brand expert for the {industry_name} industry.
-
-Given the brand name "{brand_name}", list ALL related brand names that should be tracked together.
-
-Include:
-1. Sub-brands and brand tiers
-2. Owned/acquired brands and subsidiaries
-3. Common variations, abbreviations, and alternate spellings
-4. Loyalty program names if relevant
-5. Regional variations if any
-
-DO NOT include:
-- Competitor brands
-- Unrelated companies
-- Generic terms
-
-Return ONLY a JSON object with this format:
-{{
-  "main_brand": "{brand_name}",
-  "parent_company": "Parent company name if different from main brand, or null",
-  "suggestions": [
-    "Sub-brand 1",
-    "Sub-brand 2",
-    "Owned brand 1"
-  ],
-  "notes": "Brief explanation of the brand structure"
-}}
-
-JSON OUTPUT:"""
-
-    try:
-        # Call Bedrock using Converse API
-        response_text = invoke_converse(prompt, DEFAULT_MODEL_ID, max_tokens=1500, temperature=0)
-        
-        if not response_text:
-            logger.warning("Empty response from Bedrock for brand expansion")
-            return {"main_brand": brand_name, "suggestions": [], "error": "Empty response"}
-        
-        # Parse JSON from response
-        cleaned_text = response_text.strip()
-        if '```' in cleaned_text:
-            start_fence = cleaned_text.find('```')
-            if start_fence != -1:
-                newline_after_fence = cleaned_text.find('\n', start_fence)
-                if newline_after_fence != -1:
-                    cleaned_text = cleaned_text[newline_after_fence + 1:]
-                end_fence = cleaned_text.rfind('```')
-                if end_fence != -1:
-                    cleaned_text = cleaned_text[:end_fence].strip()
-        
-        start_idx = cleaned_text.find('{')
-        end_idx = cleaned_text.rfind('}') + 1
-        
-        if start_idx == -1 or end_idx == 0:
-            logger.warning(f"No JSON object found in brand expansion response")
-            return {"main_brand": brand_name, "suggestions": [], "error": "Invalid response format"}
-        
-        json_str = cleaned_text[start_idx:end_idx]
-        result = json.loads(json_str)
-        
-        # Ensure main_brand is included in suggestions for completeness
-        suggestions = result.get("suggestions", [])
-        if brand_name not in suggestions:
-            suggestions.insert(0, brand_name)
-        
-        return {
-            "main_brand": brand_name,
-            "parent_company": result.get("parent_company"),
-            "suggestions": suggestions,
-            "notes": result.get("notes", ""),
-            "industry": industry
-        }
-        
-    except Exception as e:
-        logger.error(f"Error expanding brand name '{brand_name}': {str(e)}")
-        return {
-            "main_brand": brand_name,
-            "suggestions": [brand_name],
-            "error": str(e)
-        }

@@ -18,8 +18,6 @@ from shared.step_function_response import (
     step_function_error, step_function_success, log_error
 )
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)# Configure logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 

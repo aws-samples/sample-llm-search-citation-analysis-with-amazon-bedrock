@@ -172,18 +172,27 @@ def get_secret(secret_name: str) -> Optional[str]:
 
 
 def is_provider_enabled(provider_id: str) -> bool:
-    """Check if a provider is enabled in the config table."""
+    """Check if a provider is enabled in the config table.
+
+    Fails closed: if the config table is unavailable, return False so we do
+    not accidentally invoke a provider the user has disabled. A transient
+    DynamoDB failure should not override user intent.
+    """
     try:
         table = dynamodb.Table(PROVIDER_CONFIG_TABLE)
         response = table.get_item(Key={'provider_id': provider_id})
         item = response.get('Item')
         if item:
             return item.get('enabled', True)
-        # Default to enabled if no config exists
+        # No config row yet -> treat as enabled (first-run default)
         return True
     except Exception as e:
-        logger.warning(f"Error checking provider config for {provider_id}: {str(e)}, defaulting to enabled")
-        return True
+        logger.error(
+            "provider_config_read_failed provider=%s error=%s action=fail_closed",
+            provider_id,
+            type(e).__name__,
+        )
+        return False
 
 # Default models per provider (used when no override in ProviderConfig table)
 DEFAULT_PROVIDER_MODELS = {
@@ -196,11 +205,19 @@ DEFAULT_PROVIDER_MODELS = {
 # Cache for provider models (per Lambda invocation)
 _provider_model_cache = {}
 
+class ProviderConfigUnavailableError(RuntimeError):
+    """Raised when provider config cannot be read and no safe default exists."""
+
+
 def get_provider_model(provider_id: str) -> str:
     """Get configured model for a provider, with sensible defaults.
 
     Reads the 'model' field from the ProviderConfig table if set,
     otherwise falls back to DEFAULT_PROVIDER_MODELS.
+
+    Fails closed: raises ProviderConfigUnavailableError on DynamoDB errors
+    so the caller can skip the provider rather than silently using a
+    different model than the admin configured.
     """
     if provider_id in _provider_model_cache:
         return _provider_model_cache[provider_id]
@@ -217,9 +234,14 @@ def get_provider_model(provider_id: str) -> str:
         logger.info(f"Provider {provider_id} using model: {model}")
         return model
     except Exception as e:
-        logger.warning(f"Error reading model config for {provider_id}: {e}, using default: {default}")
-        _provider_model_cache[provider_id] = default
-        return default
+        logger.error(
+            "provider_model_read_failed provider=%s error=%s action=fail_closed",
+            provider_id,
+            type(e).__name__,
+        )
+        raise ProviderConfigUnavailableError(
+            f"Cannot read model config for provider {provider_id}"
+        ) from e
 
 
 
@@ -577,8 +599,11 @@ def execute_all_providers(keyword: str, provider_types: Optional[List[str]] = No
     if run_llm:
         if openai_key and is_provider_enabled(Provider.OPENAI) and should_run_provider(Provider.OPENAI):
             logger.info("Querying OpenAI...")
-            openai_model = get_provider_model(Provider.OPENAI)
-            results.append(query_openai(keyword, openai_key, model=openai_model, query_template=query_template))
+            try:
+                openai_model = get_provider_model(Provider.OPENAI)
+                results.append(query_openai(keyword, openai_key, model=openai_model, query_template=query_template))
+            except ProviderConfigUnavailableError:
+                logger.error("OpenAI provider config unavailable, skipping this run")
         elif openai_key and should_run_provider(Provider.OPENAI):
             logger.info("OpenAI is disabled, skipping")
         elif should_run_provider(Provider.OPENAI):
@@ -860,4 +885,3 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception as e:
         log_error(e, f"search handler for keyword {event.get('keyword', 'unknown')}", event)
         raise
-# Force rebuild

@@ -60,7 +60,7 @@ export const DEFAULT_PRESETS: IndustryPresets = {
     name: 'Hotels & Hospitality',
     description: 'Track hotel brands, chains, and individual properties',
     entity_types: ['hotel chains', 'hotel brands', 'individual properties', 'resorts', 'boutique hotels'],
-    example_brands: ['Brand A', 'Brand B', 'Brand C', 'Brand D', 'Brand E'],
+    example_brands: ['Marriott', 'Hilton', 'Hyatt', 'InterContinental', 'Four Seasons'],
     extraction_focus: 'hotel and accommodation recommendations',
     default_prompt: generateDefaultPrompt(
       'Hotels & Hospitality',

@@ -85,16 +85,21 @@ class TestGetProviderModel:
             # Should only call DynamoDB once
             assert mock_table.get_item.call_count == 1
 
-    def test_falls_back_on_error(self, mock_dynamodb):
-        """Returns default model when DynamoDB read fails."""
+    def test_raises_when_dynamodb_fails(self, mock_dynamodb):
+        """Fails closed: raises instead of silently substituting the default.
+
+        A transient DynamoDB error must not cause us to invoke a different
+        model than the admin configured. The caller is expected to catch
+        and skip the provider for this run.
+        """
         mock_db, mock_table = mock_dynamodb
         mock_table.get_item.side_effect = Exception('DynamoDB error')
 
         with patch('handler.dynamodb', mock_db):
             import handler
             handler._provider_model_cache.clear()
-            result = handler.get_provider_model('openai')
-            assert result == 'gpt-5-mini'
+            with pytest.raises(handler.ProviderConfigUnavailableError):
+                handler.get_provider_model('openai')
 
     def test_default_models_for_all_providers(self, mock_dynamodb):
         """Each provider has a sensible default model."""
@@ -110,6 +115,77 @@ class TestGetProviderModel:
             assert handler.get_provider_model('perplexity') == 'sonar'
             handler._provider_model_cache.clear()
             assert handler.get_provider_model('gemini') == 'gemini-3-flash-preview'
+
+
+class TestIsProviderEnabled:
+    """Tests for is_provider_enabled() — fail-closed on config read errors.
+
+    Regression guard: a prior version returned True on DynamoDB errors, which
+    meant a transient outage could silently run a provider the admin disabled.
+    User intent (the disable flag) must win over infra failures.
+    """
+
+    def test_returns_true_when_config_item_has_enabled_true(self, mock_dynamodb):
+        mock_db, mock_table = mock_dynamodb
+        mock_table.get_item.return_value = {
+            'Item': {'provider_id': 'openai', 'enabled': True}
+        }
+
+        with patch('handler.dynamodb', mock_db):
+            import handler
+            assert handler.is_provider_enabled('openai') is True
+
+    def test_returns_false_when_config_item_has_enabled_false(self, mock_dynamodb):
+        mock_db, mock_table = mock_dynamodb
+        mock_table.get_item.return_value = {
+            'Item': {'provider_id': 'openai', 'enabled': False}
+        }
+
+        with patch('handler.dynamodb', mock_db):
+            import handler
+            assert handler.is_provider_enabled('openai') is False
+
+    def test_returns_true_when_no_config_row_exists(self, mock_dynamodb):
+        """First-run default: no row yet means the provider is enabled."""
+        mock_db, mock_table = mock_dynamodb
+        mock_table.get_item.return_value = {}
+
+        with patch('handler.dynamodb', mock_db):
+            import handler
+            assert handler.is_provider_enabled('openai') is True
+
+    def test_returns_false_when_dynamodb_read_fails(self, mock_dynamodb):
+        """Fails closed: a DynamoDB outage must not override a user disable.
+
+        Reverting this to the old fail-open behavior would make this test fail.
+        """
+        mock_db, mock_table = mock_dynamodb
+        mock_table.get_item.side_effect = Exception('DynamoDB ThrottlingException')
+
+        with patch('handler.dynamodb', mock_db):
+            import handler
+            assert handler.is_provider_enabled('openai') is False
+
+    def test_does_not_leak_exception_details_in_log_message(
+        self, mock_dynamodb, caplog,
+    ):
+        """Logs error type only, not the full str(e) which can contain table
+        names or other infra details."""
+        import logging
+
+        mock_db, mock_table = mock_dynamodb
+        mock_table.get_item.side_effect = RuntimeError('Sensitive: table arn:aws:dynamodb:...')
+
+        with patch('handler.dynamodb', mock_db):
+            import handler
+            with caplog.at_level(logging.ERROR, logger='handler'):
+                handler.is_provider_enabled('openai')
+
+        assert any(
+            'provider_config_read_failed' in record.message
+            and 'Sensitive' not in record.message
+            for record in caplog.records
+        )
 
 
 class TestQueryOpenAIModel:

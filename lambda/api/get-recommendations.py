@@ -29,48 +29,19 @@ sys.path.insert(0, '/opt/python')
 from shared.decorators import api_handler, validate
 from shared.api_response import success_response
 from shared.utils import get_brand_config
+from shared.models import ModelRole, invoke_bedrock
+from shared.llm_json import parse_llm_json
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
-bedrock = boto3.client('bedrock-runtime')  # No region needed for global inference profiles
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')  # Optional for fallback
-
-
-def invoke_converse(prompt: str, model_id: str, max_tokens: int = 2000, temperature: float = 0) -> str:
-    """
-    Invoke Bedrock using the Converse API.
-    
-    Args:
-        prompt: The prompt to send
-        model_id: Model ID to use
-        max_tokens: Maximum tokens in response
-        temperature: Temperature for generation
-        
-    Returns:
-        Response text from the model
-    """
-    response = bedrock.converse(
-        modelId=model_id,
-        messages=[
-            {'role': 'user', 'content': [{'text': prompt}]}
-        ],
-        inferenceConfig={
-            'maxTokens': max_tokens,
-            'temperature': temperature
-        }
-    )
-    
-    output = response.get('output', {})
-    message = output.get('message', {})
-    content_blocks = message.get('content', [])
-    return content_blocks[0].get('text', '') if content_blocks else ''
 
 
 def generate_rule_based_recommendations(config: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -307,14 +278,13 @@ Focus on:
 3. Content and citation opportunities
 4. Provider-specific optimizations"""
 
-        content = invoke_converse(prompt, 'global.anthropic.claude-sonnet-4-5-20250929-v1:0', max_tokens=2000)
-        
-        # Extract JSON from response
-        import re
-        json_match = re.search(r'\[[\s\S]*\]', content)
-        if json_match:
-            return json.loads(json_match.group())
-        
+        content = invoke_bedrock(prompt, ModelRole.ANALYSIS, max_tokens=2000)
+
+        # Parse JSON array via shared helper
+        parsed = parse_llm_json(content, expect="array")
+        if parsed is not None:
+            return parsed
+
     except Exception as e:
         logger.error(f"LLM recommendation error: {e}")
     

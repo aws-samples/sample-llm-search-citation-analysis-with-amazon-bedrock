@@ -19,6 +19,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.decorators import api_handler, parse_json_body, validate, cors_preflight, route_handler
 from shared.api_response import success_response, validation_error
+from shared.llm_json import parse_llm_json
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -27,43 +28,12 @@ logger.setLevel(logging.INFO)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'search'))
 
 dynamodb = boto3.resource('dynamodb')
-bedrock = boto3.client('bedrock-runtime')
+
+# Import centralized Bedrock invocation (ModelRole.ANALYSIS -> Sonnet by default)
+from shared.models import ModelRole, invoke_bedrock  # noqa: E402
 
 # Fail-fast: Required environment variables
 DYNAMODB_TABLE_BRAND_CONFIG = os.environ['DYNAMODB_TABLE_BRAND_CONFIG']
-
-# Model for brand expansion
-EXPANSION_MODEL_ID = "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
-
-
-def invoke_converse(prompt: str, model_id: str = EXPANSION_MODEL_ID, max_tokens: int = 2000, temperature: float = 0) -> str:
-    """
-    Invoke Bedrock using the Converse API.
-    
-    Args:
-        prompt: The prompt to send
-        model_id: Model ID to use
-        max_tokens: Maximum tokens in response
-        temperature: Temperature for generation
-        
-    Returns:
-        Response text from the model
-    """
-    response = bedrock.converse(
-        modelId=model_id,
-        messages=[
-            {'role': 'user', 'content': [{'text': prompt}]}
-        ],
-        inferenceConfig={
-            'maxTokens': max_tokens,
-            'temperature': temperature
-        }
-    )
-    
-    output = response.get('output', {})
-    message = output.get('message', {})
-    content_blocks = message.get('content', [])
-    return content_blocks[0].get('text', '') if content_blocks else ''
 
 def generate_default_prompt(industry_name: str, extraction_focus: str, entity_types: list) -> str:
     """Generate a default extraction prompt for an industry."""
@@ -118,7 +88,7 @@ INDUSTRY_PRESETS = {
         "name": "Hotels & Hospitality",
         "description": "Track hotel brands, chains, and individual properties",
         "entity_types": ["hotel chains", "hotel brands", "individual properties", "resorts", "boutique hotels"],
-        "example_brands": ["Brand A", "Brand B", "Brand C", "Brand D", "Brand E"],
+        "example_brands": ["Marriott", "Hilton", "Hyatt", "InterContinental", "Four Seasons"],
         "extraction_focus": "hotel and accommodation recommendations",
         "default_prompt": generate_default_prompt(
             "Hotels & Hospitality",
@@ -320,32 +290,15 @@ If ALL sub-brands are already being tracked, return an empty suggestions array a
 JSON OUTPUT:"""
 
     try:
-        response_text = invoke_converse(prompt, EXPANSION_MODEL_ID, max_tokens=2000, temperature=0)
+        response_text = invoke_bedrock(prompt, ModelRole.ANALYSIS, max_tokens=2000, temperature=0)
         
         if not response_text:
             return {"suggestions": [], "duplicates_found": existing_duplicates, "error": "Empty response"}
         
-        # Parse JSON from response
-        cleaned_text = response_text.strip()
-        if '```' in cleaned_text:
-            start_fence = cleaned_text.find('```')
-            if start_fence != -1:
-                newline_after_fence = cleaned_text.find('\n', start_fence)
-                if newline_after_fence != -1:
-                    cleaned_text = cleaned_text[newline_after_fence + 1:]
-                end_fence = cleaned_text.rfind('```')
-                if end_fence != -1:
-                    cleaned_text = cleaned_text[:end_fence].strip()
-        
-        start_idx = cleaned_text.find('{')
-        end_idx = cleaned_text.rfind('}') + 1
-        
-        if start_idx == -1 or end_idx == 0:
+        result = parse_llm_json(response_text, expect="object")
+        if result is None:
             return {"suggestions": [], "duplicates_found": existing_duplicates, "error": "Invalid response format"}
-        
-        json_str = cleaned_text[start_idx:end_idx]
-        result = json.loads(json_str)
-        
+
         suggestions = result.get("suggestions", [])
         
         # Filter out any suggestions that match existing brands (normalized)
@@ -446,32 +399,15 @@ If all sub-brands are already tracked, return an empty suggestions array with a 
 JSON OUTPUT:"""
 
     try:
-        response_text = invoke_converse(prompt, EXPANSION_MODEL_ID, max_tokens=1500, temperature=0)
+        response_text = invoke_bedrock(prompt, ModelRole.ANALYSIS, max_tokens=1500, temperature=0)
         
         if not response_text:
             return {"main_brand": brand_name, "suggestions": [brand_name], "error": "Empty response"}
         
-        # Parse JSON from response
-        cleaned_text = response_text.strip()
-        if '```' in cleaned_text:
-            start_fence = cleaned_text.find('```')
-            if start_fence != -1:
-                newline_after_fence = cleaned_text.find('\n', start_fence)
-                if newline_after_fence != -1:
-                    cleaned_text = cleaned_text[newline_after_fence + 1:]
-                end_fence = cleaned_text.rfind('```')
-                if end_fence != -1:
-                    cleaned_text = cleaned_text[:end_fence].strip()
-        
-        start_idx = cleaned_text.find('{')
-        end_idx = cleaned_text.rfind('}') + 1
-        
-        if start_idx == -1 or end_idx == 0:
+        result = parse_llm_json(response_text, expect="object")
+        if result is None:
             return {"main_brand": brand_name, "suggestions": [brand_name], "error": "Invalid response format"}
-        
-        json_str = cleaned_text[start_idx:end_idx]
-        result = json.loads(json_str)
-        
+
         # Ensure main_brand is included in suggestions for completeness
         suggestions = result.get("suggestions", [])
         if brand_name not in suggestions:
@@ -559,32 +495,15 @@ Aim for 10-20 relevant competitors.
 JSON OUTPUT:"""
 
     try:
-        response_text = invoke_converse(prompt, EXPANSION_MODEL_ID, max_tokens=2000, temperature=0)
+        response_text = invoke_bedrock(prompt, ModelRole.ANALYSIS, max_tokens=2000, temperature=0)
         
         if not response_text:
             return {"first_party_brands": first_party_brands, "competitors": [], "error": "Empty response"}
         
-        # Parse JSON from response
-        cleaned_text = response_text.strip()
-        if '```' in cleaned_text:
-            start_fence = cleaned_text.find('```')
-            if start_fence != -1:
-                newline_after_fence = cleaned_text.find('\n', start_fence)
-                if newline_after_fence != -1:
-                    cleaned_text = cleaned_text[newline_after_fence + 1:]
-                end_fence = cleaned_text.rfind('```')
-                if end_fence != -1:
-                    cleaned_text = cleaned_text[:end_fence].strip()
-        
-        start_idx = cleaned_text.find('{')
-        end_idx = cleaned_text.rfind('}') + 1
-        
-        if start_idx == -1 or end_idx == 0:
+        result = parse_llm_json(response_text, expect="object")
+        if result is None:
             return {"first_party_brands": first_party_brands, "competitors": [], "error": "Invalid response format"}
-        
-        json_str = cleaned_text[start_idx:end_idx]
-        result = json.loads(json_str)
-        
+
         # Extract just the competitor names
         competitors = result.get("competitors", [])
         competitor_names = [c.get("name") if isinstance(c, dict) else c for c in competitors]

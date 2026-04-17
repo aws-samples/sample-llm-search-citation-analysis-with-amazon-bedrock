@@ -70,10 +70,10 @@ class LambdaConfig:
     
     # AWS Configuration
     region: str = os.environ.get("AWS_REGION", "us-west-2")
-    
-    # LLM Model for summarization (configurable via environment variable)
-    llm_model_id: str = os.environ.get('BEDROCK_MODEL_ID', 'global.anthropic.claude-sonnet-4-5-20250929-v1:0')
-    
+
+    # Note: LLM model IDs are resolved via shared.models (ModelRole + ModelTier).
+    # Env overrides: BEDROCK_MODEL_<ROLE> or BEDROCK_TIER_<ROLE>.
+
     # Get AWS Account ID automatically
     @property
     def aws_account_id(self) -> str:

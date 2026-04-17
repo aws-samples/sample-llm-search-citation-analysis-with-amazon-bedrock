@@ -29,15 +29,13 @@ sys.path.insert(0, '/opt/python')
 from shared.decorators import api_handler, parse_json_body, validate, route_handler
 from shared.api_response import success_response, validation_error, api_response
 from shared.utils import get_brand_config
+from shared.models import ModelRole, get_model_tier, invoke_bedrock, BedrockInvocationError
 from decimal_utils import to_int
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
-
-# Configure Bedrock client - using Converse API which handles timeouts better
-bedrock = boto3.client('bedrock-runtime')
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
@@ -598,86 +596,64 @@ POINTS: [3 key takeaways as bullet points]"""
         prompt += f"\n\nIMPORTANT: Write ALL content in {output_language}. The title, meta description, body, headings, and key points must all be in {output_language}."
 
     try:
-        # Using Converse API with global inference profile for cross-region routing
-        # Haiku 4.5 for fast responses - good balance of speed and quality
-        response = bedrock.converse(
-            modelId='global.anthropic.claude-haiku-4-5-20251001-v1:0',
-            messages=[
-                {'role': 'user', 'content': [{'text': prompt}]}
-            ],
-            inferenceConfig={
-                'maxTokens': 8000,
-                'temperature': 0.7
-            }
+        # Invoke shared Bedrock client with GENERATION role (Haiku default, tier-switchable)
+        generated_content = invoke_bedrock(
+            prompt,
+            ModelRole.GENERATION,
+            max_tokens=8000,
+            temperature=0.7,
         )
-        
-        # Extract content from Converse API response
-        output = response.get('output', {})
-        message = output.get('message', {})
-        content_blocks = message.get('content', [])
-        generated_content = content_blocks[0].get('text', '') if content_blocks else ''
-        
+
         parsed = parse_generated_content(generated_content)
-        
+
         return {
             'success': True,
             'content': parsed,
             'raw_content': generated_content,
-            'model': 'claude-haiku-4.5',
+            'model': get_model_tier(ModelRole.GENERATION).value,
             'content_angle': content_angle,
             'competitor_sources_used': len(competitor_content)
         }
-        
-    except bedrock.exceptions.AccessDeniedException as e:
-        logger.error(f"Bedrock access denied: {e}")
-        return {
-            'success': False,
-            'error': 'Access denied to Bedrock model. Check IAM permissions.',
-            'error_type': 'access_denied',
-            'content_angle': content_angle
-        }
-    except bedrock.exceptions.ThrottlingException as e:
-        logger.error(f"Bedrock throttling: {e}")
+
+    except BedrockInvocationError as e:
+        logger.error(f"Bedrock throttled after retries: {e}")
         return {
             'success': False,
             'error': 'Too many requests. Please wait a moment and try again.',
             'error_type': 'throttling',
             'content_angle': content_angle
         }
-    except bedrock.exceptions.ModelTimeoutException as e:
-        logger.error(f"Bedrock model timeout: {e}")
-        return {
-            'success': False,
-            'error': 'AI model took too long to respond. Please try again with a simpler keyword.',
-            'error_type': 'timeout',
-            'content_angle': content_angle
-        }
-    except bedrock.exceptions.ModelErrorException as e:
-        logger.error(f"Bedrock model error: {e}")
-        return {
-            'success': False,
-            'error': 'AI model encountered an error. Please try again.',
-            'error_type': 'model_error',
-            'content_angle': content_angle
-        }
     except Exception as e:
         error_msg = str(e)
         logger.error(f"Bedrock generation failed: {error_msg}", exc_info=True)
-        
-        # Provide user-friendly error messages
-        if 'ValidationException' in error_msg:
+
+        # Provide user-friendly error messages based on AWS error codes in the message
+        if 'AccessDeniedException' in error_msg:
+            user_error = 'Access denied to Bedrock model. Check IAM permissions.'
+            error_type = 'access_denied'
+        elif 'ModelTimeoutException' in error_msg:
+            user_error = 'AI model took too long to respond. Please try again with a simpler keyword.'
+            error_type = 'timeout'
+        elif 'ModelErrorException' in error_msg:
+            user_error = 'AI model encountered an error. Please try again.'
+            error_type = 'model_error'
+        elif 'ValidationException' in error_msg:
             user_error = 'Invalid request to AI model. Please try a different keyword.'
+            error_type = 'generation_error'
         elif 'ServiceUnavailable' in error_msg or 'InternalServerError' in error_msg:
             user_error = 'AI service temporarily unavailable. Please try again later.'
+            error_type = 'generation_error'
         elif 'ResourceNotFoundException' in error_msg:
             user_error = 'AI model not found. Please contact support.'
+            error_type = 'generation_error'
         else:
             user_error = f'Content generation failed: {error_msg[:200]}'
-        
+            error_type = 'generation_error'
+
         return {
             'success': False,
             'error': user_error,
-            'error_type': 'generation_error',
+            'error_type': error_type,
             'content_angle': content_angle
         }
 

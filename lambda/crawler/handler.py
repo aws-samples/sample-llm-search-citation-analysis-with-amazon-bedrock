@@ -15,6 +15,8 @@ import boto3
 # Import shared modules from Lambda Layer
 from shared.config import LambdaConfig
 from shared.browser_tools import SimpleBrowserTools
+from shared.models import ModelRole, invoke_bedrock
+from shared.llm_json import parse_llm_json
 from shared.step_function_response import (
     step_function_error, step_function_success, log_error
 )
@@ -26,68 +28,9 @@ logger.setLevel(logging.INFO)
 # Initialize config and clients
 config = LambdaConfig()
 dynamodb = boto3.resource('dynamodb', region_name=config.region)
-bedrock_runtime = boto3.client('bedrock-runtime', region_name=config.region)
 
 # Environment variables
 SCREENSHOTS_BUCKET = os.environ['SCREENSHOTS_BUCKET']
-
-
-def invoke_converse_with_retry(prompt: str, model_id: str, max_tokens: int = 1200, temperature: float = 0.3, max_retries: int = 5) -> str:
-    """
-    Invoke Bedrock Converse API with exponential backoff retry logic.
-    
-    Args:
-        prompt: The prompt to send
-        model_id: Model ID to invoke
-        max_tokens: Maximum tokens in response
-        temperature: Temperature for generation
-        max_retries: Maximum number of retry attempts
-        
-    Returns:
-        Response text from the model
-    """
-    import random
-    
-    for attempt in range(max_retries):
-        try:
-            response = bedrock_runtime.converse(
-                modelId=model_id,
-                messages=[
-                    {'role': 'user', 'content': [{'text': prompt}]}
-                ],
-                inferenceConfig={
-                    'maxTokens': max_tokens,
-                    'temperature': temperature
-                }
-            )
-            
-            output = response.get('output', {})
-            message = output.get('message', {})
-            content_blocks = message.get('content', [])
-            return content_blocks[0].get('text', '') if content_blocks else ''
-            
-        except Exception as e:
-            error_str = str(e)
-            
-            # Check if it's a throttling error
-            if 'ThrottlingException' in error_str or 'Too many requests' in error_str:
-                if attempt < max_retries - 1:
-                    # Exponential backoff with jitter
-                    base_delay = 2 ** attempt
-                    jitter = random.uniform(0, 1)
-                    delay = base_delay + jitter
-                    
-                    logger.warning(f"Bedrock throttled (attempt {attempt + 1}/{max_retries}), waiting {delay:.2f}s")
-                    time.sleep(delay)
-                    continue
-                else:
-                    logger.error(f"Bedrock throttled after {max_retries} attempts")
-                    raise
-            else:
-                # Non-throttling error, don't retry
-                raise
-    
-    raise Exception(f"Failed after {max_retries} attempts")
 
 
 def analyze_content_combined(content: str, title: str, url: str, keyword: str) -> tuple[str, Dict[str, Any]]:
@@ -138,8 +81,8 @@ SEO_ANALYSIS:
   "competitive_advantage": "what makes this page rank well"
 }}"""
         
-        # Use retry logic with Converse API
-        response_text = invoke_converse_with_retry(prompt, config.llm_model_id, max_tokens=1200, temperature=0.3)
+        # Use centralized Bedrock invocation (summarization role)
+        response_text = invoke_bedrock(prompt, ModelRole.SUMMARIZATION, max_tokens=1200, temperature=0.3)
         
         # Parse summary
         summary = ""
@@ -150,101 +93,18 @@ SEO_ANALYSIS:
                 summary_end = response_text.find("{")
             summary = response_text[summary_start:summary_end].strip()
         
-        # Parse SEO analysis JSON
-        seo_analysis = {}
-        try:
-            start_idx = response_text.find('{')
-            end_idx = response_text.rfind('}') + 1
-            if start_idx != -1 and end_idx > start_idx:
-                json_str = response_text[start_idx:end_idx]
-                seo_analysis = json.loads(json_str)
-        except json.JSONDecodeError as e:
-            logger.warning(f"Could not parse SEO JSON for {url}: {e}")
-        
+        # Parse SEO analysis JSON via shared helper (handles markdown fences,
+        # truncation, and wrong-type responses consistently with other lambdas)
+        seo_analysis = parse_llm_json(response_text, expect="object") or {}
+        if not seo_analysis:
+            logger.warning(f"Could not parse SEO JSON for {url}")
+
         logger.info(f"Combined analysis completed for {url}")
         return summary, seo_analysis
         
     except Exception as e:
         logger.error(f"Error in combined analysis for {url}: {e}")
         return "", {}
-
-
-def summarize_content(content: str, url: str) -> str:
-    """
-    DEPRECATED: Use analyze_content_combined() instead.
-    Kept for backward compatibility.
-    """
-    try:
-        summary, _ = analyze_content_combined(content, "", url, "")
-        return summary
-    except Exception as e:
-        logger.error(f"Error generating summary for {url}: {e}")
-        return ""
-
-
-def analyze_seo(content: str, title: str, url: str, keyword: str) -> Dict[str, Any]:
-    """
-    Analyze page for SEO and competitive intelligence using Claude.
-    
-    Args:
-        content: Page content
-        title: Page title
-        url: URL of the page
-        keyword: Search keyword that led to this citation
-        
-    Returns:
-        Dictionary with SEO analysis and recommendations
-    """
-    try:
-        logger.info(f"Analyzing SEO for {url}")
-        
-        # Truncate content
-        max_content_length = 8000
-        truncated_content = content[:max_content_length] if len(content) > max_content_length else content
-        
-        prompt = f"""Analyze this web page for SEO and competitive intelligence.
-
-URL: {url}
-Title: {title}
-Search Keyword: "{keyword}"
-
-Content:
-{truncated_content}
-
-Provide analysis in JSON format:
-{{
-  "relevance_score": 1-10,
-  "keyword_usage": "description of how keyword is used",
-  "strengths": ["strength 1", "strength 2", "strength 3"],
-  "weaknesses": ["weakness 1", "weakness 2"],
-  "recommendations": ["action 1", "action 2", "action 3"],
-  "competitive_advantage": "what makes this page rank well"
-}}
-
-JSON:"""
-        
-        response_text = invoke_converse_with_retry(prompt, config.llm_model_id, max_tokens=1000, temperature=0.2)
-        
-        # Parse JSON from response
-        try:
-            # Extract JSON from response
-            start_idx = response_text.find('{')
-            end_idx = response_text.rfind('}') + 1
-            if start_idx != -1 and end_idx > start_idx:
-                json_str = response_text[start_idx:end_idx]
-                analysis = json.loads(json_str)
-                logger.info(f"SEO analysis completed for {url}")
-                return analysis
-            else:
-                logger.warning(f"Could not parse JSON from SEO analysis for {url}")
-                return {}
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parse error in SEO analysis: {e}")
-            return {}
-        
-    except Exception as e:
-        logger.error(f"Error analyzing SEO for {url}: {e}")
-        return {}
 
 
 def upload_screenshot_to_s3(screenshot_base64: str, url: str, timestamp: str) -> str:
