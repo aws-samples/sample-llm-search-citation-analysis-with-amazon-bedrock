@@ -25,17 +25,17 @@ sys.path.insert(0, '/opt/python')
 from shared.decorators import api_handler, parse_json_body, validate, require_keyword
 from shared.api_response import success_response, validation_error
 from shared.utils import get_brand_config
+from shared.models import ModelRole, invoke_bedrock
+from shared.llm_json import parse_llm_json
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
-bedrock = boto3.client('bedrock-runtime')
 
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 SELF_REFLECTION_TABLE = os.environ['DYNAMODB_TABLE_SELF_REFLECTION']
 QUERY_PROMPTS_TABLE = os.environ['QUERY_PROMPTS_TABLE']
-MODEL_ID = os.environ.get('BEDROCK_MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
 CACHE_TTL_HOURS = 24
 
 SELF_REFLECTION_PROMPT = """You are analysing an AI search response to explain brand ranking decisions.
@@ -78,28 +78,6 @@ Please provide a JSON response with this exact structure:
 Rank recommendations by estimated impact on improving the brand's position for this specific persona.
 Be specific about what content changes would help. Reference concrete gaps you identified.
 Return ONLY the JSON object. Do not include any text before or after the JSON."""
-
-
-def invoke_bedrock(prompt: str, max_retries: int = 3) -> str:
-    """Call Bedrock Converse API with retry logic for throttling."""
-    for attempt in range(max_retries):
-        try:
-            response = bedrock.converse(
-                modelId=MODEL_ID,
-                messages=[{'role': 'user', 'content': [{'text': prompt}]}],
-                inferenceConfig={'maxTokens': 4000, 'temperature': 0}
-            )
-            content_blocks = response.get('output', {}).get('message', {}).get('content', [])
-            return content_blocks[0].get('text', '') if content_blocks else ''
-        except Exception as e:
-            error_str = str(e)
-            is_throttle = any(t in error_str for t in [
-                'ThrottlingException', 'TooManyRequestsException', 'ServiceUnavailableException'
-            ])
-            if is_throttle and attempt < max_retries - 1:
-                time.sleep((2 ** attempt) + 1)
-                continue
-            raise
 
 
 def get_persona_info(query_prompt_id: str) -> dict:
@@ -201,58 +179,6 @@ def store_reflection(keyword, brand, query_prompt_id, persona_name,
     }
     table.put_item(Item=item)
     return item
-
-
-def parse_llm_json(raw_text: str) -> dict:
-    """Parse a JSON response from the LLM, handling markdown fences and surrounding text."""
-    text = raw_text.strip()
-
-    # Strip markdown code fences (```json ... ``` or ``` ... ```)
-    if '```' in text:
-        lines = text.split('\n')
-        filtered = []
-        inside_fence = False
-        for line in lines:
-            stripped = line.strip()
-            if stripped.startswith('```'):
-                inside_fence = not inside_fence
-                continue
-            if inside_fence:
-                filtered.append(line)
-        if filtered:
-            text = '\n'.join(filtered).strip()
-
-    # Try parsing the full text as JSON first
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Find the outermost JSON object in the text
-    start = text.find('{')
-    if start >= 0:
-        depth = 0
-        end = start
-        for i in range(start, len(text)):
-            if text[i] == '{':
-                depth += 1
-            elif text[i] == '}':
-                depth -= 1
-                if depth == 0:
-                    end = i + 1
-                    break
-        try:
-            return json.loads(text[start:end])
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("Failed to parse LLM JSON response")
-    return {
-        'explanation': text, 'content_contributions': '',
-        'competitor_advantages': '', 'missing_data_points': '',
-        'recommendations': [],
-    }
-
 
 
 def strip_internal_keys(item: dict) -> dict:
@@ -359,8 +285,12 @@ def post_self_reflection(event, context, body, keyword, brand, query_prompt_id=N
         first_party_brands=', '.join(first_party),
         competitor_brands=', '.join(competitors),
     )
-    raw_response = invoke_bedrock(prompt)
-    reflection = parse_llm_json(raw_response)
+    raw_response = invoke_bedrock(prompt, ModelRole.ANALYSIS, max_tokens=4000, temperature=0)
+    reflection = parse_llm_json(raw_response, expect="object") or {
+        'explanation': raw_response, 'content_contributions': '',
+        'competitor_advantages': '', 'missing_data_points': '',
+        'recommendations': [],
+    }
 
     # 7. Store and return
     stored = store_reflection(
