@@ -154,8 +154,25 @@ class SimpleBrowserTools:
             # Wait for dynamic content
             self.page.wait_for_timeout(3000)
             
-            # Check for and handle slider challenges
-            self._handle_slider_challenge()
+            # Detect (don't bypass) CAPTCHA challenges. The crawler runs
+            # against an Amazon Bedrock AgentCore Browser configured with
+            # `browserSigning: { enabled: true }` (Web Bot Auth — see CDK
+            # `CrawlerBrowser` and the AWS blog post on the protocol). For
+            # domains that allow verified bots this typically prevents
+            # CAPTCHAs from being shown at all. For domains that still
+            # block our agent, we record the page as blocked and move on
+            # — we do NOT attempt to programmatically solve or bypass the
+            # challenge.
+            if self._detect_captcha_block():
+                logger.warning(
+                    f"CAPTCHA-protected page; recording as blocked: {url}"
+                )
+                return {
+                    "status": "blocked",
+                    "url": url,
+                    "block_reason": "captcha",
+                    "timestamp": datetime.utcnow().isoformat() + 'Z',
+                }
             
             title = self.page.title()
             
@@ -174,108 +191,41 @@ class SimpleBrowserTools:
                 "error": str(e)
             }
     
-    def _handle_slider_challenge(self) -> bool:
+    def _detect_captcha_block(self) -> bool:
         """
-        Detect and attempt to complete slider verification challenges.
-        
-        Returns True if a slider was found and completed, False otherwise.
+        Return True if the current page is a CAPTCHA / bot-challenge wall.
+
+        Detection only — never solves or bypasses. The crawler relies on
+        Amazon Bedrock AgentCore Browser's Web Bot Auth signing (configured
+        in the CDK) to reduce CAPTCHA encounters on domains that allow
+        verified bots. When a domain still gates us behind a CAPTCHA, we
+        respect that decision and record the page as blocked.
+
+        See: https://aws.amazon.com/blogs/machine-learning/reduce-captchas-for-ai-agents-browsing-the-web-with-web-bot-auth-preview-in-amazon-bedrock-agentcore-browser/
         """
         try:
-            # Check for common slider challenge indicators in page content
-            page_text = self.page.evaluate("() => document.body.innerText").lower()
-            
-            slider_indicators = [
-                'slide right to secure',
-                'slide to verify',
-                'slide right to access',
-                'drag the slider',
-                'slide to unlock',
-            ]
-            
-            has_slider = any(indicator in page_text for indicator in slider_indicators)
-            
-            if not has_slider:
-                return False
-            
-            logger.info("Slider challenge detected, attempting to complete...")
-            
-            # Common slider selectors used by various CAPTCHA providers
-            slider_selectors = [
-                # Generic arrow/slider buttons
-                'button[aria-label*="slide"]',
-                'div[class*="slider"] button',
-                'div[class*="slider"] span',
-                '[class*="slide-btn"]',
-                '[class*="slider-button"]',
-                # TripAdvisor specific patterns
-                'button svg[viewBox]',
-                'div[class*="captcha"] button',
-                # Arrow buttons
-                'button:has(svg)',
-            ]
-            
-            slider_element = None
-            for selector in slider_selectors:
-                try:
-                    element = self.page.query_selector(selector)
-                    if element and element.is_visible():
-                        slider_element = element
-                        logger.info(f"Found slider element with selector: {selector}")
-                        break
-                except Exception:
-                    continue
-            
-            if not slider_element:
-                logger.warning("Slider challenge detected but could not find slider element")
-                return False
-            
-            # Get the bounding box of the slider
-            box = slider_element.bounding_box()
-            if not box:
-                logger.warning("Could not get slider bounding box")
-                return False
-            
-            # Calculate drag distance (slide to the right)
-            start_x = box['x'] + box['width'] / 2
-            start_y = box['y'] + box['height'] / 2
-            
-            # Drag 300 pixels to the right (typical slider width)
-            end_x = start_x + 300
-            
-            logger.info(f"Dragging slider from ({start_x}, {start_y}) to ({end_x}, {start_y})")
-            
-            # Perform the drag with human-like movement
-            self.page.mouse.move(start_x, start_y)
-            self.page.wait_for_timeout(100)
-            self.page.mouse.down()
-            self.page.wait_for_timeout(50)
-            
-            # Move in steps for more natural movement
-            steps = 10
-            for i in range(1, steps + 1):
-                intermediate_x = start_x + (end_x - start_x) * i / steps
-                self.page.mouse.move(intermediate_x, start_y)
-                self.page.wait_for_timeout(30)
-            
-            self.page.mouse.up()
-            
-            # Wait for verification to complete
-            self.page.wait_for_timeout(2000)
-            
-            # Check if we're still on a challenge page
-            new_page_text = self.page.evaluate("() => document.body.innerText").lower()
-            still_has_slider = any(indicator in new_page_text for indicator in slider_indicators)
-            
-            if still_has_slider:
-                logger.warning("Slider challenge still present after attempt")
-                return False
-            
-            logger.info("Slider challenge completed successfully")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error handling slider challenge: {e}")
+            page_text = self.page.evaluate(
+                "() => document.body.innerText"
+            ).lower()
+        except Exception as exc:
+            logger.warning(f"Could not read page text for CAPTCHA detection: {exc}")
             return False
+
+        # Common phrasings that indicate a CAPTCHA / verification wall.
+        # Matched conservatively so a site that mentions "captcha" in
+        # documentation isn't false-flagged.
+        indicators = (
+            'slide to verify',
+            'slide right to secure',
+            'slide right to access',
+            'drag the slider',
+            'slide to unlock',
+            'verify you are human',
+            'prove you are not a robot',
+            'i am not a robot',
+            'please complete the security check',
+        )
+        return any(indicator in page_text for indicator in indicators)
     
     def extract_page_content(self) -> Dict:
         """Extract main content from the current page."""
