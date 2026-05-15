@@ -1,7 +1,9 @@
 /**
  * Visibility and insights API client functions.
  */
-import { apiGet } from './client';
+import {
+  apiGet, apiPost 
+} from './client';
 import type {
   VisibilityMetricsResponse,
   PromptInsightsResponse,
@@ -95,6 +97,44 @@ export function fetchRecommendations(
     params: { use_llm: useLlm.toString() },
     signal,
   });
+}
+
+interface SetRecommendationStatusBody {
+  readonly status: 'new' | 'in_progress' | 'done' | 'wontfix';
+  readonly notes?: string;
+  readonly related_keyword?: string;
+  readonly related_content_id?: string;
+}
+
+interface RecommendationStatusRow {
+  recommendation_id: string;
+  status: 'new' | 'in_progress' | 'done' | 'wontfix';
+  updated_at: string;
+  completed_at?: string;
+  notes?: string;
+  related_keyword?: string;
+  related_content_id?: string;
+  ttl?: number;
+}
+
+/**
+ * Sets the action-tracking status for a single recommendation.
+ *
+ * The `id` is the deterministic hash returned on each recommendation in
+ * `RecommendationsResponse.recommendations[].id`. Same id across list
+ * regenerations, so the status persists even when the underlying list
+ * is recomputed.
+ */
+export function setRecommendationStatus(
+  id: string,
+  body: SetRecommendationStatusBody,
+  signal?: AbortSignal,
+): Promise<RecommendationStatusRow> {
+  return apiPost<RecommendationStatusRow>(
+    `/recommendations/${encodeURIComponent(id)}/status`,
+    body,
+    { signal },
+  );
 }
 
 interface FetchHistoricalTrendsOptions {

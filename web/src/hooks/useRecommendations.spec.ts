@@ -170,4 +170,120 @@ describe('useRecommendations', () => {
       expect(result.current.error).toBeNull();
     });
   });
+
+  describe('updateRecommendationStatus', () => {
+    function statusOkResponse(payload: object) {
+      return {
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve(payload),
+      };
+    }
+
+    it('posts to /recommendations/{id}/status with the new status', async () => {
+      mockAuthenticatedFetch
+        .mockImplementationOnce(createMockFetch())
+        .mockImplementationOnce(() => Promise.resolve(statusOkResponse({
+          recommendation_id: 'rec-001',
+          status: 'in_progress',
+          updated_at: '2026-05-15T10:00:00Z',
+        })));
+
+      const { result } = renderHook(() => useRecommendations());
+      await act(async () => {
+        await result.current.fetchRecommendations();
+      });
+
+      await act(async () => {
+        await result.current.updateRecommendationStatus('rec-001', { status: 'in_progress' });
+      });
+
+      const url = mockAuthenticatedFetch.mock.calls[1][0] as string;
+      expect(url).toContain('/recommendations/rec-001/status');
+    });
+
+    it('serialises notes and relationship pointers in the request body', async () => {
+      mockAuthenticatedFetch
+        .mockImplementationOnce(createMockFetch())
+        .mockImplementationOnce(() => Promise.resolve(statusOkResponse({
+          recommendation_id: 'rec-001',
+          status: 'done',
+          updated_at: '2026-05-15T10:00:00Z',
+        })));
+
+      const { result } = renderHook(() => useRecommendations());
+      await act(async () => {
+        await result.current.fetchRecommendations();
+      });
+
+      await act(async () => {
+        await result.current.updateRecommendationStatus('rec-001', {
+          status: 'done',
+          notes: 'pitched outdoor pubs',
+          relatedKeyword: 'best running shoes',
+          relatedContentId: 'content-42',
+        });
+      });
+
+      const init = mockAuthenticatedFetch.mock.calls[1][1] as RequestInit;
+      const body = JSON.parse(init.body as string) as Record<string, string>;
+      expect(body.status).toBe('done');
+      expect(body.notes).toBe('pitched outdoor pubs');
+      expect(body.related_keyword).toBe('best running shoes');
+      expect(body.related_content_id).toBe('content-42');
+    });
+
+    it('optimistically updates the recommendation status in local state', async () => {
+      mockAuthenticatedFetch
+        .mockImplementationOnce(createMockFetch())
+        .mockImplementationOnce(() => Promise.resolve(statusOkResponse({
+          recommendation_id: 'rec-001',
+          status: 'done',
+          updated_at: '2026-05-15T10:00:00Z',
+        })));
+
+      const { result } = renderHook(() => useRecommendations());
+      await act(async () => {
+        await result.current.fetchRecommendations();
+      });
+
+      await act(async () => {
+        await result.current.updateRecommendationStatus('rec-001', { status: 'done' });
+      });
+
+      const updated = result.current.data?.recommendations.find((r) => r.id === 'rec-001');
+      expect(updated?.status).toBe('done');
+    });
+
+    it('rolls back the optimistic update when the server call fails', async () => {
+      mockAuthenticatedFetch
+        .mockImplementationOnce(createMockFetch())
+        .mockImplementationOnce(() => Promise.resolve({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({}),
+        }));
+
+      const { result } = renderHook(() => useRecommendations());
+      await act(async () => {
+        await result.current.fetchRecommendations();
+      });
+
+      await act(async () => {
+        await result.current.updateRecommendationStatus('rec-001', { status: 'done' });
+      });
+
+      const reverted = result.current.data?.recommendations.find((r) => r.id === 'rec-001');
+      expect(reverted?.status).toBe('new');
+    });
+
+    it('returns null and skips the fetch when id is empty', async () => {
+      const { result } = renderHook(() => useRecommendations());
+      const ret = await act(
+        () => result.current.updateRecommendationStatus('', { status: 'done' }),
+      );
+      expect(ret).toBeNull();
+      expect(mockAuthenticatedFetch).not.toHaveBeenCalled();
+    });
+  });
 });

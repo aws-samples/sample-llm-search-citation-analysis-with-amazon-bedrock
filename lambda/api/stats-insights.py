@@ -29,6 +29,9 @@ ROUTE_MAP = {
     '/api/visibility': 'get-visibility-metrics.py',
     '/api/prompt-insights': 'get-prompt-insights.py',
     '/api/citation-gaps': 'get-citation-gaps.py',
+    # More specific (recommendations/{id}/status) must be checked before
+    # the generic /recommendations route since the matcher uses prefix.
+    '/api/recommendations/{id}/status': 'recommendation-status.py',
     '/api/recommendations': 'get-recommendations.py',
     '/api/trends': 'get-historical-trends.py',
 }

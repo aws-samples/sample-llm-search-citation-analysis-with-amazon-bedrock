@@ -193,3 +193,33 @@ def create_success_response(data: Any, status_code: int = 200) -> Dict:
             "timestamp": get_timestamp()
         }, default=str)
     }
+
+
+
+def recommendation_id(recommendation: Dict[str, Any]) -> str:
+    """
+    Compute a deterministic stable id for a recommendation.
+
+    Recommendations are produced by `generate_rule_based_recommendations`
+    and aren't stored in DynamoDB themselves — every list call regenerates
+    them. To track per-recommendation status (acknowledged / done /
+    won't fix) we need a stable identifier that doesn't drift across
+    calls. The hash inputs are the immutable parts of a recommendation:
+    type, title, and the keywords list (sorted). Wording in `description`
+    or `action` is excluded because those tend to be slightly different
+    between rule iterations even when the underlying recommendation is
+    semantically the same.
+
+    Returns the SHA-1 hex digest, truncated to 16 characters. Truncation
+    is fine: the inputs come from a small enumerated space (a few rule
+    types × a few hundred keywords) and 64 bits of hash gives a
+    collision probability low enough for our scale.
+    """
+    import hashlib
+    rec_type = (recommendation.get('type') or '').strip().lower()
+    title = (recommendation.get('title') or '').strip().lower()
+    keywords = recommendation.get('keywords') or []
+    keyword_part = '|'.join(sorted(str(k).strip().lower() for k in keywords))
+    payload = f"{rec_type}::{title}::{keyword_part}".encode('utf-8')
+    return hashlib.sha1(payload, usedforsecurity=False).hexdigest()[:16]
+

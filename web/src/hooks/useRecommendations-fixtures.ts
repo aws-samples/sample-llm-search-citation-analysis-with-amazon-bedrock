@@ -4,6 +4,8 @@ import type { RecommendationsResponse } from '../types';
 export const mockRecommendationsResponse: RecommendationsResponse = {
   recommendations: [
     {
+      id: 'rec-001',
+      status: 'new',
       type: 'content_gap',
       priority: 'high',
       title: 'Create content for high-traffic keyword',
@@ -13,6 +15,8 @@ export const mockRecommendationsResponse: RecommendationsResponse = {
       keywords: ['best hotels'],
     },
     {
+      id: 'rec-002',
+      status: 'new',
       type: 'brand_mention',
       priority: 'medium',
       title: 'Increase brand visibility',
