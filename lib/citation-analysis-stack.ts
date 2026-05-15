@@ -1141,6 +1141,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         'get-citation-gaps.py',
         'get-recommendations.py',
         'get-historical-trends.py',
+        'get-reports-competitor.py',
       ]),
       layers: [sharedLayer],
       timeout: cdk.Duration.seconds(60),
@@ -1737,6 +1738,16 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     const trendsResource = apiResource.addResource('trends');
     trendsResource.addMethod('GET', new apigateway.LambdaIntegration(statsInsightsFunction, integrationOptions), methodOptions);
+
+    // Reports aggregator endpoints. /reports/competitor returns the
+    // per-competitor rollup (outranked keywords, exclusive citation
+    // sources, prioritised outreach list) that the Competitor Gap
+    // print report consumes. Routed to the same consolidated
+    // stats-insights Lambda so it shares the warm container with
+    // /visibility and /citation-gaps which it composes.
+    const reportsResource = apiResource.addResource('reports');
+    const reportsCompetitorResource = reportsResource.addResource('competitor');
+    reportsCompetitorResource.addMethod('GET', new apigateway.LambdaIntegration(statsInsightsFunction, integrationOptions), methodOptions);
 
     // Persona Rankings API Route
     const personaRankingsResource = apiResource.addResource('persona-rankings');

@@ -31,6 +31,7 @@ ROUTE_MAP = {
     '/api/citation-gaps': 'get-citation-gaps.py',
     '/api/recommendations': 'get-recommendations.py',
     '/api/trends': 'get-historical-trends.py',
+    '/api/reports/competitor': 'get-reports-competitor.py',
 }
 
 _handlers = HandlerLoader(__file__)
