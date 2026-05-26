@@ -339,6 +339,83 @@ To allow users to sign in with their corporate Azure AD credentials instead of C
 
 For detailed steps, see the [AWS documentation on adding OIDC identity providers to Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-oidc-idp.html).
 
+## Cost
+
+> Pricing in this section was verified from each vendor's primary source on 26th May 2026. Pricing changes regularly. Re-verify against the linked sources before sizing a workload. All figures use US East (N. Virginia) rates.
+
+Running this system costs you on two fronts: your AWS bill and your accounts with each external AI provider. Bedrock charges appear on the AWS bill rather than as a separate provider invoice. For most workloads the AI provider charges dominate. Because the system does no batching or prompt caching by default, AI cost scales linearly with `keywords × providers × personas × runs`.
+
+### AWS infrastructure
+
+A representative workload of 100 keywords analysed weekly across four LLM providers and three personas produces about 4,800 search invocations per month. AWS infrastructure for that workload typically runs between $24 and $65 per month. The crawler is the biggest variable: it uses Bedrock AgentCore browser sessions for every cited URL, and the bill scales with how many distinct citations your keywords return.
+
+| Service | Monthly cost | Notes |
+|---|---|---|
+| [Lambda](https://aws.amazon.com/lambda/pricing/) | $1-3 | $0.20/M requests, $0.0000166667/GB-s; mostly within the 1M request and 400,000 GB-s free tier |
+| [DynamoDB on-demand](https://aws.amazon.com/dynamodb/pricing/on-demand/) | $2-10 | $0.625/M writes, $0.125/M reads, $0.25/GB storage above the 25 GB free tier; 11 tables |
+| [API Gateway REST](https://aws.amazon.com/api-gateway/pricing/) | $1-5 | $3.50/M calls; the dashboard polls every 30 seconds |
+| [Step Functions](https://aws.amazon.com/step-functions/pricing/) | <$1 | $0.000025/state transition, 4,000 free per month |
+| [S3](https://aws.amazon.com/s3/pricing/) | $1-5 | Raw responses, screenshots, access logs; lifecycle expires the latter two at 90 days |
+| [Secrets Manager](https://aws.amazon.com/secrets-manager/pricing/) | $4 | ~9 secrets at $0.40 each plus negligible API call charges |
+| [Cognito](https://aws.amazon.com/cognito/pricing/) | $0 | First 10,000 monthly active users are free on the Essentials tier |
+| [WAF](https://aws.amazon.com/waf/pricing/) | $10-15 | $5/web ACL plus $1/rule plus $0.60/M requests |
+| [CloudFront](https://aws.amazon.com/cloudfront/pricing/) | $0-2 | Pay-as-you-go, dashboard traffic is small |
+| [Bedrock AgentCore Browser](https://aws.amazon.com/bedrock/agentcore/pricing/) | $5-20 | Browser sessions for cited URLs; the variable AWS cost driver |
+
+### AI provider rates
+
+The codebase ships with specific model strings configured. The rates below were verified from each vendor's primary pricing page.
+
+The external providers, billed on your account with each provider, are:
+
+| Provider | Configured model | Input | Output | Source |
+|---|---|---|---|---|
+| OpenAI | `gpt-5-mini` | $0.25/M | $2.00/M | [platform.openai.com/docs/models/gpt-5-mini](https://platform.openai.com/docs/models/gpt-5-mini) |
+| Anthropic | `claude-sonnet-4-5` | $3.00/M | $15.00/M | [docs.anthropic.com](https://docs.anthropic.com/en/docs/about-claude/pricing) |
+| Google Gemini | `gemini-3-flash-preview` | $0.50/M | $3.00/M | [ai.google.dev pricing](https://ai.google.dev/gemini-api/docs/pricing) |
+| Perplexity | `sonar` | $1.00/M | $1.00/M | [docs.perplexity.ai pricing](https://docs.perplexity.ai/getting-started/pricing) |
+
+Perplexity also charges a per-request search-context fee on top of token costs. The fee is roughly $0.005 per `web_search` invocation in low-context mode and compounds with the linear scaling above.
+
+The Bedrock models the system uses internally, billed on your AWS account, are:
+
+| Use | Model | Input | Output |
+|---|---|---|---|
+| Brand extraction (every analysis run), Content Studio, ranking self-reflection | `claude-haiku-4-5` | $1.00/M | $5.00/M |
+| Persona ranking analysis (on demand) | `claude-sonnet-4-6` | $3.00/M | $15.00/M |
+
+Self-reflection results are cached for 24 hours per `(keyword, brand, persona)` tuple, so repeat queries do not re-bill. Brand extraction runs on every search response, so its cost scales with the total number of LLM responses generated rather than with keywords directly.
+
+### Worked example
+
+Take the same workload again: 100 keywords, four LLM providers enabled, three personas, weekly runs. That comes to `100 × 4 × 3 × 4 = 4,800` provider calls per month. Assume roughly 100 input tokens per call (a persona-templated keyword) and 1,500 output tokens per call. The Claude client caps output at 1,024 tokens; the others usually return similar lengths in practice. Each provider therefore sees 1,200 calls, 120,000 input tokens, and 1.8 million output tokens per month.
+
+| Provider | Monthly cost |
+|---|---|
+| OpenAI gpt-5-mini | 120k × $0.25/M + 1.8M × $2.00/M = **$3.63** |
+| Anthropic Sonnet 4.5 | 120k × $3.00/M + 1.8M × $15.00/M = **$27.36** |
+| Gemini 3 Flash Preview | 120k × $0.50/M + 1.8M × $3.00/M = **$5.46** |
+| Perplexity Sonar | 120k × $1.00/M + 1.8M × $1.00/M + 1,200 × $0.005 = **$7.92** |
+| **External providers subtotal** | **~$44** |
+
+On top of that, brand extraction runs Bedrock Haiku 4.5 over all 4,800 responses. Each response averages around 2,000 input tokens (the LLM response being analysed) and 300 output tokens (the structured brand list), so Haiku processes roughly 9.6 million input tokens and 1.44 million output tokens per month. At $1 per million input and $5 per million output, that comes to about $17.
+
+Total AI charges for this scenario therefore land at approximately $61 per month. Anthropic Sonnet alone accounts for $27 of that. Disabling Anthropic cuts the total by $27. Replacing Sonnet with Haiku across the board saves about $18. Running with only Gemini and Perplexity, plus the Bedrock Haiku brand-extraction line, drops the AI cost to around $30.
+
+Combined with the AWS infrastructure cost above, the total monthly cost for this workload sits between roughly $85 and $126.
+
+### Reducing cost
+
+The largest lever is picking cheaper models. Sonnet's output is three times more expensive than Haiku's and five times more than Gemini Flash. You can override the default model per provider in the ProviderConfig DynamoDB table.
+
+Disabling providers and personas you do not need has a multiplicative effect, because the system queries every enabled provider for every persona for every keyword. Switching from a daily schedule to a weekly one cuts the bill to roughly a seventh of its previous size for similar insight quality.
+
+The crawler is the largest single AWS line item once cited URLs accumulate. It runs at concurrency 3 per keyword by default. Lowering that in the Step Functions state machine cuts costs at the expense of slower analysis runs.
+
+DynamoDB tables like `SearchResults` and `CrawledContent` retain data forever by default. Adding a TTL attribute drops storage costs if you do not need full history.
+
+To track actual spend, [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) can filter by `aws:cloudformation:stack-name = CitationAnalysisStack` once you activate the cost allocation tag in the Cost Allocation Tags console.
+
 ## Development
 
 ```bash
