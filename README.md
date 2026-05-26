@@ -339,6 +339,43 @@ To allow users to sign in with their corporate Azure AD credentials instead of C
 
 For detailed steps, see the [AWS documentation on adding OIDC identity providers to Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-oidc-idp.html).
 
+## Cost
+
+Operating cost has two parts: the AWS infrastructure the stack runs on, and the AI provider APIs the system calls. The AI provider costs dominate at any non-trivial workload.
+
+### AWS infrastructure: $25-50 per month
+
+Estimate for a representative workload of 100 keywords analysed weekly across 4 LLM providers, roughly 1,600 searches per month. Actual costs depend on how often you run analysis, how many citations get crawled, and how much data you retain.
+
+| Service | Monthly cost | Notes |
+|---------|--------------|-------|
+| DynamoDB | $5-15 | PAY_PER_REQUEST billing across 11 tables |
+| Lambda | $2-5 | Mostly free-tier eligible at this volume |
+| S3 | $2-5 | Storage and requests for raw responses, screenshots, access logs |
+| CloudFront | $1-5 | Dashboard data transfer |
+| Step Functions | $1-2 | State transitions for analysis runs |
+| API Gateway, Cognito, WAF, Secrets Manager | $10-20 | Mostly fixed |
+
+### AI provider API costs
+
+Billed separately by each provider. These are the dominant cost driver and scale linearly with `keywords × enabled providers × enabled personas × runs per week`. Check current pricing before deployment and start with a small keyword set to calibrate.
+
+The system uses Amazon Bedrock Claude Haiku 4.5 for brand extraction, content generation, and ranking self-reflection. These calls run on your AWS account and appear on your AWS bill rather than as a separate API charge. Self-reflection results are cached for 24 hours per `(keyword, brand, persona)` tuple to avoid repeat calls.
+
+### Worked example
+
+Analysing 100 keywords weekly with 4 LLM providers and 3 personas enabled produces 1,200 LLM calls per run, or roughly 4,800 per month. With typical prompt sizes around 1-2k tokens in and 2-4k tokens out, this comes to approximately $20-60 per month in AI provider charges, plus the AWS infrastructure costs above. Provider pricing changes frequently, so verify against current rates before committing to a workload size.
+
+Crawler costs are separate. Each unique URL cited by an AI response triggers a Bedrock AgentCore browser session, which is the costliest single operation in the pipeline. If your keywords return many distinct URLs, this is where AWS spend grows.
+
+### Reducing cost
+
+- Start with fewer keywords and scale up once you have seen real bills
+- Disable providers and personas you don't need in **Settings**
+- Use longer intervals between scheduled runs (weekly rather than daily)
+- Set a [DynamoDB TTL](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/TTL.html) on `SearchResults` and `CrawledContent` if you don't need full history
+- Use [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) to track spend by service over time
+
 ## Development
 
 ```bash
