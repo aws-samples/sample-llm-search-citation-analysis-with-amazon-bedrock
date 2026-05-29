@@ -54,6 +54,7 @@ scripts/demo-guide.md
 
 # Internal documentation (not for public release)
 .kiro/
+.agents/
 KIRO_DEMO_SCRIPT.md
 SKYSCANNER_SESSION_PLAN.md
 DEPLOYMENT.md
@@ -66,6 +67,7 @@ blog_preview.html
 blog_template.html
 amazon-ospo-ruleset.json
 architecture-diagram.drawio
+
 # Keep architecture-diagram.png - it's used in README and blog
 *.twopager.html
 *twopager*.html

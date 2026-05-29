@@ -42,14 +42,14 @@ describe('CitationGaps', () => {
       expect(screen.getByText(/Discover sources that AI cites/)).toBeInTheDocument();
     });
 
-    it('renders keyword filter with All Keywords option', () => {
+    it('renders keyword filter with a select-a-keyword placeholder', () => {
       render(<CitationGaps {...buildProps()} />);
 
-      expect(screen.getByText('All Keywords')).toBeInTheDocument();
+      expect(screen.getByText('Select a keyword…')).toBeInTheDocument();
       expect(screen.getByText('hotels')).toBeInTheDocument();
     });
 
-    it('fetches gaps on mount', () => {
+    it('does not fetch on mount when no keyword is selected', () => {
       const fetchCitationGaps = vi.fn();
       mockUseCitationGaps.mockReturnValue({
         data: null,
@@ -60,7 +60,13 @@ describe('CitationGaps', () => {
 
       render(<CitationGaps {...buildProps()} />);
 
-      expect(fetchCitationGaps).toHaveBeenCalledWith(undefined, 20);
+      expect(fetchCitationGaps).not.toHaveBeenCalled();
+    });
+
+    it('shows the select-a-keyword prompt before a keyword is chosen', () => {
+      render(<CitationGaps {...buildProps()} />);
+
+      expect(screen.getByText('Select a keyword to analyze citation gaps.')).toBeInTheDocument();
     });
   });
 

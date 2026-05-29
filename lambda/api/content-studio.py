@@ -34,7 +34,7 @@ from shared.decorators import api_handler, parse_json_body, route_handler, valid
 from shared.dynamodb_batch import query_latest_per_key
 from shared.models import BedrockInvocationError, ModelRole, get_model_tier, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
-from shared.utils import brand_names_match, extract_domain, get_brand_config, get_timestamp, utc_now
+from shared.utils import classify_brand, extract_domain, get_brand_config, get_timestamp, utc_now
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -315,22 +315,12 @@ def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
             all_citations.extend(citations)
 
             for brand in brands:
-                name = brand.get('name', '').lower()
                 rank = to_int(brand.get('rank'), 999)
                 sentiment = brand.get('sentiment', 'neutral')
 
-                # Prefer LLM classification; fall back to exact name match
-                # when missing. See audit items 9 and 22 for the substring
-                # collision bugs this replaces.
-                classification = brand.get('classification')
-                is_first_party = classification == 'first_party' or (
-                    classification is None
-                    and any(brand_names_match(name, fp) for fp in first_party)
-                )
-                is_competitor = classification == 'competitor' or (
-                    classification is None
-                    and any(brand_names_match(name, c) for c in competitors)
-                )
+                # LLM classification is authoritative; exact-name fallback only
+                # for legacy records (see shared.utils.classify_brand).
+                is_first_party, is_competitor = classify_brand(brand, first_party, competitors)
 
                 if is_first_party:
                     fp_found = True
@@ -863,7 +853,7 @@ def create_pending_content(idea: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             raise RuntimeError(
                 f"Idempotent conflict on content_id={content_id} but item "
                 "disappeared on read"
-            )
+            ) from None
         return existing, False
 
 

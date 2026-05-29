@@ -47,8 +47,9 @@ import math
 import os
 import sys
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -76,7 +77,7 @@ KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')
 # ----------------------------------------------------------------------
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
-_sibling_cache: Dict[str, Callable] = {}
+_sibling_cache: dict[str, Callable] = {}
 
 
 def _load_sibling(filename: str, attr: str) -> Callable:
@@ -108,7 +109,7 @@ def _gap_helper() -> Callable:
 # Keyword discovery + per-keyword rank lookup
 # ----------------------------------------------------------------------
 
-def _list_tracked_keywords(limit: int) -> List[str]:
+def _list_tracked_keywords(limit: int) -> list[str]:
     """
     Pull tracked keywords from the Keywords table when available, else
     fall back to a search-results scan. Same trick `get-historical-trends`
@@ -135,7 +136,7 @@ def _list_tracked_keywords(limit: int) -> List[str]:
     return list(dict.fromkeys(names))[:limit]
 
 
-def _latest_brand_ranks(keyword: str) -> Dict[str, Dict[str, Any]]:
+def _latest_brand_ranks(keyword: str) -> dict[str, dict[str, Any]]:
     """
     For a keyword, return the latest snapshot's brand ranks indexed by
     lower-cased brand name. Returns empty dict if no data.
@@ -153,7 +154,7 @@ def _latest_brand_ranks(keyword: str) -> Dict[str, Dict[str, Any]]:
     latest_ts = max(item.get('timestamp', '') for item in items)
     latest_items = [item for item in items if item.get('timestamp') == latest_ts]
 
-    aggregated: Dict[str, Dict[str, Any]] = defaultdict(lambda: {
+    aggregated: dict[str, dict[str, Any]] = defaultdict(lambda: {
         'best_rank': 999,
         'providers': set(),
         'classification': 'other',
@@ -202,17 +203,17 @@ def _outreach_lift(citation_count: int, provider_count: int) -> float:
 
 def _build_competitor_rollup(
     competitor: str,
-    keywords: List[str],
-    config: Dict[str, Any],
-) -> Dict[str, Any]:
+    keywords: list[str],
+    config: dict[str, Any],
+) -> dict[str, Any]:
     """Compose one competitor's rollup."""
     competitor_lc = competitor.lower()
     first_party = [
         b.lower() for b in config.get('tracked_brands', {}).get('first_party', [])
     ]
 
-    outranked: List[Dict[str, Any]] = []
-    exclusive_sources: List[Dict[str, Any]] = []
+    outranked: list[dict[str, Any]] = []
+    exclusive_sources: list[dict[str, Any]] = []
 
     for keyword in keywords:
         ranks = _latest_brand_ranks(keyword)
@@ -279,10 +280,10 @@ def _build_competitor_rollup(
 
 
 def build_competitor_rollups(
-    config: Dict[str, Any],
-    competitor: Optional[str],
+    config: dict[str, Any],
+    competitor: str | None,
     keyword_limit: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Top-level composer. When `competitor` is provided, returns a single
     rollup (and includes that competitor in the `competitors` list so
@@ -331,11 +332,11 @@ def build_competitor_rollups(
     'keyword_limit': {'type': int, 'min': 1, 'max': 100, 'default': 50},
 })
 def handler(
-    event: Dict[str, Any],
+    event: dict[str, Any],
     context: Any,
-    competitor: Optional[str] = None,
+    competitor: str | None = None,
     keyword_limit: int = 50,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """API handler for GET /api/reports/competitor."""
     config = get_brand_config()
     payload = build_competitor_rollups(

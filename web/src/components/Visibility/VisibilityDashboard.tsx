@@ -7,7 +7,7 @@ import { usePersonaRankings } from '../../hooks/usePersonaRankings';
 import {
   BrandRow, SummaryCards, TrendChart 
 } from './VisibilityComponents';
-import { PersonaSelector } from '../shared/PersonaSelector';
+import { PersonaSelector } from '../Persona/PersonaSelector';
 import { PersonaComparisonChart } from './PersonaComparisonChart';
 
 interface Props { readonly keywords: Array<{ keyword: string }>; }
@@ -24,10 +24,6 @@ export function VisibilityDashboard({ keywords }: Props) {
   const {
     data: personaRankings, fetchPersonaRankings 
   } = usePersonaRankings();
-
-  useEffect(() => {
-    if (keywords.length > 0 && !selectedKeyword) setSelectedKeyword(keywords[0].keyword);
-  }, [keywords, selectedKeyword]);
 
   useEffect(() => {
     if (selectedKeyword) {
@@ -55,12 +51,17 @@ export function VisibilityDashboard({ keywords }: Props) {
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1.5">Analyze keyword</label>
             <select value={selectedKeyword} onChange={(e) => setSelectedKeyword(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 text-sm bg-gray-50">
+              <option value="" disabled>Select a keyword…</option>
               {keywords.map(k => <option key={k.keyword} value={k.keyword}>{k.keyword}</option>)}
             </select>
           </div>
           <PersonaSelector selectedPersonaId={selectedPersonaId} onPersonaChange={setSelectedPersonaId} />
         </div>
       </div>
+
+      {!selectedKeyword && !visibility && !visLoading && !trendsLoading && (
+        <div className="text-center py-12 text-gray-500">Select a keyword to view visibility metrics.</div>
+      )}
 
       {(visLoading || trendsLoading) && <div className="text-center py-8 text-gray-500">Loading visibility data...</div>}
 

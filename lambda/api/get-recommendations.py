@@ -17,7 +17,7 @@ import logging
 import os
 import sys
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -31,7 +31,7 @@ from shared.api_response import success_response
 from shared.decorators import api_handler, validate
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
-from shared.utils import brand_names_match, get_brand_config, get_timestamp, recommendation_id
+from shared.utils import classify_brand, get_brand_config, get_timestamp, recommendation_id
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -43,6 +43,11 @@ SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')  # Optional for fallback
+
+# A first-party brand ranking outside the top 3 is treated as "low ranking"
+# and, when competitors are also present, as competitor dominance. Shared by
+# both checks so the two stay consistent.
+TOP_RANK_THRESHOLD = 3
 
 
 def generate_rule_based_recommendations(config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -88,9 +93,13 @@ def generate_rule_based_recommendations(config: dict[str, Any]) -> list[dict[str
         response = search_table.scan(Limit=500)
         items = response.get('Items', [])
     else:
-        # Query by each keyword (more efficient for large tables)
+        # Query by each keyword (more efficient for large tables). We analyze
+        # every active keyword the scan returned (bounded by the Keywords scan
+        # Limit above) rather than an arbitrary first-20 slice, so the Action
+        # Center reflects gaps across all tracked keywords. This is DynamoDB
+        # query cost only — one query per keyword, no LLM.
         items = []
-        for keyword in keywords[:20]:  # Limit to 20 keywords for performance
+        for keyword in keywords:
             try:
                 response = search_table.query(
                     KeyConditionExpression=Key('keyword').eq(keyword),
@@ -141,20 +150,11 @@ def generate_rule_based_recommendations(config: dict[str, Any]) -> list[dict[str
             brands = result.get('brands', [])
 
             for brand in brands:
-                name = brand.get('name', '').lower()
                 rank = to_int(brand.get('rank'), 999)
 
-                # Prefer the LLM-assigned classification. Fall back to exact
-                # brand-name match (never substring — see audit item 9, 22).
-                classification = brand.get('classification')
-                is_first_party = classification == 'first_party' or (
-                    classification is None
-                    and any(brand_names_match(name, fp) for fp in first_party)
-                )
-                is_competitor = classification == 'competitor' or (
-                    classification is None
-                    and any(brand_names_match(name, c) for c in competitors)
-                )
+                # LLM classification is authoritative; exact-name fallback only
+                # for legacy records (see shared.utils.classify_brand).
+                is_first_party, is_competitor = classify_brand(brand, first_party, competitors)
 
                 if is_first_party:
                     fp_found = True
@@ -173,14 +173,19 @@ def generate_rule_based_recommendations(config: dict[str, Any]) -> list[dict[str
                 'keyword': keyword,
                 'competitor_mentions': comp_mentions
             })
-        elif fp_best_rank > 3:
+        elif fp_best_rank > TOP_RANK_THRESHOLD:
             keywords_with_low_rank.append({
                 'keyword': keyword,
                 'rank': fp_best_rank,
                 'providers': list(fp_providers)
             })
 
-        if comp_mentions > 0 and (not fp_found or fp_best_rank > comp_mentions):
+        # Competitor dominance: competitors are mentioned for this keyword and
+        # the first-party brand is either absent or ranked outside the top 3.
+        # The previous check compared fp_best_rank (a rank) against
+        # comp_mentions (a count), which mixed unrelated units; this uses the
+        # same rank threshold as the low-ranking check above.
+        if comp_mentions > 0 and (not fp_found or fp_best_rank > TOP_RANK_THRESHOLD):
             keywords_with_competitor_dominance.append({
                 'keyword': keyword,
                 'competitor_mentions': comp_mentions,
@@ -304,7 +309,7 @@ Focus on:
     return []
 
 
-def _annotate_with_status(recommendations: List[Dict[str, Any]]) -> None:
+def _annotate_with_status(recommendations: list[dict[str, Any]]) -> None:
     """
     Mutate each recommendation in place to add `id` + persisted status.
 
@@ -321,7 +326,7 @@ def _annotate_with_status(recommendations: List[Dict[str, Any]]) -> None:
         rec['id'] = recommendation_id(rec)
 
     rec_ids = [r['id'] for r in recommendations]
-    statuses: Dict[str, Dict[str, Any]] = {}
+    statuses: dict[str, dict[str, Any]] = {}
 
     status_table = os.environ.get('RECOMMENDATION_STATUS_TABLE')
     if status_table and rec_ids:

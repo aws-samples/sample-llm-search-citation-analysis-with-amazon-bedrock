@@ -4,7 +4,9 @@ import {
 import {
   API_BASE_URL, authenticatedFetch, getErrorMessage 
 } from '../infrastructure';
-import type { SelfReflectionResponse, SelfReflectionResult } from '../types';
+import type {
+  SelfReflectionResponse, SelfReflectionResult 
+} from '../types';
 
 class SelfReflectionFetchError extends Error {
   constructor(message = 'Failed to fetch self-reflection data') {

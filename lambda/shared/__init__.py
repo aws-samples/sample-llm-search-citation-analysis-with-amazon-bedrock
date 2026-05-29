@@ -24,6 +24,7 @@ from .api_response import (
 from .config import LambdaConfig
 from .utils import (
     brand_names_match,
+    classify_brand,
     extract_domain,
     get_timestamp,
     get_timestamp_compact,
@@ -36,6 +37,7 @@ __all__ = [
     "LambdaConfig",
     "api_response",
     "brand_names_match",
+    "classify_brand",
     "error_response",
     "extract_domain",
     "get_cors_headers",

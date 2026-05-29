@@ -1821,7 +1821,13 @@ export class CitationAnalysisStack extends cdk.Stack {
     
     const keywordResearchHistoryResource = keywordResearchResource.addResource('history');
     keywordResearchHistoryResource.addMethod('GET', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
-    
+
+    // GET /keyword-research/status/{id} — point lookup used by the dashboard to
+    // poll for async expand/competitor results (O(1) get_item, not a scan).
+    const keywordResearchStatusResource = keywordResearchResource.addResource('status');
+    const keywordResearchStatusIdResource = keywordResearchStatusResource.addResource('{id}');
+    keywordResearchStatusIdResource.addMethod('GET', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+
     const keywordResearchIdResource = keywordResearchResource.addResource('{id}');
     keywordResearchIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
 

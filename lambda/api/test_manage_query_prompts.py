@@ -31,7 +31,7 @@ def _mock_boto3_resource(*args, **kwargs):
     return mock_dynamodb
 
 # Import the handler module (has hyphens in filename)
-import importlib.util  # noqa: E402
+import importlib.util
 
 _handler_spec = importlib.util.spec_from_file_location(
     'manage_query_prompts',

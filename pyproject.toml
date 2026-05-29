@@ -42,7 +42,9 @@ ignore = [
 "lambda/**/handler.py"      = ["ARG001"]
 "lambda/api/**"             = ["ARG001"]
 # Tests: allow magic values, imperative fixtures, loose typing.
-"lambda/**/test_*.py"       = ["ARG001", "ARG002", "B017", "RUF012", "SIM"]
+# ARG005 (unused lambda args) and E402 (imports after the sys.path shim that
+# loads hyphenated Lambda modules by path) are idiomatic in these test files.
+"lambda/**/test_*.py"       = ["ARG001", "ARG002", "ARG005", "B017", "E402", "RUF012", "SIM"]
 # Layer smoke test imports symbols specifically to prove they're packaged.
 "lambda/layer/test-layer.py" = ["F401"]
 # Shared __init__.py re-exports: imports are used at module boundary, ruff can't see cross-module.

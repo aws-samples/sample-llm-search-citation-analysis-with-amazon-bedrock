@@ -17,7 +17,9 @@ interface PersonaSelectorProps {
   readonly onPersonaChange: (personaId: string | null) => void;
 }
 
-export function PersonaSelector({ selectedPersonaId, onPersonaChange }: PersonaSelectorProps) {
+export function PersonaSelector({
+  selectedPersonaId, onPersonaChange 
+}: PersonaSelectorProps) {
   const [personas, setPersonas] = useState<QueryPrompt[]>([]);
 
   useEffect(() => {

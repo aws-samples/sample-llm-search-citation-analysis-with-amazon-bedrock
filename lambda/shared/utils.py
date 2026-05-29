@@ -2,6 +2,7 @@
 
 import logging
 import os
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -183,6 +184,58 @@ def brand_names_match(candidate: str, tracked: str) -> bool:
     return c == t
 
 
+def classify_brand(
+    brand: dict[str, Any],
+    first_party: Sequence[str],
+    competitors: Sequence[str] = (),
+) -> tuple[bool, bool]:
+    """Classify an extracted brand against tracked first-party/competitor lists.
+
+    This is the single source of truth for brand classification across the
+    handlers (get-citation-gaps, get-recommendations, content-studio,
+    get-historical-trends). It exists to prevent those handlers from drifting
+    apart — a past divergence let one handler use permissive substring matching
+    while another trusted only the LLM field, producing contradictory dashboard
+    numbers for the same data.
+
+    Classification rules:
+    - The LLM-assigned ``classification`` field on the brand record is
+      authoritative: ``'first_party'`` or ``'competitor'`` decides the bucket
+      outright.
+    - The exact-name fallback (``brand_names_match``) fires ONLY when
+      ``classification`` is ``None`` — i.e. legacy records that predate the
+      field. It uses normalized EXACT matching, never substring or word
+      overlap, so a brand the LLM labelled ``'other'`` is never flipped into a
+      tracked bucket merely because it shares a word with a tracked name.
+
+    Both flags can be ``False`` (e.g. an ``'other'`` brand, or a legacy record
+    matching neither list). They are not forced to be mutually exclusive; in
+    the rare legacy case where a name exactly matches entries on both lists
+    callers should prefer first-party, following the established
+    ``if is_first_party: ... elif is_competitor:`` convention.
+
+    Args:
+        brand: A single brand record from a search-result ``brands`` list.
+        first_party: Tracked first-party brand names (any case).
+        competitors: Tracked competitor brand names (any case). Optional —
+            callers that only need first-party detection may omit it.
+
+    Returns:
+        ``(is_first_party, is_competitor)``.
+    """
+    name = brand.get('name', '')
+    classification = brand.get('classification')
+    is_first_party = classification == 'first_party' or (
+        classification is None
+        and any(brand_names_match(name, fp) for fp in first_party)
+    )
+    is_competitor = classification == 'competitor' or (
+        classification is None
+        and any(brand_names_match(name, c) for c in competitors)
+    )
+    return is_first_party, is_competitor
+
+
 def recommendation_id(recommendation: dict[str, Any]) -> str:
     """
     Compute a deterministic stable id for a recommendation.
@@ -199,7 +252,7 @@ def recommendation_id(recommendation: dict[str, Any]) -> str:
 
     Returns the SHA-1 hex digest, truncated to 16 characters. Truncation
     is fine: the inputs come from a small enumerated space (a few rule
-    types × a few hundred keywords) and 64 bits of hash gives a
+    types x a few hundred keywords) and 64 bits of hash gives a
     collision probability low enough for our scale.
     """
     import hashlib
@@ -207,5 +260,5 @@ def recommendation_id(recommendation: dict[str, Any]) -> str:
     title = (recommendation.get('title') or '').strip().lower()
     keywords = recommendation.get('keywords') or []
     keyword_part = '|'.join(sorted(str(k).strip().lower() for k in keywords))
-    payload = f"{rec_type}::{title}::{keyword_part}".encode('utf-8')
+    payload = f"{rec_type}::{title}::{keyword_part}".encode()
     return hashlib.sha1(payload, usedforsecurity=False).hexdigest()[:16]

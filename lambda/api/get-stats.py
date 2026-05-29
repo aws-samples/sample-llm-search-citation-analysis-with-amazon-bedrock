@@ -7,7 +7,6 @@ Counts are cached in a metadata item to avoid expensive scan operations.
 """
 
 import logging
-import os
 import sys
 import time
 

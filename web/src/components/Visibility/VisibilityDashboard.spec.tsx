@@ -69,7 +69,7 @@ describe('VisibilityDashboard', () => {
       expect(screen.getByText('resorts')).toBeInTheDocument();
     });
 
-    it('selects first keyword by default', () => {
+    it('does not fetch on mount until a keyword is selected', () => {
       const fetchVisibilityMetrics = vi.fn();
       mockUseVisibilityMetrics.mockReturnValue({
         data: null,
@@ -79,7 +79,13 @@ describe('VisibilityDashboard', () => {
 
       render(<VisibilityDashboard {...buildProps()} />);
 
-      expect(fetchVisibilityMetrics).toHaveBeenCalledWith('hotels', undefined, undefined);
+      expect(fetchVisibilityMetrics).not.toHaveBeenCalled();
+    });
+
+    it('shows the select-a-keyword prompt before a keyword is chosen', () => {
+      render(<VisibilityDashboard {...buildProps()} />);
+
+      expect(screen.getByText('Select a keyword to view visibility metrics.')).toBeInTheDocument();
     });
   });
 

@@ -4,7 +4,7 @@ import { useBrandConfig } from '../../hooks/useBrandConfig';
 import { BrandMentionsTable } from './BrandMentionsTable';
 import { BrandDetailModal } from './BrandDetailModal';
 import { BrandConfigPanel } from './BrandConfigPanel';
-import { PersonaSelector } from '../shared/PersonaSelector';
+import { PersonaSelector } from '../Persona/PersonaSelector';
 import { Spinner } from '../ui/Spinner';
 import type {
   Keyword, AggregatedBrand, BrandMentionsResponse, BrandConfig 

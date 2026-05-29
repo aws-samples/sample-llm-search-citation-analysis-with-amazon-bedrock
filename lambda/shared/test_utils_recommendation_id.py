@@ -3,7 +3,6 @@ Tests for shared.utils.recommendation_id — the deterministic hash used
 to track recommendation status across list-regenerations.
 """
 
-import importlib
 import os
 import sys
 

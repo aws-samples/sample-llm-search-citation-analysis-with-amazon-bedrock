@@ -26,7 +26,7 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import success_response
 from shared.decorators import api_handler, validate
 from shared.dynamodb_batch import query_latest_per_key
-from shared.utils import extract_domain, get_brand_config
+from shared.utils import classify_brand, extract_domain, get_brand_config
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -128,40 +128,50 @@ def _batch_crawled_info(urls: list[str]) -> dict[str, dict[str, Any]]:
     return shaped
 
 
-def fuzzy_match_brand(brand_name: str, parent_company: str, tracked_list: list[str]) -> bool:
+def classify_response_brands(
+    brands: list[dict[str, Any]],
+    first_party_list: list[str],
+    competitors_list: list[str],
+) -> tuple[set[str], set[str]]:
+    """Split a response's brands into first-party and competitor name sets.
+
+    Reconciles citation-gap classification with get-visibility-metrics so the
+    two features agree on first-party presence. Per-brand classification is
+    delegated to ``shared.utils.classify_brand``: the LLM-assigned
+    ``classification`` field (``first_party`` | ``competitor`` | ``other``) is
+    authoritative, and its exact-name fallback fires ONLY for legacy records
+    that predate the field (``classification is None``), never via substring or
+    word overlap. This is what keeps an LLM-classified ``other`` brand that
+    merely shares a word with a tracked brand (e.g. "Istanbul Grand Hotel" vs a
+    first-party "Marmara Istanbul") from being flipped into first-party, which
+    was the root cause of the gap analyzer reporting full coverage while the
+    visibility metric reported the brand absent.
+
+    Args:
+        brands: The ``brands`` list from a search-result item.
+        first_party_list: Configured first-party brand names (any case).
+        competitors_list: Configured competitor brand names (any case).
+
+    Returns:
+        ``(mentioned_first_party, mentioned_competitors)`` as sets of brand
+        names. Brands with an empty name are ignored.
     """
-    Fuzzy match a brand against a list of tracked brands.
-    Uses intelligent matching to handle variations like "Brand Premium" matching "Brand".
-    """
-    brand_name_lower = brand_name.lower()
-    parent_company_lower = (parent_company or "").lower()
+    mentioned_first_party: set[str] = set()
+    mentioned_competitors: set[str] = set()
 
-    for tracked in tracked_list:
-        tracked_lower = tracked.lower()
-        # Extract key words from tracked brand
-        tracked_words = set(tracked_lower.split())
+    for brand in brands:
+        name = brand.get('name', '')
+        if not name:
+            continue
 
-        # Direct substring match
-        if tracked_lower in brand_name_lower or brand_name_lower in tracked_lower:
-            return True
+        is_first_party, is_competitor = classify_brand(brand, first_party_list, competitors_list)
 
-        # Parent company match
-        if parent_company_lower and (tracked_lower in parent_company_lower or parent_company_lower in tracked_lower):
-            return True
+        if is_first_party:
+            mentioned_first_party.add(name)
+        elif is_competitor:
+            mentioned_competitors.add(name)
 
-        # Word overlap match (e.g., "Brand" matches "Brand Garden Inn")
-        significant_words = [w for w in tracked_words if len(w) > 3]
-        for word in significant_words:
-            if word in brand_name_lower:
-                return True
-
-        # Check if brand contains the core brand name
-        core_brand = tracked_words - {'hotels', 'hotel', 'international', 'group', 'inc', 'corp', 'company'}
-        for core in core_brand:
-            if len(core) > 3 and core in brand_name_lower:
-                return True
-
-    return False
+    return mentioned_first_party, mentioned_competitors
 
 
 def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -169,8 +179,9 @@ def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any
     Analyze citation gaps for a keyword.
 
     Identifies sources that cite competitors but not first-party brands.
-    Uses the 'classification' field from brand extraction (LLM-based) as primary,
-    with fuzzy matching as fallback.
+    Brand classification uses the LLM-assigned 'classification' field as the
+    source of truth (via classify_response_brands), with an exact brand-name
+    fallback only for legacy records missing that field.
     """
     search_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
 
@@ -208,27 +219,14 @@ def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any
         citations = item.get('citations', [])
         brands = item.get('brands', [])
 
-        # Get brand names mentioned in this response
-        # Use the 'classification' field from LLM extraction as primary source
-        mentioned_first_party = set()
-        mentioned_competitors = set()
-
-        for brand in brands:
-            brand_name = brand.get('name', '')
-            parent_company = brand.get('parent_company', '')
-            classification = brand.get('classification', '')
-
-            # Primary: use LLM classification
-            if classification == 'first_party':
-                mentioned_first_party.add(brand_name)
-            elif classification == 'competitor':
-                mentioned_competitors.add(brand_name)
-            else:
-                # Fallback: use fuzzy matching against tracked brands
-                if fuzzy_match_brand(brand_name, parent_company, first_party_list):
-                    mentioned_first_party.add(brand_name)
-                elif fuzzy_match_brand(brand_name, parent_company, competitors_list):
-                    mentioned_competitors.add(brand_name)
+        # Classify the brands mentioned in this response. Mirrors
+        # get-visibility-metrics: the LLM 'classification' field is
+        # authoritative, with an exact-name fallback only for legacy records
+        # that predate the field. first_party_list/competitors_list are
+        # already lowercased above; brand_names_match normalizes case itself.
+        mentioned_first_party, mentioned_competitors = classify_response_brands(
+            brands, first_party_list, competitors_list
+        )
 
         # Map citations to brands
         for citation in citations:

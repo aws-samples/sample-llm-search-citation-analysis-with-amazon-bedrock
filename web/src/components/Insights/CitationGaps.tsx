@@ -77,7 +77,9 @@ export function CitationGaps({ keywords }: Props) {
   } = useCitationGaps();
 
   useEffect(() => {
-    fetchCitationGaps(selectedKeyword || undefined, 20);
+    if (selectedKeyword) {
+      fetchCitationGaps(selectedKeyword, 20);
+    }
   }, [selectedKeyword, fetchCitationGaps]);
 
   const gaps = data?.gaps ?? data?.top_gaps ?? [];
@@ -94,12 +96,16 @@ export function CitationGaps({ keywords }: Props) {
           <div>
             <label className="block text-xs font-medium text-gray-500 mb-1.5">Filter by keyword</label>
             <select value={selectedKeyword} onChange={(e) => setSelectedKeyword(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 text-sm bg-gray-50">
-              <option value="">All Keywords</option>
+              <option value="" disabled>Select a keyword…</option>
               {keywords.map(k => <option key={k.keyword} value={k.keyword}>{k.keyword}</option>)}
             </select>
           </div>
         </div>
       </div>
+
+      {!selectedKeyword && !data && !loading && !error && (
+        <div className="text-center py-12 text-gray-500">Select a keyword to analyze citation gaps.</div>
+      )}
 
       {data && <GapStats summary={data.summary} totalGaps={data.total_gaps} totalHighPriority={data.total_high_priority} />}
 
@@ -108,14 +114,16 @@ export function CitationGaps({ keywords }: Props) {
       {loading && <div className="text-center py-8 text-gray-500">Analyzing citation gaps...</div>}
       {error && <div className="text-center py-8 text-red-500">{error}</div>}
 
-      <div>
-        <h3 className="text-base sm:text-lg font-medium mb-3">Citation Gaps to Fill</h3>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {gaps.map(gap => <GapCard key={gap.url} gap={gap} />)}
+      {data && (
+        <div>
+          <h3 className="text-base sm:text-lg font-medium mb-3">Citation Gaps to Fill</h3>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {gaps.map(gap => <GapCard key={gap.url} gap={gap} />)}
+          </div>
         </div>
-      </div>
+      )}
 
-      {gaps.length === 0 && !loading && <div className="text-center py-8 text-gray-500">No citation gaps found. Great coverage!</div>}
+      {data && gaps.length === 0 && !loading && !error && <div className="text-center py-8 text-gray-500">No citation gaps found. Great coverage!</div>}
     </div>
   );
 }

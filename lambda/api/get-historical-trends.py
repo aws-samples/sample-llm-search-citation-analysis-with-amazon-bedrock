@@ -41,7 +41,7 @@ from shared.constants import (
 )
 from shared.decorators import api_handler, validate
 from shared.providers import get_enabled_provider_count
-from shared.utils import brand_names_match, get_brand_config, utc_now
+from shared.utils import classify_brand, get_brand_config, utc_now
 
 # Bounded parallelism for the per-keyword trend fan-out. 10 workers keeps the
 # DynamoDB RCU pressure reasonable on the SearchResults table while collapsing
@@ -168,14 +168,10 @@ def aggregate_by_period(items: list[dict], period: str, config: dict) -> list[di
             brands = item.get('brands', [])
 
             for brand in brands:
-                name = brand.get('name', '').lower()
-                # Prefer LLM classification; fall back to exact name match
-                # only when classification is missing (see audit items 9, 22).
-                classification = brand.get('classification')
-                is_first_party = classification == 'first_party' or (
-                    classification is None
-                    and any(brand_names_match(name, fp) for fp in first_party)
-                )
+                # LLM classification is authoritative; exact-name fallback only
+                # for legacy records (see shared.utils.classify_brand). Only the
+                # first-party flag matters here, so competitors is omitted.
+                is_first_party, _ = classify_brand(brand, first_party)
                 if is_first_party:
                     fp_mentions += to_int(brand.get('mention_count'), 1)
                     fp_providers.add(provider)

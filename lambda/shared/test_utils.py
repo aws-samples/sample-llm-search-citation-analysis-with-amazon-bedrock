@@ -194,6 +194,56 @@ class TestBrandNamesMatch:
         assert utils.brand_names_match(["Marriott"], "Marriott") is False  # type: ignore[arg-type]
 
 
+class TestClassifyBrand:
+    """Regression tests for `classify_brand` — the shared helper that all four
+    handlers (get-citation-gaps, get-recommendations, content-studio,
+    get-historical-trends) use so their brand classification can't drift apart.
+
+    Contract: the LLM `classification` field is authoritative; the exact-name
+    `brand_names_match` fallback fires ONLY when classification is missing
+    (None), and never via substring. Returns (is_first_party, is_competitor).
+    """
+
+    def test_returns_first_party_when_classification_is_first_party(self) -> None:
+        assert utils.classify_brand(
+            {'name': 'Marmara', 'classification': 'first_party'}, ['marmara'], ['four seasons']
+        ) == (True, False)
+
+    def test_returns_competitor_when_classification_is_competitor(self) -> None:
+        assert utils.classify_brand(
+            {'name': 'Four Seasons', 'classification': 'competitor'}, ['marmara'], ['four seasons']
+        ) == (False, True)
+
+    def test_returns_neither_when_classification_is_other_despite_matching_a_tracked_list(self) -> None:
+        # The root-cause guard: an LLM-'other' brand whose name matches a
+        # tracked list must NOT be reclassified — 'other' is authoritative.
+        assert utils.classify_brand(
+            {'name': 'Marmara', 'classification': 'other'}, ['marmara'], ['marmara']
+        ) == (False, False)
+
+    def test_trusts_classification_even_when_tracked_lists_are_empty(self) -> None:
+        assert utils.classify_brand(
+            {'name': 'Marmara', 'classification': 'first_party'}, [], []
+        ) == (True, False)
+
+    def test_falls_back_to_exact_first_party_match_when_classification_missing(self) -> None:
+        assert utils.classify_brand({'name': 'Marmara'}, ['marmara'], ['four seasons']) == (True, False)
+
+    def test_falls_back_to_exact_competitor_match_when_classification_missing(self) -> None:
+        assert utils.classify_brand({'name': 'Four Seasons'}, ['marmara'], ['four seasons']) == (False, True)
+
+    def test_does_not_fall_back_via_substring_when_classification_missing(self) -> None:
+        # 'Holiday Inn' must NOT match a configured 'inn' through the fallback.
+        assert utils.classify_brand({'name': 'Holiday Inn'}, ['inn'], []) == (False, False)
+
+    def test_treats_competitors_as_empty_when_omitted(self) -> None:
+        # The get-historical-trends caller omits competitors; first-party
+        # detection still works and competitor is never reported.
+        assert utils.classify_brand({'name': 'Marmara'}, ['marmara']) == (True, False)
+
+    def test_returns_neither_when_name_and_classification_both_missing(self) -> None:
+        assert utils.classify_brand({}, ['marmara'], ['four seasons']) == (False, False)
+
 
 class TestExtractDomain:
     """Tests for the refactored `extract_domain` (audit item 28).

@@ -35,6 +35,90 @@ function isCompetitorAnalysisResult(data: unknown): data is CompetitorAnalysisRe
   return typeof data === 'object' && data !== null && 'url' in data;
 }
 
+function isResearchItem(data: unknown): data is KeywordResearchItem {
+  return typeof data === 'object' && data !== null && 'id' in data && 'status' in data;
+}
+
+function isPendingResponse(data: unknown): data is {
+  id: string;
+  status: 'pending';
+} {
+  if (typeof data !== 'object' || data === null) return false;
+  const record = data as Record<string, unknown>;
+  return record.status === 'pending' && typeof record.id === 'string';
+}
+
+const POLL_INTERVAL_MS = 2000;
+
+const MAX_POLL_ATTEMPTS = 60;
+
+type PollOutcome =
+  | {
+    kind: 'done';
+    item: KeywordResearchItem;
+  }
+  | { kind: 'pending' };
+
+/**
+ * Read the research record once. Returns 'done' with the record when it has
+ * reached a terminal completed state, 'pending' when it is not ready yet (or
+ * the read was a transient non-OK), and throws KeywordResearchError when the
+ * backend reports the work failed.
+ */
+async function readResearchStatus(researchId: string): Promise<PollOutcome> {
+  const response = await authenticatedFetch(
+    `${API_BASE_URL}/keyword-research/status/${researchId}`
+  );
+
+  // 404 = record not visible yet; other non-OK = transient. Keep polling.
+  if (!response.ok) return { kind: 'pending' };
+
+  const item: unknown = await response.json();
+  if (!isResearchItem(item)) return { kind: 'pending' };
+
+  if (item.status === 'completed') {
+    return {
+      kind: 'done',
+      item
+    };
+  }
+  if (item.status === 'failed') {
+    throw new KeywordResearchError(item.error_message ?? 'Research failed');
+  }
+  return { kind: 'pending' };
+}
+
+/**
+ * Poll the point-lookup status endpoint until the research record reaches a
+ * terminal state.
+ *
+ * Uses GET /keyword-research/status/{id} (an O(1) DynamoDB get_item) instead of
+ * scanning /history. The history scan applied its `Limit` before the type
+ * filter, so once the table grew past one scan page the just-created record was
+ * frequently absent from the response and polling silently hung until timeout.
+ * The point lookup is both faster per poll and always finds the record.
+ */
+async function pollResearchStatus(
+  researchId: string,
+  attemptsLeft: number = MAX_POLL_ATTEMPTS
+): Promise<KeywordResearchItem> {
+  if (attemptsLeft <= 0) {
+    throw new KeywordResearchError('Request timed out. Check History for results.');
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+
+  try {
+    const outcome = await readResearchStatus(researchId);
+    if (outcome.kind === 'done') return outcome.item;
+  } catch (pollErr) {
+    if (pollErr instanceof KeywordResearchError) throw pollErr;
+    // Transient network error — fall through and retry.
+  }
+
+  return pollResearchStatus(researchId, attemptsLeft - 1);
+}
+
 export const useKeywordResearch = () => {
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -69,42 +153,17 @@ export const useKeywordResearch = () => {
 
       const data: unknown = await response.json();
 
-      // Async response — poll history until result appears
-      if (typeof data === 'object' && data !== null && 'status' in data && (data as Record<string, unknown>).status === 'pending') {
-        const researchId = (data as Record<string, unknown>).id as string;
-        for (let i = 0; i < 40; i++) {
-          await new Promise(r => setTimeout(r, 3000));
-          try {
-            const historyResp = await authenticatedFetch(`${API_BASE_URL}/keyword-research/history?type=expansion&limit=50`);
-            if (historyResp.ok) {
-              const historyData: unknown = await historyResp.json();
-              if (isHistoryResponse(historyData)) {
-                const completed = (historyData.items ?? []).find(
-                  (item: KeywordResearchItem) => item.id === researchId && item.status === 'completed'
-                );
-                if (completed) {
-                  setExpansionResult({
-                    id: completed.id,
-                    seed_keyword: completed.seed_keyword ?? seedKeyword,
-                    industry: completed.industry ?? industry,
-                    keywords: completed.keywords ?? [],
-                    keyword_count: completed.keyword_count ?? 0,
-                  });
-                  return;
-                }
-                const failed = (historyData.items ?? []).find(
-                  (item: KeywordResearchItem) => item.id === researchId && item.status === 'failed'
-                );
-                if (failed) {
-                  throw new KeywordResearchError(failed.error_message ?? 'Expansion failed');
-                }
-              }
-            }
-          } catch (pollErr) {
-            if (pollErr instanceof KeywordResearchError) throw pollErr;
-          }
-        }
-        throw new KeywordResearchError('Expansion timed out. Check history for results.');
+      // Async response — poll status endpoint until result appears
+      if (isPendingResponse(data)) {
+        const completed = await pollResearchStatus(data.id);
+        setExpansionResult({
+          id: completed.id,
+          seed_keyword: completed.seed_keyword ?? seedKeyword,
+          industry: completed.industry ?? industry,
+          keywords: completed.keywords ?? [],
+          keyword_count: completed.keyword_count ?? 0,
+        });
+        return;
       }
 
       // Sync response (fallback)
@@ -141,49 +200,25 @@ export const useKeywordResearch = () => {
 
       const data: unknown = await response.json();
       
-      // Async response — poll history until result appears
-      if (typeof data === 'object' && data !== null && 'status' in data && (data as Record<string, unknown>).status === 'pending') {
-        const researchId = (data as Record<string, unknown>).id as string;
-        // Poll every 3 seconds for up to 2 minutes
-        for (let i = 0; i < 40; i++) {
-          await new Promise(r => setTimeout(r, 3000));
-          try {
-            const historyResp = await authenticatedFetch(`${API_BASE_URL}/keyword-research/history?type=competitor&limit=50`);
-            if (historyResp.ok) {
-              const historyData: unknown = await historyResp.json();
-              if (isHistoryResponse(historyData)) {
-                const completed = (historyData.items ?? []).find(
-                  (item: KeywordResearchItem) => item.id === researchId && item.status === 'completed'
-                );
-                if (completed?.analysis) {
-                  setCompetitorResult({
-                    id: completed.id,
-                    url: completed.url ?? url,
-                    domain: completed.domain ?? '',
-                    provider: completed.provider ?? '',
-                    keyword_count: completed.keyword_count ?? 0,
-                    industry: completed.analysis?.industry ?? completed.industry ?? '',
-                    primary_keywords: completed.analysis?.primary_keywords ?? [],
-                    secondary_keywords: completed.analysis?.secondary_keywords ?? [],
-                    longtail_keywords: completed.analysis?.longtail_keywords ?? [],
-                    content_gaps: completed.analysis?.content_gaps ?? [],
-                  });
-                  return;
-                }
-                const failed = (historyData.items ?? []).find(
-                  (item: KeywordResearchItem) => item.id === researchId && item.status === 'failed'
-                );
-                if (failed) {
-                  throw new KeywordResearchError(failed.error_message ?? 'Analysis failed');
-                }
-              }
-            }
-          } catch (pollErr) {
-            if (pollErr instanceof KeywordResearchError) throw pollErr;
-            // Ignore transient poll errors, keep trying
-          }
+      // Async response — poll status endpoint until result appears
+      if (isPendingResponse(data)) {
+        const completed = await pollResearchStatus(data.id);
+        if (!completed.analysis) {
+          throw new KeywordResearchError('Analysis completed but returned no data');
         }
-        throw new KeywordResearchError('Analysis timed out. Check history for results.');
+        setCompetitorResult({
+          id: completed.id,
+          url: completed.url ?? url,
+          domain: completed.domain ?? '',
+          provider: completed.provider ?? '',
+          keyword_count: completed.keyword_count ?? 0,
+          industry: completed.analysis.industry ?? completed.industry ?? '',
+          primary_keywords: completed.analysis.primary_keywords ?? [],
+          secondary_keywords: completed.analysis.secondary_keywords ?? [],
+          longtail_keywords: completed.analysis.longtail_keywords ?? [],
+          content_gaps: completed.analysis.content_gaps ?? [],
+        });
+        return;
       }
 
       // Sync response (fallback)

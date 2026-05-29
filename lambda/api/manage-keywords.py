@@ -5,7 +5,6 @@ Handles POST, PUT, DELETE operations for keywords.
 """
 
 import logging
-import os
 import sys
 import uuid
 

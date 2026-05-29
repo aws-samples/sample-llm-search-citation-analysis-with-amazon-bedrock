@@ -6,7 +6,8 @@ import {
 } from '@testing-library/react';
 import { useKeywordResearch } from './useKeywordResearch';
 import {
-  mockExpansionResult, mockCompetitorResult, mockHistoryItems, createMockFetch 
+  mockExpansionResult, mockCompetitorResult, mockHistoryItems, createMockFetch,
+  mockExpansionStatusItem, mockCompetitorStatusItem, mockFailedStatusItem, createStatusPollingFetch
 } from './useKeywordResearch-fixtures';
 
 vi.mock('../infrastructure', async () => {
@@ -56,6 +57,12 @@ function findDeleteCall(calls: unknown[][]): MockCall | undefined {
   ) as MockCall | undefined;
 }
 
+function findStatusCalls(calls: unknown[]): MockCall[] {
+  return calls.filter(
+    (c): c is MockCall => isValidMockCall(c) && c[0].includes('/status/')
+  );
+}
+
 function createPromiseResolver(): {
   promise: Promise<Response>;
   resolve: (value: Response) => void;
@@ -83,6 +90,7 @@ describe('useKeywordResearch', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -382,6 +390,102 @@ describe('useKeywordResearch', () => {
       const deleteCall = findDeleteCall(mockAuthenticatedFetch.mock.calls);
       expect(deleteCall).toBeDefined();
       expect(deleteCall?.[0]).toContain('/keyword-research/research-123');
+    });
+  });
+
+  describe('async status polling', () => {
+    it('sets expansion result when status polling reports completed', async () => {
+      vi.useFakeTimers();
+      mockAuthenticatedFetch.mockImplementation(
+        createStatusPollingFetch({ statusItem: mockExpansionStatusItem })
+      );
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        const promise = result.current.expandKeywords('best hotels', 'hospitality', 10);
+        await vi.runAllTimersAsync();
+        await promise;
+      });
+
+      expect(result.current.expansionResult?.keyword_count).toBe(2);
+      expect(result.current.expansionResult?.seed_keyword).toBe('best hotels');
+    });
+
+    it('polls the status endpoint with the pending research id', async () => {
+      vi.useFakeTimers();
+      mockAuthenticatedFetch.mockImplementation(
+        createStatusPollingFetch({ statusItem: mockExpansionStatusItem })
+      );
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        const promise = result.current.expandKeywords('best hotels', 'hospitality', 10);
+        await vi.runAllTimersAsync();
+        await promise;
+      });
+
+      const statusCalls = findStatusCalls(mockAuthenticatedFetch.mock.calls);
+      expect(statusCalls[0]?.[0]).toContain('/status/research-async-1');
+    });
+
+    it('keeps polling until the status record becomes available', async () => {
+      vi.useFakeTimers();
+      mockAuthenticatedFetch.mockImplementation(
+        createStatusPollingFetch({
+          statusItem: mockExpansionStatusItem,
+          notReadyResponses: 2
+        })
+      );
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        const promise = result.current.expandKeywords('best hotels', 'hospitality', 10);
+        await vi.runAllTimersAsync();
+        await promise;
+      });
+
+      const statusCalls = findStatusCalls(mockAuthenticatedFetch.mock.calls);
+      expect(statusCalls).toHaveLength(3);
+      expect(result.current.expansionResult?.keyword_count).toBe(2);
+    });
+
+    it('sets competitor result when status polling reports completed', async () => {
+      vi.useFakeTimers();
+      mockAuthenticatedFetch.mockImplementation(
+        createStatusPollingFetch({ statusItem: mockCompetitorStatusItem })
+      );
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        const promise = result.current.analyzeCompetitor('https://competitor.com');
+        await vi.runAllTimersAsync();
+        await promise;
+      });
+
+      expect(result.current.competitorResult?.domain).toBe('competitor.com');
+      expect(result.current.competitorResult?.primary_keywords).toHaveLength(1);
+    });
+
+    it('sets error when status polling reports failed', async () => {
+      vi.useFakeTimers();
+      mockAuthenticatedFetch.mockImplementation(
+        createStatusPollingFetch({ statusItem: mockFailedStatusItem })
+      );
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        const promise = result.current.expandKeywords('best hotels', 'hospitality', 10);
+        await vi.runAllTimersAsync();
+        await promise;
+      });
+
+      expect(result.current.error).toBe('Failed to process research request');
+      expect(result.current.expansionResult).toBeNull();
     });
   });
 });

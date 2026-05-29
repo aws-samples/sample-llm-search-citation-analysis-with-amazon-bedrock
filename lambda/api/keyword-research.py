@@ -26,7 +26,7 @@ sys.path.insert(0, '/opt/python')
 # HTML parsing
 from bs4 import BeautifulSoup
 
-from shared.api_response import error_response, success_response, validation_error
+from shared.api_response import error_response, not_found_response, success_response, validation_error
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
 from shared.prompt_safety import wrap_user_input
 from shared.url_validator import validate_url_safe
@@ -638,24 +638,71 @@ Return ONLY valid JSON:
 
 
 @validate({
+    'id': {'required': True, 'type': str, 'max_length': 128, 'source': 'path'}
+})
+def _get_status(event: dict[str, Any], context: Any, id: str) -> dict[str, Any]:
+    """GET /api/keyword-research/status/{id} - Point lookup of a single research record.
+
+    Used by the dashboard to poll for async expand/competitor results. This is an
+    O(1) DynamoDB ``get_item`` on the partition key, so it stays fast and correct
+    regardless of how large the research history grows. Polling via ``/history``
+    (a table ``scan``) would miss the record once the table exceeds the scan page
+    size, because DynamoDB applies ``Limit`` before the type ``FilterExpression``.
+    """
+    try:
+        response = research_table.get_item(Key={'id': id})
+        item = response.get('Item')
+
+        if not item:
+            return not_found_response('Research', event)
+
+        # raw_response can be several KB of model output — not needed for polling.
+        item.pop('raw_response', None)
+
+        return success_response(item, event)
+
+    except Exception as e:
+        logger.error(f"Failed to get research status: {e}")
+        return error_response(e, event)
+
+
+@validate({
     'type': {'type': str, 'choices': ['expansion', 'competitor']},
     'limit': {'type': int, 'min': 1, 'max': 100, 'default': 20}
 })
 def _get_history(event: dict[str, Any], context: Any, type: str | None = None, limit: int = 20) -> dict[str, Any]:
-    """GET /api/keyword-research/history - Get keyword research history."""
+    """GET /api/keyword-research/history - Get keyword research history.
+
+    Returns the ``limit`` most recent records (optionally filtered by ``type``).
+
+    Note: we deliberately do NOT pass ``Limit`` to ``scan``. In DynamoDB the
+    scan ``Limit`` caps the number of items *evaluated* before the
+    ``FilterExpression`` runs, so a per-page ``Limit`` combined with a type
+    filter would silently drop matching records and return an incomplete,
+    non-deterministic page. Instead we page through all matching items, sort by
+    ``created_at`` descending, then slice to ``limit``.
+    """
     try:
-        scan_params = {'Limit': limit}
+        scan_params: dict[str, Any] = {}
 
         if type:
             scan_params['FilterExpression'] = '#t = :type'
             scan_params['ExpressionAttributeNames'] = {'#t': 'type'}
             scan_params['ExpressionAttributeValues'] = {':type': type}
 
-        response = research_table.scan(**scan_params)
-        items = response.get('Items', [])
+        items = []
+        while True:
+            response = research_table.scan(**scan_params)
+            items.extend(response.get('Items', []))
 
-        # Sort by created_at descending
+            last_key = response.get('LastEvaluatedKey')
+            if not last_key:
+                break
+            scan_params['ExclusiveStartKey'] = last_key
+
+        # Sort by created_at descending, then keep only the most recent `limit`.
         items.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        items = items[:limit]
 
         # Remove raw_response from list view
         for item in items:
@@ -691,6 +738,7 @@ def _delete_research(event: dict[str, Any], context: Any) -> dict[str, Any]:
 @route_handler({
     ('POST', '/expand'): _expand_keywords,
     ('POST', '/competitor'): _analyze_competitor,
+    ('GET', '/status'): _get_status,
     ('GET', '/history'): _get_history,
     ('DELETE', None): _delete_research,
 })

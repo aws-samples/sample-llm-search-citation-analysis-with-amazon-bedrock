@@ -11,22 +11,22 @@ Endpoints:
 """
 
 import json
+import logging
 import os
 import sys
 import time
-import logging
 from datetime import datetime, timedelta
 
 import boto3
-from boto3.dynamodb.conditions import Key, Attr
+from boto3.dynamodb.conditions import Attr, Key
 
 sys.path.insert(0, '/opt/python')
 
-from shared.decorators import api_handler, parse_json_body, validate, require_keyword
 from shared.api_response import success_response, validation_error
-from shared.utils import get_brand_config
-from shared.models import ModelRole, invoke_bedrock
+from shared.decorators import api_handler, parse_json_body, require_keyword, validate
 from shared.llm_json import parse_llm_json
+from shared.models import ModelRole, invoke_bedrock
+from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
