@@ -1,5 +1,5 @@
 import {
-  useEffect, useRef 
+  useEffect, useMemo, useRef 
 } from 'react';
 import {
   Chart, registerables 
@@ -12,29 +12,45 @@ Chart.register(...registerables);
 
 interface BrandChartProps {data: BrandStat[];}
 
-const BRAND_PALETTE_LIGHT = [
-  'rgba(17, 24, 39, 0.9)',
-  'rgba(55, 65, 81, 0.9)',
-  'rgba(251, 191, 36, 0.85)',
-  'rgba(167, 139, 250, 0.85)',
-  'rgba(156, 163, 175, 0.9)',
+// Distinct qualitative palette so adjacent slices never blend. Readable on
+// both light and dark backgrounds. Sized to cover the top brands shown.
+const BRAND_PALETTE = [
+  'rgba(239, 68, 68, 0.9)',   // red
+  'rgba(245, 158, 11, 0.9)',  // amber
+  'rgba(59, 130, 246, 0.9)',  // blue
+  'rgba(168, 85, 247, 0.9)',  // purple
+  'rgba(16, 185, 129, 0.9)',  // emerald
+  'rgba(236, 72, 153, 0.9)',  // pink
+  'rgba(20, 184, 166, 0.9)',  // teal
+  'rgba(249, 115, 22, 0.9)',  // orange
+  'rgba(132, 204, 22, 0.9)',  // lime
+  'rgba(99, 102, 241, 0.9)',  // indigo
 ];
 
-const BRAND_PALETTE_DARK = [
-  'rgba(229, 231, 235, 0.9)',
-  'rgba(156, 163, 175, 0.9)',
-  'rgba(251, 191, 36, 0.85)',
-  'rgba(167, 139, 250, 0.85)',
-  'rgba(107, 114, 128, 0.9)',
-];
+// Slices we never want to plot on the brand donut. "Other" is the long tail of
+// third-party citation domains and swamps the tracked brands, so exclude it.
+const EXCLUDED_LABELS = new Set(['other']);
+
+// Only show the top N brands so the donut stays readable.
+const MAX_SLICES = 10;
 
 export const BrandChart = ({ data }: BrandChartProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const chartRef = useRef<Chart | null>(null);
   const { isDark } = useTheme();
 
+  // Drop the "Other" long tail, rank by mentions, and cap the slice count so
+  // the tracked brands are clearly comparable.
+  const chartData = useMemo(
+    () => (data ?? [])
+      .filter((d) => d.brand && !EXCLUDED_LABELS.has(d.brand.toLowerCase()))
+      .sort((a, b) => b.mention_count - a.mention_count)
+      .slice(0, MAX_SLICES),
+    [data],
+  );
+
   useEffect(() => {
-    if (!canvasRef.current || !data?.length) return;
+    if (!canvasRef.current || !chartData.length) return;
 
     if (chartRef.current) {
       chartRef.current.destroy();
@@ -44,16 +60,15 @@ export const BrandChart = ({ data }: BrandChartProps) => {
     if (!ctx) return;
 
     const theme = getChartTheme(isDark);
-    const palette = isDark ? BRAND_PALETTE_DARK : BRAND_PALETTE_LIGHT;
 
     chartRef.current = new Chart(ctx, {
       type: 'doughnut',
       data: {
-        labels: data.map((d) => d.brand),
+        labels: chartData.map((d) => d.brand),
         datasets: [
           {
-            data: data.map((d) => d.mention_count),
-            backgroundColor: palette,
+            data: chartData.map((d) => d.mention_count),
+            backgroundColor: chartData.map((_, i) => BRAND_PALETTE[i % BRAND_PALETTE.length]),
             borderWidth: 0,
           },
         ],
@@ -88,9 +103,9 @@ export const BrandChart = ({ data }: BrandChartProps) => {
         chartRef.current.destroy();
       }
     };
-  }, [data, isDark]);
+  }, [chartData, isDark]);
 
-  const hasData = data && data.length > 0;
+  const hasData = chartData.length > 0;
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6">

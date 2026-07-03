@@ -17,9 +17,11 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend)
 
 interface PersonaComparisonChartProps { readonly data: PersonaRankingsResponse | null; }
 
-function computeAverageRank(brands: ReadonlyArray<{ rank: number }>): number | null {
+function computeAverageScore(
+  brands: ReadonlyArray<{ visibility_score: number }>,
+): number | null {
   if (brands.length === 0) return null;
-  const sum = brands.reduce((acc, b) => acc + b.rank, 0);
+  const sum = brands.reduce((acc, b) => acc + b.visibility_score, 0);
   return sum / brands.length;
 }
 
@@ -46,12 +48,12 @@ export function PersonaComparisonChart({ data }: PersonaComparisonChartProps) {
 
   const firstPartyAverages = personasWithResults.map((p) => {
     const matching = p.brands.filter((b) => b.classification === 'first_party');
-    return computeAverageRank(matching);
+    return computeAverageScore(matching);
   });
 
   const competitorAverages = personasWithResults.map((p) => {
     const matching = p.brands.filter((b) => b.classification === 'competitor');
-    return computeAverageRank(matching);
+    return computeAverageScore(matching);
   });
 
   const firstPartyCounts = personasWithResults.map(
@@ -101,22 +103,23 @@ export function PersonaComparisonChart({ data }: PersonaComparisonChartProps) {
             const persona = personasWithResults[personaIndex];
             const isFirstParty = context.datasetIndex === 0;
             const brandType = isFirstParty ? 'First-party' : 'Competitor';
-            const avgRank = context.parsed.y ?? 0;
+            const avgScore = context.parsed.y ?? 0;
             const brandCount = isFirstParty
               ? firstPartyCounts[personaIndex]
               : competitorCounts[personaIndex];
-            return `${persona.persona_name} — ${brandType}: avg rank ${avgRank.toFixed(1)} (${brandCount} brands)`;
+            return `${persona.persona_name} — ${brandType}: avg visibility ${avgScore.toFixed(1)} (${brandCount} brands)`;
           },
         },
       },
     },
     scales: {
       y: {
-        reverse: true,
-        beginAtZero: false,
+        beginAtZero: true,
+        min: 0,
+        max: 100,
         title: {
           display: true,
-          text: 'Average Brand Rank (lower is better)',
+          text: 'Average Visibility Score (higher is better)',
           color: theme.textColor,
         },
         ticks: { color: theme.textColor },

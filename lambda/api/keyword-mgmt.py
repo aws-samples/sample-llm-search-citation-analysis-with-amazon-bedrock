@@ -23,6 +23,14 @@ _handlers = HandlerLoader(__file__)
 
 
 def handler(event, context):
+    # Async self-invocations from keyword-research (background expand/competitor
+    # jobs) carry no HTTP resource/path — they dispatch on these flags instead.
+    # Route them straight to the keyword-research handler, which runs the work.
+    # Without this, the async payload falls through to the HTTP router, matches
+    # no route, and the job never runs (record stays 'pending' -> UI times out).
+    if event.get('async_expand') or event.get('async_competitor'):
+        return _handlers.get('keyword-research.py')(event, context)
+
     resource = event.get('resource', '')
     path = event.get('path', '')
     method = event.get('httpMethod', 'GET')

@@ -44,6 +44,96 @@ DEFAULT_EXTRACTION_CONFIG = {
 }
 
 
+def _as_int(value: Any, default: int = 0) -> int:
+    """Coerce a value (int/Decimal/str/None) to int, falling back to default."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalise_brand(name: str) -> str:
+    """Lowercase, strip accents, and collapse punctuation/whitespace for matching."""
+    import re
+    import unicodedata
+
+    decomposed = unicodedata.normalize("NFD", name or "")
+    without_accents = "".join(c for c in decomposed if unicodedata.category(c) != "Mn")
+    return re.sub(r"[^a-z0-9]+", " ", without_accents.lower()).strip()
+
+
+def build_brand_index(tracked_brands: dict, aliases: dict | None = None) -> list[tuple[str, str, str]]:
+    """Build a lookup of (normalised_key, canonical_name, classification) from the
+    configured tracked brands. Brand- and industry-agnostic: whatever is configured
+    as first_party/competitors becomes the canonical set. Each brand entry may be a
+    plain string or a dict with an optional 'aliases' list. An optional external
+    ``aliases`` map ({canonical: [alias, ...]}) is also honoured.
+
+    Longer keys are sorted first so more specific names win over generic prefixes.
+    """
+    index: list[tuple[str, str, str]] = []
+
+    def add(canonical: str, classification: str, extra_aliases: list | None = None):
+        key = _normalise_brand(canonical)
+        if key:
+            index.append((key, canonical, classification))
+        for a in extra_aliases or []:
+            ak = _normalise_brand(a)
+            if ak:
+                index.append((ak, canonical, classification))
+
+    for classification, names in (
+        ("first_party", (tracked_brands or {}).get("first_party", [])),
+        ("competitor", (tracked_brands or {}).get("competitors", [])),
+    ):
+        for entry in names:
+            if isinstance(entry, dict):
+                add(entry.get("name", ""), classification, entry.get("aliases", []))
+            elif entry:
+                add(entry, classification)
+
+    if aliases:
+        # Map canonical -> classification from what we already indexed.
+        canon_class = {c: cls for _, c, cls in index}
+        for canonical, alias_list in aliases.items():
+            cls = canon_class.get(canonical, "other")
+            add(canonical, cls, list(alias_list))
+
+    index.sort(key=lambda x: len(x[0]), reverse=True)
+    return index
+
+
+def canonicalize_brand(name: str, index: list[tuple[str, str, str]]) -> tuple[str, str | None]:
+    """Fold a mentioned brand name onto a configured canonical brand.
+
+    Matches when the normalised name equals a configured brand key or begins with
+    it at a word boundary (so "Enterprise Rent-A-Car" and "Enterprise Plus" both
+    fold to "Enterprise", but "International" never matches "National").
+
+    Returns (canonical_name, classification) on a match, else (original_name, None).
+    """
+    n = _normalise_brand(name)
+    if not n:
+        return name, None
+    # 1. Exact match wins first, so "Avis" folds to "Avis" and never to a longer
+    #    configured variant like "Avis Car Rental".
+    for key, canonical, classification in index:
+        if n == key:
+            return canonical, classification
+    # 2. Mention is a longer variant of a configured brand
+    #    ("Enterprise Rent-A-Car" -> "Enterprise"). index is longest-key-first,
+    #    so the most specific configured brand wins.
+    for key, canonical, classification in index:
+        if n.startswith(key + " "):
+            return canonical, classification
+    # 3. Mention is a shorter form of a configured brand
+    #    ("National" -> "National Car Rental").
+    for key, canonical, classification in index:
+        if key.startswith(n + " "):
+            return canonical, classification
+    return name, None
+
+
 class LLMBrandExtractor:
     """Extract brand mentions using LLM for intelligent parsing and classification."""
 
@@ -238,16 +328,48 @@ JSON OUTPUT:"""
 
     def _classify_brands(self, brands: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
-        Validate brand classifications from LLM.
-        We trust the LLM's classification entirely - no fuzzy matching fallback.
-        This method just ensures the classification field exists.
+        Canonicalise and classify extracted brands deterministically against the
+        configured tracked brands, then merge any variants that fold to the same
+        parent.
+
+        The LLM proposes names and a classification, but variants ("Enterprise
+        Rent-A-Car", "Enterprise Plus") and misreads ("Budget" as a price word)
+        make that unreliable. Here we fold each name onto its configured canonical
+        brand and inherit that brand's classification. Names that match no tracked
+        brand keep the LLM's name and a validated classification (default "other").
+        This is driven entirely by config, so it works for any industry.
         """
+        tracked = (self.config or {}).get("tracked_brands", {})
+        aliases = (self.config or {}).get("brand_aliases")
+        index = build_brand_index(tracked, aliases)
+
+        merged: dict[str, dict[str, Any]] = {}
         for brand in brands:
-            # Ensure classification exists, default to "other" if missing
-            if brand.get("classification") not in ["first_party", "competitor", "other"]:
+            name = brand.get("name") or ""
+            canonical, classification = canonicalize_brand(name, index)
+
+            if classification is not None:
+                brand["name"] = canonical
+                brand["classification"] = classification
+            elif brand.get("classification") not in ("first_party", "competitor", "other"):
                 brand["classification"] = "other"
 
-        return brands
+            key = (brand["name"] or "").lower()
+            if not key:
+                continue
+
+            if key in merged:
+                existing = merged[key]
+                existing["mention_count"] = _as_int(existing.get("mention_count")) + _as_int(brand.get("mention_count"))
+                existing["rank"] = min(_as_int(existing.get("rank"), 999), _as_int(brand.get("rank"), 999))
+                for field in ("sentiment", "sentiment_reason", "ranking_context", "parent_company"):
+                    if not existing.get(field) and brand.get(field):
+                        existing[field] = brand[field]
+            else:
+                brand["mention_count"] = _as_int(brand.get("mention_count"), 1)
+                merged[key] = brand
+
+        return list(merged.values())
 
     def _parse_llm_response(self, response_text: str) -> list[dict[str, Any]]:
         """Parse the LLM's JSON array response via the shared helper."""

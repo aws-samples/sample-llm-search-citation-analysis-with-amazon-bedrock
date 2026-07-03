@@ -72,3 +72,9 @@ architecture-diagram.drawio
 Generative Engine Optimisation*.html
 kiro-workshop-qa.md
 INCIDENT_REPORT.md
+
+# Kiro agent scratchpad (local only)
+.kiro-scratchpad/
+
+# Local validation virtualenv
+.venv-validate/
