@@ -208,6 +208,8 @@ Go to **Settings > Brand Tracking**. This is essential for visibility scoring.
 
 Without brand tracking configured, the Visibility dashboard will show 0.0 scores even if data exists.
 
+Brands are classified as first party, competitor, or other when results are collected, and this is not backdated. So if you configure brand tracking after already running an analysis, run a fresh analysis for the Visibility scores to populate. Setting the brands alone will not reclassify data you have already gathered.
+
 ### Step 3: Add Keywords
 
 Go to **Settings > Keywords**. Add search queries that represent how customers search for your products:
