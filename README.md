@@ -52,7 +52,32 @@ citation-analysis-system/
 - AWS CLI configured with appropriate permissions
 - AWS CDK CLI (`npm install -g aws-cdk`)
 - At least one API key from: OpenAI (recommended), Perplexity, Google Gemini, or Anthropic Claude
+- Amazon Bedrock model access enabled for the Anthropic Claude models in your deployment region (see "Enable Bedrock model access" below). This is required, not optional: brand extraction, which powers the Visibility and Brand Mentions views, along with Content Studio and recommendations, all run on Bedrock.
 - Docker recommended for building Lambda layers (falls back to cross-compilation if unavailable)
+
+### Enable Bedrock model access
+
+The system uses Amazon Bedrock (Anthropic Claude) in your own account for brand extraction, Content Studio, and recommendations. On a new AWS account this access is off by default, and until it is granted every Bedrock call fails with AccessDenied, which leaves the Visibility and Brand Mentions views empty even though searches and citations work.
+
+1. In the AWS console, switch to the region you will deploy to.
+2. Open Amazon Bedrock, then Model access.
+3. Request access to the Anthropic Claude models (Haiku 4.5, Sonnet, and Opus).
+4. Complete the Anthropic use-case details form when prompted. First-time Anthropic access is not granted until this form is submitted.
+5. Wait for the status to show "Access granted", usually a few minutes.
+6. The models are invoked through a global cross-region inference profile, so if invocation still fails after access is granted, enable the same Anthropic models in us-east-1 as well.
+
+### Troubleshooting: Visibility and Brand Mentions are empty
+
+If searches, citations, and the dashboard stats populate but the Visibility and Brand Mentions views stay empty, the cause is almost always missing Bedrock model access. Those two views are built from a brand-extraction step that runs on Amazon Bedrock, separate from the provider API keys, so they go blank when Bedrock access is not granted.
+
+To confirm, check the Search function logs:
+
+1. Open CloudWatch in your deployment region.
+2. Go to Log groups and open `/aws/lambda/CitationAnalysis-Search`.
+3. Search the log group for: `brand extraction`
+4. A working run logs "Starting brand extraction..." and "Brand extraction complete: N brands found". A failing run logs "Error calling Bedrock for brand extraction" or "Empty response from Bedrock", or reports 0 brands found.
+
+If you see the Bedrock error, follow "Enable Bedrock model access" above, then run a fresh analysis. Brand classification is applied when results are collected and is not backfilled, so existing runs will not reclassify; a new run is needed for the views to populate.
 
 ## Setup
 
