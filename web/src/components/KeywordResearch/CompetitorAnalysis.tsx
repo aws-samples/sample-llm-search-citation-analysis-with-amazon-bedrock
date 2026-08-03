@@ -1,5 +1,9 @@
-import { useState } from 'react';
+import {
+  useEffect, useMemo, useState 
+} from 'react';
 import type { CompetitorAnalysisResult } from '../../types';
+import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
+import { KeywordPromotionControls } from './KeywordPromotionControls';
 import {
   InputForm,
   SummaryCard,
@@ -25,13 +29,26 @@ export const CompetitorAnalysis = ({
   const [url, setUrl] = useState('');
   const [activeSection, setActiveSection] = useState<SectionId>('primary');
 
+  const currentKeywords = useMemo(
+    () => getKeywordsForSection(result, activeSection),
+    [result, activeSection]
+  );
+  const promotion = usePromoteKeywords(currentKeywords);
+  const { clearSelection } = promotion;
+  const selectedKeywords = useMemo(() => new Set(promotion.selected), [promotion.selected]);
+
+  // Each section is a distinct set of research keywords, so a section switch clears
+  // the selection just like a new result does: a promotion must never carry keywords
+  // the user can no longer see.
+  useEffect(() => {
+    clearSelection();
+  }, [result, activeSection, clearSelection]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!url.trim()) return;
     await onAnalyze(url.trim());
   };
-
-  const currentKeywords = getKeywordsForSection(result, activeSection);
 
   return (
     <div className="space-y-6">
@@ -44,9 +61,16 @@ export const CompetitorAnalysis = ({
       {result && (
         <div className="space-y-4">
           <SummaryCard result={result} />
+          <KeywordPromotionControls promotion={promotion} />
           <div className="bg-white rounded-lg border border-gray-200">
             <SectionTabs activeSection={activeSection} setActiveSection={setActiveSection} result={result} />
-            <KeywordsTable keywords={currentKeywords} showOpportunity={activeSection === 'gaps'} />
+            <KeywordsTable
+              keywords={currentKeywords}
+              showOpportunity={activeSection === 'gaps'}
+              selectable
+              selected={selectedKeywords}
+              onToggle={promotion.toggle}
+            />
           </div>
         </div>
       )}

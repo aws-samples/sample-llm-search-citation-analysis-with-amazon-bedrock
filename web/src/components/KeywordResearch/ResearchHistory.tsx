@@ -1,10 +1,12 @@
 import {
-  useEffect, useState 
+  useEffect, useMemo, useState 
 } from 'react';
 import type {
   KeywordResearchItem, ResearchKeyword 
 } from '../../types';
+import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { KeywordResultsTable } from './KeywordResultsTable';
+import { KeywordPromotionControls } from './KeywordPromotionControls';
 import { formatDate } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
 
@@ -145,9 +147,17 @@ interface HistoryItemProps {
 const HistoryItem = ({
   item, isExpanded, onToggle, onDelete 
 }: HistoryItemProps) => {
-  const keywords = getKeywordsForItem(item);
+  const keywords = useMemo(() => getKeywordsForItem(item), [item]);
   const hasKeywords = keywords.length > 0;
   const itemTitle = item.type === 'expansion' ? item.seed_keyword : (item.domain ?? item.url);
+
+  const promotion = usePromoteKeywords(keywords);
+  const { clearSelection } = promotion;
+  const selectedKeywords = useMemo(() => new Set(promotion.selected), [promotion.selected]);
+
+  useEffect(() => {
+    clearSelection();
+  }, [isExpanded, clearSelection]);
 
   return (
     <div>
@@ -184,12 +194,16 @@ const HistoryItem = ({
       </div>
 
       {isExpanded && hasKeywords && (
-        <div className="border-t border-gray-100 bg-gray-50 p-4">
+        <div className="border-t border-gray-100 bg-gray-50 p-4 space-y-4">
+          <KeywordPromotionControls promotion={promotion} />
           <KeywordResultsTable
             keywords={keywords}
             title={`${keywords.length} keywords for "${itemTitle}"`}
             subtitle={`Industry: ${item.industry ?? 'general'}`}
             compact
+            selectable
+            selected={selectedKeywords}
+            onToggle={promotion.toggle}
           />
         </div>
       )}

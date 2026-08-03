@@ -1,6 +1,10 @@
-import { useState } from 'react';
+import {
+  useEffect, useMemo, useState 
+} from 'react';
 import type { KeywordExpansionResult } from '../../types';
+import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { KeywordResultsTable } from './KeywordResultsTable';
+import { KeywordPromotionControls } from './KeywordPromotionControls';
 import { Spinner } from '../ui/Spinner';
 
 interface KeywordExpansionProps {
@@ -63,6 +67,15 @@ export const KeywordExpansion = ({
   const [seedKeyword, setSeedKeyword] = useState('');
   const [industry, setIndustry] = useState('general');
   const [count, setCount] = useState(20);
+
+  const expandedKeywords = useMemo(() => result?.keywords ?? [], [result]);
+  const promotion = usePromoteKeywords(expandedKeywords);
+  const { clearSelection } = promotion;
+  const selectedKeywords = useMemo(() => new Set(promotion.selected), [promotion.selected]);
+
+  useEffect(() => {
+    clearSelection();
+  }, [result, clearSelection]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -147,11 +160,17 @@ export const KeywordExpansion = ({
 
       {/* Results */}
       {result?.keywords && result.keywords.length > 0 && (
-        <KeywordResultsTable
-          keywords={result.keywords}
-          title={`${result.keyword_count} keywords for "${result.seed_keyword}"`}
-          subtitle={`Industry: ${result.industry}`}
-        />
+        <>
+          <KeywordPromotionControls promotion={promotion} />
+          <KeywordResultsTable
+            keywords={result.keywords}
+            title={`${result.keyword_count} keywords for "${result.seed_keyword}"`}
+            subtitle={`Industry: ${result.industry}`}
+            selectable
+            selected={selectedKeywords}
+            onToggle={promotion.toggle}
+          />
+        </>
       )}
     </div>
   );

@@ -6,10 +6,13 @@ interface KeywordResultsTableProps {
   title: string;
   subtitle?: string;
   compact?: boolean;
+  selectable?: boolean;
+  selected?: Set<string>;
+  onToggle?: (keyword: string) => void;
 }
 
 export const KeywordResultsTable = ({
-  keywords, title, subtitle, compact = false 
+  keywords, title, subtitle, compact = false, selectable = false, selected, onToggle 
 }: KeywordResultsTableProps) => {
   const [sortBy, setSortBy] = useState<'relevance' | 'competition'>('relevance');
   const [filterIntent, setFilterIntent] = useState<string>('all');
@@ -92,6 +95,9 @@ export const KeywordResultsTable = ({
         <table className="w-full">
           <thead className="bg-gray-50">
             <tr>
+              {selectable && (
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Select</th>
+              )}
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Keyword</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Intent</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Competition</th>
@@ -102,6 +108,17 @@ export const KeywordResultsTable = ({
           <tbody className="divide-y divide-gray-200">
             {sortedKeywords.map((kw) => (
               <tr key={kw.keyword} className="hover:bg-gray-50">
+                {selectable && (
+                  <td className="px-6 py-4">
+                    <input
+                      type="checkbox"
+                      checked={selected?.has(kw.keyword) ?? false}
+                      onChange={() => onToggle?.(kw.keyword)}
+                      aria-label={`Select ${kw.keyword}`}
+                      className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+                    />
+                  </td>
+                )}
                 <td className="px-6 py-4 text-sm text-gray-900">{kw.keyword}</td>
                 <td className="px-6 py-4">
                   <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${getIntentColor(kw.intent)}`}>

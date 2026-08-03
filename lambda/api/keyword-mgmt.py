@@ -3,6 +3,7 @@ Keyword Management Consolidated API Lambda
 
 Routes:
 - GET /api/keywords -> get-keywords handler
+- POST /api/keywords/promote -> promote-keywords handler
 - POST/PUT/DELETE /api/keywords/* -> manage-keywords handler
 - POST/GET/DELETE /api/keyword-research/* -> keyword-research handler
 """
@@ -37,6 +38,11 @@ def handler(event, context):
     # keyword-research routes take priority (longer prefix)
     if path_matches_route('/api/keyword-research', resource, path):
         return _handlers.get('keyword-research.py')(event, context)
+
+    # Promotion is more specific than /api/keywords and must be checked first,
+    # otherwise POST /api/keywords/promote falls through to manage-keywords.
+    if path_matches_route('/api/keywords/promote', resource, path):
+        return _handlers.get('promote-keywords.py')(event, context)
 
     # /api/keywords routes: GET list goes to get-keywords, mutations go to manage-keywords
     if path_matches_route('/api/keywords', resource, path):
