@@ -7,11 +7,15 @@ import {
 import userEvent from '@testing-library/user-event';
 import { KeywordExpansion } from './KeywordExpansion';
 import {
-  SELECTION_LIMIT, PROMOTION_TIMEOUT_MS, PROMOTION_TIMEOUT_MESSAGE 
+  SELECTION_LIMIT,
+  PROMOTION_TIMEOUT_MS,
+  PROMOTION_TIMEOUT_MESSAGE,
+  PROMOTION_SUCCESS_MESSAGE_MS,
+  promotionSuccessMessage,
 } from '../../hooks/usePromoteKeywords';
 import { ApiRequestError } from '../../infrastructure';
 import type {
-  ExpandedKeywordWithSource, KeywordExpansionResult 
+  ExpandedKeywordWithSource, Keyword, KeywordExpansionResult 
 } from '../../types';
 
 vi.mock('../../api/client', () => ({ apiPost: vi.fn() }));
@@ -150,18 +154,41 @@ const replacementResultFixture: KeywordExpansionResult = {
   seed_keyword: 'resorts',
 };
 
+/**
+ * A `created_keywords` wire entry: the COMPLETE created item as the backend
+ * writes it, which is a superset of the `Keyword` fields the active keyword list
+ * reads.
+ */
+const createdKeywordItemFixture = {
+  id: 'keyword-1',
+  keyword: luxuryHotelsFixture.keyword,
+  status: 'active',
+  created_at: '2024-01-15T10:30:00Z',
+  updated_at: '2024-01-15T10:30:00Z',
+  region: 'global',
+  language: 'en',
+  category: '',
+  priority: 'normal',
+  notes: 'intent: commercial; competition: high; source: expansion',
+};
+
 const promotionWireFixture = {
   created: 1,
   skipped: 1,
-  created_keywords: [{
-    id: 'keyword-1',
-    keyword: luxuryHotelsFixture.keyword,
-  }],
+  created_keywords: [createdKeywordItemFixture],
   skipped_keywords: [{
     keyword: beachResortsFixture.keyword,
     reason: 'duplicate',
   }],
 };
+
+const successMessage = promotionSuccessMessage({
+  created: promotionWireFixture.created,
+  skipped: promotionWireFixture.skipped,
+  createdKeywords: [],
+  createdItems: [],
+  skippedKeywords: [],
+});
 
 /** A request that never settles, so the in-flight state can be observed. */
 const mockPendingRequest = () => new Promise<never>(() => undefined);
@@ -179,15 +206,24 @@ const mockAbortableRequest = (
   signal?.addEventListener('abort', () => reject(signal.reason));
 });
 
-const renderExpansionWithResult = (result: KeywordExpansionResult) => render(
-  <KeywordExpansion onExpand={vi.fn()} loading={false} result={result} error={null} />
+const renderExpansionWithResult = (
+  result: KeywordExpansionResult,
+  onKeywordsAdded?: (created: Keyword[]) => void
+) => render(
+  <KeywordExpansion
+    onExpand={vi.fn()}
+    loading={false}
+    result={result}
+    error={null}
+    onKeywordsAdded={onKeywordsAdded}
+  />
 );
 
 const selectKeywordCheckbox = (keyword: string) =>
   screen.getByRole('checkbox', { name: `Select ${keyword}` });
 
 const getPromoteButtonElement = () =>
-  screen.getByRole('button', { name: /promote selected/i });
+  screen.getByRole('button', { name: /add to keywords/i });
 
 describe('KeywordExpansion promotion UI', () => {
   beforeEach(() => {
@@ -239,11 +275,7 @@ describe('KeywordExpansion promotion UI', () => {
     expect(mockApiPost).toHaveBeenCalledTimes(1);
     expect(mockApiPost).toHaveBeenCalledWith(
       '/keywords/promote',
-      {
-        keywords: [luxuryHotelsFixture],
-        status: 'active',
-        priority: 'normal',
-      },
+      { keywords: [luxuryHotelsFixture] },
       { signal: expect.any(AbortSignal) }
     );
   });
@@ -255,20 +287,62 @@ describe('KeywordExpansion promotion UI', () => {
     await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
     await userEvent.click(getPromoteButtonElement());
 
-    expect(screen.getByText(/promoting selected keywords/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /promoting/i })).toBeDisabled();
+    expect(screen.getByText(/adding selected keywords/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /adding/i })).toBeDisabled();
   });
 
-  it('displays the created and skipped counts when the promotion succeeds', async () => {
+  it('displays a success message when the promotion succeeds', async () => {
     mockApiPost.mockResolvedValue(promotionWireFixture);
     renderExpansionWithResult(expansionResultFixture);
 
     await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
     await userEvent.click(getPromoteButtonElement());
 
-    expect(await screen.findByText(
-      `${promotionWireFixture.created} created, ${promotionWireFixture.skipped} skipped`
-    )).toBeInTheDocument();
+    expect(await screen.findByText(successMessage)).toBeInTheDocument();
+  });
+
+  it('dismisses the success message once its display window has elapsed', async () => {
+    // Fake timers from the start, so the dismissal timer the hook arms on
+    // success is the one this test advances.
+    vi.useFakeTimers();
+    mockApiPost.mockResolvedValue(promotionWireFixture);
+    renderExpansionWithResult(expansionResultFixture);
+
+    fireEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
+    fireEvent.click(getPromoteButtonElement());
+    await act(async () => undefined);
+    expect(screen.getByText(successMessage)).toBeInTheDocument();
+
+    await act(async () => {
+      vi.advanceTimersByTime(PROMOTION_SUCCESS_MESSAGE_MS);
+    });
+
+    expect(screen.queryByText(successMessage)).not.toBeInTheDocument();
+  });
+
+  it('reports the created keywords to its owner when the promotion succeeds', async () => {
+    mockApiPost.mockResolvedValue(promotionWireFixture);
+    const onKeywordsAdded = vi.fn();
+    renderExpansionWithResult(expansionResultFixture, onKeywordsAdded);
+
+    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
+    await userEvent.click(getPromoteButtonElement());
+    await screen.findByText(successMessage);
+
+    expect(onKeywordsAdded).toHaveBeenCalledTimes(1);
+    expect(onKeywordsAdded).toHaveBeenCalledWith([createdKeywordItemFixture]);
+  });
+
+  it('reports no created keywords to its owner when the request fails', async () => {
+    mockApiPost.mockRejectedValue(new ApiRequestError('HTTP 500: Server Error', 500));
+    const onKeywordsAdded = vi.fn();
+    renderExpansionWithResult(expansionResultFixture, onKeywordsAdded);
+
+    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
+    await userEvent.click(getPromoteButtonElement());
+    await screen.findByRole('alert');
+
+    expect(onKeywordsAdded).not.toHaveBeenCalled();
   });
 
   it('shows an error and retains the selection when the request fails', async () => {
@@ -278,7 +352,7 @@ describe('KeywordExpansion promotion UI', () => {
     await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
     await userEvent.click(getPromoteButtonElement());
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/promotion failed/i);
+    expect(await screen.findByRole('alert')).toHaveTextContent(/adding keywords failed/i);
     expect(selectKeywordCheckbox(luxuryHotelsFixture.keyword)).toBeChecked();
     expect(getPromoteButtonElement()).toBeEnabled();
   });

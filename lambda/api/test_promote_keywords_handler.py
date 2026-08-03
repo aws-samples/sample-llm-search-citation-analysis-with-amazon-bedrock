@@ -51,8 +51,11 @@ Test outcomes:
       `skipped_keywords`, never its full length
     - `empty`-reason entries are reported yet counted in neither number, so
       `len(skipped_keywords)` exceeds `skipped` whenever a blank entry is sent
-    - `created_keywords` entries carry exactly `id` and `keyword`
-    - every created keyword is actually written, one put per created item
+    - `created_keywords` entries carry the COMPLETE created item -- the same
+      field set `create_items` produces -- with a non-empty `id` and matching
+      `created_at` / `updated_at`
+    - every created item is actually written, one put per item, and the reported
+      entries are exactly the written items
     - an empty keyword list, a >500 entry list, a trimmed keyword over 100
       characters, and an all-blank list each return a 400 validation error,
       create zero items, and perform no scan and no write
@@ -90,8 +93,21 @@ _MODULE_NAME = 'promote_keywords_handler_under_test'
 _TABLE_ENV_VARS = ('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
 _TEST_TABLE_NAME = 'test-keywords-table'
 
-# The fields a `created_keywords` entry is allowed to carry.
-_CREATED_ENTRY_FIELDS = {'id', 'keyword'}
+# The fields a `created_keywords` entry carries: the COMPLETE created item, the
+# same field set `create_items` produces (mirroring `create_keyword` in
+# `manage-keywords.py`).
+_CREATED_ENTRY_FIELDS = {
+    'id',
+    'keyword',
+    'status',
+    'created_at',
+    'updated_at',
+    'region',
+    'language',
+    'category',
+    'priority',
+    'notes',
+}
 
 
 def _load_promote_keywords():
@@ -401,7 +417,7 @@ class TestPromotionResponseProperty:
 
     @given(scenario=_promotion_scenarios())
     @settings(max_examples=50)
-    def test_created_entries_carry_only_id_and_keyword_when_items_are_created(
+    def test_created_entries_carry_the_complete_item_when_items_are_created(
         self, _promote_keywords, scenario
     ):
         table, _batch = _mock_table(scenario.existing_texts)
@@ -411,6 +427,9 @@ class TestPromotionResponseProperty:
         for entry in body['created_keywords']:
             assert set(entry) == _CREATED_ENTRY_FIELDS, f'Unexpected entry shape {entry!r}'
             assert entry['id'], f'Created entry carries an empty id: {entry!r}'
+            assert entry['created_at'] == entry['updated_at'], (
+                f'Created entry timestamps differ: {entry!r}'
+            )
 
     @given(scenario=_promotion_scenarios())
     @settings(max_examples=50)
@@ -425,9 +444,10 @@ class TestPromotionResponseProperty:
         assert len(written) == body['created'], (
             f'Wrote {len(written)} items for a reported created count of {body["created"]}'
         )
-        assert [item['keyword'] for item in written] == [
-            entry['keyword'] for entry in body['created_keywords']
-        ], f'Written keywords do not match the reported ones: {written}'
+        # The response reports the very items that were written, field for field.
+        assert written == body['created_keywords'], (
+            f'Written items do not match the reported ones: {written}'
+        )
 
 
 # --- Example tests ----------------------------------------------------------

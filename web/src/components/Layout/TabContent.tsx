@@ -1,5 +1,5 @@
 import {
-  lazy, Suspense, type ReactNode 
+  lazy, Suspense, useCallback, type ReactNode 
 } from 'react';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { Spinner } from '../ui/Spinner';
@@ -169,6 +169,13 @@ export function TabContent(props: TabContentProps) {
     onNavigateToRawResponses,
   } = props;
 
+  // Keywords promoted from research join the active list immediately, with no
+  // refetch: the research view reports the created items and they are appended
+  // to the state `useDashboardData` owns.
+  const appendKeywords = useCallback((created: Keyword[]) => {
+    setKeywords((previous) => [...previous, ...created]);
+  }, [setKeywords]);
+
   if (activeTab === 'dashboard') {
     return <DashboardContent stats={stats} citations={citations} keywords={keywords} setActiveTab={setActiveTab} />;
   }
@@ -196,7 +203,7 @@ export function TabContent(props: TabContentProps) {
       />
     ),
     'raw-responses': <RawResponsesExplorer initialPath={rawResponsesPath} />,
-    'keyword-research': <KeywordResearchView />,
+    'keyword-research': <KeywordResearchView onKeywordsAdded={appendKeywords} />,
   };
 
   const component = tabComponents[activeTab];

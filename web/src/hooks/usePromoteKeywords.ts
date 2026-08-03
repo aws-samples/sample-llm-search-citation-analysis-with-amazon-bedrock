@@ -9,14 +9,16 @@
  * import selection logic instead of reimplementing it.
  */
 import {
-  useCallback, useReducer, useState 
+  useCallback, useEffect, useReducer, useRef, useState 
 } from 'react';
 import { promoteKeywords } from '../api/keywords';
 import type { PromotionOutcome } from '../api/keywords';
 import {
   getErrorMessage, isAbortError 
 } from '../infrastructure';
-import type { ResearchKeyword } from '../types';
+import type {
+  Keyword, ResearchKeyword 
+} from '../types';
 
 /** Maximum number of keywords that can be selected for one promotion. */
 export const SELECTION_LIMIT = 500;
@@ -24,13 +26,27 @@ export const SELECTION_LIMIT = 500;
 /** Time allowed for a promotion request before it is aborted. */
 export const PROMOTION_TIMEOUT_MS = 30_000;
 
-export const SELECTION_LIMIT_MESSAGE =
-  `Selection limit reached: at most ${SELECTION_LIMIT} keywords can be promoted at once.`;
+/** How long the success message stays on screen before it dismisses itself. */
+export const PROMOTION_SUCCESS_MESSAGE_MS = 5_000;
 
-export const EMPTY_SELECTION_MESSAGE = 'Select at least one keyword to promote.';
+export const SELECTION_LIMIT_MESSAGE =
+  `Selection limit reached: at most ${SELECTION_LIMIT} keywords can be added at once.`;
+
+export const EMPTY_SELECTION_MESSAGE = 'Select at least one keyword to add.';
 
 export const PROMOTION_TIMEOUT_MESSAGE =
-  'Promotion failed: the request did not complete within 30 seconds.';
+  'Adding keywords failed: the request did not complete within 30 seconds.';
+
+/**
+ * The transient success line shown after a promotion, e.g. `3 keywords added`
+ * or `3 keywords added, 2 already existed`. Exported so the component and its
+ * tests read the same wording from source.
+ */
+export function promotionSuccessMessage(outcome: PromotionOutcome): string {
+  const added = `${outcome.created} ${outcome.created === 1 ? 'keyword' : 'keywords'} added`;
+
+  return outcome.skipped > 0 ? `${added}, ${outcome.skipped} already existed` : added;
+}
 
 export type SelectionAction =
   | {
@@ -137,7 +153,7 @@ export interface UsePromoteKeywords {
   outcome: PromotionOutcome | null;
   toggle: (keyword: string) => void;
   clearSelection: () => void;
-  promote: (status: string, priority: string) => Promise<void>;
+  promote: () => Promise<void>;
 }
 
 /**
@@ -147,16 +163,40 @@ export interface UsePromoteKeywords {
  * are looked up by text when a promotion request is built so the research
  * context (`intent`, `competition`) reaches the backend `notes` field; a
  * selected text with no matching row falls back to a text-only record.
+ *
+ * `onKeywordsAdded` is called with the complete created keywords after a
+ * successful request, so the owning view can insert them into the active
+ * keyword list without a refetch. The hook stays ignorant of where that list
+ * lives.
+ *
+ * The request deliberately omits `status` and `priority`: the backend resolves
+ * omitted values to `active` / `normal`, so the defaults are documented in one
+ * place instead of being restated here.
  */
-export const usePromoteKeywords = (availableKeywords: ResearchKeyword[] = []): UsePromoteKeywords => {
+export const usePromoteKeywords = (
+  availableKeywords: ResearchKeyword[] = [],
+  onKeywordsAdded?: (created: Keyword[]) => void
+): UsePromoteKeywords => {
   const [selectionState, dispatchSelection] = useReducer(reduceSelection, initialSelectionState);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<PromotionOutcome | null>(null);
+  const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
     selected, limitMessage 
   } = selectionState;
+
+  const clearSuccessTimer = useCallback(() => {
+    if (successTimerRef.current !== null) {
+      clearTimeout(successTimerRef.current);
+      successTimerRef.current = null;
+    }
+  }, []);
+
+  // The success message dismisses itself on a timer, so the timer is cleared on
+  // unmount: it must never fire against a gone component.
+  useEffect(() => clearSuccessTimer, [clearSuccessTimer]);
 
   const toggle = useCallback((keyword: string) => {
     dispatchSelection({
@@ -168,16 +208,18 @@ export const usePromoteKeywords = (availableKeywords: ResearchKeyword[] = []): U
   const clearSelection = useCallback(() => {
     dispatchSelection({ type: 'clear' });
     setError(null);
+    clearSuccessTimer();
     setOutcome(null);
-  }, []);
+  }, [clearSuccessTimer]);
 
-  const promote = useCallback(async (status: string, priority: string): Promise<void> => {
+  const promote = useCallback(async (): Promise<void> => {
     if (selected.length === 0) {
       setError(EMPTY_SELECTION_MESSAGE);
       return;
     }
 
     setError(null);
+    clearSuccessTimer();
     setOutcome(null);
     setSubmitting(true);
 
@@ -189,28 +231,35 @@ export const usePromoteKeywords = (availableKeywords: ResearchKeyword[] = []): U
     try {
       const result = await promoteKeywords({
         keywords: selected.map((text) => findResearchKeyword(text, availableKeywords)),
-        status,
-        priority,
         signal: controller.signal,
       });
 
       setOutcome(result);
+      successTimerRef.current = setTimeout(() => {
+        successTimerRef.current = null;
+        setOutcome(null);
+      }, PROMOTION_SUCCESS_MESSAGE_MS);
+
       dispatchSelection({
         type: 'reconcile',
         created: result.createdKeywords,
         skipped: result.skippedKeywords,
       });
+
+      if (result.createdItems.length > 0) {
+        onKeywordsAdded?.(result.createdItems);
+      }
     } catch (err) {
       // An abort surfaces here too; the selection is left untouched either way.
       setError(isAbortError(err)
         ? PROMOTION_TIMEOUT_MESSAGE
-        : `Promotion failed: ${getErrorMessage(err, 'keywords')}`);
+        : `Adding keywords failed: ${getErrorMessage(err, 'keywords')}`);
       console.error('[keywords] Error promoting keywords:', err);
     } finally {
       clearTimeout(timeoutId);
       setSubmitting(false);
     }
-  }, [selected, availableKeywords]);
+  }, [selected, availableKeywords, onKeywordsAdded, clearSuccessTimer]);
 
   return {
     selected,

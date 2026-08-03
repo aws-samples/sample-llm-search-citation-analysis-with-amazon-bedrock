@@ -2,7 +2,7 @@ import {
   describe, it, expect, vi, beforeEach 
 } from 'vitest';
 import {
-  render, screen 
+  render, screen, waitFor 
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ResearchHistory } from './ResearchHistory';
@@ -153,13 +153,28 @@ const competitorHistoryItemFixture: KeywordResearchItem = {
   analysis: { primary_keywords: competitorKeywordFixtures },
 };
 
+/**
+ * A `created_keywords` wire entry: the COMPLETE created item as the backend
+ * writes it, which is a superset of the `Keyword` fields the active keyword list
+ * reads.
+ */
+const createdKeywordItemFixture = {
+  id: 'keyword-1',
+  keyword: competitorPrimaryKeywordFixture.keyword,
+  status: 'active',
+  created_at: '2024-01-16T10:30:00Z',
+  updated_at: '2024-01-16T10:30:00Z',
+  region: 'global',
+  language: 'en',
+  category: '',
+  priority: 'normal',
+  notes: 'intent: commercial; competition: medium; source: meta_description',
+};
+
 const promotionWireFixture = {
   created: 1,
   skipped: 0,
-  created_keywords: [{
-    id: 'keyword-1',
-    keyword: competitorPrimaryKeywordFixture.keyword,
-  }],
+  created_keywords: [createdKeywordItemFixture],
   skipped_keywords: [],
 };
 
@@ -223,17 +238,34 @@ describe('ResearchHistory promotion UI', () => {
     await userEvent.click(screen.getByText('example.com'));
 
     await userEvent.click(selectKeywordCheckbox(competitorPrimaryKeywordFixture.keyword));
-    await userEvent.click(screen.getByRole('button', { name: /promote selected/i }));
+    await userEvent.click(screen.getByRole('button', { name: /add to keywords/i }));
 
     expect(mockApiPost).toHaveBeenCalledTimes(1);
     expect(mockApiPost).toHaveBeenCalledWith(
       '/keywords/promote',
-      {
-        keywords: [competitorPrimaryKeywordFixture],
-        status: 'active',
-        priority: 'normal',
-      },
+      { keywords: [competitorPrimaryKeywordFixture] },
       { signal: expect.any(AbortSignal) }
     );
+  });
+
+  it('reports the created keywords of the expanded item to its owner', async () => {
+    mockApiPost.mockResolvedValue(promotionWireFixture);
+    const onKeywordsAdded = vi.fn();
+    render(
+      <ResearchHistory
+        history={[competitorHistoryItemFixture]}
+        loading={false}
+        onDelete={vi.fn()}
+        onRefresh={vi.fn()}
+        onKeywordsAdded={onKeywordsAdded}
+      />
+    );
+    await userEvent.click(screen.getByText('example.com'));
+
+    await userEvent.click(selectKeywordCheckbox(competitorPrimaryKeywordFixture.keyword));
+    await userEvent.click(screen.getByRole('button', { name: /add to keywords/i }));
+
+    await waitFor(() => expect(onKeywordsAdded).toHaveBeenCalledTimes(1));
+    expect(onKeywordsAdded).toHaveBeenCalledWith([createdKeywordItemFixture]);
   });
 });

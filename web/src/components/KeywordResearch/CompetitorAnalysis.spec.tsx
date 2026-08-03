@@ -6,7 +6,9 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CompetitorAnalysis } from './CompetitorAnalysis';
-import { SELECTION_LIMIT } from '../../hooks/usePromoteKeywords';
+import {
+  SELECTION_LIMIT, promotionSuccessMessage 
+} from '../../hooks/usePromoteKeywords';
 import type {
   CompetitorAnalysisResult, ExpandedKeywordWithSource 
 } from '../../types';
@@ -146,21 +148,52 @@ const sectionFixtures = [
 
 const [firstPrimaryKeyword, secondPrimaryKeyword] = competitorResultFixture.primary_keywords;
 
+/**
+ * `created_keywords` entries: the COMPLETE created items as the backend writes
+ * them, a superset of the `Keyword` fields the active keyword list reads.
+ */
+const createdKeywordItemFixtures = [
+  {
+    id: 'keyword-1',
+    keyword: firstPrimaryKeyword.keyword,
+    status: 'active',
+    created_at: '2024-01-15T10:30:00Z',
+    updated_at: '2024-01-15T10:30:00Z',
+    region: 'global',
+    language: 'en',
+    category: '',
+    priority: 'normal',
+    notes: 'intent: transactional; competition: high; source: title',
+  },
+  {
+    id: 'keyword-2',
+    keyword: secondPrimaryKeyword.keyword,
+    status: 'active',
+    created_at: '2024-01-15T10:30:00Z',
+    updated_at: '2024-01-15T10:30:00Z',
+    region: 'global',
+    language: 'en',
+    category: '',
+    priority: 'normal',
+    notes: 'intent: commercial; competition: medium; source: h1',
+  },
+];
+
 const promotionResponseFixture = {
   created: 2,
   skipped: 0,
-  created_keywords: [
-    {
-      id: 'keyword-1',
-      keyword: firstPrimaryKeyword.keyword,
-    },
-    {
-      id: 'keyword-2',
-      keyword: secondPrimaryKeyword.keyword,
-    },
-  ],
+  created_keywords: createdKeywordItemFixtures,
   skipped_keywords: [],
 };
+
+/** The success line shown for `promotionResponseFixture`. */
+const promotionSuccessText = promotionSuccessMessage({
+  created: promotionResponseFixture.created,
+  skipped: promotionResponseFixture.skipped,
+  createdKeywords: [],
+  createdItems: [],
+  skippedKeywords: [],
+});
 
 function buildResult(overrides: Partial<CompetitorAnalysisResult> = {}): CompetitorAnalysisResult {
   return {
@@ -317,7 +350,7 @@ describe('CompetitorAnalysis', () => {
 
       expect(screen.getByText(`0 of ${SELECTION_LIMIT} keywords selected`)).toBeInTheDocument();
       expect(screen.queryAllByRole('checkbox', { checked: true })).toHaveLength(0);
-      expect(screen.getByRole('button', { name: 'Promote selected' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Add to Keywords' })).toBeDisabled();
     });
 
     it('leaves the switched-back section unselected after a section change', async () => {
@@ -349,7 +382,7 @@ describe('CompetitorAnalysis', () => {
       expect(screen.queryAllByRole('checkbox', { checked: true })).toHaveLength(0);
     });
 
-    it('sends a single promotion request with the selected keywords, status, and priority', async () => {
+    it('sends a single promotion request that omits status and priority', async () => {
       mockApiPost.mockResolvedValue(promotionResponseFixture);
       render(<CompetitorAnalysis {...defaultProps} result={competitorResultFixture} />);
 
@@ -359,21 +392,19 @@ describe('CompetitorAnalysis', () => {
       await userEvent.click(
         screen.getByRole('checkbox', { name: `Select ${secondPrimaryKeyword.keyword}` })
       );
-      await userEvent.selectOptions(screen.getByLabelText('Status'), 'paused');
-      await userEvent.selectOptions(screen.getByLabelText('Priority'), 'high');
-      await userEvent.click(screen.getByRole('button', { name: 'Promote selected' }));
-      await screen.findByText('2 created, 0 skipped');
+      await userEvent.click(screen.getByRole('button', { name: 'Add to Keywords' }));
+      await screen.findByText(promotionSuccessText);
 
       expect(mockApiPost).toHaveBeenCalledTimes(1);
       expect(mockApiPost).toHaveBeenCalledWith(
         promotionEndpoint,
-        {
-          keywords: [firstPrimaryKeyword, secondPrimaryKeyword],
-          status: 'paused',
-          priority: 'high',
-        },
+        { keywords: [firstPrimaryKeyword, secondPrimaryKeyword] },
         { signal: expect.any(AbortSignal) }
       );
+      // The UI offers no status/priority choice, so the body carries neither
+      // field and the backend applies its own defaults.
+      const [[, requestBody]] = mockApiPost.mock.calls as [[string, object]];
+      expect(Object.keys(requestBody)).toStrictEqual(['keywords']);
     });
 
     it('posts the research context of each selected competitor keyword', async () => {
@@ -386,8 +417,8 @@ describe('CompetitorAnalysis', () => {
       await userEvent.click(
         screen.getByRole('checkbox', { name: `Select ${secondPrimaryKeyword.keyword}` })
       );
-      await userEvent.click(screen.getByRole('button', { name: 'Promote selected' }));
-      await screen.findByText('2 created, 0 skipped');
+      await userEvent.click(screen.getByRole('button', { name: 'Add to Keywords' }));
+      await screen.findByText(promotionSuccessText);
 
       const [postedCall] = mockApiPost.mock.calls as [
         [string, { keywords: ExpandedKeywordWithSource[] }],

@@ -2,7 +2,7 @@ import {
   useEffect, useMemo, useState 
 } from 'react';
 import type {
-  KeywordResearchItem, ResearchKeyword 
+  Keyword, KeywordResearchItem, ResearchKeyword 
 } from '../../types';
 import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { KeywordResultsTable } from './KeywordResultsTable';
@@ -15,6 +15,7 @@ interface ResearchHistoryProps {
   loading: boolean;
   onDelete: (id: string) => Promise<void>;
   onRefresh: () => void;
+  onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
 const getKeywordsForItem = (item: KeywordResearchItem): ResearchKeyword[] => {
@@ -37,6 +38,7 @@ export const ResearchHistory = ({
   loading,
   onDelete,
   onRefresh,
+  onKeywordsAdded,
 }: ResearchHistoryProps) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -65,6 +67,7 @@ export const ResearchHistory = ({
               isExpanded={expandedId === item.id}
               onToggle={() => toggleExpand(item.id)}
               onDelete={() => onDelete(item.id)}
+              onKeywordsAdded={onKeywordsAdded}
             />
           ))}
         </div>
@@ -142,16 +145,17 @@ interface HistoryItemProps {
   isExpanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
 const HistoryItem = ({
-  item, isExpanded, onToggle, onDelete 
+  item, isExpanded, onToggle, onDelete, onKeywordsAdded 
 }: HistoryItemProps) => {
   const keywords = useMemo(() => getKeywordsForItem(item), [item]);
   const hasKeywords = keywords.length > 0;
   const itemTitle = item.type === 'expansion' ? item.seed_keyword : (item.domain ?? item.url);
 
-  const promotion = usePromoteKeywords(keywords);
+  const promotion = usePromoteKeywords(keywords, onKeywordsAdded);
   const { clearSelection } = promotion;
   const selectedKeywords = useMemo(() => new Set(promotion.selected), [promotion.selected]);
 

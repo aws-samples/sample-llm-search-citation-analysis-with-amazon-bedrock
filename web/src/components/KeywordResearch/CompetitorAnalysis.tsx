@@ -1,7 +1,9 @@
 import {
   useEffect, useMemo, useState 
 } from 'react';
-import type { CompetitorAnalysisResult } from '../../types';
+import type {
+  CompetitorAnalysisResult, Keyword 
+} from '../../types';
 import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
 import {
@@ -18,6 +20,7 @@ interface CompetitorAnalysisProps {
   loading: boolean;
   result: CompetitorAnalysisResult | null;
   error: string | null;
+  onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
 export const CompetitorAnalysis = ({
@@ -25,6 +28,7 @@ export const CompetitorAnalysis = ({
   loading,
   result,
   error,
+  onKeywordsAdded,
 }: CompetitorAnalysisProps) => {
   const [url, setUrl] = useState('');
   const [activeSection, setActiveSection] = useState<SectionId>('primary');
@@ -33,7 +37,7 @@ export const CompetitorAnalysis = ({
     () => getKeywordsForSection(result, activeSection),
     [result, activeSection]
   );
-  const promotion = usePromoteKeywords(currentKeywords);
+  const promotion = usePromoteKeywords(currentKeywords, onKeywordsAdded);
   const { clearSelection } = promotion;
   const selectedKeywords = useMemo(() => new Set(promotion.selected), [promotion.selected]);
 

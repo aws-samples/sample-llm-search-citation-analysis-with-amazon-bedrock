@@ -1,7 +1,9 @@
 import {
   useEffect, useMemo, useState 
 } from 'react';
-import type { KeywordExpansionResult } from '../../types';
+import type {
+  Keyword, KeywordExpansionResult 
+} from '../../types';
 import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { KeywordResultsTable } from './KeywordResultsTable';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
@@ -12,6 +14,7 @@ interface KeywordExpansionProps {
   loading: boolean;
   result: KeywordExpansionResult | null;
   error: string | null;
+  onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
 const INDUSTRIES = [
@@ -62,14 +65,14 @@ const INDUSTRIES = [
 ];
 
 export const KeywordExpansion = ({
-  onExpand, loading, result, error 
+  onExpand, loading, result, error, onKeywordsAdded 
 }: KeywordExpansionProps) => {
   const [seedKeyword, setSeedKeyword] = useState('');
   const [industry, setIndustry] = useState('general');
   const [count, setCount] = useState(20);
 
   const expandedKeywords = useMemo(() => result?.keywords ?? [], [result]);
-  const promotion = usePromoteKeywords(expandedKeywords);
+  const promotion = usePromoteKeywords(expandedKeywords, onKeywordsAdded);
   const { clearSelection } = promotion;
   const selectedKeywords = useMemo(() => new Set(promotion.selected), [promotion.selected]);
 

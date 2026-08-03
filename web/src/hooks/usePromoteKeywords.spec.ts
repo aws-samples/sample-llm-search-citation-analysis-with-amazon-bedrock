@@ -7,10 +7,12 @@ import {
 import {
   reduceSelection,
   initialSelectionState,
+  promotionSuccessMessage,
   usePromoteKeywords,
   SELECTION_LIMIT,
   SELECTION_LIMIT_MESSAGE,
 } from './usePromoteKeywords';
+
 import type {
   SelectionState, UsePromoteKeywords 
 } from './usePromoteKeywords';
@@ -30,6 +32,24 @@ const atCapSelection = Array.from(
   {length: SELECTION_LIMIT},
   (_unused, index) => `capped keyword ${index}`
 );
+
+/**
+ * A `created_keywords` wire entry: the COMPLETE created item as the backend
+ * writes it, which is a superset of the `Keyword` fields the active keyword list
+ * reads.
+ */
+const createdKeywordItemFixture = {
+  id: 'keyword-1',
+  keyword: 'alpha',
+  status: 'active',
+  created_at: '2024-01-15T10:30:00Z',
+  updated_at: '2024-01-15T10:30:00Z',
+  region: 'global',
+  language: 'en',
+  category: '',
+  priority: 'normal',
+  notes: 'intent: commercial; competition: high',
+};
 
 describe('Property 12: Selection toggling never exceeds the 500-item cap', () => {
   const togglingFixtures = [
@@ -150,7 +170,7 @@ describe('Property 13: Promotion trigger is enabled exactly when a non-empty sel
           readHook().toggle('alpha');
         });
         act(() => {
-          void readHook().promote('active', 'normal');
+          void readHook().promote();
         });
       },
       expectedSelectedCount: 1,
@@ -164,7 +184,7 @@ describe('Property 13: Promotion trigger is enabled exactly when a non-empty sel
           readHook().toggle('alpha');
         });
         act(() => {
-          void readHook().promote('active', 'normal');
+          void readHook().promote();
         });
         act(() => {
           readHook().clearSelection();
@@ -260,10 +280,7 @@ describe('Property 14: Successful promotion clears created keywords and retains 
     mockApiPost.mockResolvedValue({
       created: 1,
       skipped: 2,
-      created_keywords: [{
-        id: 'keyword-1',
-        keyword: 'alpha',
-      }],
+      created_keywords: [createdKeywordItemFixture],
       skipped_keywords: [
         {
           keyword: 'beta',
@@ -300,5 +317,54 @@ describe('Property 14: Successful promotion clears created keywords and retains 
     expect(outcome.skipped).toBe(outcome.skippedKeywords.length);
     expect(outcome.skippedKeywords).toStrictEqual(['beta', 'gamma']);
     expect(outcome.created).toBe(outcome.createdKeywords.length);
+    // The complete created items pass through untouched, ready for the active
+    // keyword list.
+    expect(outcome.createdItems).toStrictEqual([createdKeywordItemFixture]);
   });
+});
+
+describe('promotionSuccessMessage', () => {
+  const messageFixtures = [
+    {
+      scenario: 'one keyword was added and nothing was skipped',
+      created: 1,
+      skipped: 0,
+      expectedMessage: '1 keyword added',
+    },
+    {
+      scenario: 'several keywords were added and nothing was skipped',
+      created: 3,
+      skipped: 0,
+      expectedMessage: '3 keywords added',
+    },
+    {
+      scenario: 'keywords were added and duplicates were skipped',
+      created: 3,
+      skipped: 2,
+      expectedMessage: '3 keywords added, 2 already existed',
+    },
+    {
+      scenario: 'every selected keyword already existed',
+      created: 0,
+      skipped: 1,
+      expectedMessage: '0 keywords added, 1 already existed',
+    },
+  ];
+
+  it.each(messageFixtures)(
+    'reads "$expectedMessage" when $scenario',
+    ({
+      created, skipped, expectedMessage 
+    }) => {
+      const message = promotionSuccessMessage({
+        created,
+        skipped,
+        createdKeywords: [],
+        createdItems: [],
+        skippedKeywords: [],
+      });
+
+      expect(message).toBe(expectedMessage);
+    }
+  );
 });

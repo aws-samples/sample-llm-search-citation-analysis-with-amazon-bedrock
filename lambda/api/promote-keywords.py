@@ -83,8 +83,11 @@ def handler(event, context, body):
             `created` nor `skipped`. The requirements Glossary defines a
             Duplicate_Keyword as one matching an EXISTING Active_Keyword, and an
             empty-text entry is not one.
-        `created_keywords`: `{'id', 'keyword'}` per created item -- only those
-            two fields, not the whole DynamoDB item.
+        `created_keywords`: the COMPLETE created items, exactly as written to
+            the Keywords_Table (`id`, `keyword`, `status`, `created_at`,
+            `updated_at`, `region`, `language`, `category`, `priority`,
+            `notes`), so a client can insert them into its keyword list without
+            re-reading the table.
         `skipped_keywords`: every reported skip, `{'keyword', 'reason'}`, with
             both `duplicate` and `empty` reasons included (Req 2.4, 7.2).
 
@@ -120,7 +123,7 @@ def handler(event, context, body):
     return success_response({
         'created': len(items),
         'skipped': sum(1 for entry in skipped if entry['reason'] == REASON_DUPLICATE),
-        'created_keywords': [{'id': item['id'], 'keyword': item['keyword']} for item in items],
+        'created_keywords': items,
         'skipped_keywords': skipped,
     }, event)
 
