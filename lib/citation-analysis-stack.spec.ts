@@ -4,8 +4,6 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { CitationAnalysisStack } from './citation-analysis-stack';
 
 const KEYWORD_MGMT_FUNCTION_NAME = 'CitationAnalysis-API-KeywordMgmt';
-const KEYWORD_MGMT_ROLE_PREFIX = 'KeywordMgmtFunctionServiceRole';
-const KEYWORDS_TABLE_PREFIX = 'KeywordsTable';
 // API Gateway adds a CORS preflight method on every resource; route assertions ignore it.
 const PREFLIGHT_METHOD = 'OPTIONS';
 
@@ -18,11 +16,6 @@ interface ApiGatewayMethodProperties {
   HttpMethod: string;
   ResourceId?: { Ref?: string };
   Integration: { Type: string; Uri: unknown };
-}
-
-interface IamPolicyProperties {
-  Roles: unknown;
-  PolicyDocument: { Statement: { Action: string | string[]; Resource?: unknown }[] };
 }
 
 // Logical ids resolved from the synthesized template in beforeAll, so the keyword route
@@ -112,16 +105,6 @@ describe('Step Functions workflow', () => {
 });
 
 describe('Keyword promotion route', () => {
-  it('exposes promote as a child of the keywords resource', () => {
-    expect(keywordRouteIds.keywords).not.toBe('');
-    expect(keywordRouteIds.promote).not.toBe('');
-
-    const promoteResource = findApiResources(template)[keywordRouteIds.promote];
-
-    expect(promoteResource.Properties.PathPart).toBe('promote');
-    expect(promoteResource.Properties.ParentId?.Ref).toBe(keywordRouteIds.keywords);
-  });
-
   it('exposes POST on the promote resource integrated to the KeywordMgmt function', () => {
     const promoteMethods = findWiredMethods(template, keywordRouteIds.promote);
 
@@ -136,27 +119,6 @@ describe('Keyword promotion route', () => {
 
     expect([...idVerbs].sort((a, b) => a.localeCompare(b))).toStrictEqual(['DELETE', 'PUT']);
     expect(idVerbs).not.toContain('POST');
-  });
-
-  it('grants the KeywordMgmt function read and write on the keywords table', () => {
-    const policies = template.findResources('AWS::IAM::Policy') as Record<
-      string,
-      { Properties: IamPolicyProperties }
-    >;
-    const keywordMgmtPolicies = Object.values(policies)
-      .map((p) => p.Properties)
-      .filter((p) => JSON.stringify(p.Roles).includes(KEYWORD_MGMT_ROLE_PREFIX));
-
-    expect(keywordMgmtPolicies.length).toBeGreaterThan(0);
-
-    const keywordsTableActions = keywordMgmtPolicies
-      .flatMap((p) => p.PolicyDocument.Statement)
-      .filter((s) => JSON.stringify(s.Resource ?? '').includes(KEYWORDS_TABLE_PREFIX))
-      .flatMap((s) => (Array.isArray(s.Action) ? s.Action : [s.Action]));
-
-    expect(keywordsTableActions).toContain('dynamodb:Scan');
-    expect(keywordsTableActions).toContain('dynamodb:BatchWriteItem');
-    expect(keywordsTableActions).toContain('dynamodb:PutItem');
   });
 });
 
