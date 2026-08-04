@@ -3,42 +3,21 @@ Router dispatch tests for the promotion route on the keyword-mgmt API Lambda.
 
 Covers:
     - `POST /api/keywords/promote` dispatches to the `promote-keywords`
-      sub-handler and NOT to `manage-keywords` (**Validates: Requirements 1.1**)
+      sub-handler and NOT to `manage-keywords`
     - The pre-existing `/api/keywords` and `/api/keyword-research` dispatches are
       unchanged by the new, more specific route
     - Prefix collisions (`/api/keywords/promote-bogus`, `/api/keywordspromote`)
       do NOT reach the promotion handler
 
 Context:
-    `keyword-mgmt.py` routes by API Gateway `resource` / `path` through
-    `shared.router.path_matches_route`. `/api/keywords/promote` is a child of the
-    generic `/api/keywords` route, so without a dedicated check ahead of it a
-    promotion POST would fall through to `manage-keywords.py` and be treated as a
-    single-keyword create. These tests pin the ordering.
-
-    The router is loaded through this module's own `keyword_mgmt_router` fixture
-    (the `_load_router` pattern from `test_routers_404.py`), which sets the
-    sub-handlers' import-time env vars, patches `boto3`, and seeds the router's
-    `HandlerLoader` cache (`_handlers._cache`) with a distinct `MagicMock` per
-    sub-handler filename.
-    Dispatch is therefore asserted without executing the real promotion worker,
-    without importing `promote-keywords.py` (which builds a `boto3` resource at
-    module scope), and without reaching AWS.
-
-Test outcomes:
-    - `POST /api/keywords/promote` invokes `promote-keywords.py` exactly once and
-      leaves `manage-keywords.py` / `get-keywords.py` untouched
-    - the promotion route matches through either event field (`resource`, `path`,
-      or both) and for `PUT` / `DELETE` as well, as the sibling routes do
-    - `GET /api/keywords` without an `id` still reaches `get-keywords.py`
-    - `POST /api/keywords` and `PUT` / `DELETE` / `GET /api/keywords/{id}` still
-      reach `manage-keywords.py`
-    - `/api/keyword-research*` still reaches `keyword-research.py`
-    - `/api/keywords/promote-bogus` and friends do NOT reach the promotion
-      handler; being segment children of `/api/keywords`, they keep their
-      pre-existing `manage-keywords.py` dispatch
-    - `/api/keywordspromote` and friends are children of no route at all, so
-      they return a 404 with no sub-handler invoked
+    `keyword-mgmt.py` routes by API Gateway `resource`/`path`.
+    `/api/keywords/promote` is a child of the generic `/api/keywords` route, so
+    without a dedicated check ahead of it a promotion POST would fall through to
+    `manage-keywords.py` as a single-keyword create; these tests pin the
+    ordering. The router is loaded through the `keyword_mgmt_router` fixture (the
+    `_load_router` pattern from `test_routers_404.py`), which seeds the router's
+    `HandlerLoader` cache with a distinct `MagicMock` per sub-handler, so
+    dispatch is asserted without executing a real worker or reaching AWS.
 """
 
 import importlib
@@ -52,15 +31,12 @@ import pytest
 # --- Import-boundary bootstrap ----------------------------------------------
 #
 # `keyword-mgmt.py` is hyphenated and its sub-handlers build AWS clients at
-# import time. Following the `_load_router` pattern in `test_routers_404.py`, the
-# layer copy of `shared` is placed on `sys.path`, the sub-handlers' import-time
-# env vars are set and `boto3` is patched BEFORE the load, and the router is
-# loaded through `importlib.util.spec_from_file_location` under a module name
-# unique to THIS test file. The router's `HandlerLoader` cache is then seeded
-# with a distinct `MagicMock` per sub-handler, so dispatch is asserted without
-# executing a real worker, importing `promote-keywords.py`, or reaching AWS.
-# Every global mutation is undone when the fixture tears down; nothing is
-# autouse, so the ~200 pre-existing tests in this directory are untouched.
+# import time, so it is loaded fresh via `spec_from_file_location` under a module
+# name unique to THIS file (the `_load_router` pattern from `test_routers_404.py`)
+# with the layer `shared` on `sys.path`, env vars set, and `boto3` patched BEFORE
+# the load. The `HandlerLoader` cache is seeded with a `MagicMock` per
+# sub-handler, so dispatch is asserted without executing a real worker or
+# reaching AWS. Every global mutation is undone on teardown; nothing is autouse.
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.abspath(os.path.join(_API_DIR, '..', '..'))
@@ -111,10 +87,8 @@ def _load_keyword_mgmt_router():
 def keyword_mgmt_router():
     """Fresh `keyword-mgmt.py` router with every sub-handler stubbed distinctly.
 
-    The env vars are set and `boto3` patched inside a `with` block wrapping the
-    `yield`, so nothing leaks into another test in the session. Seeding the
-    router's `HandlerLoader` cache (`_handlers._cache`) means no real sub-handler
-    file is ever loaded or executed. Yields `(module, stubs_by_filename)`.
+    Seeding the router's `HandlerLoader` cache means no real sub-handler file is
+    loaded or executed. Yields `(module, stubs_by_filename)`.
     """
     saved = {name: os.environ.get(name) for name in _KEYWORD_MGMT_ENV}
     os.environ.update(_KEYWORD_MGMT_ENV)
@@ -192,7 +166,7 @@ def _assert_only_target_called(stubs, target, event, result):
 
 
 class TestPromoteRoutingUnit:
-    """Dispatch cases for the new `/api/keywords/promote` route (Req 1.1)."""
+    """Dispatch cases for the new `/api/keywords/promote` route."""
 
     def test_routes_to_promote_keywords_when_post_to_promote_path(self, keyword_mgmt_router):
         # Arrange

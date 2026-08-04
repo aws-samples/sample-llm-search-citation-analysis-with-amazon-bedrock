@@ -3,75 +3,31 @@ Handler and DynamoDB tests for the keyword-promotion response contract.
 
 Covers:
 - Property 4: Response counts match their reported lists
-  (**Validates: Requirements 1.4, 2.5**)
 - Property 6: Existing active keywords are never mutated by promotion
-  (**Validates: Requirements 2.2, 2.6**)
 - Example coverage of the request-rejection boundaries
-  (**Validates: Requirements 1.6, 7.1, 7.3, 7.4**)
+
+`handler(event, context)` orchestrates validate -> read existing keys ->
+partition -> build items -> write -> respond, building the success body
+`{created, skipped, created_keywords, skipped_keywords}`.
 
 Context:
-    `handler(event, context)` in `promote-keywords.py` orchestrates
-    validate -> read existing keys -> partition -> build items -> write ->
-    respond, and builds the success body
-    `{created, skipped, created_keywords, skipped_keywords}`.
-
-    Two count rules drive Property 4:
-    - `created == len(created_keywords)`;
-    - `skipped` is the DUPLICATE-ONLY count -- the number of `skipped_keywords`
-      entries whose `reason` is `duplicate`. It is NOT `len(skipped_keywords)`,
-      because that list also carries `reason: 'empty'` entries (Req 7.2), which
-      are counted in neither `created` nor `skipped`.
-
-    To make that distinction testable, every generated request mixes all three
-    cases in one payload: an entry duplicating an EXISTING keyword, an entry that
-    is empty after trimming, and an entry repeated within the request. So each
-    example genuinely has `len(skipped_keywords) > skipped`, which a test using
-    the wrong (`len(skipped_keywords)`) reading would fail. `created + skipped`
-    is deliberately NOT compared against the number of request entries:
-    intra-request repeats collapse (Req 2.3) and are reported nowhere, so the sum
-    can be smaller.
-
-    `load_existing_keyword_keys(table)` and `write_items(table, items)` are the
-    only functions touching DynamoDB. The reader runs a paginated `scan`
-    projecting just the `keyword` attribute through an
-    `ExpressionAttributeNames` alias, so a reserved-word collision is impossible;
-    the writer puts the freshly built items through `batch_writer`.
+    Two count rules drive Property 4: `created == len(created_keywords)`, and
+    `skipped` is the DUPLICATE-ONLY count (entries whose `reason` is
+    `duplicate`), NOT `len(skipped_keywords)` -- that list also carries
+    `reason: 'empty'` entries, counted in neither number. So every generated
+    request mixes all three cases (existing-duplicate, empty-after-trim, and an
+    intra-request repeat), guaranteeing `len(skipped_keywords) > skipped`.
+    Intra-request repeats collapse and are reported nowhere, so `created +
+    skipped` can be smaller than the request length.
 
     Property 6 is asserted structurally: promotion may only ADD items, so the
-    tests check that the recorded calls are `put_item` calls carrying exactly the
-    new items and that neither the table nor the batch writer ever sees an
-    `update_item` or `delete_item` -- the two operations that could change a
-    pre-existing Active_Keyword.
-
-    No AWS-mocking library is used -- none is declared in
-    `lambda/requirements-dev.txt`, and the repository convention is to mock the
-    AWS SDK at the import boundary. A `MagicMock` stands in for the
-    Keywords_Table: its `scan` returns queued pages and its `batch_writer()`
-    context manager records the puts. The handler reads the module-level
-    `keywords_table`, so each invocation swaps that attribute for the mock
-    through `patch.object`. The handler itself is loaded through this module's
-    own `promotion_handler` fixture (the `_load_router` pattern from
-    `test_routers_404.py`).
-
-Test outcomes:
-    - `created` always equals the length of `created_keywords`, and `skipped`
-      always equals the number of `duplicate`-reason entries in
-      `skipped_keywords`, never its full length
-    - `empty`-reason entries are reported yet counted in neither number
-    - `created_keywords` entries carry the COMPLETE created item, with a
-      non-empty `id` and matching `created_at` / `updated_at`, and are exactly
-      the items written
-    - `load_existing_keyword_keys` returns the normalized keys of every scanned
-      page, follows `LastEvaluatedKey`, projects only `keyword` via an alias, and
-      writes nothing
-    - `write_items` issues only `put_item` calls, one per created item, never
-      addresses a pre-existing item, and opens no writer when there is nothing
-      to create
-    - a failing `scan` propagates, so the request aborts with zero writes
-      (Req 2.6)
-    - an empty keyword list, a >500 entry list, a trimmed keyword over 100
-      characters, and an all-blank list each return a 400 validation error,
-      create zero items, and perform no scan and no write
+    tests check the recorded calls are `put_item` calls carrying exactly the new
+    items and that no `update_item` / `delete_item` is ever issued. A `MagicMock`
+    stands in for the Keywords_Table (no AWS-mocking library is declared): its
+    `scan` returns queued pages and its `batch_writer()` records the puts. Each
+    invocation swaps the module-level `keywords_table` for the mock via
+    `patch.object`; the handler is loaded through the `promotion_handler` fixture
+    (the `_load_router` pattern from `test_routers_404.py`).
 """
 
 import importlib
@@ -92,14 +48,11 @@ pytestmark = pytest.mark.usefixtures('table_env_cleared')
 # --- Import-boundary bootstrap ----------------------------------------------
 #
 # `promote-keywords.py` is hyphenated and builds a `boto3` DynamoDB resource at
-# import time, so it cannot be imported normally. Following the `_load_router`
-# pattern in `test_routers_404.py`, the layer copy of `shared` is placed on
-# `sys.path`, the table env vars are set and `boto3` is patched BEFORE the load,
-# and the handler is loaded through `importlib.util.spec_from_file_location`
-# under a module name unique to THIS test file, so a sibling module loading the
-# same handler in one pytest session cannot evict this copy. Every global
-# mutation is undone when the module-scoped fixture tears down. Nothing here is
-# autouse, so the ~200 pre-existing tests in this directory are untouched.
+# import time, so it is loaded fresh via `spec_from_file_location` under a module
+# name unique to THIS file (the `_load_router` pattern from `test_routers_404.py`)
+# with the layer `shared` on `sys.path`, table env vars set, and `boto3` patched
+# BEFORE the load. Every global mutation is undone on teardown; nothing is
+# autouse, so the pre-existing tests in this directory are untouched.
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.abspath(os.path.join(_API_DIR, '..', '..'))
@@ -132,12 +85,7 @@ def _load_promotion_handler():
 
 @pytest.fixture(scope='module')
 def promotion_handler():
-    """`promote-keywords.py`, loaded once for this module with `boto3` patched.
-
-    The env vars are set and `boto3` patched inside a `with` block wrapping the
-    `yield`, so no stubbed client and no env value leaks into another test module
-    in the same pytest session.
-    """
+    """`promote-keywords.py`, loaded once for this module with `boto3` patched."""
     saved = {name: os.environ.get(name) for name in _TABLE_ENV_VARS}
     for name in _TABLE_ENV_VARS:
         os.environ[name] = _TEST_TABLE_NAME
@@ -171,9 +119,7 @@ def table_env_cleared():
         else:
             os.environ[name] = value
 
-# The fields a `created_keywords` entry carries: the COMPLETE created item, the
-# same field set `create_items` produces (mirroring `create_keyword` in
-# `manage-keywords.py`).
+# The COMPLETE created item's field set, as `create_items` produces it.
 _CREATED_ENTRY_FIELDS = {
     'id', 'keyword', 'status', 'created_at', 'updated_at',
     'region', 'language', 'category', 'priority', 'notes',
@@ -202,11 +148,8 @@ def _scan_pages(text_pages):
 
 
 def _mock_table(scan_pages=None, scan_error=None):
-    """Build a `MagicMock` standing in for the Keywords_Table resource.
-
-    Returns `(table, batch)` where `batch` is the recorder yielded by
-    `table.batch_writer()`, so the puts issued for created items are
-    inspectable.
+    """Build a `MagicMock` Keywords_Table, returning `(table, batch)` where
+    `batch` records the puts yielded by `table.batch_writer()`.
     """
     table = MagicMock()
 
@@ -254,9 +197,8 @@ def _invoke(module, table, keywords, status=None, priority=None):
 def _supplied(drawn, allowed_values):
     """Turn a drawn status/priority into the value the request should carry.
 
-    An integer draw selects one of the module's own allowed values, so this file
-    never restates which values are allowed; `None` and `''` are passed through
-    as the two "not supplied" forms that must resolve to the documented defaults.
+    An integer selects an allowed value; `None`/`''` pass through as the two
+    "not supplied" forms.
     """
     if isinstance(drawn, int):
         return allowed_values[drawn % len(allowed_values)]
@@ -279,15 +221,13 @@ _PADDING = st.sampled_from(['', ' ', '  ', '\t', ' \t '])
 
 _CASE_TRANSFORMS = st.sampled_from(['lower', 'upper', 'title', 'capitalize', 'swapcase'])
 
-# Texts that are empty once trimmed (Req 7.2).
+# Texts that are empty once trimmed.
 _EMPTY_TEXTS = st.sampled_from(['', ' ', '   ', '\t', ' \t\n '])
 
-# Index into an allowed-values tuple; resolved with `% len(...)` against the
-# module's own `ALLOWED_STATUSES` / `ALLOWED_PRIORITIES` inside the test.
+# Index into an allowed-values tuple, resolved with `% len(...)` in the test.
 _ALLOWED_INDEX = st.integers(min_value=0, max_value=99)
 
-# Either an allowed-value index (int) or one of the two "not supplied" markers
-# that must resolve to the documented defaults.
+# Either an allowed-value index (int) or a "not supplied" marker (None/'').
 _SUPPLIED_VALUE = st.one_of(_ALLOWED_INDEX, st.sampled_from([None, '']))
 
 _CONTEXT_FIELDS = st.fixed_dictionaries(
@@ -314,15 +254,12 @@ def _variants_of(text):
 def _promotion_scenarios(draw):
     """Draw `(existing_texts, keywords, status, priority)` mixing every skip case.
 
-    Each drawn request is guaranteed to contain all three of: an entry
-    duplicating an EXISTING keyword (reported AND counted in `skipped`), an entry
-    empty after trimming (reported but counted in NEITHER number, Req 7.2), and
-    an entry repeating another entry of the same request (collapsed into it,
-    Req 2.3, so neither created nor reported). Because the empty entry is always
-    present, every example has `len(skipped_keywords) > skipped`.
-
-    `status` / `priority` are held in their DRAWN form -- an allowed-value index
-    or a "not supplied" marker -- and resolved by `_invoke_scenario`.
+    Each request is guaranteed to contain an entry duplicating an EXISTING
+    keyword (reported and counted in `skipped`), an entry empty after trimming
+    (reported but counted in neither number), and an intra-request repeat
+    (collapsed, reported nowhere), so every example has
+    `len(skipped_keywords) > skipped`. `status`/`priority` are held in their
+    drawn form and resolved by `_invoke_scenario`.
     """
     vocabulary = draw(st.lists(_BASE_TEXTS, min_size=2, max_size=4, unique=True))
     existing_text, new_text = vocabulary[0], vocabulary[1]
@@ -404,14 +341,10 @@ class TestPromotionResponseProperty:
     """
     **Property 4: Response counts match their reported lists**
 
-    For any promotion outcome, the reported `created` count equals the length of
-    the returned `created_keywords` list, and the reported `skipped` count
-    equals the number of entries in `skipped_keywords` whose `reason` is
-    `duplicate` -- not the length of `skipped_keywords`, which also contains
-    `reason: 'empty'` entries. Each reported created entry is the complete
+    `created` equals `len(created_keywords)`, and `skipped` equals the count of
+    `duplicate`-reason entries in `skipped_keywords` -- not its full length,
+    which also holds `empty` entries. Each reported created entry is the complete
     written item.
-
-    **Validates: Requirements 1.4, 2.5**
     """
 
     @given(scenario=_promotion_scenarios())
@@ -462,14 +395,9 @@ class TestPromotionPersistenceProperty:
     """
     **Property 6: Existing active keywords are never mutated by promotion**
 
-    For any promotion request over any set of existing active keywords, every
-    pre-existing item in the Keywords Table is unchanged after promotion: the
-    read path only scans (following `LastEvaluatedKey` and projecting just
-    `keyword` through an alias), and the write path only puts the newly created
-    items. No `update_item` or `delete_item` is ever issued. When the read fails,
-    the request aborts before any write happens (Req 2.6).
-
-    **Validates: Requirements 2.2, 2.6**
+    The read path only scans (following `LastEvaluatedKey`, projecting `keyword`
+    through an alias) and the write path only puts new items; no `update_item`
+    or `delete_item` is ever issued. A failed read aborts before any write.
     """
 
     @given(text_pages=_TEXT_PAGES, items=_NEW_ITEMS)
@@ -575,7 +503,7 @@ class TestPromotionPersistenceUnit:
 
 
 class TestPromotionValidationUnit:
-    """Example coverage of the request-rejection boundaries (Req 1.6, 7.1, 7.3, 7.4)."""
+    """Example coverage of the request-rejection boundaries."""
 
     def test_request_is_rejected_when_keyword_list_is_empty(self, promotion_handler):
         table, batch = _mock_table()

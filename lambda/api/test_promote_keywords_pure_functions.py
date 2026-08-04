@@ -3,65 +3,30 @@ Property tests for the pure functions of the keyword-promotion handler.
 
 Covers:
 - Property 1: Created set equals distinct, non-empty, non-duplicate keywords
-  (**Validates: Requirements 1.1, 2.3, 7.2**)
 - Property 2: Stored keyword text is the trimmed research text
-  (**Validates: Requirements 1.2**)
 - Property 3: Created items get unique ids and equal UTC timestamps
-  (**Validates: Requirements 1.3**)
 - Property 5: Duplicate classification is trim- and case-insensitive against
-  existing keywords (**Validates: Requirements 1.5, 2.1, 2.2**)
+  existing keywords
 - Property 7: Every skipped duplicate is reported with a duplicate indication
-  (**Validates: Requirements 2.4**)
 - Property 8: Status resolution applies to every created item
-  (**Validates: Requirements 3.1, 3.2**)
 - Property 9: Priority resolution applies to every created item
-  (**Validates: Requirements 3.3, 3.4**)
 - Property 10: Invalid status or priority rejects the whole request
-  (**Validates: Requirements 3.5**)
 - Property 11: Notes contain exactly the present research-context fields, labeled
-  (**Validates: Requirements 4.1, 4.2, 4.3**)
+
+`normalize_keyword`, `validate_request`, `partition_keywords`, `build_notes`,
+and `create_items` take plain data and return plain data, so they are
+property-testable without AWS. The handler response contract lives in
+`test_promote_keywords_handler_io.py`.
 
 Context:
-    `normalize_keyword`, `validate_request`, `partition_keywords`, `build_notes`,
-    and `create_items` in `promote-keywords.py` take plain data and return plain
-    data, so they are property-testable without AWS access. The DynamoDB steps
-    and the handler's response contract live in
-    `test_promote_keywords_handler_io.py`.
-
-    Three documented behaviors shape the assertions below:
-    - `validate_request` resolves status/priority BEFORE checking them, so an
-      omitted (`None`) or empty (`''`) value is VALID and becomes the documented
-      default, while present values are matched exactly and case-sensitively;
-    - `partition_keywords` lets the FIRST occurrence of a normalized key win, so
-      its original trimmed text and research context reach `to_create`;
-    - intra-request collapsed extras are NOT reported in `skipped`, because a
-      Duplicate_Keyword is defined against the EXISTING active keywords. Only
-      existing-duplicates and individually-empty entries are reported, once per
-      request entry.
-
-    The allowed status/priority sets, the defaults, the skip reasons, and the
-    notes field order are imported from the module under test: the strategies
-    generate *indices* and *case transforms* and resolve them against the
-    module's own constants, so no allowed value is restated here.
-
-    The handler is loaded through this module's own `promotion_handler` fixture
-    (the `_load_router` pattern from `test_routers_404.py`), which sets the table
-    env vars and patches `boto3` before the import.
-
-Test outcomes:
-    - the created set equals exactly the distinct, non-empty, non-existing
-      normalized keys of the request, keeping the first occurrence's text
-    - no pre-existing key is ever created, whatever whitespace/case variant the
-      request used
-    - every duplicate and every empty entry is reported once, with its text and
-      a known reason
-    - the stored `keyword` is the trimmed original text, never the normalized key
-    - created items carry unique ids and one shared UTC `created_at`/`updated_at`
-    - the resolved status/priority reach every created item
-    - an invalid status and/or priority rejects the whole request, naming each
-      offending field and its rejected value, and resolves nothing
-    - `notes` carries a labeled entry per present research-context field, in
-      source order, and is '' when none are present
+    Three behaviors shape the assertions: `validate_request` resolves
+    status/priority BEFORE checking them, so an omitted/empty value is valid and
+    becomes the default while present values are matched exactly and
+    case-sensitively; `partition_keywords` lets the FIRST occurrence of a
+    normalized key win; and intra-request collapsed extras are not reported in
+    `skipped`, because a duplicate is defined against the EXISTING active
+    keywords. The allowed sets, defaults, skip reasons, and notes field order are
+    imported from the module under test rather than restated here.
 """
 
 import importlib
@@ -81,14 +46,11 @@ pytestmark = pytest.mark.usefixtures('table_env_cleared')
 # --- Import-boundary bootstrap ----------------------------------------------
 #
 # `promote-keywords.py` is hyphenated and builds a `boto3` DynamoDB resource at
-# import time, so it cannot be imported normally. Following the `_load_router`
-# pattern in `test_routers_404.py`, the layer copy of `shared` is placed on
-# `sys.path`, the table env vars are set and `boto3` is patched BEFORE the load,
-# and the handler is loaded through `importlib.util.spec_from_file_location`
-# under a module name unique to THIS test file, so a sibling module loading the
-# same handler in one pytest session cannot evict this copy. Every global
-# mutation is undone when the module-scoped fixture tears down. Nothing here is
-# autouse, so the ~200 pre-existing tests in this directory are untouched.
+# import time, so it is loaded fresh via `spec_from_file_location` under a module
+# name unique to THIS file (the `_load_router` pattern from `test_routers_404.py`)
+# with the layer `shared` on `sys.path`, table env vars set, and `boto3` patched
+# BEFORE the load. Every global mutation is undone on teardown; nothing is
+# autouse, so the pre-existing tests in this directory are untouched.
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 _REPO = os.path.abspath(os.path.join(_API_DIR, '..', '..'))
@@ -121,12 +83,7 @@ def _load_promotion_handler():
 
 @pytest.fixture(scope='module')
 def promotion_handler():
-    """`promote-keywords.py`, loaded once for this module with `boto3` patched.
-
-    The env vars are set and `boto3` patched inside a `with` block wrapping the
-    `yield`, so no stubbed client and no env value leaks into another test module
-    in the same pytest session.
-    """
+    """`promote-keywords.py`, loaded once for this module with `boto3` patched."""
     saved = {name: os.environ.get(name) for name in _TABLE_ENV_VARS}
     for name in _TABLE_ENV_VARS:
         os.environ[name] = _TEST_TABLE_NAME
@@ -163,8 +120,7 @@ def table_env_cleared():
 
 # --- Strategies -------------------------------------------------------------
 
-# A small base vocabulary so generated requests collide often: duplicates, case
-# variants, and existing-key overlaps all stay likely at these sizes.
+# Small vocabulary so requests collide often (duplicates, case/existing overlap).
 _BASE_TEXTS = st.sampled_from([
     'best running shoes',
     'trail running shoes',
@@ -173,14 +129,13 @@ _BASE_TEXTS = st.sampled_from([
     'running shoe reviews',
 ])
 
-# Surrounding whitespace only: normalization trims, so these must not change the
-# comparison key.
+# Surrounding whitespace only; normalization trims it, so the key is unchanged.
 _PADDING = st.sampled_from(['', ' ', '  ', '\t', '\n', ' \t '])
 
 # Case transforms that must not change the comparison key either.
 _CASE_TRANSFORMS = st.sampled_from(['lower', 'upper', 'title', 'capitalize', 'swapcase'])
 
-# Texts that are empty once trimmed (Req 7.2).
+# Texts that are empty once trimmed.
 _EMPTY_TEXTS = st.sampled_from(['', ' ', '   ', '\t', '\n', ' \t\n '])
 
 _CONTEXT_FIELDS = st.fixed_dictionaries(
@@ -207,16 +162,11 @@ def _variants_of(text):
 def _partition_scenarios(draw):
     """Draw `(existing_texts, keywords)` mixing every classification case.
 
-    Each drawn request is guaranteed to contain all three of:
-    - an entry matching an EXISTING keyword under a different whitespace/case
-      variant -> skipped and reported as a duplicate;
-    - an entry that is empty after trimming -> skipped and reported as empty
-      (Req 7.2);
-    - an entry repeating another entry of the same request -> collapsed into it
-      (Req 2.3), so it is neither created nor reported.
-
-    Arbitrary extra entries are appended and the whole list is permuted, so
-    order carries no meaning and the guaranteed cases can land anywhere.
+    Each request is guaranteed to contain an entry matching an EXISTING keyword
+    under a whitespace/case variant (reported duplicate), an entry empty after
+    trimming (reported empty), and an entry repeating another entry of the same
+    request (collapsed into it, so neither created nor reported). Extra entries
+    are appended and the list permuted, so order carries no meaning.
     """
     vocabulary = draw(st.lists(_BASE_TEXTS, min_size=2, max_size=4, unique=True))
     existing_text, new_text = vocabulary[0], vocabulary[1]
@@ -246,9 +196,8 @@ def _partition_scenarios(draw):
     return [draw(_variants_of(existing_text))], list(draw(st.permutations(entries)))
 
 
-# Mixed-case keyword texts, so "original casing preserved" is a real assertion
-# rather than an accident of an all-lowercase vocabulary. `create_items` receives
-# entries `partition_keywords` has already trimmed and de-duplicated.
+# Mixed-case texts, so "original casing preserved" is a real assertion. These
+# mimic entries already trimmed and de-duplicated by `partition_keywords`.
 _TO_CREATE = st.lists(
     st.builds(
         lambda text, context: {**context, 'keyword': text},
@@ -266,15 +215,13 @@ _TO_CREATE = st.lists(
     unique_by=lambda entry: entry['keyword'],
 )
 
-# Keyword payloads that clear every other request gate (present, <= 500 entries,
-# trimmed text non-empty and <= 100 chars), so only status/priority decide the
-# outcome of a `validate_request` call.
+# Payloads that clear every gate except status/priority, so only those decide
+# the `validate_request` outcome.
 _VALID_KEYWORDS = st.lists(
     _BASE_TEXTS.map(lambda text: {'keyword': text}), min_size=1, max_size=5
 )
 
-# Index into an allowed-values tuple; resolved with `% len(...)` inside the test
-# so this file never assumes how many allowed values exist.
+# Index into an allowed-values tuple, resolved with `% len(...)` in the test.
 _ALLOWED_INDEX = st.integers(min_value=0, max_value=99)
 
 # The two forms that mean "not supplied" and resolve to the documented defaults.
@@ -283,9 +230,8 @@ _OMITTED_OR_EMPTY = st.sampled_from([None, ''])
 # Either an allowed-value index (int) or an omitted/empty marker.
 _SUPPLIED_VALUE = st.one_of(_ALLOWED_INDEX, _OMITTED_OR_EMPTY)
 
-# Candidate invalid values: plausible-but-wrong vocabulary plus arbitrary text.
-# Each draw is still `assume`d to be outside the imported allowed set, so a lucky
-# draw can never be asserted as a false rejection.
+# Plausible-but-wrong values plus arbitrary text; each is `assume`d outside the
+# allowed set so a lucky valid draw is never asserted as a rejection.
 _INVALID_CANDIDATES = st.one_of(
     st.sampled_from([
         'archived', 'enabled', 'disabled', 'urgent', 'medium', 'critical',
@@ -294,9 +240,8 @@ _INVALID_CANDIDATES = st.one_of(
     st.text(min_size=1, max_size=24),
 )
 
-# Every form a request's status / priority can take. `_resolve_field_spec` turns
-# a draw into the value to supply plus the value that must come back ('None'
-# meaning the request must be rejected).
+# Every form a status/priority can take; `_resolve_field_spec` turns a draw into
+# (value to supply, value that must come back), where None means "reject".
 _FIELD_SPEC = st.one_of(
     _ALLOWED_INDEX.map(lambda index: ('allowed', index)),
     _OMITTED_OR_EMPTY.map(lambda value: ('default', value)),
@@ -304,8 +249,8 @@ _FIELD_SPEC = st.one_of(
     st.tuples(_ALLOWED_INDEX, _CASE_TRANSFORMS).map(lambda pair: ('case-variant', pair)),
 )
 
-# Values that make a research-context field ABSENT per Req 4.2: omitted key
-# (None -> the key is dropped), empty string, or whitespace-only.
+# Values that make a research-context field ABSENT: omitted key (None), empty
+# string, or whitespace-only.
 _ABSENT_VALUES = st.one_of(
     st.none(),
     st.just(''),
@@ -329,10 +274,9 @@ _PRESENT_VALUES = st.one_of(
 
 _NOTES_FIELD_NAMES = ('intent', 'competition', 'source')
 
-# Each field draws (is_present, raw_value); the test builds the research keyword
-# from this spec so the expected outcome comes from the generator, not from a
-# reimplementation of `build_notes`. The all-absent dictionary is offered as its
-# own branch so the "no field present" outcome is drawn often, not only by luck.
+# Each field draws (is_present, raw_value); the expected outcome comes from the
+# generator, not a reimplementation of `build_notes`. The all-absent branch is
+# offered explicitly so "no field present" is drawn often.
 _NOTES_FIELD_SPECS = st.one_of(
     st.fixed_dictionaries({
         field: st.one_of(
@@ -393,10 +337,9 @@ def _with_reason(skipped, reason):
 
 
 def _resolve_supplied(drawn, allowed_values, default):
-    """Resolve a drawn `_SUPPLIED_VALUE` the way `validate_request` resolves a request.
+    """Resolve a drawn `_SUPPLIED_VALUE` as `validate_request` would.
 
-    An integer draw selects one of the module's own allowed values; `None` and
-    `''` are the two "not supplied" forms that resolve to the documented default.
+    An integer selects an allowed value; `None`/`''` resolve to the default.
     """
     if isinstance(drawn, int):
         return allowed_values[drawn % len(allowed_values)]
@@ -406,9 +349,8 @@ def _resolve_supplied(drawn, allowed_values, default):
 def _resolve_field_spec(spec, allowed_values, default):
     """Turn a drawn status/priority spec into `(supplied, expected)`.
 
-    `expected` is `None` when the drawn form must be rejected, which is also why
-    the invalid branches `assume` the drawn value really is outside the allowed
-    set imported from the module under test.
+    `expected` is `None` when the form must be rejected; the invalid branches
+    `assume` the value really is outside the allowed set.
     """
     kind, payload = spec
 
@@ -461,15 +403,9 @@ class TestPartitionCreatedSetProperty:
     """
     **Property 1: Created set equals distinct, non-empty, non-duplicate keywords**
 
-    For any promotion request list of research keywords and any set of existing
-    active keyword keys, the set of created keywords is exactly the set of
-    normalized (trimmed, lower-cased) keyword texts that are non-empty, do not
-    already exist, and -- where several request entries share a normalized
-    value -- collapse to a single creation. The first occurrence supplies the
-    created entry, and empty-after-trim entries are reported with
-    `reason: 'empty'` instead of being created.
-
-    **Validates: Requirements 1.1, 2.3, 7.2**
+    The created set is exactly the normalized keyword texts that are non-empty,
+    not already existing, and distinct within the request (first occurrence
+    wins). Empty-after-trim entries are reported as `empty`, not created.
     """
 
     @given(scenario=_partition_scenarios())
@@ -504,12 +440,8 @@ class TestPartitionDuplicateProperty:
     **Property 5: Duplicate classification is trim- and case-insensitive against
     existing keywords**
 
-    For any existing active keyword and any research keyword whose text matches
-    it after trimming and case-folding, that research keyword is classified as a
-    duplicate and is not created. `partition_keywords` only ever appends to
-    `to_create` / `skipped`, so no existing record can be modified as a result.
-
-    **Validates: Requirements 1.5, 2.1, 2.2**
+    A research keyword matching an existing one after trimming and case-folding
+    is classified as a duplicate and never created.
     """
 
     @given(scenario=_partition_scenarios())
@@ -541,13 +473,8 @@ class TestPartitionSkipReportingProperty:
     """
     **Property 7: Every skipped duplicate is reported with a duplicate indication**
 
-    For any promotion request, each research keyword classified as a duplicate
-    appears in the skipped list with its keyword text and a duplicate reason
-    indicator. Duplicates are reported once per request entry, so a request
-    carrying several existing-duplicate variants reports each of them, while an
-    intra-request collapsed extra is reported nowhere.
-
-    **Validates: Requirements 2.4**
+    Each duplicate appears in `skipped` with its text and a duplicate reason,
+    once per request entry; an intra-request collapsed extra is reported nowhere.
     """
 
     @given(scenario=_partition_scenarios())
@@ -590,12 +517,8 @@ class TestCreateItemsKeywordTextProperty:
     """
     **Property 2: Stored keyword text is the trimmed research text**
 
-    For any created Active_Keyword, its stored `keyword` value equals the
-    corresponding research keyword text with leading and trailing whitespace
-    removed and its original casing preserved -- never the lower-cased
-    normalization key used for de-duplication.
-
-    **Validates: Requirements 1.2**
+    A created item's `keyword` is the research text trimmed with original casing
+    preserved, never the lower-cased normalization key.
     """
 
     @given(to_create=_TO_CREATE, status=_SUPPLIED_VALUE, priority=_SUPPLIED_VALUE)
@@ -629,12 +552,8 @@ class TestCreateItemsIdentityProperty:
     """
     **Property 3: Created items get unique ids and equal UTC timestamps**
 
-    For any successful promotion, every created item has an `id` distinct from
-    all other created items, and each item's `created_at` equals its
-    `updated_at` and is a UTC ISO-8601 timestamp with the trailing 'Z' wire
-    format. All items built in one call share the same timestamp value.
-
-    **Validates: Requirements 1.3**
+    Every created item has a distinct `id`, and each `created_at` equals its
+    `updated_at` as a UTC ISO-8601 'Z' timestamp shared across one call.
     """
 
     @given(to_create=_TO_CREATE)
@@ -663,12 +582,8 @@ class TestCreateItemsStatusProperty:
     """
     **Property 8: Status resolution applies to every created item**
 
-    For any promotion request, when a valid status (`active` / `inactive` /
-    `paused`, matched exactly) is supplied, every created item carries that
-    status; when the status is omitted or empty, every created item carries
-    `active`.
-
-    **Validates: Requirements 3.1, 3.2**
+    Every created item carries the supplied status when valid, or `active` when
+    the status is omitted or empty.
     """
 
     @given(to_create=_TO_CREATE, status=_SUPPLIED_VALUE)
@@ -694,11 +609,8 @@ class TestCreateItemsPriorityProperty:
     """
     **Property 9: Priority resolution applies to every created item**
 
-    For any promotion request, when a valid priority (`high` / `normal` / `low`,
-    matched exactly) is supplied, every created item carries that priority; when
-    the priority is omitted or empty, every created item carries `normal`.
-
-    **Validates: Requirements 3.3, 3.4**
+    Every created item carries the supplied priority when valid, or `normal`
+    when the priority is omitted or empty.
     """
 
     @given(to_create=_TO_CREATE, priority=_SUPPLIED_VALUE)
@@ -727,16 +639,9 @@ class TestValidateRequestProperty:
     """
     **Property 10: Invalid status or priority rejects the whole request**
 
-    For any status value outside `{active, inactive, paused}` or any priority
-    value outside `{high, normal, low}`, the request is rejected with a
-    validation error that names each invalid field and its rejected value, and
-    nothing is resolved (both returned values are `None`) so no Active_Keyword
-    can be created. Values are matched exactly and case-sensitively, so case
-    variants are invalid; omitted (`None`) and empty (`''`) values are valid and
-    resolve to the documented defaults.
-
-    **Validates: Requirements 3.5**
-    (default resolution also **Validates: Requirements 3.1, 3.2, 3.3, 3.4**)
+    An out-of-set status or priority rejects the request with an error naming
+    each invalid field and its value, resolving nothing. Values are matched
+    exactly and case-sensitively; omitted/empty values are valid and default.
     """
 
     @given(keywords=_VALID_KEYWORDS, status_spec=_FIELD_SPEC, priority_spec=_FIELD_SPEC)
@@ -790,14 +695,9 @@ class TestBuildNotesProperty:
     """
     **Property 11: Notes contain exactly the present research-context fields, labeled**
 
-    For any research keyword, the created item's `notes` field contains a
-    labeled entry for each of `intent`, `competition`, and `source` that is
-    present, contains no entry for any field that is absent, and is empty when
-    none of the three are present. A missing, empty, or whitespace-only value
-    counts as absent (Req 4.2); kept values are whitespace-stripped and appear in
-    the module's fixed `NOTES_FIELDS` order.
-
-    **Validates: Requirements 4.1, 4.2, 4.3**
+    `notes` holds a labeled entry for each present field of `intent`,
+    `competition`, `source`, nothing for absent ones (missing, empty, or
+    whitespace-only), in fixed `NOTES_FIELDS` order, and is '' when none present.
     """
 
     @given(field_specs=_NOTES_FIELD_SPECS)
