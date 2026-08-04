@@ -1,5 +1,4 @@
-"""
-Promote Keywords API Lambda
+"""Promote Keywords API Lambda.
 
 Handles POST /api/keywords/promote - promotes research keywords into the
 active Keywords table, de-duplicating against existing active keywords.
@@ -31,27 +30,24 @@ keywords_table = dynamodb.Table(KEYWORDS_TABLE)
 # Research-context fields recorded in `notes`, in the order they appear.
 NOTES_FIELDS = ('intent', 'competition', 'source')
 
-# Request-level limits (Req 7.1, 7.3).
+# Request-level limits.
 MAX_KEYWORDS = 500
 MAX_KEYWORD_LENGTH = 100
 
-# Allowed status/priority values, matched exactly and case-sensitively (Req 3.1, 3.3).
+# Allowed status/priority values, matched exactly and case-sensitively.
 ALLOWED_STATUSES = ('active', 'inactive', 'paused')
 ALLOWED_PRIORITIES = ('high', 'normal', 'low')
 
-# Values applied when status/priority is omitted or empty (Req 3.2, 3.4).
+# Applied when status/priority is omitted or empty.
 DEFAULT_STATUS = 'active'
 DEFAULT_PRIORITY = 'normal'
 
-# Item defaults reused from the `create_keyword` path in `manage-keywords.py`,
-# which validates `region`/`language`/`category` with these same defaults.
+# Item defaults mirrored from the `create_keyword` path in `manage-keywords.py`.
 DEFAULT_REGION = 'global'
 DEFAULT_LANGUAGE = 'en'
 DEFAULT_CATEGORY = ''
 
-# Skip reasons reported in `skipped_keywords`. Only DUPLICATE entries are
-# counted by the response's `skipped` number (Req 1.4, 2.5); EMPTY entries
-# (Req 7.2) are reported but counted in neither `created` nor `skipped`.
+# Skip reasons reported in `skipped_keywords`.
 REASON_DUPLICATE = 'duplicate'
 REASON_EMPTY = 'empty'
 
@@ -62,18 +58,9 @@ def handler(event, context, body):
     """POST /api/keywords/promote - promote research keywords into Keywords_Table.
 
     Orchestrates validate -> read existing keys -> partition -> build items ->
-    write -> respond, returning
-    `{created, skipped, created_keywords, skipped_keywords}`.
-
-    `skipped` is the DUPLICATE-ONLY count (Req 1.4, 2.5): the number of
-    `skipped_keywords` entries whose reason is `duplicate`. It is NOT
-    `len(skipped_keywords)`, because that list also carries `reason: 'empty'`
-    entries (Req 7.2), which are counted in neither `created` nor `skipped`. The
-    requirements Glossary defines a Duplicate_Keyword as one matching an EXISTING
-    Active_Keyword, and an empty-text entry is not one.
-
-    A rejected request returns 400 before any DynamoDB read or write; a failed
-    read returns 500 with nothing created (Req 2.6).
+    write -> respond, returning `{created, skipped, created_keywords,
+    skipped_keywords}`. A rejected request returns 400 before any DynamoDB
+    access; a failed read returns 500 with nothing created.
     """
     keywords = body.get('keywords')
 
@@ -96,6 +83,8 @@ def handler(event, context, body):
 
     write_items(keywords_table, items)
 
+    # `skipped` is the DUPLICATE-ONLY count, not len(skipped_keywords): that list
+    # also holds reason:'empty' entries, which count toward neither created nor skipped.
     return success_response({
         'created': len(items),
         'skipped': sum(1 for entry in skipped if entry['reason'] == REASON_DUPLICATE),
@@ -105,22 +94,15 @@ def handler(event, context, body):
 
 
 def normalize_keyword(text):
-    """Return the canonical comparison key: trimmed and lower-cased.
-
-    Used both against existing active keywords and to collapse duplicates within
-    a single request.
-    """
+    """Return the canonical comparison key: trimmed and lower-cased."""
     return text.strip().lower()
 
 
 def build_notes(rk):
-    """Build the `notes` value from a research keyword's context fields.
+    """Build `notes` from present intent/competition/source, in that fixed order.
 
-    Joins the present `intent`, `competition`, and `source` values in that fixed
-    order, each labeled by its field name, separated by '; '. Absent or empty
-    fields are omitted; with none present the result is ''.
-
-    Example: 'intent: commercial; competition: high; source: expansion'
+    Each present value is labeled by its field name and joined with '; '; absent
+    or empty fields are omitted, so with none present the result is ''.
     """
     parts = []
     for field in NOTES_FIELDS:
@@ -135,27 +117,14 @@ def build_notes(rk):
 
 
 def validate_request(keywords, status, priority):
-    """Apply the request-level promotion gates and resolve status/priority.
+    """Apply request-level promotion gates and resolve status/priority (no IO).
 
-    Pure function: performs no IO. Every gate failure rejects the ENTIRE
-    request, so this runs before any DynamoDB read or write.
-
-    Gates, in this fixed order:
-        1. `keywords` is present and non-empty (Req 1.6, 7.4)
-        2. `keywords` holds at most MAX_KEYWORDS entries (Req 7.1)
-        3. every trimmed text is at most MAX_KEYWORD_LENGTH chars (Req 7.3)
-        4. at least one keyword has non-empty trimmed text (Req 7.4)
-        5. `status` is one of ALLOWED_STATUSES (Req 3.5)
-        6. `priority` is one of ALLOWED_PRIORITIES (Req 3.5)
-
-    An individually-empty keyword is NOT a request-level failure: it is a
-    per-item skip handled by `partition_keywords` (Req 7.2). Gate 4 only rejects
-    when NO keyword carries non-empty trimmed text.
-
-    `status` and `priority` are RESOLVED BEFORE gates 5 and 6, so an omitted
-    (`None`) or empty value is valid and becomes the default (Req 3.2, 3.4).
-    Present values are matched exactly and case-sensitively. Both gates are
-    evaluated so an invalid status AND an invalid priority are each named.
+    Every gate failure rejects the ENTIRE request. Gates run in fixed order:
+    keywords present/non-empty, at most MAX_KEYWORDS, each trimmed text within
+    MAX_KEYWORD_LENGTH, at least one non-empty text, status in ALLOWED_STATUSES,
+    priority in ALLOWED_PRIORITIES. An individually-empty keyword is a per-item
+    skip (see `partition_keywords`), not a request failure. status/priority are
+    RESOLVED BEFORE their gates, so an omitted/empty value is valid and defaults.
 
     Returns `(None, status, priority)` on success, or
     `({'message', 'field'}, None, None)` on rejection.
@@ -196,41 +165,22 @@ def validate_request(keywords, status, priority):
 
 
 def partition_keywords(keywords, existing_keys):
-    """Split validated research keywords into creations and reported skips.
+    """Split validated research keywords into creations and reported skips (no IO).
 
-    Pure function: performs no IO. Runs AFTER `validate_request` has accepted the
-    request and AFTER the existing keys have been read, so every decision here is
-    a PER-ITEM skip, never a request-level rejection. `existing_keys` members are
-    ALREADY normalized (what `load_existing_keyword_keys` returns) and are never
-    re-normalized.
+    Runs after validation and after existing keys are read, so every decision is
+    a PER-ITEM skip. `existing_keys` members are already normalized and are not
+    re-normalized. Per entry, in order: empty-after-trim -> skip reason 'empty';
+    key in existing_keys -> skip reason 'duplicate'; key already accepted earlier
+    in this request -> collapsed into that creation; otherwise -> created.
 
-    Classification, per entry, in this order:
-        1. empty after trimming -> skipped, `reason: 'empty'` (Req 7.2)
-        2. key in `existing_keys` -> skipped, `reason: 'duplicate'`
-        3. key already accepted earlier in THIS request -> collapsed into that
-           earlier creation (Req 2.3)
-        4. otherwise -> created
+    First occurrence wins: the earliest entry of a shared normalized key supplies
+    the created item (original trimmed text and context). Intra-request collapsed
+    extras are NOT reported in `skipped` -- a Duplicate_Keyword is defined against
+    an EXISTING keyword, and a collapsed extra's text was already promoted -- so
+    `len(to_create) + len(skipped)` can be LESS than `len(keywords)`.
 
-    Documented decisions:
-        - FIRST occurrence wins. Where several entries share a normalized key,
-          the earliest one supplies the created item, so its original trimmed
-          text (and its research context) is what gets stored.
-        - Intra-request collapsed extras (case 3) are NOT reported in `skipped`.
-          `skipped` reports only Duplicate_Keywords -- which the requirements
-          Glossary defines as matching an EXISTING Active_Keyword -- and
-          individually-empty keywords. A collapsed extra is neither: its text WAS
-          promoted, via its equal sibling. Reporting it as a duplicate would also
-          make the UI retain that variant in the selection forever (Req 6.5
-          retains skipped duplicates), even though the keyword now exists. So
-          `len(to_create) + len(skipped)` can be LESS than `len(keywords)` when a
-          request carries equal texts.
-        - Every OTHER skip is reported once per request entry, so each
-          individually-empty and each duplicate entry appears in `skipped` with
-          its own text (Req 2.4).
-
-    Returns `(to_create, skipped)`; a `to_create` entry carries the trimmed
-    `keyword` text (original case preserved) plus the research-context fields
-    `build_notes` reads.
+    Returns `(to_create, skipped)`; each `to_create` entry carries the trimmed
+    `keyword` text (original case) plus the fields `build_notes` reads.
     """
     to_create = []
     skipped = []
@@ -259,19 +209,13 @@ def partition_keywords(keywords, existing_keys):
 
 
 def load_existing_keyword_keys(table):
-    """Read every existing Active_Keyword's normalized comparison key.
+    """Read every existing keyword's normalized comparison key via a paginated scan.
 
-    De-duplication is defined against ANY item in the Keywords_Table (the
-    requirements Glossary defines Active_Keyword as an item in that table, not
-    only one whose `status` is `active`), so this reads the whole table via a
-    paginated `scan` following `LastEvaluatedKey` until it is exhausted.
-
-    The projection is limited to the `keyword` attribute and expressed through an
-    `ExpressionAttributeNames` alias, so a DynamoDB reserved-word collision on
-    the projected name is impossible.
-
-    Any `scan` failure propagates to the caller, which aborts the request with
-    zero writes (Req 2.6). Returns keys already run through `normalize_keyword`.
+    De-duplication is defined against any item in the table, so this scans the
+    whole table following `LastEvaluatedKey` until exhausted. The projection is
+    limited to `keyword` via an `ExpressionAttributeNames` alias to avoid a
+    reserved-word collision. Any scan failure propagates so the caller aborts
+    with zero writes. Returns keys already run through `normalize_keyword`.
     """
     existing_keys = set()
     scan_params = {
@@ -295,12 +239,10 @@ def load_existing_keyword_keys(table):
 
 
 def write_items(table, items):
-    """Put every created Active_Keyword through a `batch_writer`.
+    """Put every created keyword through a `batch_writer` (adds only, no updates).
 
-    Promotion only ADDS items: this issues `put_item` for the freshly built items
-    and never touches pre-existing ones (Req 2.2). `batch_writer` batches the puts
-    and retries unprocessed items on its own. When there is nothing to create no
-    writer is opened at all, so an all-skipped request performs zero write calls.
+    When there is nothing to create no writer is opened, so an all-skipped
+    request performs zero write calls.
     """
     if not items:
         return
@@ -311,18 +253,13 @@ def write_items(table, items):
 
 
 def create_items(to_create, status, priority):
-    """Build the Active_Keyword items for the accepted research keywords.
+    """Build the keyword items for accepted research keywords.
 
-    Pure apart from `uuid4()` and the clock. Mirrors the item shape produced by
-    `create_keyword` in `manage-keywords.py`, reusing that path's `region` /
-    `language` / `category` defaults.
-
-    Every item in a single call shares one `get_timestamp()` value, and each
-    item's `created_at` equals its `updated_at` (Req 1.3). Each `id` is a fresh
-    `uuid4()`. The stored `keyword` is the trimmed research text with its ORIGINAL
-    casing -- not the normalized comparison key (Req 1.2). The `status` /
-    `priority` arrive already resolved from `validate_request` and are applied to
-    every item.
+    Mirrors the item shape from `create_keyword` in `manage-keywords.py`, reusing
+    its region/language/category defaults. Every item in a call shares one
+    `get_timestamp()` (created_at == updated_at), each `id` is a fresh uuid4, and
+    the stored `keyword` is the trimmed research text with ORIGINAL casing (not
+    the normalized key). status/priority arrive already resolved.
     """
     timestamp = get_timestamp()
 
