@@ -16,10 +16,11 @@ Context:
     promotion POST would fall through to `manage-keywords.py` and be treated as a
     single-keyword create. These tests pin the ordering.
 
-    The router is loaded through the shared `keyword_mgmt_router` fixture in
-    `lambda/api/conftest.py`, which sets the sub-handlers' import-time env vars,
-    patches `boto3`, and seeds the router's `HandlerLoader` cache
-    (`_handlers._cache`) with a distinct `MagicMock` per sub-handler filename.
+    The router is loaded through this module's own `keyword_mgmt_router` fixture
+    (the `_load_router` pattern from `test_routers_404.py`), which sets the
+    sub-handlers' import-time env vars, patches `boto3`, and seeds the router's
+    `HandlerLoader` cache (`_handlers._cache`) with a distinct `MagicMock` per
+    sub-handler filename.
     Dispatch is therefore asserted without executing the real promotion worker,
     without importing `promote-keywords.py` (which builds a `boto3` resource at
     module scope), and without reaching AWS.
@@ -40,7 +41,105 @@ Test outcomes:
       they return a 404 with no sub-handler invoked
 """
 
+import importlib
+import importlib.util
+import os
+import sys
+from unittest.mock import MagicMock, patch
+
 import pytest
+
+# --- Import-boundary bootstrap ----------------------------------------------
+#
+# `keyword-mgmt.py` is hyphenated and its sub-handlers build AWS clients at
+# import time. Following the `_load_router` pattern in `test_routers_404.py`, the
+# layer copy of `shared` is placed on `sys.path`, the sub-handlers' import-time
+# env vars are set and `boto3` is patched BEFORE the load, and the router is
+# loaded through `importlib.util.spec_from_file_location` under a module name
+# unique to THIS test file. The router's `HandlerLoader` cache is then seeded
+# with a distinct `MagicMock` per sub-handler, so dispatch is asserted without
+# executing a real worker, importing `promote-keywords.py`, or reaching AWS.
+# Every global mutation is undone when the fixture tears down; nothing is
+# autouse, so the ~200 pre-existing tests in this directory are untouched.
+
+_API_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO = os.path.abspath(os.path.join(_API_DIR, '..', '..'))
+_LAYER_PY = os.path.join(_REPO, 'lambda', 'layer', 'python')
+
+_KEYWORD_MGMT_ROUTER_FILE = 'keyword-mgmt.py'
+_KEYWORD_MGMT_MODULE_NAME = 'keyword_mgmt_under_test_promote_routing'
+_TEST_TABLE_NAME = 'test-keywords-table'
+
+# Env vars the keyword-mgmt sub-handlers read at import time. Set so no real AWS
+# client could be built even if a sub-handler were ever loaded.
+_KEYWORD_MGMT_ENV = {
+    'KEYWORD_RESEARCH_TABLE': 'test-keyword-research-table',
+    'SECRETS_PREFIX': 'test-citation-analysis/',
+    'DYNAMODB_TABLE_KEYWORDS': _TEST_TABLE_NAME,
+    'KEYWORDS_TABLE': _TEST_TABLE_NAME,
+}
+
+# Every sub-handler `keyword-mgmt.py` can dispatch to. Each is stubbed with a
+# distinct result so a test can assert exactly which target ran.
+_KEYWORD_MGMT_SUB_HANDLERS = (
+    'keyword-research.py',
+    'get-keywords.py',
+    'manage-keywords.py',
+    'promote-keywords.py',
+)
+
+
+def _load_keyword_mgmt_router():
+    """Load `keyword-mgmt.py` fresh under this file's unique module name.
+
+    `shared/__init__.py` re-exports `api_response` as a function, shadowing the
+    submodule, so the real module object is bound explicitly.
+    """
+    if _LAYER_PY not in sys.path:
+        sys.path.insert(0, _LAYER_PY)
+    sys.modules['shared.api_response'] = importlib.import_module('shared.api_response')
+    sys.modules.pop(_KEYWORD_MGMT_MODULE_NAME, None)
+    spec = importlib.util.spec_from_file_location(
+        _KEYWORD_MGMT_MODULE_NAME, os.path.join(_API_DIR, _KEYWORD_MGMT_ROUTER_FILE)
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def keyword_mgmt_router():
+    """Fresh `keyword-mgmt.py` router with every sub-handler stubbed distinctly.
+
+    The env vars are set and `boto3` patched inside a `with` block wrapping the
+    `yield`, so nothing leaks into another test in the session. Seeding the
+    router's `HandlerLoader` cache (`_handlers._cache`) means no real sub-handler
+    file is ever loaded or executed. Yields `(module, stubs_by_filename)`.
+    """
+    saved = {name: os.environ.get(name) for name in _KEYWORD_MGMT_ENV}
+    os.environ.update(_KEYWORD_MGMT_ENV)
+
+    with (
+        patch('boto3.resource', MagicMock(name='boto3.resource')),
+        patch('boto3.client', MagicMock(name='boto3.client')),
+    ):
+        module = _load_keyword_mgmt_router()
+        stubs = {}
+        for name in _KEYWORD_MGMT_SUB_HANDLERS:
+            stub = MagicMock(name=f'{name}_handler')
+            stub.return_value = {'statusCode': 200, 'handler': name}
+            module._handlers._cache[name] = stub
+            stubs[name] = stub
+
+        yield module, stubs
+
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+    sys.modules.pop(_KEYWORD_MGMT_MODULE_NAME, None)
+
 
 _PROMOTE_PATH = '/api/keywords/promote'
 

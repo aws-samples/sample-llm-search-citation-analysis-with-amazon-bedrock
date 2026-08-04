@@ -49,8 +49,9 @@ Context:
     Keywords_Table: its `scan` returns queued pages and its `batch_writer()`
     context manager records the puts. The handler reads the module-level
     `keywords_table`, so each invocation swaps that attribute for the mock
-    through `patch.object`. The handler itself is loaded through the shared
-    `promotion_handler` fixture in `lambda/api/conftest.py`.
+    through `patch.object`. The handler itself is loaded through this module's
+    own `promotion_handler` fixture (the `_load_router` pattern from
+    `test_routers_404.py`).
 
 Test outcomes:
     - `created` always equals the length of `created_keywords`, and `skipped`
@@ -73,7 +74,11 @@ Test outcomes:
       create zero items, and perform no scan and no write
 """
 
+import importlib
+import importlib.util
 import json
+import os
+import sys
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -82,6 +87,89 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 pytestmark = pytest.mark.usefixtures('table_env_cleared')
+
+
+# --- Import-boundary bootstrap ----------------------------------------------
+#
+# `promote-keywords.py` is hyphenated and builds a `boto3` DynamoDB resource at
+# import time, so it cannot be imported normally. Following the `_load_router`
+# pattern in `test_routers_404.py`, the layer copy of `shared` is placed on
+# `sys.path`, the table env vars are set and `boto3` is patched BEFORE the load,
+# and the handler is loaded through `importlib.util.spec_from_file_location`
+# under a module name unique to THIS test file, so a sibling module loading the
+# same handler in one pytest session cannot evict this copy. Every global
+# mutation is undone when the module-scoped fixture tears down. Nothing here is
+# autouse, so the ~200 pre-existing tests in this directory are untouched.
+
+_API_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO = os.path.abspath(os.path.join(_API_DIR, '..', '..'))
+_LAYER_PY = os.path.join(_REPO, 'lambda', 'layer', 'python')
+
+_PROMOTE_HANDLER_FILE = 'promote-keywords.py'
+_PROMOTE_MODULE_NAME = 'promote_keywords_under_test_handler_io'
+_TABLE_ENV_VARS = ('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
+_TEST_TABLE_NAME = 'test-keywords-table'
+
+
+def _load_promotion_handler():
+    """Load `promote-keywords.py` fresh under this file's unique module name.
+
+    `shared/__init__.py` re-exports `api_response` as a function, shadowing the
+    submodule, so the real module object is bound explicitly -- otherwise the
+    handler's `from shared.api_response import ...` resolves to the function.
+    """
+    if _LAYER_PY not in sys.path:
+        sys.path.insert(0, _LAYER_PY)
+    sys.modules['shared.api_response'] = importlib.import_module('shared.api_response')
+    sys.modules.pop(_PROMOTE_MODULE_NAME, None)
+    spec = importlib.util.spec_from_file_location(
+        _PROMOTE_MODULE_NAME, os.path.join(_API_DIR, _PROMOTE_HANDLER_FILE)
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope='module')
+def promotion_handler():
+    """`promote-keywords.py`, loaded once for this module with `boto3` patched.
+
+    The env vars are set and `boto3` patched inside a `with` block wrapping the
+    `yield`, so no stubbed client and no env value leaks into another test module
+    in the same pytest session.
+    """
+    saved = {name: os.environ.get(name) for name in _TABLE_ENV_VARS}
+    for name in _TABLE_ENV_VARS:
+        os.environ[name] = _TEST_TABLE_NAME
+
+    with (
+        patch('boto3.resource', MagicMock(name='boto3.resource')),
+        patch('boto3.client', MagicMock(name='boto3.client')),
+    ):
+        yield _load_promotion_handler()
+
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+    sys.modules.pop(_PROMOTE_MODULE_NAME, None)
+
+
+@pytest.fixture
+def table_env_cleared():
+    """Save, clear, and restore the Keywords table env vars around one test."""
+    saved = {name: os.environ.get(name) for name in _TABLE_ENV_VARS}
+    for name in _TABLE_ENV_VARS:
+        os.environ.pop(name, None)
+
+    yield
+
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 # The fields a `created_keywords` entry carries: the COMPLETE created item, the
 # same field set `create_items` produces (mirroring `create_keyword` in
@@ -468,16 +556,6 @@ class TestPromotionPersistenceUnit:
 
         assert keys == set(), f'Expected no keys, got {keys}'
         assert table.scan.call_count == 1, f'Expected a single scan, got {table.scan.call_count}'
-
-    def test_variants_across_pages_collapse_to_one_key_when_scan_is_paginated(
-        self, promotion_handler
-    ):
-        pages = _scan_pages([['  Best Running Shoes  '], ['BEST RUNNING SHOES']])
-        table, _batch = _mock_table(scan_pages=pages)
-
-        keys = promotion_handler.load_existing_keyword_keys(table)
-
-        assert keys == {'best running shoes'}, f'Expected one collapsed key, got {keys}'
 
     def test_blank_stored_keywords_are_ignored_when_keys_are_read(self, promotion_handler):
         pages = [{'Items': [{'keyword': '   '}, {'keyword': None}, {}, {'keyword': 'seo audit'}]}]

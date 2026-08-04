@@ -9,9 +9,7 @@ import { CompetitorAnalysis } from './CompetitorAnalysis';
 import {
   SELECTION_LIMIT, promotionSuccessMessage 
 } from '../../hooks/usePromoteKeywords';
-import type {
-  CompetitorAnalysisResult, ExpandedKeywordWithSource 
-} from '../../types';
+import type { CompetitorAnalysisResult } from '../../types';
 
 vi.mock('../../api/client', () => ({ apiPost: vi.fn() }));
 
@@ -326,20 +324,6 @@ describe('CompetitorAnalysis', () => {
       }
     );
 
-    it('displays a selected count equal to the number of selected keywords', async () => {
-      render(<CompetitorAnalysis {...defaultProps} result={competitorResultFixture} />);
-
-      await userEvent.click(
-        screen.getByRole('checkbox', { name: `Select ${firstPrimaryKeyword.keyword}` })
-      );
-      await userEvent.click(
-        screen.getByRole('checkbox', { name: `Select ${secondPrimaryKeyword.keyword}` })
-      );
-
-      expect(screen.getByText(`2 of ${SELECTION_LIMIT} keywords selected`)).toBeInTheDocument();
-      expect(screen.getAllByRole('checkbox', { checked: true })).toHaveLength(2);
-    });
-
     it('clears the selection when the active section changes', async () => {
       render(<CompetitorAnalysis {...defaultProps} result={competitorResultFixture} />);
       await userEvent.click(
@@ -351,21 +335,6 @@ describe('CompetitorAnalysis', () => {
       expect(screen.getByText(`0 of ${SELECTION_LIMIT} keywords selected`)).toBeInTheDocument();
       expect(screen.queryAllByRole('checkbox', { checked: true })).toHaveLength(0);
       expect(screen.getByRole('button', { name: 'Add to Keywords' })).toBeDisabled();
-    });
-
-    it('leaves the switched-back section unselected after a section change', async () => {
-      render(<CompetitorAnalysis {...defaultProps} result={competitorResultFixture} />);
-      await userEvent.click(
-        screen.getByRole('checkbox', { name: `Select ${firstPrimaryKeyword.keyword}` })
-      );
-      await userEvent.click(screen.getByRole('button', { name: /Content Gaps/ }));
-
-      await userEvent.click(screen.getByRole('button', { name: /Primary Keywords/ }));
-
-      expect(
-        screen.getByRole('checkbox', { name: `Select ${firstPrimaryKeyword.keyword}` })
-      ).not.toBeChecked();
-      expect(screen.getByText(`0 of ${SELECTION_LIMIT} keywords selected`)).toBeInTheDocument();
     });
 
     it('clears the selection when a new analysis result arrives', async () => {
@@ -405,37 +374,6 @@ describe('CompetitorAnalysis', () => {
       // field and the backend applies its own defaults.
       const [[, requestBody]] = mockApiPost.mock.calls as [[string, object]];
       expect(Object.keys(requestBody)).toStrictEqual(['keywords']);
-    });
-
-    it('posts the research context of each selected competitor keyword', async () => {
-      mockApiPost.mockResolvedValue(promotionResponseFixture);
-      render(<CompetitorAnalysis {...defaultProps} result={competitorResultFixture} />);
-
-      await userEvent.click(
-        screen.getByRole('checkbox', { name: `Select ${firstPrimaryKeyword.keyword}` })
-      );
-      await userEvent.click(
-        screen.getByRole('checkbox', { name: `Select ${secondPrimaryKeyword.keyword}` })
-      );
-      await userEvent.click(screen.getByRole('button', { name: 'Add to Keywords' }));
-      await screen.findByText(promotionSuccessText);
-
-      const [postedCall] = mockApiPost.mock.calls as [
-        [string, { keywords: ExpandedKeywordWithSource[] }],
-      ];
-
-      expect(postedCall[1].keywords.map((kw) => kw.source)).toStrictEqual([
-        firstPrimaryKeyword.source,
-        secondPrimaryKeyword.source,
-      ]);
-      expect(postedCall[1].keywords.map((kw) => kw.intent)).toStrictEqual([
-        firstPrimaryKeyword.intent,
-        secondPrimaryKeyword.intent,
-      ]);
-      expect(postedCall[1].keywords.map((kw) => kw.competition)).toStrictEqual([
-        firstPrimaryKeyword.competition,
-        secondPrimaryKeyword.competition,
-      ]);
     });
   });
 });

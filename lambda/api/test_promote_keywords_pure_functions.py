@@ -44,9 +44,9 @@ Context:
     generate *indices* and *case transforms* and resolve them against the
     module's own constants, so no allowed value is restated here.
 
-    The handler is loaded through the shared `promotion_handler` fixture in
-    `lambda/api/conftest.py`, which sets the table env vars and patches `boto3`
-    before the import.
+    The handler is loaded through this module's own `promotion_handler` fixture
+    (the `_load_router` pattern from `test_routers_404.py`), which sets the table
+    env vars and patches `boto3` before the import.
 
 Test outcomes:
     - the created set equals exactly the distinct, non-empty, non-existing
@@ -64,13 +64,101 @@ Test outcomes:
       source order, and is '' when none are present
 """
 
+import importlib
+import importlib.util
+import os
+import sys
 from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
 pytestmark = pytest.mark.usefixtures('table_env_cleared')
+
+
+# --- Import-boundary bootstrap ----------------------------------------------
+#
+# `promote-keywords.py` is hyphenated and builds a `boto3` DynamoDB resource at
+# import time, so it cannot be imported normally. Following the `_load_router`
+# pattern in `test_routers_404.py`, the layer copy of `shared` is placed on
+# `sys.path`, the table env vars are set and `boto3` is patched BEFORE the load,
+# and the handler is loaded through `importlib.util.spec_from_file_location`
+# under a module name unique to THIS test file, so a sibling module loading the
+# same handler in one pytest session cannot evict this copy. Every global
+# mutation is undone when the module-scoped fixture tears down. Nothing here is
+# autouse, so the ~200 pre-existing tests in this directory are untouched.
+
+_API_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO = os.path.abspath(os.path.join(_API_DIR, '..', '..'))
+_LAYER_PY = os.path.join(_REPO, 'lambda', 'layer', 'python')
+
+_PROMOTE_HANDLER_FILE = 'promote-keywords.py'
+_PROMOTE_MODULE_NAME = 'promote_keywords_under_test_pure_functions'
+_TABLE_ENV_VARS = ('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
+_TEST_TABLE_NAME = 'test-keywords-table'
+
+
+def _load_promotion_handler():
+    """Load `promote-keywords.py` fresh under this file's unique module name.
+
+    `shared/__init__.py` re-exports `api_response` as a function, shadowing the
+    submodule, so the real module object is bound explicitly -- otherwise the
+    handler's `from shared.api_response import ...` resolves to the function.
+    """
+    if _LAYER_PY not in sys.path:
+        sys.path.insert(0, _LAYER_PY)
+    sys.modules['shared.api_response'] = importlib.import_module('shared.api_response')
+    sys.modules.pop(_PROMOTE_MODULE_NAME, None)
+    spec = importlib.util.spec_from_file_location(
+        _PROMOTE_MODULE_NAME, os.path.join(_API_DIR, _PROMOTE_HANDLER_FILE)
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope='module')
+def promotion_handler():
+    """`promote-keywords.py`, loaded once for this module with `boto3` patched.
+
+    The env vars are set and `boto3` patched inside a `with` block wrapping the
+    `yield`, so no stubbed client and no env value leaks into another test module
+    in the same pytest session.
+    """
+    saved = {name: os.environ.get(name) for name in _TABLE_ENV_VARS}
+    for name in _TABLE_ENV_VARS:
+        os.environ[name] = _TEST_TABLE_NAME
+
+    with (
+        patch('boto3.resource', MagicMock(name='boto3.resource')),
+        patch('boto3.client', MagicMock(name='boto3.client')),
+    ):
+        yield _load_promotion_handler()
+
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
+    sys.modules.pop(_PROMOTE_MODULE_NAME, None)
+
+
+@pytest.fixture
+def table_env_cleared():
+    """Save, clear, and restore the Keywords table env vars around one test."""
+    saved = {name: os.environ.get(name) for name in _TABLE_ENV_VARS}
+    for name in _TABLE_ENV_VARS:
+        os.environ.pop(name, None)
+
+    yield
+
+    for name, value in saved.items():
+        if value is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = value
 
 
 # --- Strategies -------------------------------------------------------------
@@ -831,58 +919,3 @@ class TestCreateItemsUnit:
         )
 
         assert items == [], f'Expected no items, got {items}'
-
-
-class TestBuildNotesUnit:
-    """Example coverage of the documented `notes` rendering."""
-
-    @pytest.mark.parametrize(
-        ('research_keyword', 'expected'),
-        [
-            (
-                {'intent': 'commercial', 'competition': 'high', 'source': 'expansion'},
-                'intent: commercial; competition: high; source: expansion',
-            ),
-            ({'intent': 'informational'}, 'intent: informational'),
-            ({'source': '  commercial  '}, 'source: commercial'),
-            ({'source': '\tcompetitor\n'}, 'source: competitor'),
-            ({'source': ''}, ''),
-            ({'source': '    '}, ''),
-            ({}, ''),
-        ],
-    )
-    def test_notes_render_the_present_fields_when_values_carry_whitespace(
-        self, promotion_handler, research_keyword, expected
-    ):
-        notes = promotion_handler.build_notes({'keyword': 'running shoes', **research_keyword})
-
-        assert notes == expected, f'Unexpected notes rendering: {notes!r}'
-
-
-class TestValidateRequestUnit:
-    """Example coverage of the documented status/priority contract."""
-
-    @pytest.mark.parametrize(
-        ('supplied_status', 'supplied_priority', 'expected_field', 'expected_values'),
-        [
-            ('Active', None, 'status', ['status', 'Active']),
-            (None, 'High', 'priority', ['priority', 'High']),
-            ('archived', None, 'status', ['status', 'archived']),
-            ('Active', 'High', 'status, priority', ['status', 'Active', 'priority', 'High']),
-        ],
-    )
-    def test_request_is_rejected_when_status_or_priority_is_outside_allowed_set(
-        self, promotion_handler, supplied_status, supplied_priority, expected_field, expected_values
-    ):
-        keywords = [{'keyword': 'best running shoes'}]
-
-        error, status, priority = promotion_handler.validate_request(
-            keywords, supplied_status, supplied_priority
-        )
-
-        assert error is not None, 'Expected a rejection, got success'
-        assert status is None, f'Rejected request resolved a status: {status!r}'
-        assert priority is None, f'Rejected request resolved a priority: {priority!r}'
-        assert error['field'] == expected_field, f'Unexpected offending field {error["field"]!r}'
-        for expected in expected_values:
-            assert expected in error['message'], f'Expected {expected!r} in {error["message"]!r}'

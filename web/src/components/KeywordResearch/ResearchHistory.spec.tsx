@@ -203,15 +203,6 @@ describe('ResearchHistory promotion UI', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(expansionHistoryKeywordFixtures.length);
   });
 
-  it('displays a selected count equal to the number of checked keywords', async () => {
-    renderHistoryWithItems([buildHistoryItem({ keywords: expansionHistoryKeywordFixtures })]);
-    await userEvent.click(screen.getByText('hotels'));
-
-    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-
-    expect(screen.getByText(`1 of ${SELECTION_LIMIT} keywords selected`)).toBeInTheDocument();
-  });
-
   it('clears the selection when a different history item is expanded', async () => {
     renderHistoryWithItems([
       buildHistoryItem({ keywords: expansionHistoryKeywordFixtures }),

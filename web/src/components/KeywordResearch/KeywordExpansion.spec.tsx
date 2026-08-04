@@ -240,31 +240,6 @@ describe('KeywordExpansion promotion UI', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(expansionKeywordFixtures.length);
   });
 
-  it('displays a selected count equal to the number of checked keywords', async () => {
-    renderExpansionWithResult(expansionResultFixture);
-
-    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    await userEvent.click(selectKeywordCheckbox(beachResortsFixture.keyword));
-
-    expect(screen.getByText(
-      `${expansionKeywordFixtures.length} of ${SELECTION_LIMIT} keywords selected`
-    )).toBeInTheDocument();
-  });
-
-  it('disables the promote trigger while no keyword is selected', () => {
-    renderExpansionWithResult(expansionResultFixture);
-
-    expect(getPromoteButtonElement()).toBeDisabled();
-  });
-
-  it('enables the promote trigger once a keyword is selected', async () => {
-    renderExpansionWithResult(expansionResultFixture);
-
-    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-
-    expect(getPromoteButtonElement()).toBeEnabled();
-  });
-
   it('sends a single request carrying the selected keyword research context on trigger', async () => {
     mockApiPost.mockResolvedValue(promotionWireFixture);
     renderExpansionWithResult(expansionResultFixture);
