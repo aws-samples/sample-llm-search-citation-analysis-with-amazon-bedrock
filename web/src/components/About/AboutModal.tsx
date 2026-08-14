@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { AboutTab } from './AboutTab';
 import { ArchitectureTab } from './ArchitectureTab';
 import { LicensesTab } from './LicensesTab';
+import { VersionTab } from './VersionTab';
 
 interface AboutModalProps {
   readonly isOpen: boolean;
   readonly onClose: () => void;
 }
 
-type TabType = 'about' | 'architecture' | 'licenses';
+type TabType = 'about' | 'architecture' | 'licenses' | 'version';
 
 interface TabConfig {
   readonly id: TabType;
@@ -27,6 +28,10 @@ const TABS: readonly TabConfig[] = [
   {
     id: 'licenses',
     label: 'Open Source' 
+  },
+  {
+    id: 'version',
+    label: 'Version' 
   },
 ];
 
@@ -75,6 +80,7 @@ export const AboutModal = ({
           {activeTab === 'about' && <AboutTab />}
           {activeTab === 'architecture' && <ArchitectureTab />}
           {activeTab === 'licenses' && <LicensesTab />}
+          {activeTab === 'version' && <VersionTab />}
         </div>
       </div>
     </div>
