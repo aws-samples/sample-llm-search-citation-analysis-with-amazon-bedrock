@@ -27,6 +27,59 @@ STATE_MACHINE_ARN = os.environ['STATE_MACHINE_ARN']
 SCHEDULE_ROLE_ARN = os.environ['SCHEDULE_ROLE_ARN']
 SCHEDULE_GROUP = 'citation-analysis-schedules'
 
+# Match the limits enforced by parse-keywords / trigger-keyword-analysis.
+MAX_SCHEDULE_KEYWORDS = 100
+MAX_KEYWORD_LENGTH = 500
+
+
+def _normalize_schedule_keywords(keywords: list) -> tuple[list[str], str | None]:
+    """
+    Normalize the optional keyword subset of a schedule.
+
+    Returns (keywords, error). An empty list means "all active keywords",
+    which keeps the schedule input resolved at execution time.
+    """
+    normalized = []
+    for keyword in keywords:
+        if not isinstance(keyword, str):
+            return [], 'keywords must be an array of strings'
+        stripped = keyword.strip()
+        if not stripped:
+            continue
+        if len(stripped) > MAX_KEYWORD_LENGTH:
+            return [], f'Each keyword must be at most {MAX_KEYWORD_LENGTH} characters'
+        normalized.append(stripped)
+
+    if len(normalized) > MAX_SCHEDULE_KEYWORDS:
+        return [], f'Too many keywords (max {MAX_SCHEDULE_KEYWORDS})'
+
+    return normalized, None
+
+
+def _build_schedule_input(schedule_keywords: list[str]) -> str:
+    """
+    Build the Step Functions input baked into the schedule target.
+
+    Schedules without a keyword subset keep {'source': 'dynamodb'} so the
+    keyword list (and query prompts) are resolved fresh at execution time.
+    """
+    if schedule_keywords:
+        return json.dumps({'keywords': schedule_keywords})
+    return json.dumps({'source': 'dynamodb'})
+
+
+def _extract_schedule_keywords(target: dict[str, Any]) -> list[str]:
+    """Read the keyword subset back out of a schedule target input."""
+    try:
+        target_input = json.loads(target.get('Input') or '{}')
+    except (TypeError, ValueError):
+        return []
+
+    keywords = target_input.get('keywords')
+    if not isinstance(keywords, list):
+        return []
+    return [kw for kw in keywords if isinstance(kw, str)]
+
 
 @api_handler
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -76,7 +129,9 @@ def list_schedules(event: dict[str, Any]) -> dict[str, Any]:
                 'schedule': detail['ScheduleExpression'],
                 'state': detail['State'],
                 'timezone': detail.get('ScheduleExpressionTimezone', 'UTC'),
-                'description': detail.get('Description', '')
+                'description': detail.get('Description', ''),
+                # Empty list = schedule runs all active keywords
+                'keywords': _extract_schedule_keywords(detail.get('Target') or {})
             })
 
         return success_response({'schedules': schedules}, event)
@@ -98,7 +153,16 @@ def list_schedules(event: dict[str, Any]) -> dict[str, Any]:
 def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str, Any],
                               name: str, frequency: str, time: str, timezone: str,
                               enabled: bool, day_of_week: str, day_of_month: str) -> dict[str, Any]:
-    """Create a new schedule."""
+    """Create a new schedule, optionally linked to a subset of keywords."""
+    # Validated from the raw body: @validate's list coercion would silently
+    # turn a string into a list of characters.
+    raw_keywords = body.get('keywords', [])
+    if not isinstance(raw_keywords, list):
+        return validation_error('keywords must be an array of strings', event, 'keywords')
+
+    schedule_keywords, keywords_error = _normalize_schedule_keywords(raw_keywords)
+    if keywords_error:
+        return validation_error(keywords_error, event, 'keywords')
     # Validate time format (HH:MM)
     if not time or len(time) != 5 or ':' not in time:
         return validation_error('Invalid time format. Use HH:MM', event, 'time')
@@ -134,6 +198,7 @@ def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
         scheduler.create_schedule_group(Name=SCHEDULE_GROUP)
 
     # Create schedule
+    scope = f"{len(schedule_keywords)} keyword(s)" if schedule_keywords else 'all keywords'
     try:
         scheduler.create_schedule(
             Name=name,
@@ -141,12 +206,12 @@ def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
             ScheduleExpression=cron_expr,
             ScheduleExpressionTimezone=timezone,
             State='ENABLED' if enabled else 'DISABLED',
-            Description=f"Automated {frequency} citation analysis",
+            Description=f"Automated {frequency} citation analysis ({scope})",
             FlexibleTimeWindow={'Mode': 'OFF'},
             Target={
                 'Arn': STATE_MACHINE_ARN,
                 'RoleArn': SCHEDULE_ROLE_ARN,
-                'Input': json.dumps({'source': 'dynamodb'})
+                'Input': _build_schedule_input(schedule_keywords)
             }
         )
 
@@ -154,7 +219,8 @@ def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
             'message': 'Schedule created successfully',
             'name': name,
             'schedule': cron_expr,
-            'timezone': timezone
+            'timezone': timezone,
+            'keywords': schedule_keywords
         }, event, 201)
     except scheduler.exceptions.ConflictException:
         return api_response(409, {'error': 'Schedule with this name already exists'}, event)

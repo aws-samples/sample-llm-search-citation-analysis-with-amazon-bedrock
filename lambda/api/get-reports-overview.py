@@ -28,7 +28,8 @@ import importlib.util
 import logging
 import os
 import sys
-from typing import Any, Callable, Dict, List
+from collections.abc import Callable
+from typing import Any
 
 # Shared layer path (populated by the Lambda layer at /opt/python)
 sys.path.insert(0, '/opt/python')
@@ -79,7 +80,7 @@ def _load_sibling(filename: str, attr: str) -> Callable:
 # environment is fully bootstrapped (and would make the module hard to
 # import in unit tests). The first invocation pays the load cost; every
 # subsequent invocation in the same warm container is free.
-_sibling_cache: Dict[str, Callable] = {}
+_sibling_cache: dict[str, Callable] = {}
 
 
 def _trends_helper() -> Callable:
@@ -103,10 +104,10 @@ def _recs_helper() -> Callable:
 # ----------------------------------------------------------------------
 
 def _top_movers(
-    keyword_trends: List[Dict[str, Any]],
+    keyword_trends: list[dict[str, Any]],
     direction: str,
     limit: int,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Pick the top N movers in the given direction.
 
@@ -124,11 +125,11 @@ def _top_movers(
 
 
 def build_overview(
-    config: Dict[str, Any],
+    config: dict[str, Any],
     period: str,
     days: int,
     top: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Compose the overview payload from existing aggregations.
 
@@ -207,12 +208,12 @@ def build_overview(
     'top': {'type': int, 'min': 1, 'max': 10, 'default': 3},
 })
 def handler(
-    event: Dict[str, Any],
+    event: dict[str, Any],
     context: Any,
     period: str = 'day',
     days: int = 30,
     top: int = 3,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """API handler for GET /api/reports/overview."""
     config = get_brand_config()
     payload = build_overview(config, period=period, days=days, top=top)

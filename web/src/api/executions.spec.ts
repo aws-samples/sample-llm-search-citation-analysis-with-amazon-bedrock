@@ -132,27 +132,28 @@ describe('executions API', () => {
   });
 
   describe('createSchedule', () => {
-    it('creates schedule with options', async () => {
+    it('posts the schedule form including the keyword subset', async () => {
       const mockSchedule = {
-        name: 'daily',
+        name: 'priority-daily',
         state: 'ENABLED' 
       };
       mockApiPost.mockResolvedValue(mockSchedule);
 
-      const result = await createSchedule({
-        name: 'daily',
-        schedule: 'rate(1 day)',
+      const formData = {
+        name: 'priority-daily',
+        frequency: 'daily',
+        time: '07:00',
         timezone: 'UTC',
+        day_of_week: 'MON',
+        day_of_month: '1',
         enabled: true,
-      });
+        keywords: ['best hotels malaga'],
+      } satisfies Parameters<typeof createSchedule>[0];
+
+      const result = await createSchedule(formData);
 
       expect(result).toStrictEqual(mockSchedule);
-      expect(mockApiPost).toHaveBeenCalledWith('/schedules', {
-        name: 'daily',
-        schedule: 'rate(1 day)',
-        timezone: 'UTC',
-        enabled: true,
-      });
+      expect(mockApiPost).toHaveBeenCalledWith('/schedules', formData);
     });
   });
 });

@@ -185,7 +185,7 @@ export function TabContent(props: TabContentProps) {
     recommendations: <Recommendations />,
     'content-studio': <ContentStudioView />,
     execution: <ExecutionMonitor execution={execution} triggerAnalysis={triggerAnalysis} keywordsCount={keywords.length} keywords={keywords} />,
-    schedule: <ScheduleManager schedules={schedules} setSchedules={setSchedules} />,
+    schedule: <ScheduleManager schedules={schedules} setSchedules={setSchedules} keywords={keywords} />,
     settings: <SettingsView keywords={keywords} setKeywords={setKeywords} initialTab={settingsInitialTab} />,
     searches: (
       <SearchesView

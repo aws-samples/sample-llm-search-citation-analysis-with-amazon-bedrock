@@ -5,7 +5,6 @@ Returns all keywords from the Keywords table.
 """
 
 import logging
-import os
 import sys
 
 import boto3

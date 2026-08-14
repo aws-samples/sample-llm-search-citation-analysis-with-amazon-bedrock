@@ -33,6 +33,50 @@ KEYWORDS_TABLE = (
     or 'CitationAnalysis-Keywords'
 )
 
+QUERY_PROMPTS_TABLE = (
+    os.environ.get('DYNAMODB_TABLE_QUERY_PROMPTS')
+    or os.environ.get('QUERY_PROMPTS_TABLE')
+    or 'CitationAnalysis-QueryPrompts'
+)
+
+
+def read_enabled_query_prompts() -> list[dict[str, str]]:
+    """
+    Read enabled query prompts from DynamoDB.
+
+    Used for executions whose input does not carry query prompts (e.g.
+    EventBridge schedules, which bake their input at creation time). Resolving
+    prompts here keeps scheduled runs in sync with the current configuration.
+    """
+    try:
+        table = dynamodb.Table(QUERY_PROMPTS_TABLE)
+        response = table.query(
+            IndexName='EnabledIndex',
+            KeyConditionExpression=Key('enabled').eq('true'),
+            Limit=10
+        )
+        prompts = [
+            {
+                'id': item['id'],
+                'name': item.get('name', ''),
+                'template': item.get('template', ''),
+            }
+            for item in response.get('Items', [])
+        ]
+        logger.info(f"Read {len(prompts)} enabled query prompts from DynamoDB")
+        return prompts
+    except Exception as e:
+        logger.warning(f"Could not fetch query prompts, proceeding without them: {e}")
+        return []
+
+
+def resolve_query_prompts(event: dict[str, Any]) -> list:
+    """Pass through query prompts from the execution input, or load enabled ones."""
+    prompts = event.get('query_prompts')
+    if isinstance(prompts, list):
+        return prompts
+    return read_enabled_query_prompts()
+
 
 def read_keywords_from_dynamodb() -> list[str]:
     """Read active keywords from DynamoDB Keywords table."""
@@ -107,11 +151,18 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     2. Direct array: {"keywords": ["keyword1", "keyword2"]}
     3. Direct string: {"keywords": "keyword1\nkeyword2"}
 
+    An optional "query_prompts" list in the input is passed through to the
+    output. When absent (scheduled runs), enabled prompts are loaded from
+    DynamoDB instead.
+
     Output:
     {
         "keywords": [
             {"keyword": "best hotels in malaga", "timestamp": "2025-01-15T10:30:00Z"},
             {"keyword": "top restaurants paris", "timestamp": "2025-01-15T10:30:00Z"}
+        ],
+        "query_prompts": [
+            {"id": "prompt-1", "name": "Family Traveler", "template": "As a family traveler, find {keyword}"}
         ]
     }
     """
@@ -160,7 +211,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             logger.warning(f"{len(valid_keywords)} keywords provided, limiting to 100")
             valid_keywords = valid_keywords[:100]
 
-        # Format output with timestamps
+        # Format output with timestamps. query_prompts is always emitted so the
+        # ProcessKeywords Map state can select it from this state's output,
+        # regardless of whether the execution input carried prompts (API
+        # triggers do, EventBridge schedules do not).
         result = {
             "keywords": [
                 {
@@ -168,7 +222,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "timestamp": timestamp
                 }
                 for keyword in valid_keywords
-            ]
+            ],
+            "query_prompts": resolve_query_prompts(event)
         }
 
         logger.info(f"Successfully parsed {len(valid_keywords)} keywords")

@@ -25,6 +25,38 @@ interface ExecutionMonitorProps {
   keywords: Keyword[];
 }
 
+interface ProviderPreflightRecord {
+  name: string;
+  enabled: boolean;
+  configured: boolean;
+  type: string;
+}
+
+interface ProviderPreflightResult {
+  anyReady: boolean;
+  missingKeyProviders: string[];
+}
+
+/**
+ * Pre-flight provider health check before triggering an analysis.
+ * Returns null when the check itself fails, in which case the analysis
+ * should proceed rather than be blocked.
+ */
+async function checkLlmProvidersReady(): Promise<ProviderPreflightResult | null> {
+  try {
+    const provResp = await authenticatedFetch(`${API_BASE_URL}/providers`);
+    if (!provResp.ok) return null;
+    const data = await provResp.json() as { providers: ProviderPreflightRecord[] };
+    const llmProviders = (data.providers ?? []).filter(p => p.type === 'llm');
+    return {
+      anyReady: llmProviders.some(p => p.enabled && p.configured),
+      missingKeyProviders: llmProviders.filter(p => p.enabled && !p.configured).map(p => p.name),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const ExecutionMonitor = ({
   execution,
   triggerAnalysis,
@@ -61,37 +93,20 @@ export const ExecutionMonitor = ({
   const handleTriggerAnalysis = async () => {
     setIsStarting(true);
     try {
-      // Pre-flight: check provider health before running
-      try {
-        const provResp = await authenticatedFetch(`${API_BASE_URL}/providers`);
-        if (provResp.ok) {
-          const data = await provResp.json() as {
-            providers: Array<{
-              name: string;
-              enabled: boolean;
-              configured: boolean;
-              type: string;
-            }> 
-          };
-          const llmProviders = (data.providers ?? []).filter(p => p.type === 'llm');
-          const ready = llmProviders.filter(p => p.enabled && p.configured);
-          if (ready.length === 0) {
-            setAlertModal({
-              isOpen: true,
-              title: 'No Providers Ready',
-              message: 'No LLM providers are enabled and configured. Go to Settings > AI Providers to add at least one API key.',
-              variant: 'error',
-            });
-            return;
-          }
-          const notReady = llmProviders.filter(p => p.enabled && !p.configured);
-          if (notReady.length > 0) {
-            console.warn(`[preflight] ${notReady.length} enabled provider(s) missing API keys: ${notReady.map(p => p.name).join(', ')}`);
-          }
-        }
-      } catch {
+      const preflight = await checkLlmProvidersReady();
+      if (preflight === null) {
         // Don't block analysis if preflight check itself fails
         console.warn('[preflight] Provider check failed, proceeding anyway');
+      } else if (!preflight.anyReady) {
+        setAlertModal({
+          isOpen: true,
+          title: 'No Providers Ready',
+          message: 'No LLM providers are enabled and configured. Go to Settings > AI Providers to add at least one API key.',
+          variant: 'error',
+        });
+        return;
+      } else if (preflight.missingKeyProviders.length > 0) {
+        console.warn(`[preflight] ${preflight.missingKeyProviders.length} enabled provider(s) missing API keys: ${preflight.missingKeyProviders.join(', ')}`);
       }
 
       const keywordsToRun = selectedKeywords.length > 0 ? selectedKeywords : undefined;
