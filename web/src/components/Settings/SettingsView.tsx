@@ -171,6 +171,10 @@ export const SettingsView = ({
           )}
         </div>
       </div>
+
+      <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
+        Version {import.meta.env.VITE_APP_VERSION ?? 'dev'}
+      </p>
     </div>
   );
 };

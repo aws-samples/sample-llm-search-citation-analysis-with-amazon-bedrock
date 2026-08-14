@@ -1,8 +1,15 @@
 /// <reference types="vitest" />
+import { readFileSync } from 'node:fs';
 import {
   defineConfig, loadEnv
 } from 'vite';
 import react from '@vitejs/plugin-react';
+
+// Single source of truth for the app version shown in the UI (Settings page).
+// Bump `version` in package.json when deploying or merging feature sets.
+const packageJson: { version: string } = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf-8')
+);
 
 /**
  * Vendor chunk assignment for Rollup/Rolldown `manualChunks`.
@@ -44,6 +51,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    define: {'import.meta.env.VITE_APP_VERSION': JSON.stringify(packageJson.version),},
     server: enableDevProxy
       ? {
         proxy: {

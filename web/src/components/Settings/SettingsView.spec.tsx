@@ -100,6 +100,14 @@ describe('SettingsView', () => {
     });
   });
 
+  describe('app version', () => {
+    it('displays the deployed application version', () => {
+      render(<SettingsView {...buildProps()} />);
+
+      expect(screen.getByText(/^Version \d+\.\d+\.\d+$/)).toBeInTheDocument();
+    });
+  });
+
   describe('providers tab', () => {
     it('switches to providers tab when clicked', async () => {
       mockUseProviderConfig.mockReturnValue({
