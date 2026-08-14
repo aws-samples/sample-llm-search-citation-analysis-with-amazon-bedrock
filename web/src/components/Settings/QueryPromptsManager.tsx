@@ -269,8 +269,10 @@ export function QueryPromptsManager() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
+      {/* items-start + gap keep the description in its own column; without
+          min-w-0 / shrink-0 the text ran underneath the button. */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex-1 min-w-0">
           <h3 className="text-lg font-semibold text-gray-900">Personas</h3>
           <p className="text-sm text-gray-500">
             Define user personas to see how AI providers change their responses based on who is asking.
@@ -281,6 +283,7 @@ export function QueryPromptsManager() {
           <Button
             onClick={() => setShowCreate(true)}
             leadingIcon={<PlusIcon className="w-4 h-4" />}
+            className="shrink-0 whitespace-nowrap"
           >
             New Persona
           </Button>
