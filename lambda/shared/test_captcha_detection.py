@@ -59,6 +59,7 @@ sys.modules.setdefault('bedrock_agentcore._utils.endpoints', _fake_bac_endpoints
 
 sys.path.insert(0, os.path.dirname(__file__))
 import browser_tools  # type: ignore[import-not-found]
+
 importlib.reload(browser_tools)
 
 

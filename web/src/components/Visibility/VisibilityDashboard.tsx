@@ -7,7 +7,7 @@ import { usePersonaRankings } from '../../hooks/usePersonaRankings';
 import {
   BrandRow, SummaryCards, TrendChart 
 } from './VisibilityComponents';
-import { PersonaSelector } from '../shared/PersonaSelector';
+import { PersonaSelector } from '../Personas/PersonaSelector';
 import { PersonaComparisonChart } from './PersonaComparisonChart';
 
 interface Props { readonly keywords: Array<{ keyword: string }>; }

@@ -14,8 +14,12 @@ const PRIORITY_BADGE_CLASSES: Record<ContentRecommendation['priority'], string> 
   low: 'bg-green-100 text-green-800',
 };
 
-export function SelfReflectionPanel({ keyword, brand, queryPromptId }: SelfReflectionPanelProps) {
-  const { data, loading, error, triggerReflection } = useSelfReflection();
+export function SelfReflectionPanel({
+  keyword, brand, queryPromptId 
+}: SelfReflectionPanelProps) {
+  const {
+    data, loading, error, triggerReflection 
+  } = useSelfReflection();
 
   const handleAnalyse = () => {
     triggerReflection(keyword, brand, queryPromptId);
@@ -25,7 +29,7 @@ export function SelfReflectionPanel({ keyword, brand, queryPromptId }: SelfRefle
     triggerReflection(keyword, brand, queryPromptId, true);
   };
 
-  const displayRank = data?.current_rank != null ? String(data.current_rank) : 'Not ranked';
+  const displayRank = data?.current_rank == null ? 'Not ranked' : String(data.current_rank);
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">

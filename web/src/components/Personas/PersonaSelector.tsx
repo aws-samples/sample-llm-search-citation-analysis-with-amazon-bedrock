@@ -1,69 +1,47 @@
 import {
-  useEffect, useState, useCallback
+  useState, useEffect, useCallback
 } from 'react';
 import {
   API_BASE_URL, authenticatedFetch
 } from '../../infrastructure';
 
-interface Persona {
-  persona_id: string;
-  persona_name: string;
+interface QueryPrompt {
+  id: string;
+  name: string;
+  template: string;
+  enabled: boolean;
 }
 
 interface PersonaSelectorProps {
   readonly selectedPersonaId: string | null;
   readonly onPersonaChange: (personaId: string | null) => void;
-  readonly personas?: Persona[];
-}
-
-interface QueryPromptRecord {
-  id: string;
-  name: string;
-}
-
-function isQueryPromptArray(data: unknown): data is QueryPromptRecord[] {
-  return Array.isArray(data) && data.every(
-    (item) => typeof item === 'object' && item !== null && 'id' in item && 'name' in item
-  );
 }
 
 export function PersonaSelector({
-  selectedPersonaId, onPersonaChange, personas: externalPersonas
+  selectedPersonaId, onPersonaChange 
 }: PersonaSelectorProps) {
-  const [fetchedPersonas, setFetchedPersonas] = useState<Persona[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  const fetchPersonas = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/query-prompts`);
-      if (!response.ok) return;
-      const json: unknown = await response.json();
-      if (isQueryPromptArray(json)) {
-        setFetchedPersonas(json.map((p) => ({
-          persona_id: p.id,
-          persona_name: p.name,
-        })));
-      }
-    } catch {
-      setFetchedPersonas([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const [personas, setPersonas] = useState<QueryPrompt[]>([]);
 
   useEffect(() => {
-    if (!externalPersonas) {
-      fetchPersonas();
-    }
-  }, [externalPersonas, fetchPersonas]);
+    const fetchPersonas = async () => {
+      try {
+        const response = await authenticatedFetch(`${API_BASE_URL}/query-prompts`);
+        if (!response.ok) return;
+        const data: unknown = await response.json();
+        if (Array.isArray(data)) {
+          setPersonas(data as QueryPrompt[]);
+        }
+      } catch {
+        setPersonas([]);
+      }
+    };
+    fetchPersonas();
+  }, []);
 
-  const personaList = externalPersonas ?? fetchedPersonas;
-
-  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     onPersonaChange(value === '' ? null : value);
-  };
+  }, [onPersonaChange]);
 
   return (
     <div>
@@ -71,16 +49,13 @@ export function PersonaSelector({
       <select
         value={selectedPersonaId ?? ''}
         onChange={handleChange}
-        disabled={loading}
         className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 text-sm bg-gray-50"
       >
         <option value="">All Personas</option>
-        {personaList.map((p) => (
-          <option key={p.persona_id} value={p.persona_id}>{p.persona_name}</option>
+        {personas.map(p => (
+          <option key={p.id} value={p.id}>{p.name}</option>
         ))}
       </select>
     </div>
   );
 }
-
-export default PersonaSelector;

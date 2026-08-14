@@ -47,6 +47,9 @@ export default tseslint.config(
       '**/lambda/**/.deps/**',
       '**/lambda/**/python/**',
       '**/lambda/crawler-layer/**',
+      // Local tooling output, not project code
+      '**/.venv/**',
+      '**/coverage/**',
     ],
   },
   eslintComments.recommended,

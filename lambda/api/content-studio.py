@@ -863,7 +863,7 @@ def create_pending_content(idea: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             raise RuntimeError(
                 f"Idempotent conflict on content_id={content_id} but item "
                 "disappeared on read"
-            )
+            ) from e
         return existing, False
 
 

@@ -41,8 +41,11 @@ ignore = [
 # Handler entry points: `event` and `context` are required by AWS but often unused by routers.
 "lambda/**/handler.py"      = ["ARG001"]
 "lambda/api/**"             = ["ARG001"]
-# Tests: allow magic values, imperative fixtures, loose typing.
-"lambda/**/test_*.py"       = ["ARG001", "ARG002", "B017", "RUF012", "SIM"]
+# Tests: allow magic values, imperative fixtures, loose typing. Mock lambdas
+# must match the mocked signature even when arguments go unused (ARG005), and
+# the sys.path shim before importing hyphenated Lambda modules forces imports
+# below module-level statements (E402).
+"lambda/**/test_*.py"       = ["ARG001", "ARG002", "ARG005", "B017", "E402", "RUF012", "SIM"]
 # Layer smoke test imports symbols specifically to prove they're packaged.
 "lambda/layer/test-layer.py" = ["F401"]
 # Shared __init__.py re-exports: imports are used at module boundary, ruff can't see cross-module.

@@ -12,7 +12,7 @@ not exact string matching. This allows the LLM to understand brand hierarchies
 import logging
 from typing import Any
 
-from shared.industry_presets import INDUSTRY_PRESETS, get_preset
+from shared.industry_presets import get_preset
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
 from shared.prompt_safety import (
