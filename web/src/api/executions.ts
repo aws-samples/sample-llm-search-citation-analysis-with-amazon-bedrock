@@ -7,7 +7,12 @@ import {
 import {
   apiGet, apiPost, ApiRequestError 
 } from './client';
-import type { Execution } from '../types';
+import type {
+  Execution, Schedule, ScheduleFormData 
+} from '../types';
+
+// Re-exported for existing consumers of this module's schedule API.
+export type { Schedule };
 
 /**
  * Fetches execution status by ARN.
@@ -64,13 +69,6 @@ export async function triggerAnalysis(
   return data as TriggerResponse;
 }
 
-export interface Schedule {
-  name: string;
-  state: 'ENABLED' | 'DISABLED';
-  schedule: string;
-  timezone: string;
-}
-
 interface SchedulesResponse {schedules: Schedule[];}
 
 /**
@@ -81,16 +79,10 @@ export async function fetchSchedules(signal?: AbortSignal): Promise<Schedule[]> 
   return response.schedules ?? [];
 }
 
-interface CreateScheduleOptions {
-  name: string;
-  schedule: string;
-  timezone: string;
-  enabled: boolean;
-}
-
 /**
- * Creates a new schedule.
+ * Creates a new schedule. `keywords` links the schedule to a keyword subset;
+ * an empty array runs all active keywords at execution time.
  */
-export function createSchedule(options: CreateScheduleOptions): Promise<Schedule> {
+export function createSchedule(options: ScheduleFormData): Promise<Schedule> {
   return apiPost<Schedule>('/schedules', options);
 }

@@ -2,16 +2,28 @@ import {
   describe, it, expect, vi, beforeEach 
 } from 'vitest';
 import {
-  render, screen 
+  render, screen, waitFor 
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ScheduleManager } from './ScheduleManager';
 
-import type { Schedule } from '../../types';
+import type {
+  Keyword, Schedule 
+} from '../../types';
 
 vi.mock('../../infrastructure', () => ({
   API_BASE_URL: 'https://api.test.com',
   authenticatedFetch: vi.fn(),
+  isAbortError: vi.fn(() => false),
 }));
+
+vi.mock('../../api/executions', () => ({fetchSchedules: vi.fn(),}));
+
+import { authenticatedFetch } from '../../infrastructure';
+import { fetchSchedules } from '../../api/executions';
+
+const mockAuthFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
+const mockFetchSchedules = fetchSchedules as ReturnType<typeof vi.fn>;
 
 const mockSchedules: Schedule[] = [
   {
@@ -22,23 +34,169 @@ const mockSchedules: Schedule[] = [
   },
 ];
 
+const mockKeywords: Keyword[] = [
+  {
+    id: 'kw-1',
+    keyword: 'best hotels malaga',
+    created_at: '2024-01-01T00:00:00Z',
+  },
+  {
+    id: 'kw-2',
+    keyword: 'boutique hotels madrid',
+    created_at: '2024-01-02T00:00:00Z',
+  },
+];
+
+function buildProps(overrides = {}) {
+  return {
+    schedules: [] satisfies Schedule[],
+    setSchedules: vi.fn(),
+    keywords: mockKeywords,
+    ...overrides,
+  };
+}
+
+async function openScheduleForm() {
+  await userEvent.click(screen.getByRole('button', { name: /New Schedule/i }));
+}
+
+function firstCreateRequestBody(): unknown {
+  const [, requestInit] = mockAuthFetch.mock.calls[0] as [string, RequestInit];
+  return JSON.parse(String(requestInit.body)) as unknown;
+}
+
 describe('ScheduleManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockFetchSchedules.mockResolvedValue([]);
   });
 
-  it('renders without crashing', () => {
-    render(<ScheduleManager schedules={[]} setSchedules={vi.fn()} />);
-    expect(document.body).toBeTruthy();
+  describe('schedule list', () => {
+    it('renders schedule name when schedules exist', () => {
+      render(<ScheduleManager {...buildProps({ schedules: mockSchedules })} />);
+      expect(screen.getByText('daily-analysis')).toBeInTheDocument();
+    });
+
+    it('shows empty state when no schedules', () => {
+      render(<ScheduleManager {...buildProps()} />);
+      expect(screen.getByText(/No schedules/i)).toBeInTheDocument();
+    });
+
+    it('shows all-keywords scope for schedules without linked keywords', () => {
+      render(<ScheduleManager {...buildProps({ schedules: mockSchedules })} />);
+      expect(screen.getByText('Runs all active keywords')).toBeInTheDocument();
+    });
+
+    it('shows linked keywords for keyword-scoped schedules', () => {
+      const keywordSchedule: Schedule[] = [
+        {
+          name: 'priority-daily',
+          state: 'ENABLED',
+          schedule: 'cron(0 7 * * ? *)',
+          timezone: 'UTC',
+          keywords: ['best hotels malaga', 'boutique hotels madrid'],
+        },
+      ];
+      render(<ScheduleManager {...buildProps({ schedules: keywordSchedule })} />);
+      expect(
+        screen.getByText('Runs 2 keyword(s): best hotels malaga, boutique hotels madrid')
+      ).toBeInTheDocument();
+    });
   });
 
-  it('renders schedule name when schedules exist', () => {
-    render(<ScheduleManager schedules={mockSchedules} setSchedules={vi.fn()} />);
-    expect(screen.getByText('daily-analysis')).toBeInTheDocument();
+  describe('initial load', () => {
+    it('loads schedules from the API on mount', async () => {
+      const props = buildProps();
+      mockFetchSchedules.mockResolvedValue(mockSchedules);
+
+      render(<ScheduleManager {...props} />);
+
+      await waitFor(() => expect(props.setSchedules).toHaveBeenCalledWith(mockSchedules));
+    });
   });
 
-  it('shows empty state when no schedules', () => {
-    render(<ScheduleManager schedules={[]} setSchedules={vi.fn()} />);
-    expect(screen.getByText(/No schedules/i)).toBeInTheDocument();
+  describe('keyword scope selection', () => {
+    it('defaults to running all keywords', async () => {
+      render(<ScheduleManager {...buildProps()} />);
+      await openScheduleForm();
+
+      expect(screen.getByRole('radio', { name: /All keywords/i })).toBeChecked();
+    });
+
+    it('lists available keywords when specific scope is selected', async () => {
+      render(<ScheduleManager {...buildProps()} />);
+      await openScheduleForm();
+
+      await userEvent.click(screen.getByRole('radio', { name: /Specific keywords/i }));
+
+      expect(screen.getByRole('checkbox', { name: 'best hotels malaga' })).toBeInTheDocument();
+      expect(screen.getByRole('checkbox', { name: 'boutique hotels madrid' })).toBeInTheDocument();
+    });
+
+    it('prompts to add keywords when none exist for specific scope', async () => {
+      render(<ScheduleManager {...buildProps({ keywords: [] })} />);
+      await openScheduleForm();
+
+      await userEvent.click(screen.getByRole('radio', { name: /Specific keywords/i }));
+
+      expect(screen.getByText(/No keywords available yet/i)).toBeInTheDocument();
+    });
+  });
+
+  describe('schedule creation', () => {
+    it('submits an empty keyword subset when all keywords is selected', async () => {
+      mockAuthFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ message: 'created' }),
+      });
+      render(<ScheduleManager {...buildProps()} />);
+      await openScheduleForm();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+
+      expect(firstCreateRequestBody()).toMatchObject({ keywords: [] });
+    });
+
+    it('submits the selected keywords when specific scope is chosen', async () => {
+      mockAuthFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ message: 'created' }),
+      });
+      render(<ScheduleManager {...buildProps()} />);
+      await openScheduleForm();
+      await userEvent.click(screen.getByRole('radio', { name: /Specific keywords/i }));
+      await userEvent.click(screen.getByRole('checkbox', { name: 'best hotels malaga' }));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+
+      expect(firstCreateRequestBody()).toMatchObject({ keywords: ['best hotels malaga'] });
+    });
+
+    it('blocks submission when specific scope has no keywords selected', async () => {
+      render(<ScheduleManager {...buildProps()} />);
+      await openScheduleForm();
+      await userEvent.click(screen.getByRole('radio', { name: /Specific keywords/i }));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+
+      expect(screen.getByText('Select at least one keyword for this schedule')).toBeInTheDocument();
+      expect(mockAuthFetch).not.toHaveBeenCalled();
+    });
+
+    it('refreshes the schedule list after a successful creation', async () => {
+      const props = buildProps();
+      mockAuthFetch.mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({ message: 'created' }),
+      });
+      mockFetchSchedules.mockResolvedValue(mockSchedules);
+      render(<ScheduleManager {...props} />);
+      await openScheduleForm();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+
+      await waitFor(() => expect(props.setSchedules).toHaveBeenCalledWith(mockSchedules));
+      expect(mockFetchSchedules).toHaveBeenCalledTimes(2);
+    });
   });
 });
