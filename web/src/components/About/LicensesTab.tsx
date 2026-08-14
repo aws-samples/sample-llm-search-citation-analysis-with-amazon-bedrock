@@ -13,9 +13,27 @@ const FRONTEND_DEPS = [
   },
   {
     name: 'Vite',
-    version: '5.x',
+    version: '8.x',
     license: 'MIT',
     desc: 'Build tool' 
+  },
+  {
+    name: 'React Router',
+    version: '7.x',
+    license: 'MIT',
+    desc: 'Routing' 
+  },
+  {
+    name: 'react-markdown',
+    version: '10.x',
+    license: 'MIT',
+    desc: 'Markdown rendering' 
+  },
+  {
+    name: 'docx',
+    version: '9.x',
+    license: 'MIT',
+    desc: 'Word export' 
   },
   {
     name: 'Tailwind CSS',
@@ -84,7 +102,7 @@ const BACKEND_DEPS = [
 
 const AWS_SERVICES = [
   'Lambda', 'DynamoDB', 'Step Functions', 'API Gateway', 'S3', 
-  'CloudFront', 'Cognito', 'Bedrock', 'Secrets Manager', 'EventBridge', 'WAF'
+  'CloudFront', 'Cognito', 'Bedrock', 'Bedrock AgentCore', 'Secrets Manager', 'EventBridge Scheduler', 'WAF'
 ];
 
 const USE_CASES = [

@@ -12,6 +12,8 @@ vi.mock('./ArchitectureTab', () => ({ArchitectureTab: () => <div>Architecture Co
 
 vi.mock('./LicensesTab', () => ({LicensesTab: () => <div>Licenses Content</div>}));
 
+vi.mock('./VersionTab', () => ({VersionTab: () => <div>Version Content</div>}));
+
 describe('AboutModal', () => {
   const mockOnClose = vi.fn();
 
@@ -53,5 +55,11 @@ describe('AboutModal', () => {
     render(<AboutModal isOpen={true} onClose={mockOnClose} />);
     fireEvent.click(screen.getByText('Open Source'));
     expect(screen.getByText('Licenses Content')).toBeInTheDocument();
+  });
+
+  it('shows Version tab content when Version tab clicked', () => {
+    render(<AboutModal isOpen={true} onClose={mockOnClose} />);
+    fireEvent.click(screen.getByText('Version'));
+    expect(screen.getByText('Version Content')).toBeInTheDocument();
   });
 });
