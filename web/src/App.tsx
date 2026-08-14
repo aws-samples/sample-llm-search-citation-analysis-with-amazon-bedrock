@@ -18,6 +18,7 @@ import { TabContent } from './components/Layout/TabContent';
 import { ReportsRouter } from './components/Reports/ReportsRouter';
 import { ConfirmModal } from './components/ui/Modal';
 import { AboutModal } from './components/About';
+import { OnboardingModal } from './components/Onboarding';
 import { ThemeToggle } from './components/ui/ThemeToggle';
 import { PrintToPdfButton } from './components/ui/PrintToPdfButton';
 import { Spinner } from './components/ui/Spinner';
@@ -334,7 +335,6 @@ function MainApp() {
                 settingsInitialTab={settingsInitialTab}
                 setActiveTab={setActiveTab}
                 onNavigateToRawResponses={handleNavigateToRawResponses}
-                onNavigateToSettings={handleNavigateToSettings}
               />
             )}
           </div>
@@ -353,6 +353,17 @@ function MainApp() {
         confirmText="Leave"
         confirmVariant="primary"
       />
+
+      {/* First-run setup guide; mounts app-wide so it is visible regardless
+          of which tab is active when the setup status resolves. */}
+      {!isPrintMode && (
+        <OnboardingModal
+          keywordsCount={keywords.length}
+          hasRunAnalysis={(stats?.total_searches ?? 0) > 0}
+          setActiveTab={setActiveTab}
+          onNavigateToSettings={handleNavigateToSettings}
+        />
+      )}
 
       <AboutModal isOpen={showAbout} onClose={() => setShowAbout(false)} />
     </div>

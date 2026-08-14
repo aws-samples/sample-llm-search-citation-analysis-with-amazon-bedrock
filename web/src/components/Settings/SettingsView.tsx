@@ -27,6 +27,14 @@ function getProviderBadgeClass(enabledCount: number, configuredCount: number): s
   return 'bg-gray-100 text-gray-600';
 }
 
+/** Notification bubble shown on tabs whose configuration blocks analysis runs. */
+const AttentionDot = () => (
+  <output
+    aria-label="Needs configuration"
+    className="ml-1 inline-block w-2 h-2 rounded-full bg-amber-500"
+  />
+);
+
 export const SettingsView = ({
   keywords, setKeywords, initialTab 
 }: SettingsViewProps) => {
@@ -44,6 +52,12 @@ export const SettingsView = ({
   
   const configuredCount = providers.filter(p => p.configured).length;
   const enabledCount = providers.filter(p => p.enabled && p.configured).length;
+
+  // Attention bubbles for setup that blocks analysis runs; suppressed while
+  // the underlying data is still loading to avoid flashing false alarms.
+  const keywordsNeedAttention = keywords.length === 0;
+  const brandNeedsAttention = !configLoading && (config?.tracked_brands.first_party.length ?? 0) === 0;
+  const providersNeedAttention = !providersLoading && configuredCount === 0;
 
   return (
     <div className="space-y-6">
@@ -67,6 +81,7 @@ export const SettingsView = ({
                 <span className="ml-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
                   {keywords.length}
                 </span>
+                {keywordsNeedAttention && <AttentionDot />}
               </div>
             </button>
             <button
@@ -85,6 +100,7 @@ export const SettingsView = ({
                 <span className="hidden lg:inline ml-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
                   {industryName}
                 </span>
+                {brandNeedsAttention && <AttentionDot />}
               </div>
             </button>
             <button
@@ -118,6 +134,7 @@ export const SettingsView = ({
                 <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${getProviderBadgeClass(enabledCount, configuredCount)}`}>
                   {enabledCount}/{providers.length}
                 </span>
+                {providersNeedAttention && <AttentionDot />}
               </div>
             </button>
             <button

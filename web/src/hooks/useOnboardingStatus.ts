@@ -17,6 +17,8 @@ export interface OnboardingSetupStatus {
   brandConfigured: boolean;
   /** At least one automated schedule exists. */
   scheduleConfigured: boolean;
+  /** At least one persona (query prompt) has been created. */
+  personasConfigured: boolean;
 }
 
 /** API functions for onboarding status - injectable for testing */
@@ -24,6 +26,7 @@ export interface OnboardingStatusApi {
   fetchProviders: () => Promise<Response>;
   fetchBrandConfig: () => Promise<Response>;
   fetchSchedules: () => Promise<Response>;
+  fetchPersonas: () => Promise<Response>;
 }
 
 /** Default API implementation using authenticatedFetch */
@@ -31,6 +34,7 @@ export const defaultOnboardingStatusApi: OnboardingStatusApi = {
   fetchProviders: () => authenticatedFetch(`${API_BASE_URL}/providers`),
   fetchBrandConfig: () => authenticatedFetch(`${API_BASE_URL}/brand-config`),
   fetchSchedules: () => authenticatedFetch(`${API_BASE_URL}/schedules`),
+  fetchPersonas: () => authenticatedFetch(`${API_BASE_URL}/query-prompts`),
 };
 
 interface ProvidersPayload {providers?: { configured?: boolean }[];}
@@ -73,6 +77,14 @@ async function readScheduleConfigured(api: OnboardingStatusApi): Promise<boolean
   return (payload.schedules ?? []).length > 0;
 }
 
+async function readPersonasConfigured(api: OnboardingStatusApi): Promise<boolean> {
+  const response = await api.fetchPersonas();
+  if (!response.ok) return false;
+  // GET /query-prompts returns the persona list as a raw array.
+  const data: unknown = await response.json();
+  return Array.isArray(data) && data.length > 0;
+}
+
 /** Treat any request failure as "not configured" - the safe onboarding default. */
 async function safeCheck(check: () => Promise<boolean>): Promise<boolean> {
   try {
@@ -110,16 +122,18 @@ export function useOnboardingStatus(
 
     const loadStatus = async () => {
       setLoading(true);
-      const [providersConfigured, brandConfigured, scheduleConfigured] = await Promise.all([
+      const [providersConfigured, brandConfigured, scheduleConfigured, personasConfigured] = await Promise.all([
         safeCheck(() => readProvidersConfigured(api)),
         safeCheck(() => readBrandConfigured(api)),
         safeCheck(() => readScheduleConfigured(api)),
+        safeCheck(() => readPersonasConfigured(api)),
       ]);
       if (!controller.signal.aborted) {
         setStatus({
           providersConfigured,
           brandConfigured,
-          scheduleConfigured, 
+          scheduleConfigured,
+          personasConfigured, 
         });
         setLoading(false);
       }

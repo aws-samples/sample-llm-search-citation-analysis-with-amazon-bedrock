@@ -60,13 +60,28 @@ export const withSchedulesPayload = {
 /** Schedules payload for a fresh install. */
 export const noSchedulesPayload = { schedules: [] };
 
+/** Personas payload (raw array) with one configured persona. */
+export const withPersonasPayload = [
+  {
+    id: 'prompt-1',
+    name: 'Family Traveler',
+    template: 'As a family traveler, find {keyword}',
+    enabled: 'true',
+  },
+];
+
+/** Personas payload for a fresh install. */
+export const noPersonasPayload: unknown[] = [];
+
 export function createMockOnboardingApi(options: {
   providersResponse?: unknown;
   brandConfigResponse?: unknown;
   schedulesResponse?: unknown;
+  personasResponse?: unknown;
   shouldFailProviders?: boolean;
   shouldFailBrandConfig?: boolean;
   shouldFailSchedules?: boolean;
+  shouldFailPersonas?: boolean;
 } = {}) {
   return {
     fetchProviders: vi.fn().mockImplementation(() => {
@@ -106,6 +121,19 @@ export function createMockOnboardingApi(options: {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve(options.schedulesResponse ?? withSchedulesPayload),
+      });
+    }),
+    fetchPersonas: vi.fn().mockImplementation(() => {
+      if (options.shouldFailPersonas) {
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          statusText: 'Server Error',
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(options.personasResponse ?? withPersonasPayload),
       });
     }),
   };

@@ -1,3 +1,3 @@
 export {
-  OnboardingChecklist, ONBOARDING_DISMISSED_STORAGE_KEY 
-} from './OnboardingChecklist';
+  OnboardingModal, ONBOARDING_DISMISSED_STORAGE_KEY, ONBOARDING_COMPLETE_STORAGE_KEY 
+} from './OnboardingModal';

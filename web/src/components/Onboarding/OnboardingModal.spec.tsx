@@ -2,12 +2,12 @@ import {
   describe, it, expect, vi, beforeEach, afterEach 
 } from 'vitest';
 import {
-  render, screen 
+  render, screen, fireEvent 
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  OnboardingChecklist, ONBOARDING_DISMISSED_STORAGE_KEY 
-} from './OnboardingChecklist';
+  OnboardingModal, ONBOARDING_DISMISSED_STORAGE_KEY, ONBOARDING_COMPLETE_STORAGE_KEY 
+} from './OnboardingModal';
 
 vi.mock('../../hooks/useOnboardingStatus', () => ({useOnboardingStatus: vi.fn(),}));
 
@@ -45,11 +45,12 @@ function buildStatus(overrides = {}) {
     providersConfigured: false,
     brandConfigured: false,
     scheduleConfigured: false,
+    personasConfigured: false,
     ...overrides,
   };
 }
 
-describe('OnboardingChecklist', () => {
+describe('OnboardingModal', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.keys(localStorageMock.store).forEach((key) => delete localStorageMock.store[key]);
@@ -68,18 +69,11 @@ describe('OnboardingChecklist', () => {
   });
 
   describe('visibility', () => {
-    it('renders the checklist when setup is incomplete', () => {
-      render(<OnboardingChecklist {...buildProps()} />);
+    it('opens the modal when setup is incomplete', () => {
+      render(<OnboardingModal {...buildProps()} />);
 
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
       expect(screen.getByText('Get started with Citation Analysis')).toBeInTheDocument();
-    });
-
-    it('renders nothing when previously dismissed', () => {
-      localStorageMock.store[ONBOARDING_DISMISSED_STORAGE_KEY] = 'true';
-
-      const { container } = render(<OnboardingChecklist {...buildProps()} />);
-
-      expect(container).toBeEmptyDOMElement();
     });
 
     it('renders nothing while setup status is loading', () => {
@@ -88,9 +82,69 @@ describe('OnboardingChecklist', () => {
         loading: true,
       });
 
-      const { container } = render(<OnboardingChecklist {...buildProps()} />);
+      const { container } = render(<OnboardingModal {...buildProps()} />);
 
       expect(container).toBeEmptyDOMElement();
+    });
+
+    it('renders nothing when previously skipped', () => {
+      localStorageMock.store[ONBOARDING_DISMISSED_STORAGE_KEY] = 'true';
+
+      const { container } = render(<OnboardingModal {...buildProps()} />);
+
+      expect(container).toBeEmptyDOMElement();
+    });
+
+    it('disables status fetching when previously skipped', () => {
+      localStorageMock.store[ONBOARDING_DISMISSED_STORAGE_KEY] = 'true';
+
+      render(<OnboardingModal {...buildProps()} />);
+
+      expect(mockUseOnboardingStatus).toHaveBeenCalledWith(false);
+    });
+
+    it('disables status fetching when setup was previously completed', () => {
+      localStorageMock.store[ONBOARDING_COMPLETE_STORAGE_KEY] = 'true';
+
+      const { container } = render(<OnboardingModal {...buildProps()} />);
+
+      expect(mockUseOnboardingStatus).toHaveBeenCalledWith(false);
+      expect(container).toBeEmptyDOMElement();
+    });
+
+    it('stays open when only optional steps are incomplete and a required step is pending', () => {
+      mockUseOnboardingStatus.mockReturnValue({
+        status: buildStatus({
+          providersConfigured: true,
+          brandConfigured: true,
+        }),
+        loading: false,
+      });
+
+      render(<OnboardingModal {...buildProps({ keywordsCount: 3 })} />);
+
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+  });
+
+  describe('completion caching', () => {
+    it('persists the completion flag when all required steps are complete', () => {
+      mockUseOnboardingStatus.mockReturnValue({
+        status: buildStatus({
+          providersConfigured: true,
+          brandConfigured: true,
+        }),
+        loading: false,
+      });
+
+      render(
+        <OnboardingModal {...buildProps({
+          keywordsCount: 3,
+          hasRunAnalysis: true,
+        })} />
+      );
+
+      expect(localStorageMock.setItem).toHaveBeenCalledWith(ONBOARDING_COMPLETE_STORAGE_KEY, 'true');
     });
 
     it('renders nothing when all required steps are complete', () => {
@@ -103,7 +157,7 @@ describe('OnboardingChecklist', () => {
       });
 
       const { container } = render(
-        <OnboardingChecklist {...buildProps({
+        <OnboardingModal {...buildProps({
           keywordsCount: 3,
           hasRunAnalysis: true,
         })} />
@@ -111,25 +165,11 @@ describe('OnboardingChecklist', () => {
 
       expect(container).toBeEmptyDOMElement();
     });
-
-    it('stays visible when only the optional schedule step is incomplete and a required step is pending', () => {
-      mockUseOnboardingStatus.mockReturnValue({
-        status: buildStatus({
-          providersConfigured: true,
-          brandConfigured: true,
-        }),
-        loading: false,
-      });
-
-      render(<OnboardingChecklist {...buildProps({ keywordsCount: 3 })} />);
-
-      expect(screen.getByText('Get started with Citation Analysis')).toBeInTheDocument();
-    });
   });
 
   describe('step content', () => {
-    it('lists every setup step by title', () => {
-      render(<OnboardingChecklist {...buildProps()} />);
+    it('lists the four required steps by title', () => {
+      render(<OnboardingModal {...buildProps()} />);
 
       expect(screen.getByText('Add AI provider API keys')).toBeInTheDocument();
       expect(screen.getByText('Add keywords to track')).toBeInTheDocument();
@@ -137,17 +177,12 @@ describe('OnboardingChecklist', () => {
       expect(screen.getByText('Run your first analysis')).toBeInTheDocument();
     });
 
-    it('labels the schedule step as optional', () => {
-      render(<OnboardingChecklist {...buildProps()} />);
+    it('lists the optional schedule and persona steps', () => {
+      render(<OnboardingModal {...buildProps()} />);
 
       expect(screen.getByText('Automate runs with a schedule')).toBeInTheDocument();
-      expect(screen.getByText('Optional')).toBeInTheDocument();
-    });
-
-    it('shows progress of zero when nothing is configured', () => {
-      render(<OnboardingChecklist {...buildProps()} />);
-
-      expect(screen.getByText('0 of 4 required steps done')).toBeInTheDocument();
+      expect(screen.getByText('Define user personas')).toBeInTheDocument();
+      expect(screen.getAllByText('Optional')).toHaveLength(2);
     });
 
     it('counts configured signals in the progress badge', () => {
@@ -156,7 +191,7 @@ describe('OnboardingChecklist', () => {
         loading: false,
       });
 
-      render(<OnboardingChecklist {...buildProps({ keywordsCount: 2 })} />);
+      render(<OnboardingModal {...buildProps({ keywordsCount: 2 })} />);
 
       expect(screen.getByText('2 of 4 required steps done')).toBeInTheDocument();
     });
@@ -167,7 +202,7 @@ describe('OnboardingChecklist', () => {
         loading: false,
       });
 
-      render(<OnboardingChecklist {...buildProps()} />);
+      render(<OnboardingModal {...buildProps()} />);
 
       expect(screen.queryByRole('button', { name: 'Configure providers' })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Add keywords' })).toBeInTheDocument();
@@ -177,73 +212,58 @@ describe('OnboardingChecklist', () => {
   describe('step navigation', () => {
     it('navigates to provider settings when the provider action is clicked', async () => {
       const props = buildProps();
-      render(<OnboardingChecklist {...props} />);
+      render(<OnboardingModal {...props} />);
 
       await userEvent.click(screen.getByRole('button', { name: 'Configure providers' }));
 
       expect(props.onNavigateToSettings).toHaveBeenCalledWith('providers');
     });
 
-    it('navigates to keyword settings when the keyword action is clicked', async () => {
+    it('navigates to persona settings when the persona action is clicked', async () => {
       const props = buildProps();
-      render(<OnboardingChecklist {...props} />);
+      render(<OnboardingModal {...props} />);
 
-      await userEvent.click(screen.getByRole('button', { name: 'Add keywords' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Add personas' }));
 
-      expect(props.onNavigateToSettings).toHaveBeenCalledWith('keywords');
-    });
-
-    it('navigates to brand settings when the brand action is clicked', async () => {
-      const props = buildProps();
-      render(<OnboardingChecklist {...props} />);
-
-      await userEvent.click(screen.getByRole('button', { name: 'Configure brands' }));
-
-      expect(props.onNavigateToSettings).toHaveBeenCalledWith('brand-config');
-    });
-
-    it('navigates to the execution tab when the run action is clicked', async () => {
-      const props = buildProps();
-      render(<OnboardingChecklist {...props} />);
-
-      await userEvent.click(screen.getByRole('button', { name: 'Run analysis' }));
-
-      expect(props.setActiveTab).toHaveBeenCalledWith('execution');
+      expect(props.onNavigateToSettings).toHaveBeenCalledWith('query-prompts');
     });
 
     it('navigates to the schedule tab when the schedule action is clicked', async () => {
       const props = buildProps();
-      render(<OnboardingChecklist {...props} />);
+      render(<OnboardingModal {...props} />);
 
       await userEvent.click(screen.getByRole('button', { name: 'Create schedule' }));
 
       expect(props.setActiveTab).toHaveBeenCalledWith('schedule');
     });
+
+    it('closes the modal for the session when a step action is clicked', async () => {
+      render(<OnboardingModal {...buildProps()} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Run analysis' }));
+
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(localStorageMock.setItem).not.toHaveBeenCalledWith(ONBOARDING_DISMISSED_STORAGE_KEY, 'true');
+    });
   });
 
-  describe('dismissal', () => {
-    it('persists the dismissal flag when set up later is clicked', async () => {
-      render(<OnboardingChecklist {...buildProps()} />);
+  describe('skip and close', () => {
+    it('persists the skip flag when set up later is clicked', async () => {
+      render(<OnboardingModal {...buildProps()} />);
 
       await userEvent.click(screen.getByRole('button', { name: 'Set up later' }));
 
       expect(localStorageMock.setItem).toHaveBeenCalledWith(ONBOARDING_DISMISSED_STORAGE_KEY, 'true');
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
 
-    it('hides the checklist when set up later is clicked', async () => {
-      render(<OnboardingChecklist {...buildProps()} />);
+    it('closes for the session without persisting when Escape is pressed', () => {
+      render(<OnboardingModal {...buildProps()} />);
 
-      await userEvent.click(screen.getByRole('button', { name: 'Set up later' }));
+      fireEvent.keyDown(document, { key: 'Escape' });
 
-      expect(screen.queryByText('Get started with Citation Analysis')).not.toBeInTheDocument();
-    });
-
-    it('disables status fetching when previously dismissed', () => {
-      localStorageMock.store[ONBOARDING_DISMISSED_STORAGE_KEY] = 'true';
-
-      render(<OnboardingChecklist {...buildProps()} />);
-
-      expect(mockUseOnboardingStatus).toHaveBeenCalledWith(false);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(localStorageMock.setItem).not.toHaveBeenCalledWith(ONBOARDING_DISMISSED_STORAGE_KEY, 'true');
     });
   });
 });

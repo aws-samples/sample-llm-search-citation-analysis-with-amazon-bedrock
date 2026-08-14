@@ -10,6 +10,7 @@ import {
   unconfiguredProvidersPayload,
   emptyBrandPayload,
   noSchedulesPayload,
+  noPersonasPayload,
 } from './useOnboardingStatus-fixtures';
 
 describe('useOnboardingStatus', () => {
@@ -31,15 +32,15 @@ describe('useOnboardingStatus', () => {
       await waitFor(() => expect(result.current.loading).toBe(false));
     });
 
-    it('fetches providers, brand config, and schedules on mount', async () => {
+    it('fetches providers, brand config, schedules, and personas exactly once on mount', async () => {
       const api = createMockOnboardingApi();
       const { result } = renderHook(() => useOnboardingStatus(true, api));
 
       await waitFor(() => expect(result.current.loading).toBe(false));
 
-      expect(api.fetchProviders).toHaveBeenCalledTimes(1);
-      expect(api.fetchBrandConfig).toHaveBeenCalledTimes(1);
-      expect(api.fetchSchedules).toHaveBeenCalledTimes(1);
+      const callCounts = [api.fetchProviders, api.fetchBrandConfig, api.fetchSchedules, api.fetchPersonas]
+        .map((endpoint) => endpoint.mock.calls.length);
+      expect(callCounts).toStrictEqual([1, 1, 1, 1]);
     });
 
     it('reports all signals configured when every endpoint has data', async () => {
@@ -52,6 +53,7 @@ describe('useOnboardingStatus', () => {
         providersConfigured: true,
         brandConfigured: true,
         scheduleConfigured: true,
+        personasConfigured: true,
       });
     });
   });
@@ -64,6 +66,7 @@ describe('useOnboardingStatus', () => {
       expect(api.fetchProviders).not.toHaveBeenCalled();
       expect(api.fetchBrandConfig).not.toHaveBeenCalled();
       expect(api.fetchSchedules).not.toHaveBeenCalled();
+      expect(api.fetchPersonas).not.toHaveBeenCalled();
     });
 
     it('returns null status and loading false', () => {
@@ -135,6 +138,26 @@ describe('useOnboardingStatus', () => {
     });
   });
 
+  describe('personas signal', () => {
+    it('reports personasConfigured false when no personas exist', async () => {
+      const api = createMockOnboardingApi({ personasResponse: noPersonasPayload });
+      const { result } = renderHook(() => useOnboardingStatus(true, api));
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.status?.personasConfigured).toBe(false);
+    });
+
+    it('reports personasConfigured false when the request fails', async () => {
+      const api = createMockOnboardingApi({ shouldFailPersonas: true });
+      const { result } = renderHook(() => useOnboardingStatus(true, api));
+
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.status?.personasConfigured).toBe(false);
+    });
+  });
+
   describe('partial failures', () => {
     it('keeps healthy signals when one endpoint fails', async () => {
       const api = createMockOnboardingApi({ shouldFailProviders: true });
@@ -146,6 +169,7 @@ describe('useOnboardingStatus', () => {
         providersConfigured: false,
         brandConfigured: true,
         scheduleConfigured: true,
+        personasConfigured: true,
       });
     });
 
@@ -154,6 +178,7 @@ describe('useOnboardingStatus', () => {
         shouldFailProviders: true,
         shouldFailBrandConfig: true,
         shouldFailSchedules: true,
+        shouldFailPersonas: true,
       });
       const { result } = renderHook(() => useOnboardingStatus(true, api));
 
@@ -163,6 +188,7 @@ describe('useOnboardingStatus', () => {
         providersConfigured: false,
         brandConfigured: false,
         scheduleConfigured: false,
+        personasConfigured: false,
       });
     });
   });

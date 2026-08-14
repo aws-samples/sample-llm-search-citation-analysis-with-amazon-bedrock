@@ -9,7 +9,6 @@ import {
 import { StatCard } from '../Dashboard/StatCard';
 import { ProviderChart } from '../Dashboard/ProviderChart';
 import { BrandChart } from '../Dashboard/BrandChart';
-import { OnboardingChecklist } from '../Onboarding';
 import type { SettingsTab } from '../Settings';
 import type {
   TabType, Stats, Citations, Search, Keyword, Execution, Schedule 
@@ -49,7 +48,6 @@ interface TabContentProps {
   readonly settingsInitialTab?: SettingsTab;
   readonly setActiveTab: (tab: TabType) => void;
   readonly onNavigateToRawResponses: (path: string) => void;
-  readonly onNavigateToSettings: (tab: SettingsTab) => void;
 }
 
 function LazyLoadFallback() {
@@ -138,22 +136,15 @@ function QuickActions({
 }
 
 function DashboardContent({
-  stats, citations, keywords, setActiveTab, onNavigateToSettings 
+  stats, citations, keywords, setActiveTab 
 }: {
   readonly stats: Stats | null;
   readonly citations: Citations | null;
   readonly keywords: Keyword[];
   readonly setActiveTab: (tab: TabType) => void;
-  readonly onNavigateToSettings: (tab: SettingsTab) => void;
 }) {
   return (
     <ErrorBoundary>
-      <OnboardingChecklist
-        keywordsCount={keywords.length}
-        hasRunAnalysis={(stats?.total_searches ?? 0) > 0}
-        setActiveTab={setActiveTab}
-        onNavigateToSettings={onNavigateToSettings}
-      />
       <DashboardStats stats={stats} />
       <DashboardCharts citations={citations} />
       <QuickActions citations={citations} keywords={keywords} setActiveTab={setActiveTab} />
@@ -179,19 +170,10 @@ export function TabContent(props: TabContentProps) {
     settingsInitialTab,
     setActiveTab,
     onNavigateToRawResponses,
-    onNavigateToSettings,
   } = props;
 
   if (activeTab === 'dashboard') {
-    return (
-      <DashboardContent
-        stats={stats}
-        citations={citations}
-        keywords={keywords}
-        setActiveTab={setActiveTab}
-        onNavigateToSettings={onNavigateToSettings}
-      />
-    );
+    return <DashboardContent stats={stats} citations={citations} keywords={keywords} setActiveTab={setActiveTab} />;
   }
 
   const tabComponents: Partial<Record<TabType, ReactNode>> = {

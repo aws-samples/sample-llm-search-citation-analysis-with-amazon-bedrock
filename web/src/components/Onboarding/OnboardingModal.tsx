@@ -1,15 +1,25 @@
-import { useState } from 'react';
+import {
+  useState, useEffect 
+} from 'react';
 import { useOnboardingStatus } from '../../hooks/useOnboardingStatus';
 import type { OnboardingSetupStatus } from '../../hooks/useOnboardingStatus';
+import { Modal } from '../ui/Modal';
 import { CheckIcon } from '../ui';
 import type { SettingsTab } from '../Settings';
 import type { TabType } from '../../types';
 
+/** Set when the user explicitly skips onboarding ("Set up later"). */
 export const ONBOARDING_DISMISSED_STORAGE_KEY = 'onboarding-dismissed';
+/**
+ * Set once every required step has been observed complete. From then on the
+ * status endpoints are never queried again, so configured installations pay
+ * no onboarding overhead.
+ */
+export const ONBOARDING_COMPLETE_STORAGE_KEY = 'onboarding-complete';
 
-function isOnboardingDismissed(): boolean {
+function readStorageFlag(key: string): boolean {
   if (typeof window !== 'undefined') {
-    return localStorage.getItem(ONBOARDING_DISMISSED_STORAGE_KEY) === 'true';
+    return localStorage.getItem(key) === 'true';
   }
   return false;
 }
@@ -24,7 +34,7 @@ interface OnboardingStep {
   onAction: () => void;
 }
 
-interface OnboardingChecklistProps {
+interface OnboardingModalProps {
   readonly keywordsCount: number;
   readonly hasRunAnalysis: boolean;
   readonly setActiveTab: (tab: TabType) => void;
@@ -84,6 +94,15 @@ function buildSteps(
       optional: true,
       onAction: () => setActiveTab('schedule'),
     },
+    {
+      id: 'personas',
+      title: 'Define user personas',
+      description: 'See how AI responses change based on who is asking, e.g. a family traveler vs a business executive.',
+      actionLabel: 'Add personas',
+      complete: status.personasConfigured,
+      optional: true,
+      onAction: () => onNavigateToSettings('query-prompts'),
+    },
   ];
 }
 
@@ -107,7 +126,7 @@ const StepRow = ({
     )}
     <div className="flex-1 min-w-0">
       <div className="flex items-center gap-2">
-        <p className={`text-sm font-medium ${step.complete ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+        <p className={`text-sm font-medium ${step.complete ? 'text-gray-400 line-through' : 'text-gray-900 dark:text-white'}`}>
           {step.title}
         </p>
         {step.optional && (
@@ -128,65 +147,100 @@ const StepRow = ({
 );
 
 /**
- * First-run setup guide shown on the dashboard. Walks a new installation
- * through the required configuration (API keys, keywords, brand tracking,
- * first run) plus optional scheduling. Hidden once every required step is
- * complete, or when the user dismisses it.
+ * First-run setup guide shown as a modal so new installations cannot miss it.
+ * Walks through the required configuration (API keys, keywords, brand
+ * tracking, first run) plus optional scheduling and personas.
+ *
+ * Lifecycle:
+ * - Only queries setup status while onboarding is neither skipped nor
+ *   complete; once every required step has been seen complete, a persisted
+ *   flag stops all future checks.
+ * - "Set up later" skips permanently (persisted).
+ * - Escape / backdrop / a step action close the modal for the current
+ *   session only, so it reappears on the next visit while setup is pending.
  */
-export const OnboardingChecklist = ({
+export const OnboardingModal = ({
   keywordsCount, hasRunAnalysis, setActiveTab, onNavigateToSettings 
-}: OnboardingChecklistProps) => {
-  const [dismissed, setDismissed] = useState(isOnboardingDismissed);
+}: OnboardingModalProps) => {
+  const [dismissed, setDismissed] = useState(() => readStorageFlag(ONBOARDING_DISMISSED_STORAGE_KEY));
+  const [completed, setCompleted] = useState(() => readStorageFlag(ONBOARDING_COMPLETE_STORAGE_KEY));
+  const [sessionClosed, setSessionClosed] = useState(false);
+
+  const enabled = !dismissed && !completed;
   const {
     status, loading 
-  } = useOnboardingStatus(!dismissed);
+  } = useOnboardingStatus(enabled);
 
-  if (dismissed || loading || !status) {
-    return null;
-  }
-
-  const steps = buildSteps(status, keywordsCount, hasRunAnalysis, setActiveTab, onNavigateToSettings);
+  const steps = status === null
+    ? []
+    : buildSteps(status, keywordsCount, hasRunAnalysis, setActiveTab, onNavigateToSettings);
   const requiredSteps = steps.filter((step) => !step.optional);
   const completedRequired = requiredSteps.filter((step) => step.complete).length;
+  const allRequiredComplete = requiredSteps.length > 0 && completedRequired === requiredSteps.length;
 
-  if (completedRequired === requiredSteps.length) {
+  // Persist completion so future sessions skip the status checks entirely.
+  useEffect(() => {
+    if (enabled && allRequiredComplete) {
+      localStorage.setItem(ONBOARDING_COMPLETE_STORAGE_KEY, 'true');
+      setCompleted(true);
+    }
+  }, [enabled, allRequiredComplete]);
+
+  const isOpen = enabled && !sessionClosed && !loading && status !== null && !allRequiredComplete;
+
+  if (!isOpen) {
     return null;
   }
 
-  const handleDismiss = () => {
+  const handleSkip = () => {
     localStorage.setItem(ONBOARDING_DISMISSED_STORAGE_KEY, 'true');
     setDismissed(true);
   };
 
+  const handleSessionClose = () => {
+    setSessionClosed(true);
+  };
+
+  const handleStepAction = (step: OnboardingStep) => {
+    setSessionClosed(true);
+    step.onAction();
+  };
+
   return (
-    <section
-      aria-label="Getting started checklist"
-      className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6 mb-6 sm:mb-8"
+    <Modal
+      isOpen
+      onClose={handleSessionClose}
+      title="Get started with Citation Analysis"
+      size="xl"
     >
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-gray-900">Get started with Citation Analysis</h2>
-          <p className="text-sm text-gray-500 mt-1">
-            Complete these steps to start tracking how AI models cite your brand.
-          </p>
-        </div>
-        <div className="flex items-center gap-3 shrink-0">
-          <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
-            {completedRequired} of {requiredSteps.length} required steps done
-          </span>
-          <button
-            onClick={handleDismiss}
-            className="text-xs text-gray-500 hover:text-gray-700 underline whitespace-nowrap"
-          >
-            Set up later
-          </button>
-        </div>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-gray-500">
+          Complete these steps to start tracking how AI models cite your brand.
+        </p>
+        <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs whitespace-nowrap">
+          {completedRequired} of {requiredSteps.length} required steps done
+        </span>
       </div>
-      <ol className="mt-4 divide-y divide-gray-100">
+      <ol className="mt-2 divide-y divide-gray-100">
         {steps.map((step, index) => (
-          <StepRow key={step.id} step={step} stepNumber={index + 1} />
+          <StepRow
+            key={step.id}
+            step={{
+              ...step,
+              onAction: () => handleStepAction(step),
+            }}
+            stepNumber={index + 1}
+          />
         ))}
       </ol>
-    </section>
+      <div className="mt-4 pt-4 border-t border-gray-100 flex justify-end">
+        <button
+          onClick={handleSkip}
+          className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+        >
+          Set up later
+        </button>
+      </div>
+    </Modal>
   );
 };
