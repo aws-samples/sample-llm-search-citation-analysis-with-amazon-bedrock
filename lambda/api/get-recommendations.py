@@ -17,7 +17,7 @@ import logging
 import os
 import sys
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -304,7 +304,7 @@ Focus on:
     return []
 
 
-def _annotate_with_status(recommendations: List[Dict[str, Any]]) -> None:
+def _annotate_with_status(recommendations: list[dict[str, Any]]) -> None:
     """
     Mutate each recommendation in place to add `id` + persisted status.
 
@@ -321,7 +321,7 @@ def _annotate_with_status(recommendations: List[Dict[str, Any]]) -> None:
         rec['id'] = recommendation_id(rec)
 
     rec_ids = [r['id'] for r in recommendations]
-    statuses: Dict[str, Dict[str, Any]] = {}
+    statuses: dict[str, dict[str, Any]] = {}
 
     status_table = os.environ.get('RECOMMENDATION_STATUS_TABLE')
     if status_table and rec_ids:

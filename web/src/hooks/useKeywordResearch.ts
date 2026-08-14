@@ -35,6 +35,123 @@ function isCompetitorAnalysisResult(data: unknown): data is CompetitorAnalysisRe
   return typeof data === 'object' && data !== null && 'url' in data;
 }
 
+// Async research jobs are polled via the history endpoint every 3 seconds
+// for up to 2 minutes.
+const POLL_MAX_ATTEMPTS = 40;
+const POLL_INTERVAL_MS = 3000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  const errorData: unknown = await response.json().catch(() => ({}));
+  return isErrorResponse(errorData)
+    ? errorData.error ?? `HTTP ${response.status}`
+    : `HTTP ${response.status}`;
+}
+
+/** Extract the research id from an async "pending" API response. */
+function getPendingResearchId(data: unknown): string | null {
+  if (typeof data === 'object' && data !== null && 'status' in data) {
+    const record = data as Record<string, unknown>;
+    if (record.status === 'pending' && typeof record.id === 'string') {
+      return record.id;
+    }
+  }
+  return null;
+}
+
+interface ResearchPollOptions {
+  type: 'expansion' | 'competitor';
+  researchId: string;
+  failureMessage: string;
+  timeoutMessage: string;
+  /** Extra completion predicate beyond status === 'completed'. */
+  isComplete?: (item: KeywordResearchItem) => boolean;
+}
+
+/**
+ * One poll attempt against the research history. Returns the completed item,
+ * null when it is not ready yet (including transient poll errors), and throws
+ * when the research job reports failure.
+ */
+async function findResearchItem(options: ResearchPollOptions): Promise<KeywordResearchItem | null> {
+  try {
+    const historyResp = await authenticatedFetch(
+      `${API_BASE_URL}/keyword-research/history?type=${options.type}&limit=50`
+    );
+    if (!historyResp.ok) return null;
+    const historyData: unknown = await historyResp.json();
+    if (!isHistoryResponse(historyData)) return null;
+
+    const items = historyData.items ?? [];
+    const completed = items.find(
+      (item) => item.id === options.researchId && item.status === 'completed'
+    );
+    if (completed && (options.isComplete?.(completed) ?? true)) {
+      return completed;
+    }
+
+    const failed = items.find(
+      (item) => item.id === options.researchId && item.status === 'failed'
+    );
+    if (failed) {
+      throw new KeywordResearchError(failed.error_message ?? options.failureMessage);
+    }
+    return null;
+  } catch (pollErr) {
+    if (pollErr instanceof KeywordResearchError) throw pollErr;
+    // Ignore transient poll errors, keep trying
+    return null;
+  }
+}
+
+/** Poll the history endpoint until the research job completes, fails, or times out. */
+async function pollUntilComplete(
+  options: ResearchPollOptions,
+  attemptsLeft: number = POLL_MAX_ATTEMPTS
+): Promise<KeywordResearchItem> {
+  if (attemptsLeft === 0) {
+    throw new KeywordResearchError(options.timeoutMessage);
+  }
+  await sleep(POLL_INTERVAL_MS);
+  const completed = await findResearchItem(options);
+  if (completed) return completed;
+  return pollUntilComplete(options, attemptsLeft - 1);
+}
+
+function toExpansionResult(
+  completed: KeywordResearchItem,
+  seedKeyword: string,
+  industry: string
+): KeywordExpansionResult {
+  return {
+    id: completed.id,
+    seed_keyword: completed.seed_keyword ?? seedKeyword,
+    industry: completed.industry ?? industry,
+    keywords: completed.keywords ?? [],
+    keyword_count: completed.keyword_count ?? 0,
+  };
+}
+
+function toCompetitorResult(completed: KeywordResearchItem, url: string): CompetitorAnalysisResult {
+  return {
+    id: completed.id,
+    url: completed.url ?? url,
+    domain: completed.domain ?? '',
+    provider: completed.provider ?? '',
+    keyword_count: completed.keyword_count ?? 0,
+    industry: completed.analysis?.industry ?? completed.industry ?? '',
+    primary_keywords: completed.analysis?.primary_keywords ?? [],
+    secondary_keywords: completed.analysis?.secondary_keywords ?? [],
+    longtail_keywords: completed.analysis?.longtail_keywords ?? [],
+    content_gaps: completed.analysis?.content_gaps ?? [],
+  };
+}
+
 export const useKeywordResearch = () => {
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -60,51 +177,22 @@ export const useKeywordResearch = () => {
       });
 
       if (!response.ok) {
-        const errorData: unknown = await response.json().catch(() => ({}));
-        const errorMsg = isErrorResponse(errorData) 
-          ? errorData.error ?? `HTTP ${response.status}` 
-          : `HTTP ${response.status}`;
-        throw new KeywordResearchError(errorMsg);
+        throw new KeywordResearchError(await readErrorMessage(response));
       }
 
       const data: unknown = await response.json();
 
       // Async response — poll history until result appears
-      if (typeof data === 'object' && data !== null && 'status' in data && (data as Record<string, unknown>).status === 'pending') {
-        const researchId = (data as Record<string, unknown>).id as string;
-        for (let i = 0; i < 40; i++) {
-          await new Promise(r => setTimeout(r, 3000));
-          try {
-            const historyResp = await authenticatedFetch(`${API_BASE_URL}/keyword-research/history?type=expansion&limit=50`);
-            if (historyResp.ok) {
-              const historyData: unknown = await historyResp.json();
-              if (isHistoryResponse(historyData)) {
-                const completed = (historyData.items ?? []).find(
-                  (item: KeywordResearchItem) => item.id === researchId && item.status === 'completed'
-                );
-                if (completed) {
-                  setExpansionResult({
-                    id: completed.id,
-                    seed_keyword: completed.seed_keyword ?? seedKeyword,
-                    industry: completed.industry ?? industry,
-                    keywords: completed.keywords ?? [],
-                    keyword_count: completed.keyword_count ?? 0,
-                  });
-                  return;
-                }
-                const failed = (historyData.items ?? []).find(
-                  (item: KeywordResearchItem) => item.id === researchId && item.status === 'failed'
-                );
-                if (failed) {
-                  throw new KeywordResearchError(failed.error_message ?? 'Expansion failed');
-                }
-              }
-            }
-          } catch (pollErr) {
-            if (pollErr instanceof KeywordResearchError) throw pollErr;
-          }
-        }
-        throw new KeywordResearchError('Expansion timed out. Check history for results.');
+      const pendingId = getPendingResearchId(data);
+      if (pendingId) {
+        const completed = await pollUntilComplete({
+          type: 'expansion',
+          researchId: pendingId,
+          failureMessage: 'Expansion failed',
+          timeoutMessage: 'Expansion timed out. Check history for results.',
+        });
+        setExpansionResult(toExpansionResult(completed, seedKeyword, industry));
+        return;
       }
 
       // Sync response (fallback)
@@ -132,58 +220,23 @@ export const useKeywordResearch = () => {
       });
 
       if (!response.ok) {
-        const errorData: unknown = await response.json().catch(() => ({}));
-        const errorMsg = isErrorResponse(errorData) 
-          ? errorData.error ?? `HTTP ${response.status}` 
-          : `HTTP ${response.status}`;
-        throw new KeywordResearchError(errorMsg);
+        throw new KeywordResearchError(await readErrorMessage(response));
       }
 
       const data: unknown = await response.json();
-      
+
       // Async response — poll history until result appears
-      if (typeof data === 'object' && data !== null && 'status' in data && (data as Record<string, unknown>).status === 'pending') {
-        const researchId = (data as Record<string, unknown>).id as string;
-        // Poll every 3 seconds for up to 2 minutes
-        for (let i = 0; i < 40; i++) {
-          await new Promise(r => setTimeout(r, 3000));
-          try {
-            const historyResp = await authenticatedFetch(`${API_BASE_URL}/keyword-research/history?type=competitor&limit=50`);
-            if (historyResp.ok) {
-              const historyData: unknown = await historyResp.json();
-              if (isHistoryResponse(historyData)) {
-                const completed = (historyData.items ?? []).find(
-                  (item: KeywordResearchItem) => item.id === researchId && item.status === 'completed'
-                );
-                if (completed?.analysis) {
-                  setCompetitorResult({
-                    id: completed.id,
-                    url: completed.url ?? url,
-                    domain: completed.domain ?? '',
-                    provider: completed.provider ?? '',
-                    keyword_count: completed.keyword_count ?? 0,
-                    industry: completed.analysis?.industry ?? completed.industry ?? '',
-                    primary_keywords: completed.analysis?.primary_keywords ?? [],
-                    secondary_keywords: completed.analysis?.secondary_keywords ?? [],
-                    longtail_keywords: completed.analysis?.longtail_keywords ?? [],
-                    content_gaps: completed.analysis?.content_gaps ?? [],
-                  });
-                  return;
-                }
-                const failed = (historyData.items ?? []).find(
-                  (item: KeywordResearchItem) => item.id === researchId && item.status === 'failed'
-                );
-                if (failed) {
-                  throw new KeywordResearchError(failed.error_message ?? 'Analysis failed');
-                }
-              }
-            }
-          } catch (pollErr) {
-            if (pollErr instanceof KeywordResearchError) throw pollErr;
-            // Ignore transient poll errors, keep trying
-          }
-        }
-        throw new KeywordResearchError('Analysis timed out. Check history for results.');
+      const pendingId = getPendingResearchId(data);
+      if (pendingId) {
+        const completed = await pollUntilComplete({
+          type: 'competitor',
+          researchId: pendingId,
+          failureMessage: 'Analysis failed',
+          timeoutMessage: 'Analysis timed out. Check history for results.',
+          isComplete: (item) => Boolean(item.analysis),
+        });
+        setCompetitorResult(toCompetitorResult(completed, url));
+        return;
       }
 
       // Sync response (fallback)

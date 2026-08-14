@@ -40,6 +40,10 @@ coverage/
 .nyc_output/
 .hypothesis/
 
+# Python virtual environments
+.venv/
+venv/
+
 # Python linters
 .ruff_cache/
 .mypy_cache/

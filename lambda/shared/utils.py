@@ -199,7 +199,7 @@ def recommendation_id(recommendation: dict[str, Any]) -> str:
 
     Returns the SHA-1 hex digest, truncated to 16 characters. Truncation
     is fine: the inputs come from a small enumerated space (a few rule
-    types × a few hundred keywords) and 64 bits of hash gives a
+    types x a few hundred keywords) and 64 bits of hash gives a
     collision probability low enough for our scale.
     """
     import hashlib
@@ -207,5 +207,5 @@ def recommendation_id(recommendation: dict[str, Any]) -> str:
     title = (recommendation.get('title') or '').strip().lower()
     keywords = recommendation.get('keywords') or []
     keyword_part = '|'.join(sorted(str(k).strip().lower() for k in keywords))
-    payload = f"{rec_type}::{title}::{keyword_part}".encode('utf-8')
+    payload = f"{rec_type}::{title}::{keyword_part}".encode()
     return hashlib.sha1(payload, usedforsecurity=False).hexdigest()[:16]

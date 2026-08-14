@@ -55,8 +55,8 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import boto3
 
@@ -85,7 +85,7 @@ MAX_RELATED_LEN = 500
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+    return datetime.now(UTC).isoformat().replace('+00:00', 'Z')
 
 
 def _ttl_for(now: datetime) -> int:
@@ -101,13 +101,13 @@ def _table():
     return dynamodb.Table(RECOMMENDATION_STATUS_TABLE)
 
 
-def _path_id(event: Dict[str, Any]) -> str:
+def _path_id(event: dict[str, Any]) -> str:
     """Pull the {id} path parameter from the API Gateway event."""
     params = event.get('pathParameters') or {}
     return (params.get('id') or '').strip()
 
 
-def _validate_post_body(body: Dict[str, Any]) -> Dict[str, Any] | None:
+def _validate_post_body(body: dict[str, Any]) -> dict[str, Any] | None:
     """Return a validation error event if the body is bad, else None."""
     status = body.get('status')
     if status not in VALID_STATUSES:
@@ -139,7 +139,7 @@ def _validate_post_body(body: Dict[str, Any]) -> Dict[str, Any] | None:
     return None
 
 
-def _post_status(event: Dict[str, Any]) -> Dict[str, Any]:
+def _post_status(event: dict[str, Any]) -> dict[str, Any]:
     rec_id = _path_id(event)
     if not rec_id:
         return validation_error('Missing recommendation id', event, 'id')
@@ -157,8 +157,8 @@ def _post_status(event: Dict[str, Any]) -> Dict[str, Any]:
     if err is not None:
         return validation_error(err['reason'], event, err['field'])
 
-    now = datetime.now(timezone.utc)
-    item: Dict[str, Any] = {
+    now = datetime.now(UTC)
+    item: dict[str, Any] = {
         'recommendation_id': rec_id,
         'status': body['status'],
         'updated_at': _now_iso(),
@@ -177,7 +177,7 @@ def _post_status(event: Dict[str, Any]) -> Dict[str, Any]:
     return success_response(item, event)
 
 
-def _get_status(event: Dict[str, Any]) -> Dict[str, Any]:
+def _get_status(event: dict[str, Any]) -> dict[str, Any]:
     rec_id = _path_id(event)
     if not rec_id:
         return validation_error('Missing recommendation id', event, 'id')
@@ -190,7 +190,7 @@ def _get_status(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @api_handler
-def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     Route by HTTP method.
 
@@ -209,7 +209,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     )
 
 
-def list_statuses(rec_ids: list[str]) -> Dict[str, Dict[str, Any]]:
+def list_statuses(rec_ids: list[str]) -> dict[str, dict[str, Any]]:
     """
     Bulk look up status rows for many recommendation ids.
 
@@ -223,7 +223,7 @@ def list_statuses(rec_ids: list[str]) -> Dict[str, Dict[str, Any]]:
         return {}
     table = _table()
     deduped = list({rid for rid in rec_ids if rid})
-    out: Dict[str, Dict[str, Any]] = {}
+    out: dict[str, dict[str, Any]] = {}
     chunk_size = 100
     for i in range(0, len(deduped), chunk_size):
         chunk = deduped[i:i + chunk_size]

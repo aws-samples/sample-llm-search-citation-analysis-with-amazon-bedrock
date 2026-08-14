@@ -6,20 +6,21 @@ Queries the SearchResults table, groups results by query_prompt_id,
 and calculates per-persona brand metrics plus a cross-persona summary.
 """
 
-import os
-import sys
 import logging
 import math
+import os
+import sys
+from typing import Any
+
 import boto3
 from boto3.dynamodb.conditions import Key
-from typing import Dict, Any, List
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.decorators import api_handler, validate, require_keyword
-from shared.api_response import success_response, validation_error
 from decimal_utils import to_int
+from shared.api_response import success_response, validation_error
+from shared.decorators import api_handler, require_keyword, validate
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -31,7 +32,7 @@ SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 QUERY_PROMPTS_TABLE = os.environ['QUERY_PROMPTS_TABLE']
 
 
-def sentiment_to_label(sentiments: List[str]) -> str:
+def sentiment_to_label(sentiments: list[str]) -> str:
     """Determine the dominant sentiment from a list of sentiment strings."""
     if not sentiments:
         return 'neutral'
@@ -89,7 +90,7 @@ def calculate_visibility_score(
     return round(provider_score + rank_score + mention_score + sentiment_score, 1)
 
 
-def fetch_persona_names() -> Dict[str, str]:
+def fetch_persona_names() -> dict[str, str]:
     """
     Fetch all persona names from the QueryPrompts table.
 
@@ -110,13 +111,13 @@ def get_valid_persona_ids() -> set:
 
 
 
-def build_persona_brands(items: List[Dict[str, Any]], total_providers: int) -> List[Dict[str, Any]]:
+def build_persona_brands(items: list[dict[str, Any]], total_providers: int) -> list[dict[str, Any]]:
     """
     Build per-brand metrics from a list of search result items belonging to one persona.
 
     Returns a list of brand dicts sorted by rank ascending.
     """
-    brand_data: Dict[str, Dict[str, Any]] = {}
+    brand_data: dict[str, dict[str, Any]] = {}
 
     for item in items:
         provider = item.get('provider', 'unknown')
@@ -174,14 +175,14 @@ def build_persona_brands(items: List[Dict[str, Any]], total_providers: int) -> L
 
 
 def build_cross_persona_summary(
-    personas: List[Dict[str, Any]],
-) -> Dict[str, Any]:
+    personas: list[dict[str, Any]],
+) -> dict[str, Any]:
     """
     Build a cross-persona summary with each brand's average rank, best rank,
     worst rank, and the persona that produced the best rank.
     """
     # brand_key -> { ranks: [(rank, persona_name)], classification }
-    brand_agg: Dict[str, Dict[str, Any]] = {}
+    brand_agg: dict[str, dict[str, Any]] = {}
 
     for persona in personas:
         persona_name = persona['persona_name']
@@ -218,7 +219,7 @@ def build_cross_persona_summary(
     return {'brands': summary_brands}
 
 
-def get_persona_rankings(keyword: str, query_prompt_id: str = None) -> Dict[str, Any]:
+def get_persona_rankings(keyword: str, query_prompt_id: str | None = None) -> dict[str, Any]:
     """
     Calculate persona-grouped brand rankings for a keyword.
 
@@ -248,7 +249,7 @@ def get_persona_rankings(keyword: str, query_prompt_id: str = None) -> Dict[str,
     total_providers = len(all_providers) if all_providers else 1
 
     # Group items by query_prompt_id
-    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    grouped: dict[str, list[dict[str, Any]]] = {}
     for item in latest_items:
         pid = item.get('query_prompt_id', 'default')
         grouped.setdefault(pid, []).append(item)
