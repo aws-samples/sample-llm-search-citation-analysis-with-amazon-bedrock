@@ -7,9 +7,15 @@ import react from '@vitejs/plugin-react';
 
 // Single source of truth for the app version shown in the UI (Settings page).
 // Bump `version` in package.json when deploying or merging feature sets.
-const packageJson: { version: string } = JSON.parse(
-  readFileSync(new URL('./package.json', import.meta.url), 'utf-8')
-);
+function readAppVersion(): string {
+  const parsed: unknown = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'));
+  if (typeof parsed === 'object' && parsed !== null && 'version' in parsed && typeof parsed.version === 'string') {
+    return parsed.version;
+  }
+  return '0.0.0';
+}
+
+const appVersion = readAppVersion();
 
 /**
  * Vendor chunk assignment for Rollup/Rolldown `manualChunks`.
@@ -51,7 +57,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
-    define: {'import.meta.env.VITE_APP_VERSION': JSON.stringify(packageJson.version),},
+    define: {'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),},
     server: enableDevProxy
       ? {
         proxy: {
