@@ -9,6 +9,8 @@ import {
 import { StatCard } from '../Dashboard/StatCard';
 import { ProviderChart } from '../Dashboard/ProviderChart';
 import { BrandChart } from '../Dashboard/BrandChart';
+import { OnboardingChecklist } from '../Onboarding';
+import type { SettingsTab } from '../Settings';
 import type {
   TabType, Stats, Citations, Search, Keyword, Execution, Schedule 
 } from '../../types';
@@ -44,8 +46,10 @@ interface TabContentProps {
   readonly startMonitoring: (arn: string, name: string) => void;
   readonly isRunning: boolean;
   readonly rawResponsesPath?: string;
+  readonly settingsInitialTab?: SettingsTab;
   readonly setActiveTab: (tab: TabType) => void;
   readonly onNavigateToRawResponses: (path: string) => void;
+  readonly onNavigateToSettings: (tab: SettingsTab) => void;
 }
 
 function LazyLoadFallback() {
@@ -134,15 +138,22 @@ function QuickActions({
 }
 
 function DashboardContent({
-  stats, citations, keywords, setActiveTab 
+  stats, citations, keywords, setActiveTab, onNavigateToSettings 
 }: {
   readonly stats: Stats | null;
   readonly citations: Citations | null;
   readonly keywords: Keyword[];
   readonly setActiveTab: (tab: TabType) => void;
+  readonly onNavigateToSettings: (tab: SettingsTab) => void;
 }) {
   return (
     <ErrorBoundary>
+      <OnboardingChecklist
+        keywordsCount={keywords.length}
+        hasRunAnalysis={(stats?.total_searches ?? 0) > 0}
+        setActiveTab={setActiveTab}
+        onNavigateToSettings={onNavigateToSettings}
+      />
       <DashboardStats stats={stats} />
       <DashboardCharts citations={citations} />
       <QuickActions citations={citations} keywords={keywords} setActiveTab={setActiveTab} />
@@ -165,12 +176,22 @@ export function TabContent(props: TabContentProps) {
     startMonitoring,
     isRunning,
     rawResponsesPath,
+    settingsInitialTab,
     setActiveTab,
     onNavigateToRawResponses,
+    onNavigateToSettings,
   } = props;
 
   if (activeTab === 'dashboard') {
-    return <DashboardContent stats={stats} citations={citations} keywords={keywords} setActiveTab={setActiveTab} />;
+    return (
+      <DashboardContent
+        stats={stats}
+        citations={citations}
+        keywords={keywords}
+        setActiveTab={setActiveTab}
+        onNavigateToSettings={onNavigateToSettings}
+      />
+    );
   }
 
   const tabComponents: Partial<Record<TabType, ReactNode>> = {
@@ -183,7 +204,7 @@ export function TabContent(props: TabContentProps) {
     'content-studio': <ContentStudioView />,
     execution: <ExecutionMonitor execution={execution} triggerAnalysis={triggerAnalysis} keywordsCount={keywords.length} keywords={keywords} />,
     schedule: <ScheduleManager schedules={schedules} setSchedules={setSchedules} />,
-    settings: <SettingsView keywords={keywords} setKeywords={setKeywords} />,
+    settings: <SettingsView keywords={keywords} setKeywords={setKeywords} initialTab={settingsInitialTab} />,
     searches: (
       <SearchesView
         searches={searches}

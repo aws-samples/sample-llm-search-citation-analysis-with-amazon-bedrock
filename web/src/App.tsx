@@ -21,6 +21,7 @@ import { AboutModal } from './components/About';
 import { ThemeToggle } from './components/ui/ThemeToggle';
 import { PrintToPdfButton } from './components/ui/PrintToPdfButton';
 import { Spinner } from './components/ui/Spinner';
+import type { SettingsTab } from './components/Settings';
 import type {
   TabType, Schedule 
 } from './types';
@@ -155,6 +156,7 @@ function MainApp() {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [rawResponsesPath, setRawResponsesPath] = useState<string | undefined>(undefined);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
 
@@ -179,6 +181,13 @@ function MainApp() {
     }
   }, [location.pathname]);
 
+  // Clear the settings deep-link when navigating away from settings
+  useEffect(() => {
+    if (location.pathname !== '/settings') {
+      setSettingsInitialTab(undefined);
+    }
+  }, [location.pathname]);
+
   const handleTabChange = (tab: TabType) => {
     const targetPath = TAB_TO_PATH[tab];
     if (isRunning && activeTab === 'execution') {
@@ -192,6 +201,11 @@ function MainApp() {
   const handleNavigateToRawResponses = (path: string) => {
     setRawResponsesPath(path);
     navigate('/raw-responses');
+  };
+
+  const handleNavigateToSettings = (tab: SettingsTab) => {
+    setSettingsInitialTab(tab);
+    navigate('/settings');
   };
 
   const confirmLeaveExecution = () => {
@@ -317,8 +331,10 @@ function MainApp() {
                 startMonitoring={startMonitoring}
                 isRunning={isRunning}
                 rawResponsesPath={rawResponsesPath}
+                settingsInitialTab={settingsInitialTab}
                 setActiveTab={setActiveTab}
                 onNavigateToRawResponses={handleNavigateToRawResponses}
+                onNavigateToSettings={handleNavigateToSettings}
               />
             )}
           </div>

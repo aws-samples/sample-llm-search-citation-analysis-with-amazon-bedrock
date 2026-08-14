@@ -11,9 +11,11 @@ import type { Keyword } from '../../types';
 interface SettingsViewProps {
   keywords: Keyword[];
   setKeywords: (keywords: Keyword[]) => void;
+  /** Tab to open on mount (e.g. deep links from the onboarding checklist). */
+  initialTab?: SettingsTab;
 }
 
-type SettingsTab = 'keywords' | 'brand-config' | 'query-prompts' | 'providers' | 'users';
+export type SettingsTab = 'keywords' | 'brand-config' | 'query-prompts' | 'providers' | 'users';
 
 function getProviderBadgeClass(enabledCount: number, configuredCount: number): string {
   if (enabledCount === configuredCount && configuredCount > 0) {
@@ -26,9 +28,9 @@ function getProviderBadgeClass(enabledCount: number, configuredCount: number): s
 }
 
 export const SettingsView = ({
-  keywords, setKeywords 
+  keywords, setKeywords, initialTab 
 }: SettingsViewProps) => {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('keywords');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? 'keywords');
   const {
     config, presets, loading: configLoading, saveConfig, expandAllBrands, findCompetitors 
   } = useBrandConfig();
