@@ -9,6 +9,7 @@ import {
 import { StatCard } from '../Dashboard/StatCard';
 import { ProviderChart } from '../Dashboard/ProviderChart';
 import { BrandChart } from '../Dashboard/BrandChart';
+import type { SettingsTab } from '../Settings';
 import type {
   TabType, Stats, Citations, Search, Keyword, Execution, Schedule 
 } from '../../types';
@@ -44,6 +45,7 @@ interface TabContentProps {
   readonly startMonitoring: (arn: string, name: string) => void;
   readonly isRunning: boolean;
   readonly rawResponsesPath?: string;
+  readonly settingsInitialTab?: SettingsTab;
   readonly setActiveTab: (tab: TabType) => void;
   readonly onNavigateToRawResponses: (path: string) => void;
 }
@@ -165,6 +167,7 @@ export function TabContent(props: TabContentProps) {
     startMonitoring,
     isRunning,
     rawResponsesPath,
+    settingsInitialTab,
     setActiveTab,
     onNavigateToRawResponses,
   } = props;
@@ -183,7 +186,7 @@ export function TabContent(props: TabContentProps) {
     'content-studio': <ContentStudioView />,
     execution: <ExecutionMonitor execution={execution} triggerAnalysis={triggerAnalysis} keywordsCount={keywords.length} keywords={keywords} />,
     schedule: <ScheduleManager schedules={schedules} setSchedules={setSchedules} keywords={keywords} />,
-    settings: <SettingsView keywords={keywords} setKeywords={setKeywords} />,
+    settings: <SettingsView keywords={keywords} setKeywords={setKeywords} initialTab={settingsInitialTab} />,
     searches: (
       <SearchesView
         searches={searches}

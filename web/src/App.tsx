@@ -18,9 +18,11 @@ import { TabContent } from './components/Layout/TabContent';
 import { ReportsRouter } from './components/Reports/ReportsRouter';
 import { ConfirmModal } from './components/ui/Modal';
 import { AboutModal } from './components/About';
+import { OnboardingModal } from './components/Onboarding';
 import { ThemeToggle } from './components/ui/ThemeToggle';
 import { PrintToPdfButton } from './components/ui/PrintToPdfButton';
 import { Spinner } from './components/ui/Spinner';
+import type { SettingsTab } from './components/Settings';
 import type {
   TabType, Schedule 
 } from './types';
@@ -155,6 +157,7 @@ function MainApp() {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [rawResponsesPath, setRawResponsesPath] = useState<string | undefined>(undefined);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
 
@@ -179,6 +182,13 @@ function MainApp() {
     }
   }, [location.pathname]);
 
+  // Clear the settings deep-link when navigating away from settings
+  useEffect(() => {
+    if (location.pathname !== '/settings') {
+      setSettingsInitialTab(undefined);
+    }
+  }, [location.pathname]);
+
   const handleTabChange = (tab: TabType) => {
     const targetPath = TAB_TO_PATH[tab];
     if (isRunning && activeTab === 'execution') {
@@ -192,6 +202,11 @@ function MainApp() {
   const handleNavigateToRawResponses = (path: string) => {
     setRawResponsesPath(path);
     navigate('/raw-responses');
+  };
+
+  const handleNavigateToSettings = (tab: SettingsTab) => {
+    setSettingsInitialTab(tab);
+    navigate('/settings');
   };
 
   const confirmLeaveExecution = () => {
@@ -317,6 +332,7 @@ function MainApp() {
                 startMonitoring={startMonitoring}
                 isRunning={isRunning}
                 rawResponsesPath={rawResponsesPath}
+                settingsInitialTab={settingsInitialTab}
                 setActiveTab={setActiveTab}
                 onNavigateToRawResponses={handleNavigateToRawResponses}
               />
@@ -337,6 +353,17 @@ function MainApp() {
         confirmText="Leave"
         confirmVariant="primary"
       />
+
+      {/* First-run setup guide; mounts app-wide so it is visible regardless
+          of which tab is active when the setup status resolves. */}
+      {!isPrintMode && (
+        <OnboardingModal
+          keywordsCount={keywords.length}
+          hasRunAnalysis={(stats?.total_searches ?? 0) > 0}
+          setActiveTab={setActiveTab}
+          onNavigateToSettings={handleNavigateToSettings}
+        />
+      )}
 
       <AboutModal isOpen={showAbout} onClose={() => setShowAbout(false)} />
     </div>
