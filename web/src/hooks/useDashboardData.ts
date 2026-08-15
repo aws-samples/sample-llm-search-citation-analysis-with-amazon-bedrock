@@ -1,5 +1,5 @@
 import {
-  useState, useEffect, useRef, useCallback 
+  useCallback, useEffect, useLayoutEffect, useRef, useState
 } from 'react';
 import {
   API_BASE_URL,
@@ -10,29 +10,77 @@ import {
   ApiRequestError,
 } from '../infrastructure';
 import type {
-  Stats, Citations, Search, Keyword 
+  Stats, Citations, Search, Keyword
 } from '../types';
+
+// The KeywordMgmt Lambda has a 120-second timeout. This second refresh runs
+// after that ceiling so an abandoned browser request cannot remain stale if
+// the Lambda commits after the immediate reconciliation read.
+export const LATE_KEYWORD_RECONCILIATION_MS = 125_000;
 
 /** @internal Response from the searches API */
 interface SearchesResponse { searches: Search[] }
 
-/** @internal Response from the keywords API */
+/** @internal Response from the ordinary keywords API */
 interface KeywordsResponse { keywords: Keyword[] }
 
-function isStats(data: unknown): data is Stats {
-  return typeof data === 'object' && data !== null && 'total_searches' in data;
+/** @internal Complete response from the authoritative keywords API */
+interface AuthoritativeKeywordsResponse {
+  keywords: Keyword[];
+  count: number;
+  complete: true;
 }
 
-function isCitations(data: unknown): data is Citations {
-  return typeof data === 'object' && data !== null && 'provider_stats' in data;
+function isStats(value: unknown): value is Stats {
+  return typeof value === 'object' && value !== null && 'total_searches' in value;
 }
 
-function isSearchesResponse(data: unknown): data is SearchesResponse {
-  return typeof data === 'object' && data !== null && 'searches' in data;
+function isCitations(value: unknown): value is Citations {
+  return typeof value === 'object' && value !== null && 'provider_stats' in value;
 }
 
-function isKeywordsResponse(data: unknown): data is KeywordsResponse {
-  return typeof data === 'object' && data !== null && 'keywords' in data;
+function isSearchesResponse(value: unknown): value is SearchesResponse {
+  return typeof value === 'object' && value !== null && 'searches' in value;
+}
+
+function isKeywordStatus(value: unknown): value is Keyword['status'] {
+  return value === undefined || value === 'active' || value === 'inactive' || value === 'paused';
+}
+
+function isKeyword(value: unknown): value is Keyword {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && 'id' in value
+    && typeof value.id === 'string'
+    && 'keyword' in value
+    && typeof value.keyword === 'string'
+    && 'created_at' in value
+    && typeof value.created_at === 'string'
+    && (!('status' in value) || isKeywordStatus(value.status))
+  );
+}
+
+function isKeywordsResponse(value: unknown): value is KeywordsResponse {
+  return (
+    typeof value === 'object'
+    && value !== null
+    && 'keywords' in value
+    && Array.isArray(value.keywords)
+    && value.keywords.every(isKeyword)
+  );
+}
+
+function isAuthoritativeKeywordsResponse(value: unknown): value is AuthoritativeKeywordsResponse {
+  return (
+    isKeywordsResponse(value)
+    && 'count' in value
+    && typeof value.count === 'number'
+    && Number.isInteger(value.count)
+    && value.count === value.keywords.length
+    && 'complete' in value
+    && value.complete === true
+  );
 }
 
 function getEmptyStats(): Stats {
@@ -40,7 +88,7 @@ function getEmptyStats(): Stats {
     total_searches: 0,
     total_citations: 0,
     total_crawled: 0,
-    unique_keywords: 0 
+    unique_keywords: 0,
   };
 }
 
@@ -48,7 +96,7 @@ function getEmptyCitations(): Citations {
   return {
     provider_stats: [],
     brand_stats: [],
-    top_urls: [] 
+    top_urls: [],
   };
 }
 
@@ -59,42 +107,16 @@ function validateApiConfig(): void {
 }
 
 function validateResponses(responses: Response[]): void {
-  const allOk = responses.every(r => r.ok);
-  if (!allOk) {
+  const allResponsesSucceeded = responses.every(response => response.ok);
+  if (!allResponsesSucceeded) {
     throw new ApiRequestError('Failed to fetch data from API. Please check your API Gateway URL.');
   }
 }
 
 /**
- * Hook for fetching dashboard data.
- * Loads statistics, citations, searches, and keywords in parallel.
- * Automatically fetches on mount and provides refetch capability.
- * 
- * @returns Object containing:
- * - `stats` - Dashboard statistics (totals for searches, citations, etc.)
- * - `citations` - Citation data with provider stats and top URLs
- * - `searches` - Recent search results
- * - `keywords` - List of tracked keywords
- * - `setKeywords` - Function to update keywords state locally
- * - `loading` - Whether data is being fetched
- * - `error` - Error message if fetch failed
- * - `lastUpdate` - Timestamp of last successful fetch
- * - `refetch` - Function to refresh all data
- * 
- * @example
- * ```tsx
- * const { stats, citations, loading, refetch } = useDashboardData();
- * 
- * if (loading) return <Spinner />;
- * 
- * return (
- *   <Dashboard
- *     totalSearches={stats?.total_searches}
- *     topUrls={citations?.top_urls}
- *     onRefresh={refetch}
- *   />
- * );
- * ```
+ * Fetches dashboard data and owns authoritative keyword reconciliation.
+ * Ordinary dashboard loads retain the `/keywords` endpoint, while promotion
+ * reconciliation uses the complete authoritative keyword snapshot.
  */
 export const useDashboardData = () => {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -104,12 +126,57 @@ export const useDashboardData = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdate, setLastUpdate] = useState(new Date());
-  const controllerRef = useRef<AbortController | null>(null);
+  const dashboardControllerRef = useRef<AbortController | null>(null);
+  const keywordControllerRef = useRef<AbortController | null>(null);
+  const lateReconciliationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dashboardGenerationRef = useRef(0);
+  const keywordGenerationRef = useRef(0);
+  const ownerMountedRef = useRef(true);
 
-  const fetchData = useCallback(async () => {
-    controllerRef.current?.abort();
-    controllerRef.current = new AbortController();
-    const signal = controllerRef.current.signal;
+  const applyDashboardResults = useCallback((
+    jsonResults: unknown[],
+    requestKeywordGeneration: number
+  ): void => {
+    const [statsJson, citationsJson, searchesJson, keywordsJson] = jsonResults;
+
+    if (isStats(statsJson)) setStats(statsJson);
+    if (isCitations(citationsJson)) setCitations(citationsJson);
+    if (isSearchesResponse(searchesJson)) setSearches(searchesJson.searches);
+    if (
+      keywordGenerationRef.current === requestKeywordGeneration
+      && isKeywordsResponse(keywordsJson)
+    ) {
+      setKeywords(keywordsJson.keywords);
+    }
+
+    setLastUpdate(new Date());
+    setError(null);
+  }, []);
+
+  const resetDashboardResults = useCallback((requestKeywordGeneration: number): void => {
+    setStats(getEmptyStats());
+    setCitations(getEmptyCitations());
+    setSearches([]);
+    if (keywordGenerationRef.current === requestKeywordGeneration) {
+      setKeywords([]);
+    }
+  }, []);
+
+  const fetchData = useCallback(async (): Promise<void> => {
+    if (!ownerMountedRef.current) return;
+
+    dashboardGenerationRef.current += 1;
+    keywordGenerationRef.current += 1;
+    const dashboardGeneration = dashboardGenerationRef.current;
+    const keywordGeneration = keywordGenerationRef.current;
+
+    dashboardControllerRef.current?.abort();
+    keywordControllerRef.current?.abort();
+    keywordControllerRef.current = null;
+
+    const dashboardController = new AbortController();
+    dashboardControllerRef.current = dashboardController;
+    const { signal } = dashboardController;
 
     try {
       setLoading(true);
@@ -125,35 +192,118 @@ export const useDashboardData = () => {
       validateResponses(responses);
 
       const jsonResults = await Promise.all(
-        responses.map(async (r): Promise<unknown> => r.json())
+        responses.map(async (response): Promise<unknown> => response.json())
       );
-      const [statsJson, citationsJson, searchesJson, keywordsJson] = jsonResults;
+      const dashboardRequestIsCurrent = ownerMountedRef.current
+        && dashboardGenerationRef.current === dashboardGeneration;
 
-      if (isStats(statsJson)) setStats(statsJson);
-      if (isCitations(citationsJson)) setCitations(citationsJson);
-      if (isSearchesResponse(searchesJson)) setSearches(searchesJson.searches ?? []);
-      if (isKeywordsResponse(keywordsJson)) setKeywords(keywordsJson.keywords ?? []);
-      
-      setLastUpdate(new Date());
-      setError(null);
-    } catch (err) {
-      if (isAbortError(err)) return;
-      
-      setError(getErrorMessage(err, 'dashboard'));
-      console.error('[dashboard] Error fetching data:', err);
-      
-      setStats(getEmptyStats());
-      setCitations(getEmptyCitations());
-      setSearches([]);
-      setKeywords([]);
+      if (!dashboardRequestIsCurrent) return;
+
+      applyDashboardResults(jsonResults, keywordGeneration);
+    } catch (fetchError) {
+      if (isAbortError(fetchError)) return;
+
+      const dashboardRequestIsCurrent = ownerMountedRef.current
+        && dashboardGenerationRef.current === dashboardGeneration;
+      if (!dashboardRequestIsCurrent) return;
+
+      setError(getErrorMessage(fetchError, 'dashboard'));
+      console.error('[dashboard] Error fetching data:', fetchError);
+      resetDashboardResults(keywordGeneration);
     } finally {
-      setLoading(false);
+      if (dashboardControllerRef.current === dashboardController) {
+        dashboardControllerRef.current = null;
+      }
+      if (ownerMountedRef.current && dashboardGenerationRef.current === dashboardGeneration) {
+        setLoading(false);
+      }
+    }
+  }, [applyDashboardResults, resetDashboardResults]);
+
+  const refreshAuthoritativeKeywords = useCallback(async (): Promise<void> => {
+    if (!ownerMountedRef.current) return;
+
+    keywordGenerationRef.current += 1;
+    const keywordGeneration = keywordGenerationRef.current;
+
+    keywordControllerRef.current?.abort();
+    const keywordController = new AbortController();
+    keywordControllerRef.current = keywordController;
+
+    try {
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/keywords?authoritative=true`,
+        { signal: keywordController.signal }
+      );
+      const keywordRequestIsCurrent = ownerMountedRef.current
+        && keywordGenerationRef.current === keywordGeneration;
+      if (!keywordRequestIsCurrent) return;
+
+      if (!response.ok) {
+        throw new ApiRequestError(
+          `HTTP ${response.status}: ${response.statusText}`,
+          response.status
+        );
+      }
+
+      const payload: unknown = await response.json();
+      const parsedRequestIsCurrent = ownerMountedRef.current
+        && keywordGenerationRef.current === keywordGeneration;
+      if (!parsedRequestIsCurrent) return;
+
+      if (!isAuthoritativeKeywordsResponse(payload)) {
+        throw new TypeError('Authoritative keywords API returned an invalid response');
+      }
+
+      setKeywords(payload.keywords);
+    } catch (reconciliationError) {
+      const keywordRequestIsCurrent = ownerMountedRef.current
+        && keywordGenerationRef.current === keywordGeneration;
+      if (!isAbortError(reconciliationError) && keywordRequestIsCurrent) {
+        console.error('[keywords] Error reconciling active keywords:', reconciliationError);
+      }
+    } finally {
+      if (keywordControllerRef.current === keywordController) {
+        keywordControllerRef.current = null;
+      }
     }
   }, []);
 
+  const reconcileKeywords = useCallback(async (): Promise<void> => {
+    if (!ownerMountedRef.current) return;
+
+    if (lateReconciliationTimerRef.current !== null) {
+      clearTimeout(lateReconciliationTimerRef.current);
+    }
+    lateReconciliationTimerRef.current = setTimeout(() => {
+      lateReconciliationTimerRef.current = null;
+      if (!ownerMountedRef.current) return;
+      void refreshAuthoritativeKeywords();
+    }, LATE_KEYWORD_RECONCILIATION_MS);
+
+    await refreshAuthoritativeKeywords();
+  }, [refreshAuthoritativeKeywords]);
+
+  useLayoutEffect(() => {
+    ownerMountedRef.current = true;
+
+    return () => {
+      ownerMountedRef.current = false;
+      if (lateReconciliationTimerRef.current !== null) {
+        clearTimeout(lateReconciliationTimerRef.current);
+        lateReconciliationTimerRef.current = null;
+      }
+      dashboardGenerationRef.current += 1;
+      keywordGenerationRef.current += 1;
+      dashboardControllerRef.current?.abort();
+      dashboardControllerRef.current = null;
+      keywordControllerRef.current?.abort();
+      keywordControllerRef.current = null;
+    };
+  }, []);
+
   useEffect(() => {
-    fetchData();
-    return () => controllerRef.current?.abort();
+    void fetchData();
   }, [fetchData]);
 
   return {
@@ -166,5 +316,6 @@ export const useDashboardData = () => {
     error,
     lastUpdate,
     refetch: fetchData,
+    reconcileKeywords,
   };
 };

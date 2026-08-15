@@ -2,6 +2,8 @@
 
 import logging
 import os
+import unicodedata
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -19,6 +21,25 @@ logger.setLevel(logging.INFO)
 _UTC_SUFFIX_NATIVE = '+00:00'
 _UTC_SUFFIX_WIRE = 'Z'
 
+# Explicit browser/Lambda keyword boundary contract. It is the union of
+# Unicode White_Space and U+FEFF BOM, without Python's extra U+001C-U+001F
+# separators. Keeping the set explicit prevents runtime-specific trim drift.
+_KEYWORD_BOUNDARY_CODEPOINTS = frozenset({
+    *range(0x0009, 0x000E),
+    0x0020,
+    0x0085,
+    0x00A0,
+    0x1680,
+    *range(0x2000, 0x200B),
+    0x2028,
+    0x2029,
+    0x202F,
+    0x205F,
+    0x3000,
+    0xFEFF,
+})
+_KEYWORD_ID_PREFIX = 'citation-analysis:keyword:'
+
 # DynamoDB resource (lazy initialization)
 _dynamodb = None
 
@@ -29,6 +50,80 @@ def _get_dynamodb():
     if _dynamodb is None:
         _dynamodb = boto3.resource('dynamodb')
     return _dynamodb
+
+
+def is_unicode_scalar_text(text: object) -> bool:
+    """Return whether text contains no unpaired surrogate code points."""
+    return isinstance(text, str) and all(
+        not 0xD800 <= ord(character) <= 0xDFFF for character in text
+    )
+
+
+def trim_keyword(text: str) -> str:
+    """Trim only the explicit cross-runtime keyword boundary set."""
+    start = 0
+    end = len(text)
+
+    while start < end and ord(text[start]) in _KEYWORD_BOUNDARY_CODEPOINTS:
+        start += 1
+    while end > start and ord(text[end - 1]) in _KEYWORD_BOUNDARY_CODEPOINTS:
+        end -= 1
+
+    return text[start:end]
+
+
+def normalize_keyword(text: str) -> str:
+    """Return the canonical scalar-safe identity shared by keyword routes.
+
+    Known accepted limitation: NFKC and lowercase use the runtime's Unicode
+    tables, so code points assigned after the deployed runtime's Unicode
+    version can canonicalize differently across runtimes.
+    """
+    if not is_unicode_scalar_text(text):
+        return ''
+
+    normalized = unicodedata.normalize('NFKC', text)
+    return trim_keyword(normalized).lower()
+
+
+def keyword_id(keyword: str) -> str:
+    """Return the deterministic primary key for a canonical keyword identity."""
+    identity = normalize_keyword(keyword)
+    if not identity:
+        raise ValueError('Keyword must have a non-empty Unicode identity')
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f'{_KEYWORD_ID_PREFIX}{identity}'))
+
+
+def load_keyword_identities(table: Any) -> set[str]:
+    """Read all canonical keyword identities with strongly consistent pages.
+
+    The scan preserves compatibility with pre-existing UUIDv4 rows. New writes
+    use ``keyword_id`` plus a conditional put, so concurrent current-version
+    writers converge on one primary key after this legacy check.
+    """
+    identities: set[str] = set()
+    scan_params: dict[str, Any] = {
+        'ProjectionExpression': '#kw',
+        'ExpressionAttributeNames': {'#kw': 'keyword'},
+        'ConsistentRead': True,
+    }
+
+    while True:
+        response = table.scan(**scan_params)
+
+        for item in response.get('Items', []):
+            stored_keyword = item.get('keyword')
+            if not isinstance(stored_keyword, str):
+                continue
+            identity = normalize_keyword(stored_keyword)
+            if identity:
+                identities.add(identity)
+
+        last_key = response.get('LastEvaluatedKey')
+        if not last_key:
+            return identities
+
+        scan_params['ExclusiveStartKey'] = last_key
 
 
 def get_brand_config(table_name: str | None = None) -> dict[str, Any]:
@@ -160,8 +255,8 @@ def brand_names_match(candidate: str, tracked: str) -> bool:
 
     Designed as a fallback for classification logic when a brand extraction
     record is missing the authoritative `classification` field. Uses
-    normalized exact matching — NOT substring matching — so `"Inn"` does
-    not match `"Holiday Inn"` or `"linkedin.com"`.
+    normalized exact matching — NOT substring matching — so `"Inn"`
+    does not match `"Holiday Inn"` or `"linkedin.com"`.
 
     Normalization:
     - Lowercase

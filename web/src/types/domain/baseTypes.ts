@@ -43,7 +43,7 @@ export interface Keyword {
   id: string;
   keyword: string;
   created_at: string;
-  status?: 'active' | 'inactive';
+  status?: 'active' | 'inactive' | 'paused';
 }
 
 export interface KeywordExtended extends Keyword {

@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import {
-  API_BASE_URL, authenticatedFetch 
-} from '../../infrastructure';
+  apiDelete, apiPost, apiPut
+} from '../../api/client';
+import { ApiRequestError } from '../../infrastructure';
 import type { Keyword } from '../../types';
 import {
-  ConfirmModal, AlertModal 
+  ConfirmModal, AlertModal
 } from '../ui/Modal';
 import {
   KeywordInputSection,
@@ -23,12 +24,34 @@ interface AlertState {
   variant: 'success' | 'error' | 'info';
 }
 
-function isKeyword(value: unknown): value is Keyword {
-  return value !== null && typeof value === 'object';
+interface BulkFailure {
+  keyword: string;
+  message: string;
+}
+
+type BulkKeywordResult =
+  | {
+    outcome: 'success';
+    data: Keyword;
+  }
+  | {
+    outcome: 'failure';
+    failure: BulkFailure;
+  };
+
+const CREATE_ERROR_MESSAGE = 'Failed to add keyword';
+const UPDATE_ERROR_MESSAGE = 'Failed to update keyword';
+const DELETE_ERROR_MESSAGE = 'Failed to delete keyword';
+
+class InvalidKeywordResponseError extends TypeError {
+  constructor() {
+    super('Keyword API returned a malformed success payload');
+    this.name = 'InvalidKeywordResponseError';
+  }
 }
 
 export const KeywordsManager = ({
-  keywords, setKeywords 
+  keywords, setKeywords
 }: KeywordsManagerProps) => {
   const [newKeyword, setNewKeyword] = useState('');
   const [bulkKeywords, setBulkKeywords] = useState('');
@@ -39,7 +62,7 @@ export const KeywordsManager = ({
 
   const [deleteModal, setDeleteModal] = useState<{
     isOpen: boolean;
-    keywordId: string 
+    keywordId: string
   }>({
     isOpen: false,
     keywordId: '',
@@ -53,7 +76,7 @@ export const KeywordsManager = ({
 
   const isDuplicate = (keyword: string): boolean => {
     const normalized = keyword.trim().toLowerCase();
-    return keywords.some((k) => k.keyword.toLowerCase() === normalized);
+    return keywords.some((item) => item.keyword.toLowerCase() === normalized);
   };
 
   const showAlert = (title: string, message: string, variant: AlertState['variant']) => {
@@ -61,7 +84,7 @@ export const KeywordsManager = ({
       isOpen: true,
       title,
       message,
-      variant 
+      variant
     });
   };
 
@@ -76,21 +99,17 @@ export const KeywordsManager = ({
 
     setSaving(true);
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/keywords`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword: trimmed }),
-      });
-
-      const json: unknown = await response.json();
-      const data: Keyword | null = isKeyword(json) ? json : null;
-      if (data) {
-        setKeywords([data, ...keywords]);
-      }
+      const response = await apiPost<unknown>(
+        '/keywords',
+        { keyword: trimmed },
+        { allowStructured4xx: true }
+      );
+      const data = parseKeywordResponse(response);
+      setKeywords([data, ...keywords]);
       setNewKeyword('');
-    } catch (err) {
-      console.error('Error adding keyword:', err);
-      showAlert('Error', 'Failed to add keyword', 'error');
+    } catch (error) {
+      console.error('Error adding keyword:', error);
+      showAlert('Error', getSafeErrorMessage(error, CREATE_ERROR_MESSAGE), 'error');
     } finally {
       setSaving(false);
     }
@@ -102,8 +121,8 @@ export const KeywordsManager = ({
     const keywordList = parseBulkKeywords(bulkKeywords);
     if (keywordList.length === 0) return;
 
-    const duplicates = keywordList.filter((k) => isDuplicate(k));
-    const newKeywordsToAdd = keywordList.filter((k) => !isDuplicate(k));
+    const duplicates = keywordList.filter((keyword) => isDuplicate(keyword));
+    const newKeywordsToAdd = keywordList.filter((keyword) => !isDuplicate(keyword));
 
     if (newKeywordsToAdd.length === 0) {
       showAlert('All Duplicates', `All keywords already exist: ${duplicates.join(', ')}`, 'error');
@@ -111,35 +130,27 @@ export const KeywordsManager = ({
     }
 
     setSaving(true);
-    const addedKeywords: Keyword[] = [];
-    const errors: string[] = [];
-
     try {
+      const results: BulkKeywordResult[] = [];
       for (const keyword of newKeywordsToAdd) {
-        const result = await processBulkKeyword(keyword);
-        if (result) {
-          addedKeywords.push(result);
-        } else {
-          errors.push(keyword);
-        }
+        results.push(await processBulkKeyword(keyword));
       }
 
-      setKeywords([...addedKeywords, ...keywords]);
-      setBulkKeywords('');
+      const {
+        addedKeywords, failures
+      } = collectBulkResults(results);
 
-      const messages: string[] = [];
-      if (addedKeywords.length > 0) messages.push(`Added ${addedKeywords.length} keywords`);
-      if (duplicates.length > 0) messages.push(`Skipped ${duplicates.length} duplicates`);
-      if (errors.length > 0) messages.push(`Failed: ${errors.join(', ')}`);
+      if (addedKeywords.length > 0) {
+        setKeywords([...addedKeywords, ...keywords]);
+      }
+      setBulkKeywords(failures.map(({ keyword }) => keyword).join('\n'));
 
+      const alert = getBulkAlert(addedKeywords.length, failures.length);
       showAlert(
-        errors.length > 0 ? 'Partial Success' : 'Success',
-        messages.join('. '),
-        errors.length > 0 ? 'info' : 'success'
+        alert.title,
+        buildBulkMessage(addedKeywords.length, duplicates.length, failures),
+        alert.variant
       );
-    } catch (err) {
-      console.error('Error adding bulk keywords:', err);
-      showAlert('Error', 'Failed to add keywords', 'error');
     } finally {
       setSaving(false);
     }
@@ -151,7 +162,7 @@ export const KeywordsManager = ({
 
     const normalized = trimmed.toLowerCase();
     const isDuplicateEdit = keywords.some(
-      (k) => k.id !== id && k.keyword.toLowerCase() === normalized
+      (item) => item.id !== id && item.keyword.toLowerCase() === normalized
     );
 
     if (isDuplicateEdit) {
@@ -161,22 +172,18 @@ export const KeywordsManager = ({
 
     setSaving(true);
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/keywords/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword: trimmed }),
-      });
-
-      const json: unknown = await response.json();
-      const data: Keyword | null = isKeyword(json) ? json : null;
-      if (data) {
-        setKeywords(keywords.map((k) => (k.id === id ? data : k)));
-      }
+      const response = await apiPut<unknown>(
+        `/keywords/${id}`,
+        { keyword: trimmed },
+        { allowStructured4xx: true }
+      );
+      const data = parseKeywordResponse(response);
+      setKeywords(keywords.map((item) => (item.id === id ? data : item)));
       setEditingId(null);
       setEditText('');
-    } catch (err) {
-      console.error('Error updating keyword:', err);
-      showAlert('Error', 'Failed to update keyword', 'error');
+    } catch (error) {
+      console.error('Error updating keyword:', error);
+      showAlert('Error', getSafeErrorMessage(error, UPDATE_ERROR_MESSAGE), 'error');
     } finally {
       setSaving(false);
     }
@@ -186,11 +193,14 @@ export const KeywordsManager = ({
     const id = deleteModal.keywordId;
     setSaving(true);
     try {
-      await authenticatedFetch(`${API_BASE_URL}/keywords/${id}`, { method: 'DELETE' });
-      setKeywords(keywords.filter((k) => k.id !== id));
-    } catch (err) {
-      console.error('Error deleting keyword:', err);
-      showAlert('Error', 'Failed to delete keyword', 'error');
+      await apiDelete<unknown>(
+        `/keywords/${id}`,
+        { allowStructured4xx: true }
+      );
+      setKeywords(keywords.filter((item) => item.id !== id));
+    } catch (error) {
+      console.error('Error deleting keyword:', error);
+      showAlert('Error', getSafeErrorMessage(error, DELETE_ERROR_MESSAGE), 'error');
     } finally {
       setSaving(false);
     }
@@ -225,7 +235,7 @@ export const KeywordsManager = ({
         onCancelEdit={() => { setEditingId(null); setEditText(''); }}
         onDeleteKeyword={(id) => setDeleteModal({
           isOpen: true,
-          keywordId: id 
+          keywordId: id
         })}
       />
 
@@ -233,7 +243,7 @@ export const KeywordsManager = ({
         isOpen={deleteModal.isOpen}
         onClose={() => setDeleteModal({
           isOpen: false,
-          keywordId: '' 
+          keywordId: ''
         })}
         onConfirm={confirmDeleteKeyword}
         title="Delete Keyword"
@@ -246,7 +256,7 @@ export const KeywordsManager = ({
         isOpen={alertModal.isOpen}
         onClose={() => setAlertModal({
           ...alertModal,
-          isOpen: false 
+          isOpen: false
         })}
         title={alertModal.title}
         message={alertModal.message}
@@ -256,45 +266,148 @@ export const KeywordsManager = ({
   );
 };
 
-function parseBulkKeywords(input: string): string[] {
-  const seen = new Set<string>();
-  return input
-    .split('\n')
-    .map((k) => k.trim())
-    .filter((k) => {
-      if (k.length === 0) return false;
-      const lower = k.toLowerCase();
-      if (seen.has(lower)) return false;
-      seen.add(lower);
-      return true;
-    });
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isKeywordStatus(value: unknown): value is Keyword['status'] {
+  return value === undefined || value === 'active' || value === 'inactive' || value === 'paused';
 }
 
 function isKeywordResponse(value: unknown): value is Keyword {
   return (
-    value !== null &&
-    typeof value === 'object' &&
-    'id' in value &&
-    'keyword' in value
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.keyword === 'string' &&
+    typeof value.created_at === 'string' &&
+    isKeywordStatus(value.status)
   );
 }
 
-async function processBulkKeyword(keyword: string): Promise<Keyword | null> {
-  try {
-    const response = await authenticatedFetch(`${API_BASE_URL}/keywords`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ keyword }),
-    });
-
-    if (response.ok) {
-      const json: unknown = await response.json();
-      if (isKeywordResponse(json)) {
-        return json;
-      }
-    }
-    return null;
-  } catch {
-    return null;
+function parseKeywordResponse(value: unknown): Keyword {
+  if (!isKeywordResponse(value)) {
+    throw new InvalidKeywordResponseError();
   }
+
+  return value;
+}
+
+function getSafeErrorMessage(error: unknown, fallback: string): string {
+  if (
+    error instanceof ApiRequestError &&
+    error.statusCode !== undefined &&
+    error.statusCode >= 400 &&
+    error.statusCode < 500 &&
+    typeof error.responseMessage === 'string' &&
+    error.responseMessage.length > 0
+  ) {
+    return error.responseMessage;
+  }
+  return fallback;
+}
+
+function parseBulkKeywords(input: string): string[] {
+  const seen = new Set<string>();
+  return input
+    .split('\n')
+    .map((keyword) => keyword.trim())
+    .filter((keyword) => {
+      if (keyword.length === 0) return false;
+      const normalized = keyword.toLowerCase();
+      if (seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    });
+}
+
+async function processBulkKeyword(keyword: string): Promise<BulkKeywordResult> {
+  try {
+    const response = await apiPost<unknown>(
+      '/keywords',
+      { keyword },
+      { allowStructured4xx: true }
+    );
+    return {
+      outcome: 'success',
+      data: parseKeywordResponse(response),
+    };
+  } catch (error) {
+    console.error(`Error adding bulk keyword "${keyword}":`, error);
+    return {
+      outcome: 'failure',
+      failure: {
+        keyword,
+        message: getSafeErrorMessage(error, CREATE_ERROR_MESSAGE),
+      },
+    };
+  }
+}
+
+function collectBulkResults(results: BulkKeywordResult[]): {
+  addedKeywords: Keyword[];
+  failures: BulkFailure[];
+} {
+  const addedKeywords: Keyword[] = [];
+  const failures: BulkFailure[] = [];
+
+  results.forEach((result) => {
+    if (result.outcome === 'success') {
+      addedKeywords.push(result.data);
+    } else {
+      failures.push(result.failure);
+    }
+  });
+
+  return {
+    addedKeywords,
+    failures,
+  };
+}
+
+function getBulkAlert(
+  addedCount: number,
+  failureCount: number
+): Pick<AlertState, 'title' | 'variant'> {
+  if (failureCount === 0) {
+    return {
+      title: 'Success',
+      variant: 'success',
+    };
+  }
+  if (addedCount > 0) {
+    return {
+      title: 'Partial Success',
+      variant: 'info',
+    };
+  }
+  return {
+    title: 'Error',
+    variant: 'error',
+  };
+}
+
+function buildBulkMessage(
+  addedCount: number,
+  duplicateCount: number,
+  failures: BulkFailure[]
+): string {
+  const messages: string[] = [];
+
+  if (addedCount > 0) {
+    messages.push(`Added ${addedCount} ${addedCount === 1 ? 'keyword' : 'keywords'}`);
+  }
+  if (duplicateCount > 0) {
+    messages.push(`Skipped ${duplicateCount} ${duplicateCount === 1 ? 'duplicate' : 'duplicates'}`);
+  }
+  if (failures.length > 0) {
+    const details = failures
+      .map(({
+        keyword,
+        message,
+      }) => `${keyword} (${message})`)
+      .join(', ');
+    messages.push(`Failed: ${details}`);
+  }
+
+  return messages.join('. ');
 }

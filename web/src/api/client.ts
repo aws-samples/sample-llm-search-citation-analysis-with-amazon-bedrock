@@ -5,10 +5,69 @@ import {
   API_BASE_URL, authenticatedFetch, ApiConfigError, ApiRequestError 
 } from '../infrastructure';
 
+interface ApiErrorResponse {
+  error: string;
+  field?: string;
+}
+
+interface ApiRequestOptions {
+  signal?: AbortSignal;
+  allowStructured4xx?: boolean;
+}
+
+interface ApiGetOptions extends ApiRequestOptions { params?: Record<string, string>; }
+
 // Type-safe JSON parsing - response.json() returns Promise<unknown> in strict mode
 async function parseJsonResponse<T>(response: Response): Promise<T> {
   const data: unknown = await response.json();
   return data as T;
+}
+
+function isJsonObject(data: unknown): data is Record<string, unknown> {
+  return typeof data === 'object' && data !== null && !Array.isArray(data);
+}
+
+function decodeApiErrorResponse(data: unknown): ApiErrorResponse | null {
+  if (!isJsonObject(data)) return null;
+
+  const {
+    error, field
+  } = data;
+  if (typeof error !== 'string' || (field !== undefined && typeof field !== 'string')) return null;
+
+  return field === undefined ? { error } : {
+    error,
+    field,
+  };
+}
+
+async function readApiErrorResponse(response: Response): Promise<ApiErrorResponse | null> {
+  try {
+    const data: unknown = await response.json();
+    return decodeApiErrorResponse(data);
+  } catch {
+    return null;
+  }
+}
+
+async function createApiRequestError(
+  response: Response,
+  allowStructured4xx: boolean
+): Promise<ApiRequestError> {
+  const decodedError = allowStructured4xx && response.status >= 400 && response.status < 500
+    ? await readApiErrorResponse(response)
+    : null;
+  const fallbackMessage = `HTTP ${response.status}: ${response.statusText}`;
+
+  if (decodedError === null) {
+    return new ApiRequestError(fallbackMessage, { statusCode: response.status });
+  }
+
+  return new ApiRequestError(decodedError.error, {
+    statusCode: response.status,
+    responseMessage: decodedError.error,
+    ...(decodedError.field === undefined ? {} : { field: decodedError.field }),
+  });
 }
 
 /**
@@ -26,19 +85,16 @@ export function validateApiConfig(): void {
 /**
  * Makes an authenticated GET request to the API.
  * @param endpoint - API endpoint (without base URL)
- * @param options - Optional fetch options
+ * @param options - Optional request options
  * @returns Parsed JSON response
  * @throws {ApiRequestError} If request fails
  */
 export async function apiGet<T>(
   endpoint: string,
-  options: {
-    signal?: AbortSignal;
-    params?: Record<string, string> 
-  } = {}
+  options: ApiGetOptions = {}
 ): Promise<T> {
   const {
-    signal, params 
+    signal, params, allowStructured4xx
   } = options;
   
   const baseUrl = `${API_BASE_URL}${endpoint}`;
@@ -47,7 +103,7 @@ export async function apiGet<T>(
   const response = await authenticatedFetch(url, { signal });
   
   if (!response.ok) {
-    throw new ApiRequestError(`HTTP ${response.status}: ${response.statusText}`, response.status);
+    throw await createApiRequestError(response, allowStructured4xx === true);
   }
 
   return parseJsonResponse<T>(response);
@@ -59,7 +115,7 @@ export async function apiGet<T>(
 export async function apiPost<T>(
   endpoint: string,
   body: unknown,
-  options: { signal?: AbortSignal } = {}
+  options: ApiRequestOptions = {}
 ): Promise<T> {
   const response = await authenticatedFetch(`${API_BASE_URL}${endpoint}`, {
     method: 'POST',
@@ -69,7 +125,7 @@ export async function apiPost<T>(
   });
 
   if (!response.ok) {
-    throw new ApiRequestError(`HTTP ${response.status}: ${response.statusText}`, response.status);
+    throw await createApiRequestError(response, options.allowStructured4xx === true);
   }
 
   return parseJsonResponse<T>(response);
@@ -81,7 +137,7 @@ export async function apiPost<T>(
 export async function apiPut<T>(
   endpoint: string,
   body: unknown,
-  options: { signal?: AbortSignal } = {}
+  options: ApiRequestOptions = {}
 ): Promise<T> {
   const response = await authenticatedFetch(`${API_BASE_URL}${endpoint}`, {
     method: 'PUT',
@@ -91,7 +147,7 @@ export async function apiPut<T>(
   });
 
   if (!response.ok) {
-    throw new ApiRequestError(`HTTP ${response.status}: ${response.statusText}`, response.status);
+    throw await createApiRequestError(response, options.allowStructured4xx === true);
   }
 
   return parseJsonResponse<T>(response);
@@ -102,7 +158,7 @@ export async function apiPut<T>(
  */
 export async function apiDelete<T>(
   endpoint: string,
-  options: { signal?: AbortSignal } = {}
+  options: ApiRequestOptions = {}
 ): Promise<T> {
   const response = await authenticatedFetch(`${API_BASE_URL}${endpoint}`, {
     method: 'DELETE',
@@ -110,7 +166,7 @@ export async function apiDelete<T>(
   });
 
   if (!response.ok) {
-    throw new ApiRequestError(`HTTP ${response.status}: ${response.statusText}`, response.status);
+    throw await createApiRequestError(response, options.allowStructured4xx === true);
   }
 
   return parseJsonResponse<T>(response);
@@ -121,7 +177,7 @@ export async function apiDelete<T>(
 export async function apiPatch<T>(
   endpoint: string,
   body?: unknown,
-  options: { signal?: AbortSignal } = {}
+  options: ApiRequestOptions = {}
 ): Promise<T> {
   const fetchOptions: RequestInit = {
     method: 'PATCH',
@@ -136,7 +192,7 @@ export async function apiPatch<T>(
   const response = await authenticatedFetch(`${API_BASE_URL}${endpoint}`, fetchOptions);
 
   if (!response.ok) {
-    throw new ApiRequestError(`HTTP ${response.status}: ${response.statusText}`, response.status);
+    throw await createApiRequestError(response, options.allowStructured4xx === true);
   }
 
   return parseJsonResponse<T>(response);

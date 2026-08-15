@@ -1,12 +1,21 @@
 import { useState } from 'react';
 import { useKeywordResearch } from '../../hooks/useKeywordResearch';
+import type { Keyword } from '../../types';
 import { KeywordExpansion } from './KeywordExpansion';
 import { CompetitorAnalysis } from './CompetitorAnalysis';
 import { ResearchHistory } from './ResearchHistory';
 
 type ResearchTab = 'expand' | 'competitor' | 'history';
 
-export const KeywordResearchView = () => {
+interface KeywordResearchViewProps {
+  /**
+   * Called with the keywords a promotion just created, so the active keyword
+   * list picks them up without a refetch.
+   */
+  onKeywordsAdded?: (created: Keyword[]) => void;
+}
+
+export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProps = {}) => {
   const [activeTab, setActiveTab] = useState<ResearchTab>('expand');
   const research = useKeywordResearch();
 
@@ -86,6 +95,7 @@ export const KeywordResearchView = () => {
             loading={research.loading}
             result={research.expansionResult}
             error={research.error}
+            onKeywordsAdded={onKeywordsAdded}
           />
         )}
         {activeTab === 'competitor' && (
@@ -94,6 +104,7 @@ export const KeywordResearchView = () => {
             loading={research.loading}
             result={research.competitorResult}
             error={research.error}
+            onKeywordsAdded={onKeywordsAdded}
           />
         )}
         {activeTab === 'history' && (
@@ -102,6 +113,7 @@ export const KeywordResearchView = () => {
             loading={research.historyLoading}
             onDelete={research.deleteResearch}
             onRefresh={research.fetchHistory}
+            onKeywordsAdded={onKeywordsAdded}
           />
         )}
       </div>

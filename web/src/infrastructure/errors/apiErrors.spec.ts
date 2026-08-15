@@ -1,5 +1,5 @@
 import {
-  describe, it, expect 
+  describe, expect, it
 } from 'vitest';
 import {
   ApiRequestError,
@@ -72,6 +72,24 @@ describe('ApiRequestError', () => {
     expect(error.statusCode).toBe(404);
   });
 
+  it('stores structured response details from options', () => {
+    const error = new ApiRequestError('Keyword is invalid', {
+      statusCode: 400,
+      responseMessage: 'Keyword is invalid',
+      field: 'keywords[0].keyword',
+    });
+
+    expect({
+      statusCode: error.statusCode,
+      responseMessage: error.responseMessage,
+      field: error.field,
+    }).toStrictEqual({
+      statusCode: 400,
+      responseMessage: 'Keyword is invalid',
+      field: 'keywords[0].keyword',
+    });
+  });
+
   it('sets category based on statusCode', () => {
     expect(new ApiRequestError('test', 401).category).toBe('auth');
     expect(new ApiRequestError('test', 404).category).toBe('not_found');
@@ -125,6 +143,22 @@ describe('parseApiError', () => {
     expect(result.category).toBe('auth');
   });
 
+  it('returns status code embedded in ApiRequestError', () => {
+    const error = new ApiRequestError('HTTP 403: Forbidden', 403);
+
+    const result = parseApiError(error);
+
+    expect(result.statusCode).toBe(403);
+  });
+
+  it('returns category inferred from ApiRequestError status', () => {
+    const error = new ApiRequestError('Request rejected', 429);
+
+    const result = parseApiError(error);
+
+    expect(result.category).toBe('rate_limit');
+  });
+
   it('returns context-specific message when context provided', () => {
     const error = new NetworkError();
 
@@ -173,6 +207,17 @@ describe('getErrorMessage', () => {
     const message = getErrorMessage(error, 'brands');
 
     expect(message).toBe('Unable to load brand mentions');
+  });
+
+  it('preserves explicitly decoded response message', () => {
+    const error = new ApiRequestError('HTTP 400: Bad Request', {
+      statusCode: 400,
+      responseMessage: 'Keyword already exists',
+    });
+
+    const message = getErrorMessage(error, 'keywords');
+
+    expect(message).toBe('Keyword already exists');
   });
 });
 

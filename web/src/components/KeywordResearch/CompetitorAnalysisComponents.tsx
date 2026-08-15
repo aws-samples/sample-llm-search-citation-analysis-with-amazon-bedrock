@@ -1,6 +1,9 @@
 import type {
-  CompetitorAnalysisResult, ExpandedKeywordWithSource 
+  CompetitorAnalysisResult, ExpandedKeywordWithSource
 } from '../../types';
+import {
+  keywordSelectionKey, uniqueResearchKeywords
+} from '../../hooks/usePromoteKeywords';
 import { Spinner } from '../ui/Spinner';
 
 type SectionId = 'primary' | 'secondary' | 'longtail' | 'gaps';
@@ -68,7 +71,7 @@ export const getKeywordsForSection = (
     longtail: result.longtail_keywords,
     gaps: result.content_gaps,
   };
-  return keywordMap[sectionId] ?? [];
+  return uniqueResearchKeywords(keywordMap[sectionId] ?? []);
 };
 
 interface InputFormProps {
@@ -245,12 +248,26 @@ export const SectionTabs = ({
 interface KeywordRowProps {
   keyword: ExpandedKeywordWithSource;
   showOpportunity: boolean;
+  selectable?: boolean;
+  selected?: Set<string>;
+  onToggle?: (keyword: string) => void;
 }
 
 const KeywordRow = ({
-  keyword: kw, showOpportunity 
+  keyword: kw, showOpportunity, selectable = false, selected, onToggle
 }: KeywordRowProps) => (
   <tr className="hover:bg-gray-50">
+    {selectable && (
+      <td className="px-6 py-4">
+        <input
+          type="checkbox"
+          checked={selected?.has(keywordSelectionKey(kw.keyword)) ?? false}
+          onChange={() => onToggle?.(kw.keyword)}
+          aria-label={`Select ${kw.keyword}`}
+          className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+        />
+      </td>
+    )}
     <td className="px-6 py-4 text-sm text-gray-900">{kw.keyword}</td>
     <td className="px-6 py-4">
       <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${getIntentColor(kw.intent)}`}>
@@ -289,15 +306,21 @@ const KeywordRow = ({
 interface KeywordsTableProps {
   keywords: ExpandedKeywordWithSource[];
   showOpportunity: boolean;
+  selectable?: boolean;
+  selected?: Set<string>;
+  onToggle?: (keyword: string) => void;
 }
 
 export const KeywordsTable = ({
-  keywords, showOpportunity 
+  keywords, showOpportunity, selectable = false, selected, onToggle
 }: KeywordsTableProps) => (
   <div className="overflow-x-auto">
     <table className="w-full">
       <thead className="bg-gray-50">
         <tr>
+          {selectable && (
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Select</th>
+          )}
           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Keyword</th>
           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Intent</th>
           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Competition</th>
@@ -310,12 +333,24 @@ export const KeywordsTable = ({
       <tbody className="divide-y divide-gray-200">
         {keywords.length === 0 ? (
           <tr>
-            <td colSpan={showOpportunity ? 7 : 6} className="px-6 py-8 text-center text-sm text-gray-500">
+            <td
+              colSpan={(showOpportunity ? 7 : 6) + (selectable ? 1 : 0)}
+              className="px-6 py-8 text-center text-sm text-gray-500"
+            >
               No keywords found in this category
             </td>
           </tr>
         ) : (
-          keywords.map((kw) => <KeywordRow key={kw.keyword} keyword={kw} showOpportunity={showOpportunity} />)
+          keywords.map((kw) => (
+            <KeywordRow
+              key={keywordSelectionKey(kw.keyword)}
+              keyword={kw}
+              showOpportunity={showOpportunity}
+              selectable={selectable}
+              selected={selected}
+              onToggle={onToggle}
+            />
+          ))
         )}
       </tbody>
     </table>

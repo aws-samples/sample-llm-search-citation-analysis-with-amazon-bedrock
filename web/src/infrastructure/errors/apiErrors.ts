@@ -23,6 +23,12 @@ export interface ApiError {
   suggestion?: string;
 }
 
+export interface ApiRequestErrorOptions {
+  statusCode?: number;
+  responseMessage?: string;
+  field?: string;
+}
+
 const STATUS_TO_CATEGORY: Record<number, ErrorCategory> = {
   400: 'validation',
   401: 'auth',
@@ -272,13 +278,23 @@ class UnknownApiError extends Error {
 /** Error thrown when an API request fails */
 export class ApiRequestError extends Error {
   readonly statusCode?: number;
+  readonly responseMessage?: string;
+  readonly field?: string;
   readonly category: ErrorCategory;
 
-  constructor(message: string, statusCode?: number) {
+  constructor(message: string, statusCodeOrOptions?: number | ApiRequestErrorOptions) {
     super(message);
+    const options = typeof statusCodeOrOptions === 'number'
+      ? { statusCode: statusCodeOrOptions }
+      : (statusCodeOrOptions ?? {});
+
     this.name = 'ApiRequestError';
-    this.statusCode = statusCode;
-    this.category = statusCode ? (categorizeByStatusCode(statusCode) ?? 'unknown') : 'unknown';
+    this.statusCode = options.statusCode;
+    this.responseMessage = options.responseMessage;
+    this.field = options.field;
+    this.category = options.statusCode === undefined
+      ? 'unknown'
+      : (categorizeByStatusCode(options.statusCode) ?? 'unknown');
   }
 }
 
@@ -295,11 +311,15 @@ export function parseApiError(
   context?: keyof typeof CONTEXT_MESSAGES,
   statusCode?: number
 ): ApiError {
-  const category = categorizeError(error, statusCode);
+  const resolvedStatusCode = statusCode
+    ?? (error instanceof ApiRequestError ? error.statusCode : undefined);
+  const category = categorizeError(error, resolvedStatusCode);
   const categoryInfo = CATEGORY_MESSAGES[category];
-  
+  const responseMessage = error instanceof ApiRequestError
+    ? error.responseMessage
+    : undefined;
   const contextMessage = context ? CONTEXT_MESSAGES[context]?.[category] : undefined;
-  const message = contextMessage ?? categoryInfo.message;
+  const message = responseMessage ?? contextMessage ?? categoryInfo.message;
 
   const originalError = error instanceof Error 
     ? error 
@@ -309,7 +329,7 @@ export function parseApiError(
     message,
     category,
     originalError,
-    statusCode,
+    statusCode: resolvedStatusCode,
     recoverable: categoryInfo.recoverable,
     suggestion: categoryInfo.suggestion,
   };

@@ -1,9 +1,20 @@
 import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import {
-  describe, it, expect, beforeAll 
+  describe, it, expect, beforeAll
 } from 'vitest';
 import { CitationAnalysisStack } from './citation-analysis-stack';
+
+const KEYWORD_MGMT_FUNCTION_NAME = 'CitationAnalysis-API-KeywordMgmt';
+const PREFLIGHT_METHOD = 'OPTIONS';
+
+interface ApiGatewayMethodSnapshot {
+  httpMethod: string;
+  integrationType: string;
+  integrationUri: string;
+  authorizationType: string;
+  authorizerId: string;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -15,6 +26,11 @@ function resolvePath(root: unknown, keys: string[]): unknown {
     (current, key) => (isRecord(current) ? current[key] : undefined),
     root
   );
+}
+
+function resolveString(root: unknown, keys: string[]): string {
+  const value = resolvePath(root, keys);
+  return typeof value === 'string' ? value : '';
 }
 
 /**
@@ -41,14 +57,54 @@ function extractLambdaEnvVars(template: Template, functionName: string): Record<
   return isRecord(envVars) ? envVars : {};
 }
 
+function findLambdaLogicalId(template: Template, functionName: string): string {
+  const functions = template.findResources('AWS::Lambda::Function', {
+    Properties: { FunctionName: functionName },
+  });
+  return Object.keys(functions)[0] ?? '';
+}
+
+function findApiResourceId(template: Template, pathPart: string, parentId?: string): string {
+  const resources = template.findResources('AWS::ApiGateway::Resource');
+  return Object.entries(resources).find(([, resource]) => {
+    const resourcePathPart = resolveString(resource, ['Properties', 'PathPart']);
+    const resourceParentId = resolveString(resource, ['Properties', 'ParentId', 'Ref']);
+    return resourcePathPart === pathPart && (parentId === undefined || resourceParentId === parentId);
+  })?.[0] ?? '';
+}
+
+function extractApiMethods(template: Template, resourceId: string): ApiGatewayMethodSnapshot[] {
+  const methods = template.findResources('AWS::ApiGateway::Method');
+  return Object.values(methods).flatMap((method) => {
+    const httpMethod = resolveString(method, ['Properties', 'HttpMethod']);
+    const methodResourceId = resolveString(method, ['Properties', 'ResourceId', 'Ref']);
+    if (methodResourceId !== resourceId || httpMethod === PREFLIGHT_METHOD) return [];
+
+    const integrationUri = resolvePath(method, ['Properties', 'Integration', 'Uri']);
+    return [{
+      httpMethod,
+      integrationType: resolveString(method, ['Properties', 'Integration', 'Type']),
+      integrationUri: JSON.stringify(integrationUri) ?? '',
+      authorizationType: resolveString(method, ['Properties', 'AuthorizationType']),
+      authorizerId: resolveString(method, ['Properties', 'AuthorizerId', 'Ref']),
+    }];
+  });
+}
+
 const synthesized: {
   definitionRaw: string;
   crawlerEnvVars: Record<string, unknown>;
   parseKeywordsEnvVars: Record<string, unknown>;
+  keywordMgmtFunctionId: string;
+  promoteMethods: ApiGatewayMethodSnapshot[];
+  keywordIdMethods: ApiGatewayMethodSnapshot[];
 } = {
   definitionRaw: '',
   crawlerEnvVars: {},
   parseKeywordsEnvVars: {},
+  keywordMgmtFunctionId: '',
+  promoteMethods: [],
+  keywordIdMethods: [],
 };
 
 beforeAll(() => {
@@ -59,11 +115,17 @@ beforeAll(() => {
   synthesized.definitionRaw = extractStateMachineDefinition(template);
   synthesized.crawlerEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-Crawler');
   synthesized.parseKeywordsEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-ParseKeywords');
+  synthesized.keywordMgmtFunctionId = findLambdaLogicalId(template, KEYWORD_MGMT_FUNCTION_NAME);
+
+  const keywordsId = findApiResourceId(template, 'keywords');
+  const promoteId = findApiResourceId(template, 'promote', keywordsId);
+  const keywordId = findApiResourceId(template, '{id}', keywordsId);
+  synthesized.promoteMethods = extractApiMethods(template, promoteId);
+  synthesized.keywordIdMethods = extractApiMethods(template, keywordId);
 }, 60_000);
 
 describe('Step Functions workflow', () => {
   it('passes keyword to CrawlCitations Map itemSelector', () => {
-    // Verify the CrawlCitations state includes keyword.$ in its ItemSelector
     expect(synthesized.definitionRaw).toContain('"keyword.$":"$.keyword"');
   });
 
@@ -72,9 +134,6 @@ describe('Step Functions workflow', () => {
   });
 
   it('does not reference query_prompts from the raw execution input', () => {
-    // Scheduled executions ({"source":"dynamodb"} or {"keywords":[...]}) carry
-    // no query_prompts key in their input; a $$.Execution.Input.query_prompts
-    // reference would raise States.Runtime for every scheduled run.
     expect(synthesized.definitionRaw).not.toContain('$$.Execution.Input.query_prompts');
   });
 });
@@ -83,6 +142,27 @@ describe('ParseKeywords Lambda environment', () => {
   it('includes the query prompts table for execution-time prompt resolution', () => {
     expect(synthesized.parseKeywordsEnvVars).toHaveProperty('DYNAMODB_TABLE_QUERY_PROMPTS');
     expect(synthesized.parseKeywordsEnvVars).toHaveProperty('QUERY_PROMPTS_TABLE');
+  });
+});
+
+describe('Keyword promotion route', () => {
+  it('exposes only POST on the promote resource through the KeywordMgmt function', () => {
+    expect(synthesized.promoteMethods).toHaveLength(1);
+    expect(synthesized.promoteMethods[0]?.httpMethod).toBe('POST');
+    expect(synthesized.promoteMethods[0]?.integrationType).toBe('AWS_PROXY');
+    expect(synthesized.promoteMethods[0]?.integrationUri).toContain(synthesized.keywordMgmtFunctionId);
+  });
+
+  it('requires the shared Cognito authorizer', () => {
+    expect(synthesized.promoteMethods[0]?.authorizationType).toBe('COGNITO_USER_POOLS');
+    expect(synthesized.promoteMethods[0]?.authorizerId).not.toBe('');
+  });
+
+  it('keeps PUT and DELETE on the sibling keyword id resource', () => {
+    const idVerbs = synthesized.keywordIdMethods.map((method) => method.httpMethod);
+
+    expect([...idVerbs].sort((left, right) => left.localeCompare(right))).toStrictEqual(['DELETE', 'PUT']);
+    expect(idVerbs).not.toContain('POST');
   });
 });
 

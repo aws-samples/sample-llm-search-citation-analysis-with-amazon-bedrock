@@ -1342,6 +1342,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         'get-keywords.py',
         'manage-keywords.py',
         'keyword-research.py',
+        'promote-keywords.py',
       ]),
       layers: [sharedLayer],
       timeout: cdk.Duration.seconds(120),
@@ -1768,6 +1769,11 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordsResource.addMethod('GET', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
     keywordsResource.addMethod('POST', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
     
+    // Static 'promote' segment is matched ahead of the '{id}' path parameter by API Gateway,
+    // and it is POST-only while '{id}' is PUT/DELETE-only, so the two do not conflict.
+    const keywordsPromoteResource = keywordsResource.addResource('promote');
+    keywordsPromoteResource.addMethod('POST', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+
     const keywordIdResource = keywordsResource.addResource('{id}');
     keywordIdResource.addMethod('PUT', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
     keywordIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);

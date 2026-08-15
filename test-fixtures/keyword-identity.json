@@ -1,0 +1,89 @@
+{
+  "valid": [
+    {
+      "description": "mixed case with ASCII boundary whitespace",
+      "input": " \tMiXeD Case\r\n",
+      "expected": "mixed case"
+    },
+    {
+      "description": "fullwidth compatibility text with BOM boundaries",
+      "input": "\uFEFFＦＵＬＬ\uFEFF",
+      "expected": "full"
+    },
+    {
+      "description": "precomposed accented text",
+      "input": "CAFÉ",
+      "expected": "café"
+    },
+    {
+      "description": "decomposed accented text",
+      "input": "CAFÉ",
+      "expected": "café"
+    },
+    {
+      "description": "NEXT LINE boundaries",
+      "input": "\u0085ALPHA\u0085",
+      "expected": "alpha"
+    },
+    {
+      "description": "BOM boundaries",
+      "input": "\uFEFFALPHA\uFEFF",
+      "expected": "alpha"
+    },
+    {
+      "description": "interior NEXT LINE and BOM characters",
+      "input": "A\u0085B\uFEFFC",
+      "expected": "a\u0085b\uFEFFc"
+    },
+    {
+      "description": "valid astral character",
+      "input": "😀 ALPHA",
+      "expected": "😀 alpha"
+    },
+    {
+      "description": "lowercase rather than full case folding",
+      "input": "Straße",
+      "expected": "straße"
+    }
+  ],
+  "boundaryWhitespace": [
+    { "description": "TAB", "codePoint": 9 },
+    { "description": "LINE FEED", "codePoint": 10 },
+    { "description": "VERTICAL TAB", "codePoint": 11 },
+    { "description": "FORM FEED", "codePoint": 12 },
+    { "description": "CARRIAGE RETURN", "codePoint": 13 },
+    { "description": "SPACE", "codePoint": 32 },
+    { "description": "NEXT LINE", "codePoint": 133 },
+    { "description": "NO-BREAK SPACE", "codePoint": 160 },
+    { "description": "OGHAM SPACE MARK", "codePoint": 5760 },
+    { "description": "EN QUAD", "codePoint": 8192 },
+    { "description": "EM QUAD", "codePoint": 8193 },
+    { "description": "EN SPACE", "codePoint": 8194 },
+    { "description": "EM SPACE", "codePoint": 8195 },
+    { "description": "THREE-PER-EM SPACE", "codePoint": 8196 },
+    { "description": "FOUR-PER-EM SPACE", "codePoint": 8197 },
+    { "description": "SIX-PER-EM SPACE", "codePoint": 8198 },
+    { "description": "FIGURE SPACE", "codePoint": 8199 },
+    { "description": "PUNCTUATION SPACE", "codePoint": 8200 },
+    { "description": "THIN SPACE", "codePoint": 8201 },
+    { "description": "HAIR SPACE", "codePoint": 8202 },
+    { "description": "LINE SEPARATOR", "codePoint": 8232 },
+    { "description": "PARAGRAPH SEPARATOR", "codePoint": 8233 },
+    { "description": "NARROW NO-BREAK SPACE", "codePoint": 8239 },
+    { "description": "MEDIUM MATHEMATICAL SPACE", "codePoint": 8287 },
+    { "description": "IDEOGRAPHIC SPACE", "codePoint": 12288 },
+    { "description": "ZERO WIDTH NO-BREAK SPACE", "codePoint": 65279 }
+  ],
+  "preservedBoundaryControls": [
+    { "description": "INFORMATION SEPARATOR FOUR", "codePoint": 28 },
+    { "description": "INFORMATION SEPARATOR THREE", "codePoint": 29 },
+    { "description": "INFORMATION SEPARATOR TWO", "codePoint": 30 },
+    { "description": "INFORMATION SEPARATOR ONE", "codePoint": 31 }
+  ],
+  "invalid": [
+    { "description": "lone high surrogate", "codeUnits": [55296] },
+    { "description": "lone low surrogate", "codeUnits": [56320] },
+    { "description": "high surrogate followed by ASCII", "codeUnits": [55296, 65] },
+    { "description": "ASCII followed by low surrogate", "codeUnits": [65, 56320] }
+  ]
+}

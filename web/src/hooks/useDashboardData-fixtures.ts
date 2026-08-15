@@ -1,4 +1,9 @@
 import { vi } from 'vitest';
+import type { Keyword } from '../types';
+
+export const MOCK_API_BASE_URL = 'https://api.test.com';
+export const MOCK_KEYWORDS_URL = `${MOCK_API_BASE_URL}/keywords`;
+export const MOCK_AUTHORITATIVE_KEYWORDS_URL = `${MOCK_KEYWORDS_URL}?authoritative=true`;
 
 export const mockStats = {
   total_searches: 100,
@@ -10,16 +15,16 @@ export const mockStats = {
 export const mockCitations = {
   provider_stats: [{
     provider: 'openai',
-    citation_count: 100 
+    citation_count: 100,
   }],
   brand_stats: [{
     brand: 'TestBrand',
-    mention_count: 50 
+    mention_count: 50,
   }],
   top_urls: [{
     url: 'https://example.com',
     citation_count: 10,
-    keyword_count: 5 
+    keyword_count: 5,
   }],
 };
 
@@ -27,60 +32,96 @@ export const mockSearches = [
   {
     keyword: 'test',
     provider: 'openai',
-    timestamp: '2024-01-01' 
+    timestamp: '2024-01-01',
   },
 ];
 
 export const mockKeywords = [
   {
+    id: 'keyword-1',
     keyword: 'test keyword',
-    created_at: '2024-01-01' 
+    created_at: '2024-01-01',
+    status: 'active',
   },
-];
+] satisfies Keyword[];
 
-export function createMockFetch(overrides: {
+export function createMockKeywords(count: number, namePrefix = 'keyword'): Keyword[] {
+  return Array.from({ length: count }, (_unusedValue, keywordIndex) => ({
+    id: `${namePrefix}-${keywordIndex + 1}`,
+    keyword: `${namePrefix} ${keywordIndex + 1}`,
+    created_at: '2024-01-01',
+    status: 'active',
+  }));
+}
+
+export function createMockAuthoritativeKeywordsResponse(
+  keywords: Keyword[],
+  count = keywords.length,
+  complete = true
+) {
+  return {
+    keywords,
+    count,
+    complete,
+  };
+}
+
+export const mockAuthoritativeKeywordsResponse =
+  createMockAuthoritativeKeywordsResponse(mockKeywords);
+
+export function createMockJsonResponse(
+  responsePayload: unknown,
+  responseStatus = 200
+): Response {
+  return new Response(JSON.stringify(responsePayload), {
+    status: responseStatus,
+    statusText: responseStatus === 200 ? 'OK' : 'Request failed',
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+
+export function createMockDelayedJsonResponse(
+  responsePayload: unknown,
+  delayMilliseconds: number
+): Promise<Response> {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve(createMockJsonResponse(responsePayload)), delayMilliseconds);
+  });
+}
+
+interface MockFetchOverrides {
   stats?: unknown;
   citations?: unknown;
   searches?: unknown;
   keywords?: unknown;
+  authoritativeResponse?: unknown;
   shouldFail?: boolean;
   failStatus?: number;
-} = {}) {
-  return vi.fn().mockImplementation((url: string) => {
+}
+
+export function createMockFetch(overrides: MockFetchOverrides = {}) {
+  return vi.fn((url: string): Promise<Response> => {
     if (overrides.shouldFail) {
-      return Promise.resolve({
-        ok: false,
-        status: overrides.failStatus ?? 500,
-      });
+      return Promise.resolve(createMockJsonResponse({}, overrides.failStatus ?? 500));
     }
 
-    if (url.includes('/stats')) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(overrides.stats ?? mockStats),
-      });
+    if (url === `${MOCK_API_BASE_URL}/stats`) {
+      return Promise.resolve(createMockJsonResponse(overrides.stats ?? mockStats));
     }
-    if (url.includes('/citations')) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(overrides.citations ?? mockCitations),
-      });
+    if (url === `${MOCK_API_BASE_URL}/citations`) {
+      return Promise.resolve(createMockJsonResponse(overrides.citations ?? mockCitations));
     }
-    if (url.includes('/searches')) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ searches: overrides.searches ?? mockSearches }),
-      });
+    if (url === `${MOCK_API_BASE_URL}/searches`) {
+      return Promise.resolve(createMockJsonResponse({ searches: overrides.searches ?? mockSearches }));
     }
-    if (url.includes('/keywords')) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ keywords: overrides.keywords ?? mockKeywords }),
-      });
+    if (url === MOCK_AUTHORITATIVE_KEYWORDS_URL) {
+      return Promise.resolve(createMockJsonResponse(
+        overrides.authoritativeResponse ?? mockAuthoritativeKeywordsResponse
+      ));
     }
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({}) 
-    });
+    if (url === MOCK_KEYWORDS_URL) {
+      return Promise.resolve(createMockJsonResponse({ keywords: overrides.keywords ?? mockKeywords }));
+    }
+    return Promise.resolve(createMockJsonResponse({}));
   });
 }

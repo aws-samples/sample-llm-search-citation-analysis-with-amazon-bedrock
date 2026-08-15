@@ -34,19 +34,21 @@ VALID_PRIORITIES = ['high', 'normal', 'low']
 @validate({
     'status': {'choices': VALID_STATUSES},
     'priority': {'choices': VALID_PRIORITIES},
-    'limit': optional_limit(default=500, max_val=1000)
+    'limit': optional_limit(default=500, max_val=1000),
+    'authoritative': {'type': bool, 'default': False},
 })
-def handler(event, context, status=None, priority=None, limit=500):
+def handler(event, context, status=None, priority=None, limit=500, authoritative=False):
     """
     GET /api/keywords
 
     Query params (all optional):
         - status: Filter by status (active, inactive, paused)
         - priority: Filter by priority (high, normal, low)
-        - limit: Maximum number of results (default: 500, max: 1000)
+        - limit: Maximum number of ordinary results (default: 500, max: 1000)
+        - authoritative: Read and return every matching keyword when true
     """
-    # Build scan parameters with optional filters
-    scan_params = {'Limit': limit}
+    # Authoritative reads are unbounded; DynamoDB controls each scan page size.
+    scan_params = {'ConsistentRead': True} if authoritative else {'Limit': limit}
     filter_expressions = []
     expression_values = {}
     expression_names = {}
@@ -66,14 +68,24 @@ def handler(event, context, status=None, priority=None, limit=500):
         if expression_names:
             scan_params['ExpressionAttributeNames'] = expression_names
 
-    # Scan keywords table
-    response = keywords_table.scan(**scan_params)
-    items = response.get('Items', [])
+    items = []
+    while True:
+        response = keywords_table.scan(**scan_params)
+        items.extend(response.get('Items', []))
 
-    # Sort by created_at descending
-    items.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+        last_evaluated_key = response.get('LastEvaluatedKey')
+        if not authoritative or not last_evaluated_key:
+            break
+        scan_params['ExclusiveStartKey'] = last_evaluated_key
 
-    return success_response({
+    # Sort the complete result, or the ordinary first page, by created_at descending.
+    items.sort(key=lambda item: item.get('created_at', ''), reverse=True)
+
+    response_body = {
         'keywords': items,
-        'count': len(items)
-    }, event)
+        'count': len(items),
+    }
+    if authoritative:
+        response_body['complete'] = True
+
+    return success_response(response_body, event)
