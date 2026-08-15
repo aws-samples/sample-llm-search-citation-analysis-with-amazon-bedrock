@@ -1,14 +1,10 @@
-"""Promote Keywords API Lambda.
-
-Handles POST /api/keywords/promote - promotes research keywords into the
-active Keywords table, de-duplicating against existing active keywords.
-"""
+"""Promote keyword-research results into the active Keywords table."""
 
 import logging
 import sys
-import uuid
 
 import boto3
+from botocore.exceptions import ClientError
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
@@ -16,134 +12,152 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import error_response, success_response, validation_error
 from shared.decorators import api_handler, parse_json_body
 from shared.env_vars import resolve_table_env
-from shared.utils import get_timestamp
+from shared.utils import (
+    get_timestamp,
+    is_unicode_scalar_text,
+    keyword_id,
+    load_keyword_identities,
+    normalize_keyword,
+    trim_keyword,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-# Fail-fast: Required environment variables (audit #12 canonical naming).
 KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
 keywords_table = dynamodb.Table(KEYWORDS_TABLE)
 
-# Research-context fields recorded in `notes`, in the order they appear.
 NOTES_FIELDS = ('intent', 'competition', 'source')
-
-# Request-level limits.
 MAX_KEYWORDS = 500
-MAX_KEYWORD_LENGTH = 100
+MAX_KEYWORD_LENGTH = 500
+MAX_NOTES_LENGTH = 1000
 
-# Allowed status/priority values, matched exactly and case-sensitively.
 ALLOWED_STATUSES = ('active', 'inactive', 'paused')
 ALLOWED_PRIORITIES = ('high', 'normal', 'low')
-
-# Applied when status/priority is omitted or empty.
 DEFAULT_STATUS = 'active'
 DEFAULT_PRIORITY = 'normal'
 
-# Item defaults mirrored from the `create_keyword` path in `manage-keywords.py`.
 DEFAULT_REGION = 'global'
 DEFAULT_LANGUAGE = 'en'
 DEFAULT_CATEGORY = ''
 
-# Skip reasons reported in `skipped_keywords`.
 REASON_DUPLICATE = 'duplicate'
 REASON_EMPTY = 'empty'
+
+# Compatibility name retained for the focused property tests and the handler's
+# existing read/partition terminology.
+load_existing_keyword_keys = load_keyword_identities
 
 
 @api_handler
 @parse_json_body
 def handler(event, context, body):
-    """POST /api/keywords/promote - promote research keywords into Keywords_Table.
+    """Handle POST /api/keywords/promote."""
+    if event.get('httpMethod') != 'POST':
+        return validation_error('Method not allowed', event, 'httpMethod')
 
-    Orchestrates validate -> read existing keys -> partition -> build items ->
-    write -> respond, returning `{created, skipped, created_keywords,
-    skipped_keywords}`. A rejected request returns 400 before any DynamoDB
-    access; a failed read returns 500 with nothing created.
-    """
+    if not isinstance(body, dict):
+        return validation_error('Request body must be a JSON object', event, 'body')
+
     keywords = body.get('keywords')
-
     error, status, priority = validate_request(
         keywords, body.get('status'), body.get('priority')
     )
     if error:
         return validation_error(error['message'], event, error['field'])
 
-    # Only the read is wrapped: a read failure must abort with nothing created
-    # (Req 2.6). Write failures stay with `@api_handler`'s sanitized 500.
     try:
         existing_keys = load_existing_keyword_keys(keywords_table)
-    except Exception as e:
-        logger.error(f'Failed to read existing keywords for promotion: {e!s}', exc_info=True)
-        return error_response(e, event)
+    except Exception as error:
+        logger.error(
+            f'Failed to read existing keywords for promotion: {error!s}',
+            exc_info=True,
+        )
+        return error_response(error, event)
 
     to_create, skipped = partition_keywords(keywords, existing_keys)
     items = create_items(to_create, status, priority)
+    created_items, concurrent_skips = write_items(keywords_table, items)
+    skipped.extend(concurrent_skips)
 
-    write_items(keywords_table, items)
-
-    # `skipped` is the DUPLICATE-ONLY count, not len(skipped_keywords): that list
-    # also holds reason:'empty' entries, which count toward neither created nor skipped.
     return success_response({
-        'created': len(items),
-        'skipped': sum(1 for entry in skipped if entry['reason'] == REASON_DUPLICATE),
-        'created_keywords': items,
+        'created': len(created_items),
+        'skipped': sum(
+            1 for entry in skipped if entry['reason'] == REASON_DUPLICATE
+        ),
+        'created_keywords': created_items,
         'skipped_keywords': skipped,
     }, event)
 
 
-def normalize_keyword(text):
-    """Return the canonical comparison key: trimmed and lower-cased."""
-    return text.strip().lower()
-
-
-def build_notes(rk):
-    """Build `notes` from present intent/competition/source, in that fixed order.
-
-    Each present value is labeled by its field name and joined with '; '; absent
-    or empty fields are omitted, so with none present the result is ''.
-    """
+def build_notes(research_keyword):
+    """Build bounded notes from validated research context fields."""
     parts = []
     for field in NOTES_FIELDS:
-        value = rk.get(field)
-        if not value:
+        value = research_keyword.get(field)
+        if not isinstance(value, str):
             continue
-        value = str(value).strip()
-        if value:
-            parts.append(f'{field}: {value}')
+        trimmed = value.strip()
+        if trimmed:
+            parts.append(f'{field}: {trimmed}')
 
     return '; '.join(parts)
 
 
 def validate_request(keywords, status, priority):
-    """Apply request-level promotion gates and resolve status/priority (no IO).
-
-    Every gate failure rejects the ENTIRE request. Gates run in fixed order:
-    keywords present/non-empty, at most MAX_KEYWORDS, each trimmed text within
-    MAX_KEYWORD_LENGTH, at least one non-empty text, status in ALLOWED_STATUSES,
-    priority in ALLOWED_PRIORITIES. An individually-empty keyword is a per-item
-    skip (see `partition_keywords`), not a request failure. status/priority are
-    RESOLVED BEFORE their gates, so an omitted/empty value is valid and defaults.
-
-    Returns `(None, status, priority)` on success, or
-    `({'message', 'field'}, None, None)` on rejection.
-    """
-    if not keywords:
+    """Validate the complete promotion request before any DynamoDB access."""
+    if not isinstance(keywords, list) or not keywords:
         return _rejection('At least one keyword is required', 'keywords')
 
     if len(keywords) > MAX_KEYWORDS:
         return _rejection(f'Maximum {MAX_KEYWORDS} keywords per request', 'keywords')
 
-    texts = [str(rk.get('keyword') or '').strip() for rk in keywords]
+    texts = []
+    for index, research_keyword in enumerate(keywords):
+        field_prefix = f'keywords[{index}]'
+        if not isinstance(research_keyword, dict):
+            return _rejection('Each keyword must be a JSON object', field_prefix)
 
-    if any(len(text) > MAX_KEYWORD_LENGTH for text in texts):
-        return _rejection(
-            f'Keyword exceeds maximum length of {MAX_KEYWORD_LENGTH} characters', 'keywords'
-        )
+        keyword_value = research_keyword.get('keyword')
+        if keyword_value is not None and not isinstance(keyword_value, str):
+            return _rejection('Keyword must be a string', f'{field_prefix}.keyword')
+        if isinstance(keyword_value, str) and not is_unicode_scalar_text(keyword_value):
+            return _rejection(
+                'Keyword must contain valid Unicode scalar values',
+                f'{field_prefix}.keyword',
+            )
+
+        text = trim_keyword(keyword_value) if isinstance(keyword_value, str) else ''
+        texts.append(text)
+        if len(text) > MAX_KEYWORD_LENGTH:
+            return _rejection(
+                f'Keyword exceeds maximum length of {MAX_KEYWORD_LENGTH} characters',
+                f'{field_prefix}.keyword',
+            )
+
+        for notes_field in NOTES_FIELDS:
+            notes_value = research_keyword.get(notes_field)
+            if notes_value is not None and not isinstance(notes_value, str):
+                return _rejection(
+                    f'{notes_field} must be a string',
+                    f'{field_prefix}.{notes_field}',
+                )
+
+        if len(build_notes(research_keyword)) > MAX_NOTES_LENGTH:
+            return _rejection(
+                f'Keyword notes exceed maximum length of {MAX_NOTES_LENGTH} characters',
+                field_prefix,
+            )
 
     if not any(texts):
         return _rejection('At least one non-empty keyword is required', 'keywords')
+
+    if status is not None and not isinstance(status, str):
+        return _rejection('status must be a string', 'status')
+    if priority is not None and not isinstance(priority, str):
+        return _rejection('priority must be a string', 'priority')
 
     resolved_status = DEFAULT_STATUS if status is None or status == '' else status
     resolved_priority = DEFAULT_PRIORITY if priority is None or priority == '' else priority
@@ -159,42 +173,32 @@ def validate_request(keywords, status, priority):
             f"Invalid {field} '{value}' (allowed: {', '.join(allowed)})"
             for field, value, allowed in invalid
         )
-        return _rejection(message, ', '.join(field for field, _value, _allowed in invalid))
+        return _rejection(
+            message,
+            ', '.join(field for field, _value, _allowed in invalid),
+        )
 
     return None, resolved_status, resolved_priority
 
 
 def partition_keywords(keywords, existing_keys):
-    """Split validated research keywords into creations and reported skips (no IO).
-
-    Runs after validation and after existing keys are read, so every decision is
-    a PER-ITEM skip. `existing_keys` members are already normalized and are not
-    re-normalized. Per entry, in order: empty-after-trim -> skip reason 'empty';
-    key in existing_keys -> skip reason 'duplicate'; key already accepted earlier
-    in this request -> collapsed into that creation; otherwise -> created.
-
-    First occurrence wins: the earliest entry of a shared normalized key supplies
-    the created item (original trimmed text and context). Intra-request collapsed
-    extras are NOT reported in `skipped` -- a Duplicate_Keyword is defined against
-    an EXISTING keyword, and a collapsed extra's text was already promoted -- so
-    `len(to_create) + len(skipped)` can be LESS than `len(keywords)`.
-
-    Returns `(to_create, skipped)`; each `to_create` entry carries the trimmed
-    `keyword` text (original case) plus the fields `build_notes` reads.
-    """
+    """Split validated keywords into creations and reported skips."""
     to_create = []
     skipped = []
     accepted_keys = set()
 
-    for rk in keywords:
-        text = str(rk.get('keyword') or '').strip()
+    for research_keyword in keywords:
+        keyword_value = research_keyword.get('keyword')
+        text = trim_keyword(keyword_value) if isinstance(keyword_value, str) else ''
 
         if not text:
             skipped.append({'keyword': text, 'reason': REASON_EMPTY})
             continue
 
         key = normalize_keyword(text)
-
+        if not key:
+            skipped.append({'keyword': '', 'reason': REASON_EMPTY})
+            continue
         if key in existing_keys:
             skipped.append({'keyword': text, 'reason': REASON_DUPLICATE})
             continue
@@ -203,69 +207,44 @@ def partition_keywords(keywords, existing_keys):
             continue
 
         accepted_keys.add(key)
-        to_create.append({**rk, 'keyword': text})
+        to_create.append({**research_keyword, 'keyword': text})
 
     return to_create, skipped
 
 
-def load_existing_keyword_keys(table):
-    """Read every existing keyword's normalized comparison key via a paginated scan.
-
-    De-duplication is defined against any item in the table, so this scans the
-    whole table following `LastEvaluatedKey` until exhausted. The projection is
-    limited to `keyword` via an `ExpressionAttributeNames` alias to avoid a
-    reserved-word collision. Any scan failure propagates so the caller aborts
-    with zero writes. Returns keys already run through `normalize_keyword`.
-    """
-    existing_keys = set()
-    scan_params = {
-        'ProjectionExpression': '#kw',
-        'ExpressionAttributeNames': {'#kw': 'keyword'},
-    }
-
-    while True:
-        response = table.scan(**scan_params)
-
-        for item in response.get('Items', []):
-            key = normalize_keyword(str(item.get('keyword') or ''))
-            if key:
-                existing_keys.add(key)
-
-        last_key = response.get('LastEvaluatedKey')
-        if not last_key:
-            return existing_keys
-
-        scan_params['ExclusiveStartKey'] = last_key
-
-
 def write_items(table, items):
-    """Put every created keyword through a `batch_writer` (adds only, no updates).
+    """Conditionally create items and report concurrent duplicate writes."""
+    created_items = []
+    skipped = []
 
-    When there is nothing to create no writer is opened, so an all-skipped
-    request performs zero write calls.
-    """
-    if not items:
-        return
+    for item in items:
+        try:
+            table.put_item(
+                Item=item,
+                ConditionExpression='attribute_not_exists(#id)',
+                ExpressionAttributeNames={'#id': 'id'},
+            )
+        except ClientError as error:
+            error_code = error.response.get('Error', {}).get('Code')
+            if error_code != 'ConditionalCheckFailedException':
+                raise
+            skipped.append({
+                'keyword': item['keyword'],
+                'reason': REASON_DUPLICATE,
+            })
+        else:
+            created_items.append(item)
 
-    with table.batch_writer() as batch:
-        for item in items:
-            batch.put_item(Item=item)
+    return created_items, skipped
 
 
 def create_items(to_create, status, priority):
-    """Build the keyword items for accepted research keywords.
-
-    Mirrors the item shape from `create_keyword` in `manage-keywords.py`, reusing
-    its region/language/category defaults. Every item in a call shares one
-    `get_timestamp()` (created_at == updated_at), each `id` is a fresh uuid4, and
-    the stored `keyword` is the trimmed research text with ORIGINAL casing (not
-    the normalized key). status/priority arrive already resolved.
-    """
+    """Build keyword-table items for accepted research keywords."""
     timestamp = get_timestamp()
 
     return [
         {
-            'id': str(uuid.uuid4()),
+            'id': keyword_id(entry['keyword']),
             'keyword': entry['keyword'],
             'status': status,
             'created_at': timestamp,
@@ -281,5 +260,5 @@ def create_items(to_create, status, priority):
 
 
 def _rejection(message, field):
-    """Build the failure form of the `validate_request` return value."""
+    """Build the failure form returned by ``validate_request``."""
     return {'message': message, 'field': field}, None, None

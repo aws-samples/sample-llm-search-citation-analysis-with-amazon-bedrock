@@ -100,6 +100,67 @@ describe('SettingsView', () => {
     });
   });
 
+  describe('attention bubbles', () => {
+    it('shows attention dots for unconfigured brand and providers', () => {
+      render(<SettingsView {...buildProps()} />);
+
+      expect(screen.getAllByRole('status', { name: 'Needs configuration' })).toHaveLength(2);
+    });
+
+    it('shows a keywords attention dot when no keywords exist', () => {
+      render(<SettingsView {...buildProps({ keywords: [] })} />);
+
+      expect(screen.getAllByRole('status', { name: 'Needs configuration' })).toHaveLength(3);
+    });
+
+    it('hides all attention dots when everything is configured', () => {
+      mockUseBrandConfig.mockReturnValue({
+        config: {
+          industry: 'hospitality',
+          tracked_brands: {
+            first_party: ['MyHotel'],
+            competitors: [],
+          },
+        },
+        presets: {},
+        loading: false,
+        saveConfig: vi.fn(),
+        expandAllBrands: vi.fn(),
+        findCompetitors: vi.fn(),
+      });
+      mockUseProviderConfig.mockReturnValue({
+        providers: [
+          {
+            id: 'openai',
+            name: 'OpenAI',
+            description: 'GPT model',
+            model: 'gpt',
+            docs_url: 'https://openai.com',
+            enabled: true,
+            configured: true,
+            masked_key: '****1234',
+            last_updated: null,
+          },
+        ],
+        loading: false,
+        updateProvider: vi.fn(),
+        refreshProviders: vi.fn(),
+      });
+
+      render(<SettingsView {...buildProps()} />);
+
+      expect(screen.queryByRole('status', { name: 'Needs configuration' })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('app version', () => {
+    it('displays the deployed application version', () => {
+      render(<SettingsView {...buildProps()} />);
+
+      expect(screen.getByText(/^Version \d+\.\d+\.\d+$/)).toBeInTheDocument();
+    });
+  });
+
   describe('providers tab', () => {
     it('switches to providers tab when clicked', async () => {
       mockUseProviderConfig.mockReturnValue({

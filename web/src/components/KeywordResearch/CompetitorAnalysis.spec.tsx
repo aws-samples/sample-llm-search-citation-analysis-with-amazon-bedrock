@@ -1,13 +1,13 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi, beforeEach
 } from 'vitest';
 import {
-  render, screen 
+  render, screen
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CompetitorAnalysis } from './CompetitorAnalysis';
 import {
-  SELECTION_LIMIT, promotionSuccessMessage 
+  SELECTION_LIMIT, promotionSuccessMessage
 } from '../../hooks/usePromoteKeywords';
 import type { CompetitorAnalysisResult } from '../../types';
 
@@ -15,7 +15,7 @@ vi.mock('../../api/client', () => ({ apiPost: vi.fn() }));
 
 import { apiPost } from '../../api/client';
 
-const mockApiPost = apiPost as ReturnType<typeof vi.fn>;
+const mockApiPost = vi.mocked(apiPost);
 
 const promotionEndpoint = '/keywords/promote';
 
@@ -203,29 +203,29 @@ function buildResult(overrides: Partial<CompetitorAnalysisResult> = {}): Competi
       keyword: 'hotel',
       intent: 'transactional',
       competition: 'high',
-      relevance: 0.9 
+      relevance: 0.9
     }, {
       keyword: 'resort',
       intent: 'transactional',
       competition: 'medium',
-      relevance: 0.8 
+      relevance: 0.8
     }],
     secondary_keywords: [{
       keyword: 'vacation',
       intent: 'informational',
       competition: 'low',
-      relevance: 0.7 
+      relevance: 0.7
     }, {
       keyword: 'travel',
       intent: 'informational',
       competition: 'low',
-      relevance: 0.6 
+      relevance: 0.6
     }],
     longtail_keywords: [{
       keyword: 'luxury beach resort',
       intent: 'transactional',
       competition: 'low',
-      relevance: 0.85 
+      relevance: 0.85
     }],
     content_gaps: [],
     keyword_count: 5,
@@ -308,7 +308,7 @@ describe('CompetitorAnalysis', () => {
     it.each(sectionFixtures)(
       'renders one selection checkbox per keyword row in the $sectionLabel section',
       async ({
-        tabName, keywords, expectedOpportunityHeaders 
+        tabName, keywords, expectedOpportunityHeaders
       }) => {
         render(<CompetitorAnalysis {...defaultProps} result={competitorResultFixture} />);
 
@@ -316,7 +316,10 @@ describe('CompetitorAnalysis', () => {
 
         expect(screen.getAllByRole('checkbox')).toHaveLength(keywords.length);
         expect(
-          keywords.map((kw) => screen.getByRole('checkbox', { name: `Select ${kw.keyword}` }))
+          keywords.map((keyword) => screen.getByRole(
+            'checkbox',
+            { name: `Select ${keyword.keyword}` }
+          ))
         ).toHaveLength(keywords.length);
         expect(screen.queryAllByRole('columnheader', { name: 'Opportunity' })).toHaveLength(
           expectedOpportunityHeaders
@@ -368,12 +371,11 @@ describe('CompetitorAnalysis', () => {
       expect(mockApiPost).toHaveBeenCalledWith(
         promotionEndpoint,
         { keywords: [firstPrimaryKeyword, secondPrimaryKeyword] },
-        { signal: expect.any(AbortSignal) }
+        {
+          signal: expect.any(AbortSignal),
+          allowStructured4xx: true,
+        }
       );
-      // The UI offers no status/priority choice, so the body carries neither
-      // field and the backend applies its own defaults.
-      const [[, requestBody]] = mockApiPost.mock.calls as [[string, object]];
-      expect(Object.keys(requestBody)).toStrictEqual(['keywords']);
     });
   });
 });

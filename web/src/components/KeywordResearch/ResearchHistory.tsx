@@ -1,10 +1,12 @@
 import {
-  useEffect, useMemo, useState 
+  useEffect, useMemo, useState
 } from 'react';
 import type {
-  Keyword, KeywordResearchItem, ResearchKeyword 
+  Keyword, KeywordResearchItem, ResearchKeyword
 } from '../../types';
-import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
+import {
+  uniqueResearchKeywords, usePromoteKeywords
+} from '../../hooks/usePromoteKeywords';
 import { KeywordResultsTable } from './KeywordResultsTable';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
 import { formatDate } from '../../formatting/dateFormatter';
@@ -20,15 +22,15 @@ interface ResearchHistoryProps {
 
 const getKeywordsForItem = (item: KeywordResearchItem): ResearchKeyword[] => {
   if (item.type === 'expansion' && item.keywords) {
-    return item.keywords;
+    return uniqueResearchKeywords(item.keywords);
   }
   if (item.type === 'competitor' && item.analysis) {
-    return [
+    return uniqueResearchKeywords([
       ...(item.analysis.primary_keywords ?? []),
       ...(item.analysis.secondary_keywords ?? []),
       ...(item.analysis.longtail_keywords ?? []),
       ...(item.analysis.content_gaps ?? []),
-    ];
+    ]);
   }
   return [];
 };
@@ -44,10 +46,10 @@ export const ResearchHistory = ({
 
   useEffect(() => {
     onRefresh();
-  }, []);
+  }, [onRefresh]);
 
   const toggleExpand = (id: string) => {
-    setExpandedId(expandedId === id ? null : id);
+    setExpandedId((currentId) => currentId === id ? null : id);
   };
 
   return (
@@ -55,7 +57,6 @@ export const ResearchHistory = ({
       <Header loading={loading} onRefresh={onRefresh} />
 
       {loading && history.length === 0 && <LoadingState />}
-
       {!loading && history.length === 0 && <EmptyState />}
 
       {history.length > 0 && (
@@ -82,7 +83,7 @@ interface HeaderProps {
 }
 
 const Header = ({
-  loading, onRefresh 
+  loading, onRefresh
 }: HeaderProps) => (
   <div className="flex items-center justify-between">
     <p className="text-sm text-gray-600">
@@ -149,11 +150,12 @@ interface HistoryItemProps {
 }
 
 const HistoryItem = ({
-  item, isExpanded, onToggle, onDelete, onKeywordsAdded 
+  item, isExpanded, onToggle, onDelete, onKeywordsAdded
 }: HistoryItemProps) => {
   const keywords = useMemo(() => getKeywordsForItem(item), [item]);
   const hasKeywords = keywords.length > 0;
   const itemTitle = item.type === 'expansion' ? item.seed_keyword : (item.domain ?? item.url);
+  const panelId = `research-history-keywords-${item.id}`;
 
   const promotion = usePromoteKeywords(keywords, onKeywordsAdded);
   const { clearSelection } = promotion;
@@ -161,7 +163,7 @@ const HistoryItem = ({
 
   useEffect(() => {
     clearSelection();
-  }, [isExpanded, clearSelection]);
+  }, [isExpanded, keywords, clearSelection]);
 
   return (
     <div>
@@ -171,7 +173,13 @@ const HistoryItem = ({
       >
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
           <div className="flex-1 flex items-start gap-2 sm:gap-3">
-            {hasKeywords && <ExpandIcon isExpanded={isExpanded} />}
+            {hasKeywords && (
+              <ExpandButton
+                isExpanded={isExpanded}
+                controls={panelId}
+                onToggle={onToggle}
+              />
+            )}
 
             <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -182,7 +190,7 @@ const HistoryItem = ({
               <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-2 text-xs text-gray-500">
                 <span>{formatDate(item.created_at)}</span>
                 <span className="hidden sm:inline">•</span>
-                <span>{item.keyword_count ?? 0} keywords</span>
+                <span>{keywords.length} keywords</span>
                 {item.industry && (
                   <>
                     <span className="hidden sm:inline">•</span>
@@ -198,7 +206,7 @@ const HistoryItem = ({
       </div>
 
       {isExpanded && hasKeywords && (
-        <div className="border-t border-gray-100 bg-gray-50 p-4 space-y-4">
+        <div id={panelId} className="border-t border-gray-100 bg-gray-50 p-4 space-y-4">
           <KeywordPromotionControls promotion={promotion} />
           <KeywordResultsTable
             keywords={keywords}
@@ -215,8 +223,26 @@ const HistoryItem = ({
   );
 };
 
-const ExpandIcon = ({ isExpanded }: { isExpanded: boolean }) => (
-  <button className="mt-0.5 text-gray-400 shrink-0">
+interface ExpandButtonProps {
+  isExpanded: boolean;
+  controls: string;
+  onToggle: () => void;
+}
+
+const ExpandButton = ({
+  isExpanded, controls, onToggle
+}: ExpandButtonProps) => (
+  <button
+    type="button"
+    className="mt-0.5 text-gray-400 shrink-0"
+    aria-label={isExpanded ? 'Collapse research keywords' : 'Expand research keywords'}
+    aria-expanded={isExpanded}
+    aria-controls={controls}
+    onClick={(event) => {
+      event.stopPropagation();
+      onToggle();
+    }}
+  >
     <svg
       className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
       fill="none"
@@ -242,8 +268,8 @@ interface DeleteButtonProps {onClick: () => void;}
 
 const DeleteButton = ({ onClick }: DeleteButtonProps) => (
   <button
-    onClick={(e) => {
-      e.stopPropagation();
+    onClick={(event) => {
+      event.stopPropagation();
       onClick();
     }}
     className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors self-end sm:self-start"

@@ -1,8 +1,8 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi, beforeEach, afterEach
 } from 'vitest';
 import {
-  render, screen, fireEvent, act 
+  render, screen, fireEvent, act
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { KeywordExpansion } from './KeywordExpansion';
@@ -15,14 +15,14 @@ import {
 } from '../../hooks/usePromoteKeywords';
 import { ApiRequestError } from '../../infrastructure';
 import type {
-  ExpandedKeywordWithSource, Keyword, KeywordExpansionResult 
+  ExpandedKeywordWithSource, Keyword, KeywordExpansionResult
 } from '../../types';
 
 vi.mock('../../api/client', () => ({ apiPost: vi.fn() }));
 
 import { apiPost } from '../../api/client';
 
-const mockApiPost = apiPost as ReturnType<typeof vi.fn>;
+const mockApiPost = vi.mocked(apiPost);
 
 function buildProps(overrides = {}) {
   return {
@@ -190,6 +190,17 @@ const successMessage = promotionSuccessMessage({
   skippedKeywords: [],
 });
 
+const definitiveRejectionMessage = 'Keyword cannot be promoted';
+const definitiveRejectionField = 'keywords[0].keyword';
+
+function createDefinitiveRejection(field?: string): ApiRequestError {
+  return new ApiRequestError(definitiveRejectionMessage, {
+    statusCode: 400,
+    responseMessage: definitiveRejectionMessage,
+    ...(field === undefined ? {} : { field }),
+  });
+}
+
 /** A request that never settles, so the in-flight state can be observed. */
 const mockPendingRequest = () => new Promise<never>(() => undefined);
 
@@ -251,7 +262,10 @@ describe('KeywordExpansion promotion UI', () => {
     expect(mockApiPost).toHaveBeenCalledWith(
       '/keywords/promote',
       { keywords: [luxuryHotelsFixture] },
-      { signal: expect.any(AbortSignal) }
+      {
+        signal: expect.any(AbortSignal),
+        allowStructured4xx: true,
+      }
     );
   });
 
@@ -330,6 +344,38 @@ describe('KeywordExpansion promotion UI', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/adding keywords failed/i);
     expect(selectKeywordCheckbox(luxuryHotelsFixture.keyword)).toBeChecked();
     expect(getPromoteButtonElement()).toBeEnabled();
+  });
+
+  it('shows exact field-qualified backend message when promotion is rejected', async () => {
+    mockApiPost.mockRejectedValue(createDefinitiveRejection(definitiveRejectionField));
+    renderExpansionWithResult(expansionResultFixture);
+
+    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
+    await userEvent.click(getPromoteButtonElement());
+
+    expect((await screen.findByRole('alert')).textContent)
+      .toBe(`${definitiveRejectionMessage} (field: ${definitiveRejectionField})`);
+  });
+
+  it('shows exact backend message when rejection omits field', async () => {
+    mockApiPost.mockRejectedValue(createDefinitiveRejection());
+    renderExpansionWithResult(expansionResultFixture);
+
+    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
+    await userEvent.click(getPromoteButtonElement());
+
+    expect((await screen.findByRole('alert')).textContent).toBe(definitiveRejectionMessage);
+  });
+
+  it('retains selection when promotion receives a definitive rejection', async () => {
+    mockApiPost.mockRejectedValue(createDefinitiveRejection(definitiveRejectionField));
+    renderExpansionWithResult(expansionResultFixture);
+
+    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
+    await userEvent.click(getPromoteButtonElement());
+    await screen.findByRole('alert');
+
+    expect(selectKeywordCheckbox(luxuryHotelsFixture.keyword)).toBeChecked();
   });
 
   it('shows the timeout message when the request does not settle within the promotion timeout', async () => {

@@ -21,13 +21,14 @@ Context:
     skipped` can be smaller than the request length.
 
     Property 6 is asserted structurally: promotion may only ADD items, so the
-    tests check the recorded calls are `put_item` calls carrying exactly the new
-    items and that no `update_item` / `delete_item` is ever issued. A `MagicMock`
-    stands in for the Keywords_Table (no AWS-mocking library is declared): its
-    `scan` returns queued pages and its `batch_writer()` records the puts. Each
-    invocation swaps the module-level `keywords_table` for the mock via
-    `patch.object`; the handler is loaded through the `promotion_handler` fixture
-    (the `_load_router` pattern from `test_routers_404.py`).
+    tests check the recorded calls are conditional `put_item` calls carrying
+    exactly the candidate items and that no `update_item` / `delete_item` is
+    ever issued. A `MagicMock` stands in for the Keywords_Table (no AWS-mocking
+    library is declared): its `scan` returns queued pages and its `put_item`
+    records writes. Each invocation swaps the module-level `keywords_table` for
+    the mock via `patch.object`; the handler is loaded through the
+    `promotion_handler` fixture (the `_load_router` pattern from
+    `test_routers_404.py`).
 """
 
 import importlib
@@ -119,6 +120,7 @@ def table_env_cleared():
         else:
             os.environ[name] = value
 
+
 # The COMPLETE created item's field set, as `create_items` produces it.
 _CREATED_ENTRY_FIELDS = {
     'id', 'keyword', 'status', 'created_at', 'updated_at',
@@ -147,10 +149,8 @@ def _scan_pages(text_pages):
     return pages
 
 
-def _mock_table(scan_pages=None, scan_error=None):
-    """Build a `MagicMock` Keywords_Table, returning `(table, batch)` where
-    `batch` records the puts yielded by `table.batch_writer()`.
-    """
+def _mock_table(scan_pages=None, scan_error=None, put_side_effect=None):
+    """Build a `MagicMock` Keywords_Table with queued reads and writes."""
     table = MagicMock()
 
     if scan_error is not None:
@@ -158,10 +158,10 @@ def _mock_table(scan_pages=None, scan_error=None):
     else:
         table.scan.side_effect = list(scan_pages or [{'Items': []}])
 
-    batch = MagicMock()
-    table.batch_writer.return_value.__enter__.return_value = batch
+    if put_side_effect is not None:
+        table.put_item.side_effect = put_side_effect
 
-    return table, batch
+    return table
 
 
 def _mutating_calls(*mocks):
@@ -353,7 +353,7 @@ class TestPromotionResponseProperty:
         self, promotion_handler, scenario
     ):
         existing_texts, _keywords, _status, _priority = scenario
-        table, batch = _mock_table(scan_pages=_scan_pages([existing_texts]))
+        table = _mock_table(scan_pages=_scan_pages([existing_texts]))
 
         status_code, body = _invoke_scenario(promotion_handler, table, scenario)
 
@@ -385,7 +385,7 @@ class TestPromotionResponseProperty:
             assert entry['created_at'] == entry['updated_at'], (
                 f'Created entry timestamps differ: {entry!r}'
             )
-        written = [put_call.kwargs['Item'] for put_call in batch.put_item.call_args_list]
+        written = [put_call.kwargs['Item'] for put_call in table.put_item.call_args_list]
         assert written == body['created_keywords'], (
             f'Written items do not match the reported ones: {written}'
         )
@@ -396,8 +396,9 @@ class TestPromotionPersistenceProperty:
     **Property 6: Existing active keywords are never mutated by promotion**
 
     The read path only scans (following `LastEvaluatedKey`, projecting `keyword`
-    through an alias) and the write path only puts new items; no `update_item`
-    or `delete_item` is ever issued. A failed read aborts before any write.
+    through an alias) and the write path only conditionally puts new items; no
+    `update_item` or `delete_item` is ever issued. A failed read aborts before
+    any write.
     """
 
     @given(text_pages=_TEXT_PAGES, items=_NEW_ITEMS)
@@ -406,7 +407,7 @@ class TestPromotionPersistenceProperty:
         self, promotion_handler, text_pages, items
     ):
         pages = _scan_pages(text_pages)
-        table, batch = _mock_table(scan_pages=pages)
+        table = _mock_table(scan_pages=pages)
         all_texts = [text for page in text_pages for text in page]
         expected_keys = {
             promotion_handler.normalize_keyword(text)
@@ -438,21 +439,25 @@ class TestPromotionPersistenceProperty:
                 f'Scan {index + 1} did not follow the previous LastEvaluatedKey: {scan_call.kwargs}'
             )
         table.batch_writer.assert_not_called()
-        assert _mutating_calls(table, batch) == [], 'Reading existing keys issued a mutating call'
+        assert _mutating_calls(table) == [], 'Reading existing keys issued a mutating call'
 
         new_items = [
             item for item in items
             if promotion_handler.normalize_keyword(item['keyword']) not in existing_keys
         ]
-        promotion_handler.write_items(table, new_items)
+        result = promotion_handler.write_items(table, new_items)
 
-        if new_items:
-            table.batch_writer.assert_called_once_with()
-        assert batch.put_item.call_args_list == [call(Item=item) for item in new_items], (
-            f'Unexpected puts {batch.put_item.call_args_list}'
-        )
-        table.put_item.assert_not_called()
-        assert _mutating_calls(table, batch) == [], 'Promotion issued a mutating call'
+        assert result == (new_items, []), f'Unexpected write result {result}'
+        assert table.put_item.call_args_list == [
+            call(
+                Item=item,
+                ConditionExpression='attribute_not_exists(#id)',
+                ExpressionAttributeNames={'#id': 'id'},
+            )
+            for item in new_items
+        ], f'Unexpected puts {table.put_item.call_args_list}'
+        table.batch_writer.assert_not_called()
+        assert _mutating_calls(table) == [], 'Promotion issued a mutating call'
 
     @given(scan_error_code=_SCAN_ERROR_CODES)
     @settings(max_examples=10)
@@ -460,15 +465,14 @@ class TestPromotionPersistenceProperty:
         self, promotion_handler, scan_error_code
     ):
         error = ClientError({'Error': {'Code': scan_error_code, 'Message': 'no'}}, 'Scan')
-        table, batch = _mock_table(scan_error=error)
+        table = _mock_table(scan_error=error)
 
         with pytest.raises(ClientError):
             promotion_handler.load_existing_keyword_keys(table)
 
         table.batch_writer.assert_not_called()
         table.put_item.assert_not_called()
-        assert batch.put_item.call_args_list == [], 'A failed read still wrote items'
-        assert _mutating_calls(table, batch) == [], 'A failed read issued a mutating call'
+        assert _mutating_calls(table) == [], 'A failed read issued a mutating call'
 
 
 # --- Example tests ----------------------------------------------------------
@@ -478,7 +482,7 @@ class TestPromotionPersistenceUnit:
     """Example coverage of the documented read/write edge cases."""
 
     def test_no_keys_are_returned_when_the_table_is_empty(self, promotion_handler):
-        table, _batch = _mock_table(scan_pages=[{'Items': []}])
+        table = _mock_table(scan_pages=[{'Items': []}])
 
         keys = promotion_handler.load_existing_keyword_keys(table)
 
@@ -487,26 +491,98 @@ class TestPromotionPersistenceUnit:
 
     def test_blank_stored_keywords_are_ignored_when_keys_are_read(self, promotion_handler):
         pages = [{'Items': [{'keyword': '   '}, {'keyword': None}, {}, {'keyword': 'seo audit'}]}]
-        table, _batch = _mock_table(scan_pages=pages)
+        table = _mock_table(scan_pages=pages)
 
         keys = promotion_handler.load_existing_keyword_keys(table)
 
         assert keys == {'seo audit'}, f'Expected only the real key, got {keys}'
 
-    def test_no_writer_is_opened_when_there_is_nothing_to_create(self, promotion_handler):
-        table, batch = _mock_table()
+    def test_returns_empty_outcomes_when_there_is_nothing_to_create(self, promotion_handler):
+        table = _mock_table()
 
-        promotion_handler.write_items(table, [])
+        result = promotion_handler.write_items(table, [])
 
+        assert result == ([], [])
+        table.put_item.assert_not_called()
         table.batch_writer.assert_not_called()
-        assert batch.put_item.call_args_list == [], 'An empty write opened a writer'
+
+    def test_reports_only_the_conflicting_item_as_duplicate_when_conditional_write_fails(
+        self, promotion_handler
+    ):
+        items = [
+            {'id': 'alpha-id', 'keyword': 'alpha'},
+            {'id': 'beta-id', 'keyword': 'beta'},
+            {'id': 'gamma-id', 'keyword': 'gamma'},
+        ]
+        conflict = ClientError(
+            {'Error': {'Code': 'ConditionalCheckFailedException', 'Message': 'duplicate'}},
+            'PutItem',
+        )
+        table = _mock_table(put_side_effect=[None, conflict, None])
+
+        result = promotion_handler.write_items(table, items)
+
+        assert result == (
+            [items[0], items[2]],
+            [{'keyword': 'beta', 'reason': promotion_handler.REASON_DUPLICATE}],
+        )
+        assert table.put_item.call_count == 3
+        table.batch_writer.assert_not_called()
+
+    def test_reraises_non_duplicate_write_errors_when_put_fails(self, promotion_handler):
+        error = ClientError(
+            {
+                'Error': {
+                    'Code': 'ProvisionedThroughputExceededException',
+                    'Message': 'throttled',
+                }
+            },
+            'PutItem',
+        )
+        table = _mock_table(put_side_effect=error)
+
+        with pytest.raises(ClientError) as raised:
+            promotion_handler.write_items(table, [{'id': 'alpha-id', 'keyword': 'alpha'}])
+
+        assert raised.value is error
+
+    def test_reports_actual_write_outcomes_when_a_concurrent_promotion_wins(
+        self, promotion_handler
+    ):
+        conflict = ClientError(
+            {'Error': {'Code': 'ConditionalCheckFailedException', 'Message': 'duplicate'}},
+            'PutItem',
+        )
+        table = _mock_table(
+            scan_pages=_scan_pages([['existing']]),
+            put_side_effect=[None, conflict],
+        )
+
+        status_code, body = _invoke(
+            promotion_handler,
+            table,
+            [
+                {'keyword': 'existing'},
+                {'keyword': 'alpha'},
+                {'keyword': 'beta'},
+            ],
+        )
+
+        assert status_code == 200
+        assert body['created'] == 1
+        assert [item['keyword'] for item in body['created_keywords']] == ['alpha']
+        assert body['skipped_keywords'] == [
+            {'keyword': 'existing', 'reason': promotion_handler.REASON_DUPLICATE},
+            {'keyword': 'beta', 'reason': promotion_handler.REASON_DUPLICATE},
+        ]
+        assert body['skipped'] == 2
 
 
 class TestPromotionValidationUnit:
     """Example coverage of the request-rejection boundaries."""
 
     def test_request_is_rejected_when_keyword_list_is_empty(self, promotion_handler):
-        table, batch = _mock_table()
+        table = _mock_table()
 
         status_code, body = _invoke(promotion_handler, table, [])
 
@@ -514,11 +590,10 @@ class TestPromotionValidationUnit:
         assert body['field'] == 'keywords', f'Unexpected field {body.get("field")!r}'
         assert 'error' in body, f'Missing error message in {body}'
         table.scan.assert_not_called()
-        table.batch_writer.assert_not_called()
-        assert batch.put_item.call_args_list == [], 'A rejected request wrote items'
+        table.put_item.assert_not_called()
 
     def test_request_is_rejected_when_keyword_count_exceeds_the_maximum(self, promotion_handler):
-        table, batch = _mock_table()
+        table = _mock_table()
         keywords = [
             {'keyword': f'keyword {index}'}
             for index in range(promotion_handler.MAX_KEYWORDS + 1)
@@ -531,13 +606,12 @@ class TestPromotionValidationUnit:
             f'Error should name the {promotion_handler.MAX_KEYWORDS} limit: {body["error"]!r}'
         )
         table.scan.assert_not_called()
-        table.batch_writer.assert_not_called()
-        assert batch.put_item.call_args_list == [], 'A rejected request wrote items'
+        table.put_item.assert_not_called()
 
     def test_request_is_rejected_when_a_trimmed_keyword_exceeds_the_length_limit(
         self, promotion_handler
     ):
-        table, batch = _mock_table()
+        table = _mock_table()
         too_long = 'a' * (promotion_handler.MAX_KEYWORD_LENGTH + 1)
         keywords = [{'keyword': 'best running shoes'}, {'keyword': f'  {too_long}  '}]
 
@@ -549,8 +623,7 @@ class TestPromotionValidationUnit:
             f'{body["error"]!r}'
         )
         table.scan.assert_not_called()
-        table.batch_writer.assert_not_called()
-        assert batch.put_item.call_args_list == [], 'A rejected request wrote items'
+        table.put_item.assert_not_called()
 
     @pytest.mark.parametrize(
         'keywords',
@@ -564,12 +637,78 @@ class TestPromotionValidationUnit:
     def test_request_is_rejected_when_every_keyword_is_empty_after_trim(
         self, promotion_handler, keywords
     ):
-        table, batch = _mock_table()
+        table = _mock_table()
 
         status_code, body = _invoke(promotion_handler, table, keywords)
 
         assert status_code == 400, f'Expected 400, got {status_code}: {body}'
         assert body['field'] == 'keywords', f'Unexpected field {body.get("field")!r}'
         table.scan.assert_not_called()
-        table.batch_writer.assert_not_called()
-        assert batch.put_item.call_args_list == [], 'A rejected request wrote items'
+        table.put_item.assert_not_called()
+
+
+class TestPromotionMalformedInputUnit:
+    """Malformed client payloads are rejected before DynamoDB access."""
+
+    @pytest.mark.parametrize('body', [None, [], 'keyword', 1])
+    def test_returns_400_when_request_body_is_not_an_object(
+        self, promotion_handler, body
+    ):
+        table = _mock_table()
+        event = {
+            'httpMethod': 'POST',
+            'path': '/api/keywords/promote',
+            'headers': {},
+            'body': json.dumps(body),
+        }
+
+        with patch.object(promotion_handler, 'keywords_table', table):
+            response = promotion_handler.handler(event, None)
+
+        assert response['statusCode'] == 400
+        table.scan.assert_not_called()
+        table.put_item.assert_not_called()
+
+    @pytest.mark.parametrize('entry', [None, 'keyword', 1, []])
+    def test_returns_400_when_keyword_entry_is_not_an_object(
+        self, promotion_handler, entry
+    ):
+        table = _mock_table()
+
+        status_code, body = _invoke(promotion_handler, table, [entry])
+
+        assert status_code == 400
+        assert body['field'] == 'keywords[0]'
+        table.scan.assert_not_called()
+        table.put_item.assert_not_called()
+
+    @pytest.mark.parametrize('value', [1, [], {}])
+    def test_returns_400_when_keyword_value_is_not_a_string(
+        self, promotion_handler, value
+    ):
+        table = _mock_table()
+
+        status_code, body = _invoke(
+            promotion_handler, table, [{'keyword': value}]
+        )
+
+        assert status_code == 400
+        assert body['field'] == 'keywords[0].keyword'
+        table.scan.assert_not_called()
+        table.put_item.assert_not_called()
+
+    def test_returns_400_when_generated_notes_exceed_keyword_notes_limit(
+        self, promotion_handler
+    ):
+        table = _mock_table()
+        keywords = [{
+            'keyword': 'running shoes',
+            'intent': 'x' * promotion_handler.MAX_NOTES_LENGTH,
+        }]
+
+        status_code, body = _invoke(promotion_handler, table, keywords)
+
+        assert status_code == 400
+        assert str(promotion_handler.MAX_NOTES_LENGTH) in body['error']
+        table.scan.assert_not_called()
+        table.put_item.assert_not_called()

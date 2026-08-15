@@ -1,20 +1,27 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi, beforeEach
 } from 'vitest';
 import {
-  renderHook, act 
+  renderHook, act
 } from '@testing-library/react';
 import {
   reduceSelection,
   initialSelectionState,
   promotionSuccessMessage,
+  uniqueResearchKeywords,
   usePromoteKeywords,
   SELECTION_LIMIT,
   SELECTION_LIMIT_MESSAGE,
 } from './usePromoteKeywords';
+import {
+  availableKeywordFixtures,
+  createMockPromotionRequest,
+  createdKeywordItemFixture,
+  replacementAvailableKeywordFixtures,
+} from './usePromoteKeywords-fixtures';
 
 import type {
-  SelectionState, UsePromoteKeywords 
+  SelectionState, UsePromoteKeywords
 } from './usePromoteKeywords';
 import { promoteKeywords } from '../api/keywords';
 
@@ -22,34 +29,16 @@ vi.mock('../api/client', () => ({ apiPost: vi.fn() }));
 
 import { apiPost } from '../api/client';
 
-const mockApiPost = apiPost as ReturnType<typeof vi.fn>;
+const mockApiPost = vi.mocked(apiPost);
 
 /**
  * A selection of exactly SELECTION_LIMIT texts, built programmatically so the
  * cap boundary is exercised without hand-writing 500 literals.
  */
 const atCapSelection = Array.from(
-  {length: SELECTION_LIMIT},
+  { length: SELECTION_LIMIT },
   (_unused, index) => `capped keyword ${index}`
 );
-
-/**
- * A `created_keywords` wire entry: the COMPLETE created item as the backend
- * writes it, which is a superset of the `Keyword` fields the active keyword list
- * reads.
- */
-const createdKeywordItemFixture = {
-  id: 'keyword-1',
-  keyword: 'alpha',
-  status: 'active',
-  created_at: '2024-01-15T10:30:00Z',
-  updated_at: '2024-01-15T10:30:00Z',
-  region: 'global',
-  language: 'en',
-  category: '',
-  priority: 'normal',
-  notes: 'intent: commercial; competition: high',
-};
 
 describe('Property 12: Selection toggling never exceeds the 500-item cap', () => {
   const togglingFixtures = [
@@ -100,7 +89,7 @@ describe('Property 12: Selection toggling never exceeds the 500-item cap', () =>
   it.each(togglingFixtures)(
     'keeps the selection within the cap when $scenario',
     ({
-      initialSelected, toggles, expectedSelected, expectedLimitMessage 
+      initialSelected, toggles, expectedSelected, expectedLimitMessage
     }) => {
       const seedState: SelectionState = {
         ...initialSelectionState,
@@ -108,7 +97,7 @@ describe('Property 12: Selection toggling never exceeds the 500-item cap', () =>
       };
 
       const finalState = toggles.reduce<SelectionState>(
-        (state, keyword) => reduceSelection(state, {
+        (selection, keyword) => reduceSelection(selection, {
           type: 'toggle',
           keyword,
         }),
@@ -124,11 +113,9 @@ describe('Property 12: Selection toggling never exceeds the 500-item cap', () =>
 
 /**
  * `canPromote` is computed by the hook rather than by the reducer, so these
- * cases render the real hook and read its real output. The submitting cells are
- * produced by a promotion request that never settles; the empty-and-submitting
- * cell is reached by clearing the selection while that request is in flight,
- * which is the only way an empty selection can coexist with `submitting`
- * (`promote` refuses to start on an empty selection).
+ * cases render the real hook and read its real output. Submitting cases use a
+ * promotion request that never settles. Clearing the selection cancels that
+ * request, so an empty selection cannot remain in a submitting state.
  */
 interface EnablementFixture {
   scenario: string;
@@ -141,13 +128,13 @@ interface EnablementFixture {
 describe('Property 13: Promotion trigger is enabled exactly when a non-empty selection exists', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockApiPost.mockReturnValue(new Promise(() => undefined));
+    mockApiPost.mockReturnValue(new Promise(vi.fn()));
   });
 
   const enablementFixtures: EnablementFixture[] = [
     {
       scenario: 'the selection is empty and no request is in progress',
-      setupSelection: () => undefined,
+      setupSelection: vi.fn(),
       expectedSelectedCount: 0,
       expectedSubmitting: false,
       expectedCanPromote: false,
@@ -191,7 +178,7 @@ describe('Property 13: Promotion trigger is enabled exactly when a non-empty sel
         });
       },
       expectedSelectedCount: 0,
-      expectedSubmitting: true,
+      expectedSubmitting: false,
       expectedCanPromote: false,
     },
   ];
@@ -199,9 +186,9 @@ describe('Property 13: Promotion trigger is enabled exactly when a non-empty sel
   it.each(enablementFixtures)(
     'reports canPromote $expectedCanPromote when $scenario',
     ({
-      setupSelection, expectedSelectedCount, expectedSubmitting, expectedCanPromote 
+      setupSelection, expectedSelectedCount, expectedSubmitting, expectedCanPromote
     }) => {
-      const { result } = renderHook(() => usePromoteKeywords());
+      const { result } = renderHook(() => usePromoteKeywords(availableKeywordFixtures));
 
       setupSelection(() => result.current);
 
@@ -258,7 +245,7 @@ describe('Property 14: Successful promotion clears created keywords and retains 
   it.each(reconciliationFixtures)(
     'retains the original selection minus created plus skipped when $scenario',
     ({
-      selected, created, skipped, expectedSelected 
+      selected, created, skipped, expectedSelected
     }) => {
       const seedState: SelectionState = {
         ...initialSelectionState,
@@ -297,14 +284,9 @@ describe('Property 14: Successful promotion clears created keywords and retains 
       ],
     });
 
-    const outcome = await promoteKeywords({
+    const promotionOutcome = await promoteKeywords({
       keywords: [
-        {
-          keyword: 'alpha',
-          intent: 'commercial',
-          competition: 'high',
-          relevance: 90,
-        },
+        availableKeywordFixtures[0],
         {
           keyword: 'beta',
           intent: 'informational',
@@ -314,12 +296,10 @@ describe('Property 14: Successful promotion clears created keywords and retains 
       ],
     });
 
-    expect(outcome.skipped).toBe(outcome.skippedKeywords.length);
-    expect(outcome.skippedKeywords).toStrictEqual(['beta', 'gamma']);
-    expect(outcome.created).toBe(outcome.createdKeywords.length);
-    // The complete created items pass through untouched, ready for the active
-    // keyword list.
-    expect(outcome.createdItems).toStrictEqual([createdKeywordItemFixture]);
+    expect(promotionOutcome.skipped).toBe(promotionOutcome.skippedKeywords.length);
+    expect(promotionOutcome.skippedKeywords).toStrictEqual(['beta', 'gamma']);
+    expect(promotionOutcome.created).toBe(promotionOutcome.createdKeywords.length);
+    expect(promotionOutcome.createdItems).toStrictEqual([createdKeywordItemFixture]);
   });
 });
 
@@ -354,7 +334,7 @@ describe('promotionSuccessMessage', () => {
   it.each(messageFixtures)(
     'reads "$expectedMessage" when $scenario',
     ({
-      created, skipped, expectedMessage 
+      created, skipped, expectedMessage
     }) => {
       const message = promotionSuccessMessage({
         created,
@@ -367,4 +347,235 @@ describe('promotionSuccessMessage', () => {
       expect(message).toBe(expectedMessage);
     }
   );
+});
+
+describe('promotion request safety', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApiPost.mockReturnValue(new Promise(vi.fn()));
+  });
+
+  it('sends one request when promotion is triggered twice before rendering updates', () => {
+    const { result } = renderHook(() => usePromoteKeywords(availableKeywordFixtures));
+
+    act(() => {
+      result.current.toggle('alpha');
+    });
+    act(() => {
+      void result.current.promote();
+      void result.current.promote();
+    });
+
+    expect(mockApiPost).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts the pending request when the hook unmounts', () => {
+    const {
+      result, unmount
+    } = renderHook(() => usePromoteKeywords(availableKeywordFixtures));
+
+    act(() => {
+      result.current.toggle('alpha');
+    });
+    act(() => {
+      void result.current.promote();
+    });
+    unmount();
+
+    expect(mockApiPost).toHaveBeenCalledWith(
+      '/keywords/promote',
+      { keywords: availableKeywordFixtures },
+      {
+        signal: expect.objectContaining({ aborted: true }),
+        allowStructured4xx: true,
+      }
+    );
+  });
+
+  it('clears the request timeout when the hook unmounts during promotion', () => {
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const {
+      result, unmount
+    } = renderHook(() => usePromoteKeywords(availableKeywordFixtures));
+
+    act(() => {
+      result.current.toggle('alpha');
+    });
+    act(() => {
+      void result.current.promote();
+    });
+    const callsBeforeUnmount = clearTimeoutSpy.mock.calls.length;
+    unmount();
+
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(callsBeforeUnmount + 1);
+    clearTimeoutSpy.mockRestore();
+  });
+
+  it('cancels stale promotion when available keywords change', () => {
+    const {
+      result, rerender
+    } = renderHook(
+      ({ availableKeywords }) => usePromoteKeywords(availableKeywords),
+      { initialProps: { availableKeywords: availableKeywordFixtures } }
+    );
+
+    act(() => {
+      result.current.toggle('alpha');
+    });
+    act(() => {
+      void result.current.promote();
+    });
+    rerender({ availableKeywords: replacementAvailableKeywordFixtures });
+
+    expect(mockApiPost).toHaveBeenCalledWith(
+      '/keywords/promote',
+      { keywords: availableKeywordFixtures },
+      {
+        signal: expect.objectContaining({ aborted: true }),
+        allowStructured4xx: true,
+      }
+    );
+    expect(result.current.selected).toStrictEqual([]);
+    expect(result.current.submitting).toBe(false);
+  });
+
+  it('clears the request timeout when available keywords change during promotion', () => {
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    const {
+      result, rerender
+    } = renderHook(
+      ({ availableKeywords }) => usePromoteKeywords(availableKeywords),
+      { initialProps: { availableKeywords: availableKeywordFixtures } }
+    );
+
+    act(() => {
+      result.current.toggle('alpha');
+    });
+    act(() => {
+      void result.current.promote();
+    });
+    const callsBeforeRerender = clearTimeoutSpy.mock.calls.length;
+    rerender({ availableKeywords: replacementAvailableKeywordFixtures });
+
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(callsBeforeRerender + 1);
+    clearTimeoutSpy.mockRestore();
+  });
+
+  it('aborts the pending request when the selection is cleared', () => {
+    const { result } = renderHook(() => usePromoteKeywords(availableKeywordFixtures));
+
+    act(() => {
+      result.current.toggle('alpha');
+    });
+    act(() => {
+      void result.current.promote();
+    });
+    act(() => {
+      result.current.clearSelection();
+    });
+
+    expect(mockApiPost).toHaveBeenCalledWith(
+      '/keywords/promote',
+      { keywords: availableKeywordFixtures },
+      {
+        signal: expect.objectContaining({ aborted: true }),
+        allowStructured4xx: true,
+      }
+    );
+    expect(result.current.submitting).toBe(false);
+  });
+
+  it('ignores the result when a cancelled promotion settles', async () => {
+    const promotionRequest = createMockPromotionRequest();
+    const onKeywordsAdded = vi.fn();
+    mockApiPost.mockReturnValue(promotionRequest.promise);
+    const {
+      result, rerender
+    } = renderHook(
+      ({ availableKeywords }) => usePromoteKeywords(availableKeywords, onKeywordsAdded),
+      { initialProps: { availableKeywords: availableKeywordFixtures } }
+    );
+
+    act(() => {
+      result.current.toggle('alpha');
+    });
+    act(() => {
+      void result.current.promote();
+    });
+    rerender({ availableKeywords: replacementAvailableKeywordFixtures });
+    await act(async () => {
+      promotionRequest.resolve();
+      await promotionRequest.promise;
+    });
+
+    expect(result.current.outcome).toBeNull();
+    expect(result.current.error).toBeNull();
+    expect(result.current.selected).toStrictEqual([]);
+    expect(onKeywordsAdded).toHaveBeenCalledTimes(0);
+  });
+
+  it('does not clear the request timeout again when a cancelled promotion settles', async () => {
+    const promotionRequest = createMockPromotionRequest();
+    const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
+    mockApiPost.mockReturnValue(promotionRequest.promise);
+    const {
+      result, rerender
+    } = renderHook(
+      ({ availableKeywords }) => usePromoteKeywords(availableKeywords),
+      { initialProps: { availableKeywords: availableKeywordFixtures } }
+    );
+
+    act(() => {
+      result.current.toggle('alpha');
+    });
+    act(() => {
+      void result.current.promote();
+    });
+    rerender({ availableKeywords: replacementAvailableKeywordFixtures });
+    const callsAfterCancellation = clearTimeoutSpy.mock.calls.length;
+    await act(async () => {
+      promotionRequest.resolve();
+      await promotionRequest.promise;
+    });
+
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(callsAfterCancellation);
+    clearTimeoutSpy.mockRestore();
+  });
+});
+
+describe('research keyword identity', () => {
+  it('keeps the first row when keywords differ only by case and whitespace', () => {
+    const duplicate = {
+      ...availableKeywordFixtures[0],
+      keyword: '  ALPHA  ',
+      intent: 'informational',
+    };
+    const beta = {
+      ...availableKeywordFixtures[0],
+      keyword: 'beta',
+    };
+
+    const uniqueKeywords = uniqueResearchKeywords([
+      availableKeywordFixtures[0],
+      duplicate,
+      beta,
+    ]);
+
+    expect(uniqueKeywords).toStrictEqual([availableKeywordFixtures[0], beta]);
+  });
+
+  it('keeps the first row when keywords use compatibility-equivalent Unicode', () => {
+    const compatibilityDuplicate = {
+      ...availableKeywordFixtures[0],
+      keyword: '  ＡＬＰＨＡ  ',
+      intent: 'informational',
+    };
+
+    const uniqueKeywords = uniqueResearchKeywords([
+      availableKeywordFixtures[0],
+      compatibilityDuplicate,
+    ]);
+
+    expect(uniqueKeywords).toStrictEqual([availableKeywordFixtures[0]]);
+  });
 });

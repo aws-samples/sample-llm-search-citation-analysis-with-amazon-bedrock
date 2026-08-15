@@ -1,8 +1,8 @@
 import {
-  useEffect, useMemo, useState 
+  useEffect, useMemo, useState
 } from 'react';
 import type {
-  Keyword, KeywordExpansionResult 
+  Keyword, KeywordExpansionResult
 } from '../../types';
 import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { KeywordResultsTable } from './KeywordResultsTable';
@@ -65,7 +65,7 @@ const INDUSTRIES = [
 ];
 
 export const KeywordExpansion = ({
-  onExpand, loading, result, error, onKeywordsAdded 
+  onExpand, loading, result, error, onKeywordsAdded
 }: KeywordExpansionProps) => {
   const [seedKeyword, setSeedKeyword] = useState('');
   const [industry, setIndustry] = useState('general');

@@ -199,7 +199,7 @@ class TestPromoteRoutingUnit:
         _assert_only_target_called(stubs, 'promote-keywords.py', event, result)
 
     @pytest.mark.parametrize('method', ['PUT', 'DELETE'])
-    def test_routes_to_promote_keywords_when_other_method_on_promote_path(
+    def test_does_not_dispatch_when_other_method_targets_promote_path(
         self, keyword_mgmt_router, method
     ):
         # Arrange
@@ -210,7 +210,25 @@ class TestPromoteRoutingUnit:
         result = mod.handler(event, None)
 
         # Assert
-        _assert_only_target_called(stubs, 'promote-keywords.py', event, result)
+        assert result['statusCode'] == 400
+        for stub in stubs.values():
+            stub.assert_not_called()
+
+    def test_returns_not_found_when_post_targets_promote_descendant(
+        self, keyword_mgmt_router
+    ):
+        # Arrange
+        mod, stubs = keyword_mgmt_router
+        child_path = f'{_PROMOTE_PATH}/unexpected'
+        event = _request_event(child_path, child_path, 'POST')
+
+        # Act
+        result = mod.handler(event, None)
+
+        # Assert
+        assert result['statusCode'] == 404
+        for stub in stubs.values():
+            stub.assert_not_called()
 
 
 # --- Pre-existing routes ---------------------------------------------------

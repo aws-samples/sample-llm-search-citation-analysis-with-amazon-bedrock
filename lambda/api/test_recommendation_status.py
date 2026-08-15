@@ -172,7 +172,7 @@ def test_post_sets_ttl_approximately_90_days_in_the_future(loaded):
 
 
 def test_post_response_body_contains_the_persisted_item(loaded):
-    mod, table, _ddb = loaded
+    mod, _table, _ddb = loaded
     result = mod.handler(_post_event('abc', {'status': 'done'}), None)
     body = json.loads(result['body'])
     assert body['recommendation_id'] == 'abc'

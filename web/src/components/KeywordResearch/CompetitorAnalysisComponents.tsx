@@ -1,6 +1,9 @@
 import type {
-  CompetitorAnalysisResult, ExpandedKeywordWithSource 
+  CompetitorAnalysisResult, ExpandedKeywordWithSource
 } from '../../types';
+import {
+  keywordSelectionKey, uniqueResearchKeywords
+} from '../../hooks/usePromoteKeywords';
 import { Spinner } from '../ui/Spinner';
 
 type SectionId = 'primary' | 'secondary' | 'longtail' | 'gaps';
@@ -68,7 +71,7 @@ export const getKeywordsForSection = (
     longtail: result.longtail_keywords,
     gaps: result.content_gaps,
   };
-  return keywordMap[sectionId] ?? [];
+  return uniqueResearchKeywords(keywordMap[sectionId] ?? []);
 };
 
 interface InputFormProps {
@@ -251,14 +254,14 @@ interface KeywordRowProps {
 }
 
 const KeywordRow = ({
-  keyword: kw, showOpportunity, selectable = false, selected, onToggle 
+  keyword: kw, showOpportunity, selectable = false, selected, onToggle
 }: KeywordRowProps) => (
   <tr className="hover:bg-gray-50">
     {selectable && (
       <td className="px-6 py-4">
         <input
           type="checkbox"
-          checked={selected?.has(kw.keyword) ?? false}
+          checked={selected?.has(keywordSelectionKey(kw.keyword)) ?? false}
           onChange={() => onToggle?.(kw.keyword)}
           aria-label={`Select ${kw.keyword}`}
           className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
@@ -309,7 +312,7 @@ interface KeywordsTableProps {
 }
 
 export const KeywordsTable = ({
-  keywords, showOpportunity, selectable = false, selected, onToggle 
+  keywords, showOpportunity, selectable = false, selected, onToggle
 }: KeywordsTableProps) => (
   <div className="overflow-x-auto">
     <table className="w-full">
@@ -340,7 +343,7 @@ export const KeywordsTable = ({
         ) : (
           keywords.map((kw) => (
             <KeywordRow
-              key={kw.keyword}
+              key={keywordSelectionKey(kw.keyword)}
               keyword={kw}
               showOpportunity={showOpportunity}
               selectable={selectable}

@@ -1,8 +1,8 @@
 import {
-  useEffect, useMemo, useState 
+  useEffect, useMemo, useState
 } from 'react';
 import type {
-  CompetitorAnalysisResult, Keyword 
+  CompetitorAnalysisResult, Keyword
 } from '../../types';
 import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { KeywordPromotionControls } from './KeywordPromotionControls';

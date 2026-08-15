@@ -1,21 +1,21 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi, beforeEach
 } from 'vitest';
 import {
-  render, screen, waitFor 
+  render, screen, waitFor
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ResearchHistory } from './ResearchHistory';
 import { SELECTION_LIMIT } from '../../hooks/usePromoteKeywords';
 import type {
-  ExpandedKeywordWithSource, KeywordResearchItem 
+  ExpandedKeywordWithSource, KeywordResearchItem
 } from '../../types';
 
 vi.mock('../../api/client', () => ({ apiPost: vi.fn() }));
 
 import { apiPost } from '../../api/client';
 
-const mockApiPost = apiPost as ReturnType<typeof vi.fn>;
+const mockApiPost = vi.mocked(apiPost);
 
 function buildHistoryItem(overrides: Partial<KeywordResearchItem> = {}): KeywordResearchItem {
   const defaults: KeywordResearchItem = {
@@ -30,13 +30,13 @@ function buildHistoryItem(overrides: Partial<KeywordResearchItem> = {}): Keyword
         keyword: 'luxury hotels',
         intent: 'transactional',
         competition: 'high',
-        relevance: 0.9 
+        relevance: 0.9
       },
       {
         keyword: 'beach resorts',
         intent: 'transactional',
         competition: 'medium',
-        relevance: 0.8 
+        relevance: 0.8
       },
     ],
     ...overrides,
@@ -235,7 +235,10 @@ describe('ResearchHistory promotion UI', () => {
     expect(mockApiPost).toHaveBeenCalledWith(
       '/keywords/promote',
       { keywords: [competitorPrimaryKeywordFixture] },
-      { signal: expect.any(AbortSignal) }
+      {
+        signal: expect.any(AbortSignal),
+        allowStructured4xx: true,
+      }
     );
   });
 

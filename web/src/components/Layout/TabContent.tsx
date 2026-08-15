@@ -1,31 +1,33 @@
 import {
-  lazy, Suspense, useCallback, type ReactNode 
+  lazy, Suspense, useCallback, type ReactNode
 } from 'react';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { Spinner } from '../ui/Spinner';
 import {
-  SearchIcon, LinkIcon, GlobeIcon, KeyIcon 
+  SearchIcon, LinkIcon, GlobeIcon, KeyIcon
 } from '../ui';
 import { StatCard } from '../Dashboard/StatCard';
 import { ProviderChart } from '../Dashboard/ProviderChart';
 import { BrandChart } from '../Dashboard/BrandChart';
+import type { SettingsTab } from '../Settings';
+import { keywordSelectionKey } from '../../hooks/usePromoteKeywords';
 import type {
-  TabType, Stats, Citations, Search, Keyword, Execution, Schedule 
+  TabType, Stats, Citations, Search, Keyword, Execution, Schedule
 } from '../../types';
 
-const ExecutionMonitor = lazy(() => import('../Execution/ExecutionMonitor').then(m => ({ default: m.ExecutionMonitor })));
-const ScheduleManager = lazy(() => import('../Schedule/ScheduleManager').then(m => ({ default: m.ScheduleManager })));
-const BrandsView = lazy(() => import('../Brands/BrandsView').then(m => ({ default: m.BrandsView })));
-const CitationsView = lazy(() => import('../Citations').then(m => ({ default: m.CitationsView })));
-const SearchesView = lazy(() => import('../Searches').then(m => ({ default: m.SearchesView })));
-const SettingsView = lazy(() => import('../Settings').then(m => ({ default: m.SettingsView })));
-const RawResponsesExplorer = lazy(() => import('../RawResponses').then(m => ({ default: m.RawResponsesExplorer })));
-const KeywordResearchView = lazy(() => import('../KeywordResearch').then(m => ({ default: m.KeywordResearchView })));
-const VisibilityDashboard = lazy(() => import('../Visibility').then(m => ({ default: m.VisibilityDashboard })));
-const PromptInsights = lazy(() => import('../Insights').then(m => ({ default: m.PromptInsights })));
-const CitationGaps = lazy(() => import('../Insights').then(m => ({ default: m.CitationGaps })));
-const Recommendations = lazy(() => import('../Insights').then(m => ({ default: m.Recommendations })));
-const ContentStudioView = lazy(() => import('../ContentStudio').then(m => ({ default: m.ContentStudioView })));
+const ExecutionMonitor = lazy(() => import('../Execution/ExecutionMonitor').then(module => ({ default: module.ExecutionMonitor })));
+const ScheduleManager = lazy(() => import('../Schedule/ScheduleManager').then(module => ({ default: module.ScheduleManager })));
+const BrandsView = lazy(() => import('../Brands/BrandsView').then(module => ({ default: module.BrandsView })));
+const CitationsView = lazy(() => import('../Citations').then(module => ({ default: module.CitationsView })));
+const SearchesView = lazy(() => import('../Searches').then(module => ({ default: module.SearchesView })));
+const SettingsView = lazy(() => import('../Settings').then(module => ({ default: module.SettingsView })));
+const RawResponsesExplorer = lazy(() => import('../RawResponses').then(module => ({ default: module.RawResponsesExplorer })));
+const KeywordResearchView = lazy(() => import('../KeywordResearch').then(module => ({ default: module.KeywordResearchView })));
+const VisibilityDashboard = lazy(() => import('../Visibility').then(module => ({ default: module.VisibilityDashboard })));
+const PromptInsights = lazy(() => import('../Insights').then(module => ({ default: module.PromptInsights })));
+const CitationGaps = lazy(() => import('../Insights').then(module => ({ default: module.CitationGaps })));
+const Recommendations = lazy(() => import('../Insights').then(module => ({ default: module.Recommendations })));
+const ContentStudioView = lazy(() => import('../ContentStudio').then(module => ({ default: module.ContentStudioView })));
 
 interface TabContentProps {
   readonly activeTab: TabType;
@@ -39,13 +41,28 @@ interface TabContentProps {
   readonly execution: Execution | null;
   readonly triggerAnalysis: (keywords?: string[]) => Promise<{
     success: boolean;
-    message: string 
+    message: string
   }>;
   readonly startMonitoring: (arn: string, name: string) => void;
   readonly isRunning: boolean;
   readonly rawResponsesPath?: string;
+  readonly settingsInitialTab?: SettingsTab;
   readonly setActiveTab: (tab: TabType) => void;
   readonly onNavigateToRawResponses: (path: string) => void;
+}
+
+function mergeCreatedKeywords(existing: Keyword[], created: Keyword[]): Keyword[] {
+  const ids = new Set(existing.map((keyword) => keyword.id));
+  const identities = new Set(existing.map((keyword) => keywordSelectionKey(keyword.keyword)));
+  const additions = created.filter((keyword) => {
+    const identity = keywordSelectionKey(keyword.keyword);
+    if (ids.has(keyword.id) || identities.has(identity)) return false;
+    ids.add(keyword.id);
+    identities.add(identity);
+    return true;
+  });
+
+  return additions.length === 0 ? existing : [...existing, ...additions];
 }
 
 function LazyLoadFallback() {
@@ -87,7 +104,7 @@ function DashboardCharts({ citations }: { readonly citations: Citations | null }
 }
 
 function QuickActions({
-  citations, keywords, setActiveTab 
+  citations, keywords, setActiveTab
 }: {
   readonly citations: Citations | null;
   readonly keywords: Keyword[];
@@ -134,7 +151,7 @@ function QuickActions({
 }
 
 function DashboardContent({
-  stats, citations, keywords, setActiveTab 
+  stats, citations, keywords, setActiveTab
 }: {
   readonly stats: Stats | null;
   readonly citations: Citations | null;
@@ -165,15 +182,13 @@ export function TabContent(props: TabContentProps) {
     startMonitoring,
     isRunning,
     rawResponsesPath,
+    settingsInitialTab,
     setActiveTab,
     onNavigateToRawResponses,
   } = props;
 
-  // Keywords promoted from research join the active list immediately, with no
-  // refetch: the research view reports the created items and they are appended
-  // to the state `useDashboardData` owns.
   const appendKeywords = useCallback((created: Keyword[]) => {
-    setKeywords((previous) => [...previous, ...created]);
+    setKeywords((previous) => mergeCreatedKeywords(previous, created));
   }, [setKeywords]);
 
   if (activeTab === 'dashboard') {
@@ -189,8 +204,8 @@ export function TabContent(props: TabContentProps) {
     recommendations: <Recommendations />,
     'content-studio': <ContentStudioView />,
     execution: <ExecutionMonitor execution={execution} triggerAnalysis={triggerAnalysis} keywordsCount={keywords.length} keywords={keywords} />,
-    schedule: <ScheduleManager schedules={schedules} setSchedules={setSchedules} />,
-    settings: <SettingsView keywords={keywords} setKeywords={setKeywords} />,
+    schedule: <ScheduleManager schedules={schedules} setSchedules={setSchedules} keywords={keywords} />,
+    settings: <SettingsView keywords={keywords} setKeywords={setKeywords} initialTab={settingsInitialTab} />,
     searches: (
       <SearchesView
         searches={searches}

@@ -38,6 +38,18 @@ const bedrockTierEnv = {
 } as const;
 
 /**
+ * Thrown at synth time when a Lambda layer's local build output is missing.
+ * Layers must be built (scripts/deploy.sh or the per-layer build-layer.sh)
+ * before `cdk synth`/`cdk deploy`.
+ */
+class LayerNotBuiltError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LayerNotBuiltError';
+  }
+}
+
+/**
  * Creates optimized Lambda code bundle containing only the specific handler file
  * plus shared utilities (decimal_utils.py). This reduces deployment package size
  * and improves cold start times compared to bundling all API handlers together.
@@ -707,7 +719,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     const sharedLayerPath = path.join(__dirname, '../lambda/layer');
     const sharedLayerPythonPath = path.join(sharedLayerPath, 'python');
     if (!fs.existsSync(sharedLayerPythonPath) || fs.readdirSync(sharedLayerPythonPath).length === 0) {
-      throw new Error(
+      throw new LayerNotBuiltError(
         'Shared layer not built. Run: bash lambda/layer/build-layer.sh\n' +
         'Or use scripts/deploy.sh which builds all layers automatically.'
       );
@@ -745,12 +757,17 @@ export class CitationAnalysisStack extends cdk.Stack {
         // Audit #12 canonical name + legacy for in-flight rollouts.
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
         KEYWORDS_TABLE: keywordsTable.tableName,
+        // Enabled query prompts are resolved here for executions whose input
+        // does not carry them (EventBridge schedules).
+        DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
+        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
       },
     });
 
-    // Grant ParseKeywords Lambda read access to keywords bucket and table
+    // Grant ParseKeywords Lambda read access to keywords bucket and tables
     keywordsBucket.grantRead(parseKeywordsFunction);
     keywordsTable.grantReadData(parseKeywordsFunction);
+    queryPromptsTable.grantReadData(parseKeywordsFunction);
 
     // Search Lambda Function
     const searchLogGroup = new logs.LogGroup(this, 'SearchLogGroup', {
@@ -818,7 +835,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     const crawlerLayerPath = path.join(__dirname, '../lambda/crawler-layer');
     const crawlerLayerPythonPath = path.join(crawlerLayerPath, 'python');
     if (!fs.existsSync(crawlerLayerPythonPath) || fs.readdirSync(crawlerLayerPythonPath).length === 0) {
-      throw new Error(
+      throw new LayerNotBuiltError(
         'Crawler layer not built. Run: bash lambda/crawler-layer/build-layer.sh\n' +
         'Or use scripts/deploy.sh which builds all layers automatically.'
       );
@@ -1005,7 +1022,12 @@ export class CitationAnalysisStack extends cdk.Stack {
       itemSelector: {
         'keyword.$': '$$.Map.Item.Value.keyword',
         'timestamp.$': '$$.Map.Item.Value.timestamp',
-        'query_prompts.$': '$$.Execution.Input.query_prompts',
+        // query_prompts comes from the ParseKeywords output (this state's
+        // input), NOT the raw execution input: scheduled runs don't carry
+        // prompts in their input, so ParseKeywords resolves them and always
+        // emits the key. Referencing $$.Execution.Input.query_prompts here
+        // would raise States.Runtime for scheduled executions.
+        'query_prompts.$': '$.query_prompts',
       },
     }).itemProcessor(processKeywordChain);
 
@@ -2377,12 +2399,6 @@ def delete_waf(waf, arn):
     // for consolidated functions. The wildcard permission above covers all methods.
     // We use Aspects to remove them after synthesis since they're created on the
     // API Gateway method constructs, not on the Lambda.
-    const consolidatedLogicalPrefixes: string[] = [];
-    for (const fn of consolidatedFunctions) {
-      const cfnFn = fn.node.defaultChild as cdk.CfnResource;
-      consolidatedLogicalPrefixes.push(cfnFn.logicalId);
-    }
-
     class RemoveDuplicatePermissions implements cdk.IAspect {
       private readonly fnArns: Set<string>;
       private readonly fnArnStrings: string[];

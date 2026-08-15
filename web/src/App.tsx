@@ -1,28 +1,31 @@
 import {
-  useState, useEffect 
+  useState, useEffect
 } from 'react';
 import {
-  BrowserRouter, Routes, Route, useNavigate, useLocation 
+  BrowserRouter, Routes, Route, useNavigate, useLocation
 } from 'react-router-dom';
 import { Amplify } from 'aws-amplify';
 import { signOut } from 'aws-amplify/auth';
 import {
-  useAuthenticator, Authenticator 
+  useAuthenticator, Authenticator
 } from '@aws-amplify/ui-react';
 import '@aws-amplify/ui-react/styles.css';
 import { useDashboardData } from './hooks/useDashboardData';
 import { useExecutionPolling } from './hooks/useExecutionPolling';
 import { usePrintMode } from './hooks/usePrintMode';
+import { KEYWORD_RECONCILIATION_CONTEXT } from './hooks/usePromoteKeywords';
 import { Sidebar } from './components/Layout/Sidebar';
 import { TabContent } from './components/Layout/TabContent';
 import { ReportsRouter } from './components/Reports/ReportsRouter';
 import { ConfirmModal } from './components/ui/Modal';
 import { AboutModal } from './components/About';
+import { OnboardingModal } from './components/Onboarding';
 import { ThemeToggle } from './components/ui/ThemeToggle';
 import { PrintToPdfButton } from './components/ui/PrintToPdfButton';
 import { Spinner } from './components/ui/Spinner';
+import type { SettingsTab } from './components/Settings';
 import type {
-  TabType, Schedule 
+  TabType, Schedule
 } from './types';
 
 Amplify.configure({
@@ -55,7 +58,7 @@ const TAB_TO_PATH: Record<TabType, string> = {
 const PATH_TO_TAB: Record<string, TabType> = Object.entries(TAB_TO_PATH).reduce<Record<string, TabType>>(
   (acc, [tab, path]) => ({
     ...acc,
-    [path]: tab as TabType 
+    [path]: tab as TabType,
   }),
   {}
 );
@@ -85,27 +88,27 @@ function Login() {
             signIn: {
               username: {
                 label: 'Email Address',
-                placeholder: 'Enter your email address' 
-              } 
+                placeholder: 'Enter your email address',
+              },
             },
             signUp: {
               email: {
                 label: 'Email Address',
                 placeholder: 'Enter your email address',
                 isRequired: true,
-                order: 1 
+                order: 1,
               },
               password: {
                 label: 'Password',
                 placeholder: 'Enter your password',
                 isRequired: true,
-                order: 2 
+                order: 2,
               },
               confirm_password: {
                 label: 'Confirm Password',
                 placeholder: 'Confirm your password',
                 isRequired: true,
-                order: 3 
+                order: 3,
               },
             },
           }}
@@ -147,22 +150,32 @@ const PAGE_TITLES: Record<TabType, string> = {
 function MainApp() {
   const navigate = useNavigate();
   const location = useLocation();
-  
+
   const activeTab = resolveActiveTab(location.pathname);
   const isReportRoute = location.pathname.startsWith('/reports');
-  
+
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [rawResponsesPath, setRawResponsesPath] = useState<string | undefined>(undefined);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
 
   const {
-    stats, citations, searches, keywords, setKeywords, loading, error, lastUpdate, refetch 
+    stats,
+    citations,
+    searches,
+    keywords,
+    setKeywords,
+    loading,
+    error,
+    lastUpdate,
+    refetch,
+    reconcileKeywords,
   } = useDashboardData();
   const {
-    execution, triggerAnalysis, startMonitoring, isRunning 
+    execution, triggerAnalysis, startMonitoring, isRunning
   } = useExecutionPolling(refetch);
 
   // Print mode: when ?print=1 is in the URL we hide the sidebar/header chrome
@@ -179,6 +192,13 @@ function MainApp() {
     }
   }, [location.pathname]);
 
+  // Clear the settings deep-link when navigating away from settings
+  useEffect(() => {
+    if (location.pathname !== '/settings') {
+      setSettingsInitialTab(undefined);
+    }
+  }, [location.pathname]);
+
   const handleTabChange = (tab: TabType) => {
     const targetPath = TAB_TO_PATH[tab];
     if (isRunning && activeTab === 'execution') {
@@ -192,6 +212,11 @@ function MainApp() {
   const handleNavigateToRawResponses = (path: string) => {
     setRawResponsesPath(path);
     navigate('/raw-responses');
+  };
+
+  const handleNavigateToSettings = (tab: SettingsTab) => {
+    setSettingsInitialTab(tab);
+    navigate('/settings');
   };
 
   const confirmLeaveExecution = () => {
@@ -273,8 +298,8 @@ function MainApp() {
                 onClick={async () => {
                   try {
                     await signOut();
-                  } catch (error) {
-                    console.error('Sign out error:', error);
+                  } catch (signOutError) {
+                    console.error('Sign out error:', signOutError);
                   }
                 }}
                 className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
@@ -300,27 +325,30 @@ function MainApp() {
 
         <div className="p-4 sm:p-6 lg:p-8">
           <div className="max-w-7xl mx-auto">
-            {isReportRoute ? (
-              <ReportsRouter keywords={keywords} />
-            ) : (
-              <TabContent
-                activeTab={activeTab}
-                stats={stats}
-                citations={citations}
-                searches={searches}
-                keywords={keywords}
-                setKeywords={setKeywords}
-                schedules={schedules}
-                setSchedules={setSchedules}
-                execution={execution}
-                triggerAnalysis={triggerAnalysis}
-                startMonitoring={startMonitoring}
-                isRunning={isRunning}
-                rawResponsesPath={rawResponsesPath}
-                setActiveTab={setActiveTab}
-                onNavigateToRawResponses={handleNavigateToRawResponses}
-              />
-            )}
+            <KEYWORD_RECONCILIATION_CONTEXT.Provider value={reconcileKeywords}>
+              {isReportRoute ? (
+                <ReportsRouter keywords={keywords} />
+              ) : (
+                <TabContent
+                  activeTab={activeTab}
+                  stats={stats}
+                  citations={citations}
+                  searches={searches}
+                  keywords={keywords}
+                  setKeywords={setKeywords}
+                  schedules={schedules}
+                  setSchedules={setSchedules}
+                  execution={execution}
+                  triggerAnalysis={triggerAnalysis}
+                  startMonitoring={startMonitoring}
+                  isRunning={isRunning}
+                  rawResponsesPath={rawResponsesPath}
+                  settingsInitialTab={settingsInitialTab}
+                  setActiveTab={setActiveTab}
+                  onNavigateToRawResponses={handleNavigateToRawResponses}
+                />
+              )}
+            </KEYWORD_RECONCILIATION_CONTEXT.Provider>
           </div>
         </div>
       </main>
@@ -337,6 +365,17 @@ function MainApp() {
         confirmText="Leave"
         confirmVariant="primary"
       />
+
+      {/* First-run setup guide; mounts app-wide so it is visible regardless
+          of which tab is active when the setup status resolves. */}
+      {!isPrintMode && (
+        <OnboardingModal
+          keywordsCount={keywords.length}
+          hasRunAnalysis={(stats?.total_searches ?? 0) > 0}
+          setActiveTab={setActiveTab}
+          onNavigateToSettings={handleNavigateToSettings}
+        />
+      )}
 
       <AboutModal isOpen={showAbout} onClose={() => setShowAbout(false)} />
     </div>

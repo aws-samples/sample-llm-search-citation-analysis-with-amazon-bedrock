@@ -5,19 +5,21 @@ Retrieves brand mentions from search results for a specific keyword.
 Supports multiple industries and brand classification (first_party, competitor, other).
 """
 
+import logging
 import os
 import sys
-import logging
+from typing import Any
+
 import boto3
 from boto3.dynamodb.conditions import Key
-from typing import Dict, Any, List
+
 from decimal_utils import to_int
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.decorators import api_handler, validate, require_keyword, optional_provider
-from shared.api_response import success_response, not_found_response
+from shared.api_response import not_found_response, success_response
+from shared.decorators import api_handler, optional_provider, require_keyword, validate
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -29,31 +31,31 @@ dynamodb = boto3.resource('dynamodb')
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 
 
-def aggregate_brand_mentions(results: List[Dict[str, Any]], config: Dict[str, Any] = None) -> Dict[str, Any]:
+def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     Aggregate brand mentions across all providers.
-    
+
     Returns:
         Dict with aggregated brand data including cross-provider rankings
     """
     brand_scores = {}  # brand_name -> {providers: [], total_mentions: int, best_rank: int}
-    
+
     for result in results:
         provider = result.get('provider', 'unknown')
         brands = result.get('brands', [])
-        
+
         for brand in brands:
             name = brand.get('name')
             if not name:
                 continue
-            
+
             normalized_name = name.lower()
-            
+
             if normalized_name not in brand_scores:
                 # Use the LLM-assigned classification directly
                 # The LLM has already classified brands based on ownership knowledge
                 classification = brand.get('classification', 'other')
-                
+
                 brand_scores[normalized_name] = {
                     'name': name,  # Keep original casing from first mention
                     'parent_company': brand.get('parent_company'),
@@ -63,7 +65,7 @@ def aggregate_brand_mentions(results: List[Dict[str, Any]], config: Dict[str, An
                     'classification': classification,
                     'appearances': []
                 }
-            
+
             brand_scores[normalized_name]['providers'].append(provider)
             brand_scores[normalized_name]['total_mentions'] += to_int(brand.get('mention_count'), 1)
             brand_scores[normalized_name]['best_rank'] = min(
@@ -79,30 +81,30 @@ def aggregate_brand_mentions(results: List[Dict[str, Any]], config: Dict[str, An
                 'sentiment_reason': brand.get('sentiment_reason'),
                 'ranking_context': brand.get('ranking_context')
             })
-    
+
     # Convert to list and calculate aggregate score
     aggregated = []
     for brand_data in brand_scores.values():
         # Score: number of providers * 10 + inverse of best rank + total mentions
         provider_count = len(set(brand_data['providers']))
         score = (provider_count * 10) + (10 - brand_data['best_rank']) + brand_data['total_mentions']
-        
+
         brand_data['provider_count'] = provider_count
         brand_data['aggregate_score'] = score
         aggregated.append(brand_data)
-    
+
     # Sort by aggregate score
     aggregated.sort(key=lambda x: x['aggregate_score'], reverse=True)
-    
+
     # Add overall rank
     for idx, brand in enumerate(aggregated, 1):
         brand['overall_rank'] = idx
-    
+
     # Separate by classification
     first_party_brands = [b for b in aggregated if b.get('classification') == 'first_party']
     competitor_brands = [b for b in aggregated if b.get('classification') == 'competitor']
     other_brands = [b for b in aggregated if b.get('classification') == 'other']
-    
+
     return {
         'brands': aggregated,
         'total_unique_brands': len(aggregated),
@@ -125,17 +127,17 @@ def aggregate_brand_mentions(results: List[Dict[str, Any]], config: Dict[str, An
     'classification': {'type': str, 'choices': ['first_party', 'competitor', 'other']},
     'query_prompt_id': {'type': str, 'max_length': 100},
 })
-def handler(event: Dict[str, Any], context: Any, keyword: str, timestamp: str = None, 
-            provider: str = None, classification: str = None, query_prompt_id: str = None) -> Dict[str, Any]:
+def handler(event: dict[str, Any], context: Any, keyword: str, timestamp: str | None = None,
+            provider: str | None = None, classification: str | None = None, query_prompt_id: str | None = None) -> dict[str, Any]:
     """
     API handler to get brand mentions for a keyword.
-    
+
     Query params:
         - keyword: The search keyword (required)
         - timestamp: Specific timestamp (optional, defaults to latest)
         - provider: Filter by specific provider (optional)
         - classification: Filter by classification (first_party, competitor, other) (optional)
-    
+
     Returns:
         {
             "keyword": "best running shoes",
@@ -153,9 +155,9 @@ def handler(event: Dict[str, Any], context: Any, keyword: str, timestamp: str = 
     """
     # Get brand tracking configuration
     brand_config = get_brand_config()
-    
+
     table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    
+
     # Query by keyword
     if timestamp:
         response = table.query(
@@ -165,27 +167,27 @@ def handler(event: Dict[str, Any], context: Any, keyword: str, timestamp: str = 
         response = table.query(
             KeyConditionExpression=Key('keyword').eq(keyword)
         )
-    
+
     items = response.get('Items', [])
-    
+
     if not items:
         return not_found_response('Results for keyword', event)
-    
+
     # Filter by persona if specified
     if query_prompt_id:
         items = [item for item in items if item.get('query_prompt_id', 'default') == query_prompt_id]
-    
+
     # Filter by provider if specified
     if provider:
         items = [item for item in items if item.get('provider') == provider]
-    
+
     # Get latest timestamp if not specified
     result_timestamp = timestamp
     if not timestamp and items:
         latest_timestamp = max(item.get('timestamp', '') for item in items)
         items = [item for item in items if item.get('timestamp') == latest_timestamp]
         result_timestamp = latest_timestamp
-    
+
     # Format response by provider
     by_provider = []
     for item in items:
@@ -201,14 +203,14 @@ def handler(event: Dict[str, Any], context: Any, keyword: str, timestamp: str = 
             'geo_feedback': item.get('geo_feedback', ''),
             'citations': item.get('citations', [])
         })
-    
+
     # Aggregate across providers
     aggregated = aggregate_brand_mentions(items, brand_config)
-    
+
     # Apply classification filter if specified
     if classification:
         aggregated['brands'] = [b for b in aggregated['brands'] if b.get('classification') == classification]
-    
+
     result = {
         'keyword': keyword,
         'timestamp': result_timestamp,
@@ -216,5 +218,5 @@ def handler(event: Dict[str, Any], context: Any, keyword: str, timestamp: str = 
         'by_provider': by_provider,
         'aggregated': aggregated
     }
-    
+
     return success_response(result, event)

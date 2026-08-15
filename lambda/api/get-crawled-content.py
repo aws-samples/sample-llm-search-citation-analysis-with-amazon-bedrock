@@ -5,7 +5,6 @@ Retrieves crawled content including screenshots and SEO analysis.
 """
 
 import logging
-import os
 import sys
 
 import boto3

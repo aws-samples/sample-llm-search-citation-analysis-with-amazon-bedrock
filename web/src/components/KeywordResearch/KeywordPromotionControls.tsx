@@ -9,7 +9,7 @@
  * result) and passes it here, so each result keeps its own selection.
  */
 import {
-  SELECTION_LIMIT, promotionSuccessMessage 
+  SELECTION_LIMIT, promotionSuccessMessage
 } from '../../hooks/usePromoteKeywords';
 import type { UsePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { Spinner } from '../ui/Spinner';

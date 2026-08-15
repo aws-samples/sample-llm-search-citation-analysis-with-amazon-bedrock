@@ -5,7 +5,6 @@ Returns search results with optional filtering by keyword or provider.
 """
 
 import logging
-import os
 import sys
 
 import boto3

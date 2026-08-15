@@ -80,9 +80,9 @@ const NonActionableIdeas = ({ ideas }: { ideas: ContentIdea[] }) => {
 };
 
 interface ConfirmGenerateModalProps {
-  idea: ContentIdea;
-  onConfirm: (outputLanguage: string) => void;
-  onCancel: () => void;
+  readonly idea: ContentIdea;
+  readonly onConfirm: (outputLanguage: string) => void;
+  readonly onCancel: () => void;
 }
 
 const COMMON_LANGUAGES = [

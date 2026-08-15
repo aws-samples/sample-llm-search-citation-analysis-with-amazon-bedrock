@@ -43,7 +43,7 @@ export interface Keyword {
   id: string;
   keyword: string;
   created_at: string;
-  status?: 'active' | 'inactive';
+  status?: 'active' | 'inactive' | 'paused';
 }
 
 export interface KeywordExtended extends Keyword {
@@ -83,6 +83,8 @@ export interface Schedule {
   state: ScheduleState;
   schedule: string;
   timezone: string;
+  /** Keyword subset this schedule runs. Empty/absent = all active keywords. */
+  keywords?: string[];
 }
 
 export type ScheduleFrequency = 'daily' | 'weekly' | 'monthly';
@@ -95,4 +97,6 @@ export interface ScheduleFormData {
   day_of_week: string;
   day_of_month: string;
   enabled: boolean;
+  /** Keyword subset to run. Empty = all active keywords at execution time. */
+  keywords: string[];
 }

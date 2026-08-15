@@ -819,3 +819,18 @@ class TestCreateItemsUnit:
         )
 
         assert items == [], f'Expected no items, got {items}'
+
+
+def test_retries_build_the_same_id_for_the_same_normalized_keyword(promotion_handler):
+    first = promotion_handler.create_items(
+        [{'keyword': 'Trail Running Shoes'}],
+        promotion_handler.DEFAULT_STATUS,
+        promotion_handler.DEFAULT_PRIORITY,
+    )
+    retried = promotion_handler.create_items(
+        [{'keyword': '  TRAIL running shoes  '}],
+        promotion_handler.DEFAULT_STATUS,
+        promotion_handler.DEFAULT_PRIORITY,
+    )
+
+    assert first[0]['id'] == retried[0]['id']

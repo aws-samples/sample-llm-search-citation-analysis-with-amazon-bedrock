@@ -11,9 +11,11 @@ import type { Keyword } from '../../types';
 interface SettingsViewProps {
   keywords: Keyword[];
   setKeywords: (keywords: Keyword[]) => void;
+  /** Tab to open on mount (e.g. deep links from the onboarding checklist). */
+  initialTab?: SettingsTab;
 }
 
-type SettingsTab = 'keywords' | 'brand-config' | 'query-prompts' | 'providers' | 'users';
+export type SettingsTab = 'keywords' | 'brand-config' | 'query-prompts' | 'providers' | 'users';
 
 function getProviderBadgeClass(enabledCount: number, configuredCount: number): string {
   if (enabledCount === configuredCount && configuredCount > 0) {
@@ -25,10 +27,18 @@ function getProviderBadgeClass(enabledCount: number, configuredCount: number): s
   return 'bg-gray-100 text-gray-600';
 }
 
+/** Notification bubble shown on tabs whose configuration blocks analysis runs. */
+const AttentionDot = () => (
+  <output
+    aria-label="Needs configuration"
+    className="ml-1 inline-block w-2 h-2 rounded-full bg-amber-500"
+  />
+);
+
 export const SettingsView = ({
-  keywords, setKeywords 
+  keywords, setKeywords, initialTab 
 }: SettingsViewProps) => {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('keywords');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? 'keywords');
   const {
     config, presets, loading: configLoading, saveConfig, expandAllBrands, findCompetitors 
   } = useBrandConfig();
@@ -42,6 +52,12 @@ export const SettingsView = ({
   
   const configuredCount = providers.filter(p => p.configured).length;
   const enabledCount = providers.filter(p => p.enabled && p.configured).length;
+
+  // Attention bubbles for setup that blocks analysis runs; suppressed while
+  // the underlying data is still loading to avoid flashing false alarms.
+  const keywordsNeedAttention = keywords.length === 0;
+  const brandNeedsAttention = !configLoading && (config?.tracked_brands.first_party.length ?? 0) === 0;
+  const providersNeedAttention = !providersLoading && configuredCount === 0;
 
   return (
     <div className="space-y-6">
@@ -65,6 +81,7 @@ export const SettingsView = ({
                 <span className="ml-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
                   {keywords.length}
                 </span>
+                {keywordsNeedAttention && <AttentionDot />}
               </div>
             </button>
             <button
@@ -83,6 +100,7 @@ export const SettingsView = ({
                 <span className="hidden lg:inline ml-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
                   {industryName}
                 </span>
+                {brandNeedsAttention && <AttentionDot />}
               </div>
             </button>
             <button
@@ -116,6 +134,7 @@ export const SettingsView = ({
                 <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${getProviderBadgeClass(enabledCount, configuredCount)}`}>
                   {enabledCount}/{providers.length}
                 </span>
+                {providersNeedAttention && <AttentionDot />}
               </div>
             </button>
             <button
@@ -171,6 +190,10 @@ export const SettingsView = ({
           )}
         </div>
       </div>
+
+      <p className="text-xs text-gray-400 dark:text-gray-500 text-center">
+        Version {import.meta.env.VITE_APP_VERSION ?? 'dev'}
+      </p>
     </div>
   );
 };
