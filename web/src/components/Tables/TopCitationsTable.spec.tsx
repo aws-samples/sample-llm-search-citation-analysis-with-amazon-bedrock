@@ -7,9 +7,14 @@ import {
 import { TopCitationsTable } from './TopCitationsTable';
 import type { TopUrl } from '../../types';
 
-vi.mock('../../infrastructure', () => ({
+// The barrel is stubbed to keep config/auth side effects out of the test;
+// urlSafety is pure, so its real exports are spread in unchanged.
+vi.mock('../../infrastructure', async () => ({
   API_BASE_URL: 'https://api.test.com',
   authenticatedFetch: vi.fn(),
+  ...(await vi.importActual<typeof import('../../infrastructure/urlSafety')>(
+    '../../infrastructure/urlSafety'
+  )),
 }));
 
 function buildCitation(overrides: Partial<TopUrl> = {}): TopUrl {

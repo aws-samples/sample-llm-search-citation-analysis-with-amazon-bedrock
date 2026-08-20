@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useUserManagement } from '../../hooks/useUserManagement';
 import type { CognitoUser } from '../../api/users';
+import { formatDateOnly } from '../../formatting/dateFormatter';
 import {
   InviteModal,
   UserDetailsModal,
   getStatusBadgeClass,
   getStatusLabel,
-  formatDate,
 } from './UserModals';
 
 class InviteError extends Error {
@@ -158,7 +158,7 @@ export function UsersConfig() {
                     </div>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500">
-                    {formatDate(user.created_at)}
+                    {formatDateOnly(user.created_at)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <button

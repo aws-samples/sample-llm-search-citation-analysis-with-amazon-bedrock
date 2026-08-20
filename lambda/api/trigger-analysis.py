@@ -18,6 +18,7 @@ from boto3.dynamodb.conditions import Key
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
+from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler
 from shared.env_vars import resolve_table_env
 from shared.utils import get_timestamp, get_timestamp_compact
@@ -44,12 +45,18 @@ query_prompts_table = dynamodb.Table(QUERY_PROMPTS_TABLE)
 
 
 @api_handler
+@require_group(ADMIN_GROUP)
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     POST /api/trigger-analysis
 
     Starts a Step Functions execution with active keywords from DynamoDB.
     Uses StatusIndex GSI for efficient querying of active keywords.
+
+    Admin-only. One request fans out up to 500 keywords x 10 personas x 4 paid
+    providers, plus a Bedrock call per crawled page, so an ungated caller in a
+    loop is unbounded spend (AUDIT-2026-08-19 §2.3). The gate is the authz half
+    of that finding; throttling and idempotency are tracked separately.
     """
     # Get active keywords using StatusIndex GSI (more efficient than scan with filter)
     try:

@@ -138,3 +138,72 @@ export function createMockFetch(options: {
     });
   });
 }
+
+/** A completed expansion history item for poll-path tests. */
+export function buildCompletedExpansionItem(id: string, seedKeyword: string): KeywordResearchItem {
+  return {
+    id,
+    type: 'expansion',
+    seed_keyword: seedKeyword,
+    industry: 'hospitality',
+    keyword_count: 1,
+    created_at: '2026-08-19',
+    status: 'completed',
+    keywords: [
+      {
+        keyword: `${seedKeyword} deluxe`,
+        intent: 'commercial',
+        competition: 'low',
+        relevance: 0.9,
+        opportunity: 'high',
+      },
+    ],
+  };
+}
+
+interface PollingHistoryResult {
+  ok: boolean;
+  status?: number;
+  items?: KeywordResearchItem[];
+}
+
+/**
+ * Mock fetch for the async/polling path (AUDIT 2.20 regression tests):
+ * POSTs to /expand and /competitor return a pending job id (consumed from
+ * `pendingIds` in order), and each /history GET is answered by calling
+ * `historyResult` — letting tests script 401s, empty polls, or completions.
+ */
+export function createPollingMockFetch(options: {
+  pendingIds: string[];
+  historyResult: () => PollingHistoryResult;
+}) {
+  const remainingIds = [...options.pendingIds];
+  return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+    if ((url.includes('/expand') || url.includes('/competitor')) && init?.method === 'POST') {
+      const id = remainingIds.shift() ?? 'research-pending';
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({
+          status: 'pending',
+          id,
+        }),
+      });
+    }
+
+    if (url.includes('/history')) {
+      const result = options.historyResult();
+      return Promise.resolve({
+        ok: result.ok,
+        status: result.status ?? (result.ok ? 200 : 500),
+        json: () => Promise.resolve({ items: result.items ?? [] }),
+      });
+    }
+
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({}),
+    });
+  });
+}

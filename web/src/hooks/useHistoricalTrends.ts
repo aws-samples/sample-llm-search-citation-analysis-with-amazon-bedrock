@@ -1,19 +1,6 @@
-import {
-  useState, useCallback 
-} from 'react';
-import {
-  API_BASE_URL,
-  authenticatedFetch,
-  getErrorMessage,
-  ApiRequestError,
-} from '../infrastructure';
+import { ApiRequestError } from '../infrastructure';
 import type { HistoricalTrendsResponse } from '../types';
-
-interface BackendErrorResponse {error: string;}
-
-function isBackendErrorResponse(data: unknown): data is BackendErrorResponse {
-  return typeof data === 'object' && data !== null && 'error' in data && typeof (data as BackendErrorResponse).error === 'string';
-}
+import { useAnalysisEndpoint } from './useAnalysisEndpoint';
 
 function isHistoricalTrendsResponse(data: unknown): data is HistoricalTrendsResponse {
   if (typeof data !== 'object' || data === null) return false;
@@ -29,6 +16,29 @@ function isHistoricalTrendsResponse(data: unknown): data is HistoricalTrendsResp
   
   return hasSingleKeywordFields || hasAllKeywordsFields;
 }
+
+const historicalTrendsEndpoint = {
+  errorContext: 'visibility',
+  logMessage: '[historicalTrends] Error fetching trends:',
+  isValidResponse: isHistoricalTrendsResponse,
+  createHttpError: (status: number) => new ApiRequestError('Failed to fetch historical trends', status),
+  createResponseError: (message: string) => new ApiRequestError(message),
+  buildRequest: (
+    keyword?: string,
+    period: 'day' | 'week' | 'month' = 'day',
+    days = 30
+  ) => {
+    const params = new URLSearchParams({
+      period,
+      days: days.toString() 
+    });
+    if (keyword) params.append('keyword', keyword);
+    return {
+      path: '/trends',
+      params,
+    };
+  },
+};
 
 /**
  * Hook for fetching historical visibility trends.
@@ -54,46 +64,9 @@ function isHistoricalTrendsResponse(data: unknown): data is HistoricalTrendsResp
  * ```
  */
 export function useHistoricalTrends() {
-  const [data, setData] = useState<HistoricalTrendsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchHistoricalTrends = useCallback(async (
-    keyword?: string,
-    period: 'day' | 'week' | 'month' = 'day',
-    days = 30
-  ): Promise<HistoricalTrendsResponse | null> => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const params = new URLSearchParams({
-        period,
-        days: days.toString() 
-      });
-      if (keyword) params.append('keyword', keyword);
-      
-      const response = await authenticatedFetch(`${API_BASE_URL}/trends?${params}`);
-      if (!response.ok) throw new ApiRequestError('Failed to fetch historical trends', response.status);
-      
-      const json: unknown = await response.json();
-      if (isBackendErrorResponse(json)) {
-        throw new ApiRequestError(json.error);
-      }
-      if (!isHistoricalTrendsResponse(json)) {
-        throw new ApiRequestError('Invalid response format');
-      }
-      setData(json);
-      return json;
-    } catch (err) {
-      const message = getErrorMessage(err, 'visibility');
-      setError(message);
-      console.error('[historicalTrends] Error fetching trends:', err);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const {
+    data, loading, error, fetchData: fetchHistoricalTrends 
+  } = useAnalysisEndpoint(historicalTrendsEndpoint);
 
   return {
     data,

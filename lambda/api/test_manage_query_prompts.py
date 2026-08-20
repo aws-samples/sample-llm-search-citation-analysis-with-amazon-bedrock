@@ -48,15 +48,23 @@ with patch('boto3.resource', side_effect=_mock_boto3_resource):
 _handler_mod.query_prompts_table = mock_table
 
 
-def make_event(method, body=None, path_params=None):
-    """Build a minimal API Gateway event."""
-    event = {
+def make_event(method, body=None, path_params=None, groups='Admin'):
+    """Build a minimal API Gateway event.
+
+    Defaults to an Admin caller because every mutating route now requires the
+    group (AUDIT-2026-08-19 §0). Pass `groups=None` for an unauthorized caller.
+    """
+    claims = {'cognito:username': 'admin@example.com', 'email': 'admin@example.com'}
+    if groups is not None:
+        claims['cognito:groups'] = groups
+
+    return {
         'httpMethod': method,
         'pathParameters': path_params,
         'headers': {'origin': 'http://localhost:3000'},
         'body': json.dumps(body) if body else None,
+        'requestContext': {'authorizer': {'claims': claims}},
     }
-    return event
 
 
 def parse_response(result):
@@ -210,3 +218,166 @@ class TestDeletePrompt:
         result = handler_module.handler(event, {})
         status, _ = parse_response(result)
         assert status == 400
+
+
+class TestQueryPromptAuthorization:
+    """
+    Admin gate on the mutating routes (AUDIT-2026-08-19 §0).
+
+    Each enabled persona multiplies every analysis run's provider spend, so
+    creating and toggling them is an administrative act. `list_prompts` stays
+    open because the dashboard renders the active set for all users.
+    """
+
+    def test_creating_a_prompt_without_the_admin_group_returns_403(self, handler_module):
+        event = make_event(
+            'POST', body={'name': 'Persona', 'template': 'about {keyword}'}, groups='Users'
+        )
+
+        status, _ = parse_response(handler_module.handler(event, {}))
+
+        assert status == 403
+
+    def test_does_not_write_the_prompt_when_authorization_fails(self, handler_module):
+        event = make_event(
+            'POST', body={'name': 'Persona', 'template': 'about {keyword}'}, groups='Users'
+        )
+
+        handler_module.handler(event, {})
+
+        assert mock_table.put_item.call_count == 0
+
+    def test_updating_a_prompt_without_the_admin_group_returns_403(self, handler_module):
+        event = make_event(
+            'PUT', body={'name': 'Renamed'}, path_params={'id': 'abc'}, groups='Users'
+        )
+
+        status, _ = parse_response(handler_module.handler(event, {}))
+
+        assert status == 403
+
+    def test_deleting_a_prompt_without_the_admin_group_returns_403(self, handler_module):
+        event = make_event('DELETE', path_params={'id': 'abc'}, groups='Users')
+
+        status, _ = parse_response(handler_module.handler(event, {}))
+
+        assert status == 403
+
+    def test_does_not_delete_the_prompt_when_authorization_fails(self, handler_module):
+        event = make_event('DELETE', path_params={'id': 'abc'}, groups='Users')
+
+        handler_module.handler(event, {})
+
+        assert mock_table.delete_item.call_count == 0
+
+    def test_toggling_a_prompt_without_the_admin_group_returns_403(self, handler_module):
+        event = make_event('PATCH', path_params={'id': 'abc'}, groups='Users')
+
+        status, _ = parse_response(handler_module.handler(event, {}))
+
+        assert status == 403
+
+    def test_returns_403_when_the_groups_claim_is_absent(self, handler_module):
+        """Fail closed: an invited user in no group is not an administrator."""
+        event = make_event('DELETE', path_params={'id': 'abc'}, groups=None)
+
+        status, _ = parse_response(handler_module.handler(event, {}))
+
+        assert status == 403
+
+    def test_listing_prompts_stays_open_to_non_admin_callers(self, handler_module):
+        """The gate must not lock non-admins out of read-only dashboard data."""
+        event = make_event('GET', groups='Users')
+
+        status, _ = parse_response(handler_module.handler(event, {}))
+
+        assert status == 200
+
+
+class TestUpdatePrompt:
+    """
+    Tests for PUT /api/query-prompts/{id}.
+
+    REGRESSION: this route returned 500 for every caller, admins included. The
+    handler dispatches `update_prompt(event, context, prompt_id)` positionally
+    and `parse_json_body` dropped `*args`, so the call raised TypeError before
+    reaching the body. There were no update tests, so the suite stayed green.
+    See `lambda/shared/test_decorators.py` for the contract these depend on.
+    """
+
+    def test_renames_a_prompt(self, handler_module):
+        mock_table.update_item.return_value = {
+            'Attributes': {
+                'id': 'abc',
+                'name': 'Renamed',
+                'template': 'about {keyword}',
+            }
+        }
+        event = make_event('PUT', body={'name': 'Renamed'}, path_params={'id': 'abc'})
+
+        result = handler_module.handler(event, {})
+        status, body = parse_response(result)
+
+        assert status == 200
+        assert body['name'] == 'Renamed'
+
+    def test_persists_the_update_against_the_path_id(self, handler_module):
+        """The positional prompt_id has to survive the whole decorator stack."""
+        event = make_event('PUT', body={'name': 'Renamed'}, path_params={'id': 'abc'})
+
+        handler_module.handler(event, {})
+
+        assert mock_table.update_item.call_args.kwargs['Key'] == {'id': 'abc'}
+
+    def test_rejects_a_template_without_the_keyword_placeholder(self, handler_module):
+        event = make_event(
+            'PUT', body={'template': 'no placeholder here'}, path_params={'id': 'abc'}
+        )
+
+        status, body = parse_response(handler_module.handler(event, {}))
+
+        assert status == 400
+        assert body['field'] == 'template'
+
+    def test_returns_400_when_the_path_id_is_missing(self, handler_module):
+        event = make_event('PUT', body={'name': 'Renamed'}, path_params={})
+
+        status, body = parse_response(handler_module.handler(event, {}))
+
+        assert status == 400
+        assert body['field'] == 'id'
+
+    def test_does_not_write_when_the_path_id_is_missing(self, handler_module):
+        event = make_event('PUT', body={'name': 'Renamed'}, path_params={})
+
+        handler_module.handler(event, {})
+
+        assert mock_table.update_item.call_count == 0
+
+
+class TestTogglePromptAdminPath:
+    """
+    PATCH shares the positional-dispatch shape with PUT but has no
+    `parse_json_body` in its stack, so it survived the bug. Pinned so a future
+    body-parsing decorator on this route cannot reintroduce it silently.
+    """
+
+    def test_toggles_an_enabled_prompt_to_disabled(self, handler_module):
+        mock_table.get_item.return_value = {'Item': {'id': 'abc', 'enabled': 'true'}}
+        mock_table.update_item.return_value = {
+            'Attributes': {'id': 'abc', 'enabled': 'false'}
+        }
+        event = make_event('PATCH', path_params={'id': 'abc'})
+
+        status, body = parse_response(handler_module.handler(event, {}))
+
+        assert status == 200
+        assert body['enabled'] == 'false'
+
+    def test_toggles_against_the_path_id(self, handler_module):
+        mock_table.get_item.return_value = {'Item': {'id': 'abc', 'enabled': 'true'}}
+        event = make_event('PATCH', path_params={'id': 'abc'})
+
+        handler_module.handler(event, {})
+
+        assert mock_table.update_item.call_args.kwargs['Key'] == {'id': 'abc'}

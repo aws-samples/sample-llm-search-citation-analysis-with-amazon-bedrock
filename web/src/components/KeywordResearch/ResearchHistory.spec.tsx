@@ -178,6 +178,22 @@ const promotionWireFixture = {
   skipped_keywords: [],
 };
 
+/**
+ * The five stranded production rows this covers were failed by the timeout
+ * sweep long after they were queued, so the message carries a raw second count
+ * (4434821 == 51 days).
+ */
+const strandedRunFixture: KeywordResearchItem = {
+  id: 'item-stranded',
+  type: 'expansion',
+  seed_keyword: 'hotels',
+  industry: 'hospitality',
+  keyword_count: 0,
+  created_at: '2026-06-29T10:30:00Z',
+  status: 'failed',
+  error_message: 'Research timed out after 4434821 seconds. Please try again.',
+};
+
 const renderHistoryWithItems = (history: KeywordResearchItem[]) => render(
   <ResearchHistory
     history={history}
@@ -261,5 +277,87 @@ describe('ResearchHistory promotion UI', () => {
 
     await waitFor(() => expect(onKeywordsAdded).toHaveBeenCalledTimes(1));
     expect(onKeywordsAdded).toHaveBeenCalledWith([createdKeywordItemFixture]);
+  });
+});
+
+describe('ResearchHistory run status', () => {
+  /**
+   * Before this, a row the backend marked `failed` rendered identically to a
+   * run that genuinely returned nothing: same "0 keywords", no reason given.
+   */
+
+  it('marks a failed run as failed', () => {
+    renderHistoryWithItems([strandedRunFixture]);
+
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+  });
+
+  it('marks a queued run as queued', () => {
+    renderHistoryWithItems([buildHistoryItem({ status: 'pending' })]);
+
+    expect(screen.getByText('Queued')).toBeInTheDocument();
+  });
+
+  it('marks an in-flight run as running', () => {
+    renderHistoryWithItems([buildHistoryItem({ status: 'processing' })]);
+
+    expect(screen.getByText('Running')).toBeInTheDocument();
+  });
+
+  it('marks a finished run as completed', () => {
+    renderHistoryWithItems([buildHistoryItem({ status: 'completed' })]);
+
+    expect(screen.getByText('Completed')).toBeInTheDocument();
+  });
+
+  it('shows no status badge for a legacy row that has no status', () => {
+    renderHistoryWithItems([buildHistoryItem({ status: undefined })]);
+
+    expect(screen.queryByText('Completed')).not.toBeInTheDocument();
+    expect(screen.queryByText('Failed')).not.toBeInTheDocument();
+  });
+
+  it('distinguishes a failed run from a genuine empty result', () => {
+    renderHistoryWithItems([
+      strandedRunFixture,
+      buildHistoryItem({
+        id: 'item-empty',
+        seed_keyword: 'flights',
+        status: 'completed',
+        keywords: [],
+      }),
+    ]);
+
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(screen.getByText('Completed')).toBeInTheDocument();
+  });
+});
+
+describe('ResearchHistory failure message', () => {
+  it('reports the failure reason on a failed run', () => {
+    renderHistoryWithItems([strandedRunFixture]);
+
+    expect(screen.getByText(/Research timed out/)).toBeInTheDocument();
+  });
+
+  it('states the timeout in days rather than raw seconds', () => {
+    renderHistoryWithItems([strandedRunFixture]);
+
+    expect(screen.getByText('Research timed out after 51 days. Please try again.')).toBeInTheDocument();
+  });
+
+  it('keeps the untranslated backend message available for debugging', () => {
+    renderHistoryWithItems([strandedRunFixture]);
+
+    expect(screen.getByText(/Research timed out/)).toHaveAttribute(
+      'title',
+      'Research timed out after 4434821 seconds. Please try again.'
+    );
+  });
+
+  it('shows no failure message on a run that carries none', () => {
+    renderHistoryWithItems([buildHistoryItem({ status: 'completed' })]);
+
+    expect(screen.queryByText(/timed out/)).not.toBeInTheDocument();
   });
 });

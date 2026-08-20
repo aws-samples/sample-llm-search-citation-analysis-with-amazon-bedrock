@@ -3,6 +3,8 @@ import type {
   S3Item, RawResponseContent, RawResponseDocument 
 } from '../../types';
 import { formatDate } from '../../formatting/dateFormatter';
+import { useClipboardCopy } from '../../hooks/useClipboardCopy';
+import { safeHref } from '../../infrastructure';
 import { Spinner } from '../ui/Spinner';
 
 interface FileViewerProps {
@@ -50,9 +52,7 @@ export const FileViewer = ({
     ? content.content
     : null;
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-  };
+  const { copy } = useClipboardCopy();
 
   if (loading) {
     return (
@@ -68,7 +68,7 @@ export const FileViewer = ({
       <FileHeader
         file={file}
         content={content}
-        onCopy={() => copyToClipboard(JSON.stringify(content.content, null, 2))}
+        onCopy={() => void copy(JSON.stringify(content.content, null, 2))}
         onDownload={onDownload}
       />
 
@@ -123,7 +123,7 @@ const FileHeader = ({
             d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
           />
         </svg>
-        <span className="hidden sm:inline">Copy</span>
+        <span className="sr-only sm:not-sr-only">Copy</span>
       </button>
       <button
         onClick={onDownload}
@@ -137,7 +137,7 @@ const FileHeader = ({
             d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
           />
         </svg>
-        <span className="hidden sm:inline">Download</span>
+        <span className="sr-only sm:not-sr-only">Download</span>
       </button>
     </div>
   </div>
@@ -251,7 +251,7 @@ const OverviewTab = ({ doc }: OverviewTabProps) => (
           {doc.extracted.citations.map((url) => (
             <a
               key={url}
-              href={url}
+              href={safeHref(url)}
               target="_blank"
               rel="noopener noreferrer"
               className="block text-sm text-blue-600 hover:underline truncate"

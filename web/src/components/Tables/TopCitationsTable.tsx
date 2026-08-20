@@ -2,7 +2,9 @@ import {
   useState, useMemo 
 } from 'react';
 import type { TopUrl } from '../../types';
-import { API_BASE_URL } from '../../infrastructure';
+import {
+  API_BASE_URL, safeHref 
+} from '../../infrastructure';
 import { exportToExcel } from '../../exporters/excelGenerator';
 import {
   ChevronDownIcon, ChevronRightIcon 
@@ -266,7 +268,7 @@ export const TopCitationsTable = ({ citations }: TopCitationsTableProps) => {
                       <div className="flex items-center gap-3">
                         <span className="text-gray-400 font-medium min-w-[2rem]">#{globalRank}</span>
                         <a
-                          href={citation.url}
+                          href={safeHref(citation.url)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-blue-600 hover:underline"

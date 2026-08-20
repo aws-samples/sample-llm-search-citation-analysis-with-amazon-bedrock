@@ -120,9 +120,11 @@ export const FiltersSection = ({
   <div className="bg-white rounded-lg border border-gray-200 p-4">
     <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
       <div className="flex-1">
-        <label className="block text-sm font-medium text-gray-700 mb-1">Search Keyword</label>
+        <label htmlFor="searches-keyword-filter" className="block text-sm font-medium text-gray-700 mb-1">Search Keyword</label>
         <input
           type="text"
+          id="searches-keyword-filter"
+          name="searches-keyword-filter"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Filter by keyword..."
@@ -130,8 +132,10 @@ export const FiltersSection = ({
         />
       </div>
       <div className="w-full sm:w-40">
-        <label className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
+        <label htmlFor="searches-provider-filter" className="block text-sm font-medium text-gray-700 mb-1">Provider</label>
         <select
+          id="searches-provider-filter"
+          name="searches-provider-filter"
           value={providerFilter}
           onChange={(e) => setProviderFilter(e.target.value)}
           className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
@@ -144,8 +148,10 @@ export const FiltersSection = ({
       </div>
       {promptNames.length > 0 && (
         <div className="w-full sm:w-44">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Query Prompt</label>
+          <label htmlFor="searches-prompt-filter" className="block text-sm font-medium text-gray-700 mb-1">Query Prompt</label>
           <select
+            id="searches-prompt-filter"
+            name="searches-prompt-filter"
             value={promptFilter}
             onChange={(e) => setPromptFilter(e.target.value)}
             className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
@@ -169,7 +175,7 @@ export const FiltersSection = ({
           className="flex-1 sm:flex-none px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 flex items-center justify-center gap-2"
         >
           <DownloadIcon />
-          <span className="hidden sm:inline">Export</span>
+          <span className="sr-only sm:not-sr-only">Export</span>
         </button>
       </div>
     </div>

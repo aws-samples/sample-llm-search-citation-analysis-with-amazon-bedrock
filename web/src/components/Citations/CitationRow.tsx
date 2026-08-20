@@ -1,5 +1,7 @@
 import React from 'react';
 import type { TopUrl } from '../../types';
+import { getDomain } from '../../formatting/urlFormatter';
+import { safeHref } from '../../infrastructure';
 import { Spinner } from '../ui/Spinner';
 
 interface UrlBreakdown {
@@ -18,7 +20,6 @@ interface CitationRowProps {
   onToggleRow: (idx: number, url: string) => void;
   onViewDetails: (url: string, e: React.MouseEvent) => void;
   onKeywordClick: (keyword: string) => void;
-  getDomain: (url: string) => string;
 }
 
 export const CitationRow = ({
@@ -31,7 +32,6 @@ export const CitationRow = ({
   onToggleRow,
   onViewDetails,
   onKeywordClick,
-  getDomain,
 }: CitationRowProps) => {
   // Group breakdown by keyword
   const keywordGroups: Record<string, UrlBreakdown[]> = {};
@@ -57,7 +57,7 @@ export const CitationRow = ({
         <td className="px-6 py-4 text-sm">
           <div className="flex items-center gap-2">
             <a 
-              href={citation.url} 
+              href={safeHref(citation.url)} 
               target="_blank" 
               rel="noopener noreferrer" 
               className="text-gray-900 hover:underline flex-1"

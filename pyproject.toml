@@ -16,6 +16,24 @@ extend-exclude = [
     "lambda/crawler-layer/python",
 ]
 
+[tool.pytest.ini_options]
+# Without this, bare `pytest` from the repo root walks into the built Lambda
+# layers and tries to collect ~20 vendored third-party test modules —
+# `greenlet/tests/test_cpp.py` compiles C++, `certifi/tests` imports a package
+# that isn't installed — and the run dies with collection errors before any
+# first-party test executes. The exclusions mirror `[tool.ruff].extend-exclude`
+# above; keep the two lists in step when a new layer is added.
+testpaths = ["lambda"]
+norecursedirs = [
+    "node_modules",
+    "cdk.out",
+    "lambda/*/.deps",
+    "lambda/layer/python",        # layer build artifacts
+    "lambda/crawler-layer/python",
+    "*.egg",
+    ".*",
+]
+
 [tool.ruff.lint]
 # Curated rule set:
 #   F   — pyflakes (unused imports F401, unused local vars F841, undefined names)
@@ -52,7 +70,7 @@ ignore = [
 "lambda/shared/__init__.py" = ["F401"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["shared", "api_clients", "search_clients", "brand_extractor", "decimal_utils"]
+known-first-party = ["shared", "api_clients", "search_clients", "brand_extractor"]
 
 # ---------------------------------------------------------------------------
 # Vulture config — dead-code finder. Complements ruff.
@@ -88,6 +106,7 @@ ignore_decorators = [
     "@parse_json_body",
     "@paginate",
     "@cors_preflight",
+    "@require_group",
     "@retry_with_backoff",
     "@pytest.fixture",
     "@pytest.mark.parametrize",

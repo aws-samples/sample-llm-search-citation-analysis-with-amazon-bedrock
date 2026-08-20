@@ -12,13 +12,11 @@ Endpoints:
 """
 
 import hashlib
-import json
 import logging
 import os
 import sys
 import uuid
 from collections import defaultdict
-from datetime import datetime
 from typing import Any
 
 import boto3
@@ -28,12 +26,15 @@ from botocore.exceptions import ClientError
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from decimal_utils import to_int
 from shared.api_response import api_response, success_response, validation_error
+from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import query_latest_per_key
 from shared.models import BedrockInvocationError, ModelRole, get_model_tier, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
+from shared.self_invoke import SelfInvokeDispatchError, invoke_self_async
+from shared.stale_jobs import stale_elapsed_seconds
 from shared.utils import brand_names_match, extract_domain, get_brand_config, get_timestamp, utc_now
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,13 @@ CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 CONTENT_STUDIO_TABLE = os.environ['DYNAMODB_TABLE_CONTENT_STUDIO']
 KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')  # Optional for fallback
-GENERATION_TIMEOUT_SECONDS = int(os.environ.get('GENERATION_TIMEOUT_SECONDS', '240'))
+# Budget after which the reader-side sweep declares a generation dead. MUST
+# stay above this function's Lambda timeout (300s): the previous 240s default
+# marked a legitimate 241-300s run as `failed` while it was still running, and
+# it then flipped back to `generated` on completion (AUDIT-2026-08-19 §2.9).
+# The default matters as much as the CDK value — it applies whenever the env
+# var is absent. See `shared.stale_jobs`.
+GENERATION_TIMEOUT_SECONDS = int(os.environ.get('GENERATION_TIMEOUT_SECONDS', '360'))
 
 
 def _get_seasonal_suggestions(keywords: list[str], config: dict[str, Any]) -> list[dict[str, Any]]:
@@ -243,7 +250,7 @@ def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
                 )
                 items.extend(response.get('Items', []))
             except Exception as e:
-                logger.error(f"Error querying keyword {keyword}: {e}")
+                logger.error(f"Error querying keyword {keyword!r}: {e}")
                 continue
 
     if not items:
@@ -927,34 +934,39 @@ def get_content_by_id(content_id: str) -> dict[str, Any]:
         return None
 
 
+def _fail_if_generation_timed_out(row: dict[str, Any]) -> None:
+    """Mark a non-terminal row failed once it has outlived the worker's budget.
+
+    A Lambda timeout is a SIGKILL, so `_process_generation_async`'s `except`
+    block never runs and the row would sit at `pending`/`generating` forever.
+    This reader-side sweep is what makes such a death observable.
+
+    Mutates ``row`` in place so the caller reports the corrected status in the
+    same response that triggered the sweep, rather than showing a stale
+    "generating" until the next poll.
+    """
+    if row.get('status') not in ('pending', 'generating'):
+        return
+
+    elapsed = stale_elapsed_seconds(row.get('created_at', ''), GENERATION_TIMEOUT_SECONDS)
+    if elapsed is None:
+        return
+
+    error_msg = f'Generation timed out after {int(elapsed)} seconds. Please try again.'
+    update_content_status(row['id'], 'failed', {'error': error_msg})
+    row['status'] = 'failed'
+    row['error_message'] = error_msg
+    logger.info(f"Marked content {row['id']} as failed due to timeout ({int(elapsed)}s)")
+
+
 def get_content_history(limit: int = 20) -> list[dict[str, Any]]:
     """Get generated content history."""
     table = dynamodb.Table(CONTENT_STUDIO_TABLE)
     response = table.scan(Limit=limit)
     items = response.get('Items', [])
 
-    # Check for stuck items and mark them as failed
-    now = utc_now()
     for item in items:
-        if item.get('status') in ('pending', 'generating'):
-            created_at_str = item.get('created_at', '')
-            if created_at_str:
-                try:
-                    # Parse 'Z' suffix as UTC — result is timezone-aware, matches `now`.
-                    created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
-                    elapsed_seconds = (now - created_at).total_seconds()
-                    if elapsed_seconds > GENERATION_TIMEOUT_SECONDS:
-                        # Mark as failed due to timeout
-                        update_content_status(
-                            item['id'],
-                            'failed',
-                            {'error': f'Generation timed out after {int(elapsed_seconds)} seconds. Please try again.'}
-                        )
-                        item['status'] = 'failed'
-                        item['error_message'] = f'Generation timed out after {int(elapsed_seconds)} seconds. Please try again.'
-                        logger.info(f"Marked content {item['id']} as failed due to timeout ({elapsed_seconds}s)")
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Could not parse created_at for item {item.get('id')}: {e}")
+        _fail_if_generation_timed_out(item)
 
     # Sort by created_at descending
     items.sort(key=lambda x: x.get('created_at', ''), reverse=True)
@@ -1032,8 +1044,10 @@ def _generate_content(event: dict[str, Any], context: Any, body: dict, idea: dic
         return validation_error('idea must have a keyword', event, 'keyword')
 
     # Input validation - limit keyword length
-    if len(idea.get('keyword', '')) > 500:
-        return validation_error('Keyword too long (max 500 characters)', event, 'keyword')
+    if len(idea.get('keyword', '')) > MAX_KEYWORD_LENGTH:
+        return validation_error(
+            f'Keyword too long (max {MAX_KEYWORD_LENGTH} characters)', event, 'keyword'
+        )
 
     # Create pending record immediately. If an idempotency-key hit occurs
     # (API Gateway retry or client double-click within the window), `created`
@@ -1057,30 +1071,35 @@ def _generate_content(event: dict[str, Any], context: Any, body: dict, idea: dic
             'idempotent_hit': True,
         }, event)
 
-    # Get the current function name for async invocation
-    function_name = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', '')
-
-    if function_name:
-        # Invoke self asynchronously for background processing
-        lambda_client = boto3.client('lambda')
-        try:
-            lambda_client.invoke(
-                FunctionName=function_name,
-                InvocationType='Event',  # Async invocation
-                Payload=json.dumps({
-                    'async_generation': True,
-                    'content_id': content_id,
-                    'idea': idea
-                })
-            )
-            logger.info(f"Triggered async generation for content_id={content_id}")
-        except Exception as e:
-            logger.error(f"Failed to trigger async generation: {e}")
-            # Fall back to sync if async fails
-            _process_generation_async(content_id, idea)
-    else:
-        # Local testing - run synchronously
-        _process_generation_async(content_id, idea)
+    try:
+        invoke_self_async(
+            {
+                'async_generation': True,
+                'content_id': content_id,
+                'idea': idea,
+            },
+            lambda: _process_generation_async(content_id, idea),
+            description='generation',
+            success_log=f"Triggered async generation for content_id={content_id}",
+        )
+    except SelfInvokeDispatchError as exc:
+        # The background job never started. Running it here instead would
+        # outlive API Gateway's 29s timeout, so the client would get a 504
+        # with the work invisibly continuing (AUDIT-2026-08-19 §2.9). Mark the
+        # row terminal — otherwise the idempotency key means a retry inside
+        # the 5-minute window returns this same dead row without re-invoking.
+        logger.error(f"Could not dispatch generation for content_id={content_id}: {exc}")
+        update_content_status(
+            content_id,
+            'failed',
+            {'error': 'Could not start content generation. Please try again.'},
+        )
+        return api_response(503, {
+            'success': False,
+            'id': content_id,
+            'status': 'failed',
+            'error': 'Could not start content generation. Please try again.',
+        }, event)
 
     # Return immediately with pending status
     return success_response({
@@ -1113,24 +1132,7 @@ def _get_content_status(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if not content:
         return api_response(404, {'error': 'Content not found'}, event)
 
-    # Check for timeout on pending/generating items
-    if content.get('status') in ('pending', 'generating'):
-        created_at_str = content.get('created_at', '')
-        if created_at_str:
-            try:
-                now = utc_now()
-                # Parse 'Z' suffix as UTC — result is timezone-aware, matches `now`.
-                created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
-                elapsed_seconds = (now - created_at).total_seconds()
-                if elapsed_seconds > GENERATION_TIMEOUT_SECONDS:
-                    # Mark as failed due to timeout
-                    error_msg = f'Generation timed out after {int(elapsed_seconds)} seconds. Please try again.'
-                    update_content_status(content_id, 'failed', {'error': error_msg})
-                    content['status'] = 'failed'
-                    content['error_message'] = error_msg
-                    logger.info(f"Marked content {content_id} as failed due to timeout ({elapsed_seconds}s)")
-            except (ValueError, TypeError) as e:
-                logger.warning(f"Could not parse created_at for content {content_id}: {e}")
+    _fail_if_generation_timed_out(content)
 
     return success_response({
         'id': content_id,

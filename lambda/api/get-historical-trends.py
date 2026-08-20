@@ -22,8 +22,6 @@ from typing import Any
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from decimal_utils import to_int
-
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
@@ -40,6 +38,7 @@ from shared.constants import (
     VISIBILITY_RANK_WEIGHT,
 )
 from shared.decorators import api_handler, validate
+from shared.dynamo_decimal import to_int
 from shared.providers import get_enabled_provider_count
 from shared.utils import brand_names_match, get_brand_config, utc_now
 

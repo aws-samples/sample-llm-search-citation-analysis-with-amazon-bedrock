@@ -15,7 +15,15 @@ from botocore.exceptions import ClientError
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import api_response, not_found_response, success_response, validation_error
+from shared.api_response import (
+    api_response,
+    forbidden_response,
+    not_found_response,
+    sanitize_error_message,
+    success_response,
+    validation_error,
+)
+from shared.auth import ADMIN_GROUP, is_self_reference, require_group
 from shared.decorators import api_handler, cors_preflight, paginate, parse_json_body, route_handler
 
 logger = logging.getLogger(__name__)
@@ -218,7 +226,11 @@ def handle_invite_user(event: dict, context: Any, body: dict | None = None, **kw
 
 @parse_json_body
 def handle_update_user(event: dict, context: Any, body: dict | None = None, **kwargs) -> dict:
-    """PUT /users/{username} - Update user (enable/disable, groups)."""
+    """PUT /users/{username} - Update user (enable/disable, groups).
+
+    Requires Admin (gated on `handler`). Self-modification of the two
+    privilege-bearing fields is refused on top of that — see the guard below.
+    """
     path_params = event.get('pathParameters') or {}
     username = path_params.get('username')
 
@@ -226,6 +238,30 @@ def handle_update_user(event: dict, context: Any, body: dict | None = None, **kw
         return validation_error('Username required', event)
 
     body = body or {}
+
+    # Refused regardless of the caller's group: an Admin editing their own
+    # `groups` is indistinguishable on the wire from the escalation path in
+    # AUDIT-2026-08-19 §0.1, and an Admin disabling their own account can lock
+    # the last administrator out of the deployment. Editing *another* user's
+    # groups remains allowed — that is the legitimate admin workflow.
+    privileged_edits = [field for field in ('groups', 'enabled') if field in body]
+    if privileged_edits and is_self_reference(event, username):
+        logger.warning(
+            "Refused self-modification of %s by %r", privileged_edits, username
+        )
+        return forbidden_response(
+            'You cannot change your own group membership or account status', event
+        )
+
+    # `set()` over a non-iterable raises TypeError, and over a bare string
+    # silently yields one bogus group per character ('Admin' -> {'A','d',...}),
+    # which would then hit Cognito five times. Validate the shape first.
+    if 'groups' in body:
+        groups_input = body['groups']
+        if not isinstance(groups_input, list) or not all(
+            isinstance(group, str) for group in groups_input
+        ):
+            return validation_error('groups must be an array of strings', event, 'groups')
 
     try:
         # Enable/disable user
@@ -291,12 +327,20 @@ def handle_update_user(event: dict, context: Any, body: dict | None = None, **kw
 
 
 def handle_delete_user(event: dict, context: Any, **kwargs) -> dict:
-    """DELETE /users/{username} - Delete a user."""
+    """DELETE /users/{username} - Delete a user.
+
+    Requires Admin (gated on `handler`). Self-deletion is refused because
+    `admin_delete_user` is irreversible and the caller may be the last Admin.
+    """
     path_params = event.get('pathParameters') or {}
     username = path_params.get('username')
 
     if not username:
         return validation_error('Username required', event)
+
+    if is_self_reference(event, username):
+        logger.warning("Refused self-deletion of %r", username)
+        return forbidden_response('You cannot delete your own account', event)
 
     try:
         cognito_client.admin_delete_user(
@@ -336,7 +380,10 @@ def handle_reset_password(event: dict, context: Any, body: dict | None = None, *
     except cognito_client.exceptions.UserNotFoundException:
         return not_found_response(f'User {username}', event)
     except cognito_client.exceptions.InvalidParameterException as e:
-        return api_response(400, {'error': str(e)}, event)
+        # botocore's str(e) carries the full AWS request context; route it
+        # through the sanitizer like every other error path in the codebase.
+        logger.error(f"Invalid parameter resetting password: {e!s}")
+        return api_response(400, {'error': sanitize_error_message(e)}, event)
     except ClientError as e:
         logger.error(f"Error resetting password: {e!s}")
         return api_response(500, {'error': 'Failed to reset password'}, event)
@@ -363,14 +410,33 @@ def handle_list_groups(event: dict, context: Any, **kwargs) -> dict:
         return api_response(500, {'error': 'Failed to list groups'}, event)
 
 
+def handle_get_users_route(event: dict, context: Any, **kwargs) -> dict:
+    """GET /users or GET /users/{username} - dispatch on the path parameter.
+
+    `route_handler`'s `('GET', None)` key is a method-only match, so one entry
+    cannot separate the collection route from the parametric item route — the
+    username is dynamic, so there is no static segment to match on. Without
+    this split the method-only key swallowed every GET and
+    `GET /api/users/{username}` returned the entire roster, leaving
+    `handle_get_user` unreachable.
+    """
+    path_params = event.get('pathParameters') or {}
+
+    if path_params.get('username'):
+        return handle_get_user(event, context, **kwargs)
+
+    return handle_list_users(event, context, **kwargs)
+
+
 @api_handler
 @cors_preflight
+@require_group(ADMIN_GROUP)
 @paginate(default_limit=50, max_limit=100)
 @route_handler({
     ('GET', '/groups'): handle_list_groups,
     ('GET', '/reset-password'): lambda e, _c, **_k: validation_error('Use POST method', e),
     ('POST', '/reset-password'): handle_reset_password,
-    ('GET', None): handle_list_users,
+    ('GET', None): handle_get_users_route,
     ('POST', None): handle_invite_user,
     ('PUT', None): handle_update_user,
     ('DELETE', None): handle_delete_user,
@@ -378,6 +444,16 @@ def handle_list_groups(event: dict, context: Any, **kwargs) -> dict:
 def handler(event: dict, context: Any) -> dict:
     """
     User Management API Lambda Handler
+
+    Every route here is Admin-only, including the reads: `handle_list_users`
+    hands back the full roster and `handle_list_groups` enumerates the group
+    names an attacker needs for the escalation path in AUDIT-2026-08-19 §0.1.
+    So the gate sits on the whole surface rather than per route.
+
+    `@require_group` is below `@cors_preflight` so browser preflight (an
+    OPTIONS request, which carries no Authorization header) still answers 200,
+    and above `@paginate`/`@route_handler` so an unauthorized request is
+    refused before any input is parsed.
 
     Endpoints:
     - GET /users - List all users
@@ -388,20 +464,4 @@ def handler(event: dict, context: Any) -> dict:
     - DELETE /users/{username} - Delete user
     - POST /users/{username}/reset-password - Reset user password
     """
-    # Check if this is a single user request
-    path_params = event.get('pathParameters') or {}
-    if path_params.get('username'):
-        method = event.get('httpMethod', 'GET').upper()
-        path = event.get('path', '')
-
-        if 'reset-password' in path:
-            return handle_reset_password(event, context)
-        elif method == 'GET':
-            return handle_get_user(event, context)
-        elif method == 'PUT':
-            return handle_update_user(event, context)
-        elif method == 'DELETE':
-            return handle_delete_user(event, context)
-
-    # Route handler will handle the rest
-    pass
+    pass  # Routes handle everything

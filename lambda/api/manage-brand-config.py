@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Callable
 from typing import Any
 
 import boto3
@@ -18,6 +19,7 @@ import boto3
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
+from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler, validate
 from shared.industry_presets import INDUSTRY_PRESETS as _BASE_PRESETS
 from shared.industry_presets import get_preset as get_shared_preset
@@ -38,6 +40,41 @@ from shared.models import ModelRole, invoke_bedrock  # noqa: E402
 
 # Fail-fast: Required environment variables
 DYNAMODB_TABLE_BRAND_CONFIG = os.environ['DYNAMODB_TABLE_BRAND_CONFIG']
+
+
+def _run_brand_prompt(
+    prompt: str,
+    *,
+    max_tokens: int,
+    error_defaults: dict[str, Any],
+    shape: Callable[[dict[str, Any]], dict[str, Any]],
+    log_context: str,
+) -> dict[str, Any]:
+    """Invoke Bedrock, parse the JSON object, and shape the success payload.
+
+    The three brand-suggestion endpoints (expand_brands, expand_brand,
+    find_competitors) each hand-rolled this same invoke -> guard-empty ->
+    parse -> guard-invalid -> shape -> except ladder (bugs.md §5).
+    `error_defaults` is what the endpoint returns when the model response is
+    unusable; `shape` builds the success payload from the parsed object and
+    runs inside the try so shaping bugs degrade to the same defaults instead
+    of crashing the handler.
+    """
+    try:
+        response_text = invoke_bedrock(prompt, ModelRole.ANALYSIS, max_tokens=max_tokens, temperature=0)
+
+        if not response_text:
+            return {**error_defaults, "error": "Empty response"}
+
+        result = parse_llm_json(response_text, expect="object")
+        if result is None:
+            return {**error_defaults, "error": "Invalid response format"}
+
+        return shape(result)
+
+    except Exception as e:
+        logger.error(f"Error {log_context}: {e!s}")
+        return {**error_defaults, "error": str(e)}
 
 def generate_default_prompt(industry_name: str, extraction_focus: str, entity_types: list) -> str:
     """Generate a default extraction prompt for an industry."""
@@ -217,20 +254,10 @@ If ALL sub-brands are already being tracked, return an empty suggestions array a
 
 JSON OUTPUT:"""
 
-    try:
-        response_text = invoke_bedrock(prompt, ModelRole.ANALYSIS, max_tokens=2000, temperature=0)
-
-        if not response_text:
-            return {"suggestions": [], "duplicates_found": existing_duplicates, "error": "Empty response"}
-
-        result = parse_llm_json(response_text, expect="object")
-        if result is None:
-            return {"suggestions": [], "duplicates_found": existing_duplicates, "error": "Invalid response format"}
-
+    def shape(result: dict[str, Any]) -> dict[str, Any]:
         suggestions = result.get("suggestions", [])
 
         # Filter out any suggestions that match existing brands (normalized)
-        existing_normalized = {normalize_brand(b) for b in existing_brands}
         filtered_suggestions = [s for s in suggestions if normalize_brand(s) not in existing_normalized]
 
         # Also deduplicate within suggestions
@@ -251,13 +278,13 @@ JSON OUTPUT:"""
             "industry": industry
         }
 
-    except Exception as e:
-        logger.error(f"Error expanding brands: {e!s}")
-        return {
-            "suggestions": [],
-            "duplicates_found": existing_duplicates,
-            "error": str(e)
-        }
+    return _run_brand_prompt(
+        prompt,
+        max_tokens=2000,
+        error_defaults={"suggestions": [], "duplicates_found": existing_duplicates},
+        shape=shape,
+        log_context="expanding brands",
+    )
 
 
 def expand_brand(brand_name: str, industry: str = "hotels", existing_brands: list | None = None) -> dict[str, Any]:
@@ -332,16 +359,7 @@ If all sub-brands are already tracked, return an empty suggestions array with a 
 
 JSON OUTPUT:"""
 
-    try:
-        response_text = invoke_bedrock(prompt, ModelRole.ANALYSIS, max_tokens=1500, temperature=0)
-
-        if not response_text:
-            return {"main_brand": brand_name, "suggestions": [brand_name], "error": "Empty response"}
-
-        result = parse_llm_json(response_text, expect="object")
-        if result is None:
-            return {"main_brand": brand_name, "suggestions": [brand_name], "error": "Invalid response format"}
-
+    def shape(result: dict[str, Any]) -> dict[str, Any]:
         # Ensure main_brand is included in suggestions for completeness
         suggestions = result.get("suggestions", [])
         if brand_name not in suggestions:
@@ -355,13 +373,13 @@ JSON OUTPUT:"""
             "industry": industry
         }
 
-    except Exception as e:
-        logger.error(f"Error expanding brand name '{brand_name}': {e!s}")
-        return {
-            "main_brand": brand_name,
-            "suggestions": [brand_name],
-            "error": str(e)
-        }
+    return _run_brand_prompt(
+        prompt,
+        max_tokens=1500,
+        error_defaults={"main_brand": brand_name, "suggestions": [brand_name]},
+        shape=shape,
+        log_context=f"expanding brand name '{brand_name}'",
+    )
 
 
 def find_competitors(first_party_brands: list, industry: str = "hotels", existing_competitors: list | None = None) -> dict[str, Any]:
@@ -434,16 +452,7 @@ Aim for 10-20 relevant competitors.
 
 JSON OUTPUT:"""
 
-    try:
-        response_text = invoke_bedrock(prompt, ModelRole.ANALYSIS, max_tokens=2000, temperature=0)
-
-        if not response_text:
-            return {"first_party_brands": first_party_brands, "competitors": [], "error": "Empty response"}
-
-        result = parse_llm_json(response_text, expect="object")
-        if result is None:
-            return {"first_party_brands": first_party_brands, "competitors": [], "error": "Invalid response format"}
-
+    def shape(result: dict[str, Any]) -> dict[str, Any]:
         # Extract just the competitor names
         competitors = result.get("competitors", [])
         competitor_names = [c.get("name") if isinstance(c, dict) else c for c in competitors]
@@ -456,13 +465,13 @@ JSON OUTPUT:"""
             "industry": industry
         }
 
-    except Exception as e:
-        logger.error(f"Error finding competitors: {e!s}")
-        return {
-            "first_party_brands": first_party_brands,
-            "competitors": [],
-            "error": str(e)
-        }
+    return _run_brand_prompt(
+        prompt,
+        max_tokens=2000,
+        error_defaults={"first_party_brands": first_party_brands, "competitors": []},
+        shape=shape,
+        log_context="finding competitors",
+    )
 
 
 def get_config() -> dict[str, Any]:
@@ -495,6 +504,7 @@ def _get_presets(event: dict[str, Any], context: Any) -> dict[str, Any]:
     return success_response({'presets': presets_with_prompts}, event)
 
 
+@require_group(ADMIN_GROUP)
 @parse_json_body
 @validate({
     'brand_name': {'required': True, 'type': str, 'max_length': 200, 'source': 'body'},
@@ -507,6 +517,7 @@ def _expand_brand(event: dict[str, Any], context: Any, body: dict, brand_name: s
     return success_response(result, event)
 
 
+@require_group(ADMIN_GROUP)
 @parse_json_body
 @validate({
     'existing_brands': {'required': True, 'type': list, 'source': 'body'},
@@ -522,6 +533,7 @@ def _expand_all_brands(event: dict[str, Any], context: Any, body: dict, existing
     return success_response(result, event)
 
 
+@require_group(ADMIN_GROUP)
 @parse_json_body
 @validate({
     'first_party_brands': {'required': True, 'type': list, 'source': 'body'},
@@ -564,12 +576,17 @@ def _get_config(event: dict[str, Any], context: Any) -> dict[str, Any]:
     return success_response(config, event)
 
 
+@require_group(ADMIN_GROUP)
 @parse_json_body
 @validate({
     'industry': {'required': True, 'type': str, 'source': 'body'}
 })
 def _save_config(event: dict[str, Any], context: Any, body: dict, industry: str) -> dict[str, Any]:
-    """POST/PUT /brand-config - Create or update configuration."""
+    """POST/PUT /brand-config - Create or update configuration.
+
+    Admin-only. The reads (`_get_config`, `_get_presets`) stay open — the
+    dashboard needs the tracked-brand list to render every other view.
+    """
     # Validate industry
     if industry not in _BASE_PRESETS:
         return validation_error(
@@ -603,8 +620,13 @@ def _save_config(event: dict[str, Any], context: Any, body: dict, industry: str)
     }, event)
 
 
+@require_group(ADMIN_GROUP)
 def _reset_config(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """DELETE /brand-config - Reset to defaults."""
+    """DELETE /brand-config - Reset to defaults.
+
+    Admin-only and destructive: it overwrites `tracked_brands`,
+    `first_party_domains`, `custom_entity_types` and `industry_prompts`.
+    """
     default_config = {
         'industry': 'hotels',
         'extract_brands': True,

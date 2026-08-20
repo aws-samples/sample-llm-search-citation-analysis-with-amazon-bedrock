@@ -239,7 +239,15 @@ class TestQueryTemplateSubstitution:
         assert call_args.kwargs.get('query') == 'As a family traveler, find me hotels in malaga'
 
     def test_openai_default_query_without_template(self):
-        """query_openai uses default format when no template provided."""
+        """query_openai sends the bare keyword when no template is provided.
+
+        This previously asserted `'Search for information about: hotels in
+        malaga'`. OpenAI was the only provider whose no-template query was
+        rewritten, while Perplexity and Gemini received the bare keyword — an
+        uncontrolled variable in the cross-provider comparison this system
+        exists to produce. Parity is now pinned in
+        `test_provider_query_parity.py`.
+        """
         import handler
 
         mock_client = MagicMock()
@@ -251,7 +259,7 @@ class TestQueryTemplateSubstitution:
             handler.query_openai('hotels in malaga', 'key')
 
         call_args = mock_client.responses_with_web_search.call_args
-        assert call_args.kwargs.get('query') == 'Search for information about: hotels in malaga'
+        assert call_args.kwargs.get('query') == 'hotels in malaga'
 
     def test_perplexity_uses_template(self):
         """query_perplexity substitutes {keyword} in template."""

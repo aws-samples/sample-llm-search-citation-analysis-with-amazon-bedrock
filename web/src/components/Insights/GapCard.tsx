@@ -1,4 +1,5 @@
 import type { CitationGap } from '../../types';
+import { safeHref } from '../../infrastructure';
 
 const PRIORITY_STYLES: Record<string, string> = {
   high: 'bg-red-100 text-red-800',
@@ -12,7 +13,7 @@ export function GapCard({ gap }: { readonly gap: CitationGap }) {
       <div className="flex justify-between items-start mb-2">
         <div className="flex-1 min-w-0">
           <a
-            href={gap.url}
+            href={safeHref(gap.url)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-blue-600 hover:underline text-sm font-medium truncate block"

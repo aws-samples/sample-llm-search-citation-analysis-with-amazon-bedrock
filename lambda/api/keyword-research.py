@@ -12,13 +12,11 @@ import logging
 import os
 import re
 import sys
-import time
 import uuid
 from typing import Any
 from urllib.parse import urlparse
 
 import boto3
-import requests
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
@@ -26,9 +24,15 @@ sys.path.insert(0, '/opt/python')
 # HTML parsing
 from bs4 import BeautifulSoup
 
+from shared.ai_clients import get_web_search_clients, search_with_fallback
 from shared.api_response import error_response, success_response, validation_error
+from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.llm_json import parse_llm_json
 from shared.prompt_safety import wrap_user_input
+from shared.safe_fetch import fetch_following_validated_redirects
+from shared.self_invoke import SelfInvokeDispatchError, invoke_self_async
+from shared.stale_jobs import stale_elapsed_seconds
 from shared.url_validator import validate_url_safe
 
 # Configure logging
@@ -38,204 +42,82 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
-secrets_client = boto3.client('secretsmanager')
 
 # Fail-fast: Required environment variables
 KEYWORD_RESEARCH_TABLE = os.environ['KEYWORD_RESEARCH_TABLE']
-SECRETS_PREFIX = os.environ.get('SECRETS_PREFIX', 'citation-analysis/')
 
 research_table = dynamodb.Table(KEYWORD_RESEARCH_TABLE)
+
+# Budget after which a non-terminal research row cannot still be running, so
+# the reader-side sweep marks it failed. MUST stay above the KeywordMgmt Lambda
+# timeout (120s) — a threshold below it would mark live jobs as failed and they
+# would then flip back to completed. See `shared.stale_jobs`.
+RESEARCH_TIMEOUT_SECONDS = int(os.environ.get('RESEARCH_TIMEOUT_SECONDS', '180'))
 
 # User agent for web requests
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
-# Cache for secrets
-_secrets_cache = {}
-_secrets_cache_time = {}
-SECRETS_CACHE_TTL = 300
-
-
-def get_secret(secret_name: str) -> str | None:
-    """Retrieve secret from Secrets Manager with caching."""
-    current_time = time.time()
-    full_name = f"{SECRETS_PREFIX}{secret_name}"
-
-    # Check cache
-    if full_name in _secrets_cache:
-        cache_time = _secrets_cache_time.get(full_name, 0)
-        if current_time - cache_time < SECRETS_CACHE_TTL:
-            return _secrets_cache[full_name]
-
-    try:
-        response = secrets_client.get_secret_value(SecretId=full_name)
-        secret_string = response['SecretString']
-        try:
-            secret_data = json.loads(secret_string)
-            api_key = secret_data.get('api_key', secret_string)
-        except json.JSONDecodeError:
-            api_key = secret_string
-
-        _secrets_cache[full_name] = api_key
-        _secrets_cache_time[full_name] = current_time
-        return api_key
-    except Exception as e:
-        logger.warning("Secret lookup failed: %s", type(e).__name__)
-        return None
-
 
 # =============================================================================
-# AI Provider Clients with Web Search
-# Note: These are simplified versions of the clients in lambda/search/api_clients.py.
-# They live here because API Lambda bundling (createApiLambdaCode) only includes
-# the handler file. Provider fallback is handled by search_with_fallback() instead
-# of per-request retry logic.
+# Research status updates
+#
+# AI provider clients, fallback, and response-text extraction live in
+# `shared.ai_clients` (bugs.md 3.1) — this file previously carried drifted
+# simplified copies without retry, justified by a stale bundling comment.
 # =============================================================================
 
-class PerplexityClient:
-    """Perplexity API client - best for keyword research due to native web search."""
+def _set_research_status(research_id: str, status: str) -> None:
+    """Set the status field of a research record."""
+    research_table.update_item(
+        Key={'id': research_id},
+        UpdateExpression='SET #s = :s',
+        ExpressionAttributeNames={'#s': 'status'},
+        ExpressionAttributeValues={':s': status},
+    )
 
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://api.perplexity.ai"
 
-    def search(self, query: str, model: str = "sonar") -> dict[str, Any]:
-        """Execute search with web grounding."""
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": model,
-            "messages": [{"role": "user", "content": query}]
-        }
-
-        response = requests.post(
-            f"{self.base_url}/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=90
+def _mark_research_failed(research_id: str, error: Exception) -> None:
+    """Record a failed run; never let the bookkeeping write mask the error."""
+    with contextlib.suppress(Exception):
+        research_table.update_item(
+            Key={'id': research_id},
+            UpdateExpression='SET #s = :s, error_message = :e',
+            ExpressionAttributeNames={'#s': 'status'},
+            ExpressionAttributeValues={':s': 'failed', ':e': str(error)[:500]},
         )
-        response.raise_for_status()
-        return response.json()
 
 
-class OpenAIClient:
-    """OpenAI API client with web search via Responses API."""
+def _fail_if_research_timed_out(row: dict[str, Any]) -> None:
+    """Mark a non-terminal row failed once it has outlived the worker's budget.
 
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://api.openai.com/v1"
+    `_mark_research_failed` only ever runs from an `except` block, and a Lambda
+    timeout is a SIGKILL that raises nothing. So a background run killed at the
+    120s ceiling used to leave `status='processing'` forever, with no sweep
+    anywhere in this module — the UI polled `/history` and spun indefinitely
+    (AUDIT-2026-08-19 §2.9). Content Studio already had this sweep; keyword
+    research did not.
 
-    def search(self, query: str, model: str = "gpt-5-mini") -> dict[str, Any]:
-        """Execute search with web grounding."""
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": model,
-            "tools": [{"type": "web_search_preview"}],
-            "tool_choice": "auto",
-            "input": query
-        }
-
-        response = requests.post(
-            f"{self.base_url}/responses",
-            headers=headers,
-            json=payload,
-            timeout=90
-        )
-        response.raise_for_status()
-        return response.json()
-
-
-class GeminiClient:
-    """Gemini API client with Google Search grounding."""
-
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://generativelanguage.googleapis.com/v1beta"
-        self.model = "gemini-3-flash-preview"
-
-    def search(self, query: str) -> dict[str, Any]:
-        """Execute search with Google Search grounding."""
-        url = f"{self.base_url}/models/{self.model}:generateContent"
-        headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
-        payload = {
-            "contents": [{"role": "user", "parts": [{"text": query}]}],
-            "tools": [{"googleSearch": {}}]
-        }
-
-        response = requests.post(url, json=payload, headers=headers, timeout=20)
-        response.raise_for_status()
-        return response.json()
-
-
-def get_ai_client():
-    """Get the best available AI client for keyword research.
-
-    Returns a list of (client, provider_name) tuples ordered by preference.
-    Skips providers with placeholder keys.
+    Mutates ``row`` in place so the same response that triggers the sweep
+    reports the corrected status.
     """
-    clients = []
+    if row.get('status') not in ('pending', 'processing'):
+        return
 
-    for secret_name, ClientClass, provider_name in [
-        ('perplexity-key', PerplexityClient, 'perplexity'),
-        ('openai-key', OpenAIClient, 'openai'),
-        ('gemini-key', GeminiClient, 'gemini'),
-    ]:
-        key = get_secret(secret_name)
-        if key and key != 'placeholder':
-            clients.append((ClientClass(key), provider_name))
+    elapsed = stale_elapsed_seconds(row.get('created_at', ''), RESEARCH_TIMEOUT_SECONDS)
+    if elapsed is None:
+        return
 
-    # Return first working client for backwards compat, plus all as fallbacks
-    if clients:
-        return clients[0][0], clients[0][1], clients
-    return None, None, []
-
-
-def search_with_fallback(clients, prompt):
-    """Try each provider in order, falling back on errors."""
-    last_error = None
-    for client, provider in clients:
-        try:
-            logger.info(f"Trying {provider}")
-            raw_response = client.search(prompt)
-            return raw_response, provider
-        except Exception as e:
-            logger.warning(f"{provider} failed: {e}")
-            last_error = e
-            continue
-    raise last_error or Exception("All providers failed")
-
-
-def extract_response_text(response: dict, provider: str) -> str:
-    """Extract text from provider response."""
-    logger.info(f"Extracting response text from {provider}, response keys: {list(response.keys())}")
-
-    if provider == 'perplexity':
-        choices = response.get('choices', [])
-        if not choices:
-            logger.warning(f"Perplexity response has no choices: {response}")
-            return ''
-        content = choices[0].get('message', {}).get('content', '')
-        logger.info(f"Perplexity content length: {len(content)}")
-        return content
-    elif provider == 'openai':
-        output = response.get('output', [])
-        for item in output:
-            if item.get('type') == 'message':
-                content = item.get('content', [])
-                for c in content:
-                    if c.get('type') == 'output_text':
-                        return c.get('text', '')
-        return response.get('output_text', '')
-    elif provider == 'gemini':
-        candidates = response.get('candidates', [])
-        if candidates:
-            parts = candidates[0].get('content', {}).get('parts', [])
-            return ' '.join([p.get('text', '') for p in parts])
-    return ''
+    message = f'Research timed out after {int(elapsed)} seconds. Please try again.'
+    with contextlib.suppress(Exception):
+        research_table.update_item(
+            Key={'id': row['id']},
+            UpdateExpression='SET #s = :s, error_message = :e',
+            ExpressionAttributeNames={'#s': 'status'},
+            ExpressionAttributeValues={':s': 'failed', ':e': message},
+        )
+    row['status'] = 'failed'
+    row['error_message'] = message
+    logger.info(f"Marked research {row['id']} as failed due to timeout ({int(elapsed)}s)")
 
 
 # =============================================================================
@@ -272,7 +154,22 @@ def fetch_page_seo_elements(url: str) -> dict[str, Any]:
             'Connection': 'keep-alive',
         }
 
-        response = requests.get(url, headers=headers, timeout=5, allow_redirects=True)
+        # Redirects are followed one hop at a time with the destination
+        # revalidated each time. `allow_redirects=True` used to hand the chain
+        # to `requests`, so the validation above only ever covered the URL the
+        # caller typed — one `301` to an internal address bypassed it entirely
+        # and this function returns the body (AUDIT-2026-08-19 §2.6).
+        response, _final_url, fetch_error = fetch_following_validated_redirects(
+            url, headers=headers, timeout=5
+        )
+        if fetch_error:
+            logger.warning("fetch_page_seo_elements rejected URL: %s", fetch_error)
+            return {
+                'success': False,
+                'error': f'URL rejected: {fetch_error}',
+                'domain': urlparse(url).netloc.replace('www.', ''),
+            }
+
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, 'html.parser')
@@ -335,7 +232,7 @@ def fetch_page_seo_elements(url: str) -> dict[str, Any]:
 
 @parse_json_body
 @validate({
-    'seed_keyword': {'required': True, 'type': str, 'max_length': 500, 'source': 'body'},
+    'seed_keyword': {'required': True, 'type': str, 'max_length': MAX_KEYWORD_LENGTH, 'source': 'body'},
     'industry': {'type': str, 'max_length': 100, 'default': 'general', 'source': 'body'},
     'count': {'type': int, 'min': 1, 'max': 50, 'default': 20, 'source': 'body'}
 })
@@ -343,59 +240,55 @@ def _expand_keywords(event: dict[str, Any], context: Any, body: dict, seed_keywo
     """
     POST /api/keyword-research/expand
     Starts async keyword expansion. Returns immediately with a pending record.
+
+    Unexpected errors are handled by the @api_handler on the router.
     """
+    if not get_web_search_clients():
+        return error_response("No API keys configured.", event, 400)
+
+    # Create pending record
+    research_id = str(uuid.uuid4())
+    timestamp = get_timestamp()
+
+    item = {
+        'id': research_id,
+        'type': 'expansion',
+        'seed_keyword': seed_keyword,
+        'industry': industry,
+        'status': 'pending',
+        'keyword_count': 0,
+        'created_at': timestamp,
+    }
+    research_table.put_item(Item=item)
+
     try:
-        _, _, all_clients = get_ai_client()
-        if not all_clients:
-            return error_response("No API keys configured.", event, 400)
+        invoke_self_async(
+            {
+                'async_expand': True,
+                'research_id': research_id,
+                'seed_keyword': seed_keyword,
+                'industry': industry,
+                'count': count,
+            },
+            lambda: _process_expand_sync(research_id, seed_keyword, industry, count),
+            description='expand',
+        )
+    except SelfInvokeDispatchError as exc:
+        # Running the expansion here instead would outlive API Gateway's 29s
+        # timeout: the client gets a 504 while the multi-provider LLM work
+        # continues invisibly (AUDIT-2026-08-19 §2.9). Fail fast and mark the
+        # row terminal so it does not sit at `pending` forever.
+        _mark_research_failed(research_id, exc)
+        return error_response(
+            'Could not start keyword expansion. Please try again.', event, 503
+        )
 
-        # Create pending record
-        research_id = str(uuid.uuid4())
-        timestamp = get_timestamp()
-
-        item = {
-            'id': research_id,
-            'type': 'expansion',
-            'seed_keyword': seed_keyword,
-            'industry': industry,
-            'status': 'pending',
-            'keyword_count': 0,
-            'created_at': timestamp,
-        }
-        research_table.put_item(Item=item)
-
-        # Invoke self asynchronously
-        function_name = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', '')
-        if function_name:
-            lambda_client = boto3.client('lambda')
-            try:
-                lambda_client.invoke(
-                    FunctionName=function_name,
-                    InvocationType='Event',
-                    Payload=json.dumps({
-                        'async_expand': True,
-                        'research_id': research_id,
-                        'seed_keyword': seed_keyword,
-                        'industry': industry,
-                        'count': count,
-                    })
-                )
-            except Exception as e:
-                logger.error(f"Failed to trigger async expand: {e}")
-                _process_expand_sync(research_id, seed_keyword, industry, count)
-        else:
-            _process_expand_sync(research_id, seed_keyword, industry, count)
-
-        return success_response({
-            'id': research_id,
-            'seed_keyword': seed_keyword,
-            'status': 'pending',
-            'message': 'Keyword expansion started. Poll /history for results.',
-        }, event, 202)
-
-    except Exception as e:
-        logger.error(f"Keyword expansion failed: {e}")
-        return error_response(e, event)
+    return success_response({
+        'id': research_id,
+        'seed_keyword': seed_keyword,
+        'status': 'pending',
+        'message': 'Keyword expansion started. Poll /history for results.',
+    }, event, 202)
 
 
 @parse_json_body
@@ -415,8 +308,7 @@ def _analyze_competitor(event: dict[str, Any], context: Any, body: dict, url: st
     if not is_safe:
         return validation_error(ssrf_error, event)
 
-    _, _, all_clients = get_ai_client()
-    if not all_clients:
+    if not get_web_search_clients():
         return error_response("No API keys configured.", event, 400)
 
     # Create pending record
@@ -436,50 +328,45 @@ def _analyze_competitor(event: dict[str, Any], context: Any, body: dict, url: st
     }
     research_table.put_item(Item=item)
 
-    # Invoke self asynchronously
-    function_name = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', '')
-    if function_name:
-        lambda_client = boto3.client('lambda')
-        try:
-            lambda_client.invoke(
-                FunctionName=function_name,
-                InvocationType='Event',
-                Payload=json.dumps({
-                    'async_competitor': True,
-                    'research_id': research_id,
-                    'url': competitor_url,
-                    'domain': domain,
-                })
-            )
-            logger.info(f"Triggered async competitor analysis for {domain} (id={research_id})")
-        except Exception as e:
-            logger.error(f"Failed to trigger async competitor analysis: {e}")
-            _process_competitor_sync(research_id, competitor_url, domain)
-    else:
-        _process_competitor_sync(research_id, competitor_url, domain)
+    try:
+        invoke_self_async(
+            {
+                'async_competitor': True,
+                'research_id': research_id,
+                'url': competitor_url,
+                'domain': domain,
+            },
+            lambda: _process_competitor_sync(research_id, competitor_url, domain),
+            description='competitor analysis',
+            success_log=f"Triggered async competitor analysis for {domain} (id={research_id})",
+        )
+    except SelfInvokeDispatchError as exc:
+        # See the matching guard in `_expand_keywords`.
+        _mark_research_failed(research_id, exc)
+        return error_response(
+            'Could not start competitor analysis. Please try again.', event, 503
+        )
 
     return success_response({
         'id': research_id,
         'url': competitor_url,
         'domain': domain,
         'status': 'pending',
-        'message': 'Competitor analysis started. Poll /history or /status/{id} for results.',
+        # There is no /status/{id} route for keyword research — the CDK only
+        # registers /expand, /competitor, /history and /{id}. Advertising one
+        # sent clients to a 404.
+        'message': 'Competitor analysis started. Poll /history for results.',
     }, event, 202)
 
 
 def _process_expand_sync(research_id: str, seed_keyword: str, industry: str, count: int):
     """Run keyword expansion synchronously (called from async invoke or fallback)."""
     try:
-        logger.info(f"Processing keyword expansion for '{seed_keyword}' (id={research_id})")
+        logger.info(f"Processing keyword expansion for {seed_keyword!r} (id={research_id})")
 
-        research_table.update_item(
-            Key={'id': research_id},
-            UpdateExpression='SET #s = :s',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={':s': 'processing'},
-        )
+        _set_research_status(research_id, 'processing')
 
-        _, _, all_clients = get_ai_client()
+        all_clients = get_web_search_clients()
         if not all_clients:
             raise Exception("No API keys configured")
 
@@ -503,9 +390,8 @@ Return ONLY a JSON array with this exact structure, no other text or explanation
   ...
 ]"""
 
-        raw_response, provider = search_with_fallback(all_clients, prompt)
-        response_text = extract_response_text(raw_response, provider)
-        keywords = parse_keyword_json(response_text)
+        response_text, provider = search_with_fallback(all_clients, prompt)
+        keywords = parse_llm_json(response_text, expect="array") or []
 
         research_table.update_item(
             Key={'id': research_id},
@@ -519,17 +405,11 @@ Return ONLY a JSON array with this exact structure, no other text or explanation
                 ':rr': response_text[:5000],
             },
         )
-        logger.info(f"Keyword expansion complete: {len(keywords)} keywords for '{seed_keyword}'")
+        logger.info(f"Keyword expansion complete: {len(keywords)} keywords for {seed_keyword!r}")
 
     except Exception as e:
-        logger.error(f"Keyword expansion failed for '{seed_keyword}': {e}")
-        with contextlib.suppress(Exception):
-            research_table.update_item(
-                Key={'id': research_id},
-                UpdateExpression='SET #s = :s, error_message = :e',
-                ExpressionAttributeNames={'#s': 'status'},
-                ExpressionAttributeValues={':s': 'failed', ':e': str(e)[:500]},
-            )
+        logger.error(f"Keyword expansion failed for {seed_keyword!r}: {e}")
+        _mark_research_failed(research_id, e)
 
 
 def _process_competitor_sync(research_id: str, competitor_url: str, domain: str):
@@ -537,16 +417,11 @@ def _process_competitor_sync(research_id: str, competitor_url: str, domain: str)
     try:
         logger.info(f"Processing competitor analysis for {domain} (id={research_id})")
 
-        research_table.update_item(
-            Key={'id': research_id},
-            UpdateExpression='SET #s = :s',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={':s': 'processing'},
-        )
+        _set_research_status(research_id, 'processing')
 
         page_data = fetch_page_seo_elements(competitor_url)
 
-        _, _, all_clients = get_ai_client()
+        all_clients = get_web_search_clients()
         if not all_clients:
             raise Exception("No API keys configured")
 
@@ -596,9 +471,13 @@ Return ONLY valid JSON:
   "content_gaps": [{{"keyword": "...", "intent": "commercial", "competition": "medium", "relevance": 7, "opportunity": "..."}}]
 }}"""
 
-        raw_response, provider = search_with_fallback(all_clients, prompt)
-        response_text = extract_response_text(raw_response, provider)
-        analysis = parse_competitor_json(response_text)
+        response_text, provider = search_with_fallback(all_clients, prompt)
+        # Merge over the default shape so downstream reads never miss keys,
+        # exactly as the old local parser guaranteed.
+        analysis = {
+            **_competitor_analysis_defaults(),
+            **(parse_llm_json(response_text, expect="object") or {}),
+        }
 
         if page_data.get('success'):
             analysis['seo_elements'] = {
@@ -628,13 +507,7 @@ Return ONLY valid JSON:
 
     except Exception as e:
         logger.error(f"Competitor analysis failed for {domain}: {e}")
-        with contextlib.suppress(Exception):
-            research_table.update_item(
-                Key={'id': research_id},
-                UpdateExpression='SET #s = :s, error_message = :e',
-                ExpressionAttributeNames={'#s': 'status'},
-                ExpressionAttributeValues={':s': 'failed', ':e': str(e)[:500]},
-            )
+        _mark_research_failed(research_id, e)
 
 
 @validate({
@@ -642,49 +515,49 @@ Return ONLY valid JSON:
     'limit': {'type': int, 'min': 1, 'max': 100, 'default': 20}
 })
 def _get_history(event: dict[str, Any], context: Any, type: str | None = None, limit: int = 20) -> dict[str, Any]:
-    """GET /api/keyword-research/history - Get keyword research history."""
-    try:
-        scan_params = {'Limit': limit}
+    """GET /api/keyword-research/history - Get keyword research history.
 
-        if type:
-            scan_params['FilterExpression'] = '#t = :type'
-            scan_params['ExpressionAttributeNames'] = {'#t': 'type'}
-            scan_params['ExpressionAttributeValues'] = {':type': type}
+    Unexpected errors are handled by the @api_handler on the router.
+    """
+    scan_params = {'Limit': limit}
 
-        response = research_table.scan(**scan_params)
-        items = response.get('Items', [])
+    if type:
+        scan_params['FilterExpression'] = '#t = :type'
+        scan_params['ExpressionAttributeNames'] = {'#t': 'type'}
+        scan_params['ExpressionAttributeValues'] = {':type': type}
 
-        # Sort by created_at descending
-        items.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+    response = research_table.scan(**scan_params)
+    items = response.get('Items', [])
 
-        # Remove raw_response from list view
-        for item in items:
-            item.pop('raw_response', None)
+    for item in items:
+        _fail_if_research_timed_out(item)
 
-        return success_response({
-            'items': items,
-            'count': len(items)
-        }, event)
+    # Sort by created_at descending
+    items.sort(key=lambda x: x.get('created_at', ''), reverse=True)
 
-    except Exception as e:
-        logger.error(f"Failed to get history: {e}")
-        return error_response(e, event)
+    # Remove raw_response from list view
+    for item in items:
+        item.pop('raw_response', None)
+
+    return success_response({
+        'items': items,
+        'count': len(items)
+    }, event)
 
 
 def _delete_research(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """DELETE /api/keyword-research/{id} - Delete a research result."""
+    """DELETE /api/keyword-research/{id} - Delete a research result.
+
+    Unexpected errors are handled by the @api_handler on the router.
+    """
     path_params = event.get('pathParameters') or {}
     research_id = path_params.get('id')
 
     if not research_id:
         return validation_error('Research ID is required', event, 'id')
 
-    try:
-        research_table.delete_item(Key={'id': research_id})
-        return success_response({'message': 'Research deleted successfully'}, event)
-    except Exception as e:
-        logger.error(f"Failed to delete research: {e}")
-        return error_response(e, event)
+    research_table.delete_item(Key={'id': research_id})
+    return success_response({'message': 'Research deleted successfully'}, event)
 
 
 @api_handler
@@ -726,58 +599,20 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     return _route_handler(event, context)
 
 
-def parse_keyword_json(text: str) -> list[dict]:
-    """Parse keyword JSON from AI response."""
-    try:
-        # Try to find JSON array in the response
-        json_match = re.search(r'\[[\s\S]*\]', text)
-        if json_match:
-            return json.loads(json_match.group())
-        return []
-    except json.JSONDecodeError:
-        logger.warning(f"Failed to parse keyword JSON: {text[:200]}")
-        return []
+def _competitor_analysis_defaults() -> dict[str, Any]:
+    """Fresh default shape for a competitor analysis result.
 
-
-def parse_competitor_json(text: str) -> dict:
-    """Parse competitor analysis JSON from AI response."""
-    default_result = {
+    Built per call so the empty lists are never shared between requests.
+    JSON parsing itself is `shared.llm_json.parse_llm_json` (bugs.md 3.1) —
+    the local parsers it replaced lacked fence stripping and truncation
+    salvage.
+    """
+    return {
         'domain': '',
         'industry': 'unknown',
         'page_focus': '',
         'primary_keywords': [],
         'secondary_keywords': [],
         'longtail_keywords': [],
-        'content_gaps': []
+        'content_gaps': [],
     }
-
-    if not text or not text.strip():
-        logger.warning("Empty response text from AI provider")
-        return default_result
-
-    logger.info(f"Parsing competitor JSON from response ({len(text)} chars): {text[:300]}...")
-
-    try:
-        # Step 1: Try to extract JSON from markdown code blocks (```json ... ```)
-        code_block_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', text)
-        if code_block_match:
-            json_str = code_block_match.group(1)
-            result = json.loads(json_str)
-            logger.info(f"Parsed JSON from code block: {list(result.keys())}")
-            return {**default_result, **result}
-
-        # Step 2: Find first { and last } - most reliable for nested JSON
-        start = text.find('{')
-        end = text.rfind('}')
-        if start != -1 and end != -1 and end > start:
-            json_str = text[start:end + 1]
-            result = json.loads(json_str)
-            logger.info(f"Parsed JSON with bracket matching: {list(result.keys())}")
-            return {**default_result, **result}
-
-        logger.warning(f"No JSON object found in response: {text[:500]}")
-        return default_result
-
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON parse error: {e}. Response text: {text[:1000]}")
-        return default_result

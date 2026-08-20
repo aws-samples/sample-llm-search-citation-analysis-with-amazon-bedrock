@@ -4,10 +4,11 @@ import {
 import {
   ApiRequestError,
   ApiConfigError,
+  clientRejectionMessage,
   parseApiError,
   getErrorMessage,
   isAbortError,
-  isRecoverableError,
+  isDefinitiveClientRejection,
 } from './apiErrors';
 
 class TimeoutError extends Error {
@@ -35,13 +36,6 @@ class RateLimitError extends Error {
   constructor(message = 'Rate limit exceeded') {
     super(message);
     this.name = 'RateLimitError';
-  }
-}
-
-class NotFoundError extends Error {
-  constructor(message = 'Not found') {
-    super(message);
-    this.name = 'NotFoundError';
   }
 }
 
@@ -240,28 +234,96 @@ describe('isAbortError', () => {
   });
 });
 
-describe('isRecoverableError', () => {
-  it('returns true for network errors', () => {
-    const error = new TypeError('Failed to fetch');
+describe('isDefinitiveClientRejection', () => {
+  it('accepts a 400 validation rejection', () => {
+    const error = new ApiRequestError('rejected', {
+      statusCode: 400,
+      responseMessage: 'Keyword must not be empty',
+    });
 
-    expect(isRecoverableError(error)).toBe(true);
+    expect(isDefinitiveClientRejection(error)).toBe(true);
   });
 
-  it('returns true for rate limit errors', () => {
-    const error = new RateLimitError();
+  it('accepts a 409 conflict rejection', () => {
+    const error = new ApiRequestError('conflict', { statusCode: 409 });
 
-    expect(isRecoverableError(error, 429)).toBe(true);
+    expect(isDefinitiveClientRejection(error)).toBe(true);
   });
 
-  it('returns false for auth errors', () => {
-    const error = new UnauthorizedError();
+  it('rejects a 408 because a timed-out request may still have completed', () => {
+    const error = new ApiRequestError('timeout', {
+      statusCode: 408,
+      responseMessage: 'Request Timeout',
+    });
 
-    expect(isRecoverableError(error, 401)).toBe(false);
+    expect(isDefinitiveClientRejection(error)).toBe(false);
   });
 
-  it('returns false for not found errors', () => {
-    const error = new NotFoundError();
+  it('rejects a 500 server error', () => {
+    const error = new ApiRequestError('server', { statusCode: 500 });
 
-    expect(isRecoverableError(error, 404)).toBe(false);
+    expect(isDefinitiveClientRejection(error)).toBe(false);
+  });
+
+  it('rejects an ApiRequestError without a status code', () => {
+    expect(isDefinitiveClientRejection(new ApiRequestError('no status'))).toBe(false);
+  });
+
+  it('rejects plain transport errors', () => {
+    expect(isDefinitiveClientRejection(new TypeError('Failed to fetch'))).toBe(false);
+  });
+});
+
+describe('clientRejectionMessage', () => {
+  it('returns the server message for a definitive rejection', () => {
+    const error = new ApiRequestError('rejected', {
+      statusCode: 409,
+      responseMessage: 'Keyword already exists',
+    });
+
+    expect(clientRejectionMessage(error)).toBe('Keyword already exists');
+  });
+
+  it('appends the field pointer when includeField is set', () => {
+    const error = new ApiRequestError('rejected', {
+      statusCode: 400,
+      responseMessage: 'Keyword must be a string',
+      field: 'keywords[2].keyword',
+    });
+
+    expect(clientRejectionMessage(error, 'keywords', { includeField: true }))
+      .toBe('Keyword must be a string (field: keywords[2].keyword)');
+  });
+
+  it('omits the field pointer by default', () => {
+    const error = new ApiRequestError('rejected', {
+      statusCode: 400,
+      responseMessage: 'Keyword must be a string',
+      field: 'keyword',
+    });
+
+    expect(clientRejectionMessage(error)).toBe('Keyword must be a string');
+  });
+});
+
+describe('parseApiError server-text gating', () => {
+  it('suppresses the response message on a 500 server error', () => {
+    const error = new ApiRequestError('server', {
+      statusCode: 500,
+      responseMessage: 'Traceback: internal details',
+    });
+
+    const parsed = parseApiError(error);
+
+    expect(parsed.message).toBe('Server error occurred');
+  });
+
+  it('suppresses the response message on a 408 timeout', () => {
+    const error = new ApiRequestError('timeout', {
+      statusCode: 408,
+      responseMessage: 'upstream stalled',
+    });
+
+    expect(parseApiError(error).message).toBe('Request timed out');
   });
 });

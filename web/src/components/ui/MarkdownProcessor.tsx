@@ -1,5 +1,7 @@
 import DOMPurify from 'dompurify';
 
+import { isValidHttpUrl } from '../../infrastructure';
+
 /**
  * SECURITY: All user-generated content (AI provider responses) is sanitized via DOMPurify
  * before rendering with dangerouslySetInnerHTML. This prevents XSS attacks from malicious
@@ -11,10 +13,13 @@ import DOMPurify from 'dompurify';
  * - ALLOWED_URI_REGEXP: Only http/https URLs allowed in href attributes
  */
 export const formatInlineMarkdown = (text: string): string => {
-  // Convert markdown to HTML
-  const step1 = text.replaceAll('**', '<strong class="font-semibold">').replaceAll('**', '</strong>');
-  const step2 = step1.replaceAll('*', '<em class="italic">').replaceAll('*', '</em>');
-  const step3 = step2.replaceAll('`', '<code class="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">').replaceAll('`', '</code>');
+  // Convert PAIRED markdown markers to HTML; a lone marker stays literal.
+  // Pairing must happen in one pass per marker (bugs.md 1.3: sequential
+  // replaceAll calls consumed every marker as an opening tag, so closing
+  // tags were never emitted and emphasis rendered broken).
+  const step1 = text.replaceAll(/\*\*([^*]+)\*\*/gu, '<strong class="font-semibold">$1</strong>');
+  const step2 = step1.replaceAll(/\*([^*]+)\*/gu, '<em class="italic">$1</em>');
+  const step3 = step2.replaceAll(/`([^`]+)`/gu, '<code class="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono">$1</code>');
   
   // SECURITY: Sanitize HTML to prevent XSS from AI-generated content
   return DOMPurify.sanitize(step3, {
@@ -156,15 +161,6 @@ export const formatResponse = (text: string): JSX.Element[] => {
   }
 
   return blocks;
-};
-
-const isValidHttpUrl = (url: string): boolean => {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
 };
 
 export const extractUrls = (text: string): string[] => {

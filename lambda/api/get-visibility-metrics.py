@@ -23,7 +23,6 @@ from boto3.dynamodb.conditions import Key
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from decimal_utils import to_int
 from shared.api_response import success_response
 from shared.constants import (
     UNRANKED_SENTINEL,
@@ -36,6 +35,7 @@ from shared.constants import (
     VISIBILITY_SENTIMENT_WEIGHT,
 )
 from shared.decorators import api_handler, require_keyword, validate
+from shared.dynamo_decimal import to_int
 from shared.providers import get_enabled_provider_count
 from shared.utils import get_brand_config
 

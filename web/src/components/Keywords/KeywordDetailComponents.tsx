@@ -1,4 +1,5 @@
 import type { Search } from '../../types';
+import { safeHref } from '../../infrastructure';
 import {
   ChevronDownIcon, CloseIcon 
 } from '../ui';
@@ -337,7 +338,7 @@ const CitationsSection = ({ citations }: { citations: string[] }) => (
         <div key={citation} className="flex items-start gap-2 text-sm">
           <span className="text-gray-400">•</span>
           <a
-            href={citation}
+            href={safeHref(citation)}
             target="_blank"
             rel="noopener noreferrer"
             className="text-blue-600 hover:underline break-all flex-1"

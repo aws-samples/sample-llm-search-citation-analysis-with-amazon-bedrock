@@ -155,6 +155,7 @@ function PersonaRow({
   onToggle,
   onUpdate,
   onDelete,
+  isAdmin,
 }: {
   readonly prompt: QueryPrompt;
   readonly onToggle: (id: string) => Promise<unknown>;
@@ -164,6 +165,7 @@ function PersonaRow({
     description?: string 
   }) => Promise<unknown>;
   readonly onDelete: (id: string) => Promise<unknown>;
+  readonly isAdmin: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [toggling, setToggling] = useState(false);
@@ -224,44 +226,54 @@ function PersonaRow({
           )}
           <p className="text-xs text-gray-400 mt-1 truncate">{prompt.template}</p>
         </div>
-        <div className="flex items-center gap-1 ml-3">
-          <Button
-            variant="iconOnly"
-            size="sm"
-            onClick={handleToggle}
-            disabled={toggling}
-            title={toggleTitle}
-            aria-label={toggleTitle}
-          >
-            <ToggleIcon className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="iconOnly"
-            size="sm"
-            onClick={() => setEditing(true)}
-            title="Edit persona"
-            aria-label="Edit persona"
-          >
-            <PencilIcon className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="iconOnly"
-            size="sm"
-            onClick={handleDelete}
-            disabled={deleting}
-            title="Delete persona"
-            aria-label="Delete persona"
-            className="hover:text-red-600"
-          >
-            <TrashIcon className="w-4 h-4" />
-          </Button>
-        </div>
+        {/* PATCH/PUT/DELETE /api/query-prompts/{id} are all Admin-only
+            server-side. The row itself stays readable — personas explain the
+            keywords x providers x personas matrix to everyone. */}
+        {isAdmin && (
+          <div className="flex items-center gap-1 ml-3">
+            <Button
+              variant="iconOnly"
+              size="sm"
+              onClick={handleToggle}
+              disabled={toggling}
+              title={toggleTitle}
+              aria-label={toggleTitle}
+            >
+              <ToggleIcon className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="iconOnly"
+              size="sm"
+              onClick={() => setEditing(true)}
+              title="Edit persona"
+              aria-label="Edit persona"
+            >
+              <PencilIcon className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="iconOnly"
+              size="sm"
+              onClick={handleDelete}
+              disabled={deleting}
+              title="Delete persona"
+              aria-label="Delete persona"
+              className="hover:text-red-600"
+            >
+              <TrashIcon className="w-4 h-4" />
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-export function QueryPromptsManager() {
+interface QueryPromptsManagerProps {
+  /** Threaded from SettingsView, which already resolved membership. */
+  readonly isAdmin: boolean;
+}
+
+export function QueryPromptsManager({ isAdmin }: QueryPromptsManagerProps) {
   const {
     prompts, loading, error, createPrompt, updatePrompt, deletePrompt, togglePrompt 
   } = useQueryPrompts();
@@ -279,7 +291,7 @@ export function QueryPromptsManager() {
             Each persona runs against every keyword during analysis, giving you a keywords × providers × personas matrix.
           </p>
         </div>
-        {!showCreate && prompts.length < 10 && (
+        {isAdmin && !showCreate && prompts.length < 10 && (
           <Button
             onClick={() => setShowCreate(true)}
             leadingIcon={<PlusIcon className="w-4 h-4" />}
@@ -294,7 +306,7 @@ export function QueryPromptsManager() {
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
       )}
 
-      {showCreate && (
+      {isAdmin && showCreate && (
         <div className="p-4 border border-gray-300 rounded-lg bg-gray-50">
           <PersonaForm
             onSubmit={async (name, template, description) => {
@@ -312,10 +324,18 @@ export function QueryPromptsManager() {
       {!loading && prompts.length === 0 && !showCreate && (
         <div className="text-center py-8 text-gray-400">
           <p className="text-sm">No personas configured yet.</p>
-          <p className="text-xs mt-1">Create a persona to see how AI responses change based on user context.</p>
-          <p className="text-xs mt-2 text-gray-300">
-            Example: "I am a father of 3 living in Switzerland looking for family travel destinations"
-          </p>
+          {isAdmin ? (
+            <>
+              <p className="text-xs mt-1">Create a persona to see how AI responses change based on user context.</p>
+              <p className="text-xs mt-2 text-gray-300">
+                Example: "I am a father of 3 living in Switzerland looking for family travel destinations"
+              </p>
+            </>
+          ) : (
+            /* Telling a non-admin to "create a persona" points at a button
+               they cannot see and a route that would refuse them. */
+            <p className="text-xs mt-1">An administrator can add personas to compare how AI responses change by user context.</p>
+          )}
         </div>
       )}
       {!loading && prompts.length > 0 && (
@@ -327,6 +347,7 @@ export function QueryPromptsManager() {
               onToggle={togglePrompt}
               onUpdate={updatePrompt}
               onDelete={deletePrompt}
+              isAdmin={isAdmin}
             />
           ))}
         </div>

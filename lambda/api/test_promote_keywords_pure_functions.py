@@ -834,3 +834,36 @@ def test_retries_build_the_same_id_for_the_same_normalized_keyword(promotion_han
     )
 
     assert first[0]['id'] == retried[0]['id']
+
+
+class TestValidationMessageEchoCapUnit:
+    """Rejected status/priority values are capped before being echoed (bugs.md 2.4)."""
+
+    def test_rejection_message_truncates_status_longer_than_echo_cap(self, promotion_handler):
+        cap = promotion_handler.MAX_ECHOED_VALUE_LENGTH
+        long_status = 'x' * (cap * 4)
+
+        error, status, priority = promotion_handler.validate_request(
+            [{'keyword': 'best running shoes'}], long_status, None
+        )
+
+        assert error is not None, 'Expected a rejection for the out-of-set status'
+        assert (status, priority) == (None, None), 'Rejected request must resolve nothing'
+        assert f"Invalid status '{long_status[:cap]}...'" in error['message'], (
+            f'Expected capped echo in {error["message"]!r}'
+        )
+        assert long_status not in error['message'], (
+            f'Full unbounded value leaked into {error["message"]!r}'
+        )
+
+    def test_rejection_message_echoes_a_value_at_the_echo_cap_in_full(self, promotion_handler):
+        at_cap_priority = 'p' * promotion_handler.MAX_ECHOED_VALUE_LENGTH
+
+        error, _status, _priority = promotion_handler.validate_request(
+            [{'keyword': 'best running shoes'}], None, at_cap_priority
+        )
+
+        assert error is not None, 'Expected a rejection for the out-of-set priority'
+        assert f"Invalid priority '{at_cap_priority}' (allowed:" in error['message'], (
+            f'Value at the cap should be echoed untruncated in {error["message"]!r}'
+        )

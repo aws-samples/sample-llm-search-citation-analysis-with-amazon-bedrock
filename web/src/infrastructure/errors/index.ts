@@ -4,11 +4,11 @@
 export {
   ApiRequestError,
   ApiConfigError,
+  clientRejectionMessage,
   getErrorMessage,
   isAbortError,
-  isRecoverableError,
+  isDefinitiveClientRejection,
   parseApiError,
-  createErrorHandler,
 } from './apiErrors';
 
 export type {

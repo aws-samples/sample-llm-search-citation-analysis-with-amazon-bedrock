@@ -4,11 +4,11 @@ import {
 import {
   renderHook, act
 } from '@testing-library/react';
+import { uniqueResearchKeywords } from './keywordIdentity';
 import {
   reduceSelection,
   initialSelectionState,
   promotionSuccessMessage,
-  uniqueResearchKeywords,
   usePromoteKeywords,
   SELECTION_LIMIT,
   SELECTION_LIMIT_MESSAGE,

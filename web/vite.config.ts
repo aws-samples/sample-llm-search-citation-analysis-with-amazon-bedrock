@@ -77,7 +77,10 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: 'dist',
       sourcemap: false,
-      minify: 'terser',
+      // Default minifier (rolldown's built-in). The previous explicit
+      // `minify: 'terser'` predates the vite 8 / rolldown migration and made
+      // the build spend ~90% of its time in the terser plugin (the
+      // PLUGIN_TIMINGS build warning).
       chunkSizeWarningLimit: 1000,
       rollupOptions: {output: {manualChunks: vendorChunk,},},
     },

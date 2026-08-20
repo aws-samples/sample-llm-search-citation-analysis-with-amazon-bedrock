@@ -16,6 +16,8 @@ import boto3
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, error_response, not_found_response, success_response, validation_error
+from shared.auth import ADMIN_GROUP, require_group
+from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body, validate
 
 logger = logging.getLogger(__name__)
@@ -28,8 +30,8 @@ SCHEDULE_ROLE_ARN = os.environ['SCHEDULE_ROLE_ARN']
 SCHEDULE_GROUP = 'citation-analysis-schedules'
 
 # Match the limits enforced by parse-keywords / trigger-keyword-analysis.
+# MAX_KEYWORD_LENGTH is the shared cross-route cap (shared.constants).
 MAX_SCHEDULE_KEYWORDS = 100
-MAX_KEYWORD_LENGTH = 500
 
 
 def _normalize_schedule_keywords(keywords: list) -> tuple[list[str], str | None]:
@@ -89,15 +91,13 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     DELETE /api/schedules/{name} - Delete a schedule
     """
     method = event.get('httpMethod')
-    path_params = event.get('pathParameters') or {}
 
     if method == 'GET':
         return list_schedules(event)
     elif method == 'POST':
         return _create_schedule_handler(event, context)
     elif method == 'DELETE':
-        schedule_name = path_params.get('name')
-        return delete_schedule(schedule_name, event)
+        return _delete_schedule_handler(event, context)
     else:
         return validation_error('Method not allowed', event)
 
@@ -140,6 +140,7 @@ def list_schedules(event: dict[str, Any]) -> dict[str, Any]:
         return error_response(e, event)
 
 
+@require_group(ADMIN_GROUP)
 @parse_json_body
 @validate({
     'name': {'type': str, 'max_length': 100, 'default': 'daily-analysis'},
@@ -224,6 +225,19 @@ def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
         }, event, 201)
     except scheduler.exceptions.ConflictException:
         return api_response(409, {'error': 'Schedule with this name already exists'}, event)
+
+
+@require_group(ADMIN_GROUP)
+def _delete_schedule_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    """DELETE /api/schedules/{name} - Admin-only entry point.
+
+    `delete_schedule` takes `(schedule_name, event)` rather than the
+    `(event, context)` shape every decorator in this codebase expects, so this
+    thin adapter is where the authorization gate attaches. Mirrors the existing
+    `_create_schedule_handler` split.
+    """
+    path_params = event.get('pathParameters') or {}
+    return delete_schedule(path_params.get('name'), event)
 
 
 def delete_schedule(schedule_name: str, event: dict[str, Any]) -> dict[str, Any]:

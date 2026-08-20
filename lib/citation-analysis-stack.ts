@@ -12,7 +12,9 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
-import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
+// No aws-wafv2 import: the only L1 WAF construct in this stack was the
+// unassociated REGIONAL ACL deleted on 2026-08-19. The CloudFront Web ACL is
+// built through a us-east-1 custom resource (boto3 wafv2), not this module.
 import * as bedrockagentcore from 'aws-cdk-lib/aws-bedrockagentcore';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -38,6 +40,53 @@ const bedrockTierEnv = {
 } as const;
 
 /**
+ * Concurrency ceiling for the functions that invoke themselves asynchronously.
+ *
+ * `contentStudioFunction` and `keywordMgmtFunction` both re-invoke themselves
+ * via `shared/self_invoke.py` to run long work in the background. Async Lambda
+ * invocations are retried twice by default, so without a ceiling a bug in a
+ * self-invoke guard becomes an invocation storm: it consumes the account's
+ * entire concurrency pool — starving every other function in the stack,
+ * including `manage-users` — while billing an LLM call per invocation
+ * (AUDIT-2026-08-19 §2.4).
+ *
+ * 10 is deliberately generous for the expected load (a marketing team, not
+ * public traffic) while bounding a runaway loop to 10 concurrent executions
+ * instead of the account default of ~1000. Note this also *reserves* the
+ * capacity, guaranteeing these two can always run.
+ *
+ * If legitimate users start seeing 429s on content generation or keyword
+ * research, raise this — do not remove it.
+ */
+const SELF_INVOKING_FUNCTION_CONCURRENCY = 10;
+
+/**
+ * API Gateway's REST API integration timeout: a hard 29 seconds, not raisable.
+ *
+ * A Lambda behind API Gateway with a longer timeout does not get more time to
+ * answer — the client has already received a 504 at 29s. It gets more time to
+ * keep burning: billing compute, calling paid models, and writing to DynamoDB
+ * for a response nobody will ever receive (AUDIT-2026-08-19 §2.9).
+ *
+ * So every function whose ONLY invoker is API Gateway is capped here. The
+ * failure then surfaces as a Lambda timeout — visible in the function's own
+ * Duration/Errors metrics — instead of only as an opaque gateway 504.
+ *
+ * Two deliberate exceptions, both documented at their definitions:
+ *   - `contentStudioFunction` and `keywordMgmtFunction` also run as their own
+ *     async workers via `shared/self_invoke.py`. That path is NOT behind API
+ *     Gateway and legitimately needs minutes.
+ *   - `selfReflectionFunction` persists its result as the last step of a
+ *     synchronous Bedrock call, so a 504 today is still recoverable from the
+ *     cache it writes. Capping it at 29s would turn a slow request into
+ *     permanent loss.
+ *
+ * Functions invoked by Step Functions (parse-keywords, search, deduplication,
+ * crawler, generate-summary) are not subject to this at all.
+ */
+const API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS = 29;
+
+/**
  * Thrown at synth time when a Lambda layer's local build output is missing.
  * Layers must be built (scripts/deploy.sh or the per-layer build-layer.sh)
  * before `cdk synth`/`cdk deploy`.
@@ -50,26 +99,108 @@ class LayerNotBuiltError extends Error {
 }
 
 /**
- * Creates optimized Lambda code bundle containing only the specific handler file
- * plus shared utilities (decimal_utils.py). This reduces deployment package size
- * and improves cold start times compared to bundling all API handlers together.
+ * Fail synth when the built layer is missing shared modules that exist in
+ * source.
+ *
+ * `lambda/layer/python/` is gitignored build output, and the existence check
+ * alone passes against a *stale* build. Every handler imports `shared.*` from
+ * this layer, so a module added to `lambda/shared/` without rebuilding
+ * deploys cleanly and then ModuleNotFoundErrors on the first invocation of
+ * every affected function — with nothing in the CDK output hinting why.
+ *
+ * This bit for real: `auth.py`, `safe_fetch.py` and `stale_jobs.py` were all
+ * added to source while the built layer still held the previous set.
+ */
+function assertLayerContainsAllSharedModules(builtSharedPath: string): void {
+  const sourceSharedPath = path.join(__dirname, '../lambda/shared');
+  if (!fs.existsSync(sourceSharedPath)) return;
+
+  const expected = fs
+    .readdirSync(sourceSharedPath)
+    .filter((name) => name.endsWith('.py') && !name.startsWith('test_'));
+
+  const built = fs.existsSync(builtSharedPath) ? fs.readdirSync(builtSharedPath) : [];
+  const missing = expected.filter((name) => !built.includes(name));
+
+  if (missing.length > 0) {
+    throw new LayerNotBuiltError(
+      `Shared layer is stale — missing ${missing.join(', ')}.\n` +
+      'Every Lambda imports these from the layer, so deploying now would fail ' +
+      'at import time.\n' +
+      'Run: bash lambda/layer/build-layer.sh\n' +
+      'Or use scripts/deploy.sh which builds all layers automatically.'
+    );
+  }
+}
+
+/**
+ * Explicit 30-day CloudWatch log group for one of the API Lambda functions.
+ *
+ * A Lambda with no log group in the template still gets one: the Lambda
+ * service auto-creates `/aws/lambda/<functionName>` on first invocation, with
+ * retention set to "Never expire". 39 of this account's 45 log groups were in
+ * exactly that state, holding 70 MB that only grows and that nobody reads
+ * past the first week of an incident (AUDIT-2026-08-19 §2.7).
+ *
+ * This mirrors the five Step Functions workers, which have carried explicit
+ * `logs.LogGroup` constructs from the start. It is deliberately NOT
+ * `logRetention:` on `lambda.Function`: that prop is deprecated in
+ * aws-cdk-lib 2.x in favour of `logGroup`, and it works by deploying a
+ * singleton custom-resource Lambda that calls PutRetentionPolicy after the
+ * fact — an extra moving part to own for something the log group resource
+ * states directly.
+ *
+ * WHY `RETAIN` HERE WHEN THE WORKERS USE `DESTROY` — read before deploying:
+ *
+ * All twelve of these groups ALREADY EXIST in the deployed account. The Lambda
+ * service created them, so CloudFormation has never known about them, and
+ * CloudFormation cannot Create a log group whose name is already taken. The
+ * first `cdk deploy` carrying this change therefore fails with
+ * "already exists" unless each group is first brought under stack management
+ * (`cdk import`) or deleted so CloudFormation can recreate it.
+ *
+ * `RETAIN` is what keeps the import route open at all: CloudFormation's import
+ * operation requires a DeletionPolicy on every resource being imported. It
+ * also means that removing or renaming one of these constructs later abandons
+ * the group rather than deleting production logs — which for the workers'
+ * short-lived debug output did not matter, and here does.
+ */
+function apiLambdaLogGroup(scope: Construct, id: string, functionName: string): logs.LogGroup {
+  return new logs.LogGroup(scope, id, {
+    logGroupName: `/aws/lambda/${functionName}`,
+    retention: logs.RetentionDays.ONE_MONTH,
+    removalPolicy: cdk.RemovalPolicy.RETAIN,
+  });
+}
+
+/**
+ * Creates optimized Lambda code bundle containing only the specific handler
+ * file. Shared code (including Decimal helpers, now in
+ * shared/dynamo_decimal.py) ships via the Lambda layer. This reduces
+ * deployment package size and improves cold start times compared to bundling
+ * all API handlers together.
  * 
  * Uses local bundling (no Docker required) with Docker as fallback.
  * 
  * @param handlerFileName - The Python handler file name (e.g., 'get-stats.py')
  * @returns Lambda Code asset with only the required files
  */
+// Python bytecode caches are volatile local artifacts: running pytest rewrites
+// them inside the lambda/ source trees, which would otherwise change every
+// asset hash and trigger spurious redeploys of unchanged functions.
+const PYTHON_ASSET_EXCLUDES = ['**/__pycache__', '**/*.pyc'];
+
 function createApiLambdaCode(handlerFileName: string): lambda.Code {
   const apiPath = path.join(__dirname, '../lambda/api');
   
   return lambda.Code.fromAsset(apiPath, {
+    exclude: PYTHON_ASSET_EXCLUDES,
     bundling: {
       image: lambda.Runtime.PYTHON_3_12.bundlingImage,
       command: [
         'bash', '-c',
         `mkdir -p /asset-output && ` +
-        `cp /asset-input/${handlerFileName} /asset-output/ && ` +
-        `if [ -f /asset-input/decimal_utils.py ]; then cp /asset-input/decimal_utils.py /asset-output/; fi`
+        `cp /asset-input/${handlerFileName} /asset-output/`
       ],
       local: {
         tryBundle(outputDir: string): boolean {
@@ -78,13 +209,6 @@ function createApiLambdaCode(handlerFileName: string): lambda.Code {
             const handlerSrc = path.join(apiPath, handlerFileName);
             const handlerDest = path.join(outputDir, handlerFileName);
             fs.copyFileSync(handlerSrc, handlerDest);
-            
-            // Copy decimal_utils.py if it exists (shared utility)
-            const utilsSrc = path.join(apiPath, 'decimal_utils.py');
-            if (fs.existsSync(utilsSrc)) {
-              const utilsDest = path.join(outputDir, 'decimal_utils.py');
-              fs.copyFileSync(utilsSrc, utilsDest);
-            }
             
             return true;
           } catch {
@@ -108,12 +232,12 @@ function createConsolidatedApiLambdaCode(handlerFileNames: string[]): lambda.Cod
   const cpCommands = handlerFileNames.map(f => `cp /asset-input/${f} /asset-output/`).join(' && ');
   
   return lambda.Code.fromAsset(apiPath, {
+    exclude: PYTHON_ASSET_EXCLUDES,
     bundling: {
       image: lambda.Runtime.PYTHON_3_12.bundlingImage,
       command: [
         'bash', '-c',
-        `mkdir -p /asset-output && ${cpCommands} && ` +
-        `if [ -f /asset-input/decimal_utils.py ]; then cp /asset-input/decimal_utils.py /asset-output/; fi`
+        `mkdir -p /asset-output && ${cpCommands}`
       ],
       local: {
         tryBundle(outputDir: string): boolean {
@@ -122,10 +246,6 @@ function createConsolidatedApiLambdaCode(handlerFileNames: string[]): lambda.Cod
               const src = path.join(apiPath, fileName);
               const dest = path.join(outputDir, fileName);
               fs.copyFileSync(src, dest);
-            }
-            const utilsSrc = path.join(apiPath, 'decimal_utils.py');
-            if (fs.existsSync(utilsSrc)) {
-              fs.copyFileSync(utilsSrc, path.join(outputDir, 'decimal_utils.py'));
             }
             return true;
           } catch {
@@ -537,10 +657,34 @@ export class CitationAnalysisStack extends cdk.Stack {
       enforceSSL: true,
       serverAccessLogsBucket: accessLogsBucket,
       serverAccessLogsPrefix: 'screenshots/',
+      // Transition to Infrequent Access at 90 days — NOT expiration.
+      //
+      // This rule used to be `expiration: 90 days`, which silently deleted
+      // every crawl screenshot older than a quarter. Screenshots are the only
+      // evidence of what a cited page looked like at crawl time, and pages get
+      // rewritten, so a deleted screenshot is not regenerable — re-crawling
+      // captures today's page, not the one that was cited
+      // (AUDIT-2026-08-19 §2.5).
+      //
+      // Screenshots are read when a citation is first reviewed and rarely
+      // again, which is exactly the STANDARD_IA access pattern: same
+      // durability and availability SLA, roughly 45% cheaper per GB, at the
+      // cost of a per-GB retrieval fee on the infrequent reads. At the current
+      // 3.3 GB / 2,055 objects that is small either way; the point is that it
+      // stays small as the bucket grows without anything being destroyed.
+      //
+      // 90 days is kept from the previous rule deliberately: it is comfortably
+      // past the 30-day minimum STANDARD_IA billing duration, so an object
+      // transitioned here is never charged for storage it did not use.
       lifecycleRules: [
         {
-          expiration: cdk.Duration.days(90),
           enabled: true,
+          transitions: [
+            {
+              storageClass: s3.StorageClass.INFREQUENT_ACCESS,
+              transitionAfter: cdk.Duration.days(90),
+            },
+          ],
         },
       ],
     });
@@ -724,9 +868,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         'Or use scripts/deploy.sh which builds all layers automatically.'
       );
     }
+    assertLayerContainsAllSharedModules(path.join(sharedLayerPythonPath, 'shared'));
     const sharedLayer = new lambda.LayerVersion(this, 'SharedLayer', {
       layerVersionName: 'CitationAnalysis-SharedLayer',
-      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/layer')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/layer'), { exclude: PYTHON_ASSET_EXCLUDES }),
       compatibleRuntimes: [lambda.Runtime.PYTHON_3_12],
       description: 'Shared Python code and dependencies for Citation Analysis Lambda functions',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -747,7 +892,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       functionName: 'CitationAnalysis-ParseKeywords',
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'handler.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/parse-keywords')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/parse-keywords'), { exclude: PYTHON_ASSET_EXCLUDES }),
       layers: [sharedLayer],
       timeout: cdk.Duration.seconds(30),
       memorySize: 256,
@@ -780,7 +925,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       functionName: 'CitationAnalysis-Search',
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'handler.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/search')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/search'), { exclude: PYTHON_ASSET_EXCLUDES }),
       role: searchLambdaRole,
       layers: [sharedLayer],
       timeout: cdk.Duration.seconds(900), // 15 min max — invoked by Step Functions, not API Gateway
@@ -814,7 +959,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       functionName: 'CitationAnalysis-Deduplication',
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'handler.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/deduplication')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/deduplication'), { exclude: PYTHON_ASSET_EXCLUDES }),
       role: deduplicationLambdaRole,
       layers: [sharedLayer],
       timeout: cdk.Duration.seconds(30),
@@ -842,7 +987,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     }
     const crawlerLayer = new lambda.LayerVersion(this, 'CrawlerLayer', {
       layerVersionName: 'CitationAnalysis-CrawlerLayer',
-      code: lambda.Code.fromAsset(crawlerLayerPath),
+      code: lambda.Code.fromAsset(crawlerLayerPath, { exclude: PYTHON_ASSET_EXCLUDES }),
       compatibleRuntimes: [lambda.Runtime.PYTHON_3_12],
       description: 'Browser automation tools (Playwright + AgentCore) for Crawler Lambda',
       removalPolicy: cdk.RemovalPolicy.DESTROY,
@@ -896,7 +1041,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       functionName: 'CitationAnalysis-Crawler',
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'handler.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/crawler')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/crawler'), { exclude: PYTHON_ASSET_EXCLUDES }),
       role: crawlerLambdaRole,
       layers: [crawlerLayer], // Crawler layer includes shared modules (copied during build)
       timeout: cdk.Duration.seconds(300),
@@ -922,7 +1067,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       functionName: 'CitationAnalysis-GenerateSummary',
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'handler.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/generate-summary')),
+      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/generate-summary'), { exclude: PYTHON_ASSET_EXCLUDES }),
       layers: [sharedLayer],
       timeout: cdk.Duration.seconds(60),
       memorySize: 256,
@@ -1049,12 +1194,59 @@ export class CitationAnalysisStack extends cdk.Stack {
       .next(generateSummaryTask);
 
     // 10. Create the State Machine
+
+    // Execution history log group for the workflow.
+    //
+    // This is a NEW group, unlike the Lambda ones above: the state machine ran
+    // with `level: OFF` so nothing was ever written and there is no existing
+    // group to collide with. Hence `DESTROY`, matching the workers.
+    //
+    // `/aws/vendedlogs/states/` is the documented prefix, not cosmetic.
+    // Services that deliver logs on your behalf have to name each destination
+    // group in a CloudWatch Logs resource policy, and those policies cap at
+    // 5120 characters; the vendedlogs prefix is covered by a wildcard instead
+    // of consuming budget per group. Exceeding the cap fails as an opaque
+    // policy-length error at the moment logging is enabled, so the prefix is
+    // worth keeping even though only one group needs it today.
+    const stateMachineLogGroup = new logs.LogGroup(this, 'StateMachineLogGroup', {
+      logGroupName: '/aws/vendedlogs/states/CitationAnalysis-Workflow',
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
     const stateMachine = new stepfunctions.StateMachine(this, 'CitationAnalysisStateMachine', {
       stateMachineName: 'CitationAnalysis-Workflow',
       definitionBody: stepfunctions.DefinitionBody.fromChainable(definition),
       role: stepFunctionsRole,
       timeout: cdk.Duration.hours(2),
       tracingEnabled: true,
+      // Logging was `level: OFF` with `includeExecutionData: false`, so a
+      // failed execution left nothing behind to debug: X-Ray tracing shows
+      // that a state failed and how long it took, never the payload that
+      // caused it. With ProcessKeywords and CrawlCitations both being Maps,
+      // "which item failed, and on what input" is the only question worth
+      // asking after a failed run — and it was the one question this
+      // configuration could not answer (AUDIT-2026-08-19 §2.8).
+      //
+      // ALL rather than ERROR: on a Map, the interesting evidence is the
+      // per-iteration state entry/exit either side of the failure, not just
+      // the terminal error. The ingestion cost of that for a workflow that
+      // runs on a schedule, capped at 30 days, is a rounding error next to the
+      // Bedrock spend it orchestrates.
+      //
+      // `includeExecutionData` is what actually puts the failing item's input
+      // in the log; without it this is only marginally better than OFF. It
+      // does mean keyword and citation payloads land in CloudWatch, which is
+      // why the group above expires them at 30 days.
+      //
+      // No explicit grant needed: CDK attaches the logs:*LogDelivery /
+      // PutResourcePolicy statements to `stepFunctionsRole` when `logs` is
+      // set. Do not add them by hand — they will just be duplicated.
+      logs: {
+        destination: stateMachineLogGroup,
+        level: stepfunctions.LogLevel.ALL,
+        includeExecutionData: true,
+      },
     });
 
     // ========================================
@@ -1221,6 +1413,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       timeout: cdk.Duration.seconds(5),
       memorySize: 128,
       description: 'API: Health check endpoint for monitoring',
+      logGroup: apiLambdaLogGroup(this, 'HealthCheckLogGroup', 'CitationAnalysis-API-Health'),
     });
     
 
@@ -1245,9 +1438,15 @@ export class CitationAnalysisStack extends cdk.Stack {
         'get-reports-competitor.py',
       ]),
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(60),
+      // Every route here is read-only bar a millisecond-scale put_item on
+      // POST /recommendations/{id}/status, and recommendations are regenerated
+      // per call rather than persisted — so nothing is lost by capping at the
+      // gateway ceiling. The slow routes (/reports/competitor, /stats) already
+      // 504 at 29s; the extra 31s only ever burned compute.
+      timeout: cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
       memorySize: 512,
       description: 'API: Consolidated stats, visibility, insights, gaps, recommendations, and trends',
+      logGroup: apiLambdaLogGroup(this, 'StatsInsightsLogGroup', 'CitationAnalysis-API-StatsInsights'),
       environment: {
         // Audit #12: canonical DYNAMODB_TABLE_* names. Legacy names kept
         // for in-flight deploys; can be dropped after one full rollout.
@@ -1286,9 +1485,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         'browse-raw-responses.py',
       ]),
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
       memorySize: 256,
       description: 'API: Consolidated citations, URL breakdown, searches, crawled content, and raw responses',
+      logGroup: apiLambdaLogGroup(this, 'CitationsContentLogGroup', 'CitationAnalysis-API-CitationsContent'),
       environment: {
         // Audit #12 canonical names.
         DYNAMODB_TABLE_CITATIONS: citationsTable.tableName,
@@ -1311,9 +1511,10 @@ export class CitationAnalysisStack extends cdk.Stack {
       handler: 'get-brand-mentions.handler',
       code: createApiLambdaCode('get-brand-mentions.py'),
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
       memorySize: 256,
       description: 'API: Get brand mentions from search results',
+      logGroup: apiLambdaLogGroup(this, 'GetBrandMentionsLogGroup', 'CitationAnalysis-API-GetBrandMentions'),
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
@@ -1326,9 +1527,10 @@ export class CitationAnalysisStack extends cdk.Stack {
       handler: 'manage-brand-config.handler',
       code: createApiLambdaCode('manage-brand-config.py'),
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
       memorySize: 256,
       description: 'API: Manage brand tracking configuration',
+      logGroup: apiLambdaLogGroup(this, 'ManageBrandConfigLogGroup', 'CitationAnalysis-API-ManageBrandConfig'),
       environment: {DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName, ...bedrockTierEnv},
     });
 
@@ -1347,7 +1549,10 @@ export class CitationAnalysisStack extends cdk.Stack {
       layers: [sharedLayer],
       timeout: cdk.Duration.seconds(120),
       memorySize: 256,
+      // Self-invokes for async keyword research — see the constant's comment.
+      reservedConcurrentExecutions: SELF_INVOKING_FUNCTION_CONCURRENCY,
       description: 'API: Consolidated keyword get/create/update/delete and keyword research',
+      logGroup: apiLambdaLogGroup(this, 'KeywordMgmtLogGroup', 'CitationAnalysis-API-KeywordMgmt'),
       environment: {
         // Audit #12 canonical names.
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
@@ -1371,9 +1576,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         'manage-providers.py',
       ]),
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
       memorySize: 256,
       description: 'API: Consolidated query prompts, schedules, and provider config',
+      logGroup: apiLambdaLogGroup(this, 'ConfigMgmtLogGroup', 'CitationAnalysis-API-ConfigMgmt'),
       environment: {
         // Audit #12 canonical names.
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
@@ -1399,9 +1605,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         'get-execution-status.py',
       ]),
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
       memorySize: 256,
       description: 'API: Consolidated trigger analysis and execution status',
+      logGroup: apiLambdaLogGroup(this, 'ExecutionMgmtLogGroup', 'CitationAnalysis-API-ExecutionMgmt'),
       environment: {
         STATE_MACHINE_ARN: stateMachine.stateMachineArn,
         // Audit #12 canonical names.
@@ -1523,9 +1730,10 @@ export class CitationAnalysisStack extends cdk.Stack {
       handler: 'get-persona-rankings.handler',
       code: createApiLambdaCode('get-persona-rankings.py'),
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
       memorySize: 256,
       description: 'API: Get per-persona brand ranking breakdowns',
+      logGroup: apiLambdaLogGroup(this, 'GetPersonaRankingsLogGroup', 'CitationAnalysis-API-GetPersonaRankings'),
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
@@ -1544,13 +1752,37 @@ export class CitationAnalysisStack extends cdk.Stack {
       handler: 'self-reflection.handler',
       code: createApiLambdaCode('self-reflection.py'),
       layers: [sharedLayer],
+      // Deliberately ABOVE the 29s gateway ceiling — do not "fix" this to 29.
+      //
+      // `post_self_reflection` calls Bedrock synchronously and then persists
+      // the result as its very last step, and that row is what the 24h
+      // `check_cache` reads. So a slow request today degrades gracefully: the
+      // client sees a 504 at 29s, the function runs on, writes the row, and
+      // the next request returns it from cache immediately.
+      //
+      // Capping at 29s would put the SIGKILL before that write every time:
+      // Bedrock billed, nothing stored, and because only a completed run
+      // populates the cache, a slow keyword/brand pair would be broken
+      // permanently rather than intermittently (AUDIT-2026-08-19 §2.9).
+      //
+      // Making this async like Content Studio is the real fix; until then the
+      // 60s is load-bearing.
       timeout: cdk.Duration.seconds(60),
       memorySize: 256,
       description: 'API: LLM self-reflection analysis for brand rankings',
+      logGroup: apiLambdaLogGroup(this, 'SelfReflectionLogGroup', 'CitationAnalysis-API-SelfReflection'),
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_SELF_REFLECTION: selfReflectionTable.tableName,
         QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
+        // DEAD CONFIG: `shared/models.py` reads BEDROCK_MODEL_<ROLE> and
+        // BEDROCK_TIER_<ROLE>, never BEDROCK_MODEL_ID. This function also does
+        // not spread `bedrockTierEnv`, so ModelRole.ANALYSIS falls through to
+        // its hardcoded BALANCED default: Sonnet 4.6 with a 2000-token
+        // extended-thinking budget, NOT the Haiku named here. That is the root
+        // cause of the latency this function's 60s timeout accommodates.
+        // Left in place because switching to Haiku changes analysis quality
+        // and cost — a product decision, not a cleanup.
         BEDROCK_MODEL_ID: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
       },
     });
@@ -1594,90 +1826,29 @@ export class CitationAnalysisStack extends cdk.Stack {
     stateMachine.grantStartExecution(schedulerRole);
 
     // ========================================
-    // WAF Web ACL for API Gateway
+    // WAF Web ACL for API Gateway — REMOVED 2026-08-19
     // ========================================
-    
-    // Create WAF Web ACL with AWS managed rules for API protection
-    const apiWaf = new wafv2.CfnWebACL(this, 'ApiWaf', {
-      name: 'CitationAnalysis-API-WAF',
-      scope: 'REGIONAL', // REGIONAL for API Gateway
-      defaultAction: { allow: {} },
-      visibilityConfig: {
-        cloudWatchMetricsEnabled: true,
-        metricName: 'CitationAnalysisApiWaf',
-        sampledRequestsEnabled: true,
-      },
-      rules: [
-        // AWS Managed Rules - Common Rule Set (protects against common web exploits)
-        {
-          name: 'AWSManagedRulesCommonRuleSet',
-          priority: 1,
-          overrideAction: { none: {} },
-          statement: {
-            managedRuleGroupStatement: {
-              vendorName: 'AWS',
-              name: 'AWSManagedRulesCommonRuleSet',
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: 'AWSManagedRulesCommonRuleSet',
-            sampledRequestsEnabled: true,
-          },
-        },
-        // AWS Managed Rules - Known Bad Inputs (blocks request patterns known to be malicious)
-        {
-          name: 'AWSManagedRulesKnownBadInputsRuleSet',
-          priority: 2,
-          overrideAction: { none: {} },
-          statement: {
-            managedRuleGroupStatement: {
-              vendorName: 'AWS',
-              name: 'AWSManagedRulesKnownBadInputsRuleSet',
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: 'AWSManagedRulesKnownBadInputsRuleSet',
-            sampledRequestsEnabled: true,
-          },
-        },
-        // AWS Managed Rules - SQL Injection protection
-        {
-          name: 'AWSManagedRulesSQLiRuleSet',
-          priority: 3,
-          overrideAction: { none: {} },
-          statement: {
-            managedRuleGroupStatement: {
-              vendorName: 'AWS',
-              name: 'AWSManagedRulesSQLiRuleSet',
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: 'AWSManagedRulesSQLiRuleSet',
-            sampledRequestsEnabled: true,
-          },
-        },
-        // Rate limiting rule - 1000 requests per 5 minutes per IP
-        {
-          name: 'RateLimitRule',
-          priority: 4,
-          action: { block: {} },
-          statement: {
-            rateBasedStatement: {
-              limit: 1000,
-              aggregateKeyType: 'IP',
-            },
-          },
-          visibilityConfig: {
-            cloudWatchMetricsEnabled: true,
-            metricName: 'RateLimitRule',
-            sampledRequestsEnabled: true,
-          },
-        },
-      ],
-    });
+    //
+    // `CitationAnalysis-API-WAF` (REGIONAL, logical id `ApiWaf`) used to be
+    // created here with four rules — the two AWS managed sets, SQLi, and a
+    // 1000-per-5-min rate limit — and was never associated with anything. The
+    // association below it had been commented out since it was written, and
+    // `list-resources-for-web-acl` confirmed the empty set: it inspected zero
+    // requests while billing for the ACL plus every rule group, every month
+    // (AUDIT-2026-08-19 §2.1).
+    //
+    // Attaching it was the other option and was rejected: the rules it carried
+    // target injection and volumetric attacks against a public surface, and
+    // this API has no anonymous surface to speak of.
+    //
+    // What protects the API now:
+    //   - the Cognito authorizer, on every route except GET /api/health
+    //   - the stage throttle, 100 rps sustained / 200 burst
+    //   - per-request origin validation and input validation in the handlers
+    //
+    // The CloudFront Web ACL is a DIFFERENT resource, further down, created in
+    // us-east-1 via custom resource. It IS attached to the distribution and
+    // must stay.
 
     // Create REST API Gateway
     // Note: Auth construct created early, callback URLs updated after CloudFront distribution
@@ -1691,6 +1862,25 @@ export class CitationAnalysisStack extends cdk.Stack {
         stageName: 'prod',
         throttlingRateLimit: 100,
         throttlingBurstLimit: 200,
+        // Per-method CloudWatch metrics (Count, 4XXError, 5XXError, Latency,
+        // IntegrationLatency) for every route on the stage.
+        //
+        // Without this the account had aggregate stage metrics only, so
+        // "the API is throwing 5XXs" could never be narrowed to *which*
+        // endpoint, and a per-endpoint alarm was not expressible at all —
+        // there was no metric to alarm on (AUDIT-2026-08-19 §2.6).
+        metricsEnabled: true,
+        // dataTraceEnabled is deliberately LEFT OFF. Do not turn it on
+        // alongside metricsEnabled — they look like a pair and are not.
+        //
+        // It logs full request and response bodies to CloudWatch, which here
+        // means Cognito-authenticated user payloads, brand configuration, and
+        // whole LLM responses. That is a privacy exposure with no retention
+        // story and a log-ingestion bill proportional to response size, in
+        // exchange for detail that X-Ray and the functions' own structured
+        // logging already provide. Enable it temporarily on a single
+        // reproduction if you must, then turn it back off.
+        dataTraceEnabled: false,
       },
       // CORS preflight: API Gateway handles OPTIONS with wildcard origins.
       // Actual CORS enforcement happens at Lambda level via SSM parameter containing CloudFront domain.
@@ -1918,7 +2108,10 @@ export class CitationAnalysisStack extends cdk.Stack {
       layers: [sharedLayer],
       timeout: cdk.Duration.seconds(300),
       memorySize: 512,
+      // Self-invokes for async content generation — see the constant's comment.
+      reservedConcurrentExecutions: SELF_INVOKING_FUNCTION_CONCURRENCY,
       description: 'API: Content Studio - ideas and content generation',
+      logGroup: apiLambdaLogGroup(this, 'ContentStudioLogGroup', 'CitationAnalysis-API-ContentStudio'),
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_CITATIONS: citationsTable.tableName,
@@ -1927,7 +2120,13 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_CONTENT_STUDIO: contentStudioTable.tableName,
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
         DYNAMODB_TABLE_SELF_REFLECTION: selfReflectionTable.tableName,
-        GENERATION_TIMEOUT_SECONDS: '240',
+        // Budget after which the reader-side sweep declares a generation dead.
+        // MUST stay above this function's own 300s timeout: at the previous
+        // 240s a legitimate 241-300s run was marked `failed` while still
+        // running, then flipped back to `generated` on completion
+        // (AUDIT-2026-08-19 §2.9). 60s of headroom absorbs async queue delay
+        // between the row being written and the worker actually starting.
+        GENERATION_TIMEOUT_SECONDS: '360',
         ...bedrockTierEnv,
       },
     });
@@ -2008,9 +2207,10 @@ export class CitationAnalysisStack extends cdk.Stack {
       handler: 'manage-users.handler',
       code: createApiLambdaCode('manage-users.py'),
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(30),
+      timeout: cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
       memorySize: 256,
       description: 'API: Manage Cognito users',
+      logGroup: apiLambdaLogGroup(this, 'ManageUsersLogGroup', 'CitationAnalysis-API-ManageUsers'),
       environment: {
         USER_POOL_ID: auth.userPool.userPoolId,
       },
@@ -2283,26 +2483,13 @@ def delete_waf(waf, arn):
     });
 
     // ========================================
-    // Associate WAF with API Gateway
+    // Associate WAF with API Gateway — NOT DONE, BY DECISION 2026-08-19
     // ========================================
-    
-    // NOTE: WAF association commented out due to CloudFormation timing issues
-    // The WAF is created and protects CloudFront, but API Gateway association
-    // has caused deployment failures in the past. The API is still protected by:
-    // - Cognito authorizer (JWT validation on all endpoints)
-    // - Input validation in Lambda functions
-    // - CORS restrictions
-    // - Rate limiting at API Gateway level
-    // 
-    // To enable WAF on API Gateway, uncomment and test carefully:
-    /*
-    const apiStageArn = `arn:aws:apigateway:${this.region}::/restapis/${api.restApiId}/stages/prod`;
-    const apiWafAssociation = new wafv2.CfnWebACLAssociation(this, 'ApiWafAssociation', {
-      resourceArn: apiStageArn,
-      webAclArn: apiWaf.attrArn,
-    });
-    apiWafAssociation.addDependency(apiWaf);
-    */
+    //
+    // The commented-out `CfnWebACLAssociation` that lived here is gone along
+    // with the ACL it referenced; see "WAF Web ACL for API Gateway — REMOVED"
+    // above for the reasoning and for what protects the API instead. Kept as a
+    // marker so the absence reads as a decision rather than an oversight.
 
     // ========================================
     // Configure CORS with CloudFront Domain
@@ -2448,12 +2635,13 @@ def delete_waf(waf, arn):
       exportName: 'CitationAnalysis-CloudFrontDistributionId',
     });
 
-    // WAF Web ACL ARN (API Gateway)
-    new cdk.CfnOutput(this, 'WafWebAclArn', {
-      value: apiWaf.attrArn,
-      description: 'WAF Web ACL ARN protecting API Gateway',
-      exportName: 'CitationAnalysis-WafWebAclArn',
-    });
+    // There is no API Gateway Web ACL output because there is no longer an API
+    // Gateway Web ACL — it was deleted on 2026-08-19 (AUDIT-2026-08-19 §2.1).
+    // The output had already been dropped before that, because describing an
+    // unassociated ACL as "protecting API Gateway" told anyone auditing this
+    // account that protection existed where it did not.
+    //
+    // The CloudFront Web ACL below IS attached, so its export is accurate.
 
     // WAF Web ACL ARN (CloudFront - us-east-1)
     new cdk.CfnOutput(this, 'CloudFrontWafWebAclArn', {

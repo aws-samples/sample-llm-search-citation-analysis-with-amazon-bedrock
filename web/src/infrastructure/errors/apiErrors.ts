@@ -6,6 +6,7 @@
 export type ErrorCategory = 
   | 'network'
   | 'auth'
+  | 'permission'
   | 'not_found'
   | 'validation'
   | 'rate_limit'
@@ -32,7 +33,12 @@ export interface ApiRequestErrorOptions {
 const STATUS_TO_CATEGORY: Record<number, ErrorCategory> = {
   400: 'validation',
   401: 'auth',
-  403: 'auth',
+  // 403 is deliberately NOT 'auth'. The caller authenticated fine; they lack a
+  // privilege. Lumping it with 401 rendered "Authentication required — please
+  // check your API configuration" on every admin route a non-admin touches,
+  // implying a re-login would help when it never will. See
+  // `forbidden_response` in lambda/shared/api_response.py.
+  403: 'permission',
   404: 'not_found',
   408: 'timeout',
   429: 'rate_limit',
@@ -57,6 +63,11 @@ const CATEGORY_MESSAGES: Record<ErrorCategory, CategoryInfo> = {
   auth: {
     message: 'Authentication required',
     suggestion: 'Please check your API configuration',
+    recoverable: false,
+  },
+  permission: {
+    message: 'You do not have permission to perform this action',
+    suggestion: 'Contact an administrator if you need access',
     recoverable: false,
   },
   not_found: {
@@ -100,6 +111,7 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
   dashboard: {
     network: 'Unable to load dashboard data',
     auth: 'Authentication required to view dashboard',
+    permission: 'You do not have permission to view this data',
     not_found: 'Dashboard data not available',
     validation: 'Invalid dashboard request',
     rate_limit: 'Dashboard requests limited. Please wait',
@@ -111,6 +123,7 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
   brands: {
     network: 'Unable to load brand mentions',
     auth: 'Authentication required to view brands',
+    permission: 'Changing brand tracking requires an administrator',
     not_found: 'No brand data found for this keyword',
     validation: 'Invalid brand request',
     rate_limit: 'Brand requests limited. Please wait',
@@ -122,6 +135,7 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
   visibility: {
     network: 'Unable to load visibility metrics',
     auth: 'Authentication required for visibility data',
+    permission: 'You do not have permission to view visibility data',
     not_found: 'No visibility data found',
     validation: 'Invalid visibility request',
     rate_limit: 'Visibility requests limited. Please wait',
@@ -133,6 +147,7 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
   content: {
     network: 'Unable to connect to content service',
     auth: 'Authentication required for content generation',
+    permission: 'You do not have permission to generate content',
     not_found: 'Content not found',
     validation: 'Invalid content request',
     rate_limit: 'Content generation limited. Please wait',
@@ -144,6 +159,7 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
   keywords: {
     network: 'Unable to load keywords',
     auth: 'Authentication required for keyword management',
+    permission: 'Managing keywords requires an administrator',
     not_found: 'Keyword not found',
     validation: 'Invalid keyword data',
     rate_limit: 'Keyword requests limited. Please wait',
@@ -155,6 +171,7 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
   providers: {
     network: 'Unable to connect to provider service',
     auth: 'Authentication required for provider settings',
+    permission: 'Changing provider settings requires an administrator',
     not_found: 'Provider not found',
     validation: 'Invalid provider configuration',
     rate_limit: 'Provider requests limited. Please wait',
@@ -166,6 +183,7 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
   analysis: {
     network: 'Unable to start analysis',
     auth: 'Authentication required to run analysis',
+    permission: 'Running an analysis requires an administrator',
     not_found: 'Analysis execution not found',
     validation: 'Invalid analysis parameters',
     rate_limit: 'Analysis requests limited. Please wait',
@@ -177,6 +195,7 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
   research: {
     network: 'Unable to connect to research service',
     auth: 'Authentication required for keyword research',
+    permission: 'You do not have permission to run keyword research',
     not_found: 'Research data not found',
     validation: 'Invalid research parameters',
     rate_limit: 'Research requests limited. Please wait',
@@ -188,6 +207,7 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
   rawResponses: {
     network: 'Unable to browse raw responses',
     auth: 'Authentication required to view responses',
+    permission: 'You do not have permission to view these responses',
     not_found: 'Response file not found',
     validation: 'Invalid file path',
     rate_limit: 'File requests limited. Please wait',
@@ -211,7 +231,11 @@ function matchesTimeoutError(msg: string): boolean {
 }
 
 function matchesAuthError(msg: string): boolean {
-  return msg.includes('unauthorized') || msg.includes('forbidden') || msg.includes('401') || msg.includes('403');
+  return msg.includes('unauthorized') || msg.includes('401');
+}
+
+function matchesPermissionError(msg: string): boolean {
+  return msg.includes('forbidden') || msg.includes('403') || msg.includes('permission');
 }
 
 function matchesNotFoundError(msg: string): boolean {
@@ -237,6 +261,8 @@ function matchesServerError(msg: string): boolean {
 function categorizeByErrorMessage(msg: string): ErrorCategory | null {
   if (matchesNetworkError(msg)) return 'network';
   if (matchesTimeoutError(msg)) return 'timeout';
+  // Permission before auth: "403 Forbidden" must not be read as a login problem.
+  if (matchesPermissionError(msg)) return 'permission';
   if (matchesAuthError(msg)) return 'auth';
   if (matchesNotFoundError(msg)) return 'not_found';
   if (matchesRateLimitError(msg)) return 'rate_limit';
@@ -315,7 +341,10 @@ export function parseApiError(
     ?? (error instanceof ApiRequestError ? error.statusCode : undefined);
   const category = categorizeError(error, resolvedStatusCode);
   const categoryInfo = CATEGORY_MESSAGES[category];
-  const responseMessage = error instanceof ApiRequestError
+  // Server text passes through only for definitive client rejections
+  // (bugs.md 4.2): 5xx bodies can carry internals and a timeout's body is
+  // not a rejection verdict, so both fall back to the safe local messages.
+  const responseMessage = isDefinitiveClientRejection(error)
     ? error.responseMessage
     : undefined;
   const contextMessage = context ? CONTEXT_MESSAGES[context]?.[category] : undefined;
@@ -347,25 +376,37 @@ export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-export function isRecoverableError(error: unknown, statusCode?: number): boolean {
-  const category = categorizeError(error, statusCode);
-  return CATEGORY_MESSAGES[category].recoverable;
+/**
+ * The single "when may a server-provided message be shown?" policy
+ * (bugs.md 4.2 — previously three disagreeing copies).
+ *
+ * A server message is shown only for definitive client rejections: 4xx
+ * responses that are not timeouts. A timed-out request (408) may still have
+ * completed server-side, so its message is not a rejection verdict; 5xx and
+ * transport errors fall back to safe local messages because their bodies can
+ * carry internals.
+ */
+export function isDefinitiveClientRejection(error: unknown): error is ApiRequestError {
+  return error instanceof ApiRequestError
+    && error.statusCode !== undefined
+    && error.statusCode >= 400
+    && error.statusCode < 500
+    && error.category !== 'timeout';
 }
 
-export function createErrorHandler(
-  setError: (error: string | null) => void,
+/**
+ * User-facing message for a definitive client rejection.
+ *
+ * `includeField` appends the backend's offending-field pointer — promotion
+ * uses it for indexed batch fields like `keywords[2].keyword`.
+ */
+export function clientRejectionMessage(
+  error: ApiRequestError,
   context?: keyof typeof CONTEXT_MESSAGES,
-  onError?: (error: ApiError) => void
-) {
-  return (error: unknown, statusCode?: number) => {
-    if (isAbortError(error)) {
-      return;
-    }
-    
-    const apiError = parseApiError(error, context, statusCode);
-    setError(apiError.message);
-    onError?.(apiError);
-    
-    console.error(`[${context ?? 'api'}] ${apiError.message}:`, apiError.originalError);
-  };
+  options?: { includeField?: boolean }
+): string {
+  const message = getErrorMessage(error, context);
+  return options?.includeField === true && error.field !== undefined
+    ? `${message} (field: ${error.field})`
+    : message;
 }

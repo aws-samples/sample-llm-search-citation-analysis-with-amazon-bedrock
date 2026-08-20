@@ -86,6 +86,12 @@ export interface CompetitorAnalysis {
 }
 
 /**
+ * Lifecycle of a keyword-research run. Absent on rows written before the
+ * backend started recording it.
+ */
+export type ResearchStatus = 'pending' | 'processing' | 'completed' | 'failed';
+
+/**
  * Keyword research history item.
  */
 export interface KeywordResearchItem {
@@ -99,7 +105,7 @@ export interface KeywordResearchItem {
   created_at: string;
   keywords?: ResearchKeyword[];
   analysis?: CompetitorAnalysis;
-  status?: string;
+  status?: ResearchStatus;
   provider?: string;
   error_message?: string;
 }

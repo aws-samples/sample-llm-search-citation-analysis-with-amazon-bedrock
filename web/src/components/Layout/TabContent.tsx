@@ -10,7 +10,7 @@ import { StatCard } from '../Dashboard/StatCard';
 import { ProviderChart } from '../Dashboard/ProviderChart';
 import { BrandChart } from '../Dashboard/BrandChart';
 import type { SettingsTab } from '../Settings';
-import { keywordSelectionKey } from '../../hooks/usePromoteKeywords';
+import { keywordSelectionKey } from '../../hooks/keywordIdentity';
 import type {
   TabType, Stats, Citations, Search, Keyword, Execution, Schedule
 } from '../../types';

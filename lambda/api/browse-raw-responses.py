@@ -30,9 +30,16 @@ logger.setLevel(logging.INFO)
 
 s3_client = boto3.client('s3')
 
-# Fail-fast: Required environment variables
+# Fail-fast: Required environment variables.
+#
+# SCREENSHOTS_BUCKET used to default to '', which made its fallback dead code:
+# `BUCKET_MAP.get('screenshots', RAW_RESPONSES_BUCKET)` finds the key and
+# returns '' rather than falling back, so a misconfigured deployment answered
+# `400 Invalid bucket type: screenshots` on every screenshot request instead of
+# failing loudly at cold start. The CDK stack always sets it, so requiring it
+# here matches the real contract (audit corrections table).
 RAW_RESPONSES_BUCKET = os.environ['RAW_RESPONSES_BUCKET']
-SCREENSHOTS_BUCKET = os.environ.get('SCREENSHOTS_BUCKET', '')
+SCREENSHOTS_BUCKET = os.environ['SCREENSHOTS_BUCKET']
 
 # Bucket mapping
 BUCKET_MAP = {
@@ -79,6 +86,43 @@ def validate_s3_path(path: str) -> str | None:
         return 'Invalid path separator'
 
     return None
+
+
+def scope_key_to_root(key: str, root_prefix: str) -> tuple[str | None, str | None]:
+    """
+    Return ``(scoped_key, error)`` for an object key confined to ``root_prefix``.
+
+    `_get_file` and `_get_download` used to resolve the bucket and then discard
+    the prefix, so a plain relative key addressed *any* object in either bucket
+    and the download route minted a credential-free 15-minute presigned URL for
+    it — redeemable by someone with no Cognito account at all
+    (AUDIT-2026-08-19 §2.7).
+
+    Idempotent, mirroring `list_prefixes` below: the explorer sends absolute
+    keys (from the listing, which returns full keys) but relative prefixes, so
+    an already-scoped key must pass through unchanged rather than becoming
+    ``raw-responses/raw-responses/...``.
+
+    The `startswith` assertion on the result is a sound containment gate because
+    `validate_s3_path` has already rejected ``..``, absolute paths, NUL bytes
+    and backslashes — so nothing can climb back out of the prefix.
+
+    Args:
+        key: The caller-supplied object key, already unquoted and validated.
+        root_prefix: The configured root for this bucket type.
+
+    Returns:
+        ``(scoped_key, None)`` on success, ``(None, message)`` on refusal.
+    """
+    if not key:
+        return None, 'key is required'
+
+    scoped = key if key.startswith(root_prefix) else root_prefix + key
+
+    if not scoped.startswith(root_prefix):
+        return None, f'key must be within {root_prefix}'
+
+    return scoped, None
 
 
 def list_prefixes(bucket: str, prefix: str = '', root_prefix: str = 'raw-responses/') -> dict[str, Any]:
@@ -148,6 +192,10 @@ def list_prefixes(bucket: str, prefix: str = '', root_prefix: str = 'raw-respons
     }
 
 
+class ObjectNotFoundError(Exception):
+    """A requested S3 object does not exist."""
+
+
 def get_file_content(bucket: str, key: str) -> dict[str, Any]:
     """
     Get the content of a specific S3 file.
@@ -155,7 +203,7 @@ def get_file_content(bucket: str, key: str) -> dict[str, Any]:
     try:
         response = s3_client.get_object(Bucket=bucket, Key=key)
     except s3_client.exceptions.NoSuchKey as err:
-        raise Exception(f"File not found: {key}") from err
+        raise ObjectNotFoundError(f"File not found: {key}") from err
 
     content = response['Body'].read().decode('utf-8')
 
@@ -230,8 +278,8 @@ def _browse(event: dict[str, Any], context: Any, prefix: str, bucket: str) -> di
     'bucket': {'type': str, 'max_length': 20, 'default': 'responses'}
 })
 def _get_file(event: dict[str, Any], context: Any, key: str, bucket: str) -> dict[str, Any]:
-    """Get file content for the given S3 key."""
-    # URL decode the key
+    """Get file content for the given S3 key, confined to the bucket's root prefix."""
+    # URL decode the key. Unquote BEFORE validating so `%2e%2e%2f` is caught.
     key = unquote(key)
 
     # Path traversal validation
@@ -239,12 +287,16 @@ def _get_file(event: dict[str, Any], context: Any, key: str, bucket: str) -> dic
     if path_error:
         return validation_error(path_error, event, 'key')
 
-    # Get the actual bucket
-    actual_bucket, _ = get_bucket_and_prefix(bucket)
+    # Get the actual bucket and its root prefix
+    actual_bucket, root_prefix = get_bucket_and_prefix(bucket)
     if not actual_bucket:
         return validation_error(f'Invalid bucket type: {bucket}', event, 'bucket')
 
-    result = get_file_content(actual_bucket, key)
+    scoped_key, scope_error = scope_key_to_root(key, root_prefix)
+    if scope_error:
+        return validation_error(scope_error, event, 'key')
+
+    result = get_file_content(actual_bucket, scoped_key)
     return success_response(result, event)
 
 
@@ -253,8 +305,13 @@ def _get_file(event: dict[str, Any], context: Any, key: str, bucket: str) -> dic
     'bucket': {'type': str, 'max_length': 20, 'default': 'responses'}
 })
 def _get_download(event: dict[str, Any], context: Any, key: str, bucket: str) -> dict[str, Any]:
-    """Generate a presigned download URL for the given S3 key."""
-    # URL decode the key
+    """Generate a presigned download URL, confined to the bucket's root prefix.
+
+    The URL this returns is signed with the Lambda role's credentials and is
+    bearer-shareable — no Cognito token is needed to redeem it — so the key must
+    be scoped before it is signed, not after.
+    """
+    # URL decode the key. Unquote BEFORE validating so `%2e%2e%2f` is caught.
     key = unquote(key)
 
     # Path traversal validation
@@ -262,13 +319,18 @@ def _get_download(event: dict[str, Any], context: Any, key: str, bucket: str) ->
     if path_error:
         return validation_error(path_error, event, 'key')
 
-    # Get the actual bucket
-    actual_bucket, _ = get_bucket_and_prefix(bucket)
+    # Get the actual bucket and its root prefix
+    actual_bucket, root_prefix = get_bucket_and_prefix(bucket)
     if not actual_bucket:
         return validation_error(f'Invalid bucket type: {bucket}', event, 'bucket')
 
-    url = generate_download_url(actual_bucket, key)
-    return success_response({'download_url': url, 'key': key}, event)
+    scoped_key, scope_error = scope_key_to_root(key, root_prefix)
+    if scope_error:
+        return validation_error(scope_error, event, 'key')
+
+    url = generate_download_url(actual_bucket, scoped_key)
+    # Echo the key that was actually signed, not the raw input.
+    return success_response({'download_url': url, 'key': scoped_key}, event)
 
 
 # =============================================================================

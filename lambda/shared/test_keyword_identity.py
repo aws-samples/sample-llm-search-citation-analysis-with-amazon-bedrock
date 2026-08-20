@@ -7,7 +7,11 @@ import pytest
 
 from shared.utils import keyword_id, normalize_keyword
 
-_FIXTURES_PATH = Path(__file__).parents[2] / 'test-fixtures' / 'keyword-identity.json'
+# `.resolve()` before walking up: test modules add `lambda/api/..`-style entries
+# to sys.path, and Python then hands this module an unnormalized `__file__`.
+# `Path.parents` does not collapse `..`, so without resolving, `parents[2]`
+# points at `lambda/api` and the shared fixture appears to be missing.
+_FIXTURES_PATH = Path(__file__).resolve().parents[2] / 'test-fixtures' / 'keyword-identity.json'
 _FIXTURES = json.loads(_FIXTURES_PATH.read_text(encoding='utf-8'))
 
 

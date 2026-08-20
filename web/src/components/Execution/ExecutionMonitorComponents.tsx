@@ -92,17 +92,34 @@ interface TriggerSectionProps {
   onSelectAll: () => void;
   onToggleKeyword: (keyword: string) => void;
   onTriggerAnalysis: () => void;
+  /** Both trigger routes are Admin-only server-side. */
+  isAdmin: boolean;
 }
 
 export const TriggerSection = ({
   selectedKeywords, keywordsCount, activeKeywords, isRunning, isStarting,
-  onSelectAll, onToggleKeyword, onTriggerAnalysis,
+  onSelectAll, onToggleKeyword, onTriggerAnalysis, isAdmin,
 }: TriggerSectionProps) => {
   const getKeywordCountText = (): string => {
     if (selectedKeywords.length === 0) return `All ${keywordsCount} active keywords`;
     const plural = selectedKeywords.length > 1 ? 's' : '';
     return `${selectedKeywords.length} keyword${plural} selected`;
   };
+
+  // POST /api/trigger-analysis and /api/trigger-keyword-analysis are Admin-only:
+  // one request fans out paid provider calls across every keyword and persona.
+  // Non-admins keep the execution history below this panel.
+  if (!isAdmin) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
+        <h2 className="text-sm font-medium text-gray-900 mb-2">Run Citation Analysis</h2>
+        <p className="text-sm text-gray-500">
+          Starting an analysis requires an administrator. Completed runs are shown below.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
       <h2 className="text-sm font-medium text-gray-900 mb-2">Run Citation Analysis</h2>

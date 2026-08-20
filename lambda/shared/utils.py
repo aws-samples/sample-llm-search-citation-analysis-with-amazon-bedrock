@@ -44,8 +44,12 @@ _KEYWORD_ID_PREFIX = 'citation-analysis:keyword:'
 _dynamodb = None
 
 
-def _get_dynamodb():
-    """Get DynamoDB resource (lazy initialization)."""
+def get_dynamodb_resource():
+    """Lazy shared DynamoDB resource — import stays side-effect free.
+
+    The single home for the lazy-resource idiom that was previously
+    duplicated in ``shared.providers`` (bugs.md 3.4).
+    """
     global _dynamodb
     if _dynamodb is None:
         _dynamodb = boto3.resource('dynamodb')
@@ -141,7 +145,7 @@ def get_brand_config(table_name: str | None = None) -> dict[str, Any]:
     if not brand_config_table:
         return {}
     try:
-        dynamodb = _get_dynamodb()
+        dynamodb = get_dynamodb_resource()
         table = dynamodb.Table(brand_config_table)
         response = table.get_item(Key={'config_id': 'default'})
         return response.get('Item', {})

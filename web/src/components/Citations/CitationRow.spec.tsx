@@ -32,7 +32,6 @@ describe('CitationRow', () => {
     onToggleRow: vi.fn(),
     onViewDetails: vi.fn(),
     onKeywordClick: vi.fn(),
-    getDomain: vi.fn(() => 'example.com')
   };
 
   const renderInTable = (ui: React.ReactElement) => render(<table><tbody>{ui}</tbody></table>);
@@ -43,6 +42,16 @@ describe('CitationRow', () => {
     expect(screen.getByText('1')).toBeInTheDocument();
     expect(screen.getByText('https://example.com/test')).toBeInTheDocument();
     expect(screen.getByText('example.com')).toBeInTheDocument();
+  });
+
+  it('renders the URL text without a hyperlink when the stored URL is a javascript URI', () => {
+    renderInTable(<CitationRow {...defaultProps} citation={{
+      ...mockCitation,
+      url: 'javascript:alert(1)' 
+    }} />);
+
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.getByText('javascript:alert(1)')).toBeInTheDocument();
   });
 
   it('displays keyword count and citation count from citation data', () => {

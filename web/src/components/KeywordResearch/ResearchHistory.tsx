@@ -2,14 +2,19 @@ import {
   useEffect, useMemo, useState
 } from 'react';
 import type {
-  Keyword, KeywordResearchItem, ResearchKeyword
+  Keyword, KeywordResearchItem, ResearchKeyword, ResearchStatus
 } from '../../types';
-import {
-  uniqueResearchKeywords, usePromoteKeywords
-} from '../../hooks/usePromoteKeywords';
+import { uniqueResearchKeywords } from '../../hooks/keywordIdentity';
+import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { KeywordResultsTable } from './KeywordResultsTable';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
 import { formatDate } from '../../formatting/dateFormatter';
+import {
+  formatResearchFailureMessage,
+  getResearchStatusClass,
+  getResearchStatusLabel,
+  resolveResearchStatus
+} from '../../formatting/researchStatus';
 import { Spinner } from '../ui/Spinner';
 
 interface ResearchHistoryProps {
@@ -184,6 +189,7 @@ const HistoryItem = ({
             <div className="flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <TypeBadge type={item.type} />
+                <StatusBadge status={item.status} />
                 <span className="text-sm font-medium text-gray-900 truncate">{itemTitle}</span>
               </div>
 
@@ -198,6 +204,8 @@ const HistoryItem = ({
                   </>
                 )}
               </div>
+
+              <FailureMessage message={item.error_message} />
             </div>
           </div>
 
@@ -263,6 +271,38 @@ const TypeBadge = ({ type }: { type: string }) => (
     {type === 'expansion' ? 'Expansion' : 'Competitor'}
   </span>
 );
+
+/**
+ * Without this a run the backend marked `failed` was indistinguishable from a
+ * run that genuinely found nothing — both showed "0 keywords" and no reason.
+ */
+const StatusBadge = ({ status }: { status?: ResearchStatus }) => {
+  const resolved = resolveResearchStatus(status);
+  if (resolved === null) return null;
+
+  return (
+    <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${getResearchStatusClass(resolved)}`}>
+      {getResearchStatusLabel(resolved)}
+    </span>
+  );
+};
+
+/**
+ * The raw text stays on `title`: it carries the untranslated second count and
+ * any provider detail, which is what you want when debugging a stranded run.
+ */
+const FailureMessage = ({ message }: { message?: string }) => {
+  if (message === undefined || message === '') return null;
+
+  return (
+    <p
+      className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1"
+      title={message}
+    >
+      {formatResearchFailureMessage(message)}
+    </p>
+  );
+};
 
 interface DeleteButtonProps {onClick: () => void;}
 

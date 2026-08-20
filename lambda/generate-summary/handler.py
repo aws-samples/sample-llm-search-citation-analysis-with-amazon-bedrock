@@ -54,6 +54,61 @@ def count_results(keyword_results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _provider_bucket(stats: dict[str, Any], provider: str) -> dict[str, Any]:
+    """Return the mutable per-provider counter bucket, creating it if needed."""
+    return stats['providers_breakdown'].setdefault(provider, {
+        'queries': 0,
+        'citations': 0,
+        'failures': 0,
+        'error_categories': [],
+    })
+
+
+def merge_provider_summary(stats: dict[str, Any], provider_summary: dict[str, Any]) -> None:
+    """
+    Fold the deduplication step's provider rollup into the running statistics.
+
+    The Step Functions dedup task replaces the whole state, so the search
+    step's `results` array never reaches this Lambda. Every summary written
+    before this rollup existed reported `total_providers_queried: 0` and an
+    empty `providers_breakdown` (AUDIT-2026-08-19 §1.3). `summarize_providers`
+    in `lambda/deduplication/handler.py` produces the shape read here.
+    """
+    stats['total_providers_queried'] += provider_summary.get('result_count', 0)
+
+    by_provider = provider_summary.get('by_provider') or {}
+    if not isinstance(by_provider, dict):
+        return
+
+    for provider, counts in by_provider.items():
+        if not isinstance(counts, dict):
+            continue
+        bucket = _provider_bucket(stats, provider)
+        bucket['queries'] += counts.get('queries', 0)
+        bucket['citations'] += counts.get('citations', 0)
+        bucket['failures'] += counts.get('failures', 0)
+        for category in counts.get('error_categories') or []:
+            if category not in bucket['error_categories']:
+                bucket['error_categories'].append(category)
+
+
+def merge_raw_provider_results(stats: dict[str, Any], results: list[dict[str, Any]]) -> None:
+    """
+    Fold raw per-provider search rows into the running statistics.
+
+    Only reachable when this handler is invoked directly with search output
+    rather than through the state machine, which is the shape the Input
+    docstring documents.
+    """
+    stats['total_providers_queried'] += len(results)
+
+    for provider_result in results:
+        provider = provider_result.get('provider', 'unknown')
+        bucket = _provider_bucket(stats, provider)
+        bucket['queries'] += 1
+        bucket['citations'] += len(provider_result.get('citations', []))
+
+
 def aggregate_statistics(keyword_results: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate statistics from all keyword processing."""
     stats = {
@@ -74,23 +129,15 @@ def aggregate_statistics(keyword_results: list[dict[str, Any]]) -> dict[str, Any
         stats['keywords_processed'].append(keyword)
         stats['total_keywords'] += 1
 
-        # Count provider results
-        if 'results' in result:
-            providers = result['results']
-            stats['total_providers_queried'] += len(providers)
-
-            for provider_result in providers:
-                provider = provider_result.get('provider', 'unknown')
-                if provider not in stats['providers_breakdown']:
-                    stats['providers_breakdown'][provider] = {
-                        'queries': 0,
-                        'citations': 0
-                    }
-
-                stats['providers_breakdown'][provider]['queries'] += 1
-
-                citations = provider_result.get('citations', [])
-                stats['providers_breakdown'][provider]['citations'] += len(citations)
+        # Count provider results. `provider_summary` is the rollup the
+        # deduplication step echoes; the raw `results` array is the shape a
+        # direct invocation with search output would carry. See the comment on
+        # `merge_provider_summary` for why the rollup exists.
+        provider_summary = result.get('provider_summary')
+        if isinstance(provider_summary, dict):
+            merge_provider_summary(stats, provider_summary)
+        elif 'results' in result:
+            merge_raw_provider_results(stats, result['results'])
 
         # Count deduplicated citations
         if 'deduplicated_citations' in result:
@@ -110,19 +157,81 @@ def aggregate_statistics(keyword_results: list[dict[str, Any]]) -> dict[str, Any
     return stats
 
 
+def assess_provider_health(stats: dict[str, Any]) -> dict[str, Any]:
+    """
+    Summarise which providers failed during the run.
+
+    THE BUG THIS EXISTS FOR. On 2026-08-14 an execution reported
+    ``success_rate: 100.0`` while Claude answered every single query with
+    ``400 "Your credit balance is too low"``. It was still doing so on
+    2026-08-19, so every run in between measured brand visibility with one of
+    the configured providers contributing nothing — and the summary said
+    everything was fine.
+
+    Nothing was broken about the keyword counting: `count_results` asks "did
+    this keyword's pipeline finish?", and it did. The gap was that no one ever
+    asked "did the providers actually answer?", so a provider could be dead for
+    five days without a single number moving.
+
+    A provider is reported failed when it recorded at least one hard error.
+    Zero citations alone is deliberately NOT treated as failure: a provider can
+    legitimately find nothing for an obscure keyword, and conflating the two
+    would cry wolf on exactly the long-tail keywords this product exists to
+    investigate.
+    """
+    failed = []
+    for provider, counts in sorted(stats.get('providers_breakdown', {}).items()):
+        if not isinstance(counts, dict) or counts.get('failures', 0) <= 0:
+            continue
+        failed.append({
+            'provider': provider,
+            'failures': counts['failures'],
+            'queries': counts.get('queries', 0),
+            'citations': counts.get('citations', 0),
+            'error_categories': counts.get('error_categories') or ['unknown'],
+        })
+
+    total = len(stats.get('providers_breakdown', {}))
+    return {
+        'providers_total': total,
+        'providers_failed': len(failed),
+        'providers_healthy': total - len(failed),
+        'failed_providers': failed,
+        'degraded': len(failed) > 0,
+    }
+
+
 def generate_report(execution_id: str, counts: dict[str, Any], stats: dict[str, Any]) -> dict[str, Any]:
-    """Generate execution report."""
-    report = {
+    """Generate execution report.
+
+    ``status`` reflects provider health as well as keyword completion. It used
+    to be derived from ``counts['failed']`` alone, which is why a run with a
+    completely dead provider still reported ``completed`` — see
+    `assess_provider_health`.
+    """
+    provider_health = assess_provider_health(stats)
+
+    if counts['failed'] > 0:
+        status = 'completed_with_errors'
+    elif provider_health['degraded']:
+        # Every keyword finished, but at least one provider contributed
+        # nothing because it errored. Distinct from `completed_with_errors` so
+        # the two causes stay tellable apart, and distinct from `completed` so
+        # this can never again read as a clean run.
+        status = 'completed_degraded'
+    else:
+        status = 'completed'
+
+    return {
         'execution_id': execution_id,
         'timestamp': get_timestamp(),
         'summary': {
             'keywords': counts,
-            'statistics': stats
+            'statistics': stats,
+            'provider_health': provider_health,
         },
-        'status': 'completed' if counts['failed'] == 0 else 'completed_with_errors'
+        'status': status,
     }
-
-    return report
 
 
 def store_summary_in_s3(report: dict[str, Any], bucket: str) -> str:
@@ -151,19 +260,27 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     Lambda handler for generating execution summary.
 
-    Input:
+    Input (as the state machine actually delivers it):
     {
         "execution_id": "abc-123",
         "keyword_results": [
             {
                 "keyword": "best hotels in malaga",
-                "results": [...],
+                "provider_summary": {
+                    "result_count": 4,
+                    "by_provider": {"openai": {"queries": 1, "citations": 7}}
+                },
                 "deduplicated_citations": [...],
                 "crawled_results": [...]
             },
             ...
         ]
     }
+
+    Note there is no `results` key: the dedup task replaces the whole state, so
+    the search step's raw provider rows never arrive here. `provider_summary` is
+    the bounded rollup dedup echoes in their place (AUDIT-2026-08-19 §1.3). A
+    raw `results` array is still accepted for direct invocations.
 
     Output:
     {

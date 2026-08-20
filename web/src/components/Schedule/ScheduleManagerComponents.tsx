@@ -7,24 +7,28 @@ export type KeywordScope = 'all' | 'selected';
 interface ScheduleHeaderProps {
   showForm: boolean;
   setShowForm: (value: boolean) => void;
+  /** POST /api/schedules is Admin-only, so non-admins get no create affordance. */
+  isAdmin: boolean;
 }
 
 export const ScheduleHeader = ({
-  showForm, setShowForm 
+  showForm, setShowForm, isAdmin 
 }: ScheduleHeaderProps) => (
   <div className="p-4 sm:p-6 border-b border-gray-200">
     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
       <h2 className="text-lg font-semibold text-gray-900">Automated Schedules</h2>
-      <button
-        onClick={() => setShowForm(!showForm)}
-        className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 ${
-          showForm
-            ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            : 'bg-gray-900 text-white hover:bg-gray-800'
-        }`}
-      >
-        {showForm ? 'Cancel' : <><PlusIcon /><span className="hidden sm:inline">New Schedule</span><span className="sm:hidden">New</span></>}
-      </button>
+      {isAdmin && (
+        <button
+          onClick={() => setShowForm(!showForm)}
+          className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 ${
+            showForm
+              ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+              : 'bg-gray-900 text-white hover:bg-gray-800'
+          }`}
+        >
+          {showForm ? 'Cancel' : <><PlusIcon /><span className="hidden sm:inline">New Schedule</span><span className="sm:hidden">New</span></>}
+        </button>
+      )}
     </div>
   </div>
 );
@@ -239,29 +243,42 @@ const FormField = ({
 interface ScheduleListProps {
   schedules: Schedule[];
   onDelete: (name: string) => void;
+  /** Reads stay open; only the per-row delete is gated. */
+  isAdmin: boolean;
 }
 
 export const ScheduleList = ({
-  schedules, onDelete 
+  schedules, onDelete, isAdmin 
 }: ScheduleListProps) => (
   <div className="p-4 sm:p-6">
     {schedules.length === 0 ? (
-      <EmptyState />
+      <EmptyState isAdmin={isAdmin} />
     ) : (
       <div className="space-y-3">
         {schedules.map((schedule) => (
-          <ScheduleItem key={schedule.name} schedule={schedule} onDelete={onDelete} />
+          <ScheduleItem
+            key={schedule.name}
+            schedule={schedule}
+            onDelete={onDelete}
+            isAdmin={isAdmin}
+          />
         ))}
       </div>
     )}
   </div>
 );
 
-const EmptyState = () => (
+const EmptyState = ({ isAdmin }: { isAdmin: boolean }) => (
   <div className="text-center py-12 text-gray-400">
     <ClockIcon />
     <p className="text-sm">No schedules configured</p>
-    <p className="text-xs mt-1">Create a schedule to run analysis automatically</p>
+    {/* "Create a schedule" would point a non-admin at a hidden button and a
+        route that refuses them. */}
+    <p className="text-xs mt-1">
+      {isAdmin
+        ? 'Create a schedule to run analysis automatically'
+        : 'An administrator can add a schedule to run analysis automatically'}
+    </p>
   </div>
 );
 
@@ -274,6 +291,8 @@ const ClockIcon = () => (
 interface ScheduleItemProps {
   schedule: Schedule;
   onDelete: (name: string) => void;
+  /** DELETE /api/schedules/{name} is Admin-only. */
+  isAdmin: boolean;
 }
 
 const ScheduleScope = ({ keywords }: { keywords?: string[] }) => {
@@ -288,7 +307,7 @@ const ScheduleScope = ({ keywords }: { keywords?: string[] }) => {
 };
 
 const ScheduleItem = ({
-  schedule, onDelete 
+  schedule, onDelete, isAdmin 
 }: ScheduleItemProps) => (
   <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
     <div className="flex-1 min-w-0">
@@ -308,12 +327,15 @@ const ScheduleItem = ({
       <ScheduleScope keywords={schedule.keywords} />
       <p className="text-xs text-gray-400 mt-0.5">{schedule.timezone}</p>
     </div>
-    <button
-      onClick={() => onDelete(schedule.name)}
-      className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-    >
-      <TrashIcon />
-    </button>
+    {isAdmin && (
+      <button
+        onClick={() => onDelete(schedule.name)}
+        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+        aria-label={`Delete schedule ${schedule.name}`}
+      >
+        <TrashIcon />
+      </button>
+    )}
   </div>
 );
 

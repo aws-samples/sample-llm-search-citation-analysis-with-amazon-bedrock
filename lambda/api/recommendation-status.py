@@ -55,7 +55,7 @@ import json
 import logging
 import os
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 import boto3
@@ -70,6 +70,7 @@ from shared.api_response import (
     validation_error,
 )
 from shared.decorators import api_handler
+from shared.utils import get_timestamp, utc_now
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -82,10 +83,6 @@ VALID_STATUSES = {'new', 'in_progress', 'done', 'wontfix'}
 TTL_DAYS = 90
 MAX_NOTES_LEN = 2000
 MAX_RELATED_LEN = 500
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat().replace('+00:00', 'Z')
 
 
 def _ttl_for(now: datetime) -> int:
@@ -157,11 +154,13 @@ def _post_status(event: dict[str, Any]) -> dict[str, Any]:
     if err is not None:
         return validation_error(err['reason'], event, err['field'])
 
-    now = datetime.now(UTC)
+    now = utc_now()
     item: dict[str, Any] = {
         'recommendation_id': rec_id,
         'status': body['status'],
-        'updated_at': _now_iso(),
+        # Canonical wire format from shared.utils (bugs.md 3.4 — the local
+        # _now_iso duplicated get_timestamp).
+        'updated_at': get_timestamp(),
         'ttl': _ttl_for(now),
     }
     if body.get('notes'):

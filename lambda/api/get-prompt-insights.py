@@ -20,13 +20,12 @@ from typing import Any
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from decimal_utils import to_int
-
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
 from shared.decorators import api_handler, validate
+from shared.dynamo_decimal import to_int
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -95,7 +94,7 @@ def analyze_prompt_brand_correlation(config: dict[str, Any]) -> dict[str, Any]:
             )
             items.extend(response.get('Items', []))
         except Exception as e:
-            logger.error(f"Error querying keyword {keyword}: {e}")
+            logger.error(f"Error querying keyword {keyword!r}: {e}")
             continue
 
     logger.info(f"Queried {len(items)} total items across {len(keywords)} keywords")

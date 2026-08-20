@@ -31,12 +31,10 @@ describe('AboutModal', () => {
     expect(screen.getByText('Citation Analysis System')).toBeInTheDocument();
   });
 
-  it('calls onClose when close button clicked', () => {
+  it('calls onClose when the labelled close button is clicked', () => {
     render(<AboutModal isOpen={true} onClose={mockOnClose} />);
-    // Close button is in the header, contains an SVG X icon
-    const header = screen.getByText('Citation Analysis System').parentElement;
-    const closeButton = header?.querySelector('button');
-    fireEvent.click(closeButton as HTMLElement);
+
+    fireEvent.click(screen.getByLabelText('Close modal'));
     expect(mockOnClose).toHaveBeenCalledTimes(1);
   });
 

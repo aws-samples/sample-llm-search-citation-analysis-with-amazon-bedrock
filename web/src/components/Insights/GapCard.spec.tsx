@@ -35,6 +35,15 @@ describe('GapCard', () => {
     expect(screen.getByRole('link', { name: 'https://example.com/article' })).toBeInTheDocument();
   });
 
+  it('renders the title without a hyperlink when the stored URL is a javascript URI', () => {
+    render(<GapCard gap={{
+      ...baseGap,
+      url: 'javascript:alert(document.cookie)' 
+    }} />);
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.getByText('Test Article')).toBeInTheDocument();
+  });
+
   it('displays domain', () => {
     render(<GapCard gap={baseGap} />);
     expect(screen.getByText('example.com')).toBeInTheDocument();

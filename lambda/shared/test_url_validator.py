@@ -11,12 +11,13 @@ import os
 import sys
 from unittest.mock import patch
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 
-from url_validator import resolve_and_validate, validate_url_safe
+from url_validator import validate_url_safe
 
 # =============================================================================
 # Property-Based Tests
@@ -178,35 +179,94 @@ class TestURLValidatorUnit:
 
 
 
-class TestResolveAndValidate:
-    """Tests for `resolve_and_validate` — defense-in-depth helper that
-    returns the resolved IP alongside the safety verdict so callers can
-    pin the IP and close the DNS-rebinding gap (audit item 24)."""
+class TestRangesThatPreviouslyBypassedValidation:
+    """
+    REGRESSION (AUDIT-2026-08-19 §2.5). Each address below resolved to a
+    restricted range that the original blocklist let through.
 
-    def test_returns_ip_for_valid_public_url(self):
-        safe_addr_info = [(2, 1, 6, '', ('93.184.216.34', 0))]
-        with patch('url_validator.socket.getaddrinfo', return_value=safe_addr_info):
-            is_safe, error, ip = resolve_and_validate('https://example.com/')
-            assert is_safe is True
-            assert error == ''
-            assert ip == '93.184.216.34'
+    The headline case is the IPv4-mapped one: `IPv6Address in IPv4Network`
+    returns False *silently*, so a hostname with an AAAA record of
+    `::ffff:169.254.169.254` skipped all nine IPv4 rules without any error.
+    """
 
-    def test_returns_no_ip_when_url_is_unsafe(self):
-        is_safe, error, ip = resolve_and_validate('http://localhost/')
-        assert is_safe is False
-        assert error
-        assert ip is None
+    @pytest.mark.parametrize(
+        ('ip', 'why'),
+        [
+            ('::ffff:169.254.169.254', 'IPv4-mapped link-local skipped every IPv4 rule'),
+            ('::ffff:127.0.0.1', 'IPv4-mapped loopback'),
+            ('::ffff:10.0.0.1', 'IPv4-mapped RFC1918'),
+            ('2002:a9fe:a9fe::1', '6to4 wrapping link-local'),
+            ('64:ff9b::a9fe:a9fe', 'NAT64 — alternate route to IPv4 link-local'),
+            ('fc00::1', 'fc00 half of ULA, missed by the fd00::/8 entry'),
+            ('100.64.0.1', 'CGNAT — the one range the stdlib does not flag'),
+            ('192.0.0.1', 'IETF protocol assignments'),
+            ('198.18.0.1', 'benchmarking range'),
+            ('224.0.0.1', 'multicast'),
+            ('240.0.0.1', 'reserved'),
+        ],
+    )
+    def test_rejects_address_and_does_not_leak_it(self, ip, why):
+        addr_info = [(2, 1, 6, '', (ip, 0))]
+        with patch('url_validator.socket.getaddrinfo', return_value=addr_info):
+            is_safe, error = validate_url_safe('https://some-host.example.com')
 
-    def test_returns_no_ip_when_hostname_cannot_resolve(self):
-        # validate_url_safe must pass first (otherwise we short-circuit);
-        # mock the first getaddrinfo to succeed, the second to fail.
-        import socket as sock_mod
-        safe_addr_info = [(2, 1, 6, '', ('93.184.216.34', 0))]
-        with patch(
-            'url_validator.socket.getaddrinfo',
-            side_effect=[safe_addr_info, sock_mod.gaierror('second lookup failed')],
-        ):
-            is_safe, error, ip = resolve_and_validate('https://flaky.example.com/')
-            assert is_safe is False
-            assert 'resolve' in error.lower()
-            assert ip is None
+            assert not is_safe, f'Expected rejection: {why}'
+            assert ip not in error, 'Error message must not leak the resolved IP'
+
+
+class TestFailsClosedOnUnparseableAddresses:
+    """
+    `_is_ip_blocked` used to `return False` from `except ValueError`, so
+    anything the parser rejected was treated as safe.
+    """
+
+    @pytest.mark.parametrize(
+        'ip',
+        ['not-an-ip', '', '999.999.999.999', 'fe80::1%eth0'],
+    )
+    def test_rejects_when_resolution_yields_an_unparseable_address(self, ip):
+        addr_info = [(2, 1, 6, '', (ip, 0))]
+        with patch('url_validator.socket.getaddrinfo', return_value=addr_info):
+            is_safe, _ = validate_url_safe('https://some-host.example.com')
+
+            assert not is_safe
+
+
+class TestIpLiteralHostnames:
+    """
+    An IP literal needs no DNS, so it is judged directly. The literal
+    blocklist cannot enumerate every encoding of a restricted address.
+    """
+
+    def test_rejects_bracketed_ipv4_mapped_literal(self):
+        is_safe, _ = validate_url_safe('http://[::ffff:169.254.169.254]/latest/meta-data/')
+
+        assert not is_safe
+
+    def test_rejects_ipv6_unique_local_literal(self):
+        is_safe, _ = validate_url_safe('http://[fc00::1]/')
+
+        assert not is_safe
+
+    def test_rejects_cgnat_literal(self):
+        is_safe, _ = validate_url_safe('http://100.64.0.1/')
+
+        assert not is_safe
+
+
+class TestLegitimateAddressesStillAllowed:
+    """
+    A validator that rejects everything is not a fix. These prove the widened
+    blocklist did not start refusing real public hosts.
+    """
+
+    @pytest.mark.parametrize(
+        'ip',
+        ['93.184.216.34', '1.1.1.1', '2606:2800:220:1:248:1893:25c8:1946'],
+    )
+    def test_accepts_public_address(self, ip):
+        addr_info = [(2, 1, 6, '', (ip, 0))]
+        with patch('url_validator.socket.getaddrinfo', return_value=addr_info):
+            is_safe, error = validate_url_safe('https://example.com/page')
+
+            assert is_safe, f'Expected {ip} to be allowed, got: {error}'

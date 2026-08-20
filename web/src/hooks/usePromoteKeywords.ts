@@ -11,11 +11,14 @@ import {
 import { promoteKeywords } from '../api/keywords';
 import type { PromotionOutcome } from '../api/keywords';
 import {
-  ApiRequestError, getErrorMessage, isAbortError
+  clientRejectionMessage, getErrorMessage, isAbortError, isDefinitiveClientRejection
 } from '../infrastructure';
 import type {
   Keyword, ResearchKeyword
 } from '../types';
+import {
+  keywordSelectionKey, uniqueResearchKeywords
+} from './keywordIdentity';
 
 export const SELECTION_LIMIT = 500;
 export const PROMOTION_TIMEOUT_MS = 30_000;
@@ -33,64 +36,6 @@ export type KeywordReconciliation = () => void | Promise<void>;
 
 export const KEYWORD_RECONCILIATION_CONTEXT =
   createContext<KeywordReconciliation | undefined>(undefined);
-
-function isKeywordBoundaryCodePoint(codePoint: number): boolean {
-  return (
-    (codePoint >= 0x0009 && codePoint <= 0x000D)
-    || codePoint === 0x0020
-    || codePoint === 0x0085
-    || codePoint === 0x00A0
-    || codePoint === 0x1680
-    || (codePoint >= 0x2000 && codePoint <= 0x200A)
-    || codePoint === 0x2028
-    || codePoint === 0x2029
-    || codePoint === 0x202F
-    || codePoint === 0x205F
-    || codePoint === 0x3000
-    || codePoint === 0xFEFF
-  );
-}
-
-function isKeywordBoundaryCharacter(character: string): boolean {
-  return isKeywordBoundaryCodePoint(character.codePointAt(0) ?? -1);
-}
-
-export function isUnicodeScalarText(text: string): boolean {
-  return Array.from(text).every((character) => {
-    const codePoint = character.codePointAt(0);
-    return codePoint !== undefined && !(codePoint >= 0xD800 && codePoint <= 0xDFFF);
-  });
-}
-
-export function trimKeywordText(text: string): string {
-  const characters = Array.from(text);
-  const start = characters.findIndex((character) => !isKeywordBoundaryCharacter(character));
-  if (start === -1) return '';
-
-  const trailingCount = [...characters]
-    .reverse()
-    .findIndex((character) => !isKeywordBoundaryCharacter(character));
-  const end = characters.length - trailingCount;
-  return characters.slice(start, end).join('');
-}
-
-// Known accepted limitation: NFKC and lowercase use the browser's Unicode
-// tables, which can be newer than the backend runtime's tables for recently
-// assigned code points.
-export function keywordSelectionKey(keyword: string): string {
-  if (!isUnicodeScalarText(keyword)) return '';
-  return trimKeywordText(keyword.normalize('NFKC')).toLowerCase();
-}
-
-export function uniqueResearchKeywords<T extends ResearchKeyword>(keywords: readonly T[]): T[] {
-  const seen = new Set<string>();
-  return keywords.filter((keyword) => {
-    const key = keywordSelectionKey(keyword.keyword);
-    if (!key || seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
 
 export function promotionSuccessMessage(outcome: PromotionOutcome): string {
   const added = `${outcome.created} ${outcome.created === 1 ? 'keyword' : 'keywords'} added`;
@@ -190,19 +135,6 @@ function findResearchKeyword(
   return availableKeywords.find(
     (candidate) => keywordSelectionKey(candidate.keyword) === key
   );
-}
-
-function isDefinitivePromotionRejection(error: unknown): error is ApiRequestError {
-  return error instanceof ApiRequestError
-    && error.statusCode !== undefined
-    && error.statusCode >= 400
-    && error.statusCode < 500
-    && error.category !== 'timeout';
-}
-
-function definitiveRejectionMessage(error: ApiRequestError): string {
-  const message = getErrorMessage(error, 'keywords');
-  return error.field === undefined ? message : `${message} (field: ${error.field})`;
 }
 
 export interface UsePromoteKeywords {
@@ -384,8 +316,8 @@ export const usePromoteKeywords = (
       if (isAbortError(requestError)) {
         setError(PROMOTION_TIMEOUT_MESSAGE);
         requestKeywordReconciliation();
-      } else if (isDefinitivePromotionRejection(requestError)) {
-        setError(definitiveRejectionMessage(requestError));
+      } else if (isDefinitiveClientRejection(requestError)) {
+        setError(clientRejectionMessage(requestError, 'keywords', { includeField: true }));
       } else {
         setError(`Adding keywords failed to return a confirmed result: ${getErrorMessage(requestError, 'keywords')}. The server may still have completed; active keywords are being refreshed.`);
         requestKeywordReconciliation();

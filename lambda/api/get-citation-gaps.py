@@ -11,6 +11,7 @@ Features:
 - Actionable recommendations
 """
 
+import concurrent.futures
 import logging
 import os
 import sys
@@ -19,6 +20,7 @@ from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from botocore.config import Config
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
@@ -31,7 +33,22 @@ from shared.utils import extract_domain, get_brand_config
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-dynamodb = boto3.resource('dynamodb')
+# Raised connection pool: the all-keywords path fans out
+# _KEYWORD_ANALYSIS_WORKERS keyword threads, each running up to 10
+# parallel CrawledContent queries (query_latest_per_key). botocore's
+# default pool of 10 would serialize that fan-out at the HTTP layer.
+dynamodb = boto3.resource('dynamodb', config=Config(max_pool_connections=50))
+
+# Upper bound on items fetched per keyword when isolating the latest
+# analysis run. One run writes one SearchResults item per provider x
+# persona (9 providers x a handful of personas today), so 50 comfortably
+# covers a full run while keeping the read small.
+LATEST_RUN_ITEM_LIMIT = 50
+
+# Concurrency for the all-keywords analysis loop. Keyword analyses are
+# I/O bound (DynamoDB queries), so a small pool cuts wall-clock roughly
+# linearly; kept modest to stay within the connection pool above.
+_KEYWORD_ANALYSIS_WORKERS = 6
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
@@ -182,16 +199,29 @@ def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any
     if not first_party_list:
         return {"error": "No first-party brands configured"}
 
-    # Query search results for keyword
+    # Query search results for keyword — newest first, bounded, and
+    # projected down to the fields the analysis reads. The partition
+    # accumulates one item per provider x persona per run, each carrying
+    # the FULL LLM response text; the previous unbounded ascending query
+    # re-read that entire history per request (~1MB/keyword), which
+    # dominated this endpoint's ~60s latency. Worse, once a partition
+    # exceeded DynamoDB's 1MB page, "latest" was computed from the
+    # OLDEST page, silently returning stale runs. Descending + Limit
+    # fixes both; the projection drops the response text we never read.
     response = search_table.query(
-        KeyConditionExpression=Key('keyword').eq(keyword)
+        KeyConditionExpression=Key('keyword').eq(keyword),
+        ScanIndexForward=False,
+        Limit=LATEST_RUN_ITEM_LIMIT,
+        ProjectionExpression='#ts, provider, citations, brands',
+        ExpressionAttributeNames={'#ts': 'timestamp'},
     )
     items = response.get('Items', [])
 
     if not items:
         return {"error": f"No data found for keyword: {keyword}"}
 
-    # Get latest results
+    # Get latest results (items are newest-first, so the max timestamp
+    # is in this window by construction)
     latest_ts = max(item.get('timestamp', '') for item in items)
     latest_items = [item for item in items if item.get('timestamp') == latest_ts]
 
@@ -335,7 +365,7 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10) -> dict[s
             ProjectionExpression='keyword',
             Limit=500
         )
-        keywords = list(set(item.get('keyword', '') for item in response.get('Items', []) if item.get('keyword')))
+        keywords = sorted(set(item.get('keyword', '') for item in response.get('Items', []) if item.get('keyword')))
     else:
         # Fallback to scanning SearchResults if Keywords table not configured
         search_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
@@ -343,14 +373,29 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10) -> dict[s
             ProjectionExpression='keyword',
             Limit=500
         )
-        keywords = list(set(item.get('keyword', '') for item in response.get('Items', []) if item.get('keyword')))
+        keywords = sorted(set(item.get('keyword', '') for item in response.get('Items', []) if item.get('keyword')))
 
-    # Analyze each keyword
+    # Analyze keywords in parallel — each analysis is I/O bound (one
+    # SearchResults query + a CrawledContent fan-out), so the previous
+    # strictly sequential loop multiplied per-keyword latency by `limit`.
+    # sorted() above makes WHICH keywords get analyzed deterministic when
+    # more exist than `limit` (set order used to vary per invocation).
+    # pool.map preserves input order, so response ordering is unchanged.
+    selected_keywords = keywords[:limit]
     all_gaps = []
     keyword_summaries = []
 
-    for keyword in keywords[:limit]:
-        result = analyze_citation_gaps(keyword, config)
+    if not selected_keywords:
+        results: list[dict[str, Any]] = []
+    else:
+        workers = min(_KEYWORD_ANALYSIS_WORKERS, len(selected_keywords))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(
+                lambda kw: analyze_citation_gaps(kw, config),
+                selected_keywords,
+            ))
+
+    for keyword, result in zip(selected_keywords, results, strict=True):
         if 'error' not in result:
             keyword_summaries.append({
                 'keyword': keyword,

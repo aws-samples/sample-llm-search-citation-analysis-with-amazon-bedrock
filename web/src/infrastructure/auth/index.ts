@@ -2,5 +2,5 @@
  * Authentication utilities barrel export.
  */
 export {
-  getAuthToken, authenticatedFetch 
+  ADMIN_GROUP, getAuthToken, authenticatedFetch, getUserGroups 
 } from './session';

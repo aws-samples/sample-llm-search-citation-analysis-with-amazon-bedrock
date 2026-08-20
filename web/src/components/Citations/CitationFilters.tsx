@@ -27,9 +27,11 @@ export const CitationFilters = ({
     <div className="bg-white rounded-lg border border-gray-200 p-4">
       <div className="flex flex-col sm:flex-row gap-3 sm:gap-4 sm:items-end">
         <div className="flex-1">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Search URL</label>
+          <label htmlFor="citation-url-filter" className="block text-sm font-medium text-gray-700 mb-1">Search URL</label>
           <input
             type="text"
+            id="citation-url-filter"
+            name="citation-url-filter"
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
@@ -40,9 +42,11 @@ export const CitationFilters = ({
           />
         </div>
         <div className="w-full sm:w-32">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Min Citations</label>
+          <label htmlFor="citation-min-filter" className="block text-sm font-medium text-gray-700 mb-1">Min Citations</label>
           <input
             type="number"
+            id="citation-min-filter"
+            name="citation-min-filter"
             value={minCitations}
             onChange={(e) => {
               setMinCitations(e.target.value ? parseInt(e.target.value) : '');
@@ -67,7 +71,7 @@ export const CitationFilters = ({
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            <span className="hidden sm:inline">Export</span>
+            <span className="sr-only sm:not-sr-only">Export</span>
           </button>
         </div>
       </div>

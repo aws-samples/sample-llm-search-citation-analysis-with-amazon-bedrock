@@ -18,9 +18,9 @@ from boto3.dynamodb.conditions import Key
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from decimal_utils import to_int
 from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, require_keyword, validate
+from shared.dynamo_decimal import to_int
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

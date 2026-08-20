@@ -16,6 +16,7 @@ from botocore.exceptions import ClientError
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, not_found_response, success_response, validation_error
+from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler
 from shared.env_vars import resolve_table_env
 from shared.utils import get_timestamp
@@ -379,9 +380,16 @@ def handle_get_providers(event: dict, context: Any) -> dict:
     return success_response({'providers': providers}, event)
 
 
+@require_group(ADMIN_GROUP)
 @parse_json_body
 def handle_update_provider(event: dict, context: Any, body: dict | None = None) -> dict:
-    """PUT /providers/{id} - Update provider configuration."""
+    """PUT /providers/{id} - Update provider configuration.
+
+    Admin-only: this route writes Secrets Manager, and `configMgmtFunction`'s
+    role holds prefix-wide read *and* write over every `citation-analysis/*`
+    secret. An unprivileged caller could redirect provider billing or capture
+    every prompt the system sends (AUDIT-2026-08-19 §0.3).
+    """
     path_params = event.get('pathParameters') or {}
     provider_id = path_params.get('id')
 
@@ -430,9 +438,15 @@ def handle_update_provider(event: dict, context: Any, body: dict | None = None) 
     }, event)
 
 
+@require_group(ADMIN_GROUP)
 @parse_json_body
 def handle_validate_key(event: dict, context: Any, body: dict | None = None) -> dict:
-    """POST /providers/{id}/validate - Validate an API key without saving it."""
+    """POST /providers/{id}/validate - Validate an API key without saving it.
+
+    Admin-only: it makes billed outbound calls to nine third-party APIs with a
+    caller-supplied key. `GET /providers` stays open because the dashboard
+    needs provider status and it only ever returns masked keys.
+    """
     path_params = event.get('pathParameters') or {}
     provider_id = path_params.get('id')
 

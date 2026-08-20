@@ -26,7 +26,7 @@ from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, parse_json_body, require_keyword, validate
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
-from shared.utils import get_brand_config, get_timestamp, utc_now
+from shared.utils import brand_names_match, get_brand_config, get_timestamp, utc_now
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -91,14 +91,36 @@ def get_persona_info(query_prompt_id: str) -> dict:
     }
 
 
+def _key_component(value: str) -> str:
+    """Escape one composite-key component so the '#' delimiter stays unambiguous.
+
+    Keywords, brands, and persona ids are user-supplied and may themselves
+    contain '#' (bugs.md 2.3): without escaping, ("a#b", "c") and ("a", "b#c")
+    build the same partition key, and begins_with("a#") also matches persona
+    "a#b" — both cause cache collisions. Escaping '%' first keeps the encoding
+    injective. Rows written under the old key format simply miss the cache and
+    age out via the TTL.
+    """
+    return value.replace('%', '%25').replace('#', '%23')
+
+
+def _reflection_pk(keyword: str, brand: str) -> str:
+    """Build the keyword_brand partition key from escaped components."""
+    return f"{_key_component(keyword)}#{_key_component(brand.lower())}"
+
+
+def _persona_key_prefix(query_prompt_id: str) -> str:
+    """Build the persona_timestamp sort-key prefix from the escaped persona id."""
+    return f"{_key_component(query_prompt_id)}#"
+
+
 def check_cache(keyword: str, brand: str, query_prompt_id: str):
     """Return a cached self-reflection result if one exists within the TTL window."""
     table = dynamodb.Table(SELF_REFLECTION_TABLE)
-    pk = f"{keyword}#{brand.lower()}"
     response = table.query(
         KeyConditionExpression=(
-            Key('keyword_brand').eq(pk) &
-            Key('persona_timestamp').begins_with(f"{query_prompt_id}#")
+            Key('keyword_brand').eq(_reflection_pk(keyword, brand)) &
+            Key('persona_timestamp').begins_with(_persona_key_prefix(query_prompt_id))
         ),
         ScanIndexForward=False, Limit=1
     )
@@ -144,13 +166,20 @@ def fetch_search_data(keyword: str, query_prompt_id: str):
 
 
 def find_brand_in_results(brand: str, brands_list: list):
-    """Find a brand in the extracted brands list. Returns (brand_data, rank) or (None, None)."""
+    """Find a brand in the extracted brands list. Returns (brand_data, rank) or (None, None).
+
+    Uses `brand_names_match` (normalized exact comparison), not substring
+    matching. The substring form resurfaced here after four other files had
+    already removed it (AUDIT-2026-08-19 §2.15): tracking `"Inn"` would return
+    `"Holiday Inn"`'s rank, and that wrong rank is both fed to the Bedrock
+    reflection prompt and persisted by `store_reflection` with a 24h TTL — so
+    the model explains a competitor's position as if it were yours, and the
+    dashboard shows it as fact.
+    """
     if not brands_list:
         return None, None
-    brand_lower = brand.lower()
     for b in brands_list:
-        name = b.get('name', '')
-        if name.lower() == brand_lower or brand_lower in name.lower():
+        if brand_names_match(b.get('name', ''), brand):
             return b, b.get('rank', None)
     return None, None
 
@@ -161,8 +190,8 @@ def store_reflection(keyword, brand, query_prompt_id, persona_name,
     table = dynamodb.Table(SELF_REFLECTION_TABLE)
     timestamp = get_timestamp()
     item = {
-        'keyword_brand': f"{keyword}#{brand.lower()}",
-        'persona_timestamp': f"{query_prompt_id}#{timestamp}",
+        'keyword_brand': _reflection_pk(keyword, brand),
+        'persona_timestamp': f"{_persona_key_prefix(query_prompt_id)}{timestamp}",
         'keyword': keyword,
         'brand': brand,
         'query_prompt_id': query_prompt_id,
@@ -314,10 +343,9 @@ def get_self_reflection(event, context, keyword, brand=None, query_prompt_id=Non
     table = dynamodb.Table(SELF_REFLECTION_TABLE)
 
     if brand:
-        pk = f"{keyword}#{brand.lower()}"
-        key_cond = Key('keyword_brand').eq(pk)
+        key_cond = Key('keyword_brand').eq(_reflection_pk(keyword, brand))
         if query_prompt_id:
-            key_cond = key_cond & Key('persona_timestamp').begins_with(f"{query_prompt_id}#")
+            key_cond = key_cond & Key('persona_timestamp').begins_with(_persona_key_prefix(query_prompt_id))
         response = table.query(KeyConditionExpression=key_cond, ScanIndexForward=False)
         items = response.get('Items', [])
     else:

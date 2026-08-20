@@ -11,25 +11,20 @@ import json
 import logging
 import os
 import traceback
-from decimal import Decimal
 from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
+
+# Re-exported: DecimalEncoder's canonical home is shared.dynamo_decimal
+# (bugs.md 3.4); existing importers keep using shared.api_response.
+from shared.dynamo_decimal import DecimalEncoder as DecimalEncoder
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # Cache for CORS origin
 _cors_origin_cache: str | None = None
-
-
-class DecimalEncoder(json.JSONEncoder):
-    """JSON encoder that handles Decimal types from DynamoDB."""
-    def default(self, obj):
-        if isinstance(obj, Decimal):
-            return float(obj)
-        return super().default(obj)
 
 
 def get_cors_origin() -> str:
@@ -64,10 +59,17 @@ def get_cors_origin() -> str:
         logger.info(f"CORS origin loaded: {_cors_origin_cache}")
         return _cors_origin_cache
     except ClientError as e:
+        # Fail closed for THIS request, but deliberately do NOT cache the
+        # failure. The sentinel check above is `is not None`, so a cached ''
+        # is indistinguishable from a successful lookup that returned '' —
+        # one SSM ThrottlingException would blank Access-Control-Allow-Origin
+        # for the rest of the warm container's life, producing minutes to
+        # hours of "works for me / broken for you" browser CORS errors from a
+        # single ERROR line at cold start (AUDIT-2026-08-19 §2.13).
+        #
+        # Leaving the cache unset means the next request retries SSM.
         logger.error(f"Failed to get CORS origin from SSM: {e}")
-        # Fail secure - return empty string which will block CORS
-        _cors_origin_cache = ''
-        return _cors_origin_cache
+        return ''
 
 
 def get_cors_headers(request_origin: str | None = None) -> dict[str, str]:
@@ -300,3 +302,28 @@ def not_found_response(
         API Gateway response dictionary
     """
     return api_response(404, {'error': f'{resource} not found'}, event)
+
+
+def forbidden_response(
+    message: str = 'Forbidden',
+    event: dict | None = None
+) -> dict[str, Any]:
+    """
+    Create an authorization failure response.
+
+    403, not 401: the caller authenticated successfully (API Gateway's Cognito
+    authorizer already rejected bad tokens with a 401) but lacks the privilege
+    for this operation. Retrying with the same token will not help, so the
+    frontend must not treat this as a session-expiry signal.
+
+    The message is deliberately generic — it must not disclose which group is
+    required, who the caller is, or whether the target resource exists.
+
+    Args:
+        message: Safe, non-disclosing reason for the refusal
+        event: Original Lambda event
+
+    Returns:
+        API Gateway response dictionary
+    """
+    return api_response(403, {'error': message}, event)

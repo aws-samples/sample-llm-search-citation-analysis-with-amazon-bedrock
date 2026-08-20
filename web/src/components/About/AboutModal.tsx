@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Modal } from '../ui/Modal';
 import { AboutTab } from './AboutTab';
 import { ArchitectureTab } from './ArchitectureTab';
 import { LicensesTab } from './LicensesTab';
@@ -35,54 +36,40 @@ const TABS: readonly TabConfig[] = [
   },
 ];
 
+// ui/Modal supplies the dialog semantics this component previously lacked
+// (bugs.md 4.4 / AUDIT-2026-08-19 §3): role, Escape-to-close, scroll lock,
+// backdrop click-close, and a labelled close button.
 export const AboutModal = ({
   isOpen, onClose 
 }: AboutModalProps) => {
   const [activeTab, setActiveTab] = useState<TabType>('about');
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4 !mt-0">
-      <div className="bg-white rounded-lg border border-gray-200 max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Citation Analysis System</h2>
+    <Modal isOpen={isOpen} onClose={onClose} title="Citation Analysis System" size="4xl">
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200 dark:border-gray-700">
+        {TABS.map((tab) => (
           <button
-            onClick={onClose}
-            className="p-1 text-gray-400 hover:text-gray-600 transition-colors"
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === tab.id
+                ? 'border-gray-900 text-gray-900 dark:border-white dark:text-white'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            {tab.label}
           </button>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex border-b border-gray-200 px-4">
-          {TABS.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.id
-                  ? 'border-gray-900 text-gray-900'
-                  : 'border-transparent text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          {activeTab === 'about' && <AboutTab />}
-          {activeTab === 'architecture' && <ArchitectureTab />}
-          {activeTab === 'licenses' && <LicensesTab />}
-          {activeTab === 'version' && <VersionTab />}
-        </div>
+        ))}
       </div>
-    </div>
+
+      {/* Content */}
+      <div className="pt-6">
+        {activeTab === 'about' && <AboutTab />}
+        {activeTab === 'architecture' && <ArchitectureTab />}
+        {activeTab === 'licenses' && <LicensesTab />}
+        {activeTab === 'version' && <VersionTab />}
+      </div>
+    </Modal>
   );
 };

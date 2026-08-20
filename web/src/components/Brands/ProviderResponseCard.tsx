@@ -5,6 +5,7 @@ import type {
 import {
   formatResponse, extractUrls, findMentionPositions 
 } from '../ui/MarkdownProcessor';
+import { safeHref } from '../../infrastructure';
 import { ChevronDownIcon } from '../ui';
 
 interface ProviderResponseCardProps {
@@ -58,7 +59,7 @@ const CitationsList = ({
         {visibleUrls.map((url) => (
           <a
             key={`citation-${provider.provider}-${url.slice(-20)}`}
-            href={url}
+            href={safeHref(url)}
             target="_blank"
             rel="noopener noreferrer"
             className="block text-sm text-blue-600 hover:text-blue-800 hover:underline truncate"

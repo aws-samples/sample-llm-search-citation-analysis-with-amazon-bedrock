@@ -2,6 +2,8 @@ import {
   useState, useMemo 
 } from 'react';
 import type { Search } from '../../types';
+import { useAlertModal } from '../../hooks/useAlertModal';
+import { useIsAdmin } from '../../hooks/useIsAdmin';
 import {
   ConfirmModal, AlertModal 
 } from '../ui/Modal';
@@ -30,17 +32,9 @@ export const RecentSearchesTable = ({
     isOpen: false,
     failedCount: 0 
   });
-  const [alertModal, setAlertModal] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    variant: 'success' | 'error' | 'info';
-  }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    variant: 'info',
-  });
+  const {
+    alertModal, showAlert, closeAlert
+  } = useAlertModal();
 
   const keywordGroups = useMemo(() => {
     const groups: { [keyword: string]: Search[] } = {};
@@ -76,12 +70,7 @@ export const RecentSearchesTable = ({
     );
 
     if (failedKeywords.length === 0) {
-      setAlertModal({
-        isOpen: true,
-        title: 'Info',
-        message: 'No failed searches to run',
-        variant: 'info' 
-      });
+      showAlert('Info', 'No failed searches to run', 'info');
       return;
     }
 
@@ -103,23 +92,14 @@ export const RecentSearchesTable = ({
         onRerunSuccess(data.execution_arn, data.execution_name);
       }
 
-      setAlertModal({
-        isOpen: true,
-        title: 'Success',
-        message: `Running analysis for ${failedKeywords.length} keyword(s)`,
-        variant: 'success',
-      });
+      showAlert('Success', `Running analysis for ${failedKeywords.length} keyword(s)`, 'success');
     } catch (err) {
       console.error('Error re-running failed keywords:', err);
-      setAlertModal({
-        isOpen: true,
-        title: 'Error',
-        message: 'Failed to run analysis',
-        variant: 'error',
-      });
+      showAlert('Error', 'Failed to run analysis', 'error');
     }
   };
 
+  const { isAdmin } = useIsAdmin();
   const failedCount = keywordGroups.filter((g) => g.hasFailed).length;
   const totalItems = keywordGroups.length;
   const showAll = itemsPerPage === -1;
@@ -134,7 +114,10 @@ export const RecentSearchesTable = ({
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
           <div className="flex flex-wrap items-center gap-3 sm:gap-4">
             <h2 className="text-base sm:text-lg font-semibold text-gray-900">Recent Searches</h2>
-            {failedCount > 0 && !isRunning && (
+            {/* Reruns POST /api/trigger-keyword-analysis, which is Admin-only.
+                This is a second trigger path independent of useExecutionPolling
+                (it calls exporters/analysisExecutor directly). */}
+            {isAdmin && failedCount > 0 && !isRunning && (
               <button
                 onClick={rerunFailed}
                 className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
@@ -150,7 +133,7 @@ export const RecentSearchesTable = ({
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            <span className="hidden sm:inline">Export</span>
+            <span className="sr-only sm:not-sr-only">Export</span>
           </button>
         </div>
 
@@ -256,10 +239,7 @@ export const RecentSearchesTable = ({
 
       <AlertModal
         isOpen={alertModal.isOpen}
-        onClose={() => setAlertModal({
-          ...alertModal,
-          isOpen: false 
-        })}
+        onClose={closeAlert}
         title={alertModal.title}
         message={alertModal.message}
         variant={alertModal.variant}

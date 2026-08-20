@@ -3,7 +3,9 @@ import type {
 } from '../../types';
 import {
   keywordSelectionKey, uniqueResearchKeywords
-} from '../../hooks/usePromoteKeywords';
+} from '../../hooks/keywordIdentity';
+import { useClipboardCopy } from '../../hooks/useClipboardCopy';
+import { safeHref } from '../../infrastructure';
 import { Spinner } from '../ui/Spinner';
 
 type SectionId = 'primary' | 'secondary' | 'longtail' | 'gaps';
@@ -140,7 +142,7 @@ const SeoElementRow = ({
     <span className="font-medium text-gray-500 sm:w-32 shrink-0">{label}:</span>
     {isUrl ? (
       <a 
-        href={value} 
+        href={safeHref(value)} 
         target="_blank" 
         rel="noopener noreferrer"
         className="text-blue-600 hover:underline break-all"
@@ -255,53 +257,57 @@ interface KeywordRowProps {
 
 const KeywordRow = ({
   keyword: kw, showOpportunity, selectable = false, selected, onToggle
-}: KeywordRowProps) => (
-  <tr className="hover:bg-gray-50">
-    {selectable && (
+}: KeywordRowProps) => {
+  const { copy } = useClipboardCopy();
+
+  return (
+    <tr className="hover:bg-gray-50">
+      {selectable && (
+        <td className="px-6 py-4">
+          <input
+            type="checkbox"
+            checked={selected?.has(keywordSelectionKey(kw.keyword)) ?? false}
+            onChange={() => onToggle?.(kw.keyword)}
+            aria-label={`Select ${kw.keyword}`}
+            className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+          />
+        </td>
+      )}
+      <td className="px-6 py-4 text-sm text-gray-900">{kw.keyword}</td>
       <td className="px-6 py-4">
-        <input
-          type="checkbox"
-          checked={selected?.has(keywordSelectionKey(kw.keyword)) ?? false}
-          onChange={() => onToggle?.(kw.keyword)}
-          aria-label={`Select ${kw.keyword}`}
-          className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
-        />
+        <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${getIntentColor(kw.intent)}`}>
+          {kw.intent}
+        </span>
       </td>
-    )}
-    <td className="px-6 py-4 text-sm text-gray-900">{kw.keyword}</td>
-    <td className="px-6 py-4">
-      <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${getIntentColor(kw.intent)}`}>
-        {kw.intent}
-      </span>
-    </td>
-    <td className={`px-6 py-4 text-sm font-medium ${getCompetitionColor(kw.competition)}`}>{kw.competition}</td>
-    <td className="px-6 py-4">
-      <div className="flex items-center gap-2">
-        <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-          <div className="h-full bg-gray-900 rounded-full" style={{ width: `${(kw.relevance ?? 0) * 10}%` }} />
+      <td className={`px-6 py-4 text-sm font-medium ${getCompetitionColor(kw.competition)}`}>{kw.competition}</td>
+      <td className="px-6 py-4">
+        <div className="flex items-center gap-2">
+          <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div className="h-full bg-gray-900 rounded-full" style={{ width: `${(kw.relevance ?? 0) * 10}%` }} />
+          </div>
+          <span className="text-xs text-gray-500">{kw.relevance}/10</span>
         </div>
-        <span className="text-xs text-gray-500">{kw.relevance}/10</span>
-      </div>
-    </td>
-    <td className="px-6 py-4">
-      {kw.source && <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600">{kw.source}</span>}
-    </td>
-    {showOpportunity && (
-      <td className="px-6 py-4 text-xs text-gray-600 max-w-xs truncate" title={kw.opportunity}>{kw.opportunity}</td>
-    )}
-    <td className="px-6 py-4 text-right">
-      <button
-        onClick={() => navigator.clipboard.writeText(kw.keyword)}
-        className="text-gray-400 hover:text-gray-600 transition-colors"
-        title="Copy keyword"
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-        </svg>
-      </button>
-    </td>
-  </tr>
-);
+      </td>
+      <td className="px-6 py-4">
+        {kw.source && <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600">{kw.source}</span>}
+      </td>
+      {showOpportunity && (
+        <td className="px-6 py-4 text-xs text-gray-600 max-w-xs truncate" title={kw.opportunity}>{kw.opportunity}</td>
+      )}
+      <td className="px-6 py-4 text-right">
+        <button
+          onClick={() => void copy(kw.keyword)}
+          className="text-gray-400 hover:text-gray-600 transition-colors"
+          title="Copy keyword"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+          </svg>
+        </button>
+      </td>
+    </tr>
+  );
+};
 
 interface KeywordsTableProps {
   keywords: ExpandedKeywordWithSource[];

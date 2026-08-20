@@ -8,6 +8,8 @@ import {
   API_BASE_URL, authenticatedFetch 
 } from '../../infrastructure';
 import { calculateDuration } from '../../formatting/dateFormatter';
+import { useAlertModal } from '../../hooks/useAlertModal';
+import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { AlertModal } from '../ui/Modal';
 import { processExecutionData } from '../../formatting/executionProcessor';
 import {
@@ -65,17 +67,9 @@ export const ExecutionMonitor = ({
 }: ExecutionMonitorProps) => {
   const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
   const [isStarting, setIsStarting] = useState(false);
-  const [alertModal, setAlertModal] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    variant: 'success' | 'error' | 'info';
-  }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    variant: 'info',
-  });
+  const {
+    alertModal, showAlert, closeAlert
+  } = useAlertModal();
 
   const activeKeywords = keywords.filter((k) => !k.status || k.status === 'active');
 
@@ -98,12 +92,11 @@ export const ExecutionMonitor = ({
         // Don't block analysis if preflight check itself fails
         console.warn('[preflight] Provider check failed, proceeding anyway');
       } else if (!preflight.anyReady) {
-        setAlertModal({
-          isOpen: true,
-          title: 'No Providers Ready',
-          message: 'No LLM providers are enabled and configured. Go to Settings > AI Providers to add at least one API key.',
-          variant: 'error',
-        });
+        showAlert(
+          'No Providers Ready',
+          'No LLM providers are enabled and configured. Go to Settings > AI Providers to add at least one API key.',
+          'error'
+        );
         return;
       } else if (preflight.missingKeyProviders.length > 0) {
         console.warn(`[preflight] ${preflight.missingKeyProviders.length} enabled provider(s) missing API keys: ${preflight.missingKeyProviders.join(', ')}`);
@@ -111,12 +104,11 @@ export const ExecutionMonitor = ({
 
       const keywordsToRun = selectedKeywords.length > 0 ? selectedKeywords : undefined;
       const result = await triggerAnalysis(keywordsToRun);
-      setAlertModal({
-        isOpen: true,
-        title: result.success ? 'Success' : 'Error',
-        message: result.message,
-        variant: result.success ? 'success' : 'error',
-      });
+      showAlert(
+        result.success ? 'Success' : 'Error',
+        result.message,
+        result.success ? 'success' : 'error'
+      );
     } finally {
       setIsStarting(false);
     }
@@ -129,6 +121,7 @@ export const ExecutionMonitor = ({
 
   const duration = execution ? calculateDuration(execution.start_date, execution.stop_date) : null;
   const isRunning = execution?.status === 'RUNNING';
+  const { isAdmin } = useIsAdmin();
 
   return (
     <>
@@ -142,6 +135,7 @@ export const ExecutionMonitor = ({
           onSelectAll={handleSelectAll}
           onToggleKeyword={handleToggleKeyword}
           onTriggerAnalysis={handleTriggerAnalysis}
+          isAdmin={isAdmin}
         />
 
         {execution && processedExecution && (
@@ -156,10 +150,7 @@ export const ExecutionMonitor = ({
 
       <AlertModal
         isOpen={alertModal.isOpen}
-        onClose={() => setAlertModal({
-          ...alertModal,
-          isOpen: false 
-        })}
+        onClose={closeAlert}
         title={alertModal.title}
         message={alertModal.message}
         variant={alertModal.variant}

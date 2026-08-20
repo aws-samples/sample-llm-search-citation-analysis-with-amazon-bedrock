@@ -23,7 +23,15 @@ import {
 } from './usePromoteKeywords-reconciliation-fixtures';
 import { usePromoteKeywords } from './usePromoteKeywords';
 
-vi.mock('../api/client', () => ({ apiPost: vi.fn() }));
+// useDashboardData (rendered by the reconciliation harness) imports the pure
+// validateApiConfig from the same module, so keep the real implementation.
+vi.mock('../api/client', async () => {
+  const actual = await vi.importActual<typeof import('../api/client')>('../api/client');
+  return {
+    ...actual,
+    apiPost: vi.fn(),
+  };
+});
 vi.mock('../infrastructure', async () => {
   const actualInfrastructure = await vi.importActual<typeof import('../infrastructure')>(
     '../infrastructure'
