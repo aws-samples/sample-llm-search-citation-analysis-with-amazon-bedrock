@@ -1,5 +1,5 @@
 import {
-  useState, useCallback 
+  useState, useCallback, useEffect, useRef 
 } from 'react';
 import {
   API_BASE_URL, authenticatedFetch, getErrorMessage 
@@ -83,6 +83,16 @@ async function findResearchItem(options: ResearchPollOptions): Promise<KeywordRe
     const historyResp = await authenticatedFetch(
       `${API_BASE_URL}/keyword-research/history?type=${options.type}&limit=50`
     );
+    // Auth failures are fatal, not "not ready yet". Without this check an
+    // expired session kept polling for the full 2 minutes and then reported
+    // a bogus timeout (AUDIT 2.20).
+    if (historyResp.status === 401 || historyResp.status === 403) {
+      // Worded to categorize as 'auth' in getErrorMessage, so the UI shows
+      // the research auth message instead of a generic failure.
+      throw new KeywordResearchError(
+        `Unauthorized (${historyResp.status}): session expired while waiting for results. Sign in again, then check History.`
+      );
+    }
     if (!historyResp.ok) return null;
     const historyData: unknown = await historyResp.json();
     if (!isHistoryResponse(historyData)) return null;
@@ -109,18 +119,26 @@ async function findResearchItem(options: ResearchPollOptions): Promise<KeywordRe
   }
 }
 
-/** Poll the history endpoint until the research job completes, fails, or times out. */
+/**
+ * Poll the history endpoint until the research job completes, fails, or
+ * times out. Returns null when `isCancelled` reports the poll was superseded
+ * by a newer call or the component unmounted — previously polling ran to the
+ * full 2 minutes with no cancellation path at all (AUDIT 2.20).
+ */
 async function pollUntilComplete(
   options: ResearchPollOptions,
+  isCancelled: () => boolean,
   attemptsLeft: number = POLL_MAX_ATTEMPTS
-): Promise<KeywordResearchItem> {
+): Promise<KeywordResearchItem | null> {
   if (attemptsLeft === 0) {
     throw new KeywordResearchError(options.timeoutMessage);
   }
   await sleep(POLL_INTERVAL_MS);
+  if (isCancelled()) return null;
   const completed = await findResearchItem(options);
+  if (isCancelled()) return null;
   if (completed) return completed;
-  return pollUntilComplete(options, attemptsLeft - 1);
+  return pollUntilComplete(options, isCancelled, attemptsLeft - 1);
 }
 
 function toExpansionResult(
@@ -160,7 +178,20 @@ export const useKeywordResearch = () => {
   const [competitorResult, setCompetitorResult] = useState<CompetitorAnalysisResult | null>(null);
   const [history, setHistory] = useState<KeywordResearchItem[]>([]);
 
+  // Cancellation for the long-running poll loops (AUDIT 2.20): each
+  // expand/analyze call claims a new generation; a later call or unmount
+  // invalidates older generations, stopping their polls at the next tick
+  // and dropping their stale state updates.
+  const pollGenerationRef = useRef(0);
+
+  useEffect(() => () => {
+    pollGenerationRef.current += 1;
+  }, []);
+
   const expandKeywords = useCallback(async (seedKeyword: string, industry: string, count: number) => {
+    const generation = ++pollGenerationRef.current;
+    const isCancelled = () => pollGenerationRef.current !== generation;
+
     setLoading(true);
     setError(null);
     setExpansionResult(null);
@@ -190,24 +221,36 @@ export const useKeywordResearch = () => {
           researchId: pendingId,
           failureMessage: 'Expansion failed',
           timeoutMessage: 'Expansion timed out. Check history for results.',
-        });
+        }, isCancelled);
+        // null means the poll was superseded or unmounted — drop silently.
+        if (!completed) return;
         setExpansionResult(toExpansionResult(completed, seedKeyword, industry));
         return;
       }
 
       // Sync response (fallback)
+      if (isCancelled()) return;
       if (isKeywordExpansionResult(data)) {
         setExpansionResult(data);
       }
     } catch (err) {
+      // A superseded call must not overwrite the newer call's error state.
+      if (isCancelled()) return;
       setError(getErrorMessage(err, 'research'));
       console.error('[research] Error expanding keywords:', err);
     } finally {
-      setLoading(false);
+      // Only the current generation may clear loading; a superseded call
+      // finishing late would otherwise flip off the newer call's spinner.
+      if (!isCancelled()) {
+        setLoading(false);
+      }
     }
   }, []);
 
   const analyzeCompetitor = useCallback(async (url: string) => {
+    const generation = ++pollGenerationRef.current;
+    const isCancelled = () => pollGenerationRef.current !== generation;
+
     setLoading(true);
     setError(null);
     setCompetitorResult(null);
@@ -234,20 +277,29 @@ export const useKeywordResearch = () => {
           failureMessage: 'Analysis failed',
           timeoutMessage: 'Analysis timed out. Check history for results.',
           isComplete: (item) => Boolean(item.analysis),
-        });
+        }, isCancelled);
+        // null means the poll was superseded or unmounted — drop silently.
+        if (!completed) return;
         setCompetitorResult(toCompetitorResult(completed, url));
         return;
       }
 
       // Sync response (fallback)
+      if (isCancelled()) return;
       if (isCompetitorAnalysisResult(data)) {
         setCompetitorResult(data);
       }
     } catch (err) {
+      // A superseded call must not overwrite the newer call's error state.
+      if (isCancelled()) return;
       setError(getErrorMessage(err, 'research'));
       console.error('[research] Error analyzing competitor:', err);
     } finally {
-      setLoading(false);
+      // Only the current generation may clear loading; a superseded call
+      // finishing late would otherwise flip off the newer call's spinner.
+      if (!isCancelled()) {
+        setLoading(false);
+      }
     }
   }, []);
 

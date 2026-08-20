@@ -1,7 +1,7 @@
-import { useState } from 'react';
 import type {
   ContentIdea, GeneratedContent
 } from '../../types';
+import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { Spinner } from '../ui/Spinner';
 
 interface ContentGeneratorProps {
@@ -150,20 +150,18 @@ const GeneratedContentDisplay = ({
 export const ContentGenerator = ({
   idea, content, isGenerating, onClose
 }: ContentGeneratorProps) => {
-  const [copied, setCopied] = useState<string | null>(null);
+  const {
+    copied, copy
+  } = useClipboardCopy();
 
   const handleCopy = async (text: string, type: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopied(type);
-    setTimeout(() => setCopied(null), 2000);
+    await copy(text, type);
   };
 
   const handleCopyAll = async () => {
     if (!content) return;
     const fullContent = `# ${content.title}\n\n${content.meta_description}\n\n${content.body}`;
-    await navigator.clipboard.writeText(fullContent);
-    setCopied('all');
-    setTimeout(() => setCopied(null), 2000);
+    await copy(fullContent, 'all');
   };
 
   return (

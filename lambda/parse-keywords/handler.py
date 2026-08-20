@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
 
 from shared.step_function_response import log_error
 
@@ -40,6 +41,10 @@ QUERY_PROMPTS_TABLE = (
 )
 
 
+class QueryPromptReadError(Exception):
+    """Raised when enabled query prompts cannot be read from DynamoDB."""
+
+
 def read_enabled_query_prompts() -> list[dict[str, str]]:
     """
     Read enabled query prompts from DynamoDB.
@@ -47,6 +52,25 @@ def read_enabled_query_prompts() -> list[dict[str, str]]:
     Used for executions whose input does not carry query prompts (e.g.
     EventBridge schedules, which bake their input at creation time). Resolving
     prompts here keeps scheduled runs in sync with the current configuration.
+
+    Fails CLOSED on read errors. This function is the sole prompt source for
+    schedule-triggered executions, and it used to return `[]` on any exception:
+    a transient DynamoDB throttle made the whole nightly run execute with
+    **zero personas**, complete, write rows, and report success — leaving a
+    hole in the time series indistinguishable from "no personas were configured
+    then" (AUDIT-2026-08-19 §2.12). A failed run is recoverable; silently wrong
+    data is not. `is_provider_enabled` was changed to fail closed for exactly
+    this class of failure, so this matches that precedent.
+
+    The one exception is a missing table or index, which means the persona
+    feature is not provisioned in this deployment — a configuration state
+    rather than a failure, so an empty list is the honest answer there.
+
+    Returns:
+        The enabled prompts, or `[]` when the feature is not provisioned.
+
+    Raises:
+        QueryPromptReadError: When the prompts exist but could not be read.
     """
     try:
         table = dynamodb.Table(QUERY_PROMPTS_TABLE)
@@ -65,9 +89,21 @@ def read_enabled_query_prompts() -> list[dict[str, str]]:
         ]
         logger.info(f"Read {len(prompts)} enabled query prompts from DynamoDB")
         return prompts
+    except ClientError as e:
+        if e.response.get('Error', {}).get('Code') == 'ResourceNotFoundException':
+            logger.warning(
+                "Query prompts table or EnabledIndex not present (%s); "
+                "treating the persona feature as unprovisioned.",
+                QUERY_PROMPTS_TABLE,
+            )
+            return []
+        raise QueryPromptReadError(
+            f"Could not read enabled query prompts from {QUERY_PROMPTS_TABLE}"
+        ) from e
     except Exception as e:
-        logger.warning(f"Could not fetch query prompts, proceeding without them: {e}")
-        return []
+        raise QueryPromptReadError(
+            f"Could not read enabled query prompts from {QUERY_PROMPTS_TABLE}"
+        ) from e
 
 
 def resolve_query_prompts(event: dict[str, Any]) -> list:

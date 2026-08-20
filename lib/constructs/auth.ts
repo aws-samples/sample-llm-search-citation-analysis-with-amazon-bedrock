@@ -83,13 +83,25 @@ export class Auth extends Construct {
     });
 
     // Create User Pool Client
-    const tokenValidity = Duration.hours(8);
+    //
+    // Token lifetimes are deliberately asymmetric (AUDIT-2026-08-19 §0.4).
+    // A single 8h value for all three was the worst of both worlds: API
+    // Gateway's Cognito authorizer validates only the signature and `exp`, so
+    // disabling or deleting a user did not revoke their bearer token for up to
+    // 8 hours — while the equally-8h refresh token also forced everyone to
+    // re-login every 8 hours.
+    //
+    // Short access/ID tokens bound the revocation window; a longer refresh
+    // token restores a usable session length. Revoking a refresh token (or
+    // disabling the user) now takes effect within `accessTokenValidity`.
+    const accessTokenValidity = Duration.hours(1);
+    const refreshTokenValidity = Duration.days(7);
     const userPoolClient = new UserPoolClient(this, "userPoolClient", {
       userPool,
       generateSecret: false,
-      refreshTokenValidity: tokenValidity,
-      accessTokenValidity: tokenValidity,
-      idTokenValidity: tokenValidity,
+      refreshTokenValidity,
+      accessTokenValidity,
+      idTokenValidity: accessTokenValidity,
       readAttributes: new ClientAttributes().withStandardAttributes({email: true,}),
       authFlows: {
         adminUserPassword: true,

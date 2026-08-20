@@ -32,8 +32,8 @@ os.environ.setdefault('DYNAMODB_TABLE_SEARCH_RESULTS', 'test-search')
 os.environ.setdefault('DYNAMODB_TABLE_CITATIONS', 'test-citations')
 os.environ.setdefault('DYNAMODB_TABLE_CRAWLED_CONTENT', 'test-crawled')
 
-# Put lambda/ on the path so `from shared...` and `from decimal_utils...` in
-# the module under test resolve to the layer copies.
+# Put lambda/ on the path so `from shared...` imports in the module under
+# test resolve to the layer copies.
 _LAMBDA_DIR = os.path.dirname(_HERE)
 if _LAMBDA_DIR not in sys.path:
     sys.path.insert(0, _LAMBDA_DIR)

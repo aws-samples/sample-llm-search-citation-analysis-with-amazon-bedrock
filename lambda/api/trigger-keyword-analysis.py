@@ -18,6 +18,7 @@ sys.path.insert(0, '/opt/python')
 from boto3.dynamodb.conditions import Key
 
 from shared.api_response import success_response, validation_error
+from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler, parse_json_body, validate
 from shared.utils import get_timestamp, get_timestamp_compact
 
@@ -34,6 +35,7 @@ query_prompts_table = dynamodb.Table(QUERY_PROMPTS_TABLE)
 
 
 @api_handler
+@require_group(ADMIN_GROUP)
 @parse_json_body
 @validate({
     'keywords': {'required': True, 'source': 'body'}
@@ -41,6 +43,10 @@ query_prompts_table = dynamodb.Table(QUERY_PROMPTS_TABLE)
 def handler(event: dict[str, Any], context: Any, body: dict, keywords) -> dict[str, Any]:
     """
     POST /api/trigger-keyword-analysis
+
+    Admin-only, and gated above `@parse_json_body` so an unauthorized request
+    is refused before its body is parsed. Same spend profile as
+    `trigger-analysis` (AUDIT-2026-08-19 §2.3).
 
     Body: {
         "keywords": ["keyword1", "keyword2"]  // Array of keyword strings

@@ -16,7 +16,6 @@ import logging
 import os
 import time
 import uuid
-from datetime import datetime
 
 import boto3
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
@@ -30,7 +29,7 @@ except ImportError:
     BEDROCK_AGENTCORE_AVAILABLE = False
     logging.warning("BedrockAgentCore SDK not available - browser features will be limited")
 
-from shared.utils import get_timestamp
+from shared.utils import get_timestamp, get_timestamp_compact
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -113,7 +112,9 @@ class SimpleBrowserTools:
         # Start a session
         self.session_id = self.browser_client.start(
             identifier=self.browser_id,
-            name=f"citation_crawler_session_{datetime.now().strftime('%Y%m%d-%H%M%S')}",
+            # UTC contract: get_timestamp_compact() — the previous naive
+            # datetime.now() stamped local server time (bugs.md 3.4).
+            name=f"citation_crawler_session_{get_timestamp_compact()}",
             session_timeout_seconds=self.config.browser_session_timeout
         )
 

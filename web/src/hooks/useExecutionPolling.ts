@@ -1,5 +1,5 @@
 import {
-  useState, useEffect, useCallback 
+  useState, useEffect, useCallback, useRef 
 } from 'react';
 import {
   API_BASE_URL,
@@ -73,27 +73,37 @@ function isTriggerErrorResponse(data: unknown): data is { error?: string } {
  */
 export const useExecutionPolling = (onComplete?: () => void) => {
   const [execution, setExecution] = useState<Execution | null>(null);
-  const [pollingInterval, setPollingInterval] = useState<ReturnType<typeof setInterval> | null>(null);
+  // Interval handle in a ref, not state (AUDIT-2026-08-19 2.16): the interval
+  // callback froze a stopPolling closure over the pre-start `null` state, so
+  // clearInterval never ran and onComplete fired on every 3s tick forever.
+  // The ref keeps stopPolling identity-stable and always current — the same
+  // pattern useContentStudio uses.
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
-    if (pollingInterval) {
-      clearInterval(pollingInterval);
-      setPollingInterval(null);
+    if (pollingIntervalRef.current !== null) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
     }
-  }, [pollingInterval]);
+  }, []);
 
-  const fetchExecutionStatus = useCallback(async (executionArn: string) => {
+  /**
+   * Fetch and apply the execution status. Returns true when the execution
+   * reached a terminal state (callers must not start polling in that case,
+   * or onComplete would fire a second time from the first tick).
+   */
+  const fetchExecutionStatus = useCallback(async (executionArn: string): Promise<boolean> => {
     try {
       const encodedArn = encodeURIComponent(executionArn);
       const response = await authenticatedFetch(`${API_BASE_URL}/executions/${encodedArn}`);
 
       if (!response.ok) {
         console.error('Failed to fetch execution status:', response.status);
-        return;
+        return false;
       }
 
       const json: unknown = await response.json();
-      if (!isExecutionStatusResponse(json)) return;
+      if (!isExecutionStatusResponse(json)) return false;
 
       if (json.execution) {
         setExecution(prev => ({
@@ -109,19 +119,21 @@ export const useExecutionPolling = (onComplete?: () => void) => {
         if (['SUCCEEDED', 'FAILED', 'TIMED_OUT', 'ABORTED'].includes(json.execution.status)) {
           stopPolling();
           onComplete?.();
+          return true;
         }
       }
+      return false;
     } catch (err) {
       console.error('Error fetching execution status:', err);
+      return false;
     }
   }, [onComplete, stopPolling]);
 
   const startPolling = useCallback((executionArn: string) => {
     stopPolling();
-    const interval = setInterval(() => {
-      fetchExecutionStatus(executionArn);
+    pollingIntervalRef.current = setInterval(() => {
+      void fetchExecutionStatus(executionArn);
     }, 3000);
-    setPollingInterval(interval);
   }, [fetchExecutionStatus, stopPolling]);
 
   const triggerAnalysis = async (selectedKeywords?: string[]): Promise<TriggerResult> => {
@@ -155,8 +167,8 @@ export const useExecutionPolling = (onComplete?: () => void) => {
           events: [],
         });
 
-        await fetchExecutionStatus(arn);
-        startPolling(arn);
+        const alreadyTerminal = await fetchExecutionStatus(arn);
+        if (!alreadyTerminal) startPolling(arn);
 
         const keywordCount = triggerJson.keywords_count;
         return {
@@ -195,8 +207,9 @@ export const useExecutionPolling = (onComplete?: () => void) => {
       events: [],
     });
 
-    fetchExecutionStatus(executionArn);
-    startPolling(executionArn);
+    void fetchExecutionStatus(executionArn).then((alreadyTerminal) => {
+      if (!alreadyTerminal) startPolling(executionArn);
+    });
   }, [fetchExecutionStatus, startPolling]);
 
   return {

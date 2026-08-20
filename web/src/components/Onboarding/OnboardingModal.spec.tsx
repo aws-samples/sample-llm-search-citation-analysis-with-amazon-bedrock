@@ -11,9 +11,13 @@ import {
 
 vi.mock('../../hooks/useOnboardingStatus', () => ({useOnboardingStatus: vi.fn(),}));
 
+vi.mock('../../hooks/useIsAdmin', () => ({useIsAdmin: vi.fn(),}));
+
 import { useOnboardingStatus } from '../../hooks/useOnboardingStatus';
+import { useIsAdmin } from '../../hooks/useIsAdmin';
 
 const mockUseOnboardingStatus = useOnboardingStatus as ReturnType<typeof vi.fn>;
+const mockUseIsAdmin = useIsAdmin as ReturnType<typeof vi.fn>;
 
 const localStorageMock: {
   store: Record<string, string>;
@@ -57,6 +61,12 @@ describe('OnboardingModal', () => {
     Object.defineProperty(window, 'localStorage', {
       value: localStorageMock,
       writable: true,
+    });
+    // Every onboarding step targets an Admin-only route, so the checklist only
+    // renders for admins. Non-admin suppression is asserted separately below.
+    mockUseIsAdmin.mockReturnValue({
+      isAdmin: true,
+      loading: false,
     });
     mockUseOnboardingStatus.mockReturnValue({
       status: buildStatus(),
@@ -265,5 +275,63 @@ describe('OnboardingModal', () => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
       expect(localStorageMock.setItem).not.toHaveBeenCalledWith(ONBOARDING_DISMISSED_STORAGE_KEY, 'true');
     });
+  });
+});
+
+
+describe('OnboardingModal for non-admin users', () => {
+  /**
+   * Every step in the checklist targets an Admin-only route: provider keys,
+   * brand config, the first run, schedules, personas. A non-admin would get a
+   * blocking modal listing six things they cannot do, so it is suppressed
+   * entirely rather than filtered — filtering to an empty list would leave
+   * `allRequiredComplete` false and render the modal with no steps at all.
+   */
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.keys(localStorageMock.store).forEach((key) => delete localStorageMock.store[key]);
+    Object.defineProperty(window, 'localStorage', {
+      value: localStorageMock,
+      writable: true,
+    });
+    mockUseIsAdmin.mockReturnValue({
+      isAdmin: false,
+      loading: false,
+    });
+    mockUseOnboardingStatus.mockReturnValue({
+      status: buildStatus(),
+      loading: false,
+    });
+  });
+
+  it('does not render the checklist for a non-admin user', () => {
+    render(<OnboardingModal {...buildProps()} />);
+
+    expect(screen.queryByText(/Get started with Citation Analysis/i)).not.toBeInTheDocument();
+  });
+
+  it('does not render any setup step for a non-admin user', () => {
+    render(<OnboardingModal {...buildProps()} />);
+
+    expect(screen.queryByText(/Add AI provider API keys/i)).not.toBeInTheDocument();
+  });
+
+  it('does not render the checklist while admin membership is still loading', () => {
+    mockUseIsAdmin.mockReturnValue({
+      isAdmin: false,
+      loading: true,
+    });
+
+    render(<OnboardingModal {...buildProps()} />);
+
+    expect(screen.queryByText(/Get started with Citation Analysis/i)).not.toBeInTheDocument();
+  });
+
+  it('does not query setup status for a non-admin user', () => {
+    /** Four API calls the caller could never act on. */
+    render(<OnboardingModal {...buildProps()} />);
+
+    expect(mockUseOnboardingStatus).toHaveBeenCalledWith(false);
   });
 });

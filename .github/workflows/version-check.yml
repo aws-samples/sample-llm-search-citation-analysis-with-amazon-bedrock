@@ -1,0 +1,61 @@
+# Enforces the release policy in CONTRIBUTING.md ("Versioning and changelog"):
+# any PR that changes application behavior must bump the version in BOTH
+# package.json and web/package.json (same value) and add a CHANGELOG.md entry
+# for it. Docs-only and CI-only PRs are exempt.
+#
+# Deliberately a check rather than an auto-bump: the bump level (major/minor/
+# patch) is a judgment call about breaking behavior that the PR author is best
+# placed to make. If the repo later commits fully to Conventional Commits,
+# this can be replaced by release-please.
+name: Version and changelog check
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Require version bump and changelog entry when application code changes
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          base="origin/${BASE_REF}"
+
+          # Paths whose changes constitute an application change.
+          app_paths=(lambda lib bin web/src web/index.html scripts cdk.json)
+
+          if git diff --quiet "${base}...HEAD" -- "${app_paths[@]}"; then
+            echo "No application code changed — version bump not required."
+            exit 0
+          fi
+
+          head_version="$(jq -r .version package.json)"
+          web_version="$(jq -r .version web/package.json)"
+          base_version="$(git show "${base}:package.json" | jq -r .version)"
+
+          if [ "${head_version}" != "${web_version}" ]; then
+            echo "::error::package.json is ${head_version} but web/package.json is ${web_version} — they must carry the same version."
+            exit 1
+          fi
+
+          if [ "${head_version}" = "${base_version}" ]; then
+            echo "::error::Application code changed but the version is still ${base_version}. Bump package.json and web/package.json and add a CHANGELOG.md entry (see CONTRIBUTING.md, 'Versioning and changelog')."
+            exit 1
+          fi
+
+          if ! grep -q "^## \[${head_version}\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [${head_version}]' entry for the new version."
+            exit 1
+          fi
+
+          echo "Version ${base_version} -> ${head_version} with a matching CHANGELOG.md entry."

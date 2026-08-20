@@ -2,7 +2,12 @@ import {
   describe, it, expect, vi, beforeEach, afterEach 
 } from 'vitest';
 import {
-  formatDate, formatTime, calculateDuration 
+  formatDate,
+  formatDateOnly,
+  formatTime,
+  calculateDuration,
+  formatApproximateDuration,
+  formatRelativeTime
 } from './dateFormatter';
 
 describe('formatDate', () => {
@@ -117,5 +122,103 @@ describe('calculateDuration', () => {
     const result = calculateDuration('2026-01-23T12:00:00Z', '2026-01-23T12:00:00Z');
 
     expect(result).toBe('0s');
+  });
+});
+
+describe('formatDateOnly', () => {
+  it('returns the locale date without a time component', () => {
+    const input = '2026-08-19T15:30:00Z';
+
+    expect(formatDateOnly(input)).toBe(new Date(input).toLocaleDateString());
+  });
+
+  it('returns N/A when the date is null or undefined', () => {
+    expect(formatDateOnly(null)).toBe('N/A');
+    expect(formatDateOnly(undefined)).toBe('N/A');
+  });
+
+  it('returns Invalid date for an unparseable string', () => {
+    expect(formatDateOnly('not-a-date')).toBe('Invalid date');
+  });
+});
+
+describe('formatApproximateDuration', () => {
+  it('returns the stranded run duration in days when given its raw seconds', () => {
+    expect(formatApproximateDuration(4434821)).toBe('51 days');
+  });
+
+  it('returns hours when the duration is under a day', () => {
+    expect(formatApproximateDuration(7200)).toBe('2 hours');
+  });
+
+  it('returns minutes when the duration is under an hour', () => {
+    expect(formatApproximateDuration(300)).toBe('5 minutes');
+  });
+
+  it('returns seconds when the duration is under a minute', () => {
+    expect(formatApproximateDuration(45)).toBe('45 seconds');
+  });
+
+  it('returns "0 seconds" when the duration is zero', () => {
+    expect(formatApproximateDuration(0)).toBe('0 seconds');
+  });
+
+  it('uses the singular unit when the count is exactly one', () => {
+    expect(formatApproximateDuration(86400)).toBe('1 day');
+  });
+
+  it('truncates rather than rounds up to the next unit', () => {
+    expect(formatApproximateDuration(172799)).toBe('1 day');
+  });
+
+  it('returns "an unknown time" when the duration is negative', () => {
+    expect(formatApproximateDuration(-5)).toBe('an unknown time');
+  });
+
+  it('returns "an unknown time" when the duration is NaN', () => {
+    expect(formatApproximateDuration(Number.NaN)).toBe('an unknown time');
+  });
+
+  it('returns "an unknown time" when the duration is Infinity', () => {
+    expect(formatApproximateDuration(Number.POSITIVE_INFINITY)).toBe('an unknown time');
+  });
+});
+
+describe('formatRelativeTime', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-23T12:00:00Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('returns "N/A" when input is null', () => {
+    expect(formatRelativeTime(null)).toBe('N/A');
+  });
+
+  it('returns "N/A" when input is undefined', () => {
+    expect(formatRelativeTime(undefined)).toBe('N/A');
+  });
+
+  it('returns "Invalid date" when input is not a valid date string', () => {
+    expect(formatRelativeTime('not-a-date')).toBe('Invalid date');
+  });
+
+  it('returns "2 hours ago" for a timestamp two hours in the past', () => {
+    expect(formatRelativeTime('2026-01-23T10:00:00Z')).toBe('2 hours ago');
+  });
+
+  it('returns days ago for a timestamp several days in the past', () => {
+    expect(formatRelativeTime('2026-01-20T12:00:00Z')).toBe('3 days ago');
+  });
+
+  it('returns "just now" for a timestamp seconds in the past', () => {
+    expect(formatRelativeTime('2026-01-23T11:59:50Z')).toBe('just now');
+  });
+
+  it('returns "just now" for a timestamp in the future', () => {
+    expect(formatRelativeTime('2026-01-23T13:00:00Z')).toBe('just now');
   });
 });

@@ -1,19 +1,6 @@
-import {
-  useState, useCallback 
-} from 'react';
-import {
-  API_BASE_URL,
-  authenticatedFetch,
-  getErrorMessage,
-  ApiRequestError,
-} from '../infrastructure';
+import { ApiRequestError } from '../infrastructure';
 import type { CitationGapsResponse } from '../types';
-
-interface BackendErrorResponse {error: string;}
-
-function isBackendErrorResponse(data: unknown): data is BackendErrorResponse {
-  return typeof data === 'object' && data !== null && 'error' in data && typeof (data as BackendErrorResponse).error === 'string';
-}
+import { useAnalysisEndpoint } from './useAnalysisEndpoint';
 
 function isCitationGapsResponse(data: unknown): data is CitationGapsResponse {
   if (typeof data !== 'object' || data === null) return false;
@@ -29,6 +16,22 @@ function isCitationGapsResponse(data: unknown): data is CitationGapsResponse {
   
   return hasSingleKeywordFields || hasAllKeywordsFields;
 }
+
+const citationGapsEndpoint = {
+  errorContext: 'visibility',
+  logMessage: '[citationGaps] Error fetching citation gaps:',
+  isValidResponse: isCitationGapsResponse,
+  createHttpError: (status: number) => new ApiRequestError('Failed to fetch citation gaps', status),
+  createResponseError: (message: string) => new ApiRequestError(message),
+  buildRequest: (keyword?: string, limit = 10) => {
+    const params = new URLSearchParams({ limit: limit.toString() });
+    if (keyword) params.append('keyword', keyword);
+    return {
+      path: '/citation-gaps',
+      params,
+    };
+  },
+};
 
 /**
  * Hook for fetching citation gap analysis.
@@ -52,39 +55,9 @@ function isCitationGapsResponse(data: unknown): data is CitationGapsResponse {
  * ```
  */
 export function useCitationGaps() {
-  const [data, setData] = useState<CitationGapsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchCitationGaps = useCallback(async (keyword?: string, limit = 10): Promise<CitationGapsResponse | null> => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const params = new URLSearchParams({ limit: limit.toString() });
-      if (keyword) params.append('keyword', keyword);
-      
-      const response = await authenticatedFetch(`${API_BASE_URL}/citation-gaps?${params}`);
-      if (!response.ok) throw new ApiRequestError('Failed to fetch citation gaps', response.status);
-      
-      const json: unknown = await response.json();
-      if (isBackendErrorResponse(json)) {
-        throw new ApiRequestError(json.error);
-      }
-      if (!isCitationGapsResponse(json)) {
-        throw new ApiRequestError('Invalid response format');
-      }
-      setData(json);
-      return json;
-    } catch (err) {
-      const message = getErrorMessage(err, 'visibility');
-      setError(message);
-      console.error('[citationGaps] Error fetching citation gaps:', err);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const {
+    data, loading, error, fetchData: fetchCitationGaps 
+  } = useAnalysisEndpoint(citationGapsEndpoint);
 
   return {
     data,

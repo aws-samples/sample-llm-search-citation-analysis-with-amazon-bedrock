@@ -13,13 +13,12 @@ from typing import Any
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from decimal_utils import to_int
-
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import not_found_response, success_response
 from shared.decorators import api_handler, optional_provider, require_keyword, validate
+from shared.dynamo_decimal import to_int
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)

@@ -2,6 +2,7 @@ import type {
   BrandConfig, IndustryPresets, BrandExpansionAllResult, CompetitorDiscoveryResult 
 } from '../../types';
 import { useBrandConfigForm } from '../../hooks/useBrandConfigForm';
+import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { IndustrySelector } from './IndustrySelector';
 import { ExtractionOptions } from './ExtractionOptions';
 import { DomainList } from './DomainList';
@@ -22,6 +23,10 @@ interface BrandConfigContentProps {
 export const BrandConfigContent = ({
   config, presets, loading, onSave, onExpandAllBrands, onFindCompetitors, onSaveComplete 
 }: BrandConfigContentProps) => {
+  // Read locally rather than as a prop: this component has two mount points
+  // (SettingsView's Brand Tracking tab and BrandConfigPanel under BrandsView),
+  // so a prop would have to be threaded from both to close the gap.
+  const { isAdmin } = useIsAdmin();
   const {
     form, inputs, expansion, ui,
     setIndustry, setFirstPartyBrands, setFirstPartyDomains, setCompetitorBrands, setCustomEntityTypes,
@@ -90,6 +95,11 @@ export const BrandConfigContent = ({
 
   if (loading) return <div className="text-center py-12 text-gray-500">Loading configuration...</div>;
 
+  // Saving and the three Bedrock-backed suggestion routes are Admin-only
+  // server-side. Read access stays open, so a non-admin sees the configured
+  // brands and domains as values but cannot submit changes.
+  const canEdit = isAdmin;
+
   return (
     <div className="space-y-6">
       <div className="flex gap-2 border-b border-gray-200 pb-3">
@@ -100,35 +110,45 @@ export const BrandConfigContent = ({
         </button>
       </div>
 
-      {ui.activeTab === 'settings' ? (
-        <div className="space-y-6">
-          <IndustrySelector industry={form.industry} presets={presets} industryPrompts={form.industryPrompts} currentPreset={currentPreset} onIndustryChange={setIndustry} />
-          <FirstPartyBrandsSection brands={form.firstPartyBrands} newBrand={inputs.newFirstParty} selectedBrand={expansion.selectedFirstPartyBrand} expandingBrand={expansion.expandingBrand} expansionResult={expansion.expansionAllResult} expansionTarget={expansion.expansionTarget} pendingBrands={expansion.pendingExpansionBrands} canExpand={!!onExpandAllBrands} onNewBrandChange={setNewFirstParty} onAddBrand={addFirstPartyBrand} onRemoveBrand={(b) => setFirstPartyBrands(form.firstPartyBrands.filter(x => x !== b))} onSelectBrand={setSelectedFirstPartyBrand} onExpandAll={handleExpandAllFirstPartyBrands} onTogglePending={togglePendingBrand} onAcceptExpansion={() => acceptExpansionSuggestions('first_party')} onCancelExpansion={cancelExpansion} />
-          <DomainList domains={form.firstPartyDomains} newDomain={inputs.newFirstPartyDomain} onNewDomainChange={setNewFirstPartyDomain} onAddDomain={addFirstPartyDomain} onRemoveDomain={(d) => setFirstPartyDomains(form.firstPartyDomains.filter(x => x !== d))} />
-          <CompetitorBrandsSection brands={form.competitorBrands} newBrand={inputs.newCompetitor} selectedBrand={expansion.selectedCompetitorBrand} expandingBrand={expansion.expandingBrand} expansionResult={expansion.expansionAllResult} discoveryResult={expansion.competitorDiscoveryResult} expansionTarget={expansion.expansionTarget} pendingBrands={expansion.pendingExpansionBrands} hasFirstPartyBrands={form.firstPartyBrands.length > 0} canExpand={!!onExpandAllBrands} canFindCompetitors={!!onFindCompetitors} brandExists={brandExists} onNewBrandChange={setNewCompetitor} onAddBrand={addCompetitorBrand} onRemoveBrand={(b) => setCompetitorBrands(form.competitorBrands.filter(x => x !== b))} onSelectBrand={setSelectedCompetitorBrand} onExpandAll={handleExpandAllCompetitorBrands} onFindCompetitors={handleFindCompetitors} onTogglePending={togglePendingBrand} onAcceptExpansion={() => acceptExpansionSuggestions('competitor')} onCancelExpansion={cancelExpansion} />
-          {form.industry === 'custom' && (
-            <div className="bg-violet-50 rounded-lg p-4 border border-violet-200">
-              <h3 className="text-sm font-semibold text-violet-800 mb-2">Custom Entity Types</h3>
-              <div className="flex gap-2 mb-3">
-                <input type="text" id="new-entity-type" value={inputs.newEntityType} onChange={(e) => setNewEntityType(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addEntityType()} placeholder="Enter entity type..." aria-label="New custom entity type" className="flex-1 p-2 border border-violet-300 rounded-lg focus:ring-2 focus:ring-violet-500 bg-white text-sm" />
-                <button onClick={addEntityType} className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors text-sm">Add</button>
+      {/* `display: contents` keeps the layout identical while the fieldset
+          still natively disables every nested input and button for
+          non-admins — the add/remove controls edit form state that only the
+          (hidden) Save button could persist. */}
+      <fieldset disabled={!canEdit} className="contents">
+        {ui.activeTab === 'settings' ? (
+          <div className="space-y-6">
+            <IndustrySelector industry={form.industry} presets={presets} industryPrompts={form.industryPrompts} currentPreset={currentPreset} onIndustryChange={setIndustry} />
+            <FirstPartyBrandsSection brands={form.firstPartyBrands} newBrand={inputs.newFirstParty} selectedBrand={expansion.selectedFirstPartyBrand} expandingBrand={expansion.expandingBrand} expansionResult={expansion.expansionAllResult} expansionTarget={expansion.expansionTarget} pendingBrands={expansion.pendingExpansionBrands} canExpand={!!onExpandAllBrands && canEdit} onNewBrandChange={setNewFirstParty} onAddBrand={addFirstPartyBrand} onRemoveBrand={(b) => setFirstPartyBrands(form.firstPartyBrands.filter(x => x !== b))} onSelectBrand={setSelectedFirstPartyBrand} onExpandAll={handleExpandAllFirstPartyBrands} onTogglePending={togglePendingBrand} onAcceptExpansion={() => acceptExpansionSuggestions('first_party')} onCancelExpansion={cancelExpansion} />
+            <DomainList domains={form.firstPartyDomains} newDomain={inputs.newFirstPartyDomain} onNewDomainChange={setNewFirstPartyDomain} onAddDomain={addFirstPartyDomain} onRemoveDomain={(d) => setFirstPartyDomains(form.firstPartyDomains.filter(x => x !== d))} />
+            <CompetitorBrandsSection brands={form.competitorBrands} newBrand={inputs.newCompetitor} selectedBrand={expansion.selectedCompetitorBrand} expandingBrand={expansion.expandingBrand} expansionResult={expansion.expansionAllResult} discoveryResult={expansion.competitorDiscoveryResult} expansionTarget={expansion.expansionTarget} pendingBrands={expansion.pendingExpansionBrands} hasFirstPartyBrands={form.firstPartyBrands.length > 0} canExpand={!!onExpandAllBrands && canEdit} canFindCompetitors={!!onFindCompetitors && canEdit} brandExists={brandExists} onNewBrandChange={setNewCompetitor} onAddBrand={addCompetitorBrand} onRemoveBrand={(b) => setCompetitorBrands(form.competitorBrands.filter(x => x !== b))} onSelectBrand={setSelectedCompetitorBrand} onExpandAll={handleExpandAllCompetitorBrands} onFindCompetitors={handleFindCompetitors} onTogglePending={togglePendingBrand} onAcceptExpansion={() => acceptExpansionSuggestions('competitor')} onCancelExpansion={cancelExpansion} />
+            {form.industry === 'custom' && (
+              <div className="bg-violet-50 rounded-lg p-4 border border-violet-200">
+                <h3 className="text-sm font-semibold text-violet-800 mb-2">Custom Entity Types</h3>
+                <div className="flex gap-2 mb-3">
+                  <input type="text" id="new-entity-type" value={inputs.newEntityType} onChange={(e) => setNewEntityType(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addEntityType()} placeholder="Enter entity type..." aria-label="New custom entity type" className="flex-1 p-2 border border-violet-300 rounded-lg focus:ring-2 focus:ring-violet-500 bg-white text-sm" />
+                  <button onClick={addEntityType} className="px-4 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors text-sm">Add</button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {form.customEntityTypes.map((type) => (
+                    <span key={type} className="px-3 py-1 bg-violet-100 text-violet-800 rounded-full text-sm flex items-center gap-2">{type}<button onClick={() => setCustomEntityTypes(form.customEntityTypes.filter((t) => t !== type))} className="text-violet-600 hover:text-violet-800 font-bold">×</button></span>
+                  ))}
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {form.customEntityTypes.map((type) => (
-                  <span key={type} className="px-3 py-1 bg-violet-100 text-violet-800 rounded-full text-sm flex items-center gap-2">{type}<button onClick={() => setCustomEntityTypes(form.customEntityTypes.filter((t) => t !== type))} className="text-violet-600 hover:text-violet-800 font-bold">×</button></span>
-                ))}
-              </div>
-            </div>
-          )}
-          <ExtractionOptions includeSentiment={form.includeSentiment} includeRankingContext={form.includeRankingContext} maxBrands={form.maxBrands} onSentimentChange={setIncludeSentiment} onRankingContextChange={setIncludeRankingContext} onMaxBrandsChange={setMaxBrands} />
-        </div>
-      ) : (
-        <PromptEditor industry={form.industry} presets={presets} industryPrompts={form.industryPrompts} currentPrompt={form.currentPrompt} promptModified={form.promptModified} onIndustryChange={setIndustry} onPromptChange={handlePromptChange} onResetToDefault={resetPromptToDefault} />
-      )}
+            )}
+            <ExtractionOptions includeSentiment={form.includeSentiment} includeRankingContext={form.includeRankingContext} maxBrands={form.maxBrands} onSentimentChange={setIncludeSentiment} onRankingContextChange={setIncludeRankingContext} onMaxBrandsChange={setMaxBrands} />
+          </div>
+        ) : (
+          <PromptEditor industry={form.industry} presets={presets} industryPrompts={form.industryPrompts} currentPrompt={form.currentPrompt} promptModified={form.promptModified} onIndustryChange={setIndustry} onPromptChange={handlePromptChange} onResetToDefault={resetPromptToDefault} />
+        )}
+      </fieldset>
 
       <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
         {ui.saved && <span className="text-green-600 text-sm flex items-center gap-1"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>Saved!</span>}
-        <button onClick={handleSave} disabled={ui.saving} className="px-6 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 text-sm font-medium">{ui.saving ? 'Saving...' : 'Save Configuration'}</button>
+        {canEdit ? (
+          <button onClick={handleSave} disabled={ui.saving} className="px-6 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 text-sm font-medium">{ui.saving ? 'Saving...' : 'Save Configuration'}</button>
+        ) : (
+          <p className="text-xs text-gray-500 self-center">Brand tracking is read-only. Contact an administrator to make changes.</p>
+        )}
       </div>
     </div>
   );

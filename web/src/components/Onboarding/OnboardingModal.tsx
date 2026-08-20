@@ -3,6 +3,7 @@ import {
 } from 'react';
 import { useOnboardingStatus } from '../../hooks/useOnboardingStatus';
 import type { OnboardingSetupStatus } from '../../hooks/useOnboardingStatus';
+import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { Modal } from '../ui/Modal';
 import { CheckIcon } from '../ui';
 import type { SettingsTab } from '../Settings';
@@ -166,7 +167,16 @@ export const OnboardingModal = ({
   const [completed, setCompleted] = useState(() => readStorageFlag(ONBOARDING_COMPLETE_STORAGE_KEY));
   const [sessionClosed, setSessionClosed] = useState(false);
 
-  const enabled = !dismissed && !completed;
+  // Every step in `buildSteps` points at an Admin-only route: providers,
+  // brand config, the first run, schedules, personas. A non-admin would get a
+  // blocking modal listing six things they cannot do, so it is suppressed
+  // wholesale rather than filtered — an empty `requiredSteps` would leave
+  // `allRequiredComplete` false and render the modal with no list at all.
+  const {
+    isAdmin, loading: isAdminLoading 
+  } = useIsAdmin();
+
+  const enabled = !dismissed && !completed && isAdmin;
   const {
     status, loading 
   } = useOnboardingStatus(enabled);
@@ -186,7 +196,8 @@ export const OnboardingModal = ({
     }
   }, [enabled, allRequiredComplete]);
 
-  const isOpen = enabled && !sessionClosed && !loading && status !== null && !allRequiredComplete;
+  const isOpen = enabled && !isAdminLoading && !sessionClosed && !loading
+    && status !== null && !allRequiredComplete;
 
   if (!isOpen) {
     return null;

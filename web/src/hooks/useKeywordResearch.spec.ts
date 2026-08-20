@@ -6,7 +6,8 @@ import {
 } from '@testing-library/react';
 import { useKeywordResearch } from './useKeywordResearch';
 import {
-  mockExpansionResult, mockCompetitorResult, mockHistoryItems, createMockFetch 
+  mockExpansionResult, mockCompetitorResult, mockHistoryItems, createMockFetch,
+  buildCompletedExpansionItem, createPollingMockFetch,
 } from './useKeywordResearch-fixtures';
 
 vi.mock('../infrastructure', async () => {
@@ -382,6 +383,144 @@ describe('useKeywordResearch', () => {
       const deleteCall = findDeleteCall(mockAuthenticatedFetch.mock.calls);
       expect(deleteCall).toBeDefined();
       expect(deleteCall?.[0]).toContain('/keyword-research/research-123');
+    });
+  });
+
+  // Regression tests for AUDIT 2.20: the async poll loop previously had no
+  // cancellation path (kept fetching for 2 minutes after unmount or a newer
+  // call) and treated auth failures as "not ready yet" (user waited the full
+  // 120s to get a bogus timeout).
+  describe('async polling (AUDIT 2.20)', () => {
+    const POLL_TICK_MS = 3000;
+
+    function countHistoryCalls(): number {
+      return mockAuthenticatedFetch.mock.calls.filter(
+        (c) => isValidMockCall(c) && c[0].includes('/history')
+      ).length;
+    }
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('sets the expansion result when a poll finds the completed job', async () => {
+      mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
+        pendingIds: ['job-1'],
+        historyResult: () => ({
+          ok: true,
+          items: [buildCompletedExpansionItem('job-1', 'best hotels')],
+        }),
+      }));
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        void result.current.expandKeywords('best hotels', 'hospitality', 10);
+        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
+      });
+
+      expect(result.current.expansionResult?.id).toBe('job-1');
+      expect(result.current.loading).toBe(false);
+    });
+
+    it('surfaces an auth error after the first poll when the session expires', async () => {
+      mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
+        pendingIds: ['job-1'],
+        historyResult: () => ({
+          ok: false,
+          status: 401,
+        }),
+      }));
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        void result.current.expandKeywords('best hotels', 'hospitality', 10);
+        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
+      });
+
+      // One 3s tick, not the full 120s timeout window.
+      expect(result.current.error).toBe('Authentication required for keyword research');
+      expect(result.current.loading).toBe(false);
+    });
+
+    it('stops polling after an auth failure instead of retrying until timeout', async () => {
+      mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
+        pendingIds: ['job-1'],
+        historyResult: () => ({
+          ok: false,
+          status: 401,
+        }),
+      }));
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        void result.current.expandKeywords('best hotels', 'hospitality', 10);
+        await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 5);
+      });
+
+      expect(countHistoryCalls()).toBe(1);
+    });
+
+    it('stops polling when the component unmounts mid-poll', async () => {
+      mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
+        pendingIds: ['job-1'],
+        historyResult: () => ({
+          ok: true,
+          items: [],
+        }),
+      }));
+
+      const {
+        result, unmount 
+      } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        void result.current.expandKeywords('best hotels', 'hospitality', 10);
+        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
+      });
+
+      expect(countHistoryCalls()).toBe(1);
+
+      unmount();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 5);
+      });
+
+      expect(countHistoryCalls()).toBe(1);
+    });
+
+    it('drops the superseded poll when a newer expansion starts', async () => {
+      mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
+        pendingIds: ['job-1', 'job-2'],
+        historyResult: () => ({
+          ok: true,
+          items: [
+            buildCompletedExpansionItem('job-1', 'first seed'),
+            buildCompletedExpansionItem('job-2', 'second seed'),
+          ],
+        }),
+      }));
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        void result.current.expandKeywords('first seed', 'hospitality', 10);
+        // Supersede before the first poll tick fires.
+        void result.current.expandKeywords('second seed', 'hospitality', 10);
+        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
+      });
+
+      // Only the second generation polled; the first exited without fetching.
+      expect(countHistoryCalls()).toBe(1);
+      expect(result.current.expansionResult?.id).toBe('job-2');
+      expect(result.current.loading).toBe(false);
     });
   });
 });

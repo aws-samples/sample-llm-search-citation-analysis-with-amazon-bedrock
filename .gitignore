@@ -76,3 +76,6 @@ architecture-diagram.drawio
 Generative Engine Optimisation*.html
 kiro-workshop-qa.md
 INCIDENT_REPORT.md
+# Working remediation plan: names the live AWS account and enumerates
+# unmitigated findings, so it must not ship in a public repo.
+todo.md

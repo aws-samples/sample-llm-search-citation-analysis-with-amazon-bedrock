@@ -30,6 +30,7 @@ Please describe the tests that you ran to verify your changes. Provide instructi
 
 ## Checklist:
 
+- [ ] I have bumped the version in `package.json` **and** `web/package.json` and added a `CHANGELOG.md` entry (not required for docs/CI-only changes — see [CONTRIBUTING.md](../CONTRIBUTING.md#versioning-and-changelog))
 - [ ] My code follows the style guidelines of this project
 - [ ] I have performed a self-review of my own code
 - [ ] I have commented my code, particularly in hard-to-understand areas

@@ -29,7 +29,7 @@ LAMBDA_PATH="./lambda"
 # the signature in ways vulture can't see through.
 VULTURE_EXCLUDE='*/.deps/*,*/layer/python/*,*/crawler-layer/python/*,*/__pycache__/*'
 VULTURE_IGNORE_NAMES='handler,lambda_handler,default,_api_handler,_route_handler'
-VULTURE_IGNORE_DECORATORS='@api_handler,@route_handler,@validate,@parse_json_body,@paginate,@cors_preflight,@retry_with_backoff,@pytest.fixture,@pytest.mark.parametrize'
+VULTURE_IGNORE_DECORATORS='@api_handler,@route_handler,@validate,@parse_json_body,@paginate,@cors_preflight,@require_group,@retry_with_backoff,@pytest.fixture,@pytest.mark.parametrize'
 
 MODE="check"
 for arg in "$@"; do

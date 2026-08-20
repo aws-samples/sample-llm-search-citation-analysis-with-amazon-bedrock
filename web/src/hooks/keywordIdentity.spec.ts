@@ -4,7 +4,7 @@ import {
 import identityFixtures from '../../../test-fixtures/keyword-identity.json';
 import {
   keywordSelectionKey, uniqueResearchKeywords
-} from './usePromoteKeywords';
+} from './keywordIdentity';
 import type { ResearchKeyword } from '../types';
 
 describe('keywordSelectionKey', () => {

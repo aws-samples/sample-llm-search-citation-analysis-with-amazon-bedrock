@@ -71,6 +71,9 @@ const BulkInput = ({
 }: BulkInputProps) => (
   <div className="space-y-3">
     <textarea
+      id="bulk-keywords"
+      name="bulk-keywords"
+      aria-label="Bulk keywords, one per line"
       value={bulkKeywords}
       onChange={(e) => setBulkKeywords(e.target.value)}
       placeholder="Enter multiple keywords (one per line)"
@@ -106,6 +109,9 @@ const SingleInput = ({
   <div className="flex gap-3">
     <input
       type="text"
+      id="new-keyword"
+      name="new-keyword"
+      aria-label="New keyword"
       value={newKeyword}
       onChange={(e) => setNewKeyword(e.target.value)}
       onKeyDown={(e) => e.key === 'Enter' && onAddKeyword()}

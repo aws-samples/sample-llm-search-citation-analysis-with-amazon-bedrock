@@ -86,6 +86,73 @@ def deduplicate_citations(results: list[dict[str, Any]]) -> dict[str, dict[str, 
     return deduplicated
 
 
+def summarize_providers(results: list[dict[str, Any]]) -> dict[str, Any]:
+    """
+    Roll up provider activity so it survives into the execution summary.
+
+    This Lambda's payload *replaces* the Step Functions state (the task is
+    declared with ``outputPath: '$.Payload'`` and no ``resultPath``), so the
+    search step's ``results`` array dies here — two states before
+    ``generate-summary`` reads it. Every summary ever written therefore reported
+    ``total_providers_queried: 0`` and an empty ``providers_breakdown``, silently
+    (AUDIT-2026-08-19 §1.3).
+
+    Echoing a rollup rather than the raw array is deliberate. ``results`` carries
+    a full ``citations`` list per provider row — ``search/handler.py`` slims
+    everything *except* that to stay under the 256KB state limit. Keeping it
+    alive through the crawl Map and into ``keyword_results`` would multiply the
+    one unbounded field by the keyword count in a single state document, which
+    is the ``States.DataLimitExceeded`` failure the slimming was written to
+    prevent. This rollup is bounded by the number of providers.
+
+    ``result_count`` counts provider-result *rows* (provider x query prompt),
+    matching what ``total_providers_queried`` counted when it still worked — so
+    two personas hitting one provider counts as two queries, not one.
+
+    Args:
+        results: The search step's per-provider result rows.
+
+    ``failures`` and ``error_categories`` are what let the execution summary
+    tell a dead provider from a provider that simply had nothing to report.
+    This rollup used to carry only ``queries`` and ``citations``, discarding the
+    ``status: 'error'`` that ``provider_error_result`` sets — so Claude
+    returning ``400 credit balance is too low`` on every query arrived at the
+    summary as ``{'queries': 1, 'citations': 0}``, indistinguishable from a
+    successful search that found nothing, and the run reported
+    ``success_rate: 100.0`` (AUDIT-2026-08-19, production).
+
+    Returns:
+        ``{'result_count': int, 'by_provider': {name: {'queries', 'citations',
+        'failures', 'error_categories'}}}``
+    """
+    by_provider: dict[str, dict[str, Any]] = {}
+
+    for result in results:
+        provider = result.get('provider', 'unknown')
+        counts = by_provider.setdefault(provider, {
+            'queries': 0,
+            'citations': 0,
+            'failures': 0,
+            'error_categories': [],
+        })
+        counts['queries'] += 1
+        counts['citations'] += len(result.get('citations', []))
+
+        if result.get('status') == 'error':
+            counts['failures'] += 1
+            # Classified upstream by `shared.provider_health`. Kept as a list
+            # so a provider failing two different ways in one run reports both
+            # rather than the last one silently winning.
+            category = result.get('error_category', 'unknown')
+            if category not in counts['error_categories']:
+                counts['error_categories'].append(category)
+
+    return {
+        'result_count': len(results),
+        'by_provider': by_provider,
+    }
+
+
 def prioritize_citations(
     deduplicated: dict[str, dict[str, Any]],
     max_citations: int | None = None,
@@ -188,7 +255,11 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         context: Lambda context object
 
     Returns:
-        Dictionary containing deduplicated and prioritized citations
+        Dictionary containing deduplicated and prioritized citations, plus a
+        ``provider_summary`` rollup. The rollup exists because this payload
+        replaces the whole Step Functions state, so the search step's
+        ``results`` array cannot reach ``generate-summary`` on its own — see
+        :func:`summarize_providers`.
     """
     logger.info(f"Received event: {json.dumps(event, default=str)}")
 
@@ -206,7 +277,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         return step_function_success({
             'keyword': keyword,
             'timestamp': timestamp,
-            'deduplicated_citations': []
+            'deduplicated_citations': [],
+            'provider_summary': summarize_providers([]),
         }, f"No results for keyword: {keyword}")
 
     try:
@@ -221,11 +293,13 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
         logger.info(f"Successfully processed {len(prioritized)} citations for keyword: {keyword}")
 
-        # Return prioritized citations for Crawler Lambda
+        # Return prioritized citations for Crawler Lambda, plus the provider
+        # rollup that would otherwise be dropped with the search output.
         return step_function_success({
             'keyword': keyword,
             'timestamp': timestamp,
-            'deduplicated_citations': prioritized
+            'deduplicated_citations': prioritized,
+            'provider_summary': summarize_providers(results),
         }, f"Processed {len(prioritized)} citations for {keyword}")
 
     except Exception as e:

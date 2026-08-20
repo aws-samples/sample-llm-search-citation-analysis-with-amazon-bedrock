@@ -44,7 +44,7 @@ class TestGetEnabledProviderCount:
     def test_returns_all_providers_when_table_is_empty(self) -> None:
         """Empty scan result → all providers enabled by default."""
         fake = self._mock_dynamodb_with_items([])
-        with patch.object(providers, '_dynamodb', fake):
+        with patch.object(providers, 'get_dynamodb_resource', return_value=fake):
             count = providers.get_enabled_provider_count(table_name='test-table')
         assert count == len(PROVIDERS)
 
@@ -55,7 +55,7 @@ class TestGetEnabledProviderCount:
             for i, p in enumerate(PROVIDERS)
         ]
         fake = self._mock_dynamodb_with_items(items)
-        with patch.object(providers, '_dynamodb', fake):
+        with patch.object(providers, 'get_dynamodb_resource', return_value=fake):
             count = providers.get_enabled_provider_count(table_name='test-table')
         expected = sum(1 for i, _ in enumerate(PROVIDERS) if i % 2 == 0)
         assert count == expected
@@ -66,7 +66,7 @@ class TestGetEnabledProviderCount:
         divide by zero."""
         items = [{'provider_id': p, 'enabled': False} for p in PROVIDERS]
         fake = self._mock_dynamodb_with_items(items)
-        with patch.object(providers, '_dynamodb', fake):
+        with patch.object(providers, 'get_dynamodb_resource', return_value=fake):
             count = providers.get_enabled_provider_count(table_name='test-table')
         assert count == len(PROVIDERS)
 
@@ -76,7 +76,7 @@ class TestGetEnabledProviderCount:
         what the user sees in settings."""
         items = [{'provider_id': p} for p in PROVIDERS]  # no `enabled` key
         fake = self._mock_dynamodb_with_items(items)
-        with patch.object(providers, '_dynamodb', fake):
+        with patch.object(providers, 'get_dynamodb_resource', return_value=fake):
             count = providers.get_enabled_provider_count(table_name='test-table')
         assert count == len(PROVIDERS)
 
@@ -86,6 +86,6 @@ class TestGetEnabledProviderCount:
         denominator."""
         fake = MagicMock()
         fake.Table.return_value.scan.side_effect = Exception("throttled")
-        with patch.object(providers, '_dynamodb', fake):
+        with patch.object(providers, 'get_dynamodb_resource', return_value=fake):
             count = providers.get_enabled_provider_count(table_name='test-table')
         assert count == len(PROVIDERS)

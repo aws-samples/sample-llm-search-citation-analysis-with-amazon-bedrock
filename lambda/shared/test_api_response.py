@@ -124,3 +124,106 @@ class TestCORSFallbackUnit:
             with patch('boto3.client', return_value=mock_ssm):
                 result = _reload_and_get_origin()
                 assert result == ''
+
+
+class TestSsmFailureIsNotCached:
+    """
+    REGRESSION (AUDIT-2026-08-19 §2.13): the SSM failure path used to assign
+    `_cors_origin_cache = ''` before returning. The sentinel check is
+    `if _cors_origin_cache is not None`, so a cached '' is indistinguishable
+    from a successful lookup, and one ThrottlingException blanked
+    Access-Control-Allow-Origin for the rest of that warm container's life —
+    minutes to hours of "works for me / broken for you" browser CORS errors
+    from a single ERROR line at cold start.
+
+    Failing closed for the failing request is correct. Caching the failure is
+    what made it durable.
+    """
+
+    @staticmethod
+    def _ssm_client(side_effects):
+        """Build a boto3 stand-in whose get_parameter follows `side_effects`."""
+        client = MagicMock()
+        client.get_parameter.side_effect = side_effects
+        return client
+
+    @staticmethod
+    def _throttling_error():
+        from botocore.exceptions import ClientError
+        return ClientError(
+            {'Error': {'Code': 'ThrottlingException', 'Message': 'Rate exceeded'}},
+            'GetParameter',
+        )
+
+    def test_returns_empty_origin_for_the_failing_request(self):
+        """Fail closed: the request that hit the error gets no origin."""
+        importlib.reload(cors_module)
+        client = self._ssm_client([self._throttling_error()])
+
+        with patch.dict(os.environ, {'CORS_ORIGIN_PARAM': '/cors/origin'}, clear=False), \
+             patch.object(cors_module.boto3, 'client', return_value=client):
+            assert cors_module.get_cors_origin() == ''
+
+    def test_retries_ssm_on_the_next_request_after_a_failure(self):
+        """
+        The whole point: a later request in the same container must re-read
+        SSM and recover, rather than serving the cached failure forever.
+        """
+        importlib.reload(cors_module)
+        configured = 'https://dashboard.example.com'
+        client = self._ssm_client([
+            self._throttling_error(),
+            {'Parameter': {'Value': configured}},
+        ])
+
+        with patch.dict(os.environ, {'CORS_ORIGIN_PARAM': '/cors/origin'}, clear=False), \
+             patch.object(cors_module.boto3, 'client', return_value=client):
+            first = cors_module.get_cors_origin()
+            second = cors_module.get_cors_origin()
+
+        assert first == ''
+        assert second == configured
+
+    def test_makes_a_second_ssm_call_after_a_failure(self):
+        """A cached failure would short-circuit before reaching SSM again."""
+        importlib.reload(cors_module)
+        client = self._ssm_client([
+            self._throttling_error(),
+            {'Parameter': {'Value': 'https://dashboard.example.com'}},
+        ])
+
+        with patch.dict(os.environ, {'CORS_ORIGIN_PARAM': '/cors/origin'}, clear=False), \
+             patch.object(cors_module.boto3, 'client', return_value=client):
+            cors_module.get_cors_origin()
+            cors_module.get_cors_origin()
+
+        assert client.get_parameter.call_count == 2
+
+    def test_caches_a_successful_lookup(self):
+        """Success must still be cached — this is a per-invocation hot path."""
+        importlib.reload(cors_module)
+        configured = 'https://dashboard.example.com'
+        client = self._ssm_client([{'Parameter': {'Value': configured}}])
+
+        with patch.dict(os.environ, {'CORS_ORIGIN_PARAM': '/cors/origin'}, clear=False), \
+             patch.object(cors_module.boto3, 'client', return_value=client):
+            first = cors_module.get_cors_origin()
+            second = cors_module.get_cors_origin()
+
+        assert (first, second) == (configured, configured)
+        assert client.get_parameter.call_count == 1
+
+    def test_still_caches_the_static_misconfiguration_path(self):
+        """
+        An unset CORS_ORIGIN_PARAM is a deploy-time state, not a transient
+        error, so caching '' there is correct and must not have regressed.
+        """
+        importlib.reload(cors_module)
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('CORS_ORIGIN_PARAM', None)
+            os.environ.pop('ALLOW_DEV_CORS', None)
+            first = cors_module.get_cors_origin()
+
+            assert first == ''
+            assert cors_module._cors_origin_cache == ''

@@ -83,3 +83,13 @@ MAX_CITATIONS_PER_KEYWORD_DEFAULT = 20
 # the `scan(Limit=...)` in `list_prompts` to match.
 # ---------------------------------------------------------------------------
 MAX_QUERY_PROMPTS_DEFAULT = 10
+
+# ---------------------------------------------------------------------------
+# Keyword text limit — the single cap for every route that accepts keyword
+# text: manage-keywords, promote-keywords, manage-schedule, the
+# keyword-research request schema, `decorators.require_keyword`'s default,
+# and the search handler's `sanitize_user_input` bound. Each file previously
+# declared its own 500 (bugs.md 3.3); change it here and every route moves
+# together.
+# ---------------------------------------------------------------------------
+MAX_KEYWORD_LENGTH = 500

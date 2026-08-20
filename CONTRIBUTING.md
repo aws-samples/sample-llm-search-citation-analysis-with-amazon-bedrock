@@ -40,6 +40,49 @@ GitHub provides additional document on [forking a repository](https://help.githu
 [creating a pull request](https://help.github.com/articles/creating-a-pull-request/).
 
 
+## Versioning and changelog
+
+The app follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The version lives in **two** files that must always carry the same value —
+`package.json` and `web/package.json` — because the web build bakes
+`web/package.json`'s version into the dashboard (Settings page and About
+modal) via `vite.config.ts`.
+
+Every pull request that changes application behavior (anything under
+`lambda/`, `lib/`, `bin/`, `web/src/`, `scripts/`, or `cdk.json`) must, in the
+same PR:
+
+1. **Bump the version** in both files:
+
+   ```bash
+   npm version <new-version> --no-git-tag-version
+   (cd web && npm version <new-version> --no-git-tag-version)
+   ```
+
+2. **Add a `CHANGELOG.md` entry** for the new version, dated, in
+   [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
+
+Choosing the bump:
+
+- **Major** — breaking changes: API request/response contracts, authentication
+  or authorization behavior, or releases that need manual steps before
+  `cdk deploy` succeeds.
+- **Minor** — new features and backwards-compatible behavior changes.
+- **Patch** — bug fixes and internal changes with no behavior change for
+  users or API clients.
+
+Documentation-only and CI-only PRs are exempt. The
+`version-check` GitHub Actions workflow enforces this on every PR: it fails
+when application code changed but the version did not, when the two
+`package.json` files disagree, or when `CHANGELOG.md` has no entry for the new
+version.
+
+Commit messages on `main` largely follow
+[Conventional Commits](https://www.conventionalcommits.org/) (`feat:`,
+`fix:`, `chore:`); keeping to that convention leaves the door open to
+automating releases (e.g. release-please) later without rewriting history.
+
+
 ## Finding contributions to work on
 Looking at the existing issues is a great way to find something to contribute on. As our projects, by default, use the default GitHub issue labels (enhancement/bug/duplicate/help wanted/invalid/question/wontfix), looking at any 'help wanted' issues is a great place to start.
 

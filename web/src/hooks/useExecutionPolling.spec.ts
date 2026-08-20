@@ -148,3 +148,54 @@ describe('useExecutionPolling', () => {
     expect(result.current.isRunning).toBe(true);
   });
 });
+
+describe('useExecutionPolling polling lifecycle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('stops polling and fires onComplete exactly once after a terminal status', async () => {
+    // Regression for AUDIT-2026-08-19 2.16: the interval handle lived in
+    // useState, the interval callback froze a stale stopPolling closure over
+    // null, clearInterval never ran, and onComplete fired on every 3s tick.
+    mockAuthenticatedFetch.mockImplementation(createMockFetch({statusResponse: createMockStatusResponse('SUCCEEDED'),}));
+    const onComplete = vi.fn();
+
+    const { result } = renderHook(() => useExecutionPolling(onComplete));
+
+    await act(async () => {
+      await result.current.triggerAnalysis();
+    });
+    const fetchCallsAfterCompletion = mockAuthenticatedFetch.mock.calls.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9000);
+    });
+
+    expect(onComplete).toHaveBeenCalledTimes(1);
+    expect(mockAuthenticatedFetch.mock.calls).toHaveLength(fetchCallsAfterCompletion);
+  });
+
+  it('keeps polling on the interval while the execution is running', async () => {
+    mockAuthenticatedFetch.mockImplementation(createMockFetch({statusResponse: createMockStatusResponse('RUNNING'),}));
+
+    const { result } = renderHook(() => useExecutionPolling());
+
+    await act(async () => {
+      await result.current.triggerAnalysis();
+    });
+    const fetchCallsAfterTrigger = mockAuthenticatedFetch.mock.calls.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+
+    expect(mockAuthenticatedFetch.mock.calls).toHaveLength(fetchCallsAfterTrigger + 2);
+  });
+});

@@ -2,9 +2,11 @@ import {
   useState, useMemo 
 } from 'react';
 import type { Search } from '../../types';
-import { AlertModal } from '../ui/Modal';
 import { KeywordDetail } from '../Keywords/KeywordDetail';
 import { exportToExcel } from '../../exporters/excelGenerator';
+import {
+  SEARCH_EXCEL_COLUMNS, searchExcelRows
+} from '../../exporters/searchResultExporter';
 import {
   KeywordGroup,
   getUniqueProviders,
@@ -32,18 +34,6 @@ export const SearchesView = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [providerFilter, setProviderFilter] = useState<string>('all');
   const [promptFilter, setPromptFilter] = useState<string>('all');
-
-  const [alertModal, setAlertModal] = useState<{
-    isOpen: boolean;
-    title: string;
-    message: string;
-    variant: 'success' | 'error' | 'info';
-  }>({
-    isOpen: false,
-    title: '',
-    message: '',
-    variant: 'info',
-  });
 
   const providers = useMemo(() => getUniqueProviders(searches), [searches]);
   
@@ -77,7 +67,7 @@ export const SearchesView = ({
     const excelData = buildExcelData(searches);
     await exportToExcel({
       data: excelData,
-      columns: [{ wch: 25 }, { wch: 12 }, { wch: 20 }, { wch: 12 }, { wch: 80 }],
+      columns: SEARCH_EXCEL_COLUMNS,
       sheetName: 'Searches',
       fileName: `searches-${new Date().toISOString().split('T')[0]}.xlsx`,
     });
@@ -144,16 +134,6 @@ export const SearchesView = ({
         />
       </div>
 
-      <AlertModal
-        isOpen={alertModal.isOpen}
-        onClose={() => setAlertModal({
-          ...alertModal,
-          isOpen: false 
-        })}
-        title={alertModal.title}
-        message={alertModal.message}
-        variant={alertModal.variant}
-      />
 
       {selectedKeyword && (
         <KeywordDetail
@@ -167,31 +147,7 @@ export const SearchesView = ({
 };
 
 function buildExcelData(searches: Search[]): Record<string, unknown>[] {
-  const excelData: Record<string, unknown>[] = [];
-
-  for (const search of searches) {
-    if (search.citations && search.citations.length > 0) {
-      search.citations.forEach((citation, idx) => {
-        excelData.push({
-          Keyword: search.keyword,
-          Provider: search.provider,
-          Timestamp: new Date(search.timestamp).toLocaleString(),
-          'Citation #': idx + 1,
-          'Citation URL': citation,
-        });
-      });
-    } else {
-      excelData.push({
-        Keyword: search.keyword,
-        Provider: search.provider,
-        Timestamp: new Date(search.timestamp).toLocaleString(),
-        'Citation #': 0,
-        'Citation URL': 'No citations',
-      });
-    }
-  }
-
-  return excelData;
+  return searches.flatMap(searchExcelRows);
 }
 
 interface SearchTableProps {

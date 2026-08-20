@@ -6,7 +6,9 @@ import {
 } from 'chart.js';
 import type { ProviderStat } from '../../types';
 import { useTheme } from '../../hooks/useTheme';
-import { getChartTheme } from '../ui/chartTheme';
+import {
+  getChartTheme, themedTooltip
+} from '../ui/chartTheme';
 
 Chart.register(...registerables);
 
@@ -52,13 +54,7 @@ export const ProviderChart = ({ data }: ProviderChartProps) => {
         maintainAspectRatio: false,
         plugins: {
           legend: { display: false },
-          tooltip: {
-            backgroundColor: theme.tooltipBackground,
-            borderColor: theme.tooltipBorder,
-            borderWidth: 1,
-            titleColor: theme.tooltipText,
-            bodyColor: theme.tooltipText,
-          },
+          tooltip: themedTooltip(theme),
         },
         scales: {
           y: {

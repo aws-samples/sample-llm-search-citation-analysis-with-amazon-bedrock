@@ -2,7 +2,8 @@ import { useState } from 'react';
 import type { ResearchKeyword } from '../../types';
 import {
   keywordSelectionKey, uniqueResearchKeywords
-} from '../../hooks/usePromoteKeywords';
+} from '../../hooks/keywordIdentity';
+import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 
 interface KeywordResultsTableProps {
   keywords: ResearchKeyword[];
@@ -19,6 +20,7 @@ export const KeywordResultsTable = ({
 }: KeywordResultsTableProps) => {
   const [sortBy, setSortBy] = useState<'relevance' | 'competition'>('relevance');
   const [filterIntent, setFilterIntent] = useState<string>('all');
+  const { copy } = useClipboardCopy();
 
   const getIntentColor = (intent: string) => {
     switch (intent?.toLowerCase()) {
@@ -145,7 +147,7 @@ export const KeywordResultsTable = ({
                   </td>
                   <td className="px-6 py-4 text-right">
                     <button
-                      onClick={() => navigator.clipboard.writeText(keyword.keyword)}
+                      onClick={() => void copy(keyword.keyword)}
                       className="text-gray-400 hover:text-gray-600 transition-colors"
                       title="Copy keyword"
                     >

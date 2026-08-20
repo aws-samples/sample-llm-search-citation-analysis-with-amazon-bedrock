@@ -4,18 +4,31 @@ import logging
 import sys
 
 import boto3
-from botocore.exceptions import ClientError
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import error_response, success_response, validation_error
-from shared.decorators import api_handler, parse_json_body
+
+# Redundant-alias form: re-exported for this module's property tests, which
+# derive their over-length fixtures from `promotion_handler.MAX_KEYWORD_LENGTH`.
+from shared.constants import MAX_KEYWORD_LENGTH as MAX_KEYWORD_LENGTH
+from shared.decorators import api_handler, parse_json_body, route_handler
 from shared.env_vars import resolve_table_env
+from shared.keyword_store import (
+    ALLOWED_KEYWORD_PRIORITIES,
+    ALLOWED_KEYWORD_STATUSES,
+    DEFAULT_KEYWORD_CATEGORY,
+    DEFAULT_KEYWORD_LANGUAGE,
+    DEFAULT_KEYWORD_PRIORITY,
+    DEFAULT_KEYWORD_REGION,
+    DEFAULT_KEYWORD_STATUS,
+    build_keyword_item,
+    put_keyword_if_absent,
+    validate_keyword_text,
+)
 from shared.utils import (
     get_timestamp,
-    is_unicode_scalar_text,
-    keyword_id,
     load_keyword_identities,
     normalize_keyword,
     trim_keyword,
@@ -31,33 +44,30 @@ keywords_table = dynamodb.Table(KEYWORDS_TABLE)
 
 NOTES_FIELDS = ('intent', 'competition', 'source')
 MAX_KEYWORDS = 500
-MAX_KEYWORD_LENGTH = 500
 MAX_NOTES_LENGTH = 1000
+# Longest slice of a rejected input value echoed back in a 400 message
+# (bugs.md 2.4) — long enough to identify the value, bounded so the response
+# can't reflect arbitrarily large request bodies.
+MAX_ECHOED_VALUE_LENGTH = 50
 
-ALLOWED_STATUSES = ('active', 'inactive', 'paused')
-ALLOWED_PRIORITIES = ('high', 'normal', 'low')
-DEFAULT_STATUS = 'active'
-DEFAULT_PRIORITY = 'normal'
-
-DEFAULT_REGION = 'global'
-DEFAULT_LANGUAGE = 'en'
-DEFAULT_CATEGORY = ''
+# Enum values and defaults come from the shared keyword store (bugs.md 3.3);
+# the local names remain this module's public vocabulary and are referenced
+# by its property tests.
+ALLOWED_STATUSES = ALLOWED_KEYWORD_STATUSES
+ALLOWED_PRIORITIES = ALLOWED_KEYWORD_PRIORITIES
+DEFAULT_STATUS = DEFAULT_KEYWORD_STATUS
+DEFAULT_PRIORITY = DEFAULT_KEYWORD_PRIORITY
+DEFAULT_REGION = DEFAULT_KEYWORD_REGION
+DEFAULT_LANGUAGE = DEFAULT_KEYWORD_LANGUAGE
+DEFAULT_CATEGORY = DEFAULT_KEYWORD_CATEGORY
 
 REASON_DUPLICATE = 'duplicate'
 REASON_EMPTY = 'empty'
 
-# Compatibility name retained for the focused property tests and the handler's
-# existing read/partition terminology.
-load_existing_keyword_keys = load_keyword_identities
 
-
-@api_handler
 @parse_json_body
-def handler(event, context, body):
-    """Handle POST /api/keywords/promote."""
-    if event.get('httpMethod') != 'POST':
-        return validation_error('Method not allowed', event, 'httpMethod')
-
+def _promote_keywords(event, context, body):
+    """Promote validated research keywords into the Keywords table."""
     if not isinstance(body, dict):
         return validation_error('Request body must be a JSON object', event, 'body')
 
@@ -69,7 +79,7 @@ def handler(event, context, body):
         return validation_error(error['message'], event, error['field'])
 
     try:
-        existing_keys = load_existing_keyword_keys(keywords_table)
+        existing_keys = load_keyword_identities(keywords_table)
     except Exception as error:
         logger.error(
             f'Failed to read existing keywords for promotion: {error!s}',
@@ -90,6 +100,12 @@ def handler(event, context, body):
         'created_keywords': created_items,
         'skipped_keywords': skipped,
     }, event)
+
+
+@api_handler
+@route_handler({'POST': _promote_keywords})
+def handler(event, context):
+    """Handle POST /api/keywords/promote."""
 
 
 def build_notes(research_keyword):
@@ -121,21 +137,17 @@ def validate_request(keywords, status, priority):
             return _rejection('Each keyword must be a JSON object', field_prefix)
 
         keyword_value = research_keyword.get('keyword')
-        if keyword_value is not None and not isinstance(keyword_value, str):
-            return _rejection('Keyword must be a string', f'{field_prefix}.keyword')
-        if isinstance(keyword_value, str) and not is_unicode_scalar_text(keyword_value):
-            return _rejection(
-                'Keyword must contain valid Unicode scalar values',
-                f'{field_prefix}.keyword',
-            )
-
-        text = trim_keyword(keyword_value) if isinstance(keyword_value, str) else ''
+        if keyword_value is None:
+            # A missing keyword is a skip (reported by partition_keywords),
+            # not a rejection — batch semantics.
+            text = ''
+        else:
+            # empty_ok: this route skips empty-after-trim entries instead of
+            # rejecting like manage-keywords does (bugs.md 3.3).
+            text, message = validate_keyword_text(keyword_value, empty_ok=True)
+            if message:
+                return _rejection(message, f'{field_prefix}.keyword')
         texts.append(text)
-        if len(text) > MAX_KEYWORD_LENGTH:
-            return _rejection(
-                f'Keyword exceeds maximum length of {MAX_KEYWORD_LENGTH} characters',
-                f'{field_prefix}.keyword',
-            )
 
         for notes_field in NOTES_FIELDS:
             notes_value = research_keyword.get(notes_field)
@@ -170,7 +182,7 @@ def validate_request(keywords, status, priority):
 
     if invalid:
         message = '; '.join(
-            f"Invalid {field} '{value}' (allowed: {', '.join(allowed)})"
+            f"Invalid {field} '{_echoed(value)}' (allowed: {', '.join(allowed)})"
             for field, value, allowed in invalid
         )
         return _rejection(
@@ -218,22 +230,13 @@ def write_items(table, items):
     skipped = []
 
     for item in items:
-        try:
-            table.put_item(
-                Item=item,
-                ConditionExpression='attribute_not_exists(#id)',
-                ExpressionAttributeNames={'#id': 'id'},
-            )
-        except ClientError as error:
-            error_code = error.response.get('Error', {}).get('Code')
-            if error_code != 'ConditionalCheckFailedException':
-                raise
+        if put_keyword_if_absent(table, item):
+            created_items.append(item)
+        else:
             skipped.append({
                 'keyword': item['keyword'],
                 'reason': REASON_DUPLICATE,
             })
-        else:
-            created_items.append(item)
 
     return created_items, skipped
 
@@ -243,20 +246,22 @@ def create_items(to_create, status, priority):
     timestamp = get_timestamp()
 
     return [
-        {
-            'id': keyword_id(entry['keyword']),
-            'keyword': entry['keyword'],
-            'status': status,
-            'created_at': timestamp,
-            'updated_at': timestamp,
-            'region': DEFAULT_REGION,
-            'language': DEFAULT_LANGUAGE,
-            'category': DEFAULT_CATEGORY,
-            'priority': priority,
-            'notes': build_notes(entry),
-        }
+        build_keyword_item(
+            entry['keyword'],
+            timestamp=timestamp,
+            status=status,
+            priority=priority,
+            notes=build_notes(entry),
+        )
         for entry in to_create
     ]
+
+
+def _echoed(value):
+    """Cap a reflected input value before echoing it in a validation message."""
+    if len(value) <= MAX_ECHOED_VALUE_LENGTH:
+        return value
+    return f'{value[:MAX_ECHOED_VALUE_LENGTH]}...'
 
 
 def _rejection(message, field):

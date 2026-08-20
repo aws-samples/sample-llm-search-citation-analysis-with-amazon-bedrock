@@ -1,22 +1,6 @@
-import {
-  useState, useCallback,
-} from 'react';
-import {
-  API_BASE_URL,
-  authenticatedFetch,
-  getErrorMessage,
-  ApiRequestError,
-} from '../infrastructure';
+import { ApiRequestError } from '../infrastructure';
 import type { CompetitorReportResponse } from '../api/reports';
-
-interface BackendErrorResponse {error: string;}
-
-function isBackendErrorResponse(data: unknown): data is BackendErrorResponse {
-  return typeof data === 'object'
-    && data !== null
-    && 'error' in data
-    && typeof (data as BackendErrorResponse).error === 'string';
-}
+import { useAnalysisEndpoint } from './useAnalysisEndpoint';
 
 function isCompetitorReportResponse(
   data: unknown,
@@ -26,6 +10,22 @@ function isCompetitorReportResponse(
   // Single-competitor variant has `rollup`; all-competitors has `rollups`.
   return 'rollup' in data || 'rollups' in data;
 }
+
+const competitorRollupEndpoint = {
+  errorContext: 'visibility',
+  logMessage: '[competitorRollup] Error:',
+  isValidResponse: isCompetitorReportResponse,
+  createHttpError: (status: number) => new ApiRequestError('Failed to fetch competitor rollup', status),
+  createResponseError: (message: string) => new ApiRequestError(message),
+  buildRequest: (competitor?: string, keywordLimit = 50) => {
+    const params = new URLSearchParams({ keyword_limit: keywordLimit.toString() });
+    if (competitor) params.append('competitor', competitor);
+    return {
+      path: '/reports/competitor',
+      params,
+    };
+  },
+};
 
 /**
  * Imperative hook for the competitor rollup endpoint. Pairs with the
@@ -37,46 +37,9 @@ function isCompetitorReportResponse(
  * changes without re-mounting.
  */
 export function useCompetitorRollup() {
-  const [data, setData] = useState<CompetitorReportResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchCompetitorRollup = useCallback(async (
-    competitor?: string,
-    keywordLimit = 50,
-  ): Promise<CompetitorReportResponse | null> => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ keyword_limit: keywordLimit.toString() });
-      if (competitor) params.append('competitor', competitor);
-      const response = await authenticatedFetch(
-        `${API_BASE_URL}/reports/competitor?${params}`,
-      );
-      if (!response.ok) {
-        throw new ApiRequestError(
-          'Failed to fetch competitor rollup',
-          response.status,
-        );
-      }
-      const json: unknown = await response.json();
-      if (isBackendErrorResponse(json)) {
-        throw new ApiRequestError(json.error);
-      }
-      if (!isCompetitorReportResponse(json)) {
-        throw new ApiRequestError('Invalid response format');
-      }
-      setData(json);
-      return json;
-    } catch (err) {
-      const message = getErrorMessage(err, 'visibility');
-      setError(message);
-      console.error('[competitorRollup] Error:', err);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  const {
+    data, loading, error, fetchData: fetchCompetitorRollup,
+  } = useAnalysisEndpoint(competitorRollupEndpoint);
 
   return {
     data,

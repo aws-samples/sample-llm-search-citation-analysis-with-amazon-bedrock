@@ -16,6 +16,7 @@ import boto3
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
+from shared.auth import ADMIN_GROUP, require_group
 from shared.constants import MAX_QUERY_PROMPTS_DEFAULT
 from shared.decorators import api_handler, parse_json_body, validate
 from shared.env_vars import resolve_table_env
@@ -78,6 +79,7 @@ def list_prompts(event, context):
     return success_response(items, event)
 
 
+@require_group(ADMIN_GROUP)
 @parse_json_body
 @validate({
     'name': {'required': True, 'type': str, 'max_length': 100, 'source': 'body'},
@@ -85,7 +87,11 @@ def list_prompts(event, context):
     'description': {'type': str, 'max_length': 1000, 'source': 'body'},
 })
 def create_prompt(event, context, body, name, template, description):
-    """POST /api/query-prompts - Create a new query prompt (persona)."""
+    """POST /api/query-prompts - Create a new query prompt (persona).
+
+    Admin-only: every persona multiplies each analysis run's provider spend by
+    one. `list_prompts` stays open so the dashboard can show the active set.
+    """
     # Validate template contains {keyword}
     if '{keyword}' not in template:
         return validation_error(
@@ -118,6 +124,7 @@ def create_prompt(event, context, body, name, template, description):
     return success_response(item, event, 201)
 
 
+@require_group(ADMIN_GROUP)
 @parse_json_body
 @validate({
     'name': {'type': str, 'max_length': 100, 'source': 'body'},
@@ -166,6 +173,7 @@ def update_prompt(event, context, prompt_id, body, name, template, description):
     return success_response(response['Attributes'], event)
 
 
+@require_group(ADMIN_GROUP)
 def delete_prompt(event, context, prompt_id):
     """DELETE /api/query-prompts/{id} - Delete a query prompt."""
     if not prompt_id:
@@ -175,6 +183,7 @@ def delete_prompt(event, context, prompt_id):
     return success_response({'message': 'Query prompt deleted successfully'}, event)
 
 
+@require_group(ADMIN_GROUP)
 def toggle_prompt(event, context, prompt_id):
     """PATCH /api/query-prompts/{id} - Toggle enabled/disabled."""
     if not prompt_id:

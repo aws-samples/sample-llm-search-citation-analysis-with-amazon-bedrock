@@ -58,13 +58,22 @@ with patch('boto3.client', side_effect=_mock_boto3_client):
 _handler_mod.scheduler = mock_scheduler
 
 
-def make_event(method, body=None, path_params=None):
-    """Build a minimal API Gateway event."""
+def make_event(method, body=None, path_params=None, groups='Admin'):
+    """Build a minimal API Gateway event.
+
+    Defaults to an Admin caller because POST and DELETE now require the group
+    (AUDIT-2026-08-19 §0). Pass `groups=None` to build an unauthorized caller.
+    """
+    claims = {'cognito:username': 'admin@example.com', 'email': 'admin@example.com'}
+    if groups is not None:
+        claims['cognito:groups'] = groups
+
     return {
         'httpMethod': method,
         'pathParameters': path_params,
         'headers': {'origin': 'http://localhost:3000'},
         'body': json.dumps(body) if body else None,
+        'requestContext': {'authorizer': {'claims': claims}},
     }
 
 
@@ -284,3 +293,58 @@ class TestDeleteSchedule:
         result = handler_module.handler(event, {})
         status, _ = parse_response(result)
         assert status == 404
+
+
+class TestScheduleAuthorization:
+    """
+    Admin gate on the mutating routes (AUDIT-2026-08-19 §0).
+
+    Schedules start Step Functions executions on a recurring cron, so an
+    unprivileged caller could commit the account to indefinite provider spend.
+    Reads stay open — the dashboard shows the configured schedules to everyone.
+    """
+
+    def test_creating_a_schedule_without_the_admin_group_returns_403(self, handler_module):
+        event = make_event('POST', body={'frequency': 'daily', 'time': '09:00'}, groups='Users')
+
+        status, _ = parse_response(handler_module.handler(event, {}))
+
+        assert status == 403
+
+    def test_does_not_create_a_schedule_when_authorization_fails(self, handler_module):
+        """A 403 with the schedule already created would be no fix at all."""
+        event = make_event('POST', body={'frequency': 'daily', 'time': '09:00'}, groups='Users')
+
+        handler_module.handler(event, {})
+
+        assert mock_scheduler.create_schedule.call_count == 0
+
+    def test_deleting_a_schedule_without_the_admin_group_returns_403(self, handler_module):
+        event = make_event('DELETE', path_params={'name': 'daily-analysis'}, groups='Users')
+
+        status, _ = parse_response(handler_module.handler(event, {}))
+
+        assert status == 403
+
+    def test_does_not_delete_a_schedule_when_authorization_fails(self, handler_module):
+        event = make_event('DELETE', path_params={'name': 'daily-analysis'}, groups='Users')
+
+        handler_module.handler(event, {})
+
+        assert mock_scheduler.delete_schedule.call_count == 0
+
+    def test_returns_403_when_the_groups_claim_is_absent(self, handler_module):
+        """Fail closed: an invited user in no group is not an administrator."""
+        event = make_event('DELETE', path_params={'name': 'daily-analysis'}, groups=None)
+
+        status, _ = parse_response(handler_module.handler(event, {}))
+
+        assert status == 403
+
+    def test_listing_schedules_stays_open_to_non_admin_callers(self, handler_module):
+        """The gate must not lock non-admins out of read-only dashboard data."""
+        event = make_event('GET', groups='Users')
+
+        status, _ = parse_response(handler_module.handler(event, {}))
+
+        assert status == 200

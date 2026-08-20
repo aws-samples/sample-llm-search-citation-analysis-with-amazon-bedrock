@@ -8,6 +8,8 @@ import { fetchSchedules } from '../../api/executions';
 import type {
   Keyword, Schedule, ScheduleFormData 
 } from '../../types';
+import { useAlertModal } from '../../hooks/useAlertModal';
+import { useIsAdmin } from '../../hooks/useIsAdmin';
 import {
   ConfirmModal, AlertModal 
 } from '../ui/Modal';
@@ -28,13 +30,6 @@ interface ScheduleResponse {
 
 function isScheduleResponse(value: unknown): value is ScheduleResponse {
   return value !== null && typeof value === 'object';
-}
-
-interface AlertState {
-  isOpen: boolean;
-  title: string;
-  message: string;
-  variant: 'success' | 'error' | 'info';
 }
 
 export const ScheduleManager = ({
@@ -74,21 +69,12 @@ export const ScheduleManager = ({
     isOpen: false,
     scheduleName: '',
   });
-  const [alertModal, setAlertModal] = useState<AlertState>({
-    isOpen: false,
-    title: '',
-    message: '',
-    variant: 'info',
-  });
-
-  const showAlert = (title: string, message: string, variant: AlertState['variant']) => {
-    setAlertModal({
-      isOpen: true,
-      title,
-      message,
-      variant 
-    });
-  };
+  const {
+    alertModal, showAlert, closeAlert
+  } = useAlertModal();
+  // POST and DELETE /api/schedules are Admin-only server-side. The list is a
+  // read, so non-admins keep visibility of what is scheduled.
+  const { isAdmin } = useIsAdmin();
 
   const createSchedule = async () => {
     const selectedKeywords = keywordScope === 'selected' ? formData.keywords : [];
@@ -131,7 +117,20 @@ export const ScheduleManager = ({
   const confirmDeleteSchedule = async () => {
     const name = deleteModal.scheduleName;
     try {
-      await authenticatedFetch(`${API_BASE_URL}/schedules/${name}`, { method: 'DELETE' });
+      const response = await authenticatedFetch(
+        `${API_BASE_URL}/schedules/${name}`, { method: 'DELETE' }
+      );
+
+      // The response was previously ignored entirely, so any failure — most
+      // reachably a 403 from the Admin gate — reported "Schedule deleted" and
+      // dropped the row from local state, only for it to return on reload.
+      if (!response.ok) {
+        const json: unknown = await response.json().catch(() => ({}));
+        const data: ScheduleResponse = isScheduleResponse(json) ? json : {};
+        showAlert('Error', data.error ?? 'Failed to delete schedule', 'error');
+        return;
+      }
+
       setSchedules(schedules.filter((s) => s.name !== name));
       showAlert('Success', 'Schedule deleted', 'success');
     } catch (err) {
@@ -159,9 +158,9 @@ export const ScheduleManager = ({
 
   return (
     <div className="bg-white rounded-lg border border-gray-200">
-      <ScheduleHeader showForm={showForm} setShowForm={setShowForm} />
+      <ScheduleHeader showForm={showForm} setShowForm={setShowForm} isAdmin={isAdmin} />
 
-      {showForm && (
+      {isAdmin && showForm && (
         <ScheduleForm
           formData={formData}
           updateFormField={updateFormField}
@@ -179,6 +178,7 @@ export const ScheduleManager = ({
           isOpen: true,
           scheduleName: name 
         })}
+        isAdmin={isAdmin}
       />
 
       <ConfirmModal
@@ -196,10 +196,7 @@ export const ScheduleManager = ({
 
       <AlertModal
         isOpen={alertModal.isOpen}
-        onClose={() => setAlertModal({
-          ...alertModal,
-          isOpen: false 
-        })}
+        onClose={closeAlert}
         title={alertModal.title}
         message={alertModal.message}
         variant={alertModal.variant}

@@ -6,6 +6,7 @@
 set -e
 
 # Colors for output
+RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m'
@@ -16,6 +17,10 @@ print_info() {
 
 print_success() {
     echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
 # Change to project root
@@ -33,14 +38,17 @@ BUCKET_NAME=$(aws cloudformation describe-stacks \
     --query 'Stacks[0].Outputs[?OutputKey==`WebBucketName`].OutputValue' \
     --output text 2>/dev/null)
 
-# Fallback: construct bucket name from account ID if output not found
+# No constructed-name fallback: step 3 runs `aws s3 sync --delete`, so guessing
+# a bucket name when the stack output is missing would wipe whatever bucket owns
+# that name. webBucket is unversioned, so recovery would be manual
+# (AUDIT-2026-08-19 §1.5).
 if [ -z "$BUCKET_NAME" ] || [ "$BUCKET_NAME" = "None" ]; then
-    ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-    BUCKET_NAME="citation-analysis-web-${ACCOUNT_ID}"
-    print_info "Using constructed bucket name: $BUCKET_NAME"
-else
-    print_info "Found bucket name: $BUCKET_NAME"
+    print_error "WebBucketName output not found on stack CitationAnalysisStack."
+    print_error "Refusing to run 'aws s3 sync --delete' against a guessed bucket name."
+    exit 1
 fi
+
+print_info "Found bucket name: $BUCKET_NAME"
 
 # Step 3: Sync to S3
 print_info "Syncing web/dist to S3..."

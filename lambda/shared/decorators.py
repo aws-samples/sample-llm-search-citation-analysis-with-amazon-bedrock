@@ -11,6 +11,19 @@ Decorators:
 - @cors_preflight: Handles OPTIONS requests for CORS automatically
 - @paginate: Handles pagination params (limit, offset, sort_by, sort_order)
 
+Wrapper contract: every decorator here wraps the handler as
+``(event, context, *args, **kwargs)`` and forwards both ``*args`` and
+``**kwargs`` untouched. Decorators only *add* to ``kwargs`` or short-circuit
+with a response dict — they never consume a caller's positional arguments.
+
+That uniformity is load-bearing, not cosmetic. Routers that pass a path
+parameter positionally (``update_prompt(event, context, prompt_id)`` in
+``manage-query-prompts.py``) compose with any subset of these decorators in any
+order. When ``parse_json_body`` alone lacked ``*args``, stacking it under a
+decorator that did forward them turned every ``PUT /api/query-prompts/{id}``
+into a ``TypeError`` and a 500 — for administrators too, silently, because no
+test exercised that composition. Keep new decorators to the same signature.
+
 Usage:
     from shared.decorators import api_handler, parse_json_body, validate
     from shared.api_response import success_response
@@ -33,6 +46,7 @@ from functools import wraps
 from typing import Any
 
 from shared.api_response import error_response, validation_error
+from shared.constants import MAX_KEYWORD_LENGTH
 from shared.router import path_contains_segment
 
 logger = logging.getLogger(__name__)
@@ -53,9 +67,9 @@ def api_handler(func: Callable) -> Callable:
             return success_response(data, event)
     """
     @wraps(func)
-    def wrapper(event: dict[str, Any], context: Any, **kwargs) -> dict[str, Any]:
+    def wrapper(event: dict[str, Any], context: Any, *args, **kwargs) -> dict[str, Any]:
         try:
-            return func(event, context, **kwargs)
+            return func(event, context, *args, **kwargs)
         except Exception as e:
             logger.error(f"Error in {func.__name__}: {e!s}", exc_info=True)
             return error_response(e, event)
@@ -78,14 +92,14 @@ def parse_json_body(func: Callable) -> Callable:
             return success_response({'keyword': keyword}, event)
     """
     @wraps(func)
-    def wrapper(event: dict[str, Any], context: Any, **kwargs) -> dict[str, Any]:
+    def wrapper(event: dict[str, Any], context: Any, *args, **kwargs) -> dict[str, Any]:
         try:
             body = json.loads(event.get('body') or '{}')
         except json.JSONDecodeError:
             return validation_error('Invalid JSON format', event)
 
         kwargs['body'] = body
-        return func(event, context, **kwargs)
+        return func(event, context, *args, **kwargs)
     return wrapper
 
 
@@ -125,7 +139,7 @@ def validate(schema: dict[str, dict[str, Any]]) -> Callable:
     """
     def decorator(func: Callable) -> Callable:
         @wraps(func)
-        def wrapper(event: dict[str, Any], context: Any, **kwargs) -> dict[str, Any]:
+        def wrapper(event: dict[str, Any], context: Any, *args, **kwargs) -> dict[str, Any]:
             # Get data sources
             body = kwargs.get('body', {})
             query_params = event.get('queryStringParameters') or {}
@@ -239,13 +253,13 @@ def validate(schema: dict[str, dict[str, Any]]) -> Callable:
                 # Inject validated value
                 kwargs[field_name] = value
 
-            return func(event, context, **kwargs)
+            return func(event, context, *args, **kwargs)
         return wrapper
     return decorator
 
 
 # Convenience aliases for common validation patterns
-def require_keyword(max_length: int = 500) -> dict[str, Any]:
+def require_keyword(max_length: int = MAX_KEYWORD_LENGTH) -> dict[str, Any]:
     """Common validation for keyword parameter."""
     return {'required': True, 'type': str, 'max_length': max_length}
 
@@ -268,12 +282,17 @@ def optional_provider() -> dict[str, Any]:
 # Route Handler Decorator
 # =============================================================================
 
-def route_handler(routes: dict[str, Callable]) -> Callable:
+def route_handler(routes: dict[str, Callable], inject_path_params: bool = False) -> Callable:
     """
     Decorator that routes requests by HTTP method to specific handler functions.
 
     Eliminates repetitive if/elif chains for multi-method endpoints.
-    Supports path-based sub-routing with tuples.
+    Supports path-based sub-routing with tuples. With
+    ``inject_path_params=True``, API Gateway ``pathParameters`` are passed to
+    the matched function as keyword arguments (e.g. ``{id}`` arrives as
+    ``id=...``), so parametric routes no longer need hand-rolled routing
+    (bugs.md 3.4). Opt-in because existing routed functions do not declare
+    path-param kwargs.
 
     Routes format:
         {
@@ -308,9 +327,12 @@ def route_handler(routes: dict[str, Callable]) -> Callable:
     """
     def decorator(func: Callable) -> Callable:
         @wraps(func)
-        def wrapper(event: dict[str, Any], context: Any, **kwargs) -> dict[str, Any]:
+        def wrapper(event: dict[str, Any], context: Any, *args, **kwargs) -> dict[str, Any]:
             method = event.get('httpMethod', 'GET').upper()
             path = event.get('path', '')
+
+            if inject_path_params:
+                kwargs.update(event.get('pathParameters') or {})
 
             # First try path-specific routes (tuple keys). Match semantics:
             #   - None → method-only match (used for fallbacks like DELETE
@@ -325,12 +347,12 @@ def route_handler(routes: dict[str, Callable]) -> Callable:
                     if method == route_method.upper() and (
                         route_path is None or path_contains_segment(route_path, path)
                     ):
-                        return handler_func(event, context, **kwargs)
+                        return handler_func(event, context, *args, **kwargs)
 
             # Then try method-only routes (string keys)
             if method in routes:
                 handler_func = routes[method]
-                return handler_func(event, context, **kwargs)
+                return handler_func(event, context, *args, **kwargs)
 
             # Method not allowed
             return validation_error(f'Method {method} not allowed', event)
@@ -358,7 +380,7 @@ def cors_preflight(func: Callable) -> Callable:
             return success_response({'data': 'value'}, event)
     """
     @wraps(func)
-    def wrapper(event: dict[str, Any], context: Any, **kwargs) -> dict[str, Any]:
+    def wrapper(event: dict[str, Any], context: Any, *args, **kwargs) -> dict[str, Any]:
         method = event.get('httpMethod', '').upper()
 
         if method == 'OPTIONS':
@@ -381,7 +403,7 @@ def cors_preflight(func: Callable) -> Callable:
                 'body': ''
             }
 
-        return func(event, context, **kwargs)
+        return func(event, context, *args, **kwargs)
 
     return wrapper
 
@@ -430,7 +452,7 @@ def paginate(
     """
     def decorator(func: Callable) -> Callable:
         @wraps(func)
-        def wrapper(event: dict[str, Any], context: Any, **kwargs) -> dict[str, Any]:
+        def wrapper(event: dict[str, Any], context: Any, *args, **kwargs) -> dict[str, Any]:
             query_params = event.get('queryStringParameters') or {}
 
             # Parse limit
@@ -467,7 +489,7 @@ def paginate(
             kwargs['sort_by'] = sort_by
             kwargs['sort_order'] = sort_order
 
-            return func(event, context, **kwargs)
+            return func(event, context, *args, **kwargs)
 
         return wrapper
     return decorator

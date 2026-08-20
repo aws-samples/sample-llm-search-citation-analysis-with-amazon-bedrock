@@ -22,13 +22,12 @@ from typing import Any
 import boto3
 from boto3.dynamodb.conditions import Key
 
-from decimal_utils import to_int
-
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
 from shared.decorators import api_handler, validate
+from shared.dynamo_decimal import to_int
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
 from shared.utils import brand_names_match, get_brand_config, get_timestamp, recommendation_id
@@ -99,7 +98,7 @@ def generate_rule_based_recommendations(config: dict[str, Any]) -> list[dict[str
                 )
                 items.extend(response.get('Items', []))
             except Exception as e:
-                logger.error(f"Error querying keyword {keyword}: {e}")
+                logger.error(f"Error querying keyword {keyword!r}: {e}")
                 continue
 
     if not items:

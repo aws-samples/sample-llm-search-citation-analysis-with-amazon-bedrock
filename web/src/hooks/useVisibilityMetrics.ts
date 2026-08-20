@@ -1,22 +1,11 @@
-import {
-  useState, useCallback 
-} from 'react';
-import {
-  API_BASE_URL, authenticatedFetch, getErrorMessage 
-} from '../infrastructure';
 import type { VisibilityMetricsResponse } from '../types';
+import { useAnalysisEndpoint } from './useAnalysisEndpoint';
 
 class VisibilityFetchError extends Error {
   constructor(message = 'Failed to fetch visibility metrics') {
     super(message);
     this.name = 'VisibilityFetchError';
   }
-}
-
-interface BackendErrorResponse {error: string;}
-
-function isBackendErrorResponse(data: unknown): data is BackendErrorResponse {
-  return typeof data === 'object' && data !== null && 'error' in data && typeof (data as BackendErrorResponse).error === 'string';
 }
 
 function isVisibilityMetricsResponse(data: unknown): data is VisibilityMetricsResponse {
@@ -28,41 +17,27 @@ function isVisibilityMetricsResponse(data: unknown): data is VisibilityMetricsRe
   return 'keyword' in data && 'brands' in data;
 }
 
-export function useVisibilityMetrics() {
-  const [data, setData] = useState<VisibilityMetricsResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+const visibilityMetricsEndpoint = {
+  errorContext: 'visibility',
+  logMessage: '[visibility] Error fetching metrics:',
+  isValidResponse: isVisibilityMetricsResponse,
+  createHttpError: () => new VisibilityFetchError(),
+  createResponseError: (message: string) => new VisibilityFetchError(message),
+  buildRequest: (keyword: string, brand?: string, queryPromptId?: string) => {
+    const params = new URLSearchParams({ keyword });
+    if (brand) params.append('brand', brand);
+    if (queryPromptId) params.append('query_prompt_id', queryPromptId);
+    return {
+      path: '/visibility',
+      params,
+    };
+  },
+};
 
-  const fetchVisibilityMetrics = useCallback(async (keyword: string, brand?: string, queryPromptId?: string) => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      const params = new URLSearchParams({ keyword });
-      if (brand) params.append('brand', brand);
-      if (queryPromptId) params.append('query_prompt_id', queryPromptId);
-      
-      const response = await authenticatedFetch(`${API_BASE_URL}/visibility?${params}`);
-      if (!response.ok) throw new VisibilityFetchError();
-      
-      const json: unknown = await response.json();
-      if (isBackendErrorResponse(json)) {
-        throw new VisibilityFetchError(json.error);
-      }
-      if (!isVisibilityMetricsResponse(json)) {
-        throw new VisibilityFetchError('Invalid response format');
-      }
-      setData(json);
-      return json;
-    } catch (err) {
-      const message = getErrorMessage(err, 'visibility');
-      setError(message);
-      console.error('[visibility] Error fetching metrics:', err);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+export function useVisibilityMetrics() {
+  const {
+    data, loading, error, fetchData: fetchVisibilityMetrics 
+  } = useAnalysisEndpoint(visibilityMetricsEndpoint);
 
   return {
     data,

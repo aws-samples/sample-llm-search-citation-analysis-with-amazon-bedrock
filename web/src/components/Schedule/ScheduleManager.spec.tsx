@@ -19,11 +19,15 @@ vi.mock('../../infrastructure', () => ({
 
 vi.mock('../../api/executions', () => ({fetchSchedules: vi.fn(),}));
 
+vi.mock('../../hooks/useIsAdmin', () => ({useIsAdmin: vi.fn(),}));
+
 import { authenticatedFetch } from '../../infrastructure';
 import { fetchSchedules } from '../../api/executions';
+import { useIsAdmin } from '../../hooks/useIsAdmin';
 
 const mockAuthFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
 const mockFetchSchedules = fetchSchedules as ReturnType<typeof vi.fn>;
+const mockUseIsAdmin = useIsAdmin as ReturnType<typeof vi.fn>;
 
 const mockSchedules: Schedule[] = [
   {
@@ -68,6 +72,13 @@ function firstCreateRequestBody(): unknown {
 describe('ScheduleManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Create and delete are Admin-only; the existing suite exercises them, so
+    // an admin caller is the default. The non-admin cases are asserted in the
+    // 'admin-only controls' block below.
+    mockUseIsAdmin.mockReturnValue({
+      isAdmin: true,
+      loading: false,
+    });
     mockFetchSchedules.mockResolvedValue([]);
   });
 
@@ -198,5 +209,64 @@ describe('ScheduleManager', () => {
       await waitFor(() => expect(props.setSchedules).toHaveBeenCalledWith(mockSchedules));
       expect(mockFetchSchedules).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+
+describe('ScheduleManager admin-only controls', () => {
+  /**
+   * POST /api/schedules and DELETE /api/schedules/{name} are Admin-only
+   * server-side. Reads stay open, so a non-admin keeps visibility of what is
+   * scheduled without any control that would return 403.
+   */
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockUseIsAdmin.mockReturnValue({
+      isAdmin: false,
+      loading: false,
+    });
+    mockFetchSchedules.mockResolvedValue([]);
+  });
+
+  it('hides the new schedule button from non-admin users', () => {
+    render(<ScheduleManager {...buildProps()} />);
+
+    expect(screen.queryByRole('button', { name: /New Schedule/i })).not.toBeInTheDocument();
+  });
+
+  it('hides the per-row delete button from non-admin users', () => {
+    render(<ScheduleManager {...buildProps({ schedules: mockSchedules })} />);
+
+    expect(
+      screen.queryByRole('button', { name: /Delete schedule daily-analysis/i })
+    ).not.toBeInTheDocument();
+  });
+
+  it('still lists existing schedules for non-admin users', () => {
+    render(<ScheduleManager {...buildProps({ schedules: mockSchedules })} />);
+
+    expect(screen.getByText('daily-analysis')).toBeInTheDocument();
+  });
+
+  it('tells non-admin users an administrator adds schedules', () => {
+    /** The admin copy says "Create a schedule", which they cannot do. */
+    render(<ScheduleManager {...buildProps()} />);
+
+    expect(screen.getByText(/An administrator can add a schedule/i)).toBeInTheDocument();
+  });
+
+  it('shows the delete button to admin users', () => {
+    /** Guards the assertions above from passing because of a renamed label. */
+    mockUseIsAdmin.mockReturnValue({
+      isAdmin: true,
+      loading: false,
+    });
+
+    render(<ScheduleManager {...buildProps({ schedules: mockSchedules })} />);
+
+    expect(
+      screen.getByRole('button', { name: /Delete schedule daily-analysis/i })
+    ).toBeInTheDocument();
   });
 });

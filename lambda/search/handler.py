@@ -8,7 +8,7 @@ import logging
 import os
 import re
 import time
-from decimal import Decimal
+from collections.abc import Callable
 from typing import Any
 
 import boto3
@@ -27,28 +27,21 @@ from search_clients import BraveSearchClient, ExaSearchClient, FirecrawlSearchCl
 
 # Import centralized provider constants and error handling
 from shared.config import Provider
+from shared.constants import MAX_KEYWORD_LENGTH
+from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.prompt_safety import sanitize_user_input
+from shared.provider_health import record_provider_failure, record_provider_success
+from shared.safe_fetch import fetch_following_validated_redirects, host_matches
+from shared.secrets import get_api_key
 from shared.step_function_response import log_error
 
 # Configure logging
-from shared.utils import get_timestamp
+from shared.utils import get_brand_config, get_timestamp
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-
-def convert_floats_to_decimal(obj: Any) -> Any:
-    """Recursively convert floats to Decimal for DynamoDB compatibility."""
-    if isinstance(obj, float):
-        return Decimal(str(obj))
-    elif isinstance(obj, dict):
-        return {k: convert_floats_to_decimal(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [convert_floats_to_decimal(item) for item in obj]
-    return obj
-
 # Initialize AWS clients
-secrets_client = boto3.client('secretsmanager')
 dynamodb = boto3.resource('dynamodb')
 s3_client = boto3.client('s3')
 
@@ -69,7 +62,6 @@ def get_extraction_config() -> dict[str, Any]:
     return _extraction_config
 
 # Environment variables
-SECRETS_PREFIX = os.environ.get('SECRETS_PREFIX', 'citation-analysis/')
 DYNAMODB_TABLE_SEARCH_RESULTS = os.environ.get('DYNAMODB_TABLE_SEARCH_RESULTS')
 RAW_RESPONSES_BUCKET = os.environ.get('RAW_RESPONSES_BUCKET')
 # Provider config table — canonical name first, legacy fallback for in-flight
@@ -80,11 +72,6 @@ PROVIDER_CONFIG_TABLE = (
     or os.environ.get('PROVIDER_CONFIG_TABLE')
     or 'CitationAnalysis-ProviderConfig'
 )
-
-# Cache for secrets with TTL
-_secrets_cache = {}
-_secrets_cache_time = {}
-SECRETS_CACHE_TTL = 300  # 5 minutes
 
 
 def slugify(text: str) -> str:
@@ -149,36 +136,6 @@ def store_raw_response_to_s3(
     except Exception as e:
         logger.error(f"Failed to store raw response to S3: {e!s}")
         return None
-
-
-def get_secret(secret_name: str) -> str | None:
-    """Retrieve a secret from AWS Secrets Manager with TTL-based caching."""
-    current_time = time.time()
-
-    # Check if cached and not expired
-    if secret_name in _secrets_cache:
-        cache_time = _secrets_cache_time.get(secret_name, 0)
-        if current_time - cache_time < SECRETS_CACHE_TTL:
-            return _secrets_cache[secret_name]
-        else:
-            # Cache expired, remove stale entries
-            logger.info("Secret cache expired, refreshing")
-            del _secrets_cache[secret_name]
-            del _secrets_cache_time[secret_name]
-
-    try:
-        response = secrets_client.get_secret_value(SecretId=secret_name)
-        if 'SecretString' in response:
-            secret_data = json.loads(response['SecretString'])
-            api_key = secret_data.get('api_key')
-            if api_key:
-                _secrets_cache[secret_name] = api_key
-                _secrets_cache_time[secret_name] = current_time
-                return api_key
-    except Exception as e:
-        logger.error("Error retrieving secret: %s", type(e).__name__)
-
-    return None
 
 
 def is_provider_enabled(provider_id: str) -> bool:
@@ -255,17 +212,61 @@ def get_provider_model(provider_id: str) -> str:
 
 
 
+def build_provider_query(keyword: str, query_template: str | None) -> str:
+    """Resolve the provider query from an optional ``{keyword}`` template.
+
+    Every query_* function previously repeated this two-liner (bugs.md 3.2).
+
+    **Every provider receives the identical string.** There used to be a
+    ``default`` parameter for per-provider no-template phrasing, and OpenAI was
+    the only caller using it — it asked ``"Search for information about: X"``
+    while Perplexity and Gemini asked ``"X"``. Since the entire point of this
+    system is comparing how different providers cite brands for the same query,
+    a per-provider wording difference is an uncontrolled variable in the
+    comparison. Provider-specific coaxing now belongs in provider-specific
+    parameters (see ``CLAUDE_CITATION_SYSTEM_PROMPT``), never in the query.
+
+    ``manage-query-prompts.py`` rejects any persona template lacking
+    ``{keyword}`` on both create and update, so a template can never silently
+    drop the keyword and send the same query for every keyword.
+    """
+    if query_template:
+        return query_template.replace("{keyword}", keyword)
+    return keyword
+
+
+# Claude needs explicit prompting to emit source URLs, and citations are this
+# system's primary output — without it Claude returns prose with nothing to
+# extract. This used to be appended to the keyword itself, which meant Claude's
+# query differed from every other provider's, and with a persona active the
+# instruction landed wherever `{keyword}` happened to sit mid-template.
+# Carrying it in the system prompt keeps the user-facing query identical across
+# providers while preserving the behaviour it was added for.
+CLAUDE_CITATION_SYSTEM_PROMPT = (
+    "Include the source URL for every claim you make in your answer."
+)
+
+
+def provider_error_result(provider: str, model: str, error: Exception, start_time: float) -> dict[str, Any]:
+    """The uniform error-result dict every query_* previously duplicated."""
+    return {
+        "provider": provider,
+        "response": "",
+        "citations": [],
+        "status": "error",
+        "error": str(error),
+        "raw_response": None,
+        "metadata": {"model": model, "latency_ms": int((time.time() - start_time) * 1000)}
+    }
+
+
 def query_openai(keyword: str, api_key: str, model: str = "gpt-5-mini", query_template: str | None = None) -> dict[str, Any]:
     """Query OpenAI API with native web search via Responses API."""
     start_time = time.time()
     try:
         client = OpenAIClient(api_key)
 
-        # Build query from template or use default
-        if query_template:
-            query = query_template.replace("{keyword}", keyword)
-        else:
-            query = f"Search for information about: {keyword}"
+        query = build_provider_query(keyword, query_template)
 
         # Use Responses API with native web search
         raw_response = client.responses_with_web_search(
@@ -329,15 +330,7 @@ def query_openai(keyword: str, api_key: str, model: str = "gpt-5-mini", query_te
         }
     except Exception as e:
         logger.error(f"OpenAI error: {e!s}")
-        return {
-            "provider": Provider.OPENAI,
-            "response": "",
-            "citations": [],
-            "status": "error",
-            "error": str(e),
-            "raw_response": None,
-            "metadata": {"model": model, "latency_ms": int((time.time() - start_time) * 1000)}
-        }
+        return provider_error_result(Provider.OPENAI, model, e, start_time)
 
 
 def query_perplexity(keyword: str, api_key: str, query_template: str | None = None) -> dict[str, Any]:
@@ -345,7 +338,7 @@ def query_perplexity(keyword: str, api_key: str, query_template: str | None = No
     start_time = time.time()
     try:
         client = PerplexityClient(api_key)
-        query = query_template.replace("{keyword}", keyword) if query_template else keyword
+        query = build_provider_query(keyword, query_template)
         messages = [{"role": "user", "content": query}]
         raw_response = client.chat_completion(messages)
 
@@ -381,33 +374,49 @@ def query_perplexity(keyword: str, api_key: str, query_template: str | None = No
         }
     except Exception as e:
         logger.error(f"Perplexity error: {e!s}")
-        return {
-            "provider": Provider.PERPLEXITY,
-            "response": "",
-            "citations": [],
-            "status": "error",
-            "error": str(e),
-            "raw_response": None,
-            "metadata": {"model": "sonar", "latency_ms": int((time.time() - start_time) * 1000)}
-        }
+        return provider_error_result(Provider.PERPLEXITY, "sonar", e, start_time)
+
+
+# Hosts permitted to start a redirect chain. Gemini returns citation links
+# wrapped in its own redirector, and the real domain can only be recovered by
+# following the wrapper — so this un-wrapping has to keep working. Restricting
+# the entry point means an arbitrary URL from a provider response cannot be
+# turned into a server-side redirect chase.
+GEMINI_REDIRECT_HOSTS = frozenset({'vertexaisearch.cloud.google.com'})
 
 
 def resolve_gemini_redirect(redirect_url: str, timeout: int = 5) -> str:
     """
     Resolve Gemini's vertex redirect URL to get the real URL.
     Gemini returns vertexaisearch.cloud.google.com redirect links that need to be followed.
+
+    Behaviour is unchanged for real Gemini wrappers. What changed is how the
+    chain is followed: `allow_redirects=True` on unvalidated input let a
+    provider-supplied URL send this HEAD request anywhere, using it as a blind
+    probe of whatever the Lambda can reach (AUDIT-2026-08-19 §2.6). Now only
+    Gemini's own redirector may start a chain, and every hop is revalidated.
+
+    Returns the original URL unchanged on any failure or refusal, which is the
+    pre-existing fallback contract — a citation that cannot be un-wrapped is
+    better than no citation.
     """
-    try:
-        import requests
-        # Follow redirects and get the final URL
-        response = requests.head(redirect_url, allow_redirects=True, timeout=timeout)
-        real_url = response.url
-        logger.info(f"Resolved Gemini redirect: {redirect_url[:50]}... -> {real_url}")
-        return real_url
-    except Exception as e:
-        logger.warning(f"Failed to resolve Gemini redirect {redirect_url[:50]}...: {e!s}")
-        # Return the redirect URL as fallback
+    if not host_matches(redirect_url, GEMINI_REDIRECT_HOSTS):
+        # Not a Gemini wrapper, so there is nothing to un-wrap. Returning it
+        # untouched avoids making this a general-purpose redirect follower.
         return redirect_url
+
+    _response, final_url, fetch_error = fetch_following_validated_redirects(
+        redirect_url, method='HEAD', timeout=timeout
+    )
+
+    if fetch_error or not final_url:
+        logger.warning(
+            f"Failed to resolve Gemini redirect {redirect_url[:50]}...: {fetch_error}"
+        )
+        return redirect_url
+
+    logger.info(f"Resolved Gemini redirect: {redirect_url[:50]}... -> {final_url}")
+    return final_url
 
 
 def query_gemini(keyword: str, api_key: str, query_template: str | None = None) -> dict[str, Any]:
@@ -415,7 +424,7 @@ def query_gemini(keyword: str, api_key: str, query_template: str | None = None) 
     start_time = time.time()
     try:
         client = GeminiClient(api_key)
-        query = query_template.replace("{keyword}", keyword) if query_template else keyword
+        query = build_provider_query(keyword, query_template)
         raw_response = client.generate_content(query)
 
         latency_ms = int((time.time() - start_time) * 1000)
@@ -467,15 +476,7 @@ def query_gemini(keyword: str, api_key: str, query_template: str | None = None) 
         }
     except Exception as e:
         logger.error(f"Gemini error: {e!s}")
-        return {
-            "provider": Provider.GEMINI,
-            "response": "",
-            "citations": [],
-            "status": "error",
-            "error": str(e),
-            "raw_response": None,
-            "metadata": {"model": "gemini-3-flash-preview", "latency_ms": int((time.time() - start_time) * 1000)}
-        }
+        return provider_error_result(Provider.GEMINI, "gemini-3-flash-preview", e, start_time)
 
 
 def query_claude(keyword: str, api_key: str, query_template: str | None = None) -> dict[str, Any]:
@@ -483,8 +484,10 @@ def query_claude(keyword: str, api_key: str, query_template: str | None = None) 
     start_time = time.time()
     try:
         client = ClaudeClient(api_key)
-        query = query_template.replace("{keyword}", keyword) if query_template else keyword
-        raw_response = client.generate_content(query)
+        query = build_provider_query(keyword, query_template)
+        raw_response = client.generate_content(
+            query, system_prompt=CLAUDE_CITATION_SYSTEM_PROMPT
+        )
 
         latency_ms = int((time.time() - start_time) * 1000)
 
@@ -550,15 +553,91 @@ def query_claude(keyword: str, api_key: str, query_template: str | None = None) 
         }
     except Exception as e:
         logger.error(f"Claude error: {e!s}")
-        return {
-            "provider": Provider.CLAUDE,
-            "response": "",
-            "citations": [],
-            "status": "error",
-            "error": str(e),
-            "raw_response": None,
-            "metadata": {"model": "claude-sonnet-4-5", "latency_ms": int((time.time() - start_time) * 1000)}
-        }
+        return provider_error_result(Provider.CLAUDE, "claude-sonnet-4-5", e, start_time)
+
+
+def _run_openai_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
+    """OpenAI is the one provider with a configurable model (fail-closed)."""
+    model = get_provider_model(Provider.OPENAI)
+    return query_openai(keyword, api_key, model=model, query_template=query_template)
+
+
+def _run_perplexity_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
+    return query_perplexity(keyword, api_key, query_template=query_template)
+
+
+def _run_gemini_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
+    return query_gemini(keyword, api_key, query_template=query_template)
+
+
+def _run_claude_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
+    """Claude gets the same query as everyone else.
+
+    The "include source URLs" instruction moved into Claude's system prompt
+    (`CLAUDE_CITATION_SYSTEM_PROMPT`); it used to be concatenated onto the
+    keyword here, which made Claude's query differ from the other providers'
+    and corrupted persona templates by injecting the instruction at the
+    `{keyword}` position.
+    """
+    return query_claude(keyword, api_key, query_template=query_template)
+
+
+def _search_provider_runner(client_class: type) -> Callable[[str, str, str | None], dict[str, Any]]:
+    """Search providers share one shape: build the client, search the keyword."""
+    def run(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
+        return client_class(api_key).search(keyword)
+    return run
+
+
+# Provider execution registry: (provider_id, secret name, log label,
+# provider type, runner). Replaces the nine copy-pasted
+# enabled/disabled/no-key ladders (bugs.md 3.2); execution order is
+# unchanged.
+PROVIDER_RUNNERS: list[tuple[str, str, str, str, Callable[[str, str, str | None], dict[str, Any]]]] = [
+    (Provider.OPENAI, 'openai-key', 'OpenAI', 'llm', _run_openai_provider),
+    (Provider.PERPLEXITY, 'perplexity-key', 'Perplexity', 'llm', _run_perplexity_provider),
+    (Provider.GEMINI, 'gemini-key', 'Gemini', 'llm', _run_gemini_provider),
+    (Provider.CLAUDE, 'claude-key', 'Claude', 'llm', _run_claude_provider),
+    (Provider.BRAVE, 'brave-key', 'Brave Search', 'search', _search_provider_runner(BraveSearchClient)),
+    (Provider.TAVILY, 'tavily-key', 'Tavily', 'search', _search_provider_runner(TavilySearchClient)),
+    (Provider.EXA, 'exa-key', 'Exa', 'search', _search_provider_runner(ExaSearchClient)),
+    (Provider.SERPAPI, 'serpapi-key', 'SerpAPI', 'search', _search_provider_runner(SerpAPIClient)),
+    (Provider.FIRECRAWL, 'firecrawl-key', 'Firecrawl', 'search', _search_provider_runner(FirecrawlSearchClient)),
+]
+
+
+def _record_provider_outcome(provider_id: str, result: dict[str, Any]) -> None:
+    """Persist provider health, and tag the result with the error category.
+
+    Two separate jobs, both needed:
+
+    1. The provider row gets `last_error`, `last_error_category`,
+       `consecutive_failures` and friends, so Settings can say "No credit
+       remaining" instead of showing a green tick. After three consecutive
+       terminal failures (no credit / rejected key) the provider is
+       auto-disabled, which is what stops a dead provider burning five retry
+       attempts per query on every future run.
+    2. `error_category` is written onto the result row so it survives into the
+       deduplication rollup and out to the execution summary. Without it the
+       summary sees `citations: 0` and cannot tell a broken provider from an
+       unproductive search.
+
+    Never raises: a health-bookkeeping failure must not take down a search that
+    otherwise succeeded, and `record_provider_*` already swallow their own
+    DynamoDB errors.
+    """
+    table = dynamodb.Table(PROVIDER_CONFIG_TABLE)
+
+    if result.get('status') == 'error':
+        outcome = record_provider_failure(
+            table, provider_id, result.get('error', 'unknown provider error')
+        )
+        result['error_category'] = outcome['category']
+        if outcome['auto_disabled']:
+            result['provider_auto_disabled'] = True
+        return
+
+    record_provider_success(table, provider_id)
 
 
 def execute_all_providers(keyword: str, provider_types: list[str] | None = None, providers: list[str] | None = None, query_template: str | None = None) -> list[dict[str, Any]]:
@@ -577,119 +656,37 @@ def execute_all_providers(keyword: str, provider_types: list[str] | None = None,
     results = []
 
     # Determine which types to run
-    run_llm = provider_types is None or "llm" in provider_types
-    run_search = provider_types is None or "search" in provider_types
+    run_types = set()
+    if provider_types is None or "llm" in provider_types:
+        run_types.add("llm")
+    if provider_types is None or "search" in provider_types:
+        run_types.add("search")
 
-    # Get API keys for LLM providers (only if needed)
-    if run_llm:
-        openai_key = get_secret(f"{SECRETS_PREFIX}openai-key")
-        perplexity_key = get_secret(f"{SECRETS_PREFIX}perplexity-key")
-        gemini_key = get_secret(f"{SECRETS_PREFIX}gemini-key")
-        claude_key = get_secret(f"{SECRETS_PREFIX}claude-key")
-    else:
-        openai_key = perplexity_key = gemini_key = claude_key = None
-
-    # Get API keys for Search providers (only if needed)
-    if run_search:
-        brave_key = get_secret(f"{SECRETS_PREFIX}brave-key")
-        tavily_key = get_secret(f"{SECRETS_PREFIX}tavily-key")
-        exa_key = get_secret(f"{SECRETS_PREFIX}exa-key")
-        serpapi_key = get_secret(f"{SECRETS_PREFIX}serpapi-key")
-        firecrawl_key = get_secret(f"{SECRETS_PREFIX}firecrawl-key")
-    else:
-        brave_key = tavily_key = exa_key = serpapi_key = firecrawl_key = None
-
-    # Helper to check if a specific provider should run
     def should_run_provider(provider_id: str) -> bool:
         if providers is not None:
             return provider_id in providers
         return True
 
-    # Query LLM providers (only if enabled and has API key)
-    if run_llm:
-        if openai_key and is_provider_enabled(Provider.OPENAI) and should_run_provider(Provider.OPENAI):
-            logger.info("Querying OpenAI...")
+    for provider_id, secret_name, label, provider_type, run_query in PROVIDER_RUNNERS:
+        if provider_type not in run_types:
+            continue
+
+        # Same decision ladder every provider block used to carry:
+        # key + enabled + selected -> run; key + selected -> disabled;
+        # selected -> no key configured.
+        api_key = get_api_key(secret_name)
+        if api_key and is_provider_enabled(provider_id) and should_run_provider(provider_id):
+            logger.info(f"Querying {label}...")
             try:
-                openai_model = get_provider_model(Provider.OPENAI)
-                results.append(query_openai(keyword, openai_key, model=openai_model, query_template=query_template))
+                result = run_query(keyword, api_key, query_template)
+                _record_provider_outcome(provider_id, result)
+                results.append(result)
             except ProviderConfigUnavailableError:
-                logger.error("OpenAI provider config unavailable, skipping this run")
-        elif openai_key and should_run_provider(Provider.OPENAI):
-            logger.info("OpenAI is disabled, skipping")
-        elif should_run_provider(Provider.OPENAI):
-            logger.info("OpenAI API key not configured, skipping")
-
-        if perplexity_key and is_provider_enabled(Provider.PERPLEXITY) and should_run_provider(Provider.PERPLEXITY):
-            logger.info("Querying Perplexity...")
-            results.append(query_perplexity(keyword, perplexity_key, query_template=query_template))
-        elif perplexity_key and should_run_provider(Provider.PERPLEXITY):
-            logger.info("Perplexity is disabled, skipping")
-        elif should_run_provider(Provider.PERPLEXITY):
-            logger.info("Perplexity API key not configured, skipping")
-
-        if gemini_key and is_provider_enabled(Provider.GEMINI) and should_run_provider(Provider.GEMINI):
-            logger.info("Querying Gemini...")
-            results.append(query_gemini(keyword, gemini_key, query_template=query_template))
-        elif gemini_key and should_run_provider(Provider.GEMINI):
-            logger.info("Gemini is disabled, skipping")
-        elif should_run_provider(Provider.GEMINI):
-            logger.info("Gemini API key not configured, skipping")
-
-        if claude_key and is_provider_enabled(Provider.CLAUDE) and should_run_provider(Provider.CLAUDE):
-            logger.info("Querying Claude...")
-            enhanced_keyword = f"{keyword}\n\nPlease include source URLs for all information provided."
-            results.append(query_claude(enhanced_keyword, claude_key, query_template=query_template))
-        elif claude_key and should_run_provider(Provider.CLAUDE):
-            logger.info("Claude is disabled, skipping")
-        elif should_run_provider(Provider.CLAUDE):
-            logger.info("Claude API key not configured, skipping")
-
-    # Query Search providers
-    if run_search:
-        if brave_key and is_provider_enabled(Provider.BRAVE) and should_run_provider(Provider.BRAVE):
-            logger.info("Querying Brave Search...")
-            client = BraveSearchClient(brave_key)
-            results.append(client.search(keyword))
-        elif brave_key and should_run_provider(Provider.BRAVE):
-            logger.info("Brave Search is disabled, skipping")
-        elif should_run_provider(Provider.BRAVE):
-            logger.info("Brave Search API key not configured, skipping")
-
-        if tavily_key and is_provider_enabled(Provider.TAVILY) and should_run_provider(Provider.TAVILY):
-            logger.info("Querying Tavily...")
-            client = TavilySearchClient(tavily_key)
-            results.append(client.search(keyword))
-        elif tavily_key and should_run_provider(Provider.TAVILY):
-            logger.info("Tavily is disabled, skipping")
-        elif should_run_provider(Provider.TAVILY):
-            logger.info("Tavily API key not configured, skipping")
-
-        if exa_key and is_provider_enabled(Provider.EXA) and should_run_provider(Provider.EXA):
-            logger.info("Querying Exa...")
-            client = ExaSearchClient(exa_key)
-            results.append(client.search(keyword))
-        elif exa_key and should_run_provider(Provider.EXA):
-            logger.info("Exa is disabled, skipping")
-        elif should_run_provider(Provider.EXA):
-            logger.info("Exa API key not configured, skipping")
-
-        if serpapi_key and is_provider_enabled(Provider.SERPAPI) and should_run_provider(Provider.SERPAPI):
-            logger.info("Querying SerpAPI...")
-            client = SerpAPIClient(serpapi_key)
-            results.append(client.search(keyword))
-        elif serpapi_key and should_run_provider(Provider.SERPAPI):
-            logger.info("SerpAPI is disabled, skipping")
-        elif should_run_provider(Provider.SERPAPI):
-            logger.info("SerpAPI API key not configured, skipping")
-
-        if firecrawl_key and is_provider_enabled(Provider.FIRECRAWL) and should_run_provider(Provider.FIRECRAWL):
-            logger.info("Querying Firecrawl...")
-            client = FirecrawlSearchClient(firecrawl_key)
-            results.append(client.search(keyword))
-        elif firecrawl_key and should_run_provider(Provider.FIRECRAWL):
-            logger.info("Firecrawl is disabled, skipping")
-        elif should_run_provider(Provider.FIRECRAWL):
-            logger.info("Firecrawl API key not configured, skipping")
+                logger.error(f"{label} provider config unavailable, skipping this run")
+        elif api_key and should_run_provider(provider_id):
+            logger.info(f"{label} is disabled, skipping")
+        elif should_run_provider(provider_id):
+            logger.info(f"{label} API key not configured, skipping")
 
     return results
 
@@ -709,8 +706,7 @@ def store_search_results(keyword: str, timestamp: str, results: list[dict[str, A
         # Load brand config once upfront and reuse for all providers (avoids repeated DynamoDB reads)
         brand_config = None
         if brand_extraction_enabled:
-            from shared.utils import get_brand_config as _get_brand_config
-            brand_config = _get_brand_config()
+            brand_config = get_brand_config()
             logger.info(f"Loaded brand config for extraction: industry={brand_config.get('industry') if brand_config else 'default'}")
 
         for result in results:
@@ -831,7 +827,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         # as untrusted input. The brand extractor downstream wraps the full
         # provider response in <response_text> tags — this is defense in depth
         # so a crafted keyword can't poison the query itself.
-        keyword = sanitize_user_input(keyword_raw, max_length=500)
+        keyword = sanitize_user_input(keyword_raw, max_length=MAX_KEYWORD_LENGTH)
         if not keyword:
             error = ValueError("Keyword is empty after sanitization")
             log_error(error, "search handler", event)
@@ -904,5 +900,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         }
 
     except Exception as e:
-        log_error(e, f"search handler for keyword {event.get('keyword', 'unknown')}", event)
+        # !r so a keyword with interior newlines can't forge log records; this
+        # path logs the PRE-sanitization keyword straight from the event.
+        log_error(e, f"search handler for keyword {event.get('keyword', 'unknown')!r}", event)
         raise

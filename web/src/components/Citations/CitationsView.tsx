@@ -6,6 +6,7 @@ import type { TopUrl } from '../../types';
 import {
   API_BASE_URL, authenticatedFetch 
 } from '../../infrastructure';
+import { getDomain } from '../../formatting/urlFormatter';
 import { KeywordDetail } from '../Keywords/KeywordDetail';
 import { CitationDetailModal } from './CitationDetailModal';
 import { CitationFilters } from './CitationFilters';
@@ -172,14 +173,6 @@ export const CitationsView = ({
     });
   };
 
-  const getDomain = (url: string) => {
-    try {
-      return new URL(url).hostname;
-    } catch {
-      return url;
-    }
-  };
-
   return (
     <>
       <div className="space-y-6">
@@ -266,7 +259,6 @@ export const CitationsView = ({
                       onToggleRow={toggleRow}
                       onViewDetails={handleViewDetails}
                       onKeywordClick={setSelectedKeyword}
-                      getDomain={getDomain}
                     />
                   );
                 })}

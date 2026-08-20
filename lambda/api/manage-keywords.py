@@ -14,16 +14,16 @@ from botocore.exceptions import ClientError
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, success_response, validation_error
-from shared.decorators import api_handler, parse_json_body, validate
+from shared.decorators import api_handler, parse_json_body, route_handler, validate
 from shared.env_vars import resolve_table_env
-from shared.utils import (
-    get_timestamp,
-    is_unicode_scalar_text,
-    keyword_id,
-    load_keyword_identities,
-    normalize_keyword,
-    trim_keyword,
+from shared.keyword_store import (
+    ALLOWED_KEYWORD_PRIORITIES,
+    ALLOWED_KEYWORD_STATUSES,
+    build_keyword_item,
+    put_keyword_if_absent,
+    validate_keyword_text,
 )
+from shared.utils import get_timestamp, load_keyword_identities, normalize_keyword
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -34,48 +34,17 @@ dynamodb = boto3.resource('dynamodb')
 KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
 keywords_table = dynamodb.Table(KEYWORDS_TABLE)
 
-MAX_KEYWORD_LENGTH = 500
-
-
-@api_handler
-def handler(event, context):
-    """
-    POST /api/keywords - Create new keyword
-    PUT /api/keywords/{id} - Update keyword
-    DELETE /api/keywords/{id} - Delete keyword
-    """
-    # Manual routing preferred here: PUT/DELETE need path param extraction
-    # which @route_handler doesn't handle automatically
-    method = event.get('httpMethod')
-    path_params = event.get('pathParameters') or {}
-
-    if method == 'POST':
-        return create_keyword(event, context)
-    if method == 'PUT':
-        return update_keyword(event, context, keyword_id=path_params.get('id'))
-    if method == 'DELETE':
-        return delete_keyword(event, context, path_params.get('id'))
-    return validation_error('Method not allowed', event)
-
 
 def _validated_keyword(keyword, event):
-    """Validate and explicitly trim a keyword without runtime-specific strip."""
-    if not isinstance(keyword, str):
-        return None, validation_error('Keyword must be a string', event, 'keyword')
-    if not is_unicode_scalar_text(keyword):
-        return None, validation_error(
-            'Keyword must contain valid Unicode scalar values', event, 'keyword'
-        )
+    """Validate and explicitly trim a keyword without runtime-specific strip.
 
-    text = trim_keyword(keyword)
-    if not text:
-        return None, validation_error('Keyword must not be empty', event, 'keyword')
-    if len(text) > MAX_KEYWORD_LENGTH:
-        return None, validation_error(
-            f'Keyword exceeds maximum length of {MAX_KEYWORD_LENGTH} characters',
-            event,
-            'keyword',
-        )
+    Delegates the shared sequence (type → surrogate check → trim → length)
+    to ``shared.keyword_store`` — empty-after-trim rejects on this route
+    (bugs.md 3.3).
+    """
+    text, message = validate_keyword_text(keyword)
+    if message:
+        return None, validation_error(message, event, 'keyword')
     return text, None
 
 
@@ -95,7 +64,7 @@ def _duplicate_response(event):
     'region': {'type': str, 'max_length': 50, 'default': 'global', 'source': 'body'},
     'language': {'type': str, 'max_length': 10, 'default': 'en', 'source': 'body'},
     'category': {'type': str, 'max_length': 100, 'default': '', 'source': 'body'},
-    'priority': {'choices': ['high', 'normal', 'low'], 'default': 'normal', 'source': 'body'},
+    'priority': {'choices': list(ALLOWED_KEYWORD_PRIORITIES), 'default': 'normal', 'source': 'body'},
     'notes': {'type': str, 'max_length': 1000, 'default': '', 'source': 'body'}
 })
 def create_keyword(event, context, body, keyword, region, language, category, priority, notes):
@@ -108,30 +77,16 @@ def create_keyword(event, context, body, keyword, region, language, category, pr
     if identity in load_keyword_identities(keywords_table):
         return _duplicate_response(event)
 
-    item_id = keyword_id(text)
-    timestamp = get_timestamp()
-    item = {
-        'id': item_id,
-        'keyword': text,
-        'status': 'active',
-        'created_at': timestamp,
-        'updated_at': timestamp,
-        'region': region,
-        'language': language,
-        'category': category,
-        'priority': priority,
-        'notes': notes
-    }
-
-    try:
-        keywords_table.put_item(
-            Item=item,
-            ConditionExpression='attribute_not_exists(#id)',
-            ExpressionAttributeNames={'#id': 'id'},
-        )
-    except ClientError as write_error:
-        if not _is_conditional_conflict(write_error):
-            raise
+    item = build_keyword_item(
+        text,
+        timestamp=get_timestamp(),
+        region=region,
+        language=language,
+        category=category,
+        priority=priority,
+        notes=notes,
+    )
+    if not put_keyword_if_absent(keywords_table, item):
         return _duplicate_response(event)
 
     return success_response(item, event, 201)
@@ -140,16 +95,16 @@ def create_keyword(event, context, body, keyword, region, language, category, pr
 @parse_json_body
 @validate({
     'keyword': {'required': True, 'source': 'body'},
-    'status': {'choices': ['active', 'inactive', 'paused'], 'default': 'active', 'source': 'body'},
+    'status': {'choices': list(ALLOWED_KEYWORD_STATUSES), 'default': 'active', 'source': 'body'},
     'region': {'type': str, 'max_length': 50, 'source': 'body'},
     'language': {'type': str, 'max_length': 10, 'source': 'body'},
     'category': {'type': str, 'max_length': 100, 'source': 'body'},
-    'priority': {'choices': ['high', 'normal', 'low'], 'source': 'body'},
+    'priority': {'choices': list(ALLOWED_KEYWORD_PRIORITIES), 'source': 'body'},
     'notes': {'type': str, 'max_length': 1000, 'source': 'body'}
 })
-def update_keyword(event, context, keyword_id, body, keyword, status, region, language, category, priority, notes):
+def update_keyword(event, context, body, keyword, status, region, language, category, priority, notes, id=None):
     """Update display text and metadata without changing canonical identity."""
-    if not keyword_id:
+    if not id:
         return validation_error('Keyword ID is required', event, 'id')
 
     text, error = _validated_keyword(keyword, event)
@@ -157,7 +112,7 @@ def update_keyword(event, context, keyword_id, body, keyword, status, region, la
         return error
 
     existing = keywords_table.get_item(
-        Key={'id': keyword_id},
+        Key={'id': id},
         ConsistentRead=True,
     ).get('Item')
     if not existing:
@@ -213,7 +168,7 @@ def update_keyword(event, context, keyword_id, body, keyword, status, region, la
 
     try:
         response = keywords_table.update_item(
-            Key={'id': keyword_id},
+            Key={'id': id},
             UpdateExpression=update_expr,
             ExpressionAttributeNames=expr_names,
             ExpressionAttributeValues=expr_values,
@@ -232,14 +187,14 @@ def update_keyword(event, context, keyword_id, body, keyword, status, region, la
     return success_response(response['Attributes'], event)
 
 
-def delete_keyword(event, context, keyword_id):
+def delete_keyword(event, context, id=None):
     """Delete a keyword only when its row still exists."""
-    if not keyword_id:
+    if not id:
         return validation_error('Keyword ID is required', event, 'id')
 
     try:
         keywords_table.delete_item(
-            Key={'id': keyword_id},
+            Key={'id': id},
             ConditionExpression='attribute_exists(#id)',
             ExpressionAttributeNames={'#id': 'id'},
         )
@@ -249,3 +204,21 @@ def delete_keyword(event, context, keyword_id):
         return api_response(404, {'error': 'Keyword not found'}, event)
 
     return success_response({'message': 'Keyword deleted successfully'}, event)
+
+
+@api_handler
+@route_handler({
+    'POST': create_keyword,
+    'PUT': update_keyword,
+    'DELETE': delete_keyword,
+}, inject_path_params=True)
+def handler(event, context):
+    """
+    POST /api/keywords - Create new keyword
+    PUT /api/keywords/{id} - Update keyword
+    DELETE /api/keywords/{id} - Delete keyword
+
+    The ``{id}`` path parameter reaches update/delete as the ``id`` kwarg via
+    ``inject_path_params`` — the hand-rolled routing this file used to carry
+    (bugs.md 3.4) is gone.
+    """

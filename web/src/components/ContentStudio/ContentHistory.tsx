@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { ContentStudioHistory } from '../../types';
+import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { Spinner } from '../ui/Spinner';
 import { ConfirmModal } from '../ui/Modal';
 import { ContentDetailModal } from './ContentDetailModal';
@@ -17,7 +18,9 @@ export const ContentHistory = ({
 }: ContentHistoryProps) => {
   const [selectedItem, setSelectedItem] = useState<ContentStudioHistory | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const {
+    copied, copy
+  } = useClipboardCopy();
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
@@ -36,9 +39,7 @@ export const ContentHistory = ({
   };
 
   const handleCopy = async (text: string) => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    await copy(text);
   };
 
   const handleSelectItem = async (item: ContentStudioHistory) => {
@@ -93,7 +94,7 @@ export const ContentHistory = ({
           item={selectedItem}
           onClose={() => setSelectedItem(null)}
           onCopy={handleCopy}
-          copied={copied}
+          copied={copied !== null}
         />
       )}
 

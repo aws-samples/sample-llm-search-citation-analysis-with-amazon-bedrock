@@ -8,6 +8,7 @@ import { useVisibilityMetrics } from './useVisibilityMetrics';
 import {
   mockVisibilityResponse, createMockFetch 
 } from './useVisibilityMetrics-fixtures';
+import { createDeferredMockFetch } from './useAnalysisEndpoint-fixtures';
 
 vi.mock('../infrastructure', async () => {
   const actual = await vi.importActual('../infrastructure');
@@ -196,6 +197,52 @@ describe('useVisibilityMetrics', () => {
       expect(returnedData).not.toBeNull();
       expect(returnedData?.keyword).toBe('best hotels');
       expect(returnedData?.brands).toHaveLength(2);
+    });
+  });
+
+  describe('rapid refetch', () => {
+    it('aborts the previous request when a newer keyword fetch starts', () => {
+      const deferred = createDeferredMockFetch();
+      mockAuthenticatedFetch.mockImplementation(deferred.impl);
+
+      const { result } = renderHook(() => useVisibilityMetrics());
+
+      act(() => {
+        result.current.fetchVisibilityMetrics('old keyword');
+      });
+      act(() => {
+        result.current.fetchVisibilityMetrics('new keyword');
+      });
+
+      expect(deferred.requests[0].signal?.aborted).toBe(true);
+      expect(deferred.requests[1].signal?.aborted).toBe(false);
+    });
+
+    it('keeps the newer keyword data when a stale response resolves late', async () => {
+      const deferred = createDeferredMockFetch();
+      mockAuthenticatedFetch.mockImplementation(deferred.impl);
+
+      const { result } = renderHook(() => useVisibilityMetrics());
+
+      act(() => {
+        result.current.fetchVisibilityMetrics('old keyword');
+      });
+      act(() => {
+        result.current.fetchVisibilityMetrics('best hotels');
+      });
+
+      await act(async () => {
+        deferred.requests[1].respond(mockVisibilityResponse);
+      });
+      await act(async () => {
+        deferred.requests[0].respond({
+          ...mockVisibilityResponse,
+          keyword: 'old keyword',
+        });
+      });
+
+      expect(result.current.data).toStrictEqual(mockVisibilityResponse);
+      expect(result.current.error).toBeNull();
     });
   });
 });

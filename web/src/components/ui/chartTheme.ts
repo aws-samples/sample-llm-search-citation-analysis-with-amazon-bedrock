@@ -40,3 +40,32 @@ const LIGHT_THEME: ChartTheme = {
 export function getChartTheme(isDark: boolean): ChartTheme {
   return isDark ? DARK_THEME : LIGHT_THEME;
 }
+
+/**
+ * Theme-aware Chart.js option fragments (bugs.md 4.4 — the tooltip block
+ * below previously existed inline in four charts). Spread `themedTooltip`
+ * into a chart's `plugins.tooltip`, adding chart-specific `callbacks` as
+ * needed.
+ */
+export const themedLegend = (theme: ChartTheme) => ({
+  display: true,
+  position: 'bottom' as const,
+  labels: { color: theme.textColor },
+});
+
+export const themedTooltip = (theme: ChartTheme) => ({
+  backgroundColor: theme.tooltipBackground,
+  borderColor: theme.tooltipBorder,
+  borderWidth: 1,
+  titleColor: theme.tooltipText,
+  bodyColor: theme.tooltipText,
+});
+
+export const themedAxis = (theme: ChartTheme, extra: Record<string, unknown> = {}) => ({
+  ticks: {
+    color: theme.textColor,
+    ...(extra.ticks as object ?? {}) 
+  },
+  grid: { color: theme.gridColor },
+  ...extra,
+});

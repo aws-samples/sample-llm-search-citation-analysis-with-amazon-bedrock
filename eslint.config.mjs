@@ -1,7 +1,7 @@
 import nx from '@nx/eslint-plugin'
 import tseslint from 'typescript-eslint'
-import noGenericNames from './.eslint-rules/no-generic-names.js'
-import noLocalTestHelpers from './.eslint-rules/no-local-test-helpers.js';
+import noGenericNames from './.eslint-rules/no-generic-names.mjs'
+import noLocalTestHelpers from './.eslint-rules/no-local-test-helpers.mjs';
 import eslintComments from '@eslint-community/eslint-plugin-eslint-comments/configs'
 import importPlugin from 'eslint-plugin-import'
 import sonarjs from 'eslint-plugin-sonarjs'
@@ -38,6 +38,7 @@ export default tseslint.config(
       'cdk.out',
       '**/cdk.out',
       '*.config.ts',
+      '*.config.mts',
       '*.config.mjs',
       '*.config.js',
       'vitest.workspace.ts',
@@ -351,7 +352,10 @@ export default tseslint.config(
       'vitest/require-to-throw-message': 'error',
       'vitest/prefer-spy-on': 'error',
       // Allow expect.any() matchers in tests (returns any by design)
-      '@typescript-eslint/no-unsafe-assignment': 'off'
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      // XSS regression fixtures need literal 'javascript:' URIs to prove the
+      // urlSafety guard rejects them; specs never evaluate these strings.
+      'sonarjs/code-eval': 'off'
     },
   },
   // CDK infrastructure code - relaxed rules for infrastructure patterns

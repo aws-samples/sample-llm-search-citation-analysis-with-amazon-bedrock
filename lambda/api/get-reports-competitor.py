@@ -239,7 +239,7 @@ def _build_competitor_rollup(
         try:
             gap_payload = _gap_helper()(keyword, config)
         except Exception as exc:
-            logger.warning(f'gap helper failed for {keyword}: {exc}')
+            logger.warning(f'gap helper failed for {keyword!r}: {exc}')
             gap_payload = {}
 
         for gap in gap_payload.get('gaps', []) or []:

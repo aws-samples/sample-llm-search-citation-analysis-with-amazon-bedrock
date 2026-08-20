@@ -2,6 +2,7 @@ import {
   useState, useEffect, useCallback 
 } from 'react';
 import { formatDate } from '../../formatting/dateFormatter';
+import { safeHref } from '../../infrastructure';
 import { fetchCrawlHistory } from '../../api/dashboard';
 import {
   HistoryTab, type HistoryCrawl 
@@ -328,7 +329,7 @@ export const CitationDetailModal = ({
                 <h2 className="text-xl font-bold text-gray-900">{citation.title}</h2>
                 <StatusBadge status={citation.status} />
               </div>
-              <a href={citation.normalized_url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline break-all">
+              <a href={safeHref(citation.normalized_url)} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline break-all">
                 {citation.normalized_url}
               </a>
               <div className="flex gap-4 mt-2 text-sm text-gray-500">

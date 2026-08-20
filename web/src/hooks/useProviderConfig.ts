@@ -10,8 +10,14 @@ import {
   PROVIDER_DESCRIPTIONS, 
   PROVIDER_DOCS_URLS
 } from '../constants/providers';
+import type { ProviderHealthRecord } from '../formatting/providerHealth';
 
-export interface ProviderConfig {
+/**
+ * Extends `ProviderHealthRecord`, whose fields are all optional: they only
+ * appear once a provider has succeeded or failed at least once since health
+ * tracking shipped.
+ */
+export interface ProviderConfig extends ProviderHealthRecord {
   id: string;
   name: string;
   description: string;

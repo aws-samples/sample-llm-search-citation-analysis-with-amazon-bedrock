@@ -42,6 +42,33 @@ command_exists() {
     command -v "$1" &> /dev/null
 }
 
+# Resolve the AWS region the CLI will actually deploy into.
+#
+# `aws configure get region` reads only ~/.aws/config and exits non-zero when
+# the region comes from AWS_REGION / AWS_DEFAULT_REGION — the normal case on CI
+# and in any env-var-configured shell. The old `|| echo "us-east-1"` fallback
+# meant `cdk deploy` went to the real region while verification queried
+# us-east-1, printed a dozen "not found" warnings, and still declared success
+# (AUDIT-2026-08-19 §1.4). Hard-fails rather than guessing.
+#
+# Errors go to stderr because callers capture stdout in a command substitution.
+resolve_region() {
+    local region
+    region=$(aws configure get region 2>/dev/null || true)
+
+    if [ -z "$region" ]; then
+        region="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
+    fi
+
+    if [ -z "$region" ]; then
+        print_error "Could not determine the AWS region." >&2
+        print_error "Set one with 'aws configure set region <region>' or export AWS_REGION." >&2
+        return 1
+    fi
+
+    printf '%s' "$region"
+}
+
 # Function to check prerequisites
 check_prerequisites() {
     print_header "Checking Prerequisites"
@@ -104,8 +131,13 @@ check_prerequisites() {
     
     # Check AWS credentials
     if aws sts get-caller-identity &> /dev/null; then
-        local account_id=$(aws sts get-caller-identity --query Account --output text)
-        local region=$(aws configure get region || echo "not set")
+        # Split declaration from assignment: `local x=$(...)` reports the exit
+        # status of `local`, not of the command, which silently defeats set -e
+        # (SC2155).
+        local account_id
+        local region
+        account_id=$(aws sts get-caller-identity --query Account --output text)
+        region=$(resolve_region)
         print_success "AWS credentials configured"
         print_info "  Account ID: $account_id"
         print_info "  Region: $region"
@@ -221,8 +253,10 @@ build_typescript() {
 check_cdk_bootstrap() {
     print_header "Checking CDK Bootstrap"
     
-    local account_id=$(aws sts get-caller-identity --query Account --output text)
-    local region=$(aws configure get region || echo "us-east-1")
+    local account_id
+    local region
+    account_id=$(aws sts get-caller-identity --query Account --output text)
+    region=$(resolve_region)
     
     print_info "Checking if CDK is bootstrapped in account $account_id, region $region..."
     
@@ -274,7 +308,8 @@ rebuild_frontend_with_cognito() {
     print_info "Fetching Cognito configuration from CloudFormation..."
     
     # Check if stack exists and has Cognito outputs
-    local user_pool_id=$(aws cloudformation describe-stacks \
+    local user_pool_id
+    user_pool_id=$(aws cloudformation describe-stacks \
         --stack-name CitationAnalysisStack \
         --query 'Stacks[0].Outputs[?OutputKey==`UserPoolId`].OutputValue' \
         --output text 2>/dev/null || echo "")
@@ -295,17 +330,25 @@ rebuild_frontend_with_cognito() {
     bash scripts/build-web.sh
     print_success "Frontend rebuilt with Cognito configuration"
     
-    # Get bucket name from CloudFormation output
-    local bucket_name=$(aws cloudformation describe-stacks \
+    # Get bucket name from CloudFormation output.
+    #
+    # There is deliberately NO constructed-name fallback here. The next command
+    # is `aws s3 sync --delete`, so inventing a bucket name when the stack
+    # output is missing (wrong stack, mid-rollback, renamed output) would
+    # replace the contents of whatever bucket happens to own that name.
+    # webBucket is `versioned: false`, so recovery would be manual
+    # (AUDIT-2026-08-19 §1.5). A missing output means the stack is not in the
+    # expected state, which is a stop condition, not a guess.
+    local bucket_name
+    bucket_name=$(aws cloudformation describe-stacks \
         --stack-name CitationAnalysisStack \
         --query 'Stacks[0].Outputs[?OutputKey==`WebBucketName`].OutputValue' \
         --output text 2>/dev/null || echo "")
     
     if [ -z "$bucket_name" ] || [ "$bucket_name" = "None" ]; then
-        # Fallback to constructed name
-        local account_id=$(aws sts get-caller-identity --query Account --output text)
-        bucket_name="citation-analysis-web-${account_id}"
-        print_warning "WebBucketName output not found, using constructed name: ${bucket_name}"
+        print_error "WebBucketName output not found on stack CitationAnalysisStack."
+        print_error "Refusing to run 'aws s3 sync --delete' against a guessed bucket name."
+        return 1
     fi
     
     # Upload updated frontend to S3
@@ -320,7 +363,8 @@ rebuild_frontend_with_cognito() {
     
     # Clear CloudFront cache
     print_info "Clearing CloudFront cache..."
-    local dist_id=$(aws cloudformation describe-stacks \
+    local dist_id
+    dist_id=$(aws cloudformation describe-stacks \
         --stack-name CitationAnalysisStack \
         --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
         --output text 2>/dev/null || echo "")
@@ -341,12 +385,17 @@ verify_deployment() {
     print_header "Verifying Deployment"
     
     local stack_name="CitationAnalysisStack"
-    local region=$(aws configure get region || echo "us-east-1")
+    local region
+    local failures=0
+    local unprovisioned_secrets=0
+    region=$(resolve_region)
     
+    print_info "Verifying in region: $region"
     print_info "Checking stack status..."
     
     if aws cloudformation describe-stacks --stack-name "$stack_name" --region "$region" &> /dev/null; then
-        local stack_status=$(aws cloudformation describe-stacks \
+        local stack_status
+        stack_status=$(aws cloudformation describe-stacks \
             --stack-name "$stack_name" \
             --region "$region" \
             --query 'Stacks[0].StackStatus' \
@@ -363,6 +412,12 @@ verify_deployment() {
                 --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' \
                 --output table
             
+            # CDK-created resources below. A missing one is a real deployment
+            # failure, so each increments `failures` and the function exits
+            # non-zero at the end. Previously every check was a print_warning
+            # and the function unconditionally reached
+            # "Deployment verification complete!" (AUDIT-2026-08-19 §1.4).
+            
             # Verify DynamoDB tables
             print_info "Verifying DynamoDB tables..."
             local tables=("SearchResults" "Citations" "CrawledContent")
@@ -370,18 +425,8 @@ verify_deployment() {
                 if aws dynamodb describe-table --table-name "CitationAnalysis-$table" --region "$region" &> /dev/null; then
                     print_success "  ✓ Table exists: CitationAnalysis-$table"
                 else
-                    print_warning "  ✗ Table not found: CitationAnalysis-$table"
-                fi
-            done
-            
-            # Verify Secrets Manager secrets
-            print_info "Verifying Secrets Manager secrets..."
-            local secrets=("openai-key" "perplexity-key" "gemini-key" "claude-key")
-            for secret in "${secrets[@]}"; do
-                if aws secretsmanager describe-secret --secret-id "citation-analysis/$secret" --region "$region" &> /dev/null; then
-                    print_success "  ✓ Secret exists: citation-analysis/$secret"
-                else
-                    print_warning "  ✗ Secret not found: citation-analysis/$secret"
+                    print_error "  ✗ Table not found: CitationAnalysis-$table"
+                    failures=$((failures + 1))
                 fi
             done
             
@@ -392,18 +437,36 @@ verify_deployment() {
                 if aws lambda get-function --function-name "CitationAnalysis-$func" --region "$region" &> /dev/null; then
                     print_success "  ✓ Lambda exists: CitationAnalysis-$func"
                 else
-                    print_warning "  ✗ Lambda not found: CitationAnalysis-$func"
+                    print_error "  ✗ Lambda not found: CitationAnalysis-$func"
+                    failures=$((failures + 1))
                 fi
             done
             
             # Verify Step Functions state machine
             print_info "Verifying Step Functions state machine..."
-            local state_machines=$(aws stepfunctions list-state-machines --region "$region" --query "stateMachines[?contains(name, 'CitationAnalysis')].name" --output text)
+            local state_machines
+            state_machines=$(aws stepfunctions list-state-machines --region "$region" --query "stateMachines[?contains(name, 'CitationAnalysis')].name" --output text)
             if [ -n "$state_machines" ]; then
                 print_success "  ✓ State machine exists: $state_machines"
             else
-                print_warning "  ✗ State machine not found"
+                print_error "  ✗ State machine not found"
+                failures=$((failures + 1))
             fi
+            
+            # Secrets are NOT CDK-created — the stack imports them with
+            # `fromSecretNameV2` and the operator provisions them via
+            # scripts/setup-secrets.sh. A fresh deployment legitimately has
+            # none, so these stay warnings.
+            print_info "Checking provider API key secrets (operator-provisioned)..."
+            local secrets=("openai-key" "perplexity-key" "gemini-key" "claude-key")
+            for secret in "${secrets[@]}"; do
+                if aws secretsmanager describe-secret --secret-id "citation-analysis/$secret" --region "$region" &> /dev/null; then
+                    print_success "  ✓ Secret exists: citation-analysis/$secret"
+                else
+                    print_warning "  ○ Not yet provisioned: citation-analysis/$secret"
+                    unprovisioned_secrets=$((unprovisioned_secrets + 1))
+                fi
+            done
             
         else
             print_error "Stack status: $stack_status"
@@ -415,6 +478,17 @@ verify_deployment() {
         exit 1
     fi
     
+    if [ "$failures" -gt 0 ]; then
+        print_error "Deployment verification FAILED: $failures expected resource(s) missing in $region."
+        print_error "Check the AWS Console for stack CitationAnalysisStack."
+        exit 1
+    fi
+    
+    if [ "$unprovisioned_secrets" -gt 0 ]; then
+        print_warning "$unprovisioned_secrets provider API key secret(s) are not provisioned yet."
+        print_warning "Run scripts/setup-secrets.sh, or add keys via Settings > AI Providers."
+    fi
+    
     print_success "Deployment verification complete!"
 }
 
@@ -422,19 +496,23 @@ verify_deployment() {
 invalidate_cloudfront_cache() {
     print_header "Invalidating CloudFront Cache"
     
-    local distribution_id=$(aws cloudformation describe-stacks \
+    # `|| echo ""` keeps this step non-fatal: cache invalidation is a
+    # convenience, and the empty-value branch below already warns and skips.
+    local distribution_id
+    distribution_id=$(aws cloudformation describe-stacks \
         --stack-name CitationAnalysisStack \
         --query 'Stacks[0].Outputs[?OutputKey==`CloudFrontDistributionId`].OutputValue' \
-        --output text 2>/dev/null)
+        --output text 2>/dev/null || echo "")
     
     if [ -n "$distribution_id" ] && [ "$distribution_id" != "None" ]; then
         print_info "Creating cache invalidation for distribution: $distribution_id"
         
-        local invalidation_id=$(aws cloudfront create-invalidation \
+        local invalidation_id
+        invalidation_id=$(aws cloudfront create-invalidation \
             --distribution-id "$distribution_id" \
             --paths "/*" \
             --query 'Invalidation.Id' \
-            --output text 2>/dev/null)
+            --output text 2>/dev/null || echo "")
         
         if [ -n "$invalidation_id" ]; then
             print_success "Cache invalidation created: $invalidation_id"
@@ -454,7 +532,8 @@ display_next_steps() {
     echo "Your Citation Analysis System has been deployed successfully!"
     echo ""
     echo "📊 Dashboard URL:"
-    local dashboard_url=$(aws cloudformation describe-stacks --stack-name CitationAnalysisStack --query 'Stacks[0].Outputs[?OutputKey==`DashboardUrl`].OutputValue' --output text 2>/dev/null)
+    local dashboard_url
+    dashboard_url=$(aws cloudformation describe-stacks --stack-name CitationAnalysisStack --query 'Stacks[0].Outputs[?OutputKey==`DashboardUrl`].OutputValue' --output text 2>/dev/null || echo "")
     if [ -n "$dashboard_url" ]; then
         echo "   $dashboard_url"
         echo ""
@@ -505,5 +584,8 @@ main() {
     print_success "Deployment complete! 🎉"
 }
 
-# Run main function
-main
+# Run main only when executed directly, so the functions above can be sourced
+# and exercised by scripts/test-deploy-helpers.sh.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+    main
+fi

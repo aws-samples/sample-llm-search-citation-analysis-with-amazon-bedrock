@@ -1,40 +1,22 @@
 /**
- * Theme-aware Chart.js option factories for the keyword detail
- * panel. Kept in a separate file so `KeywordDetailComponents.tsx`
- * stays under the 400-line `max-lines` ESLint cap.
+ * Chart.js option builders for the keyword detail panel. Kept in a
+ * separate file so `KeywordDetailComponents.tsx` stays under the
+ * 400-line `max-lines` ESLint cap.
  *
  * Call with the result of `getChartTheme(isDark)` so chart chrome
  * (axis ticks, grid, legend, tooltip) adapts to the active theme.
+ * The themed* fragments live next to the theme in `ui/chartTheme.ts`
+ * (bugs.md 4.4).
  */
 import type { ChartTheme } from '../ui/chartTheme';
+import {
+  themedAxis, themedLegend, themedTooltip
+} from '../ui/chartTheme';
 
 interface SimpleTooltipContext {
   readonly dataset: { readonly label?: string };
   readonly parsed: { readonly y: number | null };
 }
-
-const themedLegend = (theme: ChartTheme) => ({
-  display: true,
-  position: 'bottom' as const,
-  labels: { color: theme.textColor },
-});
-
-const themedTooltip = (theme: ChartTheme) => ({
-  backgroundColor: theme.tooltipBackground,
-  borderColor: theme.tooltipBorder,
-  borderWidth: 1,
-  titleColor: theme.tooltipText,
-  bodyColor: theme.tooltipText,
-});
-
-const themedAxis = (theme: ChartTheme, extra: Record<string, unknown> = {}) => ({
-  ticks: {
-    color: theme.textColor,
-    ...(extra.ticks as object ?? {}) 
-  },
-  grid: { color: theme.gridColor },
-  ...extra,
-});
 
 export const lineChartOptions = (theme: ChartTheme) => ({
   responsive: true,

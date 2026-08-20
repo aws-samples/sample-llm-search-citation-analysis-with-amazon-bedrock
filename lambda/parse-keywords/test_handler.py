@@ -137,8 +137,83 @@ class TestQueryPromptResolution:
         result = handler_module.handler({'keywords': ['best hotels malaga']}, {})
         assert result['query_prompts'] == EXPECTED_PROMPTS
 
-    def test_returns_empty_prompts_when_prompt_table_query_fails(self, handler_module):
-        """A prompt lookup failure degrades to an empty list instead of failing the run."""
-        mock_prompts_table.query.side_effect = RuntimeError('table unavailable')
+    def test_returns_empty_prompts_when_no_prompts_are_enabled(self, handler_module):
+        """
+        A genuinely empty table is a legitimate configuration, not a failure —
+        it must stay distinguishable from the error cases below.
+        """
+        mock_prompts_table.query.return_value = {'Items': []}
+
         result = handler_module.handler({'keywords': ['best hotels']}, {})
+
         assert result['query_prompts'] == []
+
+
+class TestQueryPromptReadFailsClosed:
+    """
+    REGRESSION (AUDIT-2026-08-19 §2.12).
+
+    `read_enabled_query_prompts` returned `[]` on any exception, and it is the
+    sole prompt source for schedule-triggered runs. So a transient DynamoDB
+    throttle made the entire nightly run execute with **zero personas**,
+    complete, write rows and report success — leaving a hole in the time series
+    indistinguishable from "no personas were configured then". Logged at
+    WARNING and invisible otherwise.
+
+    The test this replaces asserted the old behavior as intended
+    ("degrades to an empty list instead of failing the run"), which is why the
+    bug survived: the contract was documented rather than questioned. A failed
+    run is recoverable; silently wrong data is not.
+    """
+
+    @staticmethod
+    def _client_error(code: str):
+        from botocore.exceptions import ClientError
+        return ClientError({'Error': {'Code': code, 'Message': code}}, 'Query')
+
+    def test_raises_when_the_prompt_read_throttles(self, handler_module):
+        """The case from the audit: transient failure must not look like success."""
+        mock_prompts_table.query.side_effect = self._client_error('ThrottlingException')
+
+        with pytest.raises(handler_module.QueryPromptReadError):
+            handler_module.handler({'keywords': ['best hotels']}, {})
+
+    def test_raises_on_provisioned_throughput_exceeded(self, handler_module):
+        mock_prompts_table.query.side_effect = self._client_error(
+            'ProvisionedThroughputExceededException'
+        )
+
+        with pytest.raises(handler_module.QueryPromptReadError):
+            handler_module.handler({'keywords': ['best hotels']}, {})
+
+    def test_raises_on_an_unexpected_error(self, handler_module):
+        mock_prompts_table.query.side_effect = RuntimeError('table unavailable')
+
+        with pytest.raises(handler_module.QueryPromptReadError):
+            handler_module.handler({'keywords': ['best hotels']}, {})
+
+    def test_returns_empty_prompts_when_the_table_does_not_exist(self, handler_module):
+        """
+        A missing table or index means the persona feature is not provisioned
+        in this deployment — a configuration state, not a failure. Failing here
+        would break bootstrap deploys, so this case stays fail-open on purpose.
+        """
+        mock_prompts_table.query.side_effect = self._client_error('ResourceNotFoundException')
+
+        result = handler_module.handler({'keywords': ['best hotels']}, {})
+
+        assert result['query_prompts'] == []
+
+    def test_does_not_read_prompts_at_all_when_the_input_supplies_them(self, handler_module):
+        """
+        Trigger-API runs pass prompts in the execution input, so a broken
+        prompts table must not fail them — only schedule-driven runs read it.
+        """
+        mock_prompts_table.query.side_effect = self._client_error('ThrottlingException')
+        prompts = [{'id': 'p1', 'name': 'Custom', 'template': 'Find {keyword}'}]
+
+        result = handler_module.handler(
+            {'keywords': ['best hotels'], 'query_prompts': prompts}, {}
+        )
+
+        assert result['query_prompts'] == prompts

@@ -13,21 +13,10 @@ from __future__ import annotations
 import logging
 import os
 
-import boto3
-
 from shared.config import PROVIDERS
+from shared.utils import get_dynamodb_resource
 
 logger = logging.getLogger(__name__)
-
-_dynamodb = None
-
-
-def _get_dynamodb():
-    """Lazy DynamoDB resource so import has no side effects."""
-    global _dynamodb
-    if _dynamodb is None:
-        _dynamodb = boto3.resource('dynamodb')
-    return _dynamodb
 
 
 def get_enabled_provider_count(table_name: str | None = None) -> int:
@@ -58,7 +47,7 @@ def get_enabled_provider_count(table_name: str | None = None) -> int:
         return len(PROVIDERS)
 
     try:
-        table = _get_dynamodb().Table(resolved)
+        table = get_dynamodb_resource().Table(resolved)
         response = table.scan(ProjectionExpression='provider_id, enabled')
         items = response.get('Items', [])
 

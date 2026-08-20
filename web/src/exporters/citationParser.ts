@@ -5,6 +5,7 @@
 import {
   API_BASE_URL, authenticatedFetch 
 } from '../infrastructure';
+import { getDomain } from '../formatting/urlFormatter';
 import type { TopUrl } from '../types';
 
 interface UrlBreakdown {
@@ -48,14 +49,6 @@ export type SortDirection = 'asc' | 'desc';
 export interface SortConfig {
   column: SortColumn;
   direction: SortDirection;
-}
-
-function getDomain(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
 }
 
 /**

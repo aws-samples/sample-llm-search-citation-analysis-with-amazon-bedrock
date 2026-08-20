@@ -1,17 +1,20 @@
 import {
   useCallback, useEffect, useLayoutEffect, useRef, useState
 } from 'react';
+import { validateApiConfig } from '../api/client';
 import {
   API_BASE_URL,
   authenticatedFetch,
   getErrorMessage,
   isAbortError,
-  ApiConfigError,
   ApiRequestError,
 } from '../infrastructure';
 import type {
   Stats, Citations, Search, Keyword
 } from '../types';
+import {
+  isAuthoritativeKeywordsResponse, isKeywordsResponse
+} from '../types/domain/keywordDecoders';
 
 // The KeywordMgmt Lambda has a 120-second timeout. This second refresh runs
 // after that ceiling so an abandoned browser request cannot remain stale if
@@ -20,16 +23,6 @@ export const LATE_KEYWORD_RECONCILIATION_MS = 125_000;
 
 /** @internal Response from the searches API */
 interface SearchesResponse { searches: Search[] }
-
-/** @internal Response from the ordinary keywords API */
-interface KeywordsResponse { keywords: Keyword[] }
-
-/** @internal Complete response from the authoritative keywords API */
-interface AuthoritativeKeywordsResponse {
-  keywords: Keyword[];
-  count: number;
-  complete: true;
-}
 
 function isStats(value: unknown): value is Stats {
   return typeof value === 'object' && value !== null && 'total_searches' in value;
@@ -40,46 +33,13 @@ function isCitations(value: unknown): value is Citations {
 }
 
 function isSearchesResponse(value: unknown): value is SearchesResponse {
-  return typeof value === 'object' && value !== null && 'searches' in value;
-}
-
-function isKeywordStatus(value: unknown): value is Keyword['status'] {
-  return value === undefined || value === 'active' || value === 'inactive' || value === 'paused';
-}
-
-function isKeyword(value: unknown): value is Keyword {
+  // Array check matters (AUDIT-2026-08-19 2.17): a key-only check let
+  // `{"searches": null}` put null into Search[] state and blank the view.
   return (
     typeof value === 'object'
     && value !== null
-    && 'id' in value
-    && typeof value.id === 'string'
-    && 'keyword' in value
-    && typeof value.keyword === 'string'
-    && 'created_at' in value
-    && typeof value.created_at === 'string'
-    && (!('status' in value) || isKeywordStatus(value.status))
-  );
-}
-
-function isKeywordsResponse(value: unknown): value is KeywordsResponse {
-  return (
-    typeof value === 'object'
-    && value !== null
-    && 'keywords' in value
-    && Array.isArray(value.keywords)
-    && value.keywords.every(isKeyword)
-  );
-}
-
-function isAuthoritativeKeywordsResponse(value: unknown): value is AuthoritativeKeywordsResponse {
-  return (
-    isKeywordsResponse(value)
-    && 'count' in value
-    && typeof value.count === 'number'
-    && Number.isInteger(value.count)
-    && value.count === value.keywords.length
-    && 'complete' in value
-    && value.complete === true
+    && 'searches' in value
+    && Array.isArray(value.searches)
   );
 }
 
@@ -98,12 +58,6 @@ function getEmptyCitations(): Citations {
     brand_stats: [],
     top_urls: [],
   };
-}
-
-function validateApiConfig(): void {
-  if (API_BASE_URL.includes('PLACEHOLDER')) {
-    throw new ApiConfigError('API URL not configured. Please set VITE_API_URL environment variable or deploy the application.');
-  }
 }
 
 function validateResponses(responses: Response[]): void {

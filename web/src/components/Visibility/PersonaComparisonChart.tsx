@@ -11,7 +11,9 @@ import { Bar } from 'react-chartjs-2';
 import type { TooltipItem } from 'chart.js';
 import type { PersonaRankingsResponse } from '../../types';
 import { useTheme } from '../../hooks/useTheme';
-import { getChartTheme } from '../ui/chartTheme';
+import {
+  getChartTheme, themedTooltip
+} from '../ui/chartTheme';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -90,11 +92,7 @@ export function PersonaComparisonChart({ data }: PersonaComparisonChartProps) {
         labels: { color: theme.textColor },
       },
       tooltip: {
-        backgroundColor: theme.tooltipBackground,
-        borderColor: theme.tooltipBorder,
-        borderWidth: 1,
-        titleColor: theme.tooltipText,
-        bodyColor: theme.tooltipText,
+        ...themedTooltip(theme),
         callbacks: {
           label(context: TooltipItem<'bar'>) {
             const personaIndex = context.dataIndex;

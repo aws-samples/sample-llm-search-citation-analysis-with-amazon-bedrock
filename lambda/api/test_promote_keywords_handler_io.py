@@ -415,7 +415,7 @@ class TestPromotionPersistenceProperty:
             if promotion_handler.normalize_keyword(text)
         }
 
-        existing_keys = promotion_handler.load_existing_keyword_keys(table)
+        existing_keys = promotion_handler.load_keyword_identities(table)
 
         assert existing_keys == expected_keys, (
             f'Expected normalized keys {expected_keys}, got {existing_keys}'
@@ -468,7 +468,7 @@ class TestPromotionPersistenceProperty:
         table = _mock_table(scan_error=error)
 
         with pytest.raises(ClientError):
-            promotion_handler.load_existing_keyword_keys(table)
+            promotion_handler.load_keyword_identities(table)
 
         table.batch_writer.assert_not_called()
         table.put_item.assert_not_called()
@@ -484,7 +484,7 @@ class TestPromotionPersistenceUnit:
     def test_no_keys_are_returned_when_the_table_is_empty(self, promotion_handler):
         table = _mock_table(scan_pages=[{'Items': []}])
 
-        keys = promotion_handler.load_existing_keyword_keys(table)
+        keys = promotion_handler.load_keyword_identities(table)
 
         assert keys == set(), f'Expected no keys, got {keys}'
         assert table.scan.call_count == 1, f'Expected a single scan, got {table.scan.call_count}'
@@ -493,7 +493,7 @@ class TestPromotionPersistenceUnit:
         pages = [{'Items': [{'keyword': '   '}, {'keyword': None}, {}, {'keyword': 'seo audit'}]}]
         table = _mock_table(scan_pages=pages)
 
-        keys = promotion_handler.load_existing_keyword_keys(table)
+        keys = promotion_handler.load_keyword_identities(table)
 
         assert keys == {'seo audit'}, f'Expected only the real key, got {keys}'
 

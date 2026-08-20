@@ -20,6 +20,7 @@ import { ReportsRouter } from './components/Reports/ReportsRouter';
 import { ConfirmModal } from './components/ui/Modal';
 import { AboutModal } from './components/About';
 import { OnboardingModal } from './components/Onboarding';
+import { ProviderHealthBanner } from './components/ProviderHealth';
 import { ThemeToggle } from './components/ui/ThemeToggle';
 import { PrintToPdfButton } from './components/ui/PrintToPdfButton';
 import { Spinner } from './components/ui/Spinner';
@@ -325,6 +326,13 @@ function MainApp() {
 
         <div className="p-4 sm:p-6 lg:p-8">
           <div className="max-w-7xl mx-auto">
+            {/* Sits above the view content so a silently failing provider is
+                visible from every tab, not just Settings. Suppressed in print
+                mode, like the other app-wide chrome. */}
+            {!isPrintMode && (
+              <ProviderHealthBanner onNavigateToProviders={() => handleNavigateToSettings('providers')} />
+            )}
+
             <KEYWORD_RECONCILIATION_CONTEXT.Provider value={reconcileKeywords}>
               {isReportRoute ? (
                 <ReportsRouter keywords={keywords} />

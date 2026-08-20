@@ -13,7 +13,6 @@ vi.mock('./UserModals', () => ({
   UserDetailsModal: ({ user }: { user: unknown }) => user ? <div data-testid="user-details-modal">User Details</div> : null,
   getStatusBadgeClass: () => 'badge-class',
   getStatusLabel: (status: string) => status,
-  formatDate: (date: string) => date,
 }));
 
 import { useUserManagement } from '../../hooks/useUserManagement';
