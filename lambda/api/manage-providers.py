@@ -18,6 +18,7 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler
+from shared.dynamo_decimal import to_int
 from shared.env_vars import resolve_table_env
 from shared.utils import get_timestamp
 
@@ -114,6 +115,42 @@ PROVIDERS = {
         'type': PROVIDER_TYPE_SEARCH
     }
 }
+
+# Health bookkeeping the search Lambda records on each provider row
+# (shared/provider_health.py). Surfaced on GET /providers so the dashboard can
+# say "No credit remaining" instead of showing a green tick — the exact gap
+# behind the 2026-08-14 incident where a run reported success_rate 100.0 while
+# Claude rejected every request (AUDIT-2026-08-19).
+PROVIDER_HEALTH_FIELDS = (
+    'last_error',
+    'last_error_at',
+    'last_error_category',
+    'last_success_at',
+    'consecutive_failures',
+    'auto_disabled',
+    'disabled_reason',
+)
+
+
+def provider_health_fields(config: dict) -> dict:
+    """The health fields to surface for one provider, from its config row.
+
+    Absent fields stay absent — never ``null``. The dashboard treats the
+    *presence* of ``last_error`` as a live failure, so a row that predates
+    health tracking (or a legacy row where a success wrote an explicit
+    DynamoDB ``NULL``) must contribute nothing at all.
+
+    ``consecutive_failures`` arrives as ``Decimal`` from boto3 and is
+    normalised to ``int`` so it serialises as ``3`` rather than ``3.0``.
+    """
+    fields = {
+        field: config[field]
+        for field in PROVIDER_HEALTH_FIELDS
+        if config.get(field) is not None
+    }
+    if 'consecutive_failures' in fields:
+        fields['consecutive_failures'] = to_int(fields['consecutive_failures'])
+    return fields
 
 
 def get_secret_status(secret_name: str) -> dict:
@@ -357,7 +394,13 @@ def validate_api_key(provider_id: str, api_key: str) -> dict:
 
 
 def handle_get_providers(event: dict, context: Any) -> dict:
-    """GET /providers - Get all providers with their status."""
+    """GET /providers - Get all providers with their status and health.
+
+    Health fields (``last_error*``, ``last_success_at``,
+    ``consecutive_failures``, ``auto_disabled``, ``disabled_reason``) ride
+    along whenever the provider row carries them; the ProviderHealthBanner and
+    the Settings badges render exclusively from these fields.
+    """
     providers = []
 
     for provider_id, info in PROVIDERS.items():
@@ -374,7 +417,8 @@ def handle_get_providers(event: dict, context: Any) -> dict:
             'enabled': config.get('enabled', True),
             'configured': secret_status.get('has_value', False),
             'masked_key': secret_status.get('masked_key'),
-            'last_updated': secret_status.get('last_updated')
+            'last_updated': secret_status.get('last_updated'),
+            **provider_health_fields(config),
         })
 
     return success_response({'providers': providers}, event)

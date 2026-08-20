@@ -945,8 +945,14 @@ export class CitationAnalysisStack extends cdk.Stack {
       },
     });
 
-    // Grant Search Lambda read access to ProviderConfig table
-    providerConfigTable.grantReadData(searchLambdaRole);
+    // Grant Search Lambda read/write access to ProviderConfig table.
+    // Read: provider enablement before each query. Write: health bookkeeping —
+    // record_provider_failure / record_provider_success (shared/provider_health.py)
+    // update_item the provider row after every provider result, and the
+    // auto-disable path flips `enabled` after repeated terminal failures.
+    // Read-only here silently killed the whole health feature: the writes were
+    // AccessDenied and swallowed by design (PR #103 review, blocker 1).
+    providerConfigTable.grantReadWriteData(searchLambdaRole);
 
     // Deduplication Lambda Function
     const deduplicationLogGroup = new logs.LogGroup(this, 'DeduplicationLogGroup', {

@@ -567,13 +567,40 @@ class TestRecordProviderSuccess:
 
         assert _write(table)['ExpressionAttributeValues'][':zero'] == 0
 
-    def test_clears_the_stored_error_category(self):
-        """A stale category would keep Settings warning about a fixed provider."""
+    def test_removes_the_stored_error_fields_rather_than_nulling_them(self):
+        """
+        A stale category would keep Settings warning about a fixed provider —
+        and clearing it with ``None`` is no better: DynamoDB stores ``NULL``,
+        the API serialises it as JSON ``null``, and the dashboard's
+        ``hasFailure`` treats the field's presence as a live failure. So a
+        provider that had only ever succeeded would wear a warning badge.
+        REMOVE is the only clear that both sides read as "nothing wrong".
+        """
         table = MagicMock()
 
         record_provider_success(table, 'claude', now=NOW)
 
-        assert 'last_error_category = :none' in _write(table)['UpdateExpression']
+        assert 'REMOVE last_error, last_error_category' in _write(table)['UpdateExpression']
+
+    def test_writes_no_null_attribute_values_on_success(self):
+        """The behavioural half of the test above: no ``None`` ever leaves this function."""
+        table = MagicMock()
+
+        record_provider_success(table, 'claude', now=NOW)
+
+        assert None not in _write(table)['ExpressionAttributeValues'].values()
+
+    def test_keeps_the_last_failure_timestamp_for_recovery_display(self):
+        """
+        ``last_error_at`` is what lets the dashboard tell "recovered after a
+        failure" apart from "never failed at all", so a success must not
+        erase it.
+        """
+        table = MagicMock()
+
+        record_provider_success(table, 'claude', now=NOW)
+
+        assert 'last_error_at' not in _write(table)['UpdateExpression']
 
     def test_records_when_the_provider_last_answered(self):
         table = MagicMock()

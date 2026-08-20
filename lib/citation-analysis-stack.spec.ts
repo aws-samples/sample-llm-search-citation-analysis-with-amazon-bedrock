@@ -17,6 +17,8 @@ const ONE_HOUR_IN_MINUTES = 60;
 const SEVEN_DAYS_IN_MINUTES = 7 * 24 * 60;
 
 const API_FUNCTION_PREFIX = 'CitationAnalysis-API-';
+const SEARCH_ROLE_NAME = 'CitationAnalysis-SearchLambdaRole';
+const PROVIDER_CONFIG_TABLE_NAME = 'CitationAnalysis-ProviderConfig';
 const RETENTION_DAYS = 30;
 const RETAIN = 'Retain';
 const DELETED_API_WAF_NAME = 'CitationAnalysis-API-WAF';
@@ -448,6 +450,66 @@ function extractBucketLifecycle(template: Template, namePrefix: string): BucketL
   return { transitions, expirationDays };
 }
 
+function findLogicalIdByName(
+  template: Template,
+  resourceType: string,
+  namePropertyKey: string,
+  physicalName: string
+): string {
+  const resources = template.findResources(resourceType, {
+    Properties: { [namePropertyKey]: physicalName },
+  });
+  return Object.keys(resources)[0] ?? '';
+}
+
+/** Whether an AWS::IAM::Policy resource is attached to the given role. */
+function policyAttachedToRole(policy: unknown, roleLogicalId: string): boolean {
+  const attachedRoles = resolvePath(policy, ['Properties', 'Roles']);
+  return (Array.isArray(attachedRoles) ? attachedRoles : [])
+    .some((roleRef) => resolveString(roleRef, ['Ref']) === roleLogicalId);
+}
+
+/** The Action entries of one Allow statement whose Resource targets the table. */
+function statementActionsOnTable(statement: unknown, tableLogicalId: string): string[] {
+  if (resolveString(statement, ['Effect']) !== 'Allow') return [];
+  const resource = resolvePath(statement, ['Resource']);
+  if (!collectGetAttTargets(resource).includes(tableLogicalId)) return [];
+
+  const action = resolvePath(statement, ['Action']);
+  return (Array.isArray(action) ? action : [action])
+    .filter((entry): entry is string => typeof entry === 'string');
+}
+
+/**
+ * Every DynamoDB action a role's attached policies allow on one table,
+ * deduplicated and sorted.
+ *
+ * Exists because IAM grants and runtime writes live in different languages and
+ * different test suites: the Python tests hand `record_provider_failure` a
+ * permissive mock table, so a missing `dynamodb:UpdateItem` in the template is
+ * invisible everywhere except here. Both resources are located by physical
+ * name so a logical-ID refactor cannot silently detach the assertion.
+ */
+function extractRoleTableActions(
+  template: Template,
+  roleName: string,
+  tableName: string
+): string[] {
+  const roleLogicalId = findLogicalIdByName(template, 'AWS::IAM::Role', 'RoleName', roleName);
+  const tableLogicalId =
+    findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', tableName);
+
+  const actions = Object.values(template.findResources('AWS::IAM::Policy'))
+    .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
+    .flatMap((policy) => {
+      const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
+      return (Array.isArray(statements) ? statements : [])
+        .flatMap((statement) => statementActionsOnTable(statement, tableLogicalId));
+    });
+
+  return [...new Set(actions)].sort((left, right) => left.localeCompare(right));
+}
+
 const synthesized: {
   definitionRaw: string;
   crawlerEnvVars: Record<string, unknown>;
@@ -470,6 +532,7 @@ const synthesized: {
   cloudFrontWafResourceIds: string[];
   screenshotsLifecycle: BucketLifecycleSnapshot;
   accessLogsLifecycle: BucketLifecycleSnapshot;
+  searchRoleProviderConfigActions: string[];
 } = {
   definitionRaw: '',
   crawlerEnvVars: {},
@@ -492,6 +555,7 @@ const synthesized: {
   cloudFrontWafResourceIds: [],
   screenshotsLifecycle: { transitions: [], expirationDays: [] },
   accessLogsLifecycle: { transitions: [], expirationDays: [] },
+  searchRoleProviderConfigActions: [],
 };
 
 /**
@@ -549,6 +613,9 @@ beforeAll(() => {
 
   synthesized.screenshotsLifecycle = extractBucketLifecycle(template, SCREENSHOTS_BUCKET_PREFIX);
   synthesized.accessLogsLifecycle = extractBucketLifecycle(template, ACCESS_LOGS_BUCKET_PREFIX);
+
+  synthesized.searchRoleProviderConfigActions =
+    extractRoleTableActions(template, SEARCH_ROLE_NAME, PROVIDER_CONFIG_TABLE_NAME);
 }, 60_000);
 
 describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
@@ -1072,6 +1139,42 @@ describe('Screenshots bucket lifecycle', () => {
      */
     expect(synthesized.accessLogsLifecycle.expirationDays)
       .toStrictEqual([ACCESS_LOGS_EXPIRY_DAYS]);
+  });
+});
+
+/**
+ * PR #103 review, blocker 1 — provider health writes were denied by IAM.
+ *
+ * The search Lambda records provider health after every provider result:
+ * `record_provider_failure` / `record_provider_success`
+ * (lambda/shared/provider_health.py) `update_item` the provider row, and the
+ * auto-disable path flips `enabled = false` after repeated terminal failures.
+ * The role's grant was read-only, so every write failed AccessDenied — and was
+ * swallowed by design, because health bookkeeping must never break a search.
+ * The 2026-08-14 incident fix therefore shipped dark: `consecutive_failures`
+ * stayed 0, auto-disable never fired, and Settings kept its green ticks.
+ *
+ * Neither unit suite can see this seam — the Python tests mock the table, the
+ * synth is the only artifact that carries the actual permission — so it is
+ * pinned here.
+ */
+describe('Search Lambda provider-health permissions', () => {
+  it('grants the search role at least one DynamoDB action on the ProviderConfig table', () => {
+    /**
+     * Non-vacuity guard: if either physical-name lookup broke, the walk would
+     * return [] and a `toContain` below would fail confusingly; this names the
+     * real problem first.
+     */
+    expect(synthesized.searchRoleProviderConfigActions.length).toBeGreaterThan(0);
+  });
+
+  it('lets the search role write provider health to the ProviderConfig table', () => {
+    expect(synthesized.searchRoleProviderConfigActions).toContain('dynamodb:UpdateItem');
+  });
+
+  it('keeps the search role able to read provider enablement', () => {
+    /** The read the run loop depends on must survive the write being added. */
+    expect(synthesized.searchRoleProviderConfigActions).toContain('dynamodb:GetItem');
   });
 });
 

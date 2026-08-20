@@ -292,18 +292,27 @@ def record_provider_success(table: Any, provider_id: str, *, now: str | None = N
     Deliberately does NOT re-enable an auto-disabled provider. Re-enabling is
     the user's decision, made in Settings once they have fixed the underlying
     problem — flipping it back automatically would hide that anything happened.
+
+    The stale error fields are REMOVEd rather than set to ``None``. A ``None``
+    write stores a DynamoDB ``NULL``, which survives into the
+    ``GET /providers`` payload as JSON ``null`` — and the dashboard treats the
+    *presence* of ``last_error`` as "this provider has a live failure", so a
+    provider that had only ever succeeded would render a warning badge.
+    Absence is the one representation both sides agree means "nothing wrong".
+
+    ``last_error_at`` is intentionally kept: it is what lets the dashboard
+    tell "recovered after a failure" apart from "never failed at all".
     """
     try:
         table.update_item(
             Key={'provider_id': provider_id},
             UpdateExpression=(
-                'SET last_success_at = :ts, consecutive_failures = :zero, '
-                'last_error = :none, last_error_category = :none'
+                'SET last_success_at = :ts, consecutive_failures = :zero '
+                'REMOVE last_error, last_error_category'
             ),
             ExpressionAttributeValues={
                 ':ts': now or get_timestamp(),
                 ':zero': 0,
-                ':none': None,
             },
         )
     except Exception as exc:
