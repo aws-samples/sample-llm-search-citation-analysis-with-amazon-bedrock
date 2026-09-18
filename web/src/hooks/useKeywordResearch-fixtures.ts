@@ -1,58 +1,7 @@
 import { vi } from 'vitest';
 import type {
-  KeywordExpansionResult, CompetitorAnalysisResult, KeywordResearchItem 
+  KeywordResearchItem, ResearchStep
 } from '../types';
-
-export const mockExpansionResult: KeywordExpansionResult = {
-  id: 'expansion-1',
-  seed_keyword: 'best hotels',
-  industry: 'hospitality',
-  keyword_count: 2,
-  keywords: [
-    {
-      keyword: 'best luxury hotels',
-      intent: 'commercial',
-      competition: 'high',
-      relevance: 0.9,
-      opportunity: 'high'
-    },
-    {
-      keyword: 'top rated hotels',
-      intent: 'informational',
-      competition: 'medium',
-      relevance: 0.85,
-      opportunity: 'medium'
-    },
-  ],
-};
-
-export const mockCompetitorResult: CompetitorAnalysisResult = {
-  id: 'competitor-1',
-  url: 'https://competitor.com',
-  domain: 'competitor.com',
-  industry: 'hospitality',
-  keyword_count: 2,
-  primary_keywords: [
-    {
-      keyword: 'hotel deals',
-      intent: 'commercial',
-      competition: 'high',
-      relevance: 0.8,
-      source: 'title'
-    },
-  ],
-  secondary_keywords: [
-    {
-      keyword: 'vacation packages',
-      intent: 'commercial',
-      competition: 'medium',
-      relevance: 0.6,
-      source: 'content'
-    },
-  ],
-  longtail_keywords: [],
-  content_gaps: [],
-};
 
 export const mockHistoryItems: KeywordResearchItem[] = [
   {
@@ -61,7 +10,8 @@ export const mockHistoryItems: KeywordResearchItem[] = [
     seed_keyword: 'hotels',
     industry: 'hospitality',
     keyword_count: 5,
-    created_at: '2024-01-01'
+    created_at: '2024-01-01',
+    status: 'completed',
   },
   {
     id: 'research-2',
@@ -70,85 +20,47 @@ export const mockHistoryItems: KeywordResearchItem[] = [
     domain: 'example.com',
     industry: 'hospitality',
     keyword_count: 3,
-    created_at: '2024-01-02'
+    created_at: '2024-01-02',
+    status: 'partial',
   },
 ];
 
-export function createMockFetch(options: {
-  expansionResponse?: KeywordExpansionResult;
-  competitorResponse?: CompetitorAnalysisResult;
-  historyResponse?: { items: KeywordResearchItem[] };
-  shouldFail?: boolean;
-  errorResponse?: { error: string };
-} = {}) {
-  return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-    if (options.shouldFail) {
-      return Promise.resolve({
-        ok: false,
-        status: 500,
-        json: () => Promise.resolve({}) 
-      });
-    }
-
-    if (url.includes('/expand') && init?.method === 'POST') {
-      if (options.errorResponse) {
-        return Promise.resolve({
-          ok: false,
-          status: 400,
-          json: () => Promise.resolve(options.errorResponse) 
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.expansionResponse ?? mockExpansionResult),
-      });
-    }
-
-    if (url.includes('/competitor') && init?.method === 'POST') {
-      if (options.errorResponse) {
-        return Promise.resolve({
-          ok: false,
-          status: 400,
-          json: () => Promise.resolve(options.errorResponse) 
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.competitorResponse ?? mockCompetitorResult),
-      });
-    }
-
-    if (url.includes('/history')) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.historyResponse ?? { items: mockHistoryItems }),
-      });
-    }
-
-    if (init?.method === 'DELETE') {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ success: true }) 
-      });
-    }
-
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({}) 
-    });
-  });
+export function buildStep(provider: string, overrides: Partial<ResearchStep> = {}): ResearchStep {
+  return {
+    step_id: `r1-${provider}`,
+    provider,
+    status: 'completed',
+    keyword_count: 1,
+    ...overrides,
+  };
 }
 
-/** A completed expansion history item for poll-path tests. */
-export function buildCompletedExpansionItem(id: string, seedKeyword: string): KeywordResearchItem {
+/** A research job snapshot as `GET /keyword-research/{id}` returns it. */
+export function buildJob(overrides: Partial<KeywordResearchItem> = {}): KeywordResearchItem {
   return {
-    id,
+    id: 'job-1',
     type: 'expansion',
-    seed_keyword: seedKeyword,
+    seed_keyword: 'best hotels',
     industry: 'hospitality',
-    keyword_count: 1,
-    created_at: '2026-08-19',
+    status: 'pending',
+    keyword_count: 0,
+    created_at: '2026-09-18T10:00:00Z',
+    steps: [],
+    steps_total: 0,
+    steps_done: 0,
+    ...overrides,
+  };
+}
+
+export function buildCompletedExpansionJob(id: string, seedKeyword: string): KeywordResearchItem {
+  return buildJob({
+    id,
+    seed_keyword: seedKeyword,
     status: 'completed',
+    keyword_count: 1,
+    steps_total: 1,
+    steps_done: 1,
+    steps: [buildStep('openai')],
     keywords: [
       {
         keyword: `${seedKeyword} deluxe`,
@@ -156,54 +68,123 @@ export function buildCompletedExpansionItem(id: string, seedKeyword: string): Ke
         competition: 'low',
         relevance: 0.9,
         opportunity: 'high',
+        providers: ['openai'],
       },
     ],
+  });
+}
+
+export function buildCompletedCompetitorJob(id: string, url: string): KeywordResearchItem {
+  return buildJob({
+    id,
+    type: 'competitor',
+    seed_keyword: undefined,
+    url,
+    domain: 'competitor.com',
+    provider: 'openai',
+    status: 'completed',
+    keyword_count: 2,
+    steps_total: 1,
+    steps_done: 1,
+    steps: [buildStep('openai', { keyword_count: 2 })],
+    analysis: {
+      industry: 'hospitality',
+      primary_keywords: [{
+        keyword: 'hotel deals',
+        intent: 'commercial',
+        competition: 'high',
+        relevance: 0.8 
+      }],
+      secondary_keywords: [{
+        keyword: 'vacation packages',
+        intent: 'commercial',
+        competition: 'medium',
+        relevance: 0.6 
+      }],
+      longtail_keywords: [],
+      content_gaps: [],
+    },
+  });
+}
+
+interface MockJsonResponse {
+  ok: boolean;
+  status: number;
+  statusText?: string;
+  json: () => Promise<unknown>;
+}
+
+function jsonResponse(status: number, body: unknown): MockJsonResponse {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: '',
+    json: () => Promise.resolve(body),
   };
 }
 
-interface PollingHistoryResult {
-  ok: boolean;
-  status?: number;
-  items?: KeywordResearchItem[];
+export interface ResearchMockFetchOptions {
+  /** Job ids handed out by successive POST /expand and /competitor calls. */
+  pendingIds?: string[];
+  /**
+   * Snapshots returned by successive GET /keyword-research/{id} calls, per id.
+   * The last snapshot repeats once the list is exhausted.
+   */
+  snapshots?: Record<string, KeywordResearchItem[]>;
+  /** Replaces the snapshot lookup: script raw poll responses (401s, 404s). */
+  pollResponse?: () => MockJsonResponse;
+  /** Makes POST /expand and /competitor fail with this structured 4xx body. */
+  startError?: { error: string };
+  historyItems?: KeywordResearchItem[];
 }
 
 /**
- * Mock fetch for the async/polling path (AUDIT 2.20 regression tests):
- * POSTs to /expand and /competitor return a pending job id (consumed from
- * `pendingIds` in order), and each /history GET is answered by calling
- * `historyResult` — letting tests script 401s, empty polls, or completions.
+ * Mock `authenticatedFetch` for the research API: starts return a pending job
+ * with the next id from `pendingIds`, polls replay `snapshots[id]` in order,
+ * `/retry` answers 202, `/history` and DELETE answer from fixtures.
  */
-export function createPollingMockFetch(options: {
-  pendingIds: string[];
-  historyResult: () => PollingHistoryResult;
-}) {
-  const remainingIds = [...options.pendingIds];
+export function createResearchMockFetch(options: ResearchMockFetchOptions = {}) {
+  const remainingIds = [...(options.pendingIds ?? ['job-1'])];
+  const served: Record<string, number> = {};
+
+  const nextSnapshot = (id: string): MockJsonResponse => {
+    const list = options.snapshots?.[id] ?? [];
+    if (list.length === 0) return jsonResponse(404, { error: 'Research not found' });
+    const index = Math.min(served[id] ?? 0, list.length - 1);
+    served[id] = index + 1;
+    return jsonResponse(200, list[index]);
+  };
+
   return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
-    if ((url.includes('/expand') || url.includes('/competitor')) && init?.method === 'POST') {
-      const id = remainingIds.shift() ?? 'research-pending';
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve({
-          status: 'pending',
-          id,
-        }),
-      });
+    const method = init?.method ?? 'GET';
+
+    if (method === 'POST' && (url.endsWith('/expand') || url.endsWith('/competitor'))) {
+      if (options.startError) return Promise.resolve(jsonResponse(400, options.startError));
+      const id = remainingIds.shift() ?? 'job-pending';
+      const type = url.endsWith('/expand') ? 'expansion' : 'competitor';
+      return Promise.resolve(jsonResponse(202, buildJob({
+        id,
+        type 
+      })));
     }
 
-    if (url.includes('/history')) {
-      const result = options.historyResult();
-      return Promise.resolve({
-        ok: result.ok,
-        status: result.status ?? (result.ok ? 200 : 500),
-        json: () => Promise.resolve({ items: result.items ?? [] }),
-      });
+    if (method === 'POST' && url.endsWith('/retry')) {
+      return Promise.resolve(jsonResponse(202, {
+        id: 'job-1',
+        status: 'pending' 
+      }));
     }
 
-    return Promise.resolve({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({}),
-    });
+    if (method === 'GET' && url.includes('/keyword-research/history')) {
+      return Promise.resolve(jsonResponse(200, { items: options.historyItems ?? mockHistoryItems }));
+    }
+
+    if (method === 'GET') {
+      if (options.pollResponse) return Promise.resolve(options.pollResponse());
+      const id = url.slice(url.lastIndexOf('/') + 1);
+      return Promise.resolve(nextSnapshot(id));
+    }
+
+    return Promise.resolve(jsonResponse(200, { success: true }));
   });
 }

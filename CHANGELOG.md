@@ -9,6 +9,68 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.2.0] - 2026-09-18
+
+Keyword research that cannot lose results: every research job now runs in its
+own Step Functions execution, queries the web-search providers in parallel,
+checkpoints each provider's answer as it arrives, and can be retried for only
+the providers that failed. Refreshing the browser or switching tabs no longer
+loses a run.
+
+### Added
+
+- **Research state machine.** `CitationAnalysis-KeywordResearch` (Standard,
+  30-minute timeout) with the new worker `CitationAnalysis-ResearchWorker`
+  (`lambda/research-worker`, 300 s, shared layer): `Plan` → `Map` (one step per
+  configured provider, up to 10 in parallel) → `Finalize`. A provider error
+  fails its own step and the job ends `partial` with the other providers'
+  keywords; a worker crash is recorded by a `FailResearchStep` catch; a crash in
+  planning or finalizing marks the job `failed`. Logged to
+  `/aws/vendedlogs/states/CitationAnalysis-KeywordResearch` (30 days).
+- `GET /api/keyword-research/{id}` — the job, its per-provider steps and the
+  merged result, including the *partial* result while other providers are
+  still running. `POST /api/keyword-research/{id}/retry` — re-runs only the
+  steps that did not complete, keeping the completed providers' results.
+- Job statuses `running` and `partial` (alongside `pending`, `completed`,
+  `failed`); job rows carry `steps`, `steps_total/done/failed`, `retry_count`,
+  `execution_arn` and a 90-day TTL. Merged expansion keywords are deduplicated
+  on keyword identity, ranked by relevance and provider agreement, and record
+  the `providers` that proposed them.
+- `CitationAnalysis-KeywordResearch` table: GSI `TypeCreatedIndex`
+  (`type`, `created_at`) so `/history` is a newest-first query instead of a
+  scan, and TTL on `ttl`.
+- Research UI: a progress panel with the job status and each provider's step
+  (Waiting / Querying / Done / Failed, keyword counts, error), a
+  "Retry failed providers" action on partial and failed jobs (also in
+  History), and re-attachment to the running job after a refresh or tab
+  switch (session storage). Polling backs off from 3 s to 10 s after the first
+  minute and outlasts the state machine timeout.
+
+### Changed
+
+- `CitationAnalysis-API-KeywordMgmt` no longer invokes itself: its timeout
+  drops from 120 s to the 29 s API Gateway ceiling, its reserved concurrency
+  (10) is removed, and it gains `states:StartExecution` on the research state
+  machine. The `async_expand` / `async_competitor` self-invoke events are gone.
+- `count` on `POST /api/keyword-research/expand` is now the number of keywords
+  asked of *each* provider; the merged, deduplicated result can be larger.
+- The reader-side stale sweep fires 35 minutes after the current attempt
+  started (above the 30-minute execution timeout) instead of 180 s, and
+  measures from `retried_at` on retries so a retry of an old job is not swept
+  immediately.
+- `shared.ai_clients`: `search_with_fallback` (sequential fallback across
+  providers) is replaced by `run_web_search` (one provider, caller-owned retry
+  budget) plus `get_web_search_provider`; the per-provider runners accept
+  `max_retries`.
+
+### Fixed
+
+- A research job could only be found through the history scan; a job that
+  fell off the first page vanished from the UI while still running. Jobs are
+  now read by id.
+- Truncated or unparseable provider output is a failed step (retryable), no
+  longer a "completed" job with 0 keywords.
+
 ## [2.1.0] - 2026-09-18
 
 Keyword groups: organise keywords into folders (typically one per hotel or

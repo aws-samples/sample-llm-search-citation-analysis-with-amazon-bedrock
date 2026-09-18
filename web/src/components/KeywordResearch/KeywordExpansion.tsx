@@ -2,11 +2,12 @@ import {
   useEffect, useMemo, useState
 } from 'react';
 import type {
-  Keyword, KeywordExpansionResult
+  Keyword, KeywordExpansionResult, KeywordResearchItem
 } from '../../types';
 import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { KeywordResultsTable } from './KeywordResultsTable';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
+import { ResearchProgress } from './ResearchProgress';
 import { Spinner } from '../ui/Spinner';
 
 interface KeywordExpansionProps {
@@ -14,6 +15,9 @@ interface KeywordExpansionProps {
   loading: boolean;
   result: KeywordExpansionResult | null;
   error: string | null;
+  /** The job being followed (running or just finished), for progress and retry. */
+  activeJob?: KeywordResearchItem | null;
+  onRetry?: (job: KeywordResearchItem) => void;
   onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
@@ -65,7 +69,7 @@ const INDUSTRIES = [
 ];
 
 export const KeywordExpansion = ({
-  onExpand, loading, result, error, onKeywordsAdded
+  onExpand, loading, result, error, activeJob = null, onRetry, onKeywordsAdded
 }: KeywordExpansionProps) => {
   const [seedKeyword, setSeedKeyword] = useState('');
   const [industry, setIndustry] = useState('general');
@@ -154,6 +158,11 @@ export const KeywordExpansion = ({
         </form>
       </div>
 
+      {/* Progress: one step per provider, retry for the ones that failed */}
+      {activeJob?.type === 'expansion' && (
+        <ResearchProgress job={activeJob} onRetry={onRetry} retrying={loading} />
+      )}
+
       {/* Error */}
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
@@ -167,7 +176,7 @@ export const KeywordExpansion = ({
           <KeywordPromotionControls promotion={promotion} />
           <KeywordResultsTable
             keywords={result.keywords}
-            title={`${result.keyword_count} keywords for "${result.seed_keyword}"`}
+            title={`${result.keywords.length} keywords for "${result.seed_keyword}"`}
             subtitle={`Industry: ${result.industry}`}
             selectable
             selected={selectedKeywords}

@@ -97,15 +97,21 @@ function resolveString(root: unknown, keys: string[]): string {
   return typeof value === 'string' ? value : '';
 }
 
+/** The one AWS::StepFunctions::StateMachine resource carrying `stateMachineName`. */
+function findStateMachine(template: Template, stateMachineName: string): unknown {
+  const stateMachines = template.findResources('AWS::StepFunctions::StateMachine', {
+    Properties: { StateMachineName: stateMachineName },
+  });
+  return stateMachines[Object.keys(stateMachines)[0] ?? ''];
+}
+
 /**
- * Extract the Step Functions definition JSON from the synthesized template.
+ * Extract a Step Functions definition JSON from the synthesized template.
  * Fn::Join produces ["", [...parts]]; string parts are concatenated and
  * object refs replaced with a placeholder.
  */
-function extractStateMachineDefinition(template: Template): string {
-  const stateMachines = template.findResources('AWS::StepFunctions::StateMachine');
-  const logicalId = Object.keys(stateMachines)[0];
-  const joinArgs = resolvePath(stateMachines[logicalId], ['Properties', 'DefinitionString', 'Fn::Join']);
+function extractStateMachineDefinition(template: Template, stateMachineName: string): string {
+  const joinArgs = resolvePath(findStateMachine(template, stateMachineName), ['Properties', 'DefinitionString', 'Fn::Join']);
   const parts = Array.isArray(joinArgs) && Array.isArray(joinArgs[1]) ? joinArgs[1] : [];
   return parts
     .map((part) => (typeof part === 'string' ? part : '"__REF__"'))
@@ -203,14 +209,34 @@ function extractLambdaLayerRefs(template: Template, functionName: string): strin
     .filter((ref) => ref !== '');
 }
 
-/** KeySchema of a DynamoDB table found by its TableName property. */
-function extractTableKeySchema(template: Template, tableName: string): unknown {
+/** One property of a DynamoDB table found by its TableName property. */
+function extractTableProperty(template: Template, tableName: string, property: string): unknown {
   const tables = template.findResources('AWS::DynamoDB::Table', {
     Properties: { TableName: tableName },
   });
   const [logicalId] = Object.keys(tables);
   if (!logicalId) return undefined;
-  return resolvePath(tables[logicalId], ['Properties', 'KeySchema']);
+  return resolvePath(tables[logicalId], ['Properties', property]);
+}
+
+/** KeySchema of a DynamoDB table found by its TableName property. */
+function extractTableKeySchema(template: Template, tableName: string): unknown {
+  return extractTableProperty(template, tableName, 'KeySchema');
+}
+
+/** Timeout (seconds) of a Lambda function found by its FunctionName, NaN when absent. */
+function extractFunctionTimeout(template: Template, functionName: string): number {
+  const functions = template.findResources('AWS::Lambda::Function', {
+    Properties: { FunctionName: functionName },
+  });
+  const timeout = resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Timeout']);
+  return typeof timeout === 'number' ? timeout : Number.NaN;
+}
+
+/** The top-level `TimeoutSeconds` of a state machine definition, NaN when absent. */
+function extractDefinitionTimeoutSeconds(definitionRaw: string): number {
+  const match = /"TimeoutSeconds":(\d+)/.exec(definitionRaw);
+  return match ? Number(match[1]) : Number.NaN;
 }
 
 function findApiResourceId(template: Template, pathPart: string, parentId?: string): string {
@@ -372,13 +398,12 @@ function retentionForLogGroupName(template: Template, logGroupName: string): num
 }
 
 /**
- * Read the state machine's logging configuration, resolving the destination
+ * Read a state machine's logging configuration, resolving the destination
  * back to the log group it points at so retention can be asserted too.
  */
-function extractStateMachineLogging(template: Template): StateMachineLoggingSnapshot {
-  const stateMachines = template.findResources('AWS::StepFunctions::StateMachine');
+function extractStateMachineLogging(template: Template, stateMachineName: string): StateMachineLoggingSnapshot {
   const config = resolvePath(
-    stateMachines[Object.keys(stateMachines)[0] ?? ''],
+    findStateMachine(template, stateMachineName),
     ['Properties', 'LoggingConfiguration']
   );
 
@@ -535,6 +560,14 @@ function extractRoleTableActions(
 
 const synthesized: {
   definitionRaw: string;
+  researchDefinitionRaw: string;
+  researchStateMachineTimeoutSeconds: number;
+  researchWorkerTimeoutSeconds: number;
+  researchWorkerLayerRefs: string[];
+  keywordResearchTableIndexes: unknown;
+  keywordResearchTableTtl: unknown;
+  keywordResearchIdMethods: ApiGatewayMethodSnapshot[];
+  keywordResearchRetryMethods: ApiGatewayMethodSnapshot[];
   crawlerEnvVars: Record<string, unknown>;
   parseKeywordsEnvVars: Record<string, unknown>;
   keywordMgmtEnvVars: Record<string, unknown>;
@@ -557,6 +590,7 @@ const synthesized: {
   apiLambdaLogGroups: LambdaLogGroupSnapshot[];
   workerLogGroupRetention: Map<string, number>;
   stateMachineLogging: StateMachineLoggingSnapshot;
+  researchStateMachineLogging: StateMachineLoggingSnapshot;
   prodStageMethodSettings: StageMethodSettingSnapshot[];
   webAcls: WebAclSnapshot[];
   cloudFrontWafResourceIds: string[];
@@ -565,6 +599,14 @@ const synthesized: {
   searchRoleProviderConfigActions: string[];
 } = {
   definitionRaw: '',
+  researchDefinitionRaw: '',
+  researchStateMachineTimeoutSeconds: Number.NaN,
+  researchWorkerTimeoutSeconds: Number.NaN,
+  researchWorkerLayerRefs: [],
+  keywordResearchTableIndexes: undefined,
+  keywordResearchTableTtl: undefined,
+  keywordResearchIdMethods: [],
+  keywordResearchRetryMethods: [],
   crawlerEnvVars: {},
   parseKeywordsEnvVars: {},
   keywordMgmtEnvVars: {},
@@ -587,6 +629,7 @@ const synthesized: {
   apiLambdaLogGroups: [],
   workerLogGroupRetention: new Map(),
   stateMachineLogging: { level: '', includesExecutionData: false, destinationRetentionDays: Number.NaN },
+  researchStateMachineLogging: { level: '', includesExecutionData: false, destinationRetentionDays: Number.NaN },
   prodStageMethodSettings: [],
   webAcls: [],
   cloudFrontWafResourceIds: [],
@@ -596,7 +639,7 @@ const synthesized: {
 };
 
 /**
- * The five Step Functions workers, which have carried explicit log groups since
+ * The Step Functions workers, which have carried explicit log groups since
  * they were written. Listed so the API-side fix cannot be delivered by
  * regressing the functions that were already correct.
  */
@@ -606,14 +649,25 @@ const WORKER_LOG_GROUP_NAMES = [
   '/aws/lambda/CitationAnalysis-Deduplication',
   '/aws/lambda/CitationAnalysis-Crawler',
   '/aws/lambda/CitationAnalysis-GenerateSummary',
+  '/aws/lambda/CitationAnalysis-ResearchWorker',
 ];
+
+const WORKFLOW_STATE_MACHINE = 'CitationAnalysis-Workflow';
+const RESEARCH_STATE_MACHINE = 'CitationAnalysis-KeywordResearch';
+const RESEARCH_WORKER_FUNCTION_NAME = 'CitationAnalysis-ResearchWorker';
 
 beforeAll(() => {
   const app = new cdk.App();
   const stack = new CitationAnalysisStack(app, 'TestStack');
   const template = Template.fromStack(stack);
 
-  synthesized.definitionRaw = extractStateMachineDefinition(template);
+  synthesized.definitionRaw = extractStateMachineDefinition(template, WORKFLOW_STATE_MACHINE);
+  synthesized.researchDefinitionRaw = extractStateMachineDefinition(template, RESEARCH_STATE_MACHINE);
+  synthesized.researchStateMachineTimeoutSeconds = extractDefinitionTimeoutSeconds(synthesized.researchDefinitionRaw);
+  synthesized.researchWorkerTimeoutSeconds = extractFunctionTimeout(template, RESEARCH_WORKER_FUNCTION_NAME);
+  synthesized.researchWorkerLayerRefs = extractLambdaLayerRefs(template, RESEARCH_WORKER_FUNCTION_NAME);
+  synthesized.keywordResearchTableIndexes = extractTableProperty(template, 'CitationAnalysis-KeywordResearch', 'GlobalSecondaryIndexes');
+  synthesized.keywordResearchTableTtl = extractTableProperty(template, 'CitationAnalysis-KeywordResearch', 'TimeToLiveSpecification');
   synthesized.crawlerEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-Crawler');
   synthesized.parseKeywordsEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-ParseKeywords');
   synthesized.keywordMgmtEnvVars = extractLambdaEnvVars(template, KEYWORD_MGMT_FUNCTION_NAME);
@@ -633,6 +687,12 @@ beforeAll(() => {
   synthesized.keywordGroupIdMethods = extractApiMethods(template, keywordGroupId);
   synthesized.keywordGroupMembersMethods = extractApiMethods(template, keywordGroupMembersId);
   synthesized.keywordGroupsTableKeySchema = extractTableKeySchema(template, 'CitationAnalysis-KeywordGroups');
+
+  const keywordResearchId = findApiResourceId(template, 'keyword-research');
+  const keywordResearchJobId = findApiResourceId(template, '{id}', keywordResearchId);
+  const keywordResearchRetryId = findApiResourceId(template, 'retry', keywordResearchJobId);
+  synthesized.keywordResearchIdMethods = extractApiMethods(template, keywordResearchJobId);
+  synthesized.keywordResearchRetryMethods = extractApiMethods(template, keywordResearchRetryId);
   synthesized.healthCheckLayerRefs = extractLambdaLayerRefs(template, 'CitationAnalysis-API-Health');
 
   synthesized.apiAuthSnapshots = extractApiAuthSnapshots(template);
@@ -651,7 +711,8 @@ beforeAll(() => {
     WORKER_LOG_GROUP_NAMES.map((name) => [name, retentionForLogGroupName(template, name)])
   );
 
-  synthesized.stateMachineLogging = extractStateMachineLogging(template);
+  synthesized.stateMachineLogging = extractStateMachineLogging(template, WORKFLOW_STATE_MACHINE);
+  synthesized.researchStateMachineLogging = extractStateMachineLogging(template, RESEARCH_STATE_MACHINE);
   synthesized.prodStageMethodSettings = extractProdStageMethodSettings(template);
 
   synthesized.webAcls = extractWebAcls(template);
@@ -683,7 +744,6 @@ describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
   const DOCUMENTED_EXCEPTIONS = new Map<string, number>([
     // Also runs as its own async worker; that path is not behind the gateway.
     ['CitationAnalysis-API-ContentStudio', 300],
-    ['CitationAnalysis-API-KeywordMgmt', 120],
     // Persists its Bedrock result as the last step, so a 504 today is still
     // recoverable from the cache it writes. 29s would put the SIGKILL before
     // that write and make a slow keyword permanently broken.
@@ -711,7 +771,7 @@ describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
     expect(offenders).toStrictEqual([]);
   });
 
-  it('still has all three documented exceptions wired to the API', () => {
+  it('still has both documented exceptions wired to the API', () => {
     /** Stops the allowlist rotting into a licence for arbitrary timeouts. */
     const apiBacked = Object.keys(synthesized.apiBackedFunctionTimeouts);
 
@@ -744,11 +804,19 @@ describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
       synthesized.apiBackedFunctionTimeouts['CitationAnalysis-API-StatsInsights']
     ).toBe(GATEWAY_CEILING);
   });
+
+  it('caps Keyword Management now that research runs in its own state machine', () => {
+    /**
+     * Held a 120s exception while it invoked itself to run research in the
+     * background. Since 2.2.0 it only starts executions and reads rows.
+     */
+    expect(synthesized.apiBackedFunctionTimeouts[KEYWORD_MGMT_FUNCTION_NAME]).toBe(GATEWAY_CEILING);
+  });
 });
 
 describe('Self-invoking Lambda concurrency caps', () => {
   /**
-   * AUDIT-2026-08-19 §2.4. Both functions re-invoke themselves asynchronously
+   * AUDIT-2026-08-19 §2.4. Content Studio re-invokes itself asynchronously
    * for background work, and async invocations are retried twice by default.
    * Without a ceiling, a bug in a self-invoke guard consumes the account's
    * whole concurrency pool — starving every other function, manage-users
@@ -759,8 +827,13 @@ describe('Self-invoking Lambda concurrency caps', () => {
     expect(synthesized.contentStudioConcurrency).toBe(SELF_INVOKING_CONCURRENCY);
   });
 
-  it('caps Keyword Management, which self-invokes for keyword research', () => {
-    expect(synthesized.keywordMgmtConcurrency).toBe(SELF_INVOKING_CONCURRENCY);
+  it('no longer reserves concurrency for Keyword Management, which stopped self-invoking', () => {
+    /**
+     * Reserved concurrency also *takes* capacity from the account pool. With
+     * research in its own state machine there is no loop left to bound, so the
+     * function shares the pool like every other API function.
+     */
+    expect(synthesized.keywordMgmtConcurrency).toBeUndefined();
   });
 
   it('keeps the cap small enough to bound a runaway loop', () => {
@@ -769,12 +842,7 @@ describe('Self-invoking Lambda concurrency caps', () => {
      * so this fails if someone "fixes" a throttling complaint by raising it to
      * something that no longer bounds anything.
      */
-    const caps = [
-      synthesized.contentStudioConcurrency,
-      synthesized.keywordMgmtConcurrency,
-    ];
-
-    expect(caps.every((cap) => cap !== undefined && cap <= 50)).toBe(true);
+    expect(synthesized.contentStudioConcurrency).toBeLessThanOrEqual(50);
   });
 });
 
@@ -978,6 +1046,95 @@ describe('Step Functions workflow', () => {
 
   it('does not reference query_prompts from the raw execution input', () => {
     expect(synthesized.definitionRaw).not.toContain('$$.Execution.Input.query_prompts');
+  });
+});
+
+describe('Keyword research state machine', () => {
+  /**
+   * 2.2.0: keyword research left the API Lambda's self-invoke path for a
+   * dedicated state machine. One execution per job, one parallel step per
+   * web-search provider, every step checkpointed into the job row.
+   */
+  const SWEEP_THRESHOLD_SECONDS = 35 * 60;
+
+  it('fans out one step per provider through a Map that fails steps, not the job', () => {
+    expect(synthesized.researchDefinitionRaw).toContain('"ItemsPath":"$.steps"');
+    expect(synthesized.researchDefinitionRaw).toContain('"step_id.$":"$$.Map.Item.Value.step_id"');
+    expect(synthesized.researchDefinitionRaw).toContain('"action":"fail_step"');
+  });
+
+  it('marks the job failed when planning or finalizing crashes', () => {
+    expect(synthesized.researchDefinitionRaw).toContain('"action":"fail"');
+    expect(synthesized.researchDefinitionRaw).toContain('"Type":"Fail"');
+  });
+
+  it('times out below the API sweep threshold so a live job is never swept', () => {
+    /**
+     * `shared/research_jobs.RESEARCH_STALE_AFTER_SECONDS` marks jobs failed
+     * after 35 minutes. An execution allowed to outlive that could finish
+     * after being failed and flip the row back — the inversion the sweep
+     * exists to avoid.
+     */
+    expect(synthesized.researchStateMachineTimeoutSeconds).toBe(30 * 60);
+    expect(synthesized.researchStateMachineTimeoutSeconds).toBeLessThan(SWEEP_THRESHOLD_SECONDS);
+  });
+
+  it('gives the worker minutes per step, since Step Functions is its only invoker', () => {
+    expect(synthesized.researchWorkerTimeoutSeconds).toBe(300);
+  });
+
+  it('attaches the shared layer the worker imports from', () => {
+    expect(synthesized.researchWorkerLayerRefs).toHaveLength(1);
+    expect(synthesized.researchWorkerLayerRefs[0]).toMatch(/^SharedLayer/);
+  });
+
+  it('hands the state machine ARN to the API function that starts executions', () => {
+    expect(synthesized.keywordMgmtEnvVars).toHaveProperty('RESEARCH_STATE_MACHINE_ARN');
+  });
+
+  it('logs every state with execution data to a 30-day group', () => {
+    expect(synthesized.researchStateMachineLogging).toStrictEqual({
+      level: 'ALL',
+      includesExecutionData: true,
+      destinationRetentionDays: RETENTION_DAYS,
+    });
+  });
+});
+
+describe('Keyword research table', () => {
+  it('indexes jobs by type and creation time so history is a query, not a scan', () => {
+    expect(synthesized.keywordResearchTableIndexes).toStrictEqual([{
+      IndexName: 'TypeCreatedIndex',
+      KeySchema: [
+        { AttributeName: 'type', KeyType: 'HASH' },
+        { AttributeName: 'created_at', KeyType: 'RANGE' },
+      ],
+      Projection: { ProjectionType: 'ALL' },
+    }]);
+  });
+
+  it('expires rows through the ttl attribute the job writer sets', () => {
+    expect(synthesized.keywordResearchTableTtl).toStrictEqual({ AttributeName: 'ttl', Enabled: true });
+  });
+});
+
+describe('Keyword research routes', () => {
+  it('exposes GET and DELETE on the job id resource', () => {
+    const verbs = synthesized.keywordResearchIdMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
+
+    expect(verbs).toStrictEqual(['DELETE', 'GET']);
+  });
+
+  it('exposes POST only on the retry sub-resource', () => {
+    expect(synthesized.keywordResearchRetryMethods.map((method) => method.httpMethod)).toStrictEqual(['POST']);
+  });
+
+  it('requires the Cognito authorizer on every job route', () => {
+    const all = [...synthesized.keywordResearchIdMethods, ...synthesized.keywordResearchRetryMethods];
+
+    expect(all).toHaveLength(3);
+    expect(all.every((method) => method.authorizationType === COGNITO_AUTH)).toBe(true);
+    expect(all.every((method) => method.integrationUri.includes(synthesized.keywordMgmtFunctionId))).toBe(true);
   });
 });
 

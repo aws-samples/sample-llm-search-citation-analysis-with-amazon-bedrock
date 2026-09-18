@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { useKeywordResearch } from '../../hooks/useKeywordResearch';
-import type { Keyword } from '../../types';
+import type {
+  Keyword, KeywordResearchItem
+} from '../../types';
 import { KeywordExpansion } from './KeywordExpansion';
 import { CompetitorAnalysis } from './CompetitorAnalysis';
 import { ResearchHistory } from './ResearchHistory';
@@ -18,6 +20,12 @@ interface KeywordResearchViewProps {
 export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProps = {}) => {
   const [activeTab, setActiveTab] = useState<ResearchTab>('expand');
   const research = useKeywordResearch();
+
+  // A retry from History jumps to the tab that shows the job's progress.
+  const handleHistoryRetry = (job: KeywordResearchItem) => {
+    setActiveTab(job.type === 'expansion' ? 'expand' : 'competitor');
+    void research.retryResearch(job);
+  };
 
   const tabs: {
     id: ResearchTab;
@@ -95,6 +103,8 @@ export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProp
             loading={research.loading}
             result={research.expansionResult}
             error={research.error}
+            activeJob={research.activeJob}
+            onRetry={research.retryResearch}
             onKeywordsAdded={onKeywordsAdded}
           />
         )}
@@ -104,6 +114,8 @@ export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProp
             loading={research.loading}
             result={research.competitorResult}
             error={research.error}
+            activeJob={research.activeJob}
+            onRetry={research.retryResearch}
             onKeywordsAdded={onKeywordsAdded}
           />
         )}
@@ -113,6 +125,7 @@ export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProp
             loading={research.historyLoading}
             onDelete={research.deleteResearch}
             onRefresh={research.fetchHistory}
+            onRetry={handleHistoryRetry}
             onKeywordsAdded={onKeywordsAdded}
           />
         )}

@@ -13,6 +13,7 @@ import {
   formatResearchFailureMessage,
   getResearchStatusClass,
   getResearchStatusLabel,
+  isRetryableResearchStatus,
   resolveResearchStatus
 } from '../../formatting/researchStatus';
 import { Spinner } from '../ui/Spinner';
@@ -22,6 +23,8 @@ interface ResearchHistoryProps {
   loading: boolean;
   onDelete: (id: string) => Promise<void>;
   onRefresh: () => void;
+  /** Re-run the failed steps of a partial or failed job. */
+  onRetry?: (job: KeywordResearchItem) => void;
   onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
@@ -45,6 +48,7 @@ export const ResearchHistory = ({
   loading,
   onDelete,
   onRefresh,
+  onRetry,
   onKeywordsAdded,
 }: ResearchHistoryProps) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -73,6 +77,7 @@ export const ResearchHistory = ({
               isExpanded={expandedId === item.id}
               onToggle={() => toggleExpand(item.id)}
               onDelete={() => onDelete(item.id)}
+              onRetry={onRetry}
               onKeywordsAdded={onKeywordsAdded}
             />
           ))}
@@ -151,11 +156,12 @@ interface HistoryItemProps {
   isExpanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
+  onRetry?: (job: KeywordResearchItem) => void;
   onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
 const HistoryItem = ({
-  item, isExpanded, onToggle, onDelete, onKeywordsAdded
+  item, isExpanded, onToggle, onDelete, onRetry, onKeywordsAdded
 }: HistoryItemProps) => {
   const keywords = useMemo(() => getKeywordsForItem(item), [item]);
   const hasKeywords = keywords.length > 0;
@@ -197,6 +203,7 @@ const HistoryItem = ({
                 <span>{formatDate(item.created_at)}</span>
                 <span className="hidden sm:inline">•</span>
                 <span>{keywords.length} keywords</span>
+                <StepSummary item={item} />
                 {item.industry && (
                   <>
                     <span className="hidden sm:inline">•</span>
@@ -209,7 +216,12 @@ const HistoryItem = ({
             </div>
           </div>
 
-          <DeleteButton onClick={onDelete} />
+          <div className="flex items-center gap-1 self-end sm:self-start">
+            {onRetry !== undefined && isRetryableResearchStatus(item.status) && (
+              <RetryButton onClick={() => onRetry(item)} />
+            )}
+            <DeleteButton onClick={onDelete} />
+          </div>
         </div>
       </div>
 
@@ -304,6 +316,50 @@ const FailureMessage = ({ message }: { message?: string }) => {
   );
 };
 
+/**
+ * Providers finished out of providers planned. Jobs from before 2.2.0 have
+ * no steps and render nothing here.
+ */
+const StepSummary = ({ item }: { item: KeywordResearchItem }) => {
+  const total = item.steps_total ?? 0;
+  if (total === 0) return null;
+  const failed = item.steps_failed ?? 0;
+
+  return (
+    <>
+      <span className="hidden sm:inline">•</span>
+      <span>
+        {item.steps_done ?? 0}/{total} providers
+        {failed > 0 && <span className="text-red-600"> ({failed} failed)</span>}
+      </span>
+    </>
+  );
+};
+
+interface RetryButtonProps {onClick: () => void;}
+
+/** Re-runs only the failed steps; the completed providers' results are kept. */
+const RetryButton = ({ onClick }: RetryButtonProps) => (
+  <button
+    onClick={(event) => {
+      event.stopPropagation();
+      onClick();
+    }}
+    className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+    title="Retry failed providers"
+    aria-label="Retry failed providers"
+  >
+    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth={1.5}
+        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+      />
+    </svg>
+  </button>
+);
+
 interface DeleteButtonProps {onClick: () => void;}
 
 const DeleteButton = ({ onClick }: DeleteButtonProps) => (
@@ -312,7 +368,7 @@ const DeleteButton = ({ onClick }: DeleteButtonProps) => (
       event.stopPropagation();
       onClick();
     }}
-    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors self-end sm:self-start"
+    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
     title="Delete"
   >
     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

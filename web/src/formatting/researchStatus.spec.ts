@@ -5,8 +5,13 @@ import {
   formatResearchFailureMessage,
   getResearchStatusClass,
   getResearchStatusLabel,
+  getResearchStepStatusClass,
+  getResearchStepStatusLabel,
+  isActiveResearchStatus,
+  isRetryableResearchStatus,
   resolveResearchStatus
 } from './researchStatus';
+import type { ResearchStepStatus } from '../types';
 
 describe('resolveResearchStatus', () => {
   it('returns null when a legacy row carries no status', () => {
@@ -21,8 +26,36 @@ describe('resolveResearchStatus', () => {
     expect(resolveResearchStatus('failed')).toBe('failed');
   });
 
-  it('returns "processing" for a run still in flight', () => {
+  it('returns "processing" for a legacy run still in flight', () => {
     expect(resolveResearchStatus('processing')).toBe('processing');
+  });
+
+  it('returns "partial" for a job where only some providers answered', () => {
+    expect(resolveResearchStatus('partial')).toBe('partial');
+  });
+});
+
+describe('isActiveResearchStatus', () => {
+  it('is true while the job is queued or running', () => {
+    expect(['pending', 'running', 'processing'].map(isActiveResearchStatus)).toStrictEqual([true, true, true]);
+  });
+
+  it('is false once the job reached a terminal status', () => {
+    expect(['completed', 'partial', 'failed'].map(isActiveResearchStatus)).toStrictEqual([false, false, false]);
+  });
+
+  it('is false for a legacy row without a status', () => {
+    expect(isActiveResearchStatus(undefined)).toBe(false);
+  });
+});
+
+describe('isRetryableResearchStatus', () => {
+  it('is true for partial and failed jobs, which have steps to re-run', () => {
+    expect(['partial', 'failed'].map(isRetryableResearchStatus)).toStrictEqual([true, true]);
+  });
+
+  it('is false for completed and still-running jobs', () => {
+    expect(['completed', 'running', 'pending'].map(isRetryableResearchStatus)).toStrictEqual([false, false, false]);
   });
 });
 
@@ -35,12 +68,17 @@ describe('getResearchStatusLabel', () => {
     expect(getResearchStatusLabel('pending')).toBe('Queued');
   });
 
-  it('labels a processing run "Running"', () => {
+  it('labels running and legacy processing runs "Running"', () => {
+    expect(getResearchStatusLabel('running')).toBe('Running');
     expect(getResearchStatusLabel('processing')).toBe('Running');
   });
 
   it('labels a completed run "Completed"', () => {
     expect(getResearchStatusLabel('completed')).toBe('Completed');
+  });
+
+  it('labels a partially successful run "Partial"', () => {
+    expect(getResearchStatusLabel('partial')).toBe('Partial');
   });
 });
 
@@ -51,6 +89,23 @@ describe('getResearchStatusClass', () => {
 
   it('styles a completed run in emerald', () => {
     expect(getResearchStatusClass('completed')).toBe('bg-emerald-100 text-emerald-700');
+  });
+
+  it('styles a partial run in amber', () => {
+    expect(getResearchStatusClass('partial')).toBe('bg-amber-100 text-amber-700');
+  });
+});
+
+describe('research step status copy', () => {
+  it('labels each step status for the progress panel', () => {
+    const stepStatuses: ResearchStepStatus[] = ['pending', 'running', 'completed', 'failed'];
+
+    expect(stepStatuses.map(getResearchStepStatusLabel)).toStrictEqual(['Waiting', 'Querying', 'Done', 'Failed']);
+  });
+
+  it('styles a failed step in red and a completed step in emerald', () => {
+    expect(getResearchStepStatusClass('failed')).toBe('text-red-700');
+    expect(getResearchStepStatusClass('completed')).toBe('text-emerald-700');
   });
 });
 

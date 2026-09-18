@@ -2,10 +2,11 @@ import {
   useEffect, useMemo, useState
 } from 'react';
 import type {
-  CompetitorAnalysisResult, Keyword
+  CompetitorAnalysisResult, Keyword, KeywordResearchItem
 } from '../../types';
 import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
+import { ResearchProgress } from './ResearchProgress';
 import {
   InputForm,
   SummaryCard,
@@ -20,6 +21,9 @@ interface CompetitorAnalysisProps {
   loading: boolean;
   result: CompetitorAnalysisResult | null;
   error: string | null;
+  /** The job being followed (running or just finished), for progress and retry. */
+  activeJob?: KeywordResearchItem | null;
+  onRetry?: (job: KeywordResearchItem) => void;
   onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
@@ -28,6 +32,8 @@ export const CompetitorAnalysis = ({
   loading,
   result,
   error,
+  activeJob = null,
+  onRetry,
   onKeywordsAdded,
 }: CompetitorAnalysisProps) => {
   const [url, setUrl] = useState('');
@@ -57,6 +63,10 @@ export const CompetitorAnalysis = ({
   return (
     <div className="space-y-6">
       <InputForm url={url} setUrl={setUrl} loading={loading} onSubmit={handleSubmit} />
+
+      {activeJob?.type === 'competitor' && (
+        <ResearchProgress job={activeJob} onRetry={onRetry} retrying={loading} />
+      )}
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">{error}</div>

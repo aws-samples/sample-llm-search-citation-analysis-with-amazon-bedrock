@@ -361,3 +361,66 @@ describe('ResearchHistory failure message', () => {
     expect(screen.queryByText(/timed out/)).not.toBeInTheDocument();
   });
 });
+
+
+describe('ResearchHistory retry', () => {
+  /**
+   * 2.2.0: a job can end `partial` (some providers failed). The failed steps
+   * can be re-run on their own, so partial and failed rows offer a retry and
+   * completed rows do not.
+   */
+  const partialRun = buildHistoryItem({
+    id: 'partial-1',
+    status: 'partial',
+    steps_total: 3,
+    steps_done: 3,
+    steps_failed: 1,
+  });
+
+  it('marks a partially successful run as partial', () => {
+    renderHistoryWithItems([partialRun]);
+
+    expect(screen.getByText('Partial')).toBeInTheDocument();
+  });
+
+  it('shows how many providers finished and how many failed', () => {
+    renderHistoryWithItems([partialRun]);
+
+    expect(screen.getByText(/3\/3 providers/)).toBeInTheDocument();
+    expect(screen.getByText('(1 failed)')).toBeInTheDocument();
+  });
+
+  it('shows no provider summary for a legacy row without steps', () => {
+    renderHistoryWithItems([buildHistoryItem({ status: 'completed' })]);
+
+    expect(screen.queryByText(/providers/)).not.toBeInTheDocument();
+  });
+
+  it('offers a retry on a partial run and hands back the job', async () => {
+    const user = userEvent.setup();
+    const onRetry = vi.fn();
+    render(<ResearchHistory history={[partialRun]} loading={false} onDelete={vi.fn()} onRefresh={vi.fn()} onRetry={onRetry} />);
+
+    await user.click(screen.getByRole('button', { name: 'Retry failed providers' }));
+
+    expect(onRetry).toHaveBeenCalledWith(partialRun);
+  });
+
+  it('offers a retry on a failed run', () => {
+    render(<ResearchHistory history={[strandedRunFixture]} loading={false} onDelete={vi.fn()} onRefresh={vi.fn()} onRetry={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Retry failed providers' })).toBeInTheDocument();
+  });
+
+  it('offers no retry on a completed run', () => {
+    render(<ResearchHistory history={[buildHistoryItem({ status: 'completed' })]} loading={false} onDelete={vi.fn()} onRefresh={vi.fn()} onRetry={vi.fn()} />);
+
+    expect(screen.queryByRole('button', { name: 'Retry failed providers' })).not.toBeInTheDocument();
+  });
+
+  it('offers no retry when the caller cannot retry', () => {
+    renderHistoryWithItems([partialRun]);
+
+    expect(screen.queryByRole('button', { name: 'Retry failed providers' })).not.toBeInTheDocument();
+  });
+});

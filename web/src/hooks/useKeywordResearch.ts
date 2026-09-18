@@ -1,174 +1,96 @@
 import {
   useState, useCallback, useEffect, useRef 
 } from 'react';
+import { getErrorMessage } from '../infrastructure';
 import {
-  API_BASE_URL, authenticatedFetch, getErrorMessage 
-} from '../infrastructure';
+  deleteKeywordResearch,
+  fetchKeywordResearchHistory,
+  retryKeywordResearch,
+  startCompetitorAnalysis,
+  startKeywordExpansion,
+} from '../api/keywordResearch';
+import type { ResearchType } from '../api/keywordResearch';
+import { pollResearchJob } from './researchPolling';
 import type {
   KeywordExpansionResult, CompetitorAnalysisResult, KeywordResearchItem 
 } from '../types';
 
-class KeywordResearchError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'KeywordResearchError';
-  }
-}
-
-interface ErrorResponse {error?: string;}
-
-interface HistoryResponse {items?: KeywordResearchItem[];}
-
-function isErrorResponse(data: unknown): data is ErrorResponse {
-  return typeof data === 'object' && data !== null;
-}
-
-function isHistoryResponse(data: unknown): data is HistoryResponse {
-  return typeof data === 'object' && data !== null;
-}
-
-function isKeywordExpansionResult(data: unknown): data is KeywordExpansionResult {
-  return typeof data === 'object' && data !== null && 'keywords' in data;
-}
-
-function isCompetitorAnalysisResult(data: unknown): data is CompetitorAnalysisResult {
-  return typeof data === 'object' && data !== null && 'url' in data;
-}
-
-// Async research jobs are polled via the history endpoint every 3 seconds
-// for up to 2 minutes.
-const POLL_MAX_ATTEMPTS = 40;
-const POLL_INTERVAL_MS = 3000;
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
-}
-
-async function readErrorMessage(response: Response): Promise<string> {
-  const errorData: unknown = await response.json().catch(() => ({}));
-  return isErrorResponse(errorData)
-    ? errorData.error ?? `HTTP ${response.status}`
-    : `HTTP ${response.status}`;
-}
-
-/** Extract the research id from an async "pending" API response. */
-function getPendingResearchId(data: unknown): string | null {
-  if (typeof data === 'object' && data !== null && 'status' in data) {
-    const record = data as Record<string, unknown>;
-    if (record.status === 'pending' && typeof record.id === 'string') {
-      return record.id;
-    }
-  }
-  return null;
-}
-
-interface ResearchPollOptions {
-  type: 'expansion' | 'competitor';
-  researchId: string;
-  failureMessage: string;
-  timeoutMessage: string;
-  /** Extra completion predicate beyond status === 'completed'. */
-  isComplete?: (item: KeywordResearchItem) => boolean;
-}
-
 /**
- * One poll attempt against the research history. Returns the completed item,
- * null when it is not ready yet (including transient poll errors), and throws
- * when the research job reports failure.
+ * The job the user is waiting on, remembered across a refresh or a tab switch
+ * so the view re-attaches to it instead of losing the run (R15).
  */
-async function findResearchItem(options: ResearchPollOptions): Promise<KeywordResearchItem | null> {
+const ACTIVE_JOB_STORAGE_KEY = 'keywordResearch.activeJob';
+
+interface StoredActiveJob {
+  id: string;
+  type: ResearchType;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isStoredActiveJob(value: unknown): value is StoredActiveJob {
+  return isRecord(value)
+    && typeof value.id === 'string'
+    && (value.type === 'expansion' || value.type === 'competitor');
+}
+
+function readStoredActiveJob(): StoredActiveJob | null {
   try {
-    const historyResp = await authenticatedFetch(
-      `${API_BASE_URL}/keyword-research/history?type=${options.type}&limit=50`
-    );
-    // Auth failures are fatal, not "not ready yet". Without this check an
-    // expired session kept polling for the full 2 minutes and then reported
-    // a bogus timeout (AUDIT 2.20).
-    if (historyResp.status === 401 || historyResp.status === 403) {
-      // Worded to categorize as 'auth' in getErrorMessage, so the UI shows
-      // the research auth message instead of a generic failure.
-      throw new KeywordResearchError(
-        `Unauthorized (${historyResp.status}): session expired while waiting for results. Sign in again, then check History.`
-      );
-    }
-    if (!historyResp.ok) return null;
-    const historyData: unknown = await historyResp.json();
-    if (!isHistoryResponse(historyData)) return null;
-
-    const items = historyData.items ?? [];
-    const completed = items.find(
-      (item) => item.id === options.researchId && item.status === 'completed'
-    );
-    if (completed && (options.isComplete?.(completed) ?? true)) {
-      return completed;
-    }
-
-    const failed = items.find(
-      (item) => item.id === options.researchId && item.status === 'failed'
-    );
-    if (failed) {
-      throw new KeywordResearchError(failed.error_message ?? options.failureMessage);
-    }
-    return null;
-  } catch (pollErr) {
-    if (pollErr instanceof KeywordResearchError) throw pollErr;
-    // Ignore transient poll errors, keep trying
+    const raw = sessionStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
+    if (raw === null) return null;
+    const parsed: unknown = JSON.parse(raw);
+    return isStoredActiveJob(parsed) ? {
+      id: parsed.id,
+      type: parsed.type 
+    } : null;
+  } catch {
     return null;
   }
 }
 
-/**
- * Poll the history endpoint until the research job completes, fails, or
- * times out. Returns null when `isCancelled` reports the poll was superseded
- * by a newer call or the component unmounted — previously polling ran to the
- * full 2 minutes with no cancellation path at all (AUDIT 2.20).
- */
-async function pollUntilComplete(
-  options: ResearchPollOptions,
-  isCancelled: () => boolean,
-  attemptsLeft: number = POLL_MAX_ATTEMPTS
-): Promise<KeywordResearchItem | null> {
-  if (attemptsLeft === 0) {
-    throw new KeywordResearchError(options.timeoutMessage);
+function storeActiveJob(job: StoredActiveJob | null): void {
+  try {
+    if (job === null) {
+      sessionStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+    } else {
+      sessionStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify(job));
+    }
+  } catch {
+    // Storage can be unavailable (private mode, quota); re-attach is best effort.
   }
-  await sleep(POLL_INTERVAL_MS);
-  if (isCancelled()) return null;
-  const completed = await findResearchItem(options);
-  if (isCancelled()) return null;
-  if (completed) return completed;
-  return pollUntilComplete(options, isCancelled, attemptsLeft - 1);
 }
 
-function toExpansionResult(
-  completed: KeywordResearchItem,
-  seedKeyword: string,
-  industry: string
-): KeywordExpansionResult {
+function toExpansionResult(job: KeywordResearchItem): KeywordExpansionResult {
   return {
-    id: completed.id,
-    seed_keyword: completed.seed_keyword ?? seedKeyword,
-    industry: completed.industry ?? industry,
-    keywords: completed.keywords ?? [],
-    keyword_count: completed.keyword_count ?? 0,
+    id: job.id,
+    seed_keyword: job.seed_keyword ?? '',
+    industry: job.industry ?? 'general',
+    keywords: job.keywords ?? [],
+    keyword_count: job.keyword_count ?? 0,
   };
 }
 
-function toCompetitorResult(completed: KeywordResearchItem, url: string): CompetitorAnalysisResult {
+function toCompetitorResult(job: KeywordResearchItem): CompetitorAnalysisResult {
   return {
-    id: completed.id,
-    url: completed.url ?? url,
-    domain: completed.domain ?? '',
-    provider: completed.provider ?? '',
-    keyword_count: completed.keyword_count ?? 0,
-    industry: completed.analysis?.industry ?? completed.industry ?? '',
-    primary_keywords: completed.analysis?.primary_keywords ?? [],
-    secondary_keywords: completed.analysis?.secondary_keywords ?? [],
-    longtail_keywords: completed.analysis?.longtail_keywords ?? [],
-    content_gaps: completed.analysis?.content_gaps ?? [],
+    id: job.id,
+    url: job.url ?? '',
+    domain: job.domain ?? '',
+    provider: job.provider ?? '',
+    keyword_count: job.keyword_count ?? 0,
+    industry: job.analysis?.industry ?? job.industry ?? '',
+    primary_keywords: job.analysis?.primary_keywords ?? [],
+    secondary_keywords: job.analysis?.secondary_keywords ?? [],
+    longtail_keywords: job.analysis?.longtail_keywords ?? [],
+    content_gaps: job.analysis?.content_gaps ?? [],
   };
 }
+
+const TIMEOUT_MESSAGES: Record<ResearchType, string> = {
+  expansion: 'Expansion is taking longer than expected. Check History for the result.',
+  competitor: 'Analysis is taking longer than expected. Check History for the result.',
+};
 
 export const useKeywordResearch = () => {
   const [loading, setLoading] = useState(false);
@@ -176,150 +98,141 @@ export const useKeywordResearch = () => {
   const [error, setError] = useState<string | null>(null);
   const [expansionResult, setExpansionResult] = useState<KeywordExpansionResult | null>(null);
   const [competitorResult, setCompetitorResult] = useState<CompetitorAnalysisResult | null>(null);
+  const [activeJob, setActiveJob] = useState<KeywordResearchItem | null>(null);
   const [history, setHistory] = useState<KeywordResearchItem[]>([]);
 
   // Cancellation for the long-running poll loops (AUDIT 2.20): each
-  // expand/analyze call claims a new generation; a later call or unmount
-  // invalidates older generations, stopping their polls at the next tick
-  // and dropping their stale state updates.
+  // start/retry claims a new generation; a later call or unmount invalidates
+  // older generations, stopping their polls at the next tick and dropping
+  // their stale state updates.
   const pollGenerationRef = useRef(0);
 
   useEffect(() => () => {
     pollGenerationRef.current += 1;
   }, []);
 
-  const expandKeywords = useCallback(async (seedKeyword: string, industry: string, count: number) => {
+  const claimGeneration = useCallback(() => {
     const generation = ++pollGenerationRef.current;
-    const isCancelled = () => pollGenerationRef.current !== generation;
+    return () => pollGenerationRef.current !== generation;
+  }, []);
 
-    setLoading(true);
-    setError(null);
-    setExpansionResult(null);
-
+  /**
+   * Follow one job to its terminal status: progress snapshots land in
+   * `activeJob`, the merged result in the matching result slot. Shared by
+   * start, retry and re-attach.
+   */
+  const trackJob = useCallback(async (jobId: string, type: ResearchType, isCancelled: () => boolean) => {
+    storeActiveJob({
+      id: jobId,
+      type 
+    });
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/keyword-research/expand`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json',},
-        body: JSON.stringify({
-          seed_keyword: seedKeyword,
-          industry,
-          count,
-        }),
+      const job = await pollResearchJob({
+        jobId,
+        isCancelled,
+        onProgress: (snapshot) => {
+          if (!isCancelled()) setActiveJob(snapshot);
+        },
+        timeoutMessage: TIMEOUT_MESSAGES[type],
       });
-
-      if (!response.ok) {
-        throw new KeywordResearchError(await readErrorMessage(response));
+      // null means the poll was superseded or unmounted — keep the stored id
+      // so a remount can re-attach, and drop the rest silently.
+      if (!job) return;
+      setActiveJob(job);
+      if (job.status === 'failed') {
+        setError(job.error_message ?? 'Research failed');
+      } else if (type === 'expansion') {
+        setExpansionResult(toExpansionResult(job));
+      } else {
+        setCompetitorResult(toCompetitorResult(job));
       }
-
-      const data: unknown = await response.json();
-
-      // Async response — poll history until result appears
-      const pendingId = getPendingResearchId(data);
-      if (pendingId) {
-        const completed = await pollUntilComplete({
-          type: 'expansion',
-          researchId: pendingId,
-          failureMessage: 'Expansion failed',
-          timeoutMessage: 'Expansion timed out. Check history for results.',
-        }, isCancelled);
-        // null means the poll was superseded or unmounted — drop silently.
-        if (!completed) return;
-        setExpansionResult(toExpansionResult(completed, seedKeyword, industry));
-        return;
-      }
-
-      // Sync response (fallback)
-      if (isCancelled()) return;
-      if (isKeywordExpansionResult(data)) {
-        setExpansionResult(data);
-      }
+      storeActiveJob(null);
     } catch (err) {
       // A superseded call must not overwrite the newer call's error state.
       if (isCancelled()) return;
+      storeActiveJob(null);
       setError(getErrorMessage(err, 'research'));
-      console.error('[research] Error expanding keywords:', err);
+      console.error('[research] Error while waiting for research job:', err);
     } finally {
       // Only the current generation may clear loading; a superseded call
       // finishing late would otherwise flip off the newer call's spinner.
-      if (!isCancelled()) {
-        setLoading(false);
-      }
+      if (!isCancelled()) setLoading(false);
     }
   }, []);
+
+  const beginRun = useCallback((type: ResearchType) => {
+    setLoading(true);
+    setError(null);
+    setActiveJob(null);
+    if (type === 'expansion') {
+      setExpansionResult(null);
+    } else {
+      setCompetitorResult(null);
+    }
+  }, []);
+
+  const expandKeywords = useCallback(async (seedKeyword: string, industry: string, count: number) => {
+    const isCancelled = claimGeneration();
+    beginRun('expansion');
+    try {
+      const job = await startKeywordExpansion(seedKeyword, industry, count);
+      if (isCancelled()) return;
+      setActiveJob(job);
+      await trackJob(job.id, 'expansion', isCancelled);
+    } catch (err) {
+      if (isCancelled()) return;
+      setError(getErrorMessage(err, 'research'));
+      setLoading(false);
+      console.error('[research] Error expanding keywords:', err);
+    }
+  }, [beginRun, claimGeneration, trackJob]);
 
   const analyzeCompetitor = useCallback(async (url: string) => {
-    const generation = ++pollGenerationRef.current;
-    const isCancelled = () => pollGenerationRef.current !== generation;
-
-    setLoading(true);
-    setError(null);
-    setCompetitorResult(null);
-
+    const isCancelled = claimGeneration();
+    beginRun('competitor');
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/keyword-research/competitor`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json',},
-        body: JSON.stringify({url,}),
-      });
-
-      if (!response.ok) {
-        throw new KeywordResearchError(await readErrorMessage(response));
-      }
-
-      const data: unknown = await response.json();
-
-      // Async response — poll history until result appears
-      const pendingId = getPendingResearchId(data);
-      if (pendingId) {
-        const completed = await pollUntilComplete({
-          type: 'competitor',
-          researchId: pendingId,
-          failureMessage: 'Analysis failed',
-          timeoutMessage: 'Analysis timed out. Check history for results.',
-          isComplete: (item) => Boolean(item.analysis),
-        }, isCancelled);
-        // null means the poll was superseded or unmounted — drop silently.
-        if (!completed) return;
-        setCompetitorResult(toCompetitorResult(completed, url));
-        return;
-      }
-
-      // Sync response (fallback)
+      const job = await startCompetitorAnalysis(url);
       if (isCancelled()) return;
-      if (isCompetitorAnalysisResult(data)) {
-        setCompetitorResult(data);
-      }
+      setActiveJob(job);
+      await trackJob(job.id, 'competitor', isCancelled);
     } catch (err) {
-      // A superseded call must not overwrite the newer call's error state.
       if (isCancelled()) return;
       setError(getErrorMessage(err, 'research'));
+      setLoading(false);
       console.error('[research] Error analyzing competitor:', err);
-    } finally {
-      // Only the current generation may clear loading; a superseded call
-      // finishing late would otherwise flip off the newer call's spinner.
-      if (!isCancelled()) {
-        setLoading(false);
-      }
     }
-  }, []);
+  }, [beginRun, claimGeneration, trackJob]);
 
-  const fetchHistory = useCallback(async (type?: 'expansion' | 'competitor') => {
-    setHistoryLoading(true);
-
+  /** Re-run the failed steps of a partial or failed job and follow it again. */
+  const retryResearch = useCallback(async (job: KeywordResearchItem) => {
+    const isCancelled = claimGeneration();
+    beginRun(job.type);
+    setActiveJob(job);
     try {
-      const params = new URLSearchParams();
-      if (type) params.append('type', type);
-      params.append('limit', '50');
+      await retryKeywordResearch(job.id);
+      if (isCancelled()) return;
+      await trackJob(job.id, job.type, isCancelled);
+    } catch (err) {
+      if (isCancelled()) return;
+      setError(getErrorMessage(err, 'research'));
+      setLoading(false);
+      console.error('[research] Error retrying research:', err);
+    }
+  }, [beginRun, claimGeneration, trackJob]);
 
-      const response = await authenticatedFetch(`${API_BASE_URL}/keyword-research/history?${params}`);
-      if (!response.ok) {
-        throw new KeywordResearchError(`HTTP ${response.status}`);
-      }
+  // Re-attach to a job the user was waiting on before a refresh or tab switch.
+  useEffect(() => {
+    const stored = readStoredActiveJob();
+    if (stored === null) return;
+    const isCancelled = claimGeneration();
+    beginRun(stored.type);
+    void trackJob(stored.id, stored.type, isCancelled);
+  }, [beginRun, claimGeneration, trackJob]);
 
-      const data: unknown = await response.json();
-      if (isHistoryResponse(data)) {
-        setHistory(data.items ?? []);
-      }
+  const fetchHistory = useCallback(async (type?: ResearchType) => {
+    setHistoryLoading(true);
+    try {
+      setHistory(await fetchKeywordResearchHistory(type));
     } catch (err) {
       console.error('[research] Error fetching history:', err);
     } finally {
@@ -329,10 +242,7 @@ export const useKeywordResearch = () => {
 
   const deleteResearch = useCallback(async (id: string) => {
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/keyword-research/${id}`, {method: 'DELETE',});
-      if (!response.ok) {
-        throw new KeywordResearchError(`HTTP ${response.status}`);
-      }
+      await deleteKeywordResearch(id);
       setHistory((prev) => prev.filter((item) => item.id !== id));
     } catch (err) {
       console.error('[research] Error deleting research:', err);
@@ -345,9 +255,11 @@ export const useKeywordResearch = () => {
     error,
     expansionResult,
     competitorResult,
+    activeJob,
     history,
     expandKeywords,
     analyzeCompetitor,
+    retryResearch,
     fetchHistory,
     deleteResearch,
   };

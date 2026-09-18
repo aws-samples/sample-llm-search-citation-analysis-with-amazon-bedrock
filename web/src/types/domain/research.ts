@@ -71,6 +71,8 @@ export interface ResearchKeyword {
   competition: string;
   relevance: number;
   opportunity?: string;
+  /** Providers that proposed this keyword (merged across parallel steps). */
+  providers?: string[];
 }
 
 /**
@@ -86,10 +88,29 @@ export interface CompetitorAnalysis {
 }
 
 /**
- * Lifecycle of a keyword-research run. Absent on rows written before the
- * backend started recording it.
+ * Lifecycle of a keyword-research job. `processing` only appears on rows
+ * written before 2.2.0 (the self-invoke era); new jobs go
+ * pending -> running -> completed | partial | failed. Absent on rows written
+ * before the backend started recording it.
  */
-export type ResearchStatus = 'pending' | 'processing' | 'completed' | 'failed';
+export type ResearchStatus = 'pending' | 'running' | 'processing' | 'completed' | 'partial' | 'failed';
+
+/** Lifecycle of one provider step inside a research job. */
+export type ResearchStepStatus = 'pending' | 'running' | 'completed' | 'failed';
+
+/**
+ * One provider's step of a research job. Each step checkpoints on its own,
+ * so a job can be `partial`: some providers answered, others failed.
+ */
+export interface ResearchStep {
+  step_id: string;
+  provider: string;
+  status: ResearchStepStatus;
+  keyword_count: number;
+  error_message?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+}
 
 /**
  * Keyword research history item.
@@ -108,4 +129,11 @@ export interface KeywordResearchItem {
   status?: ResearchStatus;
   provider?: string;
   error_message?: string;
+  steps?: ResearchStep[];
+  steps_total?: number;
+  steps_done?: number;
+  steps_failed?: number;
+  retry_count?: number;
+  updated_at?: string;
+  finished_at?: string;
 }
