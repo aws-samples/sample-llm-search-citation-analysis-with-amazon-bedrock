@@ -8,7 +8,7 @@ import {
   ApiRequestError,
 } from '../infrastructure';
 import type {
-  Execution, ExecutionEvent, ExecutionStatus 
+  AnalysisScope, Execution, ExecutionEvent, ExecutionStatus 
 } from '../types';
 
 /** @internal Response from the execution status API */
@@ -67,8 +67,8 @@ function isTriggerErrorResponse(data: unknown): data is { error?: string } {
  * // Start analysis for all keywords
  * const result = await triggerAnalysis();
  * 
- * // Or for specific keywords
- * const result = await triggerAnalysis(['keyword1', 'keyword2']);
+ * // Or for a keyword group / explicit keyword ids
+ * const result = await triggerAnalysis({ mode: 'groups', group_ids: ['hotel-coruna'] });
  * ```
  */
 export const useExecutionPolling = (onComplete?: () => void) => {
@@ -136,18 +136,21 @@ export const useExecutionPolling = (onComplete?: () => void) => {
     }, 3000);
   }, [fetchExecutionStatus, stopPolling]);
 
-  const triggerAnalysis = async (selectedKeywords?: string[]): Promise<TriggerResult> => {
+  const triggerAnalysis = async (scope?: AnalysisScope): Promise<TriggerResult> => {
     try {
-      const isKeywordSpecific = selectedKeywords && selectedKeywords.length > 0;
-      const endpoint = isKeywordSpecific
+      // A scope (groups / keyword ids / explicit all) goes to the subset
+      // endpoint, which resolves it server-side against the active keywords.
+      // No scope means "everything", which the classic endpoint handles.
+      const isScoped = scope !== undefined;
+      const endpoint = isScoped
         ? `${API_BASE_URL}/trigger-keyword-analysis`
         : `${API_BASE_URL}/trigger-analysis`;
       
-      const requestOptions: RequestInit = isKeywordSpecific
+      const requestOptions: RequestInit = isScoped
         ? {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ keywords: selectedKeywords }),
+          body: JSON.stringify({ scope }),
         }
         : { method: 'POST' };
 

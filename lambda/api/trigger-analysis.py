@@ -21,6 +21,7 @@ from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler
 from shared.env_vars import resolve_table_env
+from shared.keyword_groups import query_active_keywords
 from shared.utils import get_timestamp, get_timestamp_compact
 
 logger = logging.getLogger(__name__)
@@ -53,40 +54,46 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     Starts a Step Functions execution with active keywords from DynamoDB.
     Uses StatusIndex GSI for efficient querying of active keywords.
 
-    Admin-only. One request fans out up to 500 keywords x 10 personas x 4 paid
+    Admin-only. One request fans out every active keyword x 10 personas x 4 paid
     providers, plus a Bedrock call per crawled page, so an ungated caller in a
     loop is unbounded spend (AUDIT-2026-08-19 §2.3). The gate is the authz half
     of that finding; throttling and idempotency are tracked separately.
+
+    There is no per-execution keyword cap: every active keyword is included
+    (StatusIndex is read to the last page) and the ProcessKeywords Map bounds
+    concurrency.
     """
-    # Get active keywords using StatusIndex GSI (more efficient than scan with filter)
     try:
-        response = keywords_table.query(
-            IndexName='StatusIndex',
-            KeyConditionExpression=Key('status').eq('active'),
-            Limit=500  # Cap to prevent runaway queries
-        )
-        keywords = response.get('Items', [])
+        keywords = query_active_keywords(keywords_table)
     except Exception as gsi_error:
         # Fallback to scan if GSI doesn't exist (for backwards compatibility)
         logger.warning(f"StatusIndex GSI not available, falling back to scan: {gsi_error}")
-        response = keywords_table.scan(
-            FilterExpression='#status = :status',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={':status': 'active'},
-            Limit=500
-        )
-        keywords = response.get('Items', [])
+        keywords = []
+        scan_params: dict[str, Any] = {
+            'FilterExpression': '#status = :status',
+            'ExpressionAttributeNames': {'#status': 'status'},
+            'ExpressionAttributeValues': {':status': 'active'},
+        }
+        while True:
+            response = keywords_table.scan(**scan_params)
+            keywords.extend(response.get('Items', []))
+            last_key = response.get('LastEvaluatedKey')
+            if not last_key:
+                break
+            scan_params['ExclusiveStartKey'] = last_key
 
     if not keywords:
         return validation_error('No active keywords found. Please add keywords first.', event)
 
     # Format keywords for Step Functions
+    run_timestamp = get_timestamp()
     keyword_list = [
         {
             'keyword': kw['keyword'],
-            'timestamp': get_timestamp()
+            'timestamp': run_timestamp
         }
         for kw in keywords
+        if kw.get('keyword')
     ]
 
     # Fetch enabled query prompts

@@ -216,6 +216,8 @@ Go to **Settings > Keywords**. Add search queries that represent how customers s
 - Add multiple keywords to track different aspects of your market
 - Keywords are used when running analysis
 
+**Keyword groups.** Organise keywords into groups (folders), for example one per hotel or property. A keyword can belong to several groups, so shared queries such as "best hotels in Galicia" can sit under every property they matter to. Create groups at the top of the Keywords tab, filter the list by group, tick keywords and use *Add to group*, or open a keyword's *Groups* menu. Keywords added while a group is selected land in that group. Deleting a group keeps its keywords.
+
 ### Step 4: Configure Query Prompts (Personas)
 
 Go to **Settings > Query Prompts**. Define persona-based search templates that shape how AI engines are queried:
@@ -231,10 +233,10 @@ Go to **Settings > Query Prompts**. Define persona-based search templates that s
 
 Go to **Operations > Run Analysis**:
 
-1. Select which keywords to analyze (or all)
+1. Pick what to run: click a keyword group to run the whole group, or tick individual keywords (grouped by keyword group, with search) — or leave everything unticked to run all active keywords
 2. Click **Start Analysis**
 3. Monitor progress in the execution view
-4. Analysis typically takes 3-5 minutes depending on keyword count
+4. Analysis time scales with the number of keywords (3 processed concurrently by default; tune with the CDK context value `processKeywordsConcurrency`). There is no per-run keyword cap.
 
 For recurring analysis, go to **Operations > Schedule** to set up automated runs with EventBridge.
 
@@ -280,7 +282,7 @@ Content generation (Content Studio) and ranking self-reflection both use Amazon 
 - Step Functions retry on Lambda-level failures only
 
 ### Concurrency
-- Keyword processing: 3 concurrent
+- Keyword processing: 3 concurrent by default (`cdk deploy -c processKeywordsConcurrency=5` to raise it); runs are not capped by keyword count
 - Citation crawling: 3 concurrent per keyword
 
 ### Security

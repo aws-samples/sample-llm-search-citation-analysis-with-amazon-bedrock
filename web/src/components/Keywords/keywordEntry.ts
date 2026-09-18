@@ -88,11 +88,22 @@ export function parseBulkKeywords(input: string): string[] {
     });
 }
 
-export async function processBulkKeyword(keyword: string): Promise<BulkKeywordResult> {
+/** Request body for creating a keyword; `group_ids` is sent only when non-empty. */
+export function buildCreateKeywordBody(keyword: string, groupIds: readonly string[] = []): {
+  keyword: string;
+  group_ids?: string[] 
+} {
+  return groupIds.length > 0 ? {
+    keyword,
+    group_ids: [...groupIds] 
+  } : { keyword };
+}
+
+export async function processBulkKeyword(keyword: string, groupIds: readonly string[] = []): Promise<BulkKeywordResult> {
   try {
     const response = await apiPost<unknown>(
       '/keywords',
-      { keyword },
+      buildCreateKeywordBody(keyword, groupIds),
       { allowStructured4xx: true }
     );
     return {

@@ -93,17 +93,42 @@ describe('useExecutionPolling', () => {
     expect(triggerResult.message).toBeTruthy();
   });
 
-  it('uses keyword-specific endpoint when keywords provided', async () => {
+  it('posts the scope to the keyword-specific endpoint when a scope is provided', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
 
     const { result } = renderHook(() => useExecutionPolling());
 
     await act(async () => {
-      await result.current.triggerAnalysis(['keyword1', 'keyword2']);
+      await result.current.triggerAnalysis({
+        mode: 'groups',
+        group_ids: ['hotel-coruna'] 
+      });
     });
 
     const triggerCall = mockAuthenticatedFetch.mock.calls.find(
       (call: unknown[]) => (call[0] as string).includes('/trigger-keyword-analysis')
+    );
+    expect(triggerCall).toBeDefined();
+    const requestInit = triggerCall?.[1] as RequestInit;
+    expect(JSON.parse(requestInit.body as string)).toStrictEqual({
+      scope: {
+        mode: 'groups',
+        group_ids: ['hotel-coruna'] 
+      } 
+    });
+  });
+
+  it('uses the classic all-keywords endpoint when no scope is provided', async () => {
+    mockAuthenticatedFetch.mockImplementation(createMockFetch());
+
+    const { result } = renderHook(() => useExecutionPolling());
+
+    await act(async () => {
+      await result.current.triggerAnalysis();
+    });
+
+    const triggerCall = mockAuthenticatedFetch.mock.calls.find(
+      (call: unknown[]) => (call[0] as string).endsWith('/trigger-analysis')
     );
     expect(triggerCall).toBeDefined();
   });

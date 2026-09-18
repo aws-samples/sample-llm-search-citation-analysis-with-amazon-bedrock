@@ -17,6 +17,7 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
+from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
 from shared.step_function_response import log_error
 
 # Configure logging
@@ -115,15 +116,20 @@ def resolve_query_prompts(event: dict[str, Any]) -> list:
 
 
 def read_keywords_from_dynamodb() -> list[str]:
-    """Read active keywords from DynamoDB Keywords table."""
+    """Read active keywords from DynamoDB Keywords table (every page)."""
+    return read_keywords_for_scope({'mode': 'all'})
+
+
+def read_keywords_for_scope(scope: dict[str, Any]) -> list[str]:
+    """Resolve a scope descriptor (all / groups / keyword ids) to active keyword texts.
+
+    Resolution happens at run time, so a schedule that targets a keyword group
+    picks up keywords added to the group after the schedule was created.
+    """
     try:
         table = dynamodb.Table(KEYWORDS_TABLE)
-        response = table.query(
-            IndexName='StatusIndex',
-            KeyConditionExpression=Key('status').eq('active')
-        )
-        keywords = [item['keyword'] for item in response.get('Items', []) if item.get('keyword')]
-        logger.info(f"Read {len(keywords)} active keywords from DynamoDB")
+        keywords = [item['keyword'] for item in resolve_scope(scope, table)]
+        logger.info(f"Resolved {len(keywords)} active keywords for {describe_scope(scope)}")
         return keywords
     except Exception as e:
         raise Exception(f"Failed to read keywords from DynamoDB: {e!s}") from e
@@ -183,9 +189,12 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     Lambda handler for parsing keywords.
 
     Input formats:
-    1. S3 URI: {"keywords_file": "s3://bucket/path/keywords.txt"}
-    2. Direct array: {"keywords": ["keyword1", "keyword2"]}
-    3. Direct string: {"keywords": "keyword1\nkeyword2"}
+    1. Scope descriptor (schedules, run-time resolution):
+       {"scope": {"mode": "all" | "groups" | "keywords", ...}}
+    2. Legacy scheduled runs: {"source": "dynamodb"} (all active keywords)
+    3. S3 URI: {"keywords_file": "s3://bucket/path/keywords.txt"}
+    4. Direct array: {"keywords": ["keyword1", "keyword2"]}
+    5. Direct string: {"keywords": "keyword1\nkeyword2"}
 
     An optional "query_prompts" list in the input is passed through to the
     output. When absent (scheduled runs), enabled prompts are loaded from
@@ -208,8 +217,18 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         keywords = []
         timestamp = get_timestamp()
 
+        # Case 0: Scope descriptor (group-aware schedules), resolved at run time
+        if 'scope' in event:
+            scope, scope_error = validate_scope(event.get('scope'))
+            if scope_error:
+                error = ValueError(f"Invalid scope: {scope_error}")
+                log_error(error, "parse keywords handler", event)
+                raise error
+            logger.info(f"Resolving keywords for scope {describe_scope(scope)}")
+            keywords = read_keywords_for_scope(scope)
+
         # Case 1: Keywords from DynamoDB (scheduled runs)
-        if event.get('source') == 'dynamodb':
+        elif event.get('source') == 'dynamodb':
             logger.info("Reading active keywords from DynamoDB (scheduled run)")
             keywords = read_keywords_from_dynamodb()
 
@@ -230,7 +249,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             keywords = event['keywords'].split('\n')
 
         else:
-            error = ValueError("Invalid input: must provide 'source': 'dynamodb', 'keywords_file' (S3 URI), or 'keywords' (array/string)")
+            error = ValueError("Invalid input: must provide 'scope', 'source': 'dynamodb', 'keywords_file' (S3 URI), or 'keywords' (array/string)")
             log_error(error, "parse keywords handler", event)
             raise error
 
@@ -242,10 +261,11 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             log_error(error, "parse keywords validation", event)
             raise error
 
-        # Limit to 100 keywords per execution (Requirement 2.4)
+        # No per-execution cap: the ProcessKeywords Map state bounds concurrency
+        # and the state-machine timeout bounds duration. The former silent
+        # truncation to 100 dropped keywords for multi-group installations.
         if len(valid_keywords) > 100:
-            logger.warning(f"{len(valid_keywords)} keywords provided, limiting to 100")
-            valid_keywords = valid_keywords[:100]
+            logger.info(f"{len(valid_keywords)} keywords in this execution")
 
         # Format output with timestamps. query_prompts is always emitted so the
         # ProcessKeywords Map state can select it from this state's output,

@@ -2,7 +2,7 @@ import {
   afterEach, beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
-  render, screen, waitFor, within
+  render, screen, waitFor
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
@@ -35,6 +35,17 @@ vi.mock('../../api/client', () => ({
   apiPut: vi.fn(),
 }));
 
+// Group management has its own client module and specs; here it only needs to
+// resolve so the manager renders without groups.
+vi.mock('../../api/keywordGroups', () => ({
+  fetchKeywordGroups: vi.fn(() => Promise.resolve([])),
+  createKeywordGroup: vi.fn(),
+  updateKeywordGroup: vi.fn(),
+  deleteKeywordGroup: vi.fn(),
+  updateGroupMemberships: vi.fn(),
+  mergeUpdatedKeywords: vi.fn((keywords: unknown) => keywords),
+}));
+
 const mockApiDelete = vi.mocked(apiDelete);
 const mockApiPost = vi.mocked(apiPost);
 const mockApiPut = vi.mocked(apiPut);
@@ -48,8 +59,10 @@ async function submitCreate(keyword = createdKeywordFixture.keyword) {
 }
 
 function getKeywordActionButtons() {
-  const keywordRow = screen.getByText(existingKeywordFixture.keyword).parentElement;
-  return within(keywordRow ?? document.body).getAllByRole('button');
+  return [
+    screen.getByRole('button', { name: `Edit ${existingKeywordFixture.keyword}` }),
+    screen.getByRole('button', { name: `Delete ${existingKeywordFixture.keyword}` }),
+  ];
 }
 
 async function submitUpdate() {
