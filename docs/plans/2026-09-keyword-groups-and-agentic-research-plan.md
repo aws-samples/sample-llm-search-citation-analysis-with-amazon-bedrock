@@ -1,6 +1,6 @@
 # Plan: Keyword Groups, Editable Schedules, Group KPIs, Reliable Keyword Research, Research Agent, Content Workflow
 
-Status: IN DELIVERY — 2026-09-18. Phase 0a (2.0.1), Phase 1 (2.1.0, keyword groups + cap removal) and Phase 2 (2.2.0, parallel checkpointed research) merged + deployed; Phases 3–6 pending. Decisions D1, D3, D6, D9 locked (see §4).
+Status: IN DELIVERY — 2026-09-18. Phase 0a (2.0.1), Phase 1 (2.1.0, keyword groups + cap removal) and Phase 2 (2.2.0, parallel checkpointed research) and Phase 3 (2.3.0, Schedules v2) merged + deployed; Phases 4–6 pending. Decisions D1, D3, D6, D9 locked (see §4).
 Baseline: `main` at v2.0.0 (after Dependabot merges #104/#105/#106)
 Scope: six related customer requests (hotel chain customer, contact: Bastián) plus a
 dead-code cleanup the customer asked for. Original feedback was in Spanish; requirements
@@ -195,7 +195,7 @@ Acceptance (from R1–R6, R14)
 - A keyword can be in 0..n groups; groups are unlimited; existing keywords are untouched by the migration (no data migration needed — `group_ids` is optional).
 - Launching an analysis for "Hotel Coruña" runs exactly that group's active keywords; the user can untick some, or tick keywords from another group, before running.
 
-### Epic B — Schedules v2
+### Epic B — Schedules v2 — shipped in 2.3.0
 
 - Backend `manage-schedule.py`: `POST` generates `Name = sch-<hex>`, stores display name in `Description` and the v2 descriptor in `Target.Input`; new `GET /api/schedules/{id}`, `PUT /api/schedules/{id}` (admin; rebuilds cron from `form`, `UpdateSchedule` full replace incl. `State`), `DELETE` unchanged; optional `POST /api/schedules/{id}/run` (start an execution now with the same scope — also useful for Epic F). List response gains `id, display_name, form, scope, keyword_count, legacy: bool`. Legacy schedules (old Input shape) are listed read-only-ish: editing one rewrites it to v2 (same Name, keeps working).
 - Validation fixes bundled: hour/minute ranges; timezone validated with `zoneinfo.available_timezones()` (frontend list gains Europe/Madrid and a searchable input); day-of-month 1–28 in the UI; pagination with `NextToken`.
@@ -272,7 +272,7 @@ Each phase = one PR = one minor version + CHANGELOG entry; every PR runs `ruff c
 | 0b. Quick wins + foundations (folded into Phase 2) | — | `GET /keyword-research/{id}`; TTL on research rows; frontend polls by id with aligned window — all shipped in 2.2.0, so no separate release | S | 0a |
 | 1. Keyword Groups + cap removal (DONE) | 2.1.0 | Epic A: table, `group_ids`, resolver, `/api/keyword-groups`, promote/trigger `group_ids`/`scope`, Settings Groups panel, `KeywordScopePicker`, trigger page; D9 cap removal + Map concurrency parameter | M | 0b |
 | 2. Reliable, parallel research (DONE) | 2.2.0 | Epic D: research state machine + worker, parallel Map, job/step model, GSI + TTL, `GET /{id}`, retry endpoint, progressive UI, session re-attach (absorbed Phase 0b) | L | 0b (parallel with 1) |
-| 3. Schedules v2 | 2.3.0 | Epic B: v2 descriptor, generated ids + display name, `GET/PUT /{id}`, run-now, ParseKeywords scope resolution, edit UI, validation fixes | M | 1 |
+| 3. Schedules v2 (DONE) | 2.3.0 | Epic B: v2 descriptor, generated ids + display name, `GET/PUT /{id}`, run-now, ParseKeywords scope resolution, edit UI, validation fixes | M | 1 |
 | 4. Group KPIs & export | 2.4.0 | Epic C: scope params on visibility/trends/brand-mentions/gaps/citations/overview, projections + cache, Group overview + history chart + range selector, scope selector in reports, Excel export | L | 1 |
 | 5. Research Agent | 2.5.0 | Epic E: Plan/Evaluate steps, dimensions form, bounded loop, trace view, promote-to-group, export | L | 1, 2 |
 | 6. Content workflow | 2.6.0 | Epic F: ContentTasks table + API, work queue, mark-updated, ready-to-re-measure, GenerateSummary hook, comparison endpoint + panels | L | 1, 4 |

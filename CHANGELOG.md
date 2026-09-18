@@ -9,6 +9,54 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.3.0] - 2026-09-18
+
+Schedules v2: name your schedules, point them at keyword groups, edit them in
+place and run them on demand.
+
+### Added
+
+- **Group-scoped schedules.** A schedule now carries a `scope` —
+  `{"mode":"all"}`, `{"mode":"groups","group_ids":[…]}` or
+  `{"mode":"keywords","keyword_ids":[…]}` — that ParseKeywords resolves when
+  the schedule fires, so a schedule targeting "Hotel Coruña" runs whatever
+  keywords are in that group at the time. Group ids are checked against the
+  KeywordGroups table when the schedule is saved.
+- **Display names and stable ids.** EventBridge `Name` is now a generated,
+  immutable `sch-<8 hex>` id; the user's name (any text, up to 100 characters)
+  lives in `Description` and in the v2 descriptor baked into `Target.Input`
+  (`schedule_id`, `display_name`, `form`, `scope`), so every field is
+  editable without delete-and-recreate.
+- `GET /api/schedules/{id}`, `PUT /api/schedules/{id}` (partial merge over the
+  current definition, full-replace write, Admin) and
+  `POST /api/schedules/{id}/run` (start an analysis now with the schedule's
+  scope, Admin). The list response gains `id`, `display_name`, `enabled`,
+  `form`, `scope`, `scope_summary`, `legacy`, `created_at`, `updated_at`, and
+  follows pagination tokens.
+- Schedule UI: click a schedule (or Edit) to open the same form pre-filled;
+  scope picker with All / Keyword groups / Specific keywords (the grouped
+  keyword picker from Run Analysis); enable/disable toggle; "Run now"; timing
+  described in words ("Weekly on Monday at 09:00 (Europe/Madrid)") instead of
+  the raw cron; searchable IANA timezone input (Europe/Madrid included).
+- Schedules created before 2.3.0 are listed as **Legacy** with their form
+  recovered from the cron expression; `{"source":"dynamodb"}` maps to scope
+  `all`, keyword-text schedules keep their texts and ask for a scope when
+  edited. Saving upgrades them in place under the same id.
+
+### Changed
+
+- Validation: hour 0-23 and minute 0-59 are enforced (the old check only
+  required digits), timezones are validated against the IANA database
+  (`tzdata` added to the shared layer), day of month is 1-28 server- and
+  client-side, EventBridge validation errors answer 400 instead of 500.
+- `POST /api/schedules` no longer accepts `keywords` (keyword texts); it
+  answers 400 pointing at `scope`. The old keyword-text snapshot ignored later
+  renames and deactivations; scopes are resolved at run time.
+- `manage-schedule.py` routes by method and path (`shared.decorators.route_handler`);
+  the API Gateway path parameter is `{id}` (the legacy `name` key is still
+  read). `CitationAnalysis-API-ConfigMgmt` gains `states:StartExecution` on
+  the analysis workflow and read access to the KeywordGroups table.
+
 ## [2.2.0] - 2026-09-18
 
 Keyword research that cannot lose results: every research job now runs in its

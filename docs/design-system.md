@@ -367,7 +367,7 @@ correctly in both themes.
 | 10 | `/searches` | Recent Searches | `Searches/SearchesView`, `SearchesViewComponents` | ✓ auto |
 | 11 | `/raw-responses` | Raw Responses | `RawResponses/RawResponsesExplorer`, `Breadcrumb`, `FileViewer`, `ImageViewer` | ✓ auto |
 | 12 | `/execution` | Run Analysis | `Execution/ExecutionMonitor`, `ExecutionStatus`, `ExecutionMonitorComponents`, `TriggerSection` | ✓ auto |
-| 13 | `/schedule` | Schedule | `Schedule/ScheduleManager` | ✓ auto |
+| 13 | `/schedule` | Schedule | `Schedule/ScheduleManager`, `ScheduleForm`, `ScheduleManagerComponents` | ✓ auto |
 | 14 | `/settings` | Settings | `Settings/SettingsView`, `UsersConfig`, `UserModals`, `QueryPromptsManager` | ✓ auto |
 
 Modals and chrome:

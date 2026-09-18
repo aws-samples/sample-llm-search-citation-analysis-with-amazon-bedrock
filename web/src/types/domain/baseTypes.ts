@@ -105,25 +105,58 @@ export interface Execution {
 
 export type ScheduleState = 'ENABLED' | 'DISABLED';
 
-export interface Schedule {
-  name: string;
-  state: ScheduleState;
-  schedule: string;
-  timezone: string;
-  /** Keyword subset this schedule runs. Empty/absent = all active keywords. */
-  keywords?: string[];
-}
-
 export type ScheduleFrequency = 'daily' | 'weekly' | 'monthly';
 
-export interface ScheduleFormData {
+/** The editable timing of a schedule, as stored in its v2 descriptor. */
+export interface ScheduleForm {
+  frequency: ScheduleFrequency;
+  /** HH:MM, 24-hour clock, in `timezone`. */
+  time: string;
+  /** IANA zone name, e.g. Europe/Madrid. */
+  timezone: string;
+  day_of_week: string;
+  day_of_month: number;
+}
+
+/**
+ * An automated analysis schedule (EventBridge Scheduler).
+ *
+ * `id` is the generated, immutable schedule name; `display_name` is what the
+ * user typed. `scope` is resolved against the active keywords when the
+ * schedule fires. Schedules created before 2.3.0 are `legacy`: their `form`
+ * is recovered from the cron expression and a keyword-text schedule has no
+ * id-based `scope` (its texts are under `keywords`) until it is re-scoped.
+ */
+export interface Schedule {
+  id: string;
+  /** Same as `id`; kept for the previous API shape. */
   name: string;
+  display_name: string;
+  state: ScheduleState;
+  enabled: boolean;
+  /** Raw EventBridge expression, e.g. `cron(0 9 ? * MON *)`. */
+  schedule: string;
+  timezone: string;
+  form: ScheduleForm | null;
+  scope: AnalysisScope | null;
+  scope_summary: string;
+  /** Legacy keyword-text subset; empty for v2 schedules. */
+  keywords?: string[];
+  legacy: boolean;
+  description?: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+/** Form state for creating or editing a schedule. */
+export interface ScheduleFormData {
+  display_name: string;
   frequency: ScheduleFrequency;
   time: string;
   timezone: string;
   day_of_week: string;
+  /** Kept as text while editing; validated to 1-28 on save. */
   day_of_month: string;
   enabled: boolean;
-  /** Keyword subset to run. Empty = all active keywords at execution time. */
-  keywords: string[];
+  scope: AnalysisScope;
 }

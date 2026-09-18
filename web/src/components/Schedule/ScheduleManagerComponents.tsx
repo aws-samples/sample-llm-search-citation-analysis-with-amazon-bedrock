@@ -1,25 +1,30 @@
 import type {
-  Keyword, Schedule, ScheduleFormData 
+  KeywordGroup, Schedule 
 } from '../../types';
-
-export type KeywordScope = 'all' | 'selected';
+import {
+  describeScheduleScope, describeScheduleTiming 
+} from './scheduleFormModel';
 
 interface ScheduleHeaderProps {
   showForm: boolean;
-  setShowForm: (value: boolean) => void;
+  onNew: () => void;
+  onCancel: () => void;
   /** POST /api/schedules is Admin-only, so non-admins get no create affordance. */
   isAdmin: boolean;
 }
 
 export const ScheduleHeader = ({
-  showForm, setShowForm, isAdmin 
+  showForm, onNew, onCancel, isAdmin 
 }: ScheduleHeaderProps) => (
   <div className="p-4 sm:p-6 border-b border-gray-200">
     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-      <h2 className="text-lg font-semibold text-gray-900">Automated Schedules</h2>
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900">Automated Schedules</h2>
+        <p className="text-sm text-gray-500 mt-0.5">Click a schedule to edit it. Group scopes are resolved when the schedule runs.</p>
+      </div>
       {isAdmin && (
         <button
-          onClick={() => setShowForm(!showForm)}
+          onClick={showForm ? onCancel : onNew}
           className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 ${
             showForm
               ? 'bg-gray-100 text-gray-700 hover:bg-gray-200'
@@ -39,216 +44,19 @@ const PlusIcon = () => (
   </svg>
 );
 
-interface KeywordScopeFieldProps {
-  availableKeywords: Keyword[];
-  keywordScope: KeywordScope;
-  selectedKeywords: string[];
-  onScopeChange: (scope: KeywordScope) => void;
-  onToggleKeyword: (keyword: string) => void;
-}
-
-const KeywordScopeField = ({
-  availableKeywords, keywordScope, selectedKeywords, onScopeChange, onToggleKeyword 
-}: KeywordScopeFieldProps) => (
-  <div className="sm:col-span-2">
-    <FormField label="Keywords">
-      <div className="flex flex-col gap-2">
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="radio"
-            name="keyword-scope"
-            checked={keywordScope === 'all'}
-            onChange={() => onScopeChange('all')}
-          />
-          All keywords (uses the active keyword list at run time)
-        </label>
-        <label className="flex items-center gap-2 text-sm text-gray-700">
-          <input
-            type="radio"
-            name="keyword-scope"
-            checked={keywordScope === 'selected'}
-            onChange={() => onScopeChange('selected')}
-          />
-          Specific keywords
-        </label>
-      </div>
-    </FormField>
-    {keywordScope === 'selected' && (
-      <KeywordPicker
-        availableKeywords={availableKeywords}
-        selectedKeywords={selectedKeywords}
-        onToggleKeyword={onToggleKeyword}
-      />
-    )}
-  </div>
-);
-
-interface KeywordPickerProps {
-  availableKeywords: Keyword[];
-  selectedKeywords: string[];
-  onToggleKeyword: (keyword: string) => void;
-}
-
-const KeywordPicker = ({
-  availableKeywords, selectedKeywords, onToggleKeyword 
-}: KeywordPickerProps) => {
-  if (availableKeywords.length === 0) {
-    return (
-      <p className="mt-2 text-xs text-amber-600">
-        No keywords available yet. Add keywords in Settings first.
-      </p>
-    );
-  }
-
-  return (
-    <div className="mt-2">
-      <div className="max-h-40 overflow-y-auto border border-gray-200 rounded-lg bg-white p-3 grid grid-cols-1 sm:grid-cols-2 gap-1">
-        {availableKeywords.map((keyword) => (
-          <label key={keyword.id} className="flex items-center gap-2 text-sm text-gray-700 py-0.5">
-            <input
-              type="checkbox"
-              checked={selectedKeywords.includes(keyword.keyword)}
-              onChange={() => onToggleKeyword(keyword.keyword)}
-            />
-            <span className="truncate">{keyword.keyword}</span>
-          </label>
-        ))}
-      </div>
-      <p className="mt-1 text-xs text-gray-500">{selectedKeywords.length} keyword(s) selected</p>
-    </div>
-  );
-};
-
-interface ScheduleFormProps {
-  formData: ScheduleFormData;
-  updateFormField: <K extends keyof ScheduleFormData>(field: K, value: ScheduleFormData[K]) => void;
-  onSubmit: () => void;
-  availableKeywords: Keyword[];
-  keywordScope: KeywordScope;
-  onScopeChange: (scope: KeywordScope) => void;
-  onToggleKeyword: (keyword: string) => void;
-}
-
-export const ScheduleForm = ({
-  formData, updateFormField, onSubmit, availableKeywords, keywordScope, onScopeChange, onToggleKeyword 
-}: ScheduleFormProps) => (
-  <div className="p-4 sm:p-6 border-b border-gray-200 bg-gray-50">
-    <h3 className="font-medium text-gray-900 mb-4">Create New Schedule</h3>
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <FormField label="Schedule Name">
-        <input
-          type="text"
-          value={formData.name}
-          onChange={(e) => updateFormField('name', e.target.value)}
-          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-        />
-      </FormField>
-      <FormField label="Frequency">
-        <select
-          value={formData.frequency}
-          onChange={(e) => {
-            const value = e.target.value;
-            if (value === 'daily' || value === 'weekly' || value === 'monthly') {
-              updateFormField('frequency', value);
-            }
-          }}
-          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-        >
-          <option value="daily">Daily</option>
-          <option value="weekly">Weekly</option>
-          <option value="monthly">Monthly</option>
-        </select>
-      </FormField>
-      <FormField label="Time">
-        <input
-          type="time"
-          value={formData.time}
-          onChange={(e) => updateFormField('time', e.target.value)}
-          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-        />
-      </FormField>
-      <FormField label="Timezone">
-        <select
-          value={formData.timezone}
-          onChange={(e) => updateFormField('timezone', e.target.value)}
-          className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-        >
-          <option value="UTC">UTC</option>
-          <option value="America/New_York">Eastern Time</option>
-          <option value="America/Chicago">Central Time</option>
-          <option value="America/Denver">Mountain Time</option>
-          <option value="America/Los_Angeles">Pacific Time</option>
-          <option value="Europe/London">London</option>
-          <option value="Europe/Paris">Paris</option>
-        </select>
-      </FormField>
-      {formData.frequency === 'weekly' && (
-        <FormField label="Day of Week">
-          <select
-            value={formData.day_of_week}
-            onChange={(e) => updateFormField('day_of_week', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-          >
-            <option value="MON">Monday</option>
-            <option value="TUE">Tuesday</option>
-            <option value="WED">Wednesday</option>
-            <option value="THU">Thursday</option>
-            <option value="FRI">Friday</option>
-            <option value="SAT">Saturday</option>
-            <option value="SUN">Sunday</option>
-          </select>
-        </FormField>
-      )}
-      {formData.frequency === 'monthly' && (
-        <FormField label="Day of Month">
-          <input
-            type="number"
-            min="1"
-            max="31"
-            value={formData.day_of_month}
-            onChange={(e) => updateFormField('day_of_month', e.target.value)}
-            className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
-          />
-        </FormField>
-      )}
-      <KeywordScopeField
-        availableKeywords={availableKeywords}
-        keywordScope={keywordScope}
-        selectedKeywords={formData.keywords}
-        onScopeChange={onScopeChange}
-        onToggleKeyword={onToggleKeyword}
-      />
-    </div>
-    <button
-      onClick={onSubmit}
-      className="mt-4 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors"
-    >
-      Create Schedule
-    </button>
-  </div>
-);
-
-const FormField = ({
-  label, children 
-}: {
-  label: string;
-  children: React.ReactNode 
-}) => (
-  <div>
-    <label className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
-    {children}
-  </div>
-);
-
 interface ScheduleListProps {
   schedules: Schedule[];
-  onDelete: (name: string) => void;
-  /** Reads stay open; only the per-row delete is gated. */
+  groups: KeywordGroup[];
+  onEdit: (schedule: Schedule) => void;
+  onRun: (schedule: Schedule) => void;
+  onDelete: (schedule: Schedule) => void;
+  runningId: string | null;
+  /** Reads stay open; edit, run and delete are Admin-only. */
   isAdmin: boolean;
 }
 
 export const ScheduleList = ({
-  schedules, onDelete, isAdmin 
+  schedules, groups, onEdit, onRun, onDelete, runningId, isAdmin 
 }: ScheduleListProps) => (
   <div className="p-4 sm:p-6">
     {schedules.length === 0 ? (
@@ -257,9 +65,13 @@ export const ScheduleList = ({
       <div className="space-y-3">
         {schedules.map((schedule) => (
           <ScheduleItem
-            key={schedule.name}
+            key={schedule.id}
             schedule={schedule}
+            groups={groups}
+            onEdit={onEdit}
+            onRun={onRun}
             onDelete={onDelete}
+            running={runningId === schedule.id}
             isAdmin={isAdmin}
           />
         ))}
@@ -290,51 +102,81 @@ const ClockIcon = () => (
 
 interface ScheduleItemProps {
   schedule: Schedule;
-  onDelete: (name: string) => void;
-  /** DELETE /api/schedules/{name} is Admin-only. */
+  groups: KeywordGroup[];
+  onEdit: (schedule: Schedule) => void;
+  onRun: (schedule: Schedule) => void;
+  onDelete: (schedule: Schedule) => void;
+  running: boolean;
   isAdmin: boolean;
 }
 
-const ScheduleScope = ({ keywords }: { keywords?: string[] }) => {
-  if (!keywords || keywords.length === 0) {
-    return <p className="text-xs text-gray-500 mt-1">Runs all active keywords</p>;
-  }
-  return (
-    <p className="text-xs text-gray-500 mt-1 truncate" title={keywords.join(', ')}>
-      Runs {keywords.length} keyword(s): {keywords.join(', ')}
-    </p>
-  );
-};
-
+/**
+ * One schedule card. For admins the title is a button that opens the editor
+ * (click-to-edit); run and delete sit beside it.
+ */
 const ScheduleItem = ({
-  schedule, onDelete, isAdmin 
+  schedule, groups, onEdit, onRun, onDelete, running, isAdmin 
 }: ScheduleItemProps) => (
-  <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+  <div className="flex items-start justify-between gap-3 p-4 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
     <div className="flex-1 min-w-0">
-      <div className="flex items-center gap-3">
-        <h3 className="font-medium text-gray-900 text-sm">{schedule.name}</h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="font-medium text-gray-900 text-sm">
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={() => onEdit(schedule)}
+              className="text-left hover:underline focus:outline-none focus:ring-2 focus:ring-gray-900 rounded"
+              aria-label={`Edit schedule ${schedule.display_name}`}
+            >
+              {schedule.display_name}
+            </button>
+          ) : schedule.display_name}
+        </h3>
         <span
           className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-            schedule.state === 'ENABLED'
-              ? 'bg-emerald-100 text-emerald-700'
-              : 'bg-gray-100 text-gray-600'
+            schedule.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'
           }`}
         >
-          {schedule.state}
+          {schedule.enabled ? 'Enabled' : 'Disabled'}
         </span>
+        {schedule.legacy && (
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700" title="Created with the previous version; save it once to upgrade">
+            Legacy
+          </span>
+        )}
       </div>
-      <p className="text-sm text-gray-500 mt-1">{schedule.schedule}</p>
-      <ScheduleScope keywords={schedule.keywords} />
-      <p className="text-xs text-gray-400 mt-0.5">{schedule.timezone}</p>
+      <p className="text-sm text-gray-600 mt-1">{describeScheduleTiming(schedule)}</p>
+      <p className="text-xs text-gray-500 mt-1 truncate" title={describeScheduleScope(schedule.scope, groups, schedule.keywords)}>
+        {describeScheduleScope(schedule.scope, groups, schedule.keywords)}
+      </p>
     </div>
     {isAdmin && (
-      <button
-        onClick={() => onDelete(schedule.name)}
-        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-        aria-label={`Delete schedule ${schedule.name}`}
-      >
-        <TrashIcon />
-      </button>
+      <div className="flex items-center gap-1 shrink-0">
+        <button
+          type="button"
+          onClick={() => onEdit(schedule)}
+          className="px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors"
+        >
+          Edit
+        </button>
+        <button
+          type="button"
+          onClick={() => onRun(schedule)}
+          disabled={running}
+          className="px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-200 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          aria-label={`Run schedule ${schedule.display_name} now`}
+        >
+          {running ? 'Starting…' : 'Run now'}
+        </button>
+        <button
+          type="button"
+          onClick={() => onDelete(schedule)}
+          className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+          aria-label={`Delete schedule ${schedule.display_name}`}
+        >
+          <TrashIcon />
+        </button>
+      </div>
     )}
   </div>
 );
