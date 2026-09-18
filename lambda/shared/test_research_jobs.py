@@ -255,3 +255,31 @@ class TestPublicView:
 
         assert 'raw_response' not in public_view(job)
         assert public_view(job, include_raw=True)['raw_response'] == 'blob'
+
+
+    def test_agent_steps_expose_their_planned_query_dimension_and_round(self):
+        job = {
+            'id': 'job-a', 'type': 'agent', 'status': 'running',
+            'steps': {'r1-q1-openai': {**_step('openai', keyword_count=3), 'round': 1, 'query': 'hoteles coruña', 'dimension': 'destination', 'rationale': 'core'}},
+        }
+
+        step = public_view(job)['steps'][0]
+
+        assert (step['round'], step['query'], step['dimension']) == (1, 'hoteles coruña', 'destination')
+        assert 'rationale' not in step
+
+    def test_signals_step_exposes_how_many_queries_it_covers(self):
+        job = {
+            'id': 'job-a', 'type': 'agent', 'status': 'running',
+            'steps': {'r1-signals-serpapi': {**_step('serpapi'), 'round': 1, 'queries': [{'query': 'a'}, {'query': 'b'}]}},
+        }
+
+        step = public_view(job)['steps'][0]
+
+        assert step['query_count'] == 2
+        assert 'queries' not in step
+
+    def test_provider_steps_carry_no_agent_fields(self):
+        step = public_view(self._running_job())['steps'][0]
+
+        assert set(step) == {'step_id', 'provider', 'status', 'keyword_count', 'error_message', 'started_at', 'finished_at'}

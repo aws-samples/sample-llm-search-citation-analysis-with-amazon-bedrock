@@ -58,7 +58,7 @@ function countJobPolls(): number {
 describe('useKeywordResearch', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    sessionStorage.clear();
+    localStorage.clear();
     vi.useFakeTimers();
   });
 
@@ -323,8 +323,8 @@ describe('useKeywordResearch', () => {
   });
 
   describe('re-attaching after a refresh', () => {
-    it('resumes polling the job stored in the session', async () => {
-      sessionStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({
+    it('resumes polling the job stored in the browser', async () => {
+      localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify({
         id: 'job-9',
         type: 'expansion' 
       }));
@@ -338,7 +338,7 @@ describe('useKeywordResearch', () => {
       });
 
       expect(result.current.expansionResult?.seed_keyword).toBe('resumed');
-      expect(sessionStorage.getItem(ACTIVE_JOB_STORAGE_KEY)).toBeNull();
+      expect(localStorage.getItem(ACTIVE_JOB_STORAGE_KEY)).toBeNull();
     });
 
     it('remembers the job while it is still running', async () => {
@@ -350,14 +350,14 @@ describe('useKeywordResearch', () => {
         await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
       });
 
-      expect(JSON.parse(sessionStorage.getItem(ACTIVE_JOB_STORAGE_KEY) ?? '{}')).toStrictEqual({
+      expect(JSON.parse(localStorage.getItem(ACTIVE_JOB_STORAGE_KEY) ?? '{}')).toStrictEqual({
         id: 'job-1',
         type: 'expansion',
       });
     });
 
     it('ignores a malformed stored job', () => {
-      sessionStorage.setItem(ACTIVE_JOB_STORAGE_KEY, '{"id": 7}');
+      localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, '{"id": 7}');
       mockAuthenticatedFetch.mockImplementation(createResearchMockFetch());
 
       const { result } = renderHook(() => useKeywordResearch());

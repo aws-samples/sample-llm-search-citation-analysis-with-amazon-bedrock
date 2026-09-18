@@ -2,14 +2,20 @@ import {
   describe, it, expect, vi, beforeEach 
 } from 'vitest';
 import {
+  createResearchTemplate,
   deleteKeywordResearch,
+  deleteResearchTemplate,
   fetchKeywordResearch,
   fetchKeywordResearchHistory,
+  fetchResearchTemplates,
   InvalidKeywordResearchResponseError,
   isKeywordResearchItem,
+  isResearchTemplate,
   retryKeywordResearch,
   startCompetitorAnalysis,
   startKeywordExpansion,
+  startResearchAgent,
+  updateResearchTemplate,
 } from './keywordResearch';
 
 vi.mock('../infrastructure', async () => {
@@ -60,10 +66,17 @@ describe('isKeywordResearchItem', () => {
     expect(isKeywordResearchItem(PENDING_JOB)).toBe(true);
   });
 
-  it('rejects an unknown type', () => {
+  it('accepts the research-agent type', () => {
     expect(isKeywordResearchItem({
       ...PENDING_JOB,
       type: 'agent' 
+    })).toBe(true);
+  });
+
+  it('rejects an unknown type', () => {
+    expect(isKeywordResearchItem({
+      ...PENDING_JOB,
+      type: 'crawl' 
     })).toBe(false);
   });
 
@@ -171,5 +184,137 @@ describe('keyword research client', () => {
     } = lastRequest();
     expect(url).toBe('https://api.test.com/keyword-research/job-1');
     expect(init?.method).toBe('DELETE');
+  });
+});
+
+const AGENT_REQUEST = {
+  seed: 'Hotel Gran Marino',
+  country: 'es',
+  language: 'es',
+  dimensions: ['destination', 'audience'] as const,
+  instruction: 'also events',
+  targetCount: 60,
+  maxRounds: 2,
+  templateId: 'builtin-default',
+  systemPrompt: null,
+  groupId: 'g1',
+};
+
+const TEMPLATE = {
+  id: 't1',
+  name: 'Beach resorts',
+  description: '',
+  system_prompt: 'You research beach resorts for families.',
+  builtin: false,
+};
+
+describe('research agent client', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('starts an agent run with the brief in the API field names', async () => {
+    respondWith(202, {
+      ...PENDING_JOB,
+      type: 'agent' 
+    });
+
+    await startResearchAgent({
+      ...AGENT_REQUEST,
+      dimensions: [...AGENT_REQUEST.dimensions],
+    });
+
+    const {
+      url, init 
+    } = lastRequest();
+    expect(url).toBe('https://api.test.com/keyword-research/agent');
+    expect(JSON.parse(String(init?.body))).toStrictEqual({
+      seed: 'Hotel Gran Marino',
+      country: 'es',
+      language: 'es',
+      dimensions: ['destination', 'audience'],
+      instruction: 'also events',
+      target_count: 60,
+      max_rounds: 2,
+      template_id: 'builtin-default',
+      group_id: 'g1',
+    });
+  });
+
+  it('sends the edited prompt only when the form changed it', async () => {
+    respondWith(202, {
+      ...PENDING_JOB,
+      type: 'agent' 
+    });
+
+    await startResearchAgent({
+      ...AGENT_REQUEST,
+      dimensions: [...AGENT_REQUEST.dimensions],
+      systemPrompt: 'edited prompt text here',
+      groupId: null,
+    });
+
+    const body: Record<string, unknown> = JSON.parse(String(lastRequest().init?.body));
+    expect(body.system_prompt).toBe('edited prompt text here');
+    expect(body).not.toHaveProperty('group_id');
+  });
+
+  it('lists templates and drops malformed entries', async () => {
+    respondWith(200, { items: [TEMPLATE, { id: 'broken' }] });
+
+    const templates = await fetchResearchTemplates();
+
+    expect(templates).toStrictEqual([TEMPLATE]);
+  });
+
+  it('creates a template with the API field names', async () => {
+    respondWith(201, TEMPLATE);
+
+    const created = await createResearchTemplate({
+      name: 'Beach resorts',
+      systemPrompt: 'You research beach resorts for families.',
+    });
+
+    expect(created).toStrictEqual(TEMPLATE);
+    expect(JSON.parse(String(lastRequest().init?.body))).toStrictEqual({
+      name: 'Beach resorts',
+      system_prompt: 'You research beach resorts for families.',
+    });
+  });
+
+  it('updates only the fields given', async () => {
+    respondWith(200, {
+      ...TEMPLATE,
+      name: 'Renamed' 
+    });
+
+    await updateResearchTemplate('t1', { name: 'Renamed' });
+
+    const {
+      url, init 
+    } = lastRequest();
+    expect(url).toBe('https://api.test.com/keyword-research/templates/t1');
+    expect(init?.method).toBe('PUT');
+    expect(JSON.parse(String(init?.body))).toStrictEqual({ name: 'Renamed' });
+  });
+
+  it('deletes a template by id', async () => {
+    respondWith(200, { message: 'deleted' });
+
+    await deleteResearchTemplate('t1');
+
+    const {
+      url, init 
+    } = lastRequest();
+    expect(url).toBe('https://api.test.com/keyword-research/templates/t1');
+    expect(init?.method).toBe('DELETE');
+  });
+
+  it('recognises a template payload', () => {
+    expect(isResearchTemplate(TEMPLATE)).toBe(true);
+    expect(isResearchTemplate({
+      id: 't1',
+      name: 'x' 
+    })).toBe(false);
   });
 });

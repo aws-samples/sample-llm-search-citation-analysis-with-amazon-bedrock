@@ -114,6 +114,37 @@ class TestTierResolution:
             models_module.ModelTier.FAST
         )
 
+    def test_research_planning_uses_the_balanced_tier_and_evaluation_the_fast_tier(self, models_module) -> None:
+        assert models_module.get_model_tier(models_module.ModelRole.RESEARCH_PLANNING) == models_module.ModelTier.BALANCED
+        assert models_module.get_model_tier(models_module.ModelRole.RESEARCH_EVALUATION) == models_module.ModelTier.FAST
+
+
+# =============================================================================
+# invoke_bedrock — system prompt
+# =============================================================================
+
+class TestInvokeBedrockSystemPrompt:
+    def _client(self) -> MagicMock:
+        client = MagicMock()
+        client.converse.return_value = {"output": {"message": {"content": [{"text": "ok"}]}}}
+        return client
+
+    def test_sends_the_system_prompt_as_the_converse_system_block(self, models_module) -> None:
+        client = self._client()
+        models_module._bedrock_client = client
+
+        models_module.invoke_bedrock("hi", models_module.ModelRole.RESEARCH_EVALUATION, system="You are a researcher.")
+
+        assert client.converse.call_args.kwargs["system"] == [{"text": "You are a researcher."}]
+
+    def test_omits_the_system_block_when_no_system_prompt_is_given(self, models_module) -> None:
+        client = self._client()
+        models_module._bedrock_client = client
+
+        models_module.invoke_bedrock("hi", models_module.ModelRole.RESEARCH_EVALUATION)
+
+        assert "system" not in client.converse.call_args.kwargs
+
 
 # =============================================================================
 # invoke_bedrock — thinking budget

@@ -521,3 +521,340 @@ class TestHandler:
     def test_rejects_an_unknown_action(self):
         with pytest.raises(ValueError):
             _mod.handler({'action': 'dance', 'job_id': 'job-1'}, None)
+
+
+
+# =============================================================================
+# Research agent
+# =============================================================================
+
+def _agent_job(**overrides) -> dict:
+    return {
+        'id': 'job-a', 'type': 'agent', 'status': 'pending', 'round': 0, 'rounds': [], 'steps': {},
+        'system_prompt': 'You are a hotel SEO researcher.',
+        'config': {
+            'seed': 'Hotel Gran Marino', 'country': 'es', 'language': 'es',
+            'dimensions': ['destination', 'audience'], 'instruction': '', 'target_count': 60, 'max_rounds': 2, 'group_id': None,
+        },
+        'created_at': '2026-09-18T10:00:00Z',
+        **overrides,
+    }
+
+
+_PLAN_TEXT = '{"strategy": "Destination first", "queries": [{"query": "hoteles coruña centro", "dimension": "destination", "rationale": "core"}, {"query": "hotel familiar coruña", "dimension": "audience", "rationale": "families"}]}'
+
+
+def _round_one(**evaluation) -> dict:
+    """A job that finished round 1 with two completed steps."""
+    return _agent_job(status='running', round=1, rounds=[{
+        'round': 1, 'planned_at': 't', 'strategy': 'Destination first',
+        'queries': [{'query': 'hoteles coruña centro', 'dimension': 'destination', 'rationale': ''}],
+        'step_ids': ['r1-q1-perplexity'],
+        **({'evaluation': evaluation} if evaluation else {}),
+    }], steps={
+        'r1-q1-perplexity': {'provider': 'perplexity', 'status': 'completed', 'round': 1, 'query': 'hoteles coruña centro', 'dimension': 'destination',
+                             'keywords': [{'keyword': 'hotel coruña centro', 'relevance': 9, 'intent': 'commercial', 'competition': 'high', 'dimension': 'destination'}]},
+        'r1-signals-serpapi': {'provider': 'serpapi', 'status': 'completed', 'round': 1, 'queries': [{'query': 'hoteles coruña centro', 'dimension': 'destination'}],
+                               'keywords': [{'keyword': 'hoteles baratos coruña', 'relevance': 5, 'intent': '', 'competition': '', 'dimension': 'destination'}]},
+    })
+
+
+class TestAgentPlan:
+    def _plan(self, job: dict, *, retry: bool = False, bedrock=None, serpapi_key=None) -> tuple[dict, MagicMock]:
+        table = _table_with(job)
+        with (
+            patch.object(_mod, 'research_table', table),
+            patch.object(_mod, 'get_web_search_clients', _configured(_PERPLEXITY, _OPENAI)),
+            patch.object(_mod, 'get_api_key', MagicMock(return_value=serpapi_key)),
+            patch.object(_mod, 'invoke_bedrock', bedrock or MagicMock(return_value=_PLAN_TEXT)),
+        ):
+            result = _mod.handler({'action': 'plan', 'job_id': job['id'], 'retry': retry, 'execution_arn': 'arn:exec'}, None)
+        return result, table
+
+    def test_first_round_asks_the_planning_model_with_the_job_system_prompt(self):
+        bedrock = MagicMock(return_value=_PLAN_TEXT)
+
+        self._plan(_agent_job(), bedrock=bedrock)
+
+        assert bedrock.call_args.args[1] == _mod.ModelRole.RESEARCH_PLANNING
+        assert bedrock.call_args.kwargs['system'] == 'You are a hotel SEO researcher.'
+        assert '<hotel>Hotel Gran Marino</hotel>' in bedrock.call_args.args[0]
+
+    def test_first_round_becomes_one_step_per_query_rotating_providers(self):
+        result, _table = self._plan(_agent_job())
+
+        assert result == {'job_id': 'job-a', 'retry': False, 'steps': [
+            {'step_id': 'r1-q1-perplexity', 'provider': 'perplexity'},
+            {'step_id': 'r1-q2-openai', 'provider': 'openai'},
+        ]}
+
+    def test_adds_the_signals_step_when_serpapi_is_configured(self):
+        result, _table = self._plan(_agent_job(), serpapi_key='serp-key')
+
+        assert result['steps'][-1] == {'step_id': 'r1-signals-serpapi', 'provider': 'serpapi'}
+
+    def test_persists_round_one_with_its_plan_and_pending_steps(self):
+        _result, table = self._plan(_agent_job())
+
+        call = table.update_item.call_args.kwargs
+        values = call['ExpressionAttributeValues']
+        assert values[':rnd'] == 1
+        assert values[':round_info'][0]['strategy'] == 'Destination first'
+        assert [query['query'] for query in values[':round_info'][0]['queries']] == ['hoteles coruña centro', 'hotel familiar coruña']
+        assert values[':steps']['r1-q2-openai'] == {'provider': 'openai', 'status': 'pending', 'round': 1, 'query': 'hotel familiar coruña', 'dimension': 'audience', 'rationale': 'families'}
+
+    def test_appends_the_round_to_the_trace_and_marks_the_job_running(self):
+        _result, table = self._plan(_agent_job())
+
+        call = table.update_item.call_args.kwargs
+        assert 'rounds = list_append(if_not_exists(rounds, :empty), :round_info)' in call['UpdateExpression']
+        assert call['ExpressionAttributeValues'][':running'] == 'running'
+        assert call['ExpressionAttributeValues'][':total'] == 2
+
+    def test_fails_the_job_when_the_planner_returns_no_queries(self):
+        with pytest.raises(_mod.AgentPlanningError):
+            self._plan(_agent_job(), bedrock=MagicMock(return_value='{"queries": []}'))
+
+    def test_second_round_runs_the_queries_the_evaluator_asked_for_without_calling_the_model(self):
+        bedrock = MagicMock()
+        job = _round_one(decision='continue', next_queries=[{'query': 'hotel coruña con niños', 'dimension': 'audience', 'rationale': 'families'}])
+
+        result, table = self._plan(job, bedrock=bedrock)
+
+        bedrock.assert_not_called()
+        assert result['steps'] == [{'step_id': 'r2-q1-perplexity', 'provider': 'perplexity'}]
+        call = table.update_item.call_args.kwargs
+        assert call['ExpressionAttributeValues'][':rnd'] == 2
+        assert call['ExpressionAttributeValues'][':st0']['query'] == 'hotel coruña con niños'
+        assert call['ExpressionAttributeValues'][':total'] == 3
+
+    def test_plans_nothing_once_the_round_cap_is_reached(self):
+        job = _round_one(decision='continue', next_queries=[{'query': 'x', 'dimension': 'other', 'rationale': ''}])
+        job['config']['max_rounds'] = 1
+
+        result, table = self._plan(job)
+
+        assert result == {'job_id': 'job-a', 'steps': [], 'retry': False}
+        table.update_item.assert_not_called()
+
+    def test_retry_reruns_only_the_unfinished_steps_and_keeps_their_queries(self):
+        job = _round_one()
+        job['steps']['r1-signals-serpapi']['status'] = 'failed'
+        job['status'] = 'pending'
+
+        result, table = self._plan(job, retry=True)
+
+        assert result['steps'] == [{'step_id': 'r1-signals-serpapi', 'provider': 'serpapi'}]
+        values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
+        assert values[':st1'] == {'round': 1, 'queries': [{'query': 'hoteles coruña centro', 'dimension': 'destination'}], 'provider': 'serpapi', 'status': 'pending'}
+
+    def test_retry_with_every_step_completed_runs_nothing_so_evaluate_runs_again(self):
+        result, _table = self._plan(_round_one(), retry=True)
+
+        assert result['steps'] == []
+
+
+class TestAgentExecuteStep:
+    def _job_with_step(self) -> dict:
+        return _agent_job(status='running', round=1, steps={
+            'r1-q2-openai': {'provider': 'openai', 'status': 'pending', 'round': 1, 'query': 'hotel familiar coruña', 'dimension': 'audience', 'rationale': 'families'},
+            'r1-signals-serpapi': {'provider': 'serpapi', 'status': 'pending', 'round': 1, 'queries': [
+                {'query': 'hotel familiar coruña', 'dimension': 'audience'}, {'query': 'hoteles coruña', 'dimension': 'destination'},
+            ]},
+        })
+
+    def test_searches_the_planned_query_and_tags_keywords_with_its_dimension(self):
+        table = _table_with(self._job_with_step())
+        run = MagicMock(return_value='[{"keyword": "hotel coruña con niños", "intent": "commercial", "competition": "low", "relevance": 8}]')
+
+        with (
+            patch.object(_mod, 'research_table', table),
+            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
+            patch.object(_mod, 'run_web_search', run),
+        ):
+            result = _mod.handler({'action': 'execute_step', 'job_id': 'job-a', 'step_id': 'r1-q2-openai', 'provider': 'openai'}, None)
+
+        assert result['status'] == 'completed'
+        assert '<query>hotel familiar coruña</query>' in run.call_args.args[2]
+        final = _step_writes(table)[-1]
+        assert final['keywords'][0]['dimension'] == 'audience'
+
+    def test_every_status_write_keeps_the_planned_query(self):
+        table = _table_with(self._job_with_step())
+
+        with (
+            patch.object(_mod, 'research_table', table),
+            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
+            patch.object(_mod, 'run_web_search', MagicMock(return_value='[]')),
+        ):
+            _mod.handler({'action': 'execute_step', 'job_id': 'job-a', 'step_id': 'r1-q2-openai', 'provider': 'openai'}, None)
+
+        running, completed = _step_writes(table)
+        assert (running['query'], running['dimension'], running['round'], running['status']) == ('hotel familiar coruña', 'audience', 1, 'running')
+        assert (completed['query'], completed['rationale'], completed['status']) == ('hotel familiar coruña', 'families', 'completed')
+
+    def test_signals_step_collects_google_signals_for_every_query_of_the_round(self):
+        table = _table_with(self._job_with_step())
+        signals = MagicMock(side_effect=lambda _key, query, **_kw: [{'keyword': f'{query} barato', 'source': 'google autocomplete', 'relevance': 5, 'intent': '', 'competition': ''}])
+
+        with (
+            patch.object(_mod, 'research_table', table),
+            patch.object(_mod, 'get_api_key', MagicMock(return_value='serp-key')),
+            patch.object(_mod, 'fetch_google_signals', signals),
+        ):
+            result = _mod.handler({'action': 'execute_step', 'job_id': 'job-a', 'step_id': 'r1-signals-serpapi', 'provider': 'serpapi'}, None)
+
+        final = _step_writes(table)[-1]
+        assert result['status'] == 'completed'
+        assert [(entry['keyword'], entry['dimension']) for entry in final['keywords']] == [
+            ('hotel familiar coruña barato', 'audience'), ('hoteles coruña barato', 'destination'),
+        ]
+        assert signals.call_args.kwargs == {'country': 'es', 'language': 'es'}
+
+    def test_signals_step_keeps_the_queries_that_worked_and_records_the_rest_as_warnings(self):
+        table = _table_with(self._job_with_step())
+        signals = MagicMock(side_effect=[ValueError('429 rate limited'), [{'keyword': 'hoteles coruña baratos', 'source': 'google autocomplete', 'relevance': 5, 'intent': '', 'competition': ''}]])
+
+        with (
+            patch.object(_mod, 'research_table', table),
+            patch.object(_mod, 'get_api_key', MagicMock(return_value='serp-key')),
+            patch.object(_mod, 'fetch_google_signals', signals),
+        ):
+            result = _mod.handler({'action': 'execute_step', 'job_id': 'job-a', 'step_id': 'r1-signals-serpapi', 'provider': 'serpapi'}, None)
+
+        final = _step_writes(table)[-1]
+        assert (result['status'], final['keyword_count']) == ('completed', 1)
+        assert final['warnings'] == ['hotel familiar coruña: 429 rate limited']
+
+    def test_signals_step_fails_when_no_query_produced_anything(self):
+        table = _table_with(self._job_with_step())
+
+        with (
+            patch.object(_mod, 'research_table', table),
+            patch.object(_mod, 'get_api_key', MagicMock(return_value='serp-key')),
+            patch.object(_mod, 'fetch_google_signals', MagicMock(side_effect=ValueError('401 invalid key'))),
+        ):
+            result = _mod.handler({'action': 'execute_step', 'job_id': 'job-a', 'step_id': 'r1-signals-serpapi', 'provider': 'serpapi'}, None)
+
+        final = _step_writes(table)[-1]
+        assert result['status'] == 'failed'
+        assert final['error_message'] == 'hotel familiar coruña: 401 invalid key; hoteles coruña: 401 invalid key'
+
+
+class TestEvaluate:
+    def _evaluate(self, job: dict, bedrock=None) -> tuple[dict, MagicMock, MagicMock]:
+        table = _table_with(job)
+        bedrock = bedrock or MagicMock(return_value='{"decision": "stop", "reason": "saturated", "assessment": "fine", "next_queries": []}')
+        with patch.object(_mod, 'research_table', table), patch.object(_mod, 'invoke_bedrock', bedrock):
+            result = _mod.handler({'action': 'evaluate', 'job_id': job['id']}, None)
+        return result, table, bedrock
+
+    def test_non_agent_jobs_stop_without_touching_the_row_or_the_model(self):
+        result, table, bedrock = self._evaluate(_expansion_job(id='job-1', status='running'))
+
+        assert result == {'job_id': 'job-1', 'decision': 'stop', 'retry': False}
+        table.update_item.assert_not_called()
+        bedrock.assert_not_called()
+
+    def test_asks_the_evaluation_model_with_the_merged_candidates(self):
+        result, _table, bedrock = self._evaluate(_round_one())
+
+        assert bedrock.call_args.args[1] == _mod.ModelRole.RESEARCH_EVALUATION
+        prompt = bedrock.call_args.args[0]
+        assert '<kw>hotel coruña centro</kw>' in prompt
+        assert '<kw>hoteles baratos coruña</kw>' in prompt
+        assert result == {'job_id': 'job-a', 'decision': 'stop', 'round': 1, 'retry': False}
+
+    def test_continue_persists_the_evaluation_on_the_round(self):
+        text = '{"decision": "continue", "reason": "audience is thin", "assessment": "ok", "next_queries": [{"query": "hotel coruña con niños", "dimension": "audience"}]}'
+
+        result, table, _bedrock = self._evaluate(_round_one(), bedrock=MagicMock(return_value=text))
+
+        call = table.update_item.call_args.kwargs
+        assert result['decision'] == 'continue'
+        assert call['UpdateExpression'] == 'SET rounds[0].evaluation = :ev, updated_at = :ts'
+        evaluation = call['ExpressionAttributeValues'][':ev']
+        assert (evaluation['decision'], evaluation['reason'], evaluation['candidate_count']) == ('continue', 'audience is thin', 2)
+        assert evaluation['next_queries'] == [{'query': 'hotel coruña con niños', 'dimension': 'audience', 'rationale': ''}]
+
+    def test_stops_at_the_round_cap_without_calling_the_model(self):
+        job = _round_one()
+        job['config']['max_rounds'] = 1
+
+        result, table, bedrock = self._evaluate(job)
+
+        bedrock.assert_not_called()
+        assert result['decision'] == 'stop'
+        assert table.update_item.call_args.kwargs['ExpressionAttributeValues'][':ev']['reason'] == 'Reached the maximum of 1 round.'
+
+    def test_stops_when_no_candidate_was_found(self):
+        job = _round_one()
+        for step in job['steps'].values():
+            step['status'] = 'failed'
+
+        result, _table, bedrock = self._evaluate(job)
+
+        bedrock.assert_not_called()
+        assert result['decision'] == 'stop'
+
+    def test_a_model_failure_degrades_to_stop_with_the_reason_recorded(self):
+        class BedrockDown(Exception):
+            pass
+
+        result, table, _bedrock = self._evaluate(_round_one(), bedrock=MagicMock(side_effect=BedrockDown('AccessDeniedException')))
+
+        assert result['decision'] == 'stop'
+        assert table.update_item.call_args.kwargs['ExpressionAttributeValues'][':ev']['reason'].startswith('The evaluation model failed (AccessDeniedException)')
+
+    def test_an_unparseable_answer_degrades_to_stop(self):
+        result, _table, _bedrock = self._evaluate(_round_one(), bedrock=MagicMock(return_value='no json here'))
+
+        assert result['decision'] == 'stop'
+
+
+class TestAgentFinalize:
+    _SELECTION = '[{"keyword": "hotel coruña centro", "dimension": "destination", "intent": "transactional", "competition": "high", "relevance": 9, "rationale": "core demand"}]'
+
+    def _finalize(self, job: dict, bedrock=None) -> tuple[dict, MagicMock, MagicMock]:
+        table = _table_with(job)
+        bedrock = bedrock or MagicMock(return_value=self._SELECTION)
+        with patch.object(_mod, 'research_table', table), patch.object(_mod, 'invoke_bedrock', bedrock):
+            result = _mod.handler({'action': 'finalize', 'job_id': job['id']}, None)
+        return result, table, bedrock
+
+    def test_persists_the_model_selected_proposal_as_the_job_keywords(self):
+        result, table, bedrock = self._finalize(_round_one())
+
+        values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
+        assert bedrock.call_args.args[1] == _mod.ModelRole.RESEARCH_PLANNING
+        assert result == {'job_id': 'job-a', 'status': 'completed', 'keyword_count': 1}
+        assert [entry['keyword'] for entry in values[':kw']] == ['hotel coruña centro']
+        assert (values[':kc'], values[':cc'], values[':src']) == (1, 2, 'model')
+
+    def test_selected_keywords_keep_the_providers_that_proposed_them(self):
+        _result, table, _bedrock = self._finalize(_round_one())
+
+        proposal = table.update_item.call_args.kwargs['ExpressionAttributeValues'][':kw']
+        assert proposal[0]['providers'] == ['perplexity']
+
+    def test_falls_back_to_the_top_candidates_when_the_selection_model_fails(self):
+        class BedrockDown(Exception):
+            pass
+
+        result, table, _bedrock = self._finalize(_round_one(), bedrock=MagicMock(side_effect=BedrockDown('throttled')))
+
+        values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
+        assert result['status'] == 'completed'
+        assert [entry['keyword'] for entry in values[':kw']] == ['hotel coruña centro', 'hoteles baratos coruña']
+        assert values[':src'] == 'fallback'
+
+    def test_failed_job_without_candidates_skips_the_model(self):
+        job = _round_one()
+        for step in job['steps'].values():
+            step.update({'status': 'failed', 'error_message': 'boom'})
+
+        result, table, bedrock = self._finalize(job)
+
+        bedrock.assert_not_called()
+        assert result == {'job_id': 'job-a', 'status': 'failed', 'keyword_count': 0}
+        assert table.update_item.call_args.kwargs['ExpressionAttributeValues'][':src'] == 'none'

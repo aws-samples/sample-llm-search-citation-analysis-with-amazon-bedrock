@@ -41,6 +41,8 @@ class ModelRole(StrEnum):
     EXTRACTION = "extraction"        # Brand mention extraction
     GENERATION = "generation"        # Content studio article generation
     ANALYSIS = "analysis"            # Recommendations, brand expansion, reasoning
+    RESEARCH_PLANNING = "research_planning"      # Research agent: plan queries, select the final list
+    RESEARCH_EVALUATION = "research_evaluation"  # Research agent: judge a round, decide continue/stop
 
 
 class ModelTier(StrEnum):
@@ -65,6 +67,8 @@ _ROLE_DEFAULT_TIER: dict[ModelRole, ModelTier] = {
     ModelRole.EXTRACTION: ModelTier.FAST,
     ModelRole.GENERATION: ModelTier.FAST,
     ModelRole.ANALYSIS: ModelTier.BALANCED,
+    ModelRole.RESEARCH_PLANNING: ModelTier.BALANCED,
+    ModelRole.RESEARCH_EVALUATION: ModelTier.FAST,
 }
 
 # Extended thinking budget (tokens) per tier. 0 disables thinking.
@@ -134,6 +138,7 @@ def invoke_bedrock(
     temperature: float = 0.0,
     max_retries: int = 5,
     thinking: bool | None = None,
+    system: str | None = None,
 ) -> str:
     """
     Invoke Bedrock Converse API with exponential backoff on throttling.
@@ -146,6 +151,8 @@ def invoke_bedrock(
         max_retries: Total attempts before giving up on throttling.
         thinking: If True, force extended thinking on (uses tier budget).
                   If False, force off. If None (default), use tier budget.
+        system: Optional system prompt, sent as the Converse ``system`` block
+                (the research agent's user-editable instructions).
 
     Returns:
         Response text. Empty string if the model returns no text blocks.
@@ -180,6 +187,8 @@ def invoke_bedrock(
         "messages": [{"role": "user", "content": [{"text": prompt}]}],
         "inferenceConfig": inference_config,
     }
+    if system:
+        request_kwargs["system"] = [{"text": system}]
     if budget > 0:
         request_kwargs["additionalModelRequestFields"] = {
             "thinking": {"type": "enabled", "budget_tokens": budget}

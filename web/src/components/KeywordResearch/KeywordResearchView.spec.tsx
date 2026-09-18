@@ -15,6 +15,8 @@ vi.mock('./CompetitorAnalysis', () => ({CompetitorAnalysis: () => <div data-test
 
 vi.mock('./ResearchHistory', () => ({ResearchHistory: () => <div data-testid="research-history">Research History</div>,}));
 
+vi.mock('./agent/ResearchAgent', () => ({ResearchAgent: () => <div data-testid="research-agent">Research Agent</div>,}));
+
 import { useKeywordResearch } from '../../hooks/useKeywordResearch';
 
 const mockUseKeywordResearch = useKeywordResearch as ReturnType<typeof vi.fn>;
@@ -42,16 +44,25 @@ describe('KeywordResearchView', () => {
   });
 
   describe('tab navigation', () => {
-    it('renders all three tab buttons', () => {
+    it('renders the four tab buttons', () => {
       render(<KeywordResearchView />);
 
+      expect(screen.getByRole('button', { name: /research agent/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /related keywords/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /competitor analysis/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /history/i })).toBeInTheDocument();
     });
 
-    it('shows keyword expansion tab by default', () => {
+    it('shows the research agent tab by default', () => {
       render(<KeywordResearchView />);
+
+      expect(screen.getByTestId('research-agent')).toBeInTheDocument();
+    });
+
+    it('switches to keyword expansion when clicked', async () => {
+      render(<KeywordResearchView />);
+
+      await userEvent.click(screen.getByRole('button', { name: /related keywords/i }));
 
       expect(screen.getByTestId('keyword-expansion')).toBeInTheDocument();
     });
@@ -77,7 +88,7 @@ describe('KeywordResearchView', () => {
     it('displays description text', () => {
       render(<KeywordResearchView />);
 
-      expect(screen.getByText(/discover keyword opportunities/i)).toBeInTheDocument();
+      expect(screen.getByText(/let the research agent plan and run/i)).toBeInTheDocument();
     });
   });
 

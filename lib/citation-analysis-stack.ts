@@ -37,6 +37,10 @@ const bedrockTierEnv = {
   BEDROCK_TIER_EXTRACTION:    'fast',
   BEDROCK_TIER_GENERATION:    'fast',
   BEDROCK_TIER_ANALYSIS:      'balanced',
+  // Research agent (2.5.0): planning and the final selection reason over the
+  // whole brief; judging a round is a cheaper, high-volume call.
+  BEDROCK_TIER_RESEARCH_PLANNING:   'balanced',
+  BEDROCK_TIER_RESEARCH_EVALUATION: 'fast',
 } as const;
 
 /**
@@ -470,6 +474,22 @@ export class CitationAnalysisStack extends cdk.Stack {
     // holds group metadata.
     const keywordGroupsTable = new dynamodb.Table(this, 'KeywordGroupsTable', {
       tableName: 'CitationAnalysis-KeywordGroups',
+      partitionKey: {
+        name: 'id',
+        type: dynamodb.AttributeType.STRING,
+      },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+
+    // DynamoDB Table: ResearchTemplates
+    // Saved system prompts for the keyword research agent (2.5.0). The
+    // built-in template is code, not a row; every agent job snapshots the
+    // prompt it ran with, so editing a template never rewrites history.
+    const researchTemplatesTable = new dynamodb.Table(this, 'ResearchTemplatesTable', {
+      tableName: 'CitationAnalysis-ResearchTemplates',
       partitionKey: {
         name: 'id',
         type: dynamodb.AttributeType.STRING,
@@ -1334,14 +1354,24 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Keyword Research State Machine
     // ========================================
     //
-    // One execution per research job (keyword expansion or competitor URL
-    // analysis). Every configured web-search provider is a parallel step that
-    // checkpoints its own result into the job row the moment it finishes, so
-    // a provider that times out costs its own step, not the job, and the API
-    // can show partial results while the rest are still running.
+    // One execution per research job (keyword expansion, competitor URL
+    // analysis or the research agent). Every step checkpoints its own result
+    // into the job row the moment it finishes, so a provider that times out
+    // costs its own step, not the job, and the API can show partial results
+    // while the rest are still running.
     //
-    //   Plan -> Map(ExecuteResearchStep | FailResearchStep) -> Finalize
+    //   Plan -> Map(ExecuteResearchStep | FailResearchStep) -> Evaluate -> continue?
+    //     ^                                                                 | yes
+    //     +-----------------------------------------------------------------+
+    //                                                                       | no
+    //                                                                       v
+    //                                                                    Finalize
     //                                            any crash -> FailResearchJob
+    //
+    // Expansion and competitor jobs run one step per configured provider and
+    // Evaluate answers `stop` immediately. Agent jobs (2.5.0) run one step per
+    // model-planned query; Evaluate asks a model whether another round is
+    // worth it, bounded by the job's max_rounds (hard cap 3 in the worker).
     //
     // This replaced the KeywordMgmt Lambda invoking itself asynchronously
     // (2.2.0): that path ran every provider sequentially inside one 120s
@@ -1364,17 +1394,32 @@ export class CitationAnalysisStack extends cdk.Stack {
       // call: at most two HTTP attempts of up to 90s each plus backoff.
       timeout: cdk.Duration.seconds(300),
       memorySize: 512,
-      description: 'Keyword research steps: plan, one web-search provider call per step, finalize',
+      description: 'Keyword research steps: plan, one web-search provider call per step, evaluate, finalize',
       logGroup: researchWorkerLogGroup,
       environment: {
         DYNAMODB_TABLE_KEYWORD_RESEARCH: keywordResearchTable.tableName,
         SECRETS_PREFIX: 'citation-analysis/',
+        ...bedrockTierEnv,
       },
     });
     keywordResearchTable.grantReadWriteData(researchWorkerFunction);
     perplexitySecret.grantRead(researchWorkerFunction);
     openaiSecret.grantRead(researchWorkerFunction);
     geminiSecret.grantRead(researchWorkerFunction);
+    // The agent's Google signals step (related searches, People Also Ask,
+    // autocomplete) runs only when a SerpAPI key is configured.
+    serpapiSecret.grantRead(researchWorkerFunction);
+    // The agent's plan / evaluate / select calls (shared/models.py roles
+    // RESEARCH_PLANNING and RESEARCH_EVALUATION).
+    researchWorkerFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['bedrock:InvokeModel'],
+      resources: [
+        `arn:aws:bedrock:*:${this.account}:inference-profile/global.anthropic.claude-*`,
+        `arn:aws:bedrock:*::foundation-model/anthropic.claude-*`,
+        `arn:aws:bedrock:::foundation-model/anthropic.claude-*`,
+      ],
+    }));
 
     const planResearchTask = new tasks.LambdaInvoke(this, 'PlanResearch', {
       lambdaFunction: researchWorkerFunction,
@@ -1443,8 +1488,21 @@ export class CitationAnalysisStack extends cdk.Stack {
       retryOnServiceExceptions: true,
     });
 
-    // Anything that escapes Plan, the Map or Finalize marks the job failed so
-    // the UI never polls a job whose execution is gone.
+    // After every round the worker decides whether to plan another one. Its
+    // output ({job_id, decision, round, retry: false}) is also the input of
+    // the next Plan, which reads `$.retry` — hence the explicit `retry` key.
+    const evaluateResearchTask = new tasks.LambdaInvoke(this, 'EvaluateResearch', {
+      lambdaFunction: researchWorkerFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'evaluate',
+        'job_id.$': '$.job_id',
+      }),
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+    });
+
+    // Anything that escapes Plan, the Map, Evaluate or Finalize marks the job
+    // failed so the UI never polls a job whose execution is gone.
     const failResearchJobTask = new tasks.LambdaInvoke(this, 'FailResearchJob', {
       lambdaFunction: researchWorkerFunction,
       payload: stepfunctions.TaskInput.fromObject({
@@ -1459,13 +1517,20 @@ export class CitationAnalysisStack extends cdk.Stack {
       error: 'ResearchJobFailed',
       cause: 'The research job could not be completed; see the job row for details.',
     }));
-    for (const state of [planResearchTask, executeResearchStepsMap, finalizeResearchTask]) {
+    for (const state of [planResearchTask, executeResearchStepsMap, evaluateResearchTask, finalizeResearchTask]) {
       state.addCatch(failResearchJobTask, { errors: ['States.ALL'], resultPath: '$.error' });
     }
 
+    // The loop is bounded by the worker (max_rounds, hard cap 3): Evaluate
+    // answers `stop` at the cap, so the Choice can never spin.
+    const researchContinueChoice = new stepfunctions.Choice(this, 'ResearchContinue')
+      .when(stepfunctions.Condition.stringEquals('$.decision', 'continue'), planResearchTask)
+      .otherwise(finalizeResearchTask);
+
     const researchDefinition = planResearchTask
       .next(executeResearchStepsMap)
-      .next(finalizeResearchTask);
+      .next(evaluateResearchTask)
+      .next(researchContinueChoice);
 
     // New group (nothing to import) — `/aws/vendedlogs/states/` for the same
     // resource-policy reason as the workflow's group above.
@@ -1656,7 +1721,9 @@ export class CitationAnalysisStack extends cdk.Stack {
       code: createApiLambdaCode('health.py'),
       layers: [sharedLayer],
       timeout: cdk.Duration.seconds(5),
-      memorySize: 128,
+      // Python + the shared layer idle at ~95 MB; at 128 MB the function ran at
+      // 74% of its memory (14-day CloudWatch REPORT peak, 2026-09-18).
+      memorySize: 256,
       description: 'API: Health check endpoint for monitoring',
       logGroup: apiLambdaLogGroup(this, 'HealthCheckLogGroup', 'CitationAnalysis-API-Health'),
     });
@@ -1809,6 +1876,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         DYNAMODB_TABLE_KEYWORD_RESEARCH: keywordResearchTable.tableName,
+        DYNAMODB_TABLE_RESEARCH_TEMPLATES: researchTemplatesTable.tableName,
         // Legacy names, dropped once rollout verified.
         KEYWORDS_TABLE: keywordsTable.tableName,
         KEYWORD_RESEARCH_TABLE: keywordResearchTable.tableName,
@@ -1910,6 +1978,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordsTable.grantReadWriteData(keywordMgmtFunction);
     keywordGroupsTable.grantReadWriteData(keywordMgmtFunction);
     keywordResearchTable.grantReadWriteData(keywordMgmtFunction);
+    researchTemplatesTable.grantReadWriteData(keywordMgmtFunction);
     // Secrets are read only to answer "is any provider configured?" before a
     // job is created; the worker reads them again to make the calls.
     perplexitySecret.grantRead(keywordMgmtFunction);
@@ -2320,6 +2389,21 @@ export class CitationAnalysisStack extends cdk.Stack {
     
     const keywordResearchCompetitorResource = keywordResearchResource.addResource('competitor');
     keywordResearchCompetitorResource.addMethod('POST', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+
+    // POST /keyword-research/agent — start a research-agent job (2.5.0).
+    const keywordResearchAgentResource = keywordResearchResource.addResource('agent');
+    keywordResearchAgentResource.addMethod('POST', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+
+    // /keyword-research/templates — the agent's saved system prompts. Open to
+    // every authenticated user (the agent is meant to be configurable by the
+    // people who run it); `{id}` here is a child of `templates`, not a sibling
+    // of the job `{id}` below, so API Gateway accepts both variable parts.
+    const keywordResearchTemplatesResource = keywordResearchResource.addResource('templates');
+    keywordResearchTemplatesResource.addMethod('GET', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+    keywordResearchTemplatesResource.addMethod('POST', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+    const keywordResearchTemplateIdResource = keywordResearchTemplatesResource.addResource('{id}');
+    keywordResearchTemplateIdResource.addMethod('PUT', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+    keywordResearchTemplateIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
     
     const keywordResearchHistoryResource = keywordResearchResource.addResource('history');
     keywordResearchHistoryResource.addMethod('GET', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
@@ -2577,6 +2661,9 @@ export class CitationAnalysisStack extends cdk.Stack {
       sources: [s3deploy.Source.asset(distPath)],
       destinationBucket: webBucket,
       prune: false,
+      // The default 128 MB deployment handler peaked at 100% of its memory
+      // and took ~60s per deploy unzipping the dashboard bundle.
+      memoryLimit: 512,
     });
 
     // ========================================

@@ -29,6 +29,8 @@ from botocore.exceptions import ClientError
 
 os.environ.setdefault('KEYWORD_RESEARCH_TABLE', 'test-keyword-research')
 os.environ.setdefault('RESEARCH_STATE_MACHINE_ARN', 'arn:aws:states:us-west-2:123456789012:stateMachine:research')
+os.environ.setdefault('DYNAMODB_TABLE_RESEARCH_TEMPLATES', 'test-research-templates')
+os.environ.setdefault('DYNAMODB_TABLE_KEYWORD_GROUPS', 'test-keyword-groups')
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _LAMBDA_DIR = os.path.dirname(_HERE)

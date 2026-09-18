@@ -12,7 +12,8 @@ result under ``steps.<step_id>`` the moment it finishes, so a provider that
 times out or a worker that dies loses only its own step, never the job.
 ``Finalize`` merges the completed steps into the job-level result. The API
 also merges on read while a job is still running, so partial results are
-visible before the job ends.
+visible before the job ends. Agent jobs (``shared.research_agent``) reuse
+the same row and step bookkeeping with model-planned steps and rounds.
 
 Statuses::
 
@@ -48,6 +49,10 @@ STEP_FAILED = 'failed'
 
 TYPE_EXPANSION = 'expansion'
 TYPE_COMPETITOR = 'competitor'
+# Research agent (2.5.0): steps are planned by a model per round instead of
+# one per provider; ``shared.research_agent`` owns the config and prompts.
+TYPE_AGENT = 'agent'
+JOB_TYPES = (TYPE_EXPANSION, TYPE_COMPETITOR, TYPE_AGENT)
 
 # Rows expire after 90 days; the UI's history view never needs older jobs and
 # the table otherwise grows forever (there was no TTL before 2.2.0).
@@ -233,6 +238,9 @@ def public_view(job: dict[str, Any], *, include_raw: bool = False) -> dict[str, 
             'error_message': step.get('error_message'),
             'started_at': step.get('started_at'),
             'finished_at': step.get('finished_at'),
+            # Agent steps carry what was planned for them (absent otherwise).
+            **{key: step[key] for key in ('round', 'query', 'dimension') if key in step},
+            **({'query_count': len(step['queries'])} if isinstance(step.get('queries'), list) else {}),
         }
         for step_id, step in sorted(steps.items())
         if isinstance(step, dict)

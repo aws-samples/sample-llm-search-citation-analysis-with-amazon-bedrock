@@ -29,7 +29,7 @@ interface ResearchHistoryProps {
 }
 
 const getKeywordsForItem = (item: KeywordResearchItem): ResearchKeyword[] => {
-  if (item.type === 'expansion' && item.keywords) {
+  if ((item.type === 'expansion' || item.type === 'agent') && item.keywords) {
     return uniqueResearchKeywords(item.keywords);
   }
   if (item.type === 'competitor' && item.analysis) {
@@ -165,7 +165,7 @@ const HistoryItem = ({
 }: HistoryItemProps) => {
   const keywords = useMemo(() => getKeywordsForItem(item), [item]);
   const hasKeywords = keywords.length > 0;
-  const itemTitle = item.type === 'expansion' ? item.seed_keyword : (item.domain ?? item.url);
+  const itemTitle = item.type === 'competitor' ? (item.domain ?? item.url) : (item.config?.seed ?? item.seed_keyword);
   const panelId = `research-history-keywords-${item.id}`;
 
   const promotion = usePromoteKeywords(keywords, onKeywordsAdded);
@@ -274,15 +274,32 @@ const ExpandButton = ({
   </button>
 );
 
-const TypeBadge = ({ type }: { type: string }) => (
-  <span
-    className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${
-      type === 'expansion' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
-    }`}
-  >
-    {type === 'expansion' ? 'Expansion' : 'Competitor'}
-  </span>
-);
+const TYPE_BADGES: Record<string, {
+  label: string;
+  className: string 
+}> = {
+  expansion: {
+    label: 'Expansion',
+    className: 'bg-blue-100 text-blue-700',
+  },
+  competitor: {
+    label: 'Competitor',
+    className: 'bg-purple-100 text-purple-700',
+  },
+  agent: {
+    label: 'Agent',
+    className: 'bg-emerald-100 text-emerald-700',
+  },
+};
+
+const TypeBadge = ({ type }: { type: string }) => {
+  const badge = TYPE_BADGES[type] ?? TYPE_BADGES.expansion;
+  return (
+    <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${badge.className}`}>
+      {badge.label}
+    </span>
+  );
+};
 
 /**
  * Without this a run the backend marked `failed` was indistinguishable from a

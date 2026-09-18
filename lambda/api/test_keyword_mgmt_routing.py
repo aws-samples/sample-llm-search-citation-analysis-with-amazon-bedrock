@@ -51,6 +51,8 @@ _API_DIR = os.path.dirname(os.path.abspath(__file__))
 # (it reads its table and state machine ARN at module level).
 os.environ.setdefault('KEYWORD_RESEARCH_TABLE', 'test-keyword-research-table')
 os.environ.setdefault('RESEARCH_STATE_MACHINE_ARN', 'arn:aws:states:us-west-2:123456789012:stateMachine:test')
+os.environ.setdefault('DYNAMODB_TABLE_RESEARCH_TEMPLATES', 'test-research-templates')
+os.environ.setdefault('DYNAMODB_TABLE_KEYWORD_GROUPS', 'test-keyword-groups')
 os.environ.setdefault('SECRETS_PREFIX', 'test-citation-analysis/')
 
 

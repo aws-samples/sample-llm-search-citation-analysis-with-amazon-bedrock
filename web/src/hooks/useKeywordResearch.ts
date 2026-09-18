@@ -16,14 +16,20 @@ import type {
 } from '../types';
 
 /**
- * The job the user is waiting on, remembered across a refresh or a tab switch
- * so the view re-attaches to it instead of losing the run (R15).
+ * The job the user is waiting on, remembered across a refresh, a tab switch
+ * or a closed browser so the view re-attaches to it instead of losing the
+ * run (R15, R22). Kept in localStorage (sessionStorage died with the tab, so
+ * a user who closed the browser while a long expansion ran had to dig the
+ * result out of History).
  */
-const ACTIVE_JOB_STORAGE_KEY = 'keywordResearch.activeJob';
+export const ACTIVE_JOB_STORAGE_KEY = 'keywordResearch.activeJob';
+
+/** Expansion and competitor runs; agent runs are tracked by `useResearchAgent`. */
+type TrackedResearchType = Exclude<ResearchType, 'agent'>;
 
 interface StoredActiveJob {
   id: string;
-  type: ResearchType;
+  type: TrackedResearchType;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -36,9 +42,17 @@ function isStoredActiveJob(value: unknown): value is StoredActiveJob {
     && (value.type === 'expansion' || value.type === 'competitor');
 }
 
+function activeJobStorage(): Storage | null {
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 function readStoredActiveJob(): StoredActiveJob | null {
   try {
-    const raw = sessionStorage.getItem(ACTIVE_JOB_STORAGE_KEY);
+    const raw = activeJobStorage()?.getItem(ACTIVE_JOB_STORAGE_KEY) ?? null;
     if (raw === null) return null;
     const parsed: unknown = JSON.parse(raw);
     return isStoredActiveJob(parsed) ? {
@@ -52,10 +66,12 @@ function readStoredActiveJob(): StoredActiveJob | null {
 
 function storeActiveJob(job: StoredActiveJob | null): void {
   try {
+    const storage = activeJobStorage();
+    if (storage === null) return;
     if (job === null) {
-      sessionStorage.removeItem(ACTIVE_JOB_STORAGE_KEY);
+      storage.removeItem(ACTIVE_JOB_STORAGE_KEY);
     } else {
-      sessionStorage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify(job));
+      storage.setItem(ACTIVE_JOB_STORAGE_KEY, JSON.stringify(job));
     }
   } catch {
     // Storage can be unavailable (private mode, quota); re-attach is best effort.
@@ -87,7 +103,7 @@ function toCompetitorResult(job: KeywordResearchItem): CompetitorAnalysisResult 
   };
 }
 
-const TIMEOUT_MESSAGES: Record<ResearchType, string> = {
+const TIMEOUT_MESSAGES: Record<TrackedResearchType, string> = {
   expansion: 'Expansion is taking longer than expected. Check History for the result.',
   competitor: 'Analysis is taking longer than expected. Check History for the result.',
 };
@@ -121,7 +137,7 @@ export const useKeywordResearch = () => {
    * `activeJob`, the merged result in the matching result slot. Shared by
    * start, retry and re-attach.
    */
-  const trackJob = useCallback(async (jobId: string, type: ResearchType, isCancelled: () => boolean) => {
+  const trackJob = useCallback(async (jobId: string, type: TrackedResearchType, isCancelled: () => boolean) => {
     storeActiveJob({
       id: jobId,
       type 
@@ -160,7 +176,7 @@ export const useKeywordResearch = () => {
     }
   }, []);
 
-  const beginRun = useCallback((type: ResearchType) => {
+  const beginRun = useCallback((type: TrackedResearchType) => {
     setLoading(true);
     setError(null);
     setActiveJob(null);
@@ -205,6 +221,8 @@ export const useKeywordResearch = () => {
 
   /** Re-run the failed steps of a partial or failed job and follow it again. */
   const retryResearch = useCallback(async (job: KeywordResearchItem) => {
+    // Agent runs are followed by the Research Agent tab (`useResearchAgent`).
+    if (job.type === 'agent') return;
     const isCancelled = claimGeneration();
     beginRun(job.type);
     setActiveJob(job);
