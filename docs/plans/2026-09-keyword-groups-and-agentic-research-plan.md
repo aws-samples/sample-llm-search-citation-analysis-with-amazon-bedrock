@@ -1,6 +1,6 @@
 # Plan: Keyword Groups, Editable Schedules, Group KPIs, Reliable Keyword Research, Research Agent, Content Workflow
 
-Status: DRAFT v2 — 2026-09-18 (decisions D1, D3, D6 and the keyword cap locked in review round 1; see §4)
+Status: IN DELIVERY — 2026-09-18. Phase 0a (2.0.1) merged + deployed; Phase 1 (2.1.0, keyword groups + cap removal) built; Phases 2–6 pending. Decisions D1, D3, D6, D9 locked (see §4).
 Baseline: `main` at v2.0.0 (after Dependabot merges #104/#105/#106)
 Scope: six related customer requests (hotel chain customer, contact: Bastián) plus a
 dead-code cleanup the customer asked for. Original feedback was in Spanish; requirements
@@ -269,9 +269,9 @@ Each phase = one PR = one minor version + CHANGELOG entry; every PR runs `ruff c
 
 | Phase | Version | Content | Size | Depends on |
 |---|---|---|---|---|
-| 0a. Dead-code cleanup | 2.0.1 | Epic G: remove the unused modules/functions/exports listed in §3.7 (web + lambda), delete their spec files, trim barrels, drop `@types/unist`; add `knip`/dead-code scripts | S | — |
+| 0a. Dead-code cleanup (DONE, deployed) | 2.0.1 | Epic G: remove the unused modules/functions/exports listed in §3.7 (web + lambda), delete their spec files, trim barrels, drop `@types/unist`; add `knip`/dead-code scripts | S | — |
 | 0b. Quick wins + foundations | 2.0.2 | `GET /keyword-research/{id}`; TTL on research rows; async `retryAttempts: 0` on self-invoking functions; frontend polls by id with aligned window | S | 0a |
-| 1. Keyword Groups + cap removal | 2.1.0 | Epic A: table, `group_ids`, resolver, `/api/keyword-groups`, promote/trigger `group_ids`/`scope`, Settings Groups panel, `KeywordScopePicker`, trigger page; D9 cap removal + Map concurrency parameter | M | 0b |
+| 1. Keyword Groups + cap removal (DONE) | 2.1.0 | Epic A: table, `group_ids`, resolver, `/api/keyword-groups`, promote/trigger `group_ids`/`scope`, Settings Groups panel, `KeywordScopePicker`, trigger page; D9 cap removal + Map concurrency parameter | M | 0b |
 | 2. Reliable, parallel research | 2.2.0 | Epic D: research state machine + worker, parallel Map, job/step model, GSI, retry endpoint, progressive UI, URL/session re-attach | L | 0b (parallel with 1) |
 | 3. Schedules v2 | 2.3.0 | Epic B: v2 descriptor, generated ids + display name, `GET/PUT /{id}`, run-now, ParseKeywords scope resolution, edit UI, validation fixes | M | 1 |
 | 4. Group KPIs & export | 2.4.0 | Epic C: scope params on visibility/trends/brand-mentions/gaps/citations/overview, projections + cache, Group overview + history chart + range selector, scope selector in reports, Excel export | L | 1 |

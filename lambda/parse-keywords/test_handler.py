@@ -217,3 +217,61 @@ class TestQueryPromptReadFailsClosed:
         )
 
         assert result['query_prompts'] == prompts
+
+
+
+class TestScopeResolution:
+    """Group-aware execution input: {"scope": {...}} resolved at run time."""
+
+    def test_resolves_a_group_scope_to_the_active_members_of_that_group(self, handler_module):
+        mock_keywords_table.query.return_value = {'Items': [
+            {'id': 'k1', 'keyword': 'hotel coruna spa', 'group_ids': {'coruna'}},
+            {'id': 'k2', 'keyword': 'hotel marino beach', 'group_ids': {'marino'}},
+            {'id': 'k3', 'keyword': 'best hotels galicia', 'group_ids': {'coruna', 'marino'}},
+        ]}
+
+        result = handler_module.handler({'scope': {'mode': 'groups', 'group_ids': ['coruna']}, 'query_prompts': []}, {})
+
+        assert [item['keyword'] for item in result['keywords']] == ['best hotels galicia', 'hotel coruna spa']
+
+    def test_resolves_a_keyword_id_scope(self, handler_module):
+        mock_keywords_table.query.return_value = {'Items': [
+            {'id': 'k1', 'keyword': 'alpha'},
+            {'id': 'k2', 'keyword': 'beta'},
+        ]}
+
+        result = handler_module.handler({'scope': {'mode': 'keywords', 'keyword_ids': ['k2']}, 'query_prompts': []}, {})
+
+        assert [item['keyword'] for item in result['keywords']] == ['beta']
+
+    def test_raises_a_clear_error_for_an_invalid_scope(self, handler_module):
+        with pytest.raises(ValueError, match=r'Invalid scope: scope\.mode must be one of'):
+            handler_module.handler({'scope': {'mode': 'bogus'}}, {})
+
+    def test_raises_when_the_scope_matches_no_active_keyword(self, handler_module):
+        mock_keywords_table.query.return_value = {'Items': [{'id': 'k1', 'keyword': 'alpha', 'group_ids': {'other'}}]}
+
+        with pytest.raises(ValueError, match='No valid keywords'):
+            handler_module.handler({'scope': {'mode': 'groups', 'group_ids': ['coruna']}}, {})
+
+
+class TestNoKeywordCap:
+    """Executions are no longer silently truncated to 100 keywords."""
+
+    def test_keeps_every_keyword_when_more_than_100_are_supplied(self, handler_module):
+        keywords = [f'keyword {index:03d}' for index in range(180)]
+
+        result = handler_module.handler({'keywords': keywords, 'query_prompts': []}, {})
+
+        assert len(result['keywords']) == 180
+        assert result['keywords'][-1]['keyword'] == 'keyword 179'
+
+    def test_reads_every_page_of_the_status_index_for_scheduled_runs(self, handler_module):
+        first_page = {'Items': [{'id': f'k{i}', 'keyword': f'kw {i:03d}'} for i in range(100)], 'LastEvaluatedKey': {'id': 'k99'}}
+        second_page = {'Items': [{'id': f'k{i}', 'keyword': f'kw {i:03d}'} for i in range(100, 150)]}
+        mock_keywords_table.query.side_effect = [first_page, second_page]
+
+        result = handler_module.handler({'source': 'dynamodb', 'query_prompts': []}, {})
+
+        assert len(result['keywords']) == 150
+        mock_keywords_table.query.side_effect = None

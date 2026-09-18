@@ -44,7 +44,34 @@ export interface Keyword {
   keyword: string;
   created_at: string;
   status?: 'active' | 'inactive' | 'paused';
+  /** Ids of the keyword groups this keyword belongs to (absent = none). */
+  group_ids?: string[];
 }
+
+/** A folder of keywords, typically one per hotel / property. */
+export interface KeywordGroup {
+  id: string;
+  name: string;
+  description: string;
+  keyword_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * What an analysis run should cover, resolved server-side against the active
+ * keyword list: everything, whole groups, or explicit keyword ids.
+ */
+export type AnalysisScope =
+  | { mode: 'all' }
+  | {
+    mode: 'groups';
+    group_ids: string[] 
+  }
+  | {
+    mode: 'keywords';
+    keyword_ids: string[] 
+  };
 
 export interface KeywordExtended extends Keyword {
   region?: string;

@@ -2,7 +2,7 @@ import {
   useState, useMemo 
 } from 'react';
 import type {
-  Execution, Keyword 
+  AnalysisScope, Execution, Keyword, KeywordGroup 
 } from '../../types';
 import {
   API_BASE_URL, authenticatedFetch 
@@ -10,6 +10,7 @@ import {
 import { calculateDuration } from '../../formatting/dateFormatter';
 import { useAlertModal } from '../../hooks/useAlertModal';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
+import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { AlertModal } from '../ui/Modal';
 import { processExecutionData } from '../../formatting/executionProcessor';
 import {
@@ -19,7 +20,7 @@ import {
 
 interface ExecutionMonitorProps {
   execution: Execution | null;
-  triggerAnalysis: (selectedKeywords?: string[]) => Promise<{
+  triggerAnalysis: (scope?: AnalysisScope) => Promise<{
     success: boolean;
     message: string;
   }>;
@@ -65,26 +66,16 @@ export const ExecutionMonitor = ({
   keywordsCount,
   keywords,
 }: ExecutionMonitorProps) => {
-  const [selectedKeywords, setSelectedKeywords] = useState<string[]>([]);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isStarting, setIsStarting] = useState(false);
   const {
     alertModal, showAlert, closeAlert
   } = useAlertModal();
+  const { groups } = useKeywordGroups();
 
   const activeKeywords = keywords.filter((k) => !k.status || k.status === 'active');
 
-  const handleToggleKeyword = (keyword: string) => {
-    setSelectedKeywords((prev) =>
-      prev.includes(keyword) ? prev.filter((k) => k !== keyword) : [...prev, keyword]
-    );
-  };
-
-  const handleSelectAll = () => {
-    const allSelected = selectedKeywords.length === activeKeywords.length;
-    setSelectedKeywords(allSelected ? [] : activeKeywords.map((k) => k.keyword));
-  };
-
-  const handleTriggerAnalysis = async () => {
+  const runWithPreflight = async (scope: AnalysisScope | undefined) => {
     setIsStarting(true);
     try {
       const preflight = await checkLlmProvidersReady();
@@ -102,8 +93,7 @@ export const ExecutionMonitor = ({
         console.warn(`[preflight] ${preflight.missingKeyProviders.length} enabled provider(s) missing API keys: ${preflight.missingKeyProviders.join(', ')}`);
       }
 
-      const keywordsToRun = selectedKeywords.length > 0 ? selectedKeywords : undefined;
-      const result = await triggerAnalysis(keywordsToRun);
+      const result = await triggerAnalysis(scope);
       showAlert(
         result.success ? 'Success' : 'Error',
         result.message,
@@ -113,6 +103,18 @@ export const ExecutionMonitor = ({
       setIsStarting(false);
     }
   };
+
+  const handleTriggerAnalysis = () => runWithPreflight(
+    selectedIds.length > 0 ? {
+      mode: 'keywords',
+      keyword_ids: selectedIds 
+    } : undefined
+  );
+
+  const handleRunGroup = (group: KeywordGroup) => runWithPreflight({
+    mode: 'groups',
+    group_ids: [group.id] 
+  });
 
   const processedExecution = useMemo(
     () => processExecutionData(execution),
@@ -127,14 +129,15 @@ export const ExecutionMonitor = ({
     <>
       <div className="space-y-6">
         <TriggerSection
-          selectedKeywords={selectedKeywords}
+          selectedIds={selectedIds}
           keywordsCount={keywordsCount}
           activeKeywords={activeKeywords}
+          groups={groups}
           isRunning={isRunning ?? false}
           isStarting={isStarting}
-          onSelectAll={handleSelectAll}
-          onToggleKeyword={handleToggleKeyword}
-          onTriggerAnalysis={handleTriggerAnalysis}
+          onSelectionChange={setSelectedIds}
+          onTriggerAnalysis={() => { void handleTriggerAnalysis(); }}
+          onRunGroup={(group) => { void handleRunGroup(group); }}
           isAdmin={isAdmin}
         />
 

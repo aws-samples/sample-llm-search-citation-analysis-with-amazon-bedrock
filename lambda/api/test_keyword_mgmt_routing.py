@@ -245,7 +245,7 @@ class TestAsyncDispatchUnit:
 # matches. Seeding the router's HandlerLoader cache means no real sub-handler
 # is loaded and no AWS / AI-provider calls occur.
 
-_SUB_HANDLER_FILES = ('keyword-research.py', 'get-keywords.py', 'manage-keywords.py')
+_SUB_HANDLER_FILES = ('keyword-research.py', 'get-keywords.py', 'manage-keywords.py', 'manage-keyword-groups.py')
 
 
 def _install_all_handler_mocks(mod):
@@ -524,3 +524,39 @@ class TestPreservationUnit:
         )
         for sub_mock in mocks.values():
             sub_mock.assert_not_called()
+
+
+
+class TestKeywordGroupsRouting:
+    """`/api/keyword-groups*` is a sibling of `/api/keywords`, never a child."""
+
+    @pytest.mark.parametrize(
+        ('method', 'path', 'path_params'),
+        [
+            ('GET', '/api/keyword-groups', None),
+            ('POST', '/api/keyword-groups', None),
+            ('PUT', '/api/keyword-groups/g1', {'id': 'g1'}),
+            ('DELETE', '/api/keyword-groups/g1', {'id': 'g1'}),
+            ('PUT', '/api/keyword-groups/g1/keywords', {'id': 'g1'}),
+        ],
+    )
+    def test_routes_every_keyword_groups_method_to_the_groups_handler(self, keyword_mgmt_all, method, path, path_params):
+        mod, mocks = keyword_mgmt_all
+        resource = path.replace('/g1', '/{id}')
+        event = {'resource': resource, 'path': path, 'httpMethod': method, 'pathParameters': path_params}
+
+        result = mod.handler(event, None)
+
+        mocks['manage-keyword-groups.py'].assert_called_once_with(event, None)
+        assert result == mocks['manage-keyword-groups.py'].return_value
+        mocks['manage-keywords.py'].assert_not_called()
+        mocks['get-keywords.py'].assert_not_called()
+
+    def test_keeps_keyword_routes_away_from_the_groups_handler(self, keyword_mgmt_all):
+        mod, mocks = keyword_mgmt_all
+        event = {'resource': '/api/keywords', 'path': '/api/keywords', 'httpMethod': 'GET', 'pathParameters': None}
+
+        mod.handler(event, None)
+
+        mocks['manage-keyword-groups.py'].assert_not_called()
+        mocks['get-keywords.py'].assert_called_once_with(event, None)

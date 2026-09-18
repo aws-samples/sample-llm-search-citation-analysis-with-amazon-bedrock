@@ -9,6 +9,52 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.1.0] - 2026-09-18
+
+Keyword groups: organise keywords into folders (typically one per hotel or
+property), run analyses per group, and stop truncating large runs.
+
+### Added
+
+- **Keyword groups.** New table `CitationAnalysis-KeywordGroups` and routes
+  `GET/POST /api/keyword-groups`, `PUT/DELETE /api/keyword-groups/{id}`,
+  `PUT /api/keyword-groups/{id}/keywords` (bulk add/remove). Membership is the
+  `group_ids` string set on each keyword, so a keyword can belong to any
+  number of groups. Group names are unique (case-insensitive); deleting a
+  group detaches its keywords but keeps them. Like keyword management, these
+  routes are open to every authenticated user.
+- `POST /api/keywords`, `PUT /api/keywords/{id}` and `POST /api/keywords/promote`
+  accept `group_ids`; `GET /api/keywords` accepts `?group_id=` and returns
+  `group_ids` on each keyword.
+- `POST /api/trigger-keyword-analysis` accepts a `scope`
+  (`{"mode":"groups","group_ids":[…]}`, `{"mode":"keywords","keyword_ids":[…]}`
+  or `{"mode":"all"}`) resolved server-side against the active keywords; the
+  legacy `keywords` array still works. Executions record the requested scope.
+- ParseKeywords accepts `{"scope": …}` execution input and resolves it at run
+  time (groundwork for group-targeted schedules).
+- Settings → Keywords: a Keyword Groups panel (create, rename, delete, filter
+  by group / ungrouped), group chips on every keyword, a per-keyword Groups
+  menu, and bulk "Add to group / Remove from group" for ticked keywords.
+  Keywords added while a group is selected land in that group.
+- Run Analysis: one-click "run a whole keyword group" buttons and a grouped,
+  searchable keyword picker (tri-state group checkboxes) replacing the flat
+  checkbox grid.
+- CDK context `processKeywordsConcurrency` to tune the ProcessKeywords Map
+  concurrency (default 3).
+
+### Changed
+
+- **No more 100-keyword cap.** ParseKeywords no longer truncates executions,
+  `trigger-analysis` reads every StatusIndex page instead of the first 500,
+  and `trigger-keyword-analysis` drops its 100-keyword limit. Throughput is
+  governed by the Map concurrency and the 2 h state-machine timeout.
+
+### Fixed
+
+- The health check function (`GET /api/health`) shipped without the shared
+  Lambda layer it imports from and answered 502 to every monitor; it now has
+  the layer and the CORS parameter like the other API functions.
+
 ## [2.0.1] - 2026-09-18
 
 Dead-code removal and KPI-denominator fix, prompted by customer feedback that
