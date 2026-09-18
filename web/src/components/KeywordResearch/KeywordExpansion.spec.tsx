@@ -15,8 +15,14 @@ import {
 } from '../../hooks/usePromoteKeywords';
 import { ApiRequestError } from '../../infrastructure';
 import type {
-  ExpandedKeywordWithSource, Keyword, KeywordExpansionResult
+  Keyword, KeywordExpansionResult
 } from '../../types';
+import {
+  beachResortsFixture,
+  expansionKeywordFixtures,
+  luxuryHotelsFixture,
+  selectKeywordCheckbox,
+} from './expandedKeyword-fixtures';
 
 vi.mock('../../api/client', () => ({ apiPost: vi.fn() }));
 
@@ -35,10 +41,6 @@ function buildProps(overrides = {}) {
 }
 
 describe('KeywordExpansion', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   describe('initial render', () => {
     it('renders seed keyword input', () => {
       render(<KeywordExpansion {...buildProps()} />);
@@ -117,24 +119,6 @@ describe('KeywordExpansion', () => {
     });
   });
 });
-
-const luxuryHotelsFixture: ExpandedKeywordWithSource = {
-  keyword: 'luxury hotels',
-  intent: 'commercial',
-  competition: 'high',
-  relevance: 9,
-  source: 'expansion',
-};
-
-const beachResortsFixture: ExpandedKeywordWithSource = {
-  keyword: 'beach resorts',
-  intent: 'informational',
-  competition: 'low',
-  relevance: 7,
-  source: 'expansion',
-};
-
-const expansionKeywordFixtures = [luxuryHotelsFixture, beachResortsFixture];
 
 const expansionResultFixture: KeywordExpansionResult = {
   id: 'research-1',
@@ -229,9 +213,6 @@ const renderExpansionWithResult = (
     onKeywordsAdded={onKeywordsAdded}
   />
 );
-
-const selectKeywordCheckbox = (keyword: string) =>
-  screen.getByRole('checkbox', { name: `Select ${keyword}` });
 
 const getPromoteButtonElement = () =>
   screen.getByRole('button', { name: /add to keywords/i });

@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect 
 } from 'vitest';
 import {
   render, screen 
@@ -18,10 +18,6 @@ const mockSearches = [
 ];
 
 describe('SearchesView', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('renders without crashing', () => {
     render(<SearchesView searches={[]} />);
     expect(document.body).toBeTruthy();

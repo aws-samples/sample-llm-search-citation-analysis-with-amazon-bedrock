@@ -1,7 +1,10 @@
 import type { ReportsOverviewResponse } from '../../../../api/reports';
 import type { Recommendation } from '../../../../types';
 import {
-  ReportSection, SectionPlaceholder 
+  PriorityBadge,
+  ReportSection,
+  ReportSectionPlaceholder,
+  pendingSectionPlaceholder,
 } from '../../layout';
 
 interface Props {
@@ -19,30 +22,21 @@ interface Props {
 export function NextActionsSection({
   data, loading, error 
 }: Props) {
-  if (loading) {
-    return (
-      <ReportSection title="Next actions">
-        <SectionPlaceholder variant="loading" message="Loading recommendations…" />
-      </ReportSection>
-    );
-  }
-
-  if (error) {
-    return (
-      <ReportSection title="Next actions">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
+  const pending = pendingSectionPlaceholder({
+    title: 'Next actions',
+    loading,
+    loadingMessage: 'Loading recommendations…',
+    error,
+  });
+  if (pending) return pending;
 
   if (!data || data.top_recommendations.length === 0) {
     return (
-      <ReportSection title="Next actions">
-        <SectionPlaceholder
-          variant="empty"
-          message="No outstanding recommendations. The visibility plan is on track."
-        />
-      </ReportSection>
+      <ReportSectionPlaceholder
+        title="Next actions"
+        variant="empty"
+        message="No outstanding recommendations. The visibility plan is on track."
+      />
     );
   }
 
@@ -87,25 +81,4 @@ function RecommendationCard({ rec }: { readonly rec: Recommendation }) {
       </div>
     </li>
   );
-}
-
-function PriorityBadge({ priority }: { readonly priority: 'high' | 'medium' | 'low' }) {
-  const styles = priorityStyles(priority);
-  return (
-    <span
-      className={`flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold uppercase ${styles}`}
-    >
-      {priority}
-    </span>
-  );
-}
-
-function priorityStyles(priority: 'high' | 'medium' | 'low'): string {
-  if (priority === 'high') {
-    return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300';
-  }
-  if (priority === 'medium') {
-    return 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300';
-  }
-  return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
 }

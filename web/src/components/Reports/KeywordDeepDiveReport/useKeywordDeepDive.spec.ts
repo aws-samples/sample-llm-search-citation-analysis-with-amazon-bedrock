@@ -43,7 +43,6 @@ describe('useKeywordDeepDive', () => {
   const fetchRecs = vi.fn();
 
   beforeEach(() => {
-    vi.clearAllMocks();
     mockVisibility.mockReturnValue({
       ...settledSlice({ keyword: 'foo' }),
       fetchVisibilityMetrics: fetchVisibility,

@@ -6,10 +6,7 @@ import {
 } from 'vitest';
 import { BrandChart } from './BrandChart';
 
-vi.mock('chart.js', () => ({
-  Chart: Object.assign(vi.fn().mockImplementation(() => ({ destroy: vi.fn() })), {register: vi.fn(),}),
-  registerables: [],
-}));
+vi.mock('chart.js', () => import('./chartJs-fixtures'));
 
 describe('BrandChart', () => {
   it('displays title', () => {

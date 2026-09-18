@@ -1,8 +1,10 @@
 import { formatDate } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
-
-type CrawlStatus = 'success' | 'blocked' | 'error';
-type BlockReason = 'captcha' | 'access_denied' | 'rate_limited' | 'geo_blocked' | 'login_required';
+import { ClockIcon } from '../ui';
+import {
+  BLOCK_REASON_LABELS, BlockedPageBanner, isBlockReason 
+} from './BlockedPageBanner';
+import type { CrawlStatus } from './BlockedPageBanner';
 
 export interface HistoryCrawl {
   crawled_at: string;
@@ -14,50 +16,6 @@ export interface HistoryCrawl {
   page_load_time_ms?: number;
   content_length?: number;
 }
-
-const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
-  captcha: 'CAPTCHA verification required',
-  access_denied: 'Access denied (403 Forbidden)',
-  rate_limited: 'Rate limited - too many requests',
-  geo_blocked: 'Region-restricted content',
-  login_required: 'Login required to access content',
-};
-
-function isBlockReason(value: string | undefined): value is BlockReason {
-  const validReasons = ['captcha', 'access_denied', 'rate_limited', 'geo_blocked', 'login_required'];
-  return value !== undefined && validReasons.includes(value);
-}
-
-const BlockedPageBanner = ({ blockReason }: { blockReason?: BlockReason }) => (
-  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-    <div className="flex items-start gap-3">
-      <svg 
-        className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" 
-        fill="none" 
-        stroke="currentColor" 
-        viewBox="0 0 24 24"
-      >
-        <path 
-          strokeLinecap="round" 
-          strokeLinejoin="round" 
-          strokeWidth={2} 
-          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" 
-        />
-      </svg>
-      <div>
-        <h4 className="text-sm font-semibold text-amber-800">Bot Detection Blocked</h4>
-        <p className="text-sm text-amber-700 mt-1">
-          This site blocked automated access. The screenshot shows the block page, not the actual content.
-        </p>
-        {blockReason && (
-          <p className="text-sm text-amber-600 mt-2">
-            <span className="font-medium">Reason:</span> {BLOCK_REASON_LABELS[blockReason]}
-          </p>
-        )}
-      </div>
-    </div>
-  </div>
-);
 
 const HistoryItem = ({ 
   crawl, 
@@ -192,19 +150,7 @@ export const HistoryTab = ({
   if (history.length === 0) {
     return (
       <div className="text-center py-12 text-gray-500">
-        <svg 
-          className="w-12 h-12 mx-auto mb-4 text-gray-300" 
-          fill="none" 
-          stroke="currentColor" 
-          viewBox="0 0 24 24"
-        >
-          <path 
-            strokeLinecap="round" 
-            strokeLinejoin="round" 
-            strokeWidth={1.5} 
-            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" 
-          />
-        </svg>
+        <ClockIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />
         <p>No crawl history available</p>
       </div>
     );

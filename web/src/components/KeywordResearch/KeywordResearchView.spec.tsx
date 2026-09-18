@@ -37,7 +37,6 @@ function buildMockResearch(overrides = {}) {
 
 describe('KeywordResearchView', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockUseKeywordResearch.mockReturnValue(buildMockResearch());
   });
 

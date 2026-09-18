@@ -8,6 +8,7 @@ import {
   MemoryRouter, Routes, Route 
 } from 'react-router-dom';
 import { BrandVisibilityReport } from './BrandVisibilityReport';
+import { buildKeywordTrends } from './keywordTrends-fixtures';
 import type { Keyword } from '../../../types';
 
 vi.mock('./useBrandVisibilityReport', () => ({useBrandVisibilityReport: vi.fn()}));
@@ -88,44 +89,18 @@ const ALL_KEYWORDS_DATA = {
   visibility: null,
   visibilityLoading: false,
   visibilityError: null,
-  trends: {
-    period_type: 'day',
-    days_analyzed: 30,
-    data_points: 0,
-    trend_data: [],
-    trend_direction: 'stable',
-    summary: {
-      current_score: 0,
-      previous_score: 0,
-      change: 0,
-      change_percent: 0,
-      average_score: 0,
-      max_score: 0,
-      min_score: 0,
+  trends: buildKeywordTrends([
+    {
+      keyword: 'best running shoes',
+      current_score: 80,
+      change: 8,
     },
-    keyword_trends: [
-      {
-        keyword: 'best running shoes',
-        trend_direction: 'improving',
-        current_score: 80,
-        change: 8,
-        change_percent: 11.1,
-      },
-      {
-        keyword: 'best hiking boots',
-        trend_direction: 'declining',
-        current_score: 30,
-        change: -10,
-        change_percent: -25,
-      },
-    ],
-    overall: {
-      improving_count: 1,
-      declining_count: 1,
-      stable_count: 0,
-      avg_score: 55,
+    {
+      keyword: 'best hiking boots',
+      current_score: 30,
+      change: -10,
     },
-  },
+  ]),
   trendsLoading: false,
   trendsError: null,
   ready: true,
@@ -150,7 +125,6 @@ function renderAt(path: string) {
 
 describe('BrandVisibilityReport — per-keyword variant', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockUse.mockReturnValue(PER_KEYWORD_DATA);
   });
 
@@ -183,7 +157,6 @@ describe('BrandVisibilityReport — per-keyword variant', () => {
 
 describe('BrandVisibilityReport — all-keywords variant', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockUse.mockReturnValue(ALL_KEYWORDS_DATA);
   });
 

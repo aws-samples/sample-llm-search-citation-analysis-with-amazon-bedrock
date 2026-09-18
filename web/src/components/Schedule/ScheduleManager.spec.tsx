@@ -35,6 +35,7 @@ import {
 } from '../../api/executions';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
+import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
 import { ApiRequestError } from '../../infrastructure';
 
 const mockFetchSchedules = vi.mocked(fetchSchedules);
@@ -56,16 +57,7 @@ function buildProps(overrides: { schedules?: Schedule[] } = {}) {
 }
 
 function mockGroups(groups = [GROUP_CORUNA, GROUP_MARINO]) {
-  mockUseKeywordGroups.mockReturnValue({
-    groups,
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-    createGroup: vi.fn(),
-    renameGroup: vi.fn(),
-    removeGroup: vi.fn(),
-    changeMemberships: vi.fn(),
-  });
+  mockUseKeywordGroups.mockReturnValue(buildKeywordGroupsHookResult(groups));
 }
 
 async function openCreateForm() {
@@ -78,7 +70,6 @@ async function openEditForm(displayName: string) {
 
 describe('ScheduleManager', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockUseIsAdmin.mockReturnValue({
       isAdmin: true,
       loading: false,
@@ -377,12 +368,16 @@ describe('ScheduleManager', () => {
   });
 
   describe('deleting a schedule', () => {
+    async function confirmDeleteOfWeeklySchedule() {
+      await userEvent.click(screen.getByRole('button', { name: 'Delete schedule Hotel Coruña — weekly' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    }
+
     it('deletes by id after confirmation and drops the row', async () => {
       const props = buildProps({ schedules: [weeklySchedule] });
       render(<ScheduleManager {...props} />);
 
-      await userEvent.click(screen.getByRole('button', { name: 'Delete schedule Hotel Coruña — weekly' }));
-      await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+      await confirmDeleteOfWeeklySchedule();
 
       expect(mockDeleteSchedule).toHaveBeenCalledWith('sch-1a2b3c4d');
       expect(props.setSchedules).toHaveBeenCalledWith([]);
@@ -393,8 +388,7 @@ describe('ScheduleManager', () => {
       mockDeleteSchedule.mockRejectedValue(new ApiRequestError('Forbidden', { statusCode: 403 }));
       render(<ScheduleManager {...props} />);
 
-      await userEvent.click(screen.getByRole('button', { name: 'Delete schedule Hotel Coruña — weekly' }));
-      await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+      await confirmDeleteOfWeeklySchedule();
 
       expect(screen.getByText('Managing schedules requires an administrator')).toBeInTheDocument();
       // Only the mount-time load touched the list; the failed delete did not.
@@ -411,7 +405,6 @@ describe('ScheduleManager admin-only controls', () => {
    */
 
   beforeEach(() => {
-    vi.clearAllMocks();
     mockUseIsAdmin.mockReturnValue({
       isAdmin: false,
       loading: false,

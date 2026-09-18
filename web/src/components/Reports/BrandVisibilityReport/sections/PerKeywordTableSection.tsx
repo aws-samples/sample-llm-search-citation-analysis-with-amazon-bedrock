@@ -1,6 +1,11 @@
-import type { HistoricalTrendsResponse } from '../../../../types';
+import type {
+  HistoricalTrendsResponse, TrendDirection 
+} from '../../../../types';
 import {
-  ReportSection, SectionPlaceholder 
+  ReportSection,
+  ReportTable,
+  type ReportTableColumn,
+  gateSection,
 } from '../../layout';
 
 interface Props {
@@ -8,6 +13,8 @@ interface Props {
   readonly loading: boolean;
   readonly error: string | null;
 }
+
+type KeywordTrendRow = NonNullable<HistoricalTrendsResponse['keyword_trends']>[number];
 
 /**
  * Per-keyword leaderboard for the all-keywords variant. Sorted by current
@@ -19,26 +26,43 @@ interface Props {
  */
 const MOVE_THRESHOLD = 5;
 
+const COLUMNS: ReadonlyArray<ReportTableColumn<KeywordTrendRow>> = [
+  {
+    header: 'Keyword',
+    cellClassName: 'font-medium',
+    render: (row) => row.keyword,
+  },
+  {
+    header: 'Score',
+    render: (row) => row.current_score.toFixed(1),
+  },
+  {
+    header: 'Change',
+    render: (row) => `${row.change > 0 ? '+' : ''}${row.change.toFixed(1)}`,
+  },
+  {
+    header: '%',
+    render: (row) => `${row.change_percent > 0 ? '+' : ''}${row.change_percent.toFixed(1)}%`,
+  },
+  {
+    header: 'Direction',
+    render: (row) => <DirectionBadge direction={row.trend_direction} />,
+  },
+];
+
 export function PerKeywordTableSection({
   trends, loading, error 
 }: Props) {
-  if (loading) {
-    return (
-      <ReportSection title="Per-keyword leaderboard">
-        <SectionPlaceholder variant="loading" message="Loading per-keyword rankings…" />
-      </ReportSection>
-    );
-  }
+  const gate = gateSection({
+    title: 'Per-keyword leaderboard',
+    loading,
+    loadingMessage: 'Loading per-keyword rankings…',
+    error,
+    value: trends,
+  });
+  if (!gate.ready) return gate.placeholder;
 
-  if (error) {
-    return (
-      <ReportSection title="Per-keyword leaderboard">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
-
-  const rows = trends?.keyword_trends ?? [];
+  const rows = gate.value.keyword_trends ?? [];
   if (rows.length === 0) {
     return null;
   }
@@ -50,38 +74,12 @@ export function PerKeywordTableSection({
       title="Per-keyword leaderboard"
       subtitle="Current score and 30-day change for every tracked keyword. Sorted strongest to weakest. Movers (≥5 points) are highlighted."
     >
-      <div className="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-800">
-            <tr>
-              <Th>Keyword</Th>
-              <Th>Score</Th>
-              <Th>Change</Th>
-              <Th>%</Th>
-              <Th>Direction</Th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {sorted.map((row) => (
-              <tr key={row.keyword} className={moverRowClass(row.change)}>
-                <Td className="font-medium">{row.keyword}</Td>
-                <Td>{row.current_score.toFixed(1)}</Td>
-                <Td>
-                  {row.change > 0 ? '+' : ''}
-                  {row.change.toFixed(1)}
-                </Td>
-                <Td>
-                  {row.change_percent > 0 ? '+' : ''}
-                  {row.change_percent.toFixed(1)}%
-                </Td>
-                <Td>
-                  <DirectionBadge direction={row.trend_direction} />
-                </Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <ReportTable
+        columns={COLUMNS}
+        rows={sorted}
+        rowKey={(row) => row.keyword}
+        rowClassName={(row) => moverRowClass(row.change)}
+      />
     </ReportSection>
   );
 }
@@ -92,29 +90,7 @@ function moverRowClass(change: number): string {
   return 'bg-red-50 dark:bg-red-950/20';
 }
 
-function Th({ children }: { readonly children: React.ReactNode }) {
-  return (
-    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-      {children}
-    </th>
-  );
-}
-
-function Td({
-  children,
-  className = '',
-}: {
-  readonly children: React.ReactNode;
-  readonly className?: string;
-}) {
-  return (
-    <td className={`px-3 py-2 text-gray-700 dark:text-gray-300 ${className}`}>
-      {children}
-    </td>
-  );
-}
-
-function DirectionBadge({direction,}: {readonly direction: 'improving' | 'declining' | 'stable';}) {
+function DirectionBadge({ direction }: { readonly direction: TrendDirection }) {
   const styles = directionStyles(direction);
   return (
     <span
@@ -125,7 +101,7 @@ function DirectionBadge({direction,}: {readonly direction: 'improving' | 'declin
   );
 }
 
-function directionStyles(d: 'improving' | 'declining' | 'stable'): string {
+function directionStyles(d: TrendDirection): string {
   if (d === 'improving') {
     return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300';
   }

@@ -6,7 +6,7 @@ import {
 } from '@testing-library/react';
 import { ProvidersConfig } from './ProvidersConfig';
 import {
-  buildProviderConfig, buildProvidersConfigProps 
+  buildCreditExhaustedProvider, buildProviderConfig, buildProvidersConfigProps 
 } from './ProvidersConfig-fixtures';
 
 describe('ProvidersConfig', () => {
@@ -47,11 +47,7 @@ describe('ProvidersConfig health badge', () => {
   });
 
   it('reports when the provider account has run out of credit', () => {
-    const providers = [buildProviderConfig({
-      last_error: 'Your credit balance is too low',
-      last_error_at: '2026-08-19T10:00:00Z',
-      last_error_category: 'insufficient_credit',
-    })];
+    const providers = [buildCreditExhaustedProvider()];
 
     render(<ProvidersConfig {...buildProvidersConfigProps({ providers })} />);
 
@@ -103,10 +99,7 @@ describe('ProvidersConfig health badge', () => {
   });
 
   it('shows how long ago the failure happened', () => {
-    const providers = [buildProviderConfig({
-      last_error_at: '2026-08-19T10:00:00Z',
-      last_error_category: 'insufficient_credit',
-    })];
+    const providers = [buildCreditExhaustedProvider()];
 
     render(<ProvidersConfig {...buildProvidersConfigProps({ providers })} />);
 
@@ -114,11 +107,7 @@ describe('ProvidersConfig health badge', () => {
   });
 
   it('keeps the raw provider error available for debugging', () => {
-    const providers = [buildProviderConfig({
-      last_error: 'Your credit balance is too low',
-      last_error_at: '2026-08-19T10:00:00Z',
-      last_error_category: 'insufficient_credit',
-    })];
+    const providers = [buildCreditExhaustedProvider()];
 
     render(<ProvidersConfig {...buildProvidersConfigProps({ providers })} />);
 
@@ -159,14 +148,10 @@ describe('ProvidersConfig health badge', () => {
 });
 
 describe('ProvidersConfig auto-disabled provider', () => {
-  const autoDisabledProviders = [buildProviderConfig({
+  const autoDisabledProviders = [buildCreditExhaustedProvider({
     enabled: false,
     auto_disabled: true,
     disabled_reason: 'No credit remaining on this provider account',
-    last_error: 'Your credit balance is too low',
-    last_error_at: '2026-08-19T10:00:00Z',
-    last_error_category: 'insufficient_credit',
-    consecutive_failures: 3,
   })];
 
   it('states that the provider was switched off automatically', () => {

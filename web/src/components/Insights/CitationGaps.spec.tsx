@@ -13,6 +13,8 @@ vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
 
 import { useCitationGaps } from '../../hooks/useCitationGaps';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
+import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
+import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
 
 const mockUseCitationGaps = useCitationGaps as ReturnType<typeof vi.fn>;
 const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
@@ -37,30 +39,13 @@ function buildProps(overrides: { keywords?: Keyword[] } = {}) {
 
 describe('CitationGaps', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockUseCitationGaps.mockReturnValue({
       data: null,
       loading: false,
       error: null,
       fetchCitationGaps: vi.fn(),
     });
-    mockUseKeywordGroups.mockReturnValue({
-      groups: [{
-        id: 'group-coruna',
-        name: 'Hotel Coruña',
-        description: '',
-        keyword_count: 1,
-        created_at: '2026-01-01T00:00:00Z',
-        updated_at: '2026-01-01T00:00:00Z',
-      }],
-      loading: false,
-      error: null,
-      refresh: vi.fn(),
-      createGroup: vi.fn(),
-      renameGroup: vi.fn(),
-      removeGroup: vi.fn(),
-      changeMemberships: vi.fn(),
-    });
+    mockUseKeywordGroups.mockReturnValue(buildKeywordGroupsHookResult());
   });
 
   describe('initial render', () => {
@@ -74,9 +59,7 @@ describe('CitationGaps', () => {
     it('renders the scope filter with all keywords, groups and keywords', () => {
       render(<CitationGaps {...buildProps()} />);
 
-      expect(screen.getByRole('option', { name: 'All keywords' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Hotel Coruña (1)' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'hotels' })).toBeInTheDocument();
+      expect(renderedScopeOptionLabels('Filter by keyword or group')).toStrictEqual(['All keywords', 'Hotel Coruña (1)', 'hotels', 'resorts']);
     });
 
     it('fetches gaps on mount', () => {

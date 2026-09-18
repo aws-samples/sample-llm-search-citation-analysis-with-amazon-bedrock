@@ -17,4 +17,9 @@ export {
   WarningIcon,
   CheckIcon,
   ArrowRightIcon,
+  EyeIcon,
+  CogIcon,
+  RefreshIcon,
+  ClockIcon,
+  CollectionIcon,
 } from './Icons';

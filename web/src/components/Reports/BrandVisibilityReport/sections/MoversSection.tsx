@@ -1,6 +1,6 @@
 import type { HistoricalTrendsResponse } from '../../../../types';
 import {
-  ReportSection, SectionPlaceholder 
+  MoverColumn, ReportSection, gateSection 
 } from '../../layout';
 
 interface Props {
@@ -10,6 +10,7 @@ interface Props {
 }
 
 const TOP_N = 5;
+const NO_MOVERS_MESSAGE = 'No keywords moved in this direction.';
 
 /**
  * Top improvers and top decliners side by side. The aggregator endpoint
@@ -21,23 +22,16 @@ const TOP_N = 5;
 export function MoversSection({
   trends, loading, error 
 }: Props) {
-  if (loading) {
-    return (
-      <ReportSection title="Top movers">
-        <SectionPlaceholder variant="loading" message="Computing movers…" />
-      </ReportSection>
-    );
-  }
+  const gate = gateSection({
+    title: 'Top movers',
+    loading,
+    loadingMessage: 'Computing movers…',
+    error,
+    value: trends,
+  });
+  if (!gate.ready) return gate.placeholder;
 
-  if (error) {
-    return (
-      <ReportSection title="Top movers">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
-
-  const rows = trends?.keyword_trends ?? [];
+  const rows = gate.value.keyword_trends ?? [];
   if (rows.length === 0) return null;
 
   const improvers = [...rows]
@@ -61,69 +55,15 @@ export function MoversSection({
           title="Improving"
           accent="positive"
           rows={improvers}
+          emptyMessage={NO_MOVERS_MESSAGE}
         />
         <MoverColumn
           title="Declining"
           accent="negative"
           rows={decliners}
+          emptyMessage={NO_MOVERS_MESSAGE}
         />
       </div>
     </ReportSection>
-  );
-}
-
-function MoverColumn({
-  title,
-  accent,
-  rows,
-}: {
-  readonly title: string;
-  readonly accent: 'positive' | 'negative';
-  readonly rows: ReadonlyArray<{
-    keyword: string;
-    current_score: number;
-    change: number;
-    change_percent: number;
-  }>;
-}) {
-  if (rows.length === 0) {
-    return (
-      <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
-        <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
-          {title}
-        </h3>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
-          No keywords moved in this direction.
-        </p>
-      </div>
-    );
-  }
-
-  const accentClass = accent === 'positive'
-    ? 'text-emerald-700 dark:text-emerald-400'
-    : 'text-red-700 dark:text-red-400';
-
-  return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 avoid-break-inside">
-      <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
-        {title}
-      </h3>
-      <ul className="space-y-2">
-        {rows.map((row) => (
-          <li
-            key={row.keyword}
-            className="flex items-baseline justify-between gap-3 text-sm"
-          >
-            <span className="text-gray-700 dark:text-gray-300 truncate">
-              {row.keyword}
-            </span>
-            <span className={`font-mono font-semibold flex-shrink-0 ${accentClass}`}>
-              {row.change > 0 ? '+' : ''}
-              {row.change.toFixed(1)}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }

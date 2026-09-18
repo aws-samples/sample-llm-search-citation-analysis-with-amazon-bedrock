@@ -3,7 +3,7 @@ import {
 } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import {
-  describe, it, expect, vi, beforeEach, afterEach,
+  describe, it, expect, vi, beforeEach 
 } from 'vitest';
 import { PrintToPdfButton } from './PrintToPdfButton';
 
@@ -31,10 +31,6 @@ const renderAt = (path: string) =>
 describe('PrintToPdfButton', () => {
   beforeEach(() => {
     vi.spyOn(window, 'open').mockImplementation(() => null);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   it('opens a new tab when clicked', () => {

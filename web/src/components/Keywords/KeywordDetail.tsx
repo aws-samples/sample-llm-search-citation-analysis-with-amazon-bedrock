@@ -186,8 +186,8 @@ const ChartsSection = ({
   );
 };
 
-interface RunHistoryProps {
-  runBatches: Record<string, Search[]>;
+/** Expansion state and navigation callbacks threaded from the run history down to every batch card. */
+interface RunExpansionProps {
   stats: KeywordStats;
   expandedRun: number | null;
   setExpandedRun: (value: number | null) => void;
@@ -197,15 +197,10 @@ interface RunHistoryProps {
   buildRawResponsesPath: (search: Search) => string;
 }
 
+interface RunHistoryProps extends RunExpansionProps {runBatches: Record<string, Search[]>;}
+
 const RunHistory = ({
-  runBatches,
-  stats,
-  expandedRun,
-  setExpandedRun,
-  expandedResponse,
-  setExpandedResponse,
-  onNavigateToRawResponses,
-  buildRawResponsesPath,
+  runBatches, ...expansion 
 }: RunHistoryProps) => {
   const batchEntries = Object.entries(runBatches);
 
@@ -221,13 +216,7 @@ const RunHistory = ({
               timeKey={timeKey}
               batchNumber={batchNumber}
               batchSearches={batchSearches}
-              stats={stats}
-              expandedRun={expandedRun}
-              setExpandedRun={setExpandedRun}
-              expandedResponse={expandedResponse}
-              setExpandedResponse={setExpandedResponse}
-              onNavigateToRawResponses={onNavigateToRawResponses}
-              buildRawResponsesPath={buildRawResponsesPath}
+              {...expansion}
             />
           );
         })}
@@ -236,17 +225,10 @@ const RunHistory = ({
   );
 };
 
-interface BatchCardProps {
+interface BatchCardProps extends RunExpansionProps {
   timeKey: string;
   batchNumber: number;
   batchSearches: Search[];
-  stats: KeywordStats;
-  expandedRun: number | null;
-  setExpandedRun: (value: number | null) => void;
-  expandedResponse: number | null;
-  setExpandedResponse: (value: number | null) => void;
-  onNavigateToRawResponses?: (path: string) => void;
-  buildRawResponsesPath: (search: Search) => string;
 }
 
 const BatchCard = ({

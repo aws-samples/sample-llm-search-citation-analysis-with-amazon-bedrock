@@ -1,4 +1,3 @@
-import { vi } from 'vitest';
 import type { HistoricalTrendsResponse } from '../types';
 
 export const mockSingleKeywordResponse: HistoricalTrendsResponse = {
@@ -75,38 +74,3 @@ export const mockAllKeywordsResponse: HistoricalTrendsResponse = {
     avg_score: 72.5,
   },
 };
-
-export function createMockFetch(options: {
-  response?: HistoricalTrendsResponse;
-  shouldFail?: boolean;
-  errorResponse?: { error: string };
-  invalidResponse?: boolean;
-} = {}) {
-  return vi.fn().mockImplementation(() => {
-    if (options.shouldFail) {
-      return Promise.resolve({
-        ok: false,
-        status: 500 
-      });
-    }
-
-    if (options.errorResponse) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.errorResponse),
-      });
-    }
-
-    if (options.invalidResponse) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ invalid: 'data' }),
-      });
-    }
-
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve(options.response ?? mockSingleKeywordResponse),
-    });
-  });
-}

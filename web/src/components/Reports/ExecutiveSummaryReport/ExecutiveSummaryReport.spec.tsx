@@ -74,7 +74,6 @@ function renderReport() {
 
 describe('ExecutiveSummaryReport', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockUse.mockReturnValue(POPULATED);
   });
 

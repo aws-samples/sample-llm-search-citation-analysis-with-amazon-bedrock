@@ -5,7 +5,7 @@ import {
   render, screen 
 } from '@testing-library/react';
 import { NextActionsSection } from './NextActionsSection';
-import type { ReportsOverviewResponse } from '../../../../api/reports';
+import { buildOverview } from './reportsOverview-fixtures';
 import type { Recommendation } from '../../../../types';
 
 function buildRec(
@@ -24,36 +24,16 @@ function buildRec(
   };
 }
 
-function buildData(recs: Recommendation[]): ReportsOverviewResponse {
-  return {
-    generated_at: '2026-05-15T07:00:00Z',
-    period_type: 'day',
-    days_analyzed: 30,
-    keywords_analyzed: 10,
-    overall_score: 60,
-    previous_score: 55,
-    change: 5,
-    change_percent: 9.1,
-    trend_direction: 'stable',
-    summary: {
-      improving_count: 0,
-      declining_count: 0,
-      stable_count: 0 
-    },
-    top_improving: [],
-    top_declining: [],
-    top_recommendations: recs,
-  };
-}
-
 describe('NextActionsSection — content', () => {
   it('renders each recommendation title as an h3', () => {
     render(
       <NextActionsSection
-        data={buildData([
-          buildRec('First action', 'high'),
-          buildRec('Second action', 'medium'),
-        ])}
+        data={buildOverview({
+          recommendations: [
+            buildRec('First action', 'high'),
+            buildRec('Second action', 'medium'),
+          ],
+        })}
         loading={false}
         error={null}
       />,
@@ -73,13 +53,15 @@ describe('NextActionsSection — content', () => {
   it('renders the description, action, and impact for a recommendation', () => {
     render(
       <NextActionsSection
-        data={buildData([
-          buildRec('Pitch publishers', 'high', {
-            description: 'Outdoor outlets cite competitors only.',
-            action: 'Reach out to Outside, Backpacker, REI Co-op Journal',
-            impact: '5-10% visibility lift',
-          }),
-        ])}
+        data={buildOverview({
+          recommendations: [
+            buildRec('Pitch publishers', 'high', {
+              description: 'Outdoor outlets cite competitors only.',
+              action: 'Reach out to Outside, Backpacker, REI Co-op Journal',
+              impact: '5-10% visibility lift',
+            }),
+          ],
+        })}
         loading={false}
         error={null}
       />,
@@ -94,7 +76,7 @@ describe('NextActionsSection — content', () => {
   it('renders the priority label as a badge', () => {
     render(
       <NextActionsSection
-        data={buildData([buildRec('Action A', 'high')])}
+        data={buildOverview({ recommendations: [buildRec('Action A', 'high')] })}
         loading={false}
         error={null}
       />,
@@ -104,10 +86,13 @@ describe('NextActionsSection — content', () => {
 });
 
 describe('NextActionsSection — empty + placeholder states', () => {
-  it('renders the empty copy when there are no recommendations', () => {
+  it.each([
+    ['data is null', null],
+    ['data exists but recommendations array is empty', buildOverview()],
+  ])('renders the empty copy when %s', (_label, data) => {
     render(
       <NextActionsSection
-        data={buildData([])}
+        data={data}
         loading={false}
         error={null}
       />,
@@ -125,18 +110,5 @@ describe('NextActionsSection — empty + placeholder states', () => {
   it('renders the error message when error is set', () => {
     render(<NextActionsSection data={null} loading={false} error="boom" />);
     expect(screen.getByText('boom')).toBeInTheDocument();
-  });
-
-  it('renders the empty copy when data exists but recommendations array is empty', () => {
-    render(
-      <NextActionsSection
-        data={buildData([])}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(
-      screen.getByText(/visibility plan is on track/i),
-    ).toBeInTheDocument();
   });
 });

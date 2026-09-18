@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi, beforeEach 
 } from 'vitest';
 import {
   renderHook, waitFor, act 
@@ -26,12 +26,7 @@ const waitForHookReady = async (result: { current: { loading: boolean } }): Prom
 
 describe('useUserManagement', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     Object.assign(mockApi, createMockApi());
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   it('fetches users and groups on mount', async (): Promise<void> => {
@@ -97,20 +92,39 @@ describe('useUserManagement', () => {
     expect(inviteResult.message).toBe('User invited successfully');
   });
 
-  it('refreshes users after successful invite', async (): Promise<void> => {
-    const { result } = renderHook(() => useUserManagement());
-    await waitForHookReady(result);
+  describe('list refresh after a successful mutation', () => {
+    interface RefreshingMutation {
+      mutation: string;
+      run: (hook: ReturnType<typeof useUserManagement>) => Promise<unknown>;
+    }
 
-    const initialCallCount = mockApi.listUsers.mock.calls.length;
+    const refreshingMutations: RefreshingMutation[] = [
+      {
+        mutation: 'invite',
+        run: (hook) => hook.invite({
+          email: 'new@example.com',
+          groups: [] 
+        }),
+      },
+      {
+        mutation: 'update',
+        run: (hook) => hook.update('user1', { enabled: false }),
+      },
+      {
+        mutation: 'delete',
+        run: (hook) => hook.remove('user1'),
+      },
+    ];
 
-    await act(async (): Promise<void> => {
-      await result.current.invite({
-        email: 'new@example.com',
-        groups: [] 
-      });
+    it.each(refreshingMutations)('refreshes users after successful $mutation', async ({ run }) => {
+      const { result } = renderHook(() => useUserManagement());
+      await waitForHookReady(result);
+      const initialCallCount = mockApi.listUsers.mock.calls.length;
+
+      await act(() => run(result.current));
+
+      expect(mockApi.listUsers.mock.calls.length).toBeGreaterThan(initialCallCount);
     });
-
-    expect(mockApi.listUsers.mock.calls.length).toBeGreaterThan(initialCallCount);
   });
 
   it('returns failure when invite fails', async (): Promise<void> => {
@@ -145,19 +159,6 @@ describe('useUserManagement', () => {
     expect(updateResult.value).toBe(true);
   });
 
-  it('refreshes users after successful update', async (): Promise<void> => {
-    const { result } = renderHook(() => useUserManagement());
-    await waitForHookReady(result);
-
-    const initialCallCount = mockApi.listUsers.mock.calls.length;
-
-    await act(async (): Promise<void> => {
-      await result.current.update('user1', { enabled: false });
-    });
-
-    expect(mockApi.listUsers.mock.calls.length).toBeGreaterThan(initialCallCount);
-  });
-
   it('returns false and sets error when update fails', async (): Promise<void> => {
     Object.assign(mockApi, createMockApi({ shouldFailUpdate: true }));
     const { result } = renderHook(() => useUserManagement());
@@ -182,19 +183,6 @@ describe('useUserManagement', () => {
     });
 
     expect(removeResult.value).toBe(true);
-  });
-
-  it('refreshes users after successful delete', async (): Promise<void> => {
-    const { result } = renderHook(() => useUserManagement());
-    await waitForHookReady(result);
-
-    const initialCallCount = mockApi.listUsers.mock.calls.length;
-
-    await act(async (): Promise<void> => {
-      await result.current.remove('user1');
-    });
-
-    expect(mockApi.listUsers.mock.calls.length).toBeGreaterThan(initialCallCount);
   });
 
   it('returns false and sets error when delete fails', async (): Promise<void> => {

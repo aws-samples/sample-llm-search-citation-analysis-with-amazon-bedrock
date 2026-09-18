@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   renderHook, waitFor 
@@ -8,36 +8,16 @@ import { useBrandMentions } from './useBrandMentions';
 import {
   mockBrandMentionsResponse, createMockFetch 
 } from './useBrandMentions-fixtures';
+import {
+  createDeferredResponse, createMockJsonResponse 
+} from '../test/fetchResponses';
+import { keywordScope as kw } from '../components/ui/reportScope-fixtures';
 
-vi.mock('../infrastructure', async () => {
-  const actual = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { authenticatedFetch } from '../infrastructure';
-import type { ReportScope } from '../types';
-
-const mockAuthenticatedFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
-
-
-const kw = (keyword: string): ReportScope => ({
-  kind: 'keyword',
-  keyword 
-});
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 describe('useBrandMentions', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('returns null data when keyword is null', () => {
     const { result } = renderHook(() => useBrandMentions(null));
 
@@ -183,19 +163,14 @@ describe('useBrandMentions', () => {
   });
 
   it('sets loading true while fetching', async () => {
-    const resolveRef = { current: null as ((value: unknown) => void) | null };
-    mockAuthenticatedFetch.mockImplementation(() => new Promise(resolve => {
-      resolveRef.current = resolve;
-    }));
+    const deferred = createDeferredResponse();
+    mockAuthenticatedFetch.mockImplementation(() => deferred.promise);
 
     const { result } = renderHook(() => useBrandMentions(kw('test')));
 
     expect(result.current.loading).toBe(true);
 
-    resolveRef.current?.({
-      ok: true,
-      json: () => Promise.resolve(mockBrandMentionsResponse),
-    });
+    deferred.resolve(createMockJsonResponse(mockBrandMentionsResponse));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
   });

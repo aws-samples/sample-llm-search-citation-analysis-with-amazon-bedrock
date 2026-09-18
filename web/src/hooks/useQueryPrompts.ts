@@ -64,6 +64,15 @@ export function useQueryPrompts() {
     }
   }, []);
 
+  /** PUT or PATCH one prompt and swap the server's updated copy into the list. */
+  const replacePrompt = useCallback(async (id: string, init: RequestInit): Promise<QueryPrompt> => {
+    const response = await authenticatedFetch(`${API_BASE_URL}/query-prompts/${id}`, init);
+    if (!response.ok) throw new QueryPromptError(`HTTP ${response.status}`);
+    const updated = await response.json() as QueryPrompt;
+    setPrompts(prev => prev.map(p => p.id === id ? updated : p));
+    return updated;
+  }, []);
+
   const updatePrompt = useCallback(async (id: string, updates: {
     name?: string;
     template?: string;
@@ -71,21 +80,17 @@ export function useQueryPrompts() {
   }) => {
     setError(null);
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/query-prompts/${id}`, {
+      return await replacePrompt(id, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updates),
       });
-      if (!response.ok) throw new QueryPromptError(`HTTP ${response.status}`);
-      const updated = await response.json() as QueryPrompt;
-      setPrompts(prev => prev.map(p => p.id === id ? updated : p));
-      return updated;
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to update prompt';
       setError(msg);
       throw err;
     }
-  }, []);
+  }, [replacePrompt]);
 
   const deletePrompt = useCallback(async (id: string) => {
     setError(null);
@@ -103,17 +108,13 @@ export function useQueryPrompts() {
   const togglePrompt = useCallback(async (id: string) => {
     setError(null);
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/query-prompts/${id}`, {method: 'PATCH',});
-      if (!response.ok) throw new QueryPromptError(`HTTP ${response.status}`);
-      const updated = await response.json() as QueryPrompt;
-      setPrompts(prev => prev.map(p => p.id === id ? updated : p));
-      return updated;
+      return await replacePrompt(id, { method: 'PATCH' });
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to toggle prompt';
       setError(msg);
       throw err;
     }
-  }, []);
+  }, [replacePrompt]);
 
   return {
     prompts,

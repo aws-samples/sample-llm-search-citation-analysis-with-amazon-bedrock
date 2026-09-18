@@ -1,4 +1,6 @@
 import { vi } from 'vitest';
+import type { authenticatedFetch } from '../infrastructure/auth';
+import { createMockJsonResponse } from '../test/fetchResponses';
 import type {
   KeywordResearchItem, ResearchStep
 } from '../types';
@@ -107,22 +109,6 @@ export function buildCompletedCompetitorJob(id: string, url: string): KeywordRes
   });
 }
 
-interface MockJsonResponse {
-  ok: boolean;
-  status: number;
-  statusText?: string;
-  json: () => Promise<unknown>;
-}
-
-function jsonResponse(status: number, body: unknown): MockJsonResponse {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: '',
-    json: () => Promise.resolve(body),
-  };
-}
-
 export interface ResearchMockFetchOptions {
   /** Job ids handed out by successive POST /expand and /competitor calls. */
   pendingIds?: string[];
@@ -132,11 +118,13 @@ export interface ResearchMockFetchOptions {
    */
   snapshots?: Record<string, KeywordResearchItem[]>;
   /** Replaces the snapshot lookup: script raw poll responses (401s, 404s). */
-  pollResponse?: () => MockJsonResponse;
+  pollResponse?: () => Response;
   /** Makes POST /expand and /competitor fail with this structured 4xx body. */
   startError?: { error: string };
-  historyItems?: KeywordResearchItem[];
 }
+
+/** Poll snapshots for a job-1 that never leaves the running state. */
+export const runningJobResearchOptions: ResearchMockFetchOptions = {snapshots: { 'job-1': [buildJob({ status: 'running' })] },};
 
 /**
  * Mock `authenticatedFetch` for the research API: starts return a pending job
@@ -147,36 +135,36 @@ export function createResearchMockFetch(options: ResearchMockFetchOptions = {}) 
   const remainingIds = [...(options.pendingIds ?? ['job-1'])];
   const served: Record<string, number> = {};
 
-  const nextSnapshot = (id: string): MockJsonResponse => {
+  const nextSnapshot = (id: string): Response => {
     const list = options.snapshots?.[id] ?? [];
-    if (list.length === 0) return jsonResponse(404, { error: 'Research not found' });
+    if (list.length === 0) return createMockJsonResponse({ error: 'Research not found' }, 404);
     const index = Math.min(served[id] ?? 0, list.length - 1);
     served[id] = index + 1;
-    return jsonResponse(200, list[index]);
+    return createMockJsonResponse(list[index]);
   };
 
-  return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+  return vi.fn<typeof authenticatedFetch>().mockImplementation((url, init) => {
     const method = init?.method ?? 'GET';
 
     if (method === 'POST' && (url.endsWith('/expand') || url.endsWith('/competitor'))) {
-      if (options.startError) return Promise.resolve(jsonResponse(400, options.startError));
+      if (options.startError) return Promise.resolve(createMockJsonResponse(options.startError, 400));
       const id = remainingIds.shift() ?? 'job-pending';
       const type = url.endsWith('/expand') ? 'expansion' : 'competitor';
-      return Promise.resolve(jsonResponse(202, buildJob({
+      return Promise.resolve(createMockJsonResponse(buildJob({
         id,
         type 
-      })));
+      }), 202));
     }
 
     if (method === 'POST' && url.endsWith('/retry')) {
-      return Promise.resolve(jsonResponse(202, {
+      return Promise.resolve(createMockJsonResponse({
         id: 'job-1',
         status: 'pending' 
-      }));
+      }, 202));
     }
 
     if (method === 'GET' && url.includes('/keyword-research/history')) {
-      return Promise.resolve(jsonResponse(200, { items: options.historyItems ?? mockHistoryItems }));
+      return Promise.resolve(createMockJsonResponse({ items: mockHistoryItems }));
     }
 
     if (method === 'GET') {
@@ -185,6 +173,7 @@ export function createResearchMockFetch(options: ResearchMockFetchOptions = {}) 
       return Promise.resolve(nextSnapshot(id));
     }
 
-    return Promise.resolve(jsonResponse(200, { success: true }));
+    return Promise.resolve(createMockJsonResponse({ success: true }));
   });
 }
+

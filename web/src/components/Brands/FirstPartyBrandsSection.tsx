@@ -1,32 +1,13 @@
 import { Spinner } from '../ui/Spinner';
 import { BrandExpansionPanel } from './BrandExpansionPanel';
 import { BrandTagList } from './BrandTagList';
-import type { BrandExpansionAllResult } from '../../types';
-
-interface FirstPartyBrandsSectionProps {
-  readonly brands: string[];
-  readonly newBrand: string;
-  readonly selectedBrand: string | null;
-  readonly expandingBrand: 'first_party' | 'competitor' | null;
-  readonly expansionResult: BrandExpansionAllResult | null;
-  readonly expansionTarget: 'first_party' | 'competitor' | null;
-  readonly pendingBrands: string[];
-  readonly canExpand: boolean;
-  readonly onNewBrandChange: (value: string) => void;
-  readonly onAddBrand: () => void;
-  readonly onRemoveBrand: (brand: string) => void;
-  readonly onSelectBrand: (brand: string | null) => void;
-  readonly onExpandAll: () => void;
-  readonly onTogglePending: (brand: string) => void;
-  readonly onAcceptExpansion: () => void;
-  readonly onCancelExpansion: () => void;
-}
+import type { BrandListSectionProps } from './brandListSection';
 
 export function FirstPartyBrandsSection({
   brands, newBrand, selectedBrand, expandingBrand, expansionResult, expansionTarget,
   pendingBrands, canExpand, onNewBrandChange, onAddBrand, onRemoveBrand, onSelectBrand,
   onExpandAll, onTogglePending, onAcceptExpansion, onCancelExpansion
-}: FirstPartyBrandsSectionProps) {
+}: BrandListSectionProps) {
   return (
     <div className="bg-emerald-50 rounded-lg p-4 border border-emerald-200">
       <div className="flex items-center justify-between mb-2">

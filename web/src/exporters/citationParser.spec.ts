@@ -34,6 +34,14 @@ const ASC_DOMAIN = {
   direction: 'asc' 
 } satisfies SortConfig;
 
+/** One row of the count-column sorting table: which column, which way, and the counts in that order. */
+interface CountSortCase {
+  column: 'citation_count' | 'keyword_count';
+  order: 'ascending' | 'descending';
+  sort: SortConfig;
+  expected: number[];
+}
+
 describe('parseApiResponse', () => {
   it('returns empty items array when input is null', () => {
     const result = parseApiResponse(null);
@@ -159,88 +167,56 @@ describe('filterAndSortCitations', () => {
   });
 
   describe('sorting', () => {
-    it('sorts by citation_count descending when sort is citations desc', () => {
-      const citations = [
-        buildCitation({
-          url: 'a',
-          citation_count: 5 
-        }),
-        buildCitation({
-          url: 'b',
-          citation_count: 10 
-        }),
-        buildCitation({
-          url: 'c',
-          citation_count: 3 
-        }),
-      ];
+    /** Three citations whose count columns are deliberately out of order. */
+    const unsortedCitations = [
+      buildCitation({
+        url: 'a',
+        citation_count: 5,
+        keyword_count: 2,
+      }),
+      buildCitation({
+        url: 'b',
+        citation_count: 10,
+        keyword_count: 5,
+      }),
+      buildCitation({
+        url: 'c',
+        citation_count: 3,
+        keyword_count: 1,
+      }),
+    ];
 
-      const result = filterAndSortCitations(citations, '', '', DESC_CITATIONS);
+    it.each([
+      {
+        column: 'citation_count',
+        order: 'descending',
+        sort: DESC_CITATIONS,
+        expected: [10, 5, 3],
+      },
+      {
+        column: 'citation_count',
+        order: 'ascending',
+        sort: ASC_CITATIONS,
+        expected: [3, 5, 10],
+      },
+      {
+        column: 'keyword_count',
+        order: 'descending',
+        sort: DESC_KEYWORDS,
+        expected: [5, 2, 1],
+      },
+      {
+        column: 'keyword_count',
+        order: 'ascending',
+        sort: ASC_KEYWORDS,
+        expected: [1, 2, 5],
+      },
+    ] satisfies CountSortCase[])('sorts by $column $order when sort is $sort.column $sort.direction', ({
+      column, sort, expected
+    }) => {
+      const result = filterAndSortCitations(unsortedCitations, '', '', sort);
 
-      expect(result.map(c => c.citation_count)).toStrictEqual([10, 5, 3]);
-    });
-
-    it('sorts by citation_count ascending when sort is citations asc', () => {
-      const citations = [
-        buildCitation({
-          url: 'a',
-          citation_count: 5 
-        }),
-        buildCitation({
-          url: 'b',
-          citation_count: 10 
-        }),
-        buildCitation({
-          url: 'c',
-          citation_count: 3 
-        }),
-      ];
-
-      const result = filterAndSortCitations(citations, '', '', ASC_CITATIONS);
-
-      expect(result.map(c => c.citation_count)).toStrictEqual([3, 5, 10]);
-    });
-
-    it('sorts by keyword_count descending when sort is keywords desc', () => {
-      const citations = [
-        buildCitation({
-          url: 'a',
-          keyword_count: 2 
-        }),
-        buildCitation({
-          url: 'b',
-          keyword_count: 5 
-        }),
-        buildCitation({
-          url: 'c',
-          keyword_count: 1 
-        }),
-      ];
-
-      const result = filterAndSortCitations(citations, '', '', DESC_KEYWORDS);
-
-      expect(result.map(c => c.keyword_count)).toStrictEqual([5, 2, 1]);
-    });
-
-    it('sorts by keyword_count ascending when sort is keywords asc', () => {
-      const citations = [
-        buildCitation({
-          url: 'a',
-          keyword_count: 2 
-        }),
-        buildCitation({
-          url: 'b',
-          keyword_count: 5 
-        }),
-        buildCitation({
-          url: 'c',
-          keyword_count: 1 
-        }),
-      ];
-
-      const result = filterAndSortCitations(citations, '', '', ASC_KEYWORDS);
-
-      expect(result.map(c => c.keyword_count)).toStrictEqual([1, 2, 5]);
+      expect(result.map(c => c[column])).toStrictEqual(expected);
     });
 
     it('sorts by domain ascending when sort is domain asc', () => {

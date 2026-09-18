@@ -1,7 +1,25 @@
-import { vi } from 'vitest';
+import { expect } from 'vitest';
+import {
+  renderHook, waitFor 
+} from '@testing-library/react';
+import { createMockEndpoint } from './injectableApi-fixtures';
+import {
+  useOnboardingStatus, type OnboardingStatusApi 
+} from './useOnboardingStatus';
+
+export interface OnboardingMockApiOptions {
+  providersResponse?: unknown;
+  brandConfigResponse?: unknown;
+  schedulesResponse?: unknown;
+  personasResponse?: unknown;
+  shouldFailProviders?: boolean;
+  shouldFailBrandConfig?: boolean;
+  shouldFailSchedules?: boolean;
+  shouldFailPersonas?: boolean;
+}
 
 /** Providers payload with one configured provider (the happy default). */
-export const configuredProvidersPayload = {
+const configuredProvidersPayload = {
   providers: [
     {
       id: 'openai',
@@ -28,7 +46,7 @@ export const unconfiguredProvidersPayload = {
 };
 
 /** Brand config payload with tracked first-party brands. */
-export const configuredBrandPayload = {
+const configuredBrandPayload = {
   industry: 'hospitality',
   tracked_brands: {
     first_party: ['MyHotel'],
@@ -46,7 +64,7 @@ export const emptyBrandPayload = {
 };
 
 /** Schedules payload with one existing schedule. */
-export const withSchedulesPayload = {
+const withSchedulesPayload = {
   schedules: [
     {
       name: 'daily-analysis',
@@ -61,7 +79,7 @@ export const withSchedulesPayload = {
 export const noSchedulesPayload = { schedules: [] };
 
 /** Personas payload (raw array) with one configured persona. */
-export const withPersonasPayload = [
+const withPersonasPayload = [
   {
     id: 'prompt-1',
     name: 'Family Traveler',
@@ -73,68 +91,40 @@ export const withPersonasPayload = [
 /** Personas payload for a fresh install. */
 export const noPersonasPayload: unknown[] = [];
 
-export function createMockOnboardingApi(options: {
-  providersResponse?: unknown;
-  brandConfigResponse?: unknown;
-  schedulesResponse?: unknown;
-  personasResponse?: unknown;
-  shouldFailProviders?: boolean;
-  shouldFailBrandConfig?: boolean;
-  shouldFailSchedules?: boolean;
-  shouldFailPersonas?: boolean;
-} = {}) {
+function createMockOnboardingApi(options: OnboardingMockApiOptions = {}) {
   return {
-    fetchProviders: vi.fn().mockImplementation(() => {
-      if (options.shouldFailProviders) {
-        return Promise.resolve({
-          ok: false,
-          status: 500,
-          statusText: 'Server Error',
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.providersResponse ?? configuredProvidersPayload),
-      });
-    }),
-    fetchBrandConfig: vi.fn().mockImplementation(() => {
-      if (options.shouldFailBrandConfig) {
-        return Promise.resolve({
-          ok: false,
-          status: 500,
-          statusText: 'Server Error',
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.brandConfigResponse ?? configuredBrandPayload),
-      });
-    }),
-    fetchSchedules: vi.fn().mockImplementation(() => {
-      if (options.shouldFailSchedules) {
-        return Promise.resolve({
-          ok: false,
-          status: 500,
-          statusText: 'Server Error',
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.schedulesResponse ?? withSchedulesPayload),
-      });
-    }),
-    fetchPersonas: vi.fn().mockImplementation(() => {
-      if (options.shouldFailPersonas) {
-        return Promise.resolve({
-          ok: false,
-          status: 500,
-          statusText: 'Server Error',
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.personasResponse ?? withPersonasPayload),
-      });
-    }),
+    fetchProviders: createMockEndpoint(
+      options.shouldFailProviders,
+      options.providersResponse ?? configuredProvidersPayload
+    ),
+    fetchBrandConfig: createMockEndpoint(
+      options.shouldFailBrandConfig,
+      options.brandConfigResponse ?? configuredBrandPayload
+    ),
+    fetchSchedules: createMockEndpoint(
+      options.shouldFailSchedules,
+      options.schedulesResponse ?? withSchedulesPayload
+    ),
+    fetchPersonas: createMockEndpoint(
+      options.shouldFailPersonas,
+      options.personasResponse ?? withPersonasPayload
+    ),
+  } satisfies OnboardingStatusApi;
+}
+
+/** Renders the hook against a mocked API without waiting for the checks to settle. */
+export function renderOnboardingStatus(enabled: boolean, options: OnboardingMockApiOptions = {}) {
+  const api = createMockOnboardingApi(options);
+  const { result } = renderHook(() => useOnboardingStatus(enabled, api));
+  return {
+    api,
+    result,
   };
+}
+
+/** Renders the enabled hook and waits until every setup check has resolved. */
+export async function renderLoadedOnboardingStatus(options: OnboardingMockApiOptions = {}) {
+  const rendered = renderOnboardingStatus(true, options);
+  await waitFor(() => expect(rendered.result.current.loading).toBe(false));
+  return rendered;
 }

@@ -1,190 +1,87 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach,
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   renderHook, act 
 } from '@testing-library/react';
 import { useCompetitorRollup } from './useCompetitorRollup';
+import {
+  mockSingleCompetitorRollup, mockAllCompetitorsRollup 
+} from './useCompetitorRollup-fixtures';
+import {
+  createEndpointMockFetch, type EndpointMockFetchOptions 
+} from '../test/fetchResponses';
+import type { CompetitorReportResponse } from '../api/reports';
 
-vi.mock('../infrastructure', async () => {
-  const actual = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { authenticatedFetch } from '../infrastructure';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
-const mockFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
-
-const SINGLE_RESPONSE = {
-  generated_at: '2026-05-15T07:00:00Z',
-  keywords_analyzed: 4,
-  competitor: 'Adidas',
-  rollup: {
-    competitor: 'Adidas',
-    outranked_keywords: [],
-    exclusive_sources: [],
-    outreach_targets: [],
-  },
-};
-
-const ALL_RESPONSE = {
-  generated_at: '2026-05-15T07:00:00Z',
-  keywords_analyzed: 4,
-  competitors: ['Adidas', 'Asics'],
-  rollups: [
-    {
-      competitor: 'Adidas',
-      outranked_keywords: [],
-      exclusive_sources: [],
-      outreach_targets: [],
-    },
-  ],
-};
-
-function mockOk(payload: unknown) {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => payload,
-  } as unknown as Response;
-}
+type FetchCompetitorRollupArgs = Parameters<ReturnType<typeof useCompetitorRollup>['fetchCompetitorRollup']>;
 
 describe('useCompetitorRollup', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('returns null data before fetch', () => {
+  it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useCompetitorRollup());
-    expect(result.current.data).toBeNull();
-  });
 
-  it('passes the competitor name in the URL when provided', async () => {
-    mockFetch.mockResolvedValue(mockOk(SINGLE_RESPONSE));
-    const { result } = renderHook(() => useCompetitorRollup());
-    await act(async () => {
-      await result.current.fetchCompetitorRollup('Adidas');
+    expect(result.current).toStrictEqual({
+      data: null,
+      loading: false,
+      error: null,
+      fetchCompetitorRollup: expect.any(Function),
     });
-    const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain('competitor=Adidas');
   });
 
-  it('URL-encodes competitor names with special characters', async () => {
-    mockFetch.mockResolvedValue(mockOk(SINGLE_RESPONSE));
+  it.each<[url: string, condition: string, args: FetchCompetitorRollupArgs]>([
+    ['https://api.test.com/reports/competitor?keyword_limit=50&competitor=Adidas', 'a competitor is given', ['Adidas']],
+    ['https://api.test.com/reports/competitor?keyword_limit=50&competitor=Brand+%26+Co', 'the competitor name has special characters', ['Brand & Co']],
+    ['https://api.test.com/reports/competitor?keyword_limit=75&competitor=Adidas', 'a keyword limit is given', ['Adidas', 75]],
+    ['https://api.test.com/reports/competitor?keyword_limit=50', 'no competitor is given', []],
+  ])('requests %s when %s', async (url, _condition, args) => {
+    mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockSingleCompetitorRollup));
     const { result } = renderHook(() => useCompetitorRollup());
-    await act(async () => {
-      await result.current.fetchCompetitorRollup('Brand & Co');
-    });
-    const url = mockFetch.mock.calls[0][0] as string;
-    // URLSearchParams encodes "Brand & Co" as "Brand+%26+Co" or "Brand+%26+Co"
-    expect(url).toMatch(/competitor=Brand(\+|%20)%26(\+|%20)Co/);
+
+    await act(() => result.current.fetchCompetitorRollup(...args));
+
+    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(url, { signal: expect.any(AbortSignal) });
   });
 
-  it('honors a custom keyword_limit value in the request URL', async () => {
-    mockFetch.mockResolvedValue(mockOk(SINGLE_RESPONSE));
+  it.each<[payload: string, response: CompetitorReportResponse, args: FetchCompetitorRollupArgs]>([
+    ['single-competitor rollup', mockSingleCompetitorRollup, ['Adidas']],
+    ['all-competitors rollup', mockAllCompetitorsRollup, []],
+  ])('returns and stores the %s when the response passes the competitor type guard', async (_payload, response, args) => {
+    mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(response));
     const { result } = renderHook(() => useCompetitorRollup());
-    await act(async () => {
-      await result.current.fetchCompetitorRollup('Adidas', 75);
+
+    const returned = await act(() => result.current.fetchCompetitorRollup(...args));
+
+    expect(returned).toStrictEqual(response);
+    expect(result.current).toStrictEqual({
+      data: response,
+      loading: false,
+      error: null,
+      fetchCompetitorRollup: expect.any(Function),
     });
-    const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain('keyword_limit=75');
   });
 
-  it('uses default keyword_limit=50 when not specified', async () => {
-    mockFetch.mockResolvedValue(mockOk(SINGLE_RESPONSE));
+  it.each<[message: string, failure: string, options: EndpointMockFetchOptions<CompetitorReportResponse>]>([
+    ['Invalid visibility request', 'request is rejected with a 400', {
+      shouldFail: true,
+      failStatus: 400,
+    }],
+    ['Failed to load visibility metrics', 'response is a backend {error} body', { errorResponse: { error: 'Unknown competitor' } }],
+    ['Invalid visibility request', 'payload has neither rollup nor rollups', { invalidResponse: true }],
+  ])('resolves null and reports "%s" when the competitor %s', async (message, _failure, options) => {
+    mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockSingleCompetitorRollup, options));
     const { result } = renderHook(() => useCompetitorRollup());
-    await act(async () => {
-      await result.current.fetchCompetitorRollup();
-    });
-    const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).toContain('keyword_limit=50');
-  });
 
-  it('omits competitor param when not provided', async () => {
-    mockFetch.mockResolvedValue(mockOk(ALL_RESPONSE));
-    const { result } = renderHook(() => useCompetitorRollup());
-    await act(async () => {
-      await result.current.fetchCompetitorRollup();
-    });
-    const url = mockFetch.mock.calls[0][0] as string;
-    expect(url).not.toContain('competitor=');
-  });
+    const returned = await act(() => result.current.fetchCompetitorRollup('Unknown'));
 
-  it('stores the parsed single-competitor response', async () => {
-    mockFetch.mockResolvedValue(mockOk(SINGLE_RESPONSE));
-    const { result } = renderHook(() => useCompetitorRollup());
-    await act(async () => {
-      await result.current.fetchCompetitorRollup('Adidas');
+    expect(returned).toBeNull();
+    expect(result.current).toStrictEqual({
+      data: null,
+      loading: false,
+      error: message,
+      fetchCompetitorRollup: expect.any(Function),
     });
-    expect(result.current.data).toStrictEqual(SINGLE_RESPONSE);
-  });
-
-  it('returns the parsed payload from the fetch promise', async () => {
-    mockFetch.mockResolvedValue(mockOk(SINGLE_RESPONSE));
-    const { result } = renderHook(() => useCompetitorRollup());
-    const holder: { value: unknown } = { value: null };
-    await act(async () => {
-      holder.value = await result.current.fetchCompetitorRollup('Adidas');
-    });
-    expect(holder.value).toStrictEqual(SINGLE_RESPONSE);
-  });
-
-  it('stores the parsed all-competitors response', async () => {
-    mockFetch.mockResolvedValue(mockOk(ALL_RESPONSE));
-    const { result } = renderHook(() => useCompetitorRollup());
-    await act(async () => {
-      await result.current.fetchCompetitorRollup();
-    });
-    expect(result.current.data).toStrictEqual(ALL_RESPONSE);
-  });
-
-  it('records the error message when the response is not OK', async () => {
-    mockFetch.mockResolvedValue({
-      ok: false,
-      status: 400,
-      json: async () => ({}),
-    } as unknown as Response);
-    const { result } = renderHook(() => useCompetitorRollup());
-    const holder: { value: unknown } = { value: 'unset' };
-    await act(async () => {
-      holder.value = await result.current.fetchCompetitorRollup('Unknown');
-    });
-    expect(holder.value).toBeNull();
-    expect(result.current.error).toBeTruthy();
-  });
-
-  it('rejects responses missing both rollup and rollups fields', async () => {
-    mockFetch.mockResolvedValue(mockOk({ unrelated: 'shape' }));
-    const { result } = renderHook(() => useCompetitorRollup());
-    await act(async () => {
-      await result.current.fetchCompetitorRollup();
-    });
-    expect(result.current.error).toBeTruthy();
-  });
-
-  it('rejects {error} backend responses with a meaningful error message', async () => {
-    mockFetch.mockResolvedValue(mockOk({ error: 'Unknown competitor' }));
-    const { result } = renderHook(() => useCompetitorRollup());
-    await act(async () => {
-      await result.current.fetchCompetitorRollup('Unknown');
-    });
-    expect(result.current.error).toBeTruthy();
-    expect(result.current.data).toBeNull();
-  });
-
-  it('clears the loading flag once the fetch settles', async () => {
-    mockFetch.mockResolvedValue(mockOk(SINGLE_RESPONSE));
-    const { result } = renderHook(() => useCompetitorRollup());
-    await act(async () => {
-      await result.current.fetchCompetitorRollup('Adidas');
-    });
-    expect(result.current.loading).toBe(false);
   });
 });

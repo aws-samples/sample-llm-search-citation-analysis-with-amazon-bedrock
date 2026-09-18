@@ -1,27 +1,20 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect 
 } from 'vitest';
 import {
-  renderHook, waitFor, act 
+  waitFor, act 
 } from '@testing-library/react';
-import { useBrandConfig } from './useBrandConfig';
 import {
-  mockBrandConfig, createMockApi 
+  DEFAULT_CONFIG, DEFAULT_PRESETS 
+} from '../constants/brandConfigDefaults';
+import {
+  mockBrandConfig, renderBrandConfig, renderLoadedBrandConfig 
 } from './useBrandConfig-fixtures';
 
 describe('useBrandConfig', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   describe('initialization', () => {
     it('returns loading true initially', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
+      const { result } = renderBrandConfig();
 
       expect(result.current.loading).toBe(true);
 
@@ -30,207 +23,149 @@ describe('useBrandConfig', () => {
     });
 
     it('fetches config and presets on mount', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      const { api } = await renderLoadedBrandConfig();
 
       expect(api.fetchConfig).toHaveBeenCalledTimes(1);
       expect(api.fetchPresets).toHaveBeenCalledTimes(1);
     });
 
     it('sets config from API response', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      const { result } = await renderLoadedBrandConfig();
 
       expect(result.current.config?.industry).toBe('hospitality');
       expect(result.current.config?.tracked_brands.first_party).toStrictEqual(['MyHotel', 'MyResort']);
     });
 
     it('sets presets from API response', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      const { result } = await renderLoadedBrandConfig();
 
       expect(result.current.presets?.hospitality?.name).toBe('Hospitality');
       expect(result.current.presets?.retail?.name).toBe('Retail');
     });
 
     it('uses default config when API fails', async () => {
-      const api = createMockApi({ shouldFailConfig: true });
-      const { result } = renderHook(() => useBrandConfig(api));
+      const { result } = await renderLoadedBrandConfig({ shouldFailConfig: true });
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      expect(result.current.config).not.toBeNull();
+      expect(result.current.config).toStrictEqual(DEFAULT_CONFIG);
       expect(result.current.error).toBeNull();
     });
 
     it('uses default presets when API fails', async () => {
-      const api = createMockApi({ shouldFailPresets: true });
-      const { result } = renderHook(() => useBrandConfig(api));
+      const { result } = await renderLoadedBrandConfig({ shouldFailPresets: true });
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      expect(result.current.presets).not.toBeNull();
+      expect(result.current.presets).toStrictEqual(DEFAULT_PRESETS);
     });
   });
 
   describe('saveConfig', () => {
-    it('updates local config immediately', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
+    it('replaces the local config with the config the API returns', async () => {
+      const { result } = await renderLoadedBrandConfig();
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      await act(async () => {
-        await result.current.saveConfig({ industry: 'retail' });
-      });
+      await act(() => result.current.saveConfig({ industry: 'retail' }));
 
       // API returns original config
       expect(result.current.config?.industry).toBe('hospitality');
     });
 
     it('calls API saveConfig with new config', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      await act(async () => {
-        await result.current.saveConfig({
-          tracked_brands: {
-            first_party: ['NewBrand'],
-            competitors: [] 
-          } 
-        });
-      });
-
-      expect(api.saveConfig).toHaveBeenCalledWith({
+      const {
+        api, result 
+      } = await renderLoadedBrandConfig();
+      const newBrands = {
         tracked_brands: {
           first_party: ['NewBrand'],
           competitors: [] 
         } 
-      });
+      };
+
+      await act(() => result.current.saveConfig(newBrands));
+
+      expect(api.saveConfig).toHaveBeenCalledWith(newBrands);
     });
 
-    it('handles save failure gracefully', async () => {
-      const api = createMockApi({ shouldFailSave: true });
-      const { result } = renderHook(() => useBrandConfig(api));
+    it('keeps the locally saved config when the API save fails', async () => {
+      const { result } = await renderLoadedBrandConfig({ shouldFailSave: true });
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      await act(() => result.current.saveConfig({ industry: 'retail' }));
 
-      await act(async () => {
-        await result.current.saveConfig({ industry: 'retail' });
-      });
-
-      // Should not throw, config updated locally
       expect(result.current.config?.industry).toBe('retail');
     });
   });
 
   describe('resetConfig', () => {
-    it('resets config to defaults locally', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
+    it('resets config to defaults through the API', async () => {
+      const {
+        api, result 
+      } = await renderLoadedBrandConfig();
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      await act(async () => {
-        await result.current.resetConfig();
-      });
+      await act(() => result.current.resetConfig());
 
       expect(api.deleteConfig).toHaveBeenCalledTimes(1);
+      expect(result.current.config).toStrictEqual(DEFAULT_CONFIG);
     });
 
-    it('handles reset failure gracefully', async () => {
-      const api = createMockApi({ shouldFailDelete: true });
-      const { result } = renderHook(() => useBrandConfig(api));
+    it('resets config to defaults locally when the API reset fails', async () => {
+      const { result } = await renderLoadedBrandConfig({ shouldFailDelete: true });
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      await act(() => result.current.resetConfig());
 
-      await act(async () => {
-        await result.current.resetConfig();
-      });
-
-      // Should not throw
-      expect(result.current.config).not.toBeNull();
+      expect(result.current.config).toStrictEqual(DEFAULT_CONFIG);
     });
   });
 
   describe('getPromptForIndustry', () => {
-    it('returns custom prompt when set in config', async () => {
-      const api = createMockApi({
-        configResponse: {
-          ...mockBrandConfig,
-          industry_prompts: { hospitality: 'Custom hospitality prompt' },
+    const promptCases = [
+      {
+        condition: 'a custom prompt is set in config',
+        industry: 'hospitality',
+        apiOptions: {
+          configResponse: {
+            ...mockBrandConfig,
+            industry_prompts: { hospitality: 'Custom hospitality prompt' },
+          },
         },
-      });
-      const { result } = renderHook(() => useBrandConfig(api));
+        expectedPrompt: 'Custom hospitality prompt',
+      },
+      {
+        condition: 'no custom prompt is set',
+        industry: 'hospitality',
+        apiOptions: {},
+        expectedPrompt: 'Extract hotel brand mentions',
+      },
+      {
+        condition: 'the industry is unknown',
+        industry: 'unknown',
+        apiOptions: {},
+        expectedPrompt: '',
+      },
+    ];
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
+    it.each(promptCases)('returns "$expectedPrompt" when $condition', async ({
+      industry, apiOptions, expectedPrompt 
+    }) => {
+      const { result } = await renderLoadedBrandConfig(apiOptions);
 
-      const prompt = result.current.getPromptForIndustry('hospitality');
-      expect(prompt).toBe('Custom hospitality prompt');
-    });
-
-    it('returns default preset prompt when no custom prompt', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      const prompt = result.current.getPromptForIndustry('hospitality');
-      expect(prompt).toBe('Extract hotel brand mentions');
-    });
-
-    it('returns empty string for unknown industry', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      const prompt = result.current.getPromptForIndustry('unknown');
-      expect(prompt).toBe('');
+      expect(result.current.getPromptForIndustry(industry)).toBe(expectedPrompt);
     });
   });
 
   describe('expandBrand', () => {
     it('returns expansion result with suggestions', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
+      const { result } = await renderLoadedBrandConfig();
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      const expansion = await act(() => result.current.expandBrand('TestBrand'));
 
-      const expansionResult = {
-        main_brand: '',
-        suggestions: [] as string[],
-        parent_company: '' 
-      };
-      await act(async () => {
-        const res = await result.current.expandBrand('TestBrand');
-        expansionResult.main_brand = res.main_brand;
-        expansionResult.suggestions = res.suggestions;
-        expansionResult.parent_company = res.parent_company ?? '';
-      });
-
-      expect(expansionResult.main_brand).toBe('TestBrand');
-      expect(expansionResult.suggestions).toStrictEqual(['SubBrand1', 'SubBrand2']);
-      expect(expansionResult.parent_company).toBe('ParentCo');
+      expect(expansion.main_brand).toBe('TestBrand');
+      expect(expansion.suggestions).toStrictEqual(['SubBrand1', 'SubBrand2']);
+      expect(expansion.parent_company).toBe('ParentCo');
     });
 
     it('passes existing brands to API', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
+      const {
+        api, result 
+      } = await renderLoadedBrandConfig();
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      await act(async () => {
-        await result.current.expandBrand('TestBrand', ['ExistingBrand']);
-      });
+      await act(() => result.current.expandBrand('TestBrand', ['ExistingBrand']));
 
       expect(api.expandBrand).toHaveBeenCalledWith({
         brand_name: 'TestBrand',
@@ -240,59 +175,32 @@ describe('useBrandConfig', () => {
     });
 
     it('returns error result when API fails', async () => {
-      const api = createMockApi({ shouldFailExpand: true });
-      const { result } = renderHook(() => useBrandConfig(api));
+      const { result } = await renderLoadedBrandConfig({ shouldFailExpand: true });
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      const expansion = await act(() => result.current.expandBrand('TestBrand'));
 
-      const expansionResult = {
-        error: '',
-        suggestions: [] as string[] 
-      };
-      await act(async () => {
-        const res = await result.current.expandBrand('TestBrand');
-        expansionResult.error = res.error ?? '';
-        expansionResult.suggestions = res.suggestions;
-      });
-
-      expect(expansionResult.error).toBeTruthy();
-      expect(expansionResult.suggestions).toStrictEqual([]);
+      expect(expansion.error).toBeTruthy();
+      expect(expansion.suggestions).toStrictEqual([]);
     });
   });
 
   describe('expandAllBrands', () => {
     it('returns expansion result for all brands', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
+      const { result } = await renderLoadedBrandConfig();
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      const expansion = await act(() => result.current.expandAllBrands(['Brand1']));
 
-      const expansionResult = {
-        existing_brands: [] as string[],
-        suggestions: [] as string[],
-        parent_companies: [] as string[] 
-      };
-      await act(async () => {
-        const res = await result.current.expandAllBrands(['Brand1']);
-        expansionResult.existing_brands = res.existing_brands ?? [];
-        expansionResult.suggestions = res.suggestions ?? [];
-        expansionResult.parent_companies = res.parent_companies ?? [];
-      });
-
-      expect(expansionResult.existing_brands).toStrictEqual(['Brand1']);
-      expect(expansionResult.suggestions).toStrictEqual(['NewBrand1']);
-      expect(expansionResult.parent_companies).toStrictEqual(['Parent1']);
+      expect(expansion.existing_brands).toStrictEqual(['Brand1']);
+      expect(expansion.suggestions).toStrictEqual(['NewBrand1']);
+      expect(expansion.parent_companies).toStrictEqual(['Parent1']);
     });
 
     it('passes brand type to API', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
+      const {
+        api, result 
+      } = await renderLoadedBrandConfig();
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      await act(async () => {
-        await result.current.expandAllBrands(['Brand1'], 'competitor');
-      });
+      await act(() => result.current.expandAllBrands(['Brand1'], 'competitor'));
 
       expect(api.expandAllBrands).toHaveBeenCalledWith({
         existing_brands: ['Brand1'],
@@ -302,56 +210,31 @@ describe('useBrandConfig', () => {
     });
 
     it('returns error result when API fails', async () => {
-      const api = createMockApi({ shouldFailExpandAll: true });
-      const { result } = renderHook(() => useBrandConfig(api));
+      const { result } = await renderLoadedBrandConfig({ shouldFailExpandAll: true });
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      const expansion = await act(() => result.current.expandAllBrands(['Brand1']));
 
-      const expansionResult = {
-        error: '',
-        suggestions: [] as string[] 
-      };
-      await act(async () => {
-        const res = await result.current.expandAllBrands(['Brand1']);
-        expansionResult.error = res.error ?? '';
-        expansionResult.suggestions = res.suggestions;
-      });
-
-      expect(expansionResult.error).toBeTruthy();
-      expect(expansionResult.suggestions).toStrictEqual([]);
+      expect(expansion.error).toBeTruthy();
+      expect(expansion.suggestions).toStrictEqual([]);
     });
   });
 
   describe('findCompetitors', () => {
     it('returns discovered competitors', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
+      const { result } = await renderLoadedBrandConfig();
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      const discovery = await act(() => result.current.findCompetitors(['MyBrand']));
 
-      const discoveryResult = {
-        competitors: [] as string[],
-        first_party_brands: [] as string[] 
-      };
-      await act(async () => {
-        const res = await result.current.findCompetitors(['MyBrand']);
-        discoveryResult.competitors = res.competitors;
-        discoveryResult.first_party_brands = res.first_party_brands;
-      });
-
-      expect(discoveryResult.competitors).toStrictEqual(['Competitor1', 'Competitor2']);
-      expect(discoveryResult.first_party_brands).toStrictEqual(['MyBrand']);
+      expect(discovery.competitors).toStrictEqual(['Competitor1', 'Competitor2']);
+      expect(discovery.first_party_brands).toStrictEqual(['MyBrand']);
     });
 
     it('passes existing competitors to API', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
+      const {
+        api, result 
+      } = await renderLoadedBrandConfig();
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      await act(async () => {
-        await result.current.findCompetitors(['MyBrand'], ['ExistingCompetitor']);
-      });
+      await act(() => result.current.findCompetitors(['MyBrand'], ['ExistingCompetitor']));
 
       expect(api.findCompetitors).toHaveBeenCalledWith({
         first_party_brands: ['MyBrand'],
@@ -361,38 +244,23 @@ describe('useBrandConfig', () => {
     });
 
     it('returns error result when API fails', async () => {
-      const api = createMockApi({ shouldFailFindCompetitors: true });
-      const { result } = renderHook(() => useBrandConfig(api));
+      const { result } = await renderLoadedBrandConfig({ shouldFailFindCompetitors: true });
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      const discovery = await act(() => result.current.findCompetitors(['MyBrand']));
 
-      const discoveryResult = {
-        error: '',
-        competitors: [] as string[] 
-      };
-      await act(async () => {
-        const res = await result.current.findCompetitors(['MyBrand']);
-        discoveryResult.error = res.error ?? '';
-        discoveryResult.competitors = res.competitors;
-      });
-
-      expect(discoveryResult.error).toBeTruthy();
-      expect(discoveryResult.competitors).toStrictEqual([]);
+      expect(discovery.error).toBeTruthy();
+      expect(discovery.competitors).toStrictEqual([]);
     });
   });
 
   describe('refetch', () => {
     it('refetches config from API', async () => {
-      const api = createMockApi();
-      const { result } = renderHook(() => useBrandConfig(api));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
+      const {
+        api, result 
+      } = await renderLoadedBrandConfig();
       const initialCallCount = api.fetchConfig.mock.calls.length;
 
-      await act(async () => {
-        await result.current.refetch();
-      });
+      await act(() => result.current.refetch());
 
       expect(api.fetchConfig.mock.calls.length).toBeGreaterThan(initialCallCount);
     });

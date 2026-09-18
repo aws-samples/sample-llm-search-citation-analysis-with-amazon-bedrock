@@ -1,5 +1,5 @@
 import {
-  beforeEach, describe, expect, it, vi
+  describe, expect, it, vi 
 } from 'vitest';
 import {
   createKeywordGroup,
@@ -16,28 +16,13 @@ import {
   groupsResponseFixture,
   membershipResponseFixture,
 } from './keywordGroups-fixtures';
-
-vi.mock('./client', () => ({
-  apiGet: vi.fn(),
-  apiPost: vi.fn(),
-  apiPut: vi.fn(),
-  apiDelete: vi.fn(),
-}));
-
 import {
-  apiDelete, apiGet, apiPost, apiPut
-} from './client';
+  mockApiDelete, mockApiGet, mockApiPost, mockApiPut
+} from './clientMock-fixtures';
 
-const mockApiGet = vi.mocked(apiGet);
-const mockApiPost = vi.mocked(apiPost);
-const mockApiPut = vi.mocked(apiPut);
-const mockApiDelete = vi.mocked(apiDelete);
+vi.mock('./client', () => import('./clientMock-fixtures'));
 
 describe('keyword groups API', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   describe('fetchKeywordGroups', () => {
     it('returns the groups array from a valid response', async () => {
       mockApiGet.mockResolvedValue(groupsResponseFixture);

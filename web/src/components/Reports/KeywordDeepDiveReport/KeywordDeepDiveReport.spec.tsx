@@ -84,7 +84,6 @@ function renderAt(path: string) {
 
 describe('KeywordDeepDiveReport', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockUseKeywordDeepDive.mockReturnValue(settledData());
   });
 

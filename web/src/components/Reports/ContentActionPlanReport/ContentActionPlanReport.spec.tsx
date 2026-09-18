@@ -109,7 +109,6 @@ function renderReport() {
 
 describe('ContentActionPlanReport', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockUse.mockReturnValue(POPULATED);
   });
 

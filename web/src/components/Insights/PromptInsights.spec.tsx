@@ -14,7 +14,6 @@ const mockUsePromptInsights = usePromptInsights as ReturnType<typeof vi.fn>;
 
 describe('PromptInsights', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockUsePromptInsights.mockReturnValue({
       data: null,
       loading: false,
