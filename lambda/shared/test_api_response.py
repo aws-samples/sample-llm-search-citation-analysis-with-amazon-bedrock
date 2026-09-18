@@ -8,16 +8,15 @@ Covers:
 
 import importlib
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-# Add lambda/shared to path so we can import api_response directly
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-
-import api_response as cors_module
+# `shared/__init__.py` re-exports the `api_response` *function*, so
+# `from shared import api_response` would hand back the function rather than
+# the module. Resolve the submodule itself; it is what `importlib.reload` needs.
+cors_module = importlib.import_module('shared.api_response')
 
 
 def _reload_and_get_origin():
@@ -155,14 +154,19 @@ class TestSsmFailureIsNotCached:
             'GetParameter',
         )
 
+    @staticmethod
+    def _origins(client, calls: int) -> list[str]:
+        """What `calls` successive requests in one warm container get back as the CORS origin."""
+        with patch.dict(os.environ, {'CORS_ORIGIN_PARAM': '/cors/origin'}, clear=False), \
+             patch.object(cors_module.boto3, 'client', return_value=client):
+            return [cors_module.get_cors_origin() for _ in range(calls)]
+
     def test_returns_empty_origin_for_the_failing_request(self):
         """Fail closed: the request that hit the error gets no origin."""
         importlib.reload(cors_module)
         client = self._ssm_client([self._throttling_error()])
 
-        with patch.dict(os.environ, {'CORS_ORIGIN_PARAM': '/cors/origin'}, clear=False), \
-             patch.object(cors_module.boto3, 'client', return_value=client):
-            assert cors_module.get_cors_origin() == ''
+        assert self._origins(client, calls=1) == ['']
 
     def test_retries_ssm_on_the_next_request_after_a_failure(self):
         """
@@ -176,13 +180,7 @@ class TestSsmFailureIsNotCached:
             {'Parameter': {'Value': configured}},
         ])
 
-        with patch.dict(os.environ, {'CORS_ORIGIN_PARAM': '/cors/origin'}, clear=False), \
-             patch.object(cors_module.boto3, 'client', return_value=client):
-            first = cors_module.get_cors_origin()
-            second = cors_module.get_cors_origin()
-
-        assert first == ''
-        assert second == configured
+        assert self._origins(client, calls=2) == ['', configured]
 
     def test_makes_a_second_ssm_call_after_a_failure(self):
         """A cached failure would short-circuit before reaching SSM again."""
@@ -192,10 +190,7 @@ class TestSsmFailureIsNotCached:
             {'Parameter': {'Value': 'https://dashboard.example.com'}},
         ])
 
-        with patch.dict(os.environ, {'CORS_ORIGIN_PARAM': '/cors/origin'}, clear=False), \
-             patch.object(cors_module.boto3, 'client', return_value=client):
-            cors_module.get_cors_origin()
-            cors_module.get_cors_origin()
+        self._origins(client, calls=2)
 
         assert client.get_parameter.call_count == 2
 
@@ -205,12 +200,7 @@ class TestSsmFailureIsNotCached:
         configured = 'https://dashboard.example.com'
         client = self._ssm_client([{'Parameter': {'Value': configured}}])
 
-        with patch.dict(os.environ, {'CORS_ORIGIN_PARAM': '/cors/origin'}, clear=False), \
-             patch.object(cors_module.boto3, 'client', return_value=client):
-            first = cors_module.get_cors_origin()
-            second = cors_module.get_cors_origin()
-
-        assert (first, second) == (configured, configured)
+        assert self._origins(client, calls=2) == [configured, configured]
         assert client.get_parameter.call_count == 1
 
     def test_still_caches_the_static_misconfiguration_path(self):

@@ -25,11 +25,16 @@ from botocore.config import Config
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import success_response, validation_error
-from shared.constants import MAX_KEYWORD_LENGTH
+from shared.api_response import success_response
 from shared.decorators import api_handler, validate
 from shared.dynamodb_batch import query_latest_per_key
-from shared.scope_params import ReportScope, all_active_scope, parse_scope_params
+from shared.scope_params import (
+    SCOPE_QUERY_PARAMS,
+    ReportScope,
+    all_active_scope,
+    keywords_table_name,
+    scope_from_request,
+)
 from shared.utils import extract_domain, get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -41,11 +46,7 @@ logger.setLevel(logging.INFO)
 # default pool of 10 would serialize that fan-out at the HTTP layer.
 dynamodb = boto3.resource('dynamodb', config=Config(max_pool_connections=50))
 
-KEYWORDS_TABLE = (
-    os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    or os.environ.get('KEYWORDS_TABLE')
-    or 'CitationAnalysis-Keywords'
-)
+KEYWORDS_TABLE = keywords_table_name()
 
 # Upper bound on items fetched per keyword when isolating the latest
 # analysis run. One run writes one SearchResults item per provider x
@@ -424,21 +425,10 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10, scope: Re
 
 @api_handler
 @validate({
-    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
-    'group_id': {'type': str, 'max_length': 64},
-    'keyword_ids': {'type': str, 'max_length': 8000},
-    'scope': {'type': str, 'choices': ['all']},
+    **SCOPE_QUERY_PARAMS,
     'limit': {'type': int, 'min': 1, 'max': 100, 'default': 10}
 })
-def handler(
-    event: dict[str, Any],
-    context: Any,
-    keyword: str | None = None,
-    group_id: str | None = None,
-    keyword_ids: str | None = None,
-    scope: str | None = None,
-    limit: int = 10,
-) -> dict[str, Any]:
+def handler(event: dict[str, Any], context: Any, limit: int = 10, **scope_params: str | None) -> dict[str, Any]:
     """
     API handler for citation gap analysis.
 
@@ -448,11 +438,9 @@ def handler(
         - neither: analyze across all active keywords
         - limit: Number of keywords to analyze when unscoped (default: 10)
     """
-    report_scope, error = parse_scope_params(
-        {'keyword': keyword, 'group_id': group_id, 'keyword_ids': keyword_ids, 'scope': scope}, dynamodb.Table(KEYWORDS_TABLE)
-    )
-    if error:
-        return validation_error(error, event, 'scope')
+    report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE))
+    if rejected:
+        return rejected
 
     config = get_brand_config()
 

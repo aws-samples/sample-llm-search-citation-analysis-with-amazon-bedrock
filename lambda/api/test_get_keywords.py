@@ -1,7 +1,5 @@
 """Tests for ordinary and authoritative keyword retrieval."""
 
-import importlib
-import importlib.util
 import json
 import os
 import sys
@@ -9,45 +7,22 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.env import KEYWORDS_TABLE_ENV
+from testing.module_loader import load_handler_module
+
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.abspath(os.path.join(_API_DIR, '..'))
 _MODULE_NAME = 'get_keywords_under_test'
-_TABLE_ENV_VARS = ('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
-_TEST_TABLE_NAME = 'test-keywords-table'
-
-
-def _load_handler():
-    if _LAMBDA_DIR not in sys.path:
-        sys.path.insert(0, _LAMBDA_DIR)
-    sys.modules['shared.api_response'] = importlib.import_module('shared.api_response')
-    sys.modules.pop(_MODULE_NAME, None)
-    spec = importlib.util.spec_from_file_location(
-        _MODULE_NAME, os.path.join(_API_DIR, 'get-keywords.py')
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 @pytest.fixture
 def get_keywords_handler():
-    saved = {name: os.environ.get(name) for name in _TABLE_ENV_VARS}
-    for name in _TABLE_ENV_VARS:
-        os.environ[name] = _TEST_TABLE_NAME
-
+    """`get-keywords.py` bound to a fresh mock table, loaded per test."""
     table = MagicMock()
-    resource = MagicMock()
-    resource.Table.return_value = table
-    with patch('boto3.resource', return_value=resource):
-        module = _load_handler()
-
-    yield module, table
-
-    for name, value in saved.items():
-        if value is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = value
+    with patch.dict(os.environ, KEYWORDS_TABLE_ENV):
+        with patch('boto3.resource', return_value=fake_dynamodb_resource(table)):
+            module = load_handler_module(_API_DIR, 'get-keywords.py', _MODULE_NAME)
+        yield module, table
     sys.modules.pop(_MODULE_NAME, None)
 
 

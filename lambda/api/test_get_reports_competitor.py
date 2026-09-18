@@ -1,32 +1,19 @@
 """
 Tests for get-reports-competitor.py — the /reports/competitor rollup.
 
-Strategy mirrors test_get_reports_overview.py: load the module after
-mounting the shared layer / lambda source tree, then prime the lazy
-sibling cache and the per-keyword rank lookup with stubs so we never
-touch DynamoDB.
+Strategy mirrors test_get_reports_overview.py: load the module, then prime
+the lazy sibling cache and the per-keyword rank lookup with stubs so we
+never touch DynamoDB.
 """
 
-import importlib
-import importlib.util
 import json
 import os
-import sys
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-# Mount shared layer / fall back to lambda/ source.
-_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-_LAYER_PY = os.path.join(_REPO, 'lambda', 'layer', 'python')
-_LAMBDA_DIR = os.path.join(_REPO, 'lambda')
-if os.path.isdir(_LAYER_PY) and _LAYER_PY not in sys.path:
-    sys.path.insert(0, _LAYER_PY)
-elif _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-
-_layer_api_response = importlib.import_module('shared.api_response')
-sys.modules['shared.api_response'] = _layer_api_response
+from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
+from testing.module_loader import load_handler_module
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -90,13 +77,7 @@ DEFAULT_GAPS = {
 
 def _load_module():
     """Load get-reports-competitor.py with stubs primed in caches."""
-    spec = importlib.util.spec_from_file_location(
-        'get_reports_competitor_under_test',
-        os.path.join(_API_DIR, 'get-reports-competitor.py'),
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules['get_reports_competitor_under_test'] = mod
-    spec.loader.exec_module(mod)
+    mod = load_handler_module(_API_DIR, 'get-reports-competitor.py')
 
     mod._sibling_cache['gap'] = lambda keyword, config: DEFAULT_GAPS.get(keyword, {})
     mod._latest_brand_ranks = lambda keyword: DEFAULT_RANKS.get(keyword, {})
@@ -109,22 +90,25 @@ def mod():
     return _load_module()
 
 
-def _load_module_without_stubs():
-    """Load module without priming the helper stubs — for testing the
-    real DynamoDB-backed _list_tracked_keywords / _latest_brand_ranks."""
-    spec = importlib.util.spec_from_file_location(
-        'get_reports_competitor_unstubbed',
-        os.path.join(_API_DIR, 'get-reports-competitor.py'),
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules['get_reports_competitor_unstubbed'] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
 @pytest.fixture
 def raw_mod():
-    return _load_module_without_stubs()
+    """The module without the helper stubs — for testing the real
+    DynamoDB-backed _list_tracked_keywords / _latest_brand_ranks."""
+    return load_handler_module(_API_DIR, 'get-reports-competitor.py', 'get_reports_competitor_unstubbed')
+
+
+# Adidas outranks Nike on a keyword: the setup under which Adidas's rollup
+# picks up that keyword's exclusive sources.
+ADIDAS_OUTRANKS_NIKE = {
+    'adidas': {
+        'best_rank': 1, 'providers': ['openai'],
+        'classification': 'competitor',
+    },
+    'nike': {
+        'best_rank': 5, 'providers': ['openai'],
+        'classification': 'first_party',
+    },
+}
 
 
 CONFIG = {
@@ -269,16 +253,7 @@ def test_rollup_orders_outreach_targets_by_lift_score_descending(mod):
             },
         ],
     } if keyword == 'kw' else {'gaps': []}
-    mod._latest_brand_ranks = lambda keyword: {
-        'adidas': {
-            'best_rank': 1, 'providers': ['openai'],
-            'classification': 'competitor',
-        },
-        'nike': {
-            'best_rank': 5, 'providers': ['openai'],
-            'classification': 'first_party',
-        },
-    }
+    mod._latest_brand_ranks = lambda keyword: ADIDAS_OUTRANKS_NIKE
     rollup = mod._build_competitor_rollup('Adidas', ['kw'], CONFIG)
     targets = rollup['outreach_targets']
     assert targets[0]['url'] == 'https://high.com'
@@ -296,16 +271,7 @@ def test_rollup_caps_outreach_targets_at_ten_when_more_exist(mod):
         for i in range(15)
     ]
     mod._sibling_cache['gap'] = lambda keyword, config: {'gaps': sources}
-    mod._latest_brand_ranks = lambda keyword: {
-        'adidas': {
-            'best_rank': 1, 'providers': ['openai'],
-            'classification': 'competitor',
-        },
-        'nike': {
-            'best_rank': 5, 'providers': ['openai'],
-            'classification': 'first_party',
-        },
-    }
+    mod._latest_brand_ranks = lambda keyword: ADIDAS_OUTRANKS_NIKE
     rollup = mod._build_competitor_rollup('Adidas', ['kw'], CONFIG)
     assert len(rollup['outreach_targets']) == 10
 
@@ -476,17 +442,17 @@ def test_rollup_continues_when_gap_helper_raises(mod):
 # --- _list_tracked_keywords -----------------------------------------------
 
 
+def _scanning_dynamodb(items):
+    """A resource whose tables answer every scan with `items`."""
+    return fake_dynamodb_resource(fake_table(scan={'Items': items}))
+
+
 def test_list_tracked_keywords_reads_from_keywords_table_when_configured(raw_mod):
-    fake_table = MagicMock()
-    fake_table.scan.return_value = {
-        'Items': [
-            {'keyword': 'shoes'},
-            {'keyword': 'boots'},
-            {'keyword': 'shoes'},  # duplicate to verify de-dup
-        ],
-    }
-    fake_dynamodb = MagicMock()
-    fake_dynamodb.Table.return_value = fake_table
+    fake_dynamodb = _scanning_dynamodb([
+        {'keyword': 'shoes'},
+        {'keyword': 'boots'},
+        {'keyword': 'shoes'},  # duplicate to verify de-dup
+    ])
 
     with patch.object(raw_mod, 'KEYWORDS_TABLE', 'test-keywords'):
         with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
@@ -496,12 +462,7 @@ def test_list_tracked_keywords_reads_from_keywords_table_when_configured(raw_mod
 
 
 def test_list_tracked_keywords_falls_back_to_search_results_when_no_keywords_table(raw_mod):
-    fake_table = MagicMock()
-    fake_table.scan.return_value = {
-        'Items': [{'keyword': 'fallback-kw'}],
-    }
-    fake_dynamodb = MagicMock()
-    fake_dynamodb.Table.return_value = fake_table
+    fake_dynamodb = _scanning_dynamodb([{'keyword': 'fallback-kw'}])
 
     with patch.object(raw_mod, 'KEYWORDS_TABLE', None):
         with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', 'test-search'):
@@ -519,12 +480,7 @@ def test_list_tracked_keywords_returns_empty_when_no_tables_configured(raw_mod):
 
 
 def test_list_tracked_keywords_caps_result_at_limit(raw_mod):
-    fake_table = MagicMock()
-    fake_table.scan.return_value = {
-        'Items': [{'keyword': f'kw-{i}'} for i in range(20)],
-    }
-    fake_dynamodb = MagicMock()
-    fake_dynamodb.Table.return_value = fake_table
+    fake_dynamodb = _scanning_dynamodb([{'keyword': f'kw-{i}'} for i in range(20)])
 
     with patch.object(raw_mod, 'KEYWORDS_TABLE', 'test-keywords'):
         with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
@@ -536,13 +492,17 @@ def test_list_tracked_keywords_caps_result_at_limit(raw_mod):
 # --- _latest_brand_ranks --------------------------------------------------
 
 
-def _ranks_event(items):
-    """Build a fake DynamoDB query response containing search-result items."""
-    fake_table = MagicMock()
-    fake_table.query.return_value = {'Items': items}
-    fake_dynamodb = MagicMock()
-    fake_dynamodb.Table.return_value = fake_table
-    return fake_dynamodb
+def _search_item(brands, timestamp='2026-05-15T00:00:00Z', provider='openai'):
+    """One SearchResults row as `_latest_brand_ranks` reads it."""
+    return {'timestamp': timestamp, 'provider': provider, 'brands': brands}
+
+
+def _latest_ranks(raw_mod, items):
+    """Run `_latest_brand_ranks('shoes')` against a search table returning `items`."""
+    fake_dynamodb = fake_dynamodb_resource(fake_table(query={'Items': items}))
+    with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', 'test'):
+        with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
+            return raw_mod._latest_brand_ranks('shoes')
 
 
 def test_latest_brand_ranks_returns_empty_when_search_table_unset(raw_mod):
@@ -552,40 +512,16 @@ def test_latest_brand_ranks_returns_empty_when_search_table_unset(raw_mod):
 
 
 def test_latest_brand_ranks_returns_empty_when_query_returns_no_items(raw_mod):
-    fake_dynamodb = _ranks_event([])
-    with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', 'test'):
-        with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
-            result = raw_mod._latest_brand_ranks('shoes')
-    assert result == {}
+    assert _latest_ranks(raw_mod, []) == {}
 
 
 def test_latest_brand_ranks_aggregates_across_providers(raw_mod):
     items = [
-        {
-            'timestamp': '2026-05-15T00:00:00Z',
-            'provider': 'openai',
-            'brands': [
-                {
-                    'name': 'Nike', 'rank': 2,
-                    'classification': 'first_party',
-                },
-            ],
-        },
-        {
-            'timestamp': '2026-05-15T00:00:00Z',
-            'provider': 'perplexity',
-            'brands': [
-                {
-                    'name': 'Nike', 'rank': 5,
-                    'classification': 'first_party',
-                },
-            ],
-        },
+        _search_item([{'name': 'Nike', 'rank': 2, 'classification': 'first_party'}], provider='openai'),
+        _search_item([{'name': 'Nike', 'rank': 5, 'classification': 'first_party'}], provider='perplexity'),
     ]
-    fake_dynamodb = _ranks_event(items)
-    with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', 'test'):
-        with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
-            result = raw_mod._latest_brand_ranks('shoes')
+
+    result = _latest_ranks(raw_mod, items)
 
     nike = result['nike']
     # Best rank (smallest) across providers wins.
@@ -595,79 +531,42 @@ def test_latest_brand_ranks_aggregates_across_providers(raw_mod):
 
 def test_latest_brand_ranks_filters_to_latest_timestamp_only(raw_mod):
     items = [
-        {
-            'timestamp': '2026-05-14T00:00:00Z',  # older
-            'provider': 'openai',
-            'brands': [
-                {'name': 'Nike', 'rank': 1, 'classification': 'first_party'},
-            ],
-        },
-        {
-            'timestamp': '2026-05-15T00:00:00Z',  # newest — only this counts
-            'provider': 'openai',
-            'brands': [
-                {'name': 'Nike', 'rank': 7, 'classification': 'first_party'},
-            ],
-        },
+        # older
+        _search_item([{'name': 'Nike', 'rank': 1, 'classification': 'first_party'}], timestamp='2026-05-14T00:00:00Z'),
+        # newest — only this counts
+        _search_item([{'name': 'Nike', 'rank': 7, 'classification': 'first_party'}], timestamp='2026-05-15T00:00:00Z'),
     ]
-    fake_dynamodb = _ranks_event(items)
-    with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', 'test'):
-        with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
-            result = raw_mod._latest_brand_ranks('shoes')
+
+    result = _latest_ranks(raw_mod, items)
+
     # Should reflect rank=7 from the newest timestamp, not rank=1 from older.
     assert result['nike']['best_rank'] == 7
 
 
 def test_latest_brand_ranks_handles_invalid_rank_values_as_999(raw_mod):
-    items = [
-        {
-            'timestamp': '2026-05-15T00:00:00Z',
-            'provider': 'openai',
-            'brands': [
-                {'name': 'Nike', 'rank': 'not-a-number',
-                 'classification': 'first_party'},
-            ],
-        },
-    ]
-    fake_dynamodb = _ranks_event(items)
-    with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', 'test'):
-        with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
-            result = raw_mod._latest_brand_ranks('shoes')
+    items = [_search_item([{'name': 'Nike', 'rank': 'not-a-number', 'classification': 'first_party'}])]
+
+    result = _latest_ranks(raw_mod, items)
+
     assert result['nike']['best_rank'] == 999
 
 
 def test_latest_brand_ranks_skips_brands_with_empty_name(raw_mod):
-    items = [
-        {
-            'timestamp': '2026-05-15T00:00:00Z',
-            'provider': 'openai',
-            'brands': [
-                {'name': '', 'rank': 1},
-                {'name': 'Nike', 'rank': 3, 'classification': 'first_party'},
-            ],
-        },
-    ]
-    fake_dynamodb = _ranks_event(items)
-    with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', 'test'):
-        with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
-            result = raw_mod._latest_brand_ranks('shoes')
+    items = [_search_item([
+        {'name': '', 'rank': 1},
+        {'name': 'Nike', 'rank': 3, 'classification': 'first_party'},
+    ])]
+
+    result = _latest_ranks(raw_mod, items)
+
     assert list(result.keys()) == ['nike']
 
 
 def test_latest_brand_ranks_keeps_default_classification_when_missing(raw_mod):
     # Brands without an explicit `classification` field should keep the
     # default ('other') rather than overwrite it with a falsy value.
-    items = [
-        {
-            'timestamp': '2026-05-15T00:00:00Z',
-            'provider': 'openai',
-            'brands': [
-                {'name': 'Mystery', 'rank': 1},  # no classification
-            ],
-        },
-    ]
-    fake_dynamodb = _ranks_event(items)
-    with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', 'test'):
-        with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
-            result = raw_mod._latest_brand_ranks('shoes')
+    items = [_search_item([{'name': 'Mystery', 'rank': 1}])]
+
+    result = _latest_ranks(raw_mod, items)
+
     assert result['mystery']['classification'] == 'other'

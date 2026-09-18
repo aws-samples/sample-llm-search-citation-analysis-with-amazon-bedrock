@@ -22,30 +22,16 @@ These tests pin:
 
 from __future__ import annotations
 
-import importlib.util
+import json
 import os
-import sys
 from unittest.mock import MagicMock, patch
+
+from testing.module_loader import load_handler_module
 
 # Required env vars must be present BEFORE the module imports — the handler
 # resolves them at module load via ``resolve_table_env``.
 os.environ.setdefault('DYNAMODB_TABLE_CITATIONS', 'test-citations')
-
-_HERE = os.path.dirname(__file__)
-_MODULE_PATH = os.path.join(_HERE, 'get-url-breakdown.py')
-
-_LAMBDA_DIR = os.path.dirname(_HERE)
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-
-_spec = importlib.util.spec_from_file_location(
-    'get_url_breakdown_under_test', _MODULE_PATH
-)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules['get_url_breakdown_under_test'] = _mod
-_spec.loader.exec_module(_mod)
+_mod = load_handler_module(os.path.dirname(__file__), 'get-url-breakdown.py')
 
 
 def _fake_table(pages: list[dict]) -> MagicMock:
@@ -59,6 +45,11 @@ def _fake_table(pages: list[dict]) -> MagicMock:
     return table
 
 
+def _single_page(items: list[dict] | None = None) -> MagicMock:
+    """A table whose whole answer fits in one page."""
+    return _fake_table([{'Items': items or [], 'LastEvaluatedKey': None}])
+
+
 def _make_event(url: str) -> dict:
     """Mimic the API Gateway proxy event shape the handler expects."""
     return {
@@ -68,11 +59,18 @@ def _make_event(url: str) -> dict:
     }
 
 
+def _handle(url: str, items: list[dict] | None = None) -> dict:
+    """Run the handler against a single-page table and decode the response body."""
+    with patch.object(_mod, 'citations_table', _single_page(items)):
+        response = _mod.handler(_make_event(url), None)
+    return json.loads(response['body'])
+
+
 class TestQueryUrlIndex:
     """Verify the index query goes to the right place and respects paging."""
 
     def test_queries_url_index_by_normalized_url(self) -> None:
-        table = _fake_table([{'Items': [], 'LastEvaluatedKey': None}])
+        table = _single_page()
         with patch.object(_mod, 'citations_table', table):
             _mod._query_url_index('https://example.com/page')
 
@@ -84,7 +82,7 @@ class TestQueryUrlIndex:
     def test_query_uses_normalized_url_as_partition_key(self) -> None:
         """The partition key on UrlIndex is ``normalized_url`` — the key
         condition must match that attribute."""
-        table = _fake_table([{'Items': [], 'LastEvaluatedKey': None}])
+        table = _single_page()
         with patch.object(_mod, 'citations_table', table):
             _mod._query_url_index('https://example.com/page')
 
@@ -213,14 +211,9 @@ class TestHandlerResponseShape:
             {'keyword': 'new', 'citing_providers': ['openai'],
              'last_updated': '2026-04-17T12:00:00Z'},
         ]
-        table = _fake_table([{'Items': items, 'LastEvaluatedKey': None}])
 
-        with patch.object(_mod, 'citations_table', table):
-            response = _mod.handler(_make_event('https://example.com'), None)
+        breakdown = _handle('https://example.com', items)['breakdown']
 
-        import json
-        body = json.loads(response['body'])
-        breakdown = body['breakdown']
         # Newest first — consumers sort/display in this order on the UI.
         assert breakdown[0]['keyword'] == 'new'
         assert breakdown[1]['keyword'] == 'old'
@@ -232,24 +225,14 @@ class TestHandlerResponseShape:
             {'keyword': 'kw', 'citing_providers': ['openai', 'gemini', 'claude'],
              'last_updated': '2026-04-17T12:00:00Z'},
         ]
-        table = _fake_table([{'Items': items, 'LastEvaluatedKey': None}])
 
-        with patch.object(_mod, 'citations_table', table):
-            response = _mod.handler(_make_event('https://example.com'), None)
+        body = _handle('https://example.com', items)
 
-        import json
-        body = json.loads(response['body'])
         assert body['total_citations'] == 3
 
     def test_returns_empty_breakdown_when_url_not_found(self) -> None:
-        table = _fake_table([{'Items': [], 'LastEvaluatedKey': None}])
-        with patch.object(_mod, 'citations_table', table):
-            response = _mod.handler(
-                _make_event('https://nobody-cites-this.example'), None
-            )
+        body = _handle('https://nobody-cites-this.example')
 
-        import json
-        body = json.loads(response['body'])
         assert body['total_citations'] == 0
         assert body['breakdown'] == []
 
@@ -257,14 +240,8 @@ class TestHandlerResponseShape:
         """The ``url`` echoed back is the user-facing input (post-unquote)
         so the UI displays what the user clicked, not the normalized form
         used internally."""
-        table = _fake_table([{'Items': [], 'LastEvaluatedKey': None}])
-        with patch.object(_mod, 'citations_table', table):
-            response = _mod.handler(
-                _make_event('https%3A%2F%2Fexample.com%2Fpage'), None
-            )
+        body = _handle('https%3A%2F%2Fexample.com%2Fpage')
 
-        import json
-        body = json.loads(response['body'])
         assert body['url'] == 'https://example.com/page'
 
 
@@ -281,7 +258,7 @@ class TestNoLongerScansSearchResults:
 
     def test_module_does_not_call_table_scan(self) -> None:
         """A scan call is the smoking gun for the old implementation."""
-        table = _fake_table([{'Items': [], 'LastEvaluatedKey': None}])
+        table = _single_page()
         with patch.object(_mod, 'citations_table', table):
             _mod.handler(_make_event('https://example.com'), None)
 

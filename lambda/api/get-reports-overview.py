@@ -24,9 +24,7 @@ Query params:
 
 from __future__ import annotations
 
-import importlib.util
 import logging
-import os
 import sys
 from collections.abc import Callable
 from typing import Any
@@ -36,21 +34,22 @@ sys.path.insert(0, '/opt/python')
 
 import boto3
 
-from shared.api_response import success_response, validation_error
-from shared.constants import MAX_KEYWORD_LENGTH
+from shared.api_response import success_response
 from shared.decorators import api_handler, validate
-from shared.scope_params import ReportScope, parse_scope_params
+from shared.scope_params import (
+    SCOPE_QUERY_PARAMS,
+    ReportScope,
+    keywords_table_name,
+    load_sibling_function,
+    scope_from_request,
+)
 from shared.utils import get_brand_config, get_timestamp
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
-KEYWORDS_TABLE = (
-    os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    or os.environ.get('KEYWORDS_TABLE')
-    or 'CitationAnalysis-Keywords'
-)
+KEYWORDS_TABLE = keywords_table_name()
 
 
 # ----------------------------------------------------------------------
@@ -60,30 +59,17 @@ KEYWORDS_TABLE = (
 # The trend-rollup and rule-based-recommendations logic lives in
 # `get-historical-trends.py` and `get-recommendations.py`. Their filenames
 # are hyphenated so they can't be imported with a normal `import`
-# statement. We re-use the same lazy-load pattern as `shared.router`'s
-# HandlerLoader, but for top-level utility functions instead of handlers.
+# statement; `shared.scope_params.load_sibling_function` loads them the
+# way `shared.router`'s HandlerLoader loads handlers, but for top-level
+# utility functions.
 #
-# Loading happens once per Lambda container at import time. The cost is
-# paid on cold start only.
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
+# Loading happens once per Lambda container. The cost is paid on the first
+# invocation only.
 
 
 def _load_sibling(filename: str, attr: str) -> Callable:
     """Import a function from a hyphen-named sibling .py file."""
-    module_name = filename.replace('-', '_').replace('.py', '_for_overview')
-    spec = importlib.util.spec_from_file_location(
-        module_name, os.path.join(_API_DIR, filename)
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load sibling module {filename!r}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    fn = getattr(module, attr, None)
-    if fn is None:
-        raise AttributeError(f"{filename} has no attribute {attr!r}")
-    return fn
+    return load_sibling_function(__file__, filename, attr, '_for_overview')
 
 
 # Lazy cache for sibling helpers. Eager loading at module import time would
@@ -220,10 +206,7 @@ def build_overview(
     },
     'days': {'type': int, 'min': 1, 'max': 365, 'default': 30},
     'top': {'type': int, 'min': 1, 'max': 10, 'default': 3},
-    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
-    'group_id': {'type': str, 'max_length': 64},
-    'keyword_ids': {'type': str, 'max_length': 8000},
-    'scope': {'type': str, 'choices': ['all']},
+    **SCOPE_QUERY_PARAMS,
 })
 def handler(
     event: dict[str, Any],
@@ -231,21 +214,16 @@ def handler(
     period: str = 'day',
     days: int = 30,
     top: int = 3,
-    keyword: str | None = None,
-    group_id: str | None = None,
-    keyword_ids: str | None = None,
-    scope: str | None = None,
+    **scope_params: str | None,
 ) -> dict[str, Any]:
     """API handler for GET /api/reports/overview.
 
     Optional scope: ``group_id`` or ``keyword_ids`` narrows the summary to a
     keyword group / id set. A single ``keyword`` is one keyword's summary.
     """
-    report_scope, error = parse_scope_params(
-        {'keyword': keyword, 'group_id': group_id, 'keyword_ids': keyword_ids, 'scope': scope}, dynamodb.Table(KEYWORDS_TABLE)
-    )
-    if error:
-        return validation_error(error, event, 'scope')
+    report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE))
+    if rejected:
+        return rejected
     config = get_brand_config()
     payload = build_overview(config, period=period, days=days, top=top, scope=report_scope)
     return success_response(payload, event)

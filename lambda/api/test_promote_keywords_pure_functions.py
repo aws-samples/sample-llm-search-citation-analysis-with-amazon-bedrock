@@ -29,16 +29,22 @@ Context:
     imported from the module under test rather than restated here.
 """
 
-import importlib
-import importlib.util
 import os
-import sys
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
 
 import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
+
+from testing.env import KEYWORDS_TABLE_ENV, cleared_env
+from testing.handler_fixtures import handler_fixture
+from testing.keyword_strategies import (
+    BASE_TEXTS,
+    CASE_TRANSFORMS,
+    CONTEXT_FIELDS,
+    draw_mixed_request,
+    variants_of,
+)
 
 pytestmark = pytest.mark.usefixtures('table_env_cleared')
 
@@ -46,116 +52,29 @@ pytestmark = pytest.mark.usefixtures('table_env_cleared')
 # --- Import-boundary bootstrap ----------------------------------------------
 #
 # `promote-keywords.py` is hyphenated and builds a `boto3` DynamoDB resource at
-# import time, so it is loaded fresh via `spec_from_file_location` under a module
-# name unique to THIS file (the `_load_router` pattern from `test_routers_404.py`)
-# with the layer `shared` on `sys.path`, table env vars set, and `boto3` patched
-# BEFORE the load. Every global mutation is undone on teardown; nothing is
-# autouse, so the pre-existing tests in this directory are untouched.
+# import time, so it is loaded fresh under a module name unique to THIS file
+# with the table env vars set and `boto3` patched BEFORE the load. Every global
+# mutation is undone on teardown; nothing is autouse, so the pre-existing tests
+# in this directory are untouched.
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO = os.path.abspath(os.path.join(_API_DIR, '..', '..'))
-_LAYER_PY = os.path.join(_REPO, 'lambda', 'layer', 'python')
 
-_PROMOTE_HANDLER_FILE = 'promote-keywords.py'
-_PROMOTE_MODULE_NAME = 'promote_keywords_under_test_pure_functions'
-_TABLE_ENV_VARS = ('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
-_TEST_TABLE_NAME = 'test-keywords-table'
-
-
-def _load_promotion_handler():
-    """Load `promote-keywords.py` fresh under this file's unique module name.
-
-    `shared/__init__.py` re-exports `api_response` as a function, shadowing the
-    submodule, so the real module object is bound explicitly -- otherwise the
-    handler's `from shared.api_response import ...` resolves to the function.
-    """
-    if _LAYER_PY not in sys.path:
-        sys.path.insert(0, _LAYER_PY)
-    sys.modules['shared.api_response'] = importlib.import_module('shared.api_response')
-    sys.modules.pop(_PROMOTE_MODULE_NAME, None)
-    spec = importlib.util.spec_from_file_location(
-        _PROMOTE_MODULE_NAME, os.path.join(_API_DIR, _PROMOTE_HANDLER_FILE)
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-@pytest.fixture(scope='module')
-def promotion_handler():
-    """`promote-keywords.py`, loaded once for this module with `boto3` patched."""
-    saved = {name: os.environ.get(name) for name in _TABLE_ENV_VARS}
-    for name in _TABLE_ENV_VARS:
-        os.environ[name] = _TEST_TABLE_NAME
-
-    with (
-        patch('boto3.resource', MagicMock(name='boto3.resource')),
-        patch('boto3.client', MagicMock(name='boto3.client')),
-    ):
-        yield _load_promotion_handler()
-
-    for name, value in saved.items():
-        if value is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = value
-    sys.modules.pop(_PROMOTE_MODULE_NAME, None)
+promotion_handler = handler_fixture(
+    _API_DIR, 'promote-keywords.py', 'promote_keywords_under_test_pure_functions', env=KEYWORDS_TABLE_ENV
+)
 
 
 @pytest.fixture
 def table_env_cleared():
-    """Save, clear, and restore the Keywords table env vars around one test."""
-    saved = {name: os.environ.get(name) for name in _TABLE_ENV_VARS}
-    for name in _TABLE_ENV_VARS:
-        os.environ.pop(name, None)
-
-    yield
-
-    for name, value in saved.items():
-        if value is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = value
+    """Clear the Keywords table env vars around one test: the loaded handler must not re-read them."""
+    with cleared_env(*KEYWORDS_TABLE_ENV):
+        yield
 
 
 # --- Strategies -------------------------------------------------------------
-
-# Small vocabulary so requests collide often (duplicates, case/existing overlap).
-_BASE_TEXTS = st.sampled_from([
-    'best running shoes',
-    'trail running shoes',
-    'marathon training plan',
-    'lightweight racing flats',
-    'running shoe reviews',
-])
-
-# Surrounding whitespace only; normalization trims it, so the key is unchanged.
-_PADDING = st.sampled_from(['', ' ', '  ', '\t', '\n', ' \t '])
-
-# Case transforms that must not change the comparison key either.
-_CASE_TRANSFORMS = st.sampled_from(['lower', 'upper', 'title', 'capitalize', 'swapcase'])
-
-# Texts that are empty once trimmed.
-_EMPTY_TEXTS = st.sampled_from(['', ' ', '   ', '\t', '\n', ' \t\n '])
-
-_CONTEXT_FIELDS = st.fixed_dictionaries(
-    {},
-    optional={
-        'intent': st.sampled_from(['commercial', 'informational']),
-        'competition': st.sampled_from(['high', 'low']),
-        'source': st.sampled_from(['expansion', 'competitor-analysis']),
-    },
-)
-
-
-def _variant(text, case_transform, leading, trailing):
-    """Build a whitespace/case variant of a text with the same normalized key."""
-    return f'{leading}{getattr(text, case_transform)()}{trailing}'
-
-
-def _variants_of(text):
-    """A strategy for whitespace/case variants of one concrete text."""
-    return st.builds(_variant, st.just(text), _CASE_TRANSFORMS, _PADDING, _PADDING)
+#
+# Keyword texts, padding, case transforms and research-context fields come
+# from `testing.keyword_strategies`, shared with the handler-I/O suite.
 
 
 @st.composite
@@ -168,32 +87,9 @@ def _partition_scenarios(draw):
     request (collapsed into it, so neither created nor reported). Extra entries
     are appended and the list permuted, so order carries no meaning.
     """
-    vocabulary = draw(st.lists(_BASE_TEXTS, min_size=2, max_size=4, unique=True))
-    existing_text, new_text = vocabulary[0], vocabulary[1]
+    existing_text, keywords = draw_mixed_request(draw, max_extra_entries=6)
 
-    entries = [
-        {**draw(_CONTEXT_FIELDS), 'keyword': draw(_variants_of(existing_text))},
-        {'keyword': draw(_EMPTY_TEXTS)},
-        {**draw(_CONTEXT_FIELDS), 'keyword': draw(_variants_of(new_text))},
-        {'keyword': draw(_variants_of(new_text))},
-    ]
-    entries.extend(
-        draw(
-            st.lists(
-                st.one_of(
-                    st.builds(
-                        lambda text, context: {**context, 'keyword': text},
-                        st.one_of(*[_variants_of(text) for text in vocabulary]),
-                        _CONTEXT_FIELDS,
-                    ),
-                    _EMPTY_TEXTS.map(lambda text: {'keyword': text}),
-                ),
-                max_size=6,
-            )
-        )
-    )
-
-    return [draw(_variants_of(existing_text))], list(draw(st.permutations(entries)))
+    return [draw(variants_of(existing_text))], keywords
 
 
 # Mixed-case texts, so "original casing preserved" is a real assertion. These
@@ -208,7 +104,7 @@ _TO_CREATE = st.lists(
             'lightweight Racing Flats',
             'RUNNING shoe Reviews',
         ]),
-        _CONTEXT_FIELDS,
+        CONTEXT_FIELDS,
     ),
     min_size=1,
     max_size=10,
@@ -218,7 +114,7 @@ _TO_CREATE = st.lists(
 # Payloads that clear every gate except status/priority, so only those decide
 # the `validate_request` outcome.
 _VALID_KEYWORDS = st.lists(
-    _BASE_TEXTS.map(lambda text: {'keyword': text}), min_size=1, max_size=5
+    BASE_TEXTS.map(lambda text: {'keyword': text}), min_size=1, max_size=5
 )
 
 # Index into an allowed-values tuple, resolved with `% len(...)` in the test.
@@ -246,7 +142,7 @@ _FIELD_SPEC = st.one_of(
     _ALLOWED_INDEX.map(lambda index: ('allowed', index)),
     _OMITTED_OR_EMPTY.map(lambda value: ('default', value)),
     _INVALID_CANDIDATES.map(lambda value: ('invalid', value)),
-    st.tuples(_ALLOWED_INDEX, _CASE_TRANSFORMS).map(lambda pair: ('case-variant', pair)),
+    st.tuples(_ALLOWED_INDEX, CASE_TRANSFORMS).map(lambda pair: ('case-variant', pair)),
 )
 
 # Values that make a research-context field ABSENT: omitted key (None), empty

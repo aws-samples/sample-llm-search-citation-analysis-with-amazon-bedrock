@@ -7,21 +7,25 @@ This module centralizes the boilerplate for loading and caching those
 sub-handlers so each router file can stay small and focused on its route map.
 
 Usage:
-    from shared.router import HandlerLoader
+    from shared.router import HandlerLoader, dispatch_route
 
+    ROUTE_MAP = {'/api/trigger-analysis': 'trigger-analysis.py'}
     _handlers = HandlerLoader(__file__)
 
     def handler(event, context):
-        ...
-        return _handlers.get('trigger-analysis.py')(event, context)
+        return dispatch_route(event, context, ROUTE_MAP, _handlers, logger)
 """
 
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from typing import Any
+
+from shared.api_response import not_found_response
 
 
 class HandlerLoader:
@@ -77,7 +81,7 @@ class HandlerLoader:
         return handler_fn
 
 
-__all__ = ['HandlerLoader', 'path_contains_segment', 'path_matches_route']
+__all__ = ['HandlerLoader', 'dispatch_route', 'path_contains_segment', 'path_matches_route']
 
 
 def path_contains_segment(segment: str, request_path: str) -> bool:
@@ -135,3 +139,46 @@ def path_matches_route(route_path: str, resource: str, path: str) -> bool:
         if candidate.startswith(route_path + '/'):
             return True
     return False
+
+
+
+def dispatch_route(
+    event: dict[str, Any],
+    context: Any,
+    route_map: Mapping[str, str],
+    handlers: HandlerLoader,
+    logger: logging.Logger,
+) -> dict[str, Any]:
+    """Dispatch ``event`` to the sub-handler of the first matching route.
+
+    ``route_map`` maps a route prefix (``/api/stats``) to the sub-handler
+    filename (``get-stats.py``) that ``handlers`` loads. Entries are tried
+    in insertion order, so a more specific prefix
+    (``/api/recommendations/{id}/status``) must be listed before its generic
+    parent (``/api/recommendations``).
+
+    Both the API Gateway template ``resource`` and the concrete request
+    ``path`` are tested against every prefix (see `path_matches_route`).
+    When nothing matches, the 404 goes through
+    `shared.api_response.not_found_response` so the CORS header follows the
+    centralized policy instead of a hardcoded wildcard.
+
+    Args:
+        event: API Gateway proxy event.
+        context: Lambda context, passed through to the sub-handler.
+        route_map: Ordered ``{route_prefix: sub_handler_filename}``.
+        handlers: The router's `HandlerLoader`.
+        logger: The router's logger, so log lines carry the router's name.
+    """
+    resource = event.get('resource', '')
+    path = event.get('path', '')
+
+    logger.info(f"Routing request: resource={resource}, path={path}")
+
+    for route_path, filename in route_map.items():
+        if path_matches_route(route_path, resource, path):
+            logger.info(f"Matched route {route_path} -> {filename}")
+            return handlers.get(filename)(event, context)
+
+    logger.error(f"No route matched for resource={resource}, path={path}")
+    return not_found_response(resource='Route', event=event)

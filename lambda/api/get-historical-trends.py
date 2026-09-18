@@ -20,14 +20,12 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import success_response, validation_error
+from shared.api_response import success_response
 from shared.constants import (
-    MAX_KEYWORD_LENGTH,
     TREND_DIRECTION_DECLINING_SLOPE,
     TREND_DIRECTION_IMPROVING_SLOPE,
     UNRANKED_SENTINEL,
@@ -35,7 +33,14 @@ from shared.constants import (
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.providers import get_enabled_provider_count
-from shared.scope_params import ReportScope, all_active_scope, parse_scope_params
+from shared.scope_params import (
+    SCOPE_QUERY_PARAMS,
+    ReportScope,
+    all_active_scope,
+    keywords_table_name,
+    query_keyword_rows,
+    scope_from_request,
+)
 from shared.utils import brand_names_match, get_brand_config, utc_now
 from shared.visibility_score import calculate_sentiment_agnostic_visibility_score, mean
 
@@ -52,7 +57,6 @@ _SCOPE_KEYWORDS_CAP = 100
 
 # Only the fields the buckets use; the LLM response text stays in the table.
 _TREND_PROJECTION = '#ts, provider, brands'
-_TREND_PROJECTION_NAMES = {'#ts': 'timestamp'}
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -61,11 +65,7 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
-KEYWORDS_TABLE = (
-    os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    or os.environ.get('KEYWORDS_TABLE')
-    or 'CitationAnalysis-Keywords'
-)
+KEYWORDS_TABLE = keywords_table_name()
 
 
 def get_trend_direction(values: list[float]) -> str:
@@ -193,20 +193,7 @@ def _fetch_keyword_items(keyword: str) -> list[dict]:
     the whole trends dashboard. Errors are logged for ops visibility.
     """
     try:
-        table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-        params: dict[str, Any] = {
-            'KeyConditionExpression': Key('keyword').eq(keyword),
-            'ProjectionExpression': _TREND_PROJECTION,
-            'ExpressionAttributeNames': _TREND_PROJECTION_NAMES,
-        }
-        items: list[dict] = []
-        while True:
-            response = table.query(**params)
-            items.extend(response.get('Items', []))
-            last_key = response.get('LastEvaluatedKey')
-            if not last_key:
-                return items
-            params['ExclusiveStartKey'] = last_key
+        return query_keyword_rows(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword, _TREND_PROJECTION)
     except Exception as e:
         logger.error(f"Error fetching trend items for keyword {keyword!r}: {e}")
         return []
@@ -332,11 +319,11 @@ def get_historical_trends(keyword: str, config: dict, period: str = 'day', days:
     return _build_trend_from_items(keyword, items, config, period, days)
 
 
-def _keywords_for_scope(scope: ReportScope | None) -> tuple[list[str], int]:
-    """Keyword texts to fan out over and the cap applied; active keywords only."""
-    resolved = scope if scope is not None else all_active_scope(dynamodb.Table(KEYWORDS_TABLE))
-    cap = _SCOPE_KEYWORDS_CAP if scope is not None else _ALL_KEYWORDS_CAP
-    return list(resolved.keywords), cap
+def _trend_scope(scope: ReportScope | None) -> tuple[ReportScope, int]:
+    """The scope to fan out over (active keywords only) and the keyword cap that applies to it."""
+    if scope is None:
+        return all_active_scope(dynamodb.Table(KEYWORDS_TABLE)), _ALL_KEYWORDS_CAP
+    return scope, _SCOPE_KEYWORDS_CAP
 
 
 def get_all_keywords_trends(config: dict, period: str = 'day', days: int = 30, scope: ReportScope | None = None) -> dict[str, Any]:
@@ -352,9 +339,10 @@ def get_all_keywords_trends(config: dict, period: str = 'day', days: int = 30, s
     `trend_direction` / `summary` block a single keyword has, so the group
     overview charts it exactly like one keyword.
     """
-    keywords, cap = _keywords_for_scope(scope)
+    resolved, cap = _trend_scope(scope)
+    keywords = list(resolved.keywords)
     keywords_to_query = keywords[:cap]
-    scope_block = scope.describe() if scope is not None else {'mode': 'all', 'kind': 'all', 'label': 'all active keywords', 'keyword_count': len(keywords)}
+    scope_block = resolved.describe()
     if not keywords_to_query:
         return {
             'scope': scope_block,
@@ -435,23 +423,11 @@ def get_all_keywords_trends(config: dict, period: str = 'day', days: int = 30, s
 
 @api_handler
 @validate({
-    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
-    'group_id': {'type': str, 'max_length': 64},
-    'keyword_ids': {'type': str, 'max_length': 8000},
-    'scope': {'type': str, 'choices': ['all']},
+    **SCOPE_QUERY_PARAMS,
     'period': {'type': str, 'choices': ['day', 'week', 'month'], 'default': 'day'},
     'days': {'type': int, 'min': 1, 'max': 365, 'default': 30}
 })
-def handler(
-    event: dict[str, Any],
-    context: Any,
-    keyword: str | None = None,
-    group_id: str | None = None,
-    keyword_ids: str | None = None,
-    scope: str | None = None,
-    period: str = 'day',
-    days: int = 30,
-) -> dict[str, Any]:
+def handler(event: dict[str, Any], context: Any, period: str = 'day', days: int = 30, **scope_params: str | None) -> dict[str, Any]:
     """
     API handler for historical trends.
 
@@ -462,11 +438,9 @@ def handler(
         - period: 'day', 'week', or 'month' (default: day)
         - days: Number of days to analyze (default: 30, max 365)
     """
-    report_scope, error = parse_scope_params(
-        {'keyword': keyword, 'group_id': group_id, 'keyword_ids': keyword_ids, 'scope': scope}, dynamodb.Table(KEYWORDS_TABLE)
-    )
-    if error:
-        return validation_error(error, event, 'scope')
+    report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE))
+    if rejected:
+        return rejected
 
     config = get_brand_config()
     if report_scope is not None and report_scope.is_single_keyword:

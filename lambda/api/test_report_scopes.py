@@ -16,21 +16,15 @@ the group answer built from per-keyword DynamoDB partitions:
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.module_loader import load_handler_module, module_name_for
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.dirname(_HERE)
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-_LAYER_PY = os.path.join(_LAMBDA_DIR, 'layer', 'python')
-if os.path.isdir(_LAYER_PY) and _LAYER_PY not in sys.path:
-    sys.path.append(_LAYER_PY)
 
 _ENV = {
     'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
@@ -53,10 +47,7 @@ OLD_TS = '2026-09-10T10:00:00Z'
 
 def _load(filename: str):
     with patch('boto3.resource', MagicMock()), patch.dict(os.environ, _ENV):
-        spec = importlib.util.spec_from_file_location(filename.replace('-', '_').removesuffix('.py') + '_scopes', os.path.join(_HERE, filename))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-    return module
+        return load_handler_module(_HERE, filename, module_name_for(filename, '_scopes'))
 
 
 def _brand(name, classification, mentions=1, rank=1, sentiment='positive'):
@@ -465,39 +456,43 @@ def gaps():
 
 
 class TestCitationGapsScope:
-    def test_group_scope_analyzes_every_keyword_of_the_group(self, gaps):
+    @staticmethod
+    def _analyze(gaps, params: dict, summary: dict) -> tuple[list[str], dict]:
+        """Call the handler with `analyze_citation_gaps` recording its keywords.
+
+        Every keyword answers `summary`; returns the keywords analysed, in call
+        order, and the decoded response body.
+        """
         resource, _ = _fake_dynamodb()
         analyzed: list[str] = []
 
         def record(keyword, _config):
             analyzed.append(keyword)
-            return {'summary': {'gap_count': 1, 'high_priority_gaps': 0, 'coverage_rate': 50}, 'gaps': []}
+            return {'summary': summary, 'gaps': []}
 
         with (
             patch.object(gaps, 'dynamodb', resource),
             patch.object(gaps, 'get_brand_config', return_value={}),
             patch.object(gaps, 'analyze_citation_gaps', record),
         ):
-            body = _body(gaps.handler(_event({'group_id': 'coruna', 'limit': '1'}), None))
+            body = _body(gaps.handler(_event(params), None))
+        return analyzed, body
+
+    def test_group_scope_analyzes_every_keyword_of_the_group(self, gaps):
+        analyzed, body = self._analyze(
+            gaps, {'group_id': 'coruna', 'limit': '1'},
+            {'gap_count': 1, 'high_priority_gaps': 0, 'coverage_rate': 50},
+        )
 
         assert sorted(analyzed) == ['best hotels galicia', 'hotel coruna spa']
         assert body['scope']['kind'] == 'group'
         assert body['keywords_analyzed'] == 2
 
     def test_unscoped_request_keeps_the_limit_over_active_keywords(self, gaps):
-        resource, _ = _fake_dynamodb()
-        analyzed: list[str] = []
-
-        def record(keyword, _config):
-            analyzed.append(keyword)
-            return {'summary': {'gap_count': 0, 'high_priority_gaps': 0, 'coverage_rate': 0}, 'gaps': []}
-
-        with (
-            patch.object(gaps, 'dynamodb', resource),
-            patch.object(gaps, 'get_brand_config', return_value={}),
-            patch.object(gaps, 'analyze_citation_gaps', record),
-        ):
-            body = _body(gaps.handler(_event({'limit': '2'}), None))
+        analyzed, body = self._analyze(
+            gaps, {'limit': '2'},
+            {'gap_count': 0, 'high_priority_gaps': 0, 'coverage_rate': 0},
+        )
 
         assert analyzed == ['best hotels galicia', 'hotel coruna spa']
         assert body['scope']['kind'] == 'all'

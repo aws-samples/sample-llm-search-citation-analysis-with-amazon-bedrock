@@ -273,28 +273,47 @@ def _browse(event: dict[str, Any], context: Any, prefix: str, bucket: str) -> di
     return success_response(result, event)
 
 
-@validate({
-    'key': {'required': True, 'type': str, 'max_length': 1024},
-    'bucket': {'type': str, 'max_length': 20, 'default': 'responses'}
-})
-def _get_file(event: dict[str, Any], context: Any, key: str, bucket: str) -> dict[str, Any]:
-    """Get file content for the given S3 key, confined to the bucket's root prefix."""
+def _resolve_scoped_object(
+    event: dict[str, Any], key: str, bucket: str
+) -> tuple[str | None, str | None, dict[str, Any] | None]:
+    """Unquote, validate and root-scope a caller-supplied object key.
+
+    Shared by `_get_file` and `_get_download` so both routes apply the same
+    containment gate before touching S3.
+
+    Returns:
+        ``(actual_bucket, scoped_key, None)`` on success, or
+        ``(None, None, error_response)`` when the key or bucket is refused.
+    """
     # URL decode the key. Unquote BEFORE validating so `%2e%2e%2f` is caught.
     key = unquote(key)
 
     # Path traversal validation
     path_error = validate_s3_path(key)
     if path_error:
-        return validation_error(path_error, event, 'key')
+        return None, None, validation_error(path_error, event, 'key')
 
     # Get the actual bucket and its root prefix
     actual_bucket, root_prefix = get_bucket_and_prefix(bucket)
     if not actual_bucket:
-        return validation_error(f'Invalid bucket type: {bucket}', event, 'bucket')
+        return None, None, validation_error(f'Invalid bucket type: {bucket}', event, 'bucket')
 
     scoped_key, scope_error = scope_key_to_root(key, root_prefix)
     if scope_error:
-        return validation_error(scope_error, event, 'key')
+        return None, None, validation_error(scope_error, event, 'key')
+
+    return actual_bucket, scoped_key, None
+
+
+@validate({
+    'key': {'required': True, 'type': str, 'max_length': 1024},
+    'bucket': {'type': str, 'max_length': 20, 'default': 'responses'}
+})
+def _get_file(event: dict[str, Any], context: Any, key: str, bucket: str) -> dict[str, Any]:
+    """Get file content for the given S3 key, confined to the bucket's root prefix."""
+    actual_bucket, scoped_key, error = _resolve_scoped_object(event, key, bucket)
+    if error:
+        return error
 
     result = get_file_content(actual_bucket, scoped_key)
     return success_response(result, event)
@@ -311,22 +330,9 @@ def _get_download(event: dict[str, Any], context: Any, key: str, bucket: str) ->
     bearer-shareable — no Cognito token is needed to redeem it — so the key must
     be scoped before it is signed, not after.
     """
-    # URL decode the key. Unquote BEFORE validating so `%2e%2e%2f` is caught.
-    key = unquote(key)
-
-    # Path traversal validation
-    path_error = validate_s3_path(key)
-    if path_error:
-        return validation_error(path_error, event, 'key')
-
-    # Get the actual bucket and its root prefix
-    actual_bucket, root_prefix = get_bucket_and_prefix(bucket)
-    if not actual_bucket:
-        return validation_error(f'Invalid bucket type: {bucket}', event, 'bucket')
-
-    scoped_key, scope_error = scope_key_to_root(key, root_prefix)
-    if scope_error:
-        return validation_error(scope_error, event, 'key')
+    actual_bucket, scoped_key, error = _resolve_scoped_object(event, key, bucket)
+    if error:
+        return error
 
     url = generate_download_url(actual_bucket, scoped_key)
     # Echo the key that was actually signed, not the raw input.
