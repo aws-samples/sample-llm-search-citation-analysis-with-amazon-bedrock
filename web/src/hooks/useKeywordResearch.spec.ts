@@ -7,7 +7,7 @@ import {
 import { useKeywordResearch } from './useKeywordResearch';
 import {
   mockExpansionResult, mockCompetitorResult, mockHistoryItems, createMockFetch,
-  buildCompletedExpansionItem, createPollingMockFetch,
+  buildCompletedExpansionItem, createPollingMockFetch, parsePolledResearchId,
 } from './useKeywordResearch-fixtures';
 
 vi.mock('../infrastructure', async () => {
@@ -79,6 +79,18 @@ function createMockResponse(data: unknown): Response {
 }
 
 describe('useKeywordResearch', () => {
+  const POLL_TICK_MS = 3000;
+
+  /** GET polls of `/keyword-research/{id}`, excluding DELETE and history. */
+  function countPollCalls(): number {
+    return mockAuthenticatedFetch.mock.calls.filter(
+      (c) => isValidMockCall(c)
+        && !c[1]?.method
+        && !c[0].includes('/history')
+        && parsePolledResearchId(c[0]) !== null
+    ).length;
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -391,14 +403,6 @@ describe('useKeywordResearch', () => {
   // call) and treated auth failures as "not ready yet" (user waited the full
   // 120s to get a bogus timeout).
   describe('async polling (AUDIT 2.20)', () => {
-    const POLL_TICK_MS = 3000;
-
-    function countHistoryCalls(): number {
-      return mockAuthenticatedFetch.mock.calls.filter(
-        (c) => isValidMockCall(c) && c[0].includes('/history')
-      ).length;
-    }
-
     beforeEach(() => {
       vi.useFakeTimers();
     });
@@ -410,9 +414,9 @@ describe('useKeywordResearch', () => {
     it('sets the expansion result when a poll finds the completed job', async () => {
       mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
         pendingIds: ['job-1'],
-        historyResult: () => ({
+        researchResult: (id) => ({
           ok: true,
-          items: [buildCompletedExpansionItem('job-1', 'best hotels')],
+          item: buildCompletedExpansionItem(id, 'best hotels'),
         }),
       }));
 
@@ -430,7 +434,7 @@ describe('useKeywordResearch', () => {
     it('surfaces an auth error after the first poll when the session expires', async () => {
       mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
         pendingIds: ['job-1'],
-        historyResult: () => ({
+        researchResult: () => ({
           ok: false,
           status: 401,
         }),
@@ -451,7 +455,7 @@ describe('useKeywordResearch', () => {
     it('stops polling after an auth failure instead of retrying until timeout', async () => {
       mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
         pendingIds: ['job-1'],
-        historyResult: () => ({
+        researchResult: () => ({
           ok: false,
           status: 401,
         }),
@@ -464,15 +468,15 @@ describe('useKeywordResearch', () => {
         await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 5);
       });
 
-      expect(countHistoryCalls()).toBe(1);
+      expect(countPollCalls()).toBe(1);
     });
 
     it('stops polling when the component unmounts mid-poll', async () => {
       mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
         pendingIds: ['job-1'],
-        historyResult: () => ({
+        researchResult: () => ({
           ok: true,
-          items: [],
+          item: null,
         }),
       }));
 
@@ -485,7 +489,7 @@ describe('useKeywordResearch', () => {
         await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
       });
 
-      expect(countHistoryCalls()).toBe(1);
+      expect(countPollCalls()).toBe(1);
 
       unmount();
 
@@ -493,18 +497,15 @@ describe('useKeywordResearch', () => {
         await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 5);
       });
 
-      expect(countHistoryCalls()).toBe(1);
+      expect(countPollCalls()).toBe(1);
     });
 
     it('drops the superseded poll when a newer expansion starts', async () => {
       mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
         pendingIds: ['job-1', 'job-2'],
-        historyResult: () => ({
+        researchResult: (id) => ({
           ok: true,
-          items: [
-            buildCompletedExpansionItem('job-1', 'first seed'),
-            buildCompletedExpansionItem('job-2', 'second seed'),
-          ],
+          item: buildCompletedExpansionItem(id, 'seed'),
         }),
       }));
 
@@ -518,9 +519,141 @@ describe('useKeywordResearch', () => {
       });
 
       // Only the second generation polled; the first exited without fetching.
-      expect(countHistoryCalls()).toBe(1);
+      expect(countPollCalls()).toBe(1);
       expect(result.current.expansionResult?.id).toBe('job-2');
       expect(result.current.loading).toBe(false);
+    });
+  });
+
+  // Regression tests for the history-scan bug: the poll used to look for its
+  // row inside `GET /history?type=…&limit=50`. That list is a DynamoDB scan
+  // whose `Limit` is applied before the type filter, so on a table with more
+  // rows than the scanned window a completed run was often missing from it
+  // and the UI reported a timeout for work that had succeeded. The poll now
+  // reads the row by id, which cannot be crowded out by unrelated rows.
+  describe('polling reads the row by id', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('requests the pending id directly and never scans history', async () => {
+      mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
+        pendingIds: ['job-42'],
+        researchResult: (id) => ({
+          ok: true,
+          item: buildCompletedExpansionItem(id, 'best hotels'),
+        }),
+      }));
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        void result.current.expandKeywords('best hotels', 'hospitality', 10);
+        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
+      });
+
+      const polledIds = mockAuthenticatedFetch.mock.calls
+        .filter((c) => isValidMockCall(c) && !c[1]?.method)
+        .map((c) => parsePolledResearchId((c as MockCall)[0]));
+      expect(polledIds).toContain('job-42');
+
+      const historyCalls = mockAuthenticatedFetch.mock.calls.filter(
+        (c) => isValidMockCall(c) && c[0].includes('/history')
+      );
+      expect(historyCalls).toHaveLength(0);
+    });
+
+    it('completes even when unrelated rows would crowd a scanned history page', async () => {
+      // The mock only answers the exact id requested, so a hook that searched
+      // a bounded list instead of reading by id would never resolve here.
+      mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
+        pendingIds: ['job-in-the-tail'],
+        researchResult: (id) => (
+          id === 'job-in-the-tail'
+            ? {
+              ok: true,
+              item: buildCompletedExpansionItem(id, 'best hotels'),
+            }
+            : {
+              ok: true,
+              item: null,
+            }
+        ),
+      }));
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        void result.current.expandKeywords('best hotels', 'hospitality', 10);
+        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
+      });
+
+      expect(result.current.expansionResult?.id).toBe('job-in-the-tail');
+      expect(result.current.error).toBeNull();
+    });
+
+    it('stops on the first poll when the row comes back failed', async () => {
+      mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
+        pendingIds: ['job-1'],
+        researchResult: (id) => ({
+          ok: true,
+          item: {
+            ...buildCompletedExpansionItem(id, 'best hotels'),
+            status: 'failed',
+            error_message: 'All providers failed',
+          },
+        }),
+      }));
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        void result.current.expandKeywords('best hotels', 'hospitality', 10);
+        await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 5);
+      });
+
+      // A terminal `failed` row ends the poll immediately instead of retrying
+      // to the end of the 2 minute window. `getErrorMessage` maps the raw job
+      // message onto the research category, so assert the surfaced text.
+      expect(countPollCalls()).toBe(1);
+      expect(result.current.error).toBe('Failed to process research request');
+      expect(result.current.loading).toBe(false);
+    });
+
+    it('keeps polling through the 404 window before the row is readable', async () => {
+      // The row does not exist between accepting the request and the worker's
+      // first write, so a 404 has to read as "not ready", not as a failure.
+      const polledIds: string[] = [];
+      mockAuthenticatedFetch.mockImplementation(createPollingMockFetch({
+        pendingIds: ['job-1'],
+        researchResult: (id) => {
+          polledIds.push(id);
+          return polledIds.length === 1
+            ? {
+              ok: false,
+              status: 404,
+            }
+            : {
+              ok: true,
+              item: buildCompletedExpansionItem(id, 'best hotels'),
+            };
+        },
+      }));
+
+      const { result } = renderHook(() => useKeywordResearch());
+
+      await act(async () => {
+        void result.current.expandKeywords('best hotels', 'hospitality', 10);
+        await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 2);
+      });
+
+      expect(polledIds).toStrictEqual(['job-1', 'job-1']);
+      expect(result.current.expansionResult?.id).toBe('job-1');
+      expect(result.current.error).toBeNull();
     });
   });
 });

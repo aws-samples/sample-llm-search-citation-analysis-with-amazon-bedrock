@@ -2046,7 +2046,12 @@ export class CitationAnalysisStack extends cdk.Stack {
     const keywordResearchHistoryResource = keywordResearchResource.addResource('history');
     keywordResearchHistoryResource.addMethod('GET', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
     
+    // The static 'history' segment above is matched ahead of this '{id}' path
+    // parameter by API Gateway, so GET /history keeps reaching the list view.
+    // GET here is what the UI polls for a single run: reading the row by id
+    // does not depend on table size, unlike scanning the history list.
     const keywordResearchIdResource = keywordResearchResource.addResource('{id}');
+    keywordResearchIdResource.addMethod('GET', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
     keywordResearchIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
 
     // ========================================

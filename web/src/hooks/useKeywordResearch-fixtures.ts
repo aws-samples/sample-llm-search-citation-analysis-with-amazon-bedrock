@@ -161,21 +161,28 @@ export function buildCompletedExpansionItem(id: string, seedKeyword: string): Ke
   };
 }
 
-interface PollingHistoryResult {
+interface PollingResearchResult {
   ok: boolean;
   status?: number;
-  items?: KeywordResearchItem[];
+  item?: KeywordResearchItem | null;
+}
+
+/** The id the poll requested, parsed out of `/keyword-research/{id}`. */
+export function parsePolledResearchId(url: string): string | null {
+  const match = /\/keyword-research\/([^/?]+)$/.exec(url);
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 /**
  * Mock fetch for the async/polling path (AUDIT 2.20 regression tests):
  * POSTs to /expand and /competitor return a pending job id (consumed from
- * `pendingIds` in order), and each /history GET is answered by calling
- * `historyResult` — letting tests script 401s, empty polls, or completions.
+ * `pendingIds` in order), and each `GET /keyword-research/{id}` poll is
+ * answered by calling `researchResult` with the requested id — letting tests
+ * script 401s, not-ready polls, failures, or completions.
  */
 export function createPollingMockFetch(options: {
   pendingIds: string[];
-  historyResult: () => PollingHistoryResult;
+  researchResult: (researchId: string) => PollingResearchResult;
 }) {
   const remainingIds = [...options.pendingIds];
   return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
@@ -191,12 +198,23 @@ export function createPollingMockFetch(options: {
       });
     }
 
+    // Checked before the by-id branch: the history URL also ends in a
+    // single non-slash segment once the query string is attached.
     if (url.includes('/history')) {
-      const result = options.historyResult();
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({ items: [] }),
+      });
+    }
+
+    const polledId = init?.method ? null : parsePolledResearchId(url);
+    if (polledId) {
+      const result = options.researchResult(polledId);
       return Promise.resolve({
         ok: result.ok,
         status: result.status ?? (result.ok ? 200 : 500),
-        json: () => Promise.resolve({ items: result.items ?? [] }),
+        json: () => Promise.resolve(result.item ?? {}),
       });
     }
 

@@ -25,7 +25,12 @@ sys.path.insert(0, '/opt/python')
 from bs4 import BeautifulSoup
 
 from shared.ai_clients import get_web_search_clients, search_with_fallback
-from shared.api_response import error_response, success_response, validation_error
+from shared.api_response import (
+    error_response,
+    not_found_response,
+    success_response,
+    validation_error,
+)
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
 from shared.llm_json import parse_llm_json
@@ -545,6 +550,47 @@ def _get_history(event: dict[str, Any], context: Any, type: str | None = None, l
     }, event)
 
 
+def _get_research(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    """GET /api/keyword-research/{id} - Fetch one research row by id.
+
+    This is the endpoint the UI polls while a background run is in flight.
+    Reading the row by its partition key is O(1) and independent of how many
+    rows the table holds.
+
+    The poll used to page through `/history` instead, which could not find a
+    row that definitely existed: `_get_history` scans with a `Limit`, and
+    DynamoDB applies `Limit` *before* `FilterExpression`, so the scanned
+    window is an arbitrary slice of the table (partition-key hash order, not
+    `created_at`). Once the table held more rows than the window, a freshly
+    completed row often fell outside it and the UI reported a timeout for a
+    run that had in fact succeeded. Volume alone decided it, which is why the
+    failure only showed up on installations with real usage history.
+
+    Unexpected errors are handled by the @api_handler on the router.
+    """
+    path_params = event.get('pathParameters') or {}
+    research_id = path_params.get('id')
+
+    if not research_id:
+        return validation_error('Research ID is required', event, 'id')
+
+    item = research_table.get_item(Key={'id': research_id}).get('Item')
+
+    if not item:
+        return not_found_response('Research', event)
+
+    # Same reader-side sweep `/history` performs, so a row whose worker was
+    # SIGKILLed at the Lambda ceiling reports `failed` here too instead of
+    # sitting at `processing` and making the client poll to exhaustion.
+    _fail_if_research_timed_out(item)
+
+    # Mirrors the list view: the stored provider payload is large and no
+    # client reads it from the poll.
+    item.pop('raw_response', None)
+
+    return success_response(item, event)
+
+
 def _delete_research(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """DELETE /api/keyword-research/{id} - Delete a research result.
 
@@ -565,6 +611,10 @@ def _delete_research(event: dict[str, Any], context: Any) -> dict[str, Any]:
     ('POST', '/expand'): _expand_keywords,
     ('POST', '/competitor'): _analyze_competitor,
     ('GET', '/history'): _get_history,
+    # Order matters: `route_handler` iterates in insertion order and `None`
+    # matches any path for the method, so the literal `/history` route has to
+    # be declared before this parametric GET or it would be shadowed.
+    ('GET', None): _get_research,
     ('DELETE', None): _delete_research,
 })
 def _route_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:

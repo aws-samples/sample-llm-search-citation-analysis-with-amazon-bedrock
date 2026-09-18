@@ -27,6 +27,11 @@ function isHistoryResponse(data: unknown): data is HistoryResponse {
   return typeof data === 'object' && data !== null;
 }
 
+/** A single research row as returned by `GET /keyword-research/{id}`. */
+function isResearchItem(data: unknown): data is KeywordResearchItem {
+  return typeof data === 'object' && data !== null && 'id' in data;
+}
+
 function isKeywordExpansionResult(data: unknown): data is KeywordExpansionResult {
   return typeof data === 'object' && data !== null && 'keywords' in data;
 }
@@ -35,8 +40,7 @@ function isCompetitorAnalysisResult(data: unknown): data is CompetitorAnalysisRe
   return typeof data === 'object' && data !== null && 'url' in data;
 }
 
-// Async research jobs are polled via the history endpoint every 3 seconds
-// for up to 2 minutes.
+// Async research jobs are polled by id every 3 seconds for up to 2 minutes.
 const POLL_MAX_ATTEMPTS = 40;
 const POLL_INTERVAL_MS = 3000;
 
@@ -65,7 +69,6 @@ function getPendingResearchId(data: unknown): string | null {
 }
 
 interface ResearchPollOptions {
-  type: 'expansion' | 'competitor';
   researchId: string;
   failureMessage: string;
   timeoutMessage: string;
@@ -74,42 +77,44 @@ interface ResearchPollOptions {
 }
 
 /**
- * One poll attempt against the research history. Returns the completed item,
- * null when it is not ready yet (including transient poll errors), and throws
- * when the research job reports failure.
+ * One poll attempt for the research row, read by id.
+ *
+ * Reads `/keyword-research/{id}` rather than searching the history list. The
+ * list is a DynamoDB scan with a `Limit`, and the limit applies before the
+ * type filter, so the window it returns is an arbitrary slice of the table.
+ * Once a table had more rows than that window a freshly completed run was
+ * frequently absent from it, and this poll ran to exhaustion and reported a
+ * timeout for work that had actually succeeded.
+ *
+ * Returns the completed item, null when it is not ready yet (including
+ * transient poll errors), and throws when the research job reports failure.
  */
 async function findResearchItem(options: ResearchPollOptions): Promise<KeywordResearchItem | null> {
   try {
-    const historyResp = await authenticatedFetch(
-      `${API_BASE_URL}/keyword-research/history?type=${options.type}&limit=50`
+    const response = await authenticatedFetch(
+      `${API_BASE_URL}/keyword-research/${encodeURIComponent(options.researchId)}`
     );
     // Auth failures are fatal, not "not ready yet". Without this check an
     // expired session kept polling for the full 2 minutes and then reported
     // a bogus timeout (AUDIT 2.20).
-    if (historyResp.status === 401 || historyResp.status === 403) {
+    if (response.status === 401 || response.status === 403) {
       // Worded to categorize as 'auth' in getErrorMessage, so the UI shows
       // the research auth message instead of a generic failure.
       throw new KeywordResearchError(
-        `Unauthorized (${historyResp.status}): session expired while waiting for results. Sign in again, then check History.`
+        `Unauthorized (${response.status}): session expired while waiting for results. Sign in again, then check History.`
       );
     }
-    if (!historyResp.ok) return null;
-    const historyData: unknown = await historyResp.json();
-    if (!isHistoryResponse(historyData)) return null;
+    // Anything else, including the 404 window between accepting the request
+    // and the worker's first write, means "not ready yet".
+    if (!response.ok) return null;
+    const data: unknown = await response.json();
+    if (!isResearchItem(data)) return null;
 
-    const items = historyData.items ?? [];
-    const completed = items.find(
-      (item) => item.id === options.researchId && item.status === 'completed'
-    );
-    if (completed && (options.isComplete?.(completed) ?? true)) {
-      return completed;
+    if (data.status === 'failed') {
+      throw new KeywordResearchError(data.error_message ?? options.failureMessage);
     }
-
-    const failed = items.find(
-      (item) => item.id === options.researchId && item.status === 'failed'
-    );
-    if (failed) {
-      throw new KeywordResearchError(failed.error_message ?? options.failureMessage);
+    if (data.status === 'completed' && (options.isComplete?.(data) ?? true)) {
+      return data;
     }
     return null;
   } catch (pollErr) {
@@ -120,7 +125,7 @@ async function findResearchItem(options: ResearchPollOptions): Promise<KeywordRe
 }
 
 /**
- * Poll the history endpoint until the research job completes, fails, or
+ * Poll the research row until the job completes, fails, or
  * times out. Returns null when `isCancelled` reports the poll was superseded
  * by a newer call or the component unmounted — previously polling ran to the
  * full 2 minutes with no cancellation path at all (AUDIT 2.20).
@@ -213,11 +218,10 @@ export const useKeywordResearch = () => {
 
       const data: unknown = await response.json();
 
-      // Async response — poll history until result appears
+      // Async response — poll the row by id until the result appears
       const pendingId = getPendingResearchId(data);
       if (pendingId) {
         const completed = await pollUntilComplete({
-          type: 'expansion',
           researchId: pendingId,
           failureMessage: 'Expansion failed',
           timeoutMessage: 'Expansion timed out. Check history for results.',
@@ -268,11 +272,10 @@ export const useKeywordResearch = () => {
 
       const data: unknown = await response.json();
 
-      // Async response — poll history until result appears
+      // Async response — poll the row by id until the result appears
       const pendingId = getPendingResearchId(data);
       if (pendingId) {
         const completed = await pollUntilComplete({
-          type: 'competitor',
           researchId: pendingId,
           failureMessage: 'Analysis failed',
           timeoutMessage: 'Analysis timed out. Check history for results.',

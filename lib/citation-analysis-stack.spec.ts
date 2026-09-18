@@ -517,6 +517,7 @@ const synthesized: {
   keywordMgmtFunctionId: string;
   promoteMethods: ApiGatewayMethodSnapshot[];
   keywordIdMethods: ApiGatewayMethodSnapshot[];
+  researchIdMethods: ApiGatewayMethodSnapshot[];
   apiAuthSnapshots: ApiMethodAuthSnapshot[];
   userPoolClientProps: Record<string, unknown>;
   userPoolGroupNames: string[];
@@ -540,6 +541,7 @@ const synthesized: {
   keywordMgmtFunctionId: '',
   promoteMethods: [],
   keywordIdMethods: [],
+  researchIdMethods: [],
   apiAuthSnapshots: [],
   userPoolClientProps: {},
   userPoolGroupNames: [],
@@ -586,6 +588,10 @@ beforeAll(() => {
   const keywordId = findApiResourceId(template, '{id}', keywordsId);
   synthesized.promoteMethods = extractApiMethods(template, promoteId);
   synthesized.keywordIdMethods = extractApiMethods(template, keywordId);
+
+  const keywordResearchId = findApiResourceId(template, 'keyword-research');
+  const researchIdResource = findApiResourceId(template, '{id}', keywordResearchId);
+  synthesized.researchIdMethods = extractApiMethods(template, researchIdResource);
 
   synthesized.apiAuthSnapshots = extractApiAuthSnapshots(template);
   synthesized.userPoolClientProps = extractUserPoolClientProps(template);
@@ -958,6 +964,41 @@ describe('Keyword promotion route', () => {
 
     expect([...idVerbs].sort((left, right) => left.localeCompare(right))).toStrictEqual(['DELETE', 'PUT']);
     expect(idVerbs).not.toContain('POST');
+  });
+});
+
+/**
+ * The research poll reads its row by id. Without a GET on this resource the
+ * client can only look for its row inside `GET /keyword-research/history`,
+ * which is a DynamoDB scan with a `Limit` applied before the type filter: on a
+ * table with more rows than the scanned window a completed run is frequently
+ * absent from that page, and the UI reports a timeout for work that succeeded.
+ */
+describe('Keyword research by-id route', () => {
+  it('exposes GET so a poll can read a single research row', () => {
+    const verbs = synthesized.researchIdMethods.map((method) => method.httpMethod);
+
+    expect(verbs).toContain('GET');
+  });
+
+  it('keeps DELETE on the same resource', () => {
+    const verbs = synthesized.researchIdMethods.map((method) => method.httpMethod);
+
+    expect([...verbs].sort((left, right) => left.localeCompare(right))).toStrictEqual(['DELETE', 'GET']);
+  });
+
+  it('routes GET to the KeywordMgmt function through a proxy integration', () => {
+    const get = synthesized.researchIdMethods.find((method) => method.httpMethod === 'GET');
+
+    expect(get?.integrationType).toBe('AWS_PROXY');
+    expect(get?.integrationUri).toContain(synthesized.keywordMgmtFunctionId);
+  });
+
+  it('requires the shared Cognito authorizer on GET', () => {
+    const get = synthesized.researchIdMethods.find((method) => method.httpMethod === 'GET');
+
+    expect(get?.authorizationType).toBe(COGNITO_AUTH);
+    expect(get?.authorizerId).not.toBe('');
   });
 });
 
