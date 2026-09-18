@@ -239,7 +239,7 @@ Go to **Operations > Run Analysis**:
 3. Monitor progress in the execution view
 4. Analysis time scales with the number of keywords (3 processed concurrently by default; tune with the CDK context value `processKeywordsConcurrency`). There is no per-run keyword cap.
 
-For recurring analysis, go to **Operations > Schedule** to set up automated runs with EventBridge.
+For recurring analysis, go to **Operations > Schedule** to set up automated runs with EventBridge Scheduler. Give each schedule a name, pick daily/weekly/monthly timing in any IANA timezone, and choose what it runs: all active keywords, one or more keyword groups (resolved when the schedule fires, so newly added keywords are included), or a fixed selection. Click a schedule to edit it in place, toggle it on/off, or use **Run now** to start an analysis with its scope immediately.
 
 ### Step 6: Explore Results
 

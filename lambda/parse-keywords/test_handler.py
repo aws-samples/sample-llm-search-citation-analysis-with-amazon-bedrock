@@ -254,6 +254,24 @@ class TestScopeResolution:
         with pytest.raises(ValueError, match='No valid keywords'):
             handler_module.handler({'scope': {'mode': 'groups', 'group_ids': ['coruna']}}, {})
 
+    def test_accepts_the_full_v2_schedule_descriptor_as_execution_input(self, handler_module):
+        """EventBridge sends the whole descriptor; only `scope` matters here."""
+        mock_keywords_table.query.return_value = {'Items': [
+            {'id': 'k1', 'keyword': 'hotel coruna spa', 'group_ids': {'coruna'}},
+            {'id': 'k2', 'keyword': 'hotel marino beach', 'group_ids': {'marino'}},
+        ]}
+        descriptor = {
+            'schedule_id': 'sch-1a2b3c4d',
+            'display_name': 'Hotel Coruña — weekly',
+            'form': {'frequency': 'weekly', 'time': '09:00', 'timezone': 'Europe/Madrid', 'day_of_week': 'MON', 'day_of_month': 1},
+            'scope': {'mode': 'groups', 'group_ids': ['coruna']},
+            'query_prompts': [],
+        }
+
+        result = handler_module.handler(descriptor, {})
+
+        assert [item['keyword'] for item in result['keywords']] == ['hotel coruna spa']
+
 
 class TestNoKeywordCap:
     """Executions are no longer silently truncated to 100 keywords."""

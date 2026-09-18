@@ -1833,6 +1833,8 @@ export class CitationAnalysisStack extends cdk.Stack {
         // Audit #12 canonical names.
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
         DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
+        // Schedules validate their group scope against the groups table.
+        DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         // Legacy names, dropped once rollout verified.
         QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
         PROVIDER_CONFIG_TABLE: providerConfigTable.tableName,
@@ -1913,6 +1915,9 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Grant config management function access
     queryPromptsTable.grantReadWriteData(configMgmtFunction);
     providerConfigTable.grantReadWriteData(configMgmtFunction);
+    keywordGroupsTable.grantReadData(configMgmtFunction);
+    // POST /api/schedules/{id}/run starts an analysis with the schedule's scope.
+    stateMachine.grantStartExecution(configMgmtFunction);
     openaiSecret.grantRead(configMgmtFunction);
     openaiSecret.grantWrite(configMgmtFunction);
     perplexitySecret.grantRead(configMgmtFunction);
@@ -2275,9 +2280,17 @@ export class CitationAnalysisStack extends cdk.Stack {
     const schedulesResource = apiResource.addResource('schedules');
     schedulesResource.addMethod('GET', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
     schedulesResource.addMethod('POST', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
-    
-    const scheduleNameResource = schedulesResource.addResource('{name}');
-    scheduleNameResource.addMethod('DELETE', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+
+    // Schedules v2 (2.3.0): the path parameter is the generated `sch-<hex>` id
+    // (the EventBridge schedule Name); the display name lives in Description.
+    const scheduleIdResource = schedulesResource.addResource('{id}');
+    scheduleIdResource.addMethod('GET', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+    scheduleIdResource.addMethod('PUT', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+    scheduleIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+
+    // POST /schedules/{id}/run — start an analysis now with the schedule's scope.
+    const scheduleRunResource = scheduleIdResource.addResource('run');
+    scheduleRunResource.addMethod('POST', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
 
     // Raw Responses Browser API
     const rawResponsesResource = apiResource.addResource('raw-responses');

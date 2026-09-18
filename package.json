@@ -1,6 +1,6 @@
 {
   "name": "citation-analysis-system",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Serverless citation analysis system using AWS CDK",
   "main": "index.js",
   "scripts": {

@@ -2,222 +2,412 @@ import {
   describe, it, expect, vi, beforeEach 
 } from 'vitest';
 import {
-  render, screen, waitFor 
+  render, screen, waitFor, within 
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ScheduleManager } from './ScheduleManager';
+import {
+  GROUP_CORUNA, GROUP_MARINO, buildSchedule, legacyKeywordSchedule, mockKeywords 
+} from './ScheduleManager-fixtures';
+import type { Schedule } from '../../types';
 
-import type {
-  Keyword, Schedule 
-} from '../../types';
+vi.mock('../../infrastructure', async () => {
+  const actual: Record<string, unknown> = await vi.importActual('../../infrastructure');
+  return {
+    ...actual,
+    isAbortError: vi.fn(() => false),
+  };
+});
 
-vi.mock('../../infrastructure', () => ({
-  API_BASE_URL: 'https://api.test.com',
-  authenticatedFetch: vi.fn(),
-  isAbortError: vi.fn(() => false),
+vi.mock('../../api/executions', () => ({
+  fetchSchedules: vi.fn(),
+  createSchedule: vi.fn(),
+  updateSchedule: vi.fn(),
+  deleteSchedule: vi.fn(),
+  runSchedule: vi.fn(),
 }));
 
-vi.mock('../../api/executions', () => ({fetchSchedules: vi.fn(),}));
+vi.mock('../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
+vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
 
-vi.mock('../../hooks/useIsAdmin', () => ({useIsAdmin: vi.fn(),}));
-
-import { authenticatedFetch } from '../../infrastructure';
-import { fetchSchedules } from '../../api/executions';
+import {
+  createSchedule, deleteSchedule, fetchSchedules, runSchedule, updateSchedule 
+} from '../../api/executions';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
+import { useKeywordGroups } from '../../hooks/useKeywordGroups';
+import { ApiRequestError } from '../../infrastructure';
 
-const mockAuthFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
-const mockFetchSchedules = fetchSchedules as ReturnType<typeof vi.fn>;
-const mockUseIsAdmin = useIsAdmin as ReturnType<typeof vi.fn>;
+const mockFetchSchedules = vi.mocked(fetchSchedules);
+const mockCreateSchedule = vi.mocked(createSchedule);
+const mockUpdateSchedule = vi.mocked(updateSchedule);
+const mockDeleteSchedule = vi.mocked(deleteSchedule);
+const mockRunSchedule = vi.mocked(runSchedule);
+const mockUseIsAdmin = vi.mocked(useIsAdmin);
+const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
 
-const mockSchedules: Schedule[] = [
-  {
-    name: 'daily-analysis',
-    state: 'ENABLED',
-    schedule: 'rate(1 day)',
-    timezone: 'UTC',
-  },
-];
+const weeklySchedule = buildSchedule();
 
-const mockKeywords: Keyword[] = [
-  {
-    id: 'kw-1',
-    keyword: 'best hotels malaga',
-    created_at: '2024-01-01T00:00:00Z',
-  },
-  {
-    id: 'kw-2',
-    keyword: 'boutique hotels madrid',
-    created_at: '2024-01-02T00:00:00Z',
-  },
-];
-
-function buildProps(overrides = {}) {
+function buildProps(overrides: { schedules?: Schedule[] } = {}) {
   return {
-    schedules: [] satisfies Schedule[],
+    schedules: overrides.schedules ?? [],
     setSchedules: vi.fn(),
     keywords: mockKeywords,
-    ...overrides,
   };
 }
 
-async function openScheduleForm() {
+function mockGroups(groups = [GROUP_CORUNA, GROUP_MARINO]) {
+  mockUseKeywordGroups.mockReturnValue({
+    groups,
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    createGroup: vi.fn(),
+    renameGroup: vi.fn(),
+    removeGroup: vi.fn(),
+    changeMemberships: vi.fn(),
+  });
+}
+
+async function openCreateForm() {
   await userEvent.click(screen.getByRole('button', { name: /New Schedule/i }));
 }
 
-function firstCreateRequestBody(): unknown {
-  const [, requestInit] = mockAuthFetch.mock.calls[0] as [string, RequestInit];
-  return JSON.parse(String(requestInit.body)) as unknown;
+async function openEditForm(displayName: string) {
+  await userEvent.click(screen.getByRole('button', { name: `Edit schedule ${displayName}` }));
 }
 
 describe('ScheduleManager', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Create and delete are Admin-only; the existing suite exercises them, so
-    // an admin caller is the default. The non-admin cases are asserted in the
-    // 'admin-only controls' block below.
     mockUseIsAdmin.mockReturnValue({
       isAdmin: true,
       loading: false,
     });
+    mockGroups();
     mockFetchSchedules.mockResolvedValue([]);
+    mockCreateSchedule.mockResolvedValue(weeklySchedule);
+    mockUpdateSchedule.mockResolvedValue(weeklySchedule);
+    mockDeleteSchedule.mockResolvedValue();
+    mockRunSchedule.mockResolvedValue({
+      execution_arn: 'arn',
+      execution_name: 'schedule-run-1',
+      schedule_id: weeklySchedule.id,
+      scope_summary: '1 group(s)',
+      message: 'Analysis started for Hotel Coruña — weekly (1 group(s))',
+    });
   });
 
   describe('schedule list', () => {
-    it('renders schedule name when schedules exist', () => {
-      render(<ScheduleManager {...buildProps({ schedules: mockSchedules })} />);
-      expect(screen.getByText('daily-analysis')).toBeInTheDocument();
+    it('renders the display name, not the generated id', () => {
+      render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
+
+      expect(screen.getByText('Hotel Coruña — weekly')).toBeInTheDocument();
+      expect(screen.queryByText('sch-1a2b3c4d')).not.toBeInTheDocument();
+    });
+
+    it('describes the timing in words instead of the raw cron', () => {
+      render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
+
+      expect(screen.getByText('Weekly on Monday at 09:00 (Europe/Madrid)')).toBeInTheDocument();
+    });
+
+    it('names the groups a group-scoped schedule runs', () => {
+      render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
+
+      expect(screen.getByText('Groups: Hotel Coruña')).toBeInTheDocument();
+    });
+
+    it('says all active keywords for an all-scope schedule', () => {
+      render(<ScheduleManager {...buildProps({ schedules: [buildSchedule({ scope: { mode: 'all' } })] })} />);
+
+      expect(screen.getByText('All active keywords')).toBeInTheDocument();
+    });
+
+    it('marks legacy schedules and lists their keyword texts', () => {
+      render(<ScheduleManager {...buildProps({ schedules: [legacyKeywordSchedule] })} />);
+
+      expect(screen.getByText('Legacy')).toBeInTheDocument();
+      expect(screen.getByText(/2 keyword\(s\) from the previous version: best hotels malaga, boutique hotels madrid/)).toBeInTheDocument();
+    });
+
+    it('shows a disabled badge for a disabled schedule', () => {
+      render(<ScheduleManager {...buildProps({
+        schedules: [buildSchedule({
+          enabled: false,
+          state: 'DISABLED' 
+        })] 
+      })} />);
+
+      expect(screen.getByText('Disabled')).toBeInTheDocument();
     });
 
     it('shows empty state when no schedules', () => {
       render(<ScheduleManager {...buildProps()} />);
+
       expect(screen.getByText(/No schedules/i)).toBeInTheDocument();
-    });
-
-    it('shows all-keywords scope for schedules without linked keywords', () => {
-      render(<ScheduleManager {...buildProps({ schedules: mockSchedules })} />);
-      expect(screen.getByText('Runs all active keywords')).toBeInTheDocument();
-    });
-
-    it('shows linked keywords for keyword-scoped schedules', () => {
-      const keywordSchedule: Schedule[] = [
-        {
-          name: 'priority-daily',
-          state: 'ENABLED',
-          schedule: 'cron(0 7 * * ? *)',
-          timezone: 'UTC',
-          keywords: ['best hotels malaga', 'boutique hotels madrid'],
-        },
-      ];
-      render(<ScheduleManager {...buildProps({ schedules: keywordSchedule })} />);
-      expect(
-        screen.getByText('Runs 2 keyword(s): best hotels malaga, boutique hotels madrid')
-      ).toBeInTheDocument();
     });
   });
 
   describe('initial load', () => {
     it('loads schedules from the API on mount', async () => {
       const props = buildProps();
-      mockFetchSchedules.mockResolvedValue(mockSchedules);
+      mockFetchSchedules.mockResolvedValue([weeklySchedule]);
 
       render(<ScheduleManager {...props} />);
 
-      await waitFor(() => expect(props.setSchedules).toHaveBeenCalledWith(mockSchedules));
+      await waitFor(() => expect(props.setSchedules).toHaveBeenCalledWith([weeklySchedule]));
     });
   });
 
-  describe('keyword scope selection', () => {
-    it('defaults to running all keywords', async () => {
+  describe('creating a schedule', () => {
+    it('defaults to running all keywords daily at 09:00 UTC, enabled', async () => {
       render(<ScheduleManager {...buildProps()} />);
-      await openScheduleForm();
+      await openCreateForm();
 
       expect(screen.getByRole('radio', { name: /All keywords/i })).toBeChecked();
+      expect(screen.getByLabelText('Frequency')).toHaveValue('daily');
+      expect(screen.getByLabelText('Time')).toHaveValue('09:00');
+      expect(screen.getByLabelText('Timezone')).toHaveValue('UTC');
     });
 
-    it('lists available keywords when specific scope is selected', async () => {
+    it('requires a name before saving', async () => {
       render(<ScheduleManager {...buildProps()} />);
-      await openScheduleForm();
-
-      await userEvent.click(screen.getByRole('radio', { name: /Specific keywords/i }));
-
-      expect(screen.getByRole('checkbox', { name: 'best hotels malaga' })).toBeInTheDocument();
-      expect(screen.getByRole('checkbox', { name: 'boutique hotels madrid' })).toBeInTheDocument();
-    });
-
-    it('prompts to add keywords when none exist for specific scope', async () => {
-      render(<ScheduleManager {...buildProps({ keywords: [] })} />);
-      await openScheduleForm();
-
-      await userEvent.click(screen.getByRole('radio', { name: /Specific keywords/i }));
-
-      expect(screen.getByText(/No keywords available yet/i)).toBeInTheDocument();
-    });
-  });
-
-  describe('schedule creation', () => {
-    it('submits an empty keyword subset when all keywords is selected', async () => {
-      mockAuthFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ message: 'created' }),
-      });
-      render(<ScheduleManager {...buildProps()} />);
-      await openScheduleForm();
+      await openCreateForm();
 
       await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
 
-      expect(firstCreateRequestBody()).toMatchObject({ keywords: [] });
+      expect(screen.getByText('Give the schedule a name')).toBeInTheDocument();
+      expect(mockCreateSchedule).not.toHaveBeenCalled();
     });
 
-    it('submits the selected keywords when specific scope is chosen', async () => {
-      mockAuthFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ message: 'created' }),
-      });
+    it('posts the display name, timing and scope', async () => {
       render(<ScheduleManager {...buildProps()} />);
-      await openScheduleForm();
+      await openCreateForm();
+      await userEvent.type(screen.getByLabelText('Schedule name'), 'Hotel Coruña — weekly');
+      await userEvent.selectOptions(screen.getByLabelText('Frequency'), 'weekly');
+      await userEvent.selectOptions(screen.getByLabelText('Day of week'), 'FRI');
+      await userEvent.clear(screen.getByLabelText('Timezone'));
+      await userEvent.type(screen.getByLabelText('Timezone'), 'Europe/Madrid');
+      await userEvent.click(screen.getByRole('radio', { name: /Keyword groups/i }));
+      await userEvent.click(screen.getByRole('checkbox', { name: 'Include group Hotel Coruña' }));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+
+      expect(mockCreateSchedule).toHaveBeenCalledWith({
+        display_name: 'Hotel Coruña — weekly',
+        frequency: 'weekly',
+        time: '09:00',
+        timezone: 'Europe/Madrid',
+        day_of_week: 'FRI',
+        day_of_month: 1,
+        enabled: true,
+        scope: {
+          mode: 'groups',
+          group_ids: ['group-coruna'] 
+        },
+      });
+    });
+
+    it('sends the picked keyword ids for a specific-keywords scope', async () => {
+      render(<ScheduleManager {...buildProps()} />);
+      await openCreateForm();
+      await userEvent.type(screen.getByLabelText('Schedule name'), 'Priority');
       await userEvent.click(screen.getByRole('radio', { name: /Specific keywords/i }));
       await userEvent.click(screen.getByRole('checkbox', { name: 'best hotels malaga' }));
 
       await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
 
-      expect(firstCreateRequestBody()).toMatchObject({ keywords: ['best hotels malaga'] });
+      expect(mockCreateSchedule).toHaveBeenCalledWith(expect.objectContaining({
+        scope: {
+          mode: 'keywords',
+          keyword_ids: ['kw-1'] 
+        },
+      }));
     });
 
-    it('blocks submission when specific scope has no keywords selected', async () => {
+    it('blocks saving a group scope with no group selected', async () => {
       render(<ScheduleManager {...buildProps()} />);
-      await openScheduleForm();
-      await userEvent.click(screen.getByRole('radio', { name: /Specific keywords/i }));
+      await openCreateForm();
+      await userEvent.type(screen.getByLabelText('Schedule name'), 'Empty');
+      await userEvent.click(screen.getByRole('radio', { name: /Keyword groups/i }));
 
       await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
 
-      expect(screen.getByText('Select at least one keyword for this schedule')).toBeInTheDocument();
-      expect(mockAuthFetch).not.toHaveBeenCalled();
+      expect(screen.getByText('Select at least one keyword group')).toBeInTheDocument();
+      expect(mockCreateSchedule).not.toHaveBeenCalled();
     });
 
-    it('refreshes the schedule list after a successful creation', async () => {
-      const props = buildProps();
-      mockAuthFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ message: 'created' }),
-      });
-      mockFetchSchedules.mockResolvedValue(mockSchedules);
-      render(<ScheduleManager {...props} />);
-      await openScheduleForm();
+    it('points at Settings when there are no groups to pick', async () => {
+      mockGroups([]);
+      render(<ScheduleManager {...buildProps()} />);
+      await openCreateForm();
+
+      await userEvent.click(screen.getByRole('radio', { name: /Keyword groups/i }));
+
+      expect(screen.getByText(/No keyword groups yet/i)).toBeInTheDocument();
+    });
+
+    it('refuses a day of month above 28 for monthly schedules', async () => {
+      render(<ScheduleManager {...buildProps()} />);
+      await openCreateForm();
+      await userEvent.type(screen.getByLabelText('Schedule name'), 'Monthly');
+      await userEvent.selectOptions(screen.getByLabelText('Frequency'), 'monthly');
+      await userEvent.clear(screen.getByLabelText(/Day of month/));
+      await userEvent.type(screen.getByLabelText(/Day of month/), '31');
 
       await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
 
-      await waitFor(() => expect(props.setSchedules).toHaveBeenCalledWith(mockSchedules));
+      // The input's max stops the native submit; the model check backs it up.
+      expect(screen.getByLabelText(/Day of month/)).toBeInvalid();
+      expect(mockCreateSchedule).not.toHaveBeenCalled();
+    });
+
+    it('refreshes the list and closes the form after a successful creation', async () => {
+      const props = buildProps();
+      mockFetchSchedules.mockResolvedValue([weeklySchedule]);
+      render(<ScheduleManager {...props} />);
+      await openCreateForm();
+      await userEvent.type(screen.getByLabelText('Schedule name'), 'Hotel Coruña — weekly');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+
+      await waitFor(() => expect(props.setSchedules).toHaveBeenCalledWith([weeklySchedule]));
       expect(mockFetchSchedules).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole('form', { name: 'Create schedule' })).not.toBeInTheDocument();
+    });
+
+    it('shows the server rejection when the API refuses the schedule', async () => {
+      mockCreateSchedule.mockRejectedValue(new ApiRequestError('Unknown timezone', {
+        statusCode: 400,
+        responseMessage: "Unknown timezone 'Mars/Base'. Use an IANA name such as Europe/Madrid",
+      }));
+      render(<ScheduleManager {...buildProps()} />);
+      await openCreateForm();
+      await userEvent.type(screen.getByLabelText('Schedule name'), 'Bad zone');
+
+      await userEvent.click(screen.getByRole('button', { name: 'Create Schedule' }));
+
+      expect(screen.getByText(/Unknown timezone 'Mars\/Base'/)).toBeInTheDocument();
+    });
+  });
+
+  describe('editing a schedule', () => {
+    it('opens the form pre-filled from the schedule when its card is clicked', async () => {
+      render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
+
+      await openEditForm('Hotel Coruña — weekly');
+
+      expect(screen.getByRole('form', { name: 'Edit schedule' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Schedule name')).toHaveValue('Hotel Coruña — weekly');
+      expect(screen.getByLabelText('Frequency')).toHaveValue('weekly');
+      expect(screen.getByLabelText('Timezone')).toHaveValue('Europe/Madrid');
+    });
+
+    it('pre-selects the schedule scope', async () => {
+      render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
+
+      await openEditForm('Hotel Coruña — weekly');
+
+      expect(screen.getByRole('radio', { name: /Keyword groups/i })).toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'Include group Hotel Coruña' })).toBeChecked();
+    });
+
+    it('saves through PUT with the changed fields and the untouched ones', async () => {
+      render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
+      await openEditForm('Hotel Coruña — weekly');
+      await userEvent.clear(screen.getByLabelText('Time'));
+      await userEvent.type(screen.getByLabelText('Time'), '18:30');
+      await userEvent.click(screen.getByRole('checkbox', { name: /Enabled/ }));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+      expect(mockUpdateSchedule).toHaveBeenCalledWith('sch-1a2b3c4d', {
+        display_name: 'Hotel Coruña — weekly',
+        frequency: 'weekly',
+        time: '18:30',
+        timezone: 'Europe/Madrid',
+        day_of_week: 'MON',
+        day_of_month: 1,
+        enabled: false,
+        scope: {
+          mode: 'groups',
+          group_ids: ['group-coruna'] 
+        },
+      });
+      expect(mockCreateSchedule).not.toHaveBeenCalled();
+    });
+
+    it('explains that a legacy keyword-text schedule must be re-scoped', async () => {
+      render(<ScheduleManager {...buildProps({ schedules: [legacyKeywordSchedule] })} />);
+
+      await openEditForm('priority-daily');
+
+      expect(screen.getByText(/Choose its keywords again below/)).toBeInTheDocument();
+      expect(screen.getByRole('radio', { name: /All keywords/i })).toBeChecked();
+    });
+
+    it('cancel closes the editor without saving', async () => {
+      render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
+      await openEditForm('Hotel Coruña — weekly');
+
+      await userEvent.click(within(screen.getByRole('form', { name: 'Edit schedule' })).getByRole('button', { name: 'Cancel' }));
+
+      expect(screen.queryByRole('form', { name: 'Edit schedule' })).not.toBeInTheDocument();
+      expect(mockUpdateSchedule).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('run now', () => {
+    it('starts an execution for the schedule and reports it', async () => {
+      render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Run schedule Hotel Coruña — weekly now' }));
+
+      expect(mockRunSchedule).toHaveBeenCalledWith('sch-1a2b3c4d');
+      expect(screen.getByText('Analysis started for Hotel Coruña — weekly (1 group(s))')).toBeInTheDocument();
+    });
+
+    it('does not open the editor when run now is clicked', async () => {
+      render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Run schedule Hotel Coruña — weekly now' }));
+
+      expect(screen.queryByRole('form', { name: 'Edit schedule' })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('deleting a schedule', () => {
+    it('deletes by id after confirmation and drops the row', async () => {
+      const props = buildProps({ schedules: [weeklySchedule] });
+      render(<ScheduleManager {...props} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete schedule Hotel Coruña — weekly' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+      expect(mockDeleteSchedule).toHaveBeenCalledWith('sch-1a2b3c4d');
+      expect(props.setSchedules).toHaveBeenCalledWith([]);
+    });
+
+    it('keeps the row and reports the error when the API refuses', async () => {
+      const props = buildProps({ schedules: [weeklySchedule] });
+      mockDeleteSchedule.mockRejectedValue(new ApiRequestError('Forbidden', { statusCode: 403 }));
+      render(<ScheduleManager {...props} />);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Delete schedule Hotel Coruña — weekly' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+      expect(screen.getByText('Managing schedules requires an administrator')).toBeInTheDocument();
+      // Only the mount-time load touched the list; the failed delete did not.
+      expect(props.setSchedules).toHaveBeenCalledTimes(1);
     });
   });
 });
 
-
 describe('ScheduleManager admin-only controls', () => {
   /**
-   * POST /api/schedules and DELETE /api/schedules/{name} are Admin-only
-   * server-side. Reads stay open, so a non-admin keeps visibility of what is
-   * scheduled without any control that would return 403.
+   * Mutations are Admin-only server-side. Reads stay open, so a non-admin
+   * keeps visibility of what is scheduled without any control that would
+   * return 403.
    */
 
   beforeEach(() => {
@@ -226,6 +416,7 @@ describe('ScheduleManager admin-only controls', () => {
       isAdmin: false,
       loading: false,
     });
+    mockGroups();
     mockFetchSchedules.mockResolvedValue([]);
   });
 
@@ -235,18 +426,18 @@ describe('ScheduleManager admin-only controls', () => {
     expect(screen.queryByRole('button', { name: /New Schedule/i })).not.toBeInTheDocument();
   });
 
-  it('hides the per-row delete button from non-admin users', () => {
-    render(<ScheduleManager {...buildProps({ schedules: mockSchedules })} />);
+  it('hides edit, run and delete from non-admin users', () => {
+    render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
 
-    expect(
-      screen.queryByRole('button', { name: /Delete schedule daily-analysis/i })
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Edit schedule/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Run schedule/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Delete schedule/ })).not.toBeInTheDocument();
   });
 
   it('still lists existing schedules for non-admin users', () => {
-    render(<ScheduleManager {...buildProps({ schedules: mockSchedules })} />);
+    render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
 
-    expect(screen.getByText('daily-analysis')).toBeInTheDocument();
+    expect(screen.getByText('Hotel Coruña — weekly')).toBeInTheDocument();
   });
 
   it('tells non-admin users an administrator adds schedules', () => {
@@ -263,10 +454,8 @@ describe('ScheduleManager admin-only controls', () => {
       loading: false,
     });
 
-    render(<ScheduleManager {...buildProps({ schedules: mockSchedules })} />);
+    render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
 
-    expect(
-      screen.getByRole('button', { name: /Delete schedule daily-analysis/i })
-    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete schedule Hotel Coruña — weekly' })).toBeInTheDocument();
   });
 });

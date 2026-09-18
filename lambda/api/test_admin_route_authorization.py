@@ -110,8 +110,12 @@ MUTATING_ADMIN_ROUTES = [
     # manage-schedule.py — recurring spend.
     Route('manage-schedule.py', 'POST', '/api/schedules',
           body={'frequency': 'daily', 'time': '09:00'}),
-    Route('manage-schedule.py', 'DELETE', '/api/schedules/daily-analysis',
-          {'name': 'daily-analysis'}),
+    Route('manage-schedule.py', 'PUT', '/api/schedules/sch-1a2b3c4d',
+          {'id': 'sch-1a2b3c4d'}, {'time': '10:00'}),
+    Route('manage-schedule.py', 'DELETE', '/api/schedules/sch-1a2b3c4d',
+          {'id': 'sch-1a2b3c4d'}),
+    Route('manage-schedule.py', 'POST', '/api/schedules/sch-1a2b3c4d/run',
+          {'id': 'sch-1a2b3c4d'}),
 
     # manage-query-prompts.py — each persona multiplies every run's spend.
     Route('manage-query-prompts.py', 'POST', '/api/query-prompts',

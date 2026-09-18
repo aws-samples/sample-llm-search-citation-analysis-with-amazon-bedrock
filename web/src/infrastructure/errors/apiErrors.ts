@@ -216,6 +216,18 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
     config: 'Raw responses not configured',
     unknown: 'Failed to load response data',
   },
+  schedules: {
+    network: 'Unable to reach the schedule service',
+    auth: 'Authentication required to manage schedules',
+    permission: 'Managing schedules requires an administrator',
+    not_found: 'Schedule not found',
+    validation: 'Invalid schedule settings',
+    rate_limit: 'Schedule requests limited. Please wait',
+    server: 'The schedule could not be saved',
+    timeout: 'Schedule request timed out',
+    config: 'Schedule service not configured',
+    unknown: 'Failed to process schedule request',
+  },
 };
 
 function categorizeByStatusCode(statusCode: number): ErrorCategory | null {

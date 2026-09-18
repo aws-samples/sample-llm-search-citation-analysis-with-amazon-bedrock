@@ -105,6 +105,54 @@ function findStateMachine(template: Template, stateMachineName: string): unknown
   return stateMachines[Object.keys(stateMachines)[0] ?? ''];
 }
 
+function findStateMachineLogicalId(template: Template, stateMachineName: string): string {
+  const stateMachines = template.findResources('AWS::StepFunctions::StateMachine', {
+    Properties: { StateMachineName: stateMachineName },
+  });
+  return Object.keys(stateMachines)[0] ?? '';
+}
+
+/**
+ * Every IAM action a Lambda function's role is allowed on one resource (by
+ * logical id, matched through Ref or Fn::GetAtt), deduplicated and sorted.
+ */
+function extractFunctionRoleActionsOn(template: Template, functionName: string, resourceLogicalId: string): string[] {
+  const functions = template.findResources('AWS::Lambda::Function', {
+    Properties: { FunctionName: functionName },
+  });
+  const roleLogicalId = collectGetAttTargets(
+    resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Role'])
+  )[0] ?? '';
+
+  const actions = Object.values(template.findResources('AWS::IAM::Policy'))
+    .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
+    .flatMap((policy) => {
+      const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
+      return (Array.isArray(statements) ? statements : []).flatMap((statement) => {
+        const resource = resolvePath(statement, ['Resource']);
+        const targets = [...collectGetAttTargets(resource), ...collectRefTargets(resource)];
+        if (!targets.includes(resourceLogicalId) || resolveString(statement, ['Effect']) !== 'Allow') return [];
+        const action = resolvePath(statement, ['Action']);
+        return (Array.isArray(action) ? action : [action]).filter((entry): entry is string => typeof entry === 'string');
+      });
+    });
+
+  return [...new Set(actions)].sort((left, right) => left.localeCompare(right));
+}
+
+/** Collect every logical ID referenced by a Ref anywhere in a node. */
+function collectRefTargets(node: unknown, found: string[] = []): string[] {
+  if (Array.isArray(node)) {
+    for (const item of node) collectRefTargets(item, found);
+    return found;
+  }
+  if (isRecord(node)) {
+    if (typeof node.Ref === 'string') found.push(node.Ref);
+    for (const value of Object.values(node)) collectRefTargets(value, found);
+  }
+  return found;
+}
+
 /**
  * Extract a Step Functions definition JSON from the synthesized template.
  * Fn::Join produces ["", [...parts]]; string parts are concatenated and
@@ -568,6 +616,12 @@ const synthesized: {
   keywordResearchTableTtl: unknown;
   keywordResearchIdMethods: ApiGatewayMethodSnapshot[];
   keywordResearchRetryMethods: ApiGatewayMethodSnapshot[];
+  schedulesMethods: ApiGatewayMethodSnapshot[];
+  scheduleIdMethods: ApiGatewayMethodSnapshot[];
+  scheduleRunMethods: ApiGatewayMethodSnapshot[];
+  configMgmtFunctionId: string;
+  configMgmtEnvVars: Record<string, unknown>;
+  configMgmtStateMachineActions: string[];
   crawlerEnvVars: Record<string, unknown>;
   parseKeywordsEnvVars: Record<string, unknown>;
   keywordMgmtEnvVars: Record<string, unknown>;
@@ -607,6 +661,12 @@ const synthesized: {
   keywordResearchTableTtl: undefined,
   keywordResearchIdMethods: [],
   keywordResearchRetryMethods: [],
+  schedulesMethods: [],
+  scheduleIdMethods: [],
+  scheduleRunMethods: [],
+  configMgmtFunctionId: '',
+  configMgmtEnvVars: {},
+  configMgmtStateMachineActions: [],
   crawlerEnvVars: {},
   parseKeywordsEnvVars: {},
   keywordMgmtEnvVars: {},
@@ -653,6 +713,7 @@ const WORKER_LOG_GROUP_NAMES = [
 ];
 
 const WORKFLOW_STATE_MACHINE = 'CitationAnalysis-Workflow';
+const CONFIG_MGMT_FUNCTION_NAME = 'CitationAnalysis-API-ConfigMgmt';
 const RESEARCH_STATE_MACHINE = 'CitationAnalysis-KeywordResearch';
 const RESEARCH_WORKER_FUNCTION_NAME = 'CitationAnalysis-ResearchWorker';
 
@@ -693,6 +754,18 @@ beforeAll(() => {
   const keywordResearchRetryId = findApiResourceId(template, 'retry', keywordResearchJobId);
   synthesized.keywordResearchIdMethods = extractApiMethods(template, keywordResearchJobId);
   synthesized.keywordResearchRetryMethods = extractApiMethods(template, keywordResearchRetryId);
+
+  const schedulesId = findApiResourceId(template, 'schedules');
+  const scheduleId = findApiResourceId(template, '{id}', schedulesId);
+  const scheduleRunId = findApiResourceId(template, 'run', scheduleId);
+  synthesized.schedulesMethods = extractApiMethods(template, schedulesId);
+  synthesized.scheduleIdMethods = extractApiMethods(template, scheduleId);
+  synthesized.scheduleRunMethods = extractApiMethods(template, scheduleRunId);
+  synthesized.configMgmtFunctionId = findLambdaLogicalId(template, CONFIG_MGMT_FUNCTION_NAME);
+  synthesized.configMgmtEnvVars = extractLambdaEnvVars(template, CONFIG_MGMT_FUNCTION_NAME);
+  synthesized.configMgmtStateMachineActions = extractFunctionRoleActionsOn(
+    template, CONFIG_MGMT_FUNCTION_NAME, findStateMachineLogicalId(template, WORKFLOW_STATE_MACHINE)
+  );
   synthesized.healthCheckLayerRefs = extractLambdaLayerRefs(template, 'CitationAnalysis-API-Health');
 
   synthesized.apiAuthSnapshots = extractApiAuthSnapshots(template);
@@ -1135,6 +1208,41 @@ describe('Keyword research routes', () => {
     expect(all).toHaveLength(3);
     expect(all.every((method) => method.authorizationType === COGNITO_AUTH)).toBe(true);
     expect(all.every((method) => method.integrationUri.includes(synthesized.keywordMgmtFunctionId))).toBe(true);
+  });
+});
+
+describe('Schedule routes (Schedules v2)', () => {
+  /**
+   * 2.3.0: schedules are addressed by their generated `sch-<hex>` id; the
+   * definition is editable in place (PUT) and runnable on demand.
+   */
+  it('exposes GET and POST on the collection through the ConfigMgmt function', () => {
+    const verbs = synthesized.schedulesMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
+
+    expect(verbs).toStrictEqual(['GET', 'POST']);
+    expect(synthesized.schedulesMethods.every((method) => method.integrationUri.includes(synthesized.configMgmtFunctionId))).toBe(true);
+  });
+
+  it('exposes GET, PUT and DELETE on the schedule id resource', () => {
+    const verbs = synthesized.scheduleIdMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
+
+    expect(verbs).toStrictEqual(['DELETE', 'GET', 'PUT']);
+  });
+
+  it('exposes POST only on the run sub-resource', () => {
+    expect(synthesized.scheduleRunMethods.map((method) => method.httpMethod)).toStrictEqual(['POST']);
+  });
+
+  it('requires the Cognito authorizer on every schedule route', () => {
+    const all = [...synthesized.schedulesMethods, ...synthesized.scheduleIdMethods, ...synthesized.scheduleRunMethods];
+
+    expect(all).toHaveLength(6);
+    expect(all.every((method) => method.authorizationType === COGNITO_AUTH)).toBe(true);
+  });
+
+  it('lets ConfigMgmt start workflow executions for run-now and read the groups table for scope checks', () => {
+    expect(synthesized.configMgmtStateMachineActions).toContain('states:StartExecution');
+    expect(synthesized.configMgmtEnvVars).toHaveProperty('DYNAMODB_TABLE_KEYWORD_GROUPS');
   });
 });
 
