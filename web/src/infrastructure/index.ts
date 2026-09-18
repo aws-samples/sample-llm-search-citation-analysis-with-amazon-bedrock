@@ -5,7 +5,7 @@
 
 // Auth
 export {
-  ADMIN_GROUP, getAuthToken, authenticatedFetch, getUserGroups 
+  ADMIN_GROUP, authenticatedFetch, getUserGroups 
 } from './auth';
 
 // Config
@@ -24,9 +24,4 @@ export {
   getErrorMessage,
   isAbortError,
   isDefinitiveClientRejection,
-  parseApiError,
-} from './errors';
-
-export type {
-  ErrorCategory, ApiError 
 } from './errors';

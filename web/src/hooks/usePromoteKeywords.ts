@@ -26,8 +26,8 @@ export const PROMOTION_SUCCESS_MESSAGE_MS = 5_000;
 
 export const SELECTION_LIMIT_MESSAGE =
   `Selection limit reached: at most ${SELECTION_LIMIT} keywords can be added at once.`;
-export const EMPTY_SELECTION_MESSAGE = 'Select at least one keyword to add.';
-export const STALE_SELECTION_MESSAGE =
+const EMPTY_SELECTION_MESSAGE = 'Select at least one keyword to add.';
+const STALE_SELECTION_MESSAGE =
   'The research results changed. Review your selection and try again.';
 export const PROMOTION_TIMEOUT_MESSAGE =
   'Adding keywords did not return within 30 seconds. The server may still finish; active keywords are being refreshed.';

@@ -12,7 +12,7 @@ import { BrandChart } from '../Dashboard/BrandChart';
 import type { SettingsTab } from '../Settings';
 import { keywordSelectionKey } from '../../hooks/keywordIdentity';
 import type {
-  TabType, Stats, Citations, Search, Keyword, Execution, Schedule
+  TabType, Stats, Citations, Search, Keyword, Execution, Schedule, AnalysisScope
 } from '../../types';
 
 const ExecutionMonitor = lazy(() => import('../Execution/ExecutionMonitor').then(module => ({ default: module.ExecutionMonitor })));
@@ -39,7 +39,7 @@ interface TabContentProps {
   readonly schedules: Schedule[];
   readonly setSchedules: React.Dispatch<React.SetStateAction<Schedule[]>>;
   readonly execution: Execution | null;
-  readonly triggerAnalysis: (keywords?: string[]) => Promise<{
+  readonly triggerAnalysis: (scope?: AnalysisScope) => Promise<{
     success: boolean;
     message: string
   }>;

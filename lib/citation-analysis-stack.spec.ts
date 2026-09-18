@@ -190,6 +190,29 @@ function findLambdaLogicalId(template: Template, functionName: string): string {
   return Object.keys(functions)[0] ?? '';
 }
 
+/** Logical IDs of the layers attached to a function (each `Layers` entry is a Ref). */
+function extractLambdaLayerRefs(template: Template, functionName: string): string[] {
+  const functions = template.findResources('AWS::Lambda::Function', {
+    Properties: { FunctionName: functionName },
+  });
+  const logicalId = Object.keys(functions)[0];
+  const layers = resolvePath(functions[logicalId], ['Properties', 'Layers']);
+  if (!Array.isArray(layers)) return [];
+  return layers
+    .map((layer) => (isRecord(layer) && typeof layer.Ref === 'string' ? layer.Ref : ''))
+    .filter((ref) => ref !== '');
+}
+
+/** KeySchema of a DynamoDB table found by its TableName property. */
+function extractTableKeySchema(template: Template, tableName: string): unknown {
+  const tables = template.findResources('AWS::DynamoDB::Table', {
+    Properties: { TableName: tableName },
+  });
+  const [logicalId] = Object.keys(tables);
+  if (!logicalId) return undefined;
+  return resolvePath(tables[logicalId], ['Properties', 'KeySchema']);
+}
+
 function findApiResourceId(template: Template, pathPart: string, parentId?: string): string {
   const resources = template.findResources('AWS::ApiGateway::Resource');
   return Object.entries(resources).find(([, resource]) => {
@@ -514,10 +537,17 @@ const synthesized: {
   definitionRaw: string;
   crawlerEnvVars: Record<string, unknown>;
   parseKeywordsEnvVars: Record<string, unknown>;
+  keywordMgmtEnvVars: Record<string, unknown>;
+  executionMgmtEnvVars: Record<string, unknown>;
   keywordMgmtFunctionId: string;
   promoteMethods: ApiGatewayMethodSnapshot[];
   keywordIdMethods: ApiGatewayMethodSnapshot[];
   researchIdMethods: ApiGatewayMethodSnapshot[];
+  keywordGroupsMethods: ApiGatewayMethodSnapshot[];
+  keywordGroupIdMethods: ApiGatewayMethodSnapshot[];
+  keywordGroupMembersMethods: ApiGatewayMethodSnapshot[];
+  keywordGroupsTableKeySchema: unknown;
+  healthCheckLayerRefs: string[];
   apiAuthSnapshots: ApiMethodAuthSnapshot[];
   userPoolClientProps: Record<string, unknown>;
   userPoolGroupNames: string[];
@@ -538,10 +568,17 @@ const synthesized: {
   definitionRaw: '',
   crawlerEnvVars: {},
   parseKeywordsEnvVars: {},
+  keywordMgmtEnvVars: {},
+  executionMgmtEnvVars: {},
   keywordMgmtFunctionId: '',
   promoteMethods: [],
   keywordIdMethods: [],
   researchIdMethods: [],
+  keywordGroupsMethods: [],
+  keywordGroupIdMethods: [],
+  keywordGroupMembersMethods: [],
+  keywordGroupsTableKeySchema: undefined,
+  healthCheckLayerRefs: [],
   apiAuthSnapshots: [],
   userPoolClientProps: {},
   userPoolGroupNames: [],
@@ -581,6 +618,8 @@ beforeAll(() => {
   synthesized.definitionRaw = extractStateMachineDefinition(template);
   synthesized.crawlerEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-Crawler');
   synthesized.parseKeywordsEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-ParseKeywords');
+  synthesized.keywordMgmtEnvVars = extractLambdaEnvVars(template, KEYWORD_MGMT_FUNCTION_NAME);
+  synthesized.executionMgmtEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-API-ExecutionMgmt');
   synthesized.keywordMgmtFunctionId = findLambdaLogicalId(template, KEYWORD_MGMT_FUNCTION_NAME);
 
   const keywordsId = findApiResourceId(template, 'keywords');
@@ -592,6 +631,15 @@ beforeAll(() => {
   const keywordResearchId = findApiResourceId(template, 'keyword-research');
   const researchIdResource = findApiResourceId(template, '{id}', keywordResearchId);
   synthesized.researchIdMethods = extractApiMethods(template, researchIdResource);
+
+  const keywordGroupsId = findApiResourceId(template, 'keyword-groups');
+  const keywordGroupId = findApiResourceId(template, '{id}', keywordGroupsId);
+  const keywordGroupMembersId = findApiResourceId(template, 'keywords', keywordGroupId);
+  synthesized.keywordGroupsMethods = extractApiMethods(template, keywordGroupsId);
+  synthesized.keywordGroupIdMethods = extractApiMethods(template, keywordGroupId);
+  synthesized.keywordGroupMembersMethods = extractApiMethods(template, keywordGroupMembersId);
+  synthesized.keywordGroupsTableKeySchema = extractTableKeySchema(template, 'CitationAnalysis-KeywordGroups');
+  synthesized.healthCheckLayerRefs = extractLambdaLayerRefs(template, 'CitationAnalysis-API-Health');
 
   synthesized.apiAuthSnapshots = extractApiAuthSnapshots(template);
   synthesized.userPoolClientProps = extractUserPoolClientProps(template);
@@ -999,6 +1047,66 @@ describe('Keyword research by-id route', () => {
 
     expect(get?.authorizationType).toBe(COGNITO_AUTH);
     expect(get?.authorizerId).not.toBe('');
+  });
+});
+
+/**
+ * Keyword groups (2.1.0): folders of keywords, typically one per hotel.
+ * Membership lives on the Keywords item as a string set, so the only new
+ * table holds group metadata; every route runs through the KeywordMgmt
+ * function and the shared Cognito authorizer.
+ */
+describe('Keyword groups', () => {
+  it('creates the KeywordGroups table keyed by id only', () => {
+    expect(synthesized.keywordGroupsTableKeySchema).toStrictEqual([
+      { AttributeName: 'id', KeyType: 'HASH' },
+    ]);
+  });
+
+  it('exposes GET and POST on the collection through the KeywordMgmt function', () => {
+    const verbs = synthesized.keywordGroupsMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
+
+    expect(verbs).toStrictEqual(['GET', 'POST']);
+    expect(synthesized.keywordGroupsMethods.every((method) => method.integrationUri.includes(synthesized.keywordMgmtFunctionId))).toBe(true);
+  });
+
+  it('exposes PUT and DELETE on the group id resource', () => {
+    const verbs = synthesized.keywordGroupIdMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
+
+    expect(verbs).toStrictEqual(['DELETE', 'PUT']);
+  });
+
+  it('exposes PUT only on the membership sub-resource', () => {
+    expect(synthesized.keywordGroupMembersMethods.map((method) => method.httpMethod)).toStrictEqual(['PUT']);
+  });
+
+  it('requires the Cognito authorizer on every keyword-group route', () => {
+    const all = [
+      ...synthesized.keywordGroupsMethods,
+      ...synthesized.keywordGroupIdMethods,
+      ...synthesized.keywordGroupMembersMethods,
+    ];
+
+    expect(all).toHaveLength(5);
+    expect(all.every((method) => method.authorizationType === 'COGNITO_USER_POOLS')).toBe(true);
+  });
+
+  it('hands the groups table name to the functions that resolve scopes', () => {
+    expect(synthesized.keywordMgmtEnvVars).toHaveProperty('DYNAMODB_TABLE_KEYWORD_GROUPS');
+    expect(synthesized.executionMgmtEnvVars).toHaveProperty('DYNAMODB_TABLE_KEYWORD_GROUPS');
+    expect(synthesized.parseKeywordsEnvVars).toHaveProperty('DYNAMODB_TABLE_KEYWORD_GROUPS');
+  });
+});
+
+describe('Health check function', () => {
+  it('attaches the shared layer it imports from', () => {
+    /**
+     * health.py imports shared.api_response; without the layer every monitor
+     * received a 502 (Runtime.ImportModuleError). Pinned here so the layer
+     * cannot be dropped again.
+     */
+    expect(synthesized.healthCheckLayerRefs).toHaveLength(1);
+    expect(synthesized.healthCheckLayerRefs[0]).toMatch(/^SharedLayer/);
   });
 });
 

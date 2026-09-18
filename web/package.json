@@ -1,6 +1,6 @@
 {
   "name": "citation-dashboard",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -8,7 +8,9 @@
     "preview": "vite preview",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "deadcode": "knip",
+    "deadcode:prod": "knip --production"
   },
   "dependencies": {
     "@aws-amplify/ui-react": "^6.15.2",
@@ -35,15 +37,15 @@
     "@types/mdast": "^4.0.4",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
-    "@types/unist": "^3.0.3",
     "@vitejs/plugin-react": "^6.0.3",
     "autoprefixer": "^10.4.27",
     "jsdom": "^27.4.0",
+    "knip": "6.37.0",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.7.0",
     "vite": "^8.1.4",
-    "vitest": "^4.1.2"
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "fast-xml-parser": "^5.5.7",

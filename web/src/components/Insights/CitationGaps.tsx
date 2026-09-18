@@ -120,4 +120,3 @@ export function CitationGaps({ keywords }: Props) {
   );
 }
 
-export default CitationGaps;

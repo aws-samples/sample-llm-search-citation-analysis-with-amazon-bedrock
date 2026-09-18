@@ -34,13 +34,3 @@ export function buildBrandConfigWithBrands(
     },
   });
 }
-
-export function buildEmptyBrandConfig(): BrandConfig {
-  return buildBrandConfig({
-    tracked_brands: {
-      first_party: [],
-      competitors: [] 
-    },
-    first_party_domains: [],
-  });
-}

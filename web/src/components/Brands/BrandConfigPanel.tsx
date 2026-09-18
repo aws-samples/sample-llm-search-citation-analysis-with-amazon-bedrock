@@ -1,9 +1,6 @@
 import type {
-  BrandConfig, IndustryPresets 
+  BrandConfig, IndustryPresets, BrandExpansionAllResult, CompetitorDiscoveryResult 
 } from '../../types';
-import type {
-  BrandExpansionAllResult, CompetitorDiscoveryResult 
-} from '../../hooks/useBrandConfig';
 import { BrandConfigContent } from './BrandConfigContent';
 
 interface BrandConfigPanelProps {

@@ -16,6 +16,13 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import api_response, success_response, validation_error
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
 from shared.env_vars import resolve_table_env
+from shared.keyword_groups import (
+    KEYWORD_GROUPS_TABLE_ENV,
+    MAX_GROUPS_PER_KEYWORD,
+    load_existing_group_ids,
+    serialize_keyword_item,
+    validate_id_list,
+)
 from shared.keyword_store import (
     ALLOWED_KEYWORD_PRIORITIES,
     ALLOWED_KEYWORD_STATUSES,
@@ -33,6 +40,29 @@ dynamodb = boto3.resource('dynamodb')
 # Fail-fast: Required environment variables (audit #12 canonical naming).
 KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
 keywords_table = dynamodb.Table(KEYWORDS_TABLE)
+# Optional until every deployment carries the groups table.
+GROUPS_TABLE = resolve_table_env(KEYWORD_GROUPS_TABLE_ENV, required=False)
+groups_table = dynamodb.Table(GROUPS_TABLE) if GROUPS_TABLE else None
+
+
+def _validated_group_ids(body, event):
+    """Validate an optional ``group_ids`` list and confirm every id exists.
+
+    Returns ``(group_ids, None)`` — ``None`` group_ids when the field was
+    omitted — or ``(None, error_response)``.
+    """
+    if 'group_ids' not in body:
+        return None, None
+    group_ids, message = validate_id_list(body.get('group_ids'), field='group_ids', limit=MAX_GROUPS_PER_KEYWORD)
+    if message:
+        return None, validation_error(message, event, 'group_ids')
+    if group_ids and groups_table is None:
+        return None, validation_error('Keyword groups are not available on this deployment', event, 'group_ids')
+    if group_ids:
+        unknown = sorted(set(group_ids) - load_existing_group_ids(groups_table, group_ids))
+        if unknown:
+            return None, validation_error(f"Unknown keyword group ids: {', '.join(unknown)}", event, 'group_ids')
+    return group_ids, None
 
 
 def _validated_keyword(keyword, event):
@@ -72,6 +102,9 @@ def create_keyword(event, context, body, keyword, region, language, category, pr
     text, error = _validated_keyword(keyword, event)
     if error:
         return error
+    group_ids, error = _validated_group_ids(body, event)
+    if error:
+        return error
 
     identity = normalize_keyword(text)
     if identity in load_keyword_identities(keywords_table):
@@ -86,10 +119,12 @@ def create_keyword(event, context, body, keyword, region, language, category, pr
         priority=priority,
         notes=notes,
     )
+    if group_ids:
+        item['group_ids'] = set(group_ids)
     if not put_keyword_if_absent(keywords_table, item):
         return _duplicate_response(event)
 
-    return success_response(item, event, 201)
+    return success_response(serialize_keyword_item(item), event, 201)
 
 
 @parse_json_body
@@ -108,6 +143,9 @@ def update_keyword(event, context, body, keyword, status, region, language, cate
         return validation_error('Keyword ID is required', event, 'id')
 
     text, error = _validated_keyword(keyword, event)
+    if error:
+        return error
+    group_ids, error = _validated_group_ids(body, event)
     if error:
         return error
 
@@ -165,6 +203,14 @@ def update_keyword(event, context, body, keyword, status, region, language, cate
     if notes is not None:
         update_expr += ', notes = :n'
         expr_values[':n'] = notes
+    # group_ids: a string set; DynamoDB cannot store an empty set, so an empty
+    # list clears the attribute instead.
+    if group_ids is not None:
+        if group_ids:
+            update_expr += ', group_ids = :g'
+            expr_values[':g'] = set(group_ids)
+        else:
+            update_expr += ' REMOVE group_ids'
 
     try:
         response = keywords_table.update_item(
@@ -184,7 +230,7 @@ def update_keyword(event, context, body, keyword, status, region, language, cate
             event,
         )
 
-    return success_response(response['Attributes'], event)
+    return success_response(serialize_keyword_item(response['Attributes']), event)
 
 
 def delete_keyword(event, context, id=None):

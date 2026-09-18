@@ -80,5 +80,3 @@ export function useKeywordDeepDive(keyword: string | null) {
     ready,
   };
 }
-
-export type KeywordDeepDiveData = ReturnType<typeof useKeywordDeepDive>;

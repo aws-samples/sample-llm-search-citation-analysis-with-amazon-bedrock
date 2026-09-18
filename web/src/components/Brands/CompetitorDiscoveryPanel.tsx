@@ -1,4 +1,4 @@
-import type { CompetitorDiscoveryResult } from '../../hooks/useBrandConfig';
+import type { CompetitorDiscoveryResult } from '../../types';
 import { CheckIcon } from '../ui';
 
 interface CompetitorDiscoveryPanelProps {

@@ -1,19 +1,16 @@
 import type {
-  Keyword, ExecutionEvent, Execution 
+  Keyword, KeywordGroup, ExecutionEvent, Execution 
 } from '../../types';
 import {
   formatDate, formatTime 
 } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
+import { KeywordScopePicker } from '../ui/KeywordScopePicker';
 import type {
   StepState, ProcessedExecution 
 } from '../../formatting/executionProcessor';
 
-export type {
-  StepState, ProcessedExecution 
-};
-
-export const getStatusStyle = (status: string): string => {
+const getStatusStyle = (status: string): string => {
   const styles: Record<string, string> = {
     RUNNING: 'bg-gray-100 text-gray-700',
     SUCCEEDED: 'bg-emerald-100 text-emerald-700',
@@ -22,7 +19,7 @@ export const getStatusStyle = (status: string): string => {
   return styles[status] ?? 'bg-gray-100 text-gray-600';
 };
 
-export const getStepStyle = (status: string): string => {
+const getStepStyle = (status: string): string => {
   const styles: Record<string, string> = {
     running: 'border-gray-400 bg-gray-50',
     completed: 'border-emerald-400 bg-emerald-50',
@@ -31,14 +28,14 @@ export const getStepStyle = (status: string): string => {
   return styles[status] ?? 'border-gray-200 bg-gray-50';
 };
 
-export const getStepIndicator = (status: string): JSX.Element => {
+const getStepIndicator = (status: string): JSX.Element => {
   if (status === 'running') return <div className="w-2.5 h-2.5 bg-gray-500 rounded-full animate-pulse" />;
   if (status === 'completed') return <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full" />;
   if (status === 'failed') return <div className="w-2.5 h-2.5 bg-red-500 rounded-full" />;
   return <div className="w-2.5 h-2.5 bg-gray-300 rounded-full" />;
 };
 
-export const getExecutionTitle = (status: string): string => {
+const getExecutionTitle = (status: string): string => {
   const titles: Record<string, string> = {
     RUNNING: 'Analysis Running',
     SUCCEEDED: 'Analysis Completed',
@@ -53,7 +50,7 @@ const getLogItemStyle = (event: ExecutionEvent): string => {
   return 'bg-gray-50 border-gray-200';
 };
 
-export function formatEventMessage(event: ExecutionEvent): string {
+function formatEventMessage(event: ExecutionEvent): string {
   const eventType = event.type;
   const stateName = event.state_name ?? '';
   const startedMessages: Record<string, string> = {
@@ -84,26 +81,27 @@ export function formatEventMessage(event: ExecutionEvent): string {
 }
 
 interface TriggerSectionProps {
-  selectedKeywords: string[];
+  selectedIds: string[];
   keywordsCount: number;
   activeKeywords: Keyword[];
+  groups: KeywordGroup[];
   isRunning: boolean;
   isStarting: boolean;
-  onSelectAll: () => void;
-  onToggleKeyword: (keyword: string) => void;
+  onSelectionChange: (selectedIds: string[]) => void;
   onTriggerAnalysis: () => void;
+  onRunGroup: (group: KeywordGroup) => void;
   /** Both trigger routes are Admin-only server-side. */
   isAdmin: boolean;
 }
 
 export const TriggerSection = ({
-  selectedKeywords, keywordsCount, activeKeywords, isRunning, isStarting,
-  onSelectAll, onToggleKeyword, onTriggerAnalysis, isAdmin,
+  selectedIds, keywordsCount, activeKeywords, groups, isRunning, isStarting,
+  onSelectionChange, onTriggerAnalysis, onRunGroup, isAdmin,
 }: TriggerSectionProps) => {
   const getKeywordCountText = (): string => {
-    if (selectedKeywords.length === 0) return `All ${keywordsCount} active keywords`;
-    const plural = selectedKeywords.length > 1 ? 's' : '';
-    return `${selectedKeywords.length} keyword${plural} selected`;
+    if (selectedIds.length === 0) return `All ${keywordsCount} active keywords`;
+    const plural = selectedIds.length > 1 ? 's' : '';
+    return `${selectedIds.length} keyword${plural} selected`;
   };
 
   // POST /api/trigger-analysis and /api/trigger-keyword-analysis are Admin-only:
@@ -120,17 +118,26 @@ export const TriggerSection = ({
     );
   }
 
+  const busy = isRunning || isStarting;
+
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
       <h2 className="text-sm font-medium text-gray-900 mb-2">Run Citation Analysis</h2>
       <p className="text-sm text-gray-500 mb-4">{getKeywordCountText()}</p>
+      {groups.length > 0 && (
+        <GroupQuickRun groups={groups} disabled={busy} onRunGroup={onRunGroup} />
+      )}
       {activeKeywords.length > 0 && (
-        <KeywordSelector
-          activeKeywords={activeKeywords}
-          selectedKeywords={selectedKeywords}
-          onSelectAll={onSelectAll}
-          onToggleKeyword={onToggleKeyword}
-        />
+        <div className="mb-4">
+          <p className="text-sm text-gray-600 mb-2">Select keywords (optional)</p>
+          <KeywordScopePicker
+            keywords={activeKeywords}
+            groups={groups}
+            selectedIds={selectedIds}
+            onChange={onSelectionChange}
+            disabled={busy}
+          />
+        </div>
       )}
       <TriggerButton
         keywordsCount={keywordsCount}
@@ -142,37 +149,31 @@ export const TriggerSection = ({
   );
 };
 
-interface KeywordSelectorProps {
-  activeKeywords: Keyword[];
-  selectedKeywords: string[];
-  onSelectAll: () => void;
-  onToggleKeyword: (keyword: string) => void;
+interface GroupQuickRunProps {
+  groups: KeywordGroup[];
+  disabled: boolean;
+  onRunGroup: (group: KeywordGroup) => void;
 }
 
-const KeywordSelector = ({
-  activeKeywords, selectedKeywords, onSelectAll, onToggleKeyword 
-}: KeywordSelectorProps) => (
+/** One-click "run this whole group" buttons; resolved server-side at run time. */
+const GroupQuickRun = ({
+  groups, disabled, onRunGroup 
+}: GroupQuickRunProps) => (
   <div className="mb-4">
-    <div className="flex justify-between items-center mb-3">
-      <label className="text-sm text-gray-600">Select keywords (optional)</label>
-      <button onClick={onSelectAll} className="text-sm text-gray-600 hover:text-gray-900">
-        {selectedKeywords.length === activeKeywords.length ? 'Deselect all' : 'Select all'}
-      </button>
-    </div>
-    <div className="max-h-60 sm:max-h-80 overflow-y-auto border border-gray-200 rounded-lg p-3 bg-gray-50">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-        {activeKeywords.map((kw) => (
-          <label key={kw.keyword} className="flex items-center gap-2 p-2 hover:bg-white rounded cursor-pointer transition-colors">
-            <input
-              type="checkbox"
-              checked={selectedKeywords.includes(kw.keyword)}
-              onChange={() => onToggleKeyword(kw.keyword)}
-              className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900"
-            />
-            <span className="text-sm text-gray-700 truncate">{kw.keyword}</span>
-          </label>
-        ))}
-      </div>
+    <p className="text-sm text-gray-600 mb-2">Run a whole keyword group</p>
+    <div className="flex flex-wrap gap-2">
+      {groups.map((group) => (
+        <button
+          key={group.id}
+          type="button"
+          onClick={() => onRunGroup(group)}
+          disabled={disabled || group.keyword_count === 0}
+          className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {group.name}
+          <span className="ml-1 text-xs text-gray-400">({group.keyword_count})</span>
+        </button>
+      ))}
     </div>
   </div>
 );

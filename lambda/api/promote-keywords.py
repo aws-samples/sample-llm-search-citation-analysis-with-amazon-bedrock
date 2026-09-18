@@ -15,13 +15,17 @@ from shared.api_response import error_response, success_response, validation_err
 from shared.constants import MAX_KEYWORD_LENGTH as MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body, route_handler
 from shared.env_vars import resolve_table_env
+from shared.keyword_groups import (
+    KEYWORD_GROUPS_TABLE_ENV,
+    MAX_GROUPS_PER_KEYWORD,
+    load_existing_group_ids,
+    serialize_keyword_item,
+    validate_id_list,
+)
 from shared.keyword_store import (
     ALLOWED_KEYWORD_PRIORITIES,
     ALLOWED_KEYWORD_STATUSES,
-    DEFAULT_KEYWORD_CATEGORY,
-    DEFAULT_KEYWORD_LANGUAGE,
     DEFAULT_KEYWORD_PRIORITY,
-    DEFAULT_KEYWORD_REGION,
     DEFAULT_KEYWORD_STATUS,
     build_keyword_item,
     put_keyword_if_absent,
@@ -41,6 +45,9 @@ dynamodb = boto3.resource('dynamodb')
 
 KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
 keywords_table = dynamodb.Table(KEYWORDS_TABLE)
+# Optional until every deployment carries the groups table.
+GROUPS_TABLE = resolve_table_env(KEYWORD_GROUPS_TABLE_ENV, required=False)
+groups_table = dynamodb.Table(GROUPS_TABLE) if GROUPS_TABLE else None
 
 NOTES_FIELDS = ('intent', 'competition', 'source')
 MAX_KEYWORDS = 500
@@ -52,14 +59,12 @@ MAX_ECHOED_VALUE_LENGTH = 50
 
 # Enum values and defaults come from the shared keyword store (bugs.md 3.3);
 # the local names remain this module's public vocabulary and are referenced
-# by its property tests.
+# by its property tests. Region/language/category defaults are applied by
+# `build_keyword_item` and are not re-exported here.
 ALLOWED_STATUSES = ALLOWED_KEYWORD_STATUSES
 ALLOWED_PRIORITIES = ALLOWED_KEYWORD_PRIORITIES
 DEFAULT_STATUS = DEFAULT_KEYWORD_STATUS
 DEFAULT_PRIORITY = DEFAULT_KEYWORD_PRIORITY
-DEFAULT_REGION = DEFAULT_KEYWORD_REGION
-DEFAULT_LANGUAGE = DEFAULT_KEYWORD_LANGUAGE
-DEFAULT_CATEGORY = DEFAULT_KEYWORD_CATEGORY
 
 REASON_DUPLICATE = 'duplicate'
 REASON_EMPTY = 'empty'
@@ -78,6 +83,10 @@ def _promote_keywords(event, context, body):
     if error:
         return validation_error(error['message'], event, error['field'])
 
+    group_ids, group_error = _validated_group_ids(body)
+    if group_error:
+        return validation_error(group_error['message'], event, group_error['field'])
+
     try:
         existing_keys = load_keyword_identities(keywords_table)
     except Exception as error:
@@ -89,6 +98,9 @@ def _promote_keywords(event, context, body):
 
     to_create, skipped = partition_keywords(keywords, existing_keys)
     items = create_items(to_create, status, priority)
+    for item in items:
+        if group_ids:
+            item['group_ids'] = set(group_ids)
     created_items, concurrent_skips = write_items(keywords_table, items)
     skipped.extend(concurrent_skips)
 
@@ -97,9 +109,25 @@ def _promote_keywords(event, context, body):
         'skipped': sum(
             1 for entry in skipped if entry['reason'] == REASON_DUPLICATE
         ),
-        'created_keywords': created_items,
+        'created_keywords': [serialize_keyword_item(item) for item in created_items],
         'skipped_keywords': skipped,
     }, event)
+
+
+def _validated_group_ids(body):
+    """Validate the optional ``group_ids`` list (target groups for every created keyword)."""
+    if 'group_ids' not in body:
+        return None, None
+    group_ids, message = validate_id_list(body.get('group_ids'), field='group_ids', limit=MAX_GROUPS_PER_KEYWORD)
+    if message:
+        return None, {'message': message, 'field': 'group_ids'}
+    if group_ids and groups_table is None:
+        return None, {'message': 'Keyword groups are not available on this deployment', 'field': 'group_ids'}
+    if group_ids:
+        unknown = sorted(set(group_ids) - load_existing_group_ids(groups_table, group_ids))
+        if unknown:
+            return None, {'message': f"Unknown keyword group ids: {', '.join(unknown)}", 'field': 'group_ids'}
+    return group_ids, None
 
 
 @api_handler

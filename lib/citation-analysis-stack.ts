@@ -190,6 +190,31 @@ function apiLambdaLogGroup(scope: Construct, id: string, functionName: string): 
 // asset hash and trigger spurious redeploys of unchanged functions.
 const PYTHON_ASSET_EXCLUDES = ['**/__pycache__', '**/*.pyc'];
 
+/** Thrown at synth time when a CDK context tuning value is not usable. */
+class InvalidContextValueError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidContextValueError';
+  }
+}
+
+/**
+ * Read a positive-integer tuning value from CDK context (`-c key=value` or
+ * cdk.json), falling back to `fallback` when absent. Rejects anything that is
+ * not a whole number >= 1 so a typo cannot silently disable parallelism.
+ */
+function readPositiveIntegerContext(scope: Construct, key: string, fallback: number): number {
+  const raw: unknown = scope.node.tryGetContext(key);
+  if (raw === undefined || raw === null || raw === '') {
+    return fallback;
+  }
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1) {
+    throw new InvalidContextValueError(`CDK context '${key}' must be a positive integer, got ${JSON.stringify(raw)}`);
+  }
+  return value;
+}
+
 function createApiLambdaCode(handlerFileName: string): lambda.Code {
   const apiPath = path.join(__dirname, '../lambda/api');
   
@@ -418,6 +443,22 @@ export class CitationAnalysisStack extends cdk.Stack {
         type: dynamodb.AttributeType.STRING,
       },
       projectionType: dynamodb.ProjectionType.ALL,
+    });
+
+    // DynamoDB Table: KeywordGroups
+    // Folders of keywords (typically one per hotel/property). Membership lives
+    // on each Keywords item as the `group_ids` string set, so this table only
+    // holds group metadata.
+    const keywordGroupsTable = new dynamodb.Table(this, 'KeywordGroupsTable', {
+      tableName: 'CitationAnalysis-KeywordGroups',
+      partitionKey: {
+        name: 'id',
+        type: dynamodb.AttributeType.STRING,
+      },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
 
     // DynamoDB Table: BrandConfig
@@ -902,6 +943,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         // Audit #12 canonical name + legacy for in-flight rollouts.
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
         KEYWORDS_TABLE: keywordsTable.tableName,
+        DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         // Enabled query prompts are resolved here for executions whose input
         // does not carry them (EventBridge schedules).
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
@@ -911,6 +953,7 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Grant ParseKeywords Lambda read access to keywords bucket and tables
     keywordsBucket.grantRead(parseKeywordsFunction);
+    keywordGroupsTable.grantReadData(parseKeywordsFunction);
     keywordsTable.grantReadData(parseKeywordsFunction);
     queryPromptsTable.grantReadData(parseKeywordsFunction);
 
@@ -1166,8 +1209,11 @@ export class CitationAnalysisStack extends cdk.Stack {
       .next(crawlCitationsMap);
 
     // 7. ProcessKeywords Map State (parallel keyword processing)
+    // Executions are no longer capped at 100 keywords; this concurrency is the
+    // throughput knob. Override per deployment with `-c processKeywordsConcurrency=5`
+    // once provider rate limits are known to tolerate it.
     const processKeywordsMap = new stepfunctions.Map(this, 'ProcessKeywords', {
-      maxConcurrency: 3, // Reduced from 5 to 3 to avoid API rate limits
+      maxConcurrency: readPositiveIntegerContext(this, 'processKeywordsConcurrency', 3),
       itemsPath: '$.keywords',
       resultPath: '$.keyword_results',
       itemSelector: {
@@ -1410,12 +1456,16 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // API Lambda Functions
     
-    // Health Check Lambda - No authentication required
+    // Health Check Lambda - No authentication required. It imports
+    // `shared.api_response` for the CORS headers, so it needs the shared
+    // layer like every other API function (it shipped without it once and
+    // answered 502 to every monitor).
     const healthCheckFunction = new lambda.Function(this, 'HealthCheckFunction', {
       functionName: 'CitationAnalysis-API-Health',
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'health.handler',
       code: createApiLambdaCode('health.py'),
+      layers: [sharedLayer],
       timeout: cdk.Duration.seconds(5),
       memorySize: 128,
       description: 'API: Health check endpoint for monitoring',
@@ -1549,6 +1599,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         'keyword-mgmt.py',
         'get-keywords.py',
         'manage-keywords.py',
+        'manage-keyword-groups.py',
         'keyword-research.py',
         'promote-keywords.py',
       ]),
@@ -1557,11 +1608,12 @@ export class CitationAnalysisStack extends cdk.Stack {
       memorySize: 256,
       // Self-invokes for async keyword research — see the constant's comment.
       reservedConcurrentExecutions: SELF_INVOKING_FUNCTION_CONCURRENCY,
-      description: 'API: Consolidated keyword get/create/update/delete and keyword research',
+      description: 'API: Consolidated keyword get/create/update/delete, keyword groups and keyword research',
       logGroup: apiLambdaLogGroup(this, 'KeywordMgmtLogGroup', 'CitationAnalysis-API-KeywordMgmt'),
       environment: {
         // Audit #12 canonical names.
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
+        DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         DYNAMODB_TABLE_KEYWORD_RESEARCH: keywordResearchTable.tableName,
         // Legacy names, dropped once rollout verified.
         KEYWORDS_TABLE: keywordsTable.tableName,
@@ -1619,6 +1671,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         STATE_MACHINE_ARN: stateMachine.stateMachineArn,
         // Audit #12 canonical names.
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
+        DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
         // Legacy names, dropped once rollout verified.
         KEYWORDS_TABLE: keywordsTable.tableName,
@@ -1657,6 +1710,7 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Grant keyword management function access
     keywordsTable.grantReadWriteData(keywordMgmtFunction);
+    keywordGroupsTable.grantReadWriteData(keywordMgmtFunction);
     keywordResearchTable.grantReadWriteData(keywordMgmtFunction);
     perplexitySecret.grantRead(keywordMgmtFunction);
     openaiSecret.grantRead(keywordMgmtFunction);
@@ -1706,6 +1760,7 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Grant execution management function access
     keywordsTable.grantReadData(executionMgmtFunction);
+    keywordGroupsTable.grantReadData(executionMgmtFunction);
     queryPromptsTable.grantReadData(executionMgmtFunction);
     executionMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
@@ -1973,6 +2028,17 @@ export class CitationAnalysisStack extends cdk.Stack {
     const keywordIdResource = keywordsResource.addResource('{id}');
     keywordIdResource.addMethod('PUT', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
     keywordIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+
+    // Keyword groups (folders of keywords, typically one per hotel). Same
+    // consolidated function; `manage-keyword-groups.py` owns the routes.
+    const keywordGroupsResource = apiResource.addResource('keyword-groups');
+    keywordGroupsResource.addMethod('GET', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+    keywordGroupsResource.addMethod('POST', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+    const keywordGroupIdResource = keywordGroupsResource.addResource('{id}');
+    keywordGroupIdResource.addMethod('PUT', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+    keywordGroupIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+    const keywordGroupMembersResource = keywordGroupIdResource.addResource('keywords');
+    keywordGroupMembersResource.addMethod('PUT', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
 
     const queryPromptsResource = apiResource.addResource('query-prompts');
     queryPromptsResource.addMethod('GET', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
@@ -2555,6 +2621,7 @@ def delete_waf(waf, arn):
     
     // Grant all API Lambda functions read access to the CORS parameter
     const apiLambdaFunctions = [
+      healthCheckFunction,
       statsInsightsFunction, citationsContentFunction,
       keywordMgmtFunction, configMgmtFunction, executionMgmtFunction,
       getBrandMentionsFunction, manageBrandConfigFunction,

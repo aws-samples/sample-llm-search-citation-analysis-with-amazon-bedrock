@@ -59,7 +59,7 @@ const BlockedPageBanner = ({ blockReason }: { blockReason?: BlockReason }) => (
   </div>
 );
 
-export const HistoryItem = ({ 
+const HistoryItem = ({ 
   crawl, 
   isSelected, 
   onSelect 
@@ -108,7 +108,7 @@ export const HistoryItem = ({
   );
 };
 
-export const HistoryScreenshot = ({ crawl }: { crawl: HistoryCrawl }) => {
+const HistoryScreenshot = ({ crawl }: { crawl: HistoryCrawl }) => {
   const blockReason = isBlockReason(crawl.block_reason) ? crawl.block_reason : undefined;
   
   return (

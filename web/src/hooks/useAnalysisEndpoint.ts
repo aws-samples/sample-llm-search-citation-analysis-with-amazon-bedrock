@@ -14,7 +14,7 @@ import {
  */
 export interface BackendErrorResponse {error: string;}
 
-export function isBackendErrorResponse(data: unknown): data is BackendErrorResponse {
+function isBackendErrorResponse(data: unknown): data is BackendErrorResponse {
   return typeof data === 'object' && data !== null && 'error' in data && typeof (data as BackendErrorResponse).error === 'string';
 }
 

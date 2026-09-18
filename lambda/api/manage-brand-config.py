@@ -147,15 +147,6 @@ def _preset_with_prompt(preset: dict) -> dict:
     }
 
 
-def get_preset_with_prompt(industry_id: str) -> dict:
-    """Look up an industry preset and decorate it with its default prompt.
-
-    Uses `shared.industry_presets.get_preset` for the base lookup (which
-    falls back to ``custom`` on unknown ids).
-    """
-    return _preset_with_prompt(get_shared_preset(industry_id))
-
-
 def normalize_brand(name: str) -> str:
     """Normalize brand name for comparison - remove accents, lowercase, trim."""
     import unicodedata

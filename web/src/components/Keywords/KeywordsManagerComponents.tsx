@@ -1,4 +1,10 @@
-import type { Keyword } from '../../types';
+import type { ReactNode } from 'react';
+import type {
+  Keyword, KeywordGroup 
+} from '../../types';
+import {
+  KeywordGroupChips, KeywordGroupMenu 
+} from './KeywordGroupAssignment';
 
 export interface KeywordInputSectionProps {
   isBulkMode: boolean;
@@ -138,39 +144,66 @@ export interface KeywordListProps {
   onUpdateKeyword: (id: string) => void;
   onCancelEdit: () => void;
   onDeleteKeyword: (id: string) => void;
+  /** Group features (optional so the list also works without groups loaded). */
+  groups?: KeywordGroup[];
+  bulkSelectedIds?: ReadonlySet<string>;
+  onToggleBulkSelect?: (id: string) => void;
+  groupMenuKeywordId?: string | null;
+  onToggleGroupMenu?: (id: string) => void;
+  onToggleMembership?: (keyword: Keyword, group: KeywordGroup, member: boolean) => void;
+  membershipBusy?: boolean;
+  emptyMessage?: string;
 }
 
 export const KeywordList = ({
   keywords, editingId, editText, setEditText,
   onStartEdit, onUpdateKeyword, onCancelEdit, onDeleteKeyword,
-}: KeywordListProps) => (
-  <div className="p-6">
-    {keywords.length === 0 ? (
-      <EmptyState />
-    ) : (
-      <div className="space-y-2">
-        {keywords.map((keyword) => (
-          <KeywordItem
-            key={keyword.id}
-            keyword={keyword}
-            isEditing={editingId === keyword.id}
-            editText={editText}
-            setEditText={setEditText}
-            onStartEdit={() => onStartEdit(keyword)}
-            onUpdateKeyword={() => onUpdateKeyword(keyword.id)}
-            onCancelEdit={onCancelEdit}
-            onDeleteKeyword={() => onDeleteKeyword(keyword.id)}
-          />
-        ))}
-      </div>
-    )}
-  </div>
-);
+  groups = [], bulkSelectedIds, onToggleBulkSelect, groupMenuKeywordId = null,
+  onToggleGroupMenu, onToggleMembership, membershipBusy = false, emptyMessage,
+}: KeywordListProps) => {
+  const groupsById = new Map(groups.map((group) => [group.id, group]));
+  return (
+    <div className="p-6">
+      {keywords.length === 0 ? (
+        <EmptyState message={emptyMessage} />
+      ) : (
+        <div className="space-y-2">
+          {keywords.map((keyword) => (
+            <KeywordItem
+              key={keyword.id}
+              keyword={keyword}
+              isEditing={editingId === keyword.id}
+              editText={editText}
+              setEditText={setEditText}
+              onStartEdit={() => onStartEdit(keyword)}
+              onUpdateKeyword={() => onUpdateKeyword(keyword.id)}
+              onCancelEdit={onCancelEdit}
+              onDeleteKeyword={() => onDeleteKeyword(keyword.id)}
+              groupsById={groupsById}
+              bulkSelected={bulkSelectedIds?.has(keyword.id) ?? false}
+              onToggleBulkSelect={onToggleBulkSelect ? () => onToggleBulkSelect(keyword.id) : undefined}
+              groupMenu={groupMenuKeywordId === keyword.id && onToggleMembership ? (
+                <KeywordGroupMenu
+                  keyword={keyword}
+                  groups={groups}
+                  busy={membershipBusy}
+                  onToggle={(group, member) => onToggleMembership(keyword, group, member)}
+                  onClose={() => onToggleGroupMenu?.(keyword.id)}
+                />
+              ) : null}
+              onOpenGroups={onToggleGroupMenu ? () => onToggleGroupMenu(keyword.id) : undefined}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
-const EmptyState = () => (
+const EmptyState = ({ message }: { message?: string }) => (
   <div className="text-center py-12 text-gray-400">
     <TagIcon />
-    <p className="text-sm">No keywords yet. Add your first keyword above.</p>
+    <p className="text-sm">{message ?? 'No keywords yet. Add your first keyword above.'}</p>
   </div>
 );
 
@@ -189,13 +222,28 @@ interface KeywordItemProps {
   onUpdateKeyword: () => void;
   onCancelEdit: () => void;
   onDeleteKeyword: () => void;
+  groupsById: ReadonlyMap<string, KeywordGroup>;
+  bulkSelected: boolean;
+  onToggleBulkSelect?: () => void;
+  groupMenu: ReactNode;
+  onOpenGroups?: () => void;
 }
 
 const KeywordItem = ({
   keyword, isEditing, editText, setEditText,
   onStartEdit, onUpdateKeyword, onCancelEdit, onDeleteKeyword,
+  groupsById, bulkSelected, onToggleBulkSelect, groupMenu, onOpenGroups,
 }: KeywordItemProps) => (
-  <div className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+  <div className={`flex flex-wrap items-center gap-3 p-3 border rounded-lg hover:bg-gray-50 transition-colors ${bulkSelected ? 'border-gray-900 bg-gray-50' : 'border-gray-200'}`}>
+    {onToggleBulkSelect && !isEditing && (
+      <input
+        type="checkbox"
+        aria-label={`Select ${keyword.keyword}`}
+        checked={bulkSelected}
+        onChange={onToggleBulkSelect}
+        className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900"
+      />
+    )}
     {isEditing ? (
       <EditingView
         editText={editText}
@@ -206,10 +254,13 @@ const KeywordItem = ({
     ) : (
       <DisplayView
         keyword={keyword}
+        groupsById={groupsById}
         onStartEdit={onStartEdit}
         onDeleteKeyword={onDeleteKeyword}
+        onOpenGroups={onOpenGroups}
       />
     )}
+    {groupMenu}
   </div>
 );
 
@@ -239,20 +290,34 @@ const EditingView = ({
 
 interface DisplayViewProps {
   keyword: Keyword;
+  groupsById: ReadonlyMap<string, KeywordGroup>;
   onStartEdit: () => void;
   onDeleteKeyword: () => void;
+  onOpenGroups?: () => void;
 }
 
 const DisplayView = ({
-  keyword, onStartEdit, onDeleteKeyword 
+  keyword, groupsById, onStartEdit, onDeleteKeyword, onOpenGroups 
 }: DisplayViewProps) => (
   <>
-    <span className="flex-1 text-sm text-gray-900">{keyword.keyword}</span>
+    <span className="flex-1 flex flex-wrap items-center gap-2 text-sm text-gray-900">
+      <span>{keyword.keyword}</span>
+      <KeywordGroupChips keyword={keyword} groupsById={groupsById} />
+    </span>
     <span className="text-xs text-gray-400">{new Date(keyword.created_at).toLocaleDateString()}</span>
-    <button onClick={onStartEdit} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded">
+    {onOpenGroups && (
+      <button
+        onClick={onOpenGroups}
+        aria-label={`Edit groups for ${keyword.keyword}`}
+        className="px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded border border-gray-200"
+      >
+        Groups
+      </button>
+    )}
+    <button onClick={onStartEdit} aria-label={`Edit ${keyword.keyword}`} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded">
       <EditIcon />
     </button>
-    <button onClick={onDeleteKeyword} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
+    <button onClick={onDeleteKeyword} aria-label={`Delete ${keyword.keyword}`} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded">
       <TrashIcon />
     </button>
   </>

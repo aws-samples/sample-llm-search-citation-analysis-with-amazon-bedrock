@@ -12,7 +12,6 @@ Metrics:
 """
 
 import logging
-import math
 import os
 import sys
 from typing import Any
@@ -24,20 +23,12 @@ from boto3.dynamodb.conditions import Key
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
-from shared.constants import (
-    UNRANKED_SENTINEL,
-    VISIBILITY_MENTION_LOG_BASE,
-    VISIBILITY_MENTION_WEIGHT,
-    VISIBILITY_PROVIDER_WEIGHT,
-    VISIBILITY_RANK_CAP,
-    VISIBILITY_RANK_INVERSE_BASE,
-    VISIBILITY_RANK_WEIGHT,
-    VISIBILITY_SENTIMENT_WEIGHT,
-)
+from shared.constants import UNRANKED_SENTINEL
 from shared.decorators import api_handler, require_keyword, validate
 from shared.dynamo_decimal import to_int
 from shared.providers import get_enabled_provider_count
 from shared.utils import get_brand_config
+from shared.visibility_score import calculate_visibility_score, sentiment_to_score
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -46,54 +37,6 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
-
-
-def calculate_visibility_score(
-    provider_count: int,
-    total_mentions: int,
-    best_rank: int,
-    avg_sentiment_score: float,
-    total_providers: int
-) -> float:
-    """
-    Calculate visibility score (0-100) based on multiple factors.
-    Factors (weights sum to 100; see shared.constants for the source of truth):
-    - Provider coverage: VISIBILITY_PROVIDER_WEIGHT
-    - Ranking position: VISIBILITY_RANK_WEIGHT
-    - Mention frequency: VISIBILITY_MENTION_WEIGHT
-    - Sentiment: VISIBILITY_SENTIMENT_WEIGHT
-    """
-    # Provider coverage score
-    provider_score = (
-        (provider_count / total_providers) * VISIBILITY_PROVIDER_WEIGHT
-        if total_providers > 0 else 0
-    )
-
-    # Ranking score — inverse of rank, capped at VISIBILITY_RANK_CAP
-    capped_rank = min(best_rank, VISIBILITY_RANK_CAP)
-    rank_score = max(0, (VISIBILITY_RANK_INVERSE_BASE - capped_rank) / VISIBILITY_RANK_CAP) * VISIBILITY_RANK_WEIGHT
-
-    # Mention score — logarithmic saturation at VISIBILITY_MENTION_SATURATION_COUNT mentions
-    mention_score = (
-        min(math.log(total_mentions + 1) / math.log(VISIBILITY_MENTION_LOG_BASE), 1)
-        * VISIBILITY_MENTION_WEIGHT
-    )
-
-    # Sentiment score — convert -1..1 scale to 0..VISIBILITY_SENTIMENT_WEIGHT
-    sentiment_score = ((avg_sentiment_score + 1) / 2) * VISIBILITY_SENTIMENT_WEIGHT
-
-    return round(provider_score + rank_score + mention_score + sentiment_score, 1)
-
-
-def sentiment_to_score(sentiment: str) -> float:
-    """Convert sentiment string to numeric score."""
-    sentiment_map = {
-        'positive': 1.0,
-        'neutral': 0.0,
-        'negative': -1.0,
-        'mixed': 0.0
-    }
-    return sentiment_map.get(sentiment.lower() if sentiment else 'neutral', 0.0)
 
 
 def calculate_share_of_voice(brand_mentions: dict[str, int], total_mentions: int) -> dict[str, float]:

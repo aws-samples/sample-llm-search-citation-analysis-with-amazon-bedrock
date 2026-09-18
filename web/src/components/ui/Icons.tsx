@@ -86,15 +86,6 @@ export const CloseIcon = ({
   </svg>
 );
 
-export const ChevronRightIcon = ({
-  className, title 
-}: IconProps) => (
-  <svg {...baseProps(className, title)}>
-    {title && <title>{title}</title>}
-    <path {...strokeProps} d="M9 5l7 7-7 7" />
-  </svg>
-);
-
 export const ChevronDownIcon = ({
   className, title 
 }: IconProps) => (

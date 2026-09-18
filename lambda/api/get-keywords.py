@@ -15,6 +15,7 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import success_response
 from shared.decorators import api_handler, optional_limit, validate
 from shared.env_vars import resolve_table_env
+from shared.keyword_groups import serialize_keyword_item
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -34,16 +35,18 @@ VALID_PRIORITIES = ['high', 'normal', 'low']
 @validate({
     'status': {'choices': VALID_STATUSES},
     'priority': {'choices': VALID_PRIORITIES},
+    'group_id': {'type': str, 'max_length': 64},
     'limit': optional_limit(default=500, max_val=1000),
     'authoritative': {'type': bool, 'default': False},
 })
-def handler(event, context, status=None, priority=None, limit=500, authoritative=False):
+def handler(event, context, status=None, priority=None, group_id=None, limit=500, authoritative=False):
     """
     GET /api/keywords
 
     Query params (all optional):
         - status: Filter by status (active, inactive, paused)
         - priority: Filter by priority (high, normal, low)
+        - group_id: Only keywords that belong to this keyword group
         - limit: Maximum number of ordinary results (default: 500, max: 1000)
         - authoritative: Read and return every matching keyword when true
     """
@@ -61,6 +64,10 @@ def handler(event, context, status=None, priority=None, limit=500, authoritative
     if priority:
         filter_expressions.append('priority = :priority')
         expression_values[':priority'] = priority
+
+    if group_id:
+        filter_expressions.append('contains(group_ids, :group_id)')
+        expression_values[':group_id'] = group_id
 
     if filter_expressions:
         scan_params['FilterExpression'] = ' AND '.join(filter_expressions)
@@ -80,6 +87,7 @@ def handler(event, context, status=None, priority=None, limit=500, authoritative
 
     # Sort the complete result, or the ordinary first page, by created_at descending.
     items.sort(key=lambda item: item.get('created_at', ''), reverse=True)
+    items = [serialize_keyword_item(item) for item in items]
 
     response_body = {
         'keywords': items,
