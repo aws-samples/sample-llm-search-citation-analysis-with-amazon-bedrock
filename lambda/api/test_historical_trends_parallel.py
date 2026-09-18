@@ -119,7 +119,7 @@ class TestGetAllKeywordsTrendsParallelFanOut:
         double-queries. The previous serial loop only called fetch once per
         keyword; we must preserve that."""
         keywords_table = MagicMock()
-        keywords_table.scan.return_value = {
+        keywords_table.query.return_value = {
             'Items': [{'keyword': f'kw{i}'} for i in range(5)]
         }
         search_table = MagicMock()
@@ -153,7 +153,7 @@ class TestGetAllKeywordsTrendsParallelFanOut:
         is used. This catches the whole class of "accidentally serial"
         regressions."""
         keywords_table = MagicMock()
-        keywords_table.scan.return_value = {
+        keywords_table.query.return_value = {
             'Items': [{'keyword': f'kw{i}'} for i in range(3)]
         }
         fake_resource = MagicMock()
@@ -173,7 +173,7 @@ class TestGetAllKeywordsTrendsParallelFanOut:
         capped — otherwise we'd spawn 20+ threads and overshoot DynamoDB RCU.
         """
         keywords_table = MagicMock()
-        keywords_table.scan.return_value = {
+        keywords_table.query.return_value = {
             'Items': [{'keyword': f'kw{i}'} for i in range(20)]
         }
         fake_resource = MagicMock()
@@ -194,7 +194,7 @@ class TestGetAllKeywordsTrendsParallelFanOut:
         """With fewer keywords than `_TRENDS_MAX_WORKERS`, size to keyword
         count. No point spinning up 10 threads for 3 items."""
         keywords_table = MagicMock()
-        keywords_table.scan.return_value = {
+        keywords_table.query.return_value = {
             'Items': [{'keyword': f'kw{i}'} for i in range(3)]
         }
         fake_resource = MagicMock()
@@ -213,7 +213,7 @@ class TestGetAllKeywordsTrendsParallelFanOut:
     def test_returns_empty_payload_when_no_keywords(self) -> None:
         """Empty keyword set must not spin up the pool or fail."""
         keywords_table = MagicMock()
-        keywords_table.scan.return_value = {'Items': []}
+        keywords_table.query.return_value = {'Items': []}
         fake_resource = MagicMock()
         fake_resource.Table.return_value = keywords_table
 
@@ -232,7 +232,7 @@ class TestGetAllKeywordsTrendsParallelFanOut:
         non-deterministic. The output must still cover every input keyword
         (sorting by current_score is applied at the end)."""
         keywords_table = MagicMock()
-        keywords_table.scan.return_value = {
+        keywords_table.query.return_value = {
             'Items': [{'keyword': f'kw{i}'} for i in range(5)]
         }
         fake_resource = MagicMock()
@@ -249,7 +249,7 @@ class TestGetAllKeywordsTrendsParallelFanOut:
     def test_caps_fan_out_at_twenty_keywords(self) -> None:
         """Dashboard breadth cap — unchanged from the serial implementation."""
         keywords_table = MagicMock()
-        keywords_table.scan.return_value = {
+        keywords_table.query.return_value = {
             'Items': [{'keyword': f'kw{i}'} for i in range(50)]
         }
         fake_resource = MagicMock()
@@ -272,7 +272,7 @@ class TestGetAllKeywordsTrendsParallelFanOut:
         """If `_fetch_keyword_items` returns [] for one keyword (its own
         try/except caught the error), the others still produce trends."""
         keywords_table = MagicMock()
-        keywords_table.scan.return_value = {
+        keywords_table.query.return_value = {
             'Items': [{'keyword': f'kw{i}'} for i in range(3)]
         }
         fake_resource = MagicMock()

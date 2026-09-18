@@ -1740,6 +1740,8 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
         DYNAMODB_TABLE_CRAWLED_CONTENT: crawledContentTable.tableName,
+        // /citations resolves group_id / keyword_ids scopes against the keywords table.
+        DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
         // Legacy names, dropped once rollout verified.
         CITATIONS_TABLE: citationsTable.tableName,
         SEARCH_RESULTS_TABLE: searchResultsTable.tableName,
@@ -1763,6 +1765,8 @@ export class CitationAnalysisStack extends cdk.Stack {
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
+        // group_id / keyword_ids scopes resolve against the keywords table.
+        DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
       },
     });
 
@@ -1898,6 +1902,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     searchResultsTable.grantReadData(citationsContentFunction);
     brandConfigTable.grantReadData(citationsContentFunction);
     crawledContentTable.grantReadData(citationsContentFunction);
+    keywordsTable.grantReadData(citationsContentFunction);
     screenshotsBucket.grantRead(citationsContentFunction);
     rawResponsesBucket.grantRead(citationsContentFunction);
 
@@ -1974,6 +1979,7 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     searchResultsTable.grantReadData(getBrandMentionsFunction);
     brandConfigTable.grantReadData(getBrandMentionsFunction);
+    keywordsTable.grantReadData(getBrandMentionsFunction);
 
     // ========================================
     // Persona Rankings API

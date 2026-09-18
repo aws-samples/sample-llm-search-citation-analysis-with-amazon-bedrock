@@ -9,6 +9,71 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.4.0] - 2026-09-18
+
+Group KPIs: every visibility view and report can be scoped to a keyword group
+(a hotel), to all keywords, or to one keyword — with one score, share of voice
+and coverage for the group, its history, the per-keyword table and Excel export.
+
+### Added
+
+- **Report scopes.** `/api/visibility`, `/api/trends`, `/api/brand-mentions`,
+  `/api/citations`, `/api/citation-gaps` and `/api/reports/overview` accept
+  exactly one of `keyword=`, `group_id=`, `keyword_ids=` (comma-separated, max
+  100) or `scope=all`. Scopes resolve server-side to the active keywords
+  (`shared/scope_params.py` + `shared/keyword_groups.resolve_scope`) and the
+  answer echoes a `scope` block (`kind`, `label`, `keyword_count`).
+- **Group visibility summary** (`/api/visibility?group_id=`): per-keyword
+  metrics computed in parallel with projected queries (no LLM text), then
+  averaged over the keywords that have data — mean first-party and competitor
+  visibility, *averaged* share of voice, coverage rate (% of keywords where a
+  first-party brand is mentioned), provider coverage — plus a per-keyword
+  breakdown and a brand ranking across the group's keywords (mean score,
+  `keyword_count`). Formulas live in `shared/visibility_score.py`
+  (`calculate_share_of_voice`, `summarize_group_visibility`,
+  `aggregate_brands_across_keywords`).
+- **Group history** (`/api/trends?group_id=`): `trend_data` becomes the
+  per-bucket mean first-party score across the group's keywords (with
+  `keywords_with_data` per bucket) alongside the existing `keyword_trends` /
+  `overall`; the same `trend_direction` / `summary` block as a single keyword.
+- `/api/brand-mentions?group_id=` aggregates the latest run of every keyword
+  (distinct providers, summed mentions, best rank, `keyword_count`, `keywords`
+  per brand); `/api/citations?group_id=` queries one partition per keyword
+  instead of scanning the table; `/api/citation-gaps?group_id=` and
+  `/api/reports/overview?group_id=` fan out over the group's keywords.
+- Dashboard: a scope selector (All keywords / Keyword groups / Keywords) on
+  Visibility, Brand Mentions and Citation Gaps. Visibility gets a **Group
+  overview**: KPI cards, group history with a 7 / 30 / 90-day range, sortable
+  per-keyword table, brand ranking across the scope and **Export to Excel**
+  (Summary, Keywords, Brands, History sheets). Reports: Brand Visibility
+  (`/reports/visibility?group=<id>`) and Executive Summary
+  (`/reports/executive-summary?group=<id>`) take a group scope.
+- Keyword Research results table: **Export to Excel** (current filter and
+  sort order).
+
+### Changed
+
+- The unscoped "all keywords" paths of `/trends`, `/citation-gaps` and
+  `/reports/overview` cover the *active* keywords (StatusIndex) instead of a
+  raw table scan, and `/visibility` no longer requires `keyword`
+  (400 without any scope). The single-keyword payloads are unchanged.
+- `/visibility` and `/trends` read projected rows (`timestamp, provider,
+  brands`) and follow pagination; the group fan-out uses up to 10 parallel
+  queries and covers at most 100 keywords (`keywords_truncated: true` beyond).
+- `CitationAnalysis-API-CitationsContent` and `CitationAnalysis-API-GetBrandMentions`
+  gain read access to the Keywords table to resolve scopes.
+
+### Fixed
+
+- Every `ModelRole.ANALYSIS` Bedrock call (recommendations, brand expansion,
+  competitor discovery, the search self-reflection pass) failed on the
+  balanced and quality tiers: Anthropic's extended thinking is only accepted
+  with `temperature` 1 and a `maxTokens` above the thinking budget, but the
+  callers passed `temperature=0`, so Bedrock answered a `ValidationException`
+  and each feature quietly fell back to its no-LLM path.
+  `shared.models.invoke_bedrock` now forces `temperature: 1` and
+  `maxTokens = max_tokens + budget` whenever a thinking budget is set.
+
 ## [2.3.1] - 2026-09-18
 
 ### Fixed

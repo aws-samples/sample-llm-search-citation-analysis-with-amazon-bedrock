@@ -1,3 +1,4 @@
+import type { ReportScopeInfo } from './baseTypes';
 /**
  * Brand-related types for brand mentions, visibility, and configuration.
  */
@@ -62,6 +63,9 @@ export interface AggregatedBrand {
   classification: BrandClassification;
   providers: string[];
   appearances: BrandAppearance[];
+  /** Distinct keywords mentioning the brand (2.4.0; meaningful for group answers). */
+  keyword_count?: number;
+  keywords?: string[];
 }
 
 /**
@@ -90,9 +94,15 @@ export interface BrandConfig {
  * Complete brand mentions response from the API.
  */
 export interface BrandMentionsResponse {
-  keyword: string;
-  timestamp: string;
+  /** Null for a group / all answer, which has no single keyword. */
+  keyword: string | null;
+  timestamp: string | null;
+  /** Present on group / all answers. */
+  scope?: ReportScopeInfo;
+  keywords_analyzed?: number;
+  keywords_with_data?: number;
   config: BrandConfig | null;
+  /** Per-provider responses; empty for a group / all answer. */
   by_provider: ProviderBrandData[];
   aggregated: {
     brands: AggregatedBrand[];

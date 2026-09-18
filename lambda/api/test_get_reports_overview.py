@@ -107,9 +107,9 @@ def _load_overview_module():
     # Pre-fill the lazy cache with our fakes so the production
     # _load_sibling code path is never exercised in tests.
     mod._sibling_cache['trends'] = (
-        lambda config, period='day', days=30: DEFAULT_FAKE_TRENDS
+        lambda config, period='day', days=30, scope=None: DEFAULT_FAKE_TRENDS
     )
-    mod._sibling_cache['recs'] = lambda config: DEFAULT_FAKE_RECS
+    mod._sibling_cache['recs'] = lambda config, keywords=None: DEFAULT_FAKE_RECS
     return mod
 
 
@@ -172,7 +172,7 @@ def test_build_overview_derives_previous_score_from_overall_minus_change(overvie
 
 
 def test_build_overview_marks_trend_direction_improving_when_avg_change_strongly_positive(overview_mod):
-    overview_mod._sibling_cache['trends'] = lambda c, period='day', days=30: {
+    overview_mod._sibling_cache['trends'] = lambda c, period='day', days=30, scope=None: {
         'keywords_analyzed': 1,
         'keyword_trends': [{
             'keyword': 'x', 'trend_direction': 'improving',
@@ -188,7 +188,7 @@ def test_build_overview_marks_trend_direction_improving_when_avg_change_strongly
 
 
 def test_build_overview_marks_trend_direction_declining_when_avg_change_strongly_negative(overview_mod):
-    overview_mod._sibling_cache['trends'] = lambda c, period='day', days=30: {
+    overview_mod._sibling_cache['trends'] = lambda c, period='day', days=30, scope=None: {
         'keywords_analyzed': 1,
         'keyword_trends': [{
             'keyword': 'x', 'trend_direction': 'declining',
@@ -228,7 +228,7 @@ def test_build_overview_returns_iso_generated_at_with_zulu(overview_mod):
 
 
 def test_build_overview_handles_empty_keyword_trends(overview_mod):
-    overview_mod._sibling_cache['trends'] = lambda c, period='day', days=30: {
+    overview_mod._sibling_cache['trends'] = lambda c, period='day', days=30, scope=None: {
         'keywords_analyzed': 0, 'keyword_trends': [], 'overall': {},
     }
     result = overview_mod.build_overview({}, period='day', days=30, top=3)
@@ -239,7 +239,7 @@ def test_build_overview_handles_empty_keyword_trends(overview_mod):
 
 def test_build_overview_returns_zero_change_percent_when_previous_score_is_zero(overview_mod):
     # If previous_score derives to 0, change_percent should not divide by zero.
-    overview_mod._sibling_cache['trends'] = lambda c, period='day', days=30: {
+    overview_mod._sibling_cache['trends'] = lambda c, period='day', days=30, scope=None: {
         'keywords_analyzed': 0, 'keyword_trends': [], 'overall': {'avg_score': 0},
     }
     result = overview_mod.build_overview({}, period='day', days=30, top=3)

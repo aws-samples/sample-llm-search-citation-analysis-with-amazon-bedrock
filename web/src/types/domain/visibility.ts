@@ -1,4 +1,5 @@
 import type { BrandClassification } from './brands';
+import type { ReportScopeInfo } from './baseTypes';
 
 export interface BrandVisibilityMetric {
   name: string;
@@ -27,6 +28,70 @@ export interface VisibilityMetricsResponse {
     first_party_total_sov: number;
     competitor_total_sov: number;
   };
+}
+
+/** A brand ranked across the keywords of a group (`/visibility?group_id=`). */
+export interface GroupBrandVisibilityMetric {
+  name: string;
+  classification: BrandClassification;
+  /** Mean visibility over the keywords the brand appears on. */
+  visibility_score: number;
+  share_of_voice: number;
+  provider_count: number;
+  providers: string[];
+  total_mentions: number;
+  best_rank: number | null;
+  /** How many of the group's keywords mention the brand. */
+  keyword_count: number;
+}
+
+/** One keyword's line in a group visibility summary. */
+export interface KeywordVisibilityRow {
+  keyword: string;
+  has_data: boolean;
+  timestamp: string | null;
+  first_party_score: number;
+  competitor_score: number;
+  first_party_sov: number;
+  competitor_sov: number;
+  first_party_providers: number;
+  total_mentions: number;
+  first_party_mentioned: boolean;
+}
+
+/**
+ * Group summary answered by `/visibility` for `group_id=`, `keyword_ids=` or
+ * `scope=all`: per-keyword metrics averaged over the keywords with data.
+ */
+export interface GroupVisibilityResponse {
+  scope: ReportScopeInfo;
+  timestamp: string | null;
+  total_providers: number;
+  /** True when the scope had more keywords than the summary covers (100). */
+  keywords_truncated?: boolean;
+  keywords_analyzed: number;
+  keywords_with_data: number;
+  keywords: KeywordVisibilityRow[];
+  brands: GroupBrandVisibilityMetric[];
+  first_party: GroupBrandVisibilityMetric[];
+  competitors: GroupBrandVisibilityMetric[];
+  others: GroupBrandVisibilityMetric[];
+  summary: {
+    first_party_avg_score: number;
+    competitor_avg_score: number;
+    first_party_avg_sov: number;
+    competitor_avg_sov: number;
+    /** % of keywords (with data) where a first-party brand is mentioned. */
+    coverage_rate: number;
+    /** Mean share of enabled providers mentioning a first-party brand. */
+    provider_coverage: number;
+  };
+}
+
+export type VisibilityResponse = VisibilityMetricsResponse | GroupVisibilityResponse;
+
+export function isGroupVisibilityResponse(data: VisibilityResponse): data is GroupVisibilityResponse {
+  return 'scope' in data && 'keywords' in data;
 }
 
 export interface PromptBrandData {
@@ -89,6 +154,7 @@ export interface DomainGapSummary {
 
 export interface CitationGapsResponse {
   keyword?: string;
+  scope?: ReportScopeInfo;
   timestamp?: string;
   gaps: CitationGap[];
   covered_sources: CitationGap[];
@@ -168,9 +234,13 @@ export type PeriodType = 'day' | 'week' | 'month';
 
 export interface HistoricalTrendsResponse {
   keyword?: string;
+  /** Present on group / all answers. */
+  scope?: ReportScopeInfo;
+  keywords_truncated?: boolean;
   period_type: PeriodType;
   days_analyzed: number;
   data_points: number;
+  /** Single keyword: its series. Group: per-bucket mean across keywords. */
   trend_data: TrendDataPoint[];
   trend_direction: TrendDirection;
   summary: {

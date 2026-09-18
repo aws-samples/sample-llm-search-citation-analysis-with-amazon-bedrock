@@ -20,6 +20,7 @@ vi.mock('../infrastructure', async () => {
 });
 
 import { authenticatedFetch } from '../infrastructure';
+import type { ReportScope } from '../types';
 
 const mockAuthenticatedFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
 
@@ -40,6 +41,12 @@ const resolveWithMockResponse = (resolvePromise?: (value: unknown) => void) => {
     json: () => Promise.resolve(mockVisibilityResponse),
   });
 };
+
+
+const kw = (keyword: string): ReportScope => ({
+  kind: 'keyword',
+  keyword 
+});
 
 describe('useVisibilityMetrics', () => {
   beforeEach(() => {
@@ -71,7 +78,7 @@ describe('useVisibilityMetrics', () => {
       const { result } = renderHook(() => useVisibilityMetrics());
 
       act(() => {
-        result.current.fetchVisibilityMetrics('test keyword');
+        result.current.fetchVisibilityMetrics(kw('test keyword'));
       });
 
       expect(result.current.loading).toBe(true);
@@ -89,7 +96,7 @@ describe('useVisibilityMetrics', () => {
       const { result } = renderHook(() => useVisibilityMetrics());
 
       const fetchResult = await act(async () => {
-        return await result.current.fetchVisibilityMetrics('best hotels');
+        return await result.current.fetchVisibilityMetrics(kw('best hotels'));
       });
 
       expect(fetchResult).toStrictEqual(mockVisibilityResponse);
@@ -103,7 +110,7 @@ describe('useVisibilityMetrics', () => {
       const { result } = renderHook(() => useVisibilityMetrics());
 
       await act(async () => {
-        await result.current.fetchVisibilityMetrics('best hotels in paris');
+        await result.current.fetchVisibilityMetrics(kw('best hotels in paris'));
       });
 
       const firstCall = mockAuthenticatedFetch.mock.calls[0];
@@ -118,7 +125,7 @@ describe('useVisibilityMetrics', () => {
       const { result } = renderHook(() => useVisibilityMetrics());
 
       await act(async () => {
-        await result.current.fetchVisibilityMetrics('best hotels', 'MyHotel');
+        await result.current.fetchVisibilityMetrics(kw('best hotels'), undefined, 'MyHotel');
       });
 
       const firstCall = mockAuthenticatedFetch.mock.calls[0];
@@ -133,7 +140,7 @@ describe('useVisibilityMetrics', () => {
       const { result } = renderHook(() => useVisibilityMetrics());
 
       const fetchResult = await act(async () => {
-        return await result.current.fetchVisibilityMetrics('test');
+        return await result.current.fetchVisibilityMetrics(kw('test'));
       });
 
       expect(fetchResult).toBeNull();
@@ -147,7 +154,7 @@ describe('useVisibilityMetrics', () => {
       const { result } = renderHook(() => useVisibilityMetrics());
 
       await act(async () => {
-        await result.current.fetchVisibilityMetrics('test');
+        await result.current.fetchVisibilityMetrics(kw('test'));
       });
 
       expect(result.current.error).toBeTruthy();
@@ -159,7 +166,7 @@ describe('useVisibilityMetrics', () => {
       const { result } = renderHook(() => useVisibilityMetrics());
 
       await act(async () => {
-        await result.current.fetchVisibilityMetrics('test');
+        await result.current.fetchVisibilityMetrics(kw('test'));
       });
 
       expect(result.current.error).toBeTruthy();
@@ -173,13 +180,13 @@ describe('useVisibilityMetrics', () => {
       const { result } = renderHook(() => useVisibilityMetrics());
 
       await act(async () => {
-        await result.current.fetchVisibilityMetrics('test');
+        await result.current.fetchVisibilityMetrics(kw('test'));
       });
 
       expect(result.current.error).toBeTruthy();
 
       await act(async () => {
-        await result.current.fetchVisibilityMetrics('test');
+        await result.current.fetchVisibilityMetrics(kw('test'));
       });
 
       expect(result.current.error).toBeNull();
@@ -191,11 +198,11 @@ describe('useVisibilityMetrics', () => {
       const { result } = renderHook(() => useVisibilityMetrics());
 
       const returnedData = await act(async () => {
-        return await result.current.fetchVisibilityMetrics('test');
+        return await result.current.fetchVisibilityMetrics(kw('test'));
       });
 
       expect(returnedData).not.toBeNull();
-      expect(returnedData?.keyword).toBe('best hotels');
+      expect(returnedData && 'keyword' in returnedData ? returnedData.keyword : null).toBe('best hotels');
       expect(returnedData?.brands).toHaveLength(2);
     });
   });
@@ -208,10 +215,10 @@ describe('useVisibilityMetrics', () => {
       const { result } = renderHook(() => useVisibilityMetrics());
 
       act(() => {
-        result.current.fetchVisibilityMetrics('old keyword');
+        result.current.fetchVisibilityMetrics(kw('old keyword'));
       });
       act(() => {
-        result.current.fetchVisibilityMetrics('new keyword');
+        result.current.fetchVisibilityMetrics(kw('new keyword'));
       });
 
       expect(deferred.requests[0].signal?.aborted).toBe(true);
@@ -225,10 +232,10 @@ describe('useVisibilityMetrics', () => {
       const { result } = renderHook(() => useVisibilityMetrics());
 
       act(() => {
-        result.current.fetchVisibilityMetrics('old keyword');
+        result.current.fetchVisibilityMetrics(kw('old keyword'));
       });
       act(() => {
-        result.current.fetchVisibilityMetrics('best hotels');
+        result.current.fetchVisibilityMetrics(kw('best hotels'));
       });
 
       await act(async () => {

@@ -19,8 +19,16 @@ vi.mock('../infrastructure', async () => {
 });
 
 import { authenticatedFetch } from '../infrastructure';
+import type { ReportScope } from '../types';
+import { ALL_SCOPE } from '../components/ui/reportScope';
 
 const mockAuthenticatedFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
+
+
+const kw = (keyword: string): ReportScope => ({
+  kind: 'keyword',
+  keyword 
+});
 
 describe('useHistoricalTrends', () => {
   beforeEach(() => {
@@ -56,7 +64,7 @@ describe('useHistoricalTrends', () => {
 
       const fetchResult: { value: typeof mockSingleKeywordResponse | null } = { value: null };
       await act(async () => {
-        fetchResult.value = await result.current.fetchHistoricalTrends('best hotels');
+        fetchResult.value = await result.current.fetchHistoricalTrends(kw('best hotels'));
       });
 
       expect(fetchResult.value?.keyword).toBe('best hotels');
@@ -70,7 +78,7 @@ describe('useHistoricalTrends', () => {
       const { result } = renderHook(() => useHistoricalTrends());
 
       await act(async () => {
-        await result.current.fetchHistoricalTrends('best hotels');
+        await result.current.fetchHistoricalTrends(kw('best hotels'));
       });
 
       const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
@@ -83,7 +91,7 @@ describe('useHistoricalTrends', () => {
       const { result } = renderHook(() => useHistoricalTrends());
 
       await act(async () => {
-        await result.current.fetchHistoricalTrends();
+        await result.current.fetchHistoricalTrends(ALL_SCOPE);
       });
 
       const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
@@ -96,7 +104,7 @@ describe('useHistoricalTrends', () => {
       const { result } = renderHook(() => useHistoricalTrends());
 
       await act(async () => {
-        await result.current.fetchHistoricalTrends('test', 'week');
+        await result.current.fetchHistoricalTrends(kw('test'), 'week');
       });
 
       const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
@@ -109,7 +117,7 @@ describe('useHistoricalTrends', () => {
       const { result } = renderHook(() => useHistoricalTrends());
 
       await act(async () => {
-        await result.current.fetchHistoricalTrends('test', 'day', 60);
+        await result.current.fetchHistoricalTrends(kw('test'), 'day', 60);
       });
 
       const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
@@ -122,7 +130,7 @@ describe('useHistoricalTrends', () => {
       const { result } = renderHook(() => useHistoricalTrends());
 
       await act(async () => {
-        await result.current.fetchHistoricalTrends('test');
+        await result.current.fetchHistoricalTrends(kw('test'));
       });
 
       const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
@@ -135,7 +143,7 @@ describe('useHistoricalTrends', () => {
       const { result } = renderHook(() => useHistoricalTrends());
 
       await act(async () => {
-        await result.current.fetchHistoricalTrends('test');
+        await result.current.fetchHistoricalTrends(kw('test'));
       });
 
       const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
@@ -161,7 +169,7 @@ describe('useHistoricalTrends', () => {
       const { result } = renderHook(() => useHistoricalTrends());
 
       act(() => { 
-        result.current.fetchHistoricalTrends('test'); 
+        result.current.fetchHistoricalTrends(kw('test')); 
       });
       expect(result.current.loading).toBe(true);
 
@@ -184,7 +192,7 @@ describe('useHistoricalTrends', () => {
       const { result } = renderHook(() => useHistoricalTrends());
 
       await act(async () => {
-        await result.current.fetchHistoricalTrends('test');
+        await result.current.fetchHistoricalTrends(kw('test'));
       });
 
       expect(result.current.error).toBeTruthy();
@@ -197,7 +205,7 @@ describe('useHistoricalTrends', () => {
       const { result } = renderHook(() => useHistoricalTrends());
 
       await act(async () => {
-        await result.current.fetchHistoricalTrends('test');
+        await result.current.fetchHistoricalTrends(kw('test'));
       });
 
       expect(result.current.error).toBeTruthy();
@@ -209,7 +217,7 @@ describe('useHistoricalTrends', () => {
       const { result } = renderHook(() => useHistoricalTrends());
 
       await act(async () => {
-        await result.current.fetchHistoricalTrends('test');
+        await result.current.fetchHistoricalTrends(kw('test'));
       });
 
       expect(result.current.error).toBeTruthy();
@@ -222,7 +230,7 @@ describe('useHistoricalTrends', () => {
 
       const fetchResult: { value: typeof mockSingleKeywordResponse | null } = { value: null };
       await act(async () => {
-        fetchResult.value = await result.current.fetchHistoricalTrends('test');
+        fetchResult.value = await result.current.fetchHistoricalTrends(kw('test'));
       });
 
       expect(fetchResult.value).toBeNull();
@@ -236,12 +244,12 @@ describe('useHistoricalTrends', () => {
       const { result } = renderHook(() => useHistoricalTrends());
 
       await act(async () => {
-        await result.current.fetchHistoricalTrends('test');
+        await result.current.fetchHistoricalTrends(kw('test'));
       });
       expect(result.current.error).toBeTruthy();
 
       await act(async () => {
-        await result.current.fetchHistoricalTrends('test');
+        await result.current.fetchHistoricalTrends(kw('test'));
       });
       expect(result.current.error).toBeNull();
     });

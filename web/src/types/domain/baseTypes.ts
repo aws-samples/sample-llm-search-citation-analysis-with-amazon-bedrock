@@ -73,6 +73,29 @@ export type AnalysisScope =
     keyword_ids: string[] 
   };
 
+/**
+ * What a KPI view or report covers. Serialised to the read endpoints' scope
+ * query parameters (`keyword=`, `group_id=`, `scope=all`) by
+ * `reportScopeParams`; resolved server-side against the active keywords.
+ */
+export type ReportScope =
+  | { kind: 'all' }
+  | {
+    kind: 'group';
+    groupId: string 
+  }
+  | {
+    kind: 'keyword';
+    keyword: string 
+  };
+
+/** The `scope` block the read endpoints echo back for a group / all answer. */
+export interface ReportScopeInfo {
+  kind: 'all' | 'group' | 'keywords' | 'keyword';
+  label: string;
+  keyword_count: number;
+}
+
 export interface KeywordExtended extends Keyword {
   region?: string;
   language?: string;

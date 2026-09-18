@@ -19,8 +19,15 @@ vi.mock('../infrastructure', async () => {
 });
 
 import { authenticatedFetch } from '../infrastructure';
+import type { ReportScope } from '../types';
 
 const mockAuthenticatedFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
+
+
+const kw = (keyword: string): ReportScope => ({
+  kind: 'keyword',
+  keyword 
+});
 
 describe('useBrandMentions', () => {
   beforeEach(() => {
@@ -42,7 +49,7 @@ describe('useBrandMentions', () => {
   it('fetches brand mentions when keyword provided', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
 
-    const { result } = renderHook(() => useBrandMentions('test keyword'));
+    const { result } = renderHook(() => useBrandMentions(kw('test keyword')));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -53,23 +60,23 @@ describe('useBrandMentions', () => {
   it('encodes keyword in URL', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
 
-    renderHook(() => useBrandMentions('best hotels in paris'));
+    renderHook(() => useBrandMentions(kw('best hotels in paris')));
 
     await waitFor(() => {
       expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-        expect.stringContaining('best%20hotels%20in%20paris'),
+        expect.stringContaining('keyword=best+hotels+in+paris'),
         expect.any(Object)
       );
     });
 
     const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-    expect(url).toContain('keyword=best%20hotels%20in%20paris');
+    expect(url).toContain('keyword=best+hotels+in+paris');
   });
 
   it('includes classification filter in URL when provided', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
 
-    renderHook(() => useBrandMentions('test', 'first_party'));
+    renderHook(() => useBrandMentions(kw('test'), 'first_party'));
 
     await waitFor(() => {
       expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
@@ -85,7 +92,7 @@ describe('useBrandMentions', () => {
   it('sets error when fetch fails', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
 
-    const { result } = renderHook(() => useBrandMentions('test'));
+    const { result } = renderHook(() => useBrandMentions(kw('test')));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -99,7 +106,7 @@ describe('useBrandMentions', () => {
     const {
       result, rerender 
     } = renderHook(
-      ({ keyword }) => useBrandMentions(keyword),
+      ({ keyword }) => useBrandMentions(kw(keyword)),
       { initialProps: { keyword: 'keyword1' } }
     );
 
@@ -122,7 +129,7 @@ describe('useBrandMentions', () => {
     } = renderHook(
       ({
         keyword, filter 
-      }) => useBrandMentions(keyword, filter),
+      }) => useBrandMentions(kw(keyword), filter),
       {
         initialProps: {
           keyword: 'test',
@@ -150,7 +157,7 @@ describe('useBrandMentions', () => {
     // Create a promise that never resolves
     mockAuthenticatedFetch.mockImplementation(() => new Promise(vi.fn()));
 
-    const { unmount } = renderHook(() => useBrandMentions('test'));
+    const { unmount } = renderHook(() => useBrandMentions(kw('test')));
 
     unmount();
 
@@ -164,7 +171,7 @@ describe('useBrandMentions', () => {
     const {
       result, rerender 
     } = renderHook(
-      ({ keyword }) => useBrandMentions(keyword),
+      ({ keyword }) => useBrandMentions(keyword === null ? null : kw(keyword)),
       { initialProps: { keyword: 'test' as string | null } }
     );
 
@@ -181,7 +188,7 @@ describe('useBrandMentions', () => {
       resolveRef.current = resolve;
     }));
 
-    const { result } = renderHook(() => useBrandMentions('test'));
+    const { result } = renderHook(() => useBrandMentions(kw('test')));
 
     expect(result.current.loading).toBe(true);
 

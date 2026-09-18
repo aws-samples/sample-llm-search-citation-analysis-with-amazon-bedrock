@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useCitationGaps } from '../../../hooks/useCitationGaps';
 import { useContentStudio } from '../../../hooks/useContentStudio';
 import { useReportReady } from '../layout/useReportReady';
+import { ALL_SCOPE } from '../../ui/reportScope';
 
 const CITATION_GAPS_LIMIT = 50;
 
@@ -30,7 +31,7 @@ export function useContentActionPlan() {
   } = studio;
 
   useEffect(() => {
-    fetchCitationGaps(undefined, CITATION_GAPS_LIMIT);
+    fetchCitationGaps(ALL_SCOPE, CITATION_GAPS_LIMIT);
     fetchIdeas();
     fetchHistory();
   }, [fetchCitationGaps, fetchIdeas, fetchHistory]);

@@ -22,6 +22,26 @@ vi.mock('../../hooks/useBrandConfig', () => ({
   })),
 }));
 
+vi.mock('../../hooks/useKeywordGroups', () => ({
+  useKeywordGroups: vi.fn(() => ({
+    groups: [{
+      id: 'group-coruna',
+      name: 'Hotel Coruña',
+      description: '',
+      keyword_count: 1,
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    }],
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    createGroup: vi.fn(),
+    renameGroup: vi.fn(),
+    removeGroup: vi.fn(),
+    changeMemberships: vi.fn(),
+  })),
+}));
+
 const mockKeywords = [
   {
     id: '1',
@@ -40,14 +60,21 @@ describe('BrandsView', () => {
     expect(document.body).toBeTruthy();
   });
 
-  it('renders keyword selector title', () => {
+  it('renders the scope panel title', () => {
     render(<BrandsView keywords={mockKeywords} />);
-    expect(screen.getByText('Select a Keyword')).toBeInTheDocument();
+    expect(screen.getByText('What to look at')).toBeInTheDocument();
   });
 
-  it('renders keyword button', () => {
+  it('offers the keyword, its group and all keywords as scopes', () => {
     render(<BrandsView keywords={mockKeywords} />);
-    expect(screen.getByText('hotels')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'hotels' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Hotel Coruña (1)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'All keywords' })).toBeInTheDocument();
+  });
+
+  it('asks to pick a scope before showing mentions', () => {
+    render(<BrandsView keywords={mockKeywords} />);
+    expect(screen.getByText('Pick a scope above to view brand mentions')).toBeInTheDocument();
   });
 
   it('shows no keywords message when empty', () => {

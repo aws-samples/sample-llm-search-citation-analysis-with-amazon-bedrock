@@ -25,8 +25,9 @@ from boto3.dynamodb.conditions import Key
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import success_response
+from shared.api_response import success_response, validation_error
 from shared.constants import (
+    MAX_KEYWORD_LENGTH,
     TREND_DIRECTION_DECLINING_SLOPE,
     TREND_DIRECTION_IMPROVING_SLOPE,
     UNRANKED_SENTINEL,
@@ -34,13 +35,24 @@ from shared.constants import (
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.providers import get_enabled_provider_count
+from shared.scope_params import ReportScope, all_active_scope, parse_scope_params
 from shared.utils import brand_names_match, get_brand_config, utc_now
-from shared.visibility_score import calculate_sentiment_agnostic_visibility_score
+from shared.visibility_score import calculate_sentiment_agnostic_visibility_score, mean
 
 # Bounded parallelism for the per-keyword trend fan-out. 10 workers keeps the
 # DynamoDB RCU pressure reasonable on the SearchResults table while collapsing
 # 20 sequential queries into ~2 rounds of parallel work.
 _TRENDS_MAX_WORKERS = 10
+
+# Fan-out ceilings. The unscoped dashboard keeps its historical breadth of 20
+# keywords; an explicit group / id scope may cover up to 100 (the
+# `keyword_ids` cap), which fits the 29s API budget with projected queries.
+_ALL_KEYWORDS_CAP = 20
+_SCOPE_KEYWORDS_CAP = 100
+
+# Only the fields the buckets use; the LLM response text stays in the table.
+_TREND_PROJECTION = '#ts, provider, brands'
+_TREND_PROJECTION_NAMES = {'#ts': 'timestamp'}
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -49,7 +61,11 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
-KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')  # Optional for fallback
+KEYWORDS_TABLE = (
+    os.environ.get('DYNAMODB_TABLE_KEYWORDS')
+    or os.environ.get('KEYWORDS_TABLE')
+    or 'CitationAnalysis-Keywords'
+)
 
 
 def get_trend_direction(values: list[float]) -> str:
@@ -178,8 +194,19 @@ def _fetch_keyword_items(keyword: str) -> list[dict]:
     """
     try:
         table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-        response = table.query(KeyConditionExpression=Key('keyword').eq(keyword))
-        return response.get('Items', [])
+        params: dict[str, Any] = {
+            'KeyConditionExpression': Key('keyword').eq(keyword),
+            'ProjectionExpression': _TREND_PROJECTION,
+            'ExpressionAttributeNames': _TREND_PROJECTION_NAMES,
+        }
+        items: list[dict] = []
+        while True:
+            response = table.query(**params)
+            items.extend(response.get('Items', []))
+            last_key = response.get('LastEvaluatedKey')
+            if not last_key:
+                return items
+            params['ExclusiveStartKey'] = last_key
     except Exception as e:
         logger.error(f"Error fetching trend items for keyword {keyword!r}: {e}")
         return []
@@ -217,11 +244,23 @@ def _build_trend_from_items(
     # Aggregate by period
     trend_data = aggregate_by_period(filtered_items, period, config)
 
-    # Calculate trend direction
+    return {
+        'keyword': keyword,
+        'period_type': period,
+        'days_analyzed': days,
+        **summarize_series(trend_data),
+    }
+
+
+def summarize_series(trend_data: list[dict[str, Any]]) -> dict[str, Any]:
+    """Direction, period-over-period change and averages of one score series.
+
+    Shared by the single-keyword payload and the group series so both are
+    read the same way by the charts.
+    """
     scores = [d['visibility_score'] for d in trend_data]
     trend_direction = get_trend_direction(scores)
 
-    # Calculate period-over-period change
     if len(trend_data) >= 2:
         current = trend_data[-1]['visibility_score']
         previous = trend_data[-2]['visibility_score']
@@ -231,15 +270,7 @@ def _build_trend_from_items(
         change = 0
         change_pct = 0
 
-    # Calculate averages
-    avg_score = round(sum(scores) / len(scores), 1) if scores else 0
-    max_score = max(scores) if scores else 0
-    min_score = min(scores) if scores else 0
-
     return {
-        'keyword': keyword,
-        'period_type': period,
-        'days_analyzed': days,
         'data_points': len(trend_data),
         'trend_data': trend_data,
         'trend_direction': trend_direction,
@@ -248,11 +279,46 @@ def _build_trend_from_items(
             'previous_score': trend_data[-2]['visibility_score'] if len(trend_data) >= 2 else 0,
             'change': change,
             'change_percent': change_pct,
-            'average_score': avg_score,
-            'max_score': max_score,
-            'min_score': min_score
-        }
+            'average_score': round(mean(scores), 1),
+            'max_score': max(scores) if scores else 0,
+            'min_score': min(scores) if scores else 0,
+        },
     }
+
+
+def build_group_series(trends: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Per-bucket mean of the first-party score across keywords.
+
+    A bucket's score averages only the keywords that have data in that
+    bucket; mentions and analysis runs are summed, provider count is the
+    widest coverage any keyword reached.
+    """
+    buckets: dict[str, dict[str, Any]] = {}
+    for trend in trends:
+        for point in trend.get('trend_data', []):
+            bucket = buckets.setdefault(point['period'], {
+                'scores': [], 'total_mentions': 0, 'provider_count': 0, 'best_rank': None, 'analysis_runs': 0,
+            })
+            bucket['scores'].append(float(point.get('visibility_score', 0)))
+            bucket['total_mentions'] += int(point.get('total_mentions', 0))
+            bucket['provider_count'] = max(bucket['provider_count'], int(point.get('provider_count', 0)))
+            rank = point.get('best_rank')
+            if rank is not None and (bucket['best_rank'] is None or int(rank) < bucket['best_rank']):
+                bucket['best_rank'] = int(rank)
+            bucket['analysis_runs'] += int(point.get('analysis_runs', 0))
+
+    return [
+        {
+            'period': period,
+            'visibility_score': round(mean(bucket['scores']), 1),
+            'total_mentions': bucket['total_mentions'],
+            'provider_count': bucket['provider_count'],
+            'best_rank': bucket['best_rank'],
+            'analysis_runs': bucket['analysis_runs'],
+            'keywords_with_data': len(bucket['scores']),
+        }
+        for period, bucket in sorted(buckets.items())
+    ]
 
 
 def get_historical_trends(keyword: str, config: dict, period: str = 'day', days: int = 30) -> dict[str, Any]:
@@ -266,46 +332,44 @@ def get_historical_trends(keyword: str, config: dict, period: str = 'day', days:
     return _build_trend_from_items(keyword, items, config, period, days)
 
 
-def get_all_keywords_trends(config: dict, period: str = 'day', days: int = 30) -> dict[str, Any]:
-    """Get trend summary across all keywords.
+def _keywords_for_scope(scope: ReportScope | None) -> tuple[list[str], int]:
+    """Keyword texts to fan out over and the cap applied; active keywords only."""
+    resolved = scope if scope is not None else all_active_scope(dynamodb.Table(KEYWORDS_TABLE))
+    cap = _SCOPE_KEYWORDS_CAP if scope is not None else _ALL_KEYWORDS_CAP
+    return list(resolved.keywords), cap
+
+
+def get_all_keywords_trends(config: dict, period: str = 'day', days: int = 30, scope: ReportScope | None = None) -> dict[str, Any]:
+    """Trend summary across the active keywords of a scope (default: all).
 
     DynamoDB queries are parallelized across up to ``_TRENDS_MAX_WORKERS``
     workers to collapse the previous N sequential queries (audit item 16).
     Aggregation runs serially afterwards on the main thread — it's pure
     Python and the GIL makes threading unhelpful for that phase.
-    """
-    # Get keywords from the Keywords table instead of scanning SearchResults
-    # This is more efficient as Keywords table is small and purpose-built
-    keywords_table_name = os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    if keywords_table_name:
-        keywords_table = dynamodb.Table(keywords_table_name)
-        response = keywords_table.scan(
-            ProjectionExpression='keyword',
-            Limit=500
-        )
-        keywords = list(set(item.get('keyword', '') for item in response.get('Items', []) if item.get('keyword')))
-    else:
-        # Fallback to scanning SearchResults if Keywords table not configured
-        table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-        response = table.scan(ProjectionExpression='keyword', Limit=500)
-        keywords = list(set(item.get('keyword', '') for item in response.get('Items', []) if item.get('keyword')))
 
-    # Cap fan-out at 20 keywords — matches the previous behavior so the
-    # dashboard's perceived breadth doesn't change, and bounds DynamoDB
-    # RCU + Lambda CPU cost.
-    keywords_to_query = keywords[:20]
+    Besides the per-keyword `keyword_trends`, the payload carries the group
+    series (`trend_data`: per-bucket mean first-party score) with the same
+    `trend_direction` / `summary` block a single keyword has, so the group
+    overview charts it exactly like one keyword.
+    """
+    keywords, cap = _keywords_for_scope(scope)
+    keywords_to_query = keywords[:cap]
+    scope_block = scope.describe() if scope is not None else {'mode': 'all', 'kind': 'all', 'label': 'all active keywords', 'keyword_count': len(keywords)}
     if not keywords_to_query:
         return {
+            'scope': scope_block,
             'period_type': period,
             'days_analyzed': days,
             'keywords_analyzed': 0,
+            'keywords_truncated': False,
             'keyword_trends': [],
             'overall': {
                 'improving_count': 0,
                 'declining_count': 0,
                 'stable_count': 0,
                 'avg_score': 0,
-            }
+            },
+            **summarize_series([]),
         }
 
     # Phase 1: parallel DynamoDB queries.
@@ -330,10 +394,12 @@ def get_all_keywords_trends(config: dict, period: str = 'day', days: int = 30) -
 
     # Phase 2: CPU-bound aggregation, serial on the main thread.
     keyword_trends = []
+    full_trends = []
     for keyword in keywords_to_query:
         items = items_by_keyword.get(keyword, [])
         trend = _build_trend_from_items(keyword, items, config, period, days)
         if 'error' not in trend:
+            full_trends.append(trend)
             keyword_trends.append({
                 'keyword': keyword,
                 'trend_direction': trend['trend_direction'],
@@ -351,39 +417,61 @@ def get_all_keywords_trends(config: dict, period: str = 'day', days: int = 30) -
     stable = len([k for k in keyword_trends if k['trend_direction'] == 'stable'])
 
     return {
+        'scope': scope_block,
         'period_type': period,
         'days_analyzed': days,
         'keywords_analyzed': len(keyword_trends),
+        'keywords_truncated': len(keywords) > len(keywords_to_query),
         'keyword_trends': keyword_trends,
         'overall': {
             'improving_count': improving,
             'declining_count': declining,
             'stable_count': stable,
-            'avg_score': round(sum(k['current_score'] for k in keyword_trends) / len(keyword_trends), 1) if keyword_trends else 0
-        }
+            'avg_score': round(mean(k['current_score'] for k in keyword_trends), 1),
+        },
+        **summarize_series(build_group_series(full_trends)),
     }
 
 
 @api_handler
 @validate({
-    'keyword': {'type': str, 'max_length': 500},
+    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
+    'group_id': {'type': str, 'max_length': 64},
+    'keyword_ids': {'type': str, 'max_length': 8000},
+    'scope': {'type': str, 'choices': ['all']},
     'period': {'type': str, 'choices': ['day', 'week', 'month'], 'default': 'day'},
     'days': {'type': int, 'min': 1, 'max': 365, 'default': 30}
 })
-def handler(event: dict[str, Any], context: Any, keyword: str | None = None, period: str = 'day', days: int = 30) -> dict[str, Any]:
+def handler(
+    event: dict[str, Any],
+    context: Any,
+    keyword: str | None = None,
+    group_id: str | None = None,
+    keyword_ids: str | None = None,
+    scope: str | None = None,
+    period: str = 'day',
+    days: int = 30,
+) -> dict[str, Any]:
     """
     API handler for historical trends.
 
     Query params:
-        - keyword: Specific keyword (optional, returns all if not specified)
+        - keyword: one keyword (single-keyword payload)
+        - group_id / keyword_ids: a keyword group or id set (group series + per-keyword trends)
+        - neither: every active keyword (capped at 20)
         - period: 'day', 'week', or 'month' (default: day)
-        - days: Number of days to analyze (default: 30)
+        - days: Number of days to analyze (default: 30, max 365)
     """
-    config = get_brand_config()
+    report_scope, error = parse_scope_params(
+        {'keyword': keyword, 'group_id': group_id, 'keyword_ids': keyword_ids, 'scope': scope}, dynamodb.Table(KEYWORDS_TABLE)
+    )
+    if error:
+        return validation_error(error, event, 'scope')
 
-    if keyword:
-        result = get_historical_trends(keyword, config, period, days)
+    config = get_brand_config()
+    if report_scope is not None and report_scope.is_single_keyword:
+        result = get_historical_trends(report_scope.keywords[0], config, period, days)
     else:
-        result = get_all_keywords_trends(config, period, days)
+        result = get_all_keywords_trends(config, period, days, scope=report_scope)
 
     return success_response(result, event)

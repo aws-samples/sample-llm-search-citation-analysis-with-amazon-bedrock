@@ -1,5 +1,7 @@
 import { ApiRequestError } from '../infrastructure';
 import type { ReportsOverviewResponse } from '../api/reports';
+import type { ReportScope } from '../types';
+import { reportScopeParams } from '../components/ui/reportScope';
 import { useAnalysisEndpoint } from './useAnalysisEndpoint';
 
 function isReportsOverviewResponse(data: unknown): data is ReportsOverviewResponse {
@@ -21,8 +23,10 @@ const reportsOverviewEndpoint = {
     days = 30,
     period: 'day' | 'week' | 'month' = 'day',
     top = 3,
+    scope: ReportScope = { kind: 'all' },
   ) => {
     const params = new URLSearchParams({
+      ...reportScopeParams(scope),
       days: days.toString(),
       period,
       top: top.toString(),

@@ -6,21 +6,33 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CitationGaps } from './CitationGaps';
+import type { Keyword } from '../../types';
 
 vi.mock('../../hooks/useCitationGaps', () => ({useCitationGaps: vi.fn(),}));
+vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
 
 import { useCitationGaps } from '../../hooks/useCitationGaps';
+import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 
 const mockUseCitationGaps = useCitationGaps as ReturnType<typeof vi.fn>;
+const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
 
-function buildProps(overrides = {}) {
-  return {
-    keywords: [
-      { keyword: 'hotels' },
-      { keyword: 'resorts' },
-    ],
-    ...overrides,
-  };
+const KEYWORDS: Keyword[] = [
+  {
+    id: 'kw-1',
+    keyword: 'hotels',
+    created_at: '2026-01-01T00:00:00Z',
+    group_ids: ['group-coruna'] 
+  },
+  {
+    id: 'kw-2',
+    keyword: 'resorts',
+    created_at: '2026-01-02T00:00:00Z' 
+  },
+];
+
+function buildProps(overrides: { keywords?: Keyword[] } = {}) {
+  return {keywords: overrides.keywords ?? KEYWORDS,};
 }
 
 describe('CitationGaps', () => {
@@ -32,6 +44,23 @@ describe('CitationGaps', () => {
       error: null,
       fetchCitationGaps: vi.fn(),
     });
+    mockUseKeywordGroups.mockReturnValue({
+      groups: [{
+        id: 'group-coruna',
+        name: 'Hotel Coruña',
+        description: '',
+        keyword_count: 1,
+        created_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:00:00Z',
+      }],
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+      createGroup: vi.fn(),
+      renameGroup: vi.fn(),
+      removeGroup: vi.fn(),
+      changeMemberships: vi.fn(),
+    });
   });
 
   describe('initial render', () => {
@@ -42,11 +71,12 @@ describe('CitationGaps', () => {
       expect(screen.getByText(/Discover sources that AI cites/)).toBeInTheDocument();
     });
 
-    it('renders keyword filter with All Keywords option', () => {
+    it('renders the scope filter with all keywords, groups and keywords', () => {
       render(<CitationGaps {...buildProps()} />);
 
-      expect(screen.getByText('All Keywords')).toBeInTheDocument();
-      expect(screen.getByText('hotels')).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'All keywords' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'Hotel Coruña (1)' })).toBeInTheDocument();
+      expect(screen.getByRole('option', { name: 'hotels' })).toBeInTheDocument();
     });
 
     it('fetches gaps on mount', () => {
@@ -60,7 +90,7 @@ describe('CitationGaps', () => {
 
       render(<CitationGaps {...buildProps()} />);
 
-      expect(fetchCitationGaps).toHaveBeenCalledWith(undefined, 20);
+      expect(fetchCitationGaps).toHaveBeenCalledWith({ kind: 'all' }, 20);
     });
   });
 
@@ -170,9 +200,12 @@ describe('CitationGaps', () => {
       render(<CitationGaps {...buildProps()} />);
 
       const select = screen.getByRole('combobox');
-      await userEvent.selectOptions(select, 'hotels');
+      await userEvent.selectOptions(select, 'keyword:hotels');
 
-      expect(fetchCitationGaps).toHaveBeenCalledWith('hotels', 20);
+      expect(fetchCitationGaps).toHaveBeenCalledWith({
+        kind: 'keyword',
+        keyword: 'hotels' 
+      }, 20);
     });
   });
 });

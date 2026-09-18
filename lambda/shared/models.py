@@ -166,10 +166,19 @@ def invoke_bedrock(
         budget = tier_budget
 
     client = _get_bedrock_client()
+    inference_config = {"maxTokens": max_tokens, "temperature": temperature}
+    if budget > 0:
+        # Anthropic's extended thinking is only accepted with temperature 1
+        # ("`temperature` may only be set to 1 when thinking is enabled" —
+        # a ValidationException otherwise), and the thinking budget counts
+        # against maxTokens, which must exceed it. Every ANALYSIS caller
+        # passed temperature 0, so the balanced tier never answered and each
+        # feature quietly fell back to its no-LLM path.
+        inference_config = {"maxTokens": max_tokens + budget, "temperature": 1.0}
     request_kwargs: dict = {
         "modelId": model_id,
         "messages": [{"role": "user", "content": [{"text": prompt}]}],
-        "inferenceConfig": {"maxTokens": max_tokens, "temperature": temperature},
+        "inferenceConfig": inference_config,
     }
     if budget > 0:
         request_kwargs["additionalModelRequestFields"] = {

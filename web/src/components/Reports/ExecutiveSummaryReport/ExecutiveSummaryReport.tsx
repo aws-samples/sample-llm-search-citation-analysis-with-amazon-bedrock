@@ -1,5 +1,14 @@
+import {
+  useNavigate, useSearchParams 
+} from 'react-router-dom';
 import { usePrintMode } from '../../../hooks/usePrintMode';
+import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
 import { ReportLayout } from '../layout';
+import type { ReportScope } from '../../../types';
+import { KeywordScopeSelector } from '../../ui/KeywordScopeSelector';
+import {
+  ALL_SCOPE, describeReportScope 
+} from '../../ui/reportScope';
 import { useExecutiveSummary } from './useExecutiveSummary';
 import { HeadlineSection } from './sections/HeadlineSection';
 import { WinsAndGapsSection } from './sections/WinsAndGapsSection';
@@ -10,6 +19,7 @@ import { NextActionsSection } from './sections/NextActionsSection';
  * would print before a quarterly business review. Sources its data from
  * `/reports/overview`, the consolidated aggregator endpoint, so it
  * doesn't replicate cross-keyword aggregation logic on the client.
+ * `?group=<id>` narrows it to one keyword group (a hotel).
  *
  * Three sections, in this order:
  *   1. Headline — overall score, 30-day movement, breadth.
@@ -20,14 +30,36 @@ import { NextActionsSection } from './sections/NextActionsSection';
  * section 3 on the second (via `startNewPage` on NextActionsSection).
  */
 export function ExecutiveSummaryReport() {
-  const data = useExecutiveSummary();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const { groups } = useKeywordGroups();
+  const groupId = searchParams.get('group');
+  const scope: ReportScope = groupId ? {
+    kind: 'group',
+    groupId 
+  } : ALL_SCOPE;
+  const data = useExecutiveSummary(undefined, scope);
 
   usePrintMode({ ready: data.ready });
+
+  const subtitle = scope.kind === 'group'
+    ? `The one-page state of brand visibility for "${describeReportScope(scope, groups)}" across AI search engines.`
+    : 'The one-page state of brand visibility across AI search engines. For quarterly reviews and exec stand-ups.';
 
   return (
     <ReportLayout
       title="Executive Summary"
-      subtitle="The one-page state of brand visibility across AI search engines. For quarterly reviews and exec stand-ups."
+      subtitle={subtitle}
+      actions={(
+        <KeywordScopeSelector
+          keywords={[]}
+          groups={groups}
+          value={scope}
+          onChange={(next) => navigate(next.kind === 'group' ? `/reports/executive-summary?group=${encodeURIComponent(next.groupId)}` : '/reports/executive-summary')}
+          label="Scope"
+          className="min-w-[16rem]"
+        />
+      )}
     >
       <HeadlineSection
         data={data.data}

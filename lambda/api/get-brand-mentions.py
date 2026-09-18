@@ -8,6 +8,7 @@ Supports multiple industries and brand classification (first_party, competitor, 
 import logging
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import boto3
@@ -16,9 +17,11 @@ from boto3.dynamodb.conditions import Key
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import not_found_response, success_response
-from shared.decorators import api_handler, optional_provider, require_keyword, validate
+from shared.api_response import not_found_response, success_response, validation_error
+from shared.constants import MAX_KEYWORD_LENGTH
+from shared.decorators import api_handler, optional_provider, validate
 from shared.dynamo_decimal import to_int
+from shared.scope_params import ReportScope, parse_scope_params
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -28,6 +31,17 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+KEYWORDS_TABLE = (
+    os.environ.get('DYNAMODB_TABLE_KEYWORDS')
+    or os.environ.get('KEYWORDS_TABLE')
+    or 'CitationAnalysis-Keywords'
+)
+
+# Group aggregates fan out one projected Query per keyword (no LLM response
+# text), in parallel.
+_SCOPE_MAX_WORKERS = 10
+_SCOPE_PROJECTION = 'keyword, #ts, provider, brands, query_prompt_id'
+_SCOPE_PROJECTION_NAMES = {'#ts': 'timestamp'}
 
 
 def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -59,6 +73,7 @@ def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, An
                     'name': name,  # Keep original casing from first mention
                     'parent_company': brand.get('parent_company'),
                     'providers': [],
+                    'keywords': set(),
                     'total_mentions': 0,
                     'best_rank': to_int(brand.get('rank'), 999),
                     'classification': classification,
@@ -66,6 +81,8 @@ def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, An
                 }
 
             brand_scores[normalized_name]['providers'].append(provider)
+            if result.get('keyword'):
+                brand_scores[normalized_name]['keywords'].add(result['keyword'])
             brand_scores[normalized_name]['total_mentions'] += to_int(brand.get('mention_count'), 1)
             brand_scores[normalized_name]['best_rank'] = min(
                 brand_scores[normalized_name]['best_rank'],
@@ -90,6 +107,9 @@ def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, An
 
         brand_data['provider_count'] = provider_count
         brand_data['aggregate_score'] = score
+        # Distinct keywords mentioning the brand (meaningful for group scopes).
+        brand_data['keyword_count'] = len(brand_data['keywords'])
+        brand_data['keywords'] = sorted(brand_data['keywords'])
         aggregated.append(brand_data)
 
     # Sort by aggregate score
@@ -118,24 +138,94 @@ def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, An
     }
 
 
+def _latest_run_items(keyword: str, query_prompt_id: str | None, provider: str | None) -> list[dict[str, Any]]:
+    """The latest analysis run of one keyword (projected), persona/provider filtered."""
+    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
+    params: dict[str, Any] = {
+        'KeyConditionExpression': Key('keyword').eq(keyword),
+        'ProjectionExpression': _SCOPE_PROJECTION,
+        'ExpressionAttributeNames': _SCOPE_PROJECTION_NAMES,
+    }
+    items: list[dict[str, Any]] = []
+    while True:
+        response = table.query(**params)
+        items.extend(response.get('Items', []))
+        last_key = response.get('LastEvaluatedKey')
+        if not last_key:
+            break
+        params['ExclusiveStartKey'] = last_key
+    if not items:
+        return []
+    latest = max(item.get('timestamp', '') for item in items)
+    items = [item for item in items if item.get('timestamp') == latest]
+    if query_prompt_id:
+        items = [item for item in items if item.get('query_prompt_id', 'default') == query_prompt_id]
+    if provider:
+        items = [item for item in items if item.get('provider') == provider]
+    return items
+
+
+def get_scope_brand_mentions(
+    scope: ReportScope,
+    brand_config: dict[str, Any],
+    query_prompt_id: str | None,
+    provider: str | None,
+    classification: str | None,
+) -> dict[str, Any]:
+    """Brand mentions aggregated over the latest run of every keyword in the scope.
+
+    Providers are counted as distinct engines across keywords, mentions are
+    summed, `best_rank` is the best position on any keyword and
+    `keyword_count` says on how many keywords the brand appeared. The full
+    LLM responses (`by_provider`) are not part of a group answer.
+    """
+    keywords = list(scope.keywords)
+    per_keyword: list[list[dict[str, Any]]] = []
+    if keywords:
+        with ThreadPoolExecutor(max_workers=min(_SCOPE_MAX_WORKERS, len(keywords))) as pool:
+            per_keyword = list(pool.map(lambda keyword: _latest_run_items(keyword, query_prompt_id, provider), keywords))
+
+    items = [item for rows in per_keyword for item in rows]
+    aggregated = aggregate_brand_mentions(items, brand_config)
+    if classification:
+        aggregated['brands'] = [b for b in aggregated['brands'] if b.get('classification') == classification]
+
+    return {
+        'scope': scope.describe(),
+        'keyword': None,
+        'timestamp': max((item.get('timestamp', '') for item in items), default=None),
+        'keywords_analyzed': len(keywords),
+        'keywords_with_data': sum(1 for rows in per_keyword if rows),
+        'config': brand_config,
+        'by_provider': [],
+        'aggregated': aggregated,
+    }
+
+
 @api_handler
 @validate({
-    'keyword': require_keyword(),
+    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
+    'group_id': {'type': str, 'max_length': 64},
+    'keyword_ids': {'type': str, 'max_length': 8000},
+    'scope': {'type': str, 'choices': ['all']},
     'timestamp': {'type': str, 'max_length': 50},
     'provider': optional_provider(),
     'classification': {'type': str, 'choices': ['first_party', 'competitor', 'other']},
     'query_prompt_id': {'type': str, 'max_length': 100},
 })
-def handler(event: dict[str, Any], context: Any, keyword: str, timestamp: str | None = None,
-            provider: str | None = None, classification: str | None = None, query_prompt_id: str | None = None) -> dict[str, Any]:
+def handler(event: dict[str, Any], context: Any, keyword: str | None = None, group_id: str | None = None,
+            keyword_ids: str | None = None, scope: str | None = None, timestamp: str | None = None, provider: str | None = None,
+            classification: str | None = None, query_prompt_id: str | None = None) -> dict[str, Any]:
     """
-    API handler to get brand mentions for a keyword.
+    API handler to get brand mentions for a keyword or a keyword group.
 
-    Query params:
-        - keyword: The search keyword (required)
-        - timestamp: Specific timestamp (optional, defaults to latest)
+    Query params (exactly one scope):
+        - keyword: The search keyword — per-provider responses + aggregate
+        - group_id / keyword_ids: a keyword group / id set — aggregate across keywords
+        - timestamp: Specific timestamp (optional, single keyword, defaults to latest)
         - provider: Filter by specific provider (optional)
         - classification: Filter by classification (first_party, competitor, other) (optional)
+        - query_prompt_id: Filter by persona (optional)
 
     Returns:
         {
@@ -152,9 +242,21 @@ def handler(event: dict[str, Any], context: Any, keyword: str, timestamp: str | 
             }
         }
     """
+    report_scope, error = parse_scope_params(
+        {'keyword': keyword, 'group_id': group_id, 'keyword_ids': keyword_ids, 'scope': scope}, dynamodb.Table(KEYWORDS_TABLE)
+    )
+    if error:
+        return validation_error(error, event, 'scope')
+    if report_scope is None:
+        return validation_error('Provide keyword, group_id or keyword_ids', event, 'keyword')
+
     # Get brand tracking configuration
     brand_config = get_brand_config()
 
+    if not report_scope.is_single_keyword:
+        return success_response(get_scope_brand_mentions(report_scope, brand_config, query_prompt_id, provider, classification), event)
+
+    keyword = report_scope.keywords[0]
     table = dynamodb.Table(SEARCH_RESULTS_TABLE)
 
     # Query by keyword

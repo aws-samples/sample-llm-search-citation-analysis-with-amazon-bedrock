@@ -6,6 +6,8 @@ import { useBrandMentions } from '../../../hooks/useBrandMentions';
 import { useCitationGaps } from '../../../hooks/useCitationGaps';
 import { useRecommendations } from '../../../hooks/useRecommendations';
 import { useReportReady } from '../layout/useReportReady';
+import type { ReportScope } from '../../../types';
+import { isGroupVisibilityResponse } from '../../../types/domain/visibility';
 
 /**
  * Compose every fetch the Keyword Deep Dive report needs into a single hook.
@@ -25,7 +27,10 @@ export function useKeywordDeepDive(keyword: string | null) {
   const gaps = useCitationGaps();
   const recommendations = useRecommendations();
 
-  const mentions = useBrandMentions(keyword);
+  const mentions = useBrandMentions(keyword ? {
+    kind: 'keyword',
+    keyword 
+  } : null);
 
   const fetchVisibility = visibility.fetchVisibilityMetrics;
   const fetchTrends = trends.fetchHistoricalTrends;
@@ -35,10 +40,14 @@ export function useKeywordDeepDive(keyword: string | null) {
 
   useEffect(() => {
     if (!keyword) return;
-    fetchVisibility(keyword);
-    fetchTrends(keyword, 'day', 30);
+    const scope: ReportScope = {
+      kind: 'keyword',
+      keyword 
+    };
+    fetchVisibility(scope);
+    fetchTrends(scope, 'day', 30);
     fetchPersonas(keyword);
-    fetchGaps(keyword);
+    fetchGaps(scope);
     fetchRecs(false);
   }, [
     keyword,
@@ -58,8 +67,12 @@ export function useKeywordDeepDive(keyword: string | null) {
     recommendations,
   ]);
 
+  // This report is per keyword; the group shape cannot arrive here, but the
+  // union is narrowed so the sections keep their single-keyword types.
+  const keywordVisibility = visibility.data && !isGroupVisibilityResponse(visibility.data) ? visibility.data : null;
+
   return {
-    visibility: visibility.data,
+    visibility: keywordVisibility,
     visibilityError: visibility.error,
     visibilityLoading: visibility.loading,
     trends: trends.data,
