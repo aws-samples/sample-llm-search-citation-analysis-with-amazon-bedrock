@@ -10,10 +10,10 @@ them for the search Lambda's existing imports.
 
 The registry (``WEB_SEARCH_PROVIDERS``) maps each web-search-capable
 provider to its secret name, client class, query runner, and response-text
-extractor, in fallback preference order. ``get_web_search_clients`` +
-``search_with_fallback`` replace keyword-research's private
-``get_ai_client`` (whose first two tuple elements were dead at every call
-site) and its per-provider extraction copies.
+extractor. ``get_web_search_clients`` builds a client per configured
+provider and ``run_web_search`` runs one prompt against one of them; the
+keyword-research state machine fans those out as parallel steps (one per
+provider) so a slow or failing provider costs its own step, not the job.
 """
 
 from __future__ import annotations
@@ -273,19 +273,19 @@ class ClaudeClient:
 
 
 # ---------------------------------------------------------------------------
-# Web-search provider registry (keyword research / fallback querying)
+# Web-search provider registry (keyword research)
 # ---------------------------------------------------------------------------
 
-def _run_perplexity(client: PerplexityClient, prompt: str) -> dict[str, Any]:
-    return client.chat_completion([{"role": "user", "content": prompt}])
+def _run_perplexity(client: PerplexityClient, prompt: str, max_retries: int = 5) -> dict[str, Any]:
+    return client.chat_completion([{"role": "user", "content": prompt}], max_retries=max_retries)
 
 
-def _run_openai(client: OpenAIClient, prompt: str) -> dict[str, Any]:
-    return client.responses_with_web_search(query=prompt)
+def _run_openai(client: OpenAIClient, prompt: str, max_retries: int = 5) -> dict[str, Any]:
+    return client.responses_with_web_search(query=prompt, max_retries=max_retries)
 
 
-def _run_gemini(client: GeminiClient, prompt: str) -> dict[str, Any]:
-    return client.generate_content(prompt)
+def _run_gemini(client: GeminiClient, prompt: str, max_retries: int = 5) -> dict[str, Any]:
+    return client.generate_content(prompt, max_retries=max_retries)
 
 
 def _extract_perplexity_text(response: dict[str, Any]) -> str:
@@ -322,11 +322,11 @@ class WebSearchProvider:
     provider_id: str
     secret_name: str
     client_class: type
-    run: Callable[[Any, str], dict[str, Any]]
+    run: Callable[..., dict[str, Any]]
     extract_text: Callable[[dict[str, Any]], str]
 
 
-# Fallback preference order (Perplexity first — best native web search for
+# Display / step order (Perplexity first — best native web search for
 # research prompts), matching the order keyword-research always used.
 WEB_SEARCH_PROVIDERS: tuple[WebSearchProvider, ...] = (
     WebSearchProvider('perplexity', 'perplexity-key', PerplexityClient, _run_perplexity, _extract_perplexity_text),
@@ -334,13 +334,20 @@ WEB_SEARCH_PROVIDERS: tuple[WebSearchProvider, ...] = (
     WebSearchProvider('gemini', 'gemini-key', GeminiClient, _run_gemini, _extract_gemini_text),
 )
 
+WEB_SEARCH_PROVIDER_IDS: tuple[str, ...] = tuple(provider.provider_id for provider in WEB_SEARCH_PROVIDERS)
+
+
+def get_web_search_provider(provider_id: str) -> WebSearchProvider | None:
+    """Registry entry for ``provider_id``, or ``None`` for an unknown id."""
+    return next((provider for provider in WEB_SEARCH_PROVIDERS if provider.provider_id == provider_id), None)
+
 
 def get_web_search_clients() -> list[tuple[WebSearchProvider, Any]]:
     """Build ``(provider, client)`` pairs for every configured provider.
 
     Skips unconfigured providers — ``get_api_key`` returns ``None`` for
     missing, empty, and placeholder keys. Order follows
-    ``WEB_SEARCH_PROVIDERS`` preference.
+    ``WEB_SEARCH_PROVIDERS``.
     """
     clients = []
     for provider in WEB_SEARCH_PROVIDERS:
@@ -350,20 +357,13 @@ def get_web_search_clients() -> list[tuple[WebSearchProvider, Any]]:
     return clients
 
 
-def search_with_fallback(clients: list[tuple[WebSearchProvider, Any]], prompt: str) -> tuple[str, str]:
-    """Try each provider in order; return ``(response_text, provider_id)``.
+def run_web_search(provider: WebSearchProvider, client: Any, prompt: str, *, max_retries: int = 5) -> str:
+    """Run ``prompt`` against one provider and return the response text.
 
-    Any provider error falls through to the next entry; when every provider
-    fails, the last error is re-raised.
+    ``max_retries`` bounds the client's in-process HTTP retries; the caller
+    (a Step Functions step with its own budget) decides how many it can
+    afford. Errors propagate — the step, not this function, records them.
     """
-    last_error = None
-    for provider, client in clients:
-        try:
-            logger.info(f"Trying {provider.provider_id}")
-            raw_response = provider.run(client, prompt)
-            return provider.extract_text(raw_response), provider.provider_id
-        except Exception as e:
-            logger.warning(f"{provider.provider_id} failed: {e}")
-            last_error = e
-            continue
-    raise last_error or Exception("All providers failed")
+    logger.info(f"Querying {provider.provider_id}")
+    raw_response = provider.run(client, prompt, max_retries=max_retries)
+    return provider.extract_text(raw_response)

@@ -5,10 +5,11 @@ The retrying clients moved here verbatim from ``lambda/search/api_clients.py``
 and the registry replaces keyword-research's drifted simplified copies
 (bugs.md 3.1). These tests pin the consolidated contract:
 
-- registry entries (order, secret names) drive fallback preference
+- registry entries (order, secret names) drive step order
 - ``get_web_search_clients`` skips unconfigured providers
-- ``search_with_fallback`` returns extracted text from the first success,
-  falls through provider errors, and re-raises the last error
+- ``run_web_search`` returns extracted text, passes the caller's retry
+  budget through to the client, and lets provider errors propagate (the
+  research step, not the client, records them)
 - per-provider text extraction matches each API's response shape
 - clients retry retryable statuses and the OpenAI payload carries
   ``include: web_search_call.action.sources`` — the two behaviors the
@@ -24,6 +25,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+# `requests` lives in the built layer, not the dev venv. Appended, so `shared`
+# still resolves from source first.
+_LAYER_PY = os.path.join(os.path.dirname(__file__), '..', 'layer', 'python')
+if os.path.isdir(_LAYER_PY) and _LAYER_PY not in sys.path:
+    sys.path.append(_LAYER_PY)
 
 from shared import ai_clients
 from shared.ai_clients import (
@@ -31,14 +37,15 @@ from shared.ai_clients import (
     OpenAIClient,
     PerplexityClient,
     get_web_search_clients,
-    search_with_fallback,
+    get_web_search_provider,
+    run_web_search,
 )
 
 _PERPLEXITY, _OPENAI, _GEMINI = WEB_SEARCH_PROVIDERS
 
 
 class TestRegistry:
-    def test_fallback_preference_order_is_perplexity_openai_gemini(self):
+    def test_step_order_is_perplexity_openai_gemini(self):
         assert [p.provider_id for p in WEB_SEARCH_PROVIDERS] == [
             'perplexity', 'openai', 'gemini',
         ]
@@ -49,6 +56,12 @@ class TestRegistry:
             'openai': 'openai-key',
             'gemini': 'gemini-key',
         }
+
+    def test_lookup_by_id_returns_the_registry_entry(self):
+        assert get_web_search_provider('openai') is _OPENAI
+
+    def test_lookup_of_an_unknown_id_returns_none(self):
+        assert get_web_search_provider('bing') is None
 
 
 class TestGetWebSearchClients:
@@ -102,42 +115,40 @@ class TestTextExtraction:
         assert _GEMINI.extract_text({'candidates': []}) == ''
 
 
-class TestSearchWithFallback:
-    def test_returns_extracted_text_and_provider_id_from_first_success(self):
+class TestRunWebSearch:
+    def test_returns_the_extracted_text_from_the_provider_response(self):
         client = MagicMock()
         client.chat_completion.return_value = {
             'choices': [{'message': {'content': 'perplexity says'}}],
         }
 
-        text, provider_id = search_with_fallback([(_PERPLEXITY, client)], 'prompt')
+        assert run_web_search(_PERPLEXITY, client, 'prompt') == 'perplexity says'
 
-        assert (text, provider_id) == ('perplexity says', 'perplexity')
+    def test_passes_the_retry_budget_through_to_the_client(self):
+        client = MagicMock()
+        client.responses_with_web_search.return_value = {'output': [], 'output_text': 'openai says'}
 
-    def test_falls_through_to_next_provider_when_the_first_errors(self):
-        failing = MagicMock()
-        failing.chat_completion.side_effect = RuntimeError('rate limited')
-        working = MagicMock()
-        working.responses_with_web_search.return_value = {
-            'output': [], 'output_text': 'openai says',
-        }
+        run_web_search(_OPENAI, client, 'prompt', max_retries=2)
 
-        text, provider_id = search_with_fallback(
-            [(_PERPLEXITY, failing), (_OPENAI, working)], 'prompt'
-        )
+        client.responses_with_web_search.assert_called_once_with(query='prompt', max_retries=2)
 
-        assert (text, provider_id) == ('openai says', 'openai')
+    def test_defaults_to_the_clients_five_retries(self):
+        client = MagicMock()
+        client.generate_content.return_value = {'candidates': []}
 
-    def test_reraises_the_last_error_when_every_provider_fails(self):
-        first = MagicMock()
-        first.chat_completion.side_effect = RuntimeError('first down')
-        last_error = RuntimeError('second down')
-        second = MagicMock()
-        second.responses_with_web_search.side_effect = last_error
+        run_web_search(_GEMINI, client, 'prompt')
+
+        client.generate_content.assert_called_once_with('prompt', max_retries=5)
+
+    def test_propagates_the_provider_error_instead_of_swallowing_it(self):
+        client = MagicMock()
+        error = RuntimeError('rate limited')
+        client.chat_completion.side_effect = error
 
         with pytest.raises(RuntimeError) as raised:
-            search_with_fallback([(_PERPLEXITY, first), (_OPENAI, second)], 'prompt')
+            run_web_search(_PERPLEXITY, client, 'prompt')
 
-        assert raised.value is last_error
+        assert raised.value is error
 
 
 class TestClientBehavior:

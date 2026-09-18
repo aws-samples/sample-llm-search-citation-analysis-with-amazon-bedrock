@@ -34,6 +34,7 @@ citation-analysis-system/
 │   ├── crawler/                # Web crawling with AgentCore
 │   ├── generate-summary/       # Execution summary generation
 │   ├── parse-keywords/         # Keyword file parsing
+│   ├── research-worker/        # Keyword research steps (own state machine)
 │   ├── layer/                  # Shared Lambda layer
 │   └── shared/                 # Common utilities and decorators
 ├── web/                        # React frontend (Vite + Tailwind)
@@ -254,7 +255,7 @@ After analysis completes, explore your data:
 - **Action Center** – Prioritized recommendations based on your data
 
 **Research Section:**
-- **Keyword Research** – Expand your keyword list using AI with live web search. Analyze competitor websites to discover keywords they target. Both operations run asynchronously — results appear after 30-60 seconds.
+- **Keyword Research** – Expand your keyword list using AI with live web search. Analyze competitor websites to discover keywords they target. Each job runs in its own Step Functions execution that queries every configured provider in parallel and checkpoints each answer as it arrives; the UI shows per-provider progress, keeps partial results when a provider fails, and lets you retry just the failed providers. Results typically appear within a minute.
 
 **Content Section:**
 - **Content Studio** – Generate content briefs and outlines based on citation gap analysis, with output language selection (English, Spanish, French, or any language). Helps you create content that AI models are more likely to cite. Self-reflection recommendations from the ranking analysis also appear here as actionable content ideas, labelled with the originating persona.

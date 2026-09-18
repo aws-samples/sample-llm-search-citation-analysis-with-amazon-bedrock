@@ -40,23 +40,27 @@ const bedrockTierEnv = {
 } as const;
 
 /**
- * Concurrency ceiling for the functions that invoke themselves asynchronously.
+ * Concurrency ceiling for the function that invokes itself asynchronously.
  *
- * `contentStudioFunction` and `keywordMgmtFunction` both re-invoke themselves
- * via `shared/self_invoke.py` to run long work in the background. Async Lambda
- * invocations are retried twice by default, so without a ceiling a bug in a
- * self-invoke guard becomes an invocation storm: it consumes the account's
- * entire concurrency pool — starving every other function in the stack,
- * including `manage-users` — while billing an LLM call per invocation
- * (AUDIT-2026-08-19 §2.4).
+ * `contentStudioFunction` re-invokes itself via `shared/self_invoke.py` to run
+ * long work in the background. Async Lambda invocations are retried twice by
+ * default, so without a ceiling a bug in a self-invoke guard becomes an
+ * invocation storm: it consumes the account's entire concurrency pool —
+ * starving every other function in the stack, including `manage-users` —
+ * while billing an LLM call per invocation (AUDIT-2026-08-19 §2.4).
  *
  * 10 is deliberately generous for the expected load (a marketing team, not
  * public traffic) while bounding a runaway loop to 10 concurrent executions
  * instead of the account default of ~1000. Note this also *reserves* the
- * capacity, guaranteeing these two can always run.
+ * capacity, guaranteeing the function can always run.
  *
- * If legitimate users start seeing 429s on content generation or keyword
- * research, raise this — do not remove it.
+ * `keywordMgmtFunction` carried the same cap until 2.2.0, when keyword
+ * research moved to its own Step Functions state machine
+ * (`CitationAnalysis-KeywordResearch`) and the function stopped invoking
+ * itself. Its jobs now scale with the state machine, not with this ceiling.
+ *
+ * If legitimate users start seeing 429s on content generation, raise this —
+ * do not remove it.
  */
 const SELF_INVOKING_FUNCTION_CONCURRENCY = 10;
 
@@ -73,18 +77,33 @@ const SELF_INVOKING_FUNCTION_CONCURRENCY = 10;
  * Duration/Errors metrics — instead of only as an opaque gateway 504.
  *
  * Two deliberate exceptions, both documented at their definitions:
- *   - `contentStudioFunction` and `keywordMgmtFunction` also run as their own
- *     async workers via `shared/self_invoke.py`. That path is NOT behind API
- *     Gateway and legitimately needs minutes.
+ *   - `contentStudioFunction` also runs as its own async worker via
+ *     `shared/self_invoke.py`. That path is NOT behind API Gateway and
+ *     legitimately needs minutes.
  *   - `selfReflectionFunction` persists its result as the last step of a
  *     synchronous Bedrock call, so a 504 today is still recoverable from the
  *     cache it writes. Capping it at 29s would turn a slow request into
  *     permanent loss.
  *
  * Functions invoked by Step Functions (parse-keywords, search, deduplication,
- * crawler, generate-summary) are not subject to this at all.
+ * crawler, generate-summary, research-worker) are not subject to this at all.
  */
 const API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS = 29;
+
+/**
+ * Budget of one keyword research execution. The API's reader-side stale
+ * sweep (`shared/research_jobs.RESEARCH_STALE_AFTER_SECONDS`, 35 minutes)
+ * must stay ABOVE this so a live job can never be marked failed and then
+ * flip back when it finishes.
+ */
+const RESEARCH_STATE_MACHINE_TIMEOUT_MINUTES = 30;
+
+/**
+ * Parallel provider steps per research job. Each step is one web-search LLM
+ * call; three providers are configured today, so this is headroom for the
+ * multi-round research agent rather than a limit anyone hits.
+ */
+const RESEARCH_STEP_CONCURRENCY = 10;
 
 /**
  * Thrown at synth time when a Lambda layer's local build output is missing.
@@ -476,7 +495,10 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     // DynamoDB Table: KeywordResearch
-    // Stores keyword expansion and competitor analysis results
+    // One row per research job (keyword expansion or competitor analysis).
+    // Per-provider steps live inside the row (`steps` map). History reads the
+    // GSI newest-first instead of scanning; rows expire after 90 days (`ttl`,
+    // written by shared/research_jobs.py) — before 2.2.0 the table only grew.
     const keywordResearchTable = new dynamodb.Table(this, 'KeywordResearchTable', {
       tableName: 'CitationAnalysis-KeywordResearch',
       partitionKey: {
@@ -487,6 +509,13 @@ export class CitationAnalysisStack extends cdk.Stack {
       encryption: dynamodb.TableEncryption.AWS_MANAGED,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+      timeToLiveAttribute: 'ttl',
+    });
+    keywordResearchTable.addGlobalSecondaryIndex({
+      indexName: 'TypeCreatedIndex',
+      partitionKey: { name: 'type', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'created_at', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
     });
 
     // DynamoDB Table: ContentStudio
@@ -1302,6 +1331,166 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     // ========================================
+    // Keyword Research State Machine
+    // ========================================
+    //
+    // One execution per research job (keyword expansion or competitor URL
+    // analysis). Every configured web-search provider is a parallel step that
+    // checkpoints its own result into the job row the moment it finishes, so
+    // a provider that times out costs its own step, not the job, and the API
+    // can show partial results while the rest are still running.
+    //
+    //   Plan -> Map(ExecuteResearchStep | FailResearchStep) -> Finalize
+    //                                            any crash -> FailResearchJob
+    //
+    // This replaced the KeywordMgmt Lambda invoking itself asynchronously
+    // (2.2.0): that path ran every provider sequentially inside one 120s
+    // Lambda, a SIGKILL at the timeout left rows at `processing` forever, and
+    // a failed dispatch fell back to running the LLM calls on the API request.
+
+    const researchWorkerLogGroup = new logs.LogGroup(this, 'ResearchWorkerLogGroup', {
+      logGroupName: '/aws/lambda/CitationAnalysis-ResearchWorker',
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    const researchWorkerFunction = new lambda.Function(this, 'ResearchWorkerFunction', {
+      functionName: 'CitationAnalysis-ResearchWorker',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'handler.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/research-worker'), { exclude: PYTHON_ASSET_EXCLUDES }),
+      layers: [sharedLayer],
+      // Invoked by Step Functions, not API Gateway. One step is one provider
+      // call: at most two HTTP attempts of up to 90s each plus backoff.
+      timeout: cdk.Duration.seconds(300),
+      memorySize: 512,
+      description: 'Keyword research steps: plan, one web-search provider call per step, finalize',
+      logGroup: researchWorkerLogGroup,
+      environment: {
+        DYNAMODB_TABLE_KEYWORD_RESEARCH: keywordResearchTable.tableName,
+        SECRETS_PREFIX: 'citation-analysis/',
+      },
+    });
+    keywordResearchTable.grantReadWriteData(researchWorkerFunction);
+    perplexitySecret.grantRead(researchWorkerFunction);
+    openaiSecret.grantRead(researchWorkerFunction);
+    geminiSecret.grantRead(researchWorkerFunction);
+
+    const planResearchTask = new tasks.LambdaInvoke(this, 'PlanResearch', {
+      lambdaFunction: researchWorkerFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'plan',
+        'job_id.$': '$.job_id',
+        'retry.$': '$.retry',
+        'execution_arn.$': '$$.Execution.Id',
+      }),
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+    });
+
+    const executeResearchStepTask = new tasks.LambdaInvoke(this, 'ExecuteResearchStep', {
+      lambdaFunction: researchWorkerFunction,
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+    });
+    // Provider errors are recorded by the worker and never raised, so the only
+    // failures reaching Step Functions are the worker itself dying: a function
+    // timeout or out-of-memory surfaces as Lambda.Unknown. One more attempt.
+    executeResearchStepTask.addRetry({
+      errors: ['Lambda.Unknown'],
+      interval: cdk.Duration.seconds(5),
+      maxAttempts: 1,
+    });
+
+    // A step the worker could not finish is still accounted for: without this
+    // the job would wait for a step that nothing will ever write.
+    const failResearchStepTask = new tasks.LambdaInvoke(this, 'FailResearchStep', {
+      lambdaFunction: researchWorkerFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'fail_step',
+        'job_id.$': '$.job_id',
+        'step_id.$': '$.step_id',
+        'provider.$': '$.provider',
+        'error.$': '$.error',
+      }),
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+    });
+    executeResearchStepTask.addCatch(failResearchStepTask, {
+      errors: ['States.ALL'],
+      resultPath: '$.error',
+    });
+
+    const executeResearchStepsMap = new stepfunctions.Map(this, 'ExecuteResearchSteps', {
+      maxConcurrency: RESEARCH_STEP_CONCURRENCY,
+      itemsPath: '$.steps',
+      resultPath: '$.step_results',
+      itemSelector: {
+        action: 'execute_step',
+        'job_id.$': '$.job_id',
+        'step_id.$': '$$.Map.Item.Value.step_id',
+        'provider.$': '$$.Map.Item.Value.provider',
+      },
+    }).itemProcessor(executeResearchStepTask);
+
+    const finalizeResearchTask = new tasks.LambdaInvoke(this, 'FinalizeResearch', {
+      lambdaFunction: researchWorkerFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'finalize',
+        'job_id.$': '$.job_id',
+      }),
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+    });
+
+    // Anything that escapes Plan, the Map or Finalize marks the job failed so
+    // the UI never polls a job whose execution is gone.
+    const failResearchJobTask = new tasks.LambdaInvoke(this, 'FailResearchJob', {
+      lambdaFunction: researchWorkerFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        action: 'fail',
+        'job_id.$': '$.job_id',
+        'error.$': '$.error',
+      }),
+      outputPath: '$.Payload',
+      retryOnServiceExceptions: true,
+    });
+    failResearchJobTask.next(new stepfunctions.Fail(this, 'ResearchJobFailed', {
+      error: 'ResearchJobFailed',
+      cause: 'The research job could not be completed; see the job row for details.',
+    }));
+    for (const state of [planResearchTask, executeResearchStepsMap, finalizeResearchTask]) {
+      state.addCatch(failResearchJobTask, { errors: ['States.ALL'], resultPath: '$.error' });
+    }
+
+    const researchDefinition = planResearchTask
+      .next(executeResearchStepsMap)
+      .next(finalizeResearchTask);
+
+    // New group (nothing to import) — `/aws/vendedlogs/states/` for the same
+    // resource-policy reason as the workflow's group above.
+    const researchStateMachineLogGroup = new logs.LogGroup(this, 'ResearchStateMachineLogGroup', {
+      logGroupName: '/aws/vendedlogs/states/CitationAnalysis-KeywordResearch',
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    const researchStateMachine = new stepfunctions.StateMachine(this, 'KeywordResearchStateMachine', {
+      stateMachineName: 'CitationAnalysis-KeywordResearch',
+      definitionBody: stepfunctions.DefinitionBody.fromChainable(researchDefinition),
+      role: stepFunctionsRole,
+      timeout: cdk.Duration.minutes(RESEARCH_STATE_MACHINE_TIMEOUT_MINUTES),
+      tracingEnabled: true,
+      // Same reasoning as the workflow: on a Map, the per-iteration input is
+      // the evidence worth having after a failed run.
+      logs: {
+        destination: researchStateMachineLogGroup,
+        level: stepfunctions.LogLevel.ALL,
+        includeExecutionData: true,
+      },
+    });
+
+    // ========================================
     // Outputs
     // ========================================
 
@@ -1604,10 +1793,11 @@ export class CitationAnalysisStack extends cdk.Stack {
         'promote-keywords.py',
       ]),
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(120),
+      // Keyword research runs in its own state machine since 2.2.0; this
+      // function only starts executions and reads rows, so the gateway
+      // ceiling applies like any other API function.
+      timeout: cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
       memorySize: 256,
-      // Self-invokes for async keyword research — see the constant's comment.
-      reservedConcurrentExecutions: SELF_INVOKING_FUNCTION_CONCURRENCY,
       description: 'API: Consolidated keyword get/create/update/delete, keyword groups and keyword research',
       logGroup: apiLambdaLogGroup(this, 'KeywordMgmtLogGroup', 'CitationAnalysis-API-KeywordMgmt'),
       environment: {
@@ -1618,6 +1808,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         // Legacy names, dropped once rollout verified.
         KEYWORDS_TABLE: keywordsTable.tableName,
         KEYWORD_RESEARCH_TABLE: keywordResearchTable.tableName,
+        RESEARCH_STATE_MACHINE_ARN: researchStateMachine.stateMachineArn,
         SECRETS_PREFIX: 'citation-analysis/',
       },
     });
@@ -1712,14 +1903,12 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordsTable.grantReadWriteData(keywordMgmtFunction);
     keywordGroupsTable.grantReadWriteData(keywordMgmtFunction);
     keywordResearchTable.grantReadWriteData(keywordMgmtFunction);
+    // Secrets are read only to answer "is any provider configured?" before a
+    // job is created; the worker reads them again to make the calls.
     perplexitySecret.grantRead(keywordMgmtFunction);
     openaiSecret.grantRead(keywordMgmtFunction);
     geminiSecret.grantRead(keywordMgmtFunction);
-    keywordMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: ['lambda:InvokeFunction'],
-      resources: [`arn:aws:lambda:${this.region}:${this.account}:function:CitationAnalysis-API-KeywordMgmt`],
-    }));
+    researchStateMachine.grantStartExecution(keywordMgmtFunction);
 
     // Grant config management function access
     queryPromptsTable.grantReadWriteData(configMgmtFunction);
@@ -2113,7 +2302,15 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordResearchHistoryResource.addMethod('GET', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
     
     const keywordResearchIdResource = keywordResearchResource.addResource('{id}');
+    // GET by id is what the UI polls: the job, its per-provider steps and the
+    // merged (partial) result. History was the only read before 2.2.0, so a
+    // job that fell off the first page of the scan vanished from the poll.
+    keywordResearchIdResource.addMethod('GET', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
     keywordResearchIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
+
+    // POST /keyword-research/{id}/retry — re-run only the failed steps.
+    const keywordResearchRetryResource = keywordResearchIdResource.addResource('retry');
+    keywordResearchRetryResource.addMethod('POST', new apigateway.LambdaIntegration(keywordMgmtFunction, integrationOptions), methodOptions);
 
     // ========================================
     // Visibility & Insights API Routes
