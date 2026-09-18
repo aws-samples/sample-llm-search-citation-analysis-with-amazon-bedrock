@@ -6,7 +6,7 @@ import type {
   CognitoUser, UserGroup 
 } from '../../api/users';
 
-export function createGroupToggler(setSelectedGroups: React.Dispatch<React.SetStateAction<string[]>>) {
+function createGroupToggler(setSelectedGroups: React.Dispatch<React.SetStateAction<string[]>>) {
   return (groupName: string) => {
     setSelectedGroups(prev =>
       prev.includes(groupName)

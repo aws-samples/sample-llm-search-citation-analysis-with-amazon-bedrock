@@ -30,17 +30,12 @@ from shared.constants import (
     TREND_DIRECTION_DECLINING_SLOPE,
     TREND_DIRECTION_IMPROVING_SLOPE,
     UNRANKED_SENTINEL,
-    VISIBILITY_MENTION_LOG_BASE,
-    VISIBILITY_MENTION_WEIGHT,
-    VISIBILITY_PROVIDER_WEIGHT,
-    VISIBILITY_RANK_CAP,
-    VISIBILITY_RANK_INVERSE_BASE,
-    VISIBILITY_RANK_WEIGHT,
 )
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.providers import get_enabled_provider_count
 from shared.utils import brand_names_match, get_brand_config, utc_now
+from shared.visibility_score import calculate_sentiment_agnostic_visibility_score
 
 # Bounded parallelism for the per-keyword trend fan-out. 10 workers keeps the
 # DynamoDB RCU pressure reasonable on the SearchResults table while collapsing
@@ -55,32 +50,6 @@ dynamodb = boto3.resource('dynamodb')
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')  # Optional for fallback
-
-
-def calculate_visibility_score(provider_count: int, total_mentions: int, best_rank: int, total_providers: int | None = None) -> float:
-    """Calculate visibility score (0-100).
-
-    This variant is sentiment-agnostic (historical-trends doesn't carry
-    per-period sentiment aggregation); the sentiment weight is folded
-    into the other three weights proportionally:
-        provider: 40, rank: 30, mentions: 20, total = 90 (out of 100).
-    See `get-visibility-metrics.py::calculate_visibility_score` for the
-    full 4-factor version. Constants are shared in `shared.constants`.
-    """
-    import math
-    if total_providers is None:
-        total_providers = get_enabled_provider_count()
-    provider_score = (
-        (provider_count / total_providers) * VISIBILITY_PROVIDER_WEIGHT
-        if total_providers > 0 else 0
-    )
-    capped_rank = min(best_rank, VISIBILITY_RANK_CAP)
-    rank_score = max(0, (VISIBILITY_RANK_INVERSE_BASE - capped_rank) / VISIBILITY_RANK_CAP) * VISIBILITY_RANK_WEIGHT
-    mention_score = (
-        min(math.log(total_mentions + 1) / math.log(VISIBILITY_MENTION_LOG_BASE), 1)
-        * VISIBILITY_MENTION_WEIGHT
-    )
-    return round(provider_score + rank_score + mention_score, 1)
 
 
 def get_trend_direction(values: list[float]) -> str:
@@ -147,7 +116,10 @@ def aggregate_by_period(items: list[dict], period: str, config: dict) -> list[di
         except (ValueError, KeyError, TypeError):
             continue
 
-    # Calculate metrics for each period
+    # Calculate metrics for each period. The enabled-provider count is the
+    # score denominator and does not change within a request, so resolve it
+    # once here rather than once per period bucket (each lookup is a table scan).
+    total_providers = get_enabled_provider_count()
     trend_data = []
 
     for period_key in sorted(period_data.keys()):
@@ -180,8 +152,8 @@ def aggregate_by_period(items: list[dict], period: str, config: dict) -> list[di
                     fp_providers.add(provider)
                     fp_best_rank = min(fp_best_rank, to_int(brand.get('rank'), UNRANKED_SENTINEL))
 
-        visibility_score = calculate_visibility_score(
-            len(fp_providers), fp_mentions, fp_best_rank
+        visibility_score = calculate_sentiment_agnostic_visibility_score(
+            len(fp_providers), fp_mentions, fp_best_rank, total_providers
         )
 
         trend_data.append({

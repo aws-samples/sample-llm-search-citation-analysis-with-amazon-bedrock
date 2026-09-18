@@ -1,15 +1,16 @@
 /**
- * Reports API client functions.
+ * Reports API response types.
  *
- * Backed by the consolidated stats-insights Lambda. The endpoints here
- * return pre-aggregated payloads tailored for the print reports —
+ * Backed by the consolidated stats-insights Lambda. The endpoints return
+ * pre-aggregated payloads tailored for the print reports —
  * /reports/overview composes data that would otherwise require multiple
  * round-trips (trends + recommendations) to assemble client-side.
  * /reports/competitor returns the per-competitor rollup (outranked
  * keywords, exclusive citation sources, prioritised outreach targets)
- * consumed by the Competitor Gap print report.
+ * consumed by the Competitor Gap print report. The requests themselves are
+ * issued through `useAnalysisEndpoint` (see `hooks/useReportsOverview.ts`
+ * and `hooks/useCompetitorRollup.ts`).
  */
-import { apiGet } from './client';
 import type {
   Recommendation, TrendDirection 
 } from '../types';
@@ -42,28 +43,6 @@ export interface ReportsOverviewResponse {
   top_improving: ReportsOverviewMover[];
   top_declining: ReportsOverviewMover[];
   top_recommendations: Recommendation[];
-}
-
-export interface ReportsOverviewParams {
-  readonly days?: number;
-  readonly period?: 'day' | 'week' | 'month';
-  readonly top?: number;
-}
-
-/**
- * Fetch the cross-keyword executive-summary rollup. Used by the Executive
- * Summary report and the Brand Visibility all-keywords variant.
- */
-export function fetchReportsOverview(
-  params: ReportsOverviewParams = {},
-  signal?: AbortSignal,
-): Promise<ReportsOverviewResponse> {
-  const query: string[] = [];
-  if (params.days !== undefined) query.push(`days=${params.days}`);
-  if (params.period) query.push(`period=${params.period}`);
-  if (params.top !== undefined) query.push(`top=${params.top}`);
-  const qs = query.length > 0 ? `?${query.join('&')}` : '';
-  return apiGet<ReportsOverviewResponse>(`/reports/overview${qs}`, { signal });
 }
 
 export interface CompetitorOutrankedKeyword {
@@ -109,31 +88,6 @@ export interface CompetitorReportAllResponse {
 export type CompetitorReportResponse =
   | CompetitorReportSingleResponse
   | CompetitorReportAllResponse;
-
-export interface CompetitorReportParams {
-  readonly competitor?: string;
-  readonly keywordLimit?: number;
-}
-
-/**
- * Fetch the competitor rollup. When `competitor` is omitted the server
- * returns a `rollups[]` payload containing every configured competitor;
- * when provided, it returns a single `rollup` for that competitor.
- */
-export function fetchCompetitorRollup(
-  params: CompetitorReportParams = {},
-  signal?: AbortSignal,
-): Promise<CompetitorReportResponse> {
-  const query: string[] = [];
-  if (params.competitor) {
-    query.push(`competitor=${encodeURIComponent(params.competitor)}`);
-  }
-  if (params.keywordLimit !== undefined) {
-    query.push(`keyword_limit=${params.keywordLimit}`);
-  }
-  const qs = query.length > 0 ? `?${query.join('&')}` : '';
-  return apiGet<CompetitorReportResponse>(`/reports/competitor${qs}`, { signal });
-}
 
 export function isSingleCompetitorResponse(
   response: CompetitorReportResponse,

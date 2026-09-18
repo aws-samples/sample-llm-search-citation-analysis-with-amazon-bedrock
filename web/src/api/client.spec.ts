@@ -3,7 +3,7 @@ import {
 } from 'vitest';
 import { authenticatedFetch } from '../infrastructure';
 import {
-  apiDelete, apiGet, apiPatch, apiPost, apiPut, validateApiConfig
+  apiDelete, apiGet, apiPost, apiPut, validateApiConfig
 } from './client';
 
 vi.mock('../infrastructure', async () => {
@@ -56,15 +56,6 @@ const apiMethodCases = [
     request: () => apiDelete<unknown>('/test'),
     requestWithStructured4xx: () => apiDelete<unknown>(
       '/test',
-      { allowStructured4xx: true }
-    ),
-  },
-  {
-    method: 'PATCH',
-    request: () => apiPatch<unknown>('/test', requestBodyFixture),
-    requestWithStructured4xx: () => apiPatch<unknown>(
-      '/test',
-      requestBodyFixture,
       { allowStructured4xx: true }
     ),
   },

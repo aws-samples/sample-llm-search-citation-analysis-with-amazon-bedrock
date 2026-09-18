@@ -60,5 +60,3 @@ export function useBrandVisibilityReport(keyword: string | null) {
     ready,
   };
 }
-
-export type BrandVisibilityReportData = ReturnType<typeof useBrandVisibilityReport>;

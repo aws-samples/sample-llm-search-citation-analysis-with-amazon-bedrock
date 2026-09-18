@@ -43,10 +43,6 @@ export async function listUsers(limit = 50, offset = 0): Promise<ListUsersRespon
   return apiGet<ListUsersResponse>(`/users?limit=${limit}&offset=${offset}`);
 }
 
-export async function getUser(username: string): Promise<{ user: CognitoUser }> {
-  return apiGet<{ user: CognitoUser }>(`/users/${encodeURIComponent(username)}`);
-}
-
 export async function inviteUser(request: InviteUserRequest): Promise<{
   user: CognitoUser;
   message: string 

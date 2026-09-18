@@ -8,9 +8,4 @@ export {
   getErrorMessage,
   isAbortError,
   isDefinitiveClientRejection,
-  parseApiError,
-} from './apiErrors';
-
-export type {
-  ErrorCategory, ApiError 
 } from './apiErrors';

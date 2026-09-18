@@ -109,4 +109,3 @@ export function VisibilityDashboard({ keywords }: Props) {
   );
 }
 
-export default VisibilityDashboard;

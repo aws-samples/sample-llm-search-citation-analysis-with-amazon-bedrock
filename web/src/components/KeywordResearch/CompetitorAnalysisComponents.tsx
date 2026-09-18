@@ -51,7 +51,7 @@ const getCompetitionColor = (competition: string): string => {
   return colors[competition?.toLowerCase()] ?? 'text-gray-600';
 };
 
-export const getSectionCount = (result: CompetitorAnalysisResult | null, sectionId: SectionId): number => {
+const getSectionCount = (result: CompetitorAnalysisResult | null, sectionId: SectionId): number => {
   if (!result) return 0;
   const counts: Record<SectionId, number> = {
     primary: result.primary_keywords?.length ?? 0,

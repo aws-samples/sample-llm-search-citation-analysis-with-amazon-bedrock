@@ -1,15 +1,7 @@
-export {
-  Modal, ConfirmModal, AlertModal 
-} from './Modal';
-export { Spinner } from './Spinner';
-export { ThemeToggle } from './ThemeToggle';
-export { PrintToPdfButton } from './PrintToPdfButton';
+// Barrel for the primitives that are consumed through `../ui`. Modal, Spinner,
+// ThemeToggle, PrintToPdfButton, chartTheme and MarkdownProcessor are imported
+// from their own files by every caller, so they are deliberately not re-exported.
 export { Button } from './Button';
-export type {
-  ButtonVariant, ButtonSize 
-} from './Button';
-export { getChartTheme } from './chartTheme';
-export type { ChartTheme } from './chartTheme';
 export {
   PauseIcon,
   PlayIcon,
@@ -17,7 +9,6 @@ export {
   TrashIcon,
   PlusIcon,
   CloseIcon,
-  ChevronRightIcon,
   ChevronDownIcon,
   SearchIcon,
   LinkIcon,
@@ -27,6 +18,3 @@ export {
   CheckIcon,
   ArrowRightIcon,
 } from './Icons';
-export {
-  formatInlineMarkdown, formatResponse, extractUrls, findMentionPositions 
-} from './MarkdownProcessor';

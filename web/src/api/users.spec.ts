@@ -3,7 +3,6 @@ import {
 } from 'vitest';
 import {
   listUsers,
-  getUser,
   inviteUser,
   updateUser,
   deleteUser,
@@ -56,29 +55,6 @@ describe('users API', () => {
       await listUsers(25, 50);
 
       expect(mockApiGet).toHaveBeenCalledWith('/users?limit=25&offset=50');
-    });
-  });
-
-  describe('getUser', () => {
-    it('fetches user by username', async () => {
-      const mockUser = {
-        username: 'test',
-        email: 'test@example.com' 
-      };
-      mockApiGet.mockResolvedValue({ user: mockUser });
-
-      const result = await getUser('test');
-
-      expect(result.user).toStrictEqual(mockUser);
-      expect(mockApiGet).toHaveBeenCalledWith('/users/test');
-    });
-
-    it('encodes username in URL', async () => {
-      mockApiGet.mockResolvedValue({ user: {} });
-
-      await getUser('user@example.com');
-
-      expect(mockApiGet).toHaveBeenCalledWith('/users/user%40example.com');
     });
   });
 
