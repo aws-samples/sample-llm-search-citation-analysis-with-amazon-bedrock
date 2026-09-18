@@ -7,7 +7,6 @@ and calculates per-persona brand metrics plus a cross-persona summary.
 """
 
 import logging
-import math
 import os
 import sys
 from typing import Any
@@ -21,6 +20,7 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, require_keyword, validate
 from shared.dynamo_decimal import to_int
+from shared.visibility_score import calculate_visibility_score, sentiment_to_score
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -43,51 +43,6 @@ def sentiment_to_label(sentiments: list[str]) -> str:
         counts[label] = counts.get(label, 0) + 1
 
     return max(counts, key=counts.get)
-
-
-def sentiment_to_score(sentiment: str) -> float:
-    """Convert sentiment string to numeric score."""
-    sentiment_map = {
-        'positive': 1.0,
-        'neutral': 0.0,
-        'negative': -1.0,
-        'mixed': 0.0,
-    }
-    return sentiment_map.get(sentiment.lower() if sentiment else 'neutral', 0.0)
-
-
-
-def calculate_visibility_score(
-    provider_count: int,
-    total_mentions: int,
-    best_rank: int,
-    avg_sentiment_score: float,
-    total_providers: int,
-) -> float:
-    """
-    Calculate visibility score (0-100) based on multiple factors.
-
-    Factors:
-    - Provider coverage (40%): How many AI engines mention the brand
-    - Ranking position (30%): Best rank across providers (1=best)
-    - Mention frequency (20%): Total number of mentions
-    - Sentiment (10%): Average sentiment score
-
-    This replicates the formula from get-visibility-metrics.py.
-    """
-    # Provider coverage score (0-40)
-    provider_score = (provider_count / total_providers) * 40 if total_providers > 0 else 0
-
-    # Ranking score (0-30) - inverse of rank, capped at rank 10
-    rank_score = max(0, (11 - min(best_rank, 10)) / 10) * 30
-
-    # Mention score (0-20) - logarithmic scale, capped at 50 mentions
-    mention_score = min(math.log(total_mentions + 1) / math.log(51), 1) * 20
-
-    # Sentiment score (0-10) - convert -1 to 1 scale to 0-10
-    sentiment_score = ((avg_sentiment_score + 1) / 2) * 10
-
-    return round(provider_score + rank_score + mention_score + sentiment_score, 1)
 
 
 def fetch_persona_names() -> dict[str, str]:

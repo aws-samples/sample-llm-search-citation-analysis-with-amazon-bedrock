@@ -43,7 +43,7 @@ export function BrandRow({
   );
 }
 
-export function TrendIcon({ direction }: { readonly direction: string }) {
+function TrendIcon({ direction }: { readonly direction: string }) {
   if (direction === 'improving') {
     return (
       <svg className="w-5 h-5 inline text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -131,5 +131,3 @@ export function TrendChart({ data }: TrendChartProps) {
     </div>
   );
 }
-
-export { getScoreColor };

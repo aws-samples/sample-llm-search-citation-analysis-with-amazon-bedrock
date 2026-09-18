@@ -3,9 +3,7 @@ import {
   useNavigate, useParams 
 } from 'react-router-dom';
 import { usePrintMode } from '../../../hooks/usePrintMode';
-import {
-  ReportLayout, ReportKeywordSelector 
-} from '../layout';
+import { ReportLayout } from '../layout';
 import type { Keyword } from '../../../types';
 import { useBrandVisibilityReport } from './useBrandVisibilityReport';
 import { PerKeywordHeadlineSection } from './sections/PerKeywordHeadlineSection';
@@ -149,7 +147,3 @@ function KeywordSwitcher({
     </div>
   );
 }
-
-// Re-exported for the case where someone wants a bare per-keyword selector
-// elsewhere. Keeps the import surface small and tree-shakeable.
-export { ReportKeywordSelector };

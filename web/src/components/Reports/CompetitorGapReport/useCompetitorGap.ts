@@ -57,5 +57,3 @@ export function useCompetitorGap(competitor: string | null) {
     ready,
   };
 }
-
-export type CompetitorGapData = ReturnType<typeof useCompetitorGap>;

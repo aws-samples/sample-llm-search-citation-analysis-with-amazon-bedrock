@@ -129,4 +129,3 @@ export function SelfReflectionPanel({
   );
 }
 
-export default SelfReflectionPanel;

@@ -140,4 +140,3 @@ export function PersonaComparisonChart({ data }: PersonaComparisonChartProps) {
   );
 }
 
-export default PersonaComparisonChart;

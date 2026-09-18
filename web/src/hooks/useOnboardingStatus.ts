@@ -30,7 +30,7 @@ export interface OnboardingStatusApi {
 }
 
 /** Default API implementation using authenticatedFetch */
-export const defaultOnboardingStatusApi: OnboardingStatusApi = {
+const defaultOnboardingStatusApi: OnboardingStatusApi = {
   fetchProviders: () => authenticatedFetch(`${API_BASE_URL}/providers`),
   fetchBrandConfig: () => authenticatedFetch(`${API_BASE_URL}/brand-config`),
   fetchSchedules: () => authenticatedFetch(`${API_BASE_URL}/schedules`),

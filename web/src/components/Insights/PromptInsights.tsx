@@ -127,4 +127,3 @@ export function PromptInsights() {
   );
 }
 
-export default PromptInsights;

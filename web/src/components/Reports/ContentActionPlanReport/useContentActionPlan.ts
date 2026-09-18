@@ -58,5 +58,3 @@ export function useContentActionPlan() {
     ready,
   };
 }
-
-export type ContentActionPlanData = ReturnType<typeof useContentActionPlan>;

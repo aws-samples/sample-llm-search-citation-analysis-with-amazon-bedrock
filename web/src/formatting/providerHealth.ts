@@ -9,7 +9,7 @@
  * is the single place that decides what the user is told about it.
  */
 
-export const PROVIDER_ERROR_CATEGORIES = [
+const PROVIDER_ERROR_CATEGORIES = [
   'insufficient_credit',
   'invalid_key',
   'rate_limited',

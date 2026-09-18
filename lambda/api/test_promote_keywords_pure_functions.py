@@ -798,6 +798,13 @@ class TestCreateItemsUnit:
         }]
 
         items = promotion_handler.create_items(to_create, 'paused', 'high')
+        # Region/language/category defaults belong to the shared keyword store,
+        # which `_load_promotion_handler` has already put on sys.path.
+        from shared.keyword_store import (
+            DEFAULT_KEYWORD_CATEGORY,
+            DEFAULT_KEYWORD_LANGUAGE,
+            DEFAULT_KEYWORD_REGION,
+        )
 
         item = items[0]
         assert set(item) == {
@@ -806,9 +813,9 @@ class TestCreateItemsUnit:
         }, f'Unexpected item fields {sorted(item)}'
         assert item['status'] == 'paused', f'Unexpected status {item["status"]!r}'
         assert item['priority'] == 'high', f'Unexpected priority {item["priority"]!r}'
-        assert item['region'] == promotion_handler.DEFAULT_REGION, 'Unexpected region default'
-        assert item['language'] == promotion_handler.DEFAULT_LANGUAGE, 'Unexpected language default'
-        assert item['category'] == promotion_handler.DEFAULT_CATEGORY, 'Unexpected category default'
+        assert item['region'] == DEFAULT_KEYWORD_REGION, 'Unexpected region default'
+        assert item['language'] == DEFAULT_KEYWORD_LANGUAGE, 'Unexpected language default'
+        assert item['category'] == DEFAULT_KEYWORD_CATEGORY, 'Unexpected category default'
         assert item['notes'] == 'intent: commercial; competition: high; source: expansion', (
             f'Unexpected notes {item["notes"]!r}'
         )

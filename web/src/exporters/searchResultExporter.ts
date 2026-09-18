@@ -1,5 +1,3 @@
-import { exportToExcel } from './excelGenerator';
-
 /** The search fields the Excel export reads. */
 export interface ExportableSearch {
   keyword: string;
@@ -8,20 +6,9 @@ export interface ExportableSearch {
   citations?: string[];
 }
 
-interface KeywordGroup {
-  keyword: string;
-  searches: ExportableSearch[];
-  latestTimestamp: string;
-  totalRuns: number;
-  totalCitations: number;
-  avgCitations: number;
-  hasFailed: boolean;
-}
-
 /**
  * One Excel row per citation of a search, or a single "No citations"
- * placeholder row. Shared by the SearchesView export and
- * `downloadSearchesToExcel` (bugs.md 4.4 — previously byte-identical copies).
+ * placeholder row. Used by the SearchesView export.
  */
 export function searchExcelRows(search: ExportableSearch): Record<string, unknown>[] {
   if (search.citations && search.citations.length > 0) {
@@ -50,16 +37,3 @@ export const SEARCH_EXCEL_COLUMNS = [
   { wch: 12 },
   { wch: 80 },
 ];
-
-export const downloadSearchesToExcel = async (keywordGroups: KeywordGroup[]) => {
-  const excelData = keywordGroups.flatMap(
-    (group) => group.searches.flatMap(searchExcelRows)
-  );
-
-  await exportToExcel({
-    data: excelData,
-    columns: SEARCH_EXCEL_COLUMNS,
-    sheetName: 'Recent Searches',
-    fileName: `citation-searches-${new Date().toISOString().split('T')[0]}.xlsx`,
-  });
-};

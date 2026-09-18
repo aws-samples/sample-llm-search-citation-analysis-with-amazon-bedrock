@@ -154,4 +154,3 @@ export const BrandConfigContent = ({
   );
 };
 
-export default BrandConfigContent;

@@ -1,4 +1,4 @@
-import type { BrandExpansionAllResult } from '../../hooks/useBrandConfig';
+import type { BrandExpansionAllResult } from '../../types';
 import { WarningIcon } from '../ui';
 
 interface BrandExpansionPanelProps {

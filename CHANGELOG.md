@@ -9,6 +9,51 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.0.1] - 2026-09-18
+
+Dead-code removal and KPI-denominator fix, prompted by customer feedback that
+the codebase carried a lot of unused code. No API contract changes.
+
+### Fixed
+
+- Visibility scores no longer count the optional Brave/Tavily/Exa/SerpAPI/
+  Firecrawl search providers in the provider-coverage denominator. Brand
+  mentions are only extracted from LLM responses, so those five providers
+  could never contribute coverage; on installations that never configured
+  them the term was capped at 4/9 of its weight and every visibility score
+  (dashboard, persona rankings, trends, reports) was deflated. Scores will
+  rise after deploying; historical values were computed with the old
+  denominator.
+- Historical trends resolve the enabled-provider count once per request
+  instead of scanning the ProviderConfig table once per period bucket.
+
+### Changed
+
+- The visibility formula lives in one place, `shared/visibility_score.py`,
+  replacing three per-handler copies (one of which hard-coded the weights);
+  the module is pinned by tests to the values the handlers produced before.
+- Web: removed 32 dead files — six typed API-client modules that no hook or
+  component imported (`brands`, `content`, `providers`, `rawResponses`,
+  `research`, `visibility`) and their specs, the `ErrorDisplay` and `Tables`
+  components, stale duplicates of `TriggerSection`/`ExecutionStatus`,
+  `exporters/analysisExecutor`, `hooks/useBrandExpansion`, and seven barrel
+  files nobody imported — plus unused functions in the remaining clients,
+  unused exports, seven redundant `default` exports and the unused
+  `@types/unist` dev dependency. The duplicated brand-expansion result types
+  now have a single definition in `types/api/brandConfig.ts`.
+- Lambda: removed `browser_tools.crawl_url`,
+  `manage-brand-config.get_preset_with_prompt` and three test-only alias
+  constants in `promote-keywords.py`.
+
+### Added
+
+- `npm run deadcode` / `npm run deadcode:prod` in `web/` (knip, pinned) with
+  `web/knip.json`; `scripts/lint-python.sh` now prefers the repo `.venv` and
+  documents the tests-hide-dead-code caveat of vulture.
+- `docs/plans/2026-09-keyword-groups-and-agentic-research-plan.md`: design
+  plan for keyword groups, editable schedules, group KPIs, parallel keyword
+  research and the Content Studio workflow.
+
 ## [2.0.0] - 2026-08-20
 
 Audit-driven refactor and hardening release (#103). Major version because it

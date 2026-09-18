@@ -14,14 +14,6 @@ export const PROVIDER = {
 /** Type for provider identifier values */
 export type ProviderId = typeof PROVIDER[keyof typeof PROVIDER];
 
-/** List of all supported providers (for iteration) */
-export const PROVIDERS: ProviderId[] = [
-  PROVIDER.OPENAI,
-  PROVIDER.PERPLEXITY,
-  PROVIDER.GEMINI,
-  PROVIDER.CLAUDE,
-];
-
 /** Provider display names */
 export const PROVIDER_NAMES: Record<ProviderId, string> = {
   [PROVIDER.OPENAI]: 'OpenAI',

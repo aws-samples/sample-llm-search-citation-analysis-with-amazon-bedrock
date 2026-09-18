@@ -171,33 +171,3 @@ export async function apiDelete<T>(
 
   return parseJsonResponse<T>(response);
 }
-/**
- * Makes an authenticated PATCH request to the API.
- */
-export async function apiPatch<T>(
-  endpoint: string,
-  body?: unknown,
-  options: ApiRequestOptions = {}
-): Promise<T> {
-  const fetchOptions: RequestInit = {
-    method: 'PATCH',
-    signal: options.signal,
-  };
-
-  if (body !== undefined) {
-    fetchOptions.headers = { 'Content-Type': 'application/json' };
-    fetchOptions.body = JSON.stringify(body);
-  }
-
-  const response = await authenticatedFetch(`${API_BASE_URL}${endpoint}`, fetchOptions);
-
-  if (!response.ok) {
-    throw await createApiRequestError(response, options.allowStructured4xx === true);
-  }
-
-  return parseJsonResponse<T>(response);
-}
-
-// Re-export for use in other modules
-export { parseJsonResponse };
-export { ApiRequestError };

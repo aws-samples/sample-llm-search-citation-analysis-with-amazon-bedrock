@@ -8,9 +8,15 @@
 #   scripts/lint-python.sh --dead-code  # Run vulture at 80% confidence (strict)
 #   scripts/lint-python.sh --dead-code-loose  # Run vulture at 60% (more signal, filters mock return_value noise)
 #
-# Requires: ruff and vulture on PATH. Install once with:
+# Requires: ruff and vulture on PATH. Both are pinned in
+# lambda/requirements-dev.txt (`pip install -r lambda/requirements-dev.txt`),
+# or install standalone with:
 #   pipx install ruff
 #   pipx install vulture
+#
+# Note: vulture treats a reference from a test file as a use, so production
+# code that only its own tests still call will not be reported. To hunt for
+# that class of dead code, add `*/test_*` to VULTURE_EXCLUDE for a one-off run.
 #
 # For running the test suite (pytest, boto3, hypothesis), see
 # lambda/requirements-dev.txt.
@@ -19,6 +25,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
+
+# Prefer the repo-local virtualenv (see lambda/requirements-dev.txt) when present.
+if [ -d "$REPO_ROOT/.venv/bin" ]; then
+  export PATH="$REPO_ROOT/.venv/bin:$PATH"
+fi
 
 # Lambda source tree — exclude vendored deps and build artifacts.
 LAMBDA_PATH="./lambda"

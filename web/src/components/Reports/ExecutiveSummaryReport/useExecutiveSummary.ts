@@ -32,5 +32,3 @@ export function useExecutiveSummary(days: number = DEFAULT_DAYS) {
     ready,
   };
 }
-
-export type ExecutiveSummaryData = ReturnType<typeof useExecutiveSummary>;

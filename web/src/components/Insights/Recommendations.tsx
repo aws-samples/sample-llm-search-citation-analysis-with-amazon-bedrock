@@ -403,4 +403,3 @@ export function Recommendations() {
   );
 }
 
-export default Recommendations;

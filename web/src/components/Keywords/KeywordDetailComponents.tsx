@@ -4,7 +4,7 @@ import {
   ChevronDownIcon, CloseIcon 
 } from '../ui';
 
-export const providerColors: Record<string, {
+const providerColors: Record<string, {
   border: string;
   bg: string 
 }> = {
@@ -26,12 +26,12 @@ export const providerColors: Record<string, {
   },
 };
 
-export const defaultProviderColor = {
+const defaultProviderColor = {
   border: 'rgb(107, 114, 128)',
   bg: 'rgba(107, 114, 128, 0.1)',
 };
 
-export const providers = ['claude', 'gemini', 'openai', 'perplexity'];
+const providers = ['claude', 'gemini', 'openai', 'perplexity'];
 
 export interface KeywordStats {
   totalRuns: number;

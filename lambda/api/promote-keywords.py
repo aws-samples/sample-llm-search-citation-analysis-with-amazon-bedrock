@@ -18,10 +18,7 @@ from shared.env_vars import resolve_table_env
 from shared.keyword_store import (
     ALLOWED_KEYWORD_PRIORITIES,
     ALLOWED_KEYWORD_STATUSES,
-    DEFAULT_KEYWORD_CATEGORY,
-    DEFAULT_KEYWORD_LANGUAGE,
     DEFAULT_KEYWORD_PRIORITY,
-    DEFAULT_KEYWORD_REGION,
     DEFAULT_KEYWORD_STATUS,
     build_keyword_item,
     put_keyword_if_absent,
@@ -52,14 +49,12 @@ MAX_ECHOED_VALUE_LENGTH = 50
 
 # Enum values and defaults come from the shared keyword store (bugs.md 3.3);
 # the local names remain this module's public vocabulary and are referenced
-# by its property tests.
+# by its property tests. Region/language/category defaults are applied by
+# `build_keyword_item` and are not re-exported here.
 ALLOWED_STATUSES = ALLOWED_KEYWORD_STATUSES
 ALLOWED_PRIORITIES = ALLOWED_KEYWORD_PRIORITIES
 DEFAULT_STATUS = DEFAULT_KEYWORD_STATUS
 DEFAULT_PRIORITY = DEFAULT_KEYWORD_PRIORITY
-DEFAULT_REGION = DEFAULT_KEYWORD_REGION
-DEFAULT_LANGUAGE = DEFAULT_KEYWORD_LANGUAGE
-DEFAULT_CATEGORY = DEFAULT_KEYWORD_CATEGORY
 
 REASON_DUPLICATE = 'duplicate'
 REASON_EMPTY = 'empty'

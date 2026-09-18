@@ -9,11 +9,7 @@ import type {
   StepState, ProcessedExecution 
 } from '../../formatting/executionProcessor';
 
-export type {
-  StepState, ProcessedExecution 
-};
-
-export const getStatusStyle = (status: string): string => {
+const getStatusStyle = (status: string): string => {
   const styles: Record<string, string> = {
     RUNNING: 'bg-gray-100 text-gray-700',
     SUCCEEDED: 'bg-emerald-100 text-emerald-700',
@@ -22,7 +18,7 @@ export const getStatusStyle = (status: string): string => {
   return styles[status] ?? 'bg-gray-100 text-gray-600';
 };
 
-export const getStepStyle = (status: string): string => {
+const getStepStyle = (status: string): string => {
   const styles: Record<string, string> = {
     running: 'border-gray-400 bg-gray-50',
     completed: 'border-emerald-400 bg-emerald-50',
@@ -31,14 +27,14 @@ export const getStepStyle = (status: string): string => {
   return styles[status] ?? 'border-gray-200 bg-gray-50';
 };
 
-export const getStepIndicator = (status: string): JSX.Element => {
+const getStepIndicator = (status: string): JSX.Element => {
   if (status === 'running') return <div className="w-2.5 h-2.5 bg-gray-500 rounded-full animate-pulse" />;
   if (status === 'completed') return <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full" />;
   if (status === 'failed') return <div className="w-2.5 h-2.5 bg-red-500 rounded-full" />;
   return <div className="w-2.5 h-2.5 bg-gray-300 rounded-full" />;
 };
 
-export const getExecutionTitle = (status: string): string => {
+const getExecutionTitle = (status: string): string => {
   const titles: Record<string, string> = {
     RUNNING: 'Analysis Running',
     SUCCEEDED: 'Analysis Completed',
@@ -53,7 +49,7 @@ const getLogItemStyle = (event: ExecutionEvent): string => {
   return 'bg-gray-50 border-gray-200';
 };
 
-export function formatEventMessage(event: ExecutionEvent): string {
+function formatEventMessage(event: ExecutionEvent): string {
   const eventType = event.type;
   const stateName = event.state_name ?? '';
   const startedMessages: Record<string, string> = {

@@ -16,7 +16,7 @@ const GROUPS_CLAIM = 'cognito:groups';
 /**
  * Get the current user's JWT token for API authentication
  */
-export async function getAuthToken(): Promise<string | null> {
+async function getAuthToken(): Promise<string | null> {
   try {
     const session = await fetchAuthSession();
     return session.tokens?.idToken?.toString() ?? null;
