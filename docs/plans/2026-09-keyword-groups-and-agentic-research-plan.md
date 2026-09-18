@@ -1,6 +1,6 @@
 # Plan: Keyword Groups, Editable Schedules, Group KPIs, Reliable Keyword Research, Research Agent, Content Workflow
 
-Status: IN DELIVERY — 2026-09-18. Phase 0a (2.0.1), Phase 1 (2.1.0, keyword groups + cap removal) and Phase 2 (2.2.0, parallel checkpointed research) and Phase 3 (2.3.0, Schedules v2) merged + deployed; Phases 4–6 pending. Decisions D1, D3, D6, D9 locked (see §4).
+Status: IN DELIVERY — 2026-09-18. Phase 0a (2.0.1), Phase 1 (2.1.0, keyword groups + cap removal) and Phase 2 (2.2.0, parallel checkpointed research), Phase 3 (2.3.0/2.3.1, Schedules v2) and Phase 4 (2.4.0, group KPIs) merged + deployed; Phases 5–6 pending. Decisions D1, D3, D6, D9 locked (see §4).
 Baseline: `main` at v2.0.0 (after Dependabot merges #104/#105/#106)
 Scope: six related customer requests (hotel chain customer, contact: Bastián) plus a
 dead-code cleanup the customer asked for. Original feedback was in Spanish; requirements
@@ -204,7 +204,7 @@ Acceptance (from R1–R6, R14)
 
 Acceptance (R4, R10–R12): a schedule named "Hotel Coruña — weekly" targeting group X runs whatever keywords are in X at trigger time; editing time/timezone/scope/name never requires delete + recreate.
 
-### Epic C — Group KPIs, reports, export
+### Epic C — Group KPIs, reports, export — shipped in 2.4.0
 
 - Build on `lambda/shared/visibility_score.py` (Phase 0a); add share-of-voice and the first-party/competitor group summaries there, pinned by tests on fixture responses.
 - Scope parsing helper `lambda/shared/scope_params.py` (`keyword | group_id | keyword_ids`), then extend, in priority order: `/visibility` (group summary: mean first-party visibility, mean competitor visibility, summed share of voice, provider coverage, keyword count + per-keyword breakdown), `/trends` (group series = per-bucket mean of first-party score across keywords, plus optional per-keyword series; `days` up to 365 already supported), `/brand-mentions` (aggregate mentions/rank/provider counts across keywords), `/citation-gaps` and `/citations` (Query per keyword instead of Scan), `/reports/overview` (group-scoped executive summary). Later: `/persona-rankings`, `/recommendations`, `/stats`.
@@ -225,6 +225,8 @@ Acceptance (R7, R8, R13): "Hotel Gran Marino" shows one visibility score, share 
 - Not done (deliberately): URL `?job=` parameter (session storage covers the refresh/tab case), per-provider concurrency ceilings (no provider throttles at 3 parallel calls).
 
 ### Epic E — Keyword Research Agent
+
+> Product steering (2026-09-18): build the agent as an *agentic workflow inside the Keyword Research tab* — the user can pick, edit and save the agent's system prompt from templates; runs execute in the background on the 2.2.0 state machine so several jobs can be shipped at once; and reuse the web-search / crawling providers the search Lambda already integrates (Exa, Firecrawl, Tavily, Brave, SerpAPI) where they offer related-search / keyword-expansion features, instead of hand-rolling every expansion. Design details follow this steering in Phase 5.
 
 - Input form ("Research Agent" tab): seed (hotel name), market + language, expansion dimensions as toggles — destination, location/neighbourhood, points of interest, hotel attributes, audience type, trip type — plus a free-text instruction ("also expand by events and seasons"), target count (default 60), max rounds (default 2, hard cap 3), destination group (existing or "create new").
 - Same state machine as Epic D with two Bedrock steps (new roles `RESEARCH_PLANNING` → Sonnet tier, `RESEARCH_EVALUATION` → Haiku tier, overridable via the existing `BEDROCK_TIER_<ROLE>` env pattern):
@@ -273,7 +275,7 @@ Each phase = one PR = one minor version + CHANGELOG entry; every PR runs `ruff c
 | 1. Keyword Groups + cap removal (DONE) | 2.1.0 | Epic A: table, `group_ids`, resolver, `/api/keyword-groups`, promote/trigger `group_ids`/`scope`, Settings Groups panel, `KeywordScopePicker`, trigger page; D9 cap removal + Map concurrency parameter | M | 0b |
 | 2. Reliable, parallel research (DONE) | 2.2.0 | Epic D: research state machine + worker, parallel Map, job/step model, GSI + TTL, `GET /{id}`, retry endpoint, progressive UI, session re-attach (absorbed Phase 0b) | L | 0b (parallel with 1) |
 | 3. Schedules v2 (DONE) | 2.3.0 | Epic B: v2 descriptor, generated ids + display name, `GET/PUT /{id}`, run-now, ParseKeywords scope resolution, edit UI, validation fixes | M | 1 |
-| 4. Group KPIs & export | 2.4.0 | Epic C: scope params on visibility/trends/brand-mentions/gaps/citations/overview, projections + cache, Group overview + history chart + range selector, scope selector in reports, Excel export | L | 1 |
+| 4. Group KPIs & export (DONE) | 2.4.0 | Epic C: scope params on visibility/trends/brand-mentions/gaps/citations/overview, projections, Group overview + history chart + range selector, scope selector in reports, Excel export (no server cache — measured fan-out fits the budget) | L | 1 |
 | 5. Research Agent | 2.5.0 | Epic E: Plan/Evaluate steps, dimensions form, bounded loop, trace view, promote-to-group, export | L | 1, 2 |
 | 6. Content workflow | 2.6.0 | Epic F: ContentTasks table + API, work queue, mark-updated, ready-to-re-measure, GenerateSummary hook, comparison endpoint + panels | L | 1, 4 |
 

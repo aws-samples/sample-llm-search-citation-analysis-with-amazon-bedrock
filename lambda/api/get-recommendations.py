@@ -44,9 +44,13 @@ CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')  # Optional for fallback
 
 
-def generate_rule_based_recommendations(config: dict[str, Any]) -> list[dict[str, Any]]:
+def generate_rule_based_recommendations(config: dict[str, Any], keywords: list[str] | None = None) -> list[dict[str, Any]]:
     """
     Generate recommendations based on rule-based analysis.
+
+    ``keywords`` restricts the analysis to those keyword texts (a keyword
+    group, for the group-scoped executive summary); by default the active
+    keywords are discovered from the Keywords table.
     """
     recommendations = []
     search_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
@@ -70,8 +74,8 @@ def generate_rule_based_recommendations(config: dict[str, Any]) -> list[dict[str
     # Get keywords from Keywords table (small, efficient scan)
     # Then query SearchResults by keyword (uses partition key)
     keywords_table_name = os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    keywords = []
-    if keywords_table_name:
+    keywords = list(keywords) if keywords is not None else []
+    if not keywords and keywords_table_name:
         keywords_table = dynamodb.Table(keywords_table_name)
         kw_response = keywords_table.scan(
             ProjectionExpression='keyword',

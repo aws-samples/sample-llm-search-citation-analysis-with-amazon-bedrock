@@ -1,4 +1,7 @@
-import type { VisibilityMetricsResponse } from '../types';
+import type {
+  ReportScope, VisibilityResponse
+} from '../types';
+import { reportScopeParams } from '../components/ui/reportScope';
 import { useAnalysisEndpoint } from './useAnalysisEndpoint';
 
 class VisibilityFetchError extends Error {
@@ -8,23 +11,25 @@ class VisibilityFetchError extends Error {
   }
 }
 
-function isVisibilityMetricsResponse(data: unknown): data is VisibilityMetricsResponse {
+function isVisibilityResponse(data: unknown): data is VisibilityResponse {
   if (typeof data !== 'object' || data === null) return false;
-  
+
   // Check for error response from backend
   if ('error' in data) return false;
-  
-  return 'keyword' in data && 'brands' in data;
+
+  // Single keyword answers carry `keyword`; group / all answers carry `scope`
+  // plus the per-keyword rows. Both carry the brand ranking.
+  return 'brands' in data && ('keyword' in data || ('scope' in data && 'keywords' in data));
 }
 
 const visibilityMetricsEndpoint = {
   errorContext: 'visibility',
   logMessage: '[visibility] Error fetching metrics:',
-  isValidResponse: isVisibilityMetricsResponse,
+  isValidResponse: isVisibilityResponse,
   createHttpError: () => new VisibilityFetchError(),
   createResponseError: (message: string) => new VisibilityFetchError(message),
-  buildRequest: (keyword: string, brand?: string, queryPromptId?: string) => {
-    const params = new URLSearchParams({ keyword });
+  buildRequest: (scope: ReportScope, queryPromptId?: string, brand?: string) => {
+    const params = new URLSearchParams(reportScopeParams(scope));
     if (brand) params.append('brand', brand);
     if (queryPromptId) params.append('query_prompt_id', queryPromptId);
     return {
@@ -34,6 +39,10 @@ const visibilityMetricsEndpoint = {
   },
 };
 
+/**
+ * Visibility metrics for a report scope: one keyword (the classic payload) or
+ * a keyword group / every keyword (a group summary with per-keyword rows).
+ */
 export function useVisibilityMetrics() {
   const {
     data, loading, error, fetchData: fetchVisibilityMetrics 

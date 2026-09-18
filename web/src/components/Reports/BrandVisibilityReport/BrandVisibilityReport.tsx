@@ -1,10 +1,15 @@
 import { useEffect } from 'react';
 import {
-  useNavigate, useParams 
+  useNavigate, useParams, useSearchParams 
 } from 'react-router-dom';
 import { usePrintMode } from '../../../hooks/usePrintMode';
+import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
 import { ReportLayout } from '../layout';
-import type { Keyword } from '../../../types';
+import type {
+  Keyword, ReportScope 
+} from '../../../types';
+import { KeywordScopeSelector } from '../../ui/KeywordScopeSelector';
+import { describeReportScope } from '../../ui/reportScope';
 import { useBrandVisibilityReport } from './useBrandVisibilityReport';
 import { PerKeywordHeadlineSection } from './sections/PerKeywordHeadlineSection';
 import { BrandRankingsSection } from './sections/BrandRankingsSection';
@@ -16,65 +21,64 @@ import { MoversSection } from './sections/MoversSection';
 interface Props {readonly keywords: ReadonlyArray<Keyword>;}
 
 /**
- * Brand Visibility report. Two URL shapes:
+ * Brand Visibility report. Three URL shapes:
  *   - `/reports/visibility` — all-keywords overview
+ *   - `/reports/visibility?group=<id>` — one keyword group (a hotel)
  *   - `/reports/visibility/:keyword` — per-keyword deep cut
  *
- * The presence of `:keyword` is the mode switch. A keyword selector at
- * the top lets the user jump between modes from inside the report (it's
- * print-hidden so the PDF doesn't carry the dropdown).
+ * The URL is the mode switch. A scope selector at the top lets the user jump
+ * between modes from inside the report (it's print-hidden so the PDF doesn't
+ * carry the dropdown).
  *
  * The marketing-lead audience reads this for "are we winning, level, or
  * losing", so the per-keyword variant is anchored on the gap to
- * competitor average and the all-keywords variant on improving vs
- * declining counts.
+ * competitor average and the cross-keyword variants on improving vs
+ * declining counts plus the group's history.
  */
 export function BrandVisibilityReport({ keywords }: Props) {
   const params = useParams<{ keyword?: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { groups } = useKeywordGroups();
 
-  const selected = params.keyword ? decodeURIComponent(params.keyword) : null;
+  const selectedKeyword = params.keyword ? decodeURIComponent(params.keyword) : null;
+  const selectedGroupId = searchParams.get('group');
+  const scope: ReportScope = resolveScope(selectedKeyword, selectedGroupId);
 
   // Auto-redirect: if the user navigated to /reports/visibility/:keyword
   // with a slug that no longer matches any tracked keyword, fall back to
   // the all-keywords overview rather than render a confusing empty state.
   useEffect(() => {
     if (
-      selected
+      selectedKeyword
       && keywords.length > 0
-      && !keywords.some((k) => k.keyword === selected)
+      && !keywords.some((k) => k.keyword === selectedKeyword)
     ) {
       navigate('/reports/visibility', { replace: true });
     }
-  }, [selected, keywords, navigate]);
+  }, [selectedKeyword, keywords, navigate]);
 
-  const data = useBrandVisibilityReport(selected);
+  const data = useBrandVisibilityReport(scope);
 
   usePrintMode({ ready: data.ready });
 
-  const subtitle = selected
-    ? `Per-keyword visibility for "${selected}"`
-    : 'Cross-keyword visibility overview';
+  const subtitle = subtitleFor(scope, describeReportScope(scope, groups));
 
   return (
     <ReportLayout
       title="Brand Visibility"
       subtitle={subtitle}
       actions={(
-        <KeywordSwitcher
-          selected={selected}
-          keywords={keywords}
-          onChange={(next) => {
-            if (next === null) {
-              navigate('/reports/visibility');
-            } else {
-              navigate(`/reports/visibility/${encodeURIComponent(next)}`);
-            }
-          }}
+        <KeywordScopeSelector
+          keywords={[...keywords]}
+          groups={groups}
+          value={scope}
+          onChange={(next) => navigate(pathFor(next))}
+          className="min-w-[16rem]"
         />
       )}
     >
-      {selected ? (
+      {scope.kind === 'keyword' ? (
         <>
           <PerKeywordHeadlineSection
             visibility={data.visibility}
@@ -100,6 +104,11 @@ export function BrandVisibilityReport({ keywords }: Props) {
             loading={data.trendsLoading}
             error={data.trendsError}
           />
+          <TrendHistorySection
+            trends={data.trends}
+            loading={data.trendsLoading}
+            error={data.trendsError}
+          />
           <MoversSection
             trends={data.trends}
             loading={data.trendsLoading}
@@ -116,34 +125,26 @@ export function BrandVisibilityReport({ keywords }: Props) {
   );
 }
 
-function KeywordSwitcher({
-  selected,
-  keywords,
-  onChange,
-}: {
-  readonly selected: string | null;
-  readonly keywords: ReadonlyArray<Keyword>;
-  readonly onChange: (next: string | null) => void;
-}) {
-  return (
-    <div className="flex items-center gap-2 text-sm">
-      <label htmlFor="visibility-mode" className="text-gray-600 dark:text-gray-400">
-        Scope:
-      </label>
-      <select
-        id="visibility-mode"
-        value={selected ?? '__all__'}
-        onChange={(e) => {
-          const v = e.target.value;
-          onChange(v === '__all__' ? null : v);
-        }}
-        className="px-3 py-1.5 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-      >
-        <option value="__all__">All keywords</option>
-        {keywords.map((k) => (
-          <option key={k.keyword} value={k.keyword}>{k.keyword}</option>
-        ))}
-      </select>
-    </div>
-  );
+function resolveScope(keyword: string | null, groupId: string | null): ReportScope {
+  if (keyword) return {
+    kind: 'keyword',
+    keyword 
+  };
+  if (groupId) return {
+    kind: 'group',
+    groupId 
+  };
+  return { kind: 'all' };
+}
+
+function pathFor(scope: ReportScope): string {
+  if (scope.kind === 'keyword') return `/reports/visibility/${encodeURIComponent(scope.keyword)}`;
+  if (scope.kind === 'group') return `/reports/visibility?group=${encodeURIComponent(scope.groupId)}`;
+  return '/reports/visibility';
+}
+
+function subtitleFor(scope: ReportScope, label: string): string {
+  if (scope.kind === 'keyword') return `Per-keyword visibility for "${label}"`;
+  if (scope.kind === 'group') return `Keyword group "${label}" — visibility overview`;
+  return 'Cross-keyword visibility overview';
 }

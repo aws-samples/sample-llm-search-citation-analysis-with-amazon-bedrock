@@ -82,14 +82,23 @@ describe('useKeywordDeepDive', () => {
 
   it('fires visibility, trends, and persona fetches when keyword is supplied', () => {
     renderHook(() => useKeywordDeepDive('best running shoes'));
-    expect(fetchVisibility).toHaveBeenCalledWith('best running shoes');
-    expect(fetchTrends).toHaveBeenCalledWith('best running shoes', 'day', 30);
+    expect(fetchVisibility).toHaveBeenCalledWith({
+      kind: 'keyword',
+      keyword: 'best running shoes' 
+    });
+    expect(fetchTrends).toHaveBeenCalledWith({
+      kind: 'keyword',
+      keyword: 'best running shoes' 
+    }, 'day', 30);
     expect(fetchPersonas).toHaveBeenCalledWith('best running shoes');
   });
 
   it('fires gap and recommendation fetches when keyword is supplied', () => {
     renderHook(() => useKeywordDeepDive('best running shoes'));
-    expect(fetchGaps).toHaveBeenCalledWith('best running shoes');
+    expect(fetchGaps).toHaveBeenCalledWith({
+      kind: 'keyword',
+      keyword: 'best running shoes' 
+    });
     expect(fetchRecs).toHaveBeenCalledWith(false);
   });
 
@@ -105,10 +114,19 @@ describe('useKeywordDeepDive', () => {
     act(() => {
       rerender({ keyword: 'second' });
     });
-    expect(fetchVisibility).toHaveBeenCalledWith('second');
-    expect(fetchTrends).toHaveBeenCalledWith('second', 'day', 30);
+    expect(fetchVisibility).toHaveBeenCalledWith({
+      kind: 'keyword',
+      keyword: 'second' 
+    });
+    expect(fetchTrends).toHaveBeenCalledWith({
+      kind: 'keyword',
+      keyword: 'second' 
+    }, 'day', 30);
     expect(fetchPersonas).toHaveBeenCalledWith('second');
-    expect(fetchGaps).toHaveBeenCalledWith('second');
+    expect(fetchGaps).toHaveBeenCalledWith({
+      kind: 'keyword',
+      keyword: 'second' 
+    });
   });
 
   it('refetches recommendations when the keyword changes', () => {

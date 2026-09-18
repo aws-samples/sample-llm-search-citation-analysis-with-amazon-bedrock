@@ -9,55 +9,96 @@ Metrics:
 - Share of Voice: % of total brand mentions that belong to each brand
 - Provider Coverage: Which AI engines mention the brand
 - Trend Direction: Improving, declining, or stable
+
+Scope (2.4.0): exactly one of ``keyword=`` (one keyword, unchanged response),
+``group_id=`` (every active keyword in a keyword group) or ``keyword_ids=``
+(comma-separated keyword ids). Group and id scopes answer a *group summary*:
+the per-keyword metrics are computed in parallel with the same formulas and
+averaged, with a per-keyword breakdown and a cross-keyword brand ranking.
 """
 
 import logging
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
+from botocore.config import Config
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import success_response
-from shared.constants import UNRANKED_SENTINEL
-from shared.decorators import api_handler, require_keyword, validate
+from shared.api_response import success_response, validation_error
+from shared.constants import MAX_KEYWORD_LENGTH, UNRANKED_SENTINEL
+from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.providers import get_enabled_provider_count
+from shared.scope_params import ReportScope, parse_scope_params
 from shared.utils import get_brand_config
-from shared.visibility_score import calculate_visibility_score, sentiment_to_score
+from shared.visibility_score import (
+    calculate_share_of_voice,
+    calculate_visibility_score,
+    mean,
+    sentiment_to_score,
+    summarize_group_visibility,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-dynamodb = boto3.resource('dynamodb')
+# The group summary fans out one Query per keyword; give boto3 enough pooled
+# connections for the thread pool below.
+dynamodb = boto3.resource('dynamodb', config=Config(max_pool_connections=50))
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+KEYWORDS_TABLE = (
+    os.environ.get('DYNAMODB_TABLE_KEYWORDS')
+    or os.environ.get('KEYWORDS_TABLE')
+    or 'CitationAnalysis-Keywords'
+)
+
+# Parallel per-keyword fan-out for group scopes, and the most keywords one
+# group summary covers (the `keyword_ids` cap; keeps the request inside the
+# 29s API budget with projected queries).
+_SCOPE_MAX_WORKERS = 10
+_SCOPE_KEYWORDS_CAP = 100
+
+# Only the fields the metrics use; the full LLM response text stays in the
+# table. Without this a 60-keyword group would pull megabytes of prose
+# through a 29s API request.
+_METRICS_PROJECTION = '#ts, provider, brands, query_prompt_id'
+_METRICS_PROJECTION_NAMES = {'#ts': 'timestamp'}
 
 
-def calculate_share_of_voice(brand_mentions: dict[str, int], total_mentions: int) -> dict[str, float]:
-    """Calculate share of voice percentage for each brand."""
-    if total_mentions == 0:
-        return {}
-    return {
-        brand: round((count / total_mentions) * 100, 2)
-        for brand, count in brand_mentions.items()
+def _query_keyword_items(table: Any, keyword: str) -> list[dict[str, Any]]:
+    """Every result row for a keyword (projected), following pagination."""
+    params: dict[str, Any] = {
+        'KeyConditionExpression': Key('keyword').eq(keyword),
+        'ProjectionExpression': _METRICS_PROJECTION,
+        'ExpressionAttributeNames': _METRICS_PROJECTION_NAMES,
     }
+    items: list[dict[str, Any]] = []
+    while True:
+        response = table.query(**params)
+        items.extend(response.get('Items', []))
+        last_key = response.get('LastEvaluatedKey')
+        if not last_key:
+            return items
+        params['ExclusiveStartKey'] = last_key
 
 
-def get_visibility_metrics(keyword: str, config: dict[str, Any], query_prompt_id: str | None = None) -> dict[str, Any]:
+def get_visibility_metrics(
+    keyword: str,
+    config: dict[str, Any],
+    query_prompt_id: str | None = None,
+    total_providers: int | None = None,
+) -> dict[str, Any]:
     """Calculate visibility metrics for a keyword, optionally filtered by persona."""
     table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-
-    # Query all results for this keyword
-    response = table.query(
-        KeyConditionExpression=Key('keyword').eq(keyword)
-    )
-    items = response.get('Items', [])
+    items = _query_keyword_items(table, keyword)
 
     if not items:
         return {"error": "No data found for keyword"}
@@ -105,8 +146,10 @@ def get_visibility_metrics(keyword: str, config: dict[str, Any], query_prompt_id
 
             total_mentions += mention_count
 
-    # Get enabled provider count for visibility calculation
-    total_providers = get_enabled_provider_count()
+    # Get enabled provider count for visibility calculation (the group
+    # summary passes it in once instead of reading ProviderConfig per keyword)
+    if total_providers is None:
+        total_providers = get_enabled_provider_count()
 
     # Calculate metrics for each brand
     brand_metrics = []
@@ -161,42 +204,88 @@ def get_visibility_metrics(keyword: str, config: dict[str, Any], query_prompt_id
         'timestamp': latest_timestamp,
         'total_brands': len(brand_metrics),
         'total_mentions': total_mentions,
+        'total_providers': total_providers,
         'brands': brand_metrics,
         'first_party': first_party_metrics,
         'competitors': competitor_metrics,
         'others': other_metrics,
         'summary': {
-            'first_party_avg_score': round(sum(b['visibility_score'] for b in first_party_metrics) / len(first_party_metrics), 1) if first_party_metrics else 0,
-            'competitor_avg_score': round(sum(b['visibility_score'] for b in competitor_metrics) / len(competitor_metrics), 1) if competitor_metrics else 0,
+            'first_party_avg_score': round(mean(b['visibility_score'] for b in first_party_metrics), 1),
+            'competitor_avg_score': round(mean(b['visibility_score'] for b in competitor_metrics), 1),
             'first_party_total_sov': round(sum(b['share_of_voice'] for b in first_party_metrics), 2),
             'competitor_total_sov': round(sum(b['share_of_voice'] for b in competitor_metrics), 2)
         }
     }
 
 
+def get_scope_visibility_metrics(scope: ReportScope, config: dict[str, Any], query_prompt_id: str | None = None) -> dict[str, Any]:
+    """Group summary: per-keyword metrics in parallel, then averaged.
+
+    Keywords without any analysis result are reported but excluded from the
+    averages, so a freshly added keyword does not drag a hotel's score to zero.
+    """
+    total_providers = get_enabled_provider_count()
+    keywords = list(scope.keywords)[:_SCOPE_KEYWORDS_CAP]
+
+    def compute(keyword: str) -> dict[str, Any]:
+        try:
+            return get_visibility_metrics(keyword, config, query_prompt_id=query_prompt_id, total_providers=total_providers)
+        except Exception as exc:  # one broken partition must not sink the group
+            logger.warning(f"Visibility metrics failed for {keyword!r}: {exc}")
+            return {'error': str(exc)}
+
+    per_keyword: list[dict[str, Any]] = []
+    if keywords:
+        with ThreadPoolExecutor(max_workers=min(_SCOPE_MAX_WORKERS, len(keywords))) as pool:
+            per_keyword = list(pool.map(compute, keywords))
+
+    summary = summarize_group_visibility(keywords, per_keyword, total_providers)
+    return {
+        'scope': scope.describe(),
+        'total_providers': total_providers,
+        'keywords_truncated': len(scope.keywords) > len(keywords),
+        **summary,
+    }
+
+
 @api_handler
 @validate({
-    'keyword': require_keyword(),
+    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
+    'group_id': {'type': str, 'max_length': 64},
+    'keyword_ids': {'type': str, 'max_length': 8000},
+    'scope': {'type': str, 'choices': ['all']},
     'brand': {'type': str, 'max_length': 200},
     'query_prompt_id': {'type': str, 'max_length': 100},
 })
-def handler(event, context, keyword, brand=None, query_prompt_id=None):
+def handler(event, context, keyword=None, group_id=None, keyword_ids=None, scope=None, brand=None, query_prompt_id=None):
     """
     API handler for visibility metrics.
 
-    Query params:
-        - keyword: Search keyword (required)
-        - brand: Filter to specific brand (optional)
-        - query_prompt_id: Filter to specific persona (optional)
+    Query params (exactly one scope):
+        - keyword: one keyword — the single-keyword response
+        - group_id: every active keyword of a keyword group — group summary
+        - keyword_ids: comma-separated keyword ids — group summary
+    Optional:
+        - brand: Filter to specific brand (single keyword only)
+        - query_prompt_id: Filter to specific persona
     """
+    report_scope, error = parse_scope_params(
+        {'keyword': keyword, 'group_id': group_id, 'keyword_ids': keyword_ids, 'scope': scope}, dynamodb.Table(KEYWORDS_TABLE)
+    )
+    if error:
+        return validation_error(error, event, 'scope')
+    if report_scope is None:
+        return validation_error('Provide keyword, group_id or keyword_ids', event, 'keyword')
+
     config = get_brand_config()
-    metrics = get_visibility_metrics(keyword, config, query_prompt_id=query_prompt_id)
+    if report_scope.is_single_keyword:
+        metrics = get_visibility_metrics(report_scope.keywords[0], config, query_prompt_id=query_prompt_id)
+        # Filter to specific brand if requested
+        if brand and 'brands' in metrics:
+            metrics['brands'] = [
+                b for b in metrics['brands']
+                if brand.lower() in b['name'].lower()
+            ]
+        return success_response(metrics, event)
 
-    # Filter to specific brand if requested
-    if brand and 'brands' in metrics:
-        metrics['brands'] = [
-            b for b in metrics['brands']
-            if brand.lower() in b['name'].lower()
-        ]
-
-    return success_response(metrics, event)
+    return success_response(get_scope_visibility_metrics(report_scope, config, query_prompt_id=query_prompt_id), event)

@@ -115,3 +115,143 @@ class TestSentimentToScore:
 
     def test_treats_unknown_label_as_neutral(self) -> None:
         assert visibility_score.sentiment_to_score('weird') == 0.0
+
+
+
+def _keyword_metrics(first_party_score, competitor_score, first_party_sov, brands, timestamp='2026-09-18T10:00:00Z'):
+    return {
+        'timestamp': timestamp,
+        'total_mentions': sum(int(brand.get('total_mentions', 0)) for brand in brands),
+        'brands': brands,
+        'first_party': [brand for brand in brands if brand['classification'] == 'first_party'],
+        'summary': {
+            'first_party_avg_score': first_party_score,
+            'competitor_avg_score': competitor_score,
+            'first_party_total_sov': first_party_sov,
+            'competitor_total_sov': 100 - first_party_sov,
+        },
+    }
+
+
+def _brand(name, classification, score, sov=10.0, providers=('openai',), mentions=1, rank=1):
+    return {
+        'name': name, 'classification': classification, 'visibility_score': score, 'share_of_voice': sov,
+        'providers': list(providers), 'provider_count': len(providers), 'total_mentions': mentions, 'best_rank': rank,
+    }
+
+
+class TestShareOfVoice:
+    def test_splits_mentions_into_percentages(self) -> None:
+        assert visibility_score.calculate_share_of_voice({'a': 3, 'b': 1}, 4) == {'a': 75.0, 'b': 25.0}
+
+    def test_is_empty_when_nothing_was_mentioned(self) -> None:
+        assert visibility_score.calculate_share_of_voice({'a': 0}, 0) == {}
+
+
+class TestMean:
+    def test_averages_values(self) -> None:
+        assert visibility_score.mean([1, 2, 3]) == 2.0
+
+    def test_is_zero_for_no_values(self) -> None:
+        assert visibility_score.mean([]) == 0.0
+
+
+class TestGroupSummary:
+    def test_averages_only_keywords_that_have_data(self) -> None:
+        per_keyword = [
+            _keyword_metrics(80.0, 40.0, 60.0, [_brand('Mine', 'first_party', 80.0, providers=('openai', 'gemini'))]),
+            {'error': 'No data found for keyword'},
+            _keyword_metrics(40.0, 20.0, 20.0, [_brand('Mine', 'first_party', 40.0, providers=('openai',))]),
+        ]
+
+        summary = visibility_score.summarize_group_visibility(['a', 'b', 'c'], per_keyword, total_providers=4)
+
+        assert (summary['keywords_analyzed'], summary['keywords_with_data']) == (3, 2)
+        assert summary['summary']['first_party_avg_score'] == 60.0
+        assert summary['summary']['competitor_avg_score'] == 30.0
+        assert summary['summary']['first_party_avg_sov'] == 40.0
+
+    def test_coverage_is_the_share_of_keywords_where_the_brand_appears(self) -> None:
+        per_keyword = [
+            _keyword_metrics(80.0, 40.0, 60.0, [_brand('Mine', 'first_party', 80.0)]),
+            _keyword_metrics(0.0, 50.0, 0.0, [_brand('Rival', 'competitor', 50.0)]),
+        ]
+
+        summary = visibility_score.summarize_group_visibility(['a', 'b'], per_keyword, total_providers=4)
+
+        assert summary['summary']['coverage_rate'] == 50.0
+
+    def test_provider_coverage_averages_first_party_engine_share(self) -> None:
+        per_keyword = [
+            _keyword_metrics(80.0, 0.0, 100.0, [_brand('Mine', 'first_party', 80.0, providers=('openai', 'gemini', 'perplexity', 'claude'))]),
+            _keyword_metrics(20.0, 0.0, 100.0, [_brand('Mine', 'first_party', 20.0, providers=('openai',))]),
+        ]
+
+        summary = visibility_score.summarize_group_visibility(['a', 'b'], per_keyword, total_providers=4)
+
+        assert summary['summary']['provider_coverage'] == 62.5
+
+    def test_per_keyword_rows_keep_their_order_and_flag_missing_data(self) -> None:
+        per_keyword = [{'error': 'x'}, _keyword_metrics(30.0, 10.0, 25.0, [_brand('Mine', 'first_party', 30.0)])]
+
+        rows = visibility_score.summarize_group_visibility(['first', 'second'], per_keyword, total_providers=3)['keywords']
+
+        assert [row['keyword'] for row in rows] == ['first', 'second']
+        assert (rows[0]['has_data'], rows[1]['has_data']) == (False, True)
+        assert (rows[1]['first_party_score'], rows[1]['first_party_sov'], rows[1]['first_party_mentioned']) == (30.0, 25.0, True)
+
+    def test_reports_the_latest_timestamp_across_keywords(self) -> None:
+        per_keyword = [
+            _keyword_metrics(1.0, 1.0, 1.0, [], timestamp='2026-09-01T00:00:00Z'),
+            _keyword_metrics(1.0, 1.0, 1.0, [], timestamp='2026-09-18T00:00:00Z'),
+        ]
+
+        summary = visibility_score.summarize_group_visibility(['a', 'b'], per_keyword, total_providers=3)
+
+        assert summary['timestamp'] == '2026-09-18T00:00:00Z'
+
+    def test_is_all_zero_when_no_keyword_has_data(self) -> None:
+        summary = visibility_score.summarize_group_visibility(['a'], [{'error': 'x'}], total_providers=3)
+
+        assert summary['summary'] == {
+            'first_party_avg_score': 0.0, 'competitor_avg_score': 0.0, 'first_party_avg_sov': 0.0,
+            'competitor_avg_sov': 0.0, 'coverage_rate': 0.0, 'provider_coverage': 0.0,
+        }
+        assert summary['brands'] == []
+
+
+class TestBrandsAcrossKeywords:
+    def test_averages_a_brands_score_over_the_keywords_it_appears_on(self) -> None:
+        per_keyword = [
+            _keyword_metrics(0, 0, 0, [_brand('Rival', 'competitor', 90.0, providers=('openai',), mentions=2, rank=1)]),
+            _keyword_metrics(0, 0, 0, [_brand('Rival', 'competitor', 50.0, providers=('gemini',), mentions=1, rank=3)]),
+            _keyword_metrics(0, 0, 0, [_brand('Other', 'other', 60.0)]),
+        ]
+
+        brands = visibility_score.aggregate_brands_across_keywords(per_keyword)
+
+        rival = next(brand for brand in brands if brand['name'] == 'Rival')
+        assert rival['visibility_score'] == 70.0
+        assert rival['keyword_count'] == 2
+        assert rival['providers'] == ['gemini', 'openai']
+        assert (rival['total_mentions'], rival['best_rank']) == (3, 1)
+
+    def test_ranks_by_score_then_breadth(self) -> None:
+        per_keyword = [
+            _keyword_metrics(0, 0, 0, [_brand('Wide', 'competitor', 70.0), _brand('Narrow', 'competitor', 70.0)]),
+            _keyword_metrics(0, 0, 0, [_brand('Wide', 'competitor', 70.0), _brand('Top', 'competitor', 95.0)]),
+        ]
+
+        brands = visibility_score.aggregate_brands_across_keywords(per_keyword)
+
+        assert [brand['name'] for brand in brands] == ['Top', 'Wide', 'Narrow']
+
+    def test_merges_names_case_insensitively(self) -> None:
+        per_keyword = [
+            _keyword_metrics(0, 0, 0, [_brand('Hotel X', 'first_party', 10.0)]),
+            _keyword_metrics(0, 0, 0, [_brand('hotel x', 'first_party', 30.0)]),
+        ]
+
+        brands = visibility_score.aggregate_brands_across_keywords(per_keyword)
+
+        assert [(brand['name'], brand['visibility_score'], brand['keyword_count']) for brand in brands] == [('Hotel X', 20.0, 2)]

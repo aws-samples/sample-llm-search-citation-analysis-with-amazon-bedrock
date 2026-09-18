@@ -1,5 +1,8 @@
 import { ApiRequestError } from '../infrastructure';
-import type { HistoricalTrendsResponse } from '../types';
+import type {
+  HistoricalTrendsResponse, ReportScope
+} from '../types';
+import { reportScopeParams } from '../components/ui/reportScope';
 import { useAnalysisEndpoint } from './useAnalysisEndpoint';
 
 function isHistoricalTrendsResponse(data: unknown): data is HistoricalTrendsResponse {
@@ -24,15 +27,15 @@ const historicalTrendsEndpoint = {
   createHttpError: (status: number) => new ApiRequestError('Failed to fetch historical trends', status),
   createResponseError: (message: string) => new ApiRequestError(message),
   buildRequest: (
-    keyword?: string,
+    scope: ReportScope,
     period: 'day' | 'week' | 'month' = 'day',
     days = 30
   ) => {
     const params = new URLSearchParams({
+      ...reportScopeParams(scope),
       period,
-      days: days.toString() 
+      days: days.toString(),
     });
-    if (keyword) params.append('keyword', keyword);
     return {
       path: '/trends',
       params,
@@ -56,7 +59,9 @@ const historicalTrendsEndpoint = {
  * 
  * useEffect(() => {
  *   // Fetch 30 days of daily data for a keyword
- *   fetchHistoricalTrends('best hotels', 'day', 30);
+ *   fetchHistoricalTrends({ kind: 'keyword', keyword: 'best hotels' }, 'day', 30);
+ *   // ...or the group series of a keyword group
+ *   fetchHistoricalTrends({ kind: 'group', groupId }, 'day', 90);
  * }, []);
  * 
  * // data.trend_data contains the time-series points

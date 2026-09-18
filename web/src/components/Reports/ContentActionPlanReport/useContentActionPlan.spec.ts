@@ -48,9 +48,9 @@ describe('useContentActionPlan', () => {
     });
   });
 
-  it('fires the citation-gaps fetch with limit 50 and no keyword', () => {
+  it('fires the citation-gaps fetch with limit 50 over all keywords', () => {
     renderHook(() => useContentActionPlan());
-    expect(fetchCitationGaps).toHaveBeenCalledWith(undefined, 50);
+    expect(fetchCitationGaps).toHaveBeenCalledWith({ kind: 'all' }, 50);
   });
 
   it('fires the content-studio ideas and history fetches', () => {

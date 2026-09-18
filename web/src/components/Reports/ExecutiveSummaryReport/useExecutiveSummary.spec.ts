@@ -23,14 +23,25 @@ describe('useExecutiveSummary', () => {
     });
   });
 
-  it('fetches the overview with default 30-day window', () => {
+  it('fetches the overview with default 30-day window over all keywords', () => {
     renderHook(() => useExecutiveSummary());
-    expect(fetchReportsOverview).toHaveBeenCalledWith(30, 'day', 3);
+    expect(fetchReportsOverview).toHaveBeenCalledWith(30, 'day', 3, { kind: 'all' });
   });
 
   it('respects a custom days argument', () => {
     renderHook(() => useExecutiveSummary(60));
-    expect(fetchReportsOverview).toHaveBeenCalledWith(60, 'day', 3);
+    expect(fetchReportsOverview).toHaveBeenCalledWith(60, 'day', 3, { kind: 'all' });
+  });
+
+  it('narrows the overview to a keyword group', () => {
+    renderHook(() => useExecutiveSummary(30, {
+      kind: 'group',
+      groupId: 'group-coruna' 
+    }));
+    expect(fetchReportsOverview).toHaveBeenCalledWith(30, 'day', 3, {
+      kind: 'group',
+      groupId: 'group-coruna' 
+    });
   });
 
   it('reports ready=true once the slice has data', () => {

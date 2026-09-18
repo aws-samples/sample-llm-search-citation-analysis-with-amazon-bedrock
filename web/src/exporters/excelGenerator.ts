@@ -11,6 +11,13 @@ interface ExportOptions<T> {
   fileName: string;
 }
 
+/** One sheet of a multi-sheet workbook. */
+export interface ExcelSheet {
+  name: string;
+  data: Record<string, unknown>[];
+  columns: ExcelColumn[];
+}
+
 /**
  * Export data to Excel file. Dynamically imports xlsx to reduce initial bundle.
  */
@@ -20,10 +27,24 @@ export async function exportToExcel<T extends Record<string, unknown>>({
   sheetName,
   fileName,
 }: ExportOptions<T>): Promise<void> {
+  await exportWorkbook([{
+    name: sheetName,
+    data,
+    columns 
+  }], fileName);
+}
+
+/**
+ * Export several sheets into one workbook (e.g. a KPI table plus its history).
+ * Sheet names are truncated to Excel's 31-character limit.
+ */
+export async function exportWorkbook(sheets: ExcelSheet[], fileName: string): Promise<void> {
   const XLSX = await import('xlsx-js-style') as typeof import('xlsx-js-style');
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(data);
-  ws['!cols'] = columns;
-  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  for (const sheet of sheets) {
+    const ws = XLSX.utils.json_to_sheet(sheet.data);
+    ws['!cols'] = sheet.columns;
+    XLSX.utils.book_append_sheet(wb, ws, sheet.name.slice(0, 31));
+  }
   XLSX.writeFile(wb, fileName);
 }

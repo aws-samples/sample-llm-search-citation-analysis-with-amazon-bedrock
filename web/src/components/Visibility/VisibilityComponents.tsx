@@ -114,12 +114,15 @@ interface TrendChartProps {
     period: string;
     visibility_score: number 
   }>;
+  readonly title?: string;
 }
 
-export function TrendChart({ data }: TrendChartProps) {
+export function TrendChart({
+  data, title = 'Visibility Trend (Last 30 Days)' 
+}: TrendChartProps) {
   return (
     <div className="bg-white p-4 rounded-lg shadow">
-      <h3 className="text-lg font-medium mb-4">Visibility Trend (Last 30 Days)</h3>
+      <h3 className="text-lg font-medium mb-4">{title}</h3>
       <div className="h-48 flex items-end gap-1">
         {data.map((point, i) => (
           <div key={point.period} className="flex-1 flex flex-col items-center">

@@ -21,8 +21,16 @@ vi.mock('../infrastructure', async () => {
 });
 
 import { authenticatedFetch } from '../infrastructure';
+import type { ReportScope } from '../types';
+import { ALL_SCOPE } from '../components/ui/reportScope';
 
 const mockAuthenticatedFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
+
+
+const kw = (keyword: string): ReportScope => ({
+  kind: 'keyword',
+  keyword 
+});
 
 describe('useCitationGaps', () => {
   beforeEach(() => {
@@ -55,7 +63,7 @@ describe('useCitationGaps', () => {
       const { result } = renderHook(() => useCitationGaps());
 
       act(() => {
-        result.current.fetchCitationGaps('test keyword');
+        result.current.fetchCitationGaps(kw('test keyword'));
       });
 
       expect(result.current.loading).toBe(true);
@@ -69,7 +77,7 @@ describe('useCitationGaps', () => {
       const { result } = renderHook(() => useCitationGaps());
 
       await act(async () => {
-        const data = await result.current.fetchCitationGaps('best hotels');
+        const data = await result.current.fetchCitationGaps(kw('best hotels'));
         expect(data).toStrictEqual(mockCitationGapsResponse);
       });
 
@@ -83,7 +91,7 @@ describe('useCitationGaps', () => {
       const { result } = renderHook(() => useCitationGaps());
 
       await act(async () => {
-        await result.current.fetchCitationGaps();
+        await result.current.fetchCitationGaps(ALL_SCOPE);
       });
 
       const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
@@ -97,7 +105,7 @@ describe('useCitationGaps', () => {
       const { result } = renderHook(() => useCitationGaps());
 
       await act(async () => {
-        await result.current.fetchCitationGaps('best hotels');
+        await result.current.fetchCitationGaps(kw('best hotels'));
       });
 
       const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
@@ -110,7 +118,7 @@ describe('useCitationGaps', () => {
       const { result } = renderHook(() => useCitationGaps());
 
       await act(async () => {
-        await result.current.fetchCitationGaps('test', 20);
+        await result.current.fetchCitationGaps(kw('test'), 20);
       });
 
       const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
@@ -123,7 +131,7 @@ describe('useCitationGaps', () => {
       const { result } = renderHook(() => useCitationGaps());
 
       await act(async () => {
-        await result.current.fetchCitationGaps('test');
+        await result.current.fetchCitationGaps(kw('test'));
       });
 
       const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
@@ -136,7 +144,7 @@ describe('useCitationGaps', () => {
       const { result } = renderHook(() => useCitationGaps());
 
       await act(async () => {
-        const data = await result.current.fetchCitationGaps('test');
+        const data = await result.current.fetchCitationGaps(kw('test'));
         expect(data).toBeNull();
       });
 
@@ -150,7 +158,7 @@ describe('useCitationGaps', () => {
       const { result } = renderHook(() => useCitationGaps());
 
       await act(async () => {
-        await result.current.fetchCitationGaps('test');
+        await result.current.fetchCitationGaps(kw('test'));
       });
 
       expect(result.current.error).toBeTruthy();
@@ -162,7 +170,7 @@ describe('useCitationGaps', () => {
       const { result } = renderHook(() => useCitationGaps());
 
       await act(async () => {
-        await result.current.fetchCitationGaps('test');
+        await result.current.fetchCitationGaps(kw('test'));
       });
 
       expect(result.current.error).toBeTruthy();
@@ -176,13 +184,13 @@ describe('useCitationGaps', () => {
       const { result } = renderHook(() => useCitationGaps());
 
       await act(async () => {
-        await result.current.fetchCitationGaps('test');
+        await result.current.fetchCitationGaps(kw('test'));
       });
 
       expect(result.current.error).toBeTruthy();
 
       await act(async () => {
-        await result.current.fetchCitationGaps('test');
+        await result.current.fetchCitationGaps(kw('test'));
       });
 
       expect(result.current.error).toBeNull();
@@ -194,7 +202,7 @@ describe('useCitationGaps', () => {
       const { result } = renderHook(() => useCitationGaps());
 
       await act(async () => {
-        const data = await result.current.fetchCitationGaps('test');
+        const data = await result.current.fetchCitationGaps(kw('test'));
         expect(data?.gaps).toHaveLength(2);
         expect(data?.gaps?.[0].priority).toBe('high');
         expect(data?.summary?.gap_count).toBe(2);
@@ -207,7 +215,7 @@ describe('useCitationGaps', () => {
       const { result } = renderHook(() => useCitationGaps());
 
       await act(async () => {
-        const data = await result.current.fetchCitationGaps();
+        const data = await result.current.fetchCitationGaps(ALL_SCOPE);
         expect(data?.top_gaps).toHaveLength(1);
         expect(data?.keyword_summaries).toHaveLength(2);
       });

@@ -8,17 +8,23 @@ import {
   isAbortError,
   ApiRequestError,
 } from '../infrastructure';
-import type { BrandMentionsResponse } from '../types';
+import type {
+  BrandMentionsResponse, ReportScope
+} from '../types';
+import {
+  decodeReportScope, encodeReportScope, reportScopeParams
+} from '../components/ui/reportScope';
 
 function isBrandMentionsResponse(data: unknown): data is BrandMentionsResponse {
   return typeof data === 'object' && data !== null && 'aggregated' in data;
 }
 
 /**
- * Hook for fetching brand mentions data for a keyword.
- * Automatically fetches data when keyword changes and supports filtering by classification.
+ * Hook for fetching brand mentions data for a report scope (one keyword, a
+ * keyword group, or every keyword). Automatically fetches when the scope
+ * changes and supports filtering by classification.
  * 
- * @param keyword - The keyword to fetch brand mentions for (null to skip fetch)
+ * @param scope - What to fetch brand mentions for (null to skip fetch)
  * @param classificationFilter - Optional filter for brand classification ('first_party', 'competitor', 'other')
  * @returns Object containing:
  * - `data` - Brand mentions response data
@@ -27,7 +33,7 @@ function isBrandMentionsResponse(data: unknown): data is BrandMentionsResponse {
  * 
  * @example
  * ```tsx
- * const { data, loading, error } = useBrandMentions('best hotels in paris');
+ * const { data, loading, error } = useBrandMentions({ kind: 'keyword', keyword: 'best hotels in paris' });
  * 
  * if (loading) return <Spinner />;
  * if (error) return <Error message={error} />;
@@ -35,13 +41,16 @@ function isBrandMentionsResponse(data: unknown): data is BrandMentionsResponse {
  * return <BrandTable brands={data?.aggregated.brands} />;
  * ```
  */
-export const useBrandMentions = (keyword: string | null, classificationFilter: string | null = null, queryPromptId: string | null = null) => {
+export const useBrandMentions = (scope: ReportScope | null, classificationFilter: string | null = null, queryPromptId: string | null = null) => {
   const [data, setData] = useState<BrandMentionsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The scope object is rebuilt by callers on every render; key the effect on
+  // its encoded form so a same-value scope does not refetch.
+  const scopeKey = scope === null ? null : encodeReportScope(scope);
 
   useEffect(() => {
-    if (!keyword) {
+    if (scopeKey === null) {
       setData(null);
       return;
     }
@@ -53,13 +62,10 @@ export const useBrandMentions = (keyword: string | null, classificationFilter: s
       setError(null);
 
       try {
-        const baseUrl = `${API_BASE_URL}/brand-mentions?keyword=${encodeURIComponent(keyword)}`;
-        const classificationUrl = classificationFilter
-          ? `${baseUrl}&classification=${encodeURIComponent(classificationFilter)}`
-          : baseUrl;
-        const url = queryPromptId
-          ? `${classificationUrl}&query_prompt_id=${encodeURIComponent(queryPromptId)}`
-          : classificationUrl;
+        const params = new URLSearchParams(reportScopeParams(decodeReportScope(scopeKey)));
+        if (classificationFilter) params.append('classification', classificationFilter);
+        if (queryPromptId) params.append('query_prompt_id', queryPromptId);
+        const url = `${API_BASE_URL}/brand-mentions?${params.toString()}`;
 
         const response = await authenticatedFetch(url, { signal: controller.signal });
 
@@ -87,7 +93,7 @@ export const useBrandMentions = (keyword: string | null, classificationFilter: s
     fetchBrandMentions();
 
     return () => controller.abort();
-  }, [keyword, classificationFilter, queryPromptId]);
+  }, [scopeKey, classificationFilter, queryPromptId]);
 
   return {
     data,

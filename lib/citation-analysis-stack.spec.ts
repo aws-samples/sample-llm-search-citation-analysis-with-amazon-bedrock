@@ -622,6 +622,7 @@ const synthesized: {
   configMgmtFunctionId: string;
   configMgmtEnvVars: Record<string, unknown>;
   configMgmtStateMachineActions: string[];
+  scopedReadFunctionEnvVars: Record<string, Record<string, unknown>>;
   crawlerEnvVars: Record<string, unknown>;
   parseKeywordsEnvVars: Record<string, unknown>;
   keywordMgmtEnvVars: Record<string, unknown>;
@@ -667,6 +668,7 @@ const synthesized: {
   configMgmtFunctionId: '',
   configMgmtEnvVars: {},
   configMgmtStateMachineActions: [],
+  scopedReadFunctionEnvVars: {},
   crawlerEnvVars: {},
   parseKeywordsEnvVars: {},
   keywordMgmtEnvVars: {},
@@ -714,6 +716,16 @@ const WORKER_LOG_GROUP_NAMES = [
 
 const WORKFLOW_STATE_MACHINE = 'CitationAnalysis-Workflow';
 const CONFIG_MGMT_FUNCTION_NAME = 'CitationAnalysis-API-ConfigMgmt';
+
+/**
+ * The read functions that resolve `group_id` / `keyword_ids` report scopes
+ * (2.4.0). Each needs the keywords table to turn a scope into keyword texts.
+ */
+const SCOPED_READ_FUNCTION_NAMES = [
+  'CitationAnalysis-API-StatsInsights',
+  'CitationAnalysis-API-CitationsContent',
+  'CitationAnalysis-API-GetBrandMentions',
+];
 const RESEARCH_STATE_MACHINE = 'CitationAnalysis-KeywordResearch';
 const RESEARCH_WORKER_FUNCTION_NAME = 'CitationAnalysis-ResearchWorker';
 
@@ -765,6 +777,9 @@ beforeAll(() => {
   synthesized.configMgmtEnvVars = extractLambdaEnvVars(template, CONFIG_MGMT_FUNCTION_NAME);
   synthesized.configMgmtStateMachineActions = extractFunctionRoleActionsOn(
     template, CONFIG_MGMT_FUNCTION_NAME, findStateMachineLogicalId(template, WORKFLOW_STATE_MACHINE)
+  );
+  synthesized.scopedReadFunctionEnvVars = Object.fromEntries(
+    SCOPED_READ_FUNCTION_NAMES.map((name) => [name, extractLambdaEnvVars(template, name)])
   );
   synthesized.healthCheckLayerRefs = extractLambdaLayerRefs(template, 'CitationAnalysis-API-Health');
 
@@ -1243,6 +1258,16 @@ describe('Schedule routes (Schedules v2)', () => {
   it('lets ConfigMgmt start workflow executions for run-now and read the groups table for scope checks', () => {
     expect(synthesized.configMgmtStateMachineActions).toContain('states:StartExecution');
     expect(synthesized.configMgmtEnvVars).toHaveProperty('DYNAMODB_TABLE_KEYWORD_GROUPS');
+  });
+});
+
+describe('Report scope resolution (group KPIs)', () => {
+  it('hands the keywords table to every function that resolves a report scope', () => {
+    const missing = SCOPED_READ_FUNCTION_NAMES.filter(
+      (name) => !('DYNAMODB_TABLE_KEYWORDS' in synthesized.scopedReadFunctionEnvVars[name])
+    );
+
+    expect(missing).toStrictEqual([]);
   });
 });
 

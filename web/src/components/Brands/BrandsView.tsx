@@ -1,42 +1,40 @@
-import { useState } from 'react';
+import {
+  useMemo, useState 
+} from 'react';
 import { useBrandMentions } from '../../hooks/useBrandMentions';
 import { useBrandConfig } from '../../hooks/useBrandConfig';
+import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { BrandMentionsTable } from './BrandMentionsTable';
 import { BrandDetailModal } from './BrandDetailModal';
 import { BrandConfigPanel } from './BrandConfigPanel';
 import { PersonaSelector } from '../Personas/PersonaSelector';
 import { Spinner } from '../ui/Spinner';
+import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
+import { describeReportScope } from '../ui/reportScope';
 import type {
-  Keyword, AggregatedBrand, BrandMentionsResponse, BrandConfig 
+  Keyword, KeywordGroup, AggregatedBrand, BrandMentionsResponse, BrandConfig, ReportScope 
 } from '../../types';
 
 interface BrandsViewProps {keywords: Keyword[];}
 
-const KeywordSelector = ({
-  keywords, selectedKeyword, onSelect 
+const ScopePanel = ({
+  keywords, groups, scope, onChange 
 }: {
   keywords: Keyword[];
-  selectedKeyword: string | null;
-  onSelect: (keyword: string) => void;
+  groups: KeywordGroup[];
+  scope: ReportScope | null;
+  onChange: (scope: ReportScope) => void;
 }) => (
   <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
-    <h3 className="text-sm font-medium text-gray-900 mb-4">Select a Keyword</h3>
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-      {keywords.map((kw) => (
-        <button
-          key={kw.id}
-          onClick={() => onSelect(kw.keyword)}
-          className={`p-4 rounded-lg border text-left transition-all ${
-            selectedKeyword === kw.keyword
-              ? 'border-gray-900 bg-gray-50'
-              : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-          }`}
-        >
-          <div className="font-medium text-sm text-gray-900">{kw.keyword}</div>
-          <div className="text-xs text-gray-400 mt-1">{new Date(kw.created_at).toLocaleDateString()}</div>
-        </button>
-      ))}
-    </div>
+    <h3 className="text-sm font-medium text-gray-900 mb-1">What to look at</h3>
+    <p className="text-xs text-gray-500 mb-4">One keyword shows each AI engine&apos;s answer; a keyword group or all keywords aggregates the latest run of every keyword.</p>
+    <KeywordScopeSelector
+      keywords={keywords}
+      groups={groups}
+      value={scope ?? { kind: 'all' }}
+      onChange={onChange}
+      label="Scope"
+    />
     {keywords.length === 0 && (
       <p className="text-gray-400 text-center py-8 text-sm">No keywords available.</p>
     )}
@@ -90,7 +88,7 @@ const ClassificationFilter = ({
 
 const EmptyState = () => (
   <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-    <p className="text-sm text-gray-500">Select a keyword above to view brand mentions</p>
+    <p className="text-sm text-gray-500">Pick a scope above to view brand mentions</p>
   </div>
 );
 
@@ -135,12 +133,13 @@ const getFilterCounts = (data: BrandMentionsResponse | null) => ({
 });
 
 const BrandContent = ({
-  data, loading, error, selectedKeyword, classificationFilter, onFilterChange, onBrandClick, config 
+  data, loading, error, scope, scopeLabel, classificationFilter, onFilterChange, onBrandClick, config 
 }: {
   data: BrandMentionsResponse | null;
   loading: boolean;
   error: string | null;
-  selectedKeyword: string | null;
+  scope: ReportScope | null;
+  scopeLabel: string;
   classificationFilter: string | null;
   onFilterChange: (filter: string | null) => void;
   onBrandClick: (brand: AggregatedBrand) => void;
@@ -148,33 +147,39 @@ const BrandContent = ({
 }) => {
   if (loading) return <LoadingState />;
   if (error) return <div className="bg-red-50 border border-red-200 rounded-lg p-4"><p className="text-sm text-red-700">{error}</p></div>;
-  if (selectedKeyword === null) return <EmptyState />;
+  if (scope === null) return <EmptyState />;
   if (!data) return null;
 
   const counts = getFilterCounts(data);
+  const isAggregate = data.keyword === null;
 
   return (
     <>
+      {isAggregate && (
+        <p className="text-xs text-gray-500 px-1">
+          Aggregated over the latest run of {data.keywords_with_data ?? 0} of {data.keywords_analyzed ?? 0} keywords in {scopeLabel}.
+        </p>
+      )}
       <ClassificationFilter
         filter={classificationFilter}
         onFilterChange={onFilterChange}
         counts={counts}
       />
-      <BrandMentionsTable brands={data.aggregated.brands} keyword={data.keyword} onBrandClick={onBrandClick} config={config} />
+      <BrandMentionsTable brands={data.aggregated.brands} keyword={data.keyword ?? scopeLabel} onBrandClick={onBrandClick} config={config} />
     </>
   );
 };
 
 const useViewState = () => {
-  const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
+  const [scope, setScope] = useState<ReportScope | null>(null);
   const [selectedBrand, setSelectedBrand] = useState<AggregatedBrand | null>(null);
   const [showConfig, setShowConfig] = useState(false);
   const [classificationFilter, setClassificationFilter] = useState<string | null>(null);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   
   return {
-    selectedKeyword,
-    setSelectedKeyword,
+    scope,
+    setScope,
     selectedBrand,
     setSelectedBrand,
     showConfig,
@@ -199,13 +204,14 @@ const renderModals = (props: {
   expandAllBrands: ReturnType<typeof useBrandConfig>['expandAllBrands'];
   findCompetitors: ReturnType<typeof useBrandConfig>['findCompetitors'];
   selectedPersonaId: string | null;
+  scopeLabel: string;
 }) => (
   <>
     {props.selectedBrand && props.data && (
       <BrandDetailModal 
         brand={props.selectedBrand} 
         providerData={props.data.by_provider} 
-        keyword={props.data.keyword} 
+        keyword={props.data.keyword ?? props.scopeLabel} 
         queryPromptId={props.selectedPersonaId}
         onClose={() => props.setSelectedBrand(null)} 
       />
@@ -226,14 +232,20 @@ const renderModals = (props: {
 
 export const BrandsView = ({ keywords }: BrandsViewProps) => {
   const {
-    selectedKeyword, setSelectedKeyword, selectedBrand, setSelectedBrand,
+    scope, setScope, selectedBrand, setSelectedBrand,
     showConfig, setShowConfig, classificationFilter, setClassificationFilter,
     selectedPersonaId, setSelectedPersonaId
   } = useViewState();
+  const { groups } = useKeywordGroups();
+  const activeKeywords = useMemo(
+    () => keywords.filter((keyword) => !keyword.status || keyword.status === 'active'),
+    [keywords]
+  );
+  const scopeLabel = scope === null ? '' : describeReportScope(scope, groups);
 
   const {
     data, loading, error 
-  } = useBrandMentions(selectedKeyword, classificationFilter, selectedPersonaId);
+  } = useBrandMentions(scope, classificationFilter, selectedPersonaId);
   const {
     config, presets, loading: configLoading, saveConfig, expandAllBrands, findCompetitors 
   } = useBrandConfig();
@@ -248,7 +260,7 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
         competitorCount={config?.tracked_brands?.competitors?.length ?? 0}
         onConfigClick={() => setShowConfig(true)}
       />
-      <KeywordSelector keywords={keywords} selectedKeyword={selectedKeyword} onSelect={setSelectedKeyword} />
+      <ScopePanel keywords={activeKeywords} groups={groups} scope={scope} onChange={setScope} />
       <PersonaSelector selectedPersonaId={selectedPersonaId} onPersonaChange={setSelectedPersonaId} />
       {selectedPersonaId && (
         <div className="text-xs text-gray-500 px-1">Filtering by persona</div>
@@ -257,7 +269,8 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
         data={data}
         loading={loading}
         error={error}
-        selectedKeyword={selectedKeyword}
+        scope={scope}
+        scopeLabel={scopeLabel}
         classificationFilter={classificationFilter}
         onFilterChange={setClassificationFilter}
         onBrandClick={setSelectedBrand}
@@ -275,7 +288,8 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
         setShowConfig,
         expandAllBrands,
         findCompetitors,
-        selectedPersonaId
+        selectedPersonaId,
+        scopeLabel
       })}
     </div>
   );

@@ -25,9 +25,11 @@ from botocore.config import Config
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import success_response
+from shared.api_response import success_response, validation_error
+from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, validate
 from shared.dynamodb_batch import query_latest_per_key
+from shared.scope_params import ReportScope, all_active_scope, parse_scope_params
 from shared.utils import extract_domain, get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,12 @@ logger.setLevel(logging.INFO)
 # parallel CrawledContent queries (query_latest_per_key). botocore's
 # default pool of 10 would serialize that fan-out at the HTTP layer.
 dynamodb = boto3.resource('dynamodb', config=Config(max_pool_connections=50))
+
+KEYWORDS_TABLE = (
+    os.environ.get('DYNAMODB_TABLE_KEYWORDS')
+    or os.environ.get('KEYWORDS_TABLE')
+    or 'CitationAnalysis-Keywords'
+)
 
 # Upper bound on items fetched per keyword when isolating the latest
 # analysis run. One run writes one SearchResults item per provider x
@@ -54,7 +62,6 @@ _KEYWORD_ANALYSIS_WORKERS = 6
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
-KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')  # Optional for fallback
 
 
 def is_first_party_domain(domain: str, config: dict[str, Any]) -> bool:
@@ -354,26 +361,19 @@ def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any
     }
 
 
-def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10) -> dict[str, Any]:
-    """Analyze citation gaps across all keywords."""
-    # Get keywords from the Keywords table instead of scanning SearchResults
-    # This is more efficient as Keywords table is small and purpose-built
-    keywords_table_name = os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    if keywords_table_name:
-        keywords_table = dynamodb.Table(keywords_table_name)
-        response = keywords_table.scan(
-            ProjectionExpression='keyword',
-            Limit=500
-        )
-        keywords = sorted(set(item.get('keyword', '') for item in response.get('Items', []) if item.get('keyword')))
-    else:
-        # Fallback to scanning SearchResults if Keywords table not configured
-        search_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-        response = search_table.scan(
-            ProjectionExpression='keyword',
-            Limit=500
-        )
-        keywords = sorted(set(item.get('keyword', '') for item in response.get('Items', []) if item.get('keyword')))
+def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10, scope: ReportScope | None = None) -> dict[str, Any]:
+    """Analyze citation gaps across the active keywords of a scope (default: all).
+
+    A group / id scope covers every keyword it resolves to (up to the scope
+    cap); the unscoped dashboard keeps `limit` as its breadth knob.
+    """
+    keywords_table = dynamodb.Table(KEYWORDS_TABLE)
+    resolved = scope if scope is not None else all_active_scope(keywords_table)
+    keywords = sorted(resolved.keywords, key=str.casefold)
+    # A group / id scope is analysed in full (each analysis is a SearchResults
+    # query plus a CrawledContent fan-out, so `all` keeps `limit` as its guard).
+    if scope is not None and scope.kind != 'all':
+        limit = max(limit, len(keywords))
 
     # Analyze keywords in parallel — each analysis is I/O bound (one
     # SearchResults query + a CrawledContent fan-out), so the previous
@@ -413,6 +413,7 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10) -> dict[s
     all_gaps.sort(key=lambda x: (priority_order.get(x.get('priority', 'low'), 2), -x['citation_count']))
 
     return {
+        'scope': resolved.describe(),
         'keywords_analyzed': len(keyword_summaries),
         'keyword_summaries': sorted(keyword_summaries, key=lambda x: -x['high_priority_gaps']),
         'top_gaps': all_gaps[:30],
@@ -423,24 +424,43 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10) -> dict[s
 
 @api_handler
 @validate({
-    'keyword': {'type': str, 'max_length': 500},
+    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
+    'group_id': {'type': str, 'max_length': 64},
+    'keyword_ids': {'type': str, 'max_length': 8000},
+    'scope': {'type': str, 'choices': ['all']},
     'limit': {'type': int, 'min': 1, 'max': 100, 'default': 10}
 })
-def handler(event: dict[str, Any], context: Any, keyword: str | None = None, limit: int = 10) -> dict[str, Any]:
+def handler(
+    event: dict[str, Any],
+    context: Any,
+    keyword: str | None = None,
+    group_id: str | None = None,
+    keyword_ids: str | None = None,
+    scope: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
     """
     API handler for citation gap analysis.
 
     Query params:
-        - keyword: Specific keyword to analyze (optional)
-        - limit: Number of keywords to analyze if no keyword specified (default: 10)
+        - keyword: one keyword to analyze
+        - group_id / keyword_ids: analyze every active keyword of a group / id set
+        - neither: analyze across all active keywords
+        - limit: Number of keywords to analyze when unscoped (default: 10)
     """
+    report_scope, error = parse_scope_params(
+        {'keyword': keyword, 'group_id': group_id, 'keyword_ids': keyword_ids, 'scope': scope}, dynamodb.Table(KEYWORDS_TABLE)
+    )
+    if error:
+        return validation_error(error, event, 'scope')
+
     config = get_brand_config()
 
-    if keyword:
+    if report_scope is not None and report_scope.is_single_keyword:
         # Analyze specific keyword
-        result = analyze_citation_gaps(keyword, config)
+        result = analyze_citation_gaps(report_scope.keywords[0], config)
     else:
-        # Analyze across all keywords
-        result = analyze_all_keywords_gaps(config, limit)
+        # Analyze across the scope's keywords (all active keywords by default)
+        result = analyze_all_keywords_gaps(config, limit, scope=report_scope)
 
     return success_response(result, event)

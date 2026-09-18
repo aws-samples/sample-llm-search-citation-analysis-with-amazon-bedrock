@@ -356,13 +356,13 @@ correctly in both themes.
 | # | Route | Page label | Primary components | Theme support |
 | - | ----- | ---------- | ------------------ | ------------- |
 | 1 | `/` | Dashboard | `Layout/TabContent`, `Dashboard/StatCard`, `Dashboard/ProviderChart`, `Dashboard/BrandChart`, `Tables/TopCitationsTable`, `Tables/RecentSearchesTable` | ✓ auto |
-| 2 | `/visibility` | Visibility | `Visibility/VisibilityDashboard`, `VisibilityComponents`, `PersonaComparisonChart`, `shared/PersonaSelector` | ✓ auto |
+| 2 | `/visibility` | Visibility | `Visibility/VisibilityDashboard`, `GroupOverview`, `VisibilityComponents`, `PersonaComparisonChart`, `ui/KeywordScopeSelector`, `shared/PersonaSelector` | ✓ auto |
 | 3 | `/brands` | Brand Mentions | `Brands/BrandsView`, `BrandConfigContent`, `BrandConfigPanel`, `BrandTagList`, `DomainList`, `IndustrySelector`, `ExtractionOptions`, `BrandExpansionPanel`, `CompetitorDiscoveryPanel`, `FirstPartyBrandsSection`, `CompetitorBrandsSection`, `BrandMentionsTable`, `BrandOverviewTab`, `BrandDetailModal`, `ProviderResponseCard`, `PromptEditor` | ✓ auto (was the green-everywhere bug) |
 | 4 | `/citations` | Citations | `Citations/CitationsView`, `CitationFilters`, `CitationRow`, `CitationTableHeader`, `CitationDetailModal`, `CrawlHistory`, `PaginationControls` | ✓ auto |
 | 5 | `/prompt-insights` | Prompt Insights | `Insights/PromptInsights`, `PromptCard` | ✓ auto |
 | 6 | `/citation-gaps` | Citation Gaps | `Insights/CitationGaps`, `GapCard` | ✓ auto |
 | 7 | `/recommendations` | Action Center | `Insights/Recommendations` | ✓ auto |
-| 8 | `/keyword-research` | Keyword Research | `KeywordResearch/KeywordResearchView`, `KeywordExpansion`, `CompetitorAnalysis`, `CompetitorAnalysisComponents`, `ResearchProgress`, `ResearchHistory`, `KeywordResultsTable` | ✓ auto |
+| 8 | `/keyword-research` | Keyword Research | `KeywordResearch/KeywordResearchView`, `KeywordExpansion`, `CompetitorAnalysis`, `CompetitorAnalysisComponents`, `ResearchProgress`, `ResearchHistory`, `KeywordResultsTable` (Excel export) | ✓ auto |
 | 9 | `/content-studio` | Content Studio | `ContentStudio/ContentStudioView`, `ContentGenerator`, `ContentHistory`, `ContentDetailModal`, `ContentIdeaCard`, `HistoryListItem`, `SelfReflection/SelfReflectionPanel` | ✓ auto |
 | 10 | `/searches` | Recent Searches | `Searches/SearchesView`, `SearchesViewComponents` | ✓ auto |
 | 11 | `/raw-responses` | Raw Responses | `RawResponses/RawResponsesExplorer`, `Breadcrumb`, `FileViewer`, `ImageViewer` | ✓ auto |

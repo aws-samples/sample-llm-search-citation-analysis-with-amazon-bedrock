@@ -34,12 +34,23 @@ from typing import Any
 # Shared layer path (populated by the Lambda layer at /opt/python)
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import success_response
+import boto3
+
+from shared.api_response import success_response, validation_error
+from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, validate
+from shared.scope_params import ReportScope, parse_scope_params
 from shared.utils import get_brand_config, get_timestamp
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+dynamodb = boto3.resource('dynamodb')
+KEYWORDS_TABLE = (
+    os.environ.get('DYNAMODB_TABLE_KEYWORDS')
+    or os.environ.get('KEYWORDS_TABLE')
+    or 'CitationAnalysis-Keywords'
+)
 
 
 # ----------------------------------------------------------------------
@@ -129,16 +140,18 @@ def build_overview(
     period: str,
     days: int,
     top: int,
+    scope: ReportScope | None = None,
 ) -> dict[str, Any]:
     """
     Compose the overview payload from existing aggregations.
 
     Pulls cross-keyword trends + rule-based recommendations and reshapes
     them into a single payload tailored for the Executive Summary report.
-    Any error in the trends sub-call propagates up to the api_handler
-    decorator and becomes a 500.
+    ``scope`` (a keyword group or id set) narrows both to its keywords; by
+    default every active keyword is covered. Any error in the trends
+    sub-call propagates up to the api_handler decorator and becomes a 500.
     """
-    trends = _trends_helper()(config, period=period, days=days)
+    trends = _trends_helper()(config, period=period, days=days, scope=scope)
     keyword_trends = trends.get('keyword_trends', []) or []
     overall = trends.get('overall', {}) or {}
 
@@ -171,11 +184,12 @@ def build_overview(
     else:
         trend_direction = 'stable'
 
-    recommendations = _recs_helper()(config) or []
+    recommendations = _recs_helper()(config, keywords=list(scope.keywords) if scope is not None else None) or []
     top_recommendations = recommendations[:top]
 
     return {
         'generated_at': get_timestamp(),
+        'scope': trends.get('scope'),
         'period_type': period,
         'days_analyzed': days,
         'keywords_analyzed': trends.get('keywords_analyzed', 0),
@@ -206,6 +220,10 @@ def build_overview(
     },
     'days': {'type': int, 'min': 1, 'max': 365, 'default': 30},
     'top': {'type': int, 'min': 1, 'max': 10, 'default': 3},
+    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
+    'group_id': {'type': str, 'max_length': 64},
+    'keyword_ids': {'type': str, 'max_length': 8000},
+    'scope': {'type': str, 'choices': ['all']},
 })
 def handler(
     event: dict[str, Any],
@@ -213,8 +231,21 @@ def handler(
     period: str = 'day',
     days: int = 30,
     top: int = 3,
+    keyword: str | None = None,
+    group_id: str | None = None,
+    keyword_ids: str | None = None,
+    scope: str | None = None,
 ) -> dict[str, Any]:
-    """API handler for GET /api/reports/overview."""
+    """API handler for GET /api/reports/overview.
+
+    Optional scope: ``group_id`` or ``keyword_ids`` narrows the summary to a
+    keyword group / id set. A single ``keyword`` is one keyword's summary.
+    """
+    report_scope, error = parse_scope_params(
+        {'keyword': keyword, 'group_id': group_id, 'keyword_ids': keyword_ids, 'scope': scope}, dynamodb.Table(KEYWORDS_TABLE)
+    )
+    if error:
+        return validation_error(error, event, 'scope')
     config = get_brand_config()
-    payload = build_overview(config, period=period, days=days, top=top)
+    payload = build_overview(config, period=period, days=days, top=top, scope=report_scope)
     return success_response(payload, event)

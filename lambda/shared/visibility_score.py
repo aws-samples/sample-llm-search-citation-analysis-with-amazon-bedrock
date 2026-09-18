@@ -8,11 +8,18 @@ how a score is computed belongs here so the dashboard, the persona view, the
 trend charts and the reports keep agreeing with each other.
 
 Weights and caps come from ``shared.constants`` (VISIBILITY_*).
+
+Since 2.4.0 this module also owns share of voice and the group summary
+(mean first-party / competitor visibility, averaged share of voice, coverage,
+per-keyword breakdown, cross-keyword brand ranking) that ``/visibility``
+answers for a keyword group.
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
+from typing import Any
 
 from shared.constants import (
     VISIBILITY_MENTION_LOG_BASE,
@@ -105,3 +112,143 @@ def calculate_sentiment_agnostic_visibility_score(
         + _mention_score(total_mentions),
         1,
     )
+
+
+
+# ---------------------------------------------------------------------------
+# Share of voice and group (multi-keyword) summaries — 2.4.0
+# ---------------------------------------------------------------------------
+
+def mean(values: Iterable[float]) -> float:
+    """Arithmetic mean, 0.0 for an empty sequence (the KPI convention)."""
+    items = [float(value) for value in values]
+    return sum(items) / len(items) if items else 0.0
+
+
+def calculate_share_of_voice(brand_mentions: dict[str, int], total_mentions: int) -> dict[str, float]:
+    """Share of voice per brand: its mentions as a percentage of all mentions."""
+    if total_mentions <= 0:
+        return {}
+    return {
+        brand: round((count / total_mentions) * 100, 2)
+        for brand, count in brand_mentions.items()
+    }
+
+
+def _first_party_providers(metrics: dict[str, Any]) -> int:
+    return max((int(brand.get('provider_count', 0)) for brand in metrics.get('first_party', [])), default=0)
+
+
+def summarize_keyword_visibility(keyword: str, metrics: dict[str, Any] | None) -> dict[str, Any]:
+    """One row of the per-keyword breakdown of a group summary."""
+    if not metrics or 'error' in metrics or 'summary' not in metrics:
+        return {
+            'keyword': keyword,
+            'has_data': False,
+            'timestamp': None,
+            'first_party_score': 0.0,
+            'competitor_score': 0.0,
+            'first_party_sov': 0.0,
+            'competitor_sov': 0.0,
+            'first_party_providers': 0,
+            'total_mentions': 0,
+            'first_party_mentioned': False,
+        }
+    summary = metrics['summary']
+    return {
+        'keyword': keyword,
+        'has_data': True,
+        'timestamp': metrics.get('timestamp'),
+        'first_party_score': float(summary.get('first_party_avg_score', 0.0)),
+        'competitor_score': float(summary.get('competitor_avg_score', 0.0)),
+        'first_party_sov': float(summary.get('first_party_total_sov', 0.0)),
+        'competitor_sov': float(summary.get('competitor_total_sov', 0.0)),
+        'first_party_providers': _first_party_providers(metrics),
+        'total_mentions': int(metrics.get('total_mentions', 0)),
+        'first_party_mentioned': bool(metrics.get('first_party')),
+    }
+
+
+def aggregate_brands_across_keywords(per_keyword: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Cross-keyword brand ranking: mean score, mention totals, provider union.
+
+    A brand's group score is its mean visibility over the keywords where it
+    appears; ``keyword_count`` says how many of the group's keywords mention
+    it, so a brand scoring 90 on one keyword does not outrank one scoring 70
+    on twelve without the reader seeing why.
+    """
+    rollup: dict[str, dict[str, Any]] = {}
+    for metrics in per_keyword:
+        for brand in metrics.get('brands', []) if metrics else []:
+            key = str(brand.get('name', '')).lower()
+            if not key:
+                continue
+            entry = rollup.setdefault(key, {
+                'name': brand.get('name'),
+                'classification': brand.get('classification', 'other'),
+                'scores': [],
+                'sovs': [],
+                'providers': set(),
+                'total_mentions': 0,
+                'best_rank': None,
+                'keyword_count': 0,
+            })
+            entry['scores'].append(float(brand.get('visibility_score', 0.0)))
+            entry['sovs'].append(float(brand.get('share_of_voice', 0.0)))
+            entry['providers'].update(brand.get('providers', []))
+            entry['total_mentions'] += int(brand.get('total_mentions', 0))
+            rank = brand.get('best_rank')
+            if rank is not None and (entry['best_rank'] is None or int(rank) < entry['best_rank']):
+                entry['best_rank'] = int(rank)
+            entry['keyword_count'] += 1
+
+    brands = [
+        {
+            'name': entry['name'],
+            'classification': entry['classification'],
+            'visibility_score': round(mean(entry['scores']), 1),
+            'share_of_voice': round(mean(entry['sovs']), 2),
+            'provider_count': len(entry['providers']),
+            'providers': sorted(entry['providers']),
+            'total_mentions': entry['total_mentions'],
+            'best_rank': entry['best_rank'],
+            'keyword_count': entry['keyword_count'],
+        }
+        for entry in rollup.values()
+    ]
+    brands.sort(key=lambda brand: (-brand['visibility_score'], -brand['keyword_count'], brand['name'].lower()))
+    return brands
+
+
+def summarize_group_visibility(keywords: list[str], per_keyword: list[dict[str, Any]], total_providers: int) -> dict[str, Any]:
+    """Group-level KPIs from per-keyword metrics (same order as ``keywords``).
+
+    Averages cover only keywords that have analysis data. Share of voice is
+    averaged, not summed: each keyword's shares already add up to 100%, so a
+    sum across keywords would exceed it and mean nothing.
+    """
+    rows = [summarize_keyword_visibility(keyword, metrics) for keyword, metrics in zip(keywords, per_keyword, strict=True)]
+    with_data = [row for row in rows if row['has_data']]
+    brands = aggregate_brands_across_keywords(metrics for metrics in per_keyword if metrics and 'summary' in metrics)
+
+    coverage = mean(1.0 if row['first_party_mentioned'] else 0.0 for row in with_data) * 100
+    provider_coverage = mean(row['first_party_providers'] / total_providers for row in with_data) * 100 if total_providers > 0 else 0.0
+
+    return {
+        'timestamp': max((row['timestamp'] for row in with_data if row['timestamp']), default=None),
+        'keywords_analyzed': len(rows),
+        'keywords_with_data': len(with_data),
+        'keywords': rows,
+        'brands': brands,
+        'first_party': [brand for brand in brands if brand['classification'] == 'first_party'],
+        'competitors': [brand for brand in brands if brand['classification'] == 'competitor'],
+        'others': [brand for brand in brands if brand['classification'] == 'other'],
+        'summary': {
+            'first_party_avg_score': round(mean(row['first_party_score'] for row in with_data), 1),
+            'competitor_avg_score': round(mean(row['competitor_score'] for row in with_data), 1),
+            'first_party_avg_sov': round(mean(row['first_party_sov'] for row in with_data), 2),
+            'competitor_avg_sov': round(mean(row['competitor_sov'] for row in with_data), 2),
+            'coverage_rate': round(coverage, 1),
+            'provider_coverage': round(provider_coverage, 1),
+        },
+    }

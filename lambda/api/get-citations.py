@@ -16,9 +16,11 @@ from boto3.dynamodb.conditions import Key
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import success_response
+from shared.api_response import success_response, validation_error
+from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, validate
 from shared.env_vars import resolve_table_env
+from shared.scope_params import parse_scope_params
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,11 @@ dynamodb = boto3.resource('dynamodb')
 # Fail-fast: Required environment variables (audit #12 canonical naming).
 CITATIONS_TABLE = resolve_table_env('DYNAMODB_TABLE_CITATIONS', 'CITATIONS_TABLE')
 citations_table = dynamodb.Table(CITATIONS_TABLE)
+KEYWORDS_TABLE = (
+    os.environ.get('DYNAMODB_TABLE_KEYWORDS')
+    or os.environ.get('KEYWORDS_TABLE')
+    or 'CitationAnalysis-Keywords'
+)
 
 # Optional: Brand config table for dynamic brand detection
 BRAND_CONFIG_TABLE = os.environ.get('DYNAMODB_TABLE_BRAND_CONFIG')
@@ -70,32 +77,43 @@ def _detect_brand_in_url(url_lower, tracked_brands):
 _MAX_SCAN_PAGES = 25
 
 
-def _scan_all_citations(keyword=None):
-    """
-    Scan the deduplicated Citations table.
-    If keyword is provided, query by partition key for efficiency.
-    Otherwise, full scan to get all citations across all keywords.
+def _query_keyword_citations(keyword):
+    """Query the Citations partition of one keyword, bounded by ``_MAX_SCAN_PAGES``."""
+    items = []
+    pages = 0
+    params = {'KeyConditionExpression': Key('keyword').eq(keyword)}
+    response = citations_table.query(**params)
+    items.extend(response.get('Items', []))
+    pages += 1
+    while response.get('LastEvaluatedKey') and pages < _MAX_SCAN_PAGES:
+        response = citations_table.query(**params, ExclusiveStartKey=response['LastEvaluatedKey'])
+        items.extend(response.get('Items', []))
+        pages += 1
+    return items, bool(response.get('LastEvaluatedKey'))
 
-    Both paths are bounded by ``_MAX_SCAN_PAGES`` and log a warning when
-    the cap is hit so the truncation is visible in CloudWatch.
+
+def _scan_all_citations(keyword=None, keywords=None):
+    """
+    Read the deduplicated Citations table.
+
+    ``keyword`` queries one partition; ``keywords`` (a resolved group / id
+    scope) queries one partition per keyword instead of scanning; with
+    neither, a full scan covers every keyword.
+
+    Every path is bounded by ``_MAX_SCAN_PAGES`` and logs a warning when the
+    cap is hit so the truncation is visible in CloudWatch.
     """
     items = []
     pages_scanned = 0
+    truncated = False
 
     if keyword:
-        # Efficient query by partition key
-        response = citations_table.query(
-            KeyConditionExpression=Key('keyword').eq(keyword)
-        )
-        items.extend(response.get('Items', []))
-        pages_scanned += 1
-        while response.get('LastEvaluatedKey') and pages_scanned < _MAX_SCAN_PAGES:
-            response = citations_table.query(
-                KeyConditionExpression=Key('keyword').eq(keyword),
-                ExclusiveStartKey=response['LastEvaluatedKey']
-            )
-            items.extend(response.get('Items', []))
-            pages_scanned += 1
+        items, truncated = _query_keyword_citations(keyword)
+    elif keywords is not None:
+        for text in keywords:
+            partition_items, partition_truncated = _query_keyword_citations(text)
+            items.extend(partition_items)
+            truncated = truncated or partition_truncated
     else:
         # Full scan for all keywords
         response = citations_table.scan()
@@ -107,12 +125,13 @@ def _scan_all_citations(keyword=None):
             )
             items.extend(response.get('Items', []))
             pages_scanned += 1
+        truncated = bool(response.get('LastEvaluatedKey'))
 
-    if response.get('LastEvaluatedKey'):
+    if truncated:
         logger.warning(
-            "Citations scan hit the %d-page cap (keyword=%s, items=%d). "
+            "Citations read hit the %d-page cap (keyword=%s, items=%d). "
             "Results are truncated.",
-            _MAX_SCAN_PAGES, keyword or '<all>', len(items),
+            _MAX_SCAN_PAGES, keyword or '<scope>', len(items),
         )
 
     return items
@@ -166,20 +185,35 @@ def _aggregate_citations(items, tracked_brands):
 
 @api_handler
 @validate({
-    'keyword': {'type': str, 'max_length': 500},
+    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
+    'group_id': {'type': str, 'max_length': 64},
+    'keyword_ids': {'type': str, 'max_length': 8000},
+    'scope': {'type': str, 'choices': ['all']},
 })
-def handler(event, context, keyword=None):
+def handler(event, context, keyword=None, group_id=None, keyword_ids=None, scope=None):
     """
-    GET /api/citations?keyword=xxx
+    GET /api/citations?keyword=xxx | ?group_id=xxx | ?keyword_ids=a,b
 
     Returns all distinct citation URLs from the deduplicated Citations table,
-    sorted by total mentions across all keywords. No server-side limit so the
-    frontend receives the full dataset for client-side sorting and Excel export.
+    sorted by total mentions across the scope's keywords (all keywords when no
+    scope is given). No server-side limit so the frontend receives the full
+    dataset for client-side sorting and Excel export.
     """
+    report_scope, error = parse_scope_params(
+        {'keyword': keyword, 'group_id': group_id, 'keyword_ids': keyword_ids, 'scope': scope}, dynamodb.Table(KEYWORDS_TABLE)
+    )
+    if error:
+        return validation_error(error, event, 'scope')
+
     tracked_brands = _get_tracked_brands()
 
     # Query the deduplicated Citations table
-    items = _scan_all_citations(keyword=keyword)
+    if report_scope is None:
+        items = _scan_all_citations()
+    elif report_scope.is_single_keyword:
+        items = _scan_all_citations(keyword=report_scope.keywords[0])
+    else:
+        items = _scan_all_citations(keywords=list(report_scope.keywords))
     logger.info(f"Fetched {len(items)} citation records from Citations table")
 
     # Aggregate by URL across all keywords
@@ -211,6 +245,7 @@ def handler(event, context, keyword=None):
     ]
 
     return success_response({
+        'scope': report_scope.describe() if report_scope is not None else None,
         'total_citations': len(items),
         'top_urls': top_urls,
         'provider_stats': provider_stats,

@@ -1,10 +1,18 @@
 import {
-  useEffect, useState 
+  useEffect, useMemo, useState 
 } from 'react';
 import { useCitationGaps } from '../../hooks/useCitationGaps';
+import { useKeywordGroups } from '../../hooks/useKeywordGroups';
+import type {
+  Keyword, ReportScope 
+} from '../../types';
+import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
+import {
+  ALL_SCOPE, decodeReportScope, encodeReportScope 
+} from '../ui/reportScope';
 import { GapCard } from './GapCard';
 
-interface Props { readonly keywords: Array<{ keyword: string }>; }
+interface Props { readonly keywords: Array<Keyword>; }
 
 function StatCard({
   value, label, color 
@@ -71,14 +79,20 @@ function GapStats({
 }
 
 export function CitationGaps({ keywords }: Props) {
-  const [selectedKeyword, setSelectedKeyword] = useState<string>('');
+  const [scope, setScope] = useState<ReportScope>(ALL_SCOPE);
+  const { groups } = useKeywordGroups();
+  const activeKeywords = useMemo(
+    () => keywords.filter((keyword) => !keyword.status || keyword.status === 'active'),
+    [keywords]
+  );
   const {
     data, loading, error, fetchCitationGaps 
   } = useCitationGaps();
+  const scopeKey = encodeReportScope(scope);
 
   useEffect(() => {
-    fetchCitationGaps(selectedKeyword || undefined, 20);
-  }, [selectedKeyword, fetchCitationGaps]);
+    fetchCitationGaps(decodeReportScope(scopeKey), 20);
+  }, [scopeKey, fetchCitationGaps]);
 
   const gaps = data?.gaps ?? data?.top_gaps ?? [];
   const hasDomainSummary = data?.domain_summary && data.domain_summary.length > 0;
@@ -91,13 +105,13 @@ export function CitationGaps({ keywords }: Props) {
             <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Citation Gap Analysis</h2>
             <p className="text-sm text-gray-500 mt-2 leading-relaxed">Discover sources that AI cites for competitors but not you.</p>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1.5">Filter by keyword</label>
-            <select value={selectedKeyword} onChange={(e) => setSelectedKeyword(e.target.value)} className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 text-sm bg-gray-50">
-              <option value="">All Keywords</option>
-              {keywords.map(k => <option key={k.keyword} value={k.keyword}>{k.keyword}</option>)}
-            </select>
-          </div>
+          <KeywordScopeSelector
+            keywords={activeKeywords}
+            groups={groups}
+            value={scope}
+            onChange={setScope}
+            label="Filter by keyword or group"
+          />
         </div>
       </div>
 

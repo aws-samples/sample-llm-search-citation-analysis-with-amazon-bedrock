@@ -1,5 +1,8 @@
 import { ApiRequestError } from '../infrastructure';
-import type { CitationGapsResponse } from '../types';
+import type {
+  CitationGapsResponse, ReportScope
+} from '../types';
+import { reportScopeParams } from '../components/ui/reportScope';
 import { useAnalysisEndpoint } from './useAnalysisEndpoint';
 
 function isCitationGapsResponse(data: unknown): data is CitationGapsResponse {
@@ -23,9 +26,11 @@ const citationGapsEndpoint = {
   isValidResponse: isCitationGapsResponse,
   createHttpError: (status: number) => new ApiRequestError('Failed to fetch citation gaps', status),
   createResponseError: (message: string) => new ApiRequestError(message),
-  buildRequest: (keyword?: string, limit = 10) => {
-    const params = new URLSearchParams({ limit: limit.toString() });
-    if (keyword) params.append('keyword', keyword);
+  buildRequest: (scope: ReportScope, limit = 10) => {
+    const params = new URLSearchParams({
+      ...reportScopeParams(scope),
+      limit: limit.toString() 
+    });
     return {
       path: '/citation-gaps',
       params,
@@ -48,7 +53,7 @@ const citationGapsEndpoint = {
  * const { data, loading, fetchCitationGaps } = useCitationGaps();
  * 
  * useEffect(() => {
- *   fetchCitationGaps('best hotels', 20);
+ *   fetchCitationGaps({ kind: 'keyword', keyword: 'best hotels' }, 20);
  * }, []);
  * 
  * // data.gaps contains sources to target for outreach

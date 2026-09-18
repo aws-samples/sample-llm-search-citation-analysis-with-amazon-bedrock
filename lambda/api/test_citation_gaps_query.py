@@ -136,7 +136,7 @@ class TestAllKeywordsOrchestration:
     @staticmethod
     def _fake_keywords_dynamodb(keywords: list[str]) -> MagicMock:
         keywords_table = MagicMock()
-        keywords_table.scan.return_value = {'Items': [{'keyword': k} for k in keywords]}
+        keywords_table.query.return_value = {'Items': [{'id': k, 'keyword': k, 'status': 'active'} for k in keywords]}
         resource = MagicMock()
         resource.Table.return_value = keywords_table
         return resource

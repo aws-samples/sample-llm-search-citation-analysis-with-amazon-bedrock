@@ -4,6 +4,7 @@ import {
   keywordSelectionKey, uniqueResearchKeywords
 } from '../../hooks/keywordIdentity';
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
+import { exportResearchKeywords } from './researchExport';
 
 interface KeywordResultsTableProps {
   keywords: ResearchKeyword[];
@@ -20,7 +21,19 @@ export const KeywordResultsTable = ({
 }: KeywordResultsTableProps) => {
   const [sortBy, setSortBy] = useState<'relevance' | 'competition'>('relevance');
   const [filterIntent, setFilterIntent] = useState<string>('all');
+  const [exporting, setExporting] = useState(false);
   const { copy } = useClipboardCopy();
+
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      await exportResearchKeywords(sortedKeywords, title);
+    } catch (error) {
+      console.error('[research] Excel export failed:', error);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const getIntentColor = (intent: string) => {
     switch (intent?.toLowerCase()) {
@@ -92,6 +105,14 @@ export const KeywordResultsTable = ({
             <option value="relevance">Sort by Relevance</option>
             <option value="competition">Sort by Competition</option>
           </select>
+          <button
+            type="button"
+            onClick={handleExport}
+            disabled={exporting}
+            className="px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50"
+          >
+            {exporting ? 'Exporting…' : 'Export to Excel'}
+          </button>
         </div>
       </div>
 
