@@ -147,6 +147,27 @@ class TestInvokeBedrockThinkingBudget:
         extra = client.converse.call_args.kwargs["additionalModelRequestFields"]
         assert extra == {"thinking": {"type": "enabled", "budget_tokens": 2000}}
 
+    def test_forces_temperature_one_and_grows_max_tokens_when_thinking_is_on(self, models_module) -> None:
+        """
+        Anthropic rejects thinking with any temperature but 1 and counts the
+        budget against maxTokens. With temperature 0 (every ANALYSIS caller)
+        the balanced tier answered a ValidationException on every call.
+        """
+        client = self._mock_converse_success()
+        models_module._bedrock_client = client
+
+        models_module.invoke_bedrock("hi", models_module.ModelRole.ANALYSIS, max_tokens=2000, temperature=0)
+
+        assert client.converse.call_args.kwargs["inferenceConfig"] == {"maxTokens": 4000, "temperature": 1.0}
+
+    def test_keeps_the_callers_temperature_when_thinking_is_off(self, models_module) -> None:
+        client = self._mock_converse_success()
+        models_module._bedrock_client = client
+
+        models_module.invoke_bedrock("hi", models_module.ModelRole.GENERATION, max_tokens=1200, temperature=0.3)
+
+        assert client.converse.call_args.kwargs["inferenceConfig"] == {"maxTokens": 1200, "temperature": 0.3}
+
     def test_uses_deep_budget_when_tier_override_set_to_deep(
         self, models_module, monkeypatch: pytest.MonkeyPatch,
     ) -> None:

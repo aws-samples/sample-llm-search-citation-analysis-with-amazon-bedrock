@@ -63,6 +63,17 @@ and coverage for the group, its history, the per-keyword table and Excel export.
 - `CitationAnalysis-API-CitationsContent` and `CitationAnalysis-API-GetBrandMentions`
   gain read access to the Keywords table to resolve scopes.
 
+### Fixed
+
+- Every `ModelRole.ANALYSIS` Bedrock call (recommendations, brand expansion,
+  competitor discovery, the search self-reflection pass) failed on the
+  balanced and quality tiers: Anthropic's extended thinking is only accepted
+  with `temperature` 1 and a `maxTokens` above the thinking budget, but the
+  callers passed `temperature=0`, so Bedrock answered a `ValidationException`
+  and each feature quietly fell back to its no-LLM path.
+  `shared.models.invoke_bedrock` now forces `temperature: 1` and
+  `maxTokens = max_tokens + budget` whenever a thinking budget is set.
+
 ## [2.3.1] - 2026-09-18
 
 ### Fixed
