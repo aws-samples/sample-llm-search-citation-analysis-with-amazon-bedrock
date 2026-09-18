@@ -9,6 +9,17 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.3.1] - 2026-09-18
+
+### Fixed
+
+- Deploying 2.3.0 failed: renaming the API Gateway path part
+  `/api/schedules/{name}` to `{id}` made CloudFormation create the new
+  resource next to the old one, and API Gateway allows a single variable
+  sibling. The path part stays `{name}` (the handler reads either key), so the
+  routes `GET/PUT/DELETE /api/schedules/{id}` and `POST /api/schedules/{id}/run`
+  deploy in place.
+
 ## [2.3.0] - 2026-09-18
 
 Schedules v2: name your schedules, point them at keyword groups, edit them in
@@ -52,10 +63,9 @@ place and run them on demand.
 - `POST /api/schedules` no longer accepts `keywords` (keyword texts); it
   answers 400 pointing at `scope`. The old keyword-text snapshot ignored later
   renames and deactivations; scopes are resolved at run time.
-- `manage-schedule.py` routes by method and path (`shared.decorators.route_handler`);
-  the API Gateway path parameter is `{id}` (the legacy `name` key is still
-  read). `CitationAnalysis-API-ConfigMgmt` gains `states:StartExecution` on
-  the analysis workflow and read access to the KeywordGroups table.
+- `manage-schedule.py` routes by method and path (`shared.decorators.route_handler`).
+  `CitationAnalysis-API-ConfigMgmt` gains `states:StartExecution` on the
+  analysis workflow and read access to the KeywordGroups table.
 
 ## [2.2.0] - 2026-09-18
 

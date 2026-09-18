@@ -756,7 +756,7 @@ beforeAll(() => {
   synthesized.keywordResearchRetryMethods = extractApiMethods(template, keywordResearchRetryId);
 
   const schedulesId = findApiResourceId(template, 'schedules');
-  const scheduleId = findApiResourceId(template, '{id}', schedulesId);
+  const scheduleId = findApiResourceId(template, '{name}', schedulesId);
   const scheduleRunId = findApiResourceId(template, 'run', scheduleId);
   synthesized.schedulesMethods = extractApiMethods(template, schedulesId);
   synthesized.scheduleIdMethods = extractApiMethods(template, scheduleId);

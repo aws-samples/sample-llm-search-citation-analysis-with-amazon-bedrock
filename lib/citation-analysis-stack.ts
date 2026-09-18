@@ -2283,7 +2283,11 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Schedules v2 (2.3.0): the path parameter is the generated `sch-<hex>` id
     // (the EventBridge schedule Name); the display name lives in Description.
-    const scheduleIdResource = schedulesResource.addResource('{id}');
+    // The path part stays `{name}`: API Gateway allows one variable sibling,
+    // and CloudFormation creates the renamed resource before deleting the old
+    // one, so `{id}` failed with "A sibling ({name}) already has a variable
+    // path part". The handler reads either key.
+    const scheduleIdResource = schedulesResource.addResource('{name}');
     scheduleIdResource.addMethod('GET', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
     scheduleIdResource.addMethod('PUT', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
     scheduleIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
