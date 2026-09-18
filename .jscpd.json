@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/kucherenko/jscpd/master/packages/jscpd/schema.json",
+  "minTokens": 50,
+  "threshold": 0,
+  "gitignore": true,
+  "format": ["typescript", "tsx"],
+  "reporters": ["console"],
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/cdk.out/**",
+    "**/coverage/**",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "**/*-fixtures.ts",
+    "**/*-fixtures.tsx"
+  ]
+}

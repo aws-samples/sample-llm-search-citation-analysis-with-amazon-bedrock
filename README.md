@@ -430,6 +430,44 @@ npm run deploy:full    # Deploy + clear CloudFront cache
 npm run clear-cache    # Clear CloudFront cache only
 ```
 
+### Validation
+
+`npm run validate` from the repo root runs every TypeScript quality gate for
+the CDK app, the web dashboard and their tests, and stops at the first failure:
+
+```bash
+npm run validate           # lint -> build -> tests -> duplication -> dead code -> web
+```
+
+The individual gates:
+
+```bash
+npm run lint               # ESLint over the CDK app and web/src
+npm run build              # tsc (CDK app)
+npm run test               # Vitest (CDK stack tests)
+npm run duplication        # jscpd over bin, lib and web/src (production code)
+npm run duplication:tests  # jscpd over *.spec.ts(x) and *-fixtures.ts(x)
+npm run deadcode           # knip (CDK app)
+npm run validate:web       # web/: type-check -> Vitest -> knip
+```
+
+Duplication is checked by [jscpd](https://github.com/kucherenko/jscpd) with
+`minTokens: 50`. Production code and test code are measured separately:
+`.jscpd.json` gates `bin/`, `lib/` and `web/src/` and `.jscpd.tests.json`
+gates spec and fixture files. Both thresholds are `0` — the codebase carries
+no clones, and a new 50-token duplicate fails the run. Fix the duplication
+rather than raising the threshold: shared test builders live in
+`web/src/test/` (`infrastructureMock.ts`, `fetchResponses.ts`) and in the
+`*-fixtures.ts` file next to the module under test.
+
+Dead code is checked by [knip](https://knip.dev): `knip.json` covers the CDK
+app, `web/knip.json` covers the dashboard. `ts-node` sits in the root
+`ignoreDependencies` because its only caller is the `app` command in
+`cdk.json`, which knip does not read. `npm run deadcode:prod` in `web/` is a
+stricter advisory view that ignores test-only usage. The Python side has its
+own checks in `scripts/lint-python.sh` (add `--dead-code` for vulture) and is
+not part of `npm run validate`.
+
 ## License
 
 This library is licensed under the MIT-0 License. See the [LICENSE](LICENSE) file.

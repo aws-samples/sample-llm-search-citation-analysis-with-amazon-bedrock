@@ -73,6 +73,11 @@ export default defineConfig(({ mode }) => {
       globals: true,
       environment: 'jsdom',
       setupFiles: './src/test/setup.ts',
+      // Equivalent to `vi.restoreAllMocks()` + `vi.clearAllMocks()` before
+      // every test, so specs do not need their own beforeEach/afterEach
+      // hygiene hooks.
+      clearMocks: true,
+      restoreMocks: true,
     },
     build: {
       outDir: 'dist',
