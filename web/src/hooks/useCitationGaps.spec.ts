@@ -1,224 +1,122 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   renderHook, waitFor, act 
 } from '@testing-library/react';
 import { useCitationGaps } from './useCitationGaps';
 import {
-  mockCitationGapsResponse,
-  mockAllKeywordsResponse,
-  createMockFetch,
+  mockCitationGapsResponse, mockAllKeywordsResponse 
 } from './useCitationGaps-fixtures';
-
-vi.mock('../infrastructure', async () => {
-  const actual = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
-
-import { authenticatedFetch } from '../infrastructure';
-import type { ReportScope } from '../types';
+import {
+  createDeferredResponse,
+  createEndpointMockFetch,
+  createMockJsonResponse,
+  type EndpointMockFetchOptions,
+} from '../test/fetchResponses';
 import { ALL_SCOPE } from '../components/ui/reportScope';
+import {
+  groupScope, keywordScope 
+} from '../components/ui/reportScope-fixtures';
+import type { CitationGapsResponse } from '../types';
 
-const mockAuthenticatedFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
-const kw = (keyword: string): ReportScope => ({
-  kind: 'keyword',
-  keyword 
-});
+type FetchCitationGapsArgs = Parameters<ReturnType<typeof useCitationGaps>['fetchCitationGaps']>;
 
 describe('useCitationGaps', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+  it('starts with no data, not loading, and no error', () => {
+    const { result } = renderHook(() => useCitationGaps());
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  describe('initial state', () => {
-    it('returns null data initially', () => {
-      const { result } = renderHook(() => useCitationGaps());
-
-      expect(result.current.data).toBeNull();
-      expect(result.current.loading).toBe(false);
-      expect(result.current.error).toBeNull();
+    expect(result.current).toStrictEqual({
+      data: null,
+      loading: false,
+      error: null,
+      fetchCitationGaps: expect.any(Function),
     });
   });
 
   describe('fetchCitationGaps', () => {
-    it('sets loading true while fetching', async () => {
-      const mockResponse = {
-        ok: true,
-        json: () => Promise.resolve(mockCitationGapsResponse),
-      };
-      
-      mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(mockResponse));
-
+    it('sets loading true while the citation gaps request is in flight', async () => {
+      const deferred = createDeferredResponse();
+      mockAuthenticatedFetch.mockReturnValue(deferred.promise);
       const { result } = renderHook(() => useCitationGaps());
 
       act(() => {
-        result.current.fetchCitationGaps(kw('test keyword'));
+        result.current.fetchCitationGaps(keywordScope('test'));
       });
-
       expect(result.current.loading).toBe(true);
 
+      await act(async () => {
+        deferred.resolve(createMockJsonResponse(mockCitationGapsResponse));
+      });
       await waitFor(() => expect(result.current.loading).toBe(false));
     });
 
-    it('fetches and returns citation gaps for keyword', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
+    it.each<[url: string, condition: string, args: FetchCitationGapsArgs]>([
+      ['https://api.test.com/citation-gaps?keyword=best+hotels&limit=10', 'a keyword scope is given', [keywordScope('best hotels')]],
+      ['https://api.test.com/citation-gaps?keyword=test&limit=20', 'a limit is given', [keywordScope('test'), 20]],
+      ['https://api.test.com/citation-gaps?group_id=grp-luxury&limit=10', 'a group scope is given', [groupScope('grp-luxury')]],
+      ['https://api.test.com/citation-gaps?scope=all&limit=10', 'the all-keywords scope is given', [ALL_SCOPE]],
+    ])('requests %s when %s', async (url, _condition, args) => {
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockCitationGapsResponse));
       const { result } = renderHook(() => useCitationGaps());
 
-      await act(async () => {
-        const data = await result.current.fetchCitationGaps(kw('best hotels'));
-        expect(data).toStrictEqual(mockCitationGapsResponse);
-      });
+      await act(() => result.current.fetchCitationGaps(...args));
 
-      expect(result.current.data).toStrictEqual(mockCitationGapsResponse);
-      expect(result.current.error).toBeNull();
+      expect(mockAuthenticatedFetch).toHaveBeenCalledWith(url, { signal: expect.any(AbortSignal) });
     });
 
-    it('fetches all keywords when no keyword provided', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({response: mockAllKeywordsResponse,}));
-
+    it.each<[payload: string, response: CitationGapsResponse, args: FetchCitationGapsArgs]>([
+      ['single-keyword citation gaps', mockCitationGapsResponse, [keywordScope('best hotels')]],
+      ['all-keywords citation gap rollup', mockAllKeywordsResponse, [ALL_SCOPE]],
+    ])('returns and stores the %s when the response passes the citation gaps type guard', async (_payload, response, args) => {
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(response));
       const { result } = renderHook(() => useCitationGaps());
 
-      await act(async () => {
-        await result.current.fetchCitationGaps(ALL_SCOPE);
-      });
+      const returned = await act(() => result.current.fetchCitationGaps(...args));
 
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).not.toContain('keyword=');
-      expect(result.current.data?.top_gaps).toBeDefined();
+      expect(returned).toStrictEqual(response);
+      expect(result.current).toStrictEqual({
+        data: response,
+        loading: false,
+        error: null,
+        fetchCitationGaps: expect.any(Function),
+      });
     });
 
-    it('includes keyword in URL params when provided', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
+    it.each<[message: string, failure: string, options: EndpointMockFetchOptions<CitationGapsResponse>]>([
+      ['Failed to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
+      ['Failed to load visibility metrics', 'response is a backend {error} body', { errorResponse: { error: 'No brand config found' } }],
+      ['Invalid visibility request', 'payload fails the type guard', { invalidResponse: true }],
+    ])('resolves null and reports "%s" when the citation gaps %s', async (message, _failure, options) => {
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockCitationGapsResponse, options));
       const { result } = renderHook(() => useCitationGaps());
 
-      await act(async () => {
-        await result.current.fetchCitationGaps(kw('best hotels'));
-      });
+      const returned = await act(() => result.current.fetchCitationGaps(keywordScope('test')));
 
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).toContain('keyword=best+hotels');
+      expect(returned).toBeNull();
+      expect(result.current).toStrictEqual({
+        data: null,
+        loading: false,
+        error: message,
+        fetchCitationGaps: expect.any(Function),
+      });
     });
 
-    it('includes limit in URL params', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useCitationGaps());
-
-      await act(async () => {
-        await result.current.fetchCitationGaps(kw('test'), 20);
-      });
-
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).toContain('limit=20');
-    });
-
-    it('uses default limit of 10', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useCitationGaps());
-
-      await act(async () => {
-        await result.current.fetchCitationGaps(kw('test'));
-      });
-
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).toContain('limit=10');
-    });
-
-    it('sets error when fetch fails', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
-
-      const { result } = renderHook(() => useCitationGaps());
-
-      await act(async () => {
-        const data = await result.current.fetchCitationGaps(kw('test'));
-        expect(data).toBeNull();
-      });
-
-      expect(result.current.error).toBeTruthy();
-      expect(result.current.data).toBeNull();
-    });
-
-    it('sets error when backend returns error response', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({errorResponse: { error: 'No brand config found' },}));
-
-      const { result } = renderHook(() => useCitationGaps());
-
-      await act(async () => {
-        await result.current.fetchCitationGaps(kw('test'));
-      });
-
-      expect(result.current.error).toBeTruthy();
-    });
-
-    it('sets error when response format is invalid', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ invalidResponse: true }));
-
-      const { result } = renderHook(() => useCitationGaps());
-
-      await act(async () => {
-        await result.current.fetchCitationGaps(kw('test'));
-      });
-
-      expect(result.current.error).toBeTruthy();
-    });
-
-    it('clears previous error on new fetch', async () => {
+    it('clears the previous error when a later citation gaps fetch succeeds', async () => {
       mockAuthenticatedFetch
-        .mockImplementationOnce(createMockFetch({ shouldFail: true }))
-        .mockImplementationOnce(createMockFetch());
-
+        .mockResolvedValueOnce(createMockJsonResponse({}, 500))
+        .mockResolvedValueOnce(createMockJsonResponse(mockCitationGapsResponse));
       const { result } = renderHook(() => useCitationGaps());
 
-      await act(async () => {
-        await result.current.fetchCitationGaps(kw('test'));
-      });
+      await act(() => result.current.fetchCitationGaps(keywordScope('test')));
+      expect(result.current.error).toBe('Failed to load visibility metrics');
 
-      expect(result.current.error).toBeTruthy();
-
-      await act(async () => {
-        await result.current.fetchCitationGaps(kw('test'));
-      });
-
+      await act(() => result.current.fetchCitationGaps(keywordScope('test')));
       expect(result.current.error).toBeNull();
-    });
-
-    it('returns data with gaps array for single keyword', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useCitationGaps());
-
-      await act(async () => {
-        const data = await result.current.fetchCitationGaps(kw('test'));
-        expect(data?.gaps).toHaveLength(2);
-        expect(data?.gaps?.[0].priority).toBe('high');
-        expect(data?.summary?.gap_count).toBe(2);
-      });
-    });
-
-    it('returns data with top_gaps for all keywords', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({response: mockAllKeywordsResponse,}));
-
-      const { result } = renderHook(() => useCitationGaps());
-
-      await act(async () => {
-        const data = await result.current.fetchCitationGaps(ALL_SCOPE);
-        expect(data?.top_gaps).toHaveLength(1);
-        expect(data?.keyword_summaries).toHaveLength(2);
-      });
     });
   });
 });

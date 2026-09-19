@@ -37,7 +37,6 @@ function mockPrompts(prompts: QueryPrompt[]) {
 
 describe('QueryPromptsManager', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockPrompts([mockPrompt]);
   });
 

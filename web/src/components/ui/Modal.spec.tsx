@@ -15,7 +15,6 @@ describe('Modal', () => {
   });
 
   afterEach(() => {
-    vi.restoreAllMocks();
     document.body.style.overflow = '';
   });
 
@@ -153,7 +152,7 @@ describe('ConfirmModal', () => {
     expect(screen.getByText('Are you sure?')).toBeInTheDocument();
   });
 
-  it('calls onConfirm and onClose when confirm button clicked', () => {
+  function renderConfirmModal() {
     const onClose = vi.fn();
     const onConfirm = vi.fn();
     render(
@@ -165,6 +164,16 @@ describe('ConfirmModal', () => {
         message="Proceed?"
       />
     );
+    return {
+      onClose,
+      onConfirm,
+    };
+  }
+
+  it('calls onConfirm and onClose when confirm button clicked', () => {
+    const {
+      onClose, onConfirm 
+    } = renderConfirmModal();
     
     fireEvent.click(screen.getByText('OK'));
     expect(onConfirm).toHaveBeenCalledTimes(1);
@@ -172,17 +181,9 @@ describe('ConfirmModal', () => {
   });
 
   it('calls only onClose when cancel button clicked', () => {
-    const onClose = vi.fn();
-    const onConfirm = vi.fn();
-    render(
-      <ConfirmModal
-        isOpen={true}
-        onClose={onClose}
-        onConfirm={onConfirm}
-        title="Confirm"
-        message="Proceed?"
-      />
-    );
+    const {
+      onClose, onConfirm 
+    } = renderConfirmModal();
     
     fireEvent.click(screen.getByText('Cancel'));
     expect(onClose).toHaveBeenCalledTimes(1);

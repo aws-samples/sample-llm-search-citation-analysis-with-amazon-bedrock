@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import { fetchCrawlHistory } from './dashboard';
 
@@ -10,10 +10,6 @@ import { apiGet } from './client';
 const mockApiGet = apiGet as ReturnType<typeof vi.fn>;
 
 describe('dashboard API', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   describe('fetchCrawlHistory', () => {
     it('requests the crawled-content history for the encoded URL with the default limit', async () => {
       mockApiGet.mockResolvedValue({

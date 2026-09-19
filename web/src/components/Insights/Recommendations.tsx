@@ -4,6 +4,9 @@ import {
 import { useRecommendations } from '../../hooks/useRecommendations';
 import { Recommendation } from '../../types';
 import { Spinner } from '../ui/Spinner';
+import {
+  EyeIcon, CogIcon, RefreshIcon 
+} from '../ui';
 
 const getPriorityColor = (priority: string): string => {
   const colors: Record<string, string> = {
@@ -27,13 +30,6 @@ const getTypeBorderColor = (type: string): string => {
   return colors[type] ?? 'border-gray-500';
 };
 
-const VisibilityIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-  </svg>
-);
-
 const RankingIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
@@ -49,13 +45,6 @@ const ProviderGapIcon = () => (
 const CompetitiveIcon = () => (
   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-  </svg>
-);
-
-const ConfigurationIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
   </svg>
 );
 
@@ -79,11 +68,11 @@ const DefaultIcon = () => (
 
 const getTypeIcon = (type: string): JSX.Element => {
   const icons: Record<string, JSX.Element> = {
-    visibility_gap: <VisibilityIcon />,
+    visibility_gap: <EyeIcon />,
     ranking: <RankingIcon />,
     provider_gap: <ProviderGapIcon />,
     competitive: <CompetitiveIcon />,
-    configuration: <ConfigurationIcon />,
+    configuration: <CogIcon />,
     data: <DataIcon />,
     best_practice: <BestPracticeIcon />,
   };
@@ -224,9 +213,7 @@ const Header = ({
           onClick={onRefresh}
           className="px-4 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 text-sm font-medium transition-colors flex items-center justify-center gap-2"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
+          <RefreshIcon className="w-4 h-4" />
           Refresh
         </button>
       </div>

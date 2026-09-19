@@ -1,4 +1,3 @@
-import { vi } from 'vitest';
 import type { PromptInsightsResponse } from '../types';
 
 export const mockPromptInsightsResponse: PromptInsightsResponse = {
@@ -51,30 +50,3 @@ export const mockPromptInsightsResponse: PromptInsightsResponse = {
     win_rate: 50,
   },
 };
-
-export function createMockFetch(options: {
-  response?: PromptInsightsResponse;
-  shouldFail?: boolean;
-  invalidResponse?: boolean;
-} = {}) {
-  return vi.fn().mockImplementation(() => {
-    if (options.shouldFail) {
-      return Promise.resolve({
-        ok: false,
-        status: 500 
-      });
-    }
-
-    if (options.invalidResponse) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ invalid: 'data' }),
-      });
-    }
-
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve(options.response ?? mockPromptInsightsResponse),
-    });
-  });
-}

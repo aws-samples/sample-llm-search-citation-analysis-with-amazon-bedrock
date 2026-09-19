@@ -1,6 +1,8 @@
-import type { CompetitorRollup } from '../../../../api/reports';
+import type {
+  CompetitorExclusiveSource, CompetitorRollup 
+} from '../../../../api/reports';
 import {
-  ReportSection, SectionPlaceholder 
+  PriorityBadge, ReportSection, gateSection 
 } from '../../layout';
 
 interface Props {
@@ -19,24 +21,17 @@ interface Props {
 export function OutreachTargetsSection({
   rollup, loading, error 
 }: Props) {
-  if (loading) {
-    return (
-      <ReportSection title="Top outreach targets">
-        <SectionPlaceholder variant="loading" message="Loading…" />
-      </ReportSection>
-    );
-  }
+  const gate = gateSection({
+    title: 'Top outreach targets',
+    loading,
+    loadingMessage: 'Loading…',
+    error,
+    value: rollup,
+  });
+  if (!gate.ready) return gate.placeholder;
 
-  if (error) {
-    return (
-      <ReportSection title="Top outreach targets">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
-
-  if (!rollup) return null;
-  if (rollup.outreach_targets.length === 0) {
+  const targets = gate.value.outreach_targets;
+  if (targets.length === 0) {
     return (
       <ReportSection
         title="Top outreach targets"
@@ -57,7 +52,7 @@ export function OutreachTargetsSection({
       startNewPage
     >
       <div className="space-y-3">
-        {rollup.outreach_targets.map((target) => (
+        {targets.map((target) => (
           <TargetCard key={`${target.url}::${target.keyword}`} target={target} />
         ))}
       </div>
@@ -65,7 +60,7 @@ export function OutreachTargetsSection({
   );
 }
 
-function TargetCard({target,}: {readonly target: CompetitorRollup['outreach_targets'][number];}) {
+function TargetCard({ target }: { readonly target: CompetitorExclusiveSource }) {
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 avoid-break-inside">
       <div className="flex items-start justify-between gap-3 mb-2">
@@ -80,16 +75,16 @@ function TargetCard({target,}: {readonly target: CompetitorRollup['outreach_targ
         <PriorityBadge priority={target.priority} />
       </div>
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 text-xs">
-        <Metric label="Lift" value={target.lift_score.toFixed(2)} />
-        <Metric label="Citations" value={target.citation_count.toString()} />
-        <Metric label="Providers" value={target.provider_count.toString()} />
-        <Metric label="Keyword" value={target.keyword} />
+        <TargetFigure label="Lift" value={target.lift_score.toFixed(2)} />
+        <TargetFigure label="Citations" value={target.citation_count.toString()} />
+        <TargetFigure label="Providers" value={target.provider_count.toString()} />
+        <TargetFigure label="Keyword" value={target.keyword} />
       </div>
     </div>
   );
 }
 
-function Metric({
+function TargetFigure({
   label,
   value,
 }: {
@@ -104,25 +99,4 @@ function Metric({
       <p className="text-gray-900 dark:text-white mt-0.5 truncate">{value}</p>
     </div>
   );
-}
-
-function PriorityBadge({priority,}: {readonly priority: 'high' | 'medium' | 'low';}) {
-  const styles = priorityStyles(priority);
-  return (
-    <span
-      className={`flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold uppercase ${styles}`}
-    >
-      {priority}
-    </span>
-  );
-}
-
-function priorityStyles(priority: 'high' | 'medium' | 'low'): string {
-  if (priority === 'high') {
-    return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300';
-  }
-  if (priority === 'medium') {
-    return 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300';
-  }
-  return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
 }

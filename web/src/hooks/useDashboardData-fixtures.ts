@@ -1,5 +1,13 @@
-import { vi } from 'vitest';
+import {
+  expect, vi 
+} from 'vitest';
+import {
+  act, renderHook, waitFor 
+} from '@testing-library/react';
+import { createMockJsonResponse } from '../test/fetchResponses';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import type { Keyword } from '../types';
+import { useDashboardData } from './useDashboardData';
 
 export const MOCK_API_BASE_URL = 'https://api.test.com';
 export const MOCK_KEYWORDS_URL = `${MOCK_API_BASE_URL}/keywords`;
@@ -69,17 +77,6 @@ export function createMockAuthoritativeKeywordsResponse(
 export const mockAuthoritativeKeywordsResponse =
   createMockAuthoritativeKeywordsResponse(mockKeywords);
 
-export function createMockJsonResponse(
-  responsePayload: unknown,
-  responseStatus = 200
-): Response {
-  return new Response(JSON.stringify(responsePayload), {
-    status: responseStatus,
-    statusText: responseStatus === 200 ? 'OK' : 'Request failed',
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-
 export function createMockDelayedJsonResponse(
   responsePayload: unknown,
   delayMilliseconds: number
@@ -124,4 +121,30 @@ export function createMockFetch(overrides: MockFetchOverrides = {}) {
     }
     return Promise.resolve(createMockJsonResponse({}));
   });
+}
+
+/**
+ * Points the mocked network layer at `createMockFetch(overrides)`, renders the
+ * hook and waits for the initial dashboard load to finish.
+ */
+export async function renderLoadedDashboard(overrides: MockFetchOverrides = {}) {
+  mockAuthenticatedFetch.mockImplementation(createMockFetch(overrides));
+  const rendered = renderHook(() => useDashboardData());
+  await waitFor(() => expect(rendered.result.current.loading).toBe(false));
+  return rendered;
+}
+
+/**
+ * Switches the network layer to a fetch that never settles and starts a
+ * keyword reconciliation, so its authoritative request stays in flight.
+ * Returns that request's abort signal.
+ */
+export function startPendingKeywordReconciliation(
+  result: { current: ReturnType<typeof useDashboardData> }
+): AbortSignal | undefined {
+  mockAuthenticatedFetch.mockImplementation(() => new Promise<Response>(vi.fn()));
+  act(() => {
+    void result.current.reconcileKeywords();
+  });
+  return mockAuthenticatedFetch.mock.lastCall?.[1]?.signal ?? undefined;
 }

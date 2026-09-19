@@ -34,7 +34,6 @@ describe('usePrintMode', () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.restoreAllMocks();
   });
 
   it('returns isPrintMode=false when the URL has no print param', () => {

@@ -2,7 +2,7 @@ import {
   afterEach, beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
-  act, renderHook, waitFor
+  act, renderHook
 } from '@testing-library/react';
 import {
   LATE_KEYWORD_RECONCILIATION_MS, useDashboardData
@@ -18,32 +18,22 @@ import {
   createMockDelayedJsonResponse,
   createMockFetch,
   createMockKeywords,
+  renderLoadedDashboard,
+  startPendingKeywordReconciliation,
 } from './useDashboardData-fixtures';
 
-vi.mock('../infrastructure', async () => {
-  const actualInfrastructure = await vi.importActual<typeof import('../infrastructure')>(
-    '../infrastructure'
-  );
-  return {
-    ...actualInfrastructure,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { authenticatedFetch } from '../infrastructure';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
-const mockAuthenticatedFetch = vi.mocked(authenticatedFetch);
 
 describe('useDashboardData', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     vi.spyOn(console, 'error').mockImplementation(vi.fn());
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.restoreAllMocks();
   });
 
   it('returns loading true while the initial dashboard request is pending', () => {
@@ -55,22 +45,14 @@ describe('useDashboardData', () => {
   });
 
   it('returns stats and citations when the initial dashboard request succeeds', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-    const { result } = renderHook(() => useDashboardData());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedDashboard();
 
     expect(result.current.stats).toStrictEqual(mockStats);
     expect(result.current.citations).toStrictEqual(mockCitations);
   });
 
   it('returns searches and keywords from the ordinary endpoint on mount', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-    const { result } = renderHook(() => useDashboardData());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedDashboard();
 
     expect(result.current.searches).toStrictEqual(mockSearches);
     expect(result.current.keywords).toStrictEqual(mockKeywords);
@@ -81,56 +63,37 @@ describe('useDashboardData', () => {
   });
 
   it('returns null error when the initial dashboard request succeeds', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-    const { result } = renderHook(() => useDashboardData());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedDashboard();
 
     expect(result.current.error).toBeNull();
   });
 
   it('returns the dashboard network message when an API request fails', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
-
-    const { result } = renderHook(() => useDashboardData());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedDashboard({ shouldFail: true });
 
     expect(result.current.error).toBe('Unable to load dashboard data');
     expect(result.current.stats?.total_searches).toBe(0);
   });
 
   it('issues four new API requests when refetch is called', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
+    const { result } = await renderLoadedDashboard();
 
-    const { result } = renderHook(() => useDashboardData());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    await act(async () => {
-      await result.current.refetch();
-    });
+    await act(() => result.current.refetch());
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(8);
   });
 
   it('updates lastUpdate when the initial dashboard request succeeds', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
     const beforeFetch = new Date();
 
-    const { result } = renderHook(() => useDashboardData());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedDashboard();
 
     expect(result.current.lastUpdate.getTime()).toBeGreaterThanOrEqual(beforeFetch.getTime());
   });
 
   it('replaces keywords when setKeywords receives a new list', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
     const newKeywords = createMockKeywords(1, 'new-keyword');
-    const { result } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedDashboard();
 
     act(() => {
       result.current.setKeywords(newKeywords);
@@ -140,16 +103,12 @@ describe('useDashboardData', () => {
   });
 
   it('keeps the dashboard usable when API payloads have invalid shapes', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({
+    const { result } = await renderLoadedDashboard({
       stats: { invalid: 'data' },
       citations: { invalid: 'data' },
       searches: { invalid: 'data' },
       keywords: { invalid: 'data' },
-    }));
-
-    const { result } = renderHook(() => useDashboardData());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    });
 
     expect(result.current.error).toBeNull();
   });
@@ -166,11 +125,9 @@ describe('useDashboardData', () => {
   });
 
   it('returns the same reconciliation callback after rerender', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
     const {
       result, rerender
-    } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    } = await renderLoadedDashboard();
     const initialReconciliation = result.current.reconcileKeywords;
 
     rerender();
@@ -179,13 +136,9 @@ describe('useDashboardData', () => {
   });
 
   it('fetches the exact authoritative URL with an abort signal during reconciliation', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-    const { result } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedDashboard();
 
-    await act(async () => {
-      await result.current.reconcileKeywords();
-    });
+    await act(() => result.current.reconcileKeywords());
 
     expect(mockAuthenticatedFetch).toHaveBeenLastCalledWith(
       MOCK_AUTHORITATIVE_KEYWORDS_URL,
@@ -193,28 +146,73 @@ describe('useDashboardData', () => {
     );
   });
 
-  it('replaces keywords immediately when reconciliation receives a complete response', async () => {
+  describe('authoritative keyword replacement', () => {
     const reconciledKeywords = createMockKeywords(2, 'reconciled');
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({ authoritativeResponse: createMockAuthoritativeKeywordsResponse(reconciledKeywords) }));
-    const { result } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const largeReplacement = createMockKeywords(501, 'authoritative');
+    const mismatchedKeywords = createMockKeywords(2, 'mismatched');
+    const incompleteKeywords = createMockKeywords(1, 'incomplete');
+    const replacementCases = [
+      {
+        outcome: 'replaces keywords immediately',
+        condition: 'reconciliation receives a complete response',
+        authoritativeResponse: createMockAuthoritativeKeywordsResponse(reconciledKeywords),
+        expectedKeywords: reconciledKeywords,
+      },
+      {
+        outcome: 'accepts the complete replacement',
+        condition: 'the authoritative response contains 501 keywords',
+        authoritativeResponse: createMockAuthoritativeKeywordsResponse(largeReplacement),
+        expectedKeywords: largeReplacement,
+      },
+      {
+        outcome: 'preserves keywords',
+        condition: 'the authoritative count differs from the array length',
+        authoritativeResponse: createMockAuthoritativeKeywordsResponse(mismatchedKeywords, 1),
+        expectedKeywords: mockKeywords,
+      },
+      {
+        outcome: 'preserves keywords',
+        condition: 'the authoritative response is incomplete',
+        authoritativeResponse: createMockAuthoritativeKeywordsResponse(
+          incompleteKeywords,
+          incompleteKeywords.length,
+          false
+        ),
+        expectedKeywords: mockKeywords,
+      },
+      {
+        outcome: 'preserves keywords',
+        condition: 'an authoritative keyword has an invalid status',
+        authoritativeResponse: {
+          keywords: [{
+            id: 'invalid-status',
+            keyword: 'invalid status',
+            created_at: '2024-01-01',
+            status: 'archived',
+          }],
+          count: 1,
+          complete: true,
+        },
+        expectedKeywords: mockKeywords,
+      },
+    ];
 
-    await act(async () => {
-      await result.current.reconcileKeywords();
+    it.each(replacementCases)('$outcome when $condition', async ({
+      authoritativeResponse, expectedKeywords
+    }) => {
+      const { result } = await renderLoadedDashboard({ authoritativeResponse });
+
+      await act(() => result.current.reconcileKeywords());
+
+      expect(result.current.keywords).toStrictEqual(expectedKeywords);
     });
-
-    expect(result.current.keywords).toStrictEqual(reconciledKeywords);
   });
 
   it('starts the delayed authoritative refresh at exactly 125000 milliseconds', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-    const { result } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedDashboard();
     vi.useFakeTimers();
 
-    await act(async () => {
-      await result.current.reconcileKeywords();
-    });
+    await act(() => result.current.reconcileKeywords());
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(5);
     await act(async () => {
@@ -228,93 +226,16 @@ describe('useDashboardData', () => {
   });
 
   it('aborts the prior authoritative refresh when reconciliation runs again', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
     const {
       result, unmount
-    } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    mockAuthenticatedFetch.mockImplementation(() => new Promise<Response>(vi.fn()));
+    } = await renderLoadedDashboard();
 
-    act(() => {
-      void result.current.reconcileKeywords();
-    });
-    const firstSignal = mockAuthenticatedFetch.mock.calls[4]?.[1]?.signal;
-    act(() => {
-      void result.current.reconcileKeywords();
-    });
-    const secondSignal = mockAuthenticatedFetch.mock.calls[5]?.[1]?.signal;
+    const firstSignal = startPendingKeywordReconciliation(result);
+    const secondSignal = startPendingKeywordReconciliation(result);
 
     expect(firstSignal?.aborted).toBe(true);
     expect(secondSignal?.aborted).toBe(false);
     unmount();
-  });
-
-  it('accepts a complete authoritative replacement containing 501 keywords', async () => {
-    const authoritativeKeywords = createMockKeywords(501, 'authoritative');
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({ authoritativeResponse: createMockAuthoritativeKeywordsResponse(authoritativeKeywords) }));
-    const { result } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    await act(async () => {
-      await result.current.reconcileKeywords();
-    });
-
-    expect(result.current.keywords).toStrictEqual(authoritativeKeywords);
-  });
-
-  it('preserves keywords when authoritative count differs from the array length', async () => {
-    const replacementKeywords = createMockKeywords(2, 'mismatched');
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({ authoritativeResponse: createMockAuthoritativeKeywordsResponse(replacementKeywords, 1) }));
-    const { result } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    await act(async () => {
-      await result.current.reconcileKeywords();
-    });
-
-    expect(result.current.keywords).toStrictEqual(mockKeywords);
-  });
-
-  it('preserves keywords when the authoritative response is incomplete', async () => {
-    const replacementKeywords = createMockKeywords(1, 'incomplete');
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({
-      authoritativeResponse: createMockAuthoritativeKeywordsResponse(
-        replacementKeywords,
-        replacementKeywords.length,
-        false
-      ),
-    }));
-    const { result } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    await act(async () => {
-      await result.current.reconcileKeywords();
-    });
-
-    expect(result.current.keywords).toStrictEqual(mockKeywords);
-  });
-
-  it('preserves keywords when an authoritative keyword has an invalid status', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({
-      authoritativeResponse: {
-        keywords: [{
-          id: 'invalid-status',
-          keyword: 'invalid status',
-          created_at: '2024-01-01',
-          status: 'archived',
-        }],
-        count: 1,
-        complete: true,
-      },
-    }));
-    const { result } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    await act(async () => {
-      await result.current.reconcileKeywords();
-    });
-
-    expect(result.current.keywords).toStrictEqual(mockKeywords);
   });
 
   it('keeps newer reconciled keywords when an older full fetch resolves last', async () => {
@@ -330,9 +251,7 @@ describe('useDashboardData', () => {
     });
     const { result } = renderHook(() => useDashboardData());
 
-    await act(async () => {
-      await result.current.reconcileKeywords();
-    });
+    await act(() => result.current.reconcileKeywords());
     expect(result.current.keywords).toStrictEqual(reconciledKeywords);
 
     await act(async () => {
@@ -344,9 +263,7 @@ describe('useDashboardData', () => {
   });
 
   it('keeps newer full-fetch keywords when an aborted reconciliation resolves last', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-    const { result } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedDashboard();
     vi.useFakeTimers();
     const staleReconciliationKeywords = createMockKeywords(1, 'stale-reconciliation');
     const newerFullFetchKeywords = createMockKeywords(1, 'newer-full');
@@ -365,9 +282,7 @@ describe('useDashboardData', () => {
     act(() => {
       reconciliationCompletion.current = result.current.reconcileKeywords();
     });
-    await act(async () => {
-      await result.current.refetch();
-    });
+    await act(() => result.current.refetch());
     expect(result.current.keywords).toStrictEqual(newerFullFetchKeywords);
 
     await act(async () => {
@@ -379,9 +294,7 @@ describe('useDashboardData', () => {
   });
 
   it('keeps the newest reconciliation when abort-ignoring reads resolve out of order', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-    const { result } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedDashboard();
     vi.useFakeTimers();
     const staleKeywords = createMockKeywords(1, 'stale');
     const newestKeywords = createMockKeywords(1, 'newest');
@@ -416,15 +329,11 @@ describe('useDashboardData', () => {
   });
 
   it('does not start the delayed reconciliation after the owner unmounts', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
     const {
       result, unmount
-    } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    } = await renderLoadedDashboard();
     vi.useFakeTimers();
-    await act(async () => {
-      await result.current.reconcileKeywords();
-    });
+    await act(() => result.current.reconcileKeywords());
     const requestsBeforeUnmount = mockAuthenticatedFetch.mock.calls.length;
 
     unmount();
@@ -434,17 +343,11 @@ describe('useDashboardData', () => {
   });
 
   it('aborts the active authoritative refresh when the owner unmounts', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
     const {
       result, unmount
-    } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    mockAuthenticatedFetch.mockImplementation(() => new Promise<Response>(vi.fn()));
+    } = await renderLoadedDashboard();
 
-    act(() => {
-      void result.current.reconcileKeywords();
-    });
-    const activeSignal = mockAuthenticatedFetch.mock.calls[4]?.[1]?.signal;
+    const activeSignal = startPendingKeywordReconciliation(result);
     unmount();
 
     expect(activeSignal).toBeInstanceOf(AbortSignal);
@@ -452,11 +355,9 @@ describe('useDashboardData', () => {
   });
 
   it('performs no fetch when a captured reconciliation callback runs after unmount', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
     const {
       result, unmount
-    } = renderHook(() => useDashboardData());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    } = await renderLoadedDashboard();
     const capturedReconciliation = result.current.reconcileKeywords;
     const requestsBeforeUnmount = mockAuthenticatedFetch.mock.calls.length;
     vi.useFakeTimers();

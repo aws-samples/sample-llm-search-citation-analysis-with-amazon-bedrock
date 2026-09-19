@@ -1,243 +1,142 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   renderHook, waitFor, act 
 } from '@testing-library/react';
 import { useVisibilityMetrics } from './useVisibilityMetrics';
+import { mockVisibilityResponse } from './useVisibilityMetrics-fixtures';
+import { renderDeferredEndpoint } from './useAnalysisEndpoint-fixtures';
 import {
-  mockVisibilityResponse, createMockFetch 
-} from './useVisibilityMetrics-fixtures';
-import { createDeferredMockFetch } from './useAnalysisEndpoint-fixtures';
+  createDeferredResponse,
+  createEndpointMockFetch,
+  createMockJsonResponse,
+  type EndpointMockFetchOptions,
+} from '../test/fetchResponses';
+import { ALL_SCOPE } from '../components/ui/reportScope';
+import {
+  groupScope, keywordScope 
+} from '../components/ui/reportScope-fixtures';
+import type { VisibilityMetricsResponse } from '../types';
 
-vi.mock('../infrastructure', async () => {
-  const actual = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { authenticatedFetch } from '../infrastructure';
-import type { ReportScope } from '../types';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
-const mockAuthenticatedFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
-
-const createControlledPromise = () => {
-  const promiseControl = { resolvePromise: undefined as ((value: unknown) => void) | undefined };
-  const promise = new Promise(resolve => {
-    promiseControl.resolvePromise = resolve;
-  });
-  return {
-    promise,
-    resolvePromise: promiseControl.resolvePromise 
-  };
-};
-
-const resolveWithMockResponse = (resolvePromise?: (value: unknown) => void) => {
-  resolvePromise?.({
-    ok: true,
-    json: () => Promise.resolve(mockVisibilityResponse),
-  });
-};
-
-
-const kw = (keyword: string): ReportScope => ({
-  kind: 'keyword',
-  keyword 
-});
+type FetchVisibilityMetricsArgs = Parameters<ReturnType<typeof useVisibilityMetrics>['fetchVisibilityMetrics']>;
 
 describe('useVisibilityMetrics', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+  it('starts with no data, not loading, and no error', () => {
+    const { result } = renderHook(() => useVisibilityMetrics());
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  describe('initial state', () => {
-    it('returns null data initially', () => {
-      const { result } = renderHook(() => useVisibilityMetrics());
-
-      expect(result.current.data).toBeNull();
-      expect(result.current.loading).toBe(false);
-      expect(result.current.error).toBeNull();
+    expect(result.current).toStrictEqual({
+      data: null,
+      loading: false,
+      error: null,
+      fetchVisibilityMetrics: expect.any(Function),
     });
   });
 
   describe('fetchVisibilityMetrics', () => {
-    it('sets loading true while fetching', async () => {
-      const {
-        promise, resolvePromise 
-      } = createControlledPromise();
-      
-      mockAuthenticatedFetch.mockImplementation(() => promise);
-
+    it('sets loading true while the visibility request is in flight', async () => {
+      const deferred = createDeferredResponse();
+      mockAuthenticatedFetch.mockReturnValue(deferred.promise);
       const { result } = renderHook(() => useVisibilityMetrics());
 
       act(() => {
-        result.current.fetchVisibilityMetrics(kw('test keyword'));
+        result.current.fetchVisibilityMetrics(keywordScope('test keyword'));
       });
-
       expect(result.current.loading).toBe(true);
 
       await act(async () => {
-        resolveWithMockResponse(resolvePromise);
+        deferred.resolve(createMockJsonResponse(mockVisibilityResponse));
       });
-
       await waitFor(() => expect(result.current.loading).toBe(false));
     });
 
-    it('fetches and returns visibility metrics', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
+    it.each<[url: string, condition: string, args: FetchVisibilityMetricsArgs]>([
+      ['https://api.test.com/visibility?keyword=best+hotels+in+paris', 'only a keyword scope is given', [keywordScope('best hotels in paris')]],
+      ['https://api.test.com/visibility?keyword=best+hotels&brand=MyHotel', 'a brand filter is given', [keywordScope('best hotels'), undefined, 'MyHotel']],
+      ['https://api.test.com/visibility?keyword=best+hotels&query_prompt_id=prompt-7', 'a query prompt id is given', [keywordScope('best hotels'), 'prompt-7']],
+      ['https://api.test.com/visibility?group_id=grp-luxury', 'a group scope is given', [groupScope('grp-luxury')]],
+      ['https://api.test.com/visibility?scope=all', 'the all-keywords scope is given', [ALL_SCOPE]],
+    ])('requests %s when %s', async (url, _condition, args) => {
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockVisibilityResponse));
       const { result } = renderHook(() => useVisibilityMetrics());
 
-      const fetchResult = await act(async () => {
-        return await result.current.fetchVisibilityMetrics(kw('best hotels'));
-      });
+      await act(() => result.current.fetchVisibilityMetrics(...args));
 
-      expect(fetchResult).toStrictEqual(mockVisibilityResponse);
-      expect(result.current.data).toStrictEqual(mockVisibilityResponse);
-      expect(result.current.error).toBeNull();
+      expect(mockAuthenticatedFetch).toHaveBeenCalledWith(url, { signal: expect.any(AbortSignal) });
     });
 
-    it('includes keyword in URL params', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
+    it('returns and stores the visibility metrics when the response passes the type guard', async () => {
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockVisibilityResponse));
       const { result } = renderHook(() => useVisibilityMetrics());
 
-      await act(async () => {
-        await result.current.fetchVisibilityMetrics(kw('best hotels in paris'));
-      });
+      const returned = await act(() => result.current.fetchVisibilityMetrics(keywordScope('best hotels')));
 
-      const firstCall = mockAuthenticatedFetch.mock.calls[0];
-      expect(firstCall).toBeDefined();
-      const url = String(firstCall[0]);
-      expect(url).toContain('keyword=best+hotels+in+paris');
+      expect(returned).toStrictEqual(mockVisibilityResponse);
+      expect(result.current).toStrictEqual({
+        data: mockVisibilityResponse,
+        loading: false,
+        error: null,
+        fetchVisibilityMetrics: expect.any(Function),
+      });
     });
 
-    it('includes brand filter in URL params when provided', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
+    it.each<[message: string, failure: string, options: EndpointMockFetchOptions<VisibilityMetricsResponse>]>([
+      ['Unable to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
+      ['Failed to load visibility metrics', 'response is a backend {error} body', { errorResponse: { error: 'No data available' } }],
+      ['Invalid visibility request', 'payload fails the type guard', { invalidResponse: true }],
+    ])('resolves null and reports "%s" when the visibility %s', async (message, _failure, options) => {
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockVisibilityResponse, options));
       const { result } = renderHook(() => useVisibilityMetrics());
 
-      await act(async () => {
-        await result.current.fetchVisibilityMetrics(kw('best hotels'), undefined, 'MyHotel');
-      });
+      const returned = await act(() => result.current.fetchVisibilityMetrics(keywordScope('test')));
 
-      const firstCall = mockAuthenticatedFetch.mock.calls[0];
-      expect(firstCall).toBeDefined();
-      const url = String(firstCall[0]);
-      expect(url).toContain('brand=MyHotel');
+      expect(returned).toBeNull();
+      expect(result.current).toStrictEqual({
+        data: null,
+        loading: false,
+        error: message,
+        fetchVisibilityMetrics: expect.any(Function),
+      });
     });
 
-    it('sets error when fetch fails', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
-
-      const { result } = renderHook(() => useVisibilityMetrics());
-
-      const fetchResult = await act(async () => {
-        return await result.current.fetchVisibilityMetrics(kw('test'));
-      });
-
-      expect(fetchResult).toBeNull();
-      expect(result.current.error).toBeTruthy();
-      expect(result.current.data).toBeNull();
-    });
-
-    it('sets error when backend returns error response', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({errorResponse: { error: 'No data available' },}));
-
-      const { result } = renderHook(() => useVisibilityMetrics());
-
-      await act(async () => {
-        await result.current.fetchVisibilityMetrics(kw('test'));
-      });
-
-      expect(result.current.error).toBeTruthy();
-    });
-
-    it('sets error when response format is invalid', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ invalidResponse: true }));
-
-      const { result } = renderHook(() => useVisibilityMetrics());
-
-      await act(async () => {
-        await result.current.fetchVisibilityMetrics(kw('test'));
-      });
-
-      expect(result.current.error).toBeTruthy();
-    });
-
-    it('clears previous error on new fetch', async () => {
+    it('clears the previous error when a later visibility fetch succeeds', async () => {
       mockAuthenticatedFetch
-        .mockImplementationOnce(createMockFetch({ shouldFail: true }))
-        .mockImplementationOnce(createMockFetch());
-
+        .mockResolvedValueOnce(createMockJsonResponse({}, 500))
+        .mockResolvedValueOnce(createMockJsonResponse(mockVisibilityResponse));
       const { result } = renderHook(() => useVisibilityMetrics());
 
-      await act(async () => {
-        await result.current.fetchVisibilityMetrics(kw('test'));
-      });
+      await act(() => result.current.fetchVisibilityMetrics(keywordScope('test')));
+      expect(result.current.error).toBe('Unable to load visibility metrics');
 
-      expect(result.current.error).toBeTruthy();
-
-      await act(async () => {
-        await result.current.fetchVisibilityMetrics(kw('test'));
-      });
-
+      await act(() => result.current.fetchVisibilityMetrics(keywordScope('test')));
       expect(result.current.error).toBeNull();
-    });
-
-    it('returns fetched data from function', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useVisibilityMetrics());
-
-      const returnedData = await act(async () => {
-        return await result.current.fetchVisibilityMetrics(kw('test'));
-      });
-
-      expect(returnedData).not.toBeNull();
-      expect(returnedData && 'keyword' in returnedData ? returnedData.keyword : null).toBe('best hotels');
-      expect(returnedData?.brands).toHaveLength(2);
     });
   });
 
   describe('rapid refetch', () => {
     it('aborts the previous request when a newer keyword fetch starts', () => {
-      const deferred = createDeferredMockFetch();
-      mockAuthenticatedFetch.mockImplementation(deferred.impl);
+      const {
+        deferred, startRequest 
+      } = renderDeferredEndpoint(useVisibilityMetrics);
 
-      const { result } = renderHook(() => useVisibilityMetrics());
-
-      act(() => {
-        result.current.fetchVisibilityMetrics(kw('old keyword'));
-      });
-      act(() => {
-        result.current.fetchVisibilityMetrics(kw('new keyword'));
-      });
+      startRequest((hook) => hook.fetchVisibilityMetrics(keywordScope('old keyword')));
+      startRequest((hook) => hook.fetchVisibilityMetrics(keywordScope('new keyword')));
 
       expect(deferred.requests[0].signal?.aborted).toBe(true);
       expect(deferred.requests[1].signal?.aborted).toBe(false);
     });
 
     it('keeps the newer keyword data when a stale response resolves late', async () => {
-      const deferred = createDeferredMockFetch();
-      mockAuthenticatedFetch.mockImplementation(deferred.impl);
+      const {
+        deferred, result, startRequest 
+      } = renderDeferredEndpoint(useVisibilityMetrics);
 
-      const { result } = renderHook(() => useVisibilityMetrics());
-
-      act(() => {
-        result.current.fetchVisibilityMetrics(kw('old keyword'));
-      });
-      act(() => {
-        result.current.fetchVisibilityMetrics(kw('best hotels'));
-      });
-
+      startRequest((hook) => hook.fetchVisibilityMetrics(keywordScope('old keyword')));
+      startRequest((hook) => hook.fetchVisibilityMetrics(keywordScope('best hotels')));
       await act(async () => {
         deferred.requests[1].respond(mockVisibilityResponse);
       });

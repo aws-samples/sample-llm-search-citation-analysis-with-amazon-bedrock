@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   render, screen
@@ -240,10 +240,6 @@ describe('CompetitorAnalysis', () => {
     result: null,
     error: null,
   };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
 
   describe('input form', () => {
     it('renders URL input field', () => {

@@ -5,10 +5,8 @@ import {
   render, screen, within 
 } from '@testing-library/react';
 import { WinsAndGapsSection } from './WinsAndGapsSection';
-import type {
-  ReportsOverviewResponse,
-  ReportsOverviewMover,
-} from '../../../../api/reports';
+import { buildOverview } from './reportsOverview-fixtures';
+import type { ReportsOverviewMover } from '../../../../api/reports';
 
 function directionFor(change: number): 'improving' | 'declining' | 'stable' {
   if (change > 0) return 'improving';
@@ -26,36 +24,11 @@ function buildMover(keyword: string, change: number): ReportsOverviewMover {
   };
 }
 
-function buildData(
-  improving: ReportsOverviewMover[],
-  declining: ReportsOverviewMover[],
-): ReportsOverviewResponse {
-  return {
-    generated_at: '2026-05-15T07:00:00Z',
-    period_type: 'day',
-    days_analyzed: 30,
-    keywords_analyzed: 10,
-    overall_score: 60,
-    previous_score: 55,
-    change: 5,
-    change_percent: 9.1,
-    trend_direction: 'stable',
-    summary: {
-      improving_count: 0,
-      declining_count: 0,
-      stable_count: 0 
-    },
-    top_improving: improving,
-    top_declining: declining,
-    top_recommendations: [],
-  };
-}
-
 describe('WinsAndGapsSection — content rendering', () => {
   it('renders improvers in the Wins column with their change values', () => {
     render(
       <WinsAndGapsSection
-        data={buildData([buildMover('best running shoes', 8)], [])}
+        data={buildOverview({ improving: [buildMover('best running shoes', 8)] })}
         loading={false}
         error={null}
       />,
@@ -71,7 +44,7 @@ describe('WinsAndGapsSection — content rendering', () => {
   it('renders decliners in the Gaps column without a plus sign', () => {
     render(
       <WinsAndGapsSection
-        data={buildData([], [buildMover('best hiking boots', -10)])}
+        data={buildOverview({ declining: [buildMover('best hiking boots', -10)] })}
         loading={false}
         error={null}
       />,
@@ -89,7 +62,7 @@ describe('WinsAndGapsSection — empty-side messaging', () => {
   it('shows the no-improvers copy when there are no top-improving entries', () => {
     render(
       <WinsAndGapsSection
-        data={buildData([], [buildMover('declining-kw', -5)])}
+        data={buildOverview({ declining: [buildMover('declining-kw', -5)] })}
         loading={false}
         error={null}
       />,
@@ -102,7 +75,7 @@ describe('WinsAndGapsSection — empty-side messaging', () => {
   it('shows the no-decliners copy when there are no top-declining entries', () => {
     render(
       <WinsAndGapsSection
-        data={buildData([buildMover('improving-kw', 5)], [])}
+        data={buildOverview({ improving: [buildMover('improving-kw', 5)] })}
         loading={false}
         error={null}
       />,

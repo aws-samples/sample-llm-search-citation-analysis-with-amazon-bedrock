@@ -2,32 +2,15 @@ import { Spinner } from '../ui/Spinner';
 import { BrandExpansionPanel } from './BrandExpansionPanel';
 import { CompetitorDiscoveryPanel } from './CompetitorDiscoveryPanel';
 import { BrandTagList } from './BrandTagList';
-import type {
-  BrandExpansionAllResult, CompetitorDiscoveryResult 
-} from '../../types';
+import type { CompetitorDiscoveryResult } from '../../types';
+import type { BrandListSectionProps } from './brandListSection';
 
-interface CompetitorBrandsSectionProps {
-  readonly brands: string[];
-  readonly newBrand: string;
-  readonly selectedBrand: string | null;
-  readonly expandingBrand: 'first_party' | 'competitor' | null;
-  readonly expansionResult: BrandExpansionAllResult | null;
+interface CompetitorBrandsSectionProps extends BrandListSectionProps {
   readonly discoveryResult: CompetitorDiscoveryResult | null;
-  readonly expansionTarget: 'first_party' | 'competitor' | null;
-  readonly pendingBrands: string[];
   readonly hasFirstPartyBrands: boolean;
-  readonly canExpand: boolean;
   readonly canFindCompetitors: boolean;
   readonly brandExists: (brand: string, list: string[]) => boolean;
-  readonly onNewBrandChange: (value: string) => void;
-  readonly onAddBrand: () => void;
-  readonly onRemoveBrand: (brand: string) => void;
-  readonly onSelectBrand: (brand: string | null) => void;
-  readonly onExpandAll: () => void;
   readonly onFindCompetitors: () => void;
-  readonly onTogglePending: (brand: string) => void;
-  readonly onAcceptExpansion: () => void;
-  readonly onCancelExpansion: () => void;
 }
 
 export function CompetitorBrandsSection({

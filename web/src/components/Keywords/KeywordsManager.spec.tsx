@@ -1,5 +1,5 @@
 import {
-  afterEach, beforeEach, describe, expect, it, vi
+  beforeEach, describe, expect, it, vi 
 } from 'vitest';
 import {
   render, screen, waitFor
@@ -102,10 +102,6 @@ describe('KeywordsManager', () => {
     mockApiPost.mockReset();
     mockApiPut.mockReset();
     vi.spyOn(console, 'error').mockImplementation(vi.fn());
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   describe('rendering', () => {
@@ -236,33 +232,30 @@ describe('KeywordsManager', () => {
   });
 
   describe('update mutation', () => {
-    it('preserves attempted text in editor when update returns a conflict', async () => {
+    async function renderUpdateConflict() {
       const props = createKeywordsManagerProps();
       mockApiPut.mockRejectedValue(createApiRequestError(UPDATE_CONFLICT_MESSAGE));
       render(<KeywordsManager {...props} />);
 
       await submitUpdate();
+      return props;
+    }
+
+    it('preserves attempted text in editor when update returns a conflict', async () => {
+      await renderUpdateConflict();
       await screen.findByText(UPDATE_CONFLICT_MESSAGE);
 
       expect(screen.getByDisplayValue(updatedKeywordFixture.keyword)).toBeInTheDocument();
     });
 
     it('shows exact backend message when update returns a conflict', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiPut.mockRejectedValue(createApiRequestError(UPDATE_CONFLICT_MESSAGE));
-      render(<KeywordsManager {...props} />);
-
-      await submitUpdate();
+      await renderUpdateConflict();
 
       expect(await screen.findByText(UPDATE_CONFLICT_MESSAGE)).toBeInTheDocument();
     });
 
     it('does not update parent state when update returns a conflict', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiPut.mockRejectedValue(createApiRequestError(UPDATE_CONFLICT_MESSAGE));
-      render(<KeywordsManager {...props} />);
-
-      await submitUpdate();
+      const props = await renderUpdateConflict();
       await screen.findByText(UPDATE_CONFLICT_MESSAGE);
 
       expect(props.setKeywords).not.toHaveBeenCalled();

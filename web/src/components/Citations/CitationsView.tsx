@@ -14,6 +14,7 @@ import { CitationTableHeader } from './CitationTableHeader';
 import { CitationRow } from './CitationRow';
 import { PaginationControls } from './PaginationControls';
 import { Spinner } from '../ui/Spinner';
+import { paginate } from '../ui/pagination';
 import { 
   parseApiResponse, 
   filterAndSortCitations, 
@@ -96,12 +97,9 @@ export const CitationsView = ({
   [citations, searchQuery, minCitations, sortBy]
   );
 
-  const totalItems = filteredCitations.length;
-  const showAll = itemsPerPage === -1;
-  const totalPages = showAll ? 1 : Math.ceil(totalItems / itemsPerPage);
-  const startIndex = showAll ? 0 : (currentPage - 1) * itemsPerPage;
-  const endIndex = showAll ? totalItems : startIndex + itemsPerPage;
-  const paginatedCitations = filteredCitations.slice(startIndex, endIndex);
+  const {
+    pageItems: paginatedCitations, totalItems, showAll, totalPages, startIndex, endIndex 
+  } = paginate(filteredCitations, currentPage, itemsPerPage);
 
   // Stats
   const totalCitationCount = citations.reduce((sum, c) => sum + c.citation_count, 0);

@@ -1,5 +1,7 @@
-import { vi } from 'vitest';
 import type { BrandMentionsResponse } from '../types';
+import {
+  createEndpointMockFetch, type EndpointMockFetchOptions 
+} from '../test/fetchResponses';
 
 export const mockBrandMentionsResponse: BrandMentionsResponse = {
   keyword: 'test',
@@ -45,23 +47,6 @@ export const mockBrandMentionsResponse: BrandMentionsResponse = {
   by_provider: [],
 };
 
-export function createMockFetch(options: {
-  response?: BrandMentionsResponse;
-  shouldFail?: boolean;
-  failStatus?: number;
-} = {}) {
-  return vi.fn().mockImplementation(() => {
-    if (options.shouldFail) {
-      return Promise.resolve({
-        ok: false,
-        status: options.failStatus ?? 500,
-        statusText: 'Internal Server Error',
-      });
-    }
-
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve(options.response ?? mockBrandMentionsResponse),
-    });
-  });
+export function createMockFetch(options: EndpointMockFetchOptions<BrandMentionsResponse> = {}) {
+  return createEndpointMockFetch(mockBrandMentionsResponse, options);
 }

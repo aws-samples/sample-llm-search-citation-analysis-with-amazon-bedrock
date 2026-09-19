@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi, beforeEach 
 } from 'vitest';
 import {
   renderHook, act 
@@ -34,7 +34,6 @@ describe('useTheme', () => {
   }));
 
   beforeEach(() => {
-    vi.clearAllMocks();
     Object.keys(localStorageMock.store).forEach(key => delete localStorageMock.store[key]);
     Object.defineProperty(window, 'localStorage', {
       value: localStorageMock,
@@ -45,10 +44,6 @@ describe('useTheme', () => {
       writable: true 
     });
     document.documentElement.classList.remove('dark');
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   describe('initial state', () => {

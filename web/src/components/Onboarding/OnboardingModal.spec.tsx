@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi, beforeEach 
 } from 'vitest';
 import {
   render, screen, fireEvent 
@@ -54,30 +54,25 @@ function buildStatus(overrides = {}) {
   };
 }
 
+beforeEach(() => {
+  Object.keys(localStorageMock.store).forEach((key) => delete localStorageMock.store[key]);
+  Object.defineProperty(window, 'localStorage', {
+    value: localStorageMock,
+    writable: true,
+  });
+  // Every onboarding step targets an Admin-only route, so the checklist only
+  // renders for admins. Non-admin suppression is asserted separately below.
+  mockUseIsAdmin.mockReturnValue({
+    isAdmin: true,
+    loading: false,
+  });
+  mockUseOnboardingStatus.mockReturnValue({
+    status: buildStatus(),
+    loading: false,
+  });
+});
+
 describe('OnboardingModal', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    Object.keys(localStorageMock.store).forEach((key) => delete localStorageMock.store[key]);
-    Object.defineProperty(window, 'localStorage', {
-      value: localStorageMock,
-      writable: true,
-    });
-    // Every onboarding step targets an Admin-only route, so the checklist only
-    // renders for admins. Non-admin suppression is asserted separately below.
-    mockUseIsAdmin.mockReturnValue({
-      isAdmin: true,
-      loading: false,
-    });
-    mockUseOnboardingStatus.mockReturnValue({
-      status: buildStatus(),
-      loading: false,
-    });
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   describe('visibility', () => {
     it('opens the modal when setup is incomplete', () => {
       render(<OnboardingModal {...buildProps()} />);
@@ -289,18 +284,8 @@ describe('OnboardingModal for non-admin users', () => {
    */
 
   beforeEach(() => {
-    vi.clearAllMocks();
-    Object.keys(localStorageMock.store).forEach((key) => delete localStorageMock.store[key]);
-    Object.defineProperty(window, 'localStorage', {
-      value: localStorageMock,
-      writable: true,
-    });
     mockUseIsAdmin.mockReturnValue({
       isAdmin: false,
-      loading: false,
-    });
-    mockUseOnboardingStatus.mockReturnValue({
-      status: buildStatus(),
       loading: false,
     });
   });

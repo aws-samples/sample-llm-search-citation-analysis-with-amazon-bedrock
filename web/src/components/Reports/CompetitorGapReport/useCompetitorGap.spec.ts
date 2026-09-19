@@ -26,7 +26,6 @@ describe('useCompetitorGap', () => {
   const fetchCompetitorRollup = vi.fn();
 
   beforeEach(() => {
-    vi.clearAllMocks();
     mockHook.mockReturnValue({
       data: SINGLE_DATA,
       loading: false,

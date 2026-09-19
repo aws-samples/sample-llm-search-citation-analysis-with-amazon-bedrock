@@ -1,21 +1,13 @@
 import {
   beforeEach, describe, expect, it, vi
 } from 'vitest';
-import { authenticatedFetch } from '../infrastructure';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import {
   apiDelete, apiGet, apiPost, apiPut, validateApiConfig
 } from './client';
 
-vi.mock('../infrastructure', async () => {
-  const actual = await vi.importActual<typeof import('../infrastructure')>('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.example.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-const mockAuthenticatedFetch = vi.mocked(authenticatedFetch);
 const requestBodyFixture = { keyword: 'alpha' };
 
 interface ApiMethodCase {

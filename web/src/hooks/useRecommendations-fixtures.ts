@@ -1,5 +1,12 @@
-import { vi } from 'vitest';
-import type { RecommendationsResponse } from '../types';
+import {
+  renderHook, act 
+} from '@testing-library/react';
+import type {
+  RecommendationsResponse, RecommendationStatus 
+} from '../types';
+import { createMockJsonResponse } from '../test/fetchResponses';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { useRecommendations } from './useRecommendations';
 
 export const mockRecommendationsResponse: RecommendationsResponse = {
   recommendations: [
@@ -34,29 +41,25 @@ export const mockRecommendationsResponse: RecommendationsResponse = {
   },
 };
 
-export function createMockFetch(options: {
-  response?: RecommendationsResponse;
-  shouldFail?: boolean;
-  invalidResponse?: boolean;
-} = {}) {
-  return vi.fn().mockImplementation(() => {
-    if (options.shouldFail) {
-      return Promise.resolve({
-        ok: false,
-        status: 500 
-      });
-    }
+/** The row the status endpoint returns after persisting `status` for rec-001. */
+export function buildRecommendationStatusRow(status: RecommendationStatus) {
+  return {
+    recommendation_id: 'rec-001',
+    status,
+    updated_at: '2026-05-15T10:00:00Z',
+  };
+}
 
-    if (options.invalidResponse) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ invalid: 'data' }),
-      });
-    }
-
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve(options.response ?? mockRecommendationsResponse),
-    });
-  });
+/**
+ * Renders the hook with the recommendations already fetched, so a status
+ * update has local state to mutate. The next request (the status POST)
+ * receives `statusResponse`.
+ */
+export async function renderLoadedRecommendations(statusResponse: Response) {
+  mockAuthenticatedFetch
+    .mockResolvedValueOnce(createMockJsonResponse(mockRecommendationsResponse))
+    .mockResolvedValueOnce(statusResponse);
+  const rendered = renderHook(() => useRecommendations());
+  await act(() => rendered.result.current.fetchRecommendations());
+  return rendered;
 }

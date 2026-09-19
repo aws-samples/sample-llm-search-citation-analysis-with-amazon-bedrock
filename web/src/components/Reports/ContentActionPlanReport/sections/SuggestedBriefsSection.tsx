@@ -1,6 +1,6 @@
 import type { ContentIdea } from '../../../../types';
 import {
-  ReportSection, SectionPlaceholder 
+  PriorityBadge, ReportSection, pendingSectionPlaceholder 
 } from '../../layout';
 
 interface Props {
@@ -29,21 +29,13 @@ const PRIORITY_RANK = {
 export function SuggestedBriefsSection({
   ideas, loading, error 
 }: Props) {
-  if (loading) {
-    return (
-      <ReportSection title="Suggested next briefs">
-        <SectionPlaceholder variant="loading" message="Loading content ideas…" />
-      </ReportSection>
-    );
-  }
-
-  if (error) {
-    return (
-      <ReportSection title="Suggested next briefs">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
+  const pending = pendingSectionPlaceholder({
+    title: 'Suggested next briefs',
+    loading,
+    loadingMessage: 'Loading content ideas…',
+    error,
+  });
+  if (pending) return pending;
 
   const sorted = [...ideas]
     .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority])
@@ -102,25 +94,4 @@ function IdeaCard({ idea }: { readonly idea: ContentIdea }) {
 
 function formatAngle(angle: string): string {
   return angle.replaceAll('_', ' ');
-}
-
-function PriorityBadge({ priority }: { readonly priority: 'high' | 'medium' | 'low' }) {
-  const styles = priorityStyles(priority);
-  return (
-    <span
-      className={`flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold uppercase ${styles}`}
-    >
-      {priority}
-    </span>
-  );
-}
-
-function priorityStyles(priority: 'high' | 'medium' | 'low'): string {
-  if (priority === 'high') {
-    return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300';
-  }
-  if (priority === 'medium') {
-    return 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300';
-  }
-  return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';
 }

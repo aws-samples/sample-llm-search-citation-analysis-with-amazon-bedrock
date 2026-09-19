@@ -10,6 +10,9 @@ import { SELECTION_LIMIT } from '../../hooks/usePromoteKeywords';
 import type {
   ExpandedKeywordWithSource, KeywordResearchItem
 } from '../../types';
+import {
+  expansionKeywordFixtures, luxuryHotelsFixture, selectKeywordCheckbox 
+} from './expandedKeyword-fixtures';
 
 vi.mock('../../api/client', () => ({ apiPost: vi.fn() }));
 
@@ -51,10 +54,6 @@ describe('ResearchHistory', () => {
     onDelete: vi.fn(),
     onRefresh: vi.fn(),
   };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
 
   describe('empty state', () => {
     it('shows empty message when history is empty', () => {
@@ -113,24 +112,6 @@ describe('ResearchHistory', () => {
     });
   });
 });
-
-const luxuryHotelsFixture: ExpandedKeywordWithSource = {
-  keyword: 'luxury hotels',
-  intent: 'commercial',
-  competition: 'high',
-  relevance: 9,
-  source: 'expansion',
-};
-
-const beachResortsFixture: ExpandedKeywordWithSource = {
-  keyword: 'beach resorts',
-  intent: 'informational',
-  competition: 'low',
-  relevance: 7,
-  source: 'expansion',
-};
-
-const expansionHistoryKeywordFixtures = [luxuryHotelsFixture, beachResortsFixture];
 
 const competitorPrimaryKeywordFixture: ExpandedKeywordWithSource = {
   keyword: 'boutique hotel barcelona',
@@ -203,29 +184,26 @@ const renderHistoryWithItems = (history: KeywordResearchItem[]) => render(
   />
 );
 
-const selectKeywordCheckbox = (keyword: string) =>
-  screen.getByRole('checkbox', { name: `Select ${keyword}` });
-
 describe('ResearchHistory promotion UI', () => {
   beforeEach(() => {
     mockApiPost.mockReset();
   });
 
   it('renders one selection checkbox per keyword row of the expanded item', async () => {
-    renderHistoryWithItems([buildHistoryItem({ keywords: expansionHistoryKeywordFixtures })]);
+    renderHistoryWithItems([buildHistoryItem({ keywords: expansionKeywordFixtures })]);
 
     await userEvent.click(screen.getByText('hotels'));
 
-    expect(screen.getAllByRole('checkbox')).toHaveLength(expansionHistoryKeywordFixtures.length);
+    expect(screen.getAllByRole('checkbox')).toHaveLength(expansionKeywordFixtures.length);
   });
 
   it('clears the selection when a different history item is expanded', async () => {
     renderHistoryWithItems([
-      buildHistoryItem({ keywords: expansionHistoryKeywordFixtures }),
+      buildHistoryItem({ keywords: expansionKeywordFixtures }),
       buildHistoryItem({
         id: 'item-2',
         seed_keyword: 'flights',
-        keywords: expansionHistoryKeywordFixtures,
+        keywords: expansionKeywordFixtures,
       }),
     ]);
     await userEvent.click(screen.getByText('hotels'));

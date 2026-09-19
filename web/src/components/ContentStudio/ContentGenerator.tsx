@@ -3,6 +3,7 @@ import type {
 } from '../../types';
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { Spinner } from '../ui/Spinner';
+import { CloseIcon } from '../ui';
 
 interface ContentGeneratorProps {
   idea: ContentIdea;
@@ -180,9 +181,7 @@ export const ContentGenerator = ({
             onClick={onClose}
             className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <CloseIcon />
           </button>
         </div>
 

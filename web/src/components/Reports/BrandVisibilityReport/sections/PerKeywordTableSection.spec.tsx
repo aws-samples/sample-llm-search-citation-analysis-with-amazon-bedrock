@@ -5,51 +5,13 @@ import {
   render, screen 
 } from '@testing-library/react';
 import { PerKeywordTableSection } from './PerKeywordTableSection';
-import type { HistoricalTrendsResponse } from '../../../../types';
-
-function directionFor(change: number): 'improving' | 'declining' | 'stable' {
-  if (change > 0) return 'improving';
-  if (change < 0) return 'declining';
-  return 'stable';
-}
-
-function buildTrend(
-  rows: Array<{
-    keyword: string;
-    current_score: number;
-    change: number 
-  }>,
-): HistoricalTrendsResponse {
-  return {
-    period_type: 'day',
-    days_analyzed: 30,
-    data_points: 0,
-    trend_data: [],
-    trend_direction: 'stable',
-    summary: {
-      current_score: 0,
-      previous_score: 0,
-      change: 0,
-      change_percent: 0,
-      average_score: 0,
-      max_score: 0,
-      min_score: 0,
-    },
-    keyword_trends: rows.map((r) => ({
-      keyword: r.keyword,
-      trend_direction: directionFor(r.change),
-      current_score: r.current_score,
-      change: r.change,
-      change_percent: r.change * 2,
-    })),
-  };
-}
+import { buildKeywordTrends } from '../keywordTrends-fixtures';
 
 describe('PerKeywordTableSection — ordering', () => {
   it('orders rows by current_score descending', () => {
     render(
       <PerKeywordTableSection
-        trends={buildTrend([
+        trends={buildKeywordTrends([
           {
             keyword: 'low',
             current_score: 20,
@@ -78,54 +40,36 @@ describe('PerKeywordTableSection — ordering', () => {
 });
 
 describe('PerKeywordTableSection — mover highlight', () => {
-  it('applies the positive-mover class when change >= +5', () => {
+  it.each([
+    ['positive-mover', 6, 'emerald'],
+    ['negative-mover', -7, 'red'],
+  ])('applies the %s class when change is %d', (_label, change, tint) => {
     render(
       <PerKeywordTableSection
-        trends={buildTrend([
+        trends={buildKeywordTrends([
           {
-            keyword: 'big-up',
-            current_score: 60,
-            change: 6 
+            keyword: 'mover',
+            change 
           },
         ])}
         loading={false}
         error={null}
       />,
     );
-    const row = screen.getByText('big-up').closest('tr');
-    expect(row?.className).toContain('emerald');
-  });
-
-  it('applies the negative-mover class when change <= -5', () => {
-    render(
-      <PerKeywordTableSection
-        trends={buildTrend([
-          {
-            keyword: 'big-down',
-            current_score: 40,
-            change: -7 
-          },
-        ])}
-        loading={false}
-        error={null}
-      />,
-    );
-    const row = screen.getByText('big-down').closest('tr');
-    expect(row?.className).toContain('red');
+    const row = screen.getByText('mover').closest('tr');
+    expect(row?.className).toContain(tint);
   });
 
   it('does NOT highlight rows with change magnitude below the +/-5 threshold', () => {
     render(
       <PerKeywordTableSection
-        trends={buildTrend([
+        trends={buildKeywordTrends([
           {
             keyword: 'tiny-up',
-            current_score: 50,
             change: 3 
           },
           {
             keyword: 'tiny-down',
-            current_score: 50,
             change: -3 
           },
         ])}
@@ -144,7 +88,7 @@ describe('PerKeywordTableSection — empty + placeholder states', () => {
   it('returns null when keyword_trends is empty', () => {
     const { container } = render(
       <PerKeywordTableSection
-        trends={buildTrend([])}
+        trends={buildKeywordTrends([])}
         loading={false}
         error={null}
       />,
@@ -174,37 +118,22 @@ describe('PerKeywordTableSection — empty + placeholder states', () => {
 });
 
 describe('PerKeywordTableSection — change formatting', () => {
-  it('prefixes positive changes with a plus sign', () => {
+  it.each([
+    ['a plus sign', 4, '+4.0'],
+    ['a minus sign', -4, '-4.0'],
+  ])('renders the change with %s when change is %d', (_label, change, expected) => {
     render(
       <PerKeywordTableSection
-        trends={buildTrend([
+        trends={buildKeywordTrends([
           {
             keyword: 'kw',
-            current_score: 60,
-            change: 4 
+            change 
           },
         ])}
         loading={false}
         error={null}
       />,
     );
-    expect(screen.getByText('+4.0')).toBeInTheDocument();
-  });
-
-  it('renders negative changes with a minus sign', () => {
-    render(
-      <PerKeywordTableSection
-        trends={buildTrend([
-          {
-            keyword: 'kw',
-            current_score: 40,
-            change: -4 
-          },
-        ])}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(screen.getByText('-4.0')).toBeInTheDocument();
+    expect(screen.getByText(expected)).toBeInTheDocument();
   });
 });

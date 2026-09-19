@@ -1,6 +1,14 @@
-import type { HistoricalTrendsResponse } from '../../../../types';
-import { ReportSection } from '../../layout';
-import { SectionPlaceholder } from '../../layout/SectionPlaceholder';
+import type {
+  HistoricalTrendsResponse, TrendDataPoint 
+} from '../../../../types';
+import {
+  ReportSection,
+  ReportSectionPlaceholder,
+  ReportTable,
+  type ReportTableColumn,
+  pendingSectionPlaceholder,
+  sampleEvenly,
+} from '../../layout';
 
 interface Props {
   readonly trends: HistoricalTrendsResponse | null;
@@ -18,38 +26,52 @@ interface Props {
  * the table preserves the exact min/max/average so detail isn't lost.
  */
 const MAX_ROWS = 14;
+const SUBTITLE = "How this keyword's visibility has moved over the last 30 days.";
+
+const COLUMNS: ReadonlyArray<ReportTableColumn<TrendDataPoint>> = [
+  {
+    header: 'Period',
+    render: (point) => point.period,
+  },
+  {
+    header: 'Score',
+    cellClassName: 'font-medium',
+    render: (point) => point.visibility_score.toFixed(1),
+  },
+  {
+    header: 'Mentions',
+    render: (point) => point.total_mentions,
+  },
+  {
+    header: 'Best rank',
+    render: (point) => point.best_rank ?? '—',
+  },
+  {
+    header: 'Providers',
+    render: (point) => point.provider_count,
+  },
+];
 
 export function RankHistorySection({
   trends, loading, error 
 }: Props) {
-  if (loading) {
-    return (
-      <ReportSection
-        title="Rank history"
-        subtitle="How this keyword's visibility has moved over the last 30 days."
-      >
-        <SectionPlaceholder variant="loading" message="Loading trend data…" />
-      </ReportSection>
-    );
-  }
-
-  if (error) {
-    return (
-      <ReportSection title="Rank history">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
+  const pending = pendingSectionPlaceholder({
+    title: 'Rank history',
+    loading,
+    loadingMessage: 'Loading trend data…',
+    loadingSubtitle: SUBTITLE,
+    error,
+  });
+  if (pending) return pending;
 
   const trendData = trends?.trend_data ?? [];
   if (trendData.length === 0) {
     return (
-      <ReportSection title="Rank history">
-        <SectionPlaceholder
-          variant="empty"
-          message="Not enough history yet — at least two analysis runs are needed to draw a trend."
-        />
-      </ReportSection>
+      <ReportSectionPlaceholder
+        title="Rank history"
+        variant="empty"
+        message="Not enough history yet — at least two analysis runs are needed to draw a trend."
+      />
     );
   }
 
@@ -57,10 +79,7 @@ export function RankHistorySection({
   const summary = trends?.summary;
 
   return (
-    <ReportSection
-      title="Rank history"
-      subtitle="How this keyword's visibility has moved over the last 30 days."
-    >
+    <ReportSection title="Rank history" subtitle={SUBTITLE}>
       {summary && (
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
           Average score{' '}
@@ -74,58 +93,11 @@ export function RankHistorySection({
           </span>
         </p>
       )}
-      <div className="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-800">
-            <tr>
-              <Th>Period</Th>
-              <Th>Score</Th>
-              <Th>Mentions</Th>
-              <Th>Best rank</Th>
-              <Th>Providers</Th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {sampled.map((point) => (
-              <tr key={point.period}>
-                <Td>{point.period}</Td>
-                <Td className="font-medium">{point.visibility_score.toFixed(1)}</Td>
-                <Td>{point.total_mentions}</Td>
-                <Td>{point.best_rank ?? '—'}</Td>
-                <Td>{point.provider_count}</Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <ReportTable
+        columns={COLUMNS}
+        rows={sampled}
+        rowKey={(point) => point.period}
+      />
     </ReportSection>
   );
-}
-
-function Th({ children }: { readonly children: React.ReactNode }) {
-  return (
-    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-      {children}
-    </th>
-  );
-}
-
-function Td({
-  children,
-  className = '',
-}: {
-  readonly children: React.ReactNode;
-  readonly className?: string;
-}) {
-  return (
-    <td className={`px-3 py-2 text-gray-700 dark:text-gray-300 ${className}`}>
-      {children}
-    </td>
-  );
-}
-
-function sampleEvenly<T>(items: ReadonlyArray<T>, max: number): T[] {
-  if (items.length <= max) return [...items];
-  const step = (items.length - 1) / (max - 1);
-  return Array.from({ length: max }, (_, i) => items[Math.round(i * step)]);
 }

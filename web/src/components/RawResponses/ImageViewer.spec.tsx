@@ -1,11 +1,11 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   render, screen, fireEvent 
 } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { ImageViewer } from './ImageViewer';
+import { clickDownloadButton } from './DownloadButton-fixtures';
 import type { S3Item } from '../../types';
 
 function buildFile(overrides: Partial<S3Item> = {}): S3Item {
@@ -26,10 +26,6 @@ describe('ImageViewer', () => {
     onDownload: vi.fn(),
     loading: false,
   };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
 
   describe('loading state', () => {
     it('shows loading spinner when loading is true', () => {
@@ -56,7 +52,7 @@ describe('ImageViewer', () => {
       const onDownload = vi.fn();
       render(<ImageViewer {...defaultProps} onDownload={onDownload} />);
 
-      await userEvent.click(screen.getByRole('button', { name: /download/i }));
+      await clickDownloadButton();
 
       expect(onDownload).toHaveBeenCalledTimes(1);
     });

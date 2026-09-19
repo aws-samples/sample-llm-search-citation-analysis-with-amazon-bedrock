@@ -3,6 +3,7 @@ import {
 } from 'react';
 import type { Search } from '../../types';
 import { KeywordDetail } from '../Keywords/KeywordDetail';
+import { paginate } from '../ui/pagination';
 import { exportToExcel } from '../../exporters/excelGenerator';
 import {
   SEARCH_EXCEL_COLUMNS, searchExcelRows
@@ -73,12 +74,9 @@ export const SearchesView = ({
     });
   };
 
-  const totalItems = keywordGroups.length;
-  const showAll = itemsPerPage === -1;
-  const totalPages = showAll ? 1 : Math.ceil(totalItems / itemsPerPage);
-  const startIndex = showAll ? 0 : (currentPage - 1) * itemsPerPage;
-  const endIndex = showAll ? totalItems : startIndex + itemsPerPage;
-  const paginatedKeywords = keywordGroups.slice(startIndex, endIndex);
+  const {
+    pageItems: paginatedKeywords, totalItems, showAll, totalPages, startIndex, endIndex 
+  } = paginate(keywordGroups, currentPage, itemsPerPage);
 
   const handleItemsPerPageChange = (value: number) => {
     setItemsPerPage(value);

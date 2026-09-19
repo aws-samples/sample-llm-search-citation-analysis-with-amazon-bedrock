@@ -124,20 +124,7 @@ function extractFunctionRoleActionsOn(template: Template, functionName: string, 
     resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Role'])
   )[0] ?? '';
 
-  const actions = Object.values(template.findResources('AWS::IAM::Policy'))
-    .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
-    .flatMap((policy) => {
-      const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
-      return (Array.isArray(statements) ? statements : []).flatMap((statement) => {
-        const resource = resolvePath(statement, ['Resource']);
-        const targets = [...collectGetAttTargets(resource), ...collectRefTargets(resource)];
-        if (!targets.includes(resourceLogicalId) || resolveString(statement, ['Effect']) !== 'Allow') return [];
-        const action = resolvePath(statement, ['Action']);
-        return (Array.isArray(action) ? action : [action]).filter((entry): entry is string => typeof entry === 'string');
-      });
-    });
-
-  return [...new Set(actions)].sort((left, right) => left.localeCompare(right));
+  return extractRoleActionsOn(template, roleLogicalId, resourceLogicalId);
 }
 
 /** Collect every logical ID referenced by a Ref anywhere in a node. */
@@ -565,15 +552,35 @@ function policyAttachedToRole(policy: unknown, roleLogicalId: string): boolean {
     .some((roleRef) => resolveString(roleRef, ['Ref']) === roleLogicalId);
 }
 
-/** The Action entries of one Allow statement whose Resource targets the table. */
-function statementActionsOnTable(statement: unknown, tableLogicalId: string): string[] {
+/**
+ * The Action entries of one Allow statement whose Resource targets the given
+ * logical id, through either Fn::GetAtt (ARNs) or Ref.
+ */
+function statementActionsOn(statement: unknown, resourceLogicalId: string): string[] {
   if (resolveString(statement, ['Effect']) !== 'Allow') return [];
   const resource = resolvePath(statement, ['Resource']);
-  if (!collectGetAttTargets(resource).includes(tableLogicalId)) return [];
+  const targets = [...collectGetAttTargets(resource), ...collectRefTargets(resource)];
+  if (!targets.includes(resourceLogicalId)) return [];
 
   const action = resolvePath(statement, ['Action']);
   return (Array.isArray(action) ? action : [action])
     .filter((entry): entry is string => typeof entry === 'string');
+}
+
+/**
+ * Every IAM action the policies attached to one role allow on one resource
+ * (both by logical id), deduplicated and sorted.
+ */
+function extractRoleActionsOn(template: Template, roleLogicalId: string, resourceLogicalId: string): string[] {
+  const actions = Object.values(template.findResources('AWS::IAM::Policy'))
+    .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
+    .flatMap((policy) => {
+      const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
+      return (Array.isArray(statements) ? statements : [])
+        .flatMap((statement) => statementActionsOn(statement, resourceLogicalId));
+    });
+
+  return [...new Set(actions)].sort((left, right) => left.localeCompare(right));
 }
 
 /**
@@ -595,15 +602,7 @@ function extractRoleTableActions(
   const tableLogicalId =
     findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', tableName);
 
-  const actions = Object.values(template.findResources('AWS::IAM::Policy'))
-    .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
-    .flatMap((policy) => {
-      const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
-      return (Array.isArray(statements) ? statements : [])
-        .flatMap((statement) => statementActionsOnTable(statement, tableLogicalId));
-    });
-
-  return [...new Set(actions)].sort((left, right) => left.localeCompare(right));
+  return extractRoleActionsOn(template, roleLogicalId, tableLogicalId);
 }
 
 const synthesized: {

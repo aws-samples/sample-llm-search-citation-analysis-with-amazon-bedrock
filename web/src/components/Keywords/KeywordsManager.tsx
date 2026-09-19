@@ -354,13 +354,7 @@ export const KeywordsManager = ({
         confirmVariant="danger"
       />
 
-      <AlertModal
-        isOpen={alertModal.isOpen}
-        onClose={closeAlert}
-        title={alertModal.title}
-        message={alertModal.message}
-        variant={alertModal.variant}
-      />
+      <AlertModal {...alertModal} onClose={closeAlert} />
     </div>
   );
 };

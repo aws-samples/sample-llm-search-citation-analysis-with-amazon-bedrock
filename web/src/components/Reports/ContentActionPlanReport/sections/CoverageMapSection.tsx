@@ -4,16 +4,12 @@ import type {
   ContentStudioHistory,
 } from '../../../../types';
 import {
-  ReportSection, SectionPlaceholder 
+  ReportSection,
+  ReportTable,
+  type ReportTableColumn,
+  pendingSectionPlaceholder,
 } from '../../layout';
-
-interface Props {
-  readonly gaps: CitationGapsResponse | null;
-  readonly ideas: ReadonlyArray<ContentIdea>;
-  readonly history: ReadonlyArray<ContentStudioHistory>;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
+import type { ContentPlanSectionProps } from './ContentPlanSectionProps';
 
 interface KeywordCoverage {
   keyword: string;
@@ -22,6 +18,35 @@ interface KeywordCoverage {
   briefCount: number;
   ideaCount: number;
 }
+
+const COLUMNS: ReadonlyArray<ReportTableColumn<KeywordCoverage>> = [
+  {
+    header: 'Keyword',
+    cellClassName: 'font-medium',
+    render: (row) => row.keyword,
+  },
+  {
+    header: 'Gaps',
+    render: (row) => row.gapCount,
+  },
+  {
+    header: 'High priority',
+    render: (row) => row.highPriorityGaps,
+  },
+  {
+    header: 'Briefs ready',
+    render: (row) => row.briefCount,
+  },
+  {
+    header: 'Ideas queued',
+    render: (row) => row.ideaCount,
+  },
+  {
+    header: 'Status',
+    cellClassName: 'text-xs',
+    render: (row) => statusLabelFor(row),
+  },
+];
 
 /**
  * The "where do we stand" matrix: every tracked keyword that appears in
@@ -42,22 +67,14 @@ export function CoverageMapSection({
   history,
   loading,
   error,
-}: Props) {
-  if (loading) {
-    return (
-      <ReportSection title="Coverage map">
-        <SectionPlaceholder variant="loading" message="Building coverage map…" />
-      </ReportSection>
-    );
-  }
-
-  if (error) {
-    return (
-      <ReportSection title="Coverage map">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
+}: ContentPlanSectionProps) {
+  const pending = pendingSectionPlaceholder({
+    title: 'Coverage map',
+    loading,
+    loadingMessage: 'Building coverage map…',
+    error,
+  });
+  if (pending) return pending;
 
   const rows = buildCoverageRows(gaps, ideas, history);
 
@@ -70,35 +87,13 @@ export function CoverageMapSection({
       title="Coverage map"
       subtitle="Per-keyword snapshot: where the gaps are, what briefs already exist, and what ideas are queued up."
     >
-      <div className="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-800">
-            <tr>
-              <Th>Keyword</Th>
-              <Th>Gaps</Th>
-              <Th>High priority</Th>
-              <Th>Briefs ready</Th>
-              <Th>Ideas queued</Th>
-              <Th>Status</Th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {rows.map((row) => (
-              <tr
-                key={row.keyword}
-                className={statusRowClass(row)}
-              >
-                <Td className="font-medium">{row.keyword}</Td>
-                <Td>{row.gapCount}</Td>
-                <Td>{row.highPriorityGaps}</Td>
-                <Td>{row.briefCount}</Td>
-                <Td>{row.ideaCount}</Td>
-                <Td className="text-xs">{statusLabelFor(row)}</Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <ReportTable
+        columns={COLUMNS}
+        rows={rows}
+        rowKey={(row) => row.keyword}
+        rowClassName={statusRowClass}
+        alignTop
+      />
     </ReportSection>
   );
 }
@@ -171,26 +166,4 @@ function statusRowClass(row: KeywordCoverage): string {
     return 'bg-red-50 dark:bg-red-950/20';
   }
   return '';
-}
-
-function Th({ children }: { readonly children: React.ReactNode }) {
-  return (
-    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-      {children}
-    </th>
-  );
-}
-
-function Td({
-  children,
-  className = '',
-}: {
-  readonly children: React.ReactNode;
-  readonly className?: string;
-}) {
-  return (
-    <td className={`px-3 py-2 text-gray-700 dark:text-gray-300 align-top ${className}`}>
-      {children}
-    </td>
-  );
 }

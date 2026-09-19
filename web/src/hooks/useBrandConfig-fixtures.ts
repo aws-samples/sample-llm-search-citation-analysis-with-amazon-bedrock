@@ -1,7 +1,14 @@
-import { vi } from 'vitest';
+import { expect } from 'vitest';
+import {
+  renderHook, waitFor 
+} from '@testing-library/react';
 import type {
   BrandConfig, IndustryPresets 
 } from '../types';
+import { createMockEndpoint } from './injectableApi-fixtures';
+import {
+  useBrandConfig, type BrandConfigApi 
+} from './useBrandConfig';
 
 export const mockBrandConfig: BrandConfig = {
   industry: 'hospitality',
@@ -19,7 +26,7 @@ export const mockBrandConfig: BrandConfig = {
   industry_prompts: {},
 };
 
-export const mockPresets: IndustryPresets = {
+const mockPresets: IndustryPresets = {
   hospitality: {
     name: 'Hospitality',
     description: 'Hotels and travel',
@@ -38,124 +45,68 @@ export const mockPresets: IndustryPresets = {
   },
 };
 
-export function createMockApi(options: {
+/** Payload of `POST /brand-config/expand` for the fixture brand. */
+const mockBrandExpansion = {
+  main_brand: 'TestBrand',
+  parent_company: 'ParentCo',
+  suggestions: ['SubBrand1', 'SubBrand2'],
+  notes: 'Test notes',
+};
+
+/** Payload of `POST /brand-config/expand-all` for the fixture brand list. */
+const mockAllBrandsExpansion = {
+  existing_brands: ['Brand1'],
+  parent_companies: ['Parent1'],
+  suggestions: ['NewBrand1'],
+  duplicates_found: [],
+  notes: 'All brands expanded',
+};
+
+/** Payload of `POST /brand-config/find-competitors` for the fixture brand list. */
+const mockCompetitorDiscovery = {
+  first_party_brands: ['MyBrand'],
+  competitors: ['Competitor1', 'Competitor2'],
+  notes: 'Found competitors',
+};
+
+interface BrandConfigMockApiOptions {
+  /** Stored config returned by GET and echoed back by POST `/brand-config`. */
   configResponse?: BrandConfig;
-  presetsResponse?: IndustryPresets;
   shouldFailConfig?: boolean;
   shouldFailPresets?: boolean;
   shouldFailSave?: boolean;
   shouldFailDelete?: boolean;
-  expandBrandResponse?: unknown;
-  expandAllResponse?: unknown;
-  findCompetitorsResponse?: unknown;
   shouldFailExpand?: boolean;
   shouldFailExpandAll?: boolean;
   shouldFailFindCompetitors?: boolean;
-} = {}) {
+}
+
+function createMockApi(options: BrandConfigMockApiOptions = {}) {
+  const storedConfig = options.configResponse ?? mockBrandConfig;
   return {
-    fetchConfig: vi.fn().mockImplementation(() => {
-      if (options.shouldFailConfig) {
-        return Promise.resolve({
-          ok: false,
-          status: 500,
-          statusText: 'Server Error' 
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.configResponse ?? mockBrandConfig),
-      });
-    }),
-    fetchPresets: vi.fn().mockImplementation(() => {
-      if (options.shouldFailPresets) {
-        return Promise.resolve({
-          ok: false,
-          status: 500,
-          statusText: 'Server Error' 
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ presets: options.presetsResponse ?? mockPresets }),
-      });
-    }),
-    saveConfig: vi.fn().mockImplementation(() => {
-      if (options.shouldFailSave) {
-        return Promise.resolve({
-          ok: false,
-          status: 500 
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ config: options.configResponse ?? mockBrandConfig }),
-      });
-    }),
-    deleteConfig: vi.fn().mockImplementation(() => {
-      if (options.shouldFailDelete) {
-        return Promise.resolve({
-          ok: false,
-          status: 500 
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ config: {} }),
-      });
-    }),
-    expandBrand: vi.fn().mockImplementation(() => {
-      if (options.shouldFailExpand) {
-        return Promise.resolve({
-          ok: false,
-          status: 500,
-          statusText: 'Server Error' 
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.expandBrandResponse ?? {
-          main_brand: 'TestBrand',
-          parent_company: 'ParentCo',
-          suggestions: ['SubBrand1', 'SubBrand2'],
-          notes: 'Test notes',
-        }),
-      });
-    }),
-    expandAllBrands: vi.fn().mockImplementation(() => {
-      if (options.shouldFailExpandAll) {
-        return Promise.resolve({
-          ok: false,
-          status: 500,
-          statusText: 'Server Error' 
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.expandAllResponse ?? {
-          existing_brands: ['Brand1'],
-          parent_companies: ['Parent1'],
-          suggestions: ['NewBrand1'],
-          duplicates_found: [],
-          notes: 'All brands expanded',
-        }),
-      });
-    }),
-    findCompetitors: vi.fn().mockImplementation(() => {
-      if (options.shouldFailFindCompetitors) {
-        return Promise.resolve({
-          ok: false,
-          status: 500,
-          statusText: 'Server Error' 
-        });
-      }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.findCompetitorsResponse ?? {
-          first_party_brands: ['MyBrand'],
-          competitors: ['Competitor1', 'Competitor2'],
-          notes: 'Found competitors',
-        }),
-      });
-    }),
+    fetchConfig: createMockEndpoint(options.shouldFailConfig, storedConfig),
+    fetchPresets: createMockEndpoint(options.shouldFailPresets, { presets: mockPresets }),
+    saveConfig: createMockEndpoint(options.shouldFailSave, { config: storedConfig }),
+    deleteConfig: createMockEndpoint(options.shouldFailDelete, { config: {} }),
+    expandBrand: createMockEndpoint(options.shouldFailExpand, mockBrandExpansion),
+    expandAllBrands: createMockEndpoint(options.shouldFailExpandAll, mockAllBrandsExpansion),
+    findCompetitors: createMockEndpoint(options.shouldFailFindCompetitors, mockCompetitorDiscovery),
+  } satisfies BrandConfigApi;
+}
+
+/** Renders the hook against a mocked API without waiting for the initial load. */
+export function renderBrandConfig(options: BrandConfigMockApiOptions = {}) {
+  const api = createMockApi(options);
+  const { result } = renderHook(() => useBrandConfig(api));
+  return {
+    api,
+    result,
   };
+}
+
+/** Renders the hook and waits until config and presets have loaded. */
+export async function renderLoadedBrandConfig(options: BrandConfigMockApiOptions = {}) {
+  const rendered = renderBrandConfig(options);
+  await waitFor(() => expect(rendered.result.current.loading).toBe(false));
+  return rendered;
 }

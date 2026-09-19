@@ -15,7 +15,6 @@ const mockUseRecommendations = useRecommendations as ReturnType<typeof vi.fn>;
 
 describe('Recommendations', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockUseRecommendations.mockReturnValue({
       data: null,
       loading: false,

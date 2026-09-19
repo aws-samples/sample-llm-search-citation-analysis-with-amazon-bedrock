@@ -6,6 +6,7 @@ import {
 } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
 import { KeywordScopePicker } from '../ui/KeywordScopePicker';
+import { PlayIcon } from '../ui';
 import type {
   StepState, ProcessedExecution 
 } from '../../formatting/executionProcessor';
@@ -197,19 +198,12 @@ const TriggerButton = ({
       {isStarting ? (
         <><Spinner size="sm" />Starting...</>
       ) : (
-        <><PlayIcon />Start Analysis</>
+        <><PlayIcon className="w-4 h-4" />Start Analysis</>
       )}
     </button>
     {keywordsCount === 0 && <p className="text-sm text-red-600 mt-2">Add keywords first</p>}
     {isRunning && <RunningIndicator />}
   </>
-);
-
-const PlayIcon = () => (
-  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
 );
 
 const RunningIndicator = () => (

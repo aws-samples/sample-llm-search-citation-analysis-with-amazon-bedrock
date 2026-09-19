@@ -192,6 +192,48 @@ function apiLambdaLogGroup(scope: Construct, id: string, functionName: string): 
   });
 }
 
+/** A global secondary index of a stack table. Every index projects ALL attributes. */
+type CitationAnalysisIndexSpec = Pick<dynamodb.GlobalSecondaryIndexProps, 'indexName' | 'partitionKey' | 'sortKey'>;
+
+/** The schema of one stack table; everything else is fixed by `citationAnalysisTable`. */
+interface CitationAnalysisTableSpec {
+  tableName: string;
+  partitionKey: dynamodb.Attribute;
+  sortKey?: dynamodb.Attribute;
+  /** Epoch-seconds attribute after which DynamoDB expires the item. Omitted for tables that keep every row. */
+  timeToLiveAttribute?: string;
+  /**
+   * Added in the order listed. The order is load-bearing: it fixes the order of
+   * the template's AttributeDefinitions, and a reorder is a table diff on deploy.
+   */
+  globalSecondaryIndexes?: CitationAnalysisIndexSpec[];
+}
+
+/**
+ * One DynamoDB table with the settings every table in this stack shares:
+ * on-demand billing, AWS-managed encryption, point-in-time recovery and
+ * `RETAIN`, so tearing the stack down can never delete data. Only the
+ * schema varies between tables, and that is all a spec states.
+ */
+function citationAnalysisTable(scope: Construct, id: string, spec: CitationAnalysisTableSpec): dynamodb.Table {
+  const table = new dynamodb.Table(scope, id, {
+    tableName: spec.tableName,
+    partitionKey: spec.partitionKey,
+    sortKey: spec.sortKey,
+    billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+    encryption: dynamodb.TableEncryption.AWS_MANAGED,
+    pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
+    removalPolicy: cdk.RemovalPolicy.RETAIN,
+    timeToLiveAttribute: spec.timeToLiveAttribute,
+  });
+
+  for (const index of spec.globalSecondaryIndexes ?? []) {
+    table.addGlobalSecondaryIndex({ ...index, projectionType: dynamodb.ProjectionType.ALL });
+  }
+
+  return table;
+}
+
 /**
  * Creates optimized Lambda code bundle containing only the specific handler
  * file. Shared code (including Decimal helpers, now in
@@ -317,181 +359,98 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // DynamoDB Table: SearchResults
     // Stores raw search results from each AI provider
-    const searchResultsTable = new dynamodb.Table(this, 'SearchResultsTable', {
+    const searchResultsTable = citationAnalysisTable(this, 'SearchResultsTable', {
       tableName: 'CitationAnalysis-SearchResults',
-      partitionKey: {
-        name: 'keyword',
-        type: dynamodb.AttributeType.STRING,
-      },
-      sortKey: {
-        name: 'timestamp_provider',
-        type: dynamodb.AttributeType.STRING,
-      },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-    });
-
-    // GSI: ProviderIndex - Query all results by provider
-    searchResultsTable.addGlobalSecondaryIndex({
-      indexName: 'ProviderIndex',
-      partitionKey: {
-        name: 'provider',
-        type: dynamodb.AttributeType.STRING,
-      },
-      sortKey: {
-        name: 'timestamp',
-        type: dynamodb.AttributeType.STRING,
-      },
-      projectionType: dynamodb.ProjectionType.ALL,
+      partitionKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'timestamp_provider', type: dynamodb.AttributeType.STRING },
+      globalSecondaryIndexes: [
+        // GSI: ProviderIndex - Query all results by provider
+        {
+          indexName: 'ProviderIndex',
+          partitionKey: { name: 'provider', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'timestamp', type: dynamodb.AttributeType.STRING },
+        },
+      ],
     });
 
     // DynamoDB Table: Citations
     // Stores deduplicated citations with metadata
-    const citationsTable = new dynamodb.Table(this, 'CitationsTable', {
+    const citationsTable = citationAnalysisTable(this, 'CitationsTable', {
       tableName: 'CitationAnalysis-Citations',
-      partitionKey: {
-        name: 'keyword',
-        type: dynamodb.AttributeType.STRING,
-      },
-      sortKey: {
-        name: 'normalized_url',
-        type: dynamodb.AttributeType.STRING,
-      },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-    });
-
-    // GSI: CitationCountIndex - Query citations by popularity
-    citationsTable.addGlobalSecondaryIndex({
-      indexName: 'CitationCountIndex',
-      partitionKey: {
-        name: 'keyword',
-        type: dynamodb.AttributeType.STRING,
-      },
-      sortKey: {
-        name: 'citation_count',
-        type: dynamodb.AttributeType.NUMBER,
-      },
-      projectionType: dynamodb.ProjectionType.ALL,
-    });
-
-    // GSI: UrlIndex - Inverse index for "which keywords cite this URL?"
-    //
-    // The base table is keyed by (keyword, normalized_url) which makes the
-    // forward lookup ("citations for keyword X") cheap, but the reverse
-    // ("keywords that cite URL X") requires a full table scan. The
-    // get-url-breakdown handler used to scan SearchResults up to 5000 items
-    // to answer this. With this GSI, the same query is a bounded
-    // ``Query(normalized_url=X)`` against deduplicated rows.
-    //
-    // Projection is ALL because the breakdown endpoint needs
-    // citing_providers, citation_count, and last_updated alongside keyword.
-    citationsTable.addGlobalSecondaryIndex({
-      indexName: 'UrlIndex',
-      partitionKey: {
-        name: 'normalized_url',
-        type: dynamodb.AttributeType.STRING,
-      },
-      sortKey: {
-        name: 'keyword',
-        type: dynamodb.AttributeType.STRING,
-      },
-      projectionType: dynamodb.ProjectionType.ALL,
+      partitionKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'normalized_url', type: dynamodb.AttributeType.STRING },
+      globalSecondaryIndexes: [
+        // GSI: CitationCountIndex - Query citations by popularity
+        {
+          indexName: 'CitationCountIndex',
+          partitionKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'citation_count', type: dynamodb.AttributeType.NUMBER },
+        },
+        // GSI: UrlIndex - Inverse index for "which keywords cite this URL?"
+        //
+        // The base table is keyed by (keyword, normalized_url) which makes the
+        // forward lookup ("citations for keyword X") cheap, but the reverse
+        // ("keywords that cite URL X") requires a full table scan. The
+        // get-url-breakdown handler used to scan SearchResults up to 5000 items
+        // to answer this. With this GSI, the same query is a bounded
+        // ``Query(normalized_url=X)`` against deduplicated rows.
+        //
+        // Projection is ALL because the breakdown endpoint needs
+        // citing_providers, citation_count, and last_updated alongside keyword.
+        {
+          indexName: 'UrlIndex',
+          partitionKey: { name: 'normalized_url', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
+        },
+      ],
     });
 
     // DynamoDB Table: CrawledContent
     // Stores crawled page content and summaries
-    const crawledContentTable = new dynamodb.Table(this, 'CrawledContentTable', {
+    const crawledContentTable = citationAnalysisTable(this, 'CrawledContentTable', {
       tableName: 'CitationAnalysis-CrawledContent',
-      partitionKey: {
-        name: 'normalized_url',
-        type: dynamodb.AttributeType.STRING,
-      },
-      sortKey: {
-        name: 'crawled_at',
-        type: dynamodb.AttributeType.STRING,
-      },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-    });
-
-    // GSI: KeywordIndex - Query all crawled content for a keyword
-    crawledContentTable.addGlobalSecondaryIndex({
-      indexName: 'KeywordIndex',
-      partitionKey: {
-        name: 'keyword',
-        type: dynamodb.AttributeType.STRING,
-      },
-      sortKey: {
-        name: 'crawled_at',
-        type: dynamodb.AttributeType.STRING,
-      },
-      projectionType: dynamodb.ProjectionType.ALL,
+      partitionKey: { name: 'normalized_url', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'crawled_at', type: dynamodb.AttributeType.STRING },
+      globalSecondaryIndexes: [
+        // GSI: KeywordIndex - Query all crawled content for a keyword
+        {
+          indexName: 'KeywordIndex',
+          partitionKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'crawled_at', type: dynamodb.AttributeType.STRING },
+        },
+      ],
     });
 
     // DynamoDB Table: Keywords
     // Stores user-managed keywords for searches
-    const keywordsTable = new dynamodb.Table(this, 'KeywordsTable', {
+    const keywordsTable = citationAnalysisTable(this, 'KeywordsTable', {
       tableName: 'CitationAnalysis-Keywords',
-      partitionKey: {
-        name: 'id',
-        type: dynamodb.AttributeType.STRING,
-      },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-    });
-
-    // GSI: StatusIndex - Query keywords by status (active/inactive)
-    // Enables efficient querying of active keywords without full table scan
-    keywordsTable.addGlobalSecondaryIndex({
-      indexName: 'StatusIndex',
-      partitionKey: {
-        name: 'status',
-        type: dynamodb.AttributeType.STRING,
-      },
-      sortKey: {
-        name: 'keyword',
-        type: dynamodb.AttributeType.STRING,
-      },
-      projectionType: dynamodb.ProjectionType.ALL,
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+      globalSecondaryIndexes: [
+        // GSI: StatusIndex - Query keywords by status (active/inactive)
+        // Enables efficient querying of active keywords without full table scan
+        {
+          indexName: 'StatusIndex',
+          partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
+        },
+      ],
     });
 
     // DynamoDB Table: KeywordGroups
     // Folders of keywords (typically one per hotel/property). Membership lives
     // on each Keywords item as the `group_ids` string set, so this table only
     // holds group metadata.
-    const keywordGroupsTable = new dynamodb.Table(this, 'KeywordGroupsTable', {
+    const keywordGroupsTable = citationAnalysisTable(this, 'KeywordGroupsTable', {
       tableName: 'CitationAnalysis-KeywordGroups',
-      partitionKey: {
-        name: 'id',
-        type: dynamodb.AttributeType.STRING,
-      },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
     });
 
     // DynamoDB Table: BrandConfig
     // Stores brand tracking configuration (industry, tracked brands, etc.)
-    const brandConfigTable = new dynamodb.Table(this, 'BrandConfigTable', {
+    const brandConfigTable = citationAnalysisTable(this, 'BrandConfigTable', {
       tableName: 'CitationAnalysis-BrandConfig',
-      partitionKey: {
-        name: 'config_id',
-        type: dynamodb.AttributeType.STRING,
-      },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      partitionKey: { name: 'config_id', type: dynamodb.AttributeType.STRING },
     });
 
     // DynamoDB Table: KeywordResearch
@@ -499,93 +458,53 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Per-provider steps live inside the row (`steps` map). History reads the
     // GSI newest-first instead of scanning; rows expire after 90 days (`ttl`,
     // written by shared/research_jobs.py) — before 2.2.0 the table only grew.
-    const keywordResearchTable = new dynamodb.Table(this, 'KeywordResearchTable', {
+    const keywordResearchTable = citationAnalysisTable(this, 'KeywordResearchTable', {
       tableName: 'CitationAnalysis-KeywordResearch',
-      partitionKey: {
-        name: 'id',
-        type: dynamodb.AttributeType.STRING,
-      },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
       timeToLiveAttribute: 'ttl',
-    });
-    keywordResearchTable.addGlobalSecondaryIndex({
-      indexName: 'TypeCreatedIndex',
-      partitionKey: { name: 'type', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'created_at', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
+      globalSecondaryIndexes: [
+        {
+          indexName: 'TypeCreatedIndex',
+          partitionKey: { name: 'type', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'created_at', type: dynamodb.AttributeType.STRING },
+        },
+      ],
     });
 
     // DynamoDB Table: ContentStudio
     // Stores generated content ideas and content
-    const contentStudioTable = new dynamodb.Table(this, 'ContentStudioTable', {
+    const contentStudioTable = citationAnalysisTable(this, 'ContentStudioTable', {
       tableName: 'CitationAnalysis-ContentStudio',
-      partitionKey: {
-        name: 'id',
-        type: dynamodb.AttributeType.STRING,
-      },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
     });
 
     // DynamoDB Table: ProviderConfig
     // Stores AI provider enable/disable configuration
-    const providerConfigTable = new dynamodb.Table(this, 'ProviderConfigTable', {
+    const providerConfigTable = citationAnalysisTable(this, 'ProviderConfigTable', {
       tableName: 'CitationAnalysis-ProviderConfig',
-      partitionKey: {
-        name: 'provider_id',
-        type: dynamodb.AttributeType.STRING,
-      },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      partitionKey: { name: 'provider_id', type: dynamodb.AttributeType.STRING },
     });
 
     // DynamoDB Table: QueryPrompts
     // Stores user-defined query prompt templates with persona modifiers
-    const queryPromptsTable = new dynamodb.Table(this, 'QueryPromptsTable', {
+    const queryPromptsTable = citationAnalysisTable(this, 'QueryPromptsTable', {
       tableName: 'CitationAnalysis-QueryPrompts',
-      partitionKey: {
-        name: 'id',
-        type: dynamodb.AttributeType.STRING,
-      },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-    });
-
-    // GSI for querying enabled prompts efficiently
-    queryPromptsTable.addGlobalSecondaryIndex({
-      indexName: 'EnabledIndex',
-      partitionKey: {
-        name: 'enabled',
-        type: dynamodb.AttributeType.STRING,
-      },
-      projectionType: dynamodb.ProjectionType.ALL,
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+      globalSecondaryIndexes: [
+        // GSI for querying enabled prompts efficiently
+        {
+          indexName: 'EnabledIndex',
+          partitionKey: { name: 'enabled', type: dynamodb.AttributeType.STRING },
+        },
+      ],
     });
 
     // DynamoDB Table: SelfReflection
     // Stores LLM self-reflection analysis results with 24-hour TTL caching
-    const selfReflectionTable = new dynamodb.Table(this, 'SelfReflectionTable', {
+    const selfReflectionTable = citationAnalysisTable(this, 'SelfReflectionTable', {
       tableName: 'CitationAnalysis-SelfReflection',
-      partitionKey: {
-        name: 'keyword_brand',
-        type: dynamodb.AttributeType.STRING,
-      },
-      sortKey: {
-        name: 'persona_timestamp',
-        type: dynamodb.AttributeType.STRING,
-      },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      partitionKey: { name: 'keyword_brand', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'persona_timestamp', type: dynamodb.AttributeType.STRING },
       timeToLiveAttribute: 'ttl',
     });
 
@@ -599,16 +518,9 @@ export class CitationAnalysisStack extends cdk.Stack {
     // type + title + sorted keywords (see shared.utils.recommendation_id).
     // 90-day TTL evicts abandoned items so the table doesn't grow
     // unbounded for one-off recommendations that never get triaged.
-    const recommendationStatusTable = new dynamodb.Table(this, 'RecommendationStatusTable', {
+    const recommendationStatusTable = citationAnalysisTable(this, 'RecommendationStatusTable', {
       tableName: 'CitationAnalysis-RecommendationStatus',
-      partitionKey: {
-        name: 'recommendation_id',
-        type: dynamodb.AttributeType.STRING,
-      },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      encryption: dynamodb.TableEncryption.AWS_MANAGED,
-      pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
+      partitionKey: { name: 'recommendation_id', type: dynamodb.AttributeType.STRING },
       timeToLiveAttribute: 'ttl',
     });
 

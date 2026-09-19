@@ -71,6 +71,36 @@ async function createApiRequestError(
 }
 
 /**
+ * The request pipeline every verb shares: one authenticated fetch carrying the
+ * caller's abort signal, an `ApiRequestError` for any non-2xx status, and the
+ * decoded JSON body otherwise.
+ */
+async function requestJson<T>(
+  url: string,
+  init: RequestInit,
+  options: ApiRequestOptions
+): Promise<T> {
+  const response = await authenticatedFetch(url, {
+    ...init,
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    throw await createApiRequestError(response, options.allowStructured4xx === true);
+  }
+
+  return parseJsonResponse<T>(response);
+}
+
+function jsonBodyRequest(method: 'POST' | 'PUT', body: unknown): RequestInit {
+  return {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  };
+}
+
+/**
  * Validates that the API is properly configured.
  * @throws {ApiConfigError} If API URL contains placeholder or is not set
  */
@@ -94,19 +124,13 @@ export async function apiGet<T>(
   options: ApiGetOptions = {}
 ): Promise<T> {
   const {
-    signal, params, allowStructured4xx
+    params, ...requestOptions
   } = options;
-  
+
   const baseUrl = `${API_BASE_URL}${endpoint}`;
   const url = params ? `${baseUrl}?${new URLSearchParams(params)}` : baseUrl;
 
-  const response = await authenticatedFetch(url, { signal });
-  
-  if (!response.ok) {
-    throw await createApiRequestError(response, allowStructured4xx === true);
-  }
-
-  return parseJsonResponse<T>(response);
+  return requestJson<T>(url, {}, requestOptions);
 }
 
 /**
@@ -117,18 +141,7 @@ export async function apiPost<T>(
   body: unknown,
   options: ApiRequestOptions = {}
 ): Promise<T> {
-  const response = await authenticatedFetch(`${API_BASE_URL}${endpoint}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: options.signal,
-  });
-
-  if (!response.ok) {
-    throw await createApiRequestError(response, options.allowStructured4xx === true);
-  }
-
-  return parseJsonResponse<T>(response);
+  return requestJson<T>(`${API_BASE_URL}${endpoint}`, jsonBodyRequest('POST', body), options);
 }
 
 /**
@@ -139,18 +152,7 @@ export async function apiPut<T>(
   body: unknown,
   options: ApiRequestOptions = {}
 ): Promise<T> {
-  const response = await authenticatedFetch(`${API_BASE_URL}${endpoint}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal: options.signal,
-  });
-
-  if (!response.ok) {
-    throw await createApiRequestError(response, options.allowStructured4xx === true);
-  }
-
-  return parseJsonResponse<T>(response);
+  return requestJson<T>(`${API_BASE_URL}${endpoint}`, jsonBodyRequest('PUT', body), options);
 }
 
 /**
@@ -160,14 +162,5 @@ export async function apiDelete<T>(
   endpoint: string,
   options: ApiRequestOptions = {}
 ): Promise<T> {
-  const response = await authenticatedFetch(`${API_BASE_URL}${endpoint}`, {
-    method: 'DELETE',
-    signal: options.signal,
-  });
-
-  if (!response.ok) {
-    throw await createApiRequestError(response, options.allowStructured4xx === true);
-  }
-
-  return parseJsonResponse<T>(response);
+  return requestJson<T>(`${API_BASE_URL}${endpoint}`, { method: 'DELETE' }, options);
 }

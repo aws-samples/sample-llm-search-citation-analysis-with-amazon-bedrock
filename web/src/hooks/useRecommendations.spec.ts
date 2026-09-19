@@ -1,287 +1,180 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   renderHook, waitFor, act 
 } from '@testing-library/react';
 import { useRecommendations } from './useRecommendations';
-import type { RecommendationsResponse } from '../types';
 import {
-  mockRecommendationsResponse, createMockFetch 
+  mockRecommendationsResponse,
+  buildRecommendationStatusRow,
+  renderLoadedRecommendations,
 } from './useRecommendations-fixtures';
+import {
+  createDeferredResponse,
+  createEndpointMockFetch,
+  createMockJsonResponse,
+  type EndpointMockFetchOptions,
+} from '../test/fetchResponses';
+import type {
+  RecommendationsResponse, RecommendationStatus 
+} from '../types';
 
-vi.mock('../infrastructure', async () => {
-  const actual = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { authenticatedFetch } from '../infrastructure';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
-const mockAuthenticatedFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
+type FetchRecommendationsArgs = Parameters<ReturnType<typeof useRecommendations>['fetchRecommendations']>;
 
 describe('useRecommendations', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+  it('starts with no data, not loading, and no error', () => {
+    const { result } = renderHook(() => useRecommendations());
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  describe('initial state', () => {
-    it('returns null data initially', () => {
-      const { result } = renderHook(() => useRecommendations());
-      expect(result.current.data).toBeNull();
-    });
-
-    it('returns loading false initially', () => {
-      const { result } = renderHook(() => useRecommendations());
-      expect(result.current.loading).toBe(false);
-    });
-
-    it('returns null error initially', () => {
-      const { result } = renderHook(() => useRecommendations());
-      expect(result.current.error).toBeNull();
+    expect(result.current).toStrictEqual({
+      data: null,
+      loading: false,
+      error: null,
+      fetchRecommendations: expect.any(Function),
+      updateRecommendationStatus: expect.any(Function),
     });
   });
 
   describe('fetchRecommendations', () => {
-    it('fetches and returns recommendations', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
+    it('sets loading true while the recommendations request is in flight', async () => {
+      const deferred = createDeferredResponse();
+      mockAuthenticatedFetch.mockReturnValue(deferred.promise);
       const { result } = renderHook(() => useRecommendations());
 
-      const holder: { value: RecommendationsResponse | null } = { value: null };
-      await act(async () => {
-        holder.value = await result.current.fetchRecommendations();
+      act(() => {
+        result.current.fetchRecommendations();
       });
-
-      expect(holder.value?.recommendations).toHaveLength(2);
-      expect(holder.value?.total_count).toBe(2);
-      expect(result.current.data).toStrictEqual(mockRecommendationsResponse);
-    });
-
-    it('includes use_llm false in URL params by default', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useRecommendations());
-
-      await act(async () => {
-        await result.current.fetchRecommendations();
-      });
-
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).toContain('use_llm=false');
-    });
-
-    it('includes use_llm true in URL params when specified', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useRecommendations());
-
-      await act(async () => {
-        await result.current.fetchRecommendations(true);
-      });
-
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).toContain('use_llm=true');
-    });
-
-    it('sets loading true while fetching', async () => {
-      const resolvePromise = { fn: null as ((value: unknown) => void) | null };
-      const createMockPromise = (resolve: (value: unknown) => void) => {
-        resolvePromise.fn = resolve;
-      };
-      mockAuthenticatedFetch.mockImplementation(() => new Promise(createMockPromise));
-
-      const { result } = renderHook(() => useRecommendations());
-
-      act(() => { result.current.fetchRecommendations(); });
       expect(result.current.loading).toBe(true);
 
-      const mockResponse = {
-        ok: true,
-        json: () => Promise.resolve(mockRecommendationsResponse) 
-      };
       await act(async () => {
-        resolvePromise.fn?.(mockResponse);
+        deferred.resolve(createMockJsonResponse(mockRecommendationsResponse));
       });
-
       await waitFor(() => expect(result.current.loading).toBe(false));
     });
 
-    it('sets error when fetch fails', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
-
+    it.each<[url: string, condition: string, args: FetchRecommendationsArgs]>([
+      ['https://api.test.com/recommendations?use_llm=false', 'no arguments are given', []],
+      ['https://api.test.com/recommendations?use_llm=true', 'LLM generation is requested', [true]],
+    ])('requests %s when %s', async (url, _condition, args) => {
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockRecommendationsResponse));
       const { result } = renderHook(() => useRecommendations());
 
-      await act(async () => {
-        await result.current.fetchRecommendations();
+      await act(() => result.current.fetchRecommendations(...args));
+
+      expect(mockAuthenticatedFetch).toHaveBeenCalledWith(url);
+    });
+
+    it('returns and stores the recommendations when the response passes the type guard', async () => {
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockRecommendationsResponse));
+      const { result } = renderHook(() => useRecommendations());
+
+      const returned = await act(() => result.current.fetchRecommendations());
+
+      expect(returned).toStrictEqual(mockRecommendationsResponse);
+      expect(result.current).toStrictEqual({
+        data: mockRecommendationsResponse,
+        loading: false,
+        error: null,
+        fetchRecommendations: expect.any(Function),
+        updateRecommendationStatus: expect.any(Function),
       });
-
-      expect(result.current.error).toBeTruthy();
     });
 
-    it('sets error when response format is invalid', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ invalidResponse: true }));
-
+    it.each<[message: string, failure: string, options: EndpointMockFetchOptions<RecommendationsResponse>]>([
+      ['Unable to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
+      ['Invalid visibility request', 'payload fails the type guard', { invalidResponse: true }],
+    ])('resolves null and reports "%s" when the recommendations %s', async (message, _failure, options) => {
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockRecommendationsResponse, options));
       const { result } = renderHook(() => useRecommendations());
 
-      await act(async () => {
-        await result.current.fetchRecommendations();
+      const returned = await act(() => result.current.fetchRecommendations());
+
+      expect(returned).toBeNull();
+      expect(result.current).toStrictEqual({
+        data: null,
+        loading: false,
+        error: message,
+        fetchRecommendations: expect.any(Function),
+        updateRecommendationStatus: expect.any(Function),
       });
-
-      expect(result.current.error).toBeTruthy();
     });
 
-    it('returns null when fetch fails', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
-
-      const { result } = renderHook(() => useRecommendations());
-
-      const fetchResult = { value: null as typeof mockRecommendationsResponse | null };
-      const performFetch = async () => {
-        fetchResult.value = await result.current.fetchRecommendations();
-      };
-      await act(performFetch);
-
-      expect(fetchResult.value).toBeNull();
-    });
-
-    it('clears previous error on new fetch', async () => {
+    it('clears the previous error when a later recommendations fetch succeeds', async () => {
       mockAuthenticatedFetch
-        .mockImplementationOnce(createMockFetch({ shouldFail: true }))
-        .mockImplementationOnce(createMockFetch());
-
+        .mockResolvedValueOnce(createMockJsonResponse({}, 500))
+        .mockResolvedValueOnce(createMockJsonResponse(mockRecommendationsResponse));
       const { result } = renderHook(() => useRecommendations());
 
-      await act(async () => {
-        await result.current.fetchRecommendations();
-      });
-      expect(result.current.error).toBeTruthy();
+      await act(() => result.current.fetchRecommendations());
+      expect(result.current.error).toBe('Unable to load visibility metrics');
 
-      await act(async () => {
-        await result.current.fetchRecommendations();
-      });
+      await act(() => result.current.fetchRecommendations());
       expect(result.current.error).toBeNull();
     });
   });
 
   describe('updateRecommendationStatus', () => {
-    function statusOkResponse(payload: object) {
-      return {
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(payload),
-      };
-    }
+    it('posts the new status to /recommendations/{id}/status', async () => {
+      const { result } = await renderLoadedRecommendations(
+        createMockJsonResponse(buildRecommendationStatusRow('in_progress')),
+      );
 
-    it('posts to /recommendations/{id}/status with the new status', async () => {
-      mockAuthenticatedFetch
-        .mockImplementationOnce(createMockFetch())
-        .mockImplementationOnce(() => Promise.resolve(statusOkResponse({
-          recommendation_id: 'rec-001',
-          status: 'in_progress',
-          updated_at: '2026-05-15T10:00:00Z',
-        })));
+      await act(() => result.current.updateRecommendationStatus('rec-001', { status: 'in_progress' }));
 
-      const { result } = renderHook(() => useRecommendations());
-      await act(async () => {
-        await result.current.fetchRecommendations();
-      });
-
-      await act(async () => {
-        await result.current.updateRecommendationStatus('rec-001', { status: 'in_progress' });
-      });
-
-      const url = mockAuthenticatedFetch.mock.calls[1][0] as string;
-      expect(url).toContain('/recommendations/rec-001/status');
+      expect(mockAuthenticatedFetch).toHaveBeenLastCalledWith(
+        'https://api.test.com/recommendations/rec-001/status',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'in_progress' }),
+        },
+      );
     });
 
     it('serialises notes and relationship pointers in the request body', async () => {
-      mockAuthenticatedFetch
-        .mockImplementationOnce(createMockFetch())
-        .mockImplementationOnce(() => Promise.resolve(statusOkResponse({
-          recommendation_id: 'rec-001',
-          status: 'done',
-          updated_at: '2026-05-15T10:00:00Z',
-        })));
+      const { result } = await renderLoadedRecommendations(
+        createMockJsonResponse(buildRecommendationStatusRow('done')),
+      );
 
-      const { result } = renderHook(() => useRecommendations());
-      await act(async () => {
-        await result.current.fetchRecommendations();
+      await act(() => result.current.updateRecommendationStatus('rec-001', {
+        status: 'done',
+        notes: 'pitched outdoor pubs',
+        relatedKeyword: 'best running shoes',
+        relatedContentId: 'content-42',
+      }));
+
+      const statusRequest = mockAuthenticatedFetch.mock.calls[1][1];
+      expect(JSON.parse(String(statusRequest?.body))).toStrictEqual({
+        status: 'done',
+        notes: 'pitched outdoor pubs',
+        related_keyword: 'best running shoes',
+        related_content_id: 'content-42',
       });
-
-      await act(async () => {
-        await result.current.updateRecommendationStatus('rec-001', {
-          status: 'done',
-          notes: 'pitched outdoor pubs',
-          relatedKeyword: 'best running shoes',
-          relatedContentId: 'content-42',
-        });
-      });
-
-      const init = mockAuthenticatedFetch.mock.calls[1][1] as RequestInit;
-      const body = JSON.parse(init.body as string) as Record<string, string>;
-      expect(body.status).toBe('done');
-      expect(body.notes).toBe('pitched outdoor pubs');
-      expect(body.related_keyword).toBe('best running shoes');
-      expect(body.related_content_id).toBe('content-42');
     });
 
-    it('optimistically updates the recommendation status in local state', async () => {
-      mockAuthenticatedFetch
-        .mockImplementationOnce(createMockFetch())
-        .mockImplementationOnce(() => Promise.resolve(statusOkResponse({
-          recommendation_id: 'rec-001',
-          status: 'done',
-          updated_at: '2026-05-15T10:00:00Z',
-        })));
+    it.each<[status: RecommendationStatus, server: string, statusResponse: Response]>([
+      ['done', 'accepts the update', createMockJsonResponse(buildRecommendationStatusRow('done'))],
+      ['new', 'rejects the update', createMockJsonResponse({}, 500)],
+    ])('shows status "%s" for the recommendation when the server %s', async (status, _server, statusResponse) => {
+      const { result } = await renderLoadedRecommendations(statusResponse);
 
-      const { result } = renderHook(() => useRecommendations());
-      await act(async () => {
-        await result.current.fetchRecommendations();
-      });
+      await act(() => result.current.updateRecommendationStatus('rec-001', { status: 'done' }));
 
-      await act(async () => {
-        await result.current.updateRecommendationStatus('rec-001', { status: 'done' });
-      });
-
-      const updated = result.current.data?.recommendations.find((r) => r.id === 'rec-001');
-      expect(updated?.status).toBe('done');
-    });
-
-    it('rolls back the optimistic update when the server call fails', async () => {
-      mockAuthenticatedFetch
-        .mockImplementationOnce(createMockFetch())
-        .mockImplementationOnce(() => Promise.resolve({
-          ok: false,
-          status: 500,
-          json: () => Promise.resolve({}),
-        }));
-
-      const { result } = renderHook(() => useRecommendations());
-      await act(async () => {
-        await result.current.fetchRecommendations();
-      });
-
-      await act(async () => {
-        await result.current.updateRecommendationStatus('rec-001', { status: 'done' });
-      });
-
-      const reverted = result.current.data?.recommendations.find((r) => r.id === 'rec-001');
-      expect(reverted?.status).toBe('new');
+      const updated = result.current.data?.recommendations.find((rec) => rec.id === 'rec-001');
+      expect(updated?.status).toBe(status);
     });
 
     it('returns null and skips the fetch when id is empty', async () => {
       const { result } = renderHook(() => useRecommendations());
+
       const ret = await act(
         () => result.current.updateRecommendationStatus('', { status: 'done' }),
       );
+
       expect(ret).toBeNull();
       expect(mockAuthenticatedFetch).not.toHaveBeenCalled();
     });

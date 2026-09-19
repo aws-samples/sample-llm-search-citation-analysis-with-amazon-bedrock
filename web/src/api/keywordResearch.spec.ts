@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   deleteKeywordResearch,
@@ -12,18 +12,10 @@ import {
   startKeywordExpansion,
 } from './keywordResearch';
 
-vi.mock('../infrastructure', async () => {
-  const actual: Record<string, unknown> = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { authenticatedFetch } from '../infrastructure';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
-const mockAuthenticatedFetch = vi.mocked(authenticatedFetch);
 
 function respondWith(status: number, body: unknown): void {
   mockAuthenticatedFetch.mockResolvedValue({
@@ -73,10 +65,6 @@ describe('isKeywordResearchItem', () => {
 });
 
 describe('keyword research client', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('starts an expansion with the seed, industry and count', async () => {
     respondWith(202, PENDING_JOB);
 

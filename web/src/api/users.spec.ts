@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   listUsers,
@@ -9,28 +9,13 @@ import {
   resetUserPassword,
   listGroups,
 } from './users';
-
-vi.mock('./client', () => ({
-  apiGet: vi.fn(),
-  apiPost: vi.fn(),
-  apiPut: vi.fn(),
-  apiDelete: vi.fn(),
-}));
-
 import {
-  apiGet, apiPost, apiPut, apiDelete 
-} from './client';
+  mockApiDelete, mockApiGet, mockApiPost, mockApiPut
+} from './clientMock-fixtures';
 
-const mockApiGet = apiGet as ReturnType<typeof vi.fn>;
-const mockApiPost = apiPost as ReturnType<typeof vi.fn>;
-const mockApiPut = apiPut as ReturnType<typeof vi.fn>;
-const mockApiDelete = apiDelete as ReturnType<typeof vi.fn>;
+vi.mock('./client', () => import('./clientMock-fixtures'));
 
 describe('users API', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   describe('listUsers', () => {
     it('fetches users with default pagination', async () => {
       const mockResponse = {

@@ -9,6 +9,64 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.4.1] - 2026-09-18
+
+Zero-duplication refactor of the TypeScript codebase (CDK app, dashboard and
+their tests), with duplication and dead-code gates wired into `npm run validate`.
+No behaviour change: the synthesized CloudFormation template is byte-identical,
+the report sections render byte-identical markup, and the 1,378-test suite passes.
+
+### Added
+
+- `npm run validate` at the repo root: ESLint → CDK build → CDK tests →
+  jscpd duplication (production and test configs) → knip dead code → web
+  type-check, tests and knip. Documented in README.md and CONTRIBUTING.md.
+- jscpd 5.2.1 with two configs at threshold `0`: `.jscpd.json` for `bin/`,
+  `lib/`, `web/src/` and `.jscpd.tests.json` for spec and fixture files.
+  knip 6.37.0 at the root (`knip.json`) for the CDK app.
+- Shared test foundation in `web/src/test/`: `infrastructureMock.ts`
+  (`vi.mock('../infrastructure', () => import('../test/infrastructureMock'))`
+  with a typed `mockAuthenticatedFetch`) and `fetchResponses.ts`
+  (`createMockJsonResponse`, `createDeferredResponse`,
+  `createEndpointMockFetch`, `createMockMalformedResponse`) — real `Response`
+  objects instead of `{ ok, json }` look-alikes. Vitest now runs with
+  `clearMocks` and `restoreMocks`, so specs carry no mock-hygiene hooks.
+- Report layout primitives under `web/src/components/Reports/layout/`:
+  `ReportStatCard`, `ReportStatGrid`, `ReportTable`, `PriorityBadge`,
+  `MoverColumn`, `ReportSectionPlaceholder`, `gateSection` /
+  `pendingSectionPlaceholder`, `reportAccent`, `sampleEvenly`.
+- Dashboard `useThemedChart` hook and `DashboardChartCard`; `BlockedPageBanner`
+  for citations; shared `paginate`; `DownloadButton` and `fileSizeFormatter`
+  for raw responses; `EyeIcon`, `CogIcon`, `RefreshIcon`, `ClockIcon`,
+  `CollectionIcon` in `ui/Icons`.
+
+### Changed
+
+- `lib/citation-analysis-stack.ts`: the twelve DynamoDB tables are built by
+  one typed `citationAnalysisTable` factory (same construct ids, same
+  properties, same GSI order).
+- `web/src/api/client.ts`: `apiGet` / `apiPost` / `apiPut` / `apiDelete` share
+  one `requestJson` pipeline. `useQueryPrompts` and `useRawResponses` share
+  one request function per hook. `dateFormatter` formatters share one
+  parse-and-guard step (its unreachable `catch` now logs
+  `Date formatting failed:`).
+- Decorative SVGs replaced by `ui/Icons` components now carry
+  `aria-hidden="true"`; class names, paths and accessible names are unchanged.
+- Hook specs are table-driven (`it.each`) and assert the whole hook state and
+  the full request URL; report and component specs build their data through
+  `*-fixtures.ts` builders. 1,378 tests (was 1,391 on 2.4.0): weaker tests
+  were folded into stronger table rows, and every previously asserted
+  behaviour is still asserted. New coverage: malformed JSON bodies, the
+  `query_prompt_id` visibility parameter, group and all-keyword scopes on the
+  citation-gaps, trends, visibility and reports-overview requests.
+
+### Removed
+
+- Unused root dev dependencies `eslint-plugin-jsdoc` and `source-map-support`,
+  and the dangling `"main": "index.js"` in `package.json`.
+- `reportScopesEqual` in `web/src/components/ui/reportScope.ts`, which had no
+  production caller.
+
 ## [2.4.0] - 2026-09-18
 
 Group KPIs: every visibility view and report can be scoped to a keyword group

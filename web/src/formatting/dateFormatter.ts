@@ -1,38 +1,31 @@
-export const formatDate = (dateString: string | null | undefined): string => {
+/**
+ * The guard every timestamp formatter shares: `N/A` for a missing value,
+ * `invalidLabel` for anything `Date` cannot parse, otherwise `render(date)`.
+ */
+const formatParsedDate = (
+  dateString: string | null | undefined,
+  invalidLabel: string,
+  render: (date: Date) => string
+): string => {
   if (!dateString) return 'N/A';
   try {
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid date';
-    return date.toLocaleString();
+    if (isNaN(date.getTime())) return invalidLabel;
+    return render(date);
   } catch (error: unknown) {
-    console.warn('Date parsing failed:', error);
-    return 'Invalid date';
+    console.warn('Date formatting failed:', error);
+    return invalidLabel;
   }
 };
 
-export const formatDateOnly = (dateString: string | null | undefined): string => {
-  if (!dateString) return 'N/A';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid date';
-    return date.toLocaleDateString();
-  } catch (error: unknown) {
-    console.warn('Date parsing failed:', error);
-    return 'Invalid date';
-  }
-};
+export const formatDate = (dateString: string | null | undefined): string =>
+  formatParsedDate(dateString, 'Invalid date', (date) => date.toLocaleString());
 
-export const formatTime = (dateString: string | null | undefined): string => {
-  if (!dateString) return 'N/A';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid time';
-    return date.toLocaleTimeString();
-  } catch (error: unknown) {
-    console.warn('Time parsing failed:', error);
-    return 'Invalid time';
-  }
-};
+export const formatDateOnly = (dateString: string | null | undefined): string =>
+  formatParsedDate(dateString, 'Invalid date', (date) => date.toLocaleDateString());
+
+export const formatTime = (dateString: string | null | undefined): string =>
+  formatParsedDate(dateString, 'Invalid time', (date) => date.toLocaleTimeString());
 
 const SECONDS_PER_MINUTE = 60;
 const SECONDS_PER_HOUR = 3600;
@@ -92,21 +85,13 @@ export const formatApproximateDuration = (totalSeconds: number): string => {
  * How long ago a timestamp was, e.g. `2 hours ago`. Future timestamps and
  * anything within the last minute collapse to `just now`.
  */
-export const formatRelativeTime = (dateString: string | null | undefined): string => {
-  if (!dateString) return 'N/A';
-  try {
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Invalid date';
-
+export const formatRelativeTime = (dateString: string | null | undefined): string =>
+  formatParsedDate(dateString, 'Invalid date', (date) => {
     const elapsedSeconds = (Date.now() - date.getTime()) / 1000;
     if (elapsedSeconds < JUST_NOW_THRESHOLD_SECONDS) return 'just now';
 
     return `${formatApproximateDuration(elapsedSeconds)} ago`;
-  } catch (error: unknown) {
-    console.warn('Relative time formatting failed:', error);
-    return 'Invalid date';
-  }
-};
+  });
 
 export const calculateDuration = (
   startDate: string | null | undefined,
