@@ -1,6 +1,6 @@
 # Plan: Keyword Groups, Editable Schedules, Group KPIs, Reliable Keyword Research, Research Agent, Content Workflow
 
-Status: IN DELIVERY — 2026-09-18. Phase 0a (2.0.1), Phase 1 (2.1.0, keyword groups + cap removal) and Phase 2 (2.2.0, parallel checkpointed research), Phase 3 (2.3.0/2.3.1, Schedules v2) and Phase 4 (2.4.0, group KPIs) merged + deployed; Phases 5–6 pending. Decisions D1, D3, D6, D9 locked (see §4).
+Status: IN DELIVERY — 2026-09-18. Phase 0a (2.0.1), Phase 1 (2.1.0, keyword groups + cap removal), Phase 2 (2.2.0, parallel checkpointed research), Phase 3 (2.3.0/2.3.1, Schedules v2), Phase 4 (2.4.0, group KPIs) and Phase 5 (2.5.0, Research Agent) merged + deployed; Phase 5b (2.6.0, hotel KPI report: Zero Voice / Visibility / Prominence + last-N-run evolution — customer steering 2026-09-18) and Phase 6 (2.7.0, content workflow) pending. Decisions D1, D3, D6, D9 locked (see §4).
 Baseline: `main` at v2.0.0 (after Dependabot merges #104/#105/#106)
 Scope: six related customer requests (hotel chain customer, contact: Bastián) plus a
 dead-code cleanup the customer asked for. Original feedback was in Spanish; requirements
@@ -228,6 +228,8 @@ Acceptance (R7, R8, R13): "Hotel Gran Marino" shows one visibility score, share 
 
 > Product steering (2026-09-18): build the agent as an *agentic workflow inside the Keyword Research tab* — the user can pick, edit and save the agent's system prompt from templates; runs execute in the background on the 2.2.0 state machine so several jobs can be shipped at once; and reuse the web-search / crawling providers the search Lambda already integrates (Exa, Firecrawl, Tavily, Brave, SerpAPI) where they offer related-search / keyword-expansion features, instead of hand-rolling every expansion. Design details follow this steering in Phase 5.
 
+> As built (2.5.0): `shared/research_agent.py` (brief, prompts, schema checks), `shared/keyword_signals.py` (SerpAPI related searches / People Also Ask / autocomplete — the only one of the five providers with real expansion signals; Exa/Firecrawl/Tavily/Brave are plain search APIs and were not wired in), worker actions `plan` (round 1 from Bedrock, later rounds from the evaluator), `evaluate` (continue|stop, degrades to stop on model failure) and `finalize` (model selection with a relevance-ranked fallback), `CitationAnalysis-ResearchTemplates` + `/api/keyword-research/templates`, and the Research Agent tab with a multi-run list polled every 5 s. Country and language are ISO-2 codes (`country`, `language`) rather than a free-text market.
+
 - Input form ("Research Agent" tab): seed (hotel name), market + language, expansion dimensions as toggles — destination, location/neighbourhood, points of interest, hotel attributes, audience type, trip type — plus a free-text instruction ("also expand by events and seasons"), target count (default 60), max rounds (default 2, hard cap 3), destination group (existing or "create new").
 - Same state machine as Epic D with two Bedrock steps (new roles `RESEARCH_PLANNING` → Sonnet tier, `RESEARCH_EVALUATION` → Haiku tier, overridable via the existing `BEDROCK_TIER_<ROLE>` env pattern):
   1. `Plan`: from seed + dimensions + instruction, produce a structured plan (≤8 queries per round, each tagged with a dimension and rationale) — persisted on the job (R21).
@@ -276,8 +278,9 @@ Each phase = one PR = one minor version + CHANGELOG entry; every PR runs `ruff c
 | 2. Reliable, parallel research (DONE) | 2.2.0 | Epic D: research state machine + worker, parallel Map, job/step model, GSI + TTL, `GET /{id}`, retry endpoint, progressive UI, session re-attach (absorbed Phase 0b) | L | 0b (parallel with 1) |
 | 3. Schedules v2 (DONE) | 2.3.0 | Epic B: v2 descriptor, generated ids + display name, `GET/PUT /{id}`, run-now, ParseKeywords scope resolution, edit UI, validation fixes | M | 1 |
 | 4. Group KPIs & export (DONE) | 2.4.0 | Epic C: scope params on visibility/trends/brand-mentions/gaps/citations/overview, projections, Group overview + history chart + range selector, scope selector in reports, Excel export (no server cache — measured fan-out fits the budget) | L | 1 |
-| 5. Research Agent | 2.5.0 | Epic E: Plan/Evaluate steps, dimensions form, bounded loop, trace view, promote-to-group, export | L | 1, 2 |
-| 6. Content workflow | 2.6.0 | Epic F: ContentTasks table + API, work queue, mark-updated, ready-to-re-measure, GenerateSummary hook, comparison endpoint + panels | L | 1, 4 |
+| 5. Research Agent (DONE) | 2.5.0 | Epic E: `agent` job type on the 2.2.0 state machine (Plan → Map → Evaluate → Choice loop → Finalize selection), `RESEARCH_PLANNING`/`RESEARCH_EVALUATION` roles, SerpAPI Google signals step, system-prompt templates table + CRUD, Research Agent tab (brief, prompt editor, background runs list, trace, proposal → add to group, Excel); Lambda memory audit (Health 256 MB, bucket deployment 512 MB) | L | 1, 2 |
+| 5b. Hotel KPI report | 2.6.0 | Customer steering 2026-09-18: per-group report with Zero Voice, Visibility and Prominence, and a run-indexed evolution comparing the last 3–4 executions of each keyword (weekly / bi-weekly schedules) — extends the 2.4.0 Group overview | M | 4 |
+| 6. Content workflow | 2.7.0 | Epic F: ContentTasks table + API, work queue, mark-updated, ready-to-re-measure, GenerateSummary hook, comparison endpoint + panels | L | 1, 4 |
 
 Suggested sequencing with two streams: Stream 1 → Phases 0a, 0b, 1, 3, 4, 6; Stream 2 → Phase 2 then 5 (starts after 0b). Phases 3 and 4 can be developed in parallel once 1 is merged.
 

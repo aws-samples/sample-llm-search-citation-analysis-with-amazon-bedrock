@@ -14,23 +14,19 @@ tests pin the consolidated contract both callers now rely on:
   secret value or exception message
 - Results are cached for the TTL; None results are never cached
 
-Note: imported as ``shared.secrets`` rather than by bare module name like
-sibling tests — a top-level ``secrets`` module would shadow the Python
-stdlib ``secrets`` for the rest of the pytest session.
+Note: imported as ``shared.secrets``, never by bare module name — a top-level
+``secrets`` module would shadow the Python stdlib ``secrets`` for the rest of
+the pytest session.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import os
-import sys
 import time
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from shared import secrets
 

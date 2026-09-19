@@ -18,10 +18,8 @@ the JSON.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import sys
 from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -29,12 +27,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.dirname(_API_DIR)
+from testing.module_loader import load_handler_module
 
-# Make `from shared.xxx import` resolve (the layer puts shared/ at /opt/python/).
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
+_API_DIR = os.path.dirname(os.path.abspath(__file__))
 
 _ENV = {
     'CORS_ORIGIN_PARAM': '',
@@ -46,15 +41,10 @@ mock_table = MagicMock()
 mock_dynamodb = MagicMock()
 mock_dynamodb.Table.return_value = mock_table
 
-_spec = importlib.util.spec_from_file_location(
-    'manage_providers', os.path.join(_API_DIR, 'manage-providers.py')
-)
-_module = importlib.util.module_from_spec(_spec)
-
 with patch('boto3.client', side_effect=lambda *a, **k: mock_secrets), \
      patch('boto3.resource', side_effect=lambda *a, **k: mock_dynamodb), \
      patch.dict(os.environ, _ENV):
-    _spec.loader.exec_module(_module)
+    _module = load_handler_module(_API_DIR, 'manage-providers.py', 'manage_providers')
 
 #: What `record_provider_failure` + `_disable_provider` leave on the row after
 #: the 2026-08-14 outage reached the auto-disable threshold. `Decimal` because

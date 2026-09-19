@@ -16,14 +16,10 @@ The module consolidates the keyword validate/build/put pipeline that
 
 from __future__ import annotations
 
-import os
-import sys
 from unittest.mock import MagicMock
 
 import pytest
 from botocore.exceptions import ClientError
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.keyword_store import (

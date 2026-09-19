@@ -101,3 +101,70 @@ describe('ResearchProgress', () => {
     expect(screen.queryByRole('button', { name: 'Retry failed providers' })).not.toBeInTheDocument();
   });
 });
+
+
+describe('ResearchProgress for an agent run', () => {
+  const agentJob = buildJob({
+    type: 'agent',
+    status: 'running',
+    keyword_count: 26,
+    round: 2,
+    steps_total: 4,
+    steps_done: 3,
+    config: {
+      seed: 'Hotel Gran Marino',
+      country: 'es',
+      language: 'es',
+      dimensions: ['destination'],
+      instruction: '',
+      target_count: 60,
+      max_rounds: 3,
+      group_id: null,
+    },
+    steps: [
+      buildStep('perplexity', {
+        step_id: 'r1-q1-perplexity',
+        round: 1,
+        query: 'hoteles coruña centro',
+        dimension: 'destination',
+        keyword_count: 14,
+      }),
+      buildStep('serpapi', {
+        step_id: 'r1-signals-serpapi',
+        round: 1,
+        query_count: 2,
+        keyword_count: 9,
+      }),
+    ],
+  });
+
+  it('counts steps and names the round instead of providers', () => {
+    render(<ResearchProgress job={agentJob} />);
+
+    expect(screen.getByText('3 of 4 steps finished · round 2 of 3')).toBeInTheDocument();
+    expect(screen.getByText('· 26 candidates so far')).toBeInTheDocument();
+  });
+
+  it('titles each step with the query it searched and its provider', () => {
+    render(<ResearchProgress job={agentJob} />);
+
+    expect(screen.getByText('hoteles coruña centro')).toBeInTheDocument();
+    expect(screen.getByText('Perplexity · round 1')).toBeInTheDocument();
+  });
+
+  it('describes the Google-signals step by the queries it covers', () => {
+    render(<ResearchProgress job={agentJob} />);
+
+    expect(screen.getByText('Google signals for 2 queries')).toBeInTheDocument();
+  });
+
+  it('says it is planning the first round before any step exists', () => {
+    render(<ResearchProgress job={buildJob({
+      type: 'agent',
+      status: 'pending',
+      steps_total: 0,
+    })} />);
+
+    expect(screen.getByText('Planning the first round…')).toBeInTheDocument();
+  });
+});

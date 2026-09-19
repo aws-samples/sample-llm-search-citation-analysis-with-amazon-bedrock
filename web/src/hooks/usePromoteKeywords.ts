@@ -152,11 +152,19 @@ export interface UsePromoteKeywords {
 }
 
 const EMPTY_RESEARCH_KEYWORDS: ResearchKeyword[] = [];
+const NO_GROUPS: string[] = [];
+
+export interface UsePromoteKeywordsOptions {
+  /** Groups every promoted keyword joins (the research agent's destination group). */
+  groupIds?: string[];
+}
 
 export const usePromoteKeywords = (
   availableKeywords: ResearchKeyword[] = EMPTY_RESEARCH_KEYWORDS,
-  onKeywordsAdded?: (created: Keyword[]) => void
+  onKeywordsAdded?: (created: Keyword[]) => void,
+  options: UsePromoteKeywordsOptions = {}
 ): UsePromoteKeywords => {
+  const groupIds = options.groupIds ?? NO_GROUPS;
   const [selectionState, dispatchSelection] = useReducer(reduceSelection, initialSelectionState);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -289,6 +297,7 @@ export const usePromoteKeywords = (
         keywords: requestedKeywords.filter(
           (keyword): keyword is ResearchKeyword => keyword !== undefined
         ),
+        groupIds,
         signal: controller.signal,
       });
 
@@ -334,6 +343,7 @@ export const usePromoteKeywords = (
     selected,
     availableUniqueKeywords,
     availableKeys,
+    groupIds,
     onKeywordsAdded,
     clearRequestTimer,
     clearSuccessTimer,

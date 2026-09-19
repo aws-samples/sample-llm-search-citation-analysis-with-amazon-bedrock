@@ -20,7 +20,6 @@ the `_detect_captcha_block` predicate directly.
 from __future__ import annotations
 
 import importlib
-import os
 import sys
 import types
 from unittest.mock import MagicMock
@@ -57,8 +56,7 @@ sys.modules.setdefault('bedrock_agentcore.tools.browser_client', _fake_bac_brows
 sys.modules.setdefault('bedrock_agentcore._utils', _fake_bac_utils)
 sys.modules.setdefault('bedrock_agentcore._utils.endpoints', _fake_bac_endpoints)
 
-sys.path.insert(0, os.path.dirname(__file__))
-import browser_tools  # type: ignore[import-not-found]
+from shared import browser_tools
 
 importlib.reload(browser_tools)
 

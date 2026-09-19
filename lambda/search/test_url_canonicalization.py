@@ -5,13 +5,7 @@ had drifted, so the same citation could be stored in two different forms
 across the SearchResults and Citations tables.
 """
 
-import os
-import sys
-
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from api_clients import clean_url
 from shared.utils import normalize_url

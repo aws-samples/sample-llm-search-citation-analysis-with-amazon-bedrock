@@ -21,37 +21,29 @@ duration of this module's tests and required env vars are set so no real AWS
 clients are created.
 """
 
-import importlib
-import importlib.util
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from testing.env import setdefault_env
+from testing.module_loader import load_handler_module
+
 # --- Test bootstrap (import boundary) --------------------------------------
-
-# Point the layer directory at the front of sys.path so `shared` resolves to
-# the layer copy the routers load in Lambda via /opt/python.
-_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-_LAYER_PY = os.path.join(_REPO, 'lambda', 'layer', 'python')
-if _LAYER_PY not in sys.path:
-    sys.path.insert(0, _LAYER_PY)
-
-# shared/__init__.py re-exports api_response as a function, shadowing the
-# submodule — use import_module to get the real module object.
-_layer_api_response = importlib.import_module('shared.api_response')
-sys.modules['shared.api_response'] = _layer_api_response
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Required env vars must exist before `keyword-research.py` is ever imported
 # (it reads its table and state machine ARN at module level).
-os.environ.setdefault('KEYWORD_RESEARCH_TABLE', 'test-keyword-research-table')
-os.environ.setdefault('RESEARCH_STATE_MACHINE_ARN', 'arn:aws:states:us-west-2:123456789012:stateMachine:test')
-os.environ.setdefault('SECRETS_PREFIX', 'test-citation-analysis/')
+setdefault_env({
+    'KEYWORD_RESEARCH_TABLE': 'test-keyword-research-table',
+    'RESEARCH_STATE_MACHINE_ARN': 'arn:aws:states:us-west-2:123456789012:stateMachine:test',
+    'DYNAMODB_TABLE_RESEARCH_TEMPLATES': 'test-research-templates',
+    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
+    'SECRETS_PREFIX': 'test-citation-analysis/',
+})
 
 
 @pytest.fixture(scope='module', autouse=True)
@@ -72,14 +64,7 @@ def _mock_boto3():
 
 def _load_keyword_mgmt():
     """Load `keyword-mgmt.py` (hyphenated name) as a fresh module."""
-    module_name = 'keyword_mgmt_router_under_test'
-    sys.modules.pop(module_name, None)
-    spec = importlib.util.spec_from_file_location(
-        module_name, os.path.join(_API_DIR, 'keyword-mgmt.py')
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_handler_module(_API_DIR, 'keyword-mgmt.py', 'keyword_mgmt_router_under_test')
 
 
 @pytest.fixture(autouse=True)

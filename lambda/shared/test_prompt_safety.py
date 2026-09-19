@@ -7,16 +7,9 @@ exploitable, so the assertions below are explicit.
 
 from __future__ import annotations
 
-import os
-import sys
-
 import pytest
 
-# Load by bare name to bypass shared/__init__.py (which imports boto3) —
-# matches the pattern used by test_utils.py, test_llm_json.py, etc.
-sys.path.insert(0, os.path.dirname(__file__))
-
-from prompt_safety import (  # type: ignore[import-not-found]
+from shared.prompt_safety import (
     MAX_USER_INPUT_LENGTH,
     sanitize_user_input,
     untrusted_input_system_instruction,

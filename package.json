@@ -1,6 +1,6 @@
 {
   "name": "citation-analysis-system",
-  "version": "2.4.2",
+  "version": "2.5.0",
   "description": "Serverless citation analysis system using AWS CDK",
   "scripts": {
     "build": "tsc",

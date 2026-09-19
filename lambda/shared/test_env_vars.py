@@ -18,14 +18,11 @@ These tests pin:
 from __future__ import annotations
 
 import os
-import sys
 from unittest.mock import patch
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(__file__))
-
-import env_vars  # type: ignore[import-not-found]
+from shared import env_vars
 
 
 class TestResolveTableEnv:

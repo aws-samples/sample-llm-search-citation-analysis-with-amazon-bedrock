@@ -112,19 +112,22 @@ function findStateMachineLogicalId(template: Template, stateMachineName: string)
   return Object.keys(stateMachines)[0] ?? '';
 }
 
+/** Logical id of the IAM role a Lambda function (found by FunctionName) executes as. */
+function findFunctionRoleLogicalId(template: Template, functionName: string): string {
+  const functions = template.findResources('AWS::Lambda::Function', {
+    Properties: { FunctionName: functionName },
+  });
+  return collectGetAttTargets(
+    resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Role'])
+  )[0] ?? '';
+}
+
 /**
  * Every IAM action a Lambda function's role is allowed on one resource (by
  * logical id, matched through Ref or Fn::GetAtt), deduplicated and sorted.
  */
 function extractFunctionRoleActionsOn(template: Template, functionName: string, resourceLogicalId: string): string[] {
-  const functions = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const roleLogicalId = collectGetAttTargets(
-    resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Role'])
-  )[0] ?? '';
-
-  return extractRoleActionsOn(template, roleLogicalId, resourceLogicalId);
+  return extractRoleActionsOn(template, findFunctionRoleLogicalId(template, functionName), resourceLogicalId);
 }
 
 /** Collect every logical ID referenced by a Ref anywhere in a node. */
@@ -268,6 +271,29 @@ function extractFunctionTimeout(template: Template, functionName: string): numbe
   return typeof timeout === 'number' ? timeout : Number.NaN;
 }
 
+function extractFunctionMemorySize(template: Template, functionName: string): number {
+  const functions = template.findResources('AWS::Lambda::Function', {
+    Properties: { FunctionName: functionName },
+  });
+  const memory = resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'MemorySize']);
+  return typeof memory === 'number' ? memory : Number.NaN;
+}
+
+/** MemorySize of the Lambda functions whose logical id starts with `prefix` (CDK-managed singletons). */
+function extractMemorySizesByLogicalIdPrefix(template: Template, prefix: string): number[] {
+  return Object.entries(template.findResources('AWS::Lambda::Function'))
+    .filter(([logicalId]) => logicalId.startsWith(prefix))
+    .map(([, resource]) => resolvePath(resource, ['Properties', 'MemorySize']))
+    .filter((memory): memory is number => typeof memory === 'number');
+}
+
+/** Every IAM action a Lambda function's role is allowed, on any resource. */
+function extractFunctionRoleActions(template: Template, functionName: string): string[] {
+  return sortedUnique(
+    allowStatementsOfRole(template, findFunctionRoleLogicalId(template, functionName)).flatMap(statementActions)
+  );
+}
+
 /** The top-level `TimeoutSeconds` of a state machine definition, NaN when absent. */
 function extractDefinitionTimeoutSeconds(definitionRaw: string): number {
   const match = /"TimeoutSeconds":(\d+)/.exec(definitionRaw);
@@ -388,6 +414,20 @@ function extractApiMethods(template: Template, resourceId: string): ApiGatewayMe
       authorizerId: resolveString(method, ['Properties', 'AuthorizerId', 'Ref']),
     }];
   });
+}
+
+/** The verbs among `methods` that are not behind the Cognito user pool authorizer. */
+function verbsWithoutCognitoAuthorizer(methods: ApiGatewayMethodSnapshot[]): string[] {
+  return methods
+    .filter((method) => method.authorizationType !== COGNITO_AUTH)
+    .map((method) => method.httpMethod);
+}
+
+/** The verbs among `methods` whose integration is not the Lambda function with logical id `functionLogicalId`. */
+function verbsNotIntegratedWith(methods: ApiGatewayMethodSnapshot[], functionLogicalId: string): string[] {
+  return methods
+    .filter((method) => !method.integrationUri.includes(functionLogicalId))
+    .map((method) => method.httpMethod);
 }
 
 function retentionDaysOf(logGroups: Record<string, unknown>, logicalId: string): number {
@@ -552,19 +592,32 @@ function policyAttachedToRole(policy: unknown, roleLogicalId: string): boolean {
     .some((roleRef) => resolveString(roleRef, ['Ref']) === roleLogicalId);
 }
 
-/**
- * The Action entries of one Allow statement whose Resource targets the given
- * logical id, through either Fn::GetAtt (ARNs) or Ref.
- */
-function statementActionsOn(statement: unknown, resourceLogicalId: string): string[] {
-  if (resolveString(statement, ['Effect']) !== 'Allow') return [];
-  const resource = resolvePath(statement, ['Resource']);
-  const targets = [...collectGetAttTargets(resource), ...collectRefTargets(resource)];
-  if (!targets.includes(resourceLogicalId)) return [];
+/** Every Allow statement of the AWS::IAM::Policy resources attached to one role. */
+function allowStatementsOfRole(template: Template, roleLogicalId: string): unknown[] {
+  return Object.values(template.findResources('AWS::IAM::Policy'))
+    .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
+    .flatMap((policy): unknown[] => {
+      const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
+      return (Array.isArray(statements) ? statements : [])
+        .filter((statement) => resolveString(statement, ['Effect']) === 'Allow');
+    });
+}
 
+/** The Action entries of one statement, which carries either a single string or a list. */
+function statementActions(statement: unknown): string[] {
   const action = resolvePath(statement, ['Action']);
   return (Array.isArray(action) ? action : [action])
     .filter((entry): entry is string => typeof entry === 'string');
+}
+
+/** Whether a statement's Resource targets the logical id, through either Fn::GetAtt (ARNs) or Ref. */
+function statementTargets(statement: unknown, resourceLogicalId: string): boolean {
+  const resource = resolvePath(statement, ['Resource']);
+  return [...collectGetAttTargets(resource), ...collectRefTargets(resource)].includes(resourceLogicalId);
+}
+
+function sortedUnique(values: string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
 /**
@@ -572,15 +625,11 @@ function statementActionsOn(statement: unknown, resourceLogicalId: string): stri
  * (both by logical id), deduplicated and sorted.
  */
 function extractRoleActionsOn(template: Template, roleLogicalId: string, resourceLogicalId: string): string[] {
-  const actions = Object.values(template.findResources('AWS::IAM::Policy'))
-    .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
-    .flatMap((policy) => {
-      const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
-      return (Array.isArray(statements) ? statements : [])
-        .flatMap((statement) => statementActionsOn(statement, resourceLogicalId));
-    });
-
-  return [...new Set(actions)].sort((left, right) => left.localeCompare(right));
+  return sortedUnique(
+    allowStatementsOfRole(template, roleLogicalId)
+      .filter((statement) => statementTargets(statement, resourceLogicalId))
+      .flatMap(statementActions)
+  );
 }
 
 /**
@@ -615,6 +664,14 @@ const synthesized: {
   keywordResearchTableTtl: unknown;
   keywordResearchIdMethods: ApiGatewayMethodSnapshot[];
   keywordResearchRetryMethods: ApiGatewayMethodSnapshot[];
+  keywordResearchAgentMethods: ApiGatewayMethodSnapshot[];
+  researchTemplatesMethods: ApiGatewayMethodSnapshot[];
+  researchTemplateIdMethods: ApiGatewayMethodSnapshot[];
+  researchTemplatesTableKeySchema: unknown;
+  researchWorkerEnvVars: Record<string, unknown>;
+  researchWorkerRoleActions: string[];
+  healthCheckMemorySize: number;
+  bucketDeploymentMemorySizes: number[];
   schedulesMethods: ApiGatewayMethodSnapshot[];
   scheduleIdMethods: ApiGatewayMethodSnapshot[];
   scheduleRunMethods: ApiGatewayMethodSnapshot[];
@@ -661,6 +718,14 @@ const synthesized: {
   keywordResearchTableTtl: undefined,
   keywordResearchIdMethods: [],
   keywordResearchRetryMethods: [],
+  keywordResearchAgentMethods: [],
+  researchTemplatesMethods: [],
+  researchTemplateIdMethods: [],
+  researchTemplatesTableKeySchema: undefined,
+  researchWorkerEnvVars: {},
+  researchWorkerRoleActions: [],
+  healthCheckMemorySize: Number.NaN,
+  bucketDeploymentMemorySizes: [],
   schedulesMethods: [],
   scheduleIdMethods: [],
   scheduleRunMethods: [],
@@ -765,6 +830,17 @@ beforeAll(() => {
   const keywordResearchRetryId = findApiResourceId(template, 'retry', keywordResearchJobId);
   synthesized.keywordResearchIdMethods = extractApiMethods(template, keywordResearchJobId);
   synthesized.keywordResearchRetryMethods = extractApiMethods(template, keywordResearchRetryId);
+  const keywordResearchAgentId = findApiResourceId(template, 'agent', keywordResearchId);
+  const researchTemplatesId = findApiResourceId(template, 'templates', keywordResearchId);
+  const researchTemplateId = findApiResourceId(template, '{id}', researchTemplatesId);
+  synthesized.keywordResearchAgentMethods = extractApiMethods(template, keywordResearchAgentId);
+  synthesized.researchTemplatesMethods = extractApiMethods(template, researchTemplatesId);
+  synthesized.researchTemplateIdMethods = extractApiMethods(template, researchTemplateId);
+  synthesized.researchTemplatesTableKeySchema = extractTableKeySchema(template, 'CitationAnalysis-ResearchTemplates');
+  synthesized.researchWorkerEnvVars = extractLambdaEnvVars(template, RESEARCH_WORKER_FUNCTION_NAME);
+  synthesized.researchWorkerRoleActions = extractFunctionRoleActions(template, RESEARCH_WORKER_FUNCTION_NAME);
+  synthesized.healthCheckMemorySize = extractFunctionMemorySize(template, 'CitationAnalysis-API-Health');
+  synthesized.bucketDeploymentMemorySizes = extractMemorySizesByLogicalIdPrefix(template, 'CustomCDKBucketDeployment');
 
   const schedulesId = findApiResourceId(template, 'schedules');
   const scheduleId = findApiResourceId(template, '{name}', schedulesId);
@@ -1220,8 +1296,71 @@ describe('Keyword research routes', () => {
     const all = [...synthesized.keywordResearchIdMethods, ...synthesized.keywordResearchRetryMethods];
 
     expect(all).toHaveLength(3);
-    expect(all.every((method) => method.authorizationType === COGNITO_AUTH)).toBe(true);
-    expect(all.every((method) => method.integrationUri.includes(synthesized.keywordMgmtFunctionId))).toBe(true);
+    expect(verbsWithoutCognitoAuthorizer(all)).toStrictEqual([]);
+    expect(verbsNotIntegratedWith(all, synthesized.keywordMgmtFunctionId)).toStrictEqual([]);
+  });
+});
+
+describe('Research agent (2.5.0)', () => {
+  /**
+   * The agent reuses the research state machine: Evaluate runs after every
+   * Map and a Choice loops back to Plan while the worker says `continue`.
+   */
+  it('evaluates every round and loops back to Plan on continue', () => {
+    expect(synthesized.researchDefinitionRaw).toContain('"action":"evaluate"');
+    expect(synthesized.researchDefinitionRaw).toContain('"Type":"Choice"');
+    expect(synthesized.researchDefinitionRaw).toContain('"Variable":"$.decision"');
+    expect(synthesized.researchDefinitionRaw).toContain('"StringEquals":"continue"');
+  });
+
+  it('lets the worker call Bedrock for planning, evaluation and selection', () => {
+    expect(synthesized.researchWorkerRoleActions).toContain('bedrock:InvokeModel');
+  });
+
+  it('routes planning to the balanced tier and evaluation to the fast tier', () => {
+    expect(synthesized.researchWorkerEnvVars).toMatchObject({
+      BEDROCK_TIER_RESEARCH_PLANNING: 'balanced',
+      BEDROCK_TIER_RESEARCH_EVALUATION: 'fast',
+    });
+  });
+
+  it('stores saved system prompts in a table keyed by id and hands it to the API function', () => {
+    expect(synthesized.researchTemplatesTableKeySchema).toStrictEqual([{ AttributeName: 'id', KeyType: 'HASH' }]);
+    expect(synthesized.keywordMgmtEnvVars).toHaveProperty('DYNAMODB_TABLE_RESEARCH_TEMPLATES');
+  });
+
+  it('exposes POST on the agent resource', () => {
+    expect(synthesized.keywordResearchAgentMethods.map((method) => method.httpMethod)).toStrictEqual(['POST']);
+  });
+
+  it('exposes GET and POST on the templates collection and PUT and DELETE on a template', () => {
+    const collection = synthesized.researchTemplatesMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
+    const single = synthesized.researchTemplateIdMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
+
+    expect(collection).toStrictEqual(['GET', 'POST']);
+    expect(single).toStrictEqual(['DELETE', 'PUT']);
+  });
+
+  it('requires the Cognito authorizer and the KeywordMgmt integration on every agent route', () => {
+    const all = [...synthesized.keywordResearchAgentMethods, ...synthesized.researchTemplatesMethods, ...synthesized.researchTemplateIdMethods];
+
+    expect(all).toHaveLength(5);
+    expect(verbsWithoutCognitoAuthorizer(all)).toStrictEqual([]);
+    expect(verbsNotIntegratedWith(all, synthesized.keywordMgmtFunctionId)).toStrictEqual([]);
+  });
+});
+
+describe('Lambda memory headroom (2.5.0 audit)', () => {
+  /**
+   * 14-day CloudWatch REPORT peaks on 2026-09-18: every function sat below
+   * 60% of its memory except these two, which are raised here.
+   */
+  it('gives the health check the same 256 MB as the other API functions', () => {
+    expect(synthesized.healthCheckMemorySize).toBe(256);
+  });
+
+  it('gives the dashboard bucket deployment handler 512 MB', () => {
+    expect(synthesized.bucketDeploymentMemorySizes).toStrictEqual([512]);
   });
 });
 

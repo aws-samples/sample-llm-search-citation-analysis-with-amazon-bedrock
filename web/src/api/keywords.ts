@@ -10,6 +10,8 @@ interface PromoteKeywordsOptions {
   keywords: ResearchKeyword[];
   status?: NonNullable<Keyword['status']>;
   priority?: NonNullable<KeywordExtended['priority']>;
+  /** Keyword groups the new keywords join (e.g. the hotel a research run was for). */
+  groupIds?: string[];
   signal?: AbortSignal;
 }
 
@@ -35,7 +37,7 @@ export async function promoteKeywords(
   options: PromoteKeywordsOptions
 ): Promise<PromotionOutcome> {
   const {
-    keywords, status, priority, signal
+    keywords, status, priority, groupIds, signal
   } = options;
   const wire = await apiPost<PromoteKeywordsResponse>(
     '/keywords/promote',
@@ -43,6 +45,7 @@ export async function promoteKeywords(
       keywords,
       ...(status === undefined ? {} : { status }),
       ...(priority === undefined ? {} : { priority }),
+      ...(groupIds === undefined || groupIds.length === 0 ? {} : { group_ids: groupIds }),
     },
     {
       signal,

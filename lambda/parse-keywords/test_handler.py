@@ -7,15 +7,14 @@ Covers:
 - query_prompts resolution from DynamoDB for scheduled runs
 """
 
-import importlib.util
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Make `from shared.xxx import` resolve (layer puts shared/ at /opt/python/shared/)
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))  # lambda/
+from testing.module_loader import load_handler_module
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
 
 # Mock DynamoDB tables at module level
 mock_keywords_table = MagicMock()
@@ -40,22 +39,16 @@ def _mock_boto3_client(*args, **kwargs):
     return MagicMock()
 
 
-# Import the handler module
-_handler_spec = importlib.util.spec_from_file_location(
-    'parse_keywords_handler',
-    os.path.join(os.path.dirname(__file__), 'handler.py')
-)
-_handler_mod = importlib.util.module_from_spec(_handler_spec)
-
 _test_env = {
     'KEYWORDS_TABLE': 'test-keywords-table',
     'QUERY_PROMPTS_TABLE': 'test-prompts-table',
 }
 
+# Import the handler module
 with patch('boto3.resource', side_effect=_mock_boto3_resource):
     with patch('boto3.client', side_effect=_mock_boto3_client):
         with patch.dict(os.environ, _test_env):
-            _handler_spec.loader.exec_module(_handler_mod)
+            _handler_mod = load_handler_module(_HERE, 'handler.py', 'parse_keywords_handler')
 
 _handler_mod.dynamodb = mock_dynamodb
 

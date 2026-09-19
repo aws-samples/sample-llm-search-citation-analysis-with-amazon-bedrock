@@ -9,12 +9,7 @@ contract. These tests pin the contract.
 
 from __future__ import annotations
 
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(__file__))
-
-import industry_presets  # type: ignore[import-not-found]
+from shared import industry_presets
 
 REQUIRED_FIELDS = {"name", "description", "entity_types", "example_brands", "extraction_focus"}
 

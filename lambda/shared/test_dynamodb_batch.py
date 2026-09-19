@@ -11,13 +11,9 @@ Covers the semantics the handler callers depend on:
 
 from __future__ import annotations
 
-import os
-import sys
 from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.dirname(__file__))
-
-import dynamodb_batch  # type: ignore[import-not-found]
+from shared import dynamodb_batch
 
 
 def _fake_table_with_items(per_key_items: dict[str, list[dict]]) -> MagicMock:

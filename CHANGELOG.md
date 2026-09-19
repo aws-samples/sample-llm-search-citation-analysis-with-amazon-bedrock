@@ -9,6 +9,106 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.5.0] - 2026-09-18
+
+Keyword Research Agent: describe a hotel and the dimensions to expand by, and
+an agent plans its own searches, runs them in the background, judges each
+round, and proposes the keywords the hotel should be visible for — with an
+editable, saveable system prompt (the "agente configurable"), a full trace,
+one-click promotion into the hotel's keyword group and Excel export.
+
+### Added
+
+- **Research agent job type** (`POST /api/keyword-research/agent`, `type:
+  agent` in history). The brief: hotel/seed, market (`country`, `language`
+  ISO codes), expansion dimensions (destination, location/neighbourhood,
+  points of interest, hotel attributes, audience, trip type), a free-text
+  instruction, `target_count` (10–100, default 60), `max_rounds` (1–3,
+  default 2), optional destination `group_id` (validated) and the system
+  prompt (inline edit, else the chosen template, else the built-in default).
+  The prompt is snapshotted on the job, so editing a template never changes
+  what a past run did.
+- **Agentic loop on the 2.2.0 state machine.** `Plan` asks Bedrock
+  (`ModelRole.RESEARCH_PLANNING`, balanced tier) for ≤8 queries tagged with a
+  dimension and rationale; each query becomes one parallel, checkpointed step
+  on a web-search provider (rotating Perplexity / OpenAI / Gemini); a new
+  `Evaluate` state asks the model (`RESEARCH_EVALUATION`, fast tier) whether
+  another round would add materially new keywords and which queries to run;
+  a `Choice` loops back to `Plan` while it says `continue` and the round cap
+  allows, else `Finalize` asks the planning model to select and rank the
+  final list (≤ target, per dimension, with intent, competition, relevance
+  and a one-line rationale). Model failures degrade — evaluation to `stop`,
+  selection to the top candidates by relevance (`proposal_source:
+  fallback`) — instead of losing the run. Retry re-runs only the unfinished
+  steps of the current round and then continues the loop.
+- **Google expansion signals.** When a SerpAPI key is configured, one extra
+  step per round collects Google's related searches, People Also Ask
+  questions and autocomplete suggestions for every planned query
+  (`shared/keyword_signals.py`); they enter the candidate pool as provider
+  `serpapi` and are scored by the evaluation and selection models. (Exa,
+  Firecrawl, Tavily and Brave were reviewed: they are plain search APIs with
+  no expansion features, so they were not wired in.)
+- **System-prompt templates** (`CitationAnalysis-ResearchTemplates`;
+  `GET/POST /api/keyword-research/templates`, `PUT/DELETE
+  /api/keyword-research/templates/{id}`): a built-in template plus the
+  team's saved ones (name ≤100, prompt 20–6000 chars, cap 50). Open to every
+  authenticated user, like the other research routes.
+- **Research Agent tab** (now the first tab under Keyword Research): brief
+  form with dimension toggles, market and language, target and round budget,
+  destination group, template picker with an inline prompt editor (save as
+  new / update / delete) and a cost ceiling shown before starting ("up to N
+  web searches, M model calls…"); a **runs list** that keeps polling every
+  active run so several can be shipped and left in the background; a run
+  view with live per-step progress (the query each step searched, its round
+  and provider), the **agent trace** (instructions used, each round's
+  strategy, queries and evaluation) and the **proposal** grouped by dimension
+  with per-section selection, "Add N keywords to ‹group›" and **Export to
+  Excel** (Proposal, Trace and Brief sheets).
+- `POST /api/keywords/promote` callers can now pass `group_ids` from the UI
+  (`promoteKeywords({ groupIds })`), so research results land directly in a
+  hotel's group.
+- `shared.models.invoke_bedrock(system=…)` sends a Converse system block.
+
+### Changed
+
+- The keyword-research "job I was waiting for" re-attach moved from
+  sessionStorage to localStorage: a run started before the browser was
+  closed re-attaches in any tab instead of only surviving a reload.
+- Research history lists agent runs (badge "Agent") and omits their prompt
+  snapshot; the detail route (`GET /api/keyword-research/{id}`) keeps it.
+- Progress panel wording follows the job type ("3 of 4 steps finished ·
+  round 2 of 3" for agent runs; providers for expansion/competitor).
+- Lambda memory audit (14/90-day CloudWatch peaks): every function sat below
+  60% of its memory except `CitationAnalysis-API-Health` (74% of 128 MB →
+  256 MB) and the CDK dashboard bucket-deployment handler (100% of 128 MB,
+  ~60 s per deploy → 512 MB). `ResearchWorker` peaks at 20% of 512 MB.
+
+### Fixed
+
+- `POST /api/keyword-research/*` answered `{"error": "An unexpected error
+  occurred"}` when no provider key was configured or the execution could not
+  be started: `error_response` sanitizes exception *types* and swallowed the
+  plain-string messages. The routes now return the real reason (400 "No API
+  keys configured…", 503 "Could not start…").
+
+### Changed (zero-duplication follow-through)
+
+- The nine clones 2.4.2 deferred as this feature's files (`keyword-research.py`,
+  `test_keyword_research_job_lifecycle.py`, `test_research_worker.py`,
+  `test_models.py`) are gone, along with the eight TypeScript and three
+  further Python clones the feature itself introduced; the four temporary
+  entries in the Python jscpd `ignore` lists are removed. All four
+  duplication gates run at threshold `0` with no exemptions.
+- `keyword-research.py`: `_retry_research` and `_get_research` share
+  `_load_research` (path id → GetItem → 404 → stale sweep); same routes,
+  responses and status codes.
+- The feature's specs and tests use the shared foundations
+  (`web/src/test/infrastructureMock`, `fetchResponses`, `lambda/conftest.py`,
+  `lambda/testing/` — which gains `load_handler_module_offline` and
+  `KEYWORD_RESEARCH_ENV`), and the last 33 legacy Lambda tests drop their
+  redundant per-file `sys.path` shims, two of which put the built layer
+  ahead of the source tree.
+
 ## [2.4.2] - 2026-09-18
 
 Zero-duplication refactor of the Lambda (Python) code and its tests, with
@@ -66,14 +166,13 @@ shared modules).
   `_browser_created_dynamically` attribute (`shared/browser_tools.py`): no
   readers anywhere.
 
-### Deferred
+### Deferred (resolved in 2.5.0)
 
-- Nine clones inside files owned by the open research-agent PR (#113) —
+- Nine clones inside files owned by the then-open research-agent PR (#113) —
   `api/keyword-research.py`, `api/test_keyword_research_job_lifecycle.py`,
-  `research-worker/test_research_worker.py`, `shared/test_models.py` — are
+  `research-worker/test_research_worker.py`, `shared/test_models.py` — were
   temporarily listed in the two Python jscpd configs' `ignore` so the gate
-  stays at threshold `0` without editing that PR's files. Clear them and drop
-  the four entries when #113 rebases onto this.
+  stayed at threshold `0` without editing that PR's files. Cleared in 2.5.0.
 
 ## [2.4.1] - 2026-09-18
 

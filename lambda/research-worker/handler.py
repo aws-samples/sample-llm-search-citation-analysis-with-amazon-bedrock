@@ -3,22 +3,29 @@ ResearchWorker Lambda Function
 
 Runs the steps of the ``CitationAnalysis-KeywordResearch`` state machine:
 
-    Plan -> Map(ExecuteStep | FailStep) -> Finalize      (Catch -> FailJob)
+    Plan -> Map(ExecuteStep | FailStep) -> Evaluate -> continue? -> Plan ...
+                                                     \\-> Finalize
+                                          (any crash -> FailJob)
 
-One research job (keyword expansion or competitor analysis) is one row in
-``CitationAnalysis-KeywordResearch`` and one execution. Every configured
-web-search provider becomes a step that runs in parallel and checkpoints its
-own result under ``steps.<step_id>`` the moment it finishes — a provider that
-times out, or a worker that dies mid-call, loses that one step and nothing
-else. ``Finalize`` merges the completed steps into the job-level result.
+One research job (keyword expansion, competitor analysis or the research
+agent) is one row in ``CitationAnalysis-KeywordResearch`` and one execution.
+Expansion and competitor jobs run one step per configured web-search
+provider; agent jobs run one step per model-planned query, in rounds. Every
+step checkpoints its own result under ``steps.<step_id>`` the moment it
+finishes — a provider that times out, or a worker that dies mid-call, loses
+that one step and nothing else. ``Finalize`` merges the completed steps into
+the job-level result (for the agent: a model-selected proposal).
 
 Actions (``event['action']``):
 
     plan          decide which steps to run (all providers, or only the
-                  non-completed ones on a retry) and mark the job running
+                  non-completed ones on a retry; for the agent: the round's
+                  planned queries) and mark the job running
     execute_step  run one provider and write the step's result or failure
     fail_step     record a step the state machine could not complete
                   (worker crash or Lambda timeout — nothing raised in Python)
+    evaluate      agent only: judge the round, decide continue | stop and plan
+                  the next round's queries (other job types answer ``stop``)
     finalize      merge completed steps; status completed | partial | failed
     fail          mark the whole job failed (Plan or Finalize crashed)
 
@@ -30,10 +37,12 @@ failures (throttling, timeouts).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
 import re
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -43,8 +52,29 @@ from bs4 import BeautifulSoup
 
 from shared.ai_clients import get_web_search_clients, get_web_search_provider, run_web_search
 from shared.dynamo_decimal import convert_floats_to_decimal
+from shared.keyword_signals import fetch_google_signals
 from shared.llm_json import parse_llm_json
+from shared.models import ModelRole, invoke_bedrock
 from shared.prompt_safety import wrap_user_input
+from shared.research_agent import (
+    AGENT_DEFAULT_ROUNDS,
+    AGENT_MAX_ROUNDS,
+    DEFAULT_SYSTEM_PROMPT,
+    OTHER_DIMENSION,
+    SIGNALS_PROVIDER_ID,
+    SIGNALS_SECRET_NAME,
+    assign_steps,
+    build_evaluate_prompt,
+    build_plan_prompt,
+    build_search_prompt,
+    build_selection_prompt,
+    fallback_selection,
+    parse_evaluation,
+    parse_plan,
+    parse_selection,
+    planned_query_texts,
+    step_plan_fields,
+)
 from shared.research_jobs import (
     COMPETITOR_CATEGORIES,
     RAW_RESPONSE_LIMIT,
@@ -56,8 +86,11 @@ from shared.research_jobs import (
     STEP_PENDING,
     STEP_RUNNING,
     TERMINAL_STATUSES,
+    TYPE_AGENT,
     TYPE_COMPETITOR,
+    completed_steps,
     final_status,
+    merge_expansion_keywords,
     step_id_for,
     summarize_job,
 )
@@ -85,6 +118,17 @@ STEP_MAX_RETRIES = 2
 
 ERROR_MESSAGE_LIMIT = 500
 
+# Bedrock output budgets for the agent's own calls (excluding thinking): the
+# planner and evaluator answer with at most 8 queries; the selection lists up
+# to 100 keywords with a one-sentence rationale each.
+PLAN_MAX_TOKENS = 1500
+EVALUATE_MAX_TOKENS = 1500
+SELECTION_MAX_TOKENS = 6000
+
+# The SerpAPI signals step makes two calls per planned query; stop collecting
+# past this budget so the step always ends inside the 300s Lambda timeout.
+SIGNALS_TIME_BUDGET_SECONDS = 200
+
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 
 
@@ -98,6 +142,10 @@ class NoProviderConfiguredError(RuntimeError):
 
 class StepFailedError(RuntimeError):
     """A provider step failed for a reason worth showing the user."""
+
+
+class AgentPlanningError(RuntimeError):
+    """The planning model returned no usable queries — the agent job cannot start."""
 
 
 # =============================================================================
@@ -309,6 +357,9 @@ def plan(event: dict[str, Any]) -> dict[str, Any]:
     if not provider_ids:
         raise NoProviderConfiguredError('No API keys configured')
 
+    if job.get('type') == TYPE_AGENT:
+        return _plan_agent(job, provider_ids, retry, event.get('execution_arn', ''))
+
     steps, to_run = _steps_to_run(job, provider_ids, retry)
 
     names = {'#s': 'status'}
@@ -342,6 +393,251 @@ def plan(event: dict[str, Any]) -> dict[str, Any]:
     )
     logger.info(f"Planned research job {job_id}: {len(to_run)} of {len(steps)} steps to run (retry={retry})")
     return {'job_id': job_id, 'steps': to_run}
+
+
+# =============================================================================
+# Research agent
+# =============================================================================
+
+def _agent_max_rounds(job: dict[str, Any]) -> int:
+    config = job.get('config') or {}
+    return max(1, min(int(config.get('max_rounds') or AGENT_DEFAULT_ROUNDS), AGENT_MAX_ROUNDS))
+
+
+def _agent_system_prompt(job: dict[str, Any]) -> str:
+    return job.get('system_prompt') or DEFAULT_SYSTEM_PROMPT
+
+
+def _agent_candidates(job: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every keyword found so far, merged across steps and rounds."""
+    return merge_expansion_keywords(completed_steps(job))
+
+
+def _plan_first_round(job: dict[str, Any]) -> dict[str, Any]:
+    """Ask the planning model for round 1; a planner that answers nothing usable fails the job."""
+    config = job.get('config') or {}
+    text = invoke_bedrock(
+        build_plan_prompt(config),
+        ModelRole.RESEARCH_PLANNING,
+        max_tokens=PLAN_MAX_TOKENS,
+        system=_agent_system_prompt(job),
+    )
+    planned = parse_plan(text, config)
+    if planned is None:
+        raise AgentPlanningError('The planning model returned no usable search queries')
+    return planned
+
+
+def _plan_agent(job: dict[str, Any], provider_ids: list[str], retry: bool, execution_arn: str) -> dict[str, Any]:
+    """Plan the agent's next round, or re-run the unfinished steps on a retry.
+
+    Round 1 comes from the planning model; every later round runs the queries
+    the evaluator asked for. A retry keeps the plan and every completed step
+    and re-runs only the steps that did not complete — when all of them did
+    (the crash was in Evaluate or Finalize) nothing runs and the state machine
+    proceeds straight to Evaluate again.
+    """
+    job_id = job['id']
+    existing = {step_id: step for step_id, step in (job.get('steps') or {}).items() if isinstance(step, dict)}
+    round_number = int(job.get('round') or 0)
+    timestamp = get_timestamp()
+
+    names = {'#s': 'status', '#rnd': 'round'}
+    values: dict[str, Any] = {':running': STATUS_RUNNING, ':ts': timestamp, ':arn': execution_arn}
+    sets = ['#s = :running', 'updated_at = :ts', 'execution_arn = :arn']
+
+    if retry and existing:
+        to_run = []
+        for index, (step_id, step) in enumerate(existing.items()):
+            if step.get('status') == STEP_COMPLETED:
+                continue
+            reset = {**step_plan_fields(step), 'provider': step.get('provider', ''), 'status': STEP_PENDING}
+            names[f'#st{index}'] = step_id
+            values[f':st{index}'] = reset
+            sets.append(f'steps.#st{index} = :st{index}')
+            to_run.append({'step_id': step_id, 'provider': reset['provider']})
+        values[':total'] = len(existing)
+        sets.append('steps_total = :total')
+        research_table.update_item(
+            Key={'id': job_id},
+            UpdateExpression=f"SET {', '.join(sets)} REMOVE error_message",
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+        logger.info(f"Agent job {job_id}: retry re-runs {len(to_run)} of {len(existing)} steps (round {round_number})")
+        return {'job_id': job_id, 'steps': to_run, 'retry': False}
+
+    if round_number >= _agent_max_rounds(job):
+        # Nothing left to plan; Evaluate forces `stop` at the round cap.
+        return {'job_id': job_id, 'steps': [], 'retry': False}
+
+    strategy = ''
+    if round_number == 0:
+        planned = _plan_first_round(job)
+        queries, strategy = planned['queries'], planned['strategy']
+    else:
+        rounds = job.get('rounds') or []
+        last = rounds[-1] if rounds and isinstance(rounds[-1], dict) else {}
+        queries = list((last.get('evaluation') or {}).get('next_queries') or [])
+    if not queries:
+        return {'job_id': job_id, 'steps': [], 'retry': False}
+
+    new_round = round_number + 1
+    new_steps = assign_steps(queries, provider_ids, new_round, with_signals=bool(get_api_key(SIGNALS_SECRET_NAME)))
+    round_info = {
+        'round': new_round,
+        'planned_at': timestamp,
+        'strategy': strategy,
+        'queries': queries,
+        'step_ids': list(new_steps),
+    }
+    values.update({':rnd': new_round, ':round_info': [round_info], ':empty': [], ':total': len(existing) + len(new_steps)})
+    sets += ['#rnd = :rnd', 'rounds = list_append(if_not_exists(rounds, :empty), :round_info)', 'steps_total = :total']
+    if not existing:
+        values[':steps'] = new_steps
+        sets.append('steps = :steps')
+    else:
+        for index, (step_id, step) in enumerate(new_steps.items()):
+            names[f'#st{index}'] = step_id
+            values[f':st{index}'] = step
+            sets.append(f'steps.#st{index} = :st{index}')
+
+    research_table.update_item(
+        Key={'id': job_id},
+        UpdateExpression=f"SET {', '.join(sets)} REMOVE error_message",
+        ExpressionAttributeNames=names,
+        ExpressionAttributeValues=values,
+    )
+    to_run = [{'step_id': step_id, 'provider': step['provider']} for step_id, step in new_steps.items()]
+    logger.info(f"Agent job {job_id}: planned round {new_round} with {len(queries)} queries as {len(to_run)} steps")
+    return {'job_id': job_id, 'steps': to_run, 'retry': False}
+
+
+def _run_signals_step(config: dict[str, Any], planned: dict[str, Any]) -> dict[str, Any]:
+    """Google related searches / questions / autocomplete for every query of the round."""
+    api_key = get_api_key(SIGNALS_SECRET_NAME)
+    if not api_key:
+        raise StepFailedError(f'{SIGNALS_PROVIDER_ID} is not configured')
+    keywords: list[dict[str, Any]] = []
+    errors: list[str] = []
+    started = time.monotonic()
+    for item in planned.get('queries') or []:
+        if time.monotonic() - started > SIGNALS_TIME_BUDGET_SECONDS:
+            errors.append('time budget exhausted before every query was checked')
+            break
+        query = item.get('query', '') if isinstance(item, dict) else ''
+        dimension = item.get('dimension', OTHER_DIMENSION) if isinstance(item, dict) else OTHER_DIMENSION
+        try:
+            for candidate in fetch_google_signals(api_key, query, country=config.get('country', 'us'), language=config.get('language', 'en')):
+                keywords.append({**candidate, 'dimension': dimension})
+        except Exception as exc:
+            errors.append(f'{query}: {_error_text(exc)}')
+    if not keywords and errors:
+        raise StepFailedError('; '.join(errors)[:ERROR_MESSAGE_LIMIT])
+    result: dict[str, Any] = {'keywords': keywords, 'keyword_count': len(keywords)}
+    if errors:
+        result['warnings'] = errors[:5]
+    return result
+
+
+def _run_agent_step(job: dict[str, Any], planned: dict[str, Any], provider_id: str) -> dict[str, Any]:
+    """Run one planned query on its provider (or the round's signals step)."""
+    config = job.get('config') or {}
+    if provider_id == SIGNALS_PROVIDER_ID:
+        return _run_signals_step(config, planned)
+
+    provider = get_web_search_provider(provider_id)
+    if provider is None:
+        raise StepFailedError(f'Unknown provider {provider_id!r}')
+    api_key = get_api_key(provider.secret_name)
+    if not api_key:
+        raise StepFailedError(f'{provider_id} is not configured')
+    client = provider.client_class(api_key)
+
+    dimension = planned.get('dimension', OTHER_DIMENSION)
+    prompt = build_search_prompt(config, planned.get('query', ''), dimension)
+    text = run_web_search(provider, client, prompt, max_retries=STEP_MAX_RETRIES)
+    result = _parse_expansion(text)
+    for keyword in result['keywords']:
+        keyword.setdefault('dimension', dimension)
+    result['raw_response'] = text[:RAW_RESPONSE_LIMIT]
+    return result
+
+
+def _stop_evaluation(reason: str) -> dict[str, Any]:
+    return {'assessment': '', 'decision': 'stop', 'reason': reason, 'next_queries': []}
+
+
+def _evaluate_round(job: dict[str, Any], candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    """Ask the evaluation model whether another round is worth it.
+
+    Model errors degrade to ``stop`` (recorded as the reason) instead of
+    failing the job: the keywords found so far are still worth finalizing.
+    """
+    config = job.get('config') or {}
+    try:
+        text = invoke_bedrock(
+            build_evaluate_prompt(config, int(job.get('round') or 0), candidates),
+            ModelRole.RESEARCH_EVALUATION,
+            max_tokens=EVALUATE_MAX_TOKENS,
+            system=_agent_system_prompt(job),
+        )
+    except Exception as exc:
+        logger.warning(f"Agent job {job['id']}: evaluation model failed: {exc}")
+        return _stop_evaluation(f'The evaluation model failed ({_error_text(exc)}); finishing with the keywords found so far.')
+    evaluation = parse_evaluation(text, config, exclude_queries=planned_query_texts(job))
+    if evaluation is None:
+        return _stop_evaluation('The evaluation model returned no usable decision; finishing with the keywords found so far.')
+    return evaluation
+
+
+def evaluate(event: dict[str, Any]) -> dict[str, Any]:
+    """Agent only: judge the round just finished and decide continue | stop."""
+    job_id = event['job_id']
+    job = _load_job(job_id)
+    if job.get('type') != TYPE_AGENT:
+        return {'job_id': job_id, 'decision': 'stop', 'retry': False}
+
+    round_number = int(job.get('round') or 0)
+    max_rounds = _agent_max_rounds(job)
+    candidates = _agent_candidates(job)
+    if round_number >= max_rounds:
+        evaluation = _stop_evaluation(f'Reached the maximum of {max_rounds} round{"s" if max_rounds != 1 else ""}.')
+    elif not candidates:
+        evaluation = _stop_evaluation('No candidate keywords were found; nothing to expand.')
+    else:
+        evaluation = _evaluate_round(job, candidates)
+
+    evaluation = {**evaluation, 'candidate_count': len(candidates), 'evaluated_at': get_timestamp()}
+    if round_number >= 1:
+        research_table.update_item(
+            Key={'id': job_id},
+            UpdateExpression=f'SET rounds[{round_number - 1}].evaluation = :ev, updated_at = :ts',
+            ExpressionAttributeValues={':ev': convert_floats_to_decimal(evaluation), ':ts': evaluation['evaluated_at']},
+        )
+    logger.info(f"Agent job {job_id}: round {round_number} evaluated -> {evaluation['decision']} ({len(candidates)} candidates)")
+    return {'job_id': job_id, 'decision': evaluation['decision'], 'round': round_number, 'retry': False}
+
+
+def _select_proposal(job: dict[str, Any], candidates: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], str]:
+    """The final ranked list: model-selected, or the top candidates when the model fails."""
+    if not candidates:
+        return [], 'none'
+    config = job.get('config') or {}
+    try:
+        text = invoke_bedrock(
+            build_selection_prompt(config, candidates),
+            ModelRole.RESEARCH_PLANNING,
+            max_tokens=SELECTION_MAX_TOKENS,
+            system=_agent_system_prompt(job),
+        )
+        proposal = parse_selection(text, config, candidates)
+    except Exception as exc:
+        logger.warning(f"Agent job {job['id']}: selection model failed: {exc}")
+        proposal = None
+    if proposal:
+        return proposal, 'model'
+    return fallback_selection(config, candidates), 'fallback'
 
 
 def _parse_expansion(text: str) -> dict[str, Any]:
@@ -404,18 +700,21 @@ def _run_step(job: dict[str, Any], provider_id: str) -> dict[str, Any]:
 def execute_step(event: dict[str, Any]) -> dict[str, Any]:
     job_id, step_id, provider_id = event['job_id'], event['step_id'], event['provider']
     job = _load_job(job_id)
+    # Agent steps carry their planned query; every status write keeps it.
+    planned = step_plan_fields((job.get('steps') or {}).get(step_id) or {})
     started_at = get_timestamp()
-    _write_step(job_id, step_id, {'provider': provider_id, 'status': STEP_RUNNING, 'started_at': started_at})
+    _write_step(job_id, step_id, {**planned, 'provider': provider_id, 'status': STEP_RUNNING, 'started_at': started_at})
 
     try:
-        result = _run_step(job, provider_id)
-        step = {'provider': provider_id, 'status': STEP_COMPLETED, 'started_at': started_at, 'finished_at': get_timestamp(), **result}
+        result = _run_agent_step(job, planned, provider_id) if job.get('type') == TYPE_AGENT else _run_step(job, provider_id)
+        step = {**planned, 'provider': provider_id, 'status': STEP_COMPLETED, 'started_at': started_at, 'finished_at': get_timestamp(), **result}
         logger.info(f"Step {step_id} of job {job_id} completed with {result['keyword_count']} keywords")
     except Exception as e:
         # Provider errors belong to this step alone: record them and return
         # normally so the other providers' steps still count.
         logger.warning(f"Step {step_id} of job {job_id} failed: {e}")
         step = {
+            **planned,
             'provider': provider_id,
             'status': STEP_FAILED,
             'started_at': started_at,
@@ -430,7 +729,11 @@ def execute_step(event: dict[str, Any]) -> dict[str, Any]:
 def fail_step(event: dict[str, Any]) -> dict[str, Any]:
     """Record a step whose worker invocation died (Lambda timeout, crash)."""
     job_id, step_id = event['job_id'], event['step_id']
+    planned: dict[str, Any] = {}
+    with contextlib.suppress(Exception):
+        planned = step_plan_fields((_load_job(job_id).get('steps') or {}).get(step_id) or {})
     step = {
+        **planned,
         'provider': event.get('provider', ''),
         'status': STEP_FAILED,
         'finished_at': get_timestamp(),
@@ -473,6 +776,17 @@ def finalize(event: dict[str, Any]) -> dict[str, Any]:
         values[':ind'] = analysis.get('industry', 'unknown')
         values[':pf'] = analysis.get('page_focus', '')
         sets += ['analysis = :a', 'industry = :ind', 'page_focus = :pf']
+    elif job.get('type') == TYPE_AGENT:
+        # `keywords` is the proposal the user reviews; the merged candidates
+        # stay on the steps (and in the trace counts).
+        proposal, source = _select_proposal(job, summary['keywords'])
+        values.update({
+            ':kw': convert_floats_to_decimal(proposal),
+            ':kc': len(proposal),
+            ':cc': summary['keyword_count'],
+            ':src': source,
+        })
+        sets += ['keywords = :kw', 'candidates_count = :cc', 'proposal_source = :src']
     else:
         values[':kw'] = convert_floats_to_decimal(summary['keywords'])
         sets.append('keywords = :kw')
@@ -490,8 +804,8 @@ def finalize(event: dict[str, Any]) -> dict[str, Any]:
         ExpressionAttributeNames=names,
         ExpressionAttributeValues=values,
     )
-    logger.info(f"Finalized research job {job_id}: status={status} keywords={summary['keyword_count']}")
-    return {'job_id': job_id, 'status': status, 'keyword_count': summary['keyword_count']}
+    logger.info(f"Finalized research job {job_id}: status={status} keywords={values[':kc']}")
+    return {'job_id': job_id, 'status': status, 'keyword_count': values[':kc']}
 
 
 def fail(event: dict[str, Any]) -> dict[str, Any]:
@@ -530,6 +844,7 @@ ACTIONS = {
     'plan': plan,
     'execute_step': execute_step,
     'fail_step': fail_step,
+    'evaluate': evaluate,
     'finalize': finalize,
     'fail': fail,
 }

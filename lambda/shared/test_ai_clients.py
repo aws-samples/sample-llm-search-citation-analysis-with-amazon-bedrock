@@ -18,18 +18,9 @@ and the registry replaces keyword-research's drifted simplified copies
 
 from __future__ import annotations
 
-import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-# `requests` lives in the built layer, not the dev venv. Appended, so `shared`
-# still resolves from source first.
-_LAYER_PY = os.path.join(os.path.dirname(__file__), '..', 'layer', 'python')
-if os.path.isdir(_LAYER_PY) and _LAYER_PY not in sys.path:
-    sys.path.append(_LAYER_PY)
 
 from shared import ai_clients
 from shared.ai_clients import (
