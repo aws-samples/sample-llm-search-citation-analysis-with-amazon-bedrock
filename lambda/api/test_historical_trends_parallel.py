@@ -1,20 +1,4 @@
-"""
-Tests for the parallel fan-out in `get_all_keywords_trends` (audit item 16).
-
-Background — these tests pin the fix for the last N+1 DynamoDB query loop
-flagged in the audit. The previous implementation looped over keywords and
-called `get_historical_trends` serially, which issued one DynamoDB `query`
-per keyword. For the default 20-keyword cap that was 20 sequential round-trips.
-
-The refactor splits `get_historical_trends` into:
-  - `_fetch_keyword_items(keyword)` — DynamoDB query only
-  - `_build_trend_from_items(...)` — pure-Python aggregation
-
-`get_all_keywords_trends` now fans out phase 1 through a ThreadPoolExecutor
-(bounded at `_TRENDS_MAX_WORKERS=10`) and runs phase 2 serially afterwards.
-
-These tests would FAIL if the serial loop were reintroduced.
-"""
+"""Tests for historical trend aggregation and parallel keyword fan-out."""
 
 from __future__ import annotations
 
@@ -26,105 +10,257 @@ from unittest.mock import MagicMock, patch
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.module_loader import load_handler_module
 
-# The table name the module reads at import.
 os.environ.setdefault('DYNAMODB_TABLE_SEARCH_RESULTS', 'test-search')
 _mod = load_handler_module(os.path.dirname(__file__), 'get-historical-trends.py')
 
 
-class TestFetchKeywordItems:
-    """`_fetch_keyword_items` is the I/O-only helper that gets fanned out."""
+class QueryFailure(Exception):
+    """Expected query failure used by the test double."""
 
-    def test_returns_items_from_dynamodb_query(self) -> None:
+
+class TestFetchKeywordItems:
+    def test_returns_items_when_dynamodb_query_succeeds(self) -> None:
         fake_resource = fake_dynamodb_resource(
             fake_table(query={'Items': [{'timestamp': '2026-01-01T00:00:00Z'}]})
         )
         with patch.object(_mod, 'dynamodb', fake_resource):
             items = _mod._fetch_keyword_items('my-keyword')
+
         assert items == [{'timestamp': '2026-01-01T00:00:00Z'}]
 
-    def test_returns_empty_list_when_query_raises(self) -> None:
-        """A single bad keyword must not break the whole dashboard."""
+    def test_returns_empty_list_when_dynamodb_query_fails(self) -> None:
         table = MagicMock()
-        table.query.side_effect = Exception('throttled')
+        table.query.side_effect = QueryFailure('throttled')
         with patch.object(_mod, 'dynamodb', fake_dynamodb_resource(table)):
             items = _mod._fetch_keyword_items('my-keyword')
+
         assert items == []
 
 
 class TestBuildTrendFromItems:
-    """`_build_trend_from_items` is pure-Python, no I/O. Easy to test."""
-
-    def test_returns_error_for_empty_items(self) -> None:
+    def test_returns_keyword_specific_error_when_items_are_empty(self) -> None:
         result = _mod._build_trend_from_items('kw', [], {}, 'day', 30)
-        assert 'error' in result
-        assert 'kw' in result['error']
 
-    def test_returns_trend_payload_shape_for_items(self) -> None:
-        """Contract check: the returned dict still carries the same keys
-        the dashboard consumes. This is the characterization test for the
-        extract-method refactor."""
+        assert result == {'error': 'No data found for keyword: kw'}
+
+    def test_returns_exact_prominence_fields_when_ranked_answer_exists(self) -> None:
         items = [
             {
                 'keyword': 'kw',
                 'timestamp': '2026-04-17T12:00:00Z',
                 'provider': 'openai',
                 'brands': [
-                    {'name': 'MyBrand', 'classification': 'first_party',
-                     'mention_count': 1, 'rank': 1}
+                    {
+                        'name': 'MyBrand',
+                        'classification': 'first_party',
+                        'mention_count': 1,
+                        'rank': 1,
+                    }
                 ],
             }
         ]
-        result = _mod._build_trend_from_items('kw', items, {}, 'day', 30)
+        with patch.object(_mod, 'get_enabled_provider_count', return_value=4):
+            result = _mod._build_trend_from_items('kw', items, {}, 'day', 30)
+
         assert result['keyword'] == 'kw'
         assert result['period_type'] == 'day'
-        assert 'trend_data' in result
-        assert 'trend_direction' in result
-        assert 'summary' in result
+        assert result['trend_data'] == [{
+            'period': '2026-04-17',
+            'visibility_score': 43.5,
+            'total_mentions': 1,
+            'provider_count': 1,
+            'best_rank': 1,
+            'analysis_runs': 1,
+            'answers': 1,
+            'mentioned_answers': 1,
+            'rank_1_share': 100.0,
+            'top_3_share': 100.0,
+            'mean_rank': 1.0,
+            'mean_first_position': None,
+        }]
+
+
+class TestAggregateByPeriod:
+    def test_calculates_answer_level_prominence_across_a_period(self) -> None:
+        timestamp = '2026-09-18T10:00:00Z'
+        items = [
+            {
+                'timestamp': timestamp,
+                'provider': 'openai',
+                'brands': [
+                    {'name': 'Mine', 'classification': 'first_party', 'mention_count': 1, 'rank': 4, 'first_position': 40},
+                    {'name': 'Mine Plus', 'classification': 'first_party', 'mention_count': 1, 'rank': 1, 'first_position': 10},
+                ],
+            },
+            {
+                'timestamp': timestamp,
+                'provider': 'gemini',
+                'brands': [
+                    {'name': 'Mine', 'classification': 'first_party', 'mention_count': 1, 'rank': 3, 'first_position': 30}
+                ],
+            },
+            {
+                'timestamp': timestamp,
+                'provider': 'perplexity',
+                'brands': [
+                    {'name': 'Mine', 'classification': 'first_party', 'mention_count': 1, 'rank': 999, 'first_position': 20}
+                ],
+            },
+            {
+                'timestamp': timestamp,
+                'provider': 'claude',
+                'brands': [
+                    {'name': 'Rival', 'classification': 'competitor', 'mention_count': 1, 'rank': 1, 'first_position': 5}
+                ],
+            },
+        ]
+
+        with patch.object(_mod, 'get_enabled_provider_count', return_value=4):
+            trend_data = _mod.aggregate_by_period(items, 'day', {})
+
+        assert trend_data == [{
+            'period': '2026-09-18',
+            'visibility_score': 68.2,
+            'total_mentions': 4,
+            'provider_count': 3,
+            'best_rank': 1,
+            'analysis_runs': 1,
+            'answers': 4,
+            'mentioned_answers': 3,
+            'rank_1_share': 25.0,
+            'top_3_share': 50.0,
+            'mean_rank': 2.0,
+            'mean_first_position': 20.0,
+        }]
+
+    def test_returns_unavailable_rank_values_when_only_sentinel_exists(self) -> None:
+        items = [{
+            'timestamp': '2026-09-18T10:00:00Z',
+            'provider': 'openai',
+            'brands': [
+                {'name': 'Mine', 'classification': 'first_party', 'mention_count': 1, 'rank': 999}
+            ],
+        }]
+
+        with patch.object(_mod, 'get_enabled_provider_count', return_value=4):
+            trend_data = _mod.aggregate_by_period(items, 'day', {})
+
+        assert trend_data == [{
+            'period': '2026-09-18',
+            'visibility_score': 16.5,
+            'total_mentions': 1,
+            'provider_count': 1,
+            'best_rank': None,
+            'analysis_runs': 1,
+            'answers': 1,
+            'mentioned_answers': 1,
+            'rank_1_share': 0.0,
+            'top_3_share': 0.0,
+            'mean_rank': None,
+            'mean_first_position': None,
+        }]
+
+
+class TestBuildGroupSeries:
+    def test_averages_keyword_prominence_without_removing_best_rank(self) -> None:
+        trends = [
+            {'trend_data': [{
+                'period': '2026-09-18',
+                'visibility_score': 80.0,
+                'total_mentions': 4,
+                'provider_count': 3,
+                'best_rank': 1,
+                'analysis_runs': 2,
+                'answers': 4,
+                'mentioned_answers': 3,
+                'rank_1_share': 50.0,
+                'top_3_share': 75.0,
+                'mean_rank': 1.5,
+                'mean_first_position': 10.0,
+            }]},
+            {'trend_data': [{
+                'period': '2026-09-18',
+                'visibility_score': 40.0,
+                'total_mentions': 2,
+                'provider_count': 1,
+                'best_rank': 4,
+                'analysis_runs': 1,
+                'answers': 2,
+                'mentioned_answers': 1,
+                'rank_1_share': 0.0,
+                'top_3_share': 0.0,
+                'mean_rank': 4.0,
+                'mean_first_position': 30.0,
+            }]},
+            {'trend_data': [{
+                'period': '2026-09-18',
+                'visibility_score': 60.0,
+                'total_mentions': 1,
+                'provider_count': 2,
+                'best_rank': None,
+                'analysis_runs': 1,
+                'answers': 1,
+                'mentioned_answers': 1,
+                'rank_1_share': 0.0,
+                'top_3_share': 0.0,
+                'mean_rank': None,
+                'mean_first_position': None,
+            }]},
+        ]
+
+        group_series = _mod.build_group_series(trends)
+
+        assert group_series == [{
+            'period': '2026-09-18',
+            'visibility_score': 60.0,
+            'total_mentions': 7,
+            'provider_count': 3,
+            'best_rank': 1,
+            'analysis_runs': 4,
+            'answers': 7,
+            'mentioned_answers': 5,
+            'rank_1_share': 16.7,
+            'top_3_share': 25.0,
+            'mean_rank': 2.75,
+            'mean_first_position': 20.0,
+            'keywords_with_data': 3,
+        }]
 
 
 class TestGetAllKeywordsTrendsParallelFanOut:
-    """The regression guards for the parallelization."""
-
     @staticmethod
     def _fake_keyword_items(keyword: str) -> list[dict]:
-        """One trend item per keyword, enough to build a non-error trend."""
         return [
             {
                 'keyword': keyword,
                 'timestamp': '2026-04-17T12:00:00Z',
                 'provider': 'openai',
                 'brands': [
-                    {'name': 'MyBrand', 'classification': 'first_party',
-                     'mention_count': 1, 'rank': 1}
+                    {
+                        'name': 'MyBrand',
+                        'classification': 'first_party',
+                        'mention_count': 1,
+                        'rank': 1,
+                    }
                 ],
             }
         ]
 
     @staticmethod
     def _keywords_resource(count: int, search_table: MagicMock | None = None) -> MagicMock:
-        """A resource whose Keywords table lists `count` keywords (`kw0`, `kw1`, ...).
-
-        The keywords table answers every table name (the module resolved its
-        `KEYWORDS_TABLE` at import, so the name in play depends on the
-        environment at collection time); only the search table is routed by
-        its real name, when a test wants one.
-        """
-        keywords_table = fake_table(query={'Items': [{'keyword': f'kw{i}'} for i in range(count)]})
+        keywords_table = fake_table(query={'Items': [{'keyword': f'kw{index}'} for index in range(count)]})
         if search_table is None:
             return fake_dynamodb_resource(keywords_table)
         return fake_dynamodb_resource(keywords_table, by_name={_mod.SEARCH_RESULTS_TABLE: search_table})
 
     @classmethod
     @contextmanager
-    def _fan_out(cls, keyword_count: int,
-                 fetch: Callable[[str], list[dict]] | MagicMock | None = None,
-                 search_table: MagicMock | None = None) -> Iterator[MagicMock]:
-        """Stage `keyword_count` keywords with `_fetch_keyword_items` replaced.
-
-        `fetch` defaults to `_fake_keyword_items`; a `MagicMock` is installed
-        as-is so a test can inspect its calls. Yields a spy wrapping the real
-        `ThreadPoolExecutor`, the evidence that the fan-out ran in parallel.
-        """
+    def _fan_out(
+        cls,
+        keyword_count: int,
+        fetch: Callable[[str], list[dict]] | MagicMock | None = None,
+        search_table: MagicMock | None = None,
+    ) -> Iterator[MagicMock]:
         if fetch is None:
             fetch = MagicMock(side_effect=cls._fake_keyword_items)
         elif not isinstance(fetch, MagicMock):
@@ -133,38 +269,31 @@ class TestGetAllKeywordsTrendsParallelFanOut:
             patch.object(_mod, 'dynamodb', cls._keywords_resource(keyword_count, search_table)),
             patch.dict(os.environ, {'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'}),
             patch.object(_mod, '_fetch_keyword_items', fetch),
-            patch.object(_mod.concurrent.futures, 'ThreadPoolExecutor',
-                         wraps=_mod.concurrent.futures.ThreadPoolExecutor) as pool_spy,
+            patch.object(_mod, 'get_enabled_provider_count', return_value=4),
+            patch.object(
+                _mod.concurrent.futures,
+                'ThreadPoolExecutor',
+                wraps=_mod.concurrent.futures.ThreadPoolExecutor,
+            ) as pool_spy,
         ):
             yield pool_spy
 
     def test_fetches_each_keyword_exactly_once(self) -> None:
-        """Regression guard: the parallel fan-out must dedupe any accidental
-        double-queries. The previous serial loop only called fetch once per
-        keyword; we must preserve that."""
         counting_fetch = MagicMock(side_effect=self._fake_keyword_items)
 
         with self._fan_out(5, fetch=counting_fetch, search_table=MagicMock()):
             result = _mod.get_all_keywords_trends({}, 'day', 30)
 
-        # 5 keywords → 5 fetches, no duplication.
         assert counting_fetch.call_count == 5
         assert result['keywords_analyzed'] == 5
 
-    def test_uses_thread_pool_for_parallel_fetching(self) -> None:
-        """Regression guard: if someone reverts to a serial loop, the
-        ThreadPoolExecutor would never be constructed. We assert the pool
-        is used. This catches the whole class of "accidentally serial"
-        regressions."""
+    def test_uses_thread_pool_when_multiple_keywords_are_requested(self) -> None:
         with self._fan_out(3) as pool_spy:
             _mod.get_all_keywords_trends({}, 'day', 30)
 
         pool_spy.assert_called_once()
 
-    def test_caps_worker_count_at_max_workers_constant(self) -> None:
-        """With more keywords than `_TRENDS_MAX_WORKERS`, the pool size is
-        capped — otherwise we'd spawn 20+ threads and overshoot DynamoDB RCU.
-        """
+    def test_caps_worker_count_when_keywords_exceed_maximum(self) -> None:
         with self._fan_out(20) as pool_spy:
             _mod.get_all_keywords_trends({}, 'day', 30)
 
@@ -172,17 +301,14 @@ class TestGetAllKeywordsTrendsParallelFanOut:
         _, kwargs = pool_spy.call_args
         assert kwargs['max_workers'] == _mod._TRENDS_MAX_WORKERS
 
-    def test_caps_worker_count_at_keyword_count_when_fewer_than_max(self) -> None:
-        """With fewer keywords than `_TRENDS_MAX_WORKERS`, size to keyword
-        count. No point spinning up 10 threads for 3 items."""
+    def test_matches_worker_count_to_keyword_count_when_below_maximum(self) -> None:
         with self._fan_out(3) as pool_spy:
             _mod.get_all_keywords_trends({}, 'day', 30)
 
         _, kwargs = pool_spy.call_args
         assert kwargs['max_workers'] == 3
 
-    def test_returns_empty_payload_when_no_keywords(self) -> None:
-        """Empty keyword set must not spin up the pool or fail."""
+    def test_returns_empty_payload_when_no_keywords_exist(self) -> None:
         mock_fetch = MagicMock()
 
         with self._fan_out(0, fetch=mock_fetch):
@@ -193,18 +319,14 @@ class TestGetAllKeywordsTrendsParallelFanOut:
         assert result['keyword_trends'] == []
         assert result['overall']['avg_score'] == 0
 
-    def test_preserves_all_keyword_results_despite_async_order(self) -> None:
-        """`as_completed` returns futures in completion order, which is
-        non-deterministic. The output must still cover every input keyword
-        (sorting by current_score is applied at the end)."""
+    def test_preserves_every_keyword_when_futures_complete_out_of_order(self) -> None:
         with self._fan_out(5):
             result = _mod.get_all_keywords_trends({}, 'day', 30)
 
-        returned_keywords = {t['keyword'] for t in result['keyword_trends']}
-        assert returned_keywords == {f'kw{i}' for i in range(5)}
+        returned_keywords = {trend['keyword'] for trend in result['keyword_trends']}
+        assert returned_keywords == {f'kw{index}' for index in range(5)}
 
-    def test_caps_fan_out_at_twenty_keywords(self) -> None:
-        """Dashboard breadth cap — unchanged from the serial implementation."""
+    def test_caps_fan_out_at_twenty_keywords_for_all_scope(self) -> None:
         counting_fetch = MagicMock(side_effect=self._fake_keyword_items)
 
         with self._fan_out(50, fetch=counting_fetch):
@@ -212,17 +334,13 @@ class TestGetAllKeywordsTrendsParallelFanOut:
 
         assert counting_fetch.call_count == 20
 
-    def test_individual_keyword_errors_dont_break_the_batch(self) -> None:
-        """If `_fetch_keyword_items` returns [] for one keyword (its own
-        try/except caught the error), the others still produce trends."""
+    def test_preserves_successful_keywords_when_one_fetch_returns_empty(self) -> None:
         def mixed_fetch(keyword: str) -> list[dict]:
             if keyword == 'kw1':
-                return []  # Simulate the error-caught case
+                return []
             return self._fake_keyword_items(keyword)
 
         with self._fan_out(3, fetch=mixed_fetch):
             result = _mod.get_all_keywords_trends({}, 'day', 30)
 
-        # 2 succeeded (kw0, kw2), 1 returned error payload (kw1) and was
-        # filtered out. The dashboard reports the 2 successful.
         assert result['keywords_analyzed'] == 2

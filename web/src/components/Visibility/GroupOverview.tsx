@@ -2,7 +2,9 @@ import { useState } from 'react';
 import type {
   GroupBrandVisibilityMetric, GroupVisibilityResponse, HistoricalTrendsResponse, KeywordVisibilityRow
 } from '../../types';
-import { TrendChart } from './VisibilityComponents';
+import {
+  formatRank, TrendChart
+} from './VisibilityComponents';
 import { exportGroupOverview } from './groupOverviewExport';
 
 export type HistoryRangeDays = 7 | 30 | 90;
@@ -16,13 +18,9 @@ interface GroupOverviewProps {
   readonly onRangeChange: (days: HistoryRangeDays) => void;
 }
 
-/**
- * Group overview of a keyword group (or every keyword): one visibility score,
- * share of voice and coverage for the group, its history, the per-keyword
- * table beneath and the brand ranking across the group's keywords.
- */
+/** Group visibility, prominence, history and keyword-level detail. */
 export function GroupOverview({
-  visibility, trends, scopeLabel, rangeDays, onRangeChange 
+  visibility, trends, scopeLabel, rangeDays, onRangeChange
 }: GroupOverviewProps) {
   const [exporting, setExporting] = useState(false);
   const { summary } = visibility;
@@ -57,11 +55,18 @@ export function GroupOverview({
         </button>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
         <KpiCard label="Your visibility" value={summary.first_party_avg_score} suffix="/100" border="border-green-500" />
         <KpiCard label="Competitor visibility" value={summary.competitor_avg_score} suffix="/100" border="border-red-500" />
         <KpiCard label="Your share of voice" value={summary.first_party_avg_sov} suffix="%" border="border-blue-500" />
-        <KpiCard label="Coverage" value={summary.coverage_rate} suffix="%" border="border-purple-500" hint="keywords mentioning you" />
+        <KpiCard label="Citation rate" value={summary.coverage_rate} suffix="%" border="border-purple-500" hint="keywords mentioning you" />
+        <KpiCard
+          label="Prominence"
+          value={summary.rank_1_share}
+          suffix="%"
+          border="border-fuchsia-500"
+          hint={`rank-#1 share · top-3 ${summary.top_3_share}% · mean rank ${formatRank(summary.mean_rank)}`}
+        />
         <KpiCard label="Provider coverage" value={summary.provider_coverage} suffix="%" border="border-amber-500" hint="of enabled AI engines" />
       </div>
 
@@ -104,7 +109,7 @@ export function GroupOverview({
 }
 
 function KpiCard({
-  label, value, suffix, border, hint 
+  label, value, suffix, border, hint
 }: {
   readonly label: string;
   readonly value: number;
@@ -121,39 +126,62 @@ function KpiCard({
   );
 }
 
-type KeywordSortKey = 'keyword' | 'first_party_score' | 'competitor_score' | 'first_party_sov' | 'total_mentions';
+type KeywordSortKey =
+  | 'keyword'
+  | 'first_party_score'
+  | 'competitor_score'
+  | 'first_party_sov'
+  | 'first_party_best_rank'
+  | 'total_mentions';
+
+function compareNumbers(left: number | null, right: number | null, descending: boolean): number {
+  if (left === null) return right === null ? 0 : 1;
+  if (right === null) return -1;
+  return descending ? right - left : left - right;
+}
 
 function sortRows(rows: KeywordVisibilityRow[], key: KeywordSortKey, descending: boolean): KeywordVisibilityRow[] {
-  const sorted = [...rows].sort((left, right) => {
-    if (key === 'keyword') return left.keyword.localeCompare(right.keyword, undefined, { sensitivity: 'base' });
-    return Number(left[key]) - Number(right[key]);
+  return [...rows].sort((left, right) => {
+    if (key === 'keyword') {
+      const comparison = left.keyword.localeCompare(right.keyword, undefined, { sensitivity: 'base' });
+      return descending ? -comparison : comparison;
+    }
+    if (key === 'first_party_best_rank') {
+      const leftRank = formatRank(left.first_party_best_rank) === '—' ? null : left.first_party_best_rank;
+      const rightRank = formatRank(right.first_party_best_rank) === '—' ? null : right.first_party_best_rank;
+      return compareNumbers(leftRank, rightRank, descending);
+    }
+    return compareNumbers(left[key], right[key], descending);
   });
-  return descending ? sorted.reverse() : sorted;
 }
 
 const KEYWORD_COLUMNS: readonly {
   key: KeywordSortKey;
-  label: string 
+  label: string
 }[] = [
   {
     key: 'keyword',
-    label: 'Keyword' 
+    label: 'Keyword'
   },
   {
     key: 'first_party_score',
-    label: 'Your score' 
+    label: 'Your score'
   },
   {
     key: 'competitor_score',
-    label: 'Competitor score' 
+    label: 'Competitor score'
   },
   {
     key: 'first_party_sov',
-    label: 'Your SoV' 
+    label: 'Your SoV'
+  },
+  {
+    key: 'first_party_best_rank',
+    label: 'Best rank'
   },
   {
     key: 'total_mentions',
-    label: 'Mentions' 
+    label: 'Mentions'
   },
 ];
 
@@ -162,7 +190,7 @@ function sortDirection(active: boolean, descending: boolean): 'ascending' | 'des
   return descending ? 'descending' : 'ascending';
 }
 
-/** Sortable per-keyword breakdown; keywords without data sit at the bottom. */
+/** Sortable per-keyword breakdown; unavailable ranks and no-data rows stay last. */
 function KeywordTable({ rows }: { readonly rows: KeywordVisibilityRow[] }) {
   const [sortKey, setSortKey] = useState<KeywordSortKey>('first_party_score');
   const [descending, setDescending] = useState(true);
@@ -172,7 +200,7 @@ function KeywordTable({ rows }: { readonly rows: KeywordVisibilityRow[] }) {
       setDescending((previous) => !previous);
     } else {
       setSortKey(key);
-      setDescending(key !== 'keyword');
+      setDescending(key !== 'keyword' && key !== 'first_party_best_rank');
     }
   };
 
@@ -185,7 +213,7 @@ function KeywordTable({ rows }: { readonly rows: KeywordVisibilityRow[] }) {
         <h3 className="text-lg font-medium">Keywords in this scope</h3>
       </div>
       <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
+        <table aria-label="Keywords in this scope" className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
               {KEYWORD_COLUMNS.map((column) => (
@@ -203,11 +231,11 @@ function KeywordTable({ rows }: { readonly rows: KeywordVisibilityRow[] }) {
             {withoutData.map((row) => (
               <tr key={row.keyword} className="bg-gray-50 text-gray-400">
                 <td className="px-4 py-3 text-sm">{row.keyword}</td>
-                <td className="px-4 py-3 text-sm" colSpan={5}>No analysis data yet</td>
+                <td className="px-4 py-3 text-sm" colSpan={6}>No analysis data yet</td>
               </tr>
             ))}
             {rows.length === 0 && (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No keywords in this scope.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No keywords in this scope.</td></tr>
             )}
           </tbody>
         </table>
@@ -223,6 +251,7 @@ function KeywordRow({ row }: { readonly row: KeywordVisibilityRow }) {
       <td className="px-4 py-3 text-sm font-bold text-gray-900">{row.first_party_score}</td>
       <td className="px-4 py-3 text-sm text-gray-600">{row.competitor_score}</td>
       <td className="px-4 py-3 text-sm text-gray-600">{row.first_party_sov}%</td>
+      <td className="px-4 py-3 text-sm text-gray-600">{formatRank(row.first_party_best_rank)}</td>
       <td className="px-4 py-3 text-sm text-gray-600">{row.total_mentions}</td>
       <td className="px-4 py-3 text-sm">
         <span className={`px-2 py-0.5 rounded text-xs ${row.first_party_mentioned ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>

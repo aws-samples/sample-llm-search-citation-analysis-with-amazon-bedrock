@@ -1,15 +1,15 @@
 import {
-  describe, it, expect, vi 
+  describe, it, expect, vi
 } from 'vitest';
 import {
-  renderHook, waitFor 
+  renderHook, waitFor
 } from '@testing-library/react';
 import { useBrandMentions } from './useBrandMentions';
 import {
-  mockBrandMentionsResponse, createMockFetch 
+  mockBrandMentionsResponse, createMockFetch
 } from './useBrandMentions-fixtures';
 import {
-  createDeferredResponse, createMockJsonResponse 
+  createDeferredResponse, createMockJsonResponse
 } from '../test/fetchResponses';
 import { keywordScope as kw } from '../components/ui/reportScope-fixtures';
 
@@ -18,7 +18,7 @@ vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 describe('useBrandMentions', () => {
-  it('returns null data when keyword is null', () => {
+  it('returns an empty state when scope is null', () => {
     const { result } = renderHook(() => useBrandMentions(null));
 
     expect(result.current.data).toBeNull();
@@ -26,7 +26,7 @@ describe('useBrandMentions', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('fetches brand mentions when keyword provided', async () => {
+  it('returns brand mentions when the request succeeds', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
 
     const { result } = renderHook(() => useBrandMentions(kw('test keyword')));
@@ -37,7 +37,7 @@ describe('useBrandMentions', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('encodes keyword in URL', async () => {
+  it('includes the encoded keyword when building the request URL', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
 
     renderHook(() => useBrandMentions(kw('best hotels in paris')));
@@ -48,12 +48,9 @@ describe('useBrandMentions', () => {
         expect.any(Object)
       );
     });
-
-    const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-    expect(url).toContain('keyword=best+hotels+in+paris');
   });
 
-  it('includes classification filter in URL when provided', async () => {
+  it('includes classification when a filter is selected', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
 
     renderHook(() => useBrandMentions(kw('test'), 'first_party'));
@@ -64,27 +61,42 @@ describe('useBrandMentions', () => {
         expect.any(Object)
       );
     });
-
-    const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-    expect(url).toContain('classification=first_party');
   });
 
-  it('sets error when fetch fails', async () => {
+  it('includes timestamp when a historical run is selected', async () => {
+    mockAuthenticatedFetch.mockImplementation(createMockFetch());
+
+    renderHook(() => useBrandMentions(
+      kw('test'),
+      null,
+      null,
+      '2026-01-10T00:00:00Z'
+    ));
+
+    await waitFor(() => {
+      expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
+        expect.stringContaining('timestamp=2026-01-10T00%3A00%3A00Z'),
+        expect.any(Object)
+      );
+    });
+  });
+
+  it('returns a brand error when the request fails', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
 
     const { result } = renderHook(() => useBrandMentions(kw('test')));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(result.current.error).toBeTruthy();
+    expect(result.current.error).toBe('Failed to load brand mentions');
     expect(result.current.data).toBeNull();
   });
 
-  it('refetches when keyword changes', async () => {
+  it('requests new data when the keyword changes', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
 
     const {
-      result, rerender 
+      result, rerender
     } = renderHook(
       ({ keyword }) => useBrandMentions(kw(keyword)),
       { initialProps: { keyword: 'keyword1' } }
@@ -97,25 +109,27 @@ describe('useBrandMentions', () => {
     rerender({ keyword: 'keyword2' });
 
     await waitFor(() => {
-      expect(mockAuthenticatedFetch.mock.calls.length).toBeGreaterThan(initialCallCount);
+      expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(initialCallCount + 1);
     });
   });
 
-  it('refetches when classification filter changes', async () => {
+  it('requests new data when the classification changes', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
+    const initialProps: {
+      keyword: string;
+      filter: string | null
+    } = {
+      keyword: 'test',
+      filter: null,
+    };
 
     const {
-      result, rerender 
+      result, rerender
     } = renderHook(
       ({
-        keyword, filter 
+        keyword, filter
       }) => useBrandMentions(kw(keyword), filter),
-      {
-        initialProps: {
-          keyword: 'test',
-          filter: null as string | null 
-        } 
-      }
+      { initialProps }
     );
 
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -124,17 +138,16 @@ describe('useBrandMentions', () => {
 
     rerender({
       keyword: 'test',
-      filter: 'competitor' 
+      filter: 'competitor'
     });
 
     await waitFor(() => {
-      expect(mockAuthenticatedFetch.mock.calls.length).toBeGreaterThan(initialCallCount);
+      expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(initialCallCount + 1);
     });
   });
 
-  it('aborts pending request on unmount', async () => {
+  it('aborts the pending request when the hook unmounts', () => {
     const abortSpy = vi.spyOn(AbortController.prototype, 'abort');
-    // Create a promise that never resolves
     mockAuthenticatedFetch.mockImplementation(() => new Promise(vi.fn()));
 
     const { unmount } = renderHook(() => useBrandMentions(kw('test')));
@@ -145,24 +158,25 @@ describe('useBrandMentions', () => {
     abortSpy.mockRestore();
   });
 
-  it('clears data when keyword changes to null', async () => {
+  it('clears response data when the scope becomes null', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
+    const initialProps: { keyword: string | null } = { keyword: 'test' };
 
     const {
-      result, rerender 
+      result, rerender
     } = renderHook(
       ({ keyword }) => useBrandMentions(keyword === null ? null : kw(keyword)),
-      { initialProps: { keyword: 'test' as string | null } }
+      { initialProps }
     );
 
-    await waitFor(() => expect(result.current.data).not.toBeNull());
+    await waitFor(() => expect(result.current.data).toStrictEqual(mockBrandMentionsResponse));
 
     rerender({ keyword: null });
 
     expect(result.current.data).toBeNull();
   });
 
-  it('sets loading true while fetching', async () => {
+  it('reports loading while the request is pending', async () => {
     const deferred = createDeferredResponse();
     mockAuthenticatedFetch.mockImplementation(() => deferred.promise);
 

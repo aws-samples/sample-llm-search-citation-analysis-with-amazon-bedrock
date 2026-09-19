@@ -54,11 +54,43 @@ def _brand(name, classification, mentions=1, rank=1, sentiment='positive'):
     return {'name': name, 'classification': classification, 'mention_count': mentions, 'rank': rank, 'sentiment': sentiment}
 
 
-def _result(keyword, provider, brands, timestamp=RUN_TS, citations=None):
+def _result(keyword, provider, brands, timestamp=RUN_TS, citations=None, model=None, query_prompt_id='default'):
     return {
         'keyword': keyword, 'timestamp': timestamp, 'timestamp_provider': f'{timestamp}_{provider}', 'provider': provider,
         'brands': brands, 'response': 'long llm text ' * 50, 'citations': citations or [],
+        'metadata': {'model': model or f'{provider}-model'}, 'query_prompt_id': query_prompt_id,
     }
+
+
+def _trend_point(
+    *,
+    period,
+    visibility_score,
+    total_mentions,
+    provider_count,
+    best_rank,
+    analysis_runs,
+    answers,
+    mentioned_answers,
+    rank_1_share,
+    top_3_share,
+    mean_rank,
+    mean_first_position,
+):
+    return dict(
+        period=period,
+        visibility_score=visibility_score,
+        total_mentions=total_mentions,
+        provider_count=provider_count,
+        best_rank=best_rank,
+        analysis_runs=analysis_runs,
+        answers=answers,
+        mentioned_answers=mentioned_answers,
+        rank_1_share=rank_1_share,
+        top_3_share=top_3_share,
+        mean_rank=mean_rank,
+        mean_first_position=mean_first_position,
+    )
 
 
 SEARCH_ROWS = {
@@ -240,6 +272,12 @@ def brand_mentions_env(brand_mentions):
 
 
 class TestBrandMentionsScope:
+    @pytest.fixture
+    def latest_coruna_hotel_brand(self, brand_mentions_env):
+        module, _ = brand_mentions_env
+        body = _body(module.handler(_event({'group_id': 'coruna'}), None))
+        return next(brand for brand in body['aggregated']['brands'] if brand['name'] == 'Hotel Coruna')
+
     def test_requires_a_scope(self, brand_mentions_env):
         module, _ = brand_mentions_env
 
@@ -252,6 +290,70 @@ class TestBrandMentionsScope:
 
         assert body['keyword'] == 'hotel coruna spa'
         assert [entry['provider'] for entry in body['by_provider']] == ['openai', 'gemini']
+
+    def test_single_keyword_returns_the_requested_historical_run(self, brand_mentions_env):
+        module, _ = brand_mentions_env
+
+        body = _body(module.handler(_event({'keyword': 'hotel coruna spa', 'timestamp': OLD_TS}), None))
+
+        assert body['timestamp'] == OLD_TS
+        assert [entry['provider'] for entry in body['by_provider']] == ['openai']
+        assert body['aggregated']['brands'][0]['total_mentions'] == 5
+
+    def test_single_keyword_uses_every_page_to_select_the_latest_run(self, brand_mentions_env):
+        module, tables = brand_mentions_env
+        tables['search'].query.side_effect = [
+            {
+                'Items': [_result('hotel coruna spa', 'openai', [_brand('Old Brand', 'competitor')], timestamp=OLD_TS)],
+                'LastEvaluatedKey': {'keyword': 'hotel coruna spa', 'timestamp_provider': f'{OLD_TS}_openai'},
+            },
+            {'Items': [_result('hotel coruna spa', 'gemini', [_brand('Latest Brand', 'first_party')])]},
+        ]
+
+        body = _body(module.handler(_event({'keyword': 'hotel coruna spa'}), None))
+
+        assert body['available_runs'] == [RUN_TS, OLD_TS]
+        assert [entry['provider'] for entry in body['by_provider']] == ['gemini']
+
+    @pytest.mark.parametrize(
+        'filter_params',
+        [
+            pytest.param({'provider': 'openai'}, id='provider'),
+            pytest.param({'query_prompt_id': 'historical-persona'}, id='persona'),
+        ],
+    )
+    def test_single_keyword_returns_empty_latest_run_when_filter_matches_only_an_older_run(
+        self,
+        brand_mentions_env,
+        filter_params,
+    ):
+        module, tables = brand_mentions_env
+        tables['search'].query.side_effect = [{
+            'Items': [
+                _result('hotel coruna spa', 'gemini', [_brand('Latest Brand', 'first_party')]),
+                _result(
+                    'hotel coruna spa',
+                    'openai',
+                    [_brand('Old Brand', 'competitor')],
+                    timestamp=OLD_TS,
+                    query_prompt_id='historical-persona',
+                ),
+            ],
+        }]
+
+        body = _body(module.handler(_event({'keyword': 'hotel coruna spa', **filter_params}), None))
+
+        assert {
+            'timestamp': body['timestamp'],
+            'available_runs': body['available_runs'],
+            'by_provider': body['by_provider'],
+            'aggregated_brands': body['aggregated']['brands'],
+        } == {
+            'timestamp': RUN_TS,
+            'available_runs': [RUN_TS, OLD_TS],
+            'by_provider': [],
+            'aggregated_brands': [],
+        }
 
     def test_group_scope_aggregates_the_latest_run_of_every_keyword(self, brand_mentions_env):
         module, _ = brand_mentions_env
@@ -267,13 +369,39 @@ class TestBrandMentionsScope:
         assert rival['keyword_count'] == 2
         assert rival['keywords'] == ['best hotels galicia', 'hotel coruna spa']
 
-    def test_group_scope_counts_distinct_providers_across_keywords(self, brand_mentions_env):
+    @pytest.mark.parametrize('scope_params', [
+        {'group_id': 'coruna'},
+        {'keyword_ids': 'k1,k3'},
+        {'scope': 'all'},
+    ])
+    def test_aggregate_scope_returns_only_the_requested_historical_run(self, brand_mentions_env, scope_params):
+        module, _ = brand_mentions_env
+
+        body = _body(module.handler(_event({**scope_params, 'timestamp': OLD_TS}), None))
+
+        rival = next(brand for brand in body['aggregated']['brands'] if brand['name'] == 'Rival Inn')
+        assert body['timestamp'] == OLD_TS
+        assert body['keywords_with_data'] == 1
+        assert rival['total_mentions'] == 5
+
+    def test_available_runs_are_distinct_and_newest_first(self, brand_mentions_env):
         module, _ = brand_mentions_env
 
         body = _body(module.handler(_event({'group_id': 'coruna'}), None))
 
-        mine = next(brand for brand in body['aggregated']['brands'] if brand['name'] == 'Hotel Coruna')
-        assert mine['provider_count'] == 2
+        assert body['available_runs'] == [RUN_TS, OLD_TS]
+
+    def test_appearances_identify_their_keyword_provider_and_model(self, latest_coruna_hotel_brand):
+        assert [
+            (appearance['keyword'], appearance['provider'], appearance['model'])
+            for appearance in latest_coruna_hotel_brand['appearances']
+        ] == [
+            ('hotel coruna spa', 'openai', 'openai-model'),
+            ('hotel coruna spa', 'gemini', 'gemini-model'),
+        ]
+
+    def test_group_scope_counts_distinct_providers_across_keywords(self, latest_coruna_hotel_brand):
+        assert latest_coruna_hotel_brand['provider_count'] == 2
 
     def test_group_scope_reads_projections_without_the_llm_text(self, brand_mentions_env):
         module, tables = brand_mentions_env
@@ -282,6 +410,13 @@ class TestBrandMentionsScope:
 
         for call in tables['search'].query.call_args_list:
             assert 'response' not in call.kwargs['ProjectionExpression']
+
+    def test_group_scope_projects_metadata_for_appearance_models(self, brand_mentions_env):
+        module, tables = brand_mentions_env
+
+        module.handler(_event({'group_id': 'coruna'}), None)
+
+        assert all('metadata' in call.kwargs['ProjectionExpression'] for call in tables['search'].query.call_args_list)
 
     def test_group_scope_applies_the_classification_filter(self, brand_mentions_env):
         module, _ = brand_mentions_env
@@ -366,20 +501,87 @@ def trends():
 
 
 class TestTrendsGroupSeries:
-    def test_group_series_averages_scores_per_bucket_and_sums_mentions(self, trends):
+    def test_returns_complete_bucket_aggregates_when_keyword_periods_overlap(self, trends):
         series = trends.build_group_series([
             {'trend_data': [
-                {'period': '2026-09-17', 'visibility_score': 80.0, 'total_mentions': 2, 'provider_count': 2, 'best_rank': 1, 'analysis_runs': 1},
-                {'period': '2026-09-18', 'visibility_score': 60.0, 'total_mentions': 1, 'provider_count': 1, 'best_rank': 2, 'analysis_runs': 1},
+                _trend_point(
+                    period='2026-09-17',
+                    visibility_score=80.0,
+                    total_mentions=2,
+                    provider_count=2,
+                    best_rank=1,
+                    analysis_runs=1,
+                    answers=2,
+                    mentioned_answers=1,
+                    rank_1_share=50.0,
+                    top_3_share=50.0,
+                    mean_rank=2.0,
+                    mean_first_position=10.0,
+                ),
+                _trend_point(
+                    period='2026-09-18',
+                    visibility_score=60.0,
+                    total_mentions=1,
+                    provider_count=1,
+                    best_rank=2,
+                    analysis_runs=1,
+                    answers=2,
+                    mentioned_answers=2,
+                    rank_1_share=50.0,
+                    top_3_share=100.0,
+                    mean_rank=1.5,
+                    mean_first_position=4.0,
+                ),
             ]},
             {'trend_data': [
-                {'period': '2026-09-18', 'visibility_score': 20.0, 'total_mentions': 3, 'provider_count': 3, 'best_rank': None, 'analysis_runs': 2},
+                _trend_point(
+                    period='2026-09-18',
+                    visibility_score=20.0,
+                    total_mentions=3,
+                    provider_count=3,
+                    best_rank=None,
+                    analysis_runs=2,
+                    answers=4,
+                    mentioned_answers=3,
+                    rank_1_share=25.0,
+                    top_3_share=75.0,
+                    mean_rank=3.5,
+                    mean_first_position=8.0,
+                ),
             ]},
         ])
 
         assert series == [
-            {'period': '2026-09-17', 'visibility_score': 80.0, 'total_mentions': 2, 'provider_count': 2, 'best_rank': 1, 'analysis_runs': 1, 'keywords_with_data': 1},
-            {'period': '2026-09-18', 'visibility_score': 40.0, 'total_mentions': 4, 'provider_count': 3, 'best_rank': 2, 'analysis_runs': 3, 'keywords_with_data': 2},
+            {
+                'period': '2026-09-17',
+                'visibility_score': 80.0,
+                'total_mentions': 2,
+                'provider_count': 2,
+                'best_rank': 1,
+                'analysis_runs': 1,
+                'answers': 2,
+                'mentioned_answers': 1,
+                'rank_1_share': 50.0,
+                'top_3_share': 50.0,
+                'mean_rank': 2.0,
+                'mean_first_position': 10.0,
+                'keywords_with_data': 1,
+            },
+            {
+                'period': '2026-09-18',
+                'visibility_score': 40.0,
+                'total_mentions': 4,
+                'provider_count': 3,
+                'best_rank': 2,
+                'analysis_runs': 3,
+                'answers': 6,
+                'mentioned_answers': 5,
+                'rank_1_share': 37.5,
+                'top_3_share': 87.5,
+                'mean_rank': 2.5,
+                'mean_first_position': 6.0,
+                'keywords_with_data': 2,
+            },
         ]
 
     def test_series_summary_matches_the_single_keyword_shape(self, trends):

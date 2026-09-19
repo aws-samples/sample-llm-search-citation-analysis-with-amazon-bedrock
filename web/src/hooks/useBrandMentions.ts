@@ -16,32 +16,22 @@ import {
 } from '../components/ui/reportScope';
 
 function isBrandMentionsResponse(data: unknown): data is BrandMentionsResponse {
-  return typeof data === 'object' && data !== null && 'aggregated' in data;
+  return typeof data === 'object'
+    && data !== null
+    && 'aggregated' in data
+    && 'available_runs' in data
+    && Array.isArray(data.available_runs);
 }
 
 /**
- * Hook for fetching brand mentions data for a report scope (one keyword, a
- * keyword group, or every keyword). Automatically fetches when the scope
- * changes and supports filtering by classification.
- * 
- * @param scope - What to fetch brand mentions for (null to skip fetch)
- * @param classificationFilter - Optional filter for brand classification ('first_party', 'competitor', 'other')
- * @returns Object containing:
- * - `data` - Brand mentions response data
- * - `loading` - Whether data is being fetched
- * - `error` - Error message if fetch failed
- * 
- * @example
- * ```tsx
- * const { data, loading, error } = useBrandMentions({ kind: 'keyword', keyword: 'best hotels in paris' });
- * 
- * if (loading) return <Spinner />;
- * if (error) return <Error message={error} />;
- * 
- * return <BrandTable brands={data?.aggregated.brands} />;
- * ```
+ * Fetch brand mentions for one report scope and optional server-side filters.
  */
-export const useBrandMentions = (scope: ReportScope | null, classificationFilter: string | null = null, queryPromptId: string | null = null) => {
+export const useBrandMentions = (
+  scope: ReportScope | null,
+  classificationFilter: string | null = null,
+  queryPromptId: string | null = null,
+  selectedTimestamp: string | null = null
+) => {
   const [data, setData] = useState<BrandMentionsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +55,7 @@ export const useBrandMentions = (scope: ReportScope | null, classificationFilter
         const params = new URLSearchParams(reportScopeParams(decodeReportScope(scopeKey)));
         if (classificationFilter) params.append('classification', classificationFilter);
         if (queryPromptId) params.append('query_prompt_id', queryPromptId);
+        if (selectedTimestamp) params.append('timestamp', selectedTimestamp);
         const url = `${API_BASE_URL}/brand-mentions?${params.toString()}`;
 
         const response = await authenticatedFetch(url, { signal: controller.signal });
@@ -93,7 +84,7 @@ export const useBrandMentions = (scope: ReportScope | null, classificationFilter
     fetchBrandMentions();
 
     return () => controller.abort();
-  }, [scopeKey, classificationFilter, queryPromptId]);
+  }, [scopeKey, classificationFilter, queryPromptId, selectedTimestamp]);
 
   return {
     data,

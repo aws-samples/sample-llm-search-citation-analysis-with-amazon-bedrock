@@ -8,6 +8,7 @@ Metrics:
 - Visibility Score: 0-100 score based on mentions, rankings, and provider coverage
 - Share of Voice: % of total brand mentions that belong to each brand
 - Provider Coverage: Which AI engines mention the brand
+- Prominence: answer-level first-party rank and first-position metrics
 - Trend Direction: Improving, declining, or stable
 
 Scope (2.4.0): exactly one of ``keyword=`` (one keyword, unchanged response),
@@ -47,6 +48,7 @@ from shared.visibility_score import (
     calculate_visibility_score,
     mean,
     sentiment_to_score,
+    summarize_first_party_prominence,
     summarize_group_visibility,
 )
 
@@ -68,8 +70,7 @@ _SCOPE_MAX_WORKERS = 10
 _SCOPE_KEYWORDS_CAP = 100
 
 # Only the fields the metrics use; the full LLM response text stays in the
-# table. Without this a 60-keyword group would pull megabytes of prose
-# through a 29s API request.
+# table. The projected brands include rank and first_position.
 _METRICS_PROJECTION = '#ts, provider, brands, query_prompt_id'
 
 
@@ -96,6 +97,12 @@ def get_visibility_metrics(
     # Filter by persona if specified
     if query_prompt_id:
         latest_items = [item for item in latest_items if item.get('query_prompt_id', 'default') == query_prompt_id]
+
+    first_party_brands_by_answer = [
+        [brand for brand in item.get('brands', []) if brand.get('classification') == 'first_party']
+        for item in latest_items
+    ]
+    prominence = summarize_first_party_prominence(first_party_brands_by_answer)
 
     for item in latest_items:
         provider = item.get('provider', 'unknown')
@@ -191,6 +198,7 @@ def get_visibility_metrics(
         'first_party': first_party_metrics,
         'competitors': competitor_metrics,
         'others': other_metrics,
+        'prominence': prominence,
         'summary': {
             'first_party_avg_score': round(mean(b['visibility_score'] for b in first_party_metrics), 1),
             'competitor_avg_score': round(mean(b['visibility_score'] for b in competitor_metrics), 1),
