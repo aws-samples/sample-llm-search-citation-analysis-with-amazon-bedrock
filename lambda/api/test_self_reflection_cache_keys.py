@@ -8,70 +8,27 @@ same partition key, and a begins_with persona prefix for "a" also matches
 persona "a#b". The handler escapes each component, making the keys injective.
 
 `self-reflection.py` is hyphenated and builds a `boto3` DynamoDB resource at
-import time, so it is loaded fresh via `spec_from_file_location` under a
-module name unique to THIS file (the pattern from
-`test_promote_keywords_pure_functions.py`) with the layer `shared` on
-`sys.path`, table env vars set, and `boto3` patched BEFORE the load.
+import time, so it is loaded fresh under a module name unique to THIS file
+with the table env vars set and `boto3` patched BEFORE the load
+(`testing.handler_fixtures.handler_fixture`).
 """
 
-import importlib
-import importlib.util
 import os
-import sys
-from unittest.mock import MagicMock, patch
 
-import pytest
+from testing.handler_fixtures import handler_fixture
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO = os.path.abspath(os.path.join(_API_DIR, '..', '..'))
-_LAYER_PY = os.path.join(_REPO, 'lambda', 'layer', 'python')
 
-_HANDLER_FILE = 'self-reflection.py'
-_MODULE_NAME = 'self_reflection_under_test_cache_keys'
-_TABLE_ENV_VARS = {
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results-table',
-    'DYNAMODB_TABLE_SELF_REFLECTION': 'test-self-reflection-table',
-    'QUERY_PROMPTS_TABLE': 'test-query-prompts-table',
-}
-
-
-def _load_reflection_handler():
-    """Load `self-reflection.py` fresh under this file's unique module name.
-
-    `shared/__init__.py` re-exports `api_response` as a function, shadowing the
-    submodule, so the real module object is bound explicitly -- otherwise the
-    handler's `from shared.api_response import ...` resolves to the function.
-    """
-    if _LAYER_PY not in sys.path:
-        sys.path.insert(0, _LAYER_PY)
-    sys.modules['shared.api_response'] = importlib.import_module('shared.api_response')
-    sys.modules.pop(_MODULE_NAME, None)
-    spec = importlib.util.spec_from_file_location(
-        _MODULE_NAME, os.path.join(_API_DIR, _HANDLER_FILE)
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-@pytest.fixture(scope='module')
-def reflection_handler():
-    """`self-reflection.py`, loaded once for this module with `boto3` patched."""
-    saved = {name: os.environ.get(name) for name in _TABLE_ENV_VARS}
-    os.environ.update(_TABLE_ENV_VARS)
-
-    with (
-        patch('boto3.resource', MagicMock(name='boto3.resource')),
-        patch('boto3.client', MagicMock(name='boto3.client')),
-    ):
-        yield _load_reflection_handler()
-
-    for name, value in saved.items():
-        if value is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = value
-    sys.modules.pop(_MODULE_NAME, None)
+reflection_handler = handler_fixture(
+    _API_DIR,
+    'self-reflection.py',
+    'self_reflection_under_test_cache_keys',
+    env={
+        'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results-table',
+        'DYNAMODB_TABLE_SELF_REFLECTION': 'test-self-reflection-table',
+        'QUERY_PROMPTS_TABLE': 'test-query-prompts-table',
+    },
+)
 
 
 class TestReflectionPartitionKey:

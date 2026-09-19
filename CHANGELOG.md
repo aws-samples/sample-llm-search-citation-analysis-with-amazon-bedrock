@@ -9,6 +9,72 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.4.2] - 2026-09-18
+
+Zero-duplication refactor of the Lambda (Python) code and its tests, with
+the Python gates (ruff, vulture, jscpd, pytest) wired into `npm run validate`.
+No handler behaviour change: same routes, status codes, response shapes and
+validation messages; 1,425 tests pass (1,384 before, plus 41 covering the new
+shared modules).
+
+### Added
+
+- `npm run validate:python` (`scripts/validate-python.sh`): ruff → vulture →
+  jscpd (`.jscpd.python.json` for `lambda/` and `scripts/`,
+  `.jscpd.python-tests.json` for `test_*.py`, both at threshold `0`) → pytest.
+  Part of `npm run validate`.
+- `lambda/conftest.py` puts `lambda/` (source first) and the built shared
+  layer on `sys.path` for every test; the 30 per-file `sys.path` shims are gone.
+- `lambda/testing/` — test-only helpers that never ship in a Lambda asset:
+  `module_loader.load_handler_module` (the one copy of the `importlib` dance
+  for hyphenated handler files), `dynamodb_stubs`, `events`
+  (`api_gateway_event`, `parse_response`), `env`, `handler_fixtures`,
+  `keyword_strategies` (the Hypothesis strategies both promote-keywords
+  property suites used to duplicate).
+- `shared/scope_params.py`: `SCOPE_QUERY_PARAMS` (the `@validate` rules the
+  report handlers spread into their schemas), `scope_from_request`,
+  `keywords_table_name`, `query_keyword_rows`, `load_sibling_function`.
+- `shared/router.py`: `dispatch_route` — the consolidated routers
+  (`citations-content`, `config-mgmt`, `execution-mgmt`, `stats-insights`)
+  are one-liners on top of it.
+- `shared/brand_visibility.py`: `tracked_brand_names`, `classify_brand`,
+  `load_recent_search_results`, shared by `get-recommendations` and
+  `content-studio` (same limits per handler: 20 and 30 keywords).
+
+### Changed
+
+- Report handlers (`get-visibility-metrics`, `get-brand-mentions`,
+  `get-historical-trends`, `get-citation-gaps`, `get-citations`,
+  `get-reports-overview`, `get-reports-competitor`) take the scope
+  parameters through the shared schema and resolver; schema key order per
+  handler is preserved so the first-reported validation error is unchanged.
+- `manage-providers` key probes share `_probe_result`/`_bearer_json_headers`;
+  `manage-users`, `manage-brand-config`, `browse-raw-responses` and
+  `search/search_clients.py` (`BaseSearchClient._collect_results`) share one
+  helper each for their repeated blocks. `source` on search hits is now the
+  client's `provider_id` (same values as the former literals).
+- The consolidated routers log `Routing request: …` and `Matched route X -> Y`
+  (the wording `citations-content` and `stats-insights` already used);
+  `config-mgmt` and `execution-mgmt` previously logged `Routing: …` only.
+- Lambda tests use `@pytest.mark.parametrize`, module fixtures and the
+  `lambda/testing/` helpers instead of repeated setup; no test was removed or
+  weakened.
+
+### Removed
+
+- `WEB_SEARCH_PROVIDER_IDS` (`shared/ai_clients.py`) and the write-only
+  `_browser_created_dynamically` attribute (`shared/browser_tools.py`): no
+  readers anywhere.
+
+### Deferred
+
+- Nine clones inside files owned by the open research-agent PR (#113) —
+  `api/keyword-research.py`, `api/test_keyword_research_job_lifecycle.py`,
+  `research-worker/test_research_worker.py`, `shared/test_models.py` — are
+  temporarily listed in the two Python jscpd configs' `ignore` so the gate
+  stays at threshold `0` without editing that PR's files. Clear them and drop
+  the four entries when #113 rebases onto this.
+
 ## [2.4.1] - 2026-09-18
 
 Zero-duplication refactor of the TypeScript codebase (CDK app, dashboard and

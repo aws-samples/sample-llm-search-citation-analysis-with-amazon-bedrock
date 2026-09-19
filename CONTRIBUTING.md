@@ -33,9 +33,9 @@ To send us a pull request, please:
 2. Modify the source; please focus on the specific change you are contributing. If you also reformat all the code, it will be hard for us to focus on your change.
 3. Run `npm run validate` from the repo root and make sure it is clean. It runs
    ESLint, the CDK build, both Vitest suites, the jscpd duplication gates
-   (production code and test code) and knip's dead-code checks for the CDK app
-   and the dashboard. Python changes additionally need `scripts/lint-python.sh`
-   and `pytest`.
+   (TypeScript and Python, production code and tests), knip's dead-code checks
+   for the CDK app and the dashboard, and for `lambda/` ruff, vulture and
+   pytest (see "Validation" in README.md for the Python toolchain setup).
 4. Commit to your fork using clear commit messages.
 5. Send us a pull request, answering any default questions in the pull request interface.
 6. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.

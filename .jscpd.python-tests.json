@@ -1,0 +1,19 @@
+{
+  "$schema": "https://raw.githubusercontent.com/kucherenko/jscpd/master/packages/jscpd/schema.json",
+  "minTokens": 50,
+  "threshold": 0,
+  "gitignore": true,
+  "format": ["python"],
+  "reporters": ["console"],
+  "pattern": "**/{test_*,conftest}.py",
+  "ignore": [
+    "**/node_modules/**",
+    "**/layer/python/**",
+    "**/crawler-layer/python/**",
+    "**/.deps/**",
+    "**/__pycache__/**",
+    "lambda/api/test_keyword_research_job_lifecycle.py",
+    "lambda/research-worker/test_research_worker.py",
+    "lambda/shared/test_models.py"
+  ]
+}

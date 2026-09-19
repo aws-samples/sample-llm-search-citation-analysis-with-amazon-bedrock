@@ -16,11 +16,10 @@ from boto3.dynamodb.conditions import Key
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import success_response, validation_error
-from shared.constants import MAX_KEYWORD_LENGTH
+from shared.api_response import success_response
 from shared.decorators import api_handler, validate
 from shared.env_vars import resolve_table_env
-from shared.scope_params import parse_scope_params
+from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scope_from_request
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -31,11 +30,7 @@ dynamodb = boto3.resource('dynamodb')
 # Fail-fast: Required environment variables (audit #12 canonical naming).
 CITATIONS_TABLE = resolve_table_env('DYNAMODB_TABLE_CITATIONS', 'CITATIONS_TABLE')
 citations_table = dynamodb.Table(CITATIONS_TABLE)
-KEYWORDS_TABLE = (
-    os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    or os.environ.get('KEYWORDS_TABLE')
-    or 'CitationAnalysis-Keywords'
-)
+KEYWORDS_TABLE = keywords_table_name()
 
 # Optional: Brand config table for dynamic brand detection
 BRAND_CONFIG_TABLE = os.environ.get('DYNAMODB_TABLE_BRAND_CONFIG')
@@ -184,13 +179,8 @@ def _aggregate_citations(items, tracked_brands):
 
 
 @api_handler
-@validate({
-    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
-    'group_id': {'type': str, 'max_length': 64},
-    'keyword_ids': {'type': str, 'max_length': 8000},
-    'scope': {'type': str, 'choices': ['all']},
-})
-def handler(event, context, keyword=None, group_id=None, keyword_ids=None, scope=None):
+@validate(SCOPE_QUERY_PARAMS)
+def handler(event, context, **scope_params):
     """
     GET /api/citations?keyword=xxx | ?group_id=xxx | ?keyword_ids=a,b
 
@@ -199,11 +189,9 @@ def handler(event, context, keyword=None, group_id=None, keyword_ids=None, scope
     scope is given). No server-side limit so the frontend receives the full
     dataset for client-side sorting and Excel export.
     """
-    report_scope, error = parse_scope_params(
-        {'keyword': keyword, 'group_id': group_id, 'keyword_ids': keyword_ids, 'scope': scope}, dynamodb.Table(KEYWORDS_TABLE)
-    )
-    if error:
-        return validation_error(error, event, 'scope')
+    report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE))
+    if rejected:
+        return rejected
 
     tracked_brands = _get_tracked_brands()
 

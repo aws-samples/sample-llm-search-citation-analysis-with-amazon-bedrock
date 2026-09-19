@@ -7,37 +7,18 @@ The aggregator composes existing helpers (`get_all_keywords_trends` and
 handler computes itself: previous_score, change_percent, trend_direction,
 top_improving / top_declining ordering.
 
-Test bootstrap mirrors `test_routers_404.py`: the Lambda layer is mounted
-on sys.path so `from shared.* import` resolves to the layer copy, and
-the sibling-module loader is monkey-patched so we don't need a real
-DynamoDB or boto3 client.
+Test bootstrap mirrors `test_routers_404.py`: `shared.*` resolves from the
+source tree via `lambda/conftest.py`, and the sibling-module loader is
+monkey-patched so we don't need a real DynamoDB or boto3 client.
 """
 
-import importlib
-import importlib.util
 import json
 import os
-import sys
 from unittest.mock import patch
 
 import pytest
 
-# Mount the shared layer the way the production Lambda does at runtime.
-# When the layer hasn't been built locally, fall back to the source tree
-# at lambda/ which has the same `shared/` package structure.
-_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-_LAYER_PY = os.path.join(_REPO, 'lambda', 'layer', 'python')
-_LAMBDA_DIR = os.path.join(_REPO, 'lambda')
-if os.path.isdir(_LAYER_PY) and _LAYER_PY not in sys.path:
-    sys.path.insert(0, _LAYER_PY)
-elif _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-
-# `shared/__init__.py` re-exports api_response as a function, shadowing the
-# submodule. Force-resolve the module so subsequent imports get the module.
-_layer_api_response = importlib.import_module('shared.api_response')
-sys.modules['shared.api_response'] = _layer_api_response
-
+from testing.module_loader import load_handler_module
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -96,13 +77,7 @@ DEFAULT_FAKE_RECS = [
 
 def _load_overview_module():
     """Load get-reports-overview.py with sibling helpers stubbed out."""
-    spec = importlib.util.spec_from_file_location(
-        'get_reports_overview_under_test',
-        os.path.join(_API_DIR, 'get-reports-overview.py'),
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules['get_reports_overview_under_test'] = mod
-    spec.loader.exec_module(mod)
+    mod = load_handler_module(_API_DIR, 'get-reports-overview.py')
 
     # Pre-fill the lazy cache with our fakes so the production
     # _load_sibling code path is never exercised in tests.

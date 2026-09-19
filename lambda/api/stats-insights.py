@@ -17,8 +17,7 @@ import sys
 # Shared layer path (populated by the Lambda layer at /opt/python)
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import not_found_response
-from shared.router import HandlerLoader, path_matches_route
+from shared.router import HandlerLoader, dispatch_route
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -46,16 +45,4 @@ def handler(event, context):
     Router handler that dispatches to the correct sub-handler
     based on the API Gateway resource path.
     """
-    resource = event.get('resource', '')
-    path = event.get('path', '')
-
-    logger.info(f"Routing request: resource={resource}, path={path}")
-
-    # Try resource first (API Gateway template path), then fall back to actual path
-    for route_path, filename in ROUTE_MAP.items():
-        if path_matches_route(route_path, resource, path):
-            logger.info(f"Matched route {route_path} -> {filename}")
-            return _handlers.get(filename)(event, context)
-
-    logger.error(f"No route matched for resource={resource}, path={path}")
-    return not_found_response(resource='Route', event=event)
+    return dispatch_route(event, context, ROUTE_MAP, _handlers, logger)

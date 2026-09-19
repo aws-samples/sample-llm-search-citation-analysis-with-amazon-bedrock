@@ -17,35 +17,20 @@ These tests would FAIL if the substring fallback were reintroduced.
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import sys
 
-# The module filename has a hyphen, which is not a valid Python identifier.
-# Load by file path and bind to a clean module name for pytest.
-_HERE = os.path.dirname(__file__)
-_MODULE_PATH = os.path.join(_HERE, 'get-citation-gaps.py')
+from testing.env import setdefault_env
+from testing.module_loader import load_handler_module
 
-# Mock env vars the module reads at import time so we can load without
-# touching AWS.
-os.environ.setdefault('DYNAMODB_TABLE_SEARCH_RESULTS', 'test-search')
-os.environ.setdefault('DYNAMODB_TABLE_CITATIONS', 'test-citations')
-os.environ.setdefault('DYNAMODB_TABLE_CRAWLED_CONTENT', 'test-crawled')
-
-# Put lambda/ on the path so `from shared...` imports in the module under
-# test resolve to the layer copies.
-_LAMBDA_DIR = os.path.dirname(_HERE)
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-
-_spec = importlib.util.spec_from_file_location('get_citation_gaps_under_test', _MODULE_PATH)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules['get_citation_gaps_under_test'] = _mod
-_spec.loader.exec_module(_mod)
-
-is_first_party_domain = _mod.is_first_party_domain
+# Table names the module reads at import time, so it loads without touching AWS.
+setdefault_env({
+    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
+    'DYNAMODB_TABLE_CITATIONS': 'test-citations',
+    'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
+})
+is_first_party_domain = load_handler_module(
+    os.path.dirname(__file__), 'get-citation-gaps.py', 'get_citation_gaps_under_test'
+).is_first_party_domain
 
 
 class TestExactDomainMatch:

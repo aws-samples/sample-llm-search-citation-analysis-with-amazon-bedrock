@@ -10,32 +10,14 @@ unparseable, and raising model calls, and each endpoint's success shaping.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import sys
 
-# The module filename has a hyphen, which is not a valid Python identifier.
-# Load by file path and bind to a clean module name for pytest.
-_HERE = os.path.dirname(__file__)
-_MODULE_PATH = os.path.join(_HERE, 'manage-brand-config.py')
+from testing.module_loader import load_handler_module
 
-# Mock env vars the module reads at import time so we can load without
-# touching AWS.
+# The table name the module reads at import time, so it loads without touching AWS.
 os.environ.setdefault('DYNAMODB_TABLE_BRAND_CONFIG', 'test-brand-config')
-
-# Put lambda/ on the path so `from shared...` imports in the module under
-# test resolve to the layer copies.
-_LAMBDA_DIR = os.path.dirname(_HERE)
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-
-_spec = importlib.util.spec_from_file_location('manage_brand_config_under_test', _MODULE_PATH)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules['manage_brand_config_under_test'] = _mod
-_spec.loader.exec_module(_mod)
+_mod = load_handler_module(os.path.dirname(__file__), 'manage-brand-config.py')
 
 
 class BedrockUnavailableError(Exception):

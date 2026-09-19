@@ -1,11 +1,13 @@
 """
-Unit tests for shared.router.HandlerLoader.
+Unit tests for shared.router.
 
-Tests the lazy/cached loading helper used by consolidated API routers to
-dispatch to hyphenated sub-handler files without duplicating boilerplate.
+Covers `HandlerLoader` (the lazy/cached loading helper consolidated API
+routers use to dispatch to hyphenated sub-handler files), the two route
+matchers, and `dispatch_route` (the shared router body).
 """
 
 import importlib
+import logging
 import os
 import sys
 import textwrap
@@ -13,13 +15,7 @@ import textwrap
 import pytest
 
 # The shared package __init__ re-exports api_response as a function, which
-# can shadow the submodule. Point sys.path at lambda/ (so `import shared.router`
-# resolves to the in-repo module) and import directly.
-_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-_LAMBDA_DIR = os.path.join(_REPO, 'lambda')
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-
+# can shadow the submodule — import the router module object directly.
 router_mod = importlib.import_module('shared.router')
 HandlerLoader = router_mod.HandlerLoader
 
@@ -215,3 +211,84 @@ class TestPathContainsSegment:
 
     def test_returns_false_for_empty_request_path(self) -> None:
         assert router_mod.path_contains_segment('/ideas', '') is False
+
+
+
+class TestDispatchRoute:
+    """Tests for `dispatch_route` — the router body shared by the
+    consolidated API Lambdas (citations-content, config-mgmt,
+    execution-mgmt, stats-insights).
+    """
+
+    @pytest.fixture
+    def loader(self, tmp_path):
+        """A `HandlerLoader` over two sub-handlers that echo which one ran."""
+        for name in ('status-handler', 'generic-handler'):
+            (tmp_path / f'{name}.py').write_text(
+                f'def handler(event, context):\n'
+                f'    return {{"handled_by": "{name}", "event": event, "context": context}}\n'
+            )
+        return HandlerLoader(str(tmp_path / 'fake-router.py'))
+
+    @pytest.fixture
+    def route_map(self):
+        # Specific-before-generic, as the stats-insights router relies on.
+        return {
+            '/api/things/{id}/status': 'status-handler.py',
+            '/api/things': 'generic-handler.py',
+        }
+
+    @pytest.fixture(autouse=True)
+    def _dev_cors(self, monkeypatch):
+        """Make the 404 path deterministic regardless of the ambient CORS env."""
+        api_response = importlib.import_module('shared.api_response')
+        monkeypatch.delenv('CORS_ORIGIN_PARAM', raising=False)
+        monkeypatch.setenv('ALLOW_DEV_CORS', 'true')
+        monkeypatch.setattr(api_response, '_cors_origin_cache', None)
+
+    def test_dispatches_to_the_first_route_whose_prefix_matches(self, loader, route_map):
+        event = {'resource': '/api/things/{id}/status', 'path': '/api/things/42/status'}
+
+        result = router_mod.dispatch_route(event, None, route_map, loader, logging.getLogger('t'))
+
+        assert result['handled_by'] == 'status-handler'
+
+    def test_falls_through_to_the_generic_route_for_a_plain_child_path(self, loader, route_map):
+        event = {'resource': '/api/things/{id}', 'path': '/api/things/42'}
+
+        result = router_mod.dispatch_route(event, None, route_map, loader, logging.getLogger('t'))
+
+        assert result['handled_by'] == 'generic-handler'
+
+    def test_passes_event_and_context_through_to_the_sub_handler(self, loader, route_map):
+        event = {'resource': '/api/things', 'path': '/api/things', 'httpMethod': 'GET'}
+        context = object()
+
+        result = router_mod.dispatch_route(event, context, route_map, loader, logging.getLogger('t'))
+
+        assert result['event'] is event
+        assert result['context'] is context
+
+    def test_matches_on_the_concrete_path_when_the_resource_is_missing(self, loader, route_map):
+        event = {'path': '/api/things/7'}
+
+        result = router_mod.dispatch_route(event, None, route_map, loader, logging.getLogger('t'))
+
+        assert result['handled_by'] == 'generic-handler'
+
+    def test_returns_404_through_not_found_response_when_no_route_matches(self, loader, route_map):
+        event = {'resource': '/api/other', 'path': '/api/other', 'headers': {}}
+
+        result = router_mod.dispatch_route(event, None, route_map, loader, logging.getLogger('t'))
+
+        assert result['statusCode'] == 404
+        assert 'Route not found' in result['body']
+        assert result['headers']['Access-Control-Allow-Origin'] == '*'
+
+    def test_does_not_match_a_sibling_route_sharing_a_prefix(self, loader, route_map):
+        """REGRESSION GUARD: `/api/things-archive` is not under `/api/things`."""
+        event = {'resource': '/api/things-archive', 'path': '/api/things-archive', 'headers': {}}
+
+        result = router_mod.dispatch_route(event, None, route_map, loader, logging.getLogger('t'))
+
+        assert result['statusCode'] == 404

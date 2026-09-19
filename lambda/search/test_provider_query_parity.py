@@ -23,30 +23,26 @@ the user-facing query untouched.
 
 from __future__ import annotations
 
-import importlib.util
+import inspect
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
-os.environ.setdefault('DYNAMODB_TABLE_SEARCH_RESULTS', 'test-search')
-os.environ.setdefault('SEARCH_RESULTS_TABLE', 'test-search')
-os.environ.setdefault('PROVIDER_CONFIG_TABLE', 'test-providers')
-os.environ.setdefault('DYNAMODB_TABLE_PROVIDER_CONFIG', 'test-providers')
-os.environ.setdefault('BRAND_CONFIG_TABLE', 'test-brands')
-os.environ.setdefault('DYNAMODB_TABLE_BRAND_CONFIG', 'test-brands')
+from testing.env import setdefault_env
+from testing.module_loader import load_handler_module
+
+setdefault_env({
+    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
+    'SEARCH_RESULTS_TABLE': 'test-search',
+    'PROVIDER_CONFIG_TABLE': 'test-providers',
+    'DYNAMODB_TABLE_PROVIDER_CONFIG': 'test-providers',
+    'BRAND_CONFIG_TABLE': 'test-brands',
+    'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brands',
+})
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.dirname(_HERE)
-for _path in (_LAMBDA_DIR, _HERE):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
 
-_spec = importlib.util.spec_from_file_location(
-    'search_handler_parity', os.path.join(_HERE, 'handler.py')
-)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules['search_handler_parity'] = _mod
-_spec.loader.exec_module(_mod)
+# Unique module name: see test_handler_prompts.py for why `import handler` is contested.
+_mod = load_handler_module(_HERE, 'handler.py', 'search_handler_parity')
 
 KEYWORD = 'best hotels near Brussels Airport'
 PERSONA = 'I am travelling with two young children. {keyword}'
@@ -83,8 +79,6 @@ class TestQueryIsIdenticalAcrossProviders:
         wording could drift from the rest. It is gone, so the drift cannot be
         reintroduced without a visible signature change.
         """
-        import inspect
-
         params = list(inspect.signature(_mod.build_provider_query).parameters)
 
         assert params == ['keyword', 'query_template']

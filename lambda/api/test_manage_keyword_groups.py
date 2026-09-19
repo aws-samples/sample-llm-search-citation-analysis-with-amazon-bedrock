@@ -6,55 +6,33 @@ when a group is deleted, and the bulk membership route, all against mocked
 DynamoDB tables.
 """
 
-import importlib.util
-import json
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))  # lambda/
+from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.events import api_gateway_event, parse_response
+from testing.module_loader import load_handler_module
 
 mock_keywords_table = MagicMock()
 mock_groups_table = MagicMock()
+mock_dynamodb = fake_dynamodb_resource(mock_keywords_table, by_name={'test-groups': mock_groups_table})
 
-
-def _table_for(name):
-    return mock_groups_table if name == 'test-groups' else mock_keywords_table
-
-
-mock_dynamodb = MagicMock()
-mock_dynamodb.Table.side_effect = _table_for
-
-_spec = importlib.util.spec_from_file_location(
-    'manage_keyword_groups',
-    os.path.join(os.path.dirname(__file__), 'manage-keyword-groups.py'),
-)
-_mod = importlib.util.module_from_spec(_spec)
 with patch('boto3.resource', return_value=mock_dynamodb), patch.dict(os.environ, {
     'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
     'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-groups',
     'CORS_ORIGIN_PARAM': '',
 }):
-    _spec.loader.exec_module(_mod)
+    _mod = load_handler_module(os.path.dirname(__file__), 'manage-keyword-groups.py', 'manage_keyword_groups')
 
 
 def make_event(method, body=None, path_params=None, path='/api/keyword-groups'):
-    return {
-        'httpMethod': method,
-        'path': path,
-        'resource': path,
-        'pathParameters': path_params,
-        'headers': {'origin': 'http://localhost:3000'},
-        'body': json.dumps(body) if body is not None else None,
-        'requestContext': {'authorizer': {'claims': {'cognito:username': 'user@example.com'}}},
-    }
-
-
-def parse_response(result):
-    return result['statusCode'], json.loads(result['body'])
+    return api_gateway_event(
+        method, path, resource=path, body=body, path_params=path_params,
+        claims={'cognito:username': 'user@example.com'},
+    )
 
 
 def _conditional_failure():

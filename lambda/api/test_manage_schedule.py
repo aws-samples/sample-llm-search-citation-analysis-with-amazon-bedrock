@@ -13,17 +13,16 @@ Covers:
 - Delete and run-now (execution input mirrors what EventBridge sends)
 """
 
-import importlib.util
 import json
 import os
-import sys
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Make `from shared.xxx import` resolve (layer puts shared/ at /opt/python/shared/)
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))  # lambda/
+from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.events import api_gateway_event
+from testing.module_loader import load_handler_module
 
 
 class SchedulerResourceNotFound(Exception):
@@ -41,19 +40,12 @@ class SchedulerValidation(Exception):
 mock_scheduler = MagicMock(name='scheduler')
 mock_stepfunctions = MagicMock(name='stepfunctions')
 mock_groups_table = MagicMock(name='groups_table')
-mock_dynamodb = MagicMock(name='dynamodb')
-mock_dynamodb.Table.return_value = mock_groups_table
+mock_dynamodb = fake_dynamodb_resource(mock_groups_table)
 
 
 def _mock_boto3_client(service, *args, **kwargs):
     return mock_stepfunctions if service == 'stepfunctions' else mock_scheduler
 
-
-_handler_spec = importlib.util.spec_from_file_location(
-    'manage_schedule',
-    os.path.join(os.path.dirname(__file__), 'manage-schedule.py')
-)
-_handler_mod = importlib.util.module_from_spec(_handler_spec)
 
 _test_env = {
     'STATE_MACHINE_ARN': 'arn:aws:states:us-east-1:123456789012:stateMachine:test',
@@ -67,7 +59,7 @@ with (
     patch('boto3.resource', return_value=mock_dynamodb),
     patch.dict(os.environ, _test_env),
 ):
-    _handler_spec.loader.exec_module(_handler_mod)
+    _handler_mod = load_handler_module(os.path.dirname(__file__), 'manage-schedule.py', 'manage_schedule')
 
 GROUP_ID = 'a3f9c2d1-0000-4000-8000-000000000001'
 STATE_MACHINE_ARN = _test_env['STATE_MACHINE_ARN']
@@ -78,15 +70,7 @@ def make_event(method, body=None, path_params=None, groups='Admin', path='/api/s
     claims = {'cognito:username': 'admin@example.com', 'email': 'admin@example.com'}
     if groups is not None:
         claims['cognito:groups'] = groups
-    return {
-        'httpMethod': method,
-        'path': path,
-        'resource': path,
-        'pathParameters': path_params,
-        'headers': {'origin': 'http://localhost:3000'},
-        'body': json.dumps(body) if body is not None else None,
-        'requestContext': {'authorizer': {'claims': claims}},
-    }
+    return api_gateway_event(method, path, resource=path, body=body, path_params=path_params, claims=claims)
 
 
 def id_event(method, schedule_id, body=None, suffix=''):

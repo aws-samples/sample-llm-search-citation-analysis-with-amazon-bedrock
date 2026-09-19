@@ -21,28 +21,21 @@ Note: if this regression is ever reverted (hardcoded '*' re-added), the
 """
 
 import importlib
-import importlib.util
 import os
-import sys
 
 import pytest
+
+from testing.module_loader import load_handler_module
 
 # --- Test bootstrap --------------------------------------------------------
 
 # The routers do `sys.path.insert(0, '/opt/python')` at import time then
-# `from shared.api_response import not_found_response`. We point the layer
-# directory at the front of sys.path so that `shared` resolves to the layer
-# copy (the copy the routers will load in Lambda via /opt/python).
-_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-_LAYER_PY = os.path.join(_REPO, 'lambda', 'layer', 'python')
-if _LAYER_PY not in sys.path:
-    sys.path.insert(0, _LAYER_PY)
-
-# Get the real module (shared/__init__.py re-exports api_response as a function,
-# shadowing the submodule — use import_module to get the module object).
+# `from shared.api_response import not_found_response`; locally that path does
+# not exist and `shared` resolves from the source tree via lambda/conftest.py.
+# `shared/__init__.py` re-exports api_response as a *function*, shadowing the
+# submodule, so the module object (whose CORS cache the tests reset) has to be
+# fetched through import_module.
 _layer_api_response = importlib.import_module('shared.api_response')
-# Ensure sys.modules isn't holding the shadowed function under this key
-sys.modules['shared.api_response'] = _layer_api_response
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -62,15 +55,7 @@ def _reset_cors_cache():
 
 def _load_router(name):
     """Load a router .py file (hyphenated name) as a fresh module."""
-    module_name = name.replace('-', '_') + '_router_under_test'
-    # Ensure a clean import each call; previous spec caches would skip code
-    sys.modules.pop(module_name, None)
-    spec = importlib.util.spec_from_file_location(
-        module_name, os.path.join(_API_DIR, f'{name}.py')
-    )
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_handler_module(_API_DIR, f'{name}.py', name.replace('-', '_') + '_router_under_test')
 
 
 def _unmatched_event(origin='https://evil.example.com'):

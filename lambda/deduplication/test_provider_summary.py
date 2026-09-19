@@ -13,17 +13,15 @@ zeros would restore the reporting bug while looking fixed.
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.module_loader import load_handler_module
+
 _HANDLER_DIR = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.abspath(os.path.join(_HANDLER_DIR, '..'))
-_MODULE_NAME = 'deduplication_handler_under_test'
 
 _TEST_ENV = {
     'DYNAMODB_TABLE_CITATIONS': 'test-citations',
@@ -32,35 +30,18 @@ _TEST_ENV = {
 }
 
 
-def _load_handler() -> tuple[Any, MagicMock]:
-    """Import the dedup handler with DynamoDB mocked at module scope."""
-    if _LAMBDA_DIR not in sys.path:
-        sys.path.insert(0, _LAMBDA_DIR)
-
+@pytest.fixture
+def dedup():
+    """Provide a freshly imported dedup module with a mocked citations table."""
     table = MagicMock()
     resource = MagicMock()
     resource.Table.return_value = table
 
-    sys.modules.pop(_MODULE_NAME, None)
-    spec = importlib.util.spec_from_file_location(
-        _MODULE_NAME, os.path.join(_HANDLER_DIR, 'handler.py')
-    )
-    module = importlib.util.module_from_spec(spec)
-
-    with patch('boto3.resource', return_value=resource), \
-         patch.dict(os.environ, _TEST_ENV):
-        spec.loader.exec_module(module)
+    with patch('boto3.resource', return_value=resource), patch.dict(os.environ, _TEST_ENV):
+        module = load_handler_module(_HANDLER_DIR, 'handler.py', 'deduplication_handler_under_test')
 
     module.citations_table = table
-    return module, table
-
-
-@pytest.fixture
-def dedup():
-    """Provide the dedup module with a mocked citations table."""
-    module, _table = _load_handler()
-    yield module
-    sys.modules.pop(_MODULE_NAME, None)
+    return module
 
 
 def provider_row(

@@ -8,27 +8,26 @@ Covers:
 - store_search_results() includes query_prompt_id in composite key
 """
 
-import importlib.util
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.env import setdefault_env
+from testing.module_loader import load_handler_module
+
 # handler.py resolves its table names at import; the autouse fixture below
 # re-patches them per test for the code paths that read the environment.
-os.environ.setdefault('DYNAMODB_TABLE_SEARCH_RESULTS', 'test-results')
-os.environ.setdefault('SEARCH_RESULTS_TABLE', 'test-results')
-os.environ.setdefault('PROVIDER_CONFIG_TABLE', 'test-provider-config')
-os.environ.setdefault('DYNAMODB_TABLE_PROVIDER_CONFIG', 'test-provider-config')
-os.environ.setdefault('BRAND_CONFIG_TABLE', 'test-brands')
-os.environ.setdefault('DYNAMODB_TABLE_BRAND_CONFIG', 'test-brands')
+setdefault_env({
+    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-results',
+    'SEARCH_RESULTS_TABLE': 'test-results',
+    'PROVIDER_CONFIG_TABLE': 'test-provider-config',
+    'DYNAMODB_TABLE_PROVIDER_CONFIG': 'test-provider-config',
+    'BRAND_CONFIG_TABLE': 'test-brands',
+    'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brands',
+})
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.dirname(_HERE)
-for _path in (_LAMBDA_DIR, _HERE):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
 
 # Import this directory's handler.py by file path, under a unique module name.
 #
@@ -40,12 +39,7 @@ for _path in (_LAMBDA_DIR, _HERE):
 # only because alphabetical collection happened to leave search/ in front.
 # The unique name keeps this suite out of the contested `sys.modules['handler']`
 # slot entirely — the same pattern as test_provider_query_parity.py.
-_spec = importlib.util.spec_from_file_location(
-    'search_handler_prompts', os.path.join(_HERE, 'handler.py')
-)
-handler = importlib.util.module_from_spec(_spec)
-sys.modules['search_handler_prompts'] = handler
-_spec.loader.exec_module(handler)
+handler = load_handler_module(_HERE, 'handler.py', 'search_handler_prompts')
 
 
 @pytest.fixture(autouse=True)

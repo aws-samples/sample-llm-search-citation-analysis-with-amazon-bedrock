@@ -13,35 +13,23 @@ no `requestContext` at all, and the two wire encodings of `cognito:groups`.
 
 from __future__ import annotations
 
-import importlib
 import json
-import os
 import string
-import sys
 from typing import Any
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-# The shared package __init__ re-exports api_response as a function, which
-# can shadow the submodule. Point sys.path at lambda/ (so `import shared.auth`
-# resolves to the in-repo module) and import directly.
-_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-_LAMBDA_DIR = os.path.join(_REPO, 'lambda')
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-
-auth = importlib.import_module('shared.auth')
-
-ADMIN_GROUP = auth.ADMIN_GROUP
-GROUPS_CLAIM = auth.GROUPS_CLAIM
-get_caller_claims = auth.get_caller_claims
-get_caller_groups = auth.get_caller_groups
-get_caller_identity = auth.get_caller_identity
-is_self_reference = auth.is_self_reference
-require_group = auth.require_group
-
+from shared.auth import (
+    ADMIN_GROUP,
+    GROUPS_CLAIM,
+    get_caller_claims,
+    get_caller_groups,
+    get_caller_identity,
+    is_self_reference,
+    require_group,
+)
 
 # ---------------------------------------------------------------------------
 # Event builders. `authenticated_event` mirrors what API Gateway's Cognito

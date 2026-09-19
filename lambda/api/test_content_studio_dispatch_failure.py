@@ -22,31 +22,23 @@ never execute the generation here.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
-os.environ.setdefault('DYNAMODB_TABLE_SEARCH_RESULTS', 'test-search')
-os.environ.setdefault('DYNAMODB_TABLE_CITATIONS', 'test-citations')
-os.environ.setdefault('DYNAMODB_TABLE_CRAWLED_CONTENT', 'test-crawled')
-os.environ.setdefault('DYNAMODB_TABLE_CONTENT_STUDIO', 'test-content-studio')
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.dirname(_HERE)
-for _path in (_LAMBDA_DIR, _HERE):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
-
 from shared.self_invoke import SelfInvokeDispatchError
+from shared.utils import get_timestamp
+from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
+from testing.env import setdefault_env
+from testing.module_loader import load_handler_module
 
-_spec = importlib.util.spec_from_file_location(
-    'content_studio_dispatch_under_test', os.path.join(_HERE, 'content-studio.py')
-)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules['content_studio_dispatch_under_test'] = _mod
-_spec.loader.exec_module(_mod)
+setdefault_env({
+    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
+    'DYNAMODB_TABLE_CITATIONS': 'test-citations',
+    'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
+    'DYNAMODB_TABLE_CONTENT_STUDIO': 'test-content-studio',
+})
+_mod = load_handler_module(os.path.dirname(__file__), 'content-studio.py', 'content_studio_dispatch_under_test')
 
 
 IDEA = {'id': 'idea-1', 'keyword': 'best hotels malaga', 'content_angle': 'comprehensive_guide'}
@@ -60,26 +52,26 @@ def _generate_event() -> dict:
     }
 
 
-def _fake_dynamodb() -> MagicMock:
-    """A resource whose table accepts the pending write as a fresh row."""
-    table = MagicMock()
-    table.get_item.return_value = {}
-    resource = MagicMock()
-    resource.Table.return_value = table
-    return resource
+def _failing_dispatch() -> MagicMock:
+    """An `invoke_self_async` whose dispatch fails outright."""
+    return MagicMock(side_effect=SelfInvokeDispatchError('boom'))
+
+
+def _generate(dispatch: MagicMock, update_content_status: MagicMock | None = None) -> dict:
+    """Run `_generate_content` over a fresh pending row with `dispatch` as `invoke_self_async`."""
+    # A resource whose table accepts the pending write as a fresh row.
+    dynamodb = fake_dynamodb_resource(fake_table(get_item={}))
+    with (
+        patch.object(_mod, 'dynamodb', dynamodb),
+        patch.object(_mod, 'update_content_status', update_content_status or MagicMock()),
+        patch.object(_mod, 'invoke_self_async', dispatch),
+    ):
+        return _mod._generate_content(_generate_event(), None)
 
 
 class TestDispatchFailureReturns503:
     def test_returns_503_when_the_generation_cannot_be_dispatched(self):
-        with (
-            patch.object(_mod, 'dynamodb', _fake_dynamodb()),
-            patch.object(_mod, 'update_content_status', MagicMock()),
-            patch.object(
-                _mod, 'invoke_self_async',
-                MagicMock(side_effect=SelfInvokeDispatchError('boom')),
-            ),
-        ):
-            response = _mod._generate_content(_generate_event(), None)
+        response = _generate(_failing_dispatch())
 
         assert response['statusCode'] == 503
 
@@ -91,16 +83,8 @@ class TestDispatchFailureReturns503:
         """
         process = MagicMock()
 
-        with (
-            patch.object(_mod, 'dynamodb', _fake_dynamodb()),
-            patch.object(_mod, 'update_content_status', MagicMock()),
-            patch.object(_mod, '_process_generation_async', process),
-            patch.object(
-                _mod, 'invoke_self_async',
-                MagicMock(side_effect=SelfInvokeDispatchError('boom')),
-            ),
-        ):
-            _mod._generate_content(_generate_event(), None)
+        with patch.object(_mod, '_process_generation_async', process):
+            _generate(_failing_dispatch())
 
         process.assert_not_called()
 
@@ -112,40 +96,19 @@ class TestDispatchFailureReturns503:
         """
         update = MagicMock()
 
-        with (
-            patch.object(_mod, 'dynamodb', _fake_dynamodb()),
-            patch.object(_mod, 'update_content_status', update),
-            patch.object(
-                _mod, 'invoke_self_async',
-                MagicMock(side_effect=SelfInvokeDispatchError('boom')),
-            ),
-        ):
-            _mod._generate_content(_generate_event(), None)
+        _generate(_failing_dispatch(), update_content_status=update)
 
         assert update.call_args.args[1] == 'failed'
 
     def test_reports_the_failed_status_in_the_response_body(self):
-        with (
-            patch.object(_mod, 'dynamodb', _fake_dynamodb()),
-            patch.object(_mod, 'update_content_status', MagicMock()),
-            patch.object(
-                _mod, 'invoke_self_async',
-                MagicMock(side_effect=SelfInvokeDispatchError('boom')),
-            ),
-        ):
-            response = _mod._generate_content(_generate_event(), None)
+        response = _generate(_failing_dispatch())
 
         body = json.loads(response['body'])
         assert body['status'] == 'failed'
 
     def test_returns_pending_and_202_style_success_when_dispatch_works(self):
         """Control: the happy path must be untouched by the new guard."""
-        with (
-            patch.object(_mod, 'dynamodb', _fake_dynamodb()),
-            patch.object(_mod, 'update_content_status', MagicMock()),
-            patch.object(_mod, 'invoke_self_async', MagicMock()),
-        ):
-            response = _mod._generate_content(_generate_event(), None)
+        response = _generate(MagicMock())
 
         body = json.loads(response['body'])
         assert body['status'] == 'pending'
@@ -175,8 +138,6 @@ class TestGenerationTimeoutSweep:
         assert row['status'] == 'failed'
 
     def test_leaves_a_recent_row_untouched(self):
-        from shared.utils import get_timestamp
-
         row = {'id': 'abc', 'status': 'generating', 'created_at': get_timestamp()}
         update = MagicMock()
 

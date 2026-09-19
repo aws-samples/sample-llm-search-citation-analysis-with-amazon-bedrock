@@ -3,18 +3,6 @@ Tests for shared.utils.recommendation_id — the deterministic hash used
 to track recommendation status across list-regenerations.
 """
 
-import os
-import sys
-
-# Mount shared layer / fall back to lambda/ source tree.
-_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
-_LAYER_PY = os.path.join(_REPO, 'lambda', 'layer', 'python')
-_LAMBDA_DIR = os.path.join(_REPO, 'lambda')
-if os.path.isdir(_LAYER_PY) and _LAYER_PY not in sys.path:
-    sys.path.insert(0, _LAYER_PY)
-elif _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-
 from shared.utils import recommendation_id
 
 

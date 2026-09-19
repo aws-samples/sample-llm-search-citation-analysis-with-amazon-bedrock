@@ -231,6 +231,23 @@ def update_api_key(secret_name: str, api_key: str) -> dict:
         return {'success': False}
 
 
+def _bearer_json_headers(api_key: str) -> dict[str, str]:
+    """Headers for the providers that authenticate a JSON POST with a bearer token."""
+    return {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json',
+    }
+
+
+def _probe_result(response: Any) -> dict:
+    """Interpret a 1-token probe request: 200 proves the key, 401/403 refute it."""
+    if response.status_code == 200:
+        return {'valid': True}
+    if response.status_code in (401, 403):
+        return {'valid': False, 'error': 'Invalid API key'}
+    return {'valid': False, 'error': f'Unexpected status {response.status_code}'}
+
+
 def validate_api_key(provider_id: str, api_key: str) -> dict:
     """Validate API key by making a simple test request."""
     import requests
@@ -259,10 +276,7 @@ def validate_api_key(provider_id: str, api_key: str) -> dict:
             # ≤ $0.001 per validation.
             response = requests.post(
                 'https://api.perplexity.ai/chat/completions',
-                headers={
-                    'Authorization': f'Bearer {api_key}',
-                    'Content-Type': 'application/json',
-                },
+                headers=_bearer_json_headers(api_key),
                 json={
                     'model': 'sonar',
                     'messages': [{'role': 'user', 'content': 'ping'}],
@@ -270,11 +284,7 @@ def validate_api_key(provider_id: str, api_key: str) -> dict:
                 },
                 timeout=10,
             )
-            if response.status_code == 200:
-                return {'valid': True}
-            if response.status_code in (401, 403):
-                return {'valid': False, 'error': 'Invalid API key'}
-            return {'valid': False, 'error': f'Unexpected status {response.status_code}'}
+            return _probe_result(response)
 
         elif provider_id == 'gemini':
             response = requests.get(
@@ -309,10 +319,6 @@ def validate_api_key(provider_id: str, api_key: str) -> dict:
                 },
                 timeout=10,
             )
-            if response.status_code == 200:
-                return {'valid': True}
-            if response.status_code in (401, 403):
-                return {'valid': False, 'error': 'Invalid API key'}
             # 400 on bad model but valid key — still proves auth passed.
             if response.status_code == 400:
                 try:
@@ -322,7 +328,7 @@ def validate_api_key(provider_id: str, api_key: str) -> dict:
                     return {'valid': True, 'note': 'Key accepted (model validation skipped)'}
                 except Exception:
                     return {'valid': False, 'error': 'Unexpected 400 response'}
-            return {'valid': False, 'error': f'Unexpected status {response.status_code}'}
+            return _probe_result(response)
 
         # Search providers validation
         elif provider_id == 'brave':
@@ -372,18 +378,11 @@ def validate_api_key(provider_id: str, api_key: str) -> dict:
             # any request. limit=1 keeps credits usage minimal.
             response = requests.post(
                 'https://api.firecrawl.dev/v1/search',
-                headers={
-                    'Authorization': f'Bearer {api_key}',
-                    'Content-Type': 'application/json',
-                },
+                headers=_bearer_json_headers(api_key),
                 json={'query': 'ping', 'limit': 1},
                 timeout=10,
             )
-            if response.status_code == 200:
-                return {'valid': True}
-            if response.status_code in (401, 403):
-                return {'valid': False, 'error': 'Invalid API key'}
-            return {'valid': False, 'error': f'Unexpected status {response.status_code}'}
+            return _probe_result(response)
 
         return {'valid': False, 'error': 'Unknown provider'}
     except requests.Timeout:

@@ -1,5 +1,5 @@
 """
-Report scope from query-string parameters.
+Report scope from query-string parameters — the plumbing every KPI endpoint shares.
 
 Every read endpoint that reports on keywords accepts exactly one of::
 
@@ -15,17 +15,59 @@ The scope is resolved server-side into keyword *texts* (SearchResults and
 Citations are keyed by keyword text) with ``shared.keyword_groups.resolve_scope``,
 so the KPI formulas stay in one place instead of being re-implemented per
 client. Group and id scopes only ever cover *active* keywords.
+
+A handler wires the scope in three places::
+
+    KEYWORDS_TABLE = keywords_table_name()
+
+    @api_handler
+    @validate({**SCOPE_QUERY_PARAMS, 'days': {'type': int, 'default': 30}})
+    def handler(event, context, days=30, **scope_params):
+        report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE))
+        if rejected:
+            return rejected
+        ...
+
+``**scope_params`` collects exactly the values ``@validate`` injects for
+``SCOPE_QUERY_PARAMS``; every other query parameter keeps its own named
+argument. Scoped reports then fan out over the resolved keywords with
+``query_keyword_rows`` (one projected SearchResults partition per keyword),
+and the report aggregators compose KPI functions of sibling handler files
+through ``load_sibling_function``.
 """
 
 from __future__ import annotations
 
+import importlib.util
+import os
+import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from boto3.dynamodb.conditions import Key
+
+from shared.api_response import validation_error
+from shared.constants import MAX_KEYWORD_LENGTH
+from shared.env_vars import resolve_table_env
 from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
 
 MAX_KEYWORD_IDS = 100
-SCOPE_PARAMS = ('keyword', 'group_id', 'keyword_ids', 'scope')
+
+SCOPE_QUERY_PARAMS: dict[str, dict[str, Any]] = {
+    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
+    'group_id': {'type': str, 'max_length': 64},
+    'keyword_ids': {'type': str, 'max_length': 8000},
+    'scope': {'type': str, 'choices': ['all']},
+}
+"""``@validate`` rules for the scope parameters; handlers spread them into their own schema."""
+
+SCOPE_PARAMS = tuple(SCOPE_QUERY_PARAMS)
+
+
+def keywords_table_name() -> str:
+    """The Keywords table scopes resolve against: canonical env name, legacy name, then the stack default."""
+    return resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE', required=False, default='CitationAnalysis-Keywords')
 
 
 @dataclass(frozen=True)
@@ -100,3 +142,66 @@ def all_active_scope(keywords_table: Any) -> ReportScope:
     descriptor = {'mode': 'all'}
     resolved = resolve_scope(descriptor, keywords_table)
     return ReportScope(kind='all', keywords=tuple(item['keyword'] for item in resolved), scope=descriptor, label=describe_scope(descriptor))
+
+
+def scope_from_request(
+    event: dict[str, Any], params: dict[str, Any] | None, keywords_table: Any, *, required: bool = False
+) -> tuple[ReportScope | None, dict[str, Any] | None]:
+    """``parse_scope_params`` for a handler: the scope, or the 400 response to send instead.
+
+    ``required`` rejects a missing scope as well (one-keyword endpoints);
+    otherwise ``(None, None)`` means "no scope given, apply the endpoint's default".
+    """
+    scope, error = parse_scope_params(params, keywords_table)
+    if error:
+        return None, validation_error(error, event, 'scope')
+    if required and scope is None:
+        return None, validation_error('Provide keyword, group_id or keyword_ids', event, 'keyword')
+    return scope, None
+
+
+def query_keyword_rows(table: Any, keyword: str, projection: str) -> list[dict[str, Any]]:
+    """Every SearchResults row of one keyword (projected), following pagination.
+
+    The per-keyword read behind every scoped report: each keyword text a scope
+    resolves to is one partition of the table. ``projection`` names the
+    attributes to read, with ``#ts`` standing for the reserved word
+    ``timestamp``; it never includes the LLM response text, so a 60-keyword
+    group does not pull megabytes of prose through one 29s API request.
+    """
+    params: dict[str, Any] = {
+        'KeyConditionExpression': Key('keyword').eq(keyword),
+        'ProjectionExpression': projection,
+        'ExpressionAttributeNames': {'#ts': 'timestamp'},
+    }
+    rows: list[dict[str, Any]] = []
+    while True:
+        response = table.query(**params)
+        rows.extend(response.get('Items', []))
+        last_key = response.get('LastEvaluatedKey')
+        if not last_key:
+            return rows
+        params['ExclusiveStartKey'] = last_key
+
+
+def load_sibling_function(anchor_file: str, filename: str, attr: str, alias_suffix: str) -> Callable:
+    """Import function ``attr`` from the hyphen-named handler file ``filename`` next to ``anchor_file``.
+
+    The report aggregators (``/reports/overview``, ``/reports/competitor``)
+    compose KPI functions that live in other handler files, which ``import``
+    cannot reach. The module is registered in ``sys.modules`` as
+    ``<snake_name><alias_suffix>`` so it never collides with the copy a router
+    Lambda loads through ``shared.router.HandlerLoader``. Raises ``ImportError``
+    when the file cannot be loaded and ``AttributeError`` when it has no ``attr``.
+    """
+    module_name = filename.replace('-', '_').replace('.py', alias_suffix)
+    spec = importlib.util.spec_from_file_location(module_name, os.path.join(os.path.dirname(os.path.abspath(anchor_file)), filename))
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load sibling module {filename!r}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    fn = getattr(module, attr, None)
+    if fn is None:
+        raise AttributeError(f"{filename} has no attribute {attr!r}")
+    return fn
