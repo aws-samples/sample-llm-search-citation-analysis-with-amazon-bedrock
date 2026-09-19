@@ -9,6 +9,23 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.5.1] - 2026-09-19
+
+### Fixed
+
+- Research-agent searches no longer fail on a provider rate limit. A round
+  spreads its queries across the configured providers and runs them in
+  parallel, so three Perplexity calls could leave within 100 ms; the worker's
+  two-attempt budget (sized for OpenAI's 90 s timeout) gave a 429 a single
+  1-second, un-jittered retry, and two throttled steps re-collided. `429` now
+  earns three extra attempts on top of the caller's budget, waits honour a
+  numeric `Retry-After`, use exponential backoff with full jitter and are
+  capped at 30 s. Timeouts and 5xx keep the caller's budget.
+- The dashboard explains a rate-limited step ("Perplexity rate-limited one of
+  the searches. The other searches completed; use Retry to re-run the
+  throttled one.") instead of showing the provider's raw JSON error body; the
+  raw message stays in the tooltip.
+
 ## [2.5.0] - 2026-09-18
 
 Keyword Research Agent: describe a hotel and the dimensions to expand by, and

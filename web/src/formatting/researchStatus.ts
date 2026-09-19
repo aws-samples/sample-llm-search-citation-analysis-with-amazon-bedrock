@@ -86,6 +86,13 @@ export function getResearchStepStatusClass(status: ResearchStepStatus): string {
 const RAW_SECONDS_PATTERN = /(\d{1,15}) seconds\b/g;
 
 /**
+ * A provider's rate-limit refusal, as the worker records it:
+ * `perplexity: 429 Client Error: Too Many Requests for url: ... | {"error": ...}`.
+ * The leading `provider:` prefix is optional (step-level messages omit it).
+ */
+const RATE_LIMIT_PATTERN = /^(?:(?<provider>[a-z]+): )?429 Client Error: Too Many Requests\b/;
+
+/**
  * Rewrites embedded second counts into coarse units: 4434821 seconds becomes
  * "51 days".
  *
@@ -94,8 +101,20 @@ const RAW_SECONDS_PATTERN = /(\d{1,15}) seconds\b/g;
  * sweep failed it. Deriving elapsed time from `created_at` at render time would
  * keep growing every day the row sits in history, reporting a wait that never
  * happened. Callers keep the raw string available for debugging.
+ *
+ * A rate-limit refusal is replaced wholesale: the raw message is the
+ * provider's JSON error body, which tells the user nothing they can act on.
+ * The remaining searches of the run still completed, and Retry re-runs only
+ * the throttled ones, so the copy says exactly that. Callers keep the raw
+ * string in `title` for debugging.
  */
 export function formatResearchFailureMessage(message: string): string {
+  const rateLimited = RATE_LIMIT_PATTERN.exec(message);
+  if (rateLimited) {
+    const provider = rateLimited.groups?.provider;
+    const who = provider === undefined ? 'A search provider' : `${provider.charAt(0).toUpperCase()}${provider.slice(1)}`;
+    return `${who} rate-limited one of the searches. The other searches completed; use Retry to re-run the throttled one.`;
+  }
   return message.replaceAll(
     RAW_SECONDS_PATTERN,
     (_match, digits: string) => formatApproximateDuration(Number(digits))

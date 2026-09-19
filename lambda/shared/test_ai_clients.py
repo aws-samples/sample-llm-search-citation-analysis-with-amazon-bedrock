@@ -144,13 +144,14 @@ class TestRunWebSearch:
 
 class TestClientBehavior:
     def test_perplexity_client_retries_a_rate_limited_request(self):
-        rate_limited = MagicMock(status_code=429, text='slow down')
+        rate_limited = MagicMock(status_code=429, text='slow down', headers={})
         ok = MagicMock(status_code=200)
         ok.json.return_value = {'choices': []}
 
         with (
             patch.object(ai_clients.requests, 'post', side_effect=[rate_limited, ok]) as post,
             patch.object(ai_clients.time, 'sleep') as sleep,
+            patch.object(ai_clients.random, 'uniform', return_value=0.25),
         ):
             result = PerplexityClient('sk-test').chat_completion(
                 [{'role': 'user', 'content': 'q'}]
@@ -158,7 +159,90 @@ class TestClientBehavior:
 
         assert result == {'choices': []}
         assert post.call_count == 2
+        sleep.assert_called_once_with(1.25)
+
+    def test_throttling_earns_extra_attempts_beyond_the_callers_retry_budget(self):
+        """The research worker allows two attempts (sized for OpenAI's 90s timeout).
+
+        A 429 answers instantly and is cheap to wait out, so it must not be
+        spent from that budget: with ``max_retries=2`` the client keeps
+        retrying a throttled request for three more attempts.
+        """
+        rate_limited = MagicMock(status_code=429, text='slow down', headers={})
+        ok = MagicMock(status_code=200)
+        ok.json.return_value = {'choices': []}
+        responses = [rate_limited, rate_limited, rate_limited, rate_limited, ok]
+
+        with (
+            patch.object(ai_clients.requests, 'post', side_effect=responses) as post,
+            patch.object(ai_clients.time, 'sleep') as sleep,
+            patch.object(ai_clients.random, 'uniform', return_value=0.0),
+        ):
+            result = PerplexityClient('sk-test').chat_completion(
+                [{'role': 'user', 'content': 'q'}], max_retries=2
+            )
+
+        assert result == {'choices': []}
+        assert post.call_count == 5
+        assert [call.args[0] for call in sleep.call_args_list] == [1.0, 2.5, 5.0, 9.5]
+
+    def test_throttling_gives_up_after_the_extra_attempts(self):
+        rate_limited = MagicMock(status_code=429, text='slow down', headers={})
+        rate_limited.raise_for_status.side_effect = ai_clients.requests.exceptions.HTTPError(
+            '429 Client Error', response=rate_limited
+        )
+
+        with (
+            patch.object(ai_clients.requests, 'post', return_value=rate_limited) as post,
+            patch.object(ai_clients.time, 'sleep'),
+            patch.object(ai_clients.random, 'uniform', return_value=0.0),
+            pytest.raises(ai_clients.requests.exceptions.HTTPError, match='429 Client Error'),
+        ):
+            PerplexityClient('sk-test').chat_completion([{'role': 'user', 'content': 'q'}], max_retries=2)
+
+        assert post.call_count == 5
+
+    def test_server_errors_keep_the_callers_retry_budget(self):
+        """5xx and timeouts are the slow failures the caller's budget is sized for."""
+        server_error = MagicMock(status_code=503, text='unavailable', headers={})
+        server_error.raise_for_status.side_effect = ai_clients.requests.exceptions.HTTPError(
+            '503 Server Error', response=server_error
+        )
+
+        with (
+            patch.object(ai_clients.requests, 'post', return_value=server_error) as post,
+            patch.object(ai_clients.time, 'sleep') as sleep,
+            pytest.raises(ai_clients.requests.exceptions.HTTPError, match='503 Server Error'),
+        ):
+            PerplexityClient('sk-test').chat_completion([{'role': 'user', 'content': 'q'}], max_retries=2)
+
+        assert post.call_count == 2
         sleep.assert_called_once_with(1.0)
+
+    def test_throttle_wait_honours_retry_after_and_adds_jitter(self):
+        response = MagicMock(headers={'Retry-After': '4'})
+
+        with patch.object(ai_clients.random, 'uniform', return_value=1.5) as uniform:
+            wait = ai_clients._throttle_wait_seconds(response, attempt=0)
+
+        assert wait == 5.5
+        uniform.assert_called_once_with(0, 4.0)
+
+    def test_throttle_wait_falls_back_to_backoff_when_retry_after_is_unusable(self):
+        response = MagicMock(headers={'Retry-After': 'Fri, 19 Sep 2026 10:00:00 GMT'})
+
+        with patch.object(ai_clients.random, 'uniform', return_value=0.0):
+            wait = ai_clients._throttle_wait_seconds(response, attempt=2)
+
+        assert wait == 5.0
+
+    def test_throttle_wait_is_capped(self):
+        response = MagicMock(headers={'Retry-After': '120'})
+
+        with patch.object(ai_clients.random, 'uniform', return_value=0.0):
+            wait = ai_clients._throttle_wait_seconds(response, attempt=0)
+
+        assert wait == ai_clients.THROTTLE_MAX_WAIT_SECONDS
 
     def test_openai_payload_requests_web_search_call_sources(self):
         with patch.object(

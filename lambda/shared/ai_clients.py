@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import random
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -28,6 +29,38 @@ from typing import Any
 import requests
 
 from shared.secrets import get_api_key
+
+# Extra attempts a 429 earns on top of the caller's ``max_retries``. Throttling
+# answers in milliseconds, so waiting it out is cheap — unlike the timeouts the
+# caller's budget is sized for (the research worker allows two attempts because
+# OpenAI's 90s timeout must fit a 300s Lambda). Three throttled waits cost at
+# most ~14s plus jitter.
+THROTTLE_EXTRA_ATTEMPTS = 3
+THROTTLE_MAX_WAIT_SECONDS = 30.0
+
+
+def _backoff_seconds(attempt: int) -> float:
+    """Exponential backoff for attempt ``attempt`` (0-based): 1s, 2.5s, 5s, 9.5s, 17s."""
+    return (2 ** attempt) + (attempt * 0.5)
+
+
+def _throttle_wait_seconds(response: Any, attempt: int) -> float:
+    """How long to wait after a 429 before attempt ``attempt + 1``.
+
+    Honours a numeric ``Retry-After`` header when the provider sends one,
+    otherwise exponential backoff; either way full jitter is added so parallel
+    steps that were throttled together do not retry in lockstep and collide
+    again — three Perplexity steps fired within 100ms of each other did exactly
+    that, one 1.0s sleep each, and one of them lost.
+    """
+    retry_after = None
+    headers = getattr(response, 'headers', None) or {}
+    try:
+        retry_after = float(headers.get('Retry-After', ''))
+    except (TypeError, ValueError):
+        retry_after = None
+    base = retry_after if retry_after is not None and retry_after > 0 else _backoff_seconds(attempt)
+    return min(base + random.uniform(0, base), THROTTLE_MAX_WAIT_SECONDS)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -44,7 +77,10 @@ def retry_with_backoff(
 
     Args:
         provider_name: Name of the provider for logging (e.g., "OPENAI", "PERPLEXITY")
-        max_retries: Maximum number of retry attempts
+        max_retries: Maximum number of retry attempts for timeouts and 5xx
+            answers. A 429 gets ``THROTTLE_EXTRA_ATTEMPTS`` more, with jittered,
+            ``Retry-After``-aware waits — throttling is fast to fail and cheap
+            to wait out, so it should not spend the budget sized for slow failures.
         retryable_codes: HTTP status codes that should trigger a retry
         timeout: Request timeout in seconds
     """
@@ -56,27 +92,31 @@ def retry_with_backoff(
         def wrapper(*args, **kwargs) -> dict[str, Any]:
             # Allow override of max_retries via kwargs
             actual_max_retries = kwargs.pop('max_retries', max_retries)
+            throttle_attempts = actual_max_retries + THROTTLE_EXTRA_ATTEMPTS
 
-            for attempt in range(actual_max_retries):
+            attempt = 0
+            while attempt < throttle_attempts:
                 try:
                     response = func(*args, timeout=timeout, **kwargs)
 
-                    # If rate limited or server error, retry with exponential backoff
                     if response.status_code in retryable_codes:
                         error_body = response.text[:200] if response.text else "No error body"
-                        if attempt < actual_max_retries - 1:
-                            wait_time = (2 ** attempt) + (attempt * 0.5)  # 1s, 2.5s, 5s, 9.5s, 17s
+                        throttled = response.status_code == 429
+                        budget = throttle_attempts if throttled else actual_max_retries
+                        if attempt < budget - 1:
+                            wait_time = _throttle_wait_seconds(response, attempt) if throttled else _backoff_seconds(attempt)
                             logger.warning(
                                 f"[{provider_name}_RETRY] Status {response.status_code} | "
-                                f"Attempt {attempt + 1}/{actual_max_retries} | "
-                                f"Waiting {wait_time}s | Error: {error_body}"
+                                f"Attempt {attempt + 1}/{budget} | "
+                                f"Waiting {wait_time:.1f}s | Error: {error_body}"
                             )
                             time.sleep(wait_time)
+                            attempt += 1
                             continue
                         else:
                             logger.error(
                                 f"[{provider_name}_FAILED] Status {response.status_code} "
-                                f"after {actual_max_retries} attempts | Error: {error_body}"
+                                f"after {attempt + 1} attempts | Error: {error_body}"
                             )
 
                     if response.status_code != 200:
@@ -108,23 +148,25 @@ def retry_with_backoff(
 
                 except requests.exceptions.Timeout:
                     if attempt < actual_max_retries - 1:
-                        wait_time = (2 ** attempt) + (attempt * 0.5)
+                        wait_time = _backoff_seconds(attempt)
                         logger.warning(
                             f"[{provider_name}_TIMEOUT] Attempt {attempt + 1}/{actual_max_retries} | "
                             f"Waiting {wait_time}s"
                         )
                         time.sleep(wait_time)
+                        attempt += 1
                         continue
                     logger.error(f"[{provider_name}_TIMEOUT_FAILED] After {actual_max_retries} attempts")
                     raise
                 except requests.exceptions.RequestException as e:
                     if attempt < actual_max_retries - 1:
-                        wait_time = (2 ** attempt) + (attempt * 0.5)
+                        wait_time = _backoff_seconds(attempt)
                         logger.warning(
                             f"[{provider_name}_REQUEST_ERROR] {str(e)[:200]} | "
                             f"Attempt {attempt + 1}/{actual_max_retries} | Waiting {wait_time}s"
                         )
                         time.sleep(wait_time)
+                        attempt += 1
                         continue
                     logger.error(
                         f"[{provider_name}_REQUEST_FAILED] {str(e)[:500]} "
