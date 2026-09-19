@@ -9,6 +9,45 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.10.0] - 2026-09-19
+
+Complete keyword-group runs now create durable KPI baselines and actionable
+in-app alerts, with optional pay-per-delivery email notifications.
+
+### Added
+
+- **Five group alerts.** Configurable rules detect a citation-rate drop,
+  worsening first-party mean rank, a new competitor entering the configured
+  top N, an active tracked keyword losing its first-party mention, and a
+  visibility improvement after an explicitly recorded content change.
+- **Exact-run snapshots.** A failure-isolated post-summary workflow state reads
+  only the completed execution timestamp and records comparable group KPI,
+  prominence, keyword and competitor data. The first clean run is a baseline;
+  degraded, ambiguous and partial-group runs never create misleading deltas.
+- **Alerts dashboard and settings.** The Dashboard lists open alerts and lets
+  admins acknowledge them. Settings controls thresholds, recipients and SNS
+  confirmation status, and records group content-change markers so later gains
+  can be attributed honestly rather than guessed.
+- **Optional SNS email.** One plain-text message is published per execution
+  only when new alerts and configured recipients exist. Subscription failures
+  are reported safely without losing snapshots or in-app alerts.
+
+### Infrastructure
+
+- Added four retained, encrypted, on-demand DynamoDB tables for snapshots,
+  alerts, settings and content-change markers, plus one AWS-managed-key SNS
+  topic. All resources are request-priced; no provisioned or continuously
+  running compute was introduced.
+- KPI alert failures are caught by Step Functions and only add an `alerts`
+  failure block; the original analysis report and execution success remain
+  intact.
+
+### Fixed
+
+- Cleanup now shares request lifecycle and export filename primitives, removes
+  the ignored template-draft industry field, and corrects the dashboard
+  `remark-parse@^11.0.0` manifest range to match the lockfile for clean installs.
+
 ## [2.9.0] - 2026-09-19
 
 Content Studio can now create a group-level landing-page brief for any

@@ -1,15 +1,16 @@
 import { vi } from 'vitest';
-import type { Mock } from 'vitest';
 import type { ComponentProps } from 'react';
-import type {
-  BrandConfig, IndustryPresets 
-} from '../../types';
+import type { BrandConfig } from '../../types';
+import type { useBrandConfig } from '../../hooks/useBrandConfig';
 import type { ProviderConfig } from '../../hooks/useProviderConfig';
 import type { useIsAdmin } from '../../hooks/useIsAdmin';
+import { DEFAULT_CONFIG } from '../../constants/brandConfigDefaults';
 import { existingKeywordFixture } from '../Keywords/KeywordsManager-fixtures';
 import type { SettingsView } from './SettingsView';
 
 type SettingsViewProps = ComponentProps<typeof SettingsView>;
+type BrandConfigHookResult = ReturnType<typeof useBrandConfig>;
+type AdminMembership = ReturnType<typeof useIsAdmin>;
 
 export function buildSettingsViewProps(overrides: Partial<SettingsViewProps> = {}): SettingsViewProps {
   return {
@@ -19,32 +20,27 @@ export function buildSettingsViewProps(overrides: Partial<SettingsViewProps> = {
   };
 }
 
-/** The slice of `useBrandConfig()` that SettingsView reads. */
-interface BrandConfigHookSlice {
-  config: Pick<BrandConfig, 'industry' | 'tracked_brands'> | null;
-  presets: IndustryPresets;
-  loading: boolean;
-  saveConfig: Mock;
-  expandAllBrands: Mock;
-  findCompetitors: Mock;
-}
-
-/** Brand tracking not set up yet: the state that lights the attention dot. */
 export function buildBrandConfigHookResult(
-  overrides: Partial<BrandConfigHookSlice> = {}
-): BrandConfigHookSlice {
+  overrides: Partial<BrandConfigHookResult> = {}
+): BrandConfigHookResult {
   return {
     config: null,
     presets: {},
     loading: false,
+    error: null,
     saveConfig: vi.fn(),
+    resetConfig: vi.fn(),
+    refetch: vi.fn(),
+    getPromptForIndustry: vi.fn(),
+    expandBrand: vi.fn(),
     expandAllBrands: vi.fn(),
     findCompetitors: vi.fn(),
     ...overrides,
   };
 }
 
-export const HOSPITALITY_BRAND_CONFIG: BrandConfigHookSlice['config'] = {
+export const HOSPITALITY_BRAND_CONFIG: BrandConfig = {
+  ...DEFAULT_CONFIG,
   industry: 'hospitality',
   tracked_brands: {
     first_party: ['MyHotel'],
@@ -52,7 +48,6 @@ export const HOSPITALITY_BRAND_CONFIG: BrandConfigHookSlice['config'] = {
   },
 };
 
-/** OpenAI with a stored key: the provider row every admin-control test looks at. */
 export function buildConfiguredOpenAiProvider(): ProviderConfig {
   return {
     id: 'openai',
@@ -67,9 +62,6 @@ export function buildConfiguredOpenAiProvider(): ProviderConfig {
   };
 }
 
-type AdminMembership = ReturnType<typeof useIsAdmin>;
-
-/** Resolved membership; pass `{ isAdmin: false }` for a regular user. */
 export function buildAdminMembership(overrides: Partial<AdminMembership> = {}): AdminMembership {
   return {
     isAdmin: true,

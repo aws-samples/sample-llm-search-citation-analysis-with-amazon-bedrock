@@ -136,7 +136,7 @@ def calculate_share_of_voice(brand_mentions: dict[str, int], total_mentions: int
     }
 
 
-def _finite_number(value: Any) -> float | None:
+def finite_number(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
     try:
@@ -148,7 +148,7 @@ def _finite_number(value: Any) -> float | None:
 
 def normalize_rank(value: Any) -> int | None:
     """Return a reporting-safe rank, excluding malformed and unranked values."""
-    number = _finite_number(value)
+    number = finite_number(value)
     if number is None or not number.is_integer():
         return None
     rank = int(number)
@@ -156,14 +156,14 @@ def normalize_rank(value: Any) -> int | None:
 
 
 def _normalize_mean_rank(value: Any) -> float | None:
-    number = _finite_number(value)
+    number = finite_number(value)
     if number is None or not 1 <= number < UNRANKED_SENTINEL:
         return None
     return number
 
 
 def _normalize_position(value: Any) -> float | None:
-    number = _finite_number(value)
+    number = finite_number(value)
     if number is None or number < 0:
         return None
     return number
@@ -267,8 +267,8 @@ def summarize_keyword_visibility(keyword: str, metrics: dict[str, Any] | None) -
         'first_party_best_rank': _first_party_best_rank(metrics),
         'answers': int(prominence.get('answers', 0)),
         'mentioned_answers': int(prominence.get('mentioned_answers', 0)),
-        'rank_1_share': float(_finite_number(prominence.get('rank_1_share')) or 0.0),
-        'top_3_share': float(_finite_number(prominence.get('top_3_share')) or 0.0),
+        'rank_1_share': float(finite_number(prominence.get('rank_1_share')) or 0.0),
+        'top_3_share': float(finite_number(prominence.get('top_3_share')) or 0.0),
         'mean_rank': _normalize_mean_rank(prominence.get('mean_rank')),
         'mean_first_position': _normalize_position(prominence.get('mean_first_position')),
     }

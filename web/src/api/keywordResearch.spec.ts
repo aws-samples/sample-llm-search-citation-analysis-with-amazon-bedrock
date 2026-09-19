@@ -20,26 +20,9 @@ import {
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
-import { createMockJsonResponse } from '../test/fetchResponses';
-
-
-/** Every request gets its own `Response`, so a body can be read once per call. */
-function respondWith(status: number, body: unknown): void {
-  mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(createMockJsonResponse(body, status)));
-}
-
-function lastRequest(): {
-  url: string;
-  init: RequestInit | undefined 
-} {
-  const calls = mockAuthenticatedFetch.mock.calls;
-  const [url, init] = calls[calls.length - 1];
-  return {
-    url,
-    init 
-  };
-}
+import {
+  lastRequest, respondWith
+} from './keywordResearch-fixtures';
 
 const PENDING_JOB = {
   id: 'job-1',
@@ -287,7 +270,6 @@ describe('research agent client', () => {
       systemPrompt: 'You research beach resorts for families.',
       description: 'Family beach hotels',
       baseTemplateId: 'builtin-default',
-      industry: 'hotels',
       subject: 'hotel',
       audience: 'families',
       dimensions: TEMPLATE.dimensions,
@@ -298,7 +280,6 @@ describe('research agent client', () => {
       system_prompt: 'You research beach resorts for families.',
       description: 'Family beach hotels',
       base_template_id: 'builtin-default',
-      industry: 'hotels',
       subject: 'hotel',
       audience: 'families',
       dimensions: TEMPLATE.dimensions,

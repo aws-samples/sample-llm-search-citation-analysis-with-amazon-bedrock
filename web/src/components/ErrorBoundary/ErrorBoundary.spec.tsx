@@ -5,20 +5,9 @@ import {
   describe, it, expect, vi, beforeEach, afterEach 
 } from 'vitest';
 import { ErrorBoundary } from './ErrorBoundary';
-
-class TestError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'TestError';
-  }
-}
-
-const ThrowingComponent = ({ shouldThrow }: Readonly<{ shouldThrow: boolean }>) => {
-  if (shouldThrow) {
-    throw new TestError('Test error message');
-  }
-  return <div>Child content</div>;
-};
+import {
+  TestError, ThrowingComponent
+} from './ErrorBoundary-fixtures';
 
 describe('ErrorBoundary', () => {
   // Suppress console.error for expected errors in tests

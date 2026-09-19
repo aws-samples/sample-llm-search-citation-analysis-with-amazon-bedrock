@@ -13,7 +13,6 @@ Features:
 
 import concurrent.futures
 import logging
-import math
 import os
 import sys
 from collections import defaultdict
@@ -45,6 +44,7 @@ from shared.scope_params import (
 from shared.utils import brand_names_match, get_brand_config, utc_now
 from shared.visibility_score import (
     calculate_sentiment_agnostic_visibility_score,
+    finite_number,
     mean,
     normalize_rank,
     summarize_first_party_prominence,
@@ -255,14 +255,6 @@ def summarize_series(trend_data: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _finite_float(value: Any) -> float | None:
-    try:
-        number = float(value)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return number if math.isfinite(number) else None
-
-
 def _mean_or_none(values: list[float]) -> float | None:
     return round(mean(values), 2) if values else None
 
@@ -298,10 +290,10 @@ def build_group_series(trends: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if answers > 0:
                 bucket['rank_1_shares'].append(float(point.get('rank_1_share', 0.0)))
                 bucket['top_3_shares'].append(float(point.get('top_3_share', 0.0)))
-            mean_rank = _finite_float(point.get('mean_rank'))
+            mean_rank = finite_number(point.get('mean_rank'))
             if mean_rank is not None and 1 <= mean_rank < UNRANKED_SENTINEL:
                 bucket['mean_ranks'].append(mean_rank)
-            mean_position = _finite_float(point.get('mean_first_position'))
+            mean_position = finite_number(point.get('mean_first_position'))
             if mean_position is not None and mean_position >= 0:
                 bucket['mean_first_positions'].append(mean_position)
 

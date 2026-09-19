@@ -20,12 +20,51 @@ from shared.utils import get_timestamp, get_timestamp_compact
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Initialize AWS clients at module level
-dynamodb = boto3.resource('dynamodb')
+# Initialize AWS client at module level
 s3_client = boto3.client('s3')
 
 # Optional environment variables with defaults
 SUMMARY_BUCKET = os.environ.get('SUMMARY_BUCKET')
+
+
+def build_run_metadata(keyword_results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Describe the exact keyword/timestamp pairs delivered by the Map state.
+
+    ``timestamp`` is populated only when every named result carries the same
+    non-empty run timestamp. The alert worker treats ``None`` or multiple
+    timestamps as non-comparable instead of accidentally selecting newer rows.
+    """
+    processed_keywords: list[dict[str, str | None]] = []
+    timestamps: set[str] = set()
+    missing_identity = False
+
+    for result in keyword_results:
+        if not isinstance(result, dict):
+            missing_identity = True
+            continue
+        keyword = result.get('keyword')
+        if not isinstance(keyword, str) or not keyword:
+            missing_identity = True
+            continue
+        raw_timestamp = result.get('timestamp')
+        timestamp = raw_timestamp if isinstance(raw_timestamp, str) and raw_timestamp else None
+        processed_keywords.append({'keyword': keyword, 'timestamp': timestamp})
+        if timestamp is None:
+            missing_identity = True
+        else:
+            timestamps.add(timestamp)
+
+    ordered_timestamps = sorted(timestamps)
+    common_timestamp = (
+        ordered_timestamps[0]
+        if processed_keywords and not missing_identity and len(ordered_timestamps) == 1
+        else None
+    )
+    return {
+        'timestamp': common_timestamp,
+        'timestamps': ordered_timestamps,
+        'processed_keywords': processed_keywords,
+    }
 
 
 def count_results(keyword_results: list[dict[str, Any]]) -> dict[str, Any]:
@@ -234,7 +273,7 @@ def generate_report(execution_id: str, counts: dict[str, Any], stats: dict[str, 
     }
 
 
-def store_summary_in_s3(report: dict[str, Any], bucket: str) -> str:
+def store_summary_in_s3(report: dict[str, Any], bucket: str) -> str | None:
     """Store execution summary in S3."""
     execution_id = report['execution_id']
     timestamp = get_timestamp_compact()
@@ -256,7 +295,7 @@ def store_summary_in_s3(report: dict[str, Any], bucket: str) -> str:
         return None
 
 
-def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+def handler(event: dict[str, Any] | list[Any], context: Any) -> dict[str, Any]:
     """
     Lambda handler for generating execution summary.
 
@@ -309,15 +348,16 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     logger.info(f"Received event: {json.dumps(event, default=str)}")
 
     try:
-        # Extract execution ID
-        execution_id = event.get('execution_id', context.aws_request_id if context else 'unknown')
-
-        # Extract keyword results (could be from Map state output)
-        keyword_results = event.get('keyword_results', [])
-
-        # If the event is the raw output from the Map state, it might be a list
+        # Raw Map output is accepted for direct invocations; the workflow sends
+        # an object carrying execution metadata and the Map result.
         if isinstance(event, list):
+            execution_id = context.aws_request_id if context else 'unknown'
             keyword_results = event
+            requested_summary_bucket = None
+        else:
+            execution_id = event.get('execution_id', context.aws_request_id if context else 'unknown')
+            keyword_results = event.get('keyword_results', [])
+            requested_summary_bucket = event.get('summary_bucket')
 
         logger.info(f"Processing summary for {len(keyword_results)} keyword results")
 
@@ -332,8 +372,12 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         # Generate report
         report = generate_report(execution_id, counts, stats)
 
+        # Add the exact Map-state run identity without changing any existing
+        # summary fields or the S3 object location contract.
+        report['run_metadata'] = build_run_metadata(keyword_results)
+
         # Store in S3 if bucket is configured (env var takes precedence over event)
-        s3_bucket = SUMMARY_BUCKET or event.get('summary_bucket')
+        s3_bucket = SUMMARY_BUCKET or requested_summary_bucket
         if s3_bucket:
             s3_location = store_summary_in_s3(report, s3_bucket)
             if s3_location:

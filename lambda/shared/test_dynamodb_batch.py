@@ -1,5 +1,5 @@
 """
-Tests for shared.dynamodb_batch.query_latest_per_key.
+Tests for shared.dynamodb_batch query helpers.
 
 Covers the semantics the handler callers depend on:
 - Duplicates in partition_values are collapsed
@@ -7,13 +7,18 @@ Covers the semantics the handler callers depend on:
 - Failed queries produce None for that key, not a raised exception
 - The query is built with ScanIndexForward=False and Limit=1 (latest row)
 - Results preserve input order
+- Paginated operations return every page in order
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 from shared import dynamodb_batch
+
+
+class QueryFailure(Exception):
+    """Expected query failure raised by the test double."""
 
 
 def _fake_table_with_items(per_key_items: dict[str, list[dict]]) -> MagicMock:
@@ -63,7 +68,7 @@ class TestQueryLatestPerKey:
     def test_returns_none_when_query_raises(self) -> None:
         """A single partition's failure must not break the whole batch."""
         table = MagicMock()
-        table.query.side_effect = Exception('throttled')
+        table.query.side_effect = QueryFailure('throttled')
         result = dynamodb_batch.query_latest_per_key(table, 'pk', ['u1'])
         assert result == {'u1': None}
 
@@ -91,3 +96,28 @@ class TestQueryLatestPerKey:
         assert result['u1'] == {'id': 1}
         assert result['u2'] == {'id': 2}
         assert result['u3'] == {'id': 3}
+
+
+class TestCollectAllItems:
+    def test_returns_items_from_every_page_when_last_evaluated_key_is_present(self) -> None:
+        operation = MagicMock(side_effect=[
+            {
+                'Items': [{'id': 'first'}],
+                'LastEvaluatedKey': {'pk': 'first'},
+            },
+            {'Items': [{'id': 'second'}]},
+        ])
+
+        result = dynamodb_batch.collect_all_items(
+            operation,
+            KeyConditionExpression='pk = value',
+        )
+
+        assert result == [{'id': 'first'}, {'id': 'second'}]
+        assert operation.call_args_list == [
+            call(KeyConditionExpression='pk = value'),
+            call(
+                KeyConditionExpression='pk = value',
+                ExclusiveStartKey={'pk': 'first'},
+            ),
+        ]

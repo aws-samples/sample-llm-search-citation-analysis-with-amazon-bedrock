@@ -1,6 +1,6 @@
 {
   "name": "citation-dashboard",
-  "version": "2.9.0",
+  "version": "2.10.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -26,7 +26,7 @@
     "react-markdown": "^10.1.0",
     "react-router-dom": "^7.18.0",
     "remark-gfm": "^4.0.1",
-    "remark-parse": "^11.0.5",
+    "remark-parse": "^11.0.0",
     "unified": "^11.0.5",
     "xlsx-js-style": "^1.2.0"
   },

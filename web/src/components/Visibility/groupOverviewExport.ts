@@ -1,5 +1,5 @@
 import {
-  exportWorkbook, type ExcelSheet
+  exportWorkbook, scopedExcelFileName, type ExcelSheet
 } from '../../exporters/excelGenerator';
 import type {
   GroupVisibilityResponse, HistoricalTrendsResponse
@@ -182,8 +182,7 @@ export function groupOverviewSheets(
 }
 
 export function groupOverviewFileName(scopeLabel: string, date = new Date()): string {
-  const slug = scopeLabel.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replaceAll(/^-|-$/g, '') || 'keywords';
-  return `visibility-${slug}-${date.toISOString().slice(0, 10)}.xlsx`;
+  return scopedExcelFileName('visibility', scopeLabel, date);
 }
 
 export async function exportGroupOverview(

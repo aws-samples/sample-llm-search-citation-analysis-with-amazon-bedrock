@@ -29,6 +29,8 @@ from shared.content_brief import (
     render_prompt_template,
     validate_template_placeholders,
 )
+from testing.content_brief_fixtures import build_group_brief
+from testing.dynamodb_stubs import fake_table
 
 
 def streaming_response(
@@ -47,26 +49,6 @@ def streaming_response(
     return response
 
 
-def build_group_brief(**overrides: object) -> dict[str, object]:
-    """Return a complete create-new brief request."""
-    idea: dict[str, object] = {
-        'id': 'brief-1',
-        'type': 'group_brief',
-        'group_id': 'group-1',
-        'group_name': 'Client supplied group',
-        'keyword': 'client supplied group',
-        'keyword_ids': ['keyword-1'],
-        'keywords': ['client supplied keyword'],
-        'content_angle': CREATE_NEW_LANDING_PAGE,
-        'landing_url': '',
-        'current_copy': '',
-        'prompt_template': DEFAULT_PROMPT_TEMPLATES[CREATE_NEW_LANDING_PAGE],
-        'output_language': 'English',
-    }
-    idea.update(overrides)
-    return idea
-
-
 def canonicalize(
     idea: dict[str, object],
     *,
@@ -75,12 +57,10 @@ def canonicalize(
     url_validator: MagicMock | None = None,
 ):
     """Canonicalize with deterministic table responses and URL validation."""
-    groups_table = MagicMock()
-    groups_table.get_item.return_value = {
-        'Item': group if group is not None else {'id': 'group-1', 'name': 'Authoritative Group'}
-    }
-    keywords_table = MagicMock()
-    keywords_table.query.return_value = {
+    groups_table = fake_table(get_item={
+        'Item': group if group is not None else {'id': 'group-1', 'name': 'Authoritative Group'},
+    })
+    keywords_table = fake_table(query={
         'Items': members if members is not None else [
             {
                 'id': 'keyword-1',
@@ -88,8 +68,8 @@ def canonicalize(
                 'status': 'active',
                 'group_ids': {'group-1'},
             }
-        ]
-    }
+        ],
+    })
     return canonicalize_group_brief(
         idea,
         groups_table,
@@ -130,9 +110,8 @@ class TestGroupAndMembershipValidation:
         assert canonical['keywords'] == ['Alpha', 'Zulu']
 
     def test_returns_group_id_error_when_group_does_not_exist(self) -> None:
-        groups_table = MagicMock()
-        groups_table.get_item.return_value = {}
-        keywords_table = MagicMock()
+        groups_table = fake_table(get_item={})
+        keywords_table = fake_table()
 
         canonical, issue = canonicalize_group_brief(
             build_group_brief(),
@@ -194,8 +173,8 @@ class TestModeAndSizeValidation:
         assert issue.message == 'landing_url is required for improve current URL mode'
 
     def test_rejects_unsafe_landing_url_before_group_lookup(self) -> None:
-        groups_table = MagicMock()
-        keywords_table = MagicMock()
+        groups_table = fake_table()
+        keywords_table = fake_table()
         idea = build_group_brief(
             content_angle=IMPROVE_CURRENT_URL,
             landing_url='http://127.0.0.1/private',

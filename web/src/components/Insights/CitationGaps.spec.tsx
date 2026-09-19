@@ -6,7 +6,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CitationGaps } from './CitationGaps';
-import type { Keyword } from '../../types';
+import { buildProps } from './CitationGaps-fixtures';
 
 vi.mock('../../hooks/useCitationGaps', () => ({useCitationGaps: vi.fn(),}));
 vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
@@ -18,24 +18,6 @@ import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
 
 const mockUseCitationGaps = useCitationGaps as ReturnType<typeof vi.fn>;
 const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
-
-const KEYWORDS: Keyword[] = [
-  {
-    id: 'kw-1',
-    keyword: 'hotels',
-    created_at: '2026-01-01T00:00:00Z',
-    group_ids: ['group-coruna'] 
-  },
-  {
-    id: 'kw-2',
-    keyword: 'resorts',
-    created_at: '2026-01-02T00:00:00Z' 
-  },
-];
-
-function buildProps(overrides: { keywords?: Keyword[] } = {}) {
-  return {keywords: overrides.keywords ?? KEYWORDS,};
-}
 
 describe('CitationGaps', () => {
   beforeEach(() => {

@@ -4,11 +4,56 @@ import {
   describe, it, expect, beforeAll
 } from 'vitest';
 import { CitationAnalysisStack } from './citation-analysis-stack';
+import {
+  allowStatementsOfRole,
+  collectRefTargets,
+  extractApiAuthSnapshots,
+  extractApiBackedFunctionTimeouts,
+  extractApiMethods,
+  extractBucketLifecycle,
+  extractDefinitionTimeoutSeconds,
+  extractFunctionMemorySize,
+  extractFunctionRoleActions,
+  extractFunctionRoleActionsOn,
+  extractFunctionTimeout,
+  extractLambdaEnvVars,
+  extractLambdaLayerRefs,
+  extractLambdaLogGroups,
+  extractMemorySizesByLogicalIdPrefix,
+  extractProdStageMethodSettings,
+  extractReservedConcurrency,
+  extractRoleTableActions,
+  extractStateMachineDefinition,
+  extractStateMachineLogging,
+  extractTableKeySchema,
+  extractTableProperty,
+  extractUserPoolClientProps,
+  extractUserPoolGroupNames,
+  extractWebAcls,
+  findApiResourceId,
+  findFunctionRoleLogicalId,
+  findLambdaLogicalId,
+  findLogicalIdByName,
+  findStateMachineLogicalId,
+  resolvePath,
+  resolveString,
+  retentionForLogGroupName,
+  statementActions,
+  tokenValidityMinutes,
+  verbsNotIntegratedWith,
+  verbsWithoutCognitoAuthorizer,
+  type ApiGatewayMethodSnapshot,
+  type ApiMethodAuthSnapshot,
+  type BucketLifecycleSnapshot,
+  type LambdaLogGroupSnapshot,
+  type StageMethodSettingSnapshot,
+  type StateMachineLoggingSnapshot,
+  type WebAclSnapshot,
+} from './citation-analysis-stack-fixtures';
 
 const KEYWORD_MGMT_FUNCTION_NAME = 'CitationAnalysis-API-KeywordMgmt';
 const CONTENT_STUDIO_FUNCTION_NAME = 'CitationAnalysis-API-ContentStudio';
 const SELF_INVOKING_CONCURRENCY = 10;
-const PREFLIGHT_METHOD = 'OPTIONS';
 
 const PUBLIC_ROUTE = '/api/health';
 const MUTATING_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
@@ -27,632 +72,6 @@ const ACCESS_LOGS_BUCKET_PREFIX = 'citation-analysis-access-logs';
 const IA_STORAGE_CLASS = 'STANDARD_IA';
 const IA_TRANSITION_DAYS = 90;
 const ACCESS_LOGS_EXPIRY_DAYS = 90;
-
-interface ApiGatewayMethodSnapshot {
-  httpMethod: string;
-  integrationType: string;
-  integrationUri: string;
-  authorizationType: string;
-  authorizerId: string;
-}
-
-interface ApiMethodAuthSnapshot {
-  path: string;
-  httpMethod: string;
-  authorizationType: string;
-  authorizerId: string;
-}
-
-interface LambdaLogGroupSnapshot {
-  functionName: string;
-  logGroupName: string;
-  retentionDays: number;
-  deletionPolicy: string;
-}
-
-interface StateMachineLoggingSnapshot {
-  level: string;
-  includesExecutionData: boolean;
-  destinationRetentionDays: number;
-}
-
-interface StageMethodSettingSnapshot {
-  resourcePath: string;
-  httpMethod: string;
-  metricsEnabled: boolean;
-  dataTraceEnabled: boolean;
-}
-
-interface WebAclSnapshot {
-  logicalId: string;
-  name: string;
-  scope: string;
-  associated: boolean;
-}
-
-interface StorageClassTransition {
-  storageClass: string;
-  days: number;
-}
-
-interface BucketLifecycleSnapshot {
-  transitions: StorageClassTransition[];
-  expirationDays: number[];
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
-/** Walk a nested unknown structure without unsafe member access. */
-function resolvePath(root: unknown, keys: string[]): unknown {
-  return keys.reduce<unknown>(
-    (current, key) => (isRecord(current) ? current[key] : undefined),
-    root
-  );
-}
-
-function resolveString(root: unknown, keys: string[]): string {
-  const value = resolvePath(root, keys);
-  return typeof value === 'string' ? value : '';
-}
-
-/** The one AWS::StepFunctions::StateMachine resource carrying `stateMachineName`. */
-function findStateMachine(template: Template, stateMachineName: string): unknown {
-  const stateMachines = template.findResources('AWS::StepFunctions::StateMachine', {
-    Properties: { StateMachineName: stateMachineName },
-  });
-  return stateMachines[Object.keys(stateMachines)[0] ?? ''];
-}
-
-function findStateMachineLogicalId(template: Template, stateMachineName: string): string {
-  const stateMachines = template.findResources('AWS::StepFunctions::StateMachine', {
-    Properties: { StateMachineName: stateMachineName },
-  });
-  return Object.keys(stateMachines)[0] ?? '';
-}
-
-/** Logical id of the IAM role a Lambda function (found by FunctionName) executes as. */
-function findFunctionRoleLogicalId(template: Template, functionName: string): string {
-  const functions = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  return collectGetAttTargets(
-    resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Role'])
-  )[0] ?? '';
-}
-
-/**
- * Every IAM action a Lambda function's role is allowed on one resource (by
- * logical id, matched through Ref or Fn::GetAtt), deduplicated and sorted.
- */
-function extractFunctionRoleActionsOn(template: Template, functionName: string, resourceLogicalId: string): string[] {
-  return extractRoleActionsOn(template, findFunctionRoleLogicalId(template, functionName), resourceLogicalId);
-}
-
-/** Collect every logical ID referenced by a Ref anywhere in a node. */
-function collectRefTargets(node: unknown, found: string[] = []): string[] {
-  if (Array.isArray(node)) {
-    for (const item of node) collectRefTargets(item, found);
-    return found;
-  }
-  if (isRecord(node)) {
-    if (typeof node.Ref === 'string') found.push(node.Ref);
-    for (const value of Object.values(node)) collectRefTargets(value, found);
-  }
-  return found;
-}
-
-/**
- * Extract a Step Functions definition JSON from the synthesized template.
- * Fn::Join produces ["", [...parts]]; string parts are concatenated and
- * object refs replaced with a placeholder.
- */
-function extractStateMachineDefinition(template: Template, stateMachineName: string): string {
-  const joinArgs = resolvePath(findStateMachine(template, stateMachineName), ['Properties', 'DefinitionString', 'Fn::Join']);
-  const parts = Array.isArray(joinArgs) && Array.isArray(joinArgs[1]) ? joinArgs[1] : [];
-  return parts
-    .map((part) => (typeof part === 'string' ? part : '"__REF__"'))
-    .join('');
-}
-
-function extractLambdaEnvVars(template: Template, functionName: string): Record<string, unknown> {
-  const lambdas = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const logicalId = Object.keys(lambdas)[0];
-  const envVars = resolvePath(lambdas[logicalId], ['Properties', 'Environment', 'Variables']);
-  return isRecord(envVars) ? envVars : {};
-}
-
-/** Collect every logical ID referenced by an Fn::GetAtt anywhere in a node. */
-function collectGetAttTargets(node: unknown, found: string[] = []): string[] {
-  if (Array.isArray(node)) {
-    for (const item of node) collectGetAttTargets(item, found);
-    return found;
-  }
-  if (isRecord(node)) {
-    const getAtt = node['Fn::GetAtt'];
-    if (Array.isArray(getAtt) && typeof getAtt[0] === 'string') {
-      found.push(getAtt[0]);
-    }
-    for (const value of Object.values(node)) collectGetAttTargets(value, found);
-  }
-  return found;
-}
-
-/**
- * Map functionName -> Timeout for every Lambda reachable from an API Gateway
- * method integration.
- *
- * Derived from the template rather than a hand-written list so a newly added
- * API function is covered automatically — a list would silently omit it, which
- * is the failure mode this invariant exists to prevent.
- */
-function extractApiBackedFunctionTimeouts(template: Template): Record<string, number> {
-  const byLogicalId = new Map<string, { name: string; timeout: number }>();
-  for (const [logicalId, resource] of Object.entries(
-    template.findResources('AWS::Lambda::Function')
-  )) {
-    const name = resolvePath(resource, ['Properties', 'FunctionName']);
-    const timeout = resolvePath(resource, ['Properties', 'Timeout']);
-    if (typeof name === 'string' && typeof timeout === 'number') {
-      byLogicalId.set(logicalId, { name, timeout });
-    }
-  }
-
-  const timeouts: Record<string, number> = {};
-  for (const method of Object.values(template.findResources('AWS::ApiGateway::Method'))) {
-    const uri = resolvePath(method, ['Properties', 'Integration', 'Uri']);
-    for (const logicalId of collectGetAttTargets(uri)) {
-      const fn = byLogicalId.get(logicalId);
-      if (fn) timeouts[fn.name] = fn.timeout;
-    }
-  }
-  return timeouts;
-}
-
-/**
- * Read a function's ReservedConcurrentExecutions, or undefined when uncapped.
- */
-function extractReservedConcurrency(
-  template: Template,
-  functionName: string
-): number | undefined {
-  const lambdas = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const logicalId = Object.keys(lambdas)[0];
-  const value = resolvePath(lambdas[logicalId], ['Properties', 'ReservedConcurrentExecutions']);
-  return typeof value === 'number' ? value : undefined;
-}
-
-function findLambdaLogicalId(template: Template, functionName: string): string {
-  const functions = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  return Object.keys(functions)[0] ?? '';
-}
-
-/** Logical IDs of the layers attached to a function (each `Layers` entry is a Ref). */
-function extractLambdaLayerRefs(template: Template, functionName: string): string[] {
-  const functions = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const logicalId = Object.keys(functions)[0];
-  const layers = resolvePath(functions[logicalId], ['Properties', 'Layers']);
-  if (!Array.isArray(layers)) return [];
-  return layers
-    .map((layer) => (isRecord(layer) && typeof layer.Ref === 'string' ? layer.Ref : ''))
-    .filter((ref) => ref !== '');
-}
-
-/** One property of a DynamoDB table found by its TableName property. */
-function extractTableProperty(template: Template, tableName: string, property: string): unknown {
-  const tables = template.findResources('AWS::DynamoDB::Table', {
-    Properties: { TableName: tableName },
-  });
-  const [logicalId] = Object.keys(tables);
-  if (!logicalId) return undefined;
-  return resolvePath(tables[logicalId], ['Properties', property]);
-}
-
-/** KeySchema of a DynamoDB table found by its TableName property. */
-function extractTableKeySchema(template: Template, tableName: string): unknown {
-  return extractTableProperty(template, tableName, 'KeySchema');
-}
-
-/** Timeout (seconds) of a Lambda function found by its FunctionName, NaN when absent. */
-function extractFunctionTimeout(template: Template, functionName: string): number {
-  const functions = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const timeout = resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Timeout']);
-  return typeof timeout === 'number' ? timeout : Number.NaN;
-}
-
-function extractFunctionMemorySize(template: Template, functionName: string): number {
-  const functions = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const memory = resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'MemorySize']);
-  return typeof memory === 'number' ? memory : Number.NaN;
-}
-
-/** MemorySize of the Lambda functions whose logical id starts with `prefix` (CDK-managed singletons). */
-function extractMemorySizesByLogicalIdPrefix(template: Template, prefix: string): number[] {
-  return Object.entries(template.findResources('AWS::Lambda::Function'))
-    .filter(([logicalId]) => logicalId.startsWith(prefix))
-    .map(([, resource]) => resolvePath(resource, ['Properties', 'MemorySize']))
-    .filter((memory): memory is number => typeof memory === 'number');
-}
-
-/** Every IAM action a Lambda function's role is allowed, on any resource. */
-function extractFunctionRoleActions(template: Template, functionName: string): string[] {
-  return sortedUnique(
-    allowStatementsOfRole(template, findFunctionRoleLogicalId(template, functionName)).flatMap(statementActions)
-  );
-}
-
-/** The top-level `TimeoutSeconds` of a state machine definition, NaN when absent. */
-function extractDefinitionTimeoutSeconds(definitionRaw: string): number {
-  const match = /"TimeoutSeconds":(\d+)/.exec(definitionRaw);
-  return match ? Number(match[1]) : Number.NaN;
-}
-
-function findApiResourceId(template: Template, pathPart: string, parentId?: string): string {
-  const resources = template.findResources('AWS::ApiGateway::Resource');
-  return Object.entries(resources).find(([, resource]) => {
-    const resourcePathPart = resolveString(resource, ['Properties', 'PathPart']);
-    const resourceParentId = resolveString(resource, ['Properties', 'ParentId', 'Ref']);
-    return resourcePathPart === pathPart && (parentId === undefined || resourceParentId === parentId);
-  })?.[0] ?? '';
-}
-
-/**
- * Map every AWS::ApiGateway::Resource logical ID to its full path.
- *
- * Resources form a parent chain terminating at the RestApi's RootResourceId,
- * which arrives as an Fn::GetAtt rather than a Ref to a Resource — that is what
- * ends the walk.
- */
-function buildResourcePaths(template: Template): Map<string, string> {
-  const resources = template.findResources('AWS::ApiGateway::Resource');
-  const paths = new Map<string, string>();
-
-  const resolveFor = (logicalId: string): string => {
-    const cached = paths.get(logicalId);
-    if (cached !== undefined) return cached;
-
-    const resource = resources[logicalId];
-    const pathPart = resolveString(resource, ['Properties', 'PathPart']);
-    const parentId = resolveString(resource, ['Properties', 'ParentId', 'Ref']);
-    const prefix = parentId !== '' && parentId in resources ? resolveFor(parentId) : '';
-    const fullPath = `${prefix}/${pathPart}`;
-
-    paths.set(logicalId, fullPath);
-    return fullPath;
-  };
-
-  Object.keys(resources).forEach(resolveFor);
-  return paths;
-}
-
-/**
- * Snapshot the authorization configuration of every method in the API.
- *
- * OPTIONS is excluded: CORS preflight carries no Authorization header, so it
- * is unauthenticated by necessity, and counting it would drown the signal.
- */
-function extractApiAuthSnapshots(template: Template): ApiMethodAuthSnapshot[] {
-  const paths = buildResourcePaths(template);
-  const methods = template.findResources('AWS::ApiGateway::Method');
-
-  return Object.values(methods).flatMap((method) => {
-    const httpMethod = resolveString(method, ['Properties', 'HttpMethod']);
-    if (httpMethod === PREFLIGHT_METHOD) return [];
-
-    const resourceId = resolveString(method, ['Properties', 'ResourceId', 'Ref']);
-    return [{
-      path: paths.get(resourceId) ?? '/',
-      httpMethod,
-      authorizationType: resolveString(method, ['Properties', 'AuthorizationType']),
-      authorizerId: resolveString(method, ['Properties', 'AuthorizerId', 'Ref']),
-    }];
-  });
-}
-
-/**
- * Convert a Cognito token validity into minutes.
- *
- * CDK picks the serialized unit itself, so asserting on the raw number would
- * pin an implementation detail rather than the security property. Normalizing
- * lets the tests state the actual intended lifetime.
- */
-function tokenValidityMinutes(
-  clientProps: Record<string, unknown>,
-  token: 'Access' | 'Id' | 'Refresh'
-): number {
-  const raw = clientProps[`${token}TokenValidity`];
-  if (typeof raw !== 'number') return Number.NaN;
-
-  const unit = resolveString(clientProps, ['TokenValidityUnits', `${token}Token`]);
-  const perUnit: Record<string, number> = {
-    seconds: 1 / 60, minutes: 1, hours: 60, days: 1440,
-  };
-
-  return raw * (perUnit[unit] ?? Number.NaN);
-}
-
-function extractUserPoolClientProps(template: Template): Record<string, unknown> {
-  const clients = template.findResources('AWS::Cognito::UserPoolClient');
-  const logicalId = Object.keys(clients)[0];
-  const props = resolvePath(clients[logicalId], ['Properties']);
-  return isRecord(props) ? props : {};
-}
-
-function extractUserPoolGroupNames(template: Template): string[] {
-  const groups = template.findResources('AWS::Cognito::UserPoolGroup');
-  return Object.values(groups)
-    .map((group) => resolveString(group, ['Properties', 'GroupName']))
-    .sort((left, right) => left.localeCompare(right));
-}
-
-function extractApiMethods(template: Template, resourceId: string): ApiGatewayMethodSnapshot[] {
-  const methods = template.findResources('AWS::ApiGateway::Method');
-  return Object.values(methods).flatMap((method) => {
-    const httpMethod = resolveString(method, ['Properties', 'HttpMethod']);
-    const methodResourceId = resolveString(method, ['Properties', 'ResourceId', 'Ref']);
-    if (methodResourceId !== resourceId || httpMethod === PREFLIGHT_METHOD) return [];
-
-    const integrationUri = resolvePath(method, ['Properties', 'Integration', 'Uri']);
-    return [{
-      httpMethod,
-      integrationType: resolveString(method, ['Properties', 'Integration', 'Type']),
-      integrationUri: JSON.stringify(integrationUri) ?? '',
-      authorizationType: resolveString(method, ['Properties', 'AuthorizationType']),
-      authorizerId: resolveString(method, ['Properties', 'AuthorizerId', 'Ref']),
-    }];
-  });
-}
-
-/** The verbs among `methods` that are not behind the Cognito user pool authorizer. */
-function verbsWithoutCognitoAuthorizer(methods: ApiGatewayMethodSnapshot[]): string[] {
-  return methods
-    .filter((method) => method.authorizationType !== COGNITO_AUTH)
-    .map((method) => method.httpMethod);
-}
-
-/** The verbs among `methods` whose integration is not the Lambda function with logical id `functionLogicalId`. */
-function verbsNotIntegratedWith(methods: ApiGatewayMethodSnapshot[], functionLogicalId: string): string[] {
-  return methods
-    .filter((method) => !method.integrationUri.includes(functionLogicalId))
-    .map((method) => method.httpMethod);
-}
-
-function retentionDaysOf(logGroups: Record<string, unknown>, logicalId: string): number {
-  const days = resolvePath(logGroups[logicalId], ['Properties', 'RetentionInDays']);
-  return typeof days === 'number' ? days : Number.NaN;
-}
-
-/**
- * Snapshot the log group wired to every Lambda whose FunctionName starts with
- * `prefix`.
- *
- * A function with no LoggingConfig at all is still returned, carrying NaN
- * retention and an empty deletion policy. That state — no log group in the
- * template, so the Lambda service auto-creates one that never expires — is
- * precisely what this suite exists to catch, and skipping those rows would
- * shrink the offender list to nothing and turn the assertions green.
- */
-function extractLambdaLogGroups(template: Template, prefix: string): LambdaLogGroupSnapshot[] {
-  const logGroups = template.findResources('AWS::Logs::LogGroup');
-
-  return Object.values(template.findResources('AWS::Lambda::Function')).flatMap((fn) => {
-    const functionName = resolvePath(fn, ['Properties', 'FunctionName']);
-    if (typeof functionName !== 'string' || !functionName.startsWith(prefix)) return [];
-
-    const logicalId = resolveString(fn, ['Properties', 'LoggingConfig', 'LogGroup', 'Ref']);
-    const logGroup: unknown = logGroups[logicalId];
-
-    return [{
-      functionName,
-      logGroupName: resolveString(logGroup, ['Properties', 'LogGroupName']),
-      retentionDays: retentionDaysOf(logGroups, logicalId),
-      deletionPolicy: resolveString(logGroup, ['DeletionPolicy']),
-    }];
-  });
-}
-
-/** Retention of a log group looked up by its physical name, NaN when absent. */
-function retentionForLogGroupName(template: Template, logGroupName: string): number {
-  const groups = template.findResources('AWS::Logs::LogGroup', {
-    Properties: { LogGroupName: logGroupName },
-  });
-  return retentionDaysOf(groups, Object.keys(groups)[0] ?? '');
-}
-
-/**
- * Read a state machine's logging configuration, resolving the destination
- * back to the log group it points at so retention can be asserted too.
- */
-function extractStateMachineLogging(template: Template, stateMachineName: string): StateMachineLoggingSnapshot {
-  const config = resolvePath(
-    findStateMachine(template, stateMachineName),
-    ['Properties', 'LoggingConfiguration']
-  );
-
-  const destinations = resolvePath(config, ['Destinations']);
-  const destination = Array.isArray(destinations) ? destinations[0] : undefined;
-  const [groupLogicalId] = collectGetAttTargets(destination);
-
-  return {
-    level: resolveString(config, ['Level']),
-    includesExecutionData: resolvePath(config, ['IncludeExecutionData']) === true,
-    destinationRetentionDays: retentionDaysOf(
-      template.findResources('AWS::Logs::LogGroup'),
-      groupLogicalId ?? ''
-    ),
-  };
-}
-
-function extractProdStageMethodSettings(template: Template): StageMethodSettingSnapshot[] {
-  const stages = template.findResources('AWS::ApiGateway::Stage', {
-    Properties: { StageName: 'prod' },
-  });
-  const settings = resolvePath(
-    stages[Object.keys(stages)[0] ?? ''],
-    ['Properties', 'MethodSettings']
-  );
-
-  return (Array.isArray(settings) ? settings : []).map((setting) => ({
-    resourcePath: resolveString(setting, ['ResourcePath']),
-    httpMethod: resolveString(setting, ['HttpMethod']),
-    metricsEnabled: resolvePath(setting, ['MetricsEnabled']) === true,
-    dataTraceEnabled: resolvePath(setting, ['DataTraceEnabled']) === true,
-  }));
-}
-
-/**
- * Snapshot every Web ACL together with whether anything is actually bound to
- * it.
- *
- * `associated` is the property that matters: an unbound ACL bills for itself
- * and every rule group it carries while inspecting no requests, which is the
- * state the deleted API Gateway ACL sat in.
- */
-function extractWebAcls(template: Template): WebAclSnapshot[] {
-  const boundAclIds = new Set(
-    Object.values(template.findResources('AWS::WAFv2::WebACLAssociation'))
-      .flatMap((association) =>
-        collectGetAttTargets(resolvePath(association, ['Properties', 'WebACLArn'])))
-  );
-
-  return Object.entries(template.findResources('AWS::WAFv2::WebACL')).map(([logicalId, acl]) => ({
-    logicalId,
-    name: resolveString(acl, ['Properties', 'Name']),
-    scope: resolveString(acl, ['Properties', 'Scope']),
-    associated: boundAclIds.has(logicalId),
-  }));
-}
-
-/**
- * Split a bucket's lifecycle rules into transitions and expirations.
- *
- * Kept as two separate lists rather than a boolean so a test can state both
- * "objects move to cheaper storage" and "nothing is ever deleted" without
- * either claim resting on the other.
- *
- * The bucket is located by a substring of its name because BucketName
- * interpolates the account: a literal in a real synth, an Fn::Join in this one.
- */
-function extractBucketLifecycle(template: Template, namePrefix: string): BucketLifecycleSnapshot {
-  const [bucket] = Object.values(template.findResources('AWS::S3::Bucket'))
-    .filter((candidate) =>
-      JSON.stringify(resolvePath(candidate, ['Properties', 'BucketName'])).includes(namePrefix));
-
-  const rules = resolvePath(bucket, ['Properties', 'LifecycleConfiguration', 'Rules']);
-  const ruleList = Array.isArray(rules) ? rules : [];
-
-  const transitions = ruleList.flatMap((rule) => {
-    const entries = resolvePath(rule, ['Transitions']);
-    return (Array.isArray(entries) ? entries : []).map((entry) => {
-      const days = resolvePath(entry, ['TransitionInDays']);
-      return {
-        storageClass: resolveString(entry, ['StorageClass']),
-        days: typeof days === 'number' ? days : Number.NaN,
-      };
-    });
-  });
-
-  const expirationDays = ruleList.flatMap((rule) => {
-    const days = resolvePath(rule, ['ExpirationInDays']);
-    return typeof days === 'number' ? [days] : [];
-  });
-
-  return { transitions, expirationDays };
-}
-
-function findLogicalIdByName(
-  template: Template,
-  resourceType: string,
-  namePropertyKey: string,
-  physicalName: string
-): string {
-  const resources = template.findResources(resourceType, {
-    Properties: { [namePropertyKey]: physicalName },
-  });
-  return Object.keys(resources)[0] ?? '';
-}
-
-/** Whether an AWS::IAM::Policy resource is attached to the given role. */
-function policyAttachedToRole(policy: unknown, roleLogicalId: string): boolean {
-  const attachedRoles = resolvePath(policy, ['Properties', 'Roles']);
-  return (Array.isArray(attachedRoles) ? attachedRoles : [])
-    .some((roleRef) => resolveString(roleRef, ['Ref']) === roleLogicalId);
-}
-
-/** Every Allow statement of the AWS::IAM::Policy resources attached to one role. */
-function allowStatementsOfRole(template: Template, roleLogicalId: string): unknown[] {
-  return Object.values(template.findResources('AWS::IAM::Policy'))
-    .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
-    .flatMap((policy): unknown[] => {
-      const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
-      return (Array.isArray(statements) ? statements : [])
-        .filter((statement) => resolveString(statement, ['Effect']) === 'Allow');
-    });
-}
-
-/** The Action entries of one statement, which carries either a single string or a list. */
-function statementActions(statement: unknown): string[] {
-  const action = resolvePath(statement, ['Action']);
-  return (Array.isArray(action) ? action : [action])
-    .filter((entry): entry is string => typeof entry === 'string');
-}
-
-/** Whether a statement's Resource targets the logical id, through either Fn::GetAtt (ARNs) or Ref. */
-function statementTargets(statement: unknown, resourceLogicalId: string): boolean {
-  const resource = resolvePath(statement, ['Resource']);
-  return [...collectGetAttTargets(resource), ...collectRefTargets(resource)].includes(resourceLogicalId);
-}
-
-function sortedUnique(values: string[]): string[] {
-  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
-}
-
-/**
- * Every IAM action the policies attached to one role allow on one resource
- * (both by logical id), deduplicated and sorted.
- */
-function extractRoleActionsOn(template: Template, roleLogicalId: string, resourceLogicalId: string): string[] {
-  return sortedUnique(
-    allowStatementsOfRole(template, roleLogicalId)
-      .filter((statement) => statementTargets(statement, resourceLogicalId))
-      .flatMap(statementActions)
-  );
-}
-
-/**
- * Every DynamoDB action a role's attached policies allow on one table,
- * deduplicated and sorted.
- *
- * Exists because IAM grants and runtime writes live in different languages and
- * different test suites: the Python tests hand `record_provider_failure` a
- * permissive mock table, so a missing `dynamodb:UpdateItem` in the template is
- * invisible everywhere except here. Both resources are located by physical
- * name so a logical-ID refactor cannot silently detach the assertion.
- */
-function extractRoleTableActions(
-  template: Template,
-  roleName: string,
-  tableName: string
-): string[] {
-  const roleLogicalId = findLogicalIdByName(template, 'AWS::IAM::Role', 'RoleName', roleName);
-  const tableLogicalId =
-    findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', tableName);
-
-  return extractRoleActionsOn(template, roleLogicalId, tableLogicalId);
-}
 
 const synthesized: {
   definitionRaw: string;
@@ -783,6 +202,7 @@ const WORKER_LOG_GROUP_NAMES = [
   '/aws/lambda/CitationAnalysis-Deduplication',
   '/aws/lambda/CitationAnalysis-Crawler',
   '/aws/lambda/CitationAnalysis-GenerateSummary',
+  '/aws/lambda/CitationAnalysis-KpiAlerts',
   '/aws/lambda/CitationAnalysis-ResearchWorker',
 ];
 
@@ -1560,7 +980,7 @@ describe('Health check function', () => {
  * function without an explicit log group silently opts into keeping every log
  * line forever.
  *
- * The twelve API functions now declare their groups the way the five Step
+ * The twelve API functions now declare their groups the way the Step
  * Functions workers always did. The one asymmetry is deliberate and is what the
  * deletion-policy test below pins: those twelve groups already exist in the
  * deployed account, so they carry `Retain` to keep CloudFormation's import path
@@ -1613,7 +1033,7 @@ describe('API Lambda log retention', () => {
     expect([...policies]).toStrictEqual([RETAIN]);
   });
 
-  it('keeps the five Step Functions workers at 30 days', () => {
+  it('keeps every Step Functions worker at 30 days', () => {
     /** The functions that were already correct stay correct. */
     const retentions = [...synthesized.workerLogGroupRetention.values()];
 
@@ -1779,5 +1199,284 @@ describe('Crawler Lambda environment', () => {
 
   it('does not include unused NOVA_ACT_SECRET_NAME env var', () => {
     expect(synthesized.crawlerEnvVars).not.toHaveProperty('NOVA_ACT_SECRET_NAME');
+  });
+});
+
+
+
+describe('KPI alert backend infrastructure', () => {
+  const app = new cdk.App();
+  const template = Template.fromStack(new CitationAnalysisStack(app, 'KpiAlertTestStack'));
+
+  const tableNames = [
+    'CitationAnalysis-KpiSnapshots',
+    'CitationAnalysis-KpiAlerts',
+    'CitationAnalysis-AlertSettings',
+    'CitationAnalysis-ContentChanges',
+  ];
+
+  it('creates the four tables with their exact key schemas', () => {
+    const schemas = Object.fromEntries(
+      tableNames.map((name) => [name, extractTableKeySchema(template, name)])
+    );
+
+    expect(schemas).toStrictEqual({
+      'CitationAnalysis-KpiSnapshots': [
+        { AttributeName: 'group_id', KeyType: 'HASH' },
+        { AttributeName: 'snapshot_at', KeyType: 'RANGE' },
+      ],
+      'CitationAnalysis-KpiAlerts': [
+        { AttributeName: 'id', KeyType: 'HASH' },
+      ],
+      'CitationAnalysis-AlertSettings': [
+        { AttributeName: 'config_id', KeyType: 'HASH' },
+      ],
+      'CitationAnalysis-ContentChanges': [
+        { AttributeName: 'group_id', KeyType: 'HASH' },
+        { AttributeName: 'changed_at', KeyType: 'RANGE' },
+      ],
+    });
+  });
+
+  it('uses on-demand retained tables with point-in-time recovery', () => {
+    const resources = tableNames.map((name) => {
+      const matches = template.findResources('AWS::DynamoDB::Table', {
+        Properties: { TableName: name },
+      });
+      return Object.values(matches)[0];
+    });
+
+    expect(resources.map((resource) => resolvePath(resource, ['Properties', 'BillingMode'])))
+      .toStrictEqual(Array(4).fill('PAY_PER_REQUEST'));
+    expect(resources.map((resource) => resolvePath(resource, ['Properties', 'PointInTimeRecoverySpecification', 'PointInTimeRecoveryEnabled'])))
+      .toStrictEqual(Array(4).fill(true));
+    expect(resources.map((resource) => resolvePath(resource, ['DeletionPolicy'])))
+      .toStrictEqual(Array(4).fill(RETAIN));
+  });
+
+  it('expires snapshots alerts and content changes through ttl', () => {
+    const ttlByTable = Object.fromEntries(
+      tableNames.map((name) => [name, extractTableProperty(template, name, 'TimeToLiveSpecification')])
+    );
+
+    expect(ttlByTable).toStrictEqual({
+      'CitationAnalysis-KpiSnapshots': { AttributeName: 'ttl', Enabled: true },
+      'CitationAnalysis-KpiAlerts': { AttributeName: 'ttl', Enabled: true },
+      'CitationAnalysis-AlertSettings': undefined,
+      'CitationAnalysis-ContentChanges': { AttributeName: 'ttl', Enabled: true },
+    });
+  });
+
+  it('indexes alerts by status and creation time', () => {
+    expect(extractTableProperty(template, 'CitationAnalysis-KpiAlerts', 'GlobalSecondaryIndexes'))
+      .toStrictEqual([{
+        IndexName: 'StatusCreatedIndex',
+        KeySchema: [
+          { AttributeName: 'status', KeyType: 'HASH' },
+          { AttributeName: 'created_at', KeyType: 'RANGE' },
+        ],
+        Projection: { ProjectionType: 'ALL' },
+      }]);
+  });
+
+  it('creates one named SNS topic without static subscriptions', () => {
+    const topics = template.findResources('AWS::SNS::Topic', {
+      Properties: { TopicName: 'CitationAnalysis-KpiAlerts' },
+    });
+
+    expect(Object.keys(topics)).toHaveLength(1);
+    expect(template.findResources('AWS::SNS::Subscription')).toStrictEqual({});
+  });
+
+  it('encrypts the topic with the request-priced AWS-managed SNS key', () => {
+    const topics = template.findResources('AWS::SNS::Topic', {
+      Properties: { TopicName: 'CitationAnalysis-KpiAlerts' },
+    });
+    const topic = Object.values(topics)[0];
+
+    expect(JSON.stringify(resolvePath(topic, ['Properties', 'KmsMasterKeyId'])))
+      .toContain('alias/aws/sns');
+  });
+
+  it('configures the KPI worker for Python with the shared layer and bounded runtime', () => {
+    expect(extractFunctionTimeout(template, 'CitationAnalysis-KpiAlerts')).toBe(300);
+    expect(extractFunctionMemorySize(template, 'CitationAnalysis-KpiAlerts')).toBe(512);
+    expect(extractLambdaLayerRefs(template, 'CitationAnalysis-KpiAlerts')).toHaveLength(1);
+  });
+
+  it('hands every source and durable resource identifier to the KPI worker', () => {
+    const environment = extractLambdaEnvVars(template, 'CitationAnalysis-KpiAlerts');
+
+    expect(Object.keys(environment).sort((left, right) => left.localeCompare(right))).toStrictEqual([
+      'DYNAMODB_TABLE_ALERT_SETTINGS',
+      'DYNAMODB_TABLE_CONTENT_CHANGES',
+      'DYNAMODB_TABLE_KEYWORD_GROUPS',
+      'DYNAMODB_TABLE_KEYWORDS',
+      'DYNAMODB_TABLE_KPI_ALERTS',
+      'DYNAMODB_TABLE_KPI_SNAPSHOTS',
+      'DYNAMODB_TABLE_PROVIDER_CONFIG',
+      'DYNAMODB_TABLE_SEARCH_RESULTS',
+      'KPI_ALERTS_TOPIC_ARN',
+    ]);
+  });
+
+  it('grants the KPI worker publish only on the alert topic', () => {
+    const topicId = findLogicalIdByName(
+      template,
+      'AWS::SNS::Topic',
+      'TopicName',
+      'CitationAnalysis-KpiAlerts'
+    );
+
+    expect(extractFunctionRoleActionsOn(template, 'CitationAnalysis-KpiAlerts', topicId))
+      .toStrictEqual(['sns:Publish']);
+  });
+
+  it('grants the KPI worker read access to every source table', () => {
+    const sourceTables = [
+      'CitationAnalysis-SearchResults',
+      'CitationAnalysis-Keywords',
+      'CitationAnalysis-KeywordGroups',
+      'CitationAnalysis-ProviderConfig',
+      'CitationAnalysis-AlertSettings',
+      'CitationAnalysis-ContentChanges',
+    ];
+    const missing = sourceTables.filter((tableName) => {
+      const tableId = findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', tableName);
+      const actions = extractFunctionRoleActionsOn(template, 'CitationAnalysis-KpiAlerts', tableId);
+      return !actions.includes('dynamodb:GetItem') || !actions.includes('dynamodb:Query');
+    });
+
+    expect(missing).toStrictEqual([]);
+  });
+
+  it('grants the KPI worker read-write snapshots and write-only alert records', () => {
+    const snapshotsId = findLogicalIdByName(
+      template, 'AWS::DynamoDB::Table', 'TableName', 'CitationAnalysis-KpiSnapshots'
+    );
+    const alertsId = findLogicalIdByName(
+      template, 'AWS::DynamoDB::Table', 'TableName', 'CitationAnalysis-KpiAlerts'
+    );
+    const snapshotActions = extractFunctionRoleActionsOn(template, 'CitationAnalysis-KpiAlerts', snapshotsId);
+    const alertActions = extractFunctionRoleActionsOn(template, 'CitationAnalysis-KpiAlerts', alertsId);
+
+    expect(snapshotActions).toContain('dynamodb:GetItem');
+    expect(snapshotActions).toContain('dynamodb:PutItem');
+    expect(alertActions).toContain('dynamodb:PutItem');
+    expect(alertActions).not.toContain('dynamodb:Query');
+  });
+
+  it('grants the KPI worker source reads and snapshot-alert writes', () => {
+    const actions = extractFunctionRoleActions(template, 'CitationAnalysis-KpiAlerts');
+
+    expect(actions).toContain('dynamodb:Query');
+    expect(actions).toContain('dynamodb:Scan');
+    expect(actions).toContain('dynamodb:PutItem');
+    expect(actions).not.toContain('sns:Subscribe');
+  });
+
+  it('hands alert resources to ConfigMgmt and no publish permission', () => {
+    const environment = extractLambdaEnvVars(template, CONFIG_MGMT_FUNCTION_NAME);
+    const actions = extractFunctionRoleActions(template, CONFIG_MGMT_FUNCTION_NAME);
+
+    expect(environment).toHaveProperty('DYNAMODB_TABLE_KPI_ALERTS');
+    expect(environment).toHaveProperty('DYNAMODB_TABLE_ALERT_SETTINGS');
+    expect(environment).toHaveProperty('DYNAMODB_TABLE_CONTENT_CHANGES');
+    expect(actions).not.toContain('sns:Publish');
+  });
+
+  it('grants ConfigMgmt read-write access to all alert API tables', () => {
+    const tableNamesForApi = [
+      'CitationAnalysis-KpiAlerts',
+      'CitationAnalysis-AlertSettings',
+      'CitationAnalysis-ContentChanges',
+    ];
+    const missing = tableNamesForApi.filter((tableName) => {
+      const tableId = findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', tableName);
+      const actions = extractFunctionRoleActionsOn(template, CONFIG_MGMT_FUNCTION_NAME, tableId);
+      return !actions.includes('dynamodb:GetItem') || !actions.includes('dynamodb:PutItem');
+    });
+
+    expect(missing).toStrictEqual([]);
+  });
+
+  it('grants ConfigMgmt only subscription-management SNS actions for this topic', () => {
+    const topicId = findLogicalIdByName(
+      template,
+      'AWS::SNS::Topic',
+      'TopicName',
+      'CitationAnalysis-KpiAlerts'
+    );
+
+    expect(extractFunctionRoleActionsOn(template, CONFIG_MGMT_FUNCTION_NAME, topicId))
+      .toStrictEqual(['sns:ListSubscriptionsByTopic', 'sns:Subscribe', 'sns:Unsubscribe']);
+  });
+
+  it('restricts unsubscribe to subscription ARNs under the alert topic', () => {
+    const roleId = findFunctionRoleLogicalId(template, CONFIG_MGMT_FUNCTION_NAME);
+    const unsubscribe = allowStatementsOfRole(template, roleId)
+      .find((statement) => statementActions(statement).includes('sns:Unsubscribe'));
+    const resource = JSON.stringify(resolvePath(unsubscribe, ['Resource']));
+
+    expect(statementActions(unsubscribe)).toStrictEqual(['sns:Unsubscribe']);
+    expect(resource).toContain(':*');
+    expect(resource).not.toBe('"*"');
+  });
+
+  it('exposes the exact authenticated alert routes through ConfigMgmt', () => {
+    const alertRoutes = extractApiAuthSnapshots(template)
+      .filter((route) => route.path.startsWith('/api/alerts'))
+      .sort((left, right) => `${left.path} ${left.httpMethod}`.localeCompare(`${right.path} ${right.httpMethod}`));
+
+    expect(alertRoutes.map((route) => `${route.httpMethod} ${route.path}`)).toStrictEqual([
+      'GET /api/alerts',
+      'POST /api/alerts/{id}/acknowledge',
+      'GET /api/alerts/content-changes',
+      'POST /api/alerts/content-changes',
+      'GET /api/alerts/settings',
+      'PUT /api/alerts/settings',
+    ]);
+    expect(alertRoutes.every((route) => route.authorizationType === COGNITO_AUTH)).toBe(true);
+    expect(alertRoutes.every((route) => route.authorizerId !== '')).toBe(true);
+  });
+
+  it('integrates every alert route with the consolidated ConfigMgmt Lambda', () => {
+    const alertsId = findApiResourceId(template, 'alerts');
+    const alertId = findApiResourceId(template, '{id}', alertsId);
+    const routeIds = [
+      alertsId,
+      findApiResourceId(template, 'acknowledge', alertId),
+      findApiResourceId(template, 'settings', alertsId),
+      findApiResourceId(template, 'content-changes', alertsId),
+    ];
+    const methods = routeIds.flatMap((resourceId) => extractApiMethods(template, resourceId));
+    const configFunctionId = findLambdaLogicalId(template, CONFIG_MGMT_FUNCTION_NAME);
+
+    expect(methods).toHaveLength(6);
+    expect(methods.every((method) => method.integrationUri.includes(configFunctionId))).toBe(true);
+  });
+
+  it('passes execution id whole input and generated report to the alert task', () => {
+    const definition = extractStateMachineDefinition(template, WORKFLOW_STATE_MACHINE);
+
+    expect(definition).toContain('"execution_id.$":"$$.Execution.Name"');
+    expect(definition).toContain('"execution_input.$":"$$.Execution.Input"');
+    expect(definition).toContain('"report.$":"$"');
+  });
+
+  it('preserves the report and adds alerts on successful evaluation', () => {
+    const definition = extractStateMachineDefinition(template, WORKFLOW_STATE_MACHINE);
+
+    expect(definition).toContain('"Next":"KpiAlerts"');
+    expect(definition).toContain('"ResultPath":"$.alerts"');
+  });
+
+  it('catches every alert failure and records a failure block', () => {
+    const definition = extractStateMachineDefinition(template, WORKFLOW_STATE_MACHINE);
+
+    expect(definition).toContain('"ErrorEquals":["States.ALL"]');
+    expect(definition).toContain('"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":null,"Next":"KpiAlertsFailed"}]');
+    expect(definition).toContain('"Next":"KpiAlertsFailed"');
+    expect(definition).toContain('"message":"KPI alert evaluation failed; the analysis report is preserved."');
   });
 });

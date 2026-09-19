@@ -81,3 +81,8 @@ export async function renderLoadedProviderConfig(options: ProviderConfigMockFetc
   await waitFor(() => expect(rendered.result.current.loading).toBe(false));
   return rendered;
 }
+
+
+export function countProviderListRequests(): number {
+  return mockAuthenticatedFetch.mock.calls.filter(([url]) => url.endsWith('/providers')).length;
+}

@@ -5,25 +5,7 @@ import {
   render, screen 
 } from '@testing-library/react';
 import { SuggestedBriefsSection } from './SuggestedBriefsSection';
-import type { ContentIdea } from '../../../../types';
-
-function buildIdea(
-  id: string,
-  priority: 'high' | 'medium' | 'low',
-  title: string,
-): ContentIdea {
-  return {
-    id,
-    type: 'visibility_gap',
-    priority,
-    title,
-    description: 'd',
-    keyword: 'kw',
-    source: 'analysis',
-    actionable: true,
-    content_angle: 'comprehensive_guide',
-  };
-}
+import { buildIdea } from './SuggestedBriefsSection-fixtures';
 
 describe('SuggestedBriefsSection', () => {
   it('orders ideas high priority first, then medium, then low', () => {

@@ -18,6 +18,19 @@ export interface ExcelSheet {
   columns: ExcelColumn[];
 }
 
+/** Build a scoped, UTC-dated Excel filename with the existing ASCII slug format. */
+export function scopedExcelFileName(
+  filePrefix: string,
+  scopeLabel: string,
+  date: Date,
+  maxSlugLength?: number
+): string {
+  const normalizedSlug = scopeLabel.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replaceAll(/^-|-$/g, '');
+  const truncatedSlug = maxSlugLength === undefined ? normalizedSlug : normalizedSlug.slice(0, maxSlugLength);
+  const slug = truncatedSlug || 'keywords';
+  return `${filePrefix}-${slug}-${date.toISOString().slice(0, 10)}.xlsx`;
+}
+
 /**
  * Export data to Excel file. Dynamically imports xlsx to reduce initial bundle.
  */

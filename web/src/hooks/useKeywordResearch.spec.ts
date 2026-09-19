@@ -18,40 +18,18 @@ import {
   runningJobResearchOptions,
 } from './useKeywordResearch-fixtures';
 import {
-  renderResearch, startCompetitorAnalysis, startExpansion 
+  countJobPolls,
+  findCall,
+  renderResearch,
+  startCompetitorAnalysis,
+  startExpansion,
 } from './useKeywordResearch-harness-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
-
 const ACTIVE_JOB_STORAGE_KEY = 'keywordResearch.activeJob';
-
-interface RecordedCall {
-  url: string;
-  method: string;
-  body: string | undefined;
-}
-
-function recordedCalls(): RecordedCall[] {
-  return mockAuthenticatedFetch.mock.calls.map((call) => {
-    const [url, init] = call as [string, RequestInit | undefined];
-    return {
-      url,
-      method: init?.method ?? 'GET',
-      body: typeof init?.body === 'string' ? init.body : undefined,
-    };
-  });
-}
-
-function findCall(predicate: (call: RecordedCall) => boolean): RecordedCall | undefined {
-  return recordedCalls().find(predicate);
-}
-
-function countJobPolls(): number {
-  return recordedCalls().filter((call) => call.method === 'GET' && /\/keyword-research\/[^/?]+$/.test(call.url)).length;
-}
 
 describe('useKeywordResearch', () => {
   beforeEach(() => {

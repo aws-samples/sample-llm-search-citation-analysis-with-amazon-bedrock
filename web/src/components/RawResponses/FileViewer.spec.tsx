@@ -6,57 +6,9 @@ import {
 } from '@testing-library/react';
 import { FileViewer } from './FileViewer';
 import { clickDownloadButton } from './DownloadButton-fixtures';
-import type {
-  S3Item, RawResponseContent 
-} from '../../types';
-
-function buildFile(overrides: Partial<S3Item> = {}): S3Item {
-  return {
-    name: 'test-file.json',
-    path: 'responses/test-file.json',
-    type: 'file',
-    size: 1024,
-    last_modified: '2024-01-15T10:30:00Z',
-    ...overrides,
-  };
-}
-
-function buildContent(overrides: Partial<RawResponseContent> = {}): RawResponseContent {
-  return {
-    key: 'responses/test-file.json',
-    content: 'test content',
-    content_type: 'application/json',
-    size: 1024,
-    last_modified: '2024-01-15T10:30:00Z',
-    is_json: true,
-    ...overrides,
-  };
-}
-
-function buildDocumentContent(): RawResponseContent {
-  return {
-    key: 'responses/test-file.json',
-    content: {
-      provider: 'openai',
-      keyword: 'test keyword',
-      timestamp: '2024-01-15T10:30:00Z',
-      raw_api_response: {},
-      extracted: {
-        response_text: 'AI response text',
-        citations: ['https://example.com'],
-        brands: [],
-      },
-      metadata: {
-        model: 'gpt-4',
-        latency_ms: 150 
-      },
-    },
-    content_type: 'application/json',
-    size: 2048,
-    last_modified: '2024-01-15T10:30:00Z',
-    is_json: true,
-  };
-}
+import {
+  buildContent, buildDocumentContent, buildFile
+} from './FileViewer-fixtures';
 
 describe('FileViewer', () => {
   const defaultProps = {
