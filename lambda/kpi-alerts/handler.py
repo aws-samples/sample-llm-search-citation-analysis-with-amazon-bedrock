@@ -286,11 +286,11 @@ def _put_new_alert(item: dict[str, Any]) -> bool:
             Item=convert_floats_to_decimal(item),
             ConditionExpression='attribute_not_exists(id)',
         )
-        return True
     except ClientError as exc:
         if exc.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
             return False
         raise
+    return True
 
 
 def _settings() -> dict[str, Any]:

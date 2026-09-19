@@ -36,6 +36,7 @@ import os
 import re
 import secrets
 import sys
+from collections.abc import Mapping
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -83,12 +84,24 @@ _TIME_PATTERN = re.compile(r'^(\d{1,2}):(\d{2})$')
 _CRON_PATTERN = re.compile(r'^cron\((\d{1,2}) (\d{1,2}) (\*|\?|\d{1,2}) \* (\*|\?|[A-Z]{3}) \*\)$')
 
 
+class _InvalidRequest(Exception):
+    """A request field the route answers with a 400 naming ``field``."""
+
+    def __init__(self, message: str, field: str | None = None) -> None:
+        super().__init__(message)
+        self.message = message
+        self.field = field
+
+    def response(self, event: dict[str, Any]) -> dict[str, Any]:
+        return validation_error(self.message, event, self.field)
+
+
 # =============================================================================
 # Form: frequency/time/timezone/day → cron and back
 # =============================================================================
 
-def validate_form(candidate: dict[str, Any], base: dict[str, Any] | None = None) -> tuple[dict[str, Any] | None, str | None, str | None]:
-    """Validate the editable timing fields; returns (form, error, field).
+def _parse_form(candidate: dict[str, Any], base: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The validated timing fields, or ``_InvalidRequest`` naming the first bad one.
 
     ``base`` supplies the values a partial update does not mention (the
     schedule's current form); defaults fill whatever is left.
@@ -97,29 +110,29 @@ def validate_form(candidate: dict[str, Any], base: dict[str, Any] | None = None)
 
     frequency = str(merged['frequency']).strip().lower()
     if frequency not in FREQUENCIES:
-        return None, 'frequency must be one of daily, weekly, monthly', 'frequency'
+        raise _InvalidRequest('frequency must be one of daily, weekly, monthly', 'frequency')
 
     match = _TIME_PATTERN.match(str(merged['time']).strip())
     if not match:
-        return None, 'Invalid time format. Use HH:MM', 'time'
+        raise _InvalidRequest('Invalid time format. Use HH:MM', 'time')
     hour, minute = int(match.group(1)), int(match.group(2))
     if hour > 23 or minute > 59:
-        return None, 'time must be between 00:00 and 23:59', 'time'
+        raise _InvalidRequest('time must be between 00:00 and 23:59', 'time')
 
     timezone = str(merged['timezone']).strip()
     if not timezone or len(timezone) > MAX_TIMEZONE_LENGTH or not _is_valid_timezone(timezone):
-        return None, f'Unknown timezone {timezone!r}. Use an IANA name such as Europe/Madrid', 'timezone'
+        raise _InvalidRequest(f'Unknown timezone {timezone!r}. Use an IANA name such as Europe/Madrid', 'timezone')
 
     day_of_week = str(merged['day_of_week']).strip().upper()
     if day_of_week not in DAYS_OF_WEEK:
-        return None, 'day_of_week must be one of SUN, MON, TUE, WED, THU, FRI, SAT', 'day_of_week'
+        raise _InvalidRequest('day_of_week must be one of SUN, MON, TUE, WED, THU, FRI, SAT', 'day_of_week')
 
     try:
         day_of_month = int(str(merged['day_of_month']).strip())
     except ValueError:
-        return None, 'day_of_month must be a number', 'day_of_month'
+        raise _InvalidRequest('day_of_month must be a number', 'day_of_month') from None
     if day_of_month < 1 or day_of_month > MAX_DAY_OF_MONTH:
-        return None, f'day_of_month must be between 1 and {MAX_DAY_OF_MONTH}', 'day_of_month'
+        raise _InvalidRequest(f'day_of_month must be between 1 and {MAX_DAY_OF_MONTH}', 'day_of_month')
 
     return {
         'frequency': frequency,
@@ -127,7 +140,20 @@ def validate_form(candidate: dict[str, Any], base: dict[str, Any] | None = None)
         'timezone': timezone,
         'day_of_week': day_of_week,
         'day_of_month': day_of_month,
-    }, None, None
+    }
+
+
+def validate_form(candidate: dict[str, Any], base: dict[str, Any] | None = None) -> tuple[dict[str, Any] | None, str | None, str | None]:
+    """Validate the editable timing fields; returns (form, error, field).
+
+    The non-raising form of :func:`_parse_form`, for reading a stored
+    descriptor that may predate the current rules.
+    """
+    try:
+        form = _parse_form(candidate, base)
+    except _InvalidRequest as exc:
+        return None, exc.message, exc.field
+    return form, None, None
 
 
 def _is_valid_timezone(name: str) -> bool:
@@ -191,7 +217,7 @@ def _iso(value: Any) -> str | None:
     return value.isoformat() if hasattr(value, 'isoformat') else None
 
 
-def describe_schedule(detail: dict[str, Any]) -> dict[str, Any]:
+def describe_schedule(detail: Mapping[str, Any]) -> dict[str, Any]:
     """API shape of one schedule, from a GetSchedule response.
 
     v2 descriptors are returned as stored. Legacy inputs are translated as
@@ -258,14 +284,14 @@ def _list_all_schedule_names() -> list[str]:
     params: dict[str, Any] = {'GroupName': SCHEDULE_GROUP, 'MaxResults': 100}
     while True:
         response = scheduler.list_schedules(**params)
-        names.extend(summary['Name'] for summary in response.get('Schedules', []))
+        names.extend(summary['Name'] for summary in response.get('Schedules', []) if 'Name' in summary)
         token = response.get('NextToken')
         if not token:
             return names
         params['NextToken'] = token
 
 
-def _get_detail(schedule_id: str) -> dict[str, Any] | None:
+def _get_detail(schedule_id: str) -> Mapping[str, Any] | None:
     try:
         return scheduler.get_schedule(Name=schedule_id, GroupName=SCHEDULE_GROUP)
     except scheduler.exceptions.ResourceNotFoundException:
@@ -288,48 +314,51 @@ def _validation_exception_message(exc: Exception) -> str:
 
 
 # =============================================================================
-# Request validation
+# Request validation — each helper returns the accepted value or raises
+# ``_InvalidRequest`` for the route to answer with a 400
 # =============================================================================
 
-def _validate_display_name(value: Any, default: str) -> tuple[str | None, str | None]:
+def _validate_display_name(value: Any, default: str) -> str:
     if value is None:
-        return default, None
+        return default
     if not isinstance(value, str):
-        return None, 'display_name must be a string'
+        raise _InvalidRequest('display_name must be a string', 'display_name')
     name = value.strip()
     if not name:
-        return None, 'display_name must not be empty'
+        raise _InvalidRequest('display_name must not be empty', 'display_name')
     if len(name) > MAX_DISPLAY_NAME_LENGTH:
-        return None, f'display_name must be at most {MAX_DISPLAY_NAME_LENGTH} characters'
-    return name, None
+        raise _InvalidRequest(f'display_name must be at most {MAX_DISPLAY_NAME_LENGTH} characters', 'display_name')
+    return name
 
 
-def _validate_scope_request(value: Any, event: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    """Validate a scope and check that referenced groups exist; returns (scope, error_response)."""
+def _validate_scope_request(value: Any) -> dict[str, Any]:
+    """Validate a scope and check that every group it references exists."""
     scope, error = validate_scope(value)
-    if error:
-        return None, validation_error(error, event, 'scope')
+    if scope is None:
+        # validate_scope returns exactly one of (scope, None) / (None, error).
+        raise _InvalidRequest(str(error), 'scope')
     if scope['mode'] == 'groups':
         existing = load_existing_group_ids(dynamodb.Table(KEYWORD_GROUPS_TABLE), scope['group_ids'])
         missing = [group_id for group_id in scope['group_ids'] if group_id not in existing]
         if missing:
-            return None, validation_error(f"Unknown keyword group id(s): {', '.join(missing)}", event, 'scope')
-    return scope, None
+            raise _InvalidRequest(f"Unknown keyword group id(s): {', '.join(missing)}", 'scope')
+    return scope
 
 
-def _validate_enabled(value: Any, default: bool) -> tuple[bool | None, str | None]:
+def _validate_enabled(value: Any, default: bool) -> bool:
     if value is None:
-        return default, None
+        return default
     if isinstance(value, bool):
-        return value, None
+        return value
     if isinstance(value, str) and value.lower() in ('true', 'false'):
-        return value.lower() == 'true', None
-    return None, 'enabled must be true or false'
+        return value.lower() == 'true'
+    raise _InvalidRequest('enabled must be true or false', 'enabled')
 
 
 def _form_fields(body: dict[str, Any]) -> dict[str, Any]:
     """The timing fields, accepted flat or nested under ``form``."""
-    nested = body.get('form') if isinstance(body.get('form'), dict) else {}
+    form = body.get('form')
+    nested = form if isinstance(form, dict) else {}
     flat = {key: body.get(key) for key in DEFAULT_FORM}
     return {**nested, **{key: value for key, value in flat.items() if value is not None}}
 
@@ -401,18 +430,13 @@ def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
             'keywords is no longer accepted; send a scope ({"mode": "keywords", "keyword_ids": [...]})', event, 'keywords'
         )
 
-    display_name, error = _validate_display_name(body.get('display_name', body.get('name')), DEFAULT_DISPLAY_NAME)
-    if error:
-        return validation_error(error, event, 'display_name')
-    form, error, field = validate_form(_form_fields(body))
-    if error:
-        return validation_error(error, event, field)
-    scope, scope_error = _validate_scope_request(body.get('scope') or {'mode': 'all'}, event)
-    if scope_error:
-        return scope_error
-    enabled, error = _validate_enabled(body.get('enabled'), True)
-    if error:
-        return validation_error(error, event, 'enabled')
+    try:
+        display_name = _validate_display_name(body.get('display_name', body.get('name')), DEFAULT_DISPLAY_NAME)
+        form = _parse_form(_form_fields(body))
+        scope = _validate_scope_request(body.get('scope') or {'mode': 'all'})
+        enabled = _validate_enabled(body.get('enabled'), True)
+    except _InvalidRequest as exc:
+        return exc.response(event)
 
     _ensure_schedule_group()
     schedule_id = _new_schedule_id()
@@ -435,6 +459,18 @@ def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
     }, event, 201)
 
 
+def _scope_to_update(body: dict[str, Any], current: dict[str, Any]) -> Any:
+    """The scope an update applies: the request's, else the schedule's current one.
+
+    A legacy keyword-text schedule has no id-based scope, so editing one
+    requires the request to supply it.
+    """
+    scope_value = body.get('scope', current['scope'])
+    if scope_value is None:
+        raise _InvalidRequest('scope is required to update a schedule created before 2.3.0', 'scope')
+    return scope_value
+
+
 @require_group(ADMIN_GROUP)
 @parse_json_body
 def _update_schedule_handler(event: dict[str, Any], context: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -455,21 +491,13 @@ def _update_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
         return not_found_response(resource='Schedule', event=event)
     current = describe_schedule(detail)
 
-    display_name, error = _validate_display_name(body.get('display_name', body.get('name')), current['display_name'])
-    if error:
-        return validation_error(error, event, 'display_name')
-    form, error, field = validate_form(_form_fields(body), base=current.get('form'))
-    if error:
-        return validation_error(error, event, field)
-    scope_value = body.get('scope', current['scope'])
-    if scope_value is None:
-        return validation_error('scope is required to update a schedule created before 2.3.0', event, 'scope')
-    scope, scope_error = _validate_scope_request(scope_value, event)
-    if scope_error:
-        return scope_error
-    enabled, error = _validate_enabled(body.get('enabled'), current['enabled'])
-    if error:
-        return validation_error(error, event, 'enabled')
+    try:
+        display_name = _validate_display_name(body.get('display_name', body.get('name')), current['display_name'])
+        form = _parse_form(_form_fields(body), base=current.get('form'))
+        scope = _validate_scope_request(_scope_to_update(body, current))
+        enabled = _validate_enabled(body.get('enabled'), current['enabled'])
+    except _InvalidRequest as exc:
+        return exc.response(event)
 
     try:
         _write_schedule('update', schedule_id, display_name, form, scope, enabled)
@@ -550,5 +578,5 @@ def _run_schedule_handler(event: dict[str, Any], context: Any) -> dict[str, Any]
     ('DELETE', None): _delete_schedule_handler,
 })
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Route handler for API Gateway requests."""
-    pass  # Routes handle everything
+    """Route handler for API Gateway requests; routes handle everything, this body is never reached."""
+    ...

@@ -4,7 +4,6 @@ import {
 import {
   fireEvent, render, screen, waitFor, within
 } from '@testing-library/react';
-import { BrandsView } from './BrandsView';
 import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
 import {
   brandKeywordsFixture,
@@ -38,10 +37,14 @@ vi.mock('../../hooks/useBrandConfig', () => ({
   })),
 }));
 
-vi.mock('../../hooks/useKeywordGroups', async () => {
-  const { buildKeywordGroupsHookResult } = await import('../../hooks/useKeywordGroups-fixtures');
-  return { useKeywordGroups: vi.fn(() => buildKeywordGroupsHookResult()) };
-});
+// A bare mock, configured below: the fixtures module renders the real hook in
+// its own helpers, so importing it inside this factory would wait on the very
+// module being mocked.
+vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
+
+import { BrandsView } from './BrandsView';
+import { useKeywordGroups } from '../../hooks/useKeywordGroups';
+import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
 
 vi.mock('../Personas/PersonaSelector', () => ({
   PersonaSelector: ({
@@ -63,6 +66,7 @@ vi.mock('../Personas/PersonaSelector', () => ({
 describe('BrandsView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useKeywordGroups).mockReturnValue(buildKeywordGroupsHookResult());
     mocks.useBrandMentions.mockReturnValue({
       data: brandMentionsExportResponse,
       loading: false,
@@ -71,7 +75,7 @@ describe('BrandsView', () => {
     mocks.exportBrandMentions.mockResolvedValue(undefined);
   });
 
-  it('shows the Brand Mentions heading when the keyword list is empty', () => {
+  it('renders the Brand Mentions heading when there are no keywords', () => {
     render(<BrandsView keywords={[]} />);
 
     expect(screen.getByRole('heading', { name: 'Brand Mentions' })).toBeInTheDocument();

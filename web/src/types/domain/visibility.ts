@@ -17,7 +17,6 @@ export interface BrandVisibilityMetric {
   providers: string[];
   total_mentions: number;
   best_rank: number | null;
-  avg_sentiment: number;
   share_of_voice: number;
   classification: BrandClassification;
 }
@@ -25,7 +24,6 @@ export interface BrandVisibilityMetric {
 export interface VisibilityMetricsResponse {
   keyword: string;
   timestamp: string;
-  total_brands: number;
   total_mentions: number;
   brands: BrandVisibilityMetric[];
   first_party: BrandVisibilityMetric[];
@@ -64,7 +62,6 @@ export interface KeywordVisibilityRow extends ProminenceMetrics {
   first_party_score: number;
   competitor_score: number;
   first_party_sov: number;
-  competitor_sov: number;
   first_party_providers: number;
   total_mentions: number;
   first_party_mentioned: boolean;
@@ -78,7 +75,6 @@ export interface KeywordVisibilityRow extends ProminenceMetrics {
 export interface GroupVisibilityResponse {
   scope: ReportScopeInfo;
   timestamp: string | null;
-  total_providers: number;
   /** True when the scope had more keywords than the summary covers (100). */
   keywords_truncated?: boolean;
   keywords_analyzed: number;
@@ -125,7 +121,6 @@ export interface PromptInsight {
   timestamp: string;
   first_party: PromptBrandData;
   competitors: PromptBrandData;
-  total_providers: number;
   status: PromptStatus;
   score?: number;
   improvement_potential?: number;
@@ -145,7 +140,6 @@ export interface PromptInsightsResponse {
   };
 }
 
-export type GapType = 'competitor_only' | 'neutral';
 export type GapPriority = 'high' | 'medium' | 'low';
 
 export interface CitationGap {
@@ -156,7 +150,6 @@ export interface CitationGap {
   provider_count: number;
   first_party_brands: string[];
   competitor_brands: string[];
-  gap_type: GapType;
   priority: GapPriority;
   title?: string;
   seo_analysis?: Record<string, unknown>;
@@ -177,7 +170,6 @@ export interface CitationGapsResponse {
   covered_sources: CitationGap[];
   domain_summary: DomainGapSummary[];
   summary: {
-    total_sources: number;
     gap_count: number;
     covered_count: number;
     high_priority_gaps: number;
@@ -263,7 +255,6 @@ export interface HistoricalTrendsResponse {
   keywords_truncated?: boolean;
   period_type: PeriodType;
   days_analyzed: number;
-  data_points: number;
   /** Single keyword: its series. Group: per-bucket mean across keywords. */
   trend_data: TrendDataPoint[];
   trend_direction: TrendDirection;
@@ -302,14 +293,12 @@ export interface PersonaBrandRanking {
 }
 
 export interface PersonaRankingGroup {
-  persona_id: string;
   persona_name: string;
   brands: PersonaBrandRanking[];
 }
 
 export interface CrossPersonaBrandSummary {
   name: string;
-  avg_rank: number;
   best_rank: number;
   worst_rank: number;
   best_persona: string;
@@ -327,7 +316,6 @@ export interface ContentRecommendation {
   description: string;
   priority: 'high' | 'medium' | 'low';
   content_type: string;
-  gap_reference: string;
 }
 
 export interface SelfReflectionResult {

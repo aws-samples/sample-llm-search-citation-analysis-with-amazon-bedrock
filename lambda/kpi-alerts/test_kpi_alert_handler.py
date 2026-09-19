@@ -137,6 +137,21 @@ def _complete_group_patches(
     )
 
 
+def _run_complete_group(
+    worker_module,
+    resource: MagicMock,
+    settings: dict,
+    previous_snapshot: dict | None,
+) -> dict:
+    """Run the worker over one complete group whose exact-run metrics are `_visibility()`."""
+    with (
+        _complete_group_patches(worker_module, resource, settings, _visibility()),
+        patch.object(worker_module, '_previous_snapshot', return_value=previous_snapshot),
+        patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
+    ):
+        return worker_module.handler(_event(), None)
+
+
 class TestRunEligibility:
     def test_skips_degraded_report_without_reading_tables(self, worker_module) -> None:
         resource = MagicMock()
@@ -265,17 +280,12 @@ class TestCompleteSnapshotEvaluation:
     def test_records_snapshot_when_alerts_are_disabled(self, worker_module) -> None:
         snapshots, alerts, resource = _single_group_tables()
 
-        with (
-            _complete_group_patches(
-                worker_module,
-                resource,
-                {**DEFAULT_ALERT_SETTINGS, 'enabled': False},
-                _visibility(),
-            ),
-            patch.object(worker_module, '_previous_snapshot', return_value={'snapshot_at': '2026-09-01T10:00:00Z'}),
-            patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
-        ):
-            result = worker_module.handler(_event(), None)
+        result = _run_complete_group(
+            worker_module,
+            resource,
+            {**DEFAULT_ALERT_SETTINGS, 'enabled': False},
+            {'snapshot_at': '2026-09-01T10:00:00Z'},
+        )
 
         stored_snapshot = snapshots.put_item.call_args.kwargs['Item']
         assert snapshots.put_item.call_count == 1
@@ -290,17 +300,12 @@ class TestCompleteSnapshotEvaluation:
     def test_persists_nested_snapshot_metrics_as_decimals(self, worker_module) -> None:
         snapshots, _alerts, resource = _single_group_tables()
 
-        with (
-            _complete_group_patches(
-                worker_module,
-                resource,
-                {**DEFAULT_ALERT_SETTINGS, 'enabled': False},
-                _visibility(),
-            ),
-            patch.object(worker_module, '_previous_snapshot', return_value=None),
-            patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
-        ):
-            worker_module.handler(_event(), None)
+        _run_complete_group(
+            worker_module,
+            resource,
+            {**DEFAULT_ALERT_SETTINGS, 'enabled': False},
+            None,
+        )
 
         stored_snapshot = snapshots.put_item.call_args.kwargs['Item']
         assert stored_snapshot['summary']['first_party_avg_score'] == Decimal('60.0')
@@ -325,18 +330,15 @@ class TestCompleteSnapshotEvaluation:
         }
 
         with (
-            _complete_group_patches(
+            patch.object(worker_module, '_content_change', return_value=None),
+            patch.object(worker_module, 'compare_snapshots', return_value=[specification]),
+        ):
+            result = _run_complete_group(
                 worker_module,
                 resource,
                 DEFAULT_ALERT_SETTINGS,
-                _visibility(),
-            ),
-            patch.object(worker_module, '_previous_snapshot', return_value={'snapshot_at': '2026-09-01T10:00:00Z'}),
-            patch.object(worker_module, '_content_change', return_value=None),
-            patch.object(worker_module, 'compare_snapshots', return_value=[specification]),
-            patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
-        ):
-            result = worker_module.handler(_event(), None)
+                {'snapshot_at': '2026-09-01T10:00:00Z'},
+            )
 
         assert alerts.put_item.call_args.kwargs == {
             'Item': {

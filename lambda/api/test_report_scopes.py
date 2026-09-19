@@ -22,6 +22,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shared.scope_params import ReportScope
+from testing.assertions import present
 from testing.module_loader import load_handler_module, module_name_for
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -590,17 +592,29 @@ class TestTrendsGroupSeries:
             {'period': '2026-09-18', 'visibility_score': 50.0},
         ])
 
-        assert summary['data_points'] == 2
-        assert summary['summary'] == {
-            'current_score': 50.0, 'previous_score': 40.0, 'change': 10.0, 'change_percent': 25.0,
-            'average_score': 45.0, 'max_score': 50.0, 'min_score': 40.0,
+        assert summary == {
+            'trend_data': [
+                {'period': '2026-09-17', 'visibility_score': 40.0},
+                {'period': '2026-09-18', 'visibility_score': 50.0},
+            ],
+            'trend_direction': 'improving',
+            'summary': {
+                'current_score': 50.0, 'previous_score': 40.0, 'change': 10.0, 'change_percent': 25.0,
+                'average_score': 45.0, 'max_score': 50.0, 'min_score': 40.0,
+            },
         }
 
     def test_empty_series_summary_is_all_zero(self, trends):
         summary = trends.summarize_series([])
 
-        assert (summary['data_points'], summary['trend_direction']) == (0, 'stable')
-        assert summary['summary']['current_score'] == 0
+        assert summary == {
+            'trend_data': [],
+            'trend_direction': 'stable',
+            'summary': {
+                'current_score': 0, 'previous_score': 0, 'change': 0, 'change_percent': 0,
+                'average_score': 0.0, 'max_score': 0, 'min_score': 0,
+            },
+        }
 
 
 class TestTrendsScopeRouting:
@@ -624,7 +638,8 @@ class TestTrendsScopeRouting:
         assert body['keywords_truncated'] is False
         assert sorted(entry['keyword'] for entry in body['keyword_trends']) == ['best hotels galicia', 'hotel coruna spa']
         assert body['trend_data'][-1]['keywords_with_data'] == 2
-        assert 'trend_direction' in body and 'summary' in body
+        assert 'trend_direction' in body
+        assert 'summary' in body
 
     def test_single_keyword_is_unchanged(self, trends_env):
         module, _ = trends_env
@@ -714,9 +729,13 @@ class TestOverviewScope:
         resource, _ = _fake_dynamodb()
         seen: dict = {}
 
-        def fake_trends(config, period='day', days=30, scope=None):
-            seen['scope'] = scope
-            return {'scope': scope.describe(), 'keywords_analyzed': len(scope.keywords), 'keyword_trends': [], 'overall': {}}
+        def fake_trends(config, period='day', days=30, scope: ReportScope | None = None):
+            report_scope = present(scope)
+            seen['scope'] = report_scope
+            return {
+                'scope': report_scope.describe(), 'keywords_analyzed': len(report_scope.keywords),
+                'keyword_trends': [], 'overall': {},
+            }
 
         def fake_recs(config, keywords=None):
             seen['keywords'] = keywords

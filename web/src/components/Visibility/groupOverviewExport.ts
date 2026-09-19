@@ -19,6 +19,21 @@ function isExportableNumber(value: number | null | undefined): value is number {
   return value !== null && value !== undefined && Number.isFinite(value);
 }
 
+/**
+ * Widths for the prominence columns that close both the Keywords and History
+ * sheets: best rank, answers, mentioned answers, rank #1 share, top-3 share,
+ * mean rank and mean first position.
+ */
+const PROMINENCE_COLUMNS: ExcelSheet['columns'] = [
+  { wch: 12 },
+  { wch: 10 },
+  { wch: 18 },
+  { wch: 16 },
+  { wch: 16 },
+  { wch: 12 },
+  { wch: 20 },
+];
+
 /** Excel export of group visibility, prominence, keyword detail and history. */
 export function groupOverviewSheets(
   visibility: GroupVisibilityResponse,
@@ -103,13 +118,7 @@ export function groupOverviewSheets(
         { wch: 16 },
         { wch: 12 },
         { wch: 22 },
-        { wch: 12 },
-        { wch: 10 },
-        { wch: 18 },
-        { wch: 16 },
-        { wch: 16 },
-        { wch: 12 },
-        { wch: 20 },
+        ...PROMINENCE_COLUMNS,
       ],
       data: visibility.keywords.map((row) => ({
         Keyword: row.keyword,
@@ -153,13 +162,7 @@ export function groupOverviewSheets(
         { wch: 12 },
         { wch: 12 },
         { wch: 14 },
-        { wch: 12 },
-        { wch: 10 },
-        { wch: 18 },
-        { wch: 16 },
-        { wch: 16 },
-        { wch: 12 },
-        { wch: 20 },
+        ...PROMINENCE_COLUMNS,
       ],
       data: trends.trend_data.map((point) => ({
         Period: point.period,

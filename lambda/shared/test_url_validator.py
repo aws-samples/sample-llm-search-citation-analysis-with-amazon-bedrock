@@ -135,11 +135,11 @@ class TestURLValidatorUnit:
         is_safe, _ = validate_url_safe('http://0.0.0.0/')
         assert not is_safe
 
-    def test_valid_public_url(self):
+    def test_accepts_public_url_with_empty_error(self):
         safe_addr_info = [(2, 1, 6, '', ('93.184.216.34', 0))]
         with patch('shared.url_validator.socket.getaddrinfo', return_value=safe_addr_info):
             is_safe, error = validate_url_safe('https://example.com/page')
-            assert is_safe
+            assert is_safe is True
             assert error == ''
 
     def test_empty_string_rejected(self):

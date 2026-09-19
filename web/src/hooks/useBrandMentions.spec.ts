@@ -8,22 +8,29 @@ import { useBrandMentions } from './useBrandMentions';
 import {
   mockBrandMentionsResponse, createMockFetch
 } from './useBrandMentions-fixtures';
-import {
-  createDeferredResponse, createMockJsonResponse
-} from '../test/fetchResponses';
+import { createMockJsonResponse } from '../test/fetchResponses';
 import { keywordScope as kw } from '../components/ui/reportScope-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import {
+  deferAuthenticatedFetch, mockAuthenticatedFetch 
+} from '../test/infrastructureMock';
+
+interface BrandMentionsProps {
+  keyword: string;
+  filter: string | null;
+}
 
 describe('useBrandMentions', () => {
   it('returns an empty state when scope is null', () => {
     const { result } = renderHook(() => useBrandMentions(null));
 
-    expect(result.current.data).toBeNull();
-    expect(result.current.loading).toBe(false);
-    expect(result.current.error).toBeNull();
+    expect(result.current).toStrictEqual({
+      data: null,
+      loading: false,
+      error: null,
+    });
   });
 
   it('returns brand mentions when the request succeeds', async () => {
@@ -81,7 +88,7 @@ describe('useBrandMentions', () => {
     });
   });
 
-  it('returns a brand error when the request fails', async () => {
+  it('reports the brands server-error message when the fetch fails', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
 
     const { result } = renderHook(() => useBrandMentions(kw('test')));
@@ -92,43 +99,30 @@ describe('useBrandMentions', () => {
     expect(result.current.data).toBeNull();
   });
 
-  it('requests new data when the keyword changes', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-    const {
-      result, rerender
-    } = renderHook(
-      ({ keyword }) => useBrandMentions(kw(keyword)),
-      { initialProps: { keyword: 'keyword1' } }
-    );
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    const initialCallCount = mockAuthenticatedFetch.mock.calls.length;
-
-    rerender({ keyword: 'keyword2' });
-
-    await waitFor(() => {
-      expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(initialCallCount + 1);
-    });
-  });
-
-  it('requests new data when the classification changes', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-    const initialProps: {
-      keyword: string;
-      filter: string | null
-    } = {
+  it.each<[change: string, initialProps: BrandMentionsProps, nextProps: BrandMentionsProps]>([
+    ['the keyword changes', {
+      keyword: 'keyword1',
+      filter: null,
+    }, {
+      keyword: 'keyword2',
+      filter: null,
+    }],
+    ['the classification filter changes', {
       keyword: 'test',
       filter: null,
-    };
+    }, {
+      keyword: 'test',
+      filter: 'competitor',
+    }],
+  ])('refetches when %s', async (_change, initialProps, nextProps) => {
+    mockAuthenticatedFetch.mockImplementation(createMockFetch());
 
     const {
       result, rerender
     } = renderHook(
       ({
-        keyword, filter
-      }) => useBrandMentions(kw(keyword), filter),
+        keyword, filter 
+      }: BrandMentionsProps) => useBrandMentions(kw(keyword), filter),
       { initialProps }
     );
 
@@ -136,10 +130,7 @@ describe('useBrandMentions', () => {
 
     const initialCallCount = mockAuthenticatedFetch.mock.calls.length;
 
-    rerender({
-      keyword: 'test',
-      filter: 'competitor'
-    });
+    rerender(nextProps);
 
     await waitFor(() => {
       expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(initialCallCount + 1);
@@ -177,8 +168,7 @@ describe('useBrandMentions', () => {
   });
 
   it('reports loading while the request is pending', async () => {
-    const deferred = createDeferredResponse();
-    mockAuthenticatedFetch.mockImplementation(() => deferred.promise);
+    const deferred = deferAuthenticatedFetch();
 
     const { result } = renderHook(() => useBrandMentions(kw('test')));
 

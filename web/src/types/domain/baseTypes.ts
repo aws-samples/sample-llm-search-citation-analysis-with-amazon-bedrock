@@ -97,7 +97,6 @@ export interface ReportScopeInfo {
 }
 
 export interface KeywordExtended extends Keyword {
-  region?: string;
   language?: string;
   category?: string;
   priority?: 'high' | 'normal' | 'low';

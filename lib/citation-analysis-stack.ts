@@ -257,6 +257,53 @@ function citationAnalysisTable(scope: Construct, id: string, spec: CitationAnaly
   return table;
 }
 
+/** The parts of a stack data bucket that differ between buckets; `citationAnalysisBucket` fixes the rest. */
+interface CitationAnalysisBucketSpec {
+  /** Names the bucket `citation-analysis-<name>-<account>` and its access-log prefix `<name>/`. */
+  name: string;
+  accessLogsBucket: s3.IBucket;
+  lifecycleRules?: s3.LifecycleRule[];
+}
+
+/**
+ * One S3 data bucket with the settings every data bucket in this stack shares:
+ * AWS-managed encryption, no versioning, all public access blocked, SSL-only,
+ * `RETAIN` so tearing the stack down can never delete data, and server access
+ * logs written to the shared access-logs bucket under the bucket's own prefix.
+ */
+function citationAnalysisBucket(stack: cdk.Stack, id: string, spec: CitationAnalysisBucketSpec): s3.Bucket {
+  return new s3.Bucket(stack, id, {
+    bucketName: `citation-analysis-${spec.name}-${stack.account}`,
+    encryption: s3.BucketEncryption.S3_MANAGED,
+    versioned: false,
+    blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+    removalPolicy: cdk.RemovalPolicy.RETAIN,
+    enforceSSL: true,
+    serverAccessLogsBucket: spec.accessLogsBucket,
+    serverAccessLogsPrefix: `${spec.name}/`,
+    lifecycleRules: spec.lifecycleRules,
+  });
+}
+
+/**
+ * `bedrock:InvokeModel` on the Claude models this stack calls through the
+ * Converse API. The Converse API requires bedrock:InvokeModel permission (not
+ * bedrock:Converse), and global cross-region inference requires all three ARN
+ * patterns per AWS docs: the regional inference profile, the regional
+ * foundation model and the global foundation model (no region/account).
+ */
+function claudeInvokeModelStatement(stack: cdk.Stack): iam.PolicyStatement {
+  return new iam.PolicyStatement({
+    effect: iam.Effect.ALLOW,
+    actions: ['bedrock:InvokeModel'],
+    resources: [
+      `arn:aws:bedrock:*:${stack.account}:inference-profile/global.anthropic.claude-*`,
+      'arn:aws:bedrock:*::foundation-model/anthropic.claude-*',
+      'arn:aws:bedrock:::foundation-model/anthropic.claude-*',
+    ],
+  });
+}
+
 /**
  * Creates optimized Lambda code bundle containing only the specific handler
  * file. Shared code (including Decimal helpers, now in
@@ -711,27 +758,15 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     // Keywords Bucket
-    const keywordsBucket = new s3.Bucket(this, 'KeywordsBucket', {
-      bucketName: `citation-analysis-keywords-${this.account}`,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      versioned: false,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-      enforceSSL: true,
-      serverAccessLogsBucket: accessLogsBucket,
-      serverAccessLogsPrefix: 'keywords/',
+    const keywordsBucket = citationAnalysisBucket(this, 'KeywordsBucket', {
+      name: 'keywords',
+      accessLogsBucket,
     });
 
     // Screenshots Bucket
-    const screenshotsBucket = new s3.Bucket(this, 'ScreenshotsBucket', {
-      bucketName: `citation-analysis-screenshots-${this.account}`,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      versioned: false,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-      enforceSSL: true,
-      serverAccessLogsBucket: accessLogsBucket,
-      serverAccessLogsPrefix: 'screenshots/',
+    const screenshotsBucket = citationAnalysisBucket(this, 'ScreenshotsBucket', {
+      name: 'screenshots',
+      accessLogsBucket,
       // Transition to Infrequent Access at 90 days — NOT expiration.
       //
       // This rule used to be `expiration: 90 days`, which silently deleted
@@ -766,15 +801,9 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Raw Responses Bucket - stores full API responses from AI providers
     // Structure: raw-responses/{date}/{keyword}/{provider}/{timestamp}.json
-    const rawResponsesBucket = new s3.Bucket(this, 'RawResponsesBucket', {
-      bucketName: `citation-analysis-raw-responses-${this.account}`,
-      encryption: s3.BucketEncryption.S3_MANAGED,
-      versioned: false,
-      blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-      enforceSSL: true,
-      serverAccessLogsBucket: accessLogsBucket,
-      serverAccessLogsPrefix: 'raw-responses/',
+    const rawResponsesBucket = citationAnalysisBucket(this, 'RawResponsesBucket', {
+      name: 'raw-responses',
+      accessLogsBucket,
     });
 
     // ========================================
@@ -815,20 +844,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     brandConfigTable.grantReadData(searchLambdaRole);
 
     // Grant Search Lambda access to Bedrock for brand extraction
-    // Uses global.anthropic.claude-* inference profiles with Converse API
-    // Note: Converse API requires bedrock:InvokeModel permission (not bedrock:Converse)
-    // Global cross-region inference requires three ARN patterns per AWS docs
-    searchLambdaRole.addToPolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'bedrock:InvokeModel',
-      ],
-      resources: [
-        `arn:aws:bedrock:*:${this.account}:inference-profile/global.anthropic.claude-*`, // Regional inference profile
-        `arn:aws:bedrock:*::foundation-model/anthropic.claude-*`, // Regional foundation model
-        `arn:aws:bedrock:::foundation-model/anthropic.claude-*`, // Global foundation model (no region/account)
-      ],
-    }));
+    searchLambdaRole.addToPolicy(claudeInvokeModelStatement(this));
 
     // IAM Role for Deduplication Lambda
     // Permissions: Read/write to Citations table, read from SearchResults table
@@ -876,20 +892,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     }));
 
     // Grant Crawler Lambda access to Bedrock for AgentCore and LLM summarization
-    // Uses global.anthropic.claude-* inference profiles with Converse API
-    // Note: Converse API requires bedrock:InvokeModel permission (not bedrock:Converse)
-    // Global cross-region inference requires three ARN patterns per AWS docs
-    crawlerLambdaRole.addToPolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'bedrock:InvokeModel',
-      ],
-      resources: [
-        `arn:aws:bedrock:*:${this.account}:inference-profile/global.anthropic.claude-*`, // Regional inference profile
-        `arn:aws:bedrock:*::foundation-model/anthropic.claude-*`, // Regional foundation model
-        `arn:aws:bedrock:::foundation-model/anthropic.claude-*`, // Global foundation model (no region/account)
-      ],
-    }));
+    crawlerLambdaRole.addToPolicy(claudeInvokeModelStatement(this));
 
     // Grant Crawler Lambda access to Bedrock AgentCore browser capabilities
     crawlerLambdaRole.addToPolicy(new iam.PolicyStatement({
@@ -1493,15 +1496,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     serpapiSecret.grantRead(researchWorkerFunction);
     // The agent's plan / evaluate / select calls (shared/models.py roles
     // RESEARCH_PLANNING and RESEARCH_EVALUATION).
-    researchWorkerFunction.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: ['bedrock:InvokeModel'],
-      resources: [
-        `arn:aws:bedrock:*:${this.account}:inference-profile/global.anthropic.claude-*`,
-        `arn:aws:bedrock:*::foundation-model/anthropic.claude-*`,
-        `arn:aws:bedrock:::foundation-model/anthropic.claude-*`,
-      ],
-    }));
+    researchWorkerFunction.addToRolePolicy(claudeInvokeModelStatement(this));
 
     const planResearchTask = new tasks.LambdaInvoke(this, 'PlanResearch', {
       lambdaFunction: researchWorkerFunction,
@@ -1509,7 +1504,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         action: 'plan',
         'job_id.$': '$.job_id',
         'retry.$': '$.retry',
+        'attempt.$': '$.attempt',
+        'expected_round.$': '$.expected_round',
         'execution_arn.$': '$$.Execution.Id',
+        'execution_id.$': '$$.Execution.Name',
       }),
       outputPath: '$.Payload',
       retryOnServiceExceptions: true,
@@ -1538,6 +1536,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         'job_id.$': '$.job_id',
         'step_id.$': '$.step_id',
         'provider.$': '$.provider',
+        'attempt.$': '$.attempt',
+        'expected_round.$': '$.expected_round',
+        'execution_arn.$': '$$.Execution.Id',
+        'execution_id.$': '$$.Execution.Name',
         'error.$': '$.error',
       }),
       outputPath: '$.Payload',
@@ -1557,6 +1559,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         'job_id.$': '$.job_id',
         'step_id.$': '$$.Map.Item.Value.step_id',
         'provider.$': '$$.Map.Item.Value.provider',
+        'attempt.$': '$.attempt',
+        'expected_round.$': '$.expected_round',
+        'execution_arn.$': '$$.Execution.Id',
+        'execution_id.$': '$$.Execution.Name',
       },
     }).itemProcessor(executeResearchStepTask);
 
@@ -1565,19 +1571,27 @@ export class CitationAnalysisStack extends cdk.Stack {
       payload: stepfunctions.TaskInput.fromObject({
         action: 'finalize',
         'job_id.$': '$.job_id',
+        'attempt.$': '$.attempt',
+        'expected_round.$': '$.round',
+        'execution_arn.$': '$$.Execution.Id',
+        'execution_id.$': '$$.Execution.Name',
       }),
       outputPath: '$.Payload',
       retryOnServiceExceptions: true,
     });
 
     // After every round the worker decides whether to plan another one. Its
-    // output ({job_id, decision, round, retry: false}) is also the input of
-    // the next Plan, which reads `$.retry` — hence the explicit `retry` key.
+    // output preserves the attempt/execution envelope and advances
+    // `expected_round` only for `continue`, so a looped Plan remains fenced.
     const evaluateResearchTask = new tasks.LambdaInvoke(this, 'EvaluateResearch', {
       lambdaFunction: researchWorkerFunction,
       payload: stepfunctions.TaskInput.fromObject({
         action: 'evaluate',
         'job_id.$': '$.job_id',
+        'attempt.$': '$.attempt',
+        'expected_round.$': '$.expected_round',
+        'execution_arn.$': '$$.Execution.Id',
+        'execution_id.$': '$$.Execution.Name',
       }),
       outputPath: '$.Payload',
       retryOnServiceExceptions: true,
@@ -1590,6 +1604,10 @@ export class CitationAnalysisStack extends cdk.Stack {
       payload: stepfunctions.TaskInput.fromObject({
         action: 'fail',
         'job_id.$': '$.job_id',
+        'attempt.$': '$.attempt',
+        'expected_round.$': '$.expected_round',
+        'execution_arn.$': '$$.Execution.Id',
+        'execution_id.$': '$$.Execution.Name',
         'error.$': '$.error',
       }),
       outputPath: '$.Payload',
@@ -2043,15 +2061,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     // needs read-write on the status table.
     recommendationStatusTable.grantReadWriteData(statsInsightsFunction);
     // Grant Bedrock access for LLM-enhanced recommendations (get-recommendations.py)
-    statsInsightsFunction.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: ['bedrock:InvokeModel'],
-      resources: [
-        `arn:aws:bedrock:*:${this.account}:inference-profile/global.anthropic.claude-*`,
-        `arn:aws:bedrock:*::foundation-model/anthropic.claude-*`,
-        `arn:aws:bedrock:::foundation-model/anthropic.claude-*`,
-      ],
-    }));
+    statsInsightsFunction.addToRolePolicy(claudeInvokeModelStatement(this));
     // Grant consolidated citations-content function access to all required tables and buckets
     citationsTable.grantReadData(citationsContentFunction);
     searchResultsTable.grantReadData(citationsContentFunction);
@@ -2205,50 +2215,27 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_SELF_REFLECTION: selfReflectionTable.tableName,
         QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
-        // DEAD CONFIG: `shared/models.py` reads BEDROCK_MODEL_<ROLE> and
-        // BEDROCK_TIER_<ROLE>, never BEDROCK_MODEL_ID. This function also does
-        // not spread `bedrockTierEnv`, so ModelRole.ANALYSIS falls through to
-        // its hardcoded BALANCED default: Sonnet 4.6 with a 2000-token
-        // extended-thinking budget, NOT the Haiku named here. That is the root
-        // cause of the latency this function's 60s timeout accommodates.
-        // Left in place because switching to Haiku changes analysis quality
-        // and cost — a product decision, not a cleanup.
-        BEDROCK_MODEL_ID: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+        // NOTE: `shared/models.py` resolves the analysis model from
+        // BEDROCK_TIER_<ROLE> (see `bedrockTierEnv`), which this function does
+        // not spread, so ModelRole.ANALYSIS falls through to its hardcoded
+        // BALANCED default: Sonnet 4.6 with a 2000-token extended-thinking
+        // budget. That is the root cause of the latency this function's 60s
+        // timeout accommodates. Moving it to Haiku is a product decision
+        // (analysis quality and cost) — do it by spreading `bedrockTierEnv`
+        // and setting BEDROCK_TIER_ANALYSIS, not by adding an env var nothing
+        // reads.
       },
     });
     searchResultsTable.grantReadData(selfReflectionFunction);
     brandConfigTable.grantReadData(selfReflectionFunction);
     queryPromptsTable.grantReadData(selfReflectionFunction);
     selfReflectionTable.grantReadWriteData(selfReflectionFunction);
-    selfReflectionFunction.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'bedrock:InvokeModel',
-      ],
-      resources: [
-        `arn:aws:bedrock:*:${this.account}:inference-profile/global.anthropic.claude-*`,
-        `arn:aws:bedrock:*::foundation-model/anthropic.claude-*`,
-        `arn:aws:bedrock:::foundation-model/anthropic.claude-*`,
-      ],
-    }));
+    selfReflectionFunction.addToRolePolicy(claudeInvokeModelStatement(this));
 
     brandConfigTable.grantReadWriteData(manageBrandConfigFunction);
     
     // Grant Bedrock access for brand expansion feature
-    // Uses global.anthropic.claude-* inference profiles with Converse API
-    // Note: Converse API requires bedrock:InvokeModel permission (not bedrock:Converse)
-    // Global cross-region inference requires three ARN patterns per AWS docs
-    manageBrandConfigFunction.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'bedrock:InvokeModel',
-      ],
-      resources: [
-        `arn:aws:bedrock:*:${this.account}:inference-profile/global.anthropic.claude-*`, // Regional inference profile
-        'arn:aws:bedrock:*::foundation-model/anthropic.claude-*', // Regional foundation model
-        'arn:aws:bedrock:::foundation-model/anthropic.claude-*', // Global foundation model (no region/account)
-      ],
-    }));
+    manageBrandConfigFunction.addToRolePolicy(claudeInvokeModelStatement(this));
     
 
 
@@ -2617,19 +2604,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     selfReflectionTable.grantReadData(contentStudioFunction);
     // Grant Bedrock access for content generation using Converse API
     // Uses global.anthropic.claude-* inference profiles (Haiku 4.5 for speed)
-    // Note: Converse API requires bedrock:InvokeModel permission (not bedrock:Converse)
-    // Global cross-region inference requires three ARN patterns per AWS docs
-    contentStudioFunction.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'bedrock:InvokeModel',
-      ],
-      resources: [
-        `arn:aws:bedrock:*:${this.account}:inference-profile/global.anthropic.claude-*`, // Regional inference profile
-        `arn:aws:bedrock:*::foundation-model/anthropic.claude-*`, // Regional foundation model
-        `arn:aws:bedrock:::foundation-model/anthropic.claude-*`, // Global foundation model (no region/account)
-      ],
-    }));
+    contentStudioFunction.addToRolePolicy(claudeInvokeModelStatement(this));
     
     // Grant permission to invoke itself asynchronously for background content generation
     // Use ARN pattern to avoid circular dependency
@@ -3085,10 +3060,8 @@ def delete_waf(waf, arn):
     // We use Aspects to remove them after synthesis since they're created on the
     // API Gateway method constructs, not on the Lambda.
     class RemoveDuplicatePermissions implements cdk.IAspect {
-      private readonly fnArns: Set<string>;
       private readonly fnArnStrings: string[];
       constructor(fns: lambda.Function[]) {
-        this.fnArns = new Set(fns.map(fn => fn.functionArn));
         this.fnArnStrings = fns.map(fn => JSON.stringify(fn.functionArn));
       }
       public visit(node: Construct): void {

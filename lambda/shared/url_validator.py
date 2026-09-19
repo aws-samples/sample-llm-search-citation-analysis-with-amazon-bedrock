@@ -121,6 +121,61 @@ def _is_ip_blocked(ip_str: str) -> bool:
     return False
 
 
+def _parse_http_url(url: str) -> tuple[str | None, str]:
+    """``(hostname, '')`` for a well-formed http(s) URL, or ``(None, reason)``.
+
+    The reasons are the generic messages ``validate_url_safe`` returns; none
+    of them echo the input beyond its scheme.
+    """
+    if not url or not isinstance(url, str):
+        return None, 'Invalid URL format'
+
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        # `urlparse` rejects malformed IPv6 literals and netlocs whose NFKC
+        # normalisation introduces separators — both surface as ValueError.
+        return None, 'Invalid URL format'
+
+    if parsed.scheme not in ('http', 'https'):
+        return None, f'URL scheme must be http or https, got: {parsed.scheme or "none"}'
+
+    if not parsed.hostname:
+        return None, 'URL must contain a valid hostname'
+
+    return parsed.hostname, ''
+
+
+def _is_blocked_ip_literal(hostname: str) -> bool:
+    """Whether ``hostname`` is an IP literal that ``_is_ip_blocked`` rejects.
+
+    Judging a literal directly rather than handing it to DNS catches forms the
+    hostname blocklist cannot enumerate, e.g. `http://[::ffff:169.254.169.254]/`
+    or a decimal-encoded `http://2130706433/`.
+    """
+    try:
+        literal_ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return _is_ip_blocked(str(literal_ip))
+
+
+def _resolve_addresses(hostname: str) -> list[str]:
+    """Every address ``hostname`` resolves to; empty when resolution fails.
+
+    ``getaddrinfo`` reports lookup failures as ``socket.gaierror`` (an
+    ``OSError``) and unencodable labels as ``UnicodeError``; both mean the
+    URL cannot be fetched, so both collapse to "no addresses".
+    """
+    try:
+        addr_infos = socket.getaddrinfo(hostname, None)
+    except (OSError, UnicodeError):
+        return []
+    # AF_INET/AF_INET6 sockaddrs carry the host as a string; any other
+    # family is unparseable to ip_address(), which _is_ip_blocked fails closed on.
+    return [str(addr_info[4][0]) for addr_info in addr_infos]
+
+
 def validate_url_safe(url: str) -> tuple[bool, str]:
     """
     Validate that a URL is safe for server-side fetching (SSRF prevention).
@@ -137,56 +192,27 @@ def validate_url_safe(url: str) -> tuple[bool, str]:
         Tuple of (is_safe, error_message). If safe, error_message is empty string.
         Error messages are generic and do not reveal resolved IPs.
     """
-    if not url or not isinstance(url, str):
-        return False, 'Invalid URL format'
-
-    try:
-        parsed = urlparse(url)
-    except Exception:
-        return False, 'Invalid URL format'
-
-    # Check scheme
-    if parsed.scheme not in ('http', 'https'):
-        return False, f'URL scheme must be http or https, got: {parsed.scheme or "none"}'
-
-    hostname = parsed.hostname
-    if not hostname:
-        return False, 'URL must contain a valid hostname'
+    hostname, reason = _parse_http_url(url)
+    if hostname is None:
+        return False, reason
 
     # Check blocked hostnames
     hostname_lower = hostname.lower()
     if hostname_lower in BLOCKED_HOSTNAMES:
         return False, 'URL points to a restricted address'
 
-    # If the hostname is already an IP literal, judge it directly rather than
-    # handing it to DNS. Catches forms the literal blocklist above cannot
-    # enumerate, e.g. `http://[::ffff:169.254.169.254]/` or a decimal-encoded
-    # `http://2130706433/`.
-    try:
-        literal_ip = ipaddress.ip_address(hostname_lower)
-    except ValueError:
-        literal_ip = None
-
-    if literal_ip is not None and _is_ip_blocked(str(literal_ip)):
+    if _is_blocked_ip_literal(hostname_lower):
         logger.warning('SSRF blocked: IP literal in restricted range')
         return False, 'URL points to a restricted address'
 
     # Resolve hostname and check all returned IPs
-    try:
-        addr_infos = socket.getaddrinfo(hostname, None)
-    except socket.gaierror:
-        return False, 'Could not resolve hostname'
-    except Exception:
+    resolved = _resolve_addresses(hostname)
+    if not resolved:
         return False, 'Could not resolve hostname'
 
-    if not addr_infos:
-        return False, 'Could not resolve hostname'
-
-    for addr_info in addr_infos:
-        ip_str = addr_info[4][0]
-        if _is_ip_blocked(ip_str):
-            logger.warning(f'SSRF blocked: {hostname} resolved to private/reserved IP')
-            return False, 'URL points to a restricted address'
+    if any(_is_ip_blocked(ip_str) for ip_str in resolved):
+        logger.warning(f'SSRF blocked: {hostname} resolved to private/reserved IP')
+        return False, 'URL points to a restricted address'
 
     return True, ''
 

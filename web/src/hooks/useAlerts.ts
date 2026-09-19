@@ -31,40 +31,87 @@ export interface AlertSettingsSaveOutcome extends AlertMutationOutcome { warning
 const DEFAULT_OPEN_ALERT_LIMIT = 20;
 const LATEST_CONTENT_CHANGE_LIMIT = 1;
 
-export function useOpenAlerts(limit = DEFAULT_OPEN_ALERT_LIMIT) {
-  const [items, setItems] = useState<AlertItem[]>([]);
-  const [count, setCount] = useState(0);
-  const [loading, setLoading] = useState(true);
+interface LatestAlertLoadOptions {
+  initialLoading: boolean;
+  resourceLabel: string;
+}
+
+interface LatestAlertLoad<TResponse> {
+  request: (signal: AbortSignal) => Promise<TResponse>;
+  onLoaded: (response: TResponse) => void;
+}
+
+/**
+ * Loading/error state for one alert resource, fed by the latest request only:
+ * stale or aborted responses never touch state, and the current one clears
+ * `loading` when it settles.
+ */
+function useLatestAlertLoad({
+  initialLoading, resourceLabel
+}: LatestAlertLoadOptions) {
+  const [loading, setLoading] = useState(initialLoading);
   const [error, setError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [acknowledgingIds, setAcknowledgingIds] = useState<string[]>([]);
   const {
     beginRequest, cancelRequest, isMounted
   } = useLatestRequest();
 
-  const refresh = useCallback(async (): Promise<void> => {
-    const request = beginRequest();
+  const load = useCallback(async <TResponse>({
+    request, onLoaded
+  }: LatestAlertLoad<TResponse>): Promise<void> => {
+    const latest = beginRequest();
     setLoading(true);
     setError(null);
-    setActionError(null);
     try {
-      const response = await fetchAlerts({
+      const response = await request(latest.signal);
+      if (!latest.isCurrent()) return;
+      onLoaded(response);
+    } catch (loadError) {
+      if (isAbortError(loadError) || !latest.isCurrent()) return;
+      console.error(`[alerts] Error fetching ${resourceLabel}:`, loadError);
+      setError(getErrorMessage(loadError, 'alerts'));
+    } finally {
+      if (latest.isCurrent()) setLoading(false);
+      latest.finish();
+    }
+  }, [beginRequest, resourceLabel]);
+
+  return {
+    loading,
+    error,
+    setLoading,
+    setError,
+    load,
+    cancelRequest,
+    isMounted,
+  };
+}
+
+export function useOpenAlerts(limit = DEFAULT_OPEN_ALERT_LIMIT) {
+  const [items, setItems] = useState<AlertItem[]>([]);
+  const [count, setCount] = useState(0);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [acknowledgingIds, setAcknowledgingIds] = useState<string[]>([]);
+  const {
+    loading, error, setLoading, load, cancelRequest, isMounted
+  } = useLatestAlertLoad({
+    initialLoading: true,
+    resourceLabel: 'open alerts',
+  });
+
+  const refresh = useCallback(async (): Promise<void> => {
+    setActionError(null);
+    await load({
+      request: (signal) => fetchAlerts({
         status: 'open',
         limit,
-        signal: request.signal,
-      });
-      if (!request.isCurrent()) return;
-      setItems(response.items);
-      setCount(response.count);
-    } catch (fetchError) {
-      if (isAbortError(fetchError) || !request.isCurrent()) return;
-      console.error('[alerts] Error fetching open alerts:', fetchError);
-      setError(getErrorMessage(fetchError, 'alerts'));
-    } finally {
-      if (request.isCurrent()) setLoading(false);
-      request.finish();
-    }
-  }, [beginRequest, limit]);
+        signal,
+      }),
+      onLoaded: (response) => {
+        setItems(response.items);
+        setCount(response.count);
+      },
+    });
+  }, [limit, load]);
 
   useEffect(() => {
     void refresh();
@@ -105,7 +152,7 @@ export function useOpenAlerts(limit = DEFAULT_OPEN_ALERT_LIMIT) {
         setAcknowledgingIds((currentIds) => currentIds.filter((currentId) => currentId !== id));
       }
     }
-  }, [cancelRequest, isMounted]);
+  }, [cancelRequest, isMounted, setLoading]);
 
   return {
     items,
@@ -121,32 +168,22 @@ export function useOpenAlerts(limit = DEFAULT_OPEN_ALERT_LIMIT) {
 
 export function useAlertSettings() {
   const [settings, setSettings] = useState<AlertSettings | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveOutcome, setSaveOutcome] = useState<AlertSettingsSaveOutcome | null>(null);
   const {
-    beginRequest, cancelRequest, isMounted
-  } = useLatestRequest();
+    loading, error, setLoading, setError, load, cancelRequest, isMounted
+  } = useLatestAlertLoad({
+    initialLoading: true,
+    resourceLabel: 'settings',
+  });
 
   const refresh = useCallback(async (): Promise<void> => {
-    const request = beginRequest();
-    setLoading(true);
-    setError(null);
     setSaveOutcome(null);
-    try {
-      const response = await fetchAlertSettings(request.signal);
-      if (!request.isCurrent()) return;
-      setSettings(response);
-    } catch (fetchError) {
-      if (isAbortError(fetchError) || !request.isCurrent()) return;
-      console.error('[alerts] Error fetching settings:', fetchError);
-      setError(getErrorMessage(fetchError, 'alerts'));
-    } finally {
-      if (request.isCurrent()) setLoading(false);
-      request.finish();
-    }
-  }, [beginRequest]);
+    await load({
+      request: fetchAlertSettings,
+      onLoaded: setSettings,
+    });
+  }, [load]);
 
   useEffect(() => {
     void refresh();
@@ -187,7 +224,7 @@ export function useAlertSettings() {
     } finally {
       if (isMounted()) setSaving(false);
     }
-  }, [cancelRequest, isMounted]);
+  }, [cancelRequest, isMounted, setError, setLoading]);
 
   return {
     settings,
@@ -202,50 +239,37 @@ export function useAlertSettings() {
 
 export function useContentChanges(groupId: string) {
   const [latestMarker, setLatestMarker] = useState<ContentChangeMarker | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const [recordOutcome, setRecordOutcome] = useState<AlertMutationOutcome | null>(null);
   const selectedGroupRef = useRef(groupId);
   selectedGroupRef.current = groupId;
   const {
-    beginRequest, cancelRequest, isMounted
-  } = useLatestRequest();
+    loading, error, setLoading, setError, load, cancelRequest, isMounted
+  } = useLatestAlertLoad({
+    initialLoading: false,
+    resourceLabel: 'content changes',
+  });
 
   const refresh = useCallback(async (): Promise<void> => {
+    setLatestMarker(null);
+    setRecording(false);
+    setRecordOutcome(null);
     if (groupId === '') {
       cancelRequest();
-      setLatestMarker(null);
       setLoading(false);
       setError(null);
-      setRecording(false);
-      setRecordOutcome(null);
       return;
     }
 
-    const request = beginRequest();
-    setLatestMarker(null);
-    setLoading(true);
-    setError(null);
-    setRecording(false);
-    setRecordOutcome(null);
-    try {
-      const response = await fetchContentChanges({
+    await load({
+      request: (signal) => fetchContentChanges({
         groupId,
         limit: LATEST_CONTENT_CHANGE_LIMIT,
-        signal: request.signal,
-      });
-      if (!request.isCurrent()) return;
-      setLatestMarker(response.items[0] ?? null);
-    } catch (fetchError) {
-      if (isAbortError(fetchError) || !request.isCurrent()) return;
-      console.error('[alerts] Error fetching content changes:', fetchError);
-      setError(getErrorMessage(fetchError, 'alerts'));
-    } finally {
-      if (request.isCurrent()) setLoading(false);
-      request.finish();
-    }
-  }, [beginRequest, cancelRequest, groupId]);
+        signal,
+      }),
+      onLoaded: (response) => setLatestMarker(response.items[0] ?? null),
+    });
+  }, [cancelRequest, groupId, load, setError, setLoading]);
 
   useEffect(() => {
     void refresh();
@@ -287,7 +311,7 @@ export function useContentChanges(groupId: string) {
         setRecording(false);
       }
     }
-  }, [cancelRequest, isMounted]);
+  }, [cancelRequest, isMounted, setError, setLoading]);
 
   return {
     latestMarker,

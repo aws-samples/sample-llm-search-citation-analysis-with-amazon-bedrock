@@ -176,15 +176,19 @@ const StatItem = ({
   </div>
 );
 
-interface SearchItemProps {
-  search: Search;
-  globalIdx: number;
-  isExpanded: boolean;
-  onToggle: () => void;
+/** Response expansion state and raw-response navigation, threaded from the run history down to each response. */
+export interface ResponseNavigationProps {
   expandedResponse: number | null;
   setExpandedResponse: (value: number | null) => void;
   onNavigateToRawResponses?: (path: string) => void;
   buildRawResponsesPath: (search: Search) => string;
+}
+
+interface SearchItemProps extends ResponseNavigationProps {
+  search: Search;
+  globalIdx: number;
+  isExpanded: boolean;
+  onToggle: () => void;
 }
 
 export const SearchItem = ({
@@ -251,13 +255,9 @@ export const SearchItem = ({
   );
 };
 
-interface ExpandedSearchContentProps {
+interface ExpandedSearchContentProps extends ResponseNavigationProps {
   search: Search;
   globalIdx: number;
-  expandedResponse: number | null;
-  setExpandedResponse: (value: number | null) => void;
-  onNavigateToRawResponses?: (path: string) => void;
-  buildRawResponsesPath: (search: Search) => string;
 }
 
 const ExpandedSearchContent = ({

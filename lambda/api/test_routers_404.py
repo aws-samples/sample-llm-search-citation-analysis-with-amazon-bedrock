@@ -48,11 +48,6 @@ ROUTERS = [
 ]
 
 
-def _reset_cors_cache():
-    """Clear the cached CORS origin so the next call re-reads env/SSM."""
-    _layer_api_response._cors_origin_cache = None
-
-
 def _load_router(name):
     """Load a router .py file (hyphenated name) as a fresh module."""
     return load_handler_module(_API_DIR, f'{name}.py', name.replace('-', '_') + '_router_under_test')
@@ -69,22 +64,15 @@ def _unmatched_event(origin='https://evil.example.com'):
 
 
 @pytest.fixture(autouse=True)
-def _clean_env():
-    """Reset CORS-related env vars and cache before every test."""
-    prev = {
-        k: os.environ.get(k)
-        for k in ('CORS_ORIGIN_PARAM', 'ALLOW_DEV_CORS', 'ALLOW_LOCALHOST')
-    }
-    for k in prev:
-        os.environ.pop(k, None)
-    _reset_cors_cache()
-    yield
-    for k, v in prev.items():
-        if v is None:
-            os.environ.pop(k, None)
-        else:
-            os.environ[k] = v
-    _reset_cors_cache()
+def _clean_env(monkeypatch: pytest.MonkeyPatch):
+    """Unset the CORS env vars and forget the cached origin before every test.
+
+    Tests set the variables they need directly; monkeypatch restores the
+    original environment and cache value afterwards.
+    """
+    for name in ('CORS_ORIGIN_PARAM', 'ALLOW_DEV_CORS', 'ALLOW_LOCALHOST'):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(_layer_api_response, '_cors_origin_cache', None)
 
 
 # --- Tests ------------------------------------------------------------------
@@ -126,13 +114,13 @@ def test_fails_closed_when_cors_not_configured(router_name):
 
 
 @pytest.mark.parametrize('router_name', ROUTERS)
-def test_echoes_allowed_request_origin_when_configured(router_name):
+def test_echoes_allowed_request_origin_when_configured(router_name, monkeypatch: pytest.MonkeyPatch):
     """
     When a specific origin is configured via SSM and the request origin
     matches, the 404 response echoes that origin rather than the wildcard.
     """
     configured = 'https://dashboard.example.com'
-    _layer_api_response._cors_origin_cache = configured
+    monkeypatch.setattr(_layer_api_response, '_cors_origin_cache', configured)
     mod = _load_router(router_name)
 
     resp = mod.handler(_unmatched_event(origin=configured), None)

@@ -84,7 +84,7 @@ _IDENTITY_CLAIMS = ('cognito:username', 'username', 'email', 'sub')
 _GROUP_SEPARATORS = re.compile(r'[,\s]+')
 
 
-def get_caller_claims(event: dict[str, Any]) -> dict[str, Any]:
+def get_caller_claims(event: Any) -> dict[str, Any]:
     """
     Return the Cognito claims attached by the API Gateway authorizer.
 
@@ -117,7 +117,7 @@ def get_caller_claims(event: dict[str, Any]) -> dict[str, Any]:
     return claims
 
 
-def get_caller_groups(event: dict[str, Any]) -> frozenset[str]:
+def get_caller_groups(event: Any) -> frozenset[str]:
     """
     Return the Cognito groups the caller belongs to.
 

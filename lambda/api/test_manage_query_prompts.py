@@ -13,10 +13,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.events import parse_response
 from testing.module_loader import load_handler_module
 
 # Mock the DynamoDB table at module level; boto3.resource is patched before
-# the handler module's import-time code runs.
+# the handler module's import-time code runs, so the module's table IS the mock.
 mock_table = MagicMock()
 mock_dynamodb = fake_dynamodb_resource(mock_table)
 
@@ -24,11 +25,8 @@ with patch('boto3.resource', return_value=mock_dynamodb):
     with patch.dict(os.environ, {'QUERY_PROMPTS_TABLE': 'test-table', 'CORS_ORIGIN_PARAM': ''}):
         _handler_mod = load_handler_module(os.path.dirname(__file__), 'manage-query-prompts.py', 'manage_query_prompts')
 
-# Point the module's table reference to our mock
-_handler_mod.query_prompts_table = mock_table
 
-
-def make_event(method, body=None, path_params=None, groups='Admin'):
+def make_event(method, body=None, path_params=None, groups: str | None = 'Admin'):
     """Build a minimal API Gateway event.
 
     Defaults to an Admin caller because every mutating route now requires the
@@ -47,13 +45,6 @@ def make_event(method, body=None, path_params=None, groups='Admin'):
     }
 
 
-def parse_response(result):
-    """Extract status code and parsed body from Lambda response."""
-    status = result.get('statusCode', 200)
-    body = json.loads(result['body']) if isinstance(result.get('body'), str) else result.get('body', {})
-    return status, body
-
-
 @pytest.fixture(autouse=True)
 def _reset_mocks():
     """Reset mocks before each test."""
@@ -66,11 +57,11 @@ def _reset_mocks():
     mock_table.delete_item.return_value = {}
 
 
-@pytest.fixture()
-def handler_module():
+@pytest.fixture
+def handler_module(monkeypatch):
     """Provide the handler module with mocked DynamoDB."""
-    _handler_mod.query_prompts_table = mock_table
-    yield _handler_mod
+    monkeypatch.setattr(_handler_mod, 'query_prompts_table', mock_table)
+    return _handler_mod
 
 
 def _stored_prompt(enabled, toggled_to=None):

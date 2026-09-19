@@ -4,8 +4,8 @@ Get Keywords API Lambda
 Returns all keywords from the Keywords table.
 """
 
-import logging
 import sys
+from typing import Any
 
 import boto3
 
@@ -16,9 +16,6 @@ from shared.api_response import success_response
 from shared.decorators import api_handler, optional_limit, validate
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import serialize_keyword_item
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
@@ -51,7 +48,7 @@ def handler(event, context, status=None, priority=None, group_id=None, limit=500
         - authoritative: Read and return every matching keyword when true
     """
     # Authoritative reads are unbounded; DynamoDB controls each scan page size.
-    scan_params = {'ConsistentRead': True} if authoritative else {'Limit': limit}
+    scan_params: dict[str, Any] = {'ConsistentRead': True} if authoritative else {'Limit': limit}
     filter_expressions = []
     expression_values = {}
     expression_names = {}

@@ -97,6 +97,87 @@ const ProviderAutoDisabledNote = ({ provider }: ProviderHealthProps) => {
   );
 };
 
+/** "Configured" plus the masked key and health, or the amber "Not configured" pill. */
+const ProviderStatus = ({ provider }: ProviderHealthProps) => {
+  if (!provider.configured) {
+    return <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">Not configured</span>;
+  }
+  return (
+    <>
+      <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded">Configured</span>
+      {provider.masked_key && <span className="text-xs text-gray-500 font-mono">{provider.masked_key}</span>}
+      <ProviderHealthBadge provider={provider} />
+    </>
+  );
+};
+
+interface ProviderToggleProps {
+  readonly provider: ProviderConfig;
+  readonly saving: boolean;
+  readonly onToggle: () => void;
+}
+
+/** The enable/disable switch; inert until an API key is stored. */
+const ProviderToggle = ({
+  provider, saving, onToggle 
+}: ProviderToggleProps) => {
+  const on = provider.enabled && provider.configured;
+  return (
+    <button
+      onClick={onToggle}
+      disabled={saving || !provider.configured}
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+        on ? 'bg-emerald-500' : 'bg-gray-300'
+      } ${provider.configured ? '' : 'opacity-50 cursor-not-allowed'}`}
+      title={getToggleTitle(provider.configured, provider.enabled)}
+    >
+      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+        on ? 'translate-x-6' : 'translate-x-1'
+      }`} />
+    </button>
+  );
+};
+
+interface ApiKeyEditorProps {
+  readonly provider: ProviderConfig;
+  readonly value: string;
+  readonly saving: boolean;
+  readonly onChange: (value: string) => void;
+  readonly onSave: () => void;
+  readonly onCancel: () => void;
+}
+
+const ApiKeyEditor = ({
+  provider, value, saving, onChange, onSave, onCancel 
+}: ApiKeyEditorProps) => (
+  <div className="mt-4 pt-4 border-t border-gray-100">
+    <div className="flex gap-2">
+      <input
+        type="password"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={`Enter ${provider.name} API key...`}
+        className="flex-1 p-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+        autoFocus
+      />
+      <button
+        onClick={onSave}
+        disabled={saving}
+        className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center gap-2"
+      >
+        {saving ? <Spinner size="sm" /> : 'Save'}
+      </button>
+      <button onClick={onCancel} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
+    </div>
+    <p className="mt-2 text-xs text-gray-500">
+      Get your API key from{' '}
+      <a href={provider.docs_url} target="_blank" rel="noopener noreferrer" className="text-gray-700 underline hover:text-gray-900">
+        {provider.name}'s console
+      </a>
+    </p>
+  </div>
+);
+
 export const ProvidersConfig = ({
   providers, loading, onUpdate, onRefresh, isAdmin 
 }: ProvidersConfigProps) => {
@@ -178,15 +259,7 @@ export const ProvidersConfig = ({
                   </div>
                   <p className="text-xs text-gray-600 mt-1">{provider.description}</p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    {provider.configured ? (
-                      <>
-                        <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-1 rounded">Configured</span>
-                        {provider.masked_key && <span className="text-xs text-gray-500 font-mono">{provider.masked_key}</span>}
-                        <ProviderHealthBadge provider={provider} />
-                      </>
-                    ) : (
-                      <span className="text-xs text-amber-600 bg-amber-50 px-2 py-1 rounded">Not configured</span>
-                    )}
+                    <ProviderStatus provider={provider} />
                   </div>
                 </div>
               </div>
@@ -196,18 +269,11 @@ export const ProvidersConfig = ({
                     the status badge, and the docs link. */}
                 {isAdmin && (
                   <>
-                    <button
-                      onClick={() => handleToggleEnabled(provider.id, provider.enabled)}
-                      disabled={saving === provider.id || !provider.configured}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                        provider.enabled && provider.configured ? 'bg-emerald-500' : 'bg-gray-300'
-                      } ${provider.configured ? '' : 'opacity-50 cursor-not-allowed'}`}
-                      title={getToggleTitle(provider.configured, provider.enabled)}
-                    >
-                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        provider.enabled && provider.configured ? 'translate-x-6' : 'translate-x-1'
-                      }`} />
-                    </button>
+                    <ProviderToggle
+                      provider={provider}
+                      saving={saving === provider.id}
+                      onToggle={() => handleToggleEnabled(provider.id, provider.enabled)}
+                    />
                     <button onClick={() => startEditing(provider.id)} className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
                       {provider.configured ? 'Update Key' : 'Add Key'}
                     </button>
@@ -224,32 +290,14 @@ export const ProvidersConfig = ({
             <ProviderAutoDisabledNote provider={provider} />
 
             {isAdmin && editingProvider === provider.id && (
-              <div className="mt-4 pt-4 border-t border-gray-100">
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    value={apiKeyInput}
-                    onChange={(e) => setApiKeyInput(e.target.value)}
-                    placeholder={`Enter ${provider.name} API key...`}
-                    className="flex-1 p-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
-                    autoFocus
-                  />
-                  <button
-                    onClick={() => handleSaveApiKey(provider.id)}
-                    disabled={saving === provider.id}
-                    className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {saving === provider.id ? <Spinner size="sm" /> : 'Save'}
-                  </button>
-                  <button onClick={cancelEditing} className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Cancel</button>
-                </div>
-                <p className="mt-2 text-xs text-gray-500">
-                  Get your API key from{' '}
-                  <a href={provider.docs_url} target="_blank" rel="noopener noreferrer" className="text-gray-700 underline hover:text-gray-900">
-                    {provider.name}'s console
-                  </a>
-                </p>
-              </div>
+              <ApiKeyEditor
+                provider={provider}
+                value={apiKeyInput}
+                saving={saving === provider.id}
+                onChange={setApiKeyInput}
+                onSave={() => handleSaveApiKey(provider.id)}
+                onCancel={cancelEditing}
+              />
             )}
           </div>
         ))}

@@ -6,6 +6,7 @@ import { buildAgentJob } from '../components/KeywordResearch/agent/agent-fixture
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import type { KeywordResearchItem } from '../types';
+import { createJobSnapshotReplay } from './useKeywordResearch-fixtures';
 import { useResearchAgent } from './useResearchAgent';
 
 export interface AgentApiScript {
@@ -18,35 +19,37 @@ export interface AgentApiScript {
 
 export interface AgentHookResult { current: ReturnType<typeof useResearchAgent> }
 
+/** GET /keyword-research/history: the scripted runs. */
+function historyResponse(script: AgentApiScript): Response {
+  return createMockJsonResponse({ items: script.history ?? [] });
+}
+
+/** POST /keyword-research/agent: the new pending run, or the scripted 4xx rejection. */
+function startRunResponse(script: AgentApiScript): Response {
+  if (script.startError) return createMockJsonResponse(script.startError, 400);
+  return createMockJsonResponse(buildAgentJob({
+    id: 'job-new',
+    status: 'pending',
+  }), 202);
+}
+
+/** POST /keyword-research/{id}/retry: job-a is pending again. */
+function retryRunResponse(): Response {
+  return createMockJsonResponse({
+    id: 'job-a',
+    status: 'pending',
+  }, 202);
+}
+
 function scriptAgentApi(script: AgentApiScript): void {
-  const served: Record<string, number> = {};
+  const nextSnapshot = createJobSnapshotReplay(script.snapshots);
   mockAuthenticatedFetch.mockImplementation((url, init) => {
     const method = init?.method ?? 'GET';
-    if (method === 'GET' && url.includes('/keyword-research/history')) {
-      return Promise.resolve(createMockJsonResponse({ items: script.history ?? [] }));
-    }
-    if (method === 'POST' && url.endsWith('/keyword-research/agent')) {
-      if (script.startError) return Promise.resolve(createMockJsonResponse(script.startError, 400));
-      return Promise.resolve(createMockJsonResponse(buildAgentJob({
-        id: 'job-new',
-        status: 'pending',
-      }), 202));
-    }
-    if (method === 'POST' && url.endsWith('/retry')) {
-      return Promise.resolve(createMockJsonResponse({
-        id: 'job-a',
-        status: 'pending',
-      }, 202));
-    }
-    if (method === 'DELETE') {
-      return Promise.resolve(createMockJsonResponse({ message: 'deleted' }));
-    }
-    const id = url.slice(url.lastIndexOf('/') + 1);
-    const list = script.snapshots?.[id] ?? [];
-    if (list.length === 0) return Promise.resolve(createMockJsonResponse({ error: 'Research not found' }, 404));
-    const index = Math.min(served[id] ?? 0, list.length - 1);
-    served[id] = index + 1;
-    return Promise.resolve(createMockJsonResponse(list[index]));
+    if (method === 'GET' && url.includes('/keyword-research/history')) return Promise.resolve(historyResponse(script));
+    if (method === 'POST' && url.endsWith('/keyword-research/agent')) return Promise.resolve(startRunResponse(script));
+    if (method === 'POST' && url.endsWith('/retry')) return Promise.resolve(retryRunResponse());
+    if (method === 'DELETE') return Promise.resolve(createMockJsonResponse({ message: 'deleted' }));
+    return Promise.resolve(nextSnapshot(url.slice(url.lastIndexOf('/') + 1)));
   });
 }
 

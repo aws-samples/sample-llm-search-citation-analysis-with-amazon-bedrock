@@ -18,9 +18,11 @@ const mockSearches = [
 ];
 
 describe('SearchesView', () => {
-  it('renders without crashing', () => {
+  it('renders the keyword table columns when there are no searches', () => {
     render(<SearchesView searches={[]} />);
-    expect(document.body).toBeTruthy();
+    expect(screen.getAllByRole('columnheader').map((header) => header.textContent)).toStrictEqual([
+      'Keyword', 'Providers', 'Runs', 'Citations', 'Avg', 'Last Run', 'Details',
+    ]);
   });
 
   it('renders keyword when searches exist', () => {

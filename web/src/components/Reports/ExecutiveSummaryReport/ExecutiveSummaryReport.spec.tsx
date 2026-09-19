@@ -6,6 +6,7 @@ import {
 } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ExecutiveSummaryReport } from './ExecutiveSummaryReport';
+import { getReportHeading } from '../../../test/reportHeading';
 
 vi.mock('./useExecutiveSummary', () => ({useExecutiveSummary: vi.fn()}));
 vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPrintMode: false })),}));
@@ -79,12 +80,7 @@ describe('ExecutiveSummaryReport', () => {
 
   it('renders the report H1', () => {
     renderReport();
-    expect(
-      screen.getByRole('heading', {
-        level: 1,
-        name: /Executive Summary/i 
-      }),
-    ).toBeInTheDocument();
+    expect(getReportHeading(/Executive Summary/i)).toBeInTheDocument();
   });
 
   it('renders the overall visibility headline value', () => {

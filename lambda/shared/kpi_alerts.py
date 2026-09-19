@@ -288,7 +288,11 @@ def _improvement_alert(
     settings: dict[str, Any],
     marker: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    if not marker_in_window(marker, str(previous.get('snapshot_at', '')), str(current.get('snapshot_at', ''))):
+    if marker is None or not marker_in_window(
+        marker,
+        str(previous.get('snapshot_at', '')),
+        str(current.get('snapshot_at', '')),
+    ):
         return []
     before = _metric(previous, 'first_party_avg_score')
     after = _metric(current, 'first_party_avg_score')

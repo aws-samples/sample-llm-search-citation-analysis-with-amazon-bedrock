@@ -12,23 +12,27 @@ Covers:
 """
 
 import os
-from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 from testing.module_loader import load_handler_module
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
+def _bedrock_error(code: str, message: str) -> ClientError:
+    """The ``ClientError`` boto3 raises when ``converse`` fails with ``code``."""
+    return ClientError({'Error': {'Code': code, 'Message': message}}, 'Converse')
+
+
 @pytest.fixture(autouse=True)
-def clear_bedrock_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+def clear_bedrock_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate each test from env pollution across tier/model overrides."""
     for key in list(os.environ.keys()):
         if key.startswith("BEDROCK_TIER_") or key.startswith("BEDROCK_MODEL_"):
             monkeypatch.delenv(key, raising=False)
-    yield
 
 
 @pytest.fixture
@@ -258,7 +262,7 @@ class TestInvokeBedrockRetry:
     def test_retries_on_throttling_exception_then_succeeds(self, models_module) -> None:
         client = MagicMock()
         client.converse.side_effect = [
-            Exception("ThrottlingException: slow down"),
+            _bedrock_error("ThrottlingException", "slow down"),
             {"output": {"message": {"content": [{"text": "ok"}]}}},
         ]
         models_module._bedrock_client = client
@@ -271,31 +275,32 @@ class TestInvokeBedrockRetry:
         assert result == "ok"
         assert client.converse.call_count == 2
 
-    def test_raises_bedrock_invocation_error_when_all_retries_throttled(
+    def test_reraises_the_last_throttling_error_when_all_retries_throttled(
         self, models_module,
     ) -> None:
+        """The last attempt's raw exception propagates unwrapped, so callers see the provider's code."""
         client = MagicMock()
-        client.converse.side_effect = Exception("ThrottlingException: slow")
+        client.converse.side_effect = _bedrock_error("ThrottlingException", "slow")
         models_module._bedrock_client = client
 
-        with patch.object(models_module.time, "sleep"):
-            with pytest.raises(Exception) as excinfo:
-                models_module.invoke_bedrock(
-                    "q", models_module.ModelRole.GENERATION, max_retries=2,
-                )
+        with (
+            patch.object(models_module.time, "sleep"),
+            pytest.raises(ClientError, match="ThrottlingException"),
+        ):
+            models_module.invoke_bedrock(
+                "q", models_module.ModelRole.GENERATION, max_retries=2,
+            )
 
-        # Last attempt's raw exception is re-raised (not wrapped) per implementation
-        assert "ThrottlingException" in str(excinfo.value)
+        assert client.converse.call_count == 2
 
     def test_propagates_non_throttling_errors_without_retry(self, models_module) -> None:
         client = MagicMock()
-        client.converse.side_effect = Exception("ValidationException: bad input")
+        client.converse.side_effect = _bedrock_error("ValidationException", "bad input")
         models_module._bedrock_client = client
 
-        with pytest.raises(Exception) as excinfo:
+        with pytest.raises(ClientError, match="ValidationException"):
             models_module.invoke_bedrock(
                 "q", models_module.ModelRole.GENERATION, max_retries=3,
             )
 
-        assert "ValidationException" in str(excinfo.value)
         assert client.converse.call_count == 1

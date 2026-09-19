@@ -7,27 +7,16 @@ import { useCompetitorGap } from './useCompetitorGap';
 vi.mock('../../../hooks/useCompetitorRollup', () => ({useCompetitorRollup: vi.fn()}));
 
 import { useCompetitorRollup } from '../../../hooks/useCompetitorRollup';
+import { mockSingleCompetitorRollup } from '../../../hooks/useCompetitorRollup-fixtures';
 
 const mockHook = useCompetitorRollup as ReturnType<typeof vi.fn>;
-
-const SINGLE_DATA = {
-  generated_at: '2026-05-15T07:00:00Z',
-  keywords_analyzed: 4,
-  competitor: 'Adidas',
-  rollup: {
-    competitor: 'Adidas',
-    outranked_keywords: [],
-    exclusive_sources: [],
-    outreach_targets: [],
-  },
-};
 
 describe('useCompetitorGap', () => {
   const fetchCompetitorRollup = vi.fn();
 
   beforeEach(() => {
     mockHook.mockReturnValue({
-      data: SINGLE_DATA,
+      data: mockSingleCompetitorRollup,
       loading: false,
       error: null,
       fetchCompetitorRollup,

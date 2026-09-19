@@ -1,20 +1,10 @@
-import type {
-  VisibilityMetricsResponse,
-  HistoricalTrendsResponse,
-} from '../../../../types';
 import {
   ReportSection,
   ReportStatCard,
   ReportStatGrid,
-  gateSection,
+  gateVisibilityHeadline,
+  type VisibilityHeadlineProps,
 } from '../../layout';
-
-interface Props {
-  readonly visibility: VisibilityMetricsResponse | null;
-  readonly trends: HistoricalTrendsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
 
 /**
  * Per-keyword headline metrics: first-party score, share of voice, gap to
@@ -22,17 +12,8 @@ interface Props {
  * "are we ahead, level, or behind" before they read anything else in the
  * report.
  */
-export function PerKeywordHeadlineSection({
-  visibility, trends, loading, error,
-}: Props) {
-  const gate = gateSection({
-    title: 'Headline',
-    loading,
-    loadingMessage: 'Loading visibility…',
-    error,
-    value: visibility,
-    emptyMessage: 'No visibility data found for this keyword.',
-  });
+export function PerKeywordHeadlineSection(props: VisibilityHeadlineProps) {
+  const gate = gateVisibilityHeadline(props, 'No visibility data found for this keyword.');
   if (!gate.ready) return gate.placeholder;
 
   const { summary } = gate.value;
@@ -40,7 +21,7 @@ export function PerKeywordHeadlineSection({
   const compScore = summary.competitor_avg_score;
   const gap = (fpScore - compScore).toFixed(1);
   const gapAccent: 'positive' | 'negative' = fpScore >= compScore ? 'positive' : 'negative';
-  const change = trends?.summary.change ?? 0;
+  const change = props.trends?.summary.change ?? 0;
   const changeText = formatChangeFootnote(change);
 
   return (

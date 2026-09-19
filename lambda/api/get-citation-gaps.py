@@ -12,7 +12,6 @@ Features:
 """
 
 import concurrent.futures
-import logging
 import os
 import sys
 from collections import defaultdict
@@ -36,9 +35,6 @@ from shared.scope_params import (
     scope_from_request,
 )
 from shared.utils import extract_domain, get_brand_config
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 # Raised connection pool: the all-keywords path fans out
 # _KEYWORD_ANALYSIS_WORKERS keyword threads, each running up to 10
@@ -189,6 +185,119 @@ def fuzzy_match_brand(brand_name: str, parent_company: str, tracked_list: list[s
     return False
 
 
+def _classify_mentioned_brands(
+    brands: list[dict[str, Any]], first_party_list: list[str], competitors_list: list[str]
+) -> tuple[set[str], set[str]]:
+    """Split one answer's brand mentions into ``(first_party, competitor)`` names.
+
+    The LLM ``classification`` from brand extraction is the primary signal;
+    a brand without one falls back to fuzzy matching against the tracked lists.
+    """
+    mentioned_first_party: set[str] = set()
+    mentioned_competitors: set[str] = set()
+
+    for brand in brands:
+        brand_name = brand.get('name', '')
+        parent_company = brand.get('parent_company', '')
+        classification = brand.get('classification', '')
+
+        # Primary: use LLM classification
+        if classification == 'first_party':
+            mentioned_first_party.add(brand_name)
+        elif classification == 'competitor':
+            mentioned_competitors.add(brand_name)
+        # Fallback: use fuzzy matching against tracked brands
+        elif fuzzy_match_brand(brand_name, parent_company, first_party_list):
+            mentioned_first_party.add(brand_name)
+        elif fuzzy_match_brand(brand_name, parent_company, competitors_list):
+            mentioned_competitors.add(brand_name)
+
+    return mentioned_first_party, mentioned_competitors
+
+
+def _map_sources_to_brands(
+    latest_items: list[dict[str, Any]], first_party_list: list[str], competitors_list: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Index a run's citations by URL: the providers citing it, how often, and the brands those answers mentioned."""
+    source_brand_map: dict[str, dict[str, Any]] = defaultdict(lambda: {
+        'first_party': set(),
+        'competitors': set(),
+        'providers': set(),
+        'citation_count': 0
+    })
+
+    for item in latest_items:
+        provider = item.get('provider', '')
+        mentioned_first_party, mentioned_competitors = _classify_mentioned_brands(
+            item.get('brands', []), first_party_list, competitors_list
+        )
+
+        # Map citations to brands
+        for citation in item.get('citations', []):
+            domain = extract_domain(citation)
+            source_brand_map[citation]['providers'].add(provider)
+            source_brand_map[citation]['citation_count'] += 1
+            source_brand_map[citation]['domain'] = domain
+            source_brand_map[citation]['first_party'].update(mentioned_first_party)
+            source_brand_map[citation]['competitors'].update(mentioned_competitors)
+
+    return source_brand_map
+
+
+def _gaps_and_covered_sources(
+    source_brand_map: dict[str, dict[str, Any]], config: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Sort the third-party sources into ranked ``(gaps, covered_sources)`` lists.
+
+    A gap cites competitors but no first-party brand; a covered source cites
+    the first-party brand. Neutral sources (neither) are not actionable
+    opportunities and are dropped. First-party domains are never gaps: your
+    own website URLs are excluded before the crawled-content lookup.
+    """
+    third_party = {
+        url: data for url, data in source_brand_map.items()
+        if not is_first_party_domain(data['domain'], config)
+    }
+
+    # Batch-fetch crawled content for all relevant URLs up front. The
+    # previous per-URL query inside the loop was O(N) round-trips to
+    # DynamoDB (audit item 16); this collapses it to ~1 RTT worth of
+    # parallel work.
+    crawled_info_map = _batch_crawled_info(list(third_party))
+
+    gaps = []
+    covered_sources = []
+
+    for url, data in third_party.items():
+        source_info = {
+            'url': url,
+            'domain': data['domain'],
+            'citation_count': data['citation_count'],
+            'providers': list(data['providers']),
+            'provider_count': len(data['providers']),
+            'first_party_brands': list(data['first_party']),
+            'competitor_brands': list(data['competitors'])
+        }
+        # Pull crawled info from the prefetched batch.
+        source_info.update(crawled_info_map.get(url, {}))
+
+        if data['competitors'] and not data['first_party']:
+            # Gap: competitors mentioned but not first-party
+            # These are high-value opportunities - sources citing competitors but not you
+            source_info['priority'] = 'high' if len(data['providers']) >= 2 else 'medium'
+            gaps.append(source_info)
+        elif data['first_party']:
+            # Covered: first-party is mentioned on this third-party source
+            covered_sources.append(source_info)
+
+    # Sort gaps by priority and citation count
+    priority_order = {'high': 0, 'medium': 1, 'low': 2}
+    gaps.sort(key=lambda x: (priority_order.get(x.get('priority', 'low'), 2), -x['citation_count']))
+    covered_sources.sort(key=lambda x: -x['citation_count'])
+
+    return gaps, covered_sources
+
+
 def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any]:
     """
     Analyze citation gaps for a keyword.
@@ -223,7 +332,7 @@ def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any
         ProjectionExpression='#ts, provider, citations, brands',
         ExpressionAttributeNames={'#ts': 'timestamp'},
     )
-    items = response.get('Items', [])
+    items: list[dict[str, Any]] = response.get('Items', [])
 
     if not items:
         return {"error": f"No data found for keyword: {keyword}"}
@@ -233,103 +342,8 @@ def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any
     latest_ts = max(item.get('timestamp', '') for item in items)
     latest_items = [item for item in items if item.get('timestamp') == latest_ts]
 
-    # Track which sources mention which brands
-    source_brand_map = defaultdict(lambda: {
-        'first_party': set(),
-        'competitors': set(),
-        'providers': set(),
-        'citation_count': 0
-    })
-
-    for item in latest_items:
-        provider = item.get('provider', '')
-        citations = item.get('citations', [])
-        brands = item.get('brands', [])
-
-        # Get brand names mentioned in this response
-        # Use the 'classification' field from LLM extraction as primary source
-        mentioned_first_party = set()
-        mentioned_competitors = set()
-
-        for brand in brands:
-            brand_name = brand.get('name', '')
-            parent_company = brand.get('parent_company', '')
-            classification = brand.get('classification', '')
-
-            # Primary: use LLM classification
-            if classification == 'first_party':
-                mentioned_first_party.add(brand_name)
-            elif classification == 'competitor':
-                mentioned_competitors.add(brand_name)
-            else:
-                # Fallback: use fuzzy matching against tracked brands
-                if fuzzy_match_brand(brand_name, parent_company, first_party_list):
-                    mentioned_first_party.add(brand_name)
-                elif fuzzy_match_brand(brand_name, parent_company, competitors_list):
-                    mentioned_competitors.add(brand_name)
-
-        # Map citations to brands
-        for citation in citations:
-            domain = extract_domain(citation)
-            source_brand_map[citation]['providers'].add(provider)
-            source_brand_map[citation]['citation_count'] += 1
-            source_brand_map[citation]['domain'] = domain
-            source_brand_map[citation]['first_party'].update(mentioned_first_party)
-            source_brand_map[citation]['competitors'].update(mentioned_competitors)
-
-    # Identify gaps: sources with competitors but no first-party
-    gaps = []
-    covered_sources = []
-
-    # Batch-fetch crawled content for all relevant URLs up front. The
-    # previous per-URL query inside the loop was O(N) round-trips to
-    # DynamoDB (audit item 16); this collapses it to ~1 RTT worth of
-    # parallel work.
-    relevant_urls = [
-        url for url, data in source_brand_map.items()
-        if not is_first_party_domain(data['domain'], config)
-    ]
-    crawled_info_map = _batch_crawled_info(relevant_urls)
-
-    for url, data in source_brand_map.items():
-        domain = data['domain']
-
-        # Skip first-party domains - these are never gaps
-        # Your own website URLs should not appear as citation gaps
-        if is_first_party_domain(domain, config):
-            continue
-
-        source_info = {
-            'url': url,
-            'domain': domain,
-            'citation_count': data['citation_count'],
-            'providers': list(data['providers']),
-            'provider_count': len(data['providers']),
-            'first_party_brands': list(data['first_party']),
-            'competitor_brands': list(data['competitors'])
-        }
-
-        # Pull crawled info from the prefetched batch.
-        crawled_info = crawled_info_map.get(url, {})
-        if crawled_info:
-            source_info.update(crawled_info)
-
-        if data['competitors'] and not data['first_party']:
-            # Gap: competitors mentioned but not first-party
-            # These are high-value opportunities - sources citing competitors but not you
-            source_info['gap_type'] = 'competitor_only'
-            source_info['priority'] = 'high' if len(data['providers']) >= 2 else 'medium'
-            gaps.append(source_info)
-        elif data['first_party']:
-            # Covered: first-party is mentioned on this third-party source
-            covered_sources.append(source_info)
-        # Note: We no longer add "neutral" sources (neither first-party nor competitors)
-        # as gaps - they're not actionable opportunities
-
-    # Sort gaps by priority and citation count
-    priority_order = {'high': 0, 'medium': 1, 'low': 2}
-    gaps.sort(key=lambda x: (priority_order.get(x.get('priority', 'low'), 2), -x['citation_count']))
-    covered_sources.sort(key=lambda x: -x['citation_count'])
+    source_brand_map = _map_sources_to_brands(latest_items, first_party_list, competitors_list)
+    gaps, covered_sources = _gaps_and_covered_sources(source_brand_map, config)
 
     # Group gaps by domain
     domain_gaps = defaultdict(list)
@@ -353,7 +367,6 @@ def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any
             for domain, urls in sorted(domain_gaps.items(), key=lambda x: -len(x[1]))[:20]
         ],
         'summary': {
-            'total_sources': len(source_brand_map),
             'gap_count': len(gaps),
             'covered_count': len(covered_sources),
             'high_priority_gaps': len(high_priority_gaps),
@@ -423,6 +436,17 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10, scope: Re
     }
 
 
+def gaps_for_scope(scope: ReportScope | None, config: dict[str, Any], limit: int) -> dict[str, Any]:
+    """One keyword's gap analysis for a single-keyword scope; the fan-out over the scope's keywords otherwise.
+
+    ``None`` is the unscoped dashboard request: every active keyword, ``limit``
+    of them analysed.
+    """
+    if scope is not None and scope.is_single_keyword:
+        return analyze_citation_gaps(scope.keywords[0], config)
+    return analyze_all_keywords_gaps(config, limit, scope=scope)
+
+
 @api_handler
 @validate({
     **SCOPE_QUERY_PARAMS,
@@ -442,13 +466,4 @@ def handler(event: dict[str, Any], context: Any, limit: int = 10, **scope_params
     if rejected:
         return rejected
 
-    config = get_brand_config()
-
-    if report_scope is not None and report_scope.is_single_keyword:
-        # Analyze specific keyword
-        result = analyze_citation_gaps(report_scope.keywords[0], config)
-    else:
-        # Analyze across the scope's keywords (all active keywords by default)
-        result = analyze_all_keywords_gaps(config, limit, scope=report_scope)
-
-    return success_response(result, event)
+    return success_response(gaps_for_scope(report_scope, get_brand_config(), limit), event)

@@ -10,9 +10,8 @@ import os
 from unittest.mock import MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
 
-from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource, reset_tables
 from testing.events import api_gateway_event, parse_response
 from testing.module_loader import load_handler_module
 
@@ -35,14 +34,9 @@ def make_event(method, body=None, path_params=None, path='/api/keyword-groups'):
     )
 
 
-def _conditional_failure():
-    return ClientError({'Error': {'Code': 'ConditionalCheckFailedException'}}, 'UpdateItem')
-
-
 @pytest.fixture(autouse=True)
 def _reset_mocks():
-    mock_keywords_table.reset_mock(side_effect=True, return_value=True)
-    mock_groups_table.reset_mock(side_effect=True, return_value=True)
+    reset_tables(mock_keywords_table, mock_groups_table)
     mock_keywords_table.scan.return_value = {'Items': []}
     mock_groups_table.scan.return_value = {'Items': []}
     mock_groups_table.get_item.return_value = {}
@@ -207,20 +201,51 @@ class TestUpdateMemberships:
             {'id': 'k2', 'keyword': 'b'},
         ]
 
-    def test_uses_a_set_add_with_the_membership_cap_and_a_set_delete(self):
+    def test_adds_fifty_first_membership_when_keyword_has_fifty_groups(self):
         mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
-        mock_keywords_table.update_item.return_value = {'Attributes': {'id': 'k1', 'keyword': 'a'}}
+        existing_group_ids = {f'existing-{index}' for index in range(50)}
+        mock_keywords_table.update_item.return_value = {'Attributes': {
+            'id': 'k1',
+            'keyword': 'a',
+            'group_ids': existing_group_ids,
+        }}
 
-        _mod.handler(self._event({'add': ['k1'], 'remove': ['k2']}), None)
+        status, body = parse_response(_mod.handler(self._event({'add': ['k1']}), None))
 
-        add_call, remove_call = mock_keywords_table.update_item.call_args_list
-        assert add_call.kwargs['UpdateExpression'] == 'ADD group_ids :gids'
-        assert add_call.kwargs['ExpressionAttributeValues'][':max'] == 50
-        assert remove_call.kwargs['UpdateExpression'] == 'DELETE group_ids :gids'
+        assert status == 200
+        assert body['added'] == ['k1']
+        assert body['keywords'] == [{
+            'id': 'k1',
+            'keyword': 'a',
+            'group_ids': sorted(existing_group_ids | {'g1'}),
+        }]
+        mock_keywords_table.update_item.assert_called_once_with(
+            Key={'id': 'k1'},
+            UpdateExpression='ADD group_ids :gids',
+            ConditionExpression='attribute_exists(#id)',
+            ExpressionAttributeNames={'#id': 'id'},
+            ExpressionAttributeValues={':gids': {'g1'}},
+            ReturnValues='ALL_OLD',
+        )
+
+    def test_uses_set_delete_when_membership_is_removed(self):
+        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
+        mock_keywords_table.update_item.return_value = {'Attributes': {'id': 'k2', 'keyword': 'b'}}
+
+        _mod.handler(self._event({'remove': ['k2']}), None)
+
+        mock_keywords_table.update_item.assert_called_once_with(
+            Key={'id': 'k2'},
+            UpdateExpression='DELETE group_ids :gids',
+            ConditionExpression='attribute_exists(#id)',
+            ExpressionAttributeNames={'#id': 'id'},
+            ExpressionAttributeValues={':gids': {'g1'}},
+            ReturnValues='ALL_NEW',
+        )
 
     def test_reports_unknown_keyword_ids_as_missing_instead_of_failing(self):
         mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
-        mock_keywords_table.update_item.side_effect = _conditional_failure()
+        mock_keywords_table.update_item.side_effect = conditional_check_failure()
 
         status, body = parse_response(_mod.handler(self._event({'add': ['ghost']}), None))
 

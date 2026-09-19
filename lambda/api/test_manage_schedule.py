@@ -21,7 +21,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from testing.dynamodb_stubs import fake_dynamodb_resource
-from testing.events import api_gateway_event
+from testing.events import api_gateway_event, parse_response
 from testing.module_loader import load_handler_module
 
 
@@ -73,14 +73,8 @@ def make_event(method, body=None, path_params=None, groups='Admin', path='/api/s
     return api_gateway_event(method, path, resource=path, body=body, path_params=path_params, claims=claims)
 
 
-def id_event(method, schedule_id, body=None, suffix=''):
-    return make_event(method, body=body, path_params={'id': schedule_id}, path=f'/api/schedules/{schedule_id}{suffix}')
-
-
-def parse_response(result):
-    status = result.get('statusCode', 200)
-    body = json.loads(result['body']) if isinstance(result.get('body'), str) else result.get('body', {})
-    return status, body
+def id_event(method, schedule_id, body=None, suffix='', groups='Admin'):
+    return make_event(method, body=body, path_params={'id': schedule_id}, path=f'/api/schedules/{schedule_id}{suffix}', groups=groups)
 
 
 def created_kwargs():
@@ -148,12 +142,12 @@ def _reset_mocks():
     mock_stepfunctions.start_execution.return_value = {'executionArn': 'arn:aws:states:us-east-1:123456789012:execution:test:run-1'}
 
 
-@pytest.fixture()
-def handler_module():
-    _handler_mod.scheduler = mock_scheduler
-    _handler_mod.stepfunctions = mock_stepfunctions
-    _handler_mod.dynamodb = mock_dynamodb
-    yield _handler_mod
+@pytest.fixture
+def handler_module(monkeypatch):
+    monkeypatch.setattr(_handler_mod, 'scheduler', mock_scheduler)
+    monkeypatch.setattr(_handler_mod, 'stepfunctions', mock_stepfunctions)
+    monkeypatch.setattr(_handler_mod, 'dynamodb', mock_dynamodb)
+    return _handler_mod
 
 
 class TestFormValidation:
@@ -163,12 +157,17 @@ class TestFormValidation:
         assert error is None
         assert form == {'frequency': 'weekly', 'time': '09:05', 'timezone': 'UTC', 'day_of_week': 'FRI', 'day_of_month': 7}
 
-    @pytest.mark.parametrize('time', ['9am', '24:00', '12:60', '', '1:2'])
-    def test_rejects_times_outside_the_clock(self, handler_module, time):
+    @pytest.mark.parametrize(('time', 'message'), [
+        ('9am', 'Invalid time format. Use HH:MM'),
+        ('24:00', 'time must be between 00:00 and 23:59'),
+        ('12:60', 'time must be between 00:00 and 23:59'),
+        ('', 'Invalid time format. Use HH:MM'),
+        ('1:2', 'Invalid time format. Use HH:MM'),
+    ])
+    def test_rejects_times_outside_the_clock(self, handler_module, time, message):
         _, error, field = handler_module.validate_form({'time': time})
 
-        assert field == 'time'
-        assert error is not None
+        assert (field, error) == ('time', message)
 
     def test_rejects_an_unknown_timezone(self, handler_module):
         _, error, field = handler_module.validate_form({'timezone': 'Mars/Olympus_Mons'})
@@ -182,12 +181,16 @@ class TestFormValidation:
         assert error is None
         assert form['timezone'] == 'Europe/Madrid'
 
-    @pytest.mark.parametrize('day', ['0', '29', '31', 'first'])
-    def test_rejects_days_of_month_that_not_every_month_has(self, handler_module, day):
+    @pytest.mark.parametrize(('day', 'message'), [
+        ('0', 'day_of_month must be between 1 and 28'),
+        ('29', 'day_of_month must be between 1 and 28'),
+        ('31', 'day_of_month must be between 1 and 28'),
+        ('first', 'day_of_month must be a number'),
+    ])
+    def test_rejects_days_of_month_that_not_every_month_has(self, handler_module, day, message):
         _, error, field = handler_module.validate_form({'frequency': 'monthly', 'day_of_month': day})
 
-        assert field == 'day_of_month'
-        assert error is not None
+        assert (field, error) == ('day_of_month', message)
 
     def test_partial_update_keeps_the_base_values_it_does_not_mention(self, handler_module):
         base = {'frequency': 'weekly', 'time': '09:00', 'timezone': 'Europe/Madrid', 'day_of_week': 'MON', 'day_of_month': 1}
@@ -229,7 +232,8 @@ class TestCreateSchedule:
         status, body = self._create(handler_module, {'display_name': 'Hotel Coruña — weekly', 'frequency': 'weekly', 'time': '09:00', 'day_of_week': 'MON'})
 
         assert status == 201
-        assert body['id'].startswith('sch-') and len(body['id']) == 12
+        assert body['id'].startswith('sch-')
+        assert len(body['id']) == 12
         assert created_kwargs()['Name'] == body['id']
         assert created_kwargs()['Description'] == 'Hotel Coruña — weekly'
         assert body['display_name'] == 'Hotel Coruña — weekly'
@@ -327,7 +331,8 @@ class TestCreateSchedule:
 
         assert status == 201
         names = [call.kwargs['Name'] for call in mock_scheduler.create_schedule.call_args_list]
-        assert len(names) == 2 and names[0] != names[1]
+        assert len(names) == 2
+        assert names[0] != names[1]
         assert body['id'] == names[1]
 
     def test_maps_a_scheduler_validation_error_to_400(self, handler_module):
@@ -507,8 +512,7 @@ class TestUpdateSchedule:
         mock_scheduler.update_schedule.assert_not_called()
 
     def test_denies_non_admins_before_touching_the_scheduler(self, handler_module):
-        event = id_event('PUT', 'sch-1a2b3c4d', body={'time': '10:00'})
-        event['requestContext']['authorizer']['claims']['cognito:groups'] = 'Users'
+        event = id_event('PUT', 'sch-1a2b3c4d', body={'time': '10:00'}, groups='Users')
 
         status, _ = parse_response(handler_module.handler(event, {}))
 
@@ -591,8 +595,7 @@ class TestRunNow:
         mock_stepfunctions.start_execution.assert_not_called()
 
     def test_denies_non_admins_before_touching_aws(self, handler_module):
-        event = id_event('POST', 'sch-1a2b3c4d', body={}, suffix='/run')
-        event['requestContext']['authorizer']['claims']['cognito:groups'] = 'Users'
+        event = id_event('POST', 'sch-1a2b3c4d', body={}, suffix='/run', groups='Users')
 
         status, _ = parse_response(handler_module.handler(event, {}))
 

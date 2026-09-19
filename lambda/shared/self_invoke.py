@@ -93,7 +93,7 @@ def invoke_self_async(
         # Do NOT fall back to running the job here: this call is on the
         # client's synchronous request and the job outlives the 29s gateway
         # timeout. Fail fast instead.
-        logger.error(f"Failed to trigger async {description}: {e}")
+        logger.exception(f"Failed to trigger async {description}: {e}")
         raise SelfInvokeDispatchError(
             f"Could not start background {description}"
         ) from e

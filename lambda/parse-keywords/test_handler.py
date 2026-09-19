@@ -44,13 +44,12 @@ _test_env = {
     'QUERY_PROMPTS_TABLE': 'test-prompts-table',
 }
 
-# Import the handler module
+# Import the handler module. boto3.resource is stubbed while the file executes,
+# so the module-level ``dynamodb`` is already ``mock_dynamodb``.
 with patch('boto3.resource', side_effect=_mock_boto3_resource):
     with patch('boto3.client', side_effect=_mock_boto3_client):
         with patch.dict(os.environ, _test_env):
             _handler_mod = load_handler_module(_HERE, 'handler.py', 'parse_keywords_handler')
-
-_handler_mod.dynamodb = mock_dynamodb
 
 
 SAMPLE_PROMPT_ITEMS = [
@@ -59,6 +58,13 @@ SAMPLE_PROMPT_ITEMS = [
 
 EXPECTED_PROMPTS = [
     {'id': 'prompt-1', 'name': 'Family Traveler', 'template': 'As a family, find {keyword}'},
+]
+
+# Three active keywords across two groups; the third belongs to both.
+GROUPED_KEYWORD_ITEMS = [
+    {'id': 'k1', 'keyword': 'hotel coruna spa', 'group_ids': {'coruna'}},
+    {'id': 'k2', 'keyword': 'hotel marino beach', 'group_ids': {'marino'}},
+    {'id': 'k3', 'keyword': 'best hotels galicia', 'group_ids': {'coruna', 'marino'}},
 ]
 
 
@@ -72,11 +78,10 @@ def _reset_mocks():
     mock_prompts_table.query.return_value = {'Items': SAMPLE_PROMPT_ITEMS}
 
 
-@pytest.fixture()
+@pytest.fixture
 def handler_module():
     """Provide the handler module with mocked DynamoDB."""
-    _handler_mod.dynamodb = mock_dynamodb
-    yield _handler_mod
+    return _handler_mod
 
 
 class TestKeywordParsing:
@@ -217,11 +222,7 @@ class TestScopeResolution:
     """Group-aware execution input: {"scope": {...}} resolved at run time."""
 
     def test_resolves_a_group_scope_to_the_active_members_of_that_group(self, handler_module):
-        mock_keywords_table.query.return_value = {'Items': [
-            {'id': 'k1', 'keyword': 'hotel coruna spa', 'group_ids': {'coruna'}},
-            {'id': 'k2', 'keyword': 'hotel marino beach', 'group_ids': {'marino'}},
-            {'id': 'k3', 'keyword': 'best hotels galicia', 'group_ids': {'coruna', 'marino'}},
-        ]}
+        mock_keywords_table.query.return_value = {'Items': GROUPED_KEYWORD_ITEMS}
 
         result = handler_module.handler({'scope': {'mode': 'groups', 'group_ids': ['coruna']}, 'query_prompts': []}, {})
 
@@ -249,21 +250,18 @@ class TestScopeResolution:
 
     def test_accepts_the_full_v2_schedule_descriptor_as_execution_input(self, handler_module):
         """EventBridge sends the whole descriptor; only `scope` matters here."""
-        mock_keywords_table.query.return_value = {'Items': [
-            {'id': 'k1', 'keyword': 'hotel coruna spa', 'group_ids': {'coruna'}},
-            {'id': 'k2', 'keyword': 'hotel marino beach', 'group_ids': {'marino'}},
-        ]}
+        mock_keywords_table.query.return_value = {'Items': GROUPED_KEYWORD_ITEMS}
         descriptor = {
             'schedule_id': 'sch-1a2b3c4d',
             'display_name': 'Hotel Coruña — weekly',
             'form': {'frequency': 'weekly', 'time': '09:00', 'timezone': 'Europe/Madrid', 'day_of_week': 'MON', 'day_of_month': 1},
-            'scope': {'mode': 'groups', 'group_ids': ['coruna']},
+            'scope': {'mode': 'groups', 'group_ids': ['marino']},
             'query_prompts': [],
         }
 
         result = handler_module.handler(descriptor, {})
 
-        assert [item['keyword'] for item in result['keywords']] == ['hotel coruna spa']
+        assert [item['keyword'] for item in result['keywords']] == ['best hotels galicia', 'hotel marino beach']
 
 
 class TestNoKeywordCap:

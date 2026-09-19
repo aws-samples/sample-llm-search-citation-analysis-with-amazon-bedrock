@@ -190,8 +190,8 @@ def _fetch_keyword_items(keyword: str) -> list[dict]:
     """
     try:
         return query_keyword_rows(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword, _TREND_PROJECTION)
-    except Exception as exc:
-        logger.error(f"Error fetching trend items for keyword {keyword!r}: {exc}")
+    except Exception:
+        logger.exception(f"Error fetching trend items for keyword {keyword!r}")
         return []
 
 
@@ -240,7 +240,6 @@ def summarize_series(trend_data: list[dict[str, Any]]) -> dict[str, Any]:
         change_pct = 0
 
     return {
-        'data_points': len(trend_data),
         'trend_data': trend_data,
         'trend_direction': trend_direction,
         'summary': {
@@ -369,8 +368,12 @@ def get_all_keywords_trends(
             keyword = future_to_keyword[future]
             try:
                 items_by_keyword[keyword] = future.result()
-            except Exception as exc:
-                logger.error(f"Trend fan-out future failed for {keyword!r}: {exc}")
+            except Exception:
+                # _fetch_keyword_items already catches and logs, but pool
+                # propagation quirks (e.g. interpreter shutdown) could still
+                # raise. Default to empty so aggregation treats it as
+                # "no data for this keyword".
+                logger.exception(f"Trend fan-out future failed for {keyword!r}")
                 items_by_keyword[keyword] = []
 
     keyword_trends = []
@@ -411,6 +414,17 @@ def get_all_keywords_trends(
     }
 
 
+def trends_for_scope(scope: ReportScope | None, config: dict, period: str, days: int) -> dict[str, Any]:
+    """One keyword's trend payload for a single-keyword scope; the group summary otherwise.
+
+    ``None`` is the unscoped dashboard request: every active keyword, capped
+    at ``_ALL_KEYWORDS_CAP``.
+    """
+    if scope is not None and scope.is_single_keyword:
+        return get_historical_trends(scope.keywords[0], config, period, days)
+    return get_all_keywords_trends(config, period, days, scope=scope)
+
+
 @api_handler
 @validate({
     **SCOPE_QUERY_PARAMS,
@@ -429,10 +443,4 @@ def handler(
     if rejected:
         return rejected
 
-    config = get_brand_config()
-    if report_scope is not None and report_scope.is_single_keyword:
-        result = get_historical_trends(report_scope.keywords[0], config, period, days)
-    else:
-        result = get_all_keywords_trends(config, period, days, scope=report_scope)
-
-    return success_response(result, event)
+    return success_response(trends_for_scope(report_scope, get_brand_config(), period, days), event)

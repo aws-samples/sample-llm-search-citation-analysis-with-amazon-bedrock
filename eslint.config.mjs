@@ -48,7 +48,8 @@ export default tseslint.config(
       '**/lambda/**/.deps/**',
       '**/lambda/**/python/**',
       '**/lambda/crawler-layer/**',
-      // Local tooling output, not project code
+      // Local tooling output and nested Git worktrees, not project code
+      '**/.worktrees/**',
       '**/.venv/**',
       '**/coverage/**',
     ],
@@ -159,10 +160,12 @@ export default tseslint.config(
         },
       ],
 
-      // Complexity limits
+      // Complexity limits. Cyclomatic 12 is a hard stop shared with the
+      // Python side (pyproject.toml [tool.ruff.lint.mccabe]): split the
+      // function rather than raise it or disable the rule.
       'max-lines': ['error', { max: 400, skipBlankLines: true, skipComments: true }],
       'max-depth': ['error', 3],
-      complexity: ['error', 30],
+      complexity: ['error', 12],
 
       // ESM compatibility - ban CommonJS globals
         'no-restricted-globals': [

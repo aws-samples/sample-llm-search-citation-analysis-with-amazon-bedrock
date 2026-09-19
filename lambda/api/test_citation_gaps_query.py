@@ -53,14 +53,21 @@ def _search_item(ts: str, provider: str, citations: list[str], brands: list[dict
     return {'timestamp': ts, 'provider': provider, 'citations': citations, 'brands': brands}
 
 
-def _fake_dynamodb(search_items: list[dict]) -> tuple[MagicMock, MagicMock]:
-    """Fake boto3 resource: search table returns `search_items`, crawled table is empty."""
+def _fake_dynamodb(search_items: list[dict], crawled_items: list[dict] | None = None) -> tuple[MagicMock, MagicMock]:
+    """Fake boto3 resource: search table returns `search_items`, crawled table returns `crawled_items` (default empty)."""
     search_table = fake_table(query={'Items': search_items})
     resource = fake_dynamodb_resource(by_name={
         'test-search': search_table,
-        'test-crawled': fake_table(query={'Items': []}),
+        'test-crawled': fake_table(query={'Items': crawled_items or []}),
     })
     return resource, search_table
+
+
+def _analyze(monkeypatch, search_items: list[dict], crawled_items: list[dict] | None = None) -> dict:
+    """Analyse keyword `kw` over a SearchResults table answering `search_items` (and `crawled_items`)."""
+    fake, _ = _fake_dynamodb(search_items, crawled_items)
+    monkeypatch.setattr(_mod, 'dynamodb', fake)
+    return _mod.analyze_citation_gaps('kw', CONFIG)
 
 
 class TestLatestRunQueryShape:
@@ -80,10 +87,8 @@ class TestLatestRunQueryShape:
     def test_keeps_only_latest_run_when_window_spans_multiple_runs(self, monkeypatch) -> None:
         newest = _search_item('2026-08-19T00:00:00', 'openai', ['https://new.com/x'], [COMPETITOR_BRAND])
         older = _search_item('2026-08-01T00:00:00', 'openai', ['https://old.com/x'], [COMPETITOR_BRAND])
-        fake, _ = _fake_dynamodb([newest, older])
-        monkeypatch.setattr(_mod, 'dynamodb', fake)
 
-        result = _mod.analyze_citation_gaps('kw', CONFIG)
+        result = _analyze(monkeypatch, [newest, older])
 
         assert result['timestamp'] == '2026-08-19T00:00:00'
         assert [g['url'] for g in result['gaps']] == ['https://new.com/x']
@@ -91,29 +96,100 @@ class TestLatestRunQueryShape:
 
 class TestGapSemantics:
     def test_flags_competitor_only_source_as_gap(self, monkeypatch) -> None:
-        item = _search_item('2026-08-19T00:00:00', 'openai', ['https://gap.com/page'], [COMPETITOR_BRAND])
-        fake, _ = _fake_dynamodb([item])
-        monkeypatch.setattr(_mod, 'dynamodb', fake)
-
-        result = _mod.analyze_citation_gaps('kw', CONFIG)
+        result = _analyze(monkeypatch, [
+            _search_item('2026-08-19T00:00:00', 'openai', ['https://gap.com/page'], [COMPETITOR_BRAND]),
+        ])
 
         assert result['summary']['gap_count'] == 1
         assert result['gaps'][0]['url'] == 'https://gap.com/page'
-        assert result['gaps'][0]['gap_type'] == 'competitor_only'
+        assert (result['gaps'][0]['first_party_brands'], result['gaps'][0]['competitor_brands']) == ([], ['Rival Hotel'])
 
     def test_counts_first_party_mentioned_source_as_covered_not_gap(self, monkeypatch) -> None:
-        item = _search_item(
-            '2026-08-19T00:00:00', 'openai',
-            ['https://covered.com/page'],
-            [COMPETITOR_BRAND, FIRST_PARTY_BRAND],
-        )
-        fake, _ = _fake_dynamodb([item])
-        monkeypatch.setattr(_mod, 'dynamodb', fake)
-
-        result = _mod.analyze_citation_gaps('kw', CONFIG)
+        result = _analyze(monkeypatch, [
+            _search_item('2026-08-19T00:00:00', 'openai', ['https://covered.com/page'], [COMPETITOR_BRAND, FIRST_PARTY_BRAND]),
+        ])
 
         assert result['summary']['gap_count'] == 0
         assert result['summary']['covered_count'] == 1
+
+
+class TestSourceClassification:
+    def test_never_reports_a_first_party_domain_as_a_gap_or_covered_source(self, monkeypatch) -> None:
+        result = _analyze(monkeypatch, [
+            _search_item('2026-08-19T00:00:00', 'openai', ['https://www.mybrand.com/page'], [COMPETITOR_BRAND]),
+        ])
+
+        assert result['gaps'] == []
+        assert result['covered_sources'] == []
+        assert result['summary'] == {'gap_count': 0, 'covered_count': 0, 'high_priority_gaps': 0, 'coverage_rate': 0}
+
+    def test_ignores_sources_that_mention_no_tracked_brand(self, monkeypatch) -> None:
+        result = _analyze(monkeypatch, [
+            _search_item('2026-08-19T00:00:00', 'openai', ['https://neutral.io/z'], [{'name': 'Nobody', 'classification': 'other'}]),
+        ])
+
+        assert result['gaps'] == []
+        assert result['covered_sources'] == []
+
+    def test_classifies_unlabelled_brands_by_fuzzy_match_against_the_tracked_brands(self, monkeypatch) -> None:
+        result = _analyze(monkeypatch, [
+            _search_item('2026-08-19T00:00:00', 'openai', ['https://covered.net/y'], [{'name': 'MyBrand Premium'}]),
+            _search_item('2026-08-19T00:00:00', 'gemini', ['https://gap.com/x'], [{'name': 'Rival Garden'}]),
+        ])
+
+        assert [source['url'] for source in result['covered_sources']] == ['https://covered.net/y']
+        assert result['covered_sources'][0]['first_party_brands'] == ['MyBrand Premium']
+        assert [gap['url'] for gap in result['gaps']] == ['https://gap.com/x']
+        assert result['gaps'][0]['competitor_brands'] == ['Rival Garden']
+
+    def test_marks_a_gap_high_priority_when_two_providers_cite_it(self, monkeypatch) -> None:
+        result = _analyze(monkeypatch, [
+            _search_item('2026-08-19T00:00:00', 'openai', ['https://gap.com/x'], [COMPETITOR_BRAND]),
+            _search_item('2026-08-19T00:00:00', 'gemini', ['https://gap.com/x'], [COMPETITOR_BRAND]),
+        ])
+
+        assert result['gaps'][0]['priority'] == 'high'
+        assert result['gaps'][0]['provider_count'] == 2
+        assert result['summary']['high_priority_gaps'] == 1
+
+    def test_marks_a_gap_medium_priority_when_one_provider_cites_it(self, monkeypatch) -> None:
+        result = _analyze(monkeypatch, [
+            _search_item('2026-08-19T00:00:00', 'openai', ['https://gap.com/x', 'https://gap.com/x'], [COMPETITOR_BRAND]),
+        ])
+
+        assert result['gaps'][0]['priority'] == 'medium'
+        assert result['gaps'][0]['citation_count'] == 2
+        assert result['summary']['high_priority_gaps'] == 0
+
+    def test_merges_the_latest_crawled_content_into_the_gap(self, monkeypatch) -> None:
+        crawled_row = {
+            'normalized_url': 'https://gap.com/x', 'title': 'Best hotels', 'seo_analysis': {'score': 71},
+            'domain_authority': 42, 'crawled_at': '2026-08-18T00:00:00',
+        }
+        result = _analyze(
+            monkeypatch,
+            [_search_item('2026-08-19T00:00:00', 'openai', ['https://gap.com/x'], [COMPETITOR_BRAND])],
+            [crawled_row],
+        )
+
+        gap = result['gaps'][0]
+        assert (gap['title'], gap['domain_authority']) == ('Best hotels', 42)
+        assert gap['seo_analysis'] == {'score': 71}
+        assert gap['last_crawled'] == '2026-08-18T00:00:00'
+
+    def test_summarises_gaps_per_domain_with_the_most_gaps_first(self, monkeypatch) -> None:
+        result = _analyze(monkeypatch, [
+            _search_item(
+                '2026-08-19T00:00:00', 'openai',
+                ['https://gap.com/a', 'https://gap.com/b', 'https://other.org/c', 'https://gap.com/a'],
+                [COMPETITOR_BRAND],
+            ),
+        ])
+
+        assert result['domain_summary'] == [
+            {'domain': 'gap.com', 'gap_count': 2, 'total_citations': 3},
+            {'domain': 'other.org', 'gap_count': 1, 'total_citations': 1},
+        ]
 
 
 class TestAllKeywordsOrchestration:

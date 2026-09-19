@@ -11,6 +11,7 @@ import sys
 import time
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
@@ -58,12 +59,12 @@ def _get_table_item_count(table, cache_key: str) -> int:
         while 'LastEvaluatedKey' in response:
             response = table.scan(Select='COUNT', ExclusiveStartKey=response['LastEvaluatedKey'])
             count += response.get('Count', 0)
-
-        _count_cache[cache_key] = {'count': count, 'timestamp': now}
-        return count
-    except Exception as e:
+    except (BotoCoreError, ClientError) as e:
         logger.warning(f"Failed to get item count for {table.table_name}: {e}")
         return cached['count'] if cached else 0
+
+    _count_cache[cache_key] = {'count': count, 'timestamp': now}
+    return count
 
 
 @api_handler
@@ -101,7 +102,7 @@ def handler(event, context, provider=None):
             items = response.get('Items', [])
             if items:
                 timestamps.append(items[0].get('timestamp', ''))
-        except Exception as e:
+        except (BotoCoreError, ClientError) as e:
             logger.debug(f"No data for provider {p}: {e!s}")
             continue
 

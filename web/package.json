@@ -1,6 +1,6 @@
 {
   "name": "citation-dashboard",
-  "version": "2.11.0",
+  "version": "2.12.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,8 +10,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "deadcode": "knip",
-    "deadcode:prod": "knip --production",
-    "validate": "npm run type-check && npm run test && npm run deadcode"
+    "deadcode:prod": "knip --production --strict",
+    "mutation": "stryker run",
+    "validate": "npm run type-check && npm run test && npm run deadcode && npm run deadcode:prod"
   },
   "dependencies": {
     "@aws-amplify/ui-react": "^6.15.2",
@@ -31,6 +32,8 @@
     "xlsx-js-style": "^1.2.0"
   },
   "devDependencies": {
+    "@stryker-mutator/core": "10.0.0",
+    "@stryker-mutator/vitest-runner": "10.0.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",

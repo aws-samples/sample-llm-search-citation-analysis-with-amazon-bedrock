@@ -108,7 +108,6 @@ export const brandMentionsExportResponse: BrandMentionsResponse = {
     total_unique_brands: 2,
     first_party_brands: [],
     competitor_brands: [],
-    other_brands: [],
     summary: {
       first_party_count: 1,
       competitor_count: 1,

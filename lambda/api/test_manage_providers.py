@@ -20,7 +20,10 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+from collections.abc import Iterator
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -28,8 +31,6 @@ import pytest
 from botocore.exceptions import ClientError
 
 from testing.module_loader import load_handler_module
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
 
 _ENV = {
     'CORS_ORIGIN_PARAM': '',
@@ -44,7 +45,7 @@ mock_dynamodb.Table.return_value = mock_table
 with patch('boto3.client', side_effect=lambda *a, **k: mock_secrets), \
      patch('boto3.resource', side_effect=lambda *a, **k: mock_dynamodb), \
      patch.dict(os.environ, _ENV):
-    _module = load_handler_module(_API_DIR, 'manage-providers.py', 'manage_providers')
+    _module = load_handler_module(os.path.dirname(__file__), 'manage-providers.py', 'manage_providers')
 
 #: What `record_provider_failure` + `_disable_provider` leave on the row after
 #: the 2026-08-14 outage reached the auto-disable threshold. `Decimal` because
@@ -192,3 +193,57 @@ class TestGetProvidersSurfacesHealth:
 
         assert status == 200
         assert _provider(body, 'claude')['last_error_category'] == 'insufficient_credit'
+
+
+
+class ProbeTimeout(Exception):
+    """Stands in for ``requests.Timeout``."""
+
+
+@pytest.fixture
+def requests_stub() -> Iterator[MagicMock]:
+    """A stand-in ``requests`` module answering every probe with a 200.
+
+    The real library ships in the Lambda layer, not the dev venv, and
+    `validate_api_key` imports it lazily — so the stub only has to be in
+    `sys.modules` while the probe runs.
+    """
+    request = MagicMock(name='requests.request', return_value=MagicMock(status_code=200))
+    stub = SimpleNamespace(request=request, Timeout=ProbeTimeout)
+    with patch.dict(sys.modules, {'requests': stub}):
+        yield request
+
+
+class TestKeyProbeTimeouts:
+    """
+    Every outbound key probe is bounded. Without a timeout a stalled provider
+    would hold the Lambda for its whole duration, and API Gateway would answer
+    the administrator with a 504 while the probe kept running.
+    """
+
+    @pytest.mark.parametrize(('provider_id', 'timeout'), [
+        ('openai', 5),
+        ('gemini', 5),
+        ('brave', 5),
+        ('tavily', 5),
+        ('exa', 5),
+        ('serpapi', 5),
+        ('perplexity', 10),
+        ('claude', 10),
+        ('firecrawl', 10),
+    ])
+    def test_sends_the_probe_with_the_providers_timeout(self, requests_stub, provider_id, timeout):
+        _module.validate_api_key(provider_id, 'sk-test-key-1234')
+
+        assert requests_stub.call_args.kwargs['timeout'] == timeout
+
+    def test_covers_every_listed_provider(self):
+        assert set(_module._KEY_PROBES) == set(_module.PROVIDERS)
+
+    def test_reports_a_timed_out_probe_as_invalid_without_raising(self, requests_stub):
+        requests_stub.side_effect = ProbeTimeout()
+
+        assert _module.validate_api_key('claude', 'sk-test-key-1234') == {
+            'valid': False,
+            'error': 'Validation request timed out',
+        }

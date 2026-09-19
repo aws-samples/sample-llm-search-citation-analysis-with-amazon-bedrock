@@ -12,7 +12,6 @@ export const mockCitationGapsResponse: CitationGapsResponse = {
       providers: ['openai', 'perplexity', 'gemini'],
       first_party_brands: [],
       competitor_brands: ['Marriott', 'Hilton'],
-      gap_type: 'competitor_only',
     },
     {
       url: 'https://example.com/article2',
@@ -24,13 +23,11 @@ export const mockCitationGapsResponse: CitationGapsResponse = {
       providers: ['openai', 'claude'],
       first_party_brands: [],
       competitor_brands: ['Hilton'],
-      gap_type: 'neutral',
     },
   ],
   covered_sources: [],
   domain_summary: [],
   summary: {
-    total_sources: 2,
     gap_count: 2,
     covered_count: 0,
     high_priority_gaps: 1,
@@ -43,7 +40,6 @@ export const mockAllKeywordsResponse: CitationGapsResponse = {
   covered_sources: [],
   domain_summary: [],
   summary: {
-    total_sources: 10,
     gap_count: 8,
     covered_count: 2,
     high_priority_gaps: 3,
@@ -60,7 +56,6 @@ export const mockAllKeywordsResponse: CitationGapsResponse = {
       providers: ['openai', 'perplexity', 'gemini', 'claude'],
       first_party_brands: [],
       competitor_brands: ['Marriott'],
-      gap_type: 'competitor_only',
       keyword: 'best hotels',
     },
   ],

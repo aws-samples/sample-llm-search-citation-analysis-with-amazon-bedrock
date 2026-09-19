@@ -1,7 +1,9 @@
 import type {
   BrandConfig, IndustryPresets, BrandExpansionAllResult, CompetitorDiscoveryResult 
 } from '../../types';
-import { useBrandConfigForm } from '../../hooks/useBrandConfigForm';
+import {
+  useBrandConfigForm, type ConfigTab 
+} from '../../hooks/useBrandConfigForm';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { IndustrySelector } from './IndustrySelector';
 import { ExtractionOptions } from './ExtractionOptions';
@@ -18,6 +20,30 @@ interface BrandConfigContentProps {
   readonly onExpandAllBrands?: (brands: string[], type: 'first_party' | 'competitor') => Promise<BrandExpansionAllResult>;
   readonly onFindCompetitors?: (firstPartyBrands: string[], existingCompetitors: string[]) => Promise<CompetitorDiscoveryResult>;
   readonly onSaveComplete?: () => void;
+}
+
+const TAB_BUTTON_CLASS = 'px-4 py-2 text-sm font-medium rounded-lg transition-colors';
+
+function tabClass(active: boolean): string {
+  return active ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200';
+}
+
+function ConfigTabBar({
+  activeTab, customPromptCount, onTabChange 
+}: {
+  readonly activeTab: ConfigTab;
+  readonly customPromptCount: number;
+  readonly onTabChange: (tab: ConfigTab) => void;
+}) {
+  return (
+    <div className="flex gap-2 border-b border-gray-200 pb-3">
+      <button onClick={() => onTabChange('settings')} className={`${TAB_BUTTON_CLASS} ${tabClass(activeTab === 'settings')}`}>Settings & Brands</button>
+      <button onClick={() => onTabChange('prompt')} className={`${TAB_BUTTON_CLASS} flex items-center gap-2 ${tabClass(activeTab === 'prompt')}`}>
+        Extraction Prompt
+        {customPromptCount > 0 && <span className="px-2 py-0.5 bg-gray-700 text-white rounded-full text-xs">{customPromptCount}</span>}
+      </button>
+    </div>
+  );
 }
 
 export const BrandConfigContent = ({
@@ -102,13 +128,7 @@ export const BrandConfigContent = ({
 
   return (
     <div className="space-y-6">
-      <div className="flex gap-2 border-b border-gray-200 pb-3">
-        <button onClick={() => setActiveTab('settings')} className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${ui.activeTab === 'settings' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>Settings & Brands</button>
-        <button onClick={() => setActiveTab('prompt')} className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${ui.activeTab === 'prompt' ? 'bg-gray-900 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-          Extraction Prompt
-          {Object.keys(form.industryPrompts).length > 0 && <span className="px-2 py-0.5 bg-gray-700 text-white rounded-full text-xs">{Object.keys(form.industryPrompts).length}</span>}
-        </button>
-      </div>
+      <ConfigTabBar activeTab={ui.activeTab} customPromptCount={Object.keys(form.industryPrompts).length} onTabChange={setActiveTab} />
 
       {/* `display: contents` keeps the layout identical while the fieldset
           still natively disables every nested input and button for

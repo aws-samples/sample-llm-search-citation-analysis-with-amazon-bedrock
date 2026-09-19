@@ -28,7 +28,6 @@ export interface ProviderBrandData {
   provider: string;
   timestamp: string;
   brands: BrandMention[];
-  brand_count: number;
   response_preview: string;
   full_response?: string;
   seo_feedback?: string;
@@ -113,7 +112,6 @@ export interface BrandMentionsResponse {
     total_unique_brands: number;
     first_party_brands: AggregatedBrand[];
     competitor_brands: AggregatedBrand[];
-    other_brands: AggregatedBrand[];
     summary: {
       first_party_count: number;
       competitor_count: number;

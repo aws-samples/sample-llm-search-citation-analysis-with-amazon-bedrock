@@ -1,22 +1,12 @@
-import type {
-  VisibilityMetricsResponse,
-  HistoricalTrendsResponse,
-  TrendDirection,
-} from '../../../../types';
+import type { TrendDirection } from '../../../../types';
 import {
   type ReportAccent,
   ReportSection,
   ReportStatCard,
   ReportStatGrid,
-  gateSection,
+  gateVisibilityHeadline,
+  type VisibilityHeadlineProps,
 } from '../../layout';
-
-interface Props {
-  readonly visibility: VisibilityMetricsResponse | null;
-  readonly trends: HistoricalTrendsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
 
 /**
  * The headline answer to "how is this keyword doing right now?". Shows the
@@ -24,19 +14,14 @@ interface Props {
  * direction. Sized to dominate the first page of the printed report so a
  * skimmer can lift the bottom-line answer without reading further.
  */
-export function HeadlineSection({
-  visibility, trends, loading, error,
-}: Props) {
-  const gate = gateSection({
-    title: 'Headline',
-    loading,
-    loadingMessage: 'Loading visibility…',
-    error,
-    value: visibility,
-    emptyMessage: 'No visibility data found for this keyword. Run an analysis to populate the report.',
-  });
+export function HeadlineSection(props: VisibilityHeadlineProps) {
+  const gate = gateVisibilityHeadline(
+    props,
+    'No visibility data found for this keyword. Run an analysis to populate the report.',
+  );
   if (!gate.ready) return gate.placeholder;
 
+  const { trends } = props;
   const score = gate.value.summary.first_party_avg_score;
   const sov = gate.value.summary.first_party_total_sov;
   const competitorScore = gate.value.summary.competitor_avg_score;

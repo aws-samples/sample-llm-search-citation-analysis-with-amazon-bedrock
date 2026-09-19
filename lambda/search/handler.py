@@ -8,7 +8,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 import boto3
@@ -56,7 +56,7 @@ def get_extraction_config() -> dict[str, Any]:
             with open(config_path) as f:
                 _extraction_config = json.load(f)
             logger.info("Loaded extraction config")
-        except Exception as e:
+        except (OSError, json.JSONDecodeError) as e:
             logger.warning(f"Failed to load extraction config: {e!s}, using defaults")
             _extraction_config = {"hotel_extraction": {"enabled": True, "config": {}}}
     return _extraction_config
@@ -128,14 +128,13 @@ def store_raw_response_to_s3(
             Body=json.dumps(document, default=str, indent=2),
             ContentType='application/json'
         )
-
-        s3_uri = f"s3://{RAW_RESPONSES_BUCKET}/{s3_key}"
-        logger.info(f"Stored raw response to {s3_uri}")
-        return s3_uri
-
-    except Exception as e:
-        logger.error(f"Failed to store raw response to S3: {e!s}")
+    except Exception:
+        logger.exception("Failed to store raw response to S3")
         return None
+
+    s3_uri = f"s3://{RAW_RESPONSES_BUCKET}/{s3_key}"
+    logger.info(f"Stored raw response to {s3_uri}")
+    return s3_uri
 
 
 def is_provider_enabled(provider_id: str) -> bool:
@@ -147,19 +146,20 @@ def is_provider_enabled(provider_id: str) -> bool:
     """
     try:
         table = dynamodb.Table(PROVIDER_CONFIG_TABLE)
-        response = table.get_item(Key={'provider_id': provider_id})
-        item = response.get('Item')
-        if item:
-            return item.get('enabled', True)
-        # No config row yet -> treat as enabled (first-run default)
-        return True
+        item = table.get_item(Key={'provider_id': provider_id}).get('Item')
     except Exception as e:
-        logger.error(
+        # The message line carries the error type only; str(e) can name
+        # tables or ARNs, so it stays in the traceback.
+        logger.exception(
             "provider_config_read_failed provider=%s error=%s action=fail_closed",
             provider_id,
             type(e).__name__,
         )
         return False
+    if item:
+        return bool(item.get('enabled', True))
+    # No config row yet -> treat as enabled (first-run default)
+    return True
 
 # Default models per provider (used when no override in ProviderConfig table)
 DEFAULT_PROVIDER_MODELS = {
@@ -170,7 +170,7 @@ DEFAULT_PROVIDER_MODELS = {
 }
 
 # Cache for provider models (per Lambda invocation)
-_provider_model_cache = {}
+_provider_model_cache: dict[str, str] = {}
 
 class ProviderConfigUnavailableError(RuntimeError):
     """Raised when provider config cannot be read and no safe default exists."""
@@ -192,16 +192,9 @@ def get_provider_model(provider_id: str) -> str:
     default = DEFAULT_PROVIDER_MODELS.get(provider_id, '')
     try:
         table = dynamodb.Table(PROVIDER_CONFIG_TABLE)
-        response = table.get_item(Key={'provider_id': provider_id})
-        item = response.get('Item', {})
-        model = item.get('model', default)
-        if not model:
-            model = default
-        _provider_model_cache[provider_id] = model
-        logger.info(f"Provider {provider_id} using model: {model}")
-        return model
+        item = table.get_item(Key={'provider_id': provider_id}).get('Item', {})
     except Exception as e:
-        logger.error(
+        logger.exception(
             "provider_model_read_failed provider=%s error=%s action=fail_closed",
             provider_id,
             type(e).__name__,
@@ -209,6 +202,12 @@ def get_provider_model(provider_id: str) -> str:
         raise ProviderConfigUnavailableError(
             f"Cannot read model config for provider {provider_id}"
         ) from e
+
+    configured = item.get('model')
+    model = configured if isinstance(configured, str) and configured else default
+    _provider_model_cache[provider_id] = model
+    logger.info(f"Provider {provider_id} using model: {model}")
+    return model
 
 
 
@@ -260,121 +259,119 @@ def provider_error_result(provider: str, model: str, error: Exception, start_tim
     }
 
 
-def query_openai(keyword: str, api_key: str, model: str = "gpt-5-mini", query_template: str | None = None) -> dict[str, Any]:
-    """Query OpenAI API with native web search via Responses API."""
+def _merge_citations(citations: list[str], extra: Iterable[str]) -> list[str]:
+    """Append the URLs in ``extra`` that ``citations`` does not already hold, keeping order."""
+    for citation in extra:
+        if citation not in citations:
+            citations.append(citation)
+    return citations
+
+
+def _query_llm(
+    provider: str,
+    keyword: str,
+    query_template: str | None,
+    request: Callable[[str], dict[str, Any]],
+    parse: Callable[[dict[str, Any]], tuple[str, list[str]]],
+    *,
+    model: str,
+    usage_key: str = 'usage',
+    model_from_response: bool = False,
+) -> dict[str, Any]:
+    """The request/parse/error flow every LLM provider shares.
+
+    ``request`` sends the resolved query and returns the raw payload; ``parse``
+    reads ``(response_text, citations)`` out of it. A failure anywhere in that
+    flow becomes the uniform error result rather than an exception, so one dead
+    provider cannot take the keyword down and ``_record_provider_outcome`` can
+    classify what went wrong. ``model`` labels the metadata (and the error
+    result); with ``model_from_response`` the payload's own ``model`` wins.
+    """
     start_time = time.time()
     try:
-        client = OpenAIClient(api_key)
-
-        query = build_provider_query(keyword, query_template)
-
-        # Use Responses API with native web search
-        raw_response = client.responses_with_web_search(
-            query=query,
-            model=model
-        )
-
+        raw_response = request(build_provider_query(keyword, query_template))
         latency_ms = int((time.time() - start_time) * 1000)
-
-        # Extract response text and citations
-        response_text = ""
-        citations = []
-
-        # Parse output items
-        output = raw_response.get('output', [])
-        for item in output:
-            if item.get('type') == 'message':
-                # Extract text content
-                content = item.get('content', [])
-                for content_item in content:
-                    if content_item.get('type') == 'output_text':
-                        response_text += content_item.get('text', '')
-
-                        # Extract citations from annotations
-                        annotations = content_item.get('annotations', [])
-                        for annotation in annotations:
-                            if annotation.get('type') == 'url_citation':
-                                url = annotation.get('url')
-                                if url:
-                                    citations.append(clean_url(url))
-
-            elif item.get('type') == 'web_search_call':
-                # Extract sources from web search call
-                action = item.get('action', {})
-                sources = action.get('sources', [])
-                for source in sources:
-                    url = source.get('url')
-                    if url:
-                        citations.append(clean_url(url))
-
-        # Fallback: extract from output_text if available
-        if not response_text:
-            response_text = raw_response.get('output_text', '')
-
-        # Remove duplicates from citations
-        citations = list(dict.fromkeys(citations))  # Preserves order
-
-        logger.info(f"OpenAI found {len(citations)} citations for '{keyword}'")
-
-        return {
-            "provider": Provider.OPENAI,
-            "response": response_text,
-            "citations": citations,
-            "status": "success",
-            "raw_response": raw_response,
-            "metadata": {
-                "model": model,
-                "latency_ms": latency_ms,
-                "usage": raw_response.get('usage', {})
-            }
-        }
+        response_text, citations = parse(raw_response)
     except Exception as e:
-        logger.error(f"OpenAI error: {e!s}")
-        return provider_error_result(Provider.OPENAI, model, e, start_time)
+        logger.exception(f"{provider} error")
+        return provider_error_result(provider, model, e, start_time)
+
+    logger.info(f"{provider} found {len(citations)} citations for '{keyword}'")
+    return {
+        "provider": provider,
+        "response": response_text,
+        "citations": citations,
+        "status": "success",
+        "raw_response": raw_response,
+        "metadata": {
+            "model": raw_response.get('model', model) if model_from_response else model,
+            "latency_ms": latency_ms,
+            "usage": raw_response.get(usage_key, {})
+        }
+    }
+
+
+def _openai_message_content(item: dict[str, Any]) -> tuple[str, list[str]]:
+    """Text and ``url_citation`` annotations of one Responses API ``message`` item."""
+    text = ""
+    citations: list[str] = []
+    for content_item in item.get('content', []):
+        if content_item.get('type') != 'output_text':
+            continue
+        text += content_item.get('text', '')
+        citations.extend(
+            clean_url(annotation['url'])
+            for annotation in content_item.get('annotations', [])
+            if annotation.get('type') == 'url_citation' and annotation.get('url')
+        )
+    return text, citations
+
+
+def _parse_openai_response(raw_response: dict[str, Any]) -> tuple[str, list[str]]:
+    """Message text plus the URLs cited in annotations and web-search sources, deduplicated in order."""
+    response_text = ""
+    citations: list[str] = []
+    for item in raw_response.get('output', []):
+        if item.get('type') == 'message':
+            text, urls = _openai_message_content(item)
+            response_text += text
+            citations.extend(urls)
+        elif item.get('type') == 'web_search_call':
+            sources = item.get('action', {}).get('sources', [])
+            citations.extend(clean_url(source['url']) for source in sources if source.get('url'))
+    # Fallback: extract from output_text if available
+    return response_text or raw_response.get('output_text', ''), list(dict.fromkeys(citations))
+
+
+def query_openai(keyword: str, api_key: str, model: str = "gpt-5-mini", query_template: str | None = None) -> dict[str, Any]:
+    """Query OpenAI API with native web search via Responses API."""
+    def request(query: str) -> dict[str, Any]:
+        return OpenAIClient(api_key).responses_with_web_search(query=query, model=model)
+
+    return _query_llm(Provider.OPENAI, keyword, query_template, request, _parse_openai_response, model=model)
+
+
+def _parse_perplexity_response(raw_response: dict[str, Any]) -> tuple[str, list[str]]:
+    """Answer text plus citations from ``search_results``, else ``citations``, else the text itself."""
+    response_text = raw_response['choices'][0]['message']['content']
+    search_results = raw_response.get('search_results') or []
+    citations = [clean_url(result['url']) for result in search_results if result.get('url')]
+    if not citations:
+        citations = [clean_url(url) for url in raw_response.get('citations', [])]
+    if not citations:
+        citations = extract_citations_from_response(response_text)
+    return response_text, citations
 
 
 def query_perplexity(keyword: str, api_key: str, query_template: str | None = None) -> dict[str, Any]:
     """Query Perplexity API."""
-    start_time = time.time()
-    try:
-        client = PerplexityClient(api_key)
-        query = build_provider_query(keyword, query_template)
-        messages = [{"role": "user", "content": query}]
-        raw_response = client.chat_completion(messages)
+    def request(query: str) -> dict[str, Any]:
+        return PerplexityClient(api_key).chat_completion([{"role": "user", "content": query}])
 
-        latency_ms = int((time.time() - start_time) * 1000)
-
-        response_text = raw_response['choices'][0]['message']['content']
-
-        # Extract citations from search_results field (new format)
-        citations = []
-        search_results = raw_response.get('search_results', [])
-        if search_results:
-            citations = [clean_url(result.get('url')) for result in search_results if result.get('url')]
-
-        # Fallback to old citations field if search_results is empty
-        if not citations:
-            citations = [clean_url(url) for url in raw_response.get('citations', [])]
-
-        # Last resort: extract from response text
-        if not citations:
-            citations = extract_citations_from_response(response_text)
-
-        return {
-            "provider": Provider.PERPLEXITY,
-            "response": response_text,
-            "citations": citations,
-            "status": "success",
-            "raw_response": raw_response,
-            "metadata": {
-                "model": raw_response.get('model', 'sonar'),
-                "latency_ms": latency_ms,
-                "usage": raw_response.get('usage', {})
-            }
-        }
-    except Exception as e:
-        logger.error(f"Perplexity error: {e!s}")
-        return provider_error_result(Provider.PERPLEXITY, "sonar", e, start_time)
+    return _query_llm(
+        Provider.PERPLEXITY, keyword, query_template, request, _parse_perplexity_response,
+        model="sonar", model_from_response=True,
+    )
 
 
 # Hosts permitted to start a redirect chain. Gemini returns citation links
@@ -419,141 +416,96 @@ def resolve_gemini_redirect(redirect_url: str, timeout: int = 5) -> str:
     return final_url
 
 
+def _gemini_grounding_citations(grounding: dict[str, Any]) -> list[str]:
+    """Real URLs behind the grounding chunks' redirect wrappers, deduplicated in order."""
+    citations: list[str] = []
+    for chunk in grounding.get('groundingChunks', []):
+        redirect_url = chunk['web'].get('uri') if 'web' in chunk else None
+        if not redirect_url:
+            continue
+        # Resolve the vertex redirect to get the real URL, then clean it
+        cleaned_url = clean_url(resolve_gemini_redirect(redirect_url))
+        if cleaned_url and cleaned_url not in citations:
+            citations.append(cleaned_url)
+    # Also check webSearchQueries if available
+    if 'webSearchQueries' in grounding:
+        logger.info(f"Gemini search queries: {grounding['webSearchQueries']}")
+    return citations
+
+
+def _parse_gemini_response(raw_response: dict[str, Any]) -> tuple[str, list[str]]:
+    """First candidate's text and grounding citations, plus any URLs in the text itself."""
+    response_text = ""
+    citations: list[str] = []
+    candidates = raw_response.get('candidates', [])
+    if candidates:
+        candidate = candidates[0]
+        if 'content' in candidate and 'parts' in candidate['content']:
+            response_text = ' '.join([part.get('text', '') for part in candidate['content']['parts']])
+        if 'groundingMetadata' in candidate:
+            citations = _gemini_grounding_citations(candidate['groundingMetadata'])
+    return response_text, _merge_citations(citations, extract_citations_from_response(response_text))
+
+
 def query_gemini(keyword: str, api_key: str, query_template: str | None = None) -> dict[str, Any]:
     """Query Gemini API with Google Search."""
-    start_time = time.time()
-    try:
-        client = GeminiClient(api_key)
-        query = build_provider_query(keyword, query_template)
-        raw_response = client.generate_content(query)
+    def request(query: str) -> dict[str, Any]:
+        return GeminiClient(api_key).generate_content(query)
 
-        latency_ms = int((time.time() - start_time) * 1000)
+    return _query_llm(
+        Provider.GEMINI, keyword, query_template, request, _parse_gemini_response,
+        model="gemini-3-flash-preview", usage_key='usageMetadata',
+    )
 
-        # Extract text from Gemini response
-        response_text = ""
-        citations = []
 
-        if 'candidates' in raw_response and len(raw_response['candidates']) > 0:
-            candidate = raw_response['candidates'][0]
-            if 'content' in candidate and 'parts' in candidate['content']:
-                parts = candidate['content']['parts']
-                response_text = ' '.join([part.get('text', '') for part in parts])
+def _log_claude_tool_block(block_type: str | None, content_block: dict[str, Any]) -> None:
+    """Debug-log Claude's tool invocations; info-log block types this parser does not know."""
+    if block_type in ('tool_use', 'server_tool_use'):
+        tool_input = content_block.get('input', {})
+        logger.debug(f"Claude {block_type}: {content_block.get('name')}, input: {tool_input}")
+        # Extract query if present (useful for debugging)
+        if block_type == 'server_tool_use' and tool_input and 'query' in tool_input:
+            logger.debug(f"Claude web search query: {tool_input['query']}")
+    else:
+        logger.info(f"Claude unhandled block type '{block_type}': {json.dumps(content_block, default=str)[:300]}")
 
-            # Extract citations from grounding metadata and resolve redirects
-            if 'groundingMetadata' in candidate:
-                grounding = candidate['groundingMetadata']
-                if 'groundingChunks' in grounding:
-                    for chunk in grounding['groundingChunks']:
-                        if 'web' in chunk:
-                            redirect_url = chunk['web'].get('uri')
-                            if redirect_url:
-                                # Resolve the vertex redirect to get the real URL, then clean it
-                                real_url = resolve_gemini_redirect(redirect_url)
-                                cleaned_url = clean_url(real_url)
-                                if cleaned_url and cleaned_url not in citations:
-                                    citations.append(cleaned_url)
-                # Also check webSearchQueries if available
-                if 'webSearchQueries' in grounding:
-                    logger.info(f"Gemini search queries: {grounding['webSearchQueries']}")
 
-        # Also extract any URLs from the text itself
-        text_citations = extract_citations_from_response(response_text)
-        for citation in text_citations:
-            if citation not in citations:
-                citations.append(citation)
+def _claude_search_result_urls(content_block: dict[str, Any], citations: list[str]) -> None:
+    """Append the URLs of a ``web_search_tool_result`` block that are not listed yet."""
+    for result in content_block.get('content', []):
+        url = result.get('url') if result.get('type') == 'web_search_result' else None
+        if url and url not in citations:
+            citations.append(clean_url(url))
+            logger.debug(f"Claude web search result URL: {url}")
 
-        return {
-            "provider": Provider.GEMINI,
-            "response": response_text,
-            "citations": citations,
-            "status": "success",
-            "raw_response": raw_response,
-            "metadata": {
-                "model": "gemini-3-flash-preview",
-                "latency_ms": latency_ms,
-                "usage": raw_response.get('usageMetadata', {})
-            }
-        }
-    except Exception as e:
-        logger.error(f"Gemini error: {e!s}")
-        return provider_error_result(Provider.GEMINI, "gemini-3-flash-preview", e, start_time)
+
+def _parse_claude_response(raw_response: dict[str, Any]) -> tuple[str, list[str]]:
+    """Text blocks and web-search result URLs, plus any URLs in the text itself (Claude's primary source)."""
+    # Log the full response structure for debugging
+    logger.info(f"Claude raw response structure: {json.dumps(raw_response, default=str)[:1000]}")
+    response_text = ""
+    citations: list[str] = []
+    for content_block in raw_response.get('content', []):
+        block_type = content_block.get('type')
+        logger.debug(f"Claude content block type: {block_type}")
+        if block_type == 'text':
+            response_text += content_block.get('text', '')
+        elif block_type == 'web_search_tool_result':
+            _claude_search_result_urls(content_block, citations)
+        else:
+            _log_claude_tool_block(block_type, content_block)
+    return response_text, _merge_citations(citations, extract_citations_from_response(response_text))
 
 
 def query_claude(keyword: str, api_key: str, query_template: str | None = None) -> dict[str, Any]:
     """Query Claude API with web search."""
-    start_time = time.time()
-    try:
-        client = ClaudeClient(api_key)
-        query = build_provider_query(keyword, query_template)
-        raw_response = client.generate_content(
-            query, system_prompt=CLAUDE_CITATION_SYSTEM_PROMPT
-        )
+    def request(query: str) -> dict[str, Any]:
+        return ClaudeClient(api_key).generate_content(query, system_prompt=CLAUDE_CITATION_SYSTEM_PROMPT)
 
-        latency_ms = int((time.time() - start_time) * 1000)
-
-        # Log the full response structure for debugging
-        logger.info(f"Claude raw response structure: {json.dumps(raw_response, default=str)[:1000]}")
-
-        # Extract text and citations from Claude response
-        response_text = ""
-        citations = []
-
-        if 'content' in raw_response and len(raw_response['content']) > 0:
-            for content_block in raw_response['content']:
-                block_type = content_block.get('type')
-                logger.debug(f"Claude content block type: {block_type}")
-
-                if block_type == 'text':
-                    response_text += content_block.get('text', '')
-                # Extract citations from tool_use blocks (Claude's web search)
-                elif block_type == 'tool_use':
-                    tool_name = content_block.get('name')
-                    tool_input = content_block.get('input', {})
-                    logger.debug(f"Claude tool_use: {tool_name}, input: {tool_input}")
-                # Handle server_tool_use - Claude's internal tool invocation for web search
-                elif block_type == 'server_tool_use':
-                    tool_name = content_block.get('name')
-                    tool_input = content_block.get('input', {})
-                    logger.debug(f"Claude server_tool_use: {tool_name}, input: {tool_input}")
-                    # Extract query if present (useful for debugging)
-                    if tool_input and 'query' in tool_input:
-                        logger.debug(f"Claude web search query: {tool_input['query']}")
-                # Handle web_search_tool_result - contains actual search results with URLs
-                elif block_type == 'web_search_tool_result':
-                    search_results = content_block.get('content', [])
-                    for result in search_results:
-                        if result.get('type') == 'web_search_result':
-                            url = result.get('url')
-                            if url and url not in citations:
-                                citations.append(clean_url(url))
-                                logger.debug(f"Claude web search result URL: {url}")
-                # Log any truly unknown block types at info level
-                else:
-                    logger.info(f"Claude unhandled block type '{block_type}': {json.dumps(content_block, default=str)[:300]}")
-
-        # Extract any URLs from the text itself (primary method for Claude)
-        text_citations = extract_citations_from_response(response_text)
-        for citation in text_citations:
-            if citation not in citations:
-                citations.append(citation)
-
-        logger.info(f"Claude extracted {len(citations)} citations from text for '{keyword}'")
-
-        return {
-            "provider": Provider.CLAUDE,
-            "response": response_text,
-            "citations": citations,
-            "status": "success",
-            "raw_response": raw_response,
-            "metadata": {
-                "model": raw_response.get('model', 'claude-sonnet-4-5'),
-                "latency_ms": latency_ms,
-                "usage": raw_response.get('usage', {})
-            }
-        }
-    except Exception as e:
-        logger.error(f"Claude error: {e!s}")
-        return provider_error_result(Provider.CLAUDE, "claude-sonnet-4-5", e, start_time)
+    return _query_llm(
+        Provider.CLAUDE, keyword, query_template, request, _parse_claude_response,
+        model="claude-sonnet-4-5", model_from_response=True,
+    )
 
 
 def _run_openai_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
@@ -682,7 +634,7 @@ def execute_all_providers(keyword: str, provider_types: list[str] | None = None,
                 _record_provider_outcome(provider_id, result)
                 results.append(result)
             except ProviderConfigUnavailableError:
-                logger.error(f"{label} provider config unavailable, skipping this run")
+                logger.exception(f"{label} provider config unavailable, skipping this run")
         elif api_key and should_run_provider(provider_id):
             logger.info(f"{label} is disabled, skipping")
         elif should_run_provider(provider_id):
@@ -710,7 +662,8 @@ def store_search_results(keyword: str, timestamp: str, results: list[dict[str, A
             logger.info(f"Loaded brand config for extraction: industry={brand_config.get('industry') if brand_config else 'default'}")
 
         for result in results:
-            provider = result.get("provider")
+            # Every runner sets "provider"; "unknown" mirrors deduplication's rollup for a row without one.
+            provider: str = result.get("provider", "unknown")
             provider_type = result.get("provider_type", "llm")  # Default to llm for backward compatibility
             query_prompt_id = result.get("query_prompt_id", "default")
             query_prompt_name = result.get("query_prompt_name", "Default")
@@ -780,11 +733,100 @@ def store_search_results(keyword: str, timestamp: str, results: list[dict[str, A
 
             table.put_item(Item=item)
             logger.info(f"Stored result for {provider} ({provider_type}) with {item['brand_count']} brand mentions, S3: {s3_uri or 'N/A'}")
-
-        return True
-    except Exception as e:
-        logger.error(f"Error storing results: {e!s}")
+    except Exception:
+        logger.exception("Error storing results")
         return False
+    return True
+
+
+def _sanitized_keyword(event: dict[str, Any]) -> str:
+    """The event's keyword, sanitized; raises ``ValueError`` when it is missing or empties out.
+
+    Keywords are dashboard-editable (see api/manage-keywords) so treated as
+    untrusted input before they land in any provider query string. The brand
+    extractor downstream wraps the full provider response in <response_text>
+    tags — this is defense in depth so a crafted keyword can't poison the
+    query itself.
+    """
+    keyword_raw = event.get('keyword')
+    if not keyword_raw:
+        error = ValueError("Missing required field: keyword")
+        log_error(error, "search handler", event)
+        raise error
+
+    keyword = sanitize_user_input(keyword_raw, max_length=MAX_KEYWORD_LENGTH)
+    if not keyword:
+        error = ValueError("Keyword is empty after sanitization")
+        log_error(error, "search handler", event)
+        raise error
+    return keyword
+
+
+def _slim_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Strip the large fields before the result goes back to Step Functions.
+
+    ``raw_response`` is already stored to S3 and ``search_results`` to DynamoDB;
+    keeping them out of the state prevents States.DataLimitExceeded (256KB).
+    Citations stay because deduplication reads them.
+    """
+    slim_result = {
+        "provider": result.get("provider"),
+        "provider_type": result.get("provider_type", "llm"),
+        "status": result.get("status"),
+        "citation_count": len(result.get("citations", [])),
+        "citations": result.get("citations", []),
+        "query_prompt_id": result.get("query_prompt_id", "default"),
+    }
+    if "error" in result:
+        slim_result["error"] = result["error"]
+    return slim_result
+
+
+def _search_keyword(event: dict[str, Any]) -> dict[str, Any]:
+    """Run every query prompt across the selected providers and store the results."""
+    keyword = _sanitized_keyword(event)
+    timestamp = event.get('timestamp', get_timestamp())
+    provider_types = event.get('provider_types')  # Optional: ["llm"], ["search"], or ["llm", "search"]
+    providers = event.get('providers')  # Optional: specific provider IDs
+    # If no query prompts, use a single default (backward compatible)
+    query_prompts = event.get('query_prompts') or [{"id": "default", "name": "Default", "template": None}]
+
+    logger.info(f"Processing keyword: {keyword}, prompts: {len(query_prompts)}, provider_types: {provider_types}")
+
+    all_results: list[dict[str, Any]] = []
+    for prompt in query_prompts:
+        prompt_id = prompt.get('id', 'default')
+        prompt_name = prompt.get('name', 'Default')
+        logger.info(f"Running prompt '{prompt_name}' for keyword '{keyword}'")
+        try:
+            results = execute_all_providers(
+                keyword,
+                provider_types=provider_types,
+                providers=providers,
+                query_template=prompt.get('template'),
+            )
+        except Exception:
+            logger.exception(f"Error running prompt '{prompt_name}' for '{keyword}'")
+            # Continue with remaining prompts
+            continue
+        # Tag each result with the query prompt info
+        for result in results:
+            result['query_prompt_id'] = prompt_id
+            result['query_prompt_name'] = prompt_name
+        all_results.extend(results)
+
+    store_success = store_search_results(keyword, timestamp, all_results)
+    if not store_success:
+        logger.warning("Failed to store some results in DynamoDB")
+
+    return {
+        "keyword": keyword,
+        "timestamp": timestamp,
+        "provider_types": provider_types,
+        "providers": providers,
+        "results": [_slim_result(result) for result in all_results],
+        "stored": store_success
+    }
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -810,95 +852,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     logger.info(f"Received event: {json.dumps(event)}")
 
     try:
-        # Extract keyword and timestamp
-        keyword_raw = event.get('keyword')
-        timestamp = event.get('timestamp', get_timestamp())
-        provider_types = event.get('provider_types')  # Optional: ["llm"], ["search"], or ["llm", "search"]
-        providers = event.get('providers')  # Optional: specific provider IDs
-        query_prompts = event.get('query_prompts', [])
-
-        if not keyword_raw:
-            error = ValueError("Missing required field: keyword")
-            log_error(error, "search handler", event)
-            raise error
-
-        # Sanitize the keyword before it lands in any provider query string.
-        # Keywords are dashboard-editable (see api/manage-keywords) so treated
-        # as untrusted input. The brand extractor downstream wraps the full
-        # provider response in <response_text> tags — this is defense in depth
-        # so a crafted keyword can't poison the query itself.
-        keyword = sanitize_user_input(keyword_raw, max_length=MAX_KEYWORD_LENGTH)
-        if not keyword:
-            error = ValueError("Keyword is empty after sanitization")
-            log_error(error, "search handler", event)
-            raise error
-
-        # If no query prompts, use a single default (backward compatible)
-        if not query_prompts:
-            query_prompts = [{"id": "default", "name": "Default", "template": None}]
-
-        logger.info(f"Processing keyword: {keyword}, prompts: {len(query_prompts)}, provider_types: {provider_types}")
-
-        all_results = []
-        for prompt in query_prompts:
-            prompt_id = prompt.get('id', 'default')
-            prompt_name = prompt.get('name', 'Default')
-            prompt_template = prompt.get('template')
-
-            logger.info(f"Running prompt '{prompt_name}' for keyword '{keyword}'")
-
-            try:
-                # Execute queries across providers with this prompt template
-                results = execute_all_providers(
-                    keyword,
-                    provider_types=provider_types,
-                    providers=providers,
-                    query_template=prompt_template,
-                )
-
-                # Tag each result with the query prompt info
-                for result in results:
-                    result['query_prompt_id'] = prompt_id
-                    result['query_prompt_name'] = prompt_name
-
-                all_results.extend(results)
-            except Exception as prompt_error:
-                logger.error(f"Error running prompt '{prompt_name}' for '{keyword}': {prompt_error}")
-                # Continue with remaining prompts
-
-        # Store results in DynamoDB
-        store_success = store_search_results(keyword, timestamp, all_results)
-
-        if not store_success:
-            logger.warning("Failed to store some results in DynamoDB")
-
-        # Strip large fields from results before returning to Step Functions
-        # (raw_response is already stored to S3, search_results stored to DynamoDB)
-        # This prevents States.DataLimitExceeded errors (256KB limit)
-        slim_results = []
-        for result in all_results:
-            slim_result = {
-                "provider": result.get("provider"),
-                "provider_type": result.get("provider_type", "llm"),
-                "status": result.get("status"),
-                "citation_count": len(result.get("citations", [])),
-                "citations": result.get("citations", []),  # Keep citations for deduplication
-                "query_prompt_id": result.get("query_prompt_id", "default"),
-            }
-            if "error" in result:
-                slim_result["error"] = result["error"]
-            slim_results.append(slim_result)
-
-        # Return slim results
-        return {
-            "keyword": keyword,
-            "timestamp": timestamp,
-            "provider_types": provider_types,
-            "providers": providers,
-            "results": slim_results,
-            "stored": store_success
-        }
-
+        return _search_keyword(event)
     except Exception as e:
         # !r so a keyword with interior newlines can't forge log records; this
         # path logs the PRE-sanitization keyword straight from the event.

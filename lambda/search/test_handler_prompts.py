@@ -9,6 +9,7 @@ Covers:
 """
 
 import os
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -54,7 +55,7 @@ def _env_vars():
         yield
 
 
-@pytest.fixture()
+@pytest.fixture
 def mock_dynamodb():
     """Mock DynamoDB resource."""
     mock = MagicMock()
@@ -66,27 +67,27 @@ def mock_dynamodb():
 class TestGetProviderModel:
     """Tests for get_provider_model() — runtime model configuration."""
 
-    def test_returns_default_when_no_config(self, mock_dynamodb):
-        """Falls back to default model when no config exists."""
+    @staticmethod
+    def _configured_model(mock_dynamodb, item: dict) -> str:
+        """OpenAI's model as read from a config table whose row is ``item``, cache cleared first."""
         mock_db, mock_table = mock_dynamodb
-        mock_table.get_item.return_value = {'Item': {}}
+        mock_table.get_item.return_value = {'Item': item}
 
         with patch.object(handler, 'dynamodb', mock_db):
             handler._provider_model_cache.clear()
-            result = handler.get_provider_model('openai')
-            assert result == 'gpt-5-mini'
+            return handler.get_provider_model('openai')
+
+    def test_returns_default_when_no_config(self, mock_dynamodb):
+        """Falls back to default model when no config exists."""
+        assert self._configured_model(mock_dynamodb, {}) == 'gpt-5-mini'
 
     def test_returns_configured_model(self, mock_dynamodb):
         """Returns model from ProviderConfig table when set."""
-        mock_db, mock_table = mock_dynamodb
-        mock_table.get_item.return_value = {
-            'Item': {'provider_id': 'openai', 'model': 'gpt-5.2'}
-        }
+        assert self._configured_model(mock_dynamodb, {'provider_id': 'openai', 'model': 'gpt-5.2'}) == 'gpt-5.2'
 
-        with patch.object(handler, 'dynamodb', mock_db):
-            handler._provider_model_cache.clear()
-            result = handler.get_provider_model('openai')
-            assert result == 'gpt-5.2'
+    def test_falls_back_to_the_default_when_the_configured_model_is_blank(self, mock_dynamodb):
+        """An empty ``model`` attribute means "not configured", not "use the empty string"."""
+        assert self._configured_model(mock_dynamodb, {'provider_id': 'openai', 'model': ''}) == 'gpt-5-mini'
 
     def test_caches_result(self, mock_dynamodb):
         """Model is cached after first lookup."""
@@ -180,8 +181,9 @@ class TestIsProviderEnabled:
     def test_does_not_leak_exception_details_in_log_message(
         self, mock_dynamodb, caplog,
     ):
-        """Logs error type only, not the full str(e) which can contain table
-        names or other infra details."""
+        """The message line names the error type only, never str(e), which
+        can contain table names or other infra details; those stay in the
+        traceback the record carries alongside it."""
         import logging
 
         mock_db, mock_table = mock_dynamodb
@@ -198,25 +200,25 @@ class TestIsProviderEnabled:
         )
 
 
+@pytest.fixture
+def openai_client():
+    """A stub OpenAI client answering every Responses API call with an empty output, patched into the handler."""
+    client = MagicMock()
+    client.responses_with_web_search.return_value = {'output': [], 'output_text': 'response', 'usage': {}}
+
+    with patch.object(handler, 'OpenAIClient', return_value=client):
+        yield client
+
+
 class TestQueryOpenAIModel:
     """Tests for query_openai() model parameter."""
 
-    def test_uses_provided_model(self):
+    def test_uses_provided_model(self, openai_client):
         """query_openai passes the model parameter to the client."""
+        result = handler.query_openai('test keyword', 'fake-key', model='gpt-5.2')
 
-        mock_client = MagicMock()
-        mock_client.responses_with_web_search.return_value = {
-            'output': [],
-            'output_text': 'test response',
-            'usage': {},
-        }
-
-        with patch.object(handler, 'OpenAIClient', return_value=mock_client):
-            result = handler.query_openai('test keyword', 'fake-key', model='gpt-5.2')
-
-        mock_client.responses_with_web_search.assert_called_once()
-        call_kwargs = mock_client.responses_with_web_search.call_args
-        assert call_kwargs.kwargs.get('model') or call_kwargs[1].get('model') == 'gpt-5.2'
+        openai_client.responses_with_web_search.assert_called_once()
+        assert openai_client.responses_with_web_search.call_args.kwargs['model'] == 'gpt-5.2'
         assert result['metadata']['model'] == 'gpt-5.2'
 
     def test_default_model_is_gpt41(self):
@@ -230,24 +232,14 @@ class TestQueryOpenAIModel:
 class TestQueryTemplateSubstitution:
     """Tests for query template {keyword} substitution across providers."""
 
-    def test_openai_uses_template(self):
+    def test_openai_uses_template(self, openai_client):
         """query_openai substitutes {keyword} in template."""
+        handler.query_openai('hotels in malaga', 'key', query_template='As a family traveler, find me {keyword}')
 
-        mock_client = MagicMock()
-        mock_client.responses_with_web_search.return_value = {
-            'output': [], 'output_text': 'response', 'usage': {},
-        }
-
-        with patch.object(handler, 'OpenAIClient', return_value=mock_client):
-            handler.query_openai(
-                'hotels in malaga', 'key',
-                query_template='As a family traveler, find me {keyword}'
-            )
-
-        call_args = mock_client.responses_with_web_search.call_args
+        call_args = openai_client.responses_with_web_search.call_args
         assert call_args.kwargs.get('query') == 'As a family traveler, find me hotels in malaga'
 
-    def test_openai_default_query_without_template(self):
+    def test_openai_default_query_without_template(self, openai_client):
         """query_openai sends the bare keyword when no template is provided.
 
         This previously asserted `'Search for information about: hotels in
@@ -257,16 +249,9 @@ class TestQueryTemplateSubstitution:
         exists to produce. Parity is now pinned in
         `test_provider_query_parity.py`.
         """
+        handler.query_openai('hotels in malaga', 'key')
 
-        mock_client = MagicMock()
-        mock_client.responses_with_web_search.return_value = {
-            'output': [], 'output_text': 'response', 'usage': {},
-        }
-
-        with patch.object(handler, 'OpenAIClient', return_value=mock_client):
-            handler.query_openai('hotels in malaga', 'key')
-
-        call_args = mock_client.responses_with_web_search.call_args
+        call_args = openai_client.responses_with_web_search.call_args
         assert call_args.kwargs.get('query') == 'hotels in malaga'
 
     def test_perplexity_uses_template(self):
@@ -305,84 +290,82 @@ class TestQueryTemplateSubstitution:
         assert call_args.args[0] == 'From the US, find me hotels in malaga'
 
 
+@pytest.fixture
+def store_search_results():
+    """Storage stubbed to succeed; yields the mock so a test can read what would have been stored."""
+    with patch.object(handler, 'store_search_results', return_value=True) as mock_store:
+        yield mock_store
+
+
+@pytest.fixture
+def execute_all_providers(store_search_results):
+    """The provider fan-out stubbed to return no results, with storage stubbed too; yields the mock."""
+    with patch.object(handler, 'execute_all_providers', return_value=[]) as mock_exec:
+        yield mock_exec
+
+
+def _prompt(prompt_id: str, name: str) -> dict:
+    """A query prompt whose template is ``"<name> {keyword}"``."""
+    return {'id': prompt_id, 'name': name, 'template': f'{name} {{keyword}}'}
+
+
+def _search_event(*prompts: dict) -> dict:
+    """A search event for keyword ``test``; ``prompts`` become its query_prompts, none leaves the key out."""
+    event: dict[str, Any] = {'keyword': 'test', 'timestamp': '2026-01-01T00:00:00Z'}
+    if prompts:
+        event['query_prompts'] = list(prompts)
+    return event
+
+
+def _successful_result(response: str) -> dict:
+    """One successful OpenAI provider result carrying ``response`` and no citations."""
+    return {
+        'provider': 'openai', 'response': response, 'citations': [],
+        'status': 'success', 'raw_response': None, 'metadata': {},
+    }
+
+
 class TestHandlerPromptLoop:
     """Tests for handler() looping over query prompts."""
 
-    def test_handler_with_no_prompts_uses_default(self):
+    def test_handler_with_no_prompts_uses_default(self, execute_all_providers):
         """When no query_prompts in event, uses default single query."""
+        handler.handler(_search_event(), {})
 
-        with patch.object(handler, 'execute_all_providers', return_value=[]) as mock_exec, \
-             patch.object(handler, 'store_search_results', return_value=True):
-            handler.handler({
-                'keyword': 'test',
-                'timestamp': '2026-01-01T00:00:00Z',
-            }, {})
+        execute_all_providers.assert_called_once()
+        assert execute_all_providers.call_args.kwargs.get('query_template') is None
 
-        mock_exec.assert_called_once()
-        call_kwargs = mock_exec.call_args
-        assert call_kwargs.kwargs.get('query_template') is None
-
-    def test_handler_with_multiple_prompts(self):
+    def test_handler_with_multiple_prompts(self, execute_all_providers):
         """Handler calls execute_all_providers once per prompt."""
+        handler.handler(_search_event(_prompt('p1', 'Family'), _prompt('p2', 'Business')), {})
 
-        with patch.object(handler, 'execute_all_providers', return_value=[]) as mock_exec, \
-             patch.object(handler, 'store_search_results', return_value=True):
-            handler.handler({
-                'keyword': 'test',
-                'timestamp': '2026-01-01T00:00:00Z',
-                'query_prompts': [
-                    {'id': 'p1', 'name': 'Family', 'template': 'Family {keyword}'},
-                    {'id': 'p2', 'name': 'Business', 'template': 'Business {keyword}'},
-                ],
-            }, {})
+        assert execute_all_providers.call_count == 2
 
-        assert mock_exec.call_count == 2
-
-    def test_handler_tags_results_with_prompt_id(self):
+    def test_handler_tags_results_with_prompt_id(self, execute_all_providers, store_search_results):
         """Results are tagged with query_prompt_id and query_prompt_name."""
+        execute_all_providers.return_value = [_successful_result('test')]
 
-        fake_result = {
-            'provider': 'openai', 'response': 'test', 'citations': [],
-            'status': 'success', 'raw_response': None, 'metadata': {},
-        }
-
-        with patch.object(handler, 'execute_all_providers', return_value=[fake_result.copy()]), \
-             patch.object(handler, 'store_search_results', return_value=True) as mock_store:
-            handler.handler({
-                'keyword': 'test',
-                'timestamp': '2026-01-01T00:00:00Z',
-                'query_prompts': [
-                    {'id': 'p1', 'name': 'Family', 'template': 'Family {keyword}'},
-                ],
-            }, {})
+        handler.handler(_search_event(_prompt('p1', 'Family')), {})
 
         # Check that store was called with results tagged with prompt info
-        stored_results = mock_store.call_args.args[2]
+        stored_results = store_search_results.call_args.args[2]
         assert stored_results[0]['query_prompt_id'] == 'p1'
         assert stored_results[0]['query_prompt_name'] == 'Family'
 
-    def test_handler_continues_on_prompt_error(self):
+    def test_handler_continues_on_prompt_error(self, execute_all_providers):
         """If one prompt fails, handler continues with remaining prompts."""
-
         call_count = 0
+
         def side_effect(*args, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
-                raise Exception('API error')
-            return [{'provider': 'openai', 'response': 'ok', 'citations': [],
-                     'status': 'success', 'raw_response': None, 'metadata': {}}]
+                raise RuntimeError('API error')
+            return [_successful_result('ok')]
 
-        with patch.object(handler, 'execute_all_providers', side_effect=side_effect), \
-             patch.object(handler, 'store_search_results', return_value=True):
-            result = handler.handler({
-                'keyword': 'test',
-                'timestamp': '2026-01-01T00:00:00Z',
-                'query_prompts': [
-                    {'id': 'p1', 'name': 'Failing', 'template': 'Fail {keyword}'},
-                    {'id': 'p2', 'name': 'Working', 'template': 'Work {keyword}'},
-                ],
-            }, {})
+        execute_all_providers.side_effect = side_effect
+
+        result = handler.handler(_search_event(_prompt('p1', 'Failing'), _prompt('p2', 'Working')), {})
 
         # Should have results from the second prompt only
         assert len(result['results']) == 1

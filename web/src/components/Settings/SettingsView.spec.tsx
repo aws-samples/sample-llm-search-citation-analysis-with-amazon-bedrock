@@ -5,6 +5,7 @@ import {
   render, screen
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ComponentProps } from 'react';
 import { SettingsView } from './SettingsView';
 import {
   buildAdminMembership,
@@ -39,6 +40,15 @@ const mockUseProviderConfig = vi.mocked(useProviderConfig);
 const mockUseIsAdmin = vi.mocked(useIsAdmin);
 
 const NON_ADMIN_TABS = ['keywords', 'brand', 'providers', 'alerts'];
+const NON_ADMIN = buildAdminMembership({ isAdmin: false });
+
+type SettingsViewProps = ComponentProps<typeof SettingsView>;
+
+/** Mounts the view for the given member (an admin by default) with the given props. */
+function renderSettingsView(membership = buildAdminMembership(), props: Partial<SettingsViewProps> = {}) {
+  mockUseIsAdmin.mockReturnValue(membership);
+  render(<SettingsView {...buildSettingsViewProps(props)} />);
+}
 
 beforeEach(() => {
   mockUseBrandConfig.mockReturnValue(buildBrandConfigHookResult());
@@ -49,7 +59,7 @@ beforeEach(() => {
 describe('SettingsView', () => {
   describe('tab navigation', () => {
     it.each([...NON_ADMIN_TABS, 'users'])('renders the %s tab button', (tab) => {
-      render(<SettingsView {...buildSettingsViewProps()} />);
+      renderSettingsView();
 
       expect(screen.getByRole('button', { name: new RegExp(tab, 'i') })).toBeInTheDocument();
     });
@@ -148,58 +158,46 @@ describe('SettingsView', () => {
 
   describe('users tab visibility', () => {
     it('hides the users tab from non-admin users', () => {
-      mockUseIsAdmin.mockReturnValue(buildAdminMembership({ isAdmin: false }));
-
-      render(<SettingsView {...buildSettingsViewProps()} />);
+      renderSettingsView(NON_ADMIN);
 
       expect(screen.queryByRole('button', { name: /users/i })).not.toBeInTheDocument();
     });
 
     it('hides the users tab while admin membership is still loading', () => {
-      mockUseIsAdmin.mockReturnValue(buildAdminMembership({
+      renderSettingsView(buildAdminMembership({
         isAdmin: false,
         loading: true,
       }));
-
-      render(<SettingsView {...buildSettingsViewProps()} />);
 
       expect(screen.queryByRole('button', { name: /users/i })).not.toBeInTheDocument();
     });
 
     it.each(NON_ADMIN_TABS)('keeps the %s tab available to non-admin users', (tab) => {
-      mockUseIsAdmin.mockReturnValue(buildAdminMembership({ isAdmin: false }));
-
-      render(<SettingsView {...buildSettingsViewProps()} />);
+      renderSettingsView(NON_ADMIN);
 
       expect(screen.getByRole('button', { name: new RegExp(tab, 'i') })).toBeInTheDocument();
     });
 
     it('passes read-only membership to alerts for non-admin users', () => {
-      mockUseIsAdmin.mockReturnValue(buildAdminMembership({ isAdmin: false }));
-
-      render(<SettingsView {...buildSettingsViewProps({ initialTab: 'alerts' })} />);
+      renderSettingsView(NON_ADMIN, { initialTab: 'alerts' });
 
       expect(screen.getByTestId('alerts-config')).toHaveTextContent('Alerts Config admin: false');
     });
 
     it('falls back to keywords when a non-admin deep-links to the users tab', () => {
-      mockUseIsAdmin.mockReturnValue(buildAdminMembership({ isAdmin: false }));
-
-      render(<SettingsView {...buildSettingsViewProps({ initialTab: 'users' })} />);
+      renderSettingsView(NON_ADMIN, { initialTab: 'users' });
 
       expect(screen.getByTestId('keywords-manager')).toBeInTheDocument();
     });
 
     it('does not render user management for a non-admin deep link', () => {
-      mockUseIsAdmin.mockReturnValue(buildAdminMembership({ isAdmin: false }));
-
-      render(<SettingsView {...buildSettingsViewProps({ initialTab: 'users' })} />);
+      renderSettingsView(NON_ADMIN, { initialTab: 'users' });
 
       expect(screen.queryByTestId('users-config')).not.toBeInTheDocument();
     });
 
     it('honours an admin deep link straight to the users tab', () => {
-      render(<SettingsView {...buildSettingsViewProps({ initialTab: 'users' })} />);
+      renderSettingsView(buildAdminMembership(), { initialTab: 'users' });
 
       expect(screen.getByTestId('users-config')).toBeInTheDocument();
     });
@@ -214,32 +212,31 @@ describe('SettingsView admin-only provider controls', () => {
   });
 
   async function renderProvidersTab(membership = buildAdminMembership()) {
-    mockUseIsAdmin.mockReturnValue(membership);
-    render(<SettingsView {...buildSettingsViewProps()} />);
+    renderSettingsView(membership);
     await userEvent.click(screen.getByRole('button', { name: /providers/i }));
   }
 
   it('hides the provider enable toggle from non-admin users', async () => {
-    await renderProvidersTab(buildAdminMembership({ isAdmin: false }));
+    await renderProvidersTab(NON_ADMIN);
 
     expect(screen.queryByRole('button', { name: /^Disable$/i })).not.toBeInTheDocument();
   });
 
   it('hides the API key button from non-admin users', async () => {
-    await renderProvidersTab(buildAdminMembership({ isAdmin: false }));
+    await renderProvidersTab(NON_ADMIN);
 
     expect(screen.queryByRole('button', { name: /Update Key/i })).not.toBeInTheDocument();
   });
 
   it('still shows provider status to non-admin users', async () => {
-    await renderProvidersTab(buildAdminMembership({ isAdmin: false }));
+    await renderProvidersTab(NON_ADMIN);
 
     expect(screen.getByText('Configured')).toBeInTheDocument();
     expect(screen.getByText('****1234')).toBeInTheDocument();
   });
 
   it('explains to non-admin users that changes need an administrator', async () => {
-    await renderProvidersTab(buildAdminMembership({ isAdmin: false }));
+    await renderProvidersTab(NON_ADMIN);
 
     expect(screen.getByText(/Changing provider settings requires an administrator/i)).toBeInTheDocument();
   });

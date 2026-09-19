@@ -41,6 +41,13 @@ describe('alert runtime decoders', () => {
       })).toBe(true);
     });
 
+    it('accepts an alert without an optional entity', () => {
+      expect(isAlertsResponse({
+        items: [buildAlertItem({ entity: undefined })],
+        count: 1,
+      })).toBe(true);
+    });
+
     it.each([
       ['null', null],
       ['an array', []],
@@ -61,6 +68,10 @@ describe('alert runtime decoders', () => {
       ['id', {
         ...buildAlertItem(),
         id: 42,
+      }],
+      ['group id', {
+        ...buildAlertItem(),
+        group_id: '',
       }],
       ['group name', {
         ...buildAlertItem(),
@@ -94,6 +105,18 @@ describe('alert runtime decoders', () => {
         ...buildAlertItem(),
         previous: undefined,
       }],
+      ['current value', {
+        ...buildAlertItem(),
+        current: undefined,
+      }],
+      ['delta value', {
+        ...buildAlertItem(),
+        delta: { amount: 12 },
+      }],
+      ['threshold value', {
+        ...buildAlertItem(),
+        threshold: [10],
+      }],
       ['message', {
         ...buildAlertItem(),
         message: '',
@@ -101,6 +124,13 @@ describe('alert runtime decoders', () => {
     ])('rejects an alert when its required %s is malformed', (_field, alertCandidate) => {
       expect(isAlertsResponse({
         items: [alertCandidate],
+        count: 1,
+      })).toBe(false);
+    });
+
+    it('rejects an alert when its optional entity is blank', () => {
+      expect(isAlertsResponse({
+        items: [buildAlertItem({ entity: '   ' })],
         count: 1,
       })).toBe(false);
     });

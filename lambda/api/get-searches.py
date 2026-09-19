@@ -5,7 +5,9 @@ Returns search results with optional filtering by keyword or provider.
 """
 
 import logging
+import os
 import sys
+from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -16,15 +18,14 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import success_response
 from shared.config import PROVIDERS
 from shared.decorators import api_handler, optional_limit, validate
-from shared.env_vars import resolve_table_env
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-# Fail-fast: Required environment variables (audit #12 canonical naming).
-SEARCH_RESULTS_TABLE = resolve_table_env('DYNAMODB_TABLE_SEARCH_RESULTS', 'SEARCH_RESULTS_TABLE')
+# Fail-fast: Required environment variables
+SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 table = dynamodb.Table(SEARCH_RESULTS_TABLE)
 
 
@@ -41,7 +42,7 @@ def handler(event, context, keyword=None, provider=None, query_prompt_id=None, l
 
     Returns list of search results with optional filters.
     """
-    items = []
+    items: list[dict[str, Any]] = []
 
     if keyword:
         # Query by keyword (partition key) - most efficient
@@ -81,8 +82,8 @@ def handler(event, context, keyword=None, provider=None, query_prompt_id=None, l
                     Limit=items_per_provider
                 )
                 items.extend(response.get('Items', []))
-            except Exception as e:
-                logger.error(f"Error querying provider {p}: {e!s}")
+            except Exception:
+                logger.exception(f"Error querying provider {p}")
                 continue
 
     # Sort by timestamp descending

@@ -44,7 +44,6 @@ from testing.module_loader import load_handler_module
 # Table names the module reads at import time.
 setdefault_env({
     'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
-    'DYNAMODB_TABLE_CITATIONS': 'test-citations',
     'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
     'DYNAMODB_TABLE_CONTENT_STUDIO': 'test-content-studio',
     'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',

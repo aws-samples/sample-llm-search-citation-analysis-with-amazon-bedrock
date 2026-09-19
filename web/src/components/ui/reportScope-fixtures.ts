@@ -15,3 +15,7 @@ export function groupScope(groupId: string): ReportScope {
     groupId,
   };
 }
+
+
+/** The all-keywords scope, re-exported so a spec takes every scope from this one module. */
+export { ALL_SCOPE } from './reportScope';

@@ -1,6 +1,6 @@
 {
   "name": "citation-analysis-system",
-  "version": "2.11.0",
+  "version": "2.12.0",
   "description": "Serverless citation analysis system using AWS CDK",
   "scripts": {
     "build": "tsc",
@@ -10,7 +10,10 @@
     "duplication": "jscpd bin lib web/src",
     "duplication:tests": "jscpd --config .jscpd.tests.json bin lib web/src",
     "deadcode": "knip",
-    "validate": "npm run lint && npm run build && npm run test && npm run duplication && npm run duplication:tests && npm run deadcode && npm run validate:web && npm run validate:python",
+    "deadcode:prod": "knip --production --strict",
+    "contracts": "bash scripts/check-contracts.sh",
+    "mutation:python": "bash scripts/mutate-python.sh",
+    "validate": "npm run lint && npm run build && npm run test && npm run duplication && npm run duplication:tests && npm run deadcode && npm run deadcode:prod && npm run contracts && npm run validate:web && npm run validate:python",
     "validate:web": "npm --prefix web run validate",
     "validate:python": "bash scripts/validate-python.sh",
     "cdk": "cdk",

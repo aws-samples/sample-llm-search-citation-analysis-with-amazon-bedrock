@@ -1,28 +1,50 @@
 import {
-  useEffect, useMemo, useState 
+  useEffect, useState 
 } from 'react';
 import { useVisibilityMetrics } from '../../hooks/useVisibilityMetrics';
 import { useHistoricalTrends } from '../../hooks/useHistoricalTrends';
 import { usePersonaRankings } from '../../hooks/usePersonaRankings';
-import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import type {
-  Keyword, ReportScope 
+  GroupVisibilityResponse, Keyword, ReportScope, VisibilityMetricsResponse, VisibilityResponse 
 } from '../../types';
 import { isGroupVisibilityResponse } from '../../types/domain/visibility';
 import {
-  BrandRow, SummaryCards, TrendChart 
-} from './VisibilityComponents';
-import {
   GroupOverview, type HistoryRangeDays 
 } from './GroupOverview';
+import { KeywordVisibilityPanel } from './KeywordVisibilityPanel';
 import { PersonaSelector } from '../Personas/PersonaSelector';
-import { PersonaComparisonChart } from './PersonaComparisonChart';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
 import {
   ALL_SCOPE, decodeReportScope, describeReportScope, encodeReportScope, isReportScopeAvailable 
 } from '../ui/reportScope';
+import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
 
 interface Props { readonly keywords: Array<Keyword>; }
+
+interface SplitVisibility {
+  readonly groupVisibility: GroupVisibilityResponse | null;
+  readonly keywordVisibility: VisibilityMetricsResponse | null;
+}
+
+/** A response is a group overview or one keyword's metrics; the other view gets null. */
+function splitVisibility(visibility: VisibilityResponse | null): SplitVisibility {
+  if (visibility === null) {
+    return {
+      groupVisibility: null,
+      keywordVisibility: null 
+    };
+  }
+  if (isGroupVisibilityResponse(visibility)) {
+    return {
+      groupVisibility: visibility,
+      keywordVisibility: null 
+    };
+  }
+  return {
+    groupVisibility: null,
+    keywordVisibility: visibility 
+  };
+}
 
 /**
  * Visibility dashboard. The scope selector picks a keyword (the classic
@@ -34,7 +56,9 @@ export function VisibilityDashboard({ keywords }: Props) {
   const [scope, setScope] = useState<ReportScope>(ALL_SCOPE);
   const [rangeDays, setRangeDays] = useState<HistoryRangeDays>(30);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
-  const { groups } = useKeywordGroups();
+  const {
+    activeKeywords, groups 
+  } = useKeywordScopeOptions(keywords);
   const {
     data: visibility, loading: visLoading, error: visError, fetchVisibilityMetrics 
   } = useVisibilityMetrics();
@@ -44,11 +68,6 @@ export function VisibilityDashboard({ keywords }: Props) {
   const {
     data: personaRankings, fetchPersonaRankings 
   } = usePersonaRankings();
-
-  const activeKeywords = useMemo(
-    () => keywords.filter((keyword) => !keyword.status || keyword.status === 'active'),
-    [keywords]
-  );
 
   // A deleted group or keyword falls back to the whole account.
   useEffect(() => {
@@ -73,9 +92,9 @@ export function VisibilityDashboard({ keywords }: Props) {
     if (current.kind === 'keyword') fetchPersonaRankings(current.keyword);
   }, [scopeKey, fetchPersonaRankings]);
 
-  const hasTrendData = trends?.trend_data && trends.trend_data.length > 0;
-  const groupVisibility = visibility && isGroupVisibilityResponse(visibility) ? visibility : null;
-  const keywordVisibility = visibility && !isGroupVisibilityResponse(visibility) ? visibility : null;
+  const {
+    groupVisibility, keywordVisibility 
+  } = splitVisibility(visibility);
 
   return (
     <div className="space-y-6">
@@ -113,46 +132,7 @@ export function VisibilityDashboard({ keywords }: Props) {
       )}
 
       {keywordVisibility && (
-        <>
-          <SummaryCards
-            firstPartyScore={keywordVisibility.summary.first_party_avg_score}
-            competitorScore={keywordVisibility.summary.competitor_avg_score}
-            shareOfVoice={keywordVisibility.summary.first_party_total_sov}
-            prominence={keywordVisibility.prominence}
-            trendDirection={trends?.trend_direction}
-            trendChange={trends?.summary?.change}
-          />
-
-          {hasTrendData && <TrendChart data={trends.trend_data} />}
-
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-200">
-              <h3 className="text-lg font-medium">Brand Rankings</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Brand</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Score</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Share of Voice</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Best Rank</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Mentions</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Providers</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {keywordVisibility.brands.length > 0 ? keywordVisibility.brands.map((brand, index) => <BrandRow key={brand.name} brand={brand} index={index} />) : (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No brand data available.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <PersonaComparisonChart data={personaRankings} />
-        </>
+        <KeywordVisibilityPanel visibility={keywordVisibility} trends={trends} personaRankings={personaRankings} />
       )}
     </div>
   );

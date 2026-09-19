@@ -6,11 +6,9 @@ import {
 } from '@testing-library/react';
 import { useContentStudio } from './useContentStudio';
 import {
-  mockContentIdea, createMockFetch 
+  mockContentIdea, createMockFetch, renderContentStudio 
 } from './useContentStudio-fixtures';
-import {
-  createDeferredResponse, createMockJsonResponse 
-} from '../test/fetchResponses';
+import { createMockJsonResponse } from '../test/fetchResponses';
 
 interface GenerateResult {
   success: boolean;
@@ -19,7 +17,9 @@ interface GenerateResult {
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import {
+  deferAuthenticatedFetch, mockAuthenticatedFetch 
+} from '../test/infrastructureMock';
 
 type ContentStudioHook = ReturnType<typeof useContentStudio>;
 
@@ -54,9 +54,7 @@ describe('useContentStudio', () => {
 
   describe('fetchIdeas', () => {
     it('fetches and returns content ideas', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useContentStudio());
+      const { result } = renderContentStudio();
 
       const mutations = { ideas: [] as typeof mockContentIdea[] };
       await act(async () => {
@@ -69,8 +67,7 @@ describe('useContentStudio', () => {
     });
 
     it('sets loading true while fetching', async () => {
-      const deferred = createDeferredResponse();
-      mockAuthenticatedFetch.mockImplementation(() => deferred.promise);
+      const deferred = deferAuthenticatedFetch();
 
       const { result } = renderHook(() => useContentStudio());
 
@@ -88,24 +85,20 @@ describe('useContentStudio', () => {
       await waitFor(() => expect(result.current.loading).toBe(false));
     });
 
-    it('sets error when fetch fails', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
-
-      const { result } = renderHook(() => useContentStudio());
+    it('sets the content server-error message when the fetch fails', async () => {
+      const { result } = renderContentStudio(createMockFetch({ shouldFail: true }));
 
       await act(async () => {
         await result.current.fetchIdeas();
       });
 
-      expect(result.current.error).toBeTruthy();
+      expect(result.current.error).toBe('Content generation failed');
     });
   });
 
   describe('fetchHistory', () => {
     it('fetches and returns content history', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useContentStudio());
+      const { result } = renderContentStudio();
 
       await act(async () => {
         await result.current.fetchHistory();
@@ -116,9 +109,7 @@ describe('useContentStudio', () => {
     });
 
     it('includes limit in URL params', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useContentStudio());
+      const { result } = renderContentStudio();
 
       await act(async () => {
         await result.current.fetchHistory(50);
@@ -131,9 +122,7 @@ describe('useContentStudio', () => {
 
   describe('generateContent', () => {
     it('generates content and returns result', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useContentStudio());
+      const { result } = renderContentStudio();
 
       const holder: { value: GenerateResult | null } = { value: null };
       await act(async () => {
@@ -145,9 +134,7 @@ describe('useContentStudio', () => {
     });
 
     it('sets generating false after completion', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useContentStudio());
+      const { result } = renderContentStudio();
 
       await act(async () => {
         await result.current.generateContent(mockContentIdea);
@@ -157,9 +144,7 @@ describe('useContentStudio', () => {
     });
 
     it('returns null when generation fails', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFailGenerate: true }));
-
-      const { result } = renderHook(() => useContentStudio());
+      const { result } = renderContentStudio(createMockFetch({ shouldFailGenerate: true }));
 
       const mutations = { generateResult: undefined as unknown };
       await act(async () => {
@@ -172,8 +157,7 @@ describe('useContentStudio', () => {
 
   describe('markViewed and deleteContent', () => {
     it.each(mutationOperations)('%s resolves true when the server accepts the request', async (_operation, run) => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-      const { result } = renderHook(() => useContentStudio());
+      const { result } = renderContentStudio();
 
       const success = await act(() => run(result.current));
 
@@ -181,8 +165,7 @@ describe('useContentStudio', () => {
     });
 
     it.each(mutationOperations)('%s resolves false when the server rejects the request', async (_operation, run) => {
-      mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({}, 500));
-      const { result } = renderHook(() => useContentStudio());
+      const { result } = renderContentStudio(vi.fn().mockResolvedValue(createMockJsonResponse({}, 500)));
 
       const success = await act(() => run(result.current));
 
@@ -192,9 +175,7 @@ describe('useContentStudio', () => {
 
   describe('refreshGeneratingItems', () => {
     it('is a callable function', () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useContentStudio());
+      const { result } = renderContentStudio();
 
       expect(typeof result.current.refreshGeneratingItems).toBe('function');
     });

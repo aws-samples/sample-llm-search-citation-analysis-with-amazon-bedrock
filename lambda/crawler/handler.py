@@ -1,10 +1,13 @@
 """Crawler Lambda for AgentCore browser extraction and page analysis."""
 
+import base64
 import json
 import logging
 import os
 import time
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Literal
+from urllib.parse import urlparse
 
 import boto3
 
@@ -29,6 +32,34 @@ logger.setLevel(logging.INFO)
 config = LambdaConfig()
 dynamodb: Any = boto3.resource('dynamodb', region_name=config.region)
 SCREENSHOTS_BUCKET = os.environ['SCREENSHOTS_BUCKET']
+
+
+@dataclass(frozen=True)
+class _CrawlTarget:
+    """The citation URL being crawled and the evidence persisted with every artifact."""
+
+    url: str
+    keyword: str
+    citation_count: int
+    citing_providers: list[str]
+
+
+@dataclass(frozen=True)
+class _PageCapture:
+    """What the browser produced for one citation before its session was stopped.
+
+    ``blocked`` and ``error`` carry the verdict of the browser step that ended
+    the capture; ``captured`` carries the extracted page for persistence.
+    """
+
+    status: Literal['blocked', 'error', 'captured']
+    page_load_time_ms: int
+    block_reason: str = 'captcha'
+    error_message: str = ''
+    title: str = ''
+    content: str = ''
+    content_length: int = 0
+    screenshot: dict[str, Any] = field(default_factory=dict)
 
 
 def analyze_content_combined(content: str, title: str, url: str, keyword: str) -> tuple[str, dict[str, Any]]:
@@ -81,25 +112,23 @@ SEO_ANALYSIS:
                 summary_end = response_text.find("{")
             summary = response_text[summary_start:summary_end].strip()
 
+        # Parse SEO analysis JSON via shared helper (handles markdown fences,
+        # truncation, and wrong-type responses consistently with other lambdas)
         parsed_analysis = parse_llm_json(response_text, expect="object")
-        seo_analysis = parsed_analysis if isinstance(parsed_analysis, dict) else {}
+        seo_analysis: dict[str, Any] = parsed_analysis if isinstance(parsed_analysis, dict) else {}
         if not seo_analysis:
             logger.warning("Could not parse SEO JSON for crawled page")
-
-        logger.info("Combined crawl analysis completed")
-        return summary, seo_analysis
-
-    except Exception as exc:
-        logger.error("Error in combined crawl analysis: %s", exc)
+    except Exception:
+        logger.exception("Error in combined crawl analysis")
         return "", {}
+
+    logger.info("Combined crawl analysis completed")
+    return summary, seo_analysis
 
 
 def upload_screenshot_to_s3(screenshot_base64: str, url: str, timestamp: str) -> str:
     """Upload a base64-encoded screenshot under the crawler evidence prefix."""
     try:
-        import base64
-        from urllib.parse import urlparse
-
         screenshot_bytes = base64.b64decode(screenshot_base64)
         parsed_url = urlparse(url)
         domain = parsed_url.netloc.replace('www.', '')
@@ -117,14 +146,13 @@ def upload_screenshot_to_s3(screenshot_base64: str, url: str, timestamp: str) ->
                 'timestamp': timestamp,
             },
         )
-
-        s3_uri = f"s3://{SCREENSHOTS_BUCKET}/{s3_key}"
-        logger.info("Crawler screenshot uploaded")
-        return s3_uri
-
-    except Exception as exc:
-        logger.error("Error uploading screenshot: %s", exc)
+    except Exception:
+        logger.exception("Error uploading screenshot")
         return ""
+
+    s3_uri = f"s3://{SCREENSHOTS_BUCKET}/{s3_key}"
+    logger.info("Crawler screenshot uploaded")
+    return s3_uri
 
 
 def _load_block_patterns() -> dict[str, list[str]]:
@@ -133,8 +161,8 @@ def _load_block_patterns() -> dict[str, list[str]]:
     try:
         with open(patterns_path, encoding='utf-8') as file_handle:
             data = json.load(file_handle)
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.error("Failed to load block_patterns.json: %s", exc)
+    except (OSError, json.JSONDecodeError):
+        logger.exception("Failed to load block_patterns.json")
         return {}
 
     return {
@@ -221,6 +249,18 @@ def store_crawled_content(
     logger.info("Crawled content stored")
 
 
+def _crawl_target(citation: dict[str, Any]) -> _CrawlTarget:
+    """Read the crawl target and its citation evidence from one Map item."""
+    raw_url = citation.get('normalized_url')
+    raw_keyword = citation.get('keyword', '')
+    return _CrawlTarget(
+        url=raw_url if isinstance(raw_url, str) else '',
+        keyword=raw_keyword if isinstance(raw_keyword, str) and raw_keyword.strip() else 'unknown',
+        citation_count=citation.get('citation_count', 0),
+        citing_providers=citation.get('citing_providers', []),
+    )
+
+
 def _cached_result(url: str, cached: CachedCrawl) -> dict[str, Any]:
     """Build the compact Step Functions result for a cache hit."""
     result: dict[str, Any] = {
@@ -236,191 +276,248 @@ def _cached_result(url: str, cached: CachedCrawl) -> dict[str, Any]:
     return result
 
 
-def _refresh_cached_citation_metadata(
-    table: Any,
-    url: str,
-    cached: CachedCrawl,
-    citation_count: int,
-    citing_providers: list[str],
-) -> None:
+def _refresh_cached_citation_metadata(table: Any, target: _CrawlTarget, cached: CachedCrawl) -> None:
     """Keep cache artifact citation metrics aligned with current evidence."""
     try:
         table.update_item(
             Key={
-                'normalized_url': url,
+                'normalized_url': target.url,
                 'crawled_at': cached['crawled_at'],
             },
             UpdateExpression='SET citation_count = :count, citing_providers = :providers',
             ExpressionAttributeValues={
-                ':count': citation_count,
-                ':providers': citing_providers,
+                ':count': target.citation_count,
+                ':providers': target.citing_providers,
             },
         )
-    except Exception as exc:
-        logger.warning("Could not refresh cached citation metadata (%s)", type(exc).__name__)
+    except Exception:
+        logger.exception("Could not refresh cached citation metadata")
+
+
+def _lookup_cached_crawl(target: _CrawlTarget) -> dict[str, Any] | None:
+    """Return the compact result for a fresh cached verdict, or None to crawl."""
+    table = dynamodb.Table(config.crawled_content_table)
+    cached = find_fresh_crawl(
+        table,
+        config.crawl_cache_index_name,
+        target.url,
+        target.keyword,
+        success_freshness_days=config.crawl_freshness_days,
+        blocked_freshness_days=config.crawl_blocked_freshness_days,
+    )
+    if cached is None:
+        return None
+    if cached['status'] == 'success':
+        _refresh_cached_citation_metadata(table, target, cached)
+    return _cached_result(target.url, cached)
 
 
 def _error_result(
-    *,
-    url: str,
-    keyword: str,
-    citation_count: int,
-    citing_providers: list[str],
+    target: _CrawlTarget,
     error_message: str,
+    *,
     title: str = '',
     page_load_time_ms: int | None = None,
 ) -> dict[str, Any]:
     """Persist and return one compact crawl error."""
     store_crawled_content(
-        normalized_url=url,
-        keyword=keyword,
+        normalized_url=target.url,
+        keyword=target.keyword,
         title=title,
         content='',
         summary='',
-        citation_count=citation_count,
-        citing_providers=citing_providers,
+        citation_count=target.citation_count,
+        citing_providers=target.citing_providers,
         status='error',
         error_message=error_message,
         page_load_time_ms=page_load_time_ms,
     )
     return {
-        'url': url,
+        'url': target.url,
         'status': 'error',
         'error': error_message,
     }
 
 
-def _navigation_blocked_result(
-    *,
-    url: str,
-    keyword: str,
-    citation_count: int,
-    citing_providers: list[str],
-    block_reason: str,
+def _blocked_result(
+    target: _CrawlTarget,
+    block_reason: str | None,
     page_load_time_ms: int,
+    *,
+    title: str = '',
+    content: str = '',
+    content_length: int | None = None,
+    screenshot_s3_uri: str | None = None,
 ) -> dict[str, Any]:
-    """Persist an early navigation block without converting it to an error."""
+    """Persist a publisher block (with any captured evidence) without converting it to an error."""
     store_crawled_content(
-        normalized_url=url,
-        keyword=keyword,
-        title='',
-        content='',
+        normalized_url=target.url,
+        keyword=target.keyword,
+        title=title,
+        content=content,
         summary='',
-        citation_count=citation_count,
-        citing_providers=citing_providers,
+        citation_count=target.citation_count,
+        citing_providers=target.citing_providers,
         status='blocked',
         error_message=f'Bot detection - {block_reason}',
         page_load_time_ms=page_load_time_ms,
+        content_length=content_length,
+        screenshot_s3_uri=screenshot_s3_uri,
         block_reason=block_reason,
     )
     return {
-        'url': url,
+        'url': target.url,
         'status': 'blocked',
         'block_reason': block_reason,
     }
 
 
+def _store_crawl_failure(target: _CrawlTarget, error_message: str) -> dict[str, Any]:
+    """Persist an unexpected crawl failure, still answering compactly if the write fails."""
+    try:
+        return _error_result(target, error_message)
+    except Exception:
+        logger.exception("Failed to store crawler error status")
+        return {
+            'url': target.url,
+            'status': 'error',
+            'error': error_message,
+        }
+
+
+def _capture_page(browser_tools: SimpleBrowserTools, url: str) -> _PageCapture:
+    """Start the signed browser and capture the cited page; persists nothing."""
+    start_time = time.monotonic()
+    browser_tools.create_browser()
+    browser_tools.initialize_browser_session()
+
+    nav_result = browser_tools.navigate_to_url(url)
+    page_load_time_ms = int((time.monotonic() - start_time) * 1000)
+    if nav_result['status'] == 'blocked':
+        return _PageCapture(
+            status='blocked',
+            page_load_time_ms=page_load_time_ms,
+            block_reason=nav_result.get('block_reason', 'captcha'),
+        )
+    if nav_result['status'] != 'success':
+        error_message = nav_result.get('error', 'Navigation failed')
+        logger.error("Navigation failed: %s", error_message)
+        return _PageCapture(status='error', page_load_time_ms=page_load_time_ms, error_message=error_message)
+
+    content_result = browser_tools.extract_page_content()
+    if content_result['status'] != 'success':
+        error_message = content_result.get('error', 'Content extraction failed')
+        logger.error("Content extraction failed: %s", error_message)
+        return _PageCapture(
+            status='error',
+            page_load_time_ms=page_load_time_ms,
+            error_message=error_message,
+            title=nav_result.get('title', ''),
+        )
+
+    content_length = content_result.get('content_length', 0)
+    logger.info("Extracted %s visible characters", content_length)
+
+    screenshot_result = browser_tools.take_screenshot()
+    if screenshot_result['status'] != 'success':
+        logger.warning("Screenshot capture failed: %s", screenshot_result.get('error'))
+
+    return _PageCapture(
+        status='captured',
+        page_load_time_ms=page_load_time_ms,
+        title=content_result.get('title', ''),
+        content=content_result.get('content', ''),
+        content_length=content_length,
+        screenshot=screenshot_result,
+    )
+
+
+def _persist_capture(
+    target: _CrawlTarget,
+    capture: _PageCapture,
+    navigation_guard_error: str | None,
+) -> dict[str, Any]:
+    """Turn a finished capture into a stored artifact and the compact Step Functions result."""
+    if capture.status == 'blocked':
+        return _blocked_result(target, capture.block_reason, capture.page_load_time_ms)
+    if capture.status == 'error':
+        return _error_result(
+            target,
+            capture.error_message,
+            title=capture.title,
+            page_load_time_ms=capture.page_load_time_ms,
+        )
+    if navigation_guard_error:
+        return _error_result(
+            target,
+            navigation_guard_error,
+            title=capture.title,
+            page_load_time_ms=capture.page_load_time_ms,
+        )
+
+    screenshot_s3_uri = None
+    if capture.screenshot['status'] == 'success':
+        screenshot_s3_uri = upload_screenshot_to_s3(
+            capture.screenshot['screenshot_base64'],
+            target.url,
+            get_timestamp(),
+        )
+
+    is_blocked, block_reason = detect_blocked_page(capture.content, capture.title)
+    if is_blocked:
+        logger.warning("Publisher block page detected (%s)", block_reason)
+        return _blocked_result(
+            target,
+            block_reason,
+            capture.page_load_time_ms,
+            title=capture.title,
+            content=capture.content,
+            content_length=capture.content_length,
+            screenshot_s3_uri=screenshot_s3_uri,
+        )
+
+    summary, seo_analysis = analyze_content_combined(capture.content, capture.title, target.url, target.keyword)
+    analysis_status = 'complete' if summary and seo_analysis else 'failed'
+    store_crawled_content(
+        normalized_url=target.url,
+        keyword=target.keyword,
+        title=capture.title,
+        content=capture.content,
+        summary=summary,
+        citation_count=target.citation_count,
+        citing_providers=target.citing_providers,
+        status='success',
+        page_load_time_ms=capture.page_load_time_ms,
+        content_length=capture.content_length,
+        screenshot_s3_uri=screenshot_s3_uri,
+        seo_analysis=seo_analysis,
+        analysis_status=analysis_status,
+    )
+    return {
+        'url': target.url,
+        'status': 'success',
+    }
+
+
 def crawl_citation(citation: dict[str, Any]) -> dict[str, Any]:
     """Return a cached verdict or crawl and persist one citation URL."""
-    raw_url = citation.get('normalized_url')
-    url = raw_url if isinstance(raw_url, str) else ''
-    raw_keyword = citation.get('keyword', '')
-    keyword = raw_keyword if isinstance(raw_keyword, str) and raw_keyword.strip() else 'unknown'
-    citation_count = citation.get('citation_count', 0)
-    citing_providers = citation.get('citing_providers', [])
+    target = _crawl_target(citation)
     browser_tools: SimpleBrowserTools | None = None
 
     logger.info("Starting citation crawl")
 
     try:
-        is_safe, validation_error = validate_url_safe(url)
+        is_safe, validation_error = validate_url_safe(target.url)
         if not is_safe:
             logger.warning("Citation URL rejected by crawler safety policy")
-            return _error_result(
-                url=url,
-                keyword=keyword,
-                citation_count=citation_count,
-                citing_providers=citing_providers,
-                error_message=validation_error,
-            )
+            return _error_result(target, validation_error)
 
-        table = dynamodb.Table(config.crawled_content_table)
-        cached = find_fresh_crawl(
-            table,
-            config.crawl_cache_index_name,
-            url,
-            keyword,
-            success_freshness_days=config.crawl_freshness_days,
-            blocked_freshness_days=config.crawl_blocked_freshness_days,
-        )
+        cached = _lookup_cached_crawl(target)
         if cached is not None:
-            if cached['status'] == 'success':
-                _refresh_cached_citation_metadata(
-                    table,
-                    url,
-                    cached,
-                    citation_count,
-                    citing_providers,
-                )
-            return _cached_result(url, cached)
+            return cached
 
         browser_tools = SimpleBrowserTools(config)
-        start_time = time.monotonic()
-        browser_tools.create_browser()
-        browser_tools.initialize_browser_session()
-
-        nav_result = browser_tools.navigate_to_url(url)
-        page_load_time_ms = int((time.monotonic() - start_time) * 1000)
-        if nav_result['status'] == 'blocked':
-            block_reason = nav_result.get('block_reason', 'captcha')
-            browser_tools.cleanup()
-            browser_tools = None
-            return _navigation_blocked_result(
-                url=url,
-                keyword=keyword,
-                citation_count=citation_count,
-                citing_providers=citing_providers,
-                block_reason=block_reason,
-                page_load_time_ms=page_load_time_ms,
-            )
-        if nav_result['status'] != 'success':
-            error_message = nav_result.get('error', 'Navigation failed')
-            logger.error("Navigation failed: %s", error_message)
-            browser_tools.cleanup()
-            browser_tools = None
-            return _error_result(
-                url=url,
-                keyword=keyword,
-                citation_count=citation_count,
-                citing_providers=citing_providers,
-                error_message=error_message,
-                page_load_time_ms=page_load_time_ms,
-            )
-
-        content_result = browser_tools.extract_page_content()
-        if content_result['status'] != 'success':
-            error_message = content_result.get('error', 'Content extraction failed')
-            logger.error("Content extraction failed: %s", error_message)
-            browser_tools.cleanup()
-            browser_tools = None
-            return _error_result(
-                url=url,
-                keyword=keyword,
-                citation_count=citation_count,
-                citing_providers=citing_providers,
-                error_message=error_message,
-                title=nav_result.get('title', ''),
-                page_load_time_ms=page_load_time_ms,
-            )
-
-        title = content_result.get('title', '')
-        content = content_result.get('content', '')
-        content_length = content_result.get('content_length', 0)
-        logger.info("Extracted %s visible characters", content_length)
-
-        screenshot_result = browser_tools.take_screenshot()
-        if screenshot_result['status'] != 'success':
-            logger.warning("Screenshot capture failed: %s", screenshot_result.get('error'))
+        capture = _capture_page(browser_tools, target.url)
 
         # Freeze the captured page before any external write or model work.
         # This closes the final redirect race and stops paid AgentCore time
@@ -428,91 +525,14 @@ def crawl_citation(citation: dict[str, Any]) -> dict[str, Any]:
         browser_tools.cleanup()
         navigation_guard_error = browser_tools.navigation_guard_error
         browser_tools = None
-        if navigation_guard_error:
-            return _error_result(
-                url=url,
-                keyword=keyword,
-                citation_count=citation_count,
-                citing_providers=citing_providers,
-                error_message=navigation_guard_error,
-                title=title,
-                page_load_time_ms=page_load_time_ms,
-            )
-
-        screenshot_s3_uri = None
-        if screenshot_result['status'] == 'success':
-            screenshot_s3_uri = upload_screenshot_to_s3(
-                screenshot_result['screenshot_base64'],
-                url,
-                get_timestamp(),
-            )
-
-        is_blocked, block_reason = detect_blocked_page(content, title)
-        if is_blocked:
-            logger.warning("Publisher block page detected (%s)", block_reason)
-            store_crawled_content(
-                normalized_url=url,
-                keyword=keyword,
-                title=title,
-                content=content,
-                summary='',
-                citation_count=citation_count,
-                citing_providers=citing_providers,
-                status='blocked',
-                error_message=f'Bot detection - {block_reason}',
-                page_load_time_ms=page_load_time_ms,
-                content_length=content_length,
-                screenshot_s3_uri=screenshot_s3_uri,
-                block_reason=block_reason,
-            )
-            return {
-                'url': url,
-                'status': 'blocked',
-                'block_reason': block_reason,
-            }
-
-        summary, seo_analysis = analyze_content_combined(content, title, url, keyword)
-        analysis_status = 'complete' if summary and seo_analysis else 'failed'
-        store_crawled_content(
-            normalized_url=url,
-            keyword=keyword,
-            title=title,
-            content=content,
-            summary=summary,
-            citation_count=citation_count,
-            citing_providers=citing_providers,
-            status='success',
-            page_load_time_ms=page_load_time_ms,
-            content_length=content_length,
-            screenshot_s3_uri=screenshot_s3_uri,
-            seo_analysis=seo_analysis,
-            analysis_status=analysis_status,
-        )
-        return {
-            'url': url,
-            'status': 'success',
-        }
+        return _persist_capture(target, capture, navigation_guard_error)
 
     except Exception as exc:
         if browser_tools is not None:
             browser_tools.cleanup()
             browser_tools = None
-        logger.error("Error crawling citation: %s", exc)
-        try:
-            return _error_result(
-                url=url,
-                keyword=keyword,
-                citation_count=citation_count,
-                citing_providers=citing_providers,
-                error_message=str(exc),
-            )
-        except Exception as store_error:
-            logger.error("Failed to store crawler error status: %s", store_error)
-            return {
-                'url': url,
-                'status': 'error',
-                'error': str(exc),
-            }
+        logger.exception("Error crawling citation")
+        return _store_crawl_failure(target, str(exc))
 
     finally:
         if browser_tools is not None:
@@ -536,8 +556,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     try:
         result = crawl_citation(citation)
-        logger.info("Crawl completed with status %s", result.get('status'))
-        return result
     except Exception as exc:
         log_error(exc, f"crawling URL {url}", event)
         raise
+
+    logger.info("Crawl completed with status %s", result.get('status'))
+    return result

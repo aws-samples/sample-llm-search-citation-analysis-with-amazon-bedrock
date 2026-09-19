@@ -1,7 +1,19 @@
 import { vi } from 'vitest';
+import { renderHook } from '@testing-library/react';
 import type {
   S3BrowseResponse, RawResponseContent 
 } from '../types';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { useRawResponses } from './useRawResponses';
+
+/**
+ * Points the mocked network layer at `fetch` (the default browse/file/download
+ * mock unless a spec hands in another) and renders the hook.
+ */
+export function renderRawResponses(fetch: ReturnType<typeof createMockFetch> = createMockFetch()) {
+  mockAuthenticatedFetch.mockImplementation(fetch);
+  return renderHook(() => useRawResponses());
+}
 
 export const mockBrowseResponse: S3BrowseResponse = {
   prefix: 'responses/',

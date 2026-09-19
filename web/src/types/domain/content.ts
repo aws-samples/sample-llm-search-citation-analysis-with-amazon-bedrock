@@ -15,13 +15,10 @@ export interface ContentIdea {
   competitor_brands?: string[];
   competitor_urls?: string[];
   providers_missing?: string[];
-  providers_present?: string[];
   current_rank?: number;
   actionable: boolean;
   content_angle?: ContentAngle;
   persona_name?: string;
-  persona_id?: string;
-  gap_reference?: string;
   group_id?: string;
   group_name?: string;
   keyword_ids?: string[];
@@ -57,11 +54,9 @@ export interface GeneratedContent {
 export interface ContentStudioHistory {
   id: string;
   keyword: string;
-  idea_type: string;
   idea_title: string;
   content_angle: string;
   generated_content: GeneratedContent;
-  raw_content: string;
   competitor_sources_used: number;
   status: ContentStatus;
   viewed: boolean;

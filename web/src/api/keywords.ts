@@ -15,12 +15,12 @@ export interface PromoteKeywordsOptions {
   keywords: PromoteKeywordEntry[];
   status?: NonNullable<Keyword['status']>;
   priority?: NonNullable<KeywordExtended['priority']>;
-  /** Keyword groups the new keywords join (e.g. the hotel a research run was for). */
+  /** Keyword groups every promoted keyword should join. */
   groupIds?: string[];
   signal?: AbortSignal;
 }
 
-interface PromoteKeywordsResponse {
+export interface PromoteKeywordsResponse {
   created: number;
   skipped: number;
   created_keywords: Keyword[];
@@ -28,6 +28,8 @@ interface PromoteKeywordsResponse {
     keyword: string;
     reason: 'duplicate' | 'empty';
   }[];
+  /** Absent on API versions predating grouped-existing promotion. */
+  grouped_keywords?: string[];
 }
 
 export interface PromotionOutcome {
@@ -36,6 +38,7 @@ export interface PromotionOutcome {
   createdKeywords: string[];
   createdItems: Keyword[];
   skippedKeywords: string[];
+  groupedKeywords: string[];
 }
 
 export async function promoteKeywords(
@@ -66,5 +69,6 @@ export async function promoteKeywords(
     skippedKeywords: wire.skipped_keywords
       .filter((keyword) => keyword.reason === 'duplicate')
       .map((keyword) => keyword.keyword),
+    groupedKeywords: wire.grouped_keywords ?? [],
   };
 }

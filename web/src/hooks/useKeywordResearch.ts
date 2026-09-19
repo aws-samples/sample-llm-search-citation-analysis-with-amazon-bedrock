@@ -12,7 +12,7 @@ import {
 import type { ResearchType } from '../api/keywordResearch';
 import { pollResearchJob } from './researchPolling';
 import type {
-  KeywordExpansionResult, CompetitorAnalysisResult, KeywordResearchItem 
+  CompetitorAnalysis, CompetitorAnalysisResult, KeywordExpansionResult, KeywordResearchItem
 } from '../types';
 
 /**
@@ -88,18 +88,30 @@ function toExpansionResult(job: KeywordResearchItem): KeywordExpansionResult {
   };
 }
 
+const NO_ANALYSIS: CompetitorAnalysis = {};
+
+/** The four keyword sections of a competitor analysis, empty where the run found nothing. */
+function competitorKeywordSections(
+  analysis: CompetitorAnalysis
+): Pick<CompetitorAnalysisResult, 'primary_keywords' | 'secondary_keywords' | 'longtail_keywords' | 'content_gaps'> {
+  return {
+    primary_keywords: analysis.primary_keywords ?? [],
+    secondary_keywords: analysis.secondary_keywords ?? [],
+    longtail_keywords: analysis.longtail_keywords ?? [],
+    content_gaps: analysis.content_gaps ?? [],
+  };
+}
+
 function toCompetitorResult(job: KeywordResearchItem): CompetitorAnalysisResult {
+  const analysis = job.analysis ?? NO_ANALYSIS;
   return {
     id: job.id,
     url: job.url ?? '',
     domain: job.domain ?? '',
     provider: job.provider ?? '',
     keyword_count: job.keyword_count ?? 0,
-    industry: job.analysis?.industry ?? job.industry ?? '',
-    primary_keywords: job.analysis?.primary_keywords ?? [],
-    secondary_keywords: job.analysis?.secondary_keywords ?? [],
-    longtail_keywords: job.analysis?.longtail_keywords ?? [],
-    content_gaps: job.analysis?.content_gaps ?? [],
+    industry: analysis.industry ?? job.industry ?? '',
+    ...competitorKeywordSections(analysis),
   };
 }
 

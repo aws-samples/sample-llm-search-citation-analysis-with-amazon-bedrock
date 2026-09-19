@@ -6,7 +6,6 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CitationGaps } from './CitationGaps';
-import { buildProps } from './CitationGaps-fixtures';
 
 vi.mock('../../hooks/useCitationGaps', () => ({useCitationGaps: vi.fn(),}));
 vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
@@ -15,45 +14,43 @@ import { useCitationGaps } from '../../hooks/useCitationGaps';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
 import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
+import {
+  MARRIOTT_ARTICLE_GAP, buildCitationGapsHookResult, buildCitationGapsResponse, buildProps 
+} from './CitationGaps-fixtures';
 
-const mockUseCitationGaps = useCitationGaps as ReturnType<typeof vi.fn>;
+const mockUseCitationGaps = vi.mocked(useCitationGaps);
 const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
+
+/** Renders the view with the hook answering `overrides`; returns its `fetchCitationGaps` spy. */
+function renderWithGaps(overrides: Parameters<typeof buildCitationGapsHookResult>[0] = {}) {
+  const hookResult = buildCitationGapsHookResult(overrides);
+  mockUseCitationGaps.mockReturnValue(hookResult);
+  render(<CitationGaps {...buildProps()} />);
+  return hookResult.fetchCitationGaps;
+}
 
 describe('CitationGaps', () => {
   beforeEach(() => {
-    mockUseCitationGaps.mockReturnValue({
-      data: null,
-      loading: false,
-      error: null,
-      fetchCitationGaps: vi.fn(),
-    });
+    mockUseCitationGaps.mockReturnValue(buildCitationGapsHookResult());
     mockUseKeywordGroups.mockReturnValue(buildKeywordGroupsHookResult());
   });
 
   describe('initial render', () => {
     it('renders title and description', () => {
-      render(<CitationGaps {...buildProps()} />);
+      renderWithGaps();
 
       expect(screen.getByText('Citation Gap Analysis')).toBeInTheDocument();
       expect(screen.getByText(/Discover sources that AI cites/)).toBeInTheDocument();
     });
 
     it('renders the scope filter with all keywords, groups and keywords', () => {
-      render(<CitationGaps {...buildProps()} />);
+      renderWithGaps();
 
       expect(renderedScopeOptionLabels('Filter by keyword or group')).toStrictEqual(['All keywords', 'Hotel Coruña (1)', 'hotels', 'resorts']);
     });
 
     it('fetches gaps on mount', () => {
-      const fetchCitationGaps = vi.fn();
-      mockUseCitationGaps.mockReturnValue({
-        data: null,
-        loading: false,
-        error: null,
-        fetchCitationGaps,
-      });
-
-      render(<CitationGaps {...buildProps()} />);
+      const fetchCitationGaps = renderWithGaps();
 
       expect(fetchCitationGaps).toHaveBeenCalledWith({ kind: 'all' }, 20);
     });
@@ -61,14 +58,7 @@ describe('CitationGaps', () => {
 
   describe('loading state', () => {
     it('shows loading message when loading', () => {
-      mockUseCitationGaps.mockReturnValue({
-        data: null,
-        loading: true,
-        error: null,
-        fetchCitationGaps: vi.fn(),
-      });
-
-      render(<CitationGaps {...buildProps()} />);
+      renderWithGaps({ loading: true });
 
       expect(screen.getByText('Analyzing citation gaps...')).toBeInTheDocument();
     });
@@ -76,14 +66,7 @@ describe('CitationGaps', () => {
 
   describe('error state', () => {
     it('shows error message when error occurs', () => {
-      mockUseCitationGaps.mockReturnValue({
-        data: null,
-        loading: false,
-        error: 'Failed to fetch gaps',
-        fetchCitationGaps: vi.fn(),
-      });
-
-      render(<CitationGaps {...buildProps()} />);
+      renderWithGaps({ error: 'Failed to fetch gaps' });
 
       expect(screen.getByText('Failed to fetch gaps')).toBeInTheDocument();
     });
@@ -91,22 +74,16 @@ describe('CitationGaps', () => {
 
   describe('with data', () => {
     it('renders gap stats when data available', () => {
-      mockUseCitationGaps.mockReturnValue({
-        data: {
+      renderWithGaps({
+        data: buildCitationGapsResponse({
           summary: {
             gap_count: 10,
             high_priority_gaps: 3,
             covered_count: 5,
             coverage_rate: 33.3 
           },
-          gaps: [],
-        },
-        loading: false,
-        error: null,
-        fetchCitationGaps: vi.fn(),
+        }),
       });
-
-      render(<CitationGaps {...buildProps()} />);
 
       expect(screen.getByText('10')).toBeInTheDocument();
       expect(screen.getByText('Total Gaps')).toBeInTheDocument();
@@ -115,38 +92,13 @@ describe('CitationGaps', () => {
     });
 
     it('renders gap cards when gaps exist', () => {
-      mockUseCitationGaps.mockReturnValue({
-        data: {
-          gaps: [
-            {
-              url: 'https://example.com/article',
-              title: 'Test Article',
-              priority: 'high',
-              domain: 'example.com',
-              competitor_brands: ['Marriott'],
-              providers: ['openai'],
-            },
-          ],
-        },
-        loading: false,
-        error: null,
-        fetchCitationGaps: vi.fn(),
-      });
-
-      render(<CitationGaps {...buildProps()} />);
+      renderWithGaps({ data: buildCitationGapsResponse({ gaps: [MARRIOTT_ARTICLE_GAP] }) });
 
       expect(screen.getByText('Test Article')).toBeInTheDocument();
     });
 
     it('shows no gaps message when gaps array is empty', () => {
-      mockUseCitationGaps.mockReturnValue({
-        data: {gaps: []},
-        loading: false,
-        error: null,
-        fetchCitationGaps: vi.fn(),
-      });
-
-      render(<CitationGaps {...buildProps()} />);
+      renderWithGaps({ data: buildCitationGapsResponse() });
 
       expect(screen.getByText(/No citation gaps found/)).toBeInTheDocument();
     });
@@ -154,18 +106,9 @@ describe('CitationGaps', () => {
 
   describe('keyword filter', () => {
     it('fetches gaps for selected keyword', async () => {
-      const fetchCitationGaps = vi.fn();
-      mockUseCitationGaps.mockReturnValue({
-        data: null,
-        loading: false,
-        error: null,
-        fetchCitationGaps,
-      });
+      const fetchCitationGaps = renderWithGaps();
 
-      render(<CitationGaps {...buildProps()} />);
-
-      const select = screen.getByRole('combobox');
-      await userEvent.selectOptions(select, 'keyword:hotels');
+      await userEvent.selectOptions(screen.getByRole('combobox'), 'keyword:hotels');
 
       expect(fetchCitationGaps).toHaveBeenCalledWith({
         kind: 'keyword',

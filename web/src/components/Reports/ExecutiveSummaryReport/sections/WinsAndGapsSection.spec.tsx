@@ -4,6 +4,7 @@ import {
 import {
   render, screen, within 
 } from '@testing-library/react';
+import { expectRendersNothing } from '../../../../test/renderNothing';
 import { WinsAndGapsSection } from './WinsAndGapsSection';
 import {
   buildMover, buildOverview
@@ -73,10 +74,7 @@ describe('WinsAndGapsSection — empty-side messaging', () => {
 
 describe('WinsAndGapsSection — placeholder states', () => {
   it('returns null when data is null', () => {
-    const { container } = render(
-      <WinsAndGapsSection data={null} loading={false} error={null} />,
-    );
-    expect(container.firstChild).toBeNull();
+    expectRendersNothing(<WinsAndGapsSection data={null} loading={false} error={null} />);
   });
 
   it('renders the loading placeholder when loading is true', () => {

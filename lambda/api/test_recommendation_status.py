@@ -35,10 +35,8 @@ def _load_module():
     ):
         mod = load_handler_module(_API_DIR, 'recommendation-status.py')
 
-    # Override the module-level dynamodb reference so subsequent
-    # invocations use the mock too.
-    mod.dynamodb = mock_dynamodb
-    mod.RECOMMENDATION_STATUS_TABLE = 'test-rec-status'
+    # The module bound `dynamodb` and RECOMMENDATION_STATUS_TABLE while those
+    # patches were active, so every later call already goes to the mock.
     return mod, mock_table, mock_dynamodb
 
 

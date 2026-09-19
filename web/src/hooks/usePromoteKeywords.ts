@@ -40,7 +40,9 @@ export type KeywordReconciliation = () => void | Promise<void>;
 export const KEYWORD_RECONCILIATION_CONTEXT =
   createContext<KeywordReconciliation | undefined>(undefined);
 
-export function promotionSuccessMessage(outcome: PromotionOutcome): string {
+export function promotionSuccessMessage<
+  PromotionCounts extends Pick<PromotionOutcome, 'created' | 'skipped'>
+>(outcome: PromotionCounts): string {
   const added = `${outcome.created} ${outcome.created === 1 ? 'keyword' : 'keywords'} added`;
   return outcome.skipped > 0 ? `${added}, ${outcome.skipped} already existed` : added;
 }
@@ -62,6 +64,7 @@ export type SelectionAction =
   | {
     type: 'reconcile';
     created: string[];
+    grouped: string[];
     skipped: string[];
   };
 
@@ -110,11 +113,12 @@ function toggleSelection(state: SelectionState, keyword: string): SelectionState
 function reconcileSelection(
   state: SelectionState,
   created: string[],
+  grouped: string[],
   skipped: string[]
 ): SelectionState {
-  const createdKeys = new Set(created.map(keywordSelectionKey));
+  const successfulKeys = new Set([...created, ...grouped].map(keywordSelectionKey));
   const retainedKeys = new Set(
-    skipped.map(keywordSelectionKey).filter((key) => !createdKeys.has(key))
+    skipped.map(keywordSelectionKey).filter((key) => !successfulKeys.has(key))
   );
 
   return {
@@ -139,23 +143,29 @@ export function reduceSelection(state: SelectionState, action: SelectionAction):
       };
     }
     case 'reconcile':
-      return reconcileSelection(state, action.created, action.skipped);
+      return reconcileSelection(state, action.created, action.grouped, action.skipped);
     default:
       return state;
   }
 }
 
-function findResearchKeyword(
-  key: string,
+/**
+ * The research rows behind the selected keys, in selection order; null when a
+ * key no longer has a row because the results changed under the selection.
+ */
+function selectedResearchKeywords(
+  selected: readonly string[],
   availableKeywords: readonly ResearchKeyword[]
-): ResearchKeyword | undefined {
-  return availableKeywords.find(
+): ResearchKeyword[] | null {
+  const rows = selected.map((key) => availableKeywords.find(
     (candidate) => keywordSelectionKey(candidate.keyword) === key
-  );
+  ));
+  return rows.every((row): row is ResearchKeyword => row !== undefined) ? rows : null;
 }
 
 interface PromotionFailure {
   message: string;
+  /** Whether the server may still have completed the request, so the active keywords must be re-read. */
   reconcile: boolean;
 }
 
@@ -178,10 +188,12 @@ function describePromotionFailure(requestError: unknown): PromotionFailure {
   };
 }
 
+/** Which promote button is in flight: the ticked rows, or the whole proposal. */
 export type PromotionAction = 'selected' | 'proposal';
 
 export interface UsePromoteKeywords {
-  selected: string[];
+  /** Selection keys (see `keywordSelectionKey`) of the ticked rows, for the tables' checkboxes. */
+  selectedKeys: Set<string>;
   selectedCount: number;
   atLimit: boolean;
   canPromote: boolean;
@@ -234,6 +246,7 @@ export const usePromoteKeywords = (
   const {
     selected, limitMessage
   } = selectionState;
+  const selectedKeys = useMemo(() => new Set(selected), [selected]);
 
   const clearSuccessTimer = useCallback(() => {
     if (successTimerRef.current !== null) {
@@ -314,14 +327,44 @@ export const usePromoteKeywords = (
     replaceSelection([]);
   }, [replaceSelection]);
 
+  const applyPromotionOutcome = useCallback((result: PromotionOutcome, action: PromotionAction) => {
+    setOutcome(result);
+    successTimerRef.current = setTimeout(() => {
+      successTimerRef.current = null;
+      if (mountedRef.current) setOutcome(null);
+    }, PROMOTION_SUCCESS_MESSAGE_MS);
+
+    // Promoting the ticked rows unticks what was added and keeps the rows the
+    // server skipped for a retry; a whole-proposal promotion leaves the
+    // selection alone.
+    if (action === 'selected') {
+      dispatchSelection({
+        type: 'reconcile',
+        created: result.createdKeywords,
+        grouped: result.groupedKeywords,
+        skipped: result.skippedKeywords,
+      });
+    }
+
+    // A whole-proposal promotion also creates the unticked rows as inactive
+    // keywords; only the active ones join the caller's keyword list.
+    const createdActiveItems = action === 'proposal'
+      ? result.createdItems.filter((item) => item.status === 'active')
+      : result.createdItems;
+    if (createdActiveItems.length > 0) onKeywordsAdded?.(createdActiveItems);
+    requestKeywordReconciliation();
+  }, [onKeywordsAdded, requestKeywordReconciliation]);
+
   const performPromotion = useCallback(async (
     requestedKeywords: PromoteKeywordEntry[],
-    action: PromotionAction,
-    reconcileAfterSuccess: boolean
+    action: PromotionAction
   ): Promise<void> => {
     if (activeRequestRef.current !== null) return;
 
     const controller = new AbortController();
+    // A later request, a cleared selection or an unmount supersedes this
+    // request: whatever it settles with is dropped.
+    const isSuperseded = () => activeRequestRef.current !== controller || !mountedRef.current;
     activeRequestRef.current = controller;
     setError(null);
     clearSuccessTimer();
@@ -340,29 +383,10 @@ export const usePromoteKeywords = (
         signal: controller.signal,
       });
 
-      if (activeRequestRef.current !== controller || !mountedRef.current) return;
-
-      setOutcome(result);
-      successTimerRef.current = setTimeout(() => {
-        successTimerRef.current = null;
-        if (mountedRef.current) setOutcome(null);
-      }, PROMOTION_SUCCESS_MESSAGE_MS);
-
-      if (reconcileAfterSuccess) {
-        dispatchSelection({
-          type: 'reconcile',
-          created: result.createdKeywords,
-          skipped: result.skippedKeywords,
-        });
-      }
-
-      const createdActiveItems = action === 'proposal'
-        ? result.createdItems.filter((item) => item.status === 'active')
-        : result.createdItems;
-      if (createdActiveItems.length > 0) onKeywordsAdded?.(createdActiveItems);
-      requestKeywordReconciliation();
+      if (isSuperseded()) return;
+      applyPromotionOutcome(result, action);
     } catch (requestError) {
-      if (activeRequestRef.current !== controller || !mountedRef.current) return;
+      if (isSuperseded()) return;
 
       const failure = describePromotionFailure(requestError);
       setError(failure.message);
@@ -377,7 +401,7 @@ export const usePromoteKeywords = (
     }
   }, [
     groupIds,
-    onKeywordsAdded,
+    applyPromotionOutcome,
     clearRequestTimer,
     clearSuccessTimer,
     requestKeywordReconciliation,
@@ -390,10 +414,8 @@ export const usePromoteKeywords = (
       return;
     }
 
-    const requestedKeywords = selected.map(
-      (key) => findResearchKeyword(key, availableUniqueKeywords)
-    );
-    if (requestedKeywords.some((keyword) => keyword === undefined)) {
+    const requestedKeywords = selectedResearchKeywords(selected, availableUniqueKeywords);
+    if (requestedKeywords === null) {
       dispatchSelection({
         type: 'retain',
         available: availableKeys,
@@ -402,13 +424,7 @@ export const usePromoteKeywords = (
       return;
     }
 
-    await performPromotion(
-      requestedKeywords.filter(
-        (keyword): keyword is ResearchKeyword => keyword !== undefined
-      ),
-      'selected',
-      true
-    );
+    await performPromotion(requestedKeywords, 'selected');
   }, [selected, availableUniqueKeywords, availableKeys, performPromotion]);
 
   const promoteProposal = useCallback(async (): Promise<void> => {
@@ -418,17 +434,17 @@ export const usePromoteKeywords = (
       return;
     }
 
-    const selectedKeys = new Set(selected);
-    const requestedKeywords: PromoteKeywordEntry[] = availableUniqueKeywords.map((keyword) => ({
+    // Every proposal row is promoted; the ticked ones as active keywords, the
+    // rest as inactive ones.
+    await performPromotion(availableUniqueKeywords.map((keyword) => ({
       ...keyword,
       status: selectedKeys.has(keywordSelectionKey(keyword.keyword)) ? 'active' : 'inactive',
-    }));
-    await performPromotion(requestedKeywords, 'proposal', false);
-  }, [availableUniqueKeywords, selected, performPromotion]);
+    })), 'proposal');
+  }, [availableUniqueKeywords, selectedKeys, performPromotion]);
 
   const submitting = submittingAction !== null;
   return {
-    selected,
+    selectedKeys,
     selectedCount: selected.length,
     atLimit: selected.length === SELECTION_LIMIT,
     canPromote: selected.length > 0 && !submitting,

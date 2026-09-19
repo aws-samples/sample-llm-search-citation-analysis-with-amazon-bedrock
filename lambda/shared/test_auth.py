@@ -352,10 +352,8 @@ class TestRequireGroupMisuse:
     """Guard rails against a gate that silently authorizes everyone."""
 
     def test_raises_value_error_when_constructed_with_no_groups(self) -> None:
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(ValueError, match='needs at least one group name'):
             require_group()
-
-        assert 'at least one group' in str(excinfo.value)
 
 
 class TestGetCallerIdentity:

@@ -21,6 +21,7 @@ import pytest
 
 from shared import safe_fetch
 from shared.safe_fetch import MAX_REDIRECT_HOPS, fetch_following_validated_redirects, host_matches
+from testing.assertions import present
 
 PUBLIC_IP = '93.184.216.34'
 INTERNAL_REDIRECT = 'http://169.254.169.254/latest/meta-data/'
@@ -56,7 +57,7 @@ class TestRedirectsAreStillFollowed:
             )
 
         assert error == ''
-        assert response.status_code == 200
+        assert present(response).status_code == 200
         assert final_url == 'https://real-site.example/article'
 
     def test_closes_streamed_redirect_before_requesting_next_hop(self) -> None:
@@ -139,7 +140,7 @@ class TestRedirectsToRestrictedAddressesAreBlocked:
 
         assert response is None
         assert final_url is None
-        assert error
+        assert error == 'URL points to a restricted address'
 
     def test_refuses_a_redirect_to_loopback(self) -> None:
         """Where the Lambda Runtime API lives."""
@@ -149,7 +150,7 @@ class TestRedirectsToRestrictedAddressesAreBlocked:
         ):
             _, _, error = fetch_following_validated_redirects('https://attacker.example/page')
 
-        assert error
+        assert error == 'URL points to a restricted address'
 
     def test_does_not_request_the_restricted_destination(self) -> None:
         """
@@ -172,13 +173,13 @@ class TestRedirectsToRestrictedAddressesAreBlocked:
         ):
             _, _, error = fetch_following_validated_redirects('https://attacker.example/page')
 
-        assert error
+        assert error == 'URL scheme must be http or https, got: file'
 
     def test_refuses_an_internal_url_before_the_first_request(self) -> None:
         with patch('shared.safe_fetch.requests.request') as mock_request:
             _, _, error = fetch_following_validated_redirects(INTERNAL_REDIRECT)
 
-        assert error
+        assert error == 'URL points to a restricted address'
         assert mock_request.call_count == 0
 
     def test_error_message_does_not_name_the_blocked_destination(self) -> None:
@@ -224,7 +225,7 @@ class TestChainLimits:
             response, _, error = fetch_following_validated_redirects('https://site.example/')
 
         assert error == ''
-        assert response.status_code == 302
+        assert present(response).status_code == 302
 
 
 class TestTransportFailures:

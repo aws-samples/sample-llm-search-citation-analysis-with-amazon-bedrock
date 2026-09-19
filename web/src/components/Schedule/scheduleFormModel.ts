@@ -1,6 +1,6 @@
 import type { SchedulePayload } from '../../api/executions';
 import type {
-  AnalysisScope, KeywordGroup, Schedule, ScheduleFormData, ScheduleFrequency
+  AnalysisScope, KeywordGroup, Schedule, ScheduleForm, ScheduleFormData, ScheduleFrequency
 } from '../../types';
 
 /**
@@ -85,20 +85,37 @@ export function defaultScheduleFormData(): ScheduleFormData {
   };
 }
 
+/** Timing fields from a stored form; legacy gaps fall back to the defaults. */
+function timingFromScheduleForm(
+  form: ScheduleForm | null,
+  defaults: ScheduleFormData
+): Pick<ScheduleFormData, 'frequency' | 'time' | 'day_of_week' | 'day_of_month'> {
+  return {
+    frequency: form?.frequency ?? defaults.frequency,
+    time: form?.time ?? defaults.time,
+    day_of_week: form?.day_of_week ?? defaults.day_of_week,
+    day_of_month: String(form?.day_of_month ?? defaults.day_of_month),
+  };
+}
+
 /** Form state for editing an existing schedule; legacy gaps fall back to defaults. */
 export function formDataFromSchedule(schedule: Schedule): ScheduleFormData {
   const defaults = defaultScheduleFormData();
   const form = schedule.form;
   return {
     display_name: schedule.display_name,
-    frequency: form?.frequency ?? defaults.frequency,
-    time: form?.time ?? defaults.time,
+    ...timingFromScheduleForm(form, defaults),
     timezone: form?.timezone ?? schedule.timezone ?? defaults.timezone,
-    day_of_week: form?.day_of_week ?? defaults.day_of_week,
-    day_of_month: String(form?.day_of_month ?? defaults.day_of_month),
     enabled: schedule.enabled,
     scope: schedule.scope ?? defaults.scope,
   };
+}
+
+/** The problem with the scope selection, or null when it names at least one target. */
+function scopeProblem(scope: AnalysisScope): string | null {
+  if (scope.mode === 'groups' && scope.group_ids.length === 0) return 'Select at least one keyword group';
+  if (scope.mode === 'keywords' && scope.keyword_ids.length === 0) return 'Select at least one keyword';
+  return null;
 }
 
 /** The first problem with the form, or null when it can be saved. */
@@ -114,9 +131,7 @@ export function validateScheduleFormData(formData: ScheduleFormData): string | n
       return `Day of month must be between 1 and ${MAX_DAY_OF_MONTH}`;
     }
   }
-  if (formData.scope.mode === 'groups' && formData.scope.group_ids.length === 0) return 'Select at least one keyword group';
-  if (formData.scope.mode === 'keywords' && formData.scope.keyword_ids.length === 0) return 'Select at least one keyword';
-  return null;
+  return scopeProblem(formData.scope);
 }
 
 export function toSchedulePayload(formData: ScheduleFormData): SchedulePayload {

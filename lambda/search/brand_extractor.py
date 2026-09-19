@@ -76,21 +76,18 @@ class LLMBrandExtractor:
         try:
             # Call shared Bedrock client with EXTRACTION role
             response_text = invoke_bedrock(prompt, ModelRole.EXTRACTION, max_tokens=4000, temperature=0)
-
-            if not response_text:
-                logger.warning("Empty response from Bedrock")
-                return []
-            brands = self._parse_llm_response(response_text)
-
-            # Classify brands as first_party, competitor, or other
-            brands = self._classify_brands(brands)
-
-            logger.info(f"LLM extracted {len(brands)} brand mentions")
-            return brands
-
-        except Exception as e:
-            logger.error(f"Error calling Bedrock for brand extraction: {e!s}")
+        except Exception:
+            logger.exception("Error calling Bedrock for brand extraction")
             return []
+
+        if not response_text:
+            logger.warning("Empty response from Bedrock")
+            return []
+
+        # Classify brands as first_party, competitor, or other
+        brands = self._classify_brands(self._parse_llm_response(response_text))
+        logger.info(f"LLM extracted {len(brands)} brand mentions")
+        return brands
 
     def _build_extraction_prompt(self, text: str) -> str:
         """Build the extraction prompt based on configuration.
@@ -193,7 +190,7 @@ Classify all brands as "other" until the user configures their brand tracking.
             "focus",
         )
 
-        prompt = f"""{untrusted_input_system_instruction()}
+        return f"""{untrusted_input_system_instruction()}
 
 Extract all brand and company mentions from the following text.
 
@@ -234,8 +231,6 @@ TEXT TO ANALYZE:
 
 JSON OUTPUT:"""
 
-        return prompt
-
     def _classify_brands(self, brands: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Validate brand classifications from LLM.
@@ -250,15 +245,19 @@ JSON OUTPUT:"""
         return brands
 
     def _parse_llm_response(self, response_text: str) -> list[dict[str, Any]]:
-        """Parse the LLM's JSON array response via the shared helper."""
+        """Parse the LLM's JSON array response via the shared helper.
+
+        Only object entries are brands; anything else in the array (a bare
+        string, a nested list) is dropped rather than failing the extraction.
+        """
         brands = parse_llm_json(response_text, expect="array")
-        if brands is None:
+        if not isinstance(brands, list):
             logger.warning(
                 "brand_extraction_parse_failed preview=%r",
                 response_text[:300],
             )
             return []
-        return brands
+        return [brand for brand in brands if isinstance(brand, dict)]
 
 def extract_brands_from_response(response_text: str, config: dict | None = None) -> dict[str, Any]:
     """

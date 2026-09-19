@@ -6,15 +6,15 @@ import {
 } from '@testing-library/react';
 import { useRawResponses } from './useRawResponses';
 import {
-  mockBrowseResponse, mockFileContent, createMockFetch 
+  mockBrowseResponse, mockFileContent, createMockFetch, renderRawResponses 
 } from './useRawResponses-fixtures';
-import {
-  createDeferredResponse, createMockJsonResponse 
-} from '../test/fetchResponses';
+import { createMockJsonResponse } from '../test/fetchResponses';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import {
+  deferAuthenticatedFetch, mockAuthenticatedFetch 
+} from '../test/infrastructureMock';
 
 type RawResponsesHook = ReturnType<typeof useRawResponses>;
 
@@ -42,8 +42,7 @@ describe('useRawResponses', () => {
     ['https://api.test.com/raw-responses/file?key=file.png&bucket=screenshots', 'fetching a file from the screenshots bucket', (hook) => hook.getFile('file.png', 'screenshots')],
     ['https://api.test.com/raw-responses/download?key=path%2Fto%2Ffile.json&bucket=responses', 'requesting a download URL by key', (hook) => hook.getDownloadUrl('path/to/file.json')],
   ])('requests %s when %s', async (url, _condition, run) => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-    const { result } = renderHook(() => useRawResponses());
+    const { result } = renderRawResponses();
 
     await act(() => run(result.current));
 
@@ -52,8 +51,7 @@ describe('useRawResponses', () => {
 
   describe('browse', () => {
     it('returns and stores the folder listing when the response has a prefix', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-      const { result } = renderHook(() => useRawResponses());
+      const { result } = renderRawResponses();
 
       const returned = await act(() => result.current.browse());
 
@@ -62,8 +60,7 @@ describe('useRawResponses', () => {
     });
 
     it('sets loading true while the browse request is in flight', async () => {
-      const deferred = createDeferredResponse();
-      mockAuthenticatedFetch.mockReturnValue(deferred.promise);
+      const deferred = deferAuthenticatedFetch();
       const { result } = renderHook(() => useRawResponses());
 
       act(() => {
@@ -78,8 +75,7 @@ describe('useRawResponses', () => {
     });
 
     it('resolves null and reports the server failure when browsing fails', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
-      const { result } = renderHook(() => useRawResponses());
+      const { result } = renderRawResponses(createMockFetch({ shouldFail: true }));
 
       const returned = await act(() => result.current.browse());
 
@@ -90,8 +86,7 @@ describe('useRawResponses', () => {
 
   describe('getFile', () => {
     it('returns and stores the file content when the response has a key', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-      const { result } = renderHook(() => useRawResponses());
+      const { result } = renderRawResponses();
 
       const returned = await act(() => result.current.getFile('responses/file1.json'));
 
@@ -100,8 +95,7 @@ describe('useRawResponses', () => {
     });
 
     it('resolves null and reports the missing file when the file request fails', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFailFile: true }));
-      const { result } = renderHook(() => useRawResponses());
+      const { result } = renderRawResponses(createMockFetch({ shouldFailFile: true }));
 
       const returned = await act(() => result.current.getFile('nonexistent.json'));
 
@@ -112,8 +106,7 @@ describe('useRawResponses', () => {
 
   describe('getDownloadUrl', () => {
     it('returns the presigned download URL when the request succeeds', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-      const { result } = renderHook(() => useRawResponses());
+      const { result } = renderRawResponses();
 
       const downloadUrl = await act(() => result.current.getDownloadUrl('file.json'));
 
@@ -121,8 +114,7 @@ describe('useRawResponses', () => {
     });
 
     it('resolves null when the download request fails', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFailDownload: true }));
-      const { result } = renderHook(() => useRawResponses());
+      const { result } = renderRawResponses(createMockFetch({ shouldFailDownload: true }));
 
       const downloadUrl = await act(() => result.current.getDownloadUrl('file.json'));
 
@@ -132,8 +124,7 @@ describe('useRawResponses', () => {
 
   describe('clearFile', () => {
     it('resets fileContent to null after a file was loaded', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-      const { result } = renderHook(() => useRawResponses());
+      const { result } = renderRawResponses();
       await act(() => result.current.getFile('file.json'));
       expect(result.current.fileContent).toStrictEqual(mockFileContent);
 

@@ -28,6 +28,7 @@ from shared.keyword_store import (
     validate_keyword_text,
 )
 from shared.utils import keyword_id
+from testing.dynamodb_stubs import conditional_check_failure
 
 
 class TestValidateKeywordText:
@@ -122,12 +123,6 @@ class TestBuildKeywordItem:
         }
 
 
-def _conditional_failure() -> ClientError:
-    return ClientError(
-        {'Error': {'Code': 'ConditionalCheckFailedException'}}, 'PutItem'
-    )
-
-
 class TestPutKeywordIfAbsent:
     """Conditional-put semantics shared by both write routes."""
 
@@ -146,7 +141,7 @@ class TestPutKeywordIfAbsent:
 
     def test_returns_false_when_the_id_is_already_taken(self):
         table = MagicMock()
-        table.put_item.side_effect = _conditional_failure()
+        table.put_item.side_effect = conditional_check_failure('PutItem')
 
         created = put_keyword_if_absent(table, {'id': 'abc', 'keyword': 'alpha'})
 

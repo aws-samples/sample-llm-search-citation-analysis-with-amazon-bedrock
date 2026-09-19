@@ -1,6 +1,6 @@
 import { exportWorkbook } from '../../../exporters/excelGenerator';
 import type {
-  AgentDimensionOption, KeywordResearchItem, ResearchKeyword
+  AgentConfig, AgentDimensionOption, KeywordResearchItem, ResearchKeyword
 } from '../../../types';
 import { researchExcelFileName } from '../researchExport';
 import {
@@ -50,6 +50,7 @@ interface TrackingBriefCounts {
   actual: number | '';
 }
 
+/** How many keywords the brief asked to track and how many the proposal marks as recommended. */
 function trackingBriefCounts(job: KeywordResearchItem): TrackingBriefCounts {
   const config = job.config;
   const configured = config === undefined
@@ -64,23 +65,32 @@ function trackingBriefCounts(job: KeywordResearchItem): TrackingBriefCounts {
   };
 }
 
-export function briefExcelRows(job: KeywordResearchItem): Record<string, unknown>[] {
-  const config = job.config;
+const NO_CONFIG: Partial<AgentConfig> = {};
+
+/** The brief the run was started with; rows written before the agent carry no config. */
+function briefColumns(job: KeywordResearchItem): Record<string, unknown> {
+  const config = job.config ?? NO_CONFIG;
   const catalog = runCatalog(job);
   const tracking = trackingBriefCounts(job);
-  return [{
-    Business: config?.seed ?? job.seed_keyword ?? '',
-    Subject: config?.subject ?? '',
-    Audience: config?.audience ?? '',
-    Country: config?.country ?? '',
-    Language: config?.language ?? '',
-    Dimensions: (config?.dimensions ?? []).map((dimension) => dimensionLabel(dimension, catalog)).join(', '),
-    Instruction: config?.instruction ?? '',
-    'Target keywords': config?.target_count ?? '',
+  return {
+    Business: config.seed ?? job.seed_keyword ?? '',
+    Subject: config.subject ?? '',
+    Audience: config.audience ?? '',
+    Country: config.country ?? '',
+    Language: config.language ?? '',
+    Dimensions: (config.dimensions ?? []).map((dimension) => dimensionLabel(dimension, catalog)).join(', '),
+    Instruction: config.instruction ?? '',
+    'Target keywords': config.target_count ?? '',
     'Configured tracking keywords': tracking.configured,
     'Actual tracking keywords': tracking.actual,
     'Tracking interpretation': 'Demand proxy based on available signals; not measured search volume.',
-    'Max rounds': config?.max_rounds ?? '',
+    'Max rounds': config.max_rounds ?? '',
+  };
+}
+
+/** What the run produced and how it went. */
+function outcomeColumns(job: KeywordResearchItem): Record<string, unknown> {
+  return {
     Template: job.template_name ?? '',
     Status: job.status ?? '',
     Candidates: job.candidates_count ?? '',
@@ -88,6 +98,13 @@ export function briefExcelRows(job: KeywordResearchItem): Record<string, unknown
     'Selection by': job.proposal_source ?? '',
     Started: job.created_at,
     Finished: job.finished_at ?? '',
+  };
+}
+
+export function briefExcelRows(job: KeywordResearchItem): Record<string, unknown>[] {
+  return [{
+    ...briefColumns(job),
+    ...outcomeColumns(job),
   }];
 }
 

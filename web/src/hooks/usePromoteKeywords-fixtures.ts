@@ -5,7 +5,9 @@ import {
 import type {
   Keyword, ResearchKeyword 
 } from '../types';
-import { usePromoteKeywords } from './usePromoteKeywords';
+import {
+  usePromoteKeywords, type UsePromoteKeywords
+} from './usePromoteKeywords';
 
 export const availableKeywordFixtures = [{
   keyword: 'alpha',
@@ -106,6 +108,26 @@ interface PromotionRenderOptions {
   wrapper?: RenderOptions['wrapper'];
 }
 
+/** Reads the live hook value, so a step can act on the latest render. */
+export type PromotionHookReader = () => UsePromoteKeywords;
+
+/** Ticks the fixture keyword 'alpha'. */
+export function selectFixtureKeyword(readHook: PromotionHookReader): void {
+  act(() => {
+    readHook().toggle('alpha');
+  });
+}
+
+/**
+ * Starts a promotion without awaiting it. The caller scripts `apiPost`, so the
+ * request stays in flight until that mock settles.
+ */
+export function startPromotion(readHook: PromotionHookReader): void {
+  act(() => {
+    void readHook().promote();
+  });
+}
+
 /**
  * Renders the hook with the fixture keywords as rerender-able props and
  * selects 'alpha', so a promotion can be started next.
@@ -118,21 +140,13 @@ export function renderSelectedPromotion(options: PromotionRenderOptions = {}) {
       wrapper: options.wrapper,
     }
   );
-  act(() => {
-    rendered.result.current.toggle('alpha');
-  });
+  selectFixtureKeyword(() => rendered.result.current);
   return rendered;
 }
 
-/**
- * Renders the hook, selects 'alpha' and starts a promotion without awaiting
- * it. The caller scripts `apiPost`, so the request stays in flight until that
- * mock settles.
- */
+/** Renders the hook, selects 'alpha' and starts a promotion that stays in flight. */
 export function renderPendingPromotion(options: PromotionRenderOptions = {}) {
   const rendered = renderSelectedPromotion(options);
-  act(() => {
-    void rendered.result.current.promote();
-  });
+  startPromotion(() => rendered.result.current);
   return rendered;
 }

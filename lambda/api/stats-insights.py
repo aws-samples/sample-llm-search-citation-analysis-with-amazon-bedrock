@@ -11,16 +11,12 @@ Consolidates 6 separate Lambdas into one to reduce CloudFormation resource count
 - GET /api/trends -> get-historical-trends handler
 """
 
-import logging
 import sys
 
 # Shared layer path (populated by the Lambda layer at /opt/python)
 sys.path.insert(0, '/opt/python')
 
-from shared.router import HandlerLoader, dispatch_route
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+from shared.consolidated_router import route_map_handler
 
 # Map resource paths to handler module filenames
 ROUTE_MAP = {
@@ -37,12 +33,4 @@ ROUTE_MAP = {
     '/api/reports/competitor': 'get-reports-competitor.py',
 }
 
-_handlers = HandlerLoader(__file__)
-
-
-def handler(event, context):
-    """
-    Router handler that dispatches to the correct sub-handler
-    based on the API Gateway resource path.
-    """
-    return dispatch_route(event, context, ROUTE_MAP, _handlers, logger)
+handler = route_map_handler(__file__, ROUTE_MAP, __name__)

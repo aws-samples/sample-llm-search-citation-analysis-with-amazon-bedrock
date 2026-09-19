@@ -93,6 +93,14 @@ const defaultBrandConfigApi: BrandConfigApi = {
   }),
 };
 
+/** Parses a JSON body, refusing a non-2xx status the same way for every route. */
+async function readJson<T>(response: Response): Promise<T> {
+  if (!response.ok) {
+    throw new ApiRequestError(`HTTP ${response.status}: ${response.statusText}`, response.status);
+  }
+  return await response.json() as T;
+}
+
 /**
  * Hook for managing brand tracking configuration.
  * Provides CRUD operations for brand config and access to industry presets.
@@ -106,11 +114,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
 
   const fetchConfig = useCallback(async () => {
     try {
-      const response = await api.fetchConfig();
-      if (!response.ok) {
-        throw new ApiRequestError(`HTTP ${response.status}: ${response.statusText}`, response.status);
-      }
-      const data = await response.json() as BrandConfig;
+      const data = await readJson<BrandConfig>(await api.fetchConfig());
       setConfig({
         ...DEFAULT_CONFIG,
         ...data 
@@ -124,11 +128,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
 
   const fetchPresets = useCallback(async () => {
     try {
-      const response = await api.fetchPresets();
-      if (!response.ok) {
-        throw new ApiRequestError(`HTTP ${response.status}: ${response.statusText}`, response.status);
-      }
-      const data = await response.json() as PresetsResponse;
+      const data = await readJson<PresetsResponse>(await api.fetchPresets());
       setPresets(data.presets);
     } catch {
       // Use default presets if API fails (e.g., not deployed yet)
@@ -152,6 +152,26 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
     return () => controller.abort();
   }, [fetchConfig, fetchPresets]);
 
+  /**
+   * Replaces the local config with the one a mutation echoes back, when the
+   * API answers OK; a failed request leaves the optimistic local state as is.
+   */
+  const adoptServerConfig = useCallback(async (request: () => Promise<Response>, failureNote: string) => {
+    try {
+      const response = await request();
+
+      if (response.ok) {
+        const data = await response.json() as BrandConfigResponse;
+        setConfig({
+          ...DEFAULT_CONFIG,
+          ...data.config 
+        });
+      }
+    } catch {
+      console.warn(failureNote);
+    }
+  }, []);
+
   const saveConfig = useCallback(async (newConfig: Partial<BrandConfig>) => {
     const mergedConfig = {
       ...DEFAULT_CONFIG,
@@ -159,39 +179,13 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
       ...newConfig 
     };
     setConfig(mergedConfig);
-
-    try {
-      const response = await api.saveConfig(newConfig);
-
-      if (response.ok) {
-        const data = await response.json() as BrandConfigResponse;
-        setConfig({
-          ...DEFAULT_CONFIG,
-          ...data.config 
-        });
-      }
-    } catch {
-      console.warn('Could not save to API, config saved locally only');
-    }
-  }, [config, api]);
+    await adoptServerConfig(() => api.saveConfig(newConfig), 'Could not save to API, config saved locally only');
+  }, [config, api, adoptServerConfig]);
 
   const resetConfig = useCallback(async () => {
     setConfig(DEFAULT_CONFIG);
-
-    try {
-      const response = await api.deleteConfig();
-
-      if (response.ok) {
-        const data = await response.json() as BrandConfigResponse;
-        setConfig({
-          ...DEFAULT_CONFIG,
-          ...data.config 
-        });
-      }
-    } catch {
-      console.warn('Could not reset via API, using local defaults');
-    }
-  }, [api]);
+    await adoptServerConfig(() => api.deleteConfig(), 'Could not reset via API, using local defaults');
+  }, [api, adoptServerConfig]);
 
   const getPromptForIndustry = useCallback(
     (industryKey: string): string => {
@@ -206,17 +200,11 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
   const expandBrand = useCallback(
     async (brandName: string, existingBrands: string[] = []): Promise<BrandExpansionResult> => {
       try {
-        const response = await api.expandBrand({
+        const data = await readJson<ExpandBrandResponse>(await api.expandBrand({
           brand_name: brandName,
           industry: config?.industry ?? 'hotels',
           existing_brands: existingBrands,
-        });
-
-        if (!response.ok) {
-          throw new ApiRequestError(`HTTP ${response.status}: ${response.statusText}`, response.status);
-        }
-
-        const data = await response.json() as ExpandBrandResponse;
+        }));
         return {
           main_brand: data.main_brand,
           parent_company: data.parent_company,
@@ -239,17 +227,11 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
   const expandAllBrands = useCallback(
     async (existingBrands: string[], brandType: 'first_party' | 'competitor' = 'first_party'): Promise<BrandExpansionAllResult> => {
       try {
-        const response = await api.expandAllBrands({
+        const data = await readJson<ExpandAllBrandsResponse>(await api.expandAllBrands({
           existing_brands: existingBrands,
           industry: config?.industry ?? 'hotels',
           brand_type: brandType,
-        });
-
-        if (!response.ok) {
-          throw new ApiRequestError(`HTTP ${response.status}: ${response.statusText}`, response.status);
-        }
-
-        const data = await response.json() as ExpandAllBrandsResponse;
+        }));
         return {
           existing_brands: data.existing_brands ?? existingBrands,
           parent_companies: data.parent_companies ?? [],
@@ -274,17 +256,11 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
   const findCompetitors = useCallback(
     async (firstPartyBrands: string[], existingCompetitors: string[] = []): Promise<CompetitorDiscoveryResult> => {
       try {
-        const response = await api.findCompetitors({
+        const data = await readJson<FindCompetitorsResponse>(await api.findCompetitors({
           first_party_brands: firstPartyBrands,
           industry: config?.industry ?? 'hotels',
           existing_competitors: existingCompetitors,
-        });
-
-        if (!response.ok) {
-          throw new ApiRequestError(`HTTP ${response.status}: ${response.statusText}`, response.status);
-        }
-
-        const data = await response.json() as FindCompetitorsResponse;
+        }));
         return {
           first_party_brands: data.first_party_brands,
           competitors: data.competitors ?? [],

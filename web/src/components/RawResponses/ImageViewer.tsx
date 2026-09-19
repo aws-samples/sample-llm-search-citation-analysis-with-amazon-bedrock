@@ -3,6 +3,7 @@ import type { S3Item } from '../../types';
 import { formatDate } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
 import { DownloadButton } from './DownloadButton';
+import { ViewerHeader } from './ViewerHeader';
 import { formatSize } from './fileSizeFormatter';
 
 interface ImageViewerProps {
@@ -80,16 +81,15 @@ interface ImageHeaderProps {
 const ImageHeader = ({
   file, onDownload 
 }: ImageHeaderProps) => (
-  <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-gray-50 rounded-lg p-4 gap-3">
-    <div className="min-w-0">
-      <h3 className="font-medium text-gray-900 truncate">{file.name}</h3>
-      <p className="text-xs sm:text-sm text-gray-500">
+  <ViewerHeader
+    name={file.name}
+    details={
+      <>
         {file.size && formatSize(file.size)}
         {file.last_modified && ` • ${formatDate(file.last_modified)}`}
-      </p>
-    </div>
-    <div className="flex items-center gap-2 shrink-0">
-      <DownloadButton onClick={onDownload} />
-    </div>
-  </div>
+      </>
+    }
+  >
+    <DownloadButton onClick={onDownload} />
+  </ViewerHeader>
 );

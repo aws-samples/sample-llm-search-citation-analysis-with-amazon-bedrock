@@ -29,15 +29,12 @@ Context:
     imported from the module under test rather than restated here.
 """
 
-import os
 from datetime import UTC, datetime
 
 import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 
-from testing.env import KEYWORDS_TABLE_ENV, cleared_env
-from testing.handler_fixtures import handler_fixture
 from testing.keyword_strategies import (
     BASE_TEXTS,
     CASE_TRANSFORMS,
@@ -45,30 +42,9 @@ from testing.keyword_strategies import (
     draw_mixed_request,
     variants_of,
 )
+from testing.promotion_fixtures import promotion_handler_fixture
 
-pytestmark = pytest.mark.usefixtures('table_env_cleared')
-
-
-# --- Import-boundary bootstrap ----------------------------------------------
-#
-# `promote-keywords.py` is hyphenated and builds a `boto3` DynamoDB resource at
-# import time, so it is loaded fresh under a module name unique to THIS file
-# with the table env vars set and `boto3` patched BEFORE the load. Every global
-# mutation is undone on teardown; nothing is autouse, so the pre-existing tests
-# in this directory are untouched.
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
-promotion_handler = handler_fixture(
-    _API_DIR, 'promote-keywords.py', 'promote_keywords_under_test_pure_functions', env=KEYWORDS_TABLE_ENV
-)
-
-
-@pytest.fixture
-def table_env_cleared():
-    """Clear the Keywords table env vars around one test: the loaded handler must not re-read them."""
-    with cleared_env(*KEYWORDS_TABLE_ENV):
-        yield
+promotion_handler = promotion_handler_fixture('promote_keywords_under_test_pure_functions')
 
 
 # --- Strategies -------------------------------------------------------------

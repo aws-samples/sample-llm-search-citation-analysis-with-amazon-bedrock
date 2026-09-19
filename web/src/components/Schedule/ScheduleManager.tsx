@@ -1,5 +1,5 @@
 import {
-  useState, useEffect, useMemo 
+  useState, useEffect 
 } from 'react';
 import {
   getErrorMessage, isAbortError 
@@ -12,10 +12,10 @@ import type {
 } from '../../types';
 import { useAlertModal } from '../../hooks/useAlertModal';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
-import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import {
   ConfirmModal, AlertModal 
 } from '../ui/Modal';
+import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
 import {
   ScheduleHeader, ScheduleList 
 } from './ScheduleManagerComponents';
@@ -56,12 +56,9 @@ export const ScheduleManager = ({
   // Mutations are Admin-only server-side. The list is a read, so non-admins
   // keep visibility of what is scheduled.
   const { isAdmin } = useIsAdmin();
-  const { groups } = useKeywordGroups();
-
-  const activeKeywords = useMemo(
-    () => keywords.filter((keyword) => !keyword.status || keyword.status === 'active'),
-    [keywords]
-  );
+  const {
+    activeKeywords, groups 
+  } = useKeywordScopeOptions(keywords);
 
   // Load existing schedules on mount; previously the list was only refreshed
   // after creating a schedule, so it appeared empty on every fresh visit.

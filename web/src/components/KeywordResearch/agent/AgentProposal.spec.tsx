@@ -190,9 +190,11 @@ describe('AgentProposal', () => {
 
     await userEvent.click(screen.getByRole('button', { name: 'Reset to recommended (2)' }));
 
-    expect(screen.getByLabelText('Select hotel coruña centro')).toBeChecked();
-    expect(screen.getByLabelText('Select hotel coruña con niños')).toBeChecked();
-    expect(screen.getByLabelText('Select escapada coruña')).not.toBeChecked();
+    expect(screen.getAllByRole<HTMLInputElement>('checkbox').map((box) => [box.getAttribute('aria-label'), box.checked])).toStrictEqual([
+      ['Select hotel coruña centro', true],
+      ['Select hotel coruña con niños', true],
+      ['Select escapada coruña', false],
+    ]);
   });
 
   it('updates only one dimension when its section control is used', async () => {

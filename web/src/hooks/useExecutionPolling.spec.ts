@@ -10,6 +10,7 @@ import {
   mockExecutionName,
   createMockStatusResponse,
   createMockFetch,
+  renderExecutionPolling,
 } from './useExecutionPolling-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -26,8 +27,7 @@ describe('useExecutionPolling', () => {
   });
 
   it('resolves a success result naming the keyword count when triggerAnalysis succeeds', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-    const { result } = renderHook(() => useExecutionPolling());
+    const { result } = renderExecutionPolling();
 
     const triggerResult = await act(() => result.current.triggerAnalysis());
 
@@ -38,8 +38,7 @@ describe('useExecutionPolling', () => {
   });
 
   it('starts monitoring the new execution after triggering analysis', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-    const { result } = renderHook(() => useExecutionPolling());
+    const { result } = renderExecutionPolling();
 
     await act(() => result.current.triggerAnalysis());
 
@@ -48,8 +47,7 @@ describe('useExecutionPolling', () => {
   });
 
   it('resolves a failure result carrying the backend error when triggerAnalysis fails', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({ triggerSuccess: false }));
-    const { result } = renderHook(() => useExecutionPolling());
+    const { result } = renderExecutionPolling(createMockFetch({ triggerSuccess: false }));
 
     const triggerResult = await act(() => result.current.triggerAnalysis());
 
@@ -60,9 +58,7 @@ describe('useExecutionPolling', () => {
   });
 
   it('posts the scope to the keyword-specific endpoint when a scope is provided', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-    const { result } = renderHook(() => useExecutionPolling());
+    const { result } = renderExecutionPolling();
 
     await act(async () => {
       await result.current.triggerAnalysis({
@@ -71,37 +67,30 @@ describe('useExecutionPolling', () => {
       });
     });
 
-    const triggerCall = mockAuthenticatedFetch.mock.calls.find(
-      (call: unknown[]) => (call[0] as string).includes('/trigger-keyword-analysis')
-    );
-    expect(triggerCall).toBeDefined();
-    const requestInit = triggerCall?.[1] as RequestInit;
-    expect(JSON.parse(requestInit.body as string)).toStrictEqual({
-      scope: {
-        mode: 'groups',
-        group_ids: ['hotel-coruna'] 
-      } 
+    expect(mockAuthenticatedFetch).toHaveBeenCalledWith('https://api.test.com/trigger-keyword-analysis', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        scope: {
+          mode: 'groups',
+          group_ids: ['hotel-coruna'] 
+        } 
+      }),
     });
   });
 
-  it('uses the classic all-keywords endpoint when no scope is provided', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-    const { result } = renderHook(() => useExecutionPolling());
+  it('posts to the classic all-keywords endpoint with no body when no scope is provided', async () => {
+    const { result } = renderExecutionPolling();
 
     await act(async () => {
       await result.current.triggerAnalysis();
     });
 
-    const triggerCall = mockAuthenticatedFetch.mock.calls.find(
-      (call: unknown[]) => (call[0] as string).endsWith('/trigger-analysis')
-    );
-    expect(triggerCall).toBeDefined();
+    expect(mockAuthenticatedFetch).toHaveBeenCalledWith('https://api.test.com/trigger-analysis', { method: 'POST' });
   });
 
   it.each(['SUCCEEDED', 'FAILED'])('stops running and mirrors the status when the API reports %s', async (status) => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({ statusResponse: createMockStatusResponse(status) }));
-    const { result } = renderHook(() => useExecutionPolling());
+    const { result } = renderExecutionPolling(createMockFetch({ statusResponse: createMockStatusResponse(status) }));
 
     await act(() => result.current.triggerAnalysis());
 
@@ -110,9 +99,7 @@ describe('useExecutionPolling', () => {
   });
 
   it('starts monitoring existing execution via startMonitoring', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-    const { result } = renderHook(() => useExecutionPolling());
+    const { result } = renderExecutionPolling();
 
     await act(async () => {
       result.current.startMonitoring(mockExecutionArn, mockExecutionName);
@@ -156,9 +143,7 @@ describe('useExecutionPolling polling lifecycle', () => {
   });
 
   it('keeps polling on the interval while the execution is running', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({statusResponse: createMockStatusResponse('RUNNING'),}));
-
-    const { result } = renderHook(() => useExecutionPolling());
+    const { result } = renderExecutionPolling(createMockFetch({statusResponse: createMockStatusResponse('RUNNING'),}));
 
     await act(async () => {
       await result.current.triggerAnalysis();

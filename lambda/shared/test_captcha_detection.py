@@ -6,26 +6,33 @@ import importlib
 import sys
 import types
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
+
+def _stub_module(name: str, **attributes: Any) -> types.ModuleType:
+    """A bare module carrying just the names ``browser_tools`` imports from it."""
+    module = types.ModuleType(name)
+    vars(module).update(attributes)
+    return module
+
+
 # browser_tools imports Playwright and AgentCore at module scope. Stub only
 # those optional layer packages so the normal boto3 package remains available
 # to other test modules collected in the same process.
-_fake_playwright = types.ModuleType('playwright')
-_fake_sync_api = types.ModuleType('playwright.sync_api')
-for _name in ('Browser', 'BrowserContext', 'Page'):
-    setattr(_fake_sync_api, _name, object)
-_fake_sync_api.__dict__['sync_playwright'] = lambda: None
-_fake_playwright.__dict__['sync_api'] = _fake_sync_api
+_fake_sync_api = _stub_module(
+    'playwright.sync_api',
+    Browser=object, BrowserContext=object, Page=object, sync_playwright=lambda: None,
+)
+_fake_playwright = _stub_module('playwright', sync_api=_fake_sync_api)
 sys.modules.setdefault('playwright', _fake_playwright)
 sys.modules.setdefault('playwright.sync_api', _fake_sync_api)
 
-_fake_agentcore = types.ModuleType('bedrock_agentcore')
-_fake_agentcore_tools = types.ModuleType('bedrock_agentcore.tools')
-_fake_agentcore_browser = types.ModuleType('bedrock_agentcore.tools.browser_client')
-_fake_agentcore_browser.__dict__['BrowserClient'] = object
+_fake_agentcore = _stub_module('bedrock_agentcore')
+_fake_agentcore_tools = _stub_module('bedrock_agentcore.tools')
+_fake_agentcore_browser = _stub_module('bedrock_agentcore.tools.browser_client', BrowserClient=object)
 sys.modules.setdefault('bedrock_agentcore', _fake_agentcore)
 sys.modules.setdefault('bedrock_agentcore.tools', _fake_agentcore_tools)
 sys.modules.setdefault('bedrock_agentcore.tools.browser_client', _fake_agentcore_browser)
@@ -334,3 +341,35 @@ def test_attempts_every_cleanup_step_when_one_resource_fails(tools_with_page, fa
     tools_with_page.browser.close.assert_called_once_with()
     tools_with_page.playwright.stop.assert_called_once_with()
     tools_with_page.browser_client.stop.assert_called_once_with()
+
+
+_NOT_INITIALIZED = 'Browser session not initialized - call initialize_browser_session() first'
+
+
+@pytest.fixture
+def tools_without_session():
+    """A SimpleBrowserTools whose ``initialize_browser_session`` never ran."""
+    config = SimpleNamespace(region='us-east-1', browser_session_timeout=330)
+    return browser_tools.SimpleBrowserTools(config)
+
+
+def test_navigate_reports_the_missing_session_instead_of_a_none_attribute_error(tools_without_session):
+    result = tools_without_session.navigate_to_url('https://example.com')
+
+    assert result == {'status': 'error', 'url': 'https://example.com', 'error': _NOT_INITIALIZED}
+
+
+def test_extract_reports_the_missing_session_instead_of_a_none_attribute_error(tools_without_session):
+    result = tools_without_session.extract_page_content()
+
+    assert result == {'status': 'error', 'error': _NOT_INITIALIZED}
+
+
+def test_screenshot_reports_the_missing_session_instead_of_a_none_attribute_error(tools_without_session):
+    result = tools_without_session.take_screenshot()
+
+    assert result == {'status': 'error', 'error': _NOT_INITIALIZED}
+
+
+def test_captcha_detection_answers_false_without_a_session(tools_without_session):
+    assert tools_without_session._detect_captcha_block() is False

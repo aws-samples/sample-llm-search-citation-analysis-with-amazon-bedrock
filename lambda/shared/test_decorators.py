@@ -23,6 +23,7 @@ import pytest
 
 from shared.auth import require_group
 from shared.decorators import api_handler, cors_preflight, paginate, parse_json_body, route_handler, validate
+from testing.events import parse_response_lenient
 
 PATH_PARAM = 'prompt-42'
 
@@ -45,13 +46,6 @@ def make_event(
             'cognito:groups': groups,
         }}},
     }
-
-
-def parse_response(result: dict[str, Any]) -> tuple[int, Any]:
-    """Extract status code and parsed body from a Lambda response."""
-    raw = result.get('body')
-    parsed = json.loads(raw) if isinstance(raw, str) and raw else {}
-    return result.get('statusCode', 200), parsed
 
 
 def echo_positional(event: dict[str, Any], context: Any, received: str, **kwargs) -> dict[str, Any]:
@@ -81,7 +75,7 @@ class TestPositionalArgumentForwarding:
     def test_decorator_forwards_a_positional_argument(self, name, decorate) -> None:
         gated = decorate(echo_positional)
 
-        status, body = parse_response(gated(make_event(body={}), None, PATH_PARAM))
+        status, body = parse_response_lenient(gated(make_event(body={}), None, PATH_PARAM))
 
         assert status == 200, f"{name} dropped the positional argument"
         assert body['received'] == PATH_PARAM
@@ -92,7 +86,7 @@ class TestPositionalArgumentForwarding:
         def handler(event, context, *args, **kwargs):
             pass
 
-        status, body = parse_response(handler(make_event(), None, PATH_PARAM))
+        status, body = parse_response_lenient(handler(make_event(), None, PATH_PARAM))
 
         assert status == 200
         assert body['received'] == PATH_PARAM
@@ -119,7 +113,7 @@ class TestFullStackComposition:
             })}
 
         result = update_thing(make_event(body={'name': 'Renamed'}), None, PATH_PARAM)
-        status, payload = parse_response(result)
+        status, payload = parse_response_lenient(result)
 
         assert status == 200
         assert payload['thing_id'] == PATH_PARAM
@@ -135,7 +129,7 @@ class TestFullStackComposition:
         result = update_thing(
             make_event(body={'name': 'x'}, groups='Users'), None, PATH_PARAM
         )
-        status, _ = parse_response(result)
+        status, _ = parse_response_lenient(result)
 
         assert status == 403
 
@@ -149,7 +143,7 @@ class TestFullStackComposition:
                 'limit': limit,
             })}
 
-        status, payload = parse_response(
+        status, payload = parse_response_lenient(
             list_thing(make_event(body={}), None, PATH_PARAM)
         )
 
@@ -160,7 +154,7 @@ class TestFullStackComposition:
 class TestKeywordOnlyCallsStillWork:
     """The overwhelmingly common case: no positional arguments at all."""
 
-    def test_stack_works_without_positional_arguments(self) -> None:
+    def test_stack_delivers_injected_arguments_when_called_without_positional_arguments(self) -> None:
         @api_handler
         @cors_preflight
         @require_group('Admin')
@@ -169,7 +163,7 @@ class TestKeywordOnlyCallsStillWork:
         def create_thing(event, context, body, name) -> dict[str, Any]:
             return {'statusCode': 201, 'body': json.dumps({'name': name})}
 
-        status, payload = parse_response(
+        status, payload = parse_response_lenient(
             create_thing(make_event(method='POST', body={'name': 'Fresh'}), None)
         )
 
@@ -184,7 +178,7 @@ class TestKeywordOnlyCallsStillWork:
             return {'statusCode': 200, 'body': '{}'}
 
         event = {'httpMethod': 'OPTIONS', 'headers': {'origin': 'http://localhost:3000'}}
-        status, _ = parse_response(mutate(event, None))
+        status, _ = parse_response_lenient(mutate(event, None))
 
         assert status == 200
 
@@ -195,7 +189,7 @@ class TestKeywordOnlyCallsStillWork:
         def update_thing(event, context, thing_id, body, name) -> dict[str, Any]:
             return {'statusCode': 200, 'body': '{}'}
 
-        status, payload = parse_response(
+        status, payload = parse_response_lenient(
             update_thing(make_event(body={}), None, PATH_PARAM)
         )
 

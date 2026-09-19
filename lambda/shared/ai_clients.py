@@ -66,6 +66,95 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+def _status_retry_wait(
+    provider_name: str,
+    response: requests.Response,
+    attempt: int,
+    *,
+    max_retries: int,
+    throttle_attempts: int,
+) -> float | None:
+    """Seconds to wait before retrying a retryable status, or ``None`` once its budget is spent.
+
+    A 429 draws on ``throttle_attempts`` with jittered, ``Retry-After``-aware
+    waits; every other retryable status draws on ``max_retries`` with plain
+    backoff. Logs the attempt either way — the ``_RETRY`` / ``_FAILED`` tags
+    are what ``scripts/quick-error-check.sh`` filters on.
+    """
+    error_body = response.text[:200] if response.text else "No error body"
+    throttled = response.status_code == 429
+    budget = throttle_attempts if throttled else max_retries
+    if attempt >= budget - 1:
+        logger.error(
+            f"[{provider_name}_FAILED] Status {response.status_code} "
+            f"after {attempt + 1} attempts | Error: {error_body}"
+        )
+        return None
+    wait_time = _throttle_wait_seconds(response, attempt) if throttled else _backoff_seconds(attempt)
+    logger.warning(
+        f"[{provider_name}_RETRY] Status {response.status_code} | "
+        f"Attempt {attempt + 1}/{budget} | "
+        f"Waiting {wait_time:.1f}s | Error: {error_body}"
+    )
+    return wait_time
+
+
+def _request_error_wait(
+    provider_name: str,
+    error: requests.exceptions.RequestException,
+    attempt: int,
+    max_retries: int,
+) -> float | None:
+    """Seconds to wait before retrying a failed request, or ``None`` once ``max_retries`` is spent.
+
+    Timeouts keep their own log tags (``_TIMEOUT`` / ``_TIMEOUT_FAILED``) so
+    they stay distinguishable from connection and HTTP errors
+    (``_REQUEST_ERROR`` / ``_REQUEST_FAILED``). The final failure is logged
+    with the traceback of ``error``.
+    """
+    timed_out = isinstance(error, requests.exceptions.Timeout)
+    if attempt >= max_retries - 1:
+        if timed_out:
+            logger.error(f"[{provider_name}_TIMEOUT_FAILED] After {max_retries} attempts", exc_info=error)
+        else:
+            logger.error(
+                f"[{provider_name}_REQUEST_FAILED] {str(error)[:500]} after {max_retries} attempts",
+                exc_info=error,
+            )
+        return None
+    wait_time = _backoff_seconds(attempt)
+    if timed_out:
+        logger.warning(f"[{provider_name}_TIMEOUT] Attempt {attempt + 1}/{max_retries} | Waiting {wait_time}s")
+    else:
+        logger.warning(
+            f"[{provider_name}_REQUEST_ERROR] {str(error)[:200]} | "
+            f"Attempt {attempt + 1}/{max_retries} | Waiting {wait_time}s"
+        )
+    return wait_time
+
+
+def _raise_for_status_with_body(response: requests.Response) -> None:
+    """``raise_for_status`` with the response body appended to the error message.
+
+    `requests` raises `400 Client Error: Bad Request for url: ...` and nothing
+    else — the body, which is the only place a provider says *why* it refused,
+    is logged by the caller and then dropped. `shared.provider_health`
+    classifies on message text (Anthropic reports credit exhaustion as 400, not
+    402), so without the body every billing outage classifies as `unknown`:
+    non-terminal, so auto-disable never fires, and the dashboard shows
+    "unrecognised error" instead of "No credit remaining". That is the
+    2026-08-14 incident staying invisible with the fix supposedly in place.
+    """
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as http_error:
+        raise requests.exceptions.HTTPError(
+            f"{http_error} | {response.text[:500]}",
+            response=response,
+            request=http_error.request,
+        ) from http_error
+
+
 def retry_with_backoff(
     provider_name: str,
     max_retries: int = 5,
@@ -100,24 +189,14 @@ def retry_with_backoff(
                     response = func(*args, timeout=timeout, **kwargs)
 
                     if response.status_code in retryable_codes:
-                        error_body = response.text[:200] if response.text else "No error body"
-                        throttled = response.status_code == 429
-                        budget = throttle_attempts if throttled else actual_max_retries
-                        if attempt < budget - 1:
-                            wait_time = _throttle_wait_seconds(response, attempt) if throttled else _backoff_seconds(attempt)
-                            logger.warning(
-                                f"[{provider_name}_RETRY] Status {response.status_code} | "
-                                f"Attempt {attempt + 1}/{budget} | "
-                                f"Waiting {wait_time:.1f}s | Error: {error_body}"
-                            )
+                        wait_time = _status_retry_wait(
+                            provider_name, response, attempt,
+                            max_retries=actual_max_retries, throttle_attempts=throttle_attempts,
+                        )
+                        if wait_time is not None:
                             time.sleep(wait_time)
                             attempt += 1
                             continue
-                        else:
-                            logger.error(
-                                f"[{provider_name}_FAILED] Status {response.status_code} "
-                                f"after {attempt + 1} attempts | Error: {error_body}"
-                            )
 
                     if response.status_code != 200:
                         logger.error(
@@ -125,57 +204,21 @@ def retry_with_backoff(
                             f"Response: {response.text[:500]}"
                         )
 
-                    # Attach the response body to the exception. `requests`
-                    # raises `400 Client Error: Bad Request for url: ...` and
-                    # nothing else — the body, which is the only place a
-                    # provider says *why* it refused, is logged above and then
-                    # dropped. `shared.provider_health` classifies on message
-                    # text (Anthropic reports credit exhaustion as 400, not
-                    # 402), so without the body every billing outage classifies
-                    # as `unknown`: non-terminal, so auto-disable never fires,
-                    # and the dashboard shows "unrecognised error" instead of
-                    # "No credit remaining". That is the 2026-08-14 incident
-                    # staying invisible with the fix supposedly in place.
-                    try:
-                        response.raise_for_status()
-                    except requests.exceptions.HTTPError as http_error:
-                        raise requests.exceptions.HTTPError(
-                            f"{http_error} | {response.text[:500]}",
-                            response=response,
-                            request=http_error.request,
-                        ) from http_error
+                    # An HTTPError raised here is a RequestException, so a
+                    # non-retryable status still consumes the caller's retry
+                    # budget below before it propagates.
+                    _raise_for_status_with_body(response)
                     return response.json()
 
-                except requests.exceptions.Timeout:
-                    if attempt < actual_max_retries - 1:
-                        wait_time = _backoff_seconds(attempt)
-                        logger.warning(
-                            f"[{provider_name}_TIMEOUT] Attempt {attempt + 1}/{actual_max_retries} | "
-                            f"Waiting {wait_time}s"
-                        )
-                        time.sleep(wait_time)
-                        attempt += 1
-                        continue
-                    logger.error(f"[{provider_name}_TIMEOUT_FAILED] After {actual_max_retries} attempts")
-                    raise
-                except requests.exceptions.RequestException as e:
-                    if attempt < actual_max_retries - 1:
-                        wait_time = _backoff_seconds(attempt)
-                        logger.warning(
-                            f"[{provider_name}_REQUEST_ERROR] {str(e)[:200]} | "
-                            f"Attempt {attempt + 1}/{actual_max_retries} | Waiting {wait_time}s"
-                        )
-                        time.sleep(wait_time)
-                        attempt += 1
-                        continue
-                    logger.error(
-                        f"[{provider_name}_REQUEST_FAILED] {str(e)[:500]} "
-                        f"after {actual_max_retries} attempts"
-                    )
-                    raise
+                except requests.exceptions.RequestException as error:
+                    wait_time = _request_error_wait(provider_name, error, attempt, actual_max_retries)
+                    if wait_time is None:
+                        raise
+                    time.sleep(wait_time)
+                    attempt += 1
 
             logger.error(f"[{provider_name}_EXHAUSTED] Failed after {actual_max_retries} attempts")
-            raise Exception(f"{provider_name} API failed after {actual_max_retries} attempts")
+            raise RuntimeError(f"{provider_name} API failed after {actual_max_retries} attempts")
 
         return wrapper
     return decorator

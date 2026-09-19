@@ -6,7 +6,6 @@ Supports multiple industries and brand classification (first_party, competitor, 
 """
 
 import logging
-import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -17,7 +16,7 @@ from boto3.dynamodb.conditions import Key
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import not_found_response, success_response
+from shared.api_response import not_found_response, success_response, validation_error
 from shared.decorators import api_handler, optional_provider, validate
 from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import collect_all_items
@@ -28,6 +27,7 @@ from shared.scope_params import (
     query_keyword_rows,
     scope_from_request,
 )
+from shared.search_results import latest_run, search_results_table_name
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -35,8 +35,8 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-# Fail-fast: Required environment variables
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+# Scopes resolve against the Keywords table; every row a report reads comes from SearchResults.
+SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
 
 # Group aggregates fan out one projected Query per keyword (no LLM response
@@ -143,7 +143,6 @@ def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, An
         'total_unique_brands': len(aggregated),
         'first_party_brands': first_party_brands,
         'competitor_brands': competitor_brands,
-        'other_brands': other_brands,
         'summary': {
             'first_party_count': len(first_party_brands),
             'competitor_count': len(competitor_brands),
@@ -261,8 +260,9 @@ def handler(event: dict[str, Any], context: Any, timestamp: str | None = None, p
         response details for single-keyword requests.
     """
     report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE), required=True)
-    if rejected:
-        return rejected
+    if report_scope is None:
+        # required=True answers a missing scope with a rejection; the fallback only satisfies the type checker.
+        return rejected or validation_error('Provide keyword, group_id or keyword_ids', event, 'keyword')
 
     # Get brand tracking configuration
     brand_config = get_brand_config()
@@ -279,6 +279,8 @@ def handler(event: dict[str, Any], context: Any, timestamp: str | None = None, p
         return success_response(result, event)
 
     keyword = report_scope.keywords[0]
+    # Every stored run is read (paginated) so `available_runs` lists them all,
+    # even when a timestamp narrows the answer to one of them.
     items = _query_full_keyword_rows(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
 
     if not items:
@@ -292,9 +294,7 @@ def handler(event: dict[str, Any], context: Any, timestamp: str | None = None, p
         if not items:
             return not_found_response('Results for keyword', event)
     else:
-        latest_timestamp = max(item.get('timestamp', '') for item in items)
-        items = [item for item in items if item.get('timestamp') == latest_timestamp]
-        result_timestamp = latest_timestamp
+        result_timestamp, items = latest_run(items)
 
     # Filter by persona if specified
     if query_prompt_id:
@@ -312,7 +312,6 @@ def handler(event: dict[str, Any], context: Any, timestamp: str | None = None, p
             'provider': item.get('provider'),
             'timestamp': item.get('timestamp'),
             'brands': item.get('brands', []),
-            'brand_count': item.get('brand_count', 0),
             'response_preview': full_response[:200] + '...' if len(full_response) > 200 else full_response,
             'full_response': full_response,
             'seo_feedback': item.get('seo_feedback', ''),

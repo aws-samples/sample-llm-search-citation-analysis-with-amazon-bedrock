@@ -7,7 +7,6 @@ groups, or a list of keyword ids — that is resolved against the Keywords table
 so only real, active keywords are run.
 """
 
-import json
 import logging
 import os
 import sys
@@ -18,15 +17,13 @@ import boto3
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from boto3.dynamodb.conditions import Key
-
+from shared.analysis_runs import fetch_enabled_query_prompts, start_analysis_run
 from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
-from shared.utils import get_timestamp, get_timestamp_compact
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -56,22 +53,6 @@ def _keywords_from_texts(keywords_input: Any) -> list[str] | None:
     return texts
 
 
-def _fetch_query_prompts() -> list[dict[str, str]]:
-    try:
-        prompts_response = query_prompts_table.query(
-            IndexName='EnabledIndex',
-            KeyConditionExpression=Key('enabled').eq('true'),
-            Limit=10
-        )
-        return [
-            {'id': p['id'], 'name': p.get('name', ''), 'template': p.get('template', '')}
-            for p in prompts_response.get('Items', [])
-        ]
-    except Exception as e:
-        logger.warning(f"Could not fetch query prompts, proceeding without them: {e}")
-        return []
-
-
 @api_handler
 @require_group(ADMIN_GROUP)
 @parse_json_body
@@ -98,8 +79,9 @@ def handler(event: dict[str, Any], context: Any, body: dict) -> dict[str, Any]:
     scope = None
     if 'scope' in body:
         scope, scope_error = validate_scope(body.get('scope'))
-        if scope_error:
-            return validation_error(scope_error, event, 'scope')
+        if scope is None:
+            # validate_scope returns exactly one of (descriptor, None) / (None, error).
+            return validation_error(str(scope_error), event, 'scope')
         resolved = resolve_scope(scope, keywords_table)
         keyword_texts = [item['keyword'] for item in resolved]
         if not keyword_texts:
@@ -115,32 +97,16 @@ def handler(event: dict[str, Any], context: Any, body: dict) -> dict[str, Any]:
         if not keyword_texts:
             return validation_error('No valid keywords provided.', event, 'keywords')
 
-    timestamp = get_timestamp()
-    keyword_list = [{'keyword': text, 'timestamp': timestamp} for text in keyword_texts]
-    query_prompts = _fetch_query_prompts()
-
-    execution_name = f"keyword-analysis-{get_timestamp_compact()}"
-    execution_input: dict[str, Any] = {
-        'keywords': keyword_list,
-        'query_prompts': query_prompts,
-    }
-    if scope is not None:
-        # Recorded for traceability; ParseKeywords uses the explicit list above.
-        execution_input['requested_scope'] = scope
-
-    execution_response = stepfunctions.start_execution(
-        stateMachineArn=STATE_MACHINE_ARN,
-        name=execution_name,
-        input=json.dumps(execution_input)
+    query_prompts = fetch_enabled_query_prompts(query_prompts_table)
+    # `requested_scope` is recorded for traceability; ParseKeywords uses the explicit list.
+    extra_input = {'requested_scope': scope} if scope is not None else None
+    started = start_analysis_run(
+        stepfunctions, STATE_MACHINE_ARN, 'keyword-analysis', keyword_texts, query_prompts, extra_input
     )
 
     return success_response({
-        'execution_arn': execution_response['executionArn'],
-        'execution_name': execution_name,
-        'start_date': execution_response['startDate'].isoformat(),
-        'keywords_count': len(keyword_list),
-        'query_prompts_count': len(query_prompts),
+        **started,
         'keywords': keyword_texts,
         'scope': scope,
-        'message': f'Analysis started for {len(keyword_list)} keyword(s) with {len(query_prompts)} query prompts'
+        'message': f'Analysis started for {len(keyword_texts)} keyword(s) with {len(query_prompts)} query prompts'
     }, event)

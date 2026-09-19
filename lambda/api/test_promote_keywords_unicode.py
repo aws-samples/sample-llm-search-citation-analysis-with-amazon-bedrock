@@ -1,34 +1,31 @@
 """Unicode validation tests for keyword promotion requests."""
 
-import json
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from testing.env import KEYWORDS_TABLE_ENV
-from testing.handler_fixtures import handler_fixture
+from testing.events import api_gateway_event, parse_response
+from testing.promotion_fixtures import promotion_handler_fixture
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
+promotion_handler = promotion_handler_fixture('promote_keywords_under_test_unicode')
 
-promotion_handler = handler_fixture(
-    _API_DIR, 'promote-keywords.py', 'promote_keywords_under_test_unicode', env=KEYWORDS_TABLE_ENV
-)
+# Lone UTF-16 surrogates, which no UTF-8 encoder (DynamoDB's included) accepts.
+HIGH_SURROGATE = chr(0xD800)
+LOW_SURROGATE = chr(0xDFFF)
 
 
 def _invoke(module, table, keyword):
-    event = {
-        'httpMethod': 'POST',
-        'path': '/api/keywords/promote',
-        'headers': {},
-        'body': json.dumps({'keywords': [{'keyword': keyword}]}),
-    }
+    event = api_gateway_event('POST', '/api/keywords/promote', body={'keywords': [{'keyword': keyword}]})
     with patch.object(module, 'keywords_table', table):
         response = module.handler(event, None)
-    return response['statusCode'], json.loads(response['body'])
+    return parse_response(response)
 
 
-@pytest.mark.parametrize('keyword', ['\ud800', '\udfff', 'alpha\ud800'])
+@pytest.mark.parametrize(
+    'keyword',
+    [HIGH_SURROGATE, LOW_SURROGATE, f'alpha{HIGH_SURROGATE}'],
+    ids=['high-surrogate', 'low-surrogate', 'surrogate-after-text'],
+)
 def test_returns_400_before_dynamodb_when_promoted_keyword_has_unpaired_surrogate(
     promotion_handler, keyword
 ):

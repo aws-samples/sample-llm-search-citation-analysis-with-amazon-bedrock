@@ -11,6 +11,7 @@ import { GROUP_BRIEF_DEFAULT_TEMPLATES } from './GroupBriefForm-source';
 import {
   buildKeyword,
   buildKeywordGroupHookResult,
+  fillImproveUrlBrief,
   renderGroupBriefForm,
   selectGroupForBrief,
   submitGroupBrief,
@@ -116,9 +117,7 @@ describe('GroupBriefForm', () => {
   it('submits landing URL when improve current URL mode is valid', async () => {
     const formProps = renderGroupBriefForm();
 
-    await selectGroupForBrief();
-    await userEvent.click(screen.getByRole('radio', { name: /Improve current URL/u }));
-    await userEvent.type(screen.getByLabelText('Current landing URL'), 'https://example.com/page');
+    await fillImproveUrlBrief('https://example.com/page');
     await submitGroupBrief();
 
     await waitFor(() => {
@@ -187,9 +186,7 @@ describe('GroupBriefForm', () => {
   it('clears hidden URL data when switching to create-new mode', async () => {
     const formProps = renderGroupBriefForm();
 
-    await selectGroupForBrief();
-    await userEvent.click(screen.getByRole('radio', { name: /Improve current URL/u }));
-    await userEvent.type(screen.getByLabelText('Current landing URL'), 'not-a-url');
+    await fillImproveUrlBrief('not-a-url');
     await userEvent.click(screen.getByRole('radio', { name: /Create new landing page/u }));
     await submitGroupBrief();
 

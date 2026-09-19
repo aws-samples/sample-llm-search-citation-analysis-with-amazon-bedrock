@@ -13,18 +13,40 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from shared.research_agent import LEGACY_DIMENSION_CATALOG
+from shared.research_agent import AGENT_MAX_QUERIES_PER_ROUND, AGENT_MAX_ROUNDS, LEGACY_DIMENSION_CATALOG
 from shared.research_jobs import (
+    FINAL_PROPOSAL_MAX_BYTES,
     RESEARCH_STALE_AFTER_SECONDS,
     RESEARCH_TTL_SECONDS,
+    ROUND_CHECKPOINT_MAX_BYTES,
+    STEP_RESULT_MAX_BYTES,
+    bound_final_proposal,
+    bound_round_evaluation,
+    bound_round_plan,
+    bound_step_result,
     build_job_item,
     final_status,
     merge_competitor_analyses,
     merge_expansion_keywords,
+    persisted_size_bytes,
     public_view,
     step_id_for,
     summarize_job,
     ttl_epoch,
+)
+
+# The whole-row budget the per-field limits must compose under: a conservative
+# 300 KB against DynamoDB's 400 KiB item ceiling. A maximal agent job holds one
+# signals step on top of the query steps in every round, plus the fixed fields
+# (config, system prompt, timestamps, counters) budgeted at 45 KB.
+MAX_RESEARCH_JOB_BYTES = 300_000
+MAX_AGENT_PERSISTED_STEPS = (AGENT_MAX_QUERIES_PER_ROUND + 1) * AGENT_MAX_ROUNDS
+JOB_FIXED_FIELDS_MAX_BYTES = 45_000
+MAX_COMPOSED_RESEARCH_JOB_BYTES = (
+    MAX_AGENT_PERSISTED_STEPS * STEP_RESULT_MAX_BYTES
+    + AGENT_MAX_ROUNDS * ROUND_CHECKPOINT_MAX_BYTES
+    + FINAL_PROPOSAL_MAX_BYTES
+    + JOB_FIXED_FIELDS_MAX_BYTES
 )
 
 
@@ -40,6 +62,13 @@ class TestBuildJobItem:
         assert item['steps'] == {}
         assert (item['steps_total'], item['steps_done'], item['keyword_count']) == (0, 0, 0)
         assert item['ttl'] > 0
+
+    def test_initializes_immutable_attempt_one_before_the_execution_starts(self):
+        item = build_job_item('job-1', 'expansion', {}, timestamp='2026-09-18T10:00:00Z')
+
+        assert (item['attempt'], item['retry_count'], item['attempt_started_at']) == (
+            1, 0, '2026-09-18T10:00:00Z',
+        )
 
     def test_carries_the_request_fields_and_timestamps(self):
         item = build_job_item('job-1', 'competitor', {'url': 'https://a.com', 'domain': 'a.com'}, timestamp='2026-09-18T10:00:00Z')
@@ -316,3 +345,136 @@ class TestPublicView:
         job = {'id': 'job-e', 'type': 'expansion', 'status': 'completed', 'config': {'seed': 'hotel'}}
 
         assert public_view(job)['config'] == {'seed': 'hotel'}
+
+
+class TestPersistenceBudgets:
+    def test_keeps_highest_ranked_candidates_when_step_result_exceeds_its_budget(self):
+        result = bound_step_result({
+            'provider': 'openai',
+            'status': 'completed',
+            'round': 1,
+            'attempt': 1,
+            'keywords': [
+                {'keyword': f'keyword {index}', 'relevance': index, 'source': 's' * 300}
+                for index in range(50)
+            ],
+            'raw_response': 'r' * 10_000,
+        })
+
+        assert persisted_size_bytes(result) <= STEP_RESULT_MAX_BYTES
+        assert result['keywords'][0]['keyword'] == 'keyword 49'
+        assert result['truncation']['candidates_received'] == 50
+        assert result['truncation']['raw_response_truncated'] is True
+
+    def test_keeps_ranked_proposal_prefix_when_final_result_exceeds_its_budget(self):
+        proposal, truncation = bound_final_proposal([
+            {
+                'keyword': f'keyword {index}',
+                'dimension': 'destination',
+                'rationale': 'r' * 300,
+                'providers': ['openai', 'gemini', 'perplexity'],
+            }
+            for index in range(100)
+        ])
+
+        assert persisted_size_bytes({'keywords': proposal, 'proposal_truncation': truncation}) <= FINAL_PROPOSAL_MAX_BYTES
+        assert proposal[0]['keyword'] == 'keyword 0'
+        assert truncation['candidates_received'] == 100
+        assert truncation['candidates_stored'] == len(proposal)
+
+    def test_maximum_three_round_agent_job_stays_below_conservative_item_budget(self):
+        wide = '🧭'
+        candidate_rows = [
+            {
+                'keyword': f'keyword {index} {wide * 100}',
+                'relevance': index,
+                'source': wide * 300,
+            }
+            for index in range(50)
+        ]
+        steps = {}
+        rounds = []
+        next_query_sets = [
+            [
+                {'query': wide * 200, 'dimension': 'destination', 'rationale': wide * 300}
+                for _index in range(8)
+            ],
+            [
+                {'query': wide * 200, 'dimension': 'audience', 'rationale': wide * 300}
+                for _index in range(8)
+            ],
+            [],
+        ]
+        decisions = ['continue', 'continue', 'stop']
+        for round_number in range(1, 4):
+            step_ids = [f'r{round_number}-q{index}-openai' for index in range(1, 9)]
+            signal_id = f'r{round_number}-signals-serpapi'
+            for step_id in step_ids:
+                steps[step_id] = bound_step_result({
+                    'provider': 'openai', 'status': 'completed', 'round': round_number, 'attempt': 1,
+                    'query': wide * 200, 'dimension': 'destination', 'rationale': wide * 300,
+                    'keywords': candidate_rows, 'raw_response': wide * 10_000,
+                })
+            steps[signal_id] = bound_step_result({
+                'provider': 'serpapi', 'status': 'completed', 'round': round_number, 'attempt': 1,
+                'queries': [
+                    {'query': wide * 200, 'dimension': 'destination'}
+                    for _index in range(8)
+                ],
+                'keywords': candidate_rows,
+                'raw_response': wide * 10_000,
+            })
+            plan = bound_round_plan({
+                'round': round_number,
+                'planned_at': '2026-09-18T10:00:00Z',
+                'planned_attempt': 1,
+                'strategy': wide * 600,
+                'queries': [
+                    {'query': wide * 200, 'dimension': 'destination', 'rationale': wide * 300}
+                    for _index in range(8)
+                ],
+                'step_ids': [*step_ids, signal_id],
+            })
+            plan['evaluation'] = bound_round_evaluation(plan, {
+                'assessment': wide * 800,
+                'decision': decisions[round_number - 1],
+                'reason': wide * 400,
+                'next_queries': next_query_sets[round_number - 1],
+                'candidate_count': 400,
+                'evaluated_at': '2026-09-18T10:10:00Z',
+            })
+            rounds.append(plan)
+
+        proposal, proposal_truncation = bound_final_proposal([
+            {
+                'keyword': f'proposal {index} {wide * 100}',
+                'rationale': wide * 300,
+                'providers': ['openai', 'gemini', 'perplexity'],
+            }
+            for index in range(100)
+        ])
+        job = build_job_item('job-max', 'agent', {
+            'system_prompt': wide * 6_000,
+            'config': {
+                'seed': wide * 200,
+                'instruction': wide * 1_000,
+                'dimensions': ['destination', 'location', 'points_of_interest', 'hotel_attributes', 'audience', 'trip_type'],
+                'target_count': 100,
+                'max_rounds': 3,
+            },
+            'round': 3,
+            'rounds': rounds,
+            'steps': steps,
+            'steps_total': 27,
+            'steps_done': 27,
+            'keywords': proposal,
+            'proposal_truncation': proposal_truncation,
+            'execution_arn': 'arn:aws:states:eu-west-1:123456789012:execution:research:job-max',
+            'execution_id': 'job-max',
+            'active_round': 3,
+        }, timestamp='2026-09-18T10:00:00Z')
+
+        assert (len(job['steps']), all(persisted_size_bytes(step) <= STEP_RESULT_MAX_BYTES for step in steps.values())) == (27, True)
+        assert all(persisted_size_bytes(round_info) <= ROUND_CHECKPOINT_MAX_BYTES for round_info in rounds)
+        assert MAX_COMPOSED_RESEARCH_JOB_BYTES <= MAX_RESEARCH_JOB_BYTES
+        assert persisted_size_bytes(job) <= MAX_RESEARCH_JOB_BYTES

@@ -36,7 +36,6 @@ const PER_KEYWORD_DATA = {
   visibility: {
     keyword: 'best running shoes',
     timestamp: '2026-05-10T00:00:00Z',
-    total_brands: 4,
     total_mentions: 20,
     brands: [
       {
@@ -46,7 +45,6 @@ const PER_KEYWORD_DATA = {
         providers: ['openai', 'perplexity', 'gemini', 'claude'],
         total_mentions: 12,
         best_rank: 1,
-        avg_sentiment: 0.5,
         share_of_voice: 60,
         classification: 'first_party' as const,
       },

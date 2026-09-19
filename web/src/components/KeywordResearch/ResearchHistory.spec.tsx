@@ -12,14 +12,12 @@ import type {
 } from '../../types';
 import { buildHistoryItem } from './ResearchHistory-fixtures';
 import {
-  expansionKeywordFixtures, luxuryHotelsFixture, selectKeywordCheckbox 
+  expansionKeywordFixtures, luxuryHotelsFixture, promoteKeyword, selectKeywordCheckbox
 } from './expandedKeyword-fixtures';
 
-vi.mock('../../api/client', () => ({ apiPost: vi.fn() }));
+vi.mock('../../api/client', () => import('./apiClientMock-fixtures'));
 
-import { apiPost } from '../../api/client';
-
-const mockApiPost = vi.mocked(apiPost);
+import { mockApiPost } from './apiClientMock-fixtures';
 
 describe('ResearchHistory', () => {
   const defaultProps = {
@@ -196,8 +194,7 @@ describe('ResearchHistory promotion UI', () => {
     renderHistoryWithItems([competitorHistoryItemFixture]);
     await userEvent.click(screen.getByText('example.com'));
 
-    await userEvent.click(selectKeywordCheckbox(competitorPrimaryKeywordFixture.keyword));
-    await userEvent.click(screen.getByRole('button', { name: /add to keywords/i }));
+    await promoteKeyword(competitorPrimaryKeywordFixture.keyword);
 
     expect(mockApiPost).toHaveBeenCalledTimes(1);
     expect(mockApiPost).toHaveBeenCalledWith(
@@ -224,8 +221,7 @@ describe('ResearchHistory promotion UI', () => {
     );
     await userEvent.click(screen.getByText('example.com'));
 
-    await userEvent.click(selectKeywordCheckbox(competitorPrimaryKeywordFixture.keyword));
-    await userEvent.click(screen.getByRole('button', { name: /add to keywords/i }));
+    await promoteKeyword(competitorPrimaryKeywordFixture.keyword);
 
     await waitFor(() => expect(onKeywordsAdded).toHaveBeenCalledTimes(1));
     expect(onKeywordsAdded).toHaveBeenCalledWith([createdKeywordItemFixture]);

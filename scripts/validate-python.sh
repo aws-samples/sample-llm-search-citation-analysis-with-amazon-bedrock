@@ -19,7 +19,7 @@ if [ -d "$REPO_ROOT/.venv/bin" ]; then
   export PATH="$REPO_ROOT/.venv/bin:$PATH"
 fi
 
-for tool in ruff vulture pytest; do
+for tool in ruff vulture pyright pytest; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     echo "$tool not found — install the Python toolchain: python3 -m venv .venv && .venv/bin/pip install -r lambda/requirements-dev.txt" >&2
     exit 127
@@ -29,14 +29,14 @@ done
 echo "==> ruff"
 scripts/lint-python.sh
 
-echo "==> vulture (dead code, 80% confidence)"
-# vulture prints nothing when clean; any output is a finding.
-dead_code="$(scripts/lint-python.sh --dead-code | grep -v '^==>' || true)"
-if [ -n "$dead_code" ]; then
-  echo "$dead_code"
-  echo "Dead code found — remove it (see scripts/lint-python.sh --dead-code)." >&2
-  exit 1
-fi
+echo "==> pyright (types)"
+scripts/lint-python.sh --types
+
+echo "==> vulture (production code, tests excluded)"
+scripts/lint-python.sh --dead-code
+
+echo "==> vulture (whole tree: test helpers, fixtures, stubs)"
+scripts/lint-python.sh --dead-code-tests
 
 echo "==> jscpd (Lambda production code)"
 npx jscpd --config .jscpd.python.json lambda scripts

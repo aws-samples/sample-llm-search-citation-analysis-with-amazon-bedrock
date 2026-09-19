@@ -157,6 +157,17 @@ export function isHttpLandingUrl(value: string): boolean {
   }
 }
 
+/** Why the prompt template cannot be used, or null when it can: presence, length, then placeholders. */
+function promptTemplateIssueMessage(template: string): string | null {
+  if (template.trim() === '') {
+    return 'Prompt template is required.';
+  }
+  if (template.length > GROUP_BRIEF_MAX_TEMPLATE_LENGTH) {
+    return 'Prompt template must be at most 6,000 characters.';
+  }
+  return promptTemplateError(template);
+}
+
 export function validateGroupBriefDraft(
   draft: GroupBriefDraft
 ): GroupBriefValidationIssue[] {
@@ -204,24 +215,12 @@ export function validateGroupBriefDraft(
       message: 'Enter the current copy to rewrite.',
     });
   }
-  if (draft.promptTemplate.trim() === '') {
+  const templateMessage = promptTemplateIssueMessage(draft.promptTemplate);
+  if (templateMessage !== null) {
     issues.push({
       field: 'prompt_template',
-      message: 'Prompt template is required.',
+      message: templateMessage,
     });
-  } else if (draft.promptTemplate.length > GROUP_BRIEF_MAX_TEMPLATE_LENGTH) {
-    issues.push({
-      field: 'prompt_template',
-      message: 'Prompt template must be at most 6,000 characters.',
-    });
-  } else {
-    const templateError = promptTemplateError(draft.promptTemplate);
-    if (templateError !== null) {
-      issues.push({
-        field: 'prompt_template',
-        message: templateError,
-      });
-    }
   }
   return issues;
 }

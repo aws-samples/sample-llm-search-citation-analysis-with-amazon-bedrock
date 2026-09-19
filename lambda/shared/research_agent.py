@@ -338,10 +338,9 @@ BUILTIN_TEMPLATES: tuple[IndustryTemplate, ...] = (
 )
 _BUILTIN_BY_ID = {template.id: template for template in BUILTIN_TEMPLATES}
 
-# Kept as names for the callers that pin them; they describe the hotel template.
+# Kept as a name for the callers that pin it (the worker's fallback system
+# prompt); it is the hotel template's prompt.
 DEFAULT_SYSTEM_PROMPT = HOTEL_TEMPLATE.system_prompt
-DEFAULT_TEMPLATE_NAME = HOTEL_TEMPLATE.name
-DEFAULT_TEMPLATE_DESCRIPTION = HOTEL_TEMPLATE.description
 
 # Agent rows written before 2.6.0 carry neither subject, audience nor a
 # dimension catalogue: they were all hotel runs.
@@ -555,16 +554,36 @@ def step_plan_fields(step: dict[str, Any]) -> dict[str, Any]:
 # Prompts
 # ---------------------------------------------------------------------------
 
-def _selected_dimensions(config: dict[str, Any]) -> list[str]:
-    """The dimension ids a run researches: the selected ones, else the whole catalogue."""
-    selected = config.get('dimensions')
-    return list(selected) if isinstance(selected, list) and selected else catalog_ids(config)
+def selected_dimensions(config: dict[str, Any], *, include_other: bool = False) -> list[str]:
+    """The dimension ids a run researches, optionally followed by ``other``.
+
+    The requested dimensions in request order, restricted to the run's
+    catalogue and de-duplicated; a run that selected none researches the
+    whole catalogue.
+    """
+    known = catalog_ids(config)
+    configured = config.get('dimensions')
+    source = configured if isinstance(configured, list) and configured else known
+    selected: list[str] = []
+    for dimension in source:
+        if isinstance(dimension, str) and dimension in known and dimension not in selected:
+            selected.append(dimension)
+    if not selected:
+        selected = list(known)
+    if include_other:
+        selected.append(OTHER_DIMENSION)
+    return selected
+
+
+def _selection_target(config: dict[str, Any]) -> int:
+    """How many keywords the final proposal may hold, clamped to the guardrail range."""
+    return max(1, min(int(config.get('target_count') or AGENT_DEFAULT_TARGET_COUNT), AGENT_MAX_TARGET_COUNT))
 
 
 def _brief(config: dict[str, Any]) -> str:
     """The user's brief, every field wrapped as untrusted input."""
     subject = config_subject(config)
-    dimension_lines = '\n'.join(f'- {name}: {dimension_description(config, name)}' for name in _selected_dimensions(config))
+    dimension_lines = '\n'.join(f'- {name}: {dimension_description(config, name)}' for name in selected_dimensions(config))
     instruction = (config.get('instruction') or '').strip()
     instruction_line = f"Extra instruction from the user: {wrap_user_input(instruction, 'instruction')}" if instruction else 'Extra instruction from the user: none'
     return f"""{subject[:1].upper()}{subject[1:]} / seed: {wrap_user_input(config.get('seed', ''), 'subject')}
@@ -578,7 +597,7 @@ Expansion dimensions to cover:
 def build_plan_prompt(config: dict[str, Any]) -> str:
     subject = config_subject(config)
     audience = config_audience(config)
-    dimensions = _selected_dimensions(config)
+    dimensions = selected_dimensions(config)
     return f"""{untrusted_input_system_instruction()}
 
 {_brief(config)}
@@ -640,7 +659,7 @@ SELECTION_CANDIDATE_LIMIT = 400
 
 def build_evaluate_prompt(config: dict[str, Any], round_number: int, candidates: list[dict[str, Any]]) -> str:
     subject = config_subject(config)
-    dimensions = _selected_dimensions(config)
+    dimensions = selected_dimensions(config)
     max_rounds = int(config.get('max_rounds') or AGENT_DEFAULT_ROUNDS)
     return f"""{untrusted_input_system_instruction()}
 
@@ -667,8 +686,8 @@ Return ONLY this JSON object, no other text:
 def build_selection_prompt(config: dict[str, Any], candidates: list[dict[str, Any]]) -> str:
     subject = config_subject(config)
     audience = config_audience(config)
-    target = int(config.get('target_count') or AGENT_DEFAULT_TARGET_COUNT)
-    dimension_choices = ', '.join([*catalog_ids(config), OTHER_DIMENSION])
+    target = _selection_target(config)
+    dimension_choices = ', '.join(selected_dimensions(config, include_other=True))
     return f"""{untrusted_input_system_instruction()}
 
 {_brief(config)}
@@ -731,7 +750,7 @@ def parse_plan(text: str, config: dict[str, Any]) -> dict[str, Any] | None:
     parsed = parse_llm_json(text, expect='object')
     if not isinstance(parsed, dict):
         return None
-    queries = parse_queries(parsed.get('queries'), _selected_dimensions(config))
+    queries = parse_queries(parsed.get('queries'), selected_dimensions(config, include_other=True))
     if not queries:
         return None
     strategy = parsed.get('strategy')
@@ -748,7 +767,11 @@ def parse_evaluation(text: str, config: dict[str, Any], *, exclude_queries: set[
     if not isinstance(parsed, dict):
         return None
     decision = str(parsed.get('decision', '')).strip().lower()
-    next_queries = parse_queries(parsed.get('next_queries'), _selected_dimensions(config), exclude=exclude_queries)
+    next_queries = parse_queries(
+        parsed.get('next_queries'),
+        selected_dimensions(config, include_other=True),
+        exclude=exclude_queries,
+    )
     if decision != 'continue' or not next_queries:
         decision = 'stop'
         next_queries = []
@@ -781,7 +804,8 @@ def parse_selection(text: str, config: dict[str, Any], candidates: list[dict[str
     if not isinstance(parsed, list):
         return None
     by_key = {normalize_keyword(str(entry.get('keyword', ''))): entry for entry in candidates if isinstance(entry, dict)}
-    target = int(config.get('target_count') or AGENT_DEFAULT_TARGET_COUNT)
+    target = _selection_target(config)
+    dimensions = selected_dimensions(config, include_other=True)
     seen: set[str] = set()
     proposal: list[dict[str, Any]] = []
     for entry in parsed:
@@ -799,7 +823,7 @@ def parse_selection(text: str, config: dict[str, Any], candidates: list[dict[str
         rationale = entry.get('rationale')
         proposal.append({
             'keyword': keyword,
-            'dimension': _clean_dimension(entry.get('dimension'), catalog_ids(config)),
+            'dimension': _clean_dimension(entry.get('dimension'), dimensions),
             'intent': str(entry.get('intent') or source.get('intent') or 'informational').strip().lower()[:40],
             'competition': str(entry.get('competition') or source.get('competition') or 'medium').strip().lower()[:40],
             'relevance': _clean_relevance(entry.get('relevance', source.get('relevance')), 5.0),
@@ -813,12 +837,13 @@ def parse_selection(text: str, config: dict[str, Any], candidates: list[dict[str
 
 def fallback_selection(config: dict[str, Any], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Deterministic proposal when the selection model fails: top candidates by relevance."""
-    target = int(config.get('target_count') or AGENT_DEFAULT_TARGET_COUNT)
+    target = _selection_target(config)
+    dimensions = selected_dimensions(config, include_other=True)
     proposal = []
     for entry in candidates[:target]:
         proposal.append({
             'keyword': entry.get('keyword', ''),
-            'dimension': _clean_dimension(entry.get('dimension'), catalog_ids(config)),
+            'dimension': _clean_dimension(entry.get('dimension'), dimensions),
             'intent': str(entry.get('intent') or 'informational').lower()[:40],
             'competition': str(entry.get('competition') or 'medium').lower()[:40],
             'relevance': _clean_relevance(entry.get('relevance'), 5.0),
@@ -954,7 +979,7 @@ def mark_tracking_subset(
     covered_dimensions = {
         str(proposal[index].get('dimension') or '') for index in selected
     }
-    for dimension in _selected_dimensions(config):
+    for dimension in selected_dimensions(config):
         if len(selected) >= target:
             break
         if dimension in covered_dimensions:

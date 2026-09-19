@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.dynamodb_stubs import fake_dynamodb_resource, reset_tables
 from testing.env import KEYWORDS_TABLE_ENV
 from testing.events import api_gateway_event, parse_response
 from testing.module_loader import load_handler_module
@@ -44,8 +44,7 @@ def _groups_exist(*ids):
 
 @pytest.fixture(autouse=True)
 def _reset_mocks():
-    mock_keywords_table.reset_mock(side_effect=True, return_value=True)
-    mock_groups_table.reset_mock(side_effect=True, return_value=True)
+    reset_tables(mock_keywords_table, mock_groups_table)
     # No pre-existing keywords: the identity scan is empty and puts succeed.
     mock_keywords_table.scan.return_value = {'Items': []}
     mock_keywords_table.put_item.return_value = {}
@@ -69,6 +68,19 @@ class TestCreateWithGroups:
         assert status == 201
         assert 'group_ids' not in body
         assert 'group_ids' not in mock_keywords_table.put_item.call_args.kwargs['Item']
+
+    def test_accepts_more_than_fifty_memberships_when_keyword_is_created(self):
+        group_ids = [f'group-{index}' for index in range(51)]
+        _groups_exist(*group_ids)
+
+        status, body = parse_response(_mod.handler(make_event('POST', {
+            'keyword': 'hotel coruña',
+            'group_ids': group_ids,
+        }), None))
+
+        assert status == 201
+        assert body['group_ids'] == sorted(group_ids)
+        assert mock_keywords_table.put_item.call_args.kwargs['Item']['group_ids'] == set(group_ids)
 
     def test_rejects_unknown_group_ids_with_400_before_writing(self):
         _groups_exist('g1')

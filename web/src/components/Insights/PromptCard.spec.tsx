@@ -23,7 +23,6 @@ const basePrompt: PromptInsight = {
     provider_coverage: 50,
     providers: ['perplexity'] 
   },
-  total_providers: 4,
 };
 
 describe('PromptCard', () => {

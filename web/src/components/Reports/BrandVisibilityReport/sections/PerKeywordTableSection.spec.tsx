@@ -4,6 +4,7 @@ import {
 import {
   render, screen 
 } from '@testing-library/react';
+import { expectRendersNothing } from '../../../../test/renderNothing';
 import { PerKeywordTableSection } from './PerKeywordTableSection';
 import { buildKeywordTrends } from '../keywordTrends-fixtures';
 
@@ -86,14 +87,7 @@ describe('PerKeywordTableSection — mover highlight', () => {
 
 describe('PerKeywordTableSection — empty + placeholder states', () => {
   it('returns null when keyword_trends is empty', () => {
-    const { container } = render(
-      <PerKeywordTableSection
-        trends={buildKeywordTrends([])}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(container.firstChild).toBeNull();
+    expectRendersNothing(<PerKeywordTableSection trends={buildKeywordTrends([])} loading={false} error={null} />);
   });
 
   it('renders loading placeholder when loading is true', () => {

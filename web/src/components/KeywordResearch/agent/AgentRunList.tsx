@@ -24,21 +24,31 @@ function formatWhen(timestamp: string): string {
   return Number.isNaN(date.getTime()) ? timestamp : date.toLocaleString();
 }
 
-/** One line of progress for a run card: rounds, steps and what has been found. */
-export function describeRunProgress(job: KeywordResearchItem): string {
-  const status = resolveResearchStatus(job.status);
+/** "round 2/3" once a round has been planned; "planning" before that. */
+function roundText(job: KeywordResearchItem): string {
   const round = job.round ?? 0;
   const maxRounds = job.config?.max_rounds ?? round;
-  const roundText = round > 0 ? `round ${round}/${maxRounds}` : 'planning';
-  if (status !== null && isActiveResearchStatus(status)) {
-    const done = job.steps_done ?? 0;
-    const total = job.steps_total ?? 0;
-    const steps = total > 0 ? ` · ${done}/${total} steps` : '';
-    return `${roundText}${steps} · ${job.keyword_count} candidates so far`;
-  }
-  const rounds = job.rounds?.length ?? round;
+  return round > 0 ? `round ${round}/${maxRounds}` : 'planning';
+}
+
+/** While the run is going: the round, the steps finished and the candidates found so far. */
+function describeActiveRun(job: KeywordResearchItem): string {
+  const done = job.steps_done ?? 0;
+  const total = job.steps_total ?? 0;
+  const steps = total > 0 ? ` · ${done}/${total} steps` : '';
+  return `${roundText(job)}${steps} · ${job.keyword_count} candidates so far`;
+}
+
+/** Once it stopped: rounds run, candidates found and the size of the proposal. */
+function describeFinishedRun(job: KeywordResearchItem): string {
+  const rounds = job.rounds?.length ?? job.round ?? 0;
   const candidates = job.candidates_count ?? 0;
   return `${rounds} round${rounds === 1 ? '' : 's'} · ${candidates} candidates · ${job.keyword_count} proposed`;
+}
+
+/** One line of progress for a run card: rounds, steps and what has been found. */
+export function describeRunProgress(job: KeywordResearchItem): string {
+  return isActiveResearchStatus(job.status) ? describeActiveRun(job) : describeFinishedRun(job);
 }
 
 /** What opening the run shows: its progress while active, the failure for a failed run, the proposal otherwise. */

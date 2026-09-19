@@ -18,6 +18,7 @@ import os
 import sys
 import uuid
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any
 
 import boto3
@@ -52,7 +53,6 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
-CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 CONTENT_STUDIO_TABLE = os.environ['DYNAMODB_TABLE_CONTENT_STUDIO']
 KEYWORDS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORDS']
@@ -205,40 +205,211 @@ def get_crawled_content(urls: list[str], limit: int = 5) -> list[dict[str, Any]]
     return content_list
 
 
-def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
-    """Generate content ideas from multiple sources."""
+def _system_idea(idea_type: str, title: str, description: str) -> dict[str, Any]:
+    """A single non-actionable placeholder shown while there is nothing to analyse yet."""
+    return {
+        'id': str(uuid.uuid4()),
+        'type': idea_type,
+        'priority': 'high',
+        'title': title,
+        'description': description,
+        'keyword': None,
+        'source': 'system',
+        'competitor_urls': [],
+        'actionable': False
+    }
+
+
+def _citation_opportunity_ideas(keyword_data: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    """Ideas for rows without extracted brands: point at each keyword's citations instead."""
+    ideas = []
+    for keyword, results in keyword_data.items():
+        if not keyword:
+            continue
+        all_citations = []
+        for result in results:
+            all_citations.extend(result.get('citations', []))
+
+        if all_citations:
+            ideas.append({
+                'id': str(uuid.uuid4()),
+                'type': 'citation_opportunity',
+                'priority': 'medium',
+                'title': f'Analyze Citations for "{keyword}"',
+                'description': f'Found {len(set(all_citations))} unique citations. Brand extraction not yet run for this data.',
+                'keyword': keyword,
+                'source': 'citation_analysis',
+                'competitor_urls': list(set(all_citations))[:10],
+                'actionable': True,
+                'content_angle': 'comprehensive_guide'
+            })
+    return ideas[:30]
+
+
+@dataclass
+class _KeywordVisibility:
+    """How the tracked brands showed up in one keyword's most recent results."""
+
+    fp_found: bool = False
+    fp_best_rank: int = 999
+    fp_providers: set[str] = field(default_factory=set)
+    fp_sentiment: list[str] = field(default_factory=list)
+    comp_mentions: list[dict[str, Any]] = field(default_factory=list)
+    all_providers: set[str] = field(default_factory=set)
+    competitor_citations: list[str] = field(default_factory=list)
+    all_citations: list[str] = field(default_factory=list)
+
+
+def _analyze_keyword_visibility(
+    results: list[dict[str, Any]], first_party: list[str], competitors: list[str]
+) -> _KeywordVisibility:
+    """Aggregate the brand mentions in the most recent batch of ``results`` for one keyword."""
+    latest_ts = max(r.get('timestamp', '') for r in results)
+    latest = [r for r in results if r.get('timestamp') == latest_ts]
+
+    visibility = _KeywordVisibility()
+    for result in latest:
+        provider = result.get('provider', '')
+        visibility.all_providers.add(provider)
+        citations = result.get('citations', [])
+        visibility.all_citations.extend(citations)
+
+        for brand in result.get('brands', []):
+            rank = to_int(brand.get('rank'), 999)
+
+            # Prefer LLM classification; fall back to exact name match
+            # when missing. See audit items 9 and 22 for the substring
+            # collision bugs this replaces.
+            classification = classify_brand(brand, first_party, competitors)
+
+            if classification == 'first_party':
+                visibility.fp_found = True
+                visibility.fp_best_rank = min(visibility.fp_best_rank, rank)
+                visibility.fp_providers.add(provider)
+                visibility.fp_sentiment.append(brand.get('sentiment', 'neutral'))
+            elif classification == 'competitor':
+                visibility.comp_mentions.append({'name': brand.get('name'), 'rank': rank, 'provider': provider})
+                visibility.competitor_citations.extend(citations)
+
+    visibility.competitor_citations = list(set(visibility.competitor_citations))[:10]
+    visibility.all_citations = list(set(visibility.all_citations))[:10]
+    return visibility
+
+
+def _keyword_ideas(keyword: str, visibility: _KeywordVisibility) -> list[dict[str, Any]]:
+    """Turn one keyword's visibility picture into up to three content ideas."""
     ideas = []
 
+    # Visibility gap: competitors appear but you don't
+    if not visibility.fp_found and visibility.comp_mentions:
+        ideas.append({
+            'id': str(uuid.uuid4()),
+            'type': 'visibility_gap',
+            'priority': 'high',
+            'title': f'Create Content for "{keyword}"',
+            'description': f'Your brand doesn\'t appear but {len(visibility.comp_mentions)} competitors do.',
+            'keyword': keyword,
+            'source': 'visibility_analysis',
+            'competitor_brands': [c['name'] for c in visibility.comp_mentions[:5]],
+            'competitor_urls': visibility.competitor_citations,
+            'providers_missing': list(visibility.all_providers),
+            'actionable': True,
+            'content_angle': 'comprehensive_guide'
+        })
+    # Ranking improvement: you appear but not in top 2 (lowered threshold)
+    elif visibility.fp_found and visibility.fp_best_rank > 2 and visibility.comp_mentions:
+        ideas.append({
+            'id': str(uuid.uuid4()),
+            'type': 'ranking_improvement',
+            'priority': 'medium' if visibility.fp_best_rank > 3 else 'low',
+            'title': f'Improve Ranking for "{keyword}"',
+            'description': f'Your brand ranks #{visibility.fp_best_rank}. Create better content to reach #1.',
+            'keyword': keyword,
+            'source': 'ranking_analysis',
+            'current_rank': visibility.fp_best_rank,
+            'competitor_brands': [c['name'] for c in visibility.comp_mentions[:3]],
+            'competitor_urls': visibility.competitor_citations,
+            'providers_present': list(visibility.fp_providers),
+            'actionable': True,
+            'content_angle': 'differentiation'
+        })
+    # Leadership maintenance: you're #1 or #2 - keep the momentum
+    elif visibility.fp_found and visibility.fp_best_rank <= 2:
+        ideas.append({
+            'id': str(uuid.uuid4()),
+            'type': 'leadership_maintenance',
+            'priority': 'low',
+            'title': f'Maintain Leadership for "{keyword}"',
+            'description': f'You\'re #{visibility.fp_best_rank}! Create fresh content to stay ahead of {len(visibility.comp_mentions)} competitors.',
+            'keyword': keyword,
+            'source': 'leadership_analysis',
+            'current_rank': visibility.fp_best_rank,
+            'competitor_brands': [c['name'] for c in visibility.comp_mentions[:3]],
+            'competitor_urls': visibility.all_citations,
+            'providers_present': list(visibility.fp_providers),
+            'actionable': True,
+            'content_angle': 'thought_leadership'
+        })
+
+    # Provider gap: you appear on some providers but not others
+    missing_providers = visibility.all_providers - visibility.fp_providers
+    if visibility.fp_found and missing_providers:
+        ideas.append({
+            'id': str(uuid.uuid4()),
+            'type': 'provider_gap',
+            'priority': 'medium',
+            'title': f'Target {", ".join(missing_providers).title()} for "{keyword}"',
+            'description': f'Your brand appears on some AI engines but not on {", ".join(missing_providers)}.',
+            'keyword': keyword,
+            'source': 'provider_analysis',
+            'providers_missing': list(missing_providers),
+            'providers_present': list(visibility.fp_providers),
+            'competitor_urls': visibility.competitor_citations,
+            'actionable': True,
+            'content_angle': 'provider_optimization'
+        })
+
+    # Sentiment improvement: you appear but with negative sentiment
+    negative_count = sum(1 for s in visibility.fp_sentiment if s == 'negative')
+    if visibility.fp_found and negative_count > 0:
+        ideas.append({
+            'id': str(uuid.uuid4()),
+            'type': 'sentiment_improvement',
+            'priority': 'high',
+            'title': f'Address Negative Sentiment for "{keyword}"',
+            'description': f'Your brand has negative sentiment in {negative_count} provider(s). Create positive content.',
+            'keyword': keyword,
+            'source': 'sentiment_analysis',
+            'current_rank': visibility.fp_best_rank,
+            'competitor_urls': visibility.all_citations,
+            'providers_present': list(visibility.fp_providers),
+            'actionable': True,
+            'content_angle': 'reputation_management'
+        })
+
+    return ideas
+
+
+def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Generate content ideas from multiple sources."""
     first_party, competitors = tracked_brand_names(config)
 
     if not first_party:
-        return [{
-            'id': str(uuid.uuid4()),
-            'type': 'configuration',
-            'priority': 'high',
-            'title': 'Configure Your Brands First',
-            'description': 'Add your brand names in Settings to enable content recommendations.',
-            'keyword': None,
-            'source': 'system',
-            'competitor_urls': [],
-            'actionable': False
-        }]
+        return [_system_idea(
+            'configuration',
+            'Configure Your Brands First',
+            'Add your brand names in Settings to enable content recommendations.',
+        )]
 
     # Limit to 30 keywords for performance
     items = load_recent_search_results(dynamodb, SEARCH_RESULTS_TABLE, max_keywords=30)
 
     if not items:
-        return [{
-            'id': str(uuid.uuid4()),
-            'type': 'data',
-            'priority': 'high',
-            'title': 'Run Your First Analysis',
-            'description': 'No search data found. Run an analysis to generate content ideas.',
-            'keyword': None,
-            'source': 'system',
-            'competitor_urls': [],
-            'actionable': False
-        }]
+        return [_system_idea(
+            'data',
+            'Run Your First Analysis',
+            'No search data found. Run an analysis to generate content ideas.',
+        )]
 
     keyword_data = defaultdict(list)
     has_any_brands = False
@@ -249,159 +420,15 @@ def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
 
     # If no brand data extracted yet, show citation-based opportunities
     if not has_any_brands:
-        for keyword, results in keyword_data.items():
-            if not keyword:
-                continue
-            all_citations = []
-            for result in results:
-                all_citations.extend(result.get('citations', []))
-
-            if all_citations:
-                ideas.append({
-                    'id': str(uuid.uuid4()),
-                    'type': 'citation_opportunity',
-                    'priority': 'medium',
-                    'title': f'Analyze Citations for "{keyword}"',
-                    'description': f'Found {len(set(all_citations))} unique citations. Brand extraction not yet run for this data.',
-                    'keyword': keyword,
-                    'source': 'citation_analysis',
-                    'competitor_urls': list(set(all_citations))[:10],
-                    'actionable': True,
-                    'content_angle': 'comprehensive_guide'
-                })
-        return ideas[:30]
+        return _citation_opportunity_ideas(keyword_data)
 
     # Analyze each keyword for opportunities based on brand data
+    ideas = []
     for keyword, results in keyword_data.items():
         if not keyword:
             continue
-
-        latest_ts = max(r.get('timestamp', '') for r in results)
-        latest = [r for r in results if r.get('timestamp') == latest_ts]
-
-        fp_found = False
-        fp_best_rank = 999
-        fp_providers = set()
-        fp_sentiment = []
-        comp_mentions = []
-        all_providers = set()
-        competitor_citations = []
-        all_citations = []
-
-        for result in latest:
-            provider = result.get('provider', '')
-            all_providers.add(provider)
-            brands = result.get('brands', [])
-            citations = result.get('citations', [])
-            all_citations.extend(citations)
-
-            for brand in brands:
-                rank = to_int(brand.get('rank'), 999)
-                sentiment = brand.get('sentiment', 'neutral')
-
-                # Prefer LLM classification; fall back to exact name match
-                # when missing. See audit items 9 and 22 for the substring
-                # collision bugs this replaces.
-                classification = classify_brand(brand, first_party, competitors)
-
-                if classification == 'first_party':
-                    fp_found = True
-                    fp_best_rank = min(fp_best_rank, rank)
-                    fp_providers.add(provider)
-                    fp_sentiment.append(sentiment)
-                elif classification == 'competitor':
-                    comp_mentions.append({'name': brand.get('name'), 'rank': rank, 'provider': provider})
-                    competitor_citations.extend(citations)
-
-        competitor_citations = list(set(competitor_citations))[:10]
-        all_citations = list(set(all_citations))[:10]
-
-        # Visibility gap: competitors appear but you don't
-        if not fp_found and comp_mentions:
-            ideas.append({
-                'id': str(uuid.uuid4()),
-                'type': 'visibility_gap',
-                'priority': 'high',
-                'title': f'Create Content for "{keyword}"',
-                'description': f'Your brand doesn\'t appear but {len(comp_mentions)} competitors do.',
-                'keyword': keyword,
-                'source': 'visibility_analysis',
-                'competitor_brands': [c['name'] for c in comp_mentions[:5]],
-                'competitor_urls': competitor_citations,
-                'providers_missing': list(all_providers),
-                'actionable': True,
-                'content_angle': 'comprehensive_guide'
-            })
-        # Ranking improvement: you appear but not in top 2 (lowered threshold)
-        elif fp_found and fp_best_rank > 2 and comp_mentions:
-            ideas.append({
-                'id': str(uuid.uuid4()),
-                'type': 'ranking_improvement',
-                'priority': 'medium' if fp_best_rank > 3 else 'low',
-                'title': f'Improve Ranking for "{keyword}"',
-                'description': f'Your brand ranks #{fp_best_rank}. Create better content to reach #1.',
-                'keyword': keyword,
-                'source': 'ranking_analysis',
-                'current_rank': fp_best_rank,
-                'competitor_brands': [c['name'] for c in comp_mentions[:3]],
-                'competitor_urls': competitor_citations,
-                'providers_present': list(fp_providers),
-                'actionable': True,
-                'content_angle': 'differentiation'
-            })
-        # Leadership maintenance: you're #1 or #2 - keep the momentum
-        elif fp_found and fp_best_rank <= 2:
-            ideas.append({
-                'id': str(uuid.uuid4()),
-                'type': 'leadership_maintenance',
-                'priority': 'low',
-                'title': f'Maintain Leadership for "{keyword}"',
-                'description': f'You\'re #{fp_best_rank}! Create fresh content to stay ahead of {len(comp_mentions)} competitors.',
-                'keyword': keyword,
-                'source': 'leadership_analysis',
-                'current_rank': fp_best_rank,
-                'competitor_brands': [c['name'] for c in comp_mentions[:3]],
-                'competitor_urls': all_citations,
-                'providers_present': list(fp_providers),
-                'actionable': True,
-                'content_angle': 'thought_leadership'
-            })
-
-        # Provider gap: you appear on some providers but not others
-        missing_providers = all_providers - fp_providers
-        if fp_found and missing_providers:
-            ideas.append({
-                'id': str(uuid.uuid4()),
-                'type': 'provider_gap',
-                'priority': 'medium',
-                'title': f'Target {", ".join(missing_providers).title()} for "{keyword}"',
-                'description': f'Your brand appears on some AI engines but not on {", ".join(missing_providers)}.',
-                'keyword': keyword,
-                'source': 'provider_analysis',
-                'providers_missing': list(missing_providers),
-                'providers_present': list(fp_providers),
-                'competitor_urls': competitor_citations,
-                'actionable': True,
-                'content_angle': 'provider_optimization'
-            })
-
-        # Sentiment improvement: you appear but with negative sentiment
-        negative_count = sum(1 for s in fp_sentiment if s == 'negative')
-        if fp_found and negative_count > 0:
-            ideas.append({
-                'id': str(uuid.uuid4()),
-                'type': 'sentiment_improvement',
-                'priority': 'high',
-                'title': f'Address Negative Sentiment for "{keyword}"',
-                'description': f'Your brand has negative sentiment in {negative_count} provider(s). Create positive content.',
-                'keyword': keyword,
-                'source': 'sentiment_analysis',
-                'current_rank': fp_best_rank,
-                'competitor_urls': all_citations,
-                'providers_present': list(fp_providers),
-                'actionable': True,
-                'content_angle': 'reputation_management'
-            })
+        visibility = _analyze_keyword_visibility(results, first_party, competitors)
+        ideas.extend(_keyword_ideas(keyword, visibility))
 
     # Add seasonal/trending content ideas based on keywords
     seasonal_keywords = _get_seasonal_suggestions(list(keyword_data.keys()), config)
@@ -412,103 +439,45 @@ def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
     return ideas[:50]  # Increased from 30 to 50
 
 
-def _invoke_content_generation(
-    prompt: str, content_angle: str, competitor_sources_used: int
-) -> dict[str, Any]:
-    """Invoke Bedrock and preserve the established Content Studio result shape."""
-    try:
-        generated_content = invoke_bedrock(
-            prompt,
-            ModelRole.GENERATION,
-            max_tokens=8000,
-            temperature=0.7,
-        )
-        return {
-            'success': True,
-            'content': parse_generated_content(generated_content),
-            'raw_content': generated_content,
-            'model': get_model_tier(ModelRole.GENERATION).value,
-            'content_angle': content_angle,
-            'competitor_sources_used': competitor_sources_used,
-        }
-    except BedrockInvocationError as error:
-        logger.error(f"Bedrock throttled after retries: {error}")
-        return {
-            'success': False,
-            'error': 'Too many requests. Please wait a moment and try again.',
-            'error_type': 'throttling',
-            'content_angle': content_angle,
-        }
-    except Exception as error:
-        error_msg = str(error)
-        logger.error(f"Bedrock generation failed: {error_msg}", exc_info=True)
+def _competitor_context(competitor_content: list[dict[str, Any]]) -> str:
+    """Render the crawled competitor pages as a prompt section, or ``''`` when there are none.
 
-        if 'AccessDeniedException' in error_msg:
-            user_error = 'Access denied to Bedrock model. Check IAM permissions.'
-            error_type = 'access_denied'
-        elif 'ModelTimeoutException' in error_msg:
-            user_error = 'AI model took too long to respond. Please try again with a simpler keyword.'
-            error_type = 'timeout'
-        elif 'ModelErrorException' in error_msg:
-            user_error = 'AI model encountered an error. Please try again.'
-            error_type = 'model_error'
-        elif 'ValidationException' in error_msg:
-            user_error = 'Invalid request to AI model. Please try a different keyword.'
-            error_type = 'generation_error'
-        elif 'ServiceUnavailable' in error_msg or 'InternalServerError' in error_msg:
-            user_error = 'AI service temporarily unavailable. Please try again later.'
-            error_type = 'generation_error'
-        elif 'ResourceNotFoundException' in error_msg:
-            user_error = 'AI model not found. Please contact support.'
-            error_type = 'generation_error'
-        else:
-            user_error = f'Content generation failed: {error_msg[:200]}'
-            error_type = 'generation_error'
-
-        return {
-            'success': False,
-            'error': user_error,
-            'error_type': error_type,
-            'content_angle': content_angle,
-        }
+    Each page's title/preview is also untrusted (it came from the open web),
+    so every value is delimiter-wrapped like the user-controlled fields.
+    """
+    if not competitor_content:
+        return ""
+    context = "\n\nCompetitor content analysis:\n"
+    for cc in competitor_content:
+        context += f"\n--- {wrap_user_input(cc.get('domain', ''), 'domain')} ---\n"
+        context += f"Title: {wrap_user_input(cc.get('title', ''), 'title')}\n"
+        if cc.get('content_preview'):
+            context += (
+                "Content preview: "
+                f"{wrap_user_input(cc['content_preview'][:1000], 'content', max_length=2000)}...\n"
+            )
+    return context
 
 
-def _group_brief_generation(
-    idea: dict[str, Any], config: dict[str, Any], content_angle: str
-) -> dict[str, Any]:
-    """Build a group brief prompt, failing safely when its source cannot be read."""
-    try:
-        prompt, source_count = build_group_brief_prompt(idea, config)
-    except ContentBriefFetchError as error:
-        logger.warning("Group brief source fetch failed: %s", error)
-        return {
-            'success': False,
-            'error': str(error),
-            'error_type': 'source_fetch',
-            'content_angle': content_angle,
-        }
-    except ContentBriefTemplateError as error:
-        logger.warning("Group brief template rendering failed: %s", error)
-        return {
-            'success': False,
-            'error': str(error),
-            'error_type': 'template_validation',
-            'content_angle': content_angle,
-        }
-    return _invoke_content_generation(prompt, content_angle, source_count)
+def _output_language_instruction(idea: dict[str, Any]) -> str:
+    """Trailing instruction forcing a non-English output language, or ``''`` for English/unset."""
+    output_language_raw = idea.get('output_language', 'English')
+    if not output_language_raw or output_language_raw == 'English':
+        return ""
+    # Also wrapped: the value comes from the dashboard and is free-form text.
+    output_language_tag = wrap_user_input(output_language_raw, "language", max_length=100)
+    return (
+        f"\n\nIMPORTANT: Write ALL content in {output_language_tag}. "
+        f"The title, meta description, body, headings, and key points must all be in {output_language_tag}."
+    )
 
 
-def generate_content(idea: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
-    """Generate content using Bedrock Claude based on idea and competitor analysis."""
-    content_angle = idea.get('content_angle', 'comprehensive_guide')
-    if idea.get('type') == GROUP_BRIEF_TYPE:
-        return _group_brief_generation(idea, config, content_angle)
-
+def _build_generation_prompt(
+    idea: dict[str, Any], config: dict[str, Any], competitor_content: list[dict[str, Any]]
+) -> str:
+    """Assemble the Bedrock prompt: safety preamble, the brief for the content angle, language instruction."""
     keyword = idea.get('keyword', '')
-    competitor_urls = idea.get('competitor_urls', [])
-
-    # Get competitor content for analysis
-    competitor_content = get_crawled_content(competitor_urls, limit=3)
+    content_angle = idea.get('content_angle', 'comprehensive_guide')
 
     tracked_brands = config.get("tracked_brands", {})
     first_party = tracked_brands.get("first_party", [])
@@ -522,20 +491,7 @@ def generate_content(idea: dict[str, Any], config: dict[str, Any]) -> dict[str, 
     keyword_tag = wrap_user_input(keyword, "keyword")
     brand_tag = wrap_user_input(brand_name_raw, "brand")
     industry_tag = wrap_user_input(industry_raw, "industry")
-
-    # Build context from competitor content — each crawled page's title/preview
-    # is also untrusted (came from the open web).
-    competitor_context = ""
-    if competitor_content:
-        competitor_context = "\n\nCompetitor content analysis:\n"
-        for cc in competitor_content:
-            competitor_context += f"\n--- {wrap_user_input(cc.get('domain', ''), 'domain')} ---\n"
-            competitor_context += f"Title: {wrap_user_input(cc.get('title', ''), 'title')}\n"
-            if cc.get('content_preview'):
-                competitor_context += (
-                    "Content preview: "
-                    f"{wrap_user_input(cc['content_preview'][:1000], 'content', max_length=2000)}...\n"
-                )
+    competitor_context = _competitor_context(competitor_content)
 
     # Prepend the standing system instruction so the LLM knows to treat any
     # tagged content as data, not commands.
@@ -681,45 +637,114 @@ META: [150 character meta description]
 HEADINGS: [List the H2 headings you used, comma separated]
 POINTS: [3 key takeaways as bullet points]"""
 
-    # Add output language instruction if specified — also wrapped since the
-    # value comes from the dashboard and is free-form text.
-    output_language_raw = idea.get('output_language', 'English')
-    if output_language_raw and output_language_raw != 'English':
-        output_language_tag = wrap_user_input(output_language_raw, "language", max_length=100)
-        prompt += (
-            f"\n\nIMPORTANT: Write ALL content in {output_language_tag}. "
-            f"The title, meta description, body, headings, and key points must all be in {output_language_tag}."
-        )
+    return prompt + _output_language_instruction(idea)
 
+
+# Ordered ``(AWS error codes, user-facing message, error_type)`` rows for
+# `_describe_generation_error`; the first row naming a code found in the
+# message wins.
+_GENERATION_ERROR_MESSAGES: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (('AccessDeniedException',), 'Access denied to Bedrock model. Check IAM permissions.', 'access_denied'),
+    (('ModelTimeoutException',), 'AI model took too long to respond. Please try again with a simpler keyword.', 'timeout'),
+    (('ModelErrorException',), 'AI model encountered an error. Please try again.', 'model_error'),
+    (('ValidationException',), 'Invalid request to AI model. Please try a different keyword.', 'generation_error'),
+    (
+        ('ServiceUnavailable', 'InternalServerError'),
+        'AI service temporarily unavailable. Please try again later.',
+        'generation_error',
+    ),
+    (('ResourceNotFoundException',), 'AI model not found. Please contact support.', 'generation_error'),
+)
+
+
+def _describe_generation_error(error_msg: str) -> tuple[str, str]:
+    """Map a Bedrock failure message to a user-friendly ``(error, error_type)`` by the AWS error code it names."""
+    for codes, user_error, error_type in _GENERATION_ERROR_MESSAGES:
+        if any(code in error_msg for code in codes):
+            return user_error, error_type
+    return f'Content generation failed: {error_msg[:200]}', 'generation_error'
+
+
+def _generation_failure(error: str, error_type: str, content_angle: str) -> dict[str, Any]:
+    """The failed-generation result that `_process_generation_async` persists on the row."""
+    return {
+        'success': False,
+        'error': error,
+        'error_type': error_type,
+        'content_angle': content_angle
+    }
+
+
+def _invoke_content_generation(
+    prompt: str, content_angle: str, competitor_sources_used: int
+) -> dict[str, Any]:
+    """Invoke Bedrock and preserve the established Content Studio result shape."""
+    try:
+        # Invoke shared Bedrock client with GENERATION role (Haiku default, tier-switchable)
+        generated_content = invoke_bedrock(
+            prompt,
+            ModelRole.GENERATION,
+            max_tokens=8000,
+            temperature=0.7,
+        )
+        return {
+            'success': True,
+            'content': parse_generated_content(generated_content),
+            'raw_content': generated_content,
+            'model': get_model_tier(ModelRole.GENERATION).value,
+            'content_angle': content_angle,
+            'competitor_sources_used': competitor_sources_used,
+        }
+    except BedrockInvocationError:
+        logger.exception("Bedrock throttled after retries")
+        return _generation_failure(
+            'Too many requests. Please wait a moment and try again.', 'throttling', content_angle
+        )
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Bedrock generation failed: {error_msg}", exc_info=True)
+        user_error, error_type = _describe_generation_error(error_msg)
+        return _generation_failure(user_error, error_type, content_angle)
+
+
+def _group_brief_generation(
+    idea: dict[str, Any], config: dict[str, Any], content_angle: str
+) -> dict[str, Any]:
+    """Build a group brief prompt, failing safely when its source cannot be read."""
+    try:
+        prompt, source_count = build_group_brief_prompt(idea, config)
+    except ContentBriefFetchError as error:
+        logger.warning("Group brief source fetch failed: %s", error)
+        return _generation_failure(str(error), 'source_fetch', content_angle)
+    except ContentBriefTemplateError as error:
+        logger.warning("Group brief template rendering failed: %s", error)
+        return _generation_failure(str(error), 'template_validation', content_angle)
+    return _invoke_content_generation(prompt, content_angle, source_count)
+
+
+def generate_content(idea: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    """Generate content using Bedrock Claude based on idea and competitor analysis."""
+    content_angle = idea.get('content_angle', 'comprehensive_guide')
+    if idea.get('type') == GROUP_BRIEF_TYPE:
+        return _group_brief_generation(idea, config, content_angle)
+
+    # Get competitor content for analysis
+    competitor_content = get_crawled_content(idea.get('competitor_urls', []), limit=3)
+    prompt = _build_generation_prompt(idea, config, competitor_content)
     return _invoke_content_generation(prompt, content_angle, len(competitor_content))
 
 
-def parse_generated_content(text: str) -> dict[str, Any]:
-    """Parse the structured content from LLM response."""
-    result = {
-        'title': '',
-        'meta_description': '',
-        'body': '',
-        'suggested_headings': [],
-        'key_points': []
-    }
-
-    lines = text.split('\n')
-
-    # Extract title
-    for line in lines:
-        if line.strip().upper().startswith('TITLE:'):
-            result['title'] = line.split(':', 1)[1].strip()
-            break
-
-    # Extract meta description
+def _marker_value(lines: list[str], *markers: str) -> str:
+    """The text after the first line that starts with one of ``markers`` (case-insensitive), or ``''``."""
     for line in lines:
         upper = line.strip().upper()
-        if upper.startswith('META:') or upper.startswith('META_DESCRIPTION:'):
-            result['meta_description'] = line.split(':', 1)[1].strip()[:160]
-            break
+        if any(upper.startswith(marker) for marker in markers):
+            return line.split(':', 1)[1].strip()
+    return ''
 
-    # Find body content - everything between META line and HEADINGS/POINTS
+
+def _body_between_meta_and_lists(lines: list[str]) -> str:
+    """Everything after the META line up to the first HEADINGS/POINTS marker."""
     in_body = False
     body_lines = []
     for line in lines:
@@ -731,35 +756,45 @@ def parse_generated_content(text: str) -> dict[str, Any]:
             break
         if in_body:
             body_lines.append(line)
+    return '\n'.join(body_lines).strip()
 
-    result['body'] = '\n'.join(body_lines).strip()
 
-    # If no structured body found, use the whole text
-    if not result['body']:
-        result['body'] = text
-
-    # Extract headings
+def _suggested_headings(lines: list[str]) -> list[str]:
+    """The comma-separated headings on the first HEADINGS line, blanks dropped."""
     for line in lines:
-        upper_line = line.strip().upper()
-        if 'HEADINGS:' in upper_line:
+        if 'HEADINGS:' in line.strip().upper():
             after = line.split(':', 1)[1].strip() if ':' in line else ''
-            if after:
-                result['suggested_headings'] = [h.strip() for h in after.split(',') if h.strip()]
-            break
+            return [h.strip() for h in after.split(',') if h.strip()]
+    return []
 
-    # Extract key points
+
+def _key_points(lines: list[str]) -> list[str]:
+    """Every non-blank line after the POINTS marker, with bullets and numbering stripped."""
     in_points = False
+    points = []
     for line in lines:
-        upper_line = line.strip().upper()
-        if 'POINTS:' in upper_line:
+        if 'POINTS:' in line.strip().upper():
             in_points = True
             continue
         if in_points and line.strip():
             clean = line.strip().lstrip('-*0123456789. ')
             if clean:
-                result['key_points'].append(clean)
+                points.append(clean)
+    return points
 
-    return result
+
+def parse_generated_content(text: str) -> dict[str, Any]:
+    """Parse the structured content from LLM response."""
+    lines = text.split('\n')
+    # If no structured body found, use the whole text
+    body = _body_between_meta_and_lists(lines) or text
+    return {
+        'title': _marker_value(lines, 'TITLE:'),
+        'meta_description': _marker_value(lines, 'META:', 'META_DESCRIPTION:')[:160],
+        'body': body,
+        'suggested_headings': _suggested_headings(lines),
+        'key_points': _key_points(lines),
+    }
 
 
 def _compute_idempotency_key(idea: dict[str, Any], window_minutes: int = 5) -> str:
@@ -820,6 +855,28 @@ def _compute_idempotency_key(idea: dict[str, Any], window_minutes: int = 5) -> s
     return digest[:32]
 
 
+def _existing_content_row(table: Any, content_id: str, conflict: ClientError) -> dict[str, Any]:
+    """The row whose presence made the conditional write for ``content_id`` fail.
+
+    This is the retry/duplicate case — the caller hands the user the same
+    content_id and skips the second async generation.
+    """
+    logger.info(
+        f"Idempotent hit for content_id={content_id}; "
+        "returning existing record instead of creating duplicate"
+    )
+    existing = table.get_item(Key={'id': content_id}).get('Item')
+    if existing is None:
+        # Extremely unlikely: someone deleted the row between put and get.
+        # Safer to re-raise so the client sees the error rather than
+        # silently producing a surprise new UUID.
+        raise RuntimeError(
+            f"Idempotent conflict on content_id={content_id} but item "
+            "disappeared on read"
+        ) from conflict
+    return existing
+
+
 def create_pending_content(idea: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     """Create a pending content record for async generation.
 
@@ -864,27 +921,11 @@ def create_pending_content(idea: dict[str, Any]) -> tuple[dict[str, Any], bool]:
             Item=item,
             ConditionExpression='attribute_not_exists(id)',
         )
-        return item, True
     except ClientError as e:
         if e.response.get('Error', {}).get('Code') != 'ConditionalCheckFailedException':
             raise
-        # A row already exists for this key. This is the retry/duplicate
-        # case — return the existing row so the caller hands the user the
-        # same content_id and skips the second async generation.
-        logger.info(
-            f"Idempotent hit for content_id={content_id}; "
-            "returning existing record instead of creating duplicate"
-        )
-        existing = table.get_item(Key={'id': content_id}).get('Item')
-        if existing is None:
-            # Extremely unlikely: someone deleted the row between put and get.
-            # Safer to re-raise so the client sees the error rather than
-            # silently producing a surprise new UUID.
-            raise RuntimeError(
-                f"Idempotent conflict on content_id={content_id} but item "
-                "disappeared on read"
-            ) from e
-        return existing, False
+        return _existing_content_row(table, content_id, e), False
+    return item, True
 
 
 def update_content_status(content_id: str, status: str, generation_result: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -916,10 +957,10 @@ def update_content_status(content_id: str, status: str, generation_result: dict[
             ExpressionAttributeNames=expr_names,
             ExpressionAttributeValues=expr_values
         )
-        return {'success': True}
     except Exception as e:
-        logger.error(f"Failed to update content status: {e}")
+        logger.exception("Failed to update content status")
         return {'success': False, 'error': str(e)}
+    return {'success': True}
 
 
 def mark_content_viewed(content_id: str) -> dict[str, Any]:
@@ -931,19 +972,20 @@ def mark_content_viewed(content_id: str) -> dict[str, Any]:
             UpdateExpression='SET viewed = :viewed',
             ExpressionAttributeValues={':viewed': True}
         )
-        return {'success': True}
     except Exception as e:
+        logger.exception(f"Failed to mark content {content_id} viewed")
         return {'success': False, 'error': str(e)}
+    return {'success': True}
 
 
-def get_content_by_id(content_id: str) -> dict[str, Any]:
-    """Get a single content item by ID."""
+def get_content_by_id(content_id: str) -> dict[str, Any] | None:
+    """Get a single content item by ID; ``None`` when it does not exist or cannot be read."""
     table = dynamodb.Table(CONTENT_STUDIO_TABLE)
     try:
         response = table.get_item(Key={'id': content_id})
         return response.get('Item')
-    except Exception as e:
-        logger.error(f"Failed to get content: {e}")
+    except Exception:
+        logger.exception("Failed to get content")
         return None
 
 
@@ -976,7 +1018,7 @@ def get_content_history(limit: int = 20) -> list[dict[str, Any]]:
     """Get generated content history."""
     table = dynamodb.Table(CONTENT_STUDIO_TABLE)
     response = table.scan(Limit=limit)
-    items = response.get('Items', [])
+    items: list[dict[str, Any]] = response.get('Items', [])
 
     for item in items:
         _fail_if_generation_timed_out(item)
@@ -997,8 +1039,8 @@ def get_unviewed_count() -> int:
             Select='COUNT'
         )
         return response.get('Count', 0)
-    except Exception as e:
-        logger.error(f"Failed to get unviewed count: {e}")
+    except Exception:
+        logger.exception("Failed to get unviewed count")
         return 0
 
 
@@ -1007,9 +1049,10 @@ def delete_content(content_id: str) -> dict[str, Any]:
     table = dynamodb.Table(CONTENT_STUDIO_TABLE)
     try:
         table.delete_item(Key={'id': content_id})
-        return {'success': True, 'message': 'Content deleted successfully'}
     except Exception as e:
+        logger.exception(f"Failed to delete content {content_id}")
         return {'success': False, 'error': str(e)}
+    return {'success': True, 'message': 'Content deleted successfully'}
 
 
 def _get_ideas(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -1110,13 +1153,13 @@ def _generate_content(event: dict[str, Any], context: Any, body: dict, idea: dic
             description='generation',
             success_log=f"Triggered async generation for content_id={content_id}",
         )
-    except SelfInvokeDispatchError as exc:
+    except SelfInvokeDispatchError:
         # The background job never started. Running it here instead would
         # outlive API Gateway's 29s timeout, so the client would get a 504
         # with the work invisibly continuing (AUDIT-2026-08-19 §2.9). Mark the
         # row terminal — otherwise the idempotency key means a retry inside
         # the 5-minute window returns this same dead row without re-invoking.
-        logger.error(f"Could not dispatch generation for content_id={content_id}: {exc}")
+        logger.exception(f"Could not dispatch generation for content_id={content_id}")
         update_content_status(
             content_id,
             'failed',
@@ -1229,8 +1272,8 @@ def _delete_content(event: dict[str, Any], context: Any) -> dict[str, Any]:
     ('DELETE', None): _delete_content,
 })
 def _api_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Internal API handler - routes are handled by decorators."""
-    pass  # Routes handle everything
+    """Internal API handler - routes are handled by decorators; this body is never reached."""
+    ...
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:

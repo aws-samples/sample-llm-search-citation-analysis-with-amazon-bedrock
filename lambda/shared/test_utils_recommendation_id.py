@@ -54,7 +54,7 @@ def test_action_changes_do_not_affect_id():
     assert recommendation_id(a) == recommendation_id(b)
 
 
-def test_case_insensitive_on_type_and_title():
+def test_same_id_when_type_and_title_differ_only_by_case():
     a = {'type': 'GAP', 'title': 'Pitch X'}
     b = {'type': 'gap', 'title': 'pitch x'}
     assert recommendation_id(a) == recommendation_id(b)

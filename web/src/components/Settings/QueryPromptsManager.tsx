@@ -150,13 +150,7 @@ function PersonaForm({
   );
 }
 
-function PersonaRow({
-  prompt,
-  onToggle,
-  onUpdate,
-  onDelete,
-  isAdmin,
-}: {
+interface PersonaRowProps {
   readonly prompt: QueryPrompt;
   readonly onToggle: (id: string) => Promise<unknown>;
   readonly onUpdate: (id: string, updates: {
@@ -166,7 +160,15 @@ function PersonaRow({
   }) => Promise<unknown>;
   readonly onDelete: (id: string) => Promise<unknown>;
   readonly isAdmin: boolean;
-}) {
+}
+
+function PersonaRow({
+  prompt,
+  onToggle,
+  onUpdate,
+  onDelete,
+  isAdmin,
+}: PersonaRowProps) {
   const [editing, setEditing] = useState(false);
   const [toggling, setToggling] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -273,6 +275,62 @@ interface QueryPromptsManagerProps {
   readonly isAdmin: boolean;
 }
 
+function PersonaEmptyState({ isAdmin }: QueryPromptsManagerProps) {
+  return (
+    <div className="text-center py-8 text-gray-400">
+      <p className="text-sm">No personas configured yet.</p>
+      {isAdmin ? (
+        <>
+          <p className="text-xs mt-1">Create a persona to see how AI responses change based on user context.</p>
+          <p className="text-xs mt-2 text-gray-300">
+            Example: "I am a father of 3 living in Switzerland looking for family travel destinations"
+          </p>
+        </>
+      ) : (
+        /* Telling a non-admin to "create a persona" points at a button
+           they cannot see and a route that would refuse them. */
+        <p className="text-xs mt-1">An administrator can add personas to compare how AI responses change by user context.</p>
+      )}
+    </div>
+  );
+}
+
+interface PersonaListProps extends QueryPromptsManagerProps {
+  readonly prompts: QueryPrompt[];
+  readonly loading: boolean;
+  /** The create form is open, so the empty state would only repeat it. */
+  readonly creating: boolean;
+  readonly onToggle: PersonaRowProps['onToggle'];
+  readonly onUpdate: PersonaRowProps['onUpdate'];
+  readonly onDelete: PersonaRowProps['onDelete'];
+}
+
+/** The loading notice, the empty state or the persona rows — whichever applies. */
+function PersonaList({
+  prompts, loading, creating, isAdmin, onToggle, onUpdate, onDelete 
+}: PersonaListProps) {
+  if (loading) {
+    return <div className="text-sm text-gray-400 py-4 text-center">Loading personas...</div>;
+  }
+  if (prompts.length === 0) {
+    return creating ? null : <PersonaEmptyState isAdmin={isAdmin} />;
+  }
+  return (
+    <div className="space-y-2">
+      {prompts.map(prompt => (
+        <PersonaRow
+          key={prompt.id}
+          prompt={prompt}
+          onToggle={onToggle}
+          onUpdate={onUpdate}
+          onDelete={onDelete}
+          isAdmin={isAdmin}
+        />
+      ))}
+    </div>
+  );
+}
+
 export function QueryPromptsManager({ isAdmin }: QueryPromptsManagerProps) {
   const {
     prompts, loading, error, createPrompt, updatePrompt, deletePrompt, togglePrompt 
@@ -318,40 +376,15 @@ export function QueryPromptsManager({ isAdmin }: QueryPromptsManagerProps) {
         </div>
       )}
 
-      {loading && (
-        <div className="text-sm text-gray-400 py-4 text-center">Loading personas...</div>
-      )}
-      {!loading && prompts.length === 0 && !showCreate && (
-        <div className="text-center py-8 text-gray-400">
-          <p className="text-sm">No personas configured yet.</p>
-          {isAdmin ? (
-            <>
-              <p className="text-xs mt-1">Create a persona to see how AI responses change based on user context.</p>
-              <p className="text-xs mt-2 text-gray-300">
-                Example: "I am a father of 3 living in Switzerland looking for family travel destinations"
-              </p>
-            </>
-          ) : (
-            /* Telling a non-admin to "create a persona" points at a button
-               they cannot see and a route that would refuse them. */
-            <p className="text-xs mt-1">An administrator can add personas to compare how AI responses change by user context.</p>
-          )}
-        </div>
-      )}
-      {!loading && prompts.length > 0 && (
-        <div className="space-y-2">
-          {prompts.map(prompt => (
-            <PersonaRow
-              key={prompt.id}
-              prompt={prompt}
-              onToggle={togglePrompt}
-              onUpdate={updatePrompt}
-              onDelete={deletePrompt}
-              isAdmin={isAdmin}
-            />
-          ))}
-        </div>
-      )}
+      <PersonaList
+        prompts={prompts}
+        loading={loading}
+        creating={showCreate}
+        isAdmin={isAdmin}
+        onToggle={togglePrompt}
+        onUpdate={updatePrompt}
+        onDelete={deletePrompt}
+      />
 
       {prompts.length > 0 && (
         <p className="text-xs text-gray-400">

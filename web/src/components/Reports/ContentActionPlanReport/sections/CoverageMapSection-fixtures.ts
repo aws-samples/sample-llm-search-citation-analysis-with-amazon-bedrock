@@ -15,7 +15,6 @@ export function buildGaps(
     summary: {
       gap_count: summaries.reduce((total, summary) => total + summary.gap_count, 0),
       high_priority_gaps: summaries.reduce((total, summary) => total + summary.high_priority_gaps, 0),
-      total_sources: 0,
       covered_count: 0,
       coverage_rate: 0,
     },
@@ -39,7 +38,6 @@ export function brief(
   return {
     id,
     keyword,
-    idea_type: 'visibility_gap',
     idea_title: id,
     content_angle: 'comprehensive_guide',
     generated_content: {
@@ -49,7 +47,6 @@ export function brief(
       suggested_headings: [],
       key_points: [],
     },
-    raw_content: '',
     competitor_sources_used: 0,
     status,
     viewed: false,

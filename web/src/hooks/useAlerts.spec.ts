@@ -47,6 +47,13 @@ const mockFetchAlertSettings = vi.mocked(fetchAlertSettings);
 const mockFetchContentChanges = vi.mocked(fetchContentChanges);
 const mockUpdateAlertSettings = vi.mocked(updateAlertSettings);
 
+class AlertRequestAbortError extends Error {
+  constructor() {
+    super('Alert request aborted');
+    this.name = 'AbortError';
+  }
+}
+
 beforeEach(() => {
   vi.spyOn(console, 'error').mockImplementation(vi.fn());
   mockFetchAlerts.mockReset().mockResolvedValue(buildAlertsResponse());
@@ -100,6 +107,15 @@ describe('useOpenAlerts', () => {
     expect(mockFetchAlerts.mock.calls[0][0].signal?.aborted).toBe(true);
   });
 
+  it('finishes loading without an error when the alert request itself is aborted', async () => {
+    mockFetchAlerts.mockRejectedValue(new AlertRequestAbortError());
+
+    const { result } = await renderLoadedOpenAlerts();
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.items).toStrictEqual([]);
+  });
+
   it('ignores a stale alert response after manual refresh', async () => {
     const staleResponse = createDeferredValue<AlertsResponse>();
     const currentResponse = createDeferredValue<AlertsResponse>();
@@ -136,9 +152,8 @@ describe('useOpenAlerts', () => {
   it('shows the alert-specific safe message when loading fails', async () => {
     mockFetchAlerts.mockRejectedValue(new ApiRequestError('HTTP 500', 500));
 
-    const { result } = renderHook(() => useOpenAlerts());
+    const { result } = await renderLoadedOpenAlerts();
 
-    await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toBe('Failed to process alert request');
   });
 

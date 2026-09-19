@@ -4,7 +4,6 @@ export const mockSingleKeywordResponse: HistoricalTrendsResponse = {
   keyword: 'best hotels',
   period_type: 'day',
   days_analyzed: 30,
-  data_points: 2,
   trend_data: [
     {
       period: '2024-01-01',
@@ -38,7 +37,6 @@ export const mockSingleKeywordResponse: HistoricalTrendsResponse = {
 export const mockAllKeywordsResponse: HistoricalTrendsResponse = {
   period_type: 'day',
   days_analyzed: 30,
-  data_points: 0,
   trend_data: [],
   trend_direction: 'improving',
   summary: {

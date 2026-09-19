@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from decimal import Decimal
-from types import ModuleType
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -90,7 +90,7 @@ def _email_subscription(email: str, arn: str = 'PendingConfirmation') -> dict[st
     return {'Protocol': 'email', 'Endpoint': email, 'SubscriptionArn': arn}
 
 
-def _settings_backend(alert_api: ModuleType, subscriptions: list[dict[str, str]]) -> MagicMock:
+def _settings_backend(alert_api: Any, subscriptions: list[dict[str, str]]) -> MagicMock:
     settings = MagicMock()
     alert_api.dynamodb = fake_dynamodb_resource(by_name={'settings': settings})
     alert_api.sns = MagicMock()

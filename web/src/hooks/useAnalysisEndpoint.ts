@@ -16,7 +16,10 @@ import { useLatestRequest } from './useLatestRequest';
 export interface BackendErrorResponse {error: string;}
 
 function isBackendErrorResponse(data: unknown): data is BackendErrorResponse {
-  return typeof data === 'object' && data !== null && 'error' in data && typeof (data as BackendErrorResponse).error === 'string';
+  // Optional chaining makes this safe for null, primitives and arrays without
+  // the `typeof data === 'object' && data !== null && 'error' in data` guard,
+  // whose clauses were each redundant with this one comparison.
+  return typeof (data as Partial<BackendErrorResponse> | null)?.error === 'string';
 }
 
 /** Request target built from a fetch function's arguments. */
@@ -50,6 +53,34 @@ export interface AnalysisEndpointConfig<TArgs extends readonly unknown[], TRespo
 }
 
 /**
+ * Performs one analysis request and returns its validated body. Throws the
+ * contract's own errors on a non-OK status, a 200 `{error}` body (unless the
+ * contract opts out) and a body its type guard rejects; the caller owns the
+ * abort, staleness and state-write decisions.
+ */
+async function fetchAnalysisResponse<TResult>(
+  request: AnalysisRequest,
+  contract: AnalysisResponseContract<TResult>,
+  signal: AbortSignal,
+): Promise<TResult> {
+  const query = request.params ? `?${request.params.toString()}` : '';
+  const response = await authenticatedFetch(`${API_BASE_URL}${request.path}${query}`, {
+    ...request.init,
+    signal,
+  });
+  if (!response.ok) throw contract.createHttpError(response.status);
+
+  const json: unknown = await response.json();
+  if ((contract.rejectBackendErrorBody ?? true) && isBackendErrorResponse(json)) {
+    throw contract.createResponseError(json.error);
+  }
+  if (!contract.isValidResponse(json)) {
+    throw contract.createResponseError('Invalid response format');
+  }
+  return json;
+}
+
+/**
  * Shared fetch machinery for the imperative dashboard analysis hooks
  * (visibility, trends, citation gaps, persona rankings, competitor
  * rollup, reports overview, self-reflection, prompt insights).
@@ -80,6 +111,7 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
   } = useLatestRequest();
   const { errorContext } = config;
 
+  // Stryker disable ArrayDeclaration: React dependency list, not behaviour
   const runRequest = useCallback(async <TResult>(
     request: AnalysisRequest,
     contract: AnalysisResponseContract<TResult>,
@@ -92,20 +124,7 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
     setError(null);
 
     try {
-      const query = request.params ? `?${request.params.toString()}` : '';
-      const response = await authenticatedFetch(`${API_BASE_URL}${request.path}${query}`, {
-        ...request.init,
-        signal: latestRequest.signal,
-      });
-      if (!response.ok) throw contract.createHttpError(response.status);
-
-      const json: unknown = await response.json();
-      if ((contract.rejectBackendErrorBody ?? true) && isBackendErrorResponse(json)) {
-        throw contract.createResponseError(json.error);
-      }
-      if (!contract.isValidResponse(json)) {
-        throw contract.createResponseError('Invalid response format');
-      }
+      const json = await fetchAnalysisResponse(request, contract, latestRequest.signal);
       if (!latestRequest.isCurrent()) return null;
       applyResult?.(json);
       return json;
@@ -121,11 +140,13 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
       latestRequest.finish();
     }
   }, [beginRequest, errorContext, isMounted]);
+  // Stryker restore ArrayDeclaration
 
   const fetchData = useCallback(
     (...args: TArgs) => runRequest(config.buildRequest(...args), config, result => {
       setData(result);
     }),
+    // Stryker disable next-line ArrayDeclaration: React dependency list, not behaviour
     [config, runRequest],
   );
 

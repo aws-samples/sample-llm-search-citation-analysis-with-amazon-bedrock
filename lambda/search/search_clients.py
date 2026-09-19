@@ -137,7 +137,7 @@ class BraveSearchClient(BaseSearchClient):
                 metadata={"latency_ms": latency_ms, "result_count": len(results)}
             )
         except Exception as e:
-            logger.error(f"Brave Search error: {e!s}")
+            logger.exception("Brave Search error")
             return self._build_result(
                 citations=[],
                 results=[],
@@ -203,7 +203,7 @@ class TavilySearchClient(BaseSearchClient):
                 }
             )
         except Exception as e:
-            logger.error(f"Tavily Search error: {e!s}")
+            logger.exception("Tavily Search error")
             return self._build_result(
                 citations=[],
                 results=[],
@@ -274,7 +274,7 @@ class ExaSearchClient(BaseSearchClient):
                 }
             )
         except Exception as e:
-            logger.error(f"Exa Search error: {e!s}")
+            logger.exception("Exa Search error")
             return self._build_result(
                 citations=[],
                 results=[],
@@ -343,7 +343,7 @@ class SerpAPIClient(BaseSearchClient):
                 }
             )
         except Exception as e:
-            logger.error(f"SerpAPI error: {e!s}")
+            logger.exception("SerpAPI error")
             return self._build_result(
                 citations=[],
                 results=[],
@@ -417,7 +417,7 @@ class FirecrawlSearchClient(BaseSearchClient):
                 }
             )
         except Exception as e:
-            logger.error(f"Firecrawl Search error: {e!s}")
+            logger.exception("Firecrawl Search error")
             return self._build_result(
                 citations=[],
                 results=[],

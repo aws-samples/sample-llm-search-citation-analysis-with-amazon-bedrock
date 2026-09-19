@@ -136,12 +136,21 @@ describe('filterAndSortCitations', () => {
   });
 
   describe('filtering by minimum citations', () => {
-    it('returns all citations when minCitations is empty string', () => {
-      const citations = buildCitations(3);
+    it('keeps even single-citation rows when minCitations is empty string', () => {
+      const citations = [
+        buildCitation({
+          url: 'https://once.com',
+          citation_count: 1,
+        }),
+        buildCitation({
+          url: 'https://often.com',
+          citation_count: 100,
+        }),
+      ];
 
       const result = filterAndSortCitations(citations, '', '', DESC_CITATIONS);
 
-      expect(result).toHaveLength(3);
+      expect(result.map(c => c.url)).toStrictEqual(['https://often.com', 'https://once.com']);
     });
 
     it('returns only citations meeting minimum threshold', () => {
@@ -219,36 +228,20 @@ describe('filterAndSortCitations', () => {
       expect(result.map(c => c[column])).toStrictEqual(expected);
     });
 
-    it('sorts by domain ascending when sort is domain asc', () => {
-      const citations = [
-        buildCitation({ url: 'https://zebra.com/page' }),
-        buildCitation({ url: 'https://alpha.com/page' }),
-        buildCitation({ url: 'https://middle.com/page' }),
-      ];
+    /** Three citations whose domains are deliberately out of alphabetical order. */
+    const unsortedDomainCitations = [
+      buildCitation({ url: 'https://zebra.com/page' }),
+      buildCitation({ url: 'https://alpha.com/page' }),
+      buildCitation({ url: 'https://middle.com/page' }),
+    ];
 
-      const result = filterAndSortCitations(citations, '', '', ASC_DOMAIN);
+    it.each<[order: string, direction: string, sort: SortConfig, expected: string[]]>([
+      ['ascending', 'asc', ASC_DOMAIN, ['https://alpha.com/page', 'https://middle.com/page', 'https://zebra.com/page']],
+      ['descending', 'desc', DESC_DOMAIN, ['https://zebra.com/page', 'https://middle.com/page', 'https://alpha.com/page']],
+    ])('sorts by domain %s when sort is domain %s', (_order, _direction, sort, expected) => {
+      const result = filterAndSortCitations(unsortedDomainCitations, '', '', sort);
 
-      expect(result.map(c => c.url)).toStrictEqual([
-        'https://alpha.com/page',
-        'https://middle.com/page',
-        'https://zebra.com/page',
-      ]);
-    });
-
-    it('sorts by domain descending when sort is domain desc', () => {
-      const citations = [
-        buildCitation({ url: 'https://zebra.com/page' }),
-        buildCitation({ url: 'https://alpha.com/page' }),
-        buildCitation({ url: 'https://middle.com/page' }),
-      ];
-
-      const result = filterAndSortCitations(citations, '', '', DESC_DOMAIN);
-
-      expect(result.map(c => c.url)).toStrictEqual([
-        'https://zebra.com/page',
-        'https://middle.com/page',
-        'https://alpha.com/page',
-      ]);
+      expect(result.map(c => c.url)).toStrictEqual(expected);
     });
 
     it('treats undefined keyword_count as 0 when sorting', () => {

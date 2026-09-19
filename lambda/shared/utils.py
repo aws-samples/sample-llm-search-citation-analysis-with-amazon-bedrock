@@ -148,10 +148,10 @@ def get_brand_config(table_name: str | None = None) -> dict[str, Any]:
         dynamodb = get_dynamodb_resource()
         table = dynamodb.Table(brand_config_table)
         response = table.get_item(Key={'config_id': 'default'})
-        return response.get('Item', {})
-    except Exception as e:
-        logger.error(f"Error getting brand config: {e}")
+    except Exception:
+        logger.exception("Error getting brand config")
         return {}
+    return response.get('Item', {})
 
 
 def normalize_url(url: str) -> str:
@@ -166,26 +166,28 @@ def normalize_url(url: str) -> str:
     """
     try:
         parsed = urlparse(url)
-
-        # Remove tracking parameters
-        query_params = parse_qs(parsed.query)
-        tracking_params = [
-            'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
-            'fbclid', 'gclid', 'msclkid', 'ref', 'source', '_ga', 'mc_cid', 'mc_eid'
-        ]
-        clean_params = {k: v for k, v in query_params.items()
-                       if k not in tracking_params}
-
-        # Rebuild URL with domain + path + clean params
-        clean_query = urlencode(clean_params, doseq=True)
-        normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-        if clean_query:
-            normalized += f"?{clean_query}"
-
-        return normalized
-    except Exception as e:
+    except ValueError as e:
+        # The only error `urlparse` raises for a string (e.g. an unbalanced
+        # IPv6 bracket); the URL is kept verbatim rather than dropped.
         logger.warning(f"Error normalizing URL {url}: {e}")
         return url
+
+    # Remove tracking parameters
+    query_params = parse_qs(parsed.query)
+    tracking_params = [
+        'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content',
+        'fbclid', 'gclid', 'msclkid', 'ref', 'source', '_ga', 'mc_cid', 'mc_eid'
+    ]
+    clean_params = {k: v for k, v in query_params.items()
+                   if k not in tracking_params}
+
+    # Rebuild URL with domain + path + clean params
+    clean_query = urlencode(clean_params, doseq=True)
+    normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    if clean_query:
+        normalized += f"?{clean_query}"
+
+    return normalized
 
 
 def utc_now() -> datetime:
@@ -244,14 +246,16 @@ def extract_domain(url: str) -> str:
         error into the same domain. Callers that want a sentinel should
         substitute one at the call site.
     """
+    if not isinstance(url, str):
+        return ""
     try:
         parsed = urlparse(url)
-        domain = parsed.netloc.lower()
-        if domain.startswith('www.'):
-            domain = domain[4:]
-        return domain
-    except Exception:
-        return url if isinstance(url, str) else ""
+    except ValueError:
+        return url
+    domain = parsed.netloc.lower()
+    if domain.startswith('www.'):
+        domain = domain[4:]
+    return domain
 
 
 def brand_names_match(candidate: str, tracked: str) -> bool:

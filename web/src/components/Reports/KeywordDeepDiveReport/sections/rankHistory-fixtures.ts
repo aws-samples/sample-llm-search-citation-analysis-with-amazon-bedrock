@@ -23,7 +23,6 @@ export function buildTrendHistory(points: TrendDataPoint[]): HistoricalTrendsRes
   return {
     period_type: 'day',
     days_analyzed: 30,
-    data_points: points.length,
     trend_data: points,
     trend_direction: 'stable',
     summary: {

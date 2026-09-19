@@ -1,7 +1,6 @@
 import type { CompetitorDiscoveryResult } from '../../types';
-import {
-  CheckIcon, CloseIcon 
-} from '../ui';
+import { CheckIcon } from '../ui';
+import { SuggestionPanelHeader } from './SuggestionPanelHeader';
 
 interface CompetitorDiscoveryPanelProps {
   readonly result: CompetitorDiscoveryResult;
@@ -32,17 +31,13 @@ export const CompetitorDiscoveryPanel = ({
 
   return (
     <div className="mb-4 p-3 bg-white rounded-lg border border-amber-300">
-      <div className="flex items-start justify-between mb-2">
-        <div>
-          <h4 className="text-sm font-medium text-amber-800">Competitors for your brands</h4>
-          {result.notes && (
-            <p className="text-xs text-amber-600 mt-1">{result.notes}</p>
-          )}
-        </div>
-        <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
-          <CloseIcon className="w-4 h-4" />
-        </button>
-      </div>
+      <SuggestionPanelHeader
+        title="Competitors for your brands"
+        titleClassName="text-amber-800"
+        notes={result.notes}
+        notesClassName="text-amber-600"
+        onDismiss={onCancel}
+      />
       <p className="text-xs text-gray-500 mb-2">Select competitors to track (none selected by default):</p>
       <div className="flex flex-wrap gap-2 mb-3">
         {result.competitors.map((brand) => {

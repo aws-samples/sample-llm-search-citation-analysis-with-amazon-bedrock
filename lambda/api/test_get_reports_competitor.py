@@ -75,19 +75,19 @@ DEFAULT_GAPS = {
 }
 
 
-def _load_module():
-    """Load get-reports-competitor.py with stubs primed in caches."""
-    mod = load_handler_module(_API_DIR, 'get-reports-competitor.py')
-
-    mod._sibling_cache['gap'] = lambda keyword, config: DEFAULT_GAPS.get(keyword, {})
-    mod._latest_brand_ranks = lambda keyword: DEFAULT_RANKS.get(keyword, {})
-    mod._list_tracked_keywords = lambda limit: list(DEFAULT_RANKS.keys())[:limit]
-    return mod
-
-
 @pytest.fixture
-def mod():
-    return _load_module()
+def mod(monkeypatch: pytest.MonkeyPatch):
+    """get-reports-competitor.py with the gap helper and both DynamoDB lookups stubbed.
+
+    The sibling cache is primed with the gap fixture; the per-keyword rank
+    lookup and the keyword listing are replaced for the test's lifetime.
+    """
+    module = load_handler_module(_API_DIR, 'get-reports-competitor.py')
+
+    module._sibling_cache['gap'] = lambda keyword, config: DEFAULT_GAPS.get(keyword, {})
+    monkeypatch.setattr(module, '_latest_brand_ranks', lambda keyword: DEFAULT_RANKS.get(keyword, {}))
+    monkeypatch.setattr(module, '_list_tracked_keywords', lambda limit: list(DEFAULT_RANKS.keys())[:limit])
+    return module
 
 
 @pytest.fixture

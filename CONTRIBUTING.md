@@ -34,8 +34,12 @@ To send us a pull request, please:
 3. Run `npm run validate` from the repo root and make sure it is clean. It runs
    ESLint, the CDK build, both Vitest suites, the jscpd duplication gates
    (TypeScript and Python, production code and tests), knip's dead-code checks
-   for the CDK app and the dashboard, and for `lambda/` ruff, vulture and
-   pytest (see "Validation" in README.md for the Python toolchain setup).
+   for the CDK app and the dashboard (default and `--production` modes), the
+   cross-boundary contract checks (`npm run contracts`), and for `lambda/`
+   ruff (including the complexity ceilings), pyright, vulture and pytest (see
+   "Validation" in README.md for the Python toolchain setup). If your change
+   touches a module's logic, also run the targeted mutation test for it
+   (README, "Validation") and account for every survivor.
 4. Commit to your fork using clear commit messages.
 5. Send us a pull request, answering any default questions in the pull request interface.
 6. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.

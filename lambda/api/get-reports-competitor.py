@@ -50,7 +50,6 @@ from collections.abc import Callable
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 # Shared layer path
 sys.path.insert(0, '/opt/python')
@@ -58,6 +57,7 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, validate
 from shared.scope_params import load_sibling_function
+from shared.search_results import latest_run, query_keyword_items, scan_keyword_texts
 from shared.utils import get_brand_config, get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -102,23 +102,11 @@ def _list_tracked_keywords(limit: int) -> list[str]:
     uses to keep cold-start latency low.
     """
     if KEYWORDS_TABLE:
-        table = dynamodb.Table(KEYWORDS_TABLE)
-        response = table.scan(ProjectionExpression='keyword', Limit=500)
-        names = [
-            item.get('keyword', '')
-            for item in response.get('Items', [])
-            if item.get('keyword')
-        ]
+        names = scan_keyword_texts(dynamodb.Table(KEYWORDS_TABLE))
+    elif SEARCH_RESULTS_TABLE:
+        names = scan_keyword_texts(dynamodb.Table(SEARCH_RESULTS_TABLE))
     else:
-        if not SEARCH_RESULTS_TABLE:
-            return []
-        table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-        response = table.scan(ProjectionExpression='keyword', Limit=500)
-        names = [
-            item.get('keyword', '')
-            for item in response.get('Items', [])
-            if item.get('keyword')
-        ]
+        return []
     return list(dict.fromkeys(names))[:limit]
 
 
@@ -129,16 +117,11 @@ def _latest_brand_ranks(keyword: str) -> dict[str, dict[str, Any]]:
     """
     if not SEARCH_RESULTS_TABLE:
         return {}
-    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    response = table.query(
-        KeyConditionExpression=Key('keyword').eq(keyword)
-    )
-    items = response.get('Items', [])
+    items = query_keyword_items(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
     if not items:
         return {}
 
-    latest_ts = max(item.get('timestamp', '') for item in items)
-    latest_items = [item for item in items if item.get('timestamp') == latest_ts]
+    _, latest_items = latest_run(items)
 
     aggregated: dict[str, dict[str, Any]] = defaultdict(lambda: {
         'best_rank': 999,
@@ -222,11 +205,13 @@ def _build_competitor_rollup(
                 'providers': their['providers'],
             })
 
-        # Citation gaps for this keyword that name this competitor.
+        # Citation gaps for this keyword that name this competitor. The gap
+        # helper is a sibling module's aggregation, so any failure in it is
+        # logged with its traceback and the keyword keeps its rank data.
         try:
             gap_payload = _gap_helper()(keyword, config)
-        except Exception as exc:
-            logger.warning(f'gap helper failed for {keyword!r}: {exc}')
+        except Exception:
+            logger.exception(f'gap helper failed for {keyword!r}')
             gap_payload = {}
 
         for gap in gap_payload.get('gaps', []) or []:

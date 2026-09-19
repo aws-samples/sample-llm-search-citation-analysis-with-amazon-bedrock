@@ -448,16 +448,22 @@ npm run build              # tsc (CDK app)
 npm run test               # Vitest (CDK stack tests)
 npm run duplication        # jscpd over bin, lib and web/src (production code)
 npm run duplication:tests  # jscpd over *.spec.ts(x) and *-fixtures.ts(x)
-npm run deadcode           # knip (CDK app)
-npm run validate:web       # web/: type-check -> Vitest -> knip
-npm run validate:python    # lambda/: ruff -> vulture -> jscpd (code, tests) -> pytest
+npm run deadcode           # knip (CDK app, default mode)
+npm run deadcode:prod      # knip --production (CDK app, spec-only usage does not count)
+npm run contracts          # CDK env vars <-> Lambda reads; web/src/types members <-> dashboard reads
+npm run validate:web       # web/: type-check -> Vitest -> knip -> knip --production
+npm run validate:python    # lambda/: ruff -> pyright -> vulture (production, then whole tree) -> jscpd (code, tests) -> pytest
+
+# Not in validate — targeted, minutes per module, run on what a PR touches:
+npm run mutation:python -- lambda/shared/scope_params.py lambda/shared/test_scope_params.py
+(cd web && npm run mutation -- --mutate src/hooks/useAnalysisEndpoint.ts)
 ```
 
 Duplication is checked by [jscpd](https://github.com/kucherenko/jscpd) with
-`minTokens: 50` and four configs, all at threshold `0`: `.jscpd.json` (`bin/`,
+`minTokens: 40` and four configs, all at threshold `0`: `.jscpd.json` (`bin/`,
 `lib/`, `web/src/`), `.jscpd.tests.json` (spec and fixture files),
 `.jscpd.python.json` (`lambda/`, `scripts/`) and `.jscpd.python-tests.json`
-(`test_*.py`, `conftest.py`). The codebase carries no clones, and a new 50-token
+(`test_*.py`, `conftest.py`). The codebase carries no clones, and a new 40-token
 duplicate fails the run. Fix the duplication rather than raising the threshold:
 shared test builders live in `web/src/test/` (`infrastructureMock.ts`,
 `fetchResponses.ts`), in the `*-fixtures.ts` file next to the module under
@@ -471,15 +477,61 @@ lambda/requirements-dev.txt`) and the scripts pick it up — plus the built
 shared layer (`bash lambda/layer/build-layer.sh`) for the runtime libraries
 the tests import.
 
-Dead code is checked by [knip](https://knip.dev) for TypeScript (`knip.json`
-covers the CDK app, `web/knip.json` the dashboard; `ts-node` sits in the root
-`ignoreDependencies` because its only caller is the `app` command in
-`cdk.json`, which knip does not read) and by [vulture](https://github.com/jendrikseipp/vulture)
-for Python (`scripts/lint-python.sh --dead-code`, 80% confidence). Both run
-inside `npm run validate`. Stricter advisory views that ignore test-only usage:
-`npm run deadcode:prod` in `web/`, and vulture with `*/test_*` added to its
-exclude list — a production symbol that only its own tests still call is dead
-code by this project's policy.
+Lambda code has complexity ceilings: ruff's `C901`, `PLR0911`, `PLR0912` and
+`PLR0915` fail a function above 12 cyclomatic complexity, 11 returns, 16
+branches or 53 statements; `eslint.config.mjs` holds the dashboard and the CDK
+app to the same cyclomatic 12. They are hard stops — lower them as hotspots
+are broken up, and split a function rather than raise them or add a `# noqa`.
+Beyond style, ruff runs flake8-bandit (`S`), `BLE001`, tryceratops and
+flake8-pytest-style over `lambda/` and `scripts/`; the per-file exemptions in
+`pyproject.toml` each carry the reason (tests may `assert`; four verified
+bandit false positives).
+
+Python types are checked by [pyright](https://microsoft.github.io/pyright)
+(`scripts/lint-python.sh --types`, configured in `pyproject.toml`
+`[tool.pyright]`; `boto3-stubs` types the AWS clients) over the whole `lambda/`
+tree and `scripts/` in `standard` mode. Imports resolve from `lambda/` and the
+built shared layer only; the crawler layer bundles an untyped `boto3` that
+would shadow the stubs, so its client libraries (`playwright`,
+`bedrock-agentcore`) come from the dev venv at the same pins. Fix findings as
+types or annotations, never with inline suppressions.
+
+Code that runs but whose result nothing consumes is a class none of the above
+can see, so two more checks cover it. `npm run contracts`
+(`scripts/check-contracts.py`) compares what one layer produces with what the
+next consumes across the seams: every environment variable the CDK stack sets
+must be read by a Lambda, every variable a Lambda requires must be set by CDK,
+and every member declared in `web/src/types` must be read by non-test
+dashboard code — a field the backend emits and nothing renders is a payload
+nobody looks at. Allowlist entries need a reason. Mutation testing is the
+behavioural backstop: `npm run mutation:python -- <module> <tests>` (mutmut)
+and, in `web/`, `npm run mutation -- --mutate <file>` (Stryker) change one
+statement at a time and report the mutants no test kills; each survivor is
+either a missing test or a statement with no observable effect, and must end
+up as one or the other — a killing test, a deletion, or a `// Stryker disable`
+comment with the reason it is equivalent. It is deliberately not part of
+`validate`: one module against its tests takes minutes, the tree takes hours.
+
+Dead code is checked by [knip](https://knip.dev) for TypeScript and by
+[vulture](https://github.com/jendrikseipp/vulture) for Python, and both tools
+run twice inside `npm run validate` because a test reference otherwise counts
+as a use — a production symbol that only its own tests still call is dead code
+by this project's policy, and a single scan that includes the tests cannot
+see it.
+
+- knip: `npm run deadcode` (default mode: everything, including spec and
+  fixture files) and `npm run deadcode:prod` (`knip --production`: only the
+  `!`-suffixed production patterns in `knip.json` / `web/knip.json`, so a
+  function whose only importer is a spec is reported), each for the CDK app and
+  the dashboard. `ts-node` sits in the root `ignoreDependencies` because its
+  only caller is the `app` command in `cdk.json`, which knip does not read.
+- vulture: `scripts/lint-python.sh --dead-code` scans production code with
+  `test_*.py`, `conftest.py` and `lambda/testing/` excluded, then
+  `--dead-code-tests` scans the whole tree and, given a clean first pass,
+  reports only test-support code nothing exercises. Shared settings live in
+  `pyproject.toml` `[tool.vulture]` at a 60% confidence floor — the tier
+  vulture assigns every unused function, class and attribute; a higher floor
+  can only ever report unused imports and unreachable code.
 
 ## License
 

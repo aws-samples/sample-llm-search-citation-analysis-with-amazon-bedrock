@@ -1,7 +1,8 @@
 import type { HistoricalTrendsResponse } from '../../../../types';
 import {
-  MoverColumn, ReportSection, gateSection 
+  MoverColumn, ReportSection 
 } from '../../layout';
+import { gateKeywordTrendRows } from './keywordTrendRows';
 
 interface Props {
   readonly trends: HistoricalTrendsResponse | null;
@@ -22,23 +23,20 @@ const NO_MOVERS_MESSAGE = 'No keywords moved in this direction.';
 export function MoversSection({
   trends, loading, error 
 }: Props) {
-  const gate = gateSection({
+  const gate = gateKeywordTrendRows({
     title: 'Top movers',
     loading,
     loadingMessage: 'Computing movers…',
     error,
-    value: trends,
+    trends,
   });
   if (!gate.ready) return gate.placeholder;
 
-  const rows = gate.value.keyword_trends ?? [];
-  if (rows.length === 0) return null;
-
-  const improvers = [...rows]
+  const improvers = [...gate.rows]
     .filter((r) => r.change > 0)
     .sort((a, b) => b.change - a.change)
     .slice(0, TOP_N);
-  const decliners = [...rows]
+  const decliners = [...gate.rows]
     .filter((r) => r.change < 0)
     .sort((a, b) => a.change - b.change)
     .slice(0, TOP_N);

@@ -19,6 +19,7 @@ import os
 import time
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +75,10 @@ def get_api_key(key_name: str) -> str | None:
     try:
         response = _get_secrets_client().get_secret_value(SecretId=full_name)
         secret_string = response.get('SecretString')
-    except Exception as e:
-        # Exception type only — messages can leak resource names or values.
+    except (ClientError, BotoCoreError) as e:
+        # Exception type only — messages (and tracebacks) can leak resource
+        # names or values, so this is deliberately not `logger.exception`.
+        # Every boto3 failure is one of these two hierarchies.
         logger.warning("Secret lookup failed: %s", type(e).__name__)
         return None
 

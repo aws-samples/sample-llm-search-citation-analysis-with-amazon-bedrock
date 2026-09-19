@@ -15,6 +15,7 @@ import {
   StatsCards,
   FiltersSection,
   PaginationHeader,
+  type PaginationHeaderProps,
   KeywordRow,
 } from './SearchesViewComponents';
 
@@ -118,15 +119,17 @@ export const SearchesView = ({
           expandedRow={expandedRow}
           onToggleRow={toggleRow}
           onSelectKeyword={setSelectedKeyword}
-          totalItems={totalItems}
-          showAll={showAll}
-          startIndex={startIndex}
-          endIndex={endIndex}
-          totalPages={totalPages}
-          currentPage={currentPage}
-          setCurrentPage={setCurrentPage}
-          itemsPerPage={itemsPerPage}
-          onItemsPerPageChange={handleItemsPerPageChange}
+          pagination={{
+            totalItems,
+            showAll,
+            startIndex,
+            endIndex,
+            totalPages,
+            currentPage,
+            setCurrentPage,
+            itemsPerPage,
+            onItemsPerPageChange: handleItemsPerPageChange,
+          }}
           searchQuery={searchQuery}
           providerFilter={providerFilter}
         />
@@ -153,15 +156,7 @@ interface SearchTableProps {
   expandedRow: string | null;
   onToggleRow: (keyword: string) => void;
   onSelectKeyword: (keyword: string) => void;
-  totalItems: number;
-  showAll: boolean;
-  startIndex: number;
-  endIndex: number;
-  totalPages: number;
-  currentPage: number;
-  setCurrentPage: (page: number) => void;
-  itemsPerPage: number;
-  onItemsPerPageChange: (value: number) => void;
+  pagination: PaginationHeaderProps;
   searchQuery: string;
   providerFilter: string;
 }
@@ -171,30 +166,12 @@ const SearchTable = ({
   expandedRow,
   onToggleRow,
   onSelectKeyword,
-  totalItems,
-  showAll,
-  startIndex,
-  endIndex,
-  totalPages,
-  currentPage,
-  setCurrentPage,
-  itemsPerPage,
-  onItemsPerPageChange,
+  pagination,
   searchQuery,
   providerFilter,
 }: SearchTableProps) => (
   <div className="bg-white rounded-lg border border-gray-200">
-    <PaginationHeader
-      totalItems={totalItems}
-      showAll={showAll}
-      startIndex={startIndex}
-      endIndex={endIndex}
-      totalPages={totalPages}
-      currentPage={currentPage}
-      setCurrentPage={setCurrentPage}
-      itemsPerPage={itemsPerPage}
-      onItemsPerPageChange={onItemsPerPageChange}
-    />
+    <PaginationHeader {...pagination} />
 
     <div className="overflow-x-auto">
       <table className="min-w-full divide-y divide-gray-200">

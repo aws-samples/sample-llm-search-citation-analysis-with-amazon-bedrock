@@ -16,6 +16,9 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import pytest
 
 from shared import utils
 
@@ -40,11 +43,11 @@ class TestGetTimestamp:
             ts,
         ), f'Unexpected wire format: {ts!r}'
 
-    def test_parses_back_via_fromisoformat_after_Z_to_offset_swap(self) -> None:
+    def test_parses_back_as_utc_aware_datetime_after_Z_to_offset_swap(self) -> None:
         """Downstream code does fromisoformat(s.replace('Z', '+00:00')) — ensure that still works."""
         ts = utils.get_timestamp()
         parsed = datetime.fromisoformat(ts.replace('Z', '+00:00'))
-        assert parsed.tzinfo is not None
+        assert parsed.tzinfo == UTC
 
     def test_returns_current_utc_time_within_a_few_seconds(self) -> None:
         ts = utils.get_timestamp()
@@ -86,10 +89,10 @@ class TestGetTimestampCompact:
 class TestUtcNow:
     """utc_now() returns a timezone-aware UTC datetime."""
 
-    def test_returns_timezone_aware_datetime(self) -> None:
+    def test_returns_utc_aware_datetime(self) -> None:
         """The core reason this helper exists — legacy datetime.utcnow() was naive."""
         now = utils.utc_now()
-        assert now.tzinfo is not None
+        assert now.tzinfo == UTC
 
     def test_timezone_is_utc(self) -> None:
         now = utils.utc_now()
@@ -180,11 +183,12 @@ class TestBrandNamesMatch:
     def test_returns_false_for_whitespace_only(self) -> None:
         assert utils.brand_names_match("   ", "Marriott") is False
 
-    def test_returns_false_for_non_string_input(self) -> None:
-        assert utils.brand_names_match(None, "Marriott") is False  # type: ignore[arg-type]
-        assert utils.brand_names_match("Marriott", None) is False  # type: ignore[arg-type]
-        assert utils.brand_names_match(123, "Marriott") is False  # type: ignore[arg-type]
-        assert utils.brand_names_match(["Marriott"], "Marriott") is False  # type: ignore[arg-type]
+    @pytest.mark.parametrize(
+        ('candidate', 'tracked'),
+        [(None, "Marriott"), ("Marriott", None), (123, "Marriott"), (["Marriott"], "Marriott")],
+    )
+    def test_returns_false_for_non_string_input(self, candidate: Any, tracked: Any) -> None:
+        assert utils.brand_names_match(candidate, tracked) is False
 
 
 
@@ -206,13 +210,16 @@ class TestExtractDomain:
     def test_preserves_subdomains_other_than_www(self) -> None:
         assert utils.extract_domain("https://api.example.com/v1") == "api.example.com"
 
+    def test_returns_empty_string_for_non_string_input(self) -> None:
+        not_a_url: Any = None
+        assert utils.extract_domain(not_a_url) == ""
+
     def test_returns_original_string_on_parse_failure(self) -> None:
         """Regression: the old implementation returned 'unknown' so every
         parse error collapsed into one bucket in DynamoDB. Now callers
         see the raw input."""
-        # urlparse is forgiving — pass a value that explicitly raises on
-        # netloc access. None is the simplest trigger.
-        assert utils.extract_domain(None) == ""  # type: ignore[arg-type]
+        # An unclosed IPv6 bracket is one of the few inputs `urlparse` rejects.
+        assert utils.extract_domain("http://[::1") == "http://[::1"
 
     def test_empty_url_returns_empty_domain(self) -> None:
         assert utils.extract_domain("") == ""

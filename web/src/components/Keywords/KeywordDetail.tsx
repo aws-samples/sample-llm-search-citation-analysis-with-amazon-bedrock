@@ -24,6 +24,7 @@ import {
 } from 'react-chartjs-2';
 import {
   KeywordStats,
+  ResponseNavigationProps,
   groupSearchesByTime,
   buildChartData,
   lineChartOptions,
@@ -187,14 +188,10 @@ const ChartsSection = ({
 };
 
 /** Expansion state and navigation callbacks threaded from the run history down to every batch card. */
-interface RunExpansionProps {
+interface RunExpansionProps extends ResponseNavigationProps {
   stats: KeywordStats;
   expandedRun: number | null;
   setExpandedRun: (value: number | null) => void;
-  expandedResponse: number | null;
-  setExpandedResponse: (value: number | null) => void;
-  onNavigateToRawResponses?: (path: string) => void;
-  buildRawResponsesPath: (search: Search) => string;
 }
 
 interface RunHistoryProps extends RunExpansionProps {runBatches: Record<string, Search[]>;}
