@@ -12,7 +12,7 @@ not exact string matching. This allows the LLM to understand brand hierarchies
 import logging
 from typing import Any
 
-from shared.industry_presets import get_preset
+from shared.industry_presets import DEFAULT_INDUSTRY_ID, get_preset
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
 from shared.prompt_safety import (
@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Default extraction configuration
 DEFAULT_EXTRACTION_CONFIG = {
-    "industry": "hotels",
+    "industry": DEFAULT_INDUSTRY_ID,
     "extract_brands": True,
     "include_sentiment": True,
     "include_ranking_context": True,
@@ -55,7 +55,7 @@ class LLMBrandExtractor:
                          "models are resolved via shared.models.ModelRole.EXTRACTION")
         # Use default config if None or empty dict
         self.config = config if config else DEFAULT_EXTRACTION_CONFIG
-        self.industry = self.config.get("industry", "hotels")
+        self.industry = self.config.get("industry") or DEFAULT_INDUSTRY_ID
         self.industry_preset = get_preset(self.industry)
 
     def extract_mentions(self, text: str) -> list[dict[str, Any]]:

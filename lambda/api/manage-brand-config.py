@@ -22,9 +22,16 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler, validate
-from shared.industry_presets import INDUSTRY_PRESETS as _BASE_PRESETS
-from shared.industry_presets import IndustryPreset
-from shared.industry_presets import get_preset as get_shared_preset
+from shared.industry_presets import (
+    DEFAULT_INDUSTRY_ID,
+    IndustryPreset,
+)
+from shared.industry_presets import (
+    INDUSTRY_PRESETS as _BASE_PRESETS,
+)
+from shared.industry_presets import (
+    get_preset as get_shared_preset,
+)
 from shared.llm_json import parse_llm_json
 
 # Centralized Bedrock invocation (ModelRole.ANALYSIS -> Sonnet by default)
@@ -197,7 +204,7 @@ def find_duplicates(brands: list) -> list:
     return duplicates
 
 
-def expand_brands(existing_brands: list, industry: str = "hotels", brand_type: str = "first_party") -> dict[str, Any]:
+def expand_brands(existing_brands: list, industry: str = DEFAULT_INDUSTRY_ID, brand_type: str = "first_party") -> dict[str, Any]:
     """
     Use LLM to expand ALL existing brands into related sub-brands, variations, and owned properties.
     Returns deduplicated suggestions and flags existing duplicates.
@@ -297,7 +304,7 @@ JSON OUTPUT:"""
     )
 
 
-def expand_brand(brand_name: str, industry: str = "hotels", existing_brands: list | None = None) -> dict[str, Any]:
+def expand_brand(brand_name: str, industry: str = DEFAULT_INDUSTRY_ID, existing_brands: list | None = None) -> dict[str, Any]:
     """
     Use LLM to expand a brand name into related sub-brands, variations, and owned properties.
 
@@ -385,7 +392,7 @@ JSON OUTPUT:"""
     )
 
 
-def find_competitors(first_party_brands: list, industry: str = "hotels", existing_competitors: list | None = None) -> dict[str, Any]:
+def find_competitors(first_party_brands: list, industry: str = DEFAULT_INDUSTRY_ID, existing_competitors: list | None = None) -> dict[str, Any]:
     """
     Use LLM to find competitor brands based on first-party brands.
 
@@ -506,7 +513,7 @@ def _get_presets(event: dict[str, Any], context: Any) -> dict[str, Any]:
 @parse_json_body
 @validate({
     'brand_name': {'required': True, 'type': str, 'max_length': 200, 'source': 'body'},
-    'industry': {'type': str, 'max_length': 50, 'default': 'hotels', 'source': 'body'},
+    'industry': {'type': str, 'max_length': 50, 'default': DEFAULT_INDUSTRY_ID, 'source': 'body'},
     'existing_brands': {'type': list, 'default': [], 'source': 'body'}
 })
 def _expand_brand(event: dict[str, Any], context: Any, body: dict, brand_name: str, industry: str, existing_brands: list) -> dict[str, Any]:
@@ -519,7 +526,7 @@ def _expand_brand(event: dict[str, Any], context: Any, body: dict, brand_name: s
 @parse_json_body
 @validate({
     'existing_brands': {'required': True, 'type': list, 'source': 'body'},
-    'industry': {'type': str, 'max_length': 50, 'default': 'hotels', 'source': 'body'},
+    'industry': {'type': str, 'max_length': 50, 'default': DEFAULT_INDUSTRY_ID, 'source': 'body'},
     'brand_type': {'type': str, 'choices': ['first_party', 'competitor'], 'default': 'first_party', 'source': 'body'}
 })
 def _expand_all_brands(event: dict[str, Any], context: Any, body: dict, existing_brands: list, industry: str, brand_type: str) -> dict[str, Any]:
@@ -535,7 +542,7 @@ def _expand_all_brands(event: dict[str, Any], context: Any, body: dict, existing
 @parse_json_body
 @validate({
     'first_party_brands': {'required': True, 'type': list, 'source': 'body'},
-    'industry': {'type': str, 'max_length': 50, 'default': 'hotels', 'source': 'body'},
+    'industry': {'type': str, 'max_length': 50, 'default': DEFAULT_INDUSTRY_ID, 'source': 'body'},
     'existing_competitors': {'type': list, 'default': [], 'source': 'body'}
 })
 def _find_competitors(event: dict[str, Any], context: Any, body: dict, first_party_brands: list, industry: str, existing_competitors: list) -> dict[str, Any]:
@@ -553,7 +560,7 @@ def _default_config() -> dict[str, Any]:
     A fresh dict per call: `save_config` mutates its argument.
     """
     return {
-        'industry': 'hotels',
+        'industry': DEFAULT_INDUSTRY_ID,
         'extract_brands': True,
         'include_sentiment': True,
         'include_ranking_context': True,

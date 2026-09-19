@@ -7,6 +7,7 @@ import {
   fetchAlerts,
   fetchAlertSettings,
   fetchContentChanges,
+  sendTestNotification as requestTestNotification,
   updateAlertSettings,
 } from '../api/alerts';
 import type {
@@ -170,20 +171,29 @@ export function useAlertSettings() {
   const [settings, setSettings] = useState<AlertSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveOutcome, setSaveOutcome] = useState<AlertSettingsSaveOutcome | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testOutcome, setTestOutcome] = useState<AlertMutationOutcome | null>(null);
   const {
     loading, error, setLoading, setError, load, cancelRequest, isMounted
   } = useLatestAlertLoad({
     initialLoading: true,
     resourceLabel: 'settings',
   });
+  const {
+    beginRequest: beginTestRequest,
+    cancelRequest: cancelTestRequest,
+  } = useLatestRequest();
 
   const refresh = useCallback(async (): Promise<void> => {
+    cancelTestRequest();
+    setTesting(false);
+    setTestOutcome(null);
     setSaveOutcome(null);
     await load({
       request: fetchAlertSettings,
       onLoaded: setSettings,
     });
-  }, [load]);
+  }, [cancelTestRequest, load]);
 
   useEffect(() => {
     void refresh();
@@ -193,10 +203,13 @@ export function useAlertSettings() {
     update: AlertSettingsUpdate
   ): Promise<AlertSettingsSaveOutcome> => {
     cancelRequest();
+    cancelTestRequest();
     if (isMounted()) {
       setLoading(false);
       setSaving(true);
+      setTesting(false);
       setSaveOutcome(null);
+      setTestOutcome(null);
     }
     try {
       const response = await updateAlertSettings(update);
@@ -224,7 +237,46 @@ export function useAlertSettings() {
     } finally {
       if (isMounted()) setSaving(false);
     }
-  }, [cancelRequest, isMounted, setError, setLoading]);
+  }, [cancelRequest, cancelTestRequest, isMounted, setError, setLoading]);
+
+  const sendTestNotification = useCallback(async (): Promise<AlertMutationOutcome> => {
+    if (!isMounted()) {
+      return {
+        success: false,
+        message: 'Test notification cancelled.',
+      };
+    }
+
+    const latest = beginTestRequest();
+    setTesting(true);
+    setSaveOutcome(null);
+    setTestOutcome(null);
+    try {
+      const response = await requestTestNotification(latest.signal);
+      const outcome: AlertMutationOutcome = {
+        success: true,
+        message: response.message,
+      };
+      if (latest.isCurrent()) setTestOutcome(outcome);
+      return outcome;
+    } catch (testError) {
+      const aborted = isAbortError(testError);
+      const outcome: AlertMutationOutcome = {
+        success: false,
+        message: aborted
+          ? 'Test notification cancelled.'
+          : getErrorMessage(testError, 'alerts'),
+      };
+      if (!aborted && latest.isCurrent()) {
+        console.error('[alerts] Error sending test notification:', testError);
+        setTestOutcome(outcome);
+      }
+      return outcome;
+    } finally {
+      if (latest.isCurrent()) setTesting(false);
+      latest.finish();
+    }
+  }, [beginTestRequest, isMounted]);
 
   return {
     settings,
@@ -232,8 +284,11 @@ export function useAlertSettings() {
     error,
     saving,
     saveOutcome,
+    testing,
+    testOutcome,
     refresh,
     saveSettings,
+    sendTestNotification,
   };
 }
 

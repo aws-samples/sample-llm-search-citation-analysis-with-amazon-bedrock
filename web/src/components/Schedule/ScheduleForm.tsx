@@ -52,7 +52,7 @@ export const ScheduleForm = ({
           type="text"
           value={formData.display_name}
           maxLength={100}
-          placeholder="e.g. Hotel Coruña — weekly"
+          placeholder="e.g. Weekly brand analysis"
           onChange={(e) => updateFormField('display_name', e.target.value)}
           className={INPUT_CLASS}
         />

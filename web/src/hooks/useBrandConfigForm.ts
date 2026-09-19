@@ -4,6 +4,9 @@ import {
 import type {
   BrandConfig, IndustryPresets, BrandExpansionAllResult, CompetitorDiscoveryResult 
 } from '../types';
+import {
+  DEFAULT_BRAND_INDUSTRY, resolveBrandIndustryPreset
+} from '../constants/brandConfigDefaults';
 
 export interface BrandConfigFormState {
   industry: string;
@@ -96,7 +99,7 @@ type BrandConfigFormValues = Omit<BrandConfigFormState, 'currentPrompt' | 'promp
 
 function defaultFormValues(): BrandConfigFormValues {
   return {
-    industry: 'hotels',
+    industry: DEFAULT_BRAND_INDUSTRY,
     firstPartyBrands: [],
     firstPartyDomains: [],
     competitorBrands: [],
@@ -172,7 +175,7 @@ export function useBrandConfigForm(
   const [pendingExpansionBrands, setPendingExpansionBrands] = useState<string[]>([]);
   const [expansionTarget, setExpansionTarget] = useState<'first_party' | 'competitor' | null>(null);
 
-  const currentPreset = presets?.[industry];
+  const currentPreset = resolveBrandIndustryPreset(presets, industry);
 
   const normalizeBrand = useCallback((name: string): string => 
     name.normalize('NFD').replaceAll(/[\u0300-\u036F]/gi, '').toLowerCase().trim(), []);
@@ -199,26 +202,26 @@ export function useBrandConfigForm(
   // Sync prompt when industry changes
   useEffect(() => {
     const customPrompt = industry in industryPrompts ? industryPrompts[industry] : undefined;
-    const defaultPrompt = presets?.[industry]?.default_prompt ?? '';
+    const defaultPrompt = resolveBrandIndustryPreset(presets, industry)?.default_prompt ?? '';
     setCurrentPrompt(customPrompt ?? defaultPrompt);
     setPromptModified(customPrompt !== undefined);
   }, [industry, industryPrompts, presets]);
 
   const handlePromptChange = useCallback((newPrompt: string) => {
     setCurrentPrompt(newPrompt);
-    const defaultPrompt = presets?.[industry]?.default_prompt ?? '';
+    const defaultPrompt = resolveBrandIndustryPreset(presets, industry)?.default_prompt ?? '';
     setPromptModified(newPrompt !== defaultPrompt);
   }, [presets, industry]);
 
   const resetPromptToDefault = useCallback(() => {
-    const defaultPrompt = presets?.[industry]?.default_prompt ?? '';
+    const defaultPrompt = resolveBrandIndustryPreset(presets, industry)?.default_prompt ?? '';
     setCurrentPrompt(defaultPrompt);
     setIndustryPrompts(prev => Object.fromEntries(Object.entries(prev).filter(([key]) => key !== industry)));
     setPromptModified(false);
   }, [presets, industry]);
 
   const buildConfig = useCallback((): BrandConfig => {
-    const defaultPrompt = presets?.[industry]?.default_prompt ?? '';
+    const defaultPrompt = resolveBrandIndustryPreset(presets, industry)?.default_prompt ?? '';
     const finalPrompts = currentPrompt === defaultPrompt ? industryPrompts : {
       ...industryPrompts,
       [industry]: currentPrompt 

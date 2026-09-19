@@ -2,7 +2,7 @@ import {
   describe, it, expect, vi, beforeEach 
 } from 'vitest';
 import {
-  render, screen 
+  fireEvent, render, screen
 } from '@testing-library/react';
 import { QueryPromptsManager } from './QueryPromptsManager';
 import type { QueryPrompt } from '../../types';
@@ -45,6 +45,14 @@ describe('QueryPromptsManager', () => {
       render(<QueryPromptsManager isAdmin />);
 
       expect(screen.getByRole('button', { name: /New Persona/i })).toBeInTheDocument();
+    });
+
+    it('previews templates with the generic project-management sample', () => {
+      render(<QueryPromptsManager isAdmin />);
+      fireEvent.click(screen.getByRole('button', { name: /New Persona/i }));
+      fireEvent.change(screen.getByLabelText('Query Template'), { target: { value: 'Compare {keyword}' } });
+
+      expect(screen.getByText('Compare best project management software')).toBeInTheDocument();
     });
 
     it('offers the per-row edit and delete controls', () => {

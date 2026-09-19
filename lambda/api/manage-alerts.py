@@ -44,6 +44,20 @@ ALERTS_TOPIC_ARN = os.environ['KPI_ALERTS_TOPIC_ARN']
 _MAX_DESCRIPTION_LENGTH = 200
 _MAX_URL_LENGTH = 2048
 _CONFIRMED_ARN_PREFIX = 'arn:'
+_TEST_NOTIFICATION_SUBJECT = 'Citation Analysis test notification'
+_TEST_NOTIFICATION_MESSAGE = (
+    'This is a test notification from Citation Analysis. '
+    'Email alert delivery is configured correctly.'
+)
+_TEST_NOTIFICATION_ACCEPTED_MESSAGE = 'Test notification accepted for delivery.'
+_NO_CONFIRMED_NOTIFICATION_EMAILS_MESSAGE = (
+    'At least one configured notification email must have a confirmed subscription'
+)
+
+
+class TestNotificationServiceError(RuntimeError):
+    """Raised when confirmed notification recipients cannot be verified."""
+
 
 dynamodb = boto3.resource('dynamodb')
 sns = boto3.client('sns')
@@ -223,6 +237,48 @@ def _get_settings(event: dict[str, Any], context: Any) -> dict[str, Any]:
         ),
         event,
     )
+
+
+def _confirmed_configured_emails(
+    settings: dict[str, Any],
+    subscriptions: list[dict[str, Any]],
+) -> list[str]:
+    confirmed_emails = {
+        str(item['Endpoint']).lower()
+        for item in subscriptions
+        if isinstance(item.get('SubscriptionArn'), str)
+        and item['SubscriptionArn'].startswith(_CONFIRMED_ARN_PREFIX)
+    }
+    return [
+        email
+        for email in settings['notification_emails']
+        if email in confirmed_emails
+    ]
+
+
+@require_group(ADMIN_GROUP)
+def _send_test_notification(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    """POST /api/alerts/test-notification — verify configured email delivery."""
+    settings, _updated_at = _stored_settings()
+    subscriptions, _warning = _list_email_subscriptions()
+    if subscriptions is None:
+        raise TestNotificationServiceError
+    if not _confirmed_configured_emails(settings, subscriptions):
+        return validation_error(
+            _NO_CONFIRMED_NOTIFICATION_EMAILS_MESSAGE,
+            event,
+            'notification_emails',
+        )
+
+    sns.publish(
+        TopicArn=ALERTS_TOPIC_ARN,
+        Subject=_TEST_NOTIFICATION_SUBJECT,
+        Message=_TEST_NOTIFICATION_MESSAGE,
+    )
+    return success_response({
+        'success': True,
+        'message': _TEST_NOTIFICATION_ACCEPTED_MESSAGE,
+    }, event)
 
 
 def _subscriptions_by_email(
@@ -475,6 +531,7 @@ def _create_content_change(
 @api_handler
 @cors_preflight
 @route_handler({
+    ('POST', '/test-notification'): _send_test_notification,
     ('GET', '/settings'): _get_settings,
     ('PUT', '/settings'): _put_settings,
     ('GET', '/content-changes'): _list_content_changes,

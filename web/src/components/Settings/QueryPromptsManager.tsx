@@ -25,7 +25,7 @@ import {
   TrashIcon,
 } from '../ui';
 
-const SAMPLE_KEYWORD = 'best hotels in Barcelona';
+const SAMPLE_KEYWORD = 'best project management software';
 
 function PromptPreview({ template }: { readonly template: string }) {
   if (!template) return null;

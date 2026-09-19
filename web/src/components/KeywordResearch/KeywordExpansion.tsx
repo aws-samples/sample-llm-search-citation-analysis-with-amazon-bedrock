@@ -7,6 +7,7 @@ import { KeywordResultsTable } from './KeywordResultsTable';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
 import { ResearchProgress } from './ResearchProgress';
 import type { ResearchRunViewProps } from './researchRunView';
+import { DEFAULT_BRAND_INDUSTRY } from '../../constants/brandConfigDefaults';
 import { Spinner } from '../ui/Spinner';
 
 interface KeywordExpansionProps extends ResearchRunViewProps {
@@ -65,7 +66,7 @@ export const KeywordExpansion = ({
   onExpand, loading, result, error, activeJob = null, onRetry, onKeywordsAdded
 }: KeywordExpansionProps) => {
   const [seedKeyword, setSeedKeyword] = useState('');
-  const [industry, setIndustry] = useState('general');
+  const [industry, setIndustry] = useState(DEFAULT_BRAND_INDUSTRY);
   const [count, setCount] = useState(20);
 
   const expandedKeywords = useMemo(() => result?.keywords ?? [], [result]);
@@ -95,7 +96,7 @@ export const KeywordExpansion = ({
                 type="text"
                 value={seedKeyword}
                 onChange={(e) => setSeedKeyword(e.target.value)}
-                placeholder="e.g., best hotels in Barcelona"
+                placeholder="e.g. project management software"
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
               />
             </div>

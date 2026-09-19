@@ -11,6 +11,11 @@ import {
 } from '../../hooks/useKeywordGroups-fixtures';
 import { buildAlertSettings } from '../../types/domain/alerts-fixtures';
 
+export const sendTestNotificationMock = vi.fn().mockResolvedValue({
+  success: true,
+  message: 'Test notification accepted for delivery.',
+});
+
 export const recordContentChangeMock = vi.fn().mockResolvedValue({
   success: true,
   message: 'Content change recorded.',
@@ -41,6 +46,7 @@ export function buildAlertsConfigSettingsHookResult(
         },
       ],
     }),
+    sendTestNotification: sendTestNotificationMock,
     ...overrides,
   });
 }

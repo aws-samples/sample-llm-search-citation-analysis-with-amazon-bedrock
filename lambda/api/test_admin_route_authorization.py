@@ -118,6 +118,7 @@ MUTATING_ADMIN_ROUTES = [
     Route('manage-query-prompts.py', 'PATCH', '/api/query-prompts/abc', {'id': 'abc'}),
 
     # manage-alerts.py — settings alter notifications and markers feed alerts.
+    Route('manage-alerts.py', 'POST', '/api/alerts/test-notification', body={}),
     Route('manage-alerts.py', 'PUT', '/api/alerts/settings', body={}),
     Route('manage-alerts.py', 'POST', '/api/alerts/alert-1/acknowledge', {'id': 'alert-1'}),
     Route('manage-alerts.py', 'POST', '/api/alerts/content-changes', body={}),
@@ -199,7 +200,7 @@ def call(route: Route, groups: str | None) -> tuple[int, MagicMock]:
 
 @pytest.mark.parametrize('route', MUTATING_ADMIN_ROUTES, ids=str)
 class TestEveryMutatingRouteRequiresAdmin:
-    """One class, three invariants, applied to all 23 mutating admin routes."""
+    """One class, three invariants, applied to all 26 mutating admin routes."""
 
     def test_denies_a_caller_in_the_wrong_group(self, route: Route) -> None:
         status, _ = call(route, groups='Users')

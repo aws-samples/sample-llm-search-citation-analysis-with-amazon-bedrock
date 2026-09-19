@@ -4,9 +4,7 @@ import {
 import {
   waitFor, act 
 } from '@testing-library/react';
-import {
-  DEFAULT_CONFIG, DEFAULT_PRESETS 
-} from '../constants/brandConfigDefaults';
+import { DEFAULT_CONFIG } from '../constants/brandConfigDefaults';
 import {
   mockBrandConfig, renderBrandConfig, renderLoadedBrandConfig 
 } from './useBrandConfig-fixtures';
@@ -37,6 +35,17 @@ describe('useBrandConfig', () => {
       expect(result.current.config?.tracked_brands.first_party).toStrictEqual(['MyHotel', 'MyResort']);
     });
 
+    it('preserves Hotels when stored config selects Hotels', async () => {
+      const { result } = await renderLoadedBrandConfig({
+        configResponse: {
+          ...mockBrandConfig,
+          industry: 'hotels',
+        },
+      });
+
+      expect(result.current.config?.industry).toBe('hotels');
+    });
+
     it('sets presets from API response', async () => {
       const { result } = await renderLoadedBrandConfig();
 
@@ -44,17 +53,27 @@ describe('useBrandConfig', () => {
       expect(result.current.presets?.retail?.name).toBe('Retail');
     });
 
-    it('uses default config when API fails', async () => {
+    it('uses General defaults when the config API fails', async () => {
       const { result } = await renderLoadedBrandConfig({ shouldFailConfig: true });
 
       expect(result.current.config).toStrictEqual(DEFAULT_CONFIG);
+      expect(result.current.config?.industry).toBe('general');
       expect(result.current.error).toBeNull();
     });
 
-    it('uses default presets when API fails', async () => {
+    it('uses the canonical General preset when the preset API fails', async () => {
       const { result } = await renderLoadedBrandConfig({ shouldFailPresets: true });
 
-      expect(result.current.presets).toStrictEqual(DEFAULT_PRESETS);
+      expect(result.current.presets?.general).toMatchObject({
+        name: 'General',
+        description: 'Track brands and companies in any industry',
+        entity_types: [],
+        example_brands: [],
+        extraction_focus: 'brand and company recommendations',
+      });
+      expect(result.current.presets?.general?.default_prompt).toContain(
+        'INDUSTRY CONTEXT: General\nFOCUS: brand and company recommendations'
+      );
     });
   });
 
@@ -70,7 +89,7 @@ describe('useBrandConfig', () => {
 
     it('calls API saveConfig with new config', async () => {
       const {
-        api, result 
+        api, result
       } = await renderLoadedBrandConfig();
       const newBrands = {
         tracked_brands: {
@@ -94,23 +113,25 @@ describe('useBrandConfig', () => {
   });
 
   describe('resetConfig', () => {
-    it('resets config to defaults through the API', async () => {
+    it('resets config to General defaults through the API', async () => {
       const {
-        api, result 
+        api, result
       } = await renderLoadedBrandConfig();
 
       await act(() => result.current.resetConfig());
 
       expect(api.deleteConfig).toHaveBeenCalledTimes(1);
       expect(result.current.config).toStrictEqual(DEFAULT_CONFIG);
+      expect(result.current.config?.industry).toBe('general');
     });
 
-    it('resets config to defaults locally when the API reset fails', async () => {
+    it('resets config to General locally when the API reset fails', async () => {
       const { result } = await renderLoadedBrandConfig({ shouldFailDelete: true });
 
       await act(() => result.current.resetConfig());
 
       expect(result.current.config).toStrictEqual(DEFAULT_CONFIG);
+      expect(result.current.config?.industry).toBe('general');
     });
   });
 
@@ -137,7 +158,7 @@ describe('useBrandConfig', () => {
         condition: 'the industry is unknown',
         industry: 'unknown',
         apiOptions: {},
-        expectedPrompt: '',
+        expectedPrompt: 'Extract brand and company mentions',
       },
     ];
 
@@ -147,6 +168,39 @@ describe('useBrandConfig', () => {
       const { result } = await renderLoadedBrandConfig(apiOptions);
 
       expect(result.current.getPromptForIndustry(industry)).toBe(expectedPrompt);
+    });
+  });
+
+  describe('expansion industry fallback', () => {
+    it('uses General for every expansion request when stored industry is empty', async () => {
+      const {
+        api, result
+      } = await renderLoadedBrandConfig({
+        configResponse: {
+          ...mockBrandConfig,
+          industry: '',
+        },
+      });
+
+      await act(() => result.current.expandBrand('TestBrand'));
+      await act(() => result.current.expandAllBrands(['Brand1']));
+      await act(() => result.current.findCompetitors(['MyBrand']));
+
+      expect(api.expandBrand).toHaveBeenCalledWith({
+        brand_name: 'TestBrand',
+        industry: 'general',
+        existing_brands: [],
+      });
+      expect(api.expandAllBrands).toHaveBeenCalledWith({
+        existing_brands: ['Brand1'],
+        industry: 'general',
+        brand_type: 'first_party',
+      });
+      expect(api.findCompetitors).toHaveBeenCalledWith({
+        first_party_brands: ['MyBrand'],
+        industry: 'general',
+        existing_competitors: [],
+      });
     });
   });
 
@@ -163,7 +217,7 @@ describe('useBrandConfig', () => {
 
     it('passes existing brands to API', async () => {
       const {
-        api, result 
+        api, result
       } = await renderLoadedBrandConfig();
 
       await act(() => result.current.expandBrand('TestBrand', ['ExistingBrand']));
@@ -198,7 +252,7 @@ describe('useBrandConfig', () => {
 
     it('passes brand type to API', async () => {
       const {
-        api, result 
+        api, result
       } = await renderLoadedBrandConfig();
 
       await act(() => result.current.expandAllBrands(['Brand1'], 'competitor'));
@@ -232,7 +286,7 @@ describe('useBrandConfig', () => {
 
     it('passes existing competitors to API', async () => {
       const {
-        api, result 
+        api, result
       } = await renderLoadedBrandConfig();
 
       await act(() => result.current.findCompetitors(['MyBrand'], ['ExistingCompetitor']));
@@ -257,7 +311,7 @@ describe('useBrandConfig', () => {
   describe('refetch', () => {
     it('refetches config from API', async () => {
       const {
-        api, result 
+        api, result
       } = await renderLoadedBrandConfig();
       const initialCallCount = api.fetchConfig.mock.calls.length;
 

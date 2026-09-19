@@ -23,7 +23,7 @@ TEXT = 'Stay at the Marriott downtown or the Hilton by the airport.'
 
 
 def extractor_with(**overrides: Any) -> LLMBrandExtractor:
-    """An extractor over the default (hotels) config with ``overrides`` applied on top."""
+    """An extractor over the canonical config with ``overrides`` applied on top."""
     return LLMBrandExtractor(config={**DEFAULT_EXTRACTION_CONFIG, **overrides})
 
 
@@ -33,16 +33,40 @@ def tracking(first_party: list[str], competitors: list[str]) -> dict[str, list[s
 
 
 class TestExtractorConfig:
-    def test_uses_the_default_hotels_config_when_none_is_given(self) -> None:
+    def test_uses_general_config_when_none_is_given(self) -> None:
         extractor = LLMBrandExtractor()
 
-        assert (extractor.config, extractor.industry) == (DEFAULT_EXTRACTION_CONFIG, 'hotels')
+        assert (extractor.config, extractor.industry, extractor.industry_preset["name"]) == (
+            DEFAULT_EXTRACTION_CONFIG,
+            "general",
+            "General",
+        )
 
-    def test_treats_an_empty_config_as_the_default(self) -> None:
-        assert LLMBrandExtractor(config={}).config == DEFAULT_EXTRACTION_CONFIG
+    def test_uses_general_config_when_an_empty_config_is_given(self) -> None:
+        extractor = LLMBrandExtractor(config={})
+
+        assert (extractor.config, extractor.industry) == (DEFAULT_EXTRACTION_CONFIG, "general")
+
+    def test_uses_general_when_a_truthy_config_omits_industry(self) -> None:
+        extractor = LLMBrandExtractor(config={"extract_brands": False})
+
+        assert (extractor.config, extractor.industry) == ({"extract_brands": False}, "general")
+
+    def test_uses_general_when_configured_industry_is_empty(self) -> None:
+        extractor = extractor_with(industry="")
+
+        assert (extractor.industry, extractor.industry_preset["name"]) == ("general", "General")
 
     def test_resolves_the_preset_of_the_configured_industry(self) -> None:
         assert extractor_with(industry='restaurants').industry_preset['name'] == 'Restaurants & Food Service'
+
+    def test_preserves_hotels_when_explicitly_configured(self) -> None:
+        extractor = extractor_with(industry="hotels")
+
+        assert (extractor.industry, extractor.industry_preset["name"]) == (
+            "hotels",
+            "Hotels & Hospitality",
+        )
 
     def test_falls_back_to_the_custom_preset_for_an_unknown_industry(self) -> None:
         assert extractor_with(industry='space tourism').industry_preset['name'] == 'Custom Industry'
@@ -54,16 +78,25 @@ class TestExtractionPrompt:
 
         assert prompt.startswith(untrusted_input_system_instruction() + '\n\nExtract all brand and company mentions')
 
-    def test_names_the_industry_and_focus_from_the_preset(self) -> None:
+    def test_uses_the_generic_general_context_by_default(self) -> None:
         prompt = LLMBrandExtractor()._build_extraction_prompt(TEXT)
+
+        assert (
+            "INDUSTRY CONTEXT: <industry>General</industry>\n"
+            "FOCUS: <focus>brand and company recommendations</focus>\n\n"
+            "ENTITY TYPES TO EXTRACT:\n- Brand names and company names\n"
+        ) in prompt
+
+    def test_names_the_industry_and_focus_from_the_explicit_hotels_preset(self) -> None:
+        prompt = extractor_with(industry="hotels")._build_extraction_prompt(TEXT)
 
         assert (
             'INDUSTRY CONTEXT: <industry>Hotels & Hospitality</industry>\n'
             'FOCUS: <focus>hotel and accommodation recommendations</focus>\n'
         ) in prompt
 
-    def test_lists_the_preset_entity_types(self) -> None:
-        prompt = LLMBrandExtractor()._build_extraction_prompt(TEXT)
+    def test_lists_the_explicit_hotels_preset_entity_types(self) -> None:
+        prompt = extractor_with(industry="hotels")._build_extraction_prompt(TEXT)
 
         assert (
             'ENTITY TYPES TO EXTRACT:\n'
@@ -71,7 +104,7 @@ class TestExtractionPrompt:
         ) in prompt
 
     def test_appends_wrapped_custom_entity_types_after_the_preset_ones(self) -> None:
-        prompt = extractor_with(custom_entity_types=['spa resorts', '']).\
+        prompt = extractor_with(industry="hotels", custom_entity_types=['spa resorts', '']).\
             _build_extraction_prompt(TEXT)
 
         assert '- boutique hotels\n- <entity_type>spa resorts</entity_type>\n' in prompt

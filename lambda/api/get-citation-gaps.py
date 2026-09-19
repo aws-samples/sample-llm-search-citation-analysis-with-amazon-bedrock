@@ -61,7 +61,7 @@ CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 
 
-def is_first_party_domain(domain: str, config: dict[str, Any]) -> bool:
+def is_first_party_domain(domain: object, config: dict[str, Any]) -> bool:
     """
     Check whether `domain` belongs to a first-party brand.
 

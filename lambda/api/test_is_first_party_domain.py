@@ -106,11 +106,11 @@ class TestDefensiveInputHandling:
 
     def test_returns_false_for_none_domain(self) -> None:
         config = {'first_party_domains': ['example.com']}
-        assert is_first_party_domain(None, config) is False  # type: ignore[arg-type]
+        assert is_first_party_domain(None, config) is False
 
     def test_returns_false_for_non_string_domain(self) -> None:
         config = {'first_party_domains': ['example.com']}
-        assert is_first_party_domain(123, config) is False  # type: ignore[arg-type]
+        assert is_first_party_domain(123, config) is False
 
     def test_skips_non_string_entries_in_allow_list(self) -> None:
         """Config may be DynamoDB-hydrated — be defensive against mixed types."""

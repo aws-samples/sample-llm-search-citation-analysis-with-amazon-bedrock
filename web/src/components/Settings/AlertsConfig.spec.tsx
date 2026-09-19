@@ -5,13 +5,16 @@ import {
   render, screen
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { buildContentChangeMarker } from '../../types/domain/alerts-fixtures';
+import {
+  buildAlertSettings, buildContentChangeMarker
+} from '../../types/domain/alerts-fixtures';
 import { AlertsConfig } from './AlertsConfig';
 import {
   buildAlertsConfigContentHookResult,
   buildAlertsConfigGroupsHookResult,
   buildAlertsConfigSettingsHookResult,
   recordContentChangeMock,
+  sendTestNotificationMock,
 } from './AlertsConfig-fixtures';
 
 vi.mock('../../hooks/useAlerts', () => ({
@@ -111,12 +114,150 @@ describe('AlertsConfig', () => {
     );
   });
 
+  it('enables the test action when an admin has a persisted confirmed subscription', () => {
+    render(<AlertsConfig isAdmin />);
+
+    expect(screen.getByRole('button', { name: 'Send test notification' })).toBeEnabled();
+  });
+
+  it('does not render the test action when the caller is not an admin', () => {
+    render(<AlertsConfig isAdmin={false} />);
+
+    expect(screen.queryByRole('button', { name: 'Send test notification' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['pending confirmation', buildAlertSettings({
+      subscription_statuses: [{
+        email: 'alerts@example.com',
+        status: 'pending_confirmation',
+      }],
+    })],
+    ['not subscribed', buildAlertSettings({
+      subscription_statuses: [{
+        email: 'alerts@example.com',
+        status: 'not_subscribed',
+      }],
+    })],
+    ['not configured', buildAlertSettings({
+      notification_emails: [],
+      subscription_statuses: [],
+    })],
+  ])('disables the test action when persisted delivery is %s', (_condition, settings) => {
+    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({ settings }));
+
+    render(<AlertsConfig isAdmin />);
+
+    expect(screen.getByRole('button', { name: 'Send test notification' })).toBeDisabled();
+  });
+
+  it('keeps the test action disabled when only an unsaved email is entered', async () => {
+    const settings = buildAlertSettings({
+      notification_emails: [],
+      subscription_statuses: [],
+    });
+    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({ settings }));
+    render(<AlertsConfig isAdmin />);
+    const testButton = screen.getByRole('button', { name: 'Send test notification' });
+
+    await userEvent.type(screen.getByLabelText('Notification emails'), 'new@example.com');
+
+    expect(screen.getByLabelText('Notification emails')).toHaveValue('new@example.com');
+    expect(testButton).toBeDisabled();
+  });
+
+  it('requests a test notification without form values when the admin selects the action', async () => {
+    render(<AlertsConfig isAdmin />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Send test notification' }));
+
+    expect(sendTestNotificationMock.mock.calls).toStrictEqual([[]]);
+  });
+
+  it.each([
+    ['loading', { loading: true }],
+    ['saving', { saving: true }],
+    ['testing', { testing: true }],
+  ])('disables every settings action while %s', (_condition, busyState) => {
+    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult(busyState));
+
+    render(<AlertsConfig isAdmin />);
+
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Save alert settings|Saving…/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Send test notification' })).toBeDisabled();
+  });
+
+  it('shows the exact accepted outcome when the test request succeeds', () => {
+    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({
+      testOutcome: {
+        success: true,
+        message: 'Test notification accepted for delivery.',
+      },
+    }));
+
+    render(<AlertsConfig isAdmin />);
+
+    expect(screen.getByText('Test notification accepted for delivery.')).toBeInTheDocument();
+  });
+
+  it('announces the exact failure when the test request is rejected', () => {
+    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({
+      testOutcome: {
+        success: false,
+        message: 'Confirm an email subscription before testing delivery.',
+      },
+    }));
+
+    render(<AlertsConfig isAdmin />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Confirm an email subscription before testing delivery.'
+    );
+  });
+
   it('prevents non-admin users from saving settings or recording markers', () => {
     render(<AlertsConfig isAdmin={false} />);
 
     expect(screen.getByRole('button', { name: 'Save alert settings' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Record content change' })).toBeDisabled();
     expect(screen.getByText('Only administrators can change or save alert settings.')).toBeInTheDocument();
+  });
+
+  it('keeps refresh enabled while alert settings are idle', () => {
+    render(<AlertsConfig isAdmin />);
+
+    expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
+  });
+
+  it('shows loading status while initial settings are pending', () => {
+    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({
+      settings: null,
+      loading: true,
+    }));
+
+    render(<AlertsConfig isAdmin />);
+
+    expect(screen.getByText('Loading alert settings…')).toBeInTheDocument();
+  });
+
+  it('hides loading status while persisted settings refresh in place', () => {
+    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({ loading: true }));
+
+    render(<AlertsConfig isAdmin />);
+
+    expect(screen.queryByText('Loading alert settings…')).not.toBeInTheDocument();
+  });
+
+  it('hides loading status when no settings request is pending', () => {
+    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({
+      settings: null,
+      loading: false,
+    }));
+
+    render(<AlertsConfig isAdmin />);
+
+    expect(screen.queryByText('Loading alert settings…')).not.toBeInTheDocument();
   });
 
   it('disables refresh while settings are being saved', () => {

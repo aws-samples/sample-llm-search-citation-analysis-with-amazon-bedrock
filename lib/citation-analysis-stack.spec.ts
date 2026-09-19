@@ -45,6 +45,7 @@ import {
   type ApiGatewayMethodSnapshot,
   type ApiMethodAuthSnapshot,
   type BucketLifecycleSnapshot,
+  type IamPolicyStatementSnapshot,
   type LambdaLogGroupSnapshot,
   type StageMethodSettingSnapshot,
   type StateMachineLoggingSnapshot,
@@ -101,6 +102,8 @@ const synthesized: {
   scopedReadFunctionEnvVars: Record<string, Record<string, unknown>>;
   crawlerEnvVars: Record<string, unknown>;
   crawlerRoleCrawledContentActions: string[];
+  crawlerBrowserLogicalId: string;
+  crawlerRoleBrowserStatements: IamPolicyStatementSnapshot[];
   browserSigningRoleActions: string[];
   browserSigningTrustConditions: unknown;
   parseKeywordsEnvVars: Record<string, unknown>;
@@ -163,6 +166,8 @@ const synthesized: {
   scopedReadFunctionEnvVars: {},
   crawlerEnvVars: {},
   crawlerRoleCrawledContentActions: [],
+  crawlerBrowserLogicalId: '',
+  crawlerRoleBrowserStatements: [],
   browserSigningRoleActions: [],
   browserSigningTrustConditions: {},
   parseKeywordsEnvVars: {},
@@ -1279,6 +1284,37 @@ describe('Crawler Lambda environment and cache permissions', () => {
   });
 });
 
+describe('AgentCore crawler browser permissions', () => {
+  it('binds BROWSER_ID to the pre-created custom browser', () => {
+    expect(synthesized.crawlerBrowserLogicalId).not.toBe('');
+    expect(synthesized.crawlerEnvVars.BROWSER_ID).toStrictEqual({
+      'Fn::GetAtt': [synthesized.crawlerBrowserLogicalId, 'BrowserId'],
+    });
+  });
+
+  it('grants exactly the required session actions on the custom browser ARN', () => {
+    expect(synthesized.crawlerRoleBrowserStatements).toStrictEqual([{
+      actions: [
+        'bedrock-agentcore:ConnectBrowserAutomationStream',
+        'bedrock-agentcore:StartBrowserSession',
+        'bedrock-agentcore:StopBrowserSession',
+      ],
+      resources: [{
+        'Fn::GetAtt': [synthesized.crawlerBrowserLogicalId, 'BrowserArn'],
+      }],
+    }]);
+  });
+
+  it('has no wildcard or legacy browser permissions', () => {
+    const browserStatement = synthesized.crawlerRoleBrowserStatements[0];
+
+    expect(browserStatement.actions).not.toContain('bedrock-agentcore:*');
+    expect(browserStatement.actions).not.toContain('bedrock:GetAgent');
+    expect(browserStatement.actions).not.toContain('bedrock:InvokeAgent');
+    expect(browserStatement.resources).not.toContain('*');
+  });
+});
+
 describe('AgentCore browser signing role', () => {
   it('has no broad identity policy when service trust provides signing access', () => {
     expect(synthesized.browserSigningRoleActions).toStrictEqual([]);
@@ -1477,14 +1513,13 @@ describe('KPI alert backend infrastructure', () => {
     expect(actions).not.toContain('sns:Subscribe');
   });
 
-  it('hands alert resources to ConfigMgmt and no publish permission', () => {
+  it('hands every alert resource identifier to ConfigMgmt', () => {
     const environment = extractLambdaEnvVars(template, CONFIG_MGMT_FUNCTION_NAME);
-    const actions = extractFunctionRoleActions(template, CONFIG_MGMT_FUNCTION_NAME);
 
     expect(environment).toHaveProperty('DYNAMODB_TABLE_KPI_ALERTS');
     expect(environment).toHaveProperty('DYNAMODB_TABLE_ALERT_SETTINGS');
     expect(environment).toHaveProperty('DYNAMODB_TABLE_CONTENT_CHANGES');
-    expect(actions).not.toContain('sns:Publish');
+    expect(environment).toHaveProperty('KPI_ALERTS_TOPIC_ARN');
   });
 
   it('grants ConfigMgmt read-write access to all alert API tables', () => {
@@ -1502,7 +1537,7 @@ describe('KPI alert backend infrastructure', () => {
     expect(missing).toStrictEqual([]);
   });
 
-  it('grants ConfigMgmt only subscription-management SNS actions for this topic', () => {
+  it('grants ConfigMgmt only subscription management and publishing on this topic', () => {
     const topicId = findLogicalIdByName(
       template,
       'AWS::SNS::Topic',
@@ -1511,7 +1546,27 @@ describe('KPI alert backend infrastructure', () => {
     );
 
     expect(extractFunctionRoleActionsOn(template, CONFIG_MGMT_FUNCTION_NAME, topicId))
-      .toStrictEqual(['sns:ListSubscriptionsByTopic', 'sns:Subscribe', 'sns:Unsubscribe']);
+      .toStrictEqual([
+        'sns:ListSubscriptionsByTopic',
+        'sns:Publish',
+        'sns:Subscribe',
+        'sns:Unsubscribe',
+      ]);
+  });
+
+  it('scopes the sole ConfigMgmt publish statement to the alert topic', () => {
+    const topicId = findLogicalIdByName(
+      template,
+      'AWS::SNS::Topic',
+      'TopicName',
+      'CitationAnalysis-KpiAlerts'
+    );
+    const roleId = findFunctionRoleLogicalId(template, CONFIG_MGMT_FUNCTION_NAME);
+    const publishResources = allowStatementsOfRole(template, roleId)
+      .filter((statement) => statementActions(statement).includes('sns:Publish'))
+      .map((statement) => resolvePath(statement, ['Resource']));
+
+    expect(publishResources).toStrictEqual([{ Ref: topicId }]);
   });
 
   it('restricts unsubscribe to subscription ARNs under the alert topic', () => {
@@ -1537,6 +1592,7 @@ describe('KPI alert backend infrastructure', () => {
       'POST /api/alerts/content-changes',
       'GET /api/alerts/settings',
       'PUT /api/alerts/settings',
+      'POST /api/alerts/test-notification',
     ]);
     expect(alertRoutes.every((route) => route.authorizationType === COGNITO_AUTH)).toBe(true);
     expect(alertRoutes.every((route) => route.authorizerId !== '')).toBe(true);
@@ -1549,12 +1605,13 @@ describe('KPI alert backend infrastructure', () => {
       alertsId,
       findApiResourceId(template, 'acknowledge', alertId),
       findApiResourceId(template, 'settings', alertsId),
+      findApiResourceId(template, 'test-notification', alertsId),
       findApiResourceId(template, 'content-changes', alertsId),
     ];
     const methods = routeIds.flatMap((resourceId) => extractApiMethods(template, resourceId));
     const configFunctionId = findLambdaLogicalId(template, CONFIG_MGMT_FUNCTION_NAME);
 
-    expect(methods).toHaveLength(6);
+    expect(methods).toHaveLength(7);
     expect(methods.every((method) => method.integrationUri.includes(configFunctionId))).toBe(true);
   });
 

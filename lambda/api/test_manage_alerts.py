@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from decimal import Decimal
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 from botocore.exceptions import ClientError
@@ -236,6 +236,136 @@ class TestAcknowledgeAlert:
 
         assert status == 404
         assert body == {'error': 'Alert not found'}
+
+
+class TestTestNotification:
+    def test_publishes_fixed_message_once_when_detection_is_disabled(self, alert_api) -> None:
+        settings = _settings_backend(alert_api, [
+            _email_subscription(
+                'ops@example.com',
+                'arn:aws:sns:us-east-1:123:kpi-alerts:confirmed',
+            ),
+            _email_subscription('pending@example.com'),
+            _email_subscription(
+                'caller@example.com',
+                'arn:aws:sns:us-east-1:123:kpi-alerts:unconfigured',
+            ),
+        ])
+        settings.get_item.return_value = {'Item': _settings(
+            enabled=False,
+            notification_emails=['OPS@example.com', 'pending@example.com'],
+        )}
+
+        status, body = parse_response(alert_api.handler(_event(
+            'POST',
+            '/api/alerts/test-notification',
+            claims=_ADMIN,
+            body={
+                'Subject': 'Caller subject',
+                'Message': 'Caller message',
+                'notification_emails': ['caller@example.com'],
+            },
+        ), None))
+
+        assert (status, body) == (200, {
+            'success': True,
+            'message': 'Test notification accepted for delivery.',
+        })
+        assert settings.get_item.call_args_list == [call(Key={'config_id': 'default'})]
+        assert alert_api.sns.publish.call_args_list == [call(
+            TopicArn=_ENV['KPI_ALERTS_TOPIC_ARN'],
+            Subject='Citation Analysis test notification',
+            Message=(
+                'This is a test notification from Citation Analysis. '
+                'Email alert delivery is configured correctly.'
+            ),
+        )]
+        assert settings.put_item.call_count == 0
+
+    def test_rejects_when_no_configured_email_has_a_confirmed_subscription(
+        self,
+        alert_api,
+    ) -> None:
+        settings = _settings_backend(alert_api, [
+            _email_subscription('ops@example.com'),
+            _email_subscription(
+                'unconfigured@example.com',
+                'arn:aws:sns:us-east-1:123:kpi-alerts:unconfigured',
+            ),
+            {
+                'Protocol': 'sms',
+                'Endpoint': 'ops@example.com',
+                'SubscriptionArn': 'arn:aws:sns:us-east-1:123:kpi-alerts:sms',
+            },
+        ])
+        settings.get_item.return_value = {'Item': _settings(
+            notification_emails=['ops@example.com'],
+        )}
+
+        status, body = parse_response(alert_api.handler(_event(
+            'POST',
+            '/api/alerts/test-notification',
+            claims=_ADMIN,
+            body={'notification_emails': ['unconfigured@example.com']},
+        ), None))
+
+        assert status == 400
+        assert body == {
+            'error': 'At least one configured notification email must have a confirmed subscription',
+            'field': 'notification_emails',
+        }
+        assert alert_api.sns.publish.call_count == 0
+        assert settings.put_item.call_count == 0
+
+    def test_returns_sanitized_error_when_subscription_status_cannot_be_verified(
+        self,
+        alert_api,
+    ) -> None:
+        settings = _settings_backend(alert_api, [])
+        settings.get_item.return_value = {'Item': _settings(
+            notification_emails=['ops@example.com'],
+        )}
+        alert_api.sns.list_subscriptions_by_topic.side_effect = RuntimeError('private SNS detail')
+
+        status, body = parse_response(alert_api.handler(_event(
+            'POST',
+            '/api/alerts/test-notification',
+            claims=_ADMIN,
+        ), None))
+
+        assert status == 500
+        assert body == {'error': 'An unexpected error occurred'}
+        assert 'private SNS detail' not in str(body)
+        assert alert_api.sns.publish.call_count == 0
+
+    def test_returns_sanitized_error_without_persisting_when_publish_fails(
+        self,
+        alert_api,
+    ) -> None:
+        settings = _settings_backend(alert_api, [
+            _email_subscription(
+                'ops@example.com',
+                'arn:aws:sns:us-east-1:123:kpi-alerts:confirmed',
+            ),
+        ])
+        settings.get_item.return_value = {'Item': _settings(
+            notification_emails=['ops@example.com'],
+        )}
+        alert_api.sns.publish.side_effect = ClientError(
+            {'Error': {'Code': 'AccessDeniedException', 'Message': 'private AWS detail'}},
+            'Publish',
+        )
+
+        status, body = parse_response(alert_api.handler(_event(
+            'POST',
+            '/api/alerts/test-notification',
+            claims=_ADMIN,
+        ), None))
+
+        assert status == 500
+        assert body == {'error': 'Service temporarily unavailable'}
+        assert 'private AWS detail' not in str(body)
+        assert settings.put_item.call_count == 0
 
 
 class TestAlertSettings:

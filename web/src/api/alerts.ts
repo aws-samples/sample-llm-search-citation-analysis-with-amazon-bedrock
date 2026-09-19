@@ -5,6 +5,7 @@ import type {
   AlertAcknowledgement,
   AlertSettings,
   AlertSettingsUpdate,
+  AlertTestNotificationResponse,
   AlertsResponse,
   AlertStatusFilter,
   ContentChangeMarker,
@@ -14,6 +15,7 @@ import type {
 import {
   isAlertAcknowledgement,
   isAlertSettings,
+  isAlertTestNotificationResponse,
   isAlertsResponse,
   isContentChangeMarker,
   isContentChangesResponse,
@@ -103,6 +105,24 @@ export async function updateAlertSettings(settings: AlertSettingsUpdate): Promis
     { allowStructured4xx: true }
   );
   return decodeResponse(payload, isAlertSettings, 'Alerts API returned invalid settings');
+}
+
+export async function sendTestNotification(
+  signal?: AbortSignal
+): Promise<AlertTestNotificationResponse> {
+  const payload = await apiPost<unknown>(
+    '/alerts/test-notification',
+    {},
+    {
+      allowStructured4xx: true,
+      signal,
+    }
+  );
+  return decodeResponse(
+    payload,
+    isAlertTestNotificationResponse,
+    'Alerts API returned an invalid test-notification response'
+  );
 }
 
 export async function fetchContentChanges({
