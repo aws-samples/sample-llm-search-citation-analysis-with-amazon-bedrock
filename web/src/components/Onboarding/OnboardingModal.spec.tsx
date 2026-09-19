@@ -22,6 +22,20 @@ import { useIsAdmin } from '../../hooks/useIsAdmin';
 const mockUseOnboardingStatus = useOnboardingStatus as ReturnType<typeof vi.fn>;
 const mockUseIsAdmin = useIsAdmin as ReturnType<typeof vi.fn>;
 
+/** The setup status the hook resolves to, with loading finished. */
+function mockStatus(overrides: Parameters<typeof buildStatus>[0] = {}) {
+  mockUseOnboardingStatus.mockReturnValue({
+    status: buildStatus(overrides),
+    loading: false,
+  });
+}
+
+/** Providers and brand tracking done; keywords and the first run are counted from props. */
+const REQUIRED_SIGNALS_CONFIGURED = {
+  providersConfigured: true,
+  brandConfigured: true,
+};
+
 beforeEach(() => {
   Object.keys(localStorageMock.store).forEach((key) => delete localStorageMock.store[key]);
   Object.defineProperty(window, 'localStorage', {
@@ -34,10 +48,7 @@ beforeEach(() => {
     isAdmin: true,
     loading: false,
   });
-  mockUseOnboardingStatus.mockReturnValue({
-    status: buildStatus(),
-    loading: false,
-  });
+  mockStatus();
 });
 
 describe('OnboardingModal', () => {
@@ -86,13 +97,7 @@ describe('OnboardingModal', () => {
     });
 
     it('stays open when only optional steps are incomplete and a required step is pending', () => {
-      mockUseOnboardingStatus.mockReturnValue({
-        status: buildStatus({
-          providersConfigured: true,
-          brandConfigured: true,
-        }),
-        loading: false,
-      });
+      mockStatus(REQUIRED_SIGNALS_CONFIGURED);
 
       render(<OnboardingModal {...buildProps({ keywordsCount: 3 })} />);
 
@@ -101,40 +106,23 @@ describe('OnboardingModal', () => {
   });
 
   describe('completion caching', () => {
-    it('persists the completion flag when all required steps are complete', () => {
-      mockUseOnboardingStatus.mockReturnValue({
-        status: buildStatus({
-          providersConfigured: true,
-          brandConfigured: true,
-        }),
-        loading: false,
-      });
+    const allRequiredDone = {
+      keywordsCount: 3,
+      hasRunAnalysis: true,
+    };
 
-      render(
-        <OnboardingModal {...buildProps({
-          keywordsCount: 3,
-          hasRunAnalysis: true,
-        })} />
-      );
+    it('persists the completion flag when all required steps are complete', () => {
+      mockStatus(REQUIRED_SIGNALS_CONFIGURED);
+
+      render(<OnboardingModal {...buildProps(allRequiredDone)} />);
 
       expect(localStorageMock.setItem).toHaveBeenCalledWith(ONBOARDING_COMPLETE_STORAGE_KEY, 'true');
     });
 
     it('renders nothing when all required steps are complete', () => {
-      mockUseOnboardingStatus.mockReturnValue({
-        status: buildStatus({
-          providersConfigured: true,
-          brandConfigured: true,
-        }),
-        loading: false,
-      });
+      mockStatus(REQUIRED_SIGNALS_CONFIGURED);
 
-      const { container } = render(
-        <OnboardingModal {...buildProps({
-          keywordsCount: 3,
-          hasRunAnalysis: true,
-        })} />
-      );
+      const { container } = render(<OnboardingModal {...buildProps(allRequiredDone)} />);
 
       expect(container).toBeEmptyDOMElement();
     });
@@ -159,10 +147,7 @@ describe('OnboardingModal', () => {
     });
 
     it('counts configured signals in the progress badge', () => {
-      mockUseOnboardingStatus.mockReturnValue({
-        status: buildStatus({ providersConfigured: true }),
-        loading: false,
-      });
+      mockStatus({ providersConfigured: true });
 
       render(<OnboardingModal {...buildProps({ keywordsCount: 2 })} />);
 
@@ -170,10 +155,7 @@ describe('OnboardingModal', () => {
     });
 
     it('hides the action button for completed steps', () => {
-      mockUseOnboardingStatus.mockReturnValue({
-        status: buildStatus({ providersConfigured: true }),
-        loading: false,
-      });
+      mockStatus({ providersConfigured: true });
 
       render(<OnboardingModal {...buildProps()} />);
 
@@ -183,59 +165,67 @@ describe('OnboardingModal', () => {
   });
 
   describe('step navigation', () => {
-    it('navigates to provider settings when the provider action is clicked', async () => {
+    /** Mounts the checklist and presses the named button; returns the props to assert on. */
+    async function renderAndClick(buttonName: string) {
       const props = buildProps();
       render(<OnboardingModal {...props} />);
+      await userEvent.click(screen.getByRole('button', { name: buttonName }));
+      return props;
+    }
 
-      await userEvent.click(screen.getByRole('button', { name: 'Configure providers' }));
+    it('navigates to provider settings when the provider action is clicked', async () => {
+      const props = await renderAndClick('Configure providers');
 
       expect(props.onNavigateToSettings).toHaveBeenCalledWith('providers');
     });
 
     it('navigates to persona settings when the persona action is clicked', async () => {
-      const props = buildProps();
-      render(<OnboardingModal {...props} />);
-
-      await userEvent.click(screen.getByRole('button', { name: 'Add personas' }));
+      const props = await renderAndClick('Add personas');
 
       expect(props.onNavigateToSettings).toHaveBeenCalledWith('query-prompts');
     });
 
     it('navigates to the schedule tab when the schedule action is clicked', async () => {
-      const props = buildProps();
-      render(<OnboardingModal {...props} />);
-
-      await userEvent.click(screen.getByRole('button', { name: 'Create schedule' }));
+      const props = await renderAndClick('Create schedule');
 
       expect(props.setActiveTab).toHaveBeenCalledWith('schedule');
     });
 
-    it('closes the modal for the session when a step action is clicked', async () => {
-      render(<OnboardingModal {...buildProps()} />);
-
-      await userEvent.click(screen.getByRole('button', { name: 'Run analysis' }));
+    it('closes the modal when a step action is clicked', async () => {
+      await renderAndClick('Run analysis');
 
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('does not persist the skip flag when a step action is clicked', async () => {
+      await renderAndClick('Run analysis');
+
       expect(localStorageMock.setItem).not.toHaveBeenCalledWith(ONBOARDING_DISMISSED_STORAGE_KEY, 'true');
     });
-  });
 
-  describe('skip and close', () => {
     it('persists the skip flag when set up later is clicked', async () => {
-      render(<OnboardingModal {...buildProps()} />);
-
-      await userEvent.click(screen.getByRole('button', { name: 'Set up later' }));
+      await renderAndClick('Set up later');
 
       expect(localStorageMock.setItem).toHaveBeenCalledWith(ONBOARDING_DISMISSED_STORAGE_KEY, 'true');
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
+  });
 
-    it('closes for the session without persisting when Escape is pressed', () => {
+  describe('Escape', () => {
+    function renderAndPressEscape() {
       render(<OnboardingModal {...buildProps()} />);
-
       fireEvent.keyDown(document, { key: 'Escape' });
+    }
+
+    it('closes the modal when Escape is pressed', () => {
+      renderAndPressEscape();
 
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
+    it('does not persist the skip flag when Escape is pressed', () => {
+      renderAndPressEscape();
+
       expect(localStorageMock.setItem).not.toHaveBeenCalledWith(ONBOARDING_DISMISSED_STORAGE_KEY, 'true');
     });
   });

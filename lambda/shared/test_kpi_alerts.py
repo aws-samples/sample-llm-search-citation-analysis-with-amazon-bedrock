@@ -202,6 +202,7 @@ class TestSettingsValidation:
 
         assert error is None
         assert field is None
+        assert settings is not None
         assert settings['notification_emails'] == ['ops+kpi@example.com']
 
     def test_normalizes_dynamodb_numbers_in_stored_settings(self) -> None:

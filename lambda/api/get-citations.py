@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 from collections import Counter, defaultdict
+from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -18,7 +19,6 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
 from shared.decorators import api_handler, validate
-from shared.env_vars import resolve_table_env
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scope_from_request
 from shared.utils import get_brand_config
 
@@ -27,8 +27,8 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-# Fail-fast: Required environment variables (audit #12 canonical naming).
-CITATIONS_TABLE = resolve_table_env('DYNAMODB_TABLE_CITATIONS', 'CITATIONS_TABLE')
+# Fail-fast: Required environment variables
+CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
 citations_table = dynamodb.Table(CITATIONS_TABLE)
 KEYWORDS_TABLE = keywords_table_name()
 
@@ -72,22 +72,23 @@ def _detect_brand_in_url(url_lower, tracked_brands):
 _MAX_SCAN_PAGES = 25
 
 
-def _query_keyword_citations(keyword):
+def _query_keyword_citations(keyword: str) -> tuple[list[dict[str, Any]], bool]:
     """Query the Citations partition of one keyword, bounded by ``_MAX_SCAN_PAGES``."""
-    items = []
-    pages = 0
-    params = {'KeyConditionExpression': Key('keyword').eq(keyword)}
+    items: list[dict[str, Any]] = []
+    params: dict[str, Any] = {'KeyConditionExpression': Key('keyword').eq(keyword)}
     response = citations_table.query(**params)
     items.extend(response.get('Items', []))
-    pages += 1
-    while response.get('LastEvaluatedKey') and pages < _MAX_SCAN_PAGES:
-        response = citations_table.query(**params, ExclusiveStartKey=response['LastEvaluatedKey'])
+    pages = 1
+    last_evaluated_key = response.get('LastEvaluatedKey')
+    while last_evaluated_key and pages < _MAX_SCAN_PAGES:
+        response = citations_table.query(**params, ExclusiveStartKey=last_evaluated_key)
         items.extend(response.get('Items', []))
         pages += 1
-    return items, bool(response.get('LastEvaluatedKey'))
+        last_evaluated_key = response.get('LastEvaluatedKey')
+    return items, bool(last_evaluated_key)
 
 
-def _scan_all_citations(keyword=None, keywords=None):
+def _scan_all_citations(keyword=None, keywords=None) -> list[dict[str, Any]]:
     """
     Read the deduplicated Citations table.
 
@@ -98,8 +99,7 @@ def _scan_all_citations(keyword=None, keywords=None):
     Every path is bounded by ``_MAX_SCAN_PAGES`` and logs a warning when the
     cap is hit so the truncation is visible in CloudWatch.
     """
-    items = []
-    pages_scanned = 0
+    items: list[dict[str, Any]] = []
     truncated = False
 
     if keyword:
@@ -113,14 +113,14 @@ def _scan_all_citations(keyword=None, keywords=None):
         # Full scan for all keywords
         response = citations_table.scan()
         items.extend(response.get('Items', []))
-        pages_scanned += 1
-        while response.get('LastEvaluatedKey') and pages_scanned < _MAX_SCAN_PAGES:
-            response = citations_table.scan(
-                ExclusiveStartKey=response['LastEvaluatedKey']
-            )
+        pages_scanned = 1
+        last_evaluated_key = response.get('LastEvaluatedKey')
+        while last_evaluated_key and pages_scanned < _MAX_SCAN_PAGES:
+            response = citations_table.scan(ExclusiveStartKey=last_evaluated_key)
             items.extend(response.get('Items', []))
             pages_scanned += 1
-        truncated = bool(response.get('LastEvaluatedKey'))
+            last_evaluated_key = response.get('LastEvaluatedKey')
+        truncated = bool(last_evaluated_key)
 
     if truncated:
         logger.warning(

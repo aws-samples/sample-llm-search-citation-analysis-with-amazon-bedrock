@@ -1,7 +1,19 @@
 import { vi } from 'vitest';
+import { renderHook } from '@testing-library/react';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { useExecutionPolling } from './useExecutionPolling';
 
 export const mockExecutionArn = 'arn:aws:states:us-east-1:123456789:execution:test';
 export const mockExecutionName = 'test-execution-123';
+
+/**
+ * Points the mocked network layer at `fetch` (the default trigger/status mock
+ * unless a spec hands in another) and renders the hook.
+ */
+export function renderExecutionPolling(fetch: ReturnType<typeof createMockFetch> = createMockFetch()) {
+  mockAuthenticatedFetch.mockImplementation(fetch);
+  return renderHook(() => useExecutionPolling());
+}
 
 export function createMockTriggerResponse(overrides: Partial<{
   execution_arn: string;

@@ -45,7 +45,34 @@ norecursedirs = [
 #   UP  — pyupgrade (Python 3.12 modernizations)
 #   SIM — flake8-simplify (readability)
 #   RUF — ruff-specific lints
-select = ["F", "E", "W", "I", "B", "ARG", "UP", "SIM", "RUF"]
+#   C90 — mccabe cyclomatic complexity (C901)
+#   PLR0911/0912/0915 — pylint: too many returns / branches / statements
+#   RET504 — a value assigned only to be returned on the next line
+#   ERA001 — commented-out code (delete it; git remembers)
+#   S   — flake8-bandit security checks (see per-file-ignores for the two
+#         documented false-positive classes)
+#   BLE001 — blind `except Exception`; satisfied by re-raising or by logging
+#         with logger.exception(), which keeps the traceback
+#   TRY002/300/301/400 — tryceratops: no vanilla `raise Exception`, no `return`
+#         inside `try` (use else), no `raise` inside `try`, `logger.exception`
+#         not `logger.error` inside `except`. TRY003 (long messages outside the
+#         exception class) is deliberately not selected: this codebase raises
+#         built-in exception types with dynamic messages, and TRY003 would only
+#         be satisfied by wrapping every message in a custom class.
+#   T20 — no print(); Lambda code logs through `logging`
+#   PT  — flake8-pytest-style
+#
+# The ceilings below are hard stops. Cyclomatic complexity is capped at 12
+# (both languages: eslint.config.mjs caps TypeScript at the same value); the
+# pylint counts were set in 2.5.1 to half of the worst function then in the
+# tree (23 returns / 33 branches / 107 statements) and every function above
+# them was split. Lower them as hotspots are broken up; never raise them, and
+# never `# noqa` past them — split the function.
+select = [
+    "F", "E", "W", "I", "B", "ARG", "UP", "SIM", "RUF",
+    "C90", "PLR0911", "PLR0912", "PLR0915", "RET504", "ERA001",
+    "S", "BLE001", "TRY002", "TRY300", "TRY301", "TRY400", "T20", "PT",
+]
 
 ignore = [
     "E501",    # line-too-long — handled by formatter, not this project's priority
@@ -62,19 +89,51 @@ ignore = [
 # Tests: allow magic values, imperative fixtures, loose typing. Mock lambdas
 # must match the mocked signature even when arguments go unused (ARG005), and
 # the sys.path shim before importing hyphenated Lambda modules forces imports
-# below module-level statements (E402).
-"lambda/**/test_*.py"       = ["ARG001", "ARG002", "ARG005", "B017", "E402", "RUF012", "SIM"]
-# Layer smoke test imports symbols specifically to prove they're packaged.
-"lambda/layer/test-layer.py" = ["F401"]
+# below module-level statements (E402). `assert` IS the test mechanism (S101)
+# and test fixtures legitimately hold literal "passwords" and predictable
+# randomness, so the bandit family does not apply to tests or test support.
+"lambda/**/test_*.py"       = ["ARG001", "ARG002", "ARG005", "B017", "E402", "RUF012", "SIM", "S"]
+"lambda/conftest.py"        = ["S"]
+"lambda/testing/**"         = ["S101"]
+# Layer smoke test imports symbols specifically to prove they're packaged, and
+# reports through print() because it runs before logging is configured.
+"lambda/layer/test-layer.py" = ["F401", "T201"]
+# Repo tooling scripts talk to a terminal; print() is their output channel.
+"scripts/*.py"              = ["T201"]
 # Shared __init__.py re-exports: imports are used at module boundary, ruff can't see cross-module.
 "lambda/shared/__init__.py" = ["F401"]
+# Bandit false positives, each verified:
+#   S311 — random jitter for retry backoff / provider ordering; not cryptographic.
+#   S105 — `SIGNALS_SECRET_NAME` is the *name* of a Secrets Manager secret.
+#   S608 — the "SQL" is an LLM prompt that happens to contain the word SELECT.
+#   S104 — 0.0.0.0 appears in the SSRF *blocklist*, not as a bind address.
+"lambda/shared/ai_clients.py"     = ["S311"]
+"lambda/shared/models.py"         = ["S311"]
+"lambda/shared/research_agent.py" = ["S105", "S608"]
+"lambda/shared/url_validator.py"  = ["S104"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["shared", "api_clients", "search_clients", "brand_extractor"]
 
+[tool.ruff.lint.mccabe]
+max-complexity = 12
+
+[tool.ruff.lint.pylint]
+max-returns = 11
+max-branches = 16
+max-statements = 53
+
 # ---------------------------------------------------------------------------
 # Vulture config — dead-code finder. Complements ruff.
-# Run: vulture lambda/ --config pyproject.toml
+#
+# Single source of truth for the shared settings; `scripts/lint-python.sh`
+# layers the two gate modes on top (CLI flags replace, not extend, the values
+# here — so the script re-states `exclude` when it narrows the scan):
+#   --dead-code        production scan: this exclude list plus test_*.py,
+#                      conftest.py and testing/, so a test reference cannot
+#                      keep a production symbol alive
+#   --dead-code-tests  whole tree, catches dead test helpers
+# Run either directly, or `vulture lambda/` for the whole-tree view.
 # ---------------------------------------------------------------------------
 [tool.vulture]
 paths = ["lambda"]
@@ -93,11 +152,7 @@ ignore_names = [
     "default",              # JSONEncoder.default override
     "_api_handler",         # decorated with @route_handler; name is stable
     "_route_handler",
-    # pytest fixtures/helpers that vulture flags as unused
-    "_clean_env",
-    "_reset_mocks",
-    "handler_module",
-    "sub_handler_dir",
+    "pytestmark",           # pytest reads this module attribute, nothing imports it
 ]
 ignore_decorators = [
     "@api_handler",
@@ -111,7 +166,40 @@ ignore_decorators = [
     "@pytest.fixture",
     "@pytest.mark.parametrize",
 ]
-# 80% confidence floor — below this, vulture produces too many false positives
-# for decorator-driven and dynamically-loaded code.
-min_confidence = 80
+# 60% is the tier vulture assigns every unused function, class, method,
+# attribute and variable; only unused imports (90%) and unreachable code (100%)
+# score higher. A higher floor therefore cannot report a dead function at all.
+min_confidence = 60
 sort_by_size = true
+
+
+# ---------------------------------------------------------------------------
+# Pyright config — static type checker. ruff does not check types.
+# Run: pyright   (settings below; `scripts/lint-python.sh --types`)
+#
+# Covers the whole Lambda tree and the repo tooling in `standard` mode. Never
+# add a directory to `exclude` to silence it, and never suppress a finding
+# inline — fix the type or the annotation. (`strict` mode is not a realistic
+# next step for this codebase: measured at 2,754 findings on lambda/shared
+# alone, almost all `reportUnknown*` on the dict[str, Any] rows.)
+# ---------------------------------------------------------------------------
+[tool.pyright]
+pythonVersion = "3.12"
+pythonPlatform = "Linux"
+typeCheckingMode = "standard"
+include = ["lambda", "scripts"]
+exclude = [
+    "**/node_modules",
+    "**/__pycache__",
+    "**/.deps",
+    "lambda/layer/python",
+    "lambda/crawler-layer/python",
+]
+# Where imports resolve from: first-party modules under lambda/, then the built
+# shared layer for the runtime libraries the handlers import. The crawler layer
+# is deliberately absent: it bundles an untyped boto3 for AgentCore, which would
+# shadow boto3-stubs; its client libraries (playwright, bedrock-agentcore) are
+# installed into the dev venv at the layer's pins by lambda/requirements-dev.txt.
+extraPaths = ["lambda", "lambda/layer/python"]
+venvPath = "."
+venv = ".venv"

@@ -23,7 +23,6 @@ export const createdKeywordFixture = {
 export const extendedCreatedKeywordFixture = {
   ...createdKeywordFixture,
   updated_at: '2024-02-01T00:00:00Z',
-  region: 'global',
   language: 'en',
   category: 'hospitality',
   priority: 'high',

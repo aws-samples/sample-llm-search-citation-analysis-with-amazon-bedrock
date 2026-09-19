@@ -6,6 +6,7 @@ Retrieves crawled content including screenshots and SEO analysis.
 
 import logging
 import sys
+from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -29,7 +30,7 @@ CRAWLED_CONTENT_TABLE = resolve_table_env(
 )
 
 
-def generate_presigned_url(s3_uri: str, expiration: int = 900) -> str:
+def generate_presigned_url(s3_uri: str, expiration: int = 900) -> str | None:
     """Generate a presigned URL for S3 object.
 
     Args:
@@ -44,14 +45,13 @@ def generate_presigned_url(s3_uri: str, expiration: int = 900) -> str:
         bucket = parts[0]
         key = parts[1] if len(parts) > 1 else ''
 
-        url = s3_client.generate_presigned_url(
+        return s3_client.generate_presigned_url(
             'get_object',
             Params={'Bucket': bucket, 'Key': key},
             ExpiresIn=expiration
         )
-        return url
-    except Exception as e:
-        logger.error(f"Error generating presigned URL: {e!s}")
+    except Exception:
+        logger.exception("Error generating presigned URL")
         return None
 
 
@@ -77,6 +77,7 @@ def handler(event, context, url=None, keyword=None, limit=50, include_screenshot
     table = dynamodb.Table(CRAWLED_CONTENT_TABLE)
 
     # Query by URL or scan with filters
+    items: list[dict[str, Any]]
     if url:
         # If include_history, get all crawls for this URL; otherwise just the latest
         query_limit = limit if include_history else 1

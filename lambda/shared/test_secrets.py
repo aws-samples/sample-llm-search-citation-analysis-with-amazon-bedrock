@@ -27,14 +27,31 @@ import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 from shared import secrets
 
 _PREFIX = 'test-prefix/'
 
 
-class FakeClientError(Exception):
-    """Stand-in for a botocore ClientError without the botocore dependency."""
+def _lookup_failure(message: str) -> ClientError:
+    """The ``ClientError`` Secrets Manager raises when a secret cannot be read."""
+    return ClientError({'Error': {'Code': 'ResourceNotFoundException', 'Message': message}}, 'GetSecretValue')
+
+
+def _lookup_failing_with(error: Exception) -> str | None:
+    """``get_api_key('openai-key')`` against a client whose ``get_secret_value`` raises ``error``."""
+    client = MagicMock()
+    client.get_secret_value.side_effect = error
+    with patch.object(secrets, '_secrets_client', client):
+        return secrets.get_api_key('openai-key')
+
+
+def _records_of_failed_lookup(caplog: pytest.LogCaptureFixture, message: str) -> list[logging.LogRecord]:
+    """Every ``shared.secrets`` record (WARNING and up) emitted by a lookup failing with ``message``."""
+    with caplog.at_level(logging.WARNING, logger='shared.secrets'):
+        _lookup_failing_with(_lookup_failure(message))
+    return caplog.records
 
 
 def _client_returning(secret_string: str) -> MagicMock:
@@ -104,23 +121,28 @@ class TestUnconfiguredProviders:
             assert secrets.get_api_key('openai-key') is None
 
     def test_returns_none_when_lookup_raises(self):
-        client = MagicMock()
-        client.get_secret_value.side_effect = FakeClientError('ResourceNotFound')
-        with patch.object(secrets, '_secrets_client', client):
-            assert secrets.get_api_key('openai-key') is None
+        assert _lookup_failing_with(_lookup_failure('ResourceNotFound')) is None
+
+    def test_returns_none_when_the_endpoint_is_unreachable(self):
+        """Connection-level failures are ``BotoCoreError``s, not ``ClientError``s — both are swallowed."""
+        unreachable = EndpointConnectionError(endpoint_url='https://secretsmanager.invalid')
+        assert _lookup_failing_with(unreachable) is None
 
     def test_logs_exception_type_only_when_lookup_fails(self, caplog):
         """Exception messages can carry ARNs or values — only the type name
         may reach the logs, at warning level."""
-        client = MagicMock()
-        client.get_secret_value.side_effect = FakeClientError('arn:aws:secretsmanager:us-east-1 sk-leaked-value')
-        with patch.object(secrets, '_secrets_client', client), \
-             caplog.at_level(logging.WARNING, logger='shared.secrets'):
-            secrets.get_api_key('openai-key')
+        records = _records_of_failed_lookup(caplog, 'arn:aws:secretsmanager:us-east-1 sk-leaked-value')
 
-        messages = [record.getMessage() for record in caplog.records]
-        assert any('FakeClientError' in message for message in messages)
-        assert all('sk-leaked-value' not in message for message in messages)
+        assert [(record.levelname, record.getMessage()) for record in records] == [
+            ('WARNING', 'Secret lookup failed: ClientError'),
+        ]
+
+    def test_does_not_attach_the_traceback_when_lookup_fails(self, caplog):
+        """A traceback would carry the exception message, and with it the leaked value."""
+        records = _records_of_failed_lookup(caplog, 'arn:aws:secretsmanager:us-east-1 sk-leaked-value')
+
+        assert [record.exc_info for record in records] == [None]
+        assert 'sk-leaked-value' not in caplog.text
 
 
 class TestPrefixing:

@@ -8,7 +8,9 @@ import {
 } from '../../infrastructure';
 import { getDomain } from '../../formatting/urlFormatter';
 import { KeywordDetail } from '../Keywords/KeywordDetail';
-import { CitationDetailModal } from './CitationDetailModal';
+import {
+  CitationDetailModal, type CrawledContent
+} from './CitationDetailModal';
 import { CitationFilters } from './CitationFilters';
 import { CitationTableHeader } from './CitationTableHeader';
 import { CitationRow } from './CitationRow';
@@ -35,27 +37,6 @@ interface UrlBreakdown {
   keyword: string;
   provider: string;
   timestamp: string;
-}
-
-interface SEOAnalysis {
-  relevance_score?: number;
-  content_quality?: number;
-  keyword_optimization?: number;
-  recommendations?: string[];
-  [key: string]: unknown;
-}
-
-interface CrawledContent {
-  normalized_url: string;
-  title: string;
-  summary: string;
-  content: string;
-  screenshot_url?: string;
-  seo_analysis?: SEOAnalysis;
-  crawled_at: string;
-  keyword: string;
-  citation_count: number;
-  citing_providers: string[];
 }
 
 export const CitationsView = ({

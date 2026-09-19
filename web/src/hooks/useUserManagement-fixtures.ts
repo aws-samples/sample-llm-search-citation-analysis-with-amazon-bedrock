@@ -1,8 +1,14 @@
-import { vi } from 'vitest';
+import {
+  expect, vi 
+} from 'vitest';
+import {
+  renderHook, waitFor 
+} from '@testing-library/react';
 import type {
   CognitoUser, UserGroup 
 } from '../api/users';
 import { ApiRequestError } from '../infrastructure/errors/apiErrors';
+import { useUserManagement } from './useUserManagement';
 
 export const mockUsers: CognitoUser[] = [
   {
@@ -91,4 +97,12 @@ export function createMockApi(options: {
       return Promise.resolve({ message: 'Password reset email sent' });
     }),
   };
+}
+
+
+/** Renders the hook and waits for the initial users + groups load to settle. */
+export async function renderLoadedUserManagement() {
+  const { result } = renderHook(() => useUserManagement());
+  await waitFor(() => expect(result.current.loading).toBe(false));
+  return result;
 }

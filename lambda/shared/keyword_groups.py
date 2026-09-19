@@ -17,14 +17,17 @@ from __future__ import annotations
 from typing import Any
 
 from boto3.dynamodb.conditions import Key
+from botocore.exceptions import ClientError
 
+from shared.dynamodb_batch import collect_all_items
 from shared.utils import get_timestamp
 
 KEYWORD_GROUPS_TABLE_ENV = 'DYNAMODB_TABLE_KEYWORD_GROUPS'
 
 MAX_GROUP_NAME_LENGTH = 100
 MAX_GROUP_DESCRIPTION_LENGTH = 500
-MAX_GROUPS_PER_KEYWORD = 50
+# Backward-compatible sentinel for callers predating unbounded memberships.
+MAX_GROUPS_PER_KEYWORD = None
 MAX_GROUP_ID_LENGTH = 64
 MAX_SCOPE_IDS = 1000
 
@@ -66,17 +69,23 @@ def serialize_keyword_item(item: dict[str, Any]) -> dict[str, Any]:
     return serialized
 
 
-def validate_id_list(value: Any, *, field: str, limit: int) -> tuple[list[str] | None, str | None]:
+def validate_id_list(
+    value: Any,
+    *,
+    field: str,
+    limit: int | None = None,
+) -> tuple[list[str] | None, str | None]:
     """Validate a request-supplied list of ids: strings, trimmed, deduplicated.
 
     Returns ``(ids, None)`` or ``(None, error_message)``; an empty list is
-    valid and yields ``[]``.
+    valid and yields ``[]``. ``limit=None`` permits any count that fits the
+    surrounding DynamoDB item and request limits.
     """
     if value is None:
         return [], None
     if not isinstance(value, list):
         return None, f'{field} must be an array of strings'
-    if len(value) > limit:
+    if limit is not None and len(value) > limit:
         return None, f'{field} accepts at most {limit} entries'
 
     ids: list[str] = []
@@ -130,18 +139,11 @@ def load_existing_group_ids(groups_table: Any, group_ids: list[str]) -> set[str]
 
 def query_active_keywords(keywords_table: Any) -> list[dict[str, Any]]:
     """Return every active keyword item, following StatusIndex pagination."""
-    params: dict[str, Any] = {
-        'IndexName': 'StatusIndex',
-        'KeyConditionExpression': Key('status').eq('active'),
-    }
-    items: list[dict[str, Any]] = []
-    while True:
-        response = keywords_table.query(**params)
-        items.extend(response.get('Items', []))
-        last_key = response.get('LastEvaluatedKey')
-        if not last_key:
-            return items
-        params['ExclusiveStartKey'] = last_key
+    return collect_all_items(
+        keywords_table.query,
+        IndexName='StatusIndex',
+        KeyConditionExpression=Key('status').eq('active'),
+    )
 
 
 def keyword_group_ids(item: dict[str, Any]) -> set[str]:
@@ -149,6 +151,39 @@ def keyword_group_ids(item: dict[str, Any]) -> set[str]:
     if isinstance(raw, set | frozenset | list | tuple):
         return {str(value) for value in raw}
     return set()
+
+
+def add_keyword_groups(
+    keywords_table: Any,
+    keyword_id: str,
+    group_ids: set[str],
+) -> tuple[dict[str, Any] | None, set[str]]:
+    """Atomically union groups into one keyword and report newly added ids.
+
+    ``ADD`` preserves every existing membership and is idempotent when all
+    requested memberships are already present. The prior item is returned by
+    DynamoDB so callers can distinguish an actual membership change without a
+    read-before-write race. A missing keyword returns ``(None, set())``.
+    """
+    try:
+        response = keywords_table.update_item(
+            Key={'id': keyword_id},
+            UpdateExpression='ADD group_ids :gids',
+            ConditionExpression='attribute_exists(#id)',
+            ExpressionAttributeNames={'#id': 'id'},
+            ExpressionAttributeValues={':gids': group_ids},
+            ReturnValues='ALL_OLD',
+        )
+    except ClientError as error:
+        if error.response.get('Error', {}).get('Code') != 'ConditionalCheckFailedException':
+            raise
+        return None, set()
+
+    previous = response['Attributes']
+    previous_group_ids = keyword_group_ids(previous)
+    updated = dict(previous)
+    updated['group_ids'] = previous_group_ids | group_ids
+    return updated, group_ids - previous_group_ids
 
 
 def resolve_scope(scope: dict[str, Any], keywords_table: Any) -> list[dict[str, Any]]:

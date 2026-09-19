@@ -7,23 +7,15 @@ import {
 import userEvent from '@testing-library/user-event';
 import { vi } from 'vitest';
 import type { useKeywordGroups } from '../../hooks/useKeywordGroups';
+import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
 import type {
   Keyword, KeywordGroup
 } from '../../types';
+import { buildTabContentKeyword } from '../Layout/TabContent-fixtures';
 import { GroupBriefForm } from './GroupBriefForm';
 
-export function buildKeyword(
-  overrides: Partial<Keyword> = {}
-): Keyword {
-  return {
-    id: 'keyword-1',
-    keyword: 'Alpha keyword',
-    created_at: '2026-01-01T00:00:00Z',
-    status: 'active',
-    group_ids: ['group-1'],
-    ...overrides,
-  };
-}
+/** The dashboard keyword the Layout tests use: active, in group-1; every field can be overridden. */
+export const buildKeyword = buildTabContentKeyword;
 
 export function buildKeywordGroup(
   overrides: Partial<KeywordGroup> = {}
@@ -43,14 +35,7 @@ export function buildKeywordGroupHookResult(
   overrides: Partial<ReturnType<typeof useKeywordGroups>> = {}
 ): ReturnType<typeof useKeywordGroups> {
   return {
-    groups: [buildKeywordGroup()],
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-    createGroup: vi.fn(),
-    renameGroup: vi.fn(),
-    removeGroup: vi.fn(),
-    changeMemberships: vi.fn(),
+    ...buildKeywordGroupsHookResult([buildKeywordGroup()]),
     ...overrides,
   };
 }
@@ -99,6 +84,13 @@ export function renderGroupBriefForm(
 
 export async function selectGroupForBrief(): Promise<void> {
   await userEvent.selectOptions(screen.getByLabelText('Keyword group'), 'group-1');
+}
+
+/** Pick the group, switch to "Improve current URL" mode and type the landing URL. */
+export async function fillImproveUrlBrief(landingUrl: string): Promise<void> {
+  await selectGroupForBrief();
+  await userEvent.click(screen.getByRole('radio', { name: /Improve current URL/u }));
+  await userEvent.type(screen.getByLabelText('Current landing URL'), landingUrl);
 }
 
 export async function submitGroupBrief(): Promise<void> {

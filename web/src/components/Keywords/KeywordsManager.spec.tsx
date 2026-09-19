@@ -92,33 +92,33 @@ describe('KeywordsManager', () => {
   });
 
   describe('create mutation', () => {
-    it('preserves entered text when create returns a conflict', async () => {
+    async function renderCreateConflict() {
       const props = createKeywordsManagerProps();
       mockApiPost.mockRejectedValue(createApiRequestError(CREATE_CONFLICT_MESSAGE));
       render(<KeywordsManager {...props} />);
 
       const input = await submitCreate();
+      return {
+        props,
+        input,
+      };
+    }
+
+    it('preserves entered text when create returns a conflict', async () => {
+      const { input } = await renderCreateConflict();
       await screen.findByText(CREATE_CONFLICT_MESSAGE);
 
       expect(input).toHaveValue(createdKeywordFixture.keyword);
     });
 
     it('shows exact backend message when create returns a conflict', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiPost.mockRejectedValue(createApiRequestError(CREATE_CONFLICT_MESSAGE));
-      render(<KeywordsManager {...props} />);
-
-      await submitCreate();
+      await renderCreateConflict();
 
       expect(await screen.findByText(CREATE_CONFLICT_MESSAGE)).toBeInTheDocument();
     });
 
     it('does not update parent state when create returns a conflict', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiPost.mockRejectedValue(createApiRequestError(CREATE_CONFLICT_MESSAGE));
-      render(<KeywordsManager {...props} />);
-
-      await submitCreate();
+      const { props } = await renderCreateConflict();
       await screen.findByText(CREATE_CONFLICT_MESSAGE);
 
       expect(props.setKeywords).not.toHaveBeenCalled();
@@ -218,12 +218,17 @@ describe('KeywordsManager', () => {
       expect(props.setKeywords).not.toHaveBeenCalled();
     });
 
-    it('closes editor when update returns a valid keyword', async () => {
+    async function renderUpdateSuccess() {
       const props = createKeywordsManagerProps();
       mockApiPut.mockResolvedValue(updatedKeywordFixture);
       render(<KeywordsManager {...props} />);
 
       await submitUpdate();
+      return props;
+    }
+
+    it('closes editor when update returns a valid keyword', async () => {
+      await renderUpdateSuccess();
 
       await waitFor(() => {
         expect(screen.queryByDisplayValue(updatedKeywordFixture.keyword)).not.toBeInTheDocument();
@@ -231,11 +236,7 @@ describe('KeywordsManager', () => {
     });
 
     it('replaces keyword when update returns a valid keyword', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiPut.mockResolvedValue(updatedKeywordFixture);
-      render(<KeywordsManager {...props} />);
-
-      await submitUpdate();
+      const props = await renderUpdateSuccess();
 
       await waitFor(() => expect(props.setKeywords).toHaveBeenCalledWith([
         updatedKeywordFixture,
@@ -249,43 +250,33 @@ describe('KeywordsManager', () => {
   });
 
   describe('delete mutation', () => {
-    it('preserves keyword when delete targets a missing row', async () => {
+    async function renderDeleteRejected(failure: Error) {
       const props = createKeywordsManagerProps();
-      mockApiDelete.mockRejectedValue(createApiRequestError(DELETE_NOT_FOUND_MESSAGE, 404));
+      mockApiDelete.mockRejectedValue(failure);
       render(<KeywordsManager {...props} />);
 
       await submitDelete();
+      return props;
+    }
+
+    it('preserves keyword when delete targets a missing row', async () => {
+      const props = await renderDeleteRejected(createApiRequestError(DELETE_NOT_FOUND_MESSAGE, 404));
       await screen.findByText(DELETE_NOT_FOUND_MESSAGE);
 
       expect(props.setKeywords).not.toHaveBeenCalled();
     });
 
     it('shows exact backend message when delete targets a missing row', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiDelete.mockRejectedValue(createApiRequestError(DELETE_NOT_FOUND_MESSAGE, 404));
-      render(<KeywordsManager {...props} />);
-
-      await submitDelete();
+      await renderDeleteRejected(createApiRequestError(DELETE_NOT_FOUND_MESSAGE, 404));
 
       expect(await screen.findByText(DELETE_NOT_FOUND_MESSAGE)).toBeInTheDocument();
     });
 
-    it('shows safe fallback when delete transport fails', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiDelete.mockRejectedValue(createTransportError());
-      render(<KeywordsManager {...props} />);
-
-      await submitDelete();
-
-      expect(await screen.findByText(DELETE_FALLBACK_MESSAGE)).toBeInTheDocument();
-    });
-
-    it('shows safe fallback when delete returns a server error', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiDelete.mockRejectedValue(createApiRequestError(DELETE_SERVER_MESSAGE, 500));
-      render(<KeywordsManager {...props} />);
-
-      await submitDelete();
+    it.each<[failure: string, error: Error]>([
+      ['transport fails', createTransportError()],
+      ['returns a server error', createApiRequestError(DELETE_SERVER_MESSAGE, 500)],
+    ])('shows safe fallback when delete %s', async (_failure, error) => {
+      await renderDeleteRejected(error);
 
       expect(await screen.findByText(DELETE_FALLBACK_MESSAGE)).toBeInTheDocument();
     });
@@ -306,7 +297,8 @@ describe('KeywordsManager', () => {
   });
 
   describe('bulk create mutation', () => {
-    it('retains failed bulk entry when another entry succeeds', async () => {
+    /** Submits two keywords of which the first is created and the second rejected. */
+    async function renderPartialBulk() {
       const props = createKeywordsManagerProps();
       mockApiPost
         .mockResolvedValueOnce(bulkCreatedKeywordFixture)
@@ -314,18 +306,20 @@ describe('KeywordsManager', () => {
       render(<KeywordsManager {...props} />);
 
       const input = await submitBulk();
+      return {
+        props,
+        input,
+      };
+    }
+
+    it('retains failed bulk entry when another entry succeeds', async () => {
+      const { input } = await renderPartialBulk();
 
       await waitFor(() => expect(input).toHaveValue(FAILED_BULK_KEYWORD));
     });
 
     it('preserves successful bulk entry when another entry fails', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiPost
-        .mockResolvedValueOnce(bulkCreatedKeywordFixture)
-        .mockRejectedValueOnce(createApiRequestError(BULK_CONFLICT_MESSAGE));
-      render(<KeywordsManager {...props} />);
-
-      await submitBulk();
+      const { props } = await renderPartialBulk();
 
       await waitFor(() => expect(props.setKeywords.mock.calls[0]?.[0]).toStrictEqual([
         bulkCreatedKeywordFixture,
@@ -334,13 +328,7 @@ describe('KeywordsManager', () => {
     });
 
     it('reports backend failure when bulk create partially succeeds', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiPost
-        .mockResolvedValueOnce(bulkCreatedKeywordFixture)
-        .mockRejectedValueOnce(createApiRequestError(BULK_CONFLICT_MESSAGE));
-      render(<KeywordsManager {...props} />);
-
-      await submitBulk();
+      await renderPartialBulk();
 
       expect(await screen.findByText(
         `Added 1 keyword. Failed: ${FAILED_BULK_KEYWORD} (${BULK_CONFLICT_MESSAGE})`

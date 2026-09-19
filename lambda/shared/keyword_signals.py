@@ -65,7 +65,7 @@ def fetch_google_signals(api_key: str, query: str, *, country: str = 'us', langu
     search = _serpapi_get({**base, 'engine': 'google', 'num': 10})
     autocomplete = _serpapi_get({**base, 'engine': 'google_autocomplete'})
 
-    found: list[tuple[str, str]] = []
+    found: list[tuple[Any, str]] = []
     for item in search.get('related_searches') or []:
         if isinstance(item, dict):
             found.append((item.get('query'), SIGNAL_SOURCES[0]))

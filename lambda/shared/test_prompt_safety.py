@@ -7,6 +7,8 @@ exploitable, so the assertions below are explicit.
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from shared.prompt_safety import (
@@ -46,10 +48,9 @@ class TestSanitizeUserInput:
         result = sanitize_user_input("abcdefghij", max_length=5)
         assert result == "abcde... [truncated]"
 
-    def test_returns_empty_string_for_non_string_input(self) -> None:
-        assert sanitize_user_input(None) == ""  # type: ignore[arg-type]
-        assert sanitize_user_input(123) == ""  # type: ignore[arg-type]
-        assert sanitize_user_input(["list"]) == ""  # type: ignore[arg-type]
+    @pytest.mark.parametrize('non_string', [None, 123, ['list']])
+    def test_returns_empty_string_for_non_string_input(self, non_string: Any) -> None:
+        assert sanitize_user_input(non_string) == ""
 
     def test_trims_surrounding_whitespace(self) -> None:
         assert sanitize_user_input("   padded   ") == "padded"
@@ -72,13 +73,13 @@ class TestWrapUserInput:
     def test_rejects_invalid_tag_names(self) -> None:
         """Tag names must be ASCII identifiers — prevents callers from
         accidentally building tags from untrusted input."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid tag name 'has spaces'"):
             wrap_user_input("x", "has spaces")
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid tag name 'Capital'"):
             wrap_user_input("x", "Capital")
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid tag name '123_starts_with_digit'"):
             wrap_user_input("x", "123_starts_with_digit")
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="Invalid tag name ''"):
             wrap_user_input("x", "")
 
     def test_accepts_lowercase_identifier_tags(self) -> None:

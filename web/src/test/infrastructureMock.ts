@@ -21,6 +21,9 @@
  */
 import { vi } from 'vitest';
 import type { authenticatedFetch as realAuthenticatedFetch } from '../infrastructure/auth';
+import {
+  createDeferredResponse, type DeferredResponse
+} from './fetchResponses';
 
 export * from '../infrastructure/errors';
 export * from '../infrastructure/urlSafety';
@@ -33,3 +36,13 @@ export const API_BASE_URL = 'https://api.test.com';
 export const mockAuthenticatedFetch = vi.fn<typeof realAuthenticatedFetch>();
 
 export { mockAuthenticatedFetch as authenticatedFetch };
+
+/**
+ * Points `mockAuthenticatedFetch` at one response the spec settles by hand,
+ * so it can assert on the in-flight state before resolving the request.
+ */
+export function deferAuthenticatedFetch(): DeferredResponse {
+  const deferred = createDeferredResponse();
+  mockAuthenticatedFetch.mockReturnValue(deferred.promise);
+  return deferred;
+}

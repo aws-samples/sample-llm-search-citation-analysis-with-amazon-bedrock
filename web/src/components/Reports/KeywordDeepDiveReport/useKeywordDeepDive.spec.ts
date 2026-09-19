@@ -29,6 +29,14 @@ const mockMentions = useBrandMentions as ReturnType<typeof vi.fn>;
 const mockGaps = useCitationGaps as ReturnType<typeof vi.fn>;
 const mockRecommendations = useRecommendations as ReturnType<typeof vi.fn>;
 
+/** Renders the hook with a keyword prop so a test can rerender it for another keyword. */
+function renderKeywordDeepDive(initialKeyword: string) {
+  return renderHook(
+    ({ keyword }: { keyword: string | null }) => useKeywordDeepDive(keyword),
+    { initialProps: { keyword: initialKeyword } },
+  );
+}
+
 describe('useKeywordDeepDive', () => {
   const fetchVisibility = vi.fn();
   const fetchTrends = vi.fn();
@@ -96,10 +104,7 @@ describe('useKeywordDeepDive', () => {
   });
 
   it('refetches every slice when the keyword changes', () => {
-    const { rerender } = renderHook(
-      ({ keyword }: { keyword: string | null }) => useKeywordDeepDive(keyword),
-      { initialProps: { keyword: 'first' } },
-    );
+    const { rerender } = renderKeywordDeepDive('first');
     fetchVisibility.mockClear();
     fetchTrends.mockClear();
     fetchPersonas.mockClear();
@@ -123,10 +128,7 @@ describe('useKeywordDeepDive', () => {
   });
 
   it('refetches recommendations when the keyword changes', () => {
-    const { rerender } = renderHook(
-      ({ keyword }: { keyword: string | null }) => useKeywordDeepDive(keyword),
-      { initialProps: { keyword: 'first' } },
-    );
+    const { rerender } = renderKeywordDeepDive('first');
     fetchRecs.mockClear();
     act(() => {
       rerender({ keyword: 'second' });
@@ -135,10 +137,7 @@ describe('useKeywordDeepDive', () => {
   });
 
   it('does not refetch when keyword is unchanged across renders', () => {
-    const { rerender } = renderHook(
-      ({ keyword }: { keyword: string | null }) => useKeywordDeepDive(keyword),
-      { initialProps: { keyword: 'stable' } },
-    );
+    const { rerender } = renderKeywordDeepDive('stable');
     fetchVisibility.mockClear();
     act(() => {
       rerender({ keyword: 'stable' });

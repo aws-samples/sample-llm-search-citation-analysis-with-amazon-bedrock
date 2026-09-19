@@ -6,6 +6,7 @@ import os
 import sys
 from collections.abc import Iterator, Mapping
 from types import ModuleType
+from typing import Literal
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -19,7 +20,7 @@ def handler_fixture(
     module_name: str,
     *,
     env: Mapping[str, str],
-    scope: str = 'module',
+    scope: Literal['session', 'package', 'module', 'class', 'function'] = 'module',
 ):
     """Build a fixture yielding ``filename`` loaded under ``module_name``.
 

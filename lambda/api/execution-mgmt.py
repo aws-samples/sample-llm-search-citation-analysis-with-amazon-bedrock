@@ -7,16 +7,12 @@ Routes:
 - GET /api/executions/{id} -> get-execution-status handler
 """
 
-import logging
 import sys
 
 # Shared layer path (populated by the Lambda layer at /opt/python)
 sys.path.insert(0, '/opt/python')
 
-from shared.router import HandlerLoader, dispatch_route
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+from shared.consolidated_router import route_map_handler
 
 ROUTE_MAP = {
     '/api/trigger-keyword-analysis': 'trigger-keyword-analysis.py',
@@ -24,8 +20,4 @@ ROUTE_MAP = {
     '/api/executions': 'get-execution-status.py',
 }
 
-_handlers = HandlerLoader(__file__)
-
-
-def handler(event, context):
-    return dispatch_route(event, context, ROUTE_MAP, _handlers, logger)
+handler = route_map_handler(__file__, ROUTE_MAP, __name__)

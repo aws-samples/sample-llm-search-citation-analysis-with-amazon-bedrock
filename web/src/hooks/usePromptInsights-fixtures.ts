@@ -7,7 +7,6 @@ export const mockPromptInsightsResponse: PromptInsightsResponse = {
       keyword: 'best hotels',
       timestamp: '2024-01-01T00:00:00Z',
       status: 'winning',
-      total_providers: 4,
       first_party: {
         mentions: 10,
         best_rank: 1,
@@ -27,7 +26,6 @@ export const mockPromptInsightsResponse: PromptInsightsResponse = {
       keyword: 'luxury resorts',
       timestamp: '2024-01-01T00:00:00Z',
       status: 'losing',
-      total_providers: 4,
       first_party: {
         mentions: 2,
         best_rank: 5,

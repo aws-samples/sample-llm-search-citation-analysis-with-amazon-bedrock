@@ -15,7 +15,6 @@ const visibility: GroupVisibilityResponse = {
     keyword_count: 2
   },
   timestamp: '2026-09-18T10:00:00Z',
-  total_providers: 4,
   keywords_analyzed: 2,
   keywords_with_data: 1,
   keywords: [{
@@ -25,7 +24,6 @@ const visibility: GroupVisibilityResponse = {
     first_party_score: 72.5,
     competitor_score: 40,
     first_party_sov: 55,
-    competitor_sov: 45,
     first_party_providers: 3,
     total_mentions: 9,
     first_party_mentioned: true,
@@ -69,7 +67,6 @@ const visibility: GroupVisibilityResponse = {
 const trends: HistoricalTrendsResponse = {
   period_type: 'day',
   days_analyzed: 30,
-  data_points: 1,
   trend_data: [{
     period: '2026-09-18',
     visibility_score: 72.5,
@@ -263,6 +260,26 @@ describe('groupOverviewSheets', () => {
     const sheets = groupOverviewSheets(visibility, null, 'x');
 
     expect(sheets.map((sheet) => sheet.name)).toStrictEqual(['Summary', 'Keywords', 'Brands']);
+  });
+
+  it('sizes the seven prominence columns identically in the keyword and history sheets', () => {
+    const [, keywordsSheet, , historySheet] = groupOverviewSheets(visibility, trends, 'x');
+    const prominenceWidths = [{ wch: 12 }, { wch: 10 }, { wch: 18 }, { wch: 16 }, { wch: 16 }, { wch: 12 }, { wch: 20 }];
+
+    expect(keywordsSheet.columns.slice(-prominenceWidths.length)).toStrictEqual(prominenceWidths);
+    expect(historySheet.columns.slice(-prominenceWidths.length)).toStrictEqual(prominenceWidths);
+  });
+
+  it.each([
+    ['Summary', 0, 2],
+    ['Keywords', 1, 14],
+    ['Brands', 2, 8],
+    ['History', 3, 12],
+  ])('defines one column width per exported field in the %s sheet', (_sheetName, sheetIndex, fieldCount) => {
+    const sheet = groupOverviewSheets(visibility, trends, 'x')[sheetIndex];
+
+    expect(Object.keys(sheet.data[0])).toHaveLength(fieldCount);
+    expect(sheet.columns).toHaveLength(fieldCount);
   });
 });
 

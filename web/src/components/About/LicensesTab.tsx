@@ -138,13 +138,13 @@ const USE_CASES = [
   },
 ];
 
-function DependencyItem({ dep }: {
-  readonly dep: {
-    name: string;
-    version: string;
-    license: string 
-  } 
-}) {
+interface Dependency {
+  name: string;
+  version: string;
+  license: string;
+}
+
+function DependencyItem({ dep }: { readonly dep: Dependency }) {
   return (
     <div className="flex items-center justify-between p-2 bg-white rounded border border-gray-200">
       <div>
@@ -152,6 +152,22 @@ function DependencyItem({ dep }: {
         <span className="text-xs text-gray-500 ml-2">{dep.version}</span>
       </div>
       <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">{dep.license}</span>
+    </div>
+  );
+}
+
+function DependencyGroup({
+  title, deps 
+}: {
+  readonly title: string;
+  readonly deps: readonly Dependency[];
+}) {
+  return (
+    <div>
+      <h4 className="text-sm font-semibold text-gray-900 mb-3">{title}</h4>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {deps.map((dep) => <DependencyItem key={dep.name} dep={dep} />)}
+      </div>
     </div>
   );
 }
@@ -183,19 +199,9 @@ export function LicensesTab() {
         </a>
       </div>
 
-      <div>
-        <h4 className="text-sm font-semibold text-gray-900 mb-3">Frontend Technologies</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {FRONTEND_DEPS.map((dep) => <DependencyItem key={dep.name} dep={dep} />)}
-        </div>
-      </div>
+      <DependencyGroup title="Frontend Technologies" deps={FRONTEND_DEPS} />
 
-      <div>
-        <h4 className="text-sm font-semibold text-gray-900 mb-3">Backend Technologies</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {BACKEND_DEPS.map((dep) => <DependencyItem key={dep.name} dep={dep} />)}
-        </div>
-      </div>
+      <DependencyGroup title="Backend Technologies" deps={BACKEND_DEPS} />
 
       <div>
         <h4 className="text-sm font-semibold text-gray-900 mb-3">AWS Services</h4>

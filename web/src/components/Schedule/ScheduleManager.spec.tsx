@@ -338,10 +338,14 @@ describe('ScheduleManager', () => {
   });
 
   describe('run now', () => {
+    async function runScheduleNow(displayName: string) {
+      await userEvent.click(screen.getByRole('button', { name: `Run schedule ${displayName} now` }));
+    }
+
     it('starts an execution for the schedule and reports it', async () => {
       render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
 
-      await userEvent.click(screen.getByRole('button', { name: 'Run schedule Hotel Coruña — weekly now' }));
+      await runScheduleNow('Hotel Coruña — weekly');
 
       expect(mockRunSchedule).toHaveBeenCalledWith('sch-1a2b3c4d');
       expect(screen.getByText('Analysis started for Hotel Coruña — weekly (1 group(s))')).toBeInTheDocument();
@@ -350,7 +354,7 @@ describe('ScheduleManager', () => {
     it('does not open the editor when run now is clicked', async () => {
       render(<ScheduleManager {...buildProps({ schedules: [weeklySchedule] })} />);
 
-      await userEvent.click(screen.getByRole('button', { name: 'Run schedule Hotel Coruña — weekly now' }));
+      await runScheduleNow('Hotel Coruña — weekly');
 
       expect(screen.queryByRole('form', { name: 'Edit schedule' })).not.toBeInTheDocument();
     });

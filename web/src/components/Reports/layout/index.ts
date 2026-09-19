@@ -6,6 +6,9 @@ export { ReportSectionPlaceholder } from './ReportSectionPlaceholder';
 export {
   gateSection, pendingSectionPlaceholder 
 } from './sectionGate';
+export {
+  gateVisibilityHeadline, type VisibilityHeadlineProps 
+} from './visibilityHeadline';
 export { ReportStatCard } from './ReportStatCard';
 export { ReportStatGrid } from './ReportStatGrid';
 export {

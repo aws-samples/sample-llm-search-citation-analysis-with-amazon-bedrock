@@ -82,6 +82,31 @@ class TestBuildTrendFromItems:
         }]
 
 
+def _aggregate_daily(items: list[dict]) -> list[dict]:
+    """Aggregate ``items`` into daily trend points with four providers enabled."""
+    with patch.object(_mod, 'get_enabled_provider_count', return_value=4):
+        return _mod.aggregate_by_period(items, 'day', {})
+
+
+#: The daily point ``aggregate_by_period`` emits when the day's only answer
+#: mentions the brand with the 999 "unranked" sentinel: the mention counts, but
+#: there is no rank or first position to report.
+_UNRANKED_SINGLE_ANSWER_POINT = {
+    'period': '2026-09-18',
+    'visibility_score': 16.5,
+    'total_mentions': 1,
+    'provider_count': 1,
+    'best_rank': None,
+    'analysis_runs': 1,
+    'answers': 1,
+    'mentioned_answers': 1,
+    'rank_1_share': 0.0,
+    'top_3_share': 0.0,
+    'mean_rank': None,
+    'mean_first_position': None,
+}
+
+
 class TestAggregateByPeriod:
     def test_calculates_answer_level_prominence_across_a_period(self) -> None:
         timestamp = '2026-09-18T10:00:00Z'
@@ -117,8 +142,7 @@ class TestAggregateByPeriod:
             },
         ]
 
-        with patch.object(_mod, 'get_enabled_provider_count', return_value=4):
-            trend_data = _mod.aggregate_by_period(items, 'day', {})
+        trend_data = _aggregate_daily(items)
 
         assert trend_data == [{
             'period': '2026-09-18',
@@ -144,23 +168,9 @@ class TestAggregateByPeriod:
             ],
         }]
 
-        with patch.object(_mod, 'get_enabled_provider_count', return_value=4):
-            trend_data = _mod.aggregate_by_period(items, 'day', {})
+        trend_data = _aggregate_daily(items)
 
-        assert trend_data == [{
-            'period': '2026-09-18',
-            'visibility_score': 16.5,
-            'total_mentions': 1,
-            'provider_count': 1,
-            'best_rank': None,
-            'analysis_runs': 1,
-            'answers': 1,
-            'mentioned_answers': 1,
-            'rank_1_share': 0.0,
-            'top_3_share': 0.0,
-            'mean_rank': None,
-            'mean_first_position': None,
-        }]
+        assert trend_data == [_UNRANKED_SINGLE_ANSWER_POINT]
 
 
 class TestBuildGroupSeries:
@@ -240,21 +250,7 @@ class TestBuildGroupSeries:
         field_name: str,
         boolean_value: bool,
     ) -> None:
-        point = {
-            'period': '2026-09-18',
-            'visibility_score': 60.0,
-            'total_mentions': 1,
-            'provider_count': 1,
-            'best_rank': None,
-            'analysis_runs': 1,
-            'answers': 1,
-            'mentioned_answers': 1,
-            'rank_1_share': 0.0,
-            'top_3_share': 0.0,
-            'mean_rank': None,
-            'mean_first_position': None,
-        }
-        point[field_name] = boolean_value
+        point = {**_UNRANKED_SINGLE_ANSWER_POINT, field_name: boolean_value}
 
         group_series = _mod.build_group_series([{'trend_data': [point]}])
 

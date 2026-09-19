@@ -53,13 +53,6 @@ export const useResearchTemplates = (): UseResearchTemplatesReturn => {
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
 
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
   const refresh = useCallback(async (): Promise<void> => {
     setLoading(true);
     try {
@@ -76,8 +69,13 @@ export const useResearchTemplates = (): UseResearchTemplatesReturn => {
     }
   }, []);
 
+  // Load once on mount; the mount flag keeps a late answer from touching an unmounted editor.
   useEffect(() => {
+    mountedRef.current = true;
     void refresh();
+    return () => {
+      mountedRef.current = false;
+    };
   }, [refresh]);
 
   const create = useCallback(async (draft: TemplateDraft): Promise<TemplateMutationOutcome> => {

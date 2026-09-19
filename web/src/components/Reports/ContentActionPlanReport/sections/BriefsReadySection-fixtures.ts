@@ -8,7 +8,6 @@ export function buildBrief(
   return {
     id,
     keyword: 'kw',
-    idea_type: 'visibility_gap',
     idea_title: title,
     content_angle: 'comprehensive_guide',
     generated_content: {
@@ -18,7 +17,6 @@ export function buildBrief(
       suggested_headings: [],
       key_points: ['Point A', 'Point B', 'Point C', 'Point D', 'Point E'],
     },
-    raw_content: '',
     competitor_sources_used: 0,
     status,
     viewed: false,

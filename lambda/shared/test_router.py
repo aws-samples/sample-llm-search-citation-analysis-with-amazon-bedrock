@@ -11,6 +11,7 @@ import logging
 import os
 import sys
 import textwrap
+from typing import Any
 
 import pytest
 
@@ -180,7 +181,8 @@ class TestPathMatchesRoute:
         assert router_mod.path_matches_route('/api/stats', '', '') is False
 
     def test_returns_false_when_both_are_none(self) -> None:
-        assert router_mod.path_matches_route('/api/stats', None, None) is False  # type: ignore[arg-type]
+        absent: Any = None
+        assert router_mod.path_matches_route('/api/stats', absent, absent) is False
 
 
 

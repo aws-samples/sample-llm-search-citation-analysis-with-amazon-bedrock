@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect 
 } from 'vitest';
 import {
   formatDate,
@@ -9,6 +9,7 @@ import {
   formatApproximateDuration,
   formatRelativeTime
 } from './dateFormatter';
+import { freezeClockAt } from '../test/frozenClock';
 
 describe('formatDate', () => {
   it('returns "N/A" when input is null', () => {
@@ -59,14 +60,7 @@ describe('formatTime', () => {
 });
 
 describe('calculateDuration', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-01-23T12:00:00Z'));
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  freezeClockAt('2026-01-23T12:00:00Z');
 
   it('returns null when startDate is null', () => {
     expect(calculateDuration(null)).toBeNull();
@@ -185,14 +179,7 @@ describe('formatApproximateDuration', () => {
 });
 
 describe('formatRelativeTime', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-01-23T12:00:00Z'));
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  freezeClockAt('2026-01-23T12:00:00Z');
 
   it('returns "N/A" when input is null', () => {
     expect(formatRelativeTime(null)).toBe('N/A');

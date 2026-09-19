@@ -1,6 +1,18 @@
-import { vi } from 'vitest';
+import {
+  expect, vi 
+} from 'vitest';
+import {
+  renderHook, waitFor 
+} from '@testing-library/react';
 import type { KeywordGroup } from '../types';
-import type { useKeywordGroups } from './useKeywordGroups';
+import { useKeywordGroups } from './useKeywordGroups';
+
+/** Renders the hook and waits for the initial group load to settle. */
+export async function renderLoadedKeywordGroups(options?: Parameters<typeof useKeywordGroups>[0]) {
+  const rendered = renderHook(() => useKeywordGroups(options));
+  await waitFor(() => expect(rendered.result.current.loading).toBe(false));
+  return rendered;
+}
 
 /** A keyword group as the API returns it; every field can be overridden. */
 export function buildKeywordGroup(overrides: Partial<KeywordGroup> = {}): KeywordGroup {

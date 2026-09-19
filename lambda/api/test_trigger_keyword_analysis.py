@@ -5,6 +5,7 @@ cap-free active-keyword read in trigger-analysis.py.
 
 import json
 import os
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -37,11 +38,24 @@ _subset = _load('trigger-keyword-analysis.py', 'trigger_keyword_analysis_under_t
 _all = _load('trigger-analysis.py', 'trigger_analysis_under_test')
 
 
-def make_event(body=None, groups='Admin'):
+def make_event(body=None, groups: str | None = 'Admin'):
     claims = {'cognito:username': 'admin@example.com'}
     if groups is not None:
         claims['cognito:groups'] = groups
     return api_gateway_event('POST', '/api/trigger-keyword-analysis', body=body, claims=claims)
+
+
+def _keyword_row(keyword_id: str, keyword: str, *group_ids: str) -> dict[str, Any]:
+    """An active Keywords-table item; `group_ids` become its DynamoDB string set."""
+    row: dict[str, Any] = {'id': keyword_id, 'keyword': keyword}
+    if group_ids:
+        row['group_ids'] = set(group_ids)
+    return row
+
+
+def _stage_active_keywords(*rows: dict[str, Any]) -> None:
+    """What the StatusIndex query answers for the next request."""
+    mock_keywords_table.query.return_value = {'Items': list(rows)}
 
 
 def _started_input():
@@ -63,10 +77,10 @@ def _reset_mocks():
 
 class TestSubsetTriggerWithScope:
     def test_runs_the_active_keywords_of_the_requested_groups(self):
-        mock_keywords_table.query.return_value = {'Items': [
-            {'id': 'k1', 'keyword': 'hotel coruna spa', 'group_ids': {'coruna'}},
-            {'id': 'k2', 'keyword': 'hotel marino beach', 'group_ids': {'marino'}},
-        ]}
+        _stage_active_keywords(
+            _keyword_row('k1', 'hotel coruna spa', 'coruna'),
+            _keyword_row('k2', 'hotel marino beach', 'marino'),
+        )
 
         status, body = parse_response(_subset.handler(make_event({'scope': {'mode': 'groups', 'group_ids': ['coruna']}}), None))
 
@@ -79,10 +93,7 @@ class TestSubsetTriggerWithScope:
         assert started['requested_scope'] == {'mode': 'groups', 'group_ids': ['coruna']}
 
     def test_runs_only_the_requested_keyword_ids(self):
-        mock_keywords_table.query.return_value = {'Items': [
-            {'id': 'k1', 'keyword': 'alpha'},
-            {'id': 'k2', 'keyword': 'beta'},
-        ]}
+        _stage_active_keywords(_keyword_row('k1', 'alpha'), _keyword_row('k2', 'beta'))
 
         status, body = parse_response(_subset.handler(make_event({'scope': {'mode': 'keywords', 'keyword_ids': ['k2']}}), None))
 
@@ -90,7 +101,7 @@ class TestSubsetTriggerWithScope:
         assert body['keywords'] == ['beta']
 
     def test_rejects_a_scope_that_matches_no_active_keyword_without_starting_a_run(self):
-        mock_keywords_table.query.return_value = {'Items': [{'id': 'k1', 'keyword': 'alpha', 'group_ids': {'other'}}]}
+        _stage_active_keywords(_keyword_row('k1', 'alpha', 'other'))
 
         status, body = parse_response(_subset.handler(make_event({'scope': {'mode': 'groups', 'group_ids': ['coruna']}}), None))
 

@@ -403,19 +403,20 @@ export function extractApiMethods(template: Template, resourceId: string): ApiGa
   });
 }
 
-export function verbsWithoutCognitoAuthorizer(methods: ApiGatewayMethodSnapshot[]): string[] {
-  return methods
-    .filter((method) => method.authorizationType !== COGNITO_AUTH)
-    .map((method) => method.httpMethod);
-}
-
-export function verbsNotIntegratedWith(
-  methods: ApiGatewayMethodSnapshot[],
-  functionLogicalId: string
-): string[] {
-  return methods
-    .filter((method) => !method.integrationUri.includes(functionLogicalId))
-    .map((method) => method.httpMethod);
+/**
+ * The verbs among `methods` that are not behind the Cognito user pool
+ * authorizer, and those whose integration is not the Lambda function with
+ * logical id `functionLogicalId`. Both lists are empty for a fully guarded route set.
+ */
+export function unguardedVerbs(methods: ApiGatewayMethodSnapshot[], functionLogicalId: string) {
+  return {
+    withoutCognitoAuthorizer: methods
+      .filter((method) => method.authorizationType !== COGNITO_AUTH)
+      .map((method) => method.httpMethod),
+    notIntegratedWithFunction: methods
+      .filter((method) => !method.integrationUri.includes(functionLogicalId))
+      .map((method) => method.httpMethod),
+  };
 }
 
 function retentionDaysOf(logGroups: Record<string, unknown>, logicalId: string): number {

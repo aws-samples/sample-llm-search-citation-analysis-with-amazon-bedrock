@@ -22,12 +22,16 @@ import {
   renderPendingPromotion,
   renderSelectedPromotion,
   replacementAvailableKeywordFixtures,
+  selectFixtureKeyword,
+  startPromotion,
   successfulFullProposalResponseFixture,
+  type PromotionHookReader,
 } from './usePromoteKeywords-fixtures';
 
 import type {
-  SelectionState, UsePromoteKeywords
+  SelectionState, UsePromoteKeywordsOptions
 } from './usePromoteKeywords';
+import type { Keyword } from '../types';
 import { promoteKeywords } from '../api/keywords';
 
 vi.mock('../api/client', () => ({ apiPost: vi.fn() }));
@@ -141,7 +145,7 @@ describe('recommended selection replacement', () => {
  */
 interface EnablementFixture {
   scenario: string;
-  setupSelection: (readHook: () => UsePromoteKeywords) => void;
+  setupSelection: (readHook: PromotionHookReader) => void;
   expectedSelectedCount: number;
   expectedSubmitting: boolean;
   expectedCanPromote: boolean;
@@ -162,11 +166,7 @@ describe('Property 13: Promotion trigger is enabled exactly when a non-empty sel
     },
     {
       scenario: 'the selection is non-empty and no request is in progress',
-      setupSelection: (readHook) => {
-        act(() => {
-          readHook().toggle('alpha');
-        });
-      },
+      setupSelection: selectFixtureKeyword,
       expectedSelectedCount: 1,
       expectedSubmitting: false,
       expectedCanPromote: true,
@@ -174,12 +174,8 @@ describe('Property 13: Promotion trigger is enabled exactly when a non-empty sel
     {
       scenario: 'the selection is non-empty and a request is in progress',
       setupSelection: (readHook) => {
-        act(() => {
-          readHook().toggle('alpha');
-        });
-        act(() => {
-          void readHook().promote();
-        });
+        selectFixtureKeyword(readHook);
+        startPromotion(readHook);
       },
       expectedSelectedCount: 1,
       expectedSubmitting: true,
@@ -188,12 +184,8 @@ describe('Property 13: Promotion trigger is enabled exactly when a non-empty sel
     {
       scenario: 'the selection is cleared while a request is in progress',
       setupSelection: (readHook) => {
-        act(() => {
-          readHook().toggle('alpha');
-        });
-        act(() => {
-          void readHook().promote();
-        });
+        selectFixtureKeyword(readHook);
+        startPromotion(readHook);
         act(() => {
           readHook().clearSelection();
         });
@@ -220,12 +212,13 @@ describe('Property 13: Promotion trigger is enabled exactly when a non-empty sel
   );
 });
 
-describe('Property 14: Successful promotion clears created keywords and retains skipped ones', () => {
+describe('Property 14: Successful promotion retains only unchanged existing keywords', () => {
   const reconciliationFixtures = [
     {
       scenario: 'every selected keyword was created',
       selected: ['alpha', 'beta'],
       created: ['alpha', 'beta'],
+      grouped: [],
       skipped: [],
       expectedSelected: [],
     },
@@ -233,6 +226,7 @@ describe('Property 14: Successful promotion clears created keywords and retains 
       scenario: 'every selected keyword was skipped as a duplicate',
       selected: ['alpha', 'beta'],
       created: [],
+      grouped: [],
       skipped: ['alpha', 'beta'],
       expectedSelected: ['alpha', 'beta'],
     },
@@ -240,13 +234,23 @@ describe('Property 14: Successful promotion clears created keywords and retains 
       scenario: 'the selection was split between created and skipped keywords',
       selected: ['alpha', 'beta', 'gamma', 'delta'],
       created: ['alpha', 'gamma'],
+      grouped: [],
       skipped: ['beta', 'delta'],
       expectedSelected: ['beta', 'delta'],
+    },
+    {
+      scenario: 'an existing selected keyword gained its destination group',
+      selected: ['alpha', 'beta'],
+      created: [],
+      grouped: ['alpha'],
+      skipped: ['alpha', 'beta'],
+      expectedSelected: ['beta'],
     },
     {
       scenario: 'the selection is empty',
       selected: [],
       created: [],
+      grouped: [],
       skipped: [],
       expectedSelected: [],
     },
@@ -254,15 +258,16 @@ describe('Property 14: Successful promotion clears created keywords and retains 
       scenario: 'a selected text is in neither list because it was excluded upstream as empty',
       selected: ['alpha', '   ', 'beta'],
       created: ['alpha'],
+      grouped: [],
       skipped: ['beta'],
       expectedSelected: ['beta'],
     },
   ];
 
   it.each(reconciliationFixtures)(
-    'retains the original selection minus created plus skipped when $scenario',
+    'retains only unchanged existing selections when $scenario',
     ({
-      selected, created, skipped, expectedSelected
+      selected, created, grouped, skipped, expectedSelected
     }) => {
       const seedState: SelectionState = {
         ...initialSelectionState,
@@ -272,6 +277,7 @@ describe('Property 14: Successful promotion clears created keywords and retains 
       const reconciled = reduceSelection(seedState, {
         type: 'reconcile',
         created,
+        grouped,
         skipped,
       });
 
@@ -356,9 +362,6 @@ describe('promotionSuccessMessage', () => {
       const message = promotionSuccessMessage({
         created,
         skipped,
-        createdKeywords: [],
-        createdItems: [],
-        skippedKeywords: [],
       });
 
       expect(message).toBe(expectedMessage);
@@ -367,21 +370,35 @@ describe('promotionSuccessMessage', () => {
 });
 
 describe('full proposal promotion', () => {
-  it('sends the full proposal with per-keyword statuses in one grouped request', async () => {
+  /**
+   * Renders the hook over the two-row proposal, ticks `activeKeywords` and
+   * promotes the whole proposal, which the API answers with
+   * `successfulFullProposalResponseFixture`.
+   */
+  async function renderPromotedProposal(
+    activeKeywords: readonly string[],
+    onKeywordsAdded?: (created: Keyword[]) => void,
+    options?: UsePromoteKeywordsOptions
+  ) {
     mockApiPost.mockResolvedValue(successfulFullProposalResponseFixture);
-    const onKeywordsAdded = vi.fn();
     const { result } = renderHook(() => usePromoteKeywords(
       fullProposalKeywordFixtures,
       onKeywordsAdded,
-      { groupIds: ['g1'] }
+      options
     ));
     act(() => {
-      result.current.replaceSelection(['alpha']);
+      result.current.replaceSelection(activeKeywords);
     });
-
     await act(async () => {
       await result.current.promoteProposal();
     });
+    return result;
+  }
+
+  it('sends the full proposal with per-keyword statuses in one grouped request', async () => {
+    const onKeywordsAdded = vi.fn();
+
+    await renderPromotedProposal(['alpha'], onKeywordsAdded, { groupIds: ['g1'] });
 
     expect(mockApiPost).toHaveBeenCalledTimes(1);
     expect(mockApiPost).toHaveBeenCalledWith(
@@ -408,33 +425,21 @@ describe('full proposal promotion', () => {
   });
 
   it('keeps the adjusted active selection after the full proposal is added', async () => {
-    mockApiPost.mockResolvedValue(successfulFullProposalResponseFixture);
-    const { result } = renderHook(() => usePromoteKeywords(fullProposalKeywordFixtures));
-    act(() => {
-      result.current.replaceSelection(['alpha']);
-    });
+    const result = await renderPromotedProposal(['alpha']);
 
-    await act(async () => {
-      await result.current.promoteProposal();
-    });
-
-    expect(result.current.selected).toStrictEqual(['alpha']);
+    expect(result.current.selectedKeys).toStrictEqual(new Set(['alpha']));
     expect(result.current.outcome).toStrictEqual({
       created: 2,
       skipped: 0,
       createdKeywords: ['alpha', 'beta'],
       createdItems: successfulFullProposalResponseFixture.created_keywords,
       skippedKeywords: [],
+      groupedKeywords: [],
     });
   });
 
   it('marks every proposal term inactive when the active selection is empty', async () => {
-    mockApiPost.mockResolvedValue(successfulFullProposalResponseFixture);
-    const { result } = renderHook(() => usePromoteKeywords(fullProposalKeywordFixtures));
-
-    await act(async () => {
-      await result.current.promoteProposal();
-    });
+    await renderPromotedProposal([]);
 
     expect(mockApiPost).toHaveBeenCalledWith(
       '/keywords/promote',
@@ -495,7 +500,7 @@ describe('promotion request safety', () => {
     rerender({ availableKeywords: replacementAvailableKeywordFixtures });
 
     expect(mockApiPost).toHaveBeenCalledWith(...abortedPromotionRequest);
-    expect(result.current.selected).toStrictEqual([]);
+    expect(result.current.selectedKeys).toStrictEqual(new Set());
     expect(result.current.submitting).toBe(false);
   });
 
@@ -537,7 +542,7 @@ describe('promotion request safety', () => {
 
     expect(result.current.outcome).toBeNull();
     expect(result.current.error).toBeNull();
-    expect(result.current.selected).toStrictEqual([]);
+    expect(result.current.selectedKeys).toStrictEqual(new Set());
     expect(onKeywordsAdded).toHaveBeenCalledTimes(0);
   });
 

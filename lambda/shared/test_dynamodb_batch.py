@@ -1,13 +1,15 @@
 """
-Tests for shared.dynamodb_batch query helpers.
+Tests for shared.dynamodb_batch.
 
-Covers the semantics the handler callers depend on:
+``query_latest_per_key`` — the semantics the handler callers depend on:
 - Duplicates in partition_values are collapsed
 - Empty input short-circuits
 - Failed queries produce None for that key, not a raised exception
 - The query is built with ScanIndexForward=False and Limit=1 (latest row)
 - Results preserve input order
-- Paginated operations return every page in order
+
+``collect_all_items`` — pages are concatenated in order and each page's
+``LastEvaluatedKey`` is fed back as the next ``ExclusiveStartKey``.
 """
 
 from __future__ import annotations
@@ -39,7 +41,7 @@ def _fake_table_with_items(per_key_items: dict[str, list[dict]]) -> MagicMock:
         # expression is {'format': '{0} {operator} {1}', 'operator': '=',
         #                'values': [Attr, literal]}
         values = expression.get('values', [])
-        value = values[1] if len(values) > 1 else None
+        value = values[1] if len(values) > 1 else ''
         items = per_key_items.get(value, [])
         return {'Items': items}
 
@@ -99,7 +101,34 @@ class TestQueryLatestPerKey:
 
 
 class TestCollectAllItems:
-    def test_returns_items_from_every_page_when_last_evaluated_key_is_present(self) -> None:
+    def test_returns_the_items_of_a_single_page(self) -> None:
+        operation = MagicMock(return_value={'Items': [{'id': 1}, {'id': 2}]})
+
+        assert dynamodb_batch.collect_all_items(operation) == [{'id': 1}, {'id': 2}]
+
+    def test_concatenates_pages_in_order_until_one_has_no_last_evaluated_key(self) -> None:
+        operation = MagicMock(side_effect=[
+            {'Items': [{'id': 1}], 'LastEvaluatedKey': {'id': 1}},
+            {'Items': [{'id': 2}], 'LastEvaluatedKey': {'id': 2}},
+            {'Items': [{'id': 3}]},
+        ])
+
+        assert dynamodb_batch.collect_all_items(operation) == [{'id': 1}, {'id': 2}, {'id': 3}]
+
+    def test_passes_each_pages_last_evaluated_key_as_the_next_exclusive_start_key(self) -> None:
+        operation = MagicMock(side_effect=[
+            {'Items': [], 'LastEvaluatedKey': {'id': 1}},
+            {'Items': []},
+        ])
+
+        dynamodb_batch.collect_all_items(operation, IndexName='StatusIndex')
+
+        assert [call.kwargs for call in operation.call_args_list] == [
+            {'IndexName': 'StatusIndex'},
+            {'IndexName': 'StatusIndex', 'ExclusiveStartKey': {'id': 1}},
+        ]
+
+    def test_repeats_the_key_condition_on_every_follow_up_page_request(self) -> None:
         operation = MagicMock(side_effect=[
             {
                 'Items': [{'id': 'first'}],
@@ -121,3 +150,8 @@ class TestCollectAllItems:
                 ExclusiveStartKey={'pk': 'first'},
             ),
         ]
+
+    def test_returns_empty_list_when_the_page_has_no_items_key(self) -> None:
+        operation = MagicMock(return_value={})
+
+        assert dynamodb_batch.collect_all_items(operation) == []

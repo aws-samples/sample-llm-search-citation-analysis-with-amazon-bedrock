@@ -10,36 +10,34 @@ import { Recommendations } from './Recommendations';
 vi.mock('../../hooks/useRecommendations', () => ({useRecommendations: vi.fn(),}));
 
 import { useRecommendations } from '../../hooks/useRecommendations';
+import {
+  VISIBILITY_GAP_RECOMMENDATION, buildRecommendationsHookResult, buildRecommendationsResponse 
+} from './Recommendations-fixtures';
 
-const mockUseRecommendations = useRecommendations as ReturnType<typeof vi.fn>;
+const mockUseRecommendations = vi.mocked(useRecommendations);
+
+/** Renders the Action Center with the hook answering `overrides`; returns its `fetchRecommendations` spy. */
+function renderWithRecommendations(overrides: Parameters<typeof buildRecommendationsHookResult>[0] = {}) {
+  const hookResult = buildRecommendationsHookResult(overrides);
+  mockUseRecommendations.mockReturnValue(hookResult);
+  render(<Recommendations />);
+  return hookResult.fetchRecommendations;
+}
 
 describe('Recommendations', () => {
   beforeEach(() => {
-    mockUseRecommendations.mockReturnValue({
-      data: null,
-      loading: false,
-      error: null,
-      fetchRecommendations: vi.fn(),
-    });
+    mockUseRecommendations.mockReturnValue(buildRecommendationsHookResult());
   });
 
   describe('initial render', () => {
     it('renders header title', () => {
-      render(<Recommendations />);
+      renderWithRecommendations();
 
       expect(screen.getByText('Action Center')).toBeInTheDocument();
     });
 
     it('fetches recommendations on mount', () => {
-      const fetchRecommendations = vi.fn();
-      mockUseRecommendations.mockReturnValue({
-        data: null,
-        loading: false,
-        error: null,
-        fetchRecommendations,
-      });
-
-      render(<Recommendations />);
+      const fetchRecommendations = renderWithRecommendations();
 
       expect(fetchRecommendations).toHaveBeenCalledWith(false);
     });
@@ -47,14 +45,7 @@ describe('Recommendations', () => {
 
   describe('loading state', () => {
     it('shows loading message when loading', () => {
-      mockUseRecommendations.mockReturnValue({
-        data: null,
-        loading: true,
-        error: null,
-        fetchRecommendations: vi.fn(),
-      });
-
-      render(<Recommendations />);
+      renderWithRecommendations({ loading: true });
 
       expect(screen.getByText(/Generating recommendations/)).toBeInTheDocument();
     });
@@ -62,14 +53,7 @@ describe('Recommendations', () => {
 
   describe('error state', () => {
     it('shows error message when error occurs', () => {
-      mockUseRecommendations.mockReturnValue({
-        data: null,
-        loading: false,
-        error: 'Failed to load',
-        fetchRecommendations: vi.fn(),
-      });
-
-      render(<Recommendations />);
+      renderWithRecommendations({ error: 'Failed to load' });
 
       expect(screen.getByText('Failed to load')).toBeInTheDocument();
     });
@@ -77,71 +61,37 @@ describe('Recommendations', () => {
 
   describe('with data', () => {
     it('renders priority summary cards', () => {
-      mockUseRecommendations.mockReturnValue({
-        data: {
-          recommendations: [],
+      renderWithRecommendations({
+        data: buildRecommendationsResponse({
           by_priority: {
             high: 3,
             medium: 5,
             low: 2 
           },
-        },
-        loading: false,
-        error: null,
-        fetchRecommendations: vi.fn(),
+        }),
       });
-
-      render(<Recommendations />);
 
       expect(screen.getByText('High Priority')).toBeInTheDocument();
       expect(screen.getByText('3')).toBeInTheDocument();
     });
 
     it('renders recommendation cards', () => {
-      mockUseRecommendations.mockReturnValue({
-        data: {
-          recommendations: [
-            {
-              type: 'visibility_gap',
-              priority: 'high',
-              title: 'Improve visibility',
-              description: 'Your brand needs more mentions',
-              action: 'Create content',
-              impact: 'High',
-            },
-          ],
+      renderWithRecommendations({
+        data: buildRecommendationsResponse({
+          recommendations: [VISIBILITY_GAP_RECOMMENDATION],
           by_priority: {
             high: 1,
             medium: 0,
             low: 0 
           },
-        },
-        loading: false,
-        error: null,
-        fetchRecommendations: vi.fn(),
+        }),
       });
-
-      render(<Recommendations />);
 
       expect(screen.getByText('Improve visibility')).toBeInTheDocument();
     });
 
     it('shows empty state when no recommendations', () => {
-      mockUseRecommendations.mockReturnValue({
-        data: {
-          recommendations: [],
-          by_priority: {
-            high: 0,
-            medium: 0,
-            low: 0 
-          },
-        },
-        loading: false,
-        error: null,
-        fetchRecommendations: vi.fn(),
-      });
-
-      render(<Recommendations />);
+      renderWithRecommendations({ data: buildRecommendationsResponse() });
 
       expect(screen.getByText(/No recommendations available/)).toBeInTheDocument();
     });
@@ -149,25 +99,9 @@ describe('Recommendations', () => {
 
   describe('LLM toggle', () => {
     it('refetches with LLM when checkbox clicked', async () => {
-      const fetchRecommendations = vi.fn();
-      mockUseRecommendations.mockReturnValue({
-        data: {
-          recommendations: [],
-          by_priority: {
-            high: 0,
-            medium: 0,
-            low: 0 
-          },
-        },
-        loading: false,
-        error: null,
-        fetchRecommendations,
-      });
+      const fetchRecommendations = renderWithRecommendations({ data: buildRecommendationsResponse() });
 
-      render(<Recommendations />);
-
-      const checkbox = screen.getByRole('checkbox');
-      await userEvent.click(checkbox);
+      await userEvent.click(screen.getByRole('checkbox'));
 
       expect(fetchRecommendations).toHaveBeenCalledWith(true);
     });

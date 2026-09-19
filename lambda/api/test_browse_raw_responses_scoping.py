@@ -17,7 +17,6 @@ the containment ones.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 from typing import Any
@@ -25,6 +24,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.events import api_gateway_event, parse_response
 from testing.module_loader import load_handler_module
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,7 +41,11 @@ _TEST_ENV = {
 
 
 def _load_handler() -> tuple[Any, MagicMock]:
-    """Import the hyphenated handler module with S3 mocked at import time."""
+    """Import the hyphenated handler module with S3 mocked at import time.
+
+    The module binds ``s3_client`` while ``boto3.client`` is patched, so the
+    stub returned here is the client every route uses.
+    """
     s3 = MagicMock()
     s3.exceptions.NoSuchKey = type('NoSuchKey', (Exception,), {})
     s3.generate_presigned_url.return_value = 'https://signed.example/object'
@@ -58,7 +62,6 @@ def _load_handler() -> tuple[Any, MagicMock]:
     with patch('boto3.client', return_value=s3), patch.dict(os.environ, _TEST_ENV):
         module = load_handler_module(_API_DIR, 'browse-raw-responses.py', _MODULE_NAME)
 
-    module.s3_client = s3
     return module, s3
 
 
@@ -79,27 +82,22 @@ def browse():
 
 def make_event(route: str, key: str, bucket: str = 'responses') -> dict[str, Any]:
     """Build an API Gateway event for /file or /download."""
-    return {
-        'httpMethod': 'GET',
-        'path': f'/api/raw-responses{route}',
-        'headers': {'origin': 'http://localhost:3000'},
-        'queryStringParameters': {
-            'key': key,
-            'bucket': bucket,
-        },
-    }
-
-
-def parse_response(result: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    """Extract status code and parsed body from a Lambda response."""
-    raw = result.get('body')
-    parsed = json.loads(raw) if isinstance(raw, str) and raw else {}
-    return result.get('statusCode', 200), parsed
+    return api_gateway_event('GET', f'/api/raw-responses{route}', query={'key': key, 'bucket': bucket})
 
 
 def signed_key(s3: MagicMock) -> str:
     """Return the key from the most recent presigned-URL call."""
     return s3.generate_presigned_url.call_args.kwargs['Params']['Key']
+
+
+def listed_prefix(module: Any, s3: MagicMock, prefix: str) -> str:
+    """The S3 ``Prefix`` the browse route lists for the ``prefix`` query parameter."""
+    s3.list_objects_v2.return_value = {}
+    event = api_gateway_event('GET', '/api/raw-responses/browse', query={'prefix': prefix}, headers={})
+
+    module.handler(event, None)
+
+    return s3.list_objects_v2.call_args.kwargs['Prefix']
 
 
 class TestScopeKeyToRoot:
@@ -282,28 +280,10 @@ class TestBrowseRouteUnchanged:
 
     def test_lists_the_root_prefix_when_no_prefix_is_given(self, browse) -> None:
         module, s3 = browse
-        s3.list_objects_v2.return_value = {}
-        event = {
-            'httpMethod': 'GET',
-            'path': '/api/raw-responses/browse',
-            'headers': {},
-            'queryStringParameters': {'prefix': ''},
-        }
 
-        module.handler(event, None)
-
-        assert s3.list_objects_v2.call_args.kwargs['Prefix'] == 'raw-responses/'
+        assert listed_prefix(module, s3, '') == 'raw-responses/'
 
     def test_prepends_the_root_prefix_to_a_relative_prefix(self, browse) -> None:
         module, s3 = browse
-        s3.list_objects_v2.return_value = {}
-        event = {
-            'httpMethod': 'GET',
-            'path': '/api/raw-responses/browse',
-            'headers': {},
-            'queryStringParameters': {'prefix': '2026/08'},
-        }
 
-        module.handler(event, None)
-
-        assert s3.list_objects_v2.call_args.kwargs['Prefix'] == 'raw-responses/2026/08/'
+        assert listed_prefix(module, s3, '2026/08') == 'raw-responses/2026/08/'

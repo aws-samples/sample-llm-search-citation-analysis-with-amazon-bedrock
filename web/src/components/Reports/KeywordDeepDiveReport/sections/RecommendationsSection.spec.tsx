@@ -48,6 +48,18 @@ const LOW_PRIORITY_SCOPED: Recommendation = {
   keywords: ['best running shoes'],
 };
 
+/** Renders the section for 'best running shoes' when the only recommendation is scoped to another keyword. */
+function renderOtherKeywordOnly(): void {
+  render(
+    <RecommendationsSection
+      recommendations={buildRecResponse([OTHER_KEYWORD_SCOPED])}
+      keyword="best running shoes"
+      loading={false}
+      error={null}
+    />,
+  );
+}
+
 describe('RecommendationsSection — filtering', () => {
   it('renders recommendations whose keywords array matches the report keyword', () => {
     render(
@@ -62,14 +74,7 @@ describe('RecommendationsSection — filtering', () => {
   });
 
   it('hides recommendations scoped to a different keyword', () => {
-    render(
-      <RecommendationsSection
-        recommendations={buildRecResponse([OTHER_KEYWORD_SCOPED])}
-        keyword="best running shoes"
-        loading={false}
-        error={null}
-      />,
-    );
+    renderOtherKeywordOnly();
     expect(
       screen.queryByText('Different keyword item'),
     ).not.toBeInTheDocument();
@@ -137,14 +142,7 @@ describe('RecommendationsSection — ordering and empty states', () => {
   });
 
   it('renders the keyword-specific empty state when global list is non-empty but nothing matches', () => {
-    render(
-      <RecommendationsSection
-        recommendations={buildRecResponse([OTHER_KEYWORD_SCOPED])}
-        keyword="best running shoes"
-        loading={false}
-        error={null}
-      />,
-    );
+    renderOtherKeywordOnly();
     expect(
       screen.getByText(/none reference/i),
     ).toBeInTheDocument();

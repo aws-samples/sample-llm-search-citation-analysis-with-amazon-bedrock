@@ -9,6 +9,7 @@ import { ApiRequestError } from '../infrastructure';
 import {
   buildGroup, buildKeyword
 } from '../api/keywordGroups-fixtures';
+import { renderLoadedKeywordGroups } from './useKeywordGroups-fixtures';
 
 vi.mock('../api/keywordGroups', async () => {
   const actual = await vi.importActual<typeof import('../api/keywordGroups')>('../api/keywordGroups');
@@ -71,18 +72,9 @@ describe('useKeywordGroups', () => {
 
   it('creates a group and refreshes the list', async () => {
     mockCreate.mockResolvedValue(buildGroup({ name: 'New' }));
-    const { result } = renderHook(() => useKeywordGroups());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedKeywordGroups();
 
-    const outcome = {
-      success: false,
-      message: '' 
-    };
-    await act(async () => {
-      const res = await result.current.createGroup('New');
-      outcome.success = res.success;
-      outcome.message = res.message;
-    });
+    const outcome = await act(() => result.current.createGroup('New'));
 
     expect(outcome).toStrictEqual({
       success: true,
@@ -97,18 +89,9 @@ describe('useKeywordGroups', () => {
       statusCode: 409,
       responseMessage: 'A keyword group with this name already exists',
     }));
-    const { result } = renderHook(() => useKeywordGroups());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedKeywordGroups();
 
-    const outcome = {
-      success: true,
-      message: '' 
-    };
-    await act(async () => {
-      const res = await result.current.renameGroup('a', 'Marino');
-      outcome.success = res.success;
-      outcome.message = res.message;
-    });
+    const outcome = await act(() => result.current.renameGroup('a', 'Marino'));
 
     expect(outcome).toStrictEqual({
       success: false,
@@ -119,8 +102,7 @@ describe('useKeywordGroups', () => {
 
   it('deletes a group through the client', async () => {
     mockDelete.mockResolvedValue(undefined);
-    const { result } = renderHook(() => useKeywordGroups());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedKeywordGroups();
 
     await act(async () => {
       await result.current.removeGroup('a');
@@ -139,8 +121,7 @@ describe('useKeywordGroups', () => {
       keywords: updated,
     });
     const onKeywordsUpdated = vi.fn();
-    const { result } = renderHook(() => useKeywordGroups({ onKeywordsUpdated }));
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedKeywordGroups({ onKeywordsUpdated });
 
     await act(async () => {
       await result.current.changeMemberships('a', { add: ['kw-1'] });

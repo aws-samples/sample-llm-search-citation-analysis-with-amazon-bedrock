@@ -1,5 +1,5 @@
 import type {
-  CompetitorAnalysisResult, ExpandedKeywordWithSource
+  CompetitorAnalysisResult, ExpandedKeywordWithSource, SeoElements
 } from '../../types';
 import {
   keywordSelectionKey, uniqueResearchKeywords
@@ -155,13 +155,55 @@ const SeoElementRow = ({
   </div>
 );
 
-interface SeoElementsDisplayProps {seoElements: NonNullable<CompetitorAnalysisResult['seo_elements']>;}
+/**
+ * The `SeoElements` type declares every field, but jobs stored before the
+ * backend extracted `h3_tags`, `og_title`, `og_description` and `canonical`
+ * carry none of them, so every row treats its field as optional.
+ */
+type StoredSeoElements = Partial<SeoElements>;
 
-const SeoElementsDisplay = ({ seoElements }: SeoElementsDisplayProps) => {
-  const hasContent = seoElements.title || seoElements.meta_description || 
-    seoElements.h1_tags?.length > 0 || seoElements.h2_tags?.length > 0;
-  
-  if (!hasContent) return null;
+const hasTags = (tags: string[] | undefined): tags is string[] => tags !== undefined && tags.length > 0;
+
+const textRow = (label: string, value: string | undefined, isUrl = false): SeoElementRowProps | null =>
+  value ? {
+    label,
+    value,
+    isUrl,
+  } : null;
+
+const tagsRow = (label: string, tags: string[] | undefined): SeoElementRowProps | null =>
+  hasTags(tags) ? {
+    label,
+    value: tags.join(' | '),
+  } : null;
+
+/** One row per element the page actually had, in display order. */
+const seoElementRows = (seoElements: StoredSeoElements): SeoElementRowProps[] => {
+  const rows = [
+    textRow('Title Tag', seoElements.title),
+    textRow('Meta Description', seoElements.meta_description),
+    textRow('Meta Keywords', seoElements.meta_keywords),
+    tagsRow('H1 Tags', seoElements.h1_tags),
+    tagsRow('H2 Tags', seoElements.h2_tags),
+    tagsRow('H3 Tags', seoElements.h3_tags?.slice(0, 5)),
+    textRow('OG Title', seoElements.og_title),
+    textRow('OG Description', seoElements.og_description),
+    textRow('Canonical URL', seoElements.canonical, true),
+  ];
+  return rows.filter((row): row is SeoElementRowProps => row !== null);
+};
+
+/** The block only appears when the fetch yielded a title, a description or headings. */
+const hasSeoContent = (seoElements: StoredSeoElements): boolean =>
+  Boolean(seoElements.title)
+  || Boolean(seoElements.meta_description)
+  || hasTags(seoElements.h1_tags)
+  || hasTags(seoElements.h2_tags);
+
+interface SeoElementsDisplayProps {seoElements: StoredSeoElements;}
+
+export const SeoElementsDisplay = ({ seoElements }: SeoElementsDisplayProps) => {
+  if (!hasSeoContent(seoElements)) return null;
   
   return (
     <div className="mt-4 pt-4 border-t border-gray-100">
@@ -174,15 +216,7 @@ const SeoElementsDisplay = ({ seoElements }: SeoElementsDisplayProps) => {
       </div>
       
       <div className="space-y-3 text-xs">
-        {seoElements.title && <SeoElementRow label="Title Tag" value={seoElements.title} />}
-        {seoElements.meta_description && <SeoElementRow label="Meta Description" value={seoElements.meta_description} />}
-        {seoElements.meta_keywords && <SeoElementRow label="Meta Keywords" value={seoElements.meta_keywords} />}
-        {seoElements.h1_tags?.length > 0 && <SeoElementRow label="H1 Tags" value={seoElements.h1_tags.join(' | ')} />}
-        {seoElements.h2_tags?.length > 0 && <SeoElementRow label="H2 Tags" value={seoElements.h2_tags.join(' | ')} />}
-        {seoElements.h3_tags?.length > 0 && <SeoElementRow label="H3 Tags" value={seoElements.h3_tags.slice(0, 5).join(' | ')} />}
-        {seoElements.og_title && <SeoElementRow label="OG Title" value={seoElements.og_title} />}
-        {seoElements.og_description && <SeoElementRow label="OG Description" value={seoElements.og_description} />}
-        {seoElements.canonical && <SeoElementRow label="Canonical URL" value={seoElements.canonical} isUrl />}
+        {seoElementRows(seoElements).map((row) => <SeoElementRow key={row.label} {...row} />)}
       </div>
     </div>
   );

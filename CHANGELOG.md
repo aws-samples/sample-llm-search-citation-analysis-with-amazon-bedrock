@@ -9,6 +9,301 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.12.0] - 2026-09-19
+
+Research-agent reliability patch: retries and Step Functions replays are fenced to
+the attempt that owns them, timeout recovery keeps checkpointed partial results,
+and selected existing keywords can be attached to another keyword group without
+losing their current memberships. The same release tightens every local quality
+gate — zero duplication at 40 tokens, dead code that tests cannot mask, a
+cyclomatic ceiling of 12 in both languages, pyright, security and
+error-handling lint, a cross-boundary contract check and targeted mutation
+testing — and fixes the defects those gates surfaced.
+
+### Fixed
+
+- Research attempts now carry an atomic attempt number and active Step Functions
+  execution identity through Plan, provider steps, Evaluate, Finalize and failure
+  paths. Delayed work from an older attempt or round cannot mutate a newer run,
+  and sequential task replays reuse persisted outcomes.
+- A whole-workflow timeout now publishes the keywords from completed checkpoints
+  as a partial result instead of changing the job to failed and hiding usable
+  research. Timeout reconciliation is conditional, so it cannot race a retry.
+- Persisted agent steps, rounds and proposals have explicit count, string and
+  serialized-size budgets below the DynamoDB item limit. Truncation retains the
+  highest-ranked candidates and is reported in job metadata.
+- Agent dimension entries are type-checked before lookup, and model plans,
+  evaluations and proposals are constrained to the requested dimensions plus the
+  intentional `other` category.
+- Promoting research results to a keyword group now idempotently adds membership
+  for existing and concurrently-created keywords, preserves legacy keyword IDs
+  and prior memberships, and reconciles grouped results in the UI. The arbitrary
+  50-groups-per-keyword limit was removed; account-level group creation remains
+  unbounded.
+
+### Changed (zero-duplication follow-through)
+
+- The five Python clones this patch introduced are gone; all four duplication
+  gates pass at threshold `0` with no exemptions. `research-worker/handler.py`:
+  the standard and agent planners share `_runnable_steps` /
+  `_stage_step_write` for reset-or-rerun bookkeeping, and `finalize` / `fail`
+  share `_write_terminal_checkpoint` for the conditional write plus lost-race
+  replay. `shared/research_jobs.py`: `completed_steps` / `failed_steps`
+  delegate to one status filter. `lambda/testing/dynamodb_stubs.py` gains
+  `reset_tables` for the `autouse` mock-reset fixtures and
+  `conditional_check_failure`, replacing three private `_conditional_failure`
+  helpers and six inline `ClientError` constructions across the test suite.
+
+### Changed (dead-code gates that tests cannot mask)
+
+- Both dead-code tools now run twice inside `npm run validate`, because a test
+  reference counts as a use and a single scan that includes the tests cannot
+  see a production symbol only its own tests still call. `knip --production`
+  (`npm run deadcode:prod`, root and `web/`) analyses only the `!`-suffixed
+  production patterns in `knip.json` / `web/knip.json`; vulture runs a
+  production scan with `test_*.py`, `conftest.py` and `lambda/testing/`
+  excluded (`scripts/lint-python.sh --dead-code`) and then a whole-tree scan
+  for dead test helpers (`--dead-code-tests`). Each gate was proven to fail on
+  a planted spec-only export / test-only constant that the previous single scan
+  passed.
+- Vulture's floor drops from 80% to 60%: 60% is the tier vulture assigns every
+  unused function, class, method, attribute and variable, so the old gate could
+  only ever report unused imports and unreachable code. Shared settings move
+  into `pyproject.toml` `[tool.vulture]` (previously shadowed by the script's
+  CLI flags); `--dead-code-loose` is removed.
+- What the new floor found: `ALL_DIMENSIONS` (orphaned by this patch's
+  dimension changes), five `MAX_*` row-budget constants in `research_jobs.py`
+  that only `test_research_jobs.py` read — the budget invariant now lives in
+  that test, derived from `AGENT_MAX_QUERIES_PER_ROUND` and `AGENT_MAX_ROUNDS`
+  — a no-op `browser_client.identifier` assignment the AgentCore SDK overwrites
+  in `start()`, and two dead test artifacts (`SiblingLoaderError`, a stub
+  attribute).
+
+### Changed (complexity ceilings for Lambda code)
+
+- ruff now enforces `C901`, `PLR0911`, `PLR0912` and `PLR0915` over `lambda/`
+  and `scripts/` as hard stops: cyclomatic complexity 12, and 11 returns, 16
+  branches and 53 statements (the pylint counts are half of the worst function
+  in the tree at the time, 23 / 33 / 107; complexity peaked at 34).
+  `pyproject.toml` documents them as ceilings to lower, never raise, and never
+  `# noqa` past. The dashboard and CDK app share the same cyclomatic ceiling:
+  `eslint.config.mjs` `complexity` drops from 30 to 12.
+- Every function above those ceilings was split into intention-revealing
+  helpers with no behaviour change (routes, status codes, response shapes,
+  messages and thresholds preserved; the larger refactors were checked against
+  the previous implementation with differential runs over generated inputs).
+  Python: `get-execution-status.py` `handler` (34 → 4), `shared/decorators.py`
+  `validate` (26), `manage-providers.py` `validate_api_key` (23 returns → a
+  provider → probe table), `content-studio.py` `generate_content_ideas` /
+  `generate_content` / `parse_generated_content` (21 / 20 / 17),
+  `get-recommendations.py` (20), `promote-keywords.py` `validate_request`
+  (16), `manage-keywords.py` `update_keyword` (15), `search/handler.py`
+  `query_openai` / `query_gemini` / `query_claude` (13–14, now one shared
+  request/parse/error flow), `research-worker/handler.py` `_plan_agent`,
+  `shared/ai_clients.py` `retry_with_backoff`, `shared/research_jobs.py`
+  `bound_step_result`, `shared/url_validator.py` `validate_url_safe` (13
+  each), plus `get-prompt-insights.py` and `get-citation-gaps.py` on
+  statement count. TypeScript: 31 functions between 13 and 23 across
+  `App.tsx`, `KeywordResearch/*` (`ResearchProgress` 23, `AgentPromptEditor`
+  23, `agentExport.briefExcelRows` 21), `Settings/*`, `Brands/*`,
+  `Visibility/*`, `Schedule/scheduleFormModel`, `hooks/useBrandConfigForm`
+  (22), `useDashboardData`, `useAnalysisEndpoint`, `keywordIdentity` and the
+  custom ESLint rule — each split into sub-components, pure helpers or lookup
+  tables.
+- Characterization tests were written before the refactors and pin the
+  previous behaviour; the Lambda suite goes from 1,577 to 1,991 tests and the
+  dashboard suite from 1,443 to 1,496. Four production modules that had no
+  test file gained one: `get-searches.py`, `get-stats.py`,
+  `search/brand_extractor.py`, `shared/step_function_response.py`.
+
+### Added (security, error-handling and test-style lint for Lambda code)
+
+- ruff now also selects flake8-bandit (`S`), `BLE001` (blind `except`),
+  tryceratops `TRY002` / `TRY300` / `TRY301` / `TRY400`, `T20` (no `print`)
+  and flake8-pytest-style (`PT`). `TRY003` is deliberately not selected
+  (documented in `pyproject.toml`). Tests and test support are exempt from
+  the bandit family (`assert` is the test mechanism; fixtures hold literal
+  credentials); four bandit false positives are exempted per file with the
+  reason next to each.
+- What that found and fixed across 41 production files: a `requests` probe
+  in `manage-providers.py` with **no timeout** (a hung provider would have
+  pinned the Lambda until its own timeout) and a silent `try/except/pass`
+  beside it; 72 blind `except Exception` blocks now either narrow to the
+  exception they expect or log with `logger.exception` so the traceback
+  reaches CloudWatch (65 of them logged with `logger.error`, which drops it);
+  66 `print()` calls replaced by the module logger; 30 `return` statements
+  moved out of `try` bodies; 3 vanilla `raise Exception` replaced by specific
+  types; and 24 pytest-style findings (over-broad `pytest.raises`, composite
+  assertions, fixtures with a useless teardown, one duplicate parametrize
+  case).
+
+### Fixed (defects the characterization tests surfaced)
+
+- `GET /api/executions/{id}` without an `id` now answers 400 `id path
+  parameter required` on the `id` field; it used to hand `None` to
+  `DescribeExecution` and surface as a sanitized 500.
+- The execution timeline no longer raises on a `TaskSucceeded` output whose
+  `results`, `keywords` or `deduplicated_citations` is not a list of objects
+  (a list of scalars, a string, a number). Only list-valued collections are
+  counted, and `citation_count` is summed over the entries that carry a numeric
+  one; anything else simply produces no `details` — so a malformed task output
+  can no longer take the whole `/api/executions/{id}` response down.
+- `GET /api/prompt-insights` answers 400 with the actual reason (`No
+  first-party brands configured`, `No keywords configured`) when a
+  prerequisite is missing; the handler used to slice the prompt buckets out of
+  the error payload and fail with a 500 `Missing required field`. The dashboard
+  hook already treats a non-OK status as "Failed to fetch prompt insights", so
+  its message is unchanged; the wire status and body are now right.
+- `shared/browser_tools.py`: calling `navigate_to_url`,
+  `extract_page_content` or `take_screenshot` before
+  `initialize_browser_session` reports `Browser session not initialized - call
+  initialize_browser_session() first` in the same error dict that previously
+  carried `'NoneType' object has no attribute 'goto'`; the shape is unchanged
+  and the message is now pinned by tests.
+- The competitor-analysis panel's **H3 Tags, OG Title, OG Description and
+  Canonical URL rows had never rendered**: the dashboard read `h3_tags`,
+  `og_title`, `og_description` and `canonical` from the page data, but
+  `fetch_page_seo_elements` in the research worker never produced them (it
+  emitted an `og_tags` dict nothing read). The worker now extracts the four
+  fields with the same caps as the existing ones, and `og_tags` is gone. Found
+  by the contract check's "read by the dashboard, emitted by no Lambda"
+  direction.
+
+### Added (Python type checking)
+
+- `pyright` (pinned with `boto3-stubs` for the nine AWS services the Lambdas
+  call) runs inside `npm run validate` as `scripts/lint-python.sh --types`,
+  configured in `pyproject.toml` `[tool.pyright]` in `standard` mode against
+  Python 3.12 with both built layers on `extraPaths`. ruff does not check
+  types; this is the first gate that catches a `None` reaching `int()`, a wrong
+  key, or a call with the wrong shape.
+- It covers the whole `lambda/` tree and `scripts/` in `standard` mode, made
+  clean from 341 findings with no suppressions. The fixes were type-level, not
+  casts: `resolve_table_env` gains `@overload`s so `required=True` and a
+  `default` are seen to return `str`; `browser_tools` binds the optional
+  AgentCore imports to `None` on `ImportError` and reads the Playwright page
+  through one `_active_page()` accessor, so an uninitialized session now
+  reports "Browser session not initialized" instead of `'NoneType' object has
+  no attribute 'goto'`; `get_caller_claims` / `get_caller_groups` accept `Any`
+  (they already handled non-dict events); `route_handler` declares its tuple
+  route keys and its `dict` return; `query_latest_per_key` declares the `None`
+  values it documents dropping; across `lambda/api` the DynamoDB row values
+  boto3-stubs types as unions are narrowed where they are read instead of being
+  passed on as `str`. Tests gained `testing.assertions.present()` to narrow
+  `X | None` results with a clear assertion. `strict` mode is documented as
+  not a realistic next step (2,754 findings on `lambda/shared` alone, almost
+  all `reportUnknown*` on `dict[str, Any]` rows).
+
+### Changed (duplication and dead-code gates tightened)
+
+- jscpd `minTokens` drops from 50 to 40 in all four configs, still at
+  threshold `0`. The 183 clones that surfaced (48 dashboard/CDK production, 84
+  dashboard/CDK tests, 25 Lambda production, 26 Lambda tests) are gone: the
+  icon components share one `Icon` base, the CDK Lambda definitions share a
+  factory (the synthesized template is unchanged apart from the two edits
+  described elsewhere in this entry), the consolidated API routers share
+  `shared/consolidated_router.py`, per-run analysis loading shares
+  `shared/analysis_runs.py`, `shared/api_views.py` and
+  `shared/search_results.py`, the nine analysis-hook specs share one
+  `web/src/test/endpointHookContract.ts` parametrised contract, and the rest
+  moved into the sibling `*-fixtures.ts` / `lambda/testing/` helpers the
+  project already uses.
+- knip runs `--production --strict` (dependency isolation, peer dependencies,
+  dev-only type imports) in both packages; it passed as-is.
+- `BEDROCK_MODEL_ID` — an environment variable the stack set on the
+  self-reflection function and no Lambda read — is removed together with its
+  contract allowlist entry, so `npm run contracts` runs with no exemptions. The
+  stack comment that documented it now explains how the analysis model tier is
+  actually selected (`BEDROCK_TIER_<ROLE>`), which is the change a product
+  decision on model cost would need.
+
+### Changed (test assertions and names)
+
+- Every existence-only assertion in both suites now asserts the value: the 16
+  `toBeTruthy()` and 3 `toBeDefined()` in `web/` (hook specs assert the exact
+  error string the hook produces, polling specs assert the endpoint call, and
+  three view specs that asserted `document.body` exists now assert what the
+  view renders), and 12 `is not None` / bare `assert x` / `len(...) > 0`
+  checks in `lambda/` (exact validation messages, the matched brand entry, the
+  preset catalogue, `tzinfo == UTC`). Two names that described no outcome were
+  renamed (`test_stack_works_without_positional_arguments`,
+  `test_case_insensitive_on_type_and_title`, and `displays zero value
+  correctly`).
+
+### Added (effect-level dead code: produced but never consumed)
+
+Reference-based tools (knip, vulture) cannot see code that runs and whose
+result nothing uses — a response field the dashboard never reads, an env var
+no Lambda reads, a statement whose removal no test notices. Three layers now
+cover that class.
+
+- **Cross-boundary contracts** — `npm run contracts`
+  (`scripts/check-contracts.py`, in `npm run validate`). *env*: every
+  environment variable the CDK stack sets must be read by some Lambda
+  (f-string reads such as `BEDROCK_TIER_{role}` are expanded against the
+  `StrEnum` values the code declares), and every variable a Lambda requires
+  without a fallback must be set by CDK; optional reads with defaults are
+  reported for information. *types*: every member declared under
+  `web/src/types` must be read by non-test dashboard code. Allowlist entries
+  need a reason; the list is empty. What the first run found: **21 response-type
+  members the dashboard never read** — 7 of them computed on every request
+  purely to be serialized (`avg_sentiment`, `total_brands`, `gap_type`,
+  `total_sources`, `data_points`, `other_brands`, `brand_count`) are gone from
+  the Lambda responses and the types; the other 14 are persisted rows or
+  Step Functions checkpoint fields the backend needs, trimmed from the
+  dashboard types only.
+- **Lint for computed-then-dropped values** — ruff `RET504` (a value assigned
+  only to be returned) and `ERA001` (commented-out code) over `lambda/` and
+  `scripts/`; `noUnusedLocals` / `noUnusedParameters` for the CDK app, which
+  found a `Set` the `RemoveDuplicatePermissions` aspect built and never read.
+  (The TypeScript side already had sonarjs' `no-dead-store`,
+  `no-unused-collection` and `no-ignored-return` active via the recommended
+  preset, at zero findings.)
+- **Targeted mutation testing** — the only check that proves an executed
+  statement has an observable effect. `npm run mutation:python -- <module>
+  <tests>` (mutmut 2.5.1, in-place) and, in `web/`, `npm run mutation --
+  --mutate <file>` (Stryker 10 with the vitest runner). Deliberately not in
+  `validate` — one module against its tests is minutes, the tree is hours; run
+  it on the module a PR touches. First runs, and what they found:
+  `shared/scope_params.py` 132 mutants / 17 survivors → `ReportScope`'s
+  `scope`/`label` defaults were dead (every constructor passes them; a caller
+  relying on them would have silently widened a report to all keywords) and
+  are now required fields, an unreachable fallback message is gone, and six
+  behaviours gained tests — 123 mutants / 0 survivors. `web/src/hooks/
+  useAnalysisEndpoint.ts` 82 mutants / 18 survivors → the backend-error type
+  guard is one comparison instead of four redundant clauses, five uncovered
+  paths gained specs (fetch after unmount, response after unmount, no query
+  string, aborted request not logged, stale failure ignored), and the deferred
+  fetch fixture now rejects with the signal's own reason — its hand-built
+  `DOMException` was jsdom's cross-realm class, so `isAbortError` never
+  matched it and the abort path had never really been tested — 65 mutants /
+  0 survivors; six equivalent mutants (React dependency arrays, a counter
+  compared only with `===`) carry `// Stryker disable` comments with reasons.
+
+### Changed (2.6.0–2.11.0 brought under the same gates)
+
+- This release was rebased onto 2.11.0, and the code those six releases added
+  now passes every gate above without exemptions: `find_fresh_crawl`
+  (crawl cache), `AgentBriefForm`, `ContentChangeForm`, `isAlertItem` and
+  `validateGroupBriefDraft` are split below cyclomatic 12; `useAlerts` loads
+  its three resources through one `useLatestAlertLoad` hook and
+  `groupOverviewExport` declares the prominence column widths once; the
+  content-brief validators return a value or an issue instead of an
+  ambiguous `(value | None, issue | None)` pair, which is what pyright could
+  not follow; alert, brief, trend and prominence tests share fixture builders
+  instead of repeated arrange blocks. `visibility_metrics` no longer emits
+  `avg_sentiment` / `total_brands`, and `KeywordExtended.region` is gone —
+  the dashboard reads neither.
+- `scripts/check-contracts.py` counts a variable read through a validating
+  wrapper (`_integer_env('NAME', default, minimum=…)`) as an optional read,
+  and skips `lib/*-fixtures.ts` when collecting CDK keys; the allowlists stay
+  empty. The knip production profile likewise excludes `lib/**/*-fixtures.ts`.
+- pyright resolves imports from `lambda/` and the built shared layer only. The
+  crawler layer now bundles an untyped `boto3` for AgentCore, which shadowed
+  `boto3-stubs` and reported every `dynamodb.Table(...)` as unknown;
+  `playwright` and `bedrock-agentcore` are instead pinned in
+  `lambda/requirements-dev.txt` at the layer's versions.
+
 ## [2.11.0] - 2026-09-19
 
 AgentCore crawling now avoids repeat paid browser sessions through a

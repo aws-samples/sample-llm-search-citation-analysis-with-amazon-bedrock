@@ -495,3 +495,14 @@ class TestAgentHistory:
 
         assert response['statusCode'] == 200
         assert table.query.call_args.kwargs['KeyConditionExpression']._values[1] == 'agent'
+
+
+
+class TestAgentDimensionValidation:
+    @pytest.mark.parametrize('dimensions', [[1], [None], [{'nested': 'value'}]])
+    def test_returns_400_when_a_dimension_is_not_a_string(self, started, dimensions):
+        response = _mod.handler(_agent_event(dimensions=dimensions), None)
+
+        assert response['statusCode'] == 400
+        assert 'dimensions' in response['body']
+        started['research_table'].put_item.assert_not_called()

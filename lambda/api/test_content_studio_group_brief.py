@@ -152,7 +152,7 @@ class TestGroupBriefGenerateRoute:
         content_table = fake_table()
         resource = fake_dynamodb_resource(content_table)
         dispatch = MagicMock()
-        legacy_idea = {
+        legacy_idea: dict[str, object] = {
             'id': 'legacy-1',
             'type': 'visibility_gap',
             'keyword': 'generic keyword',

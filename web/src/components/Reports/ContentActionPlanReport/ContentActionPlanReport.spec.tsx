@@ -6,6 +6,7 @@ import {
 } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ContentActionPlanReport } from './ContentActionPlanReport';
+import { getReportHeading } from '../../../test/reportHeading';
 
 vi.mock('./useContentActionPlan', () => ({useContentActionPlan: vi.fn()}));
 vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPrintMode: false })),}));
@@ -114,12 +115,7 @@ describe('ContentActionPlanReport', () => {
 
   it('renders the report H1', () => {
     renderReport();
-    expect(
-      screen.getByRole('heading', {
-        level: 1,
-        name: /Content Action Plan/i 
-      }),
-    ).toBeInTheDocument();
+    expect(getReportHeading(/Content Action Plan/i)).toBeInTheDocument();
   });
 
   it('renders the headline citation gap count', () => {

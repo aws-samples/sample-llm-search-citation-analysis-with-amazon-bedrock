@@ -17,7 +17,7 @@ from shared.decorators import api_handler, parse_json_body, route_handler
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import (
     KEYWORD_GROUPS_TABLE_ENV,
-    MAX_GROUPS_PER_KEYWORD,
+    add_keyword_groups,
     load_existing_group_ids,
     serialize_keyword_item,
     validate_id_list,
@@ -88,7 +88,12 @@ def _promote_keywords(event, context, body):
         return validation_error(group_error['message'], event, group_error['field'])
 
     try:
-        existing_keys = load_keyword_identities(keywords_table)
+        if group_ids:
+            existing_items = load_keyword_items_by_identity(keywords_table)
+            existing_keys = set(existing_items)
+        else:
+            existing_items = {}
+            existing_keys = load_keyword_identities(keywords_table)
     except Exception as error:
         logger.error(
             f'Failed to read existing keywords for promotion: {error!s}',
@@ -98,10 +103,27 @@ def _promote_keywords(event, context, body):
 
     to_create, skipped = partition_keywords(keywords, existing_keys)
     items = create_items(to_create, status, priority)
-    for item in items:
-        if group_ids:
-            item['group_ids'] = set(group_ids)
-    created_items, concurrent_skips = write_items(keywords_table, items)
+    grouped_keywords = []
+    if group_ids:
+        requested_group_ids = set(group_ids)
+        for item in items:
+            item['group_ids'] = requested_group_ids
+        grouped_keywords.extend(
+            group_existing_keywords(
+                keywords_table,
+                existing_items,
+                skipped,
+                requested_group_ids,
+            )
+        )
+        created_items, concurrent_skips, concurrently_grouped = write_grouped_items(
+            keywords_table,
+            items,
+            requested_group_ids,
+        )
+        grouped_keywords.extend(concurrently_grouped)
+    else:
+        created_items, concurrent_skips = write_items(keywords_table, items)
     skipped.extend(concurrent_skips)
 
     return success_response({
@@ -111,14 +133,15 @@ def _promote_keywords(event, context, body):
         ),
         'created_keywords': [serialize_keyword_item(item) for item in created_items],
         'skipped_keywords': skipped,
+        'grouped_keywords': grouped_keywords,
     }, event)
 
 
 def _validated_group_ids(body):
-    """Validate the optional ``group_ids`` list (target groups for every created keyword)."""
+    """Validate the optional ``group_ids`` list (target groups for every keyword)."""
     if 'group_ids' not in body:
         return None, None
-    group_ids, message = validate_id_list(body.get('group_ids'), field='group_ids', limit=MAX_GROUPS_PER_KEYWORD)
+    group_ids, message = validate_id_list(body.get('group_ids'), field='group_ids')
     if message:
         return None, {'message': message, 'field': 'group_ids'}
     if group_ids and groups_table is None:
@@ -151,69 +174,59 @@ def build_notes(research_keyword):
 
 
 def _entry_status_error(index, research_keyword):
-    """Field-specific rejection for an invalid per-keyword status override."""
+    """Field-specific rejection for an invalid per-keyword status override, else ``None``."""
     if 'status' not in research_keyword:
         return None
     status = research_keyword['status']
     field = f'keywords[{index}].status'
     if not isinstance(status, str):
-        return {'message': 'status must be a string', 'field': field}
+        return _rejection('status must be a string', field)
     if status not in ALLOWED_STATUSES:
-        return {
-            'message': f"Invalid status '{_echoed(status)}' (allowed: {', '.join(ALLOWED_STATUSES)})",
-            'field': field,
-        }
+        return _rejection(
+            f"Invalid status '{_echoed(status)}' (allowed: {', '.join(ALLOWED_STATUSES)})",
+            field,
+        )
     return None
 
 
-def validate_request(keywords, status, priority):
-    """Validate the complete promotion request before any DynamoDB access."""
-    if not isinstance(keywords, list) or not keywords:
-        return _rejection('At least one keyword is required', 'keywords')
+def _validate_keyword_entry(index, research_keyword):
+    """Validate one promotion entry; ``(text, None)`` or ``(None, rejection)``.
 
-    if len(keywords) > MAX_KEYWORDS:
-        return _rejection(f'Maximum {MAX_KEYWORDS} keywords per request', 'keywords')
+    A missing ``keyword`` is a skip (reported by ``partition_keywords``), not a
+    rejection — batch semantics — so it yields ``''``. An empty-after-trim text
+    is likewise skipped rather than rejected as manage-keywords does (bugs.md 3.3).
+    An entry may carry its own ``status`` override, checked before the text.
+    """
+    field_prefix = f'keywords[{index}]'
+    if not isinstance(research_keyword, dict):
+        return None, _rejection('Each keyword must be a JSON object', field_prefix)
 
-    texts = []
-    for index, research_keyword in enumerate(keywords):
-        field_prefix = f'keywords[{index}]'
-        if not isinstance(research_keyword, dict):
-            return _rejection('Each keyword must be a JSON object', field_prefix)
+    entry_status_error = _entry_status_error(index, research_keyword)
+    if entry_status_error is not None:
+        return None, entry_status_error
 
-        entry_status_error = _entry_status_error(index, research_keyword)
-        if entry_status_error:
-            return entry_status_error, None, None
+    keyword_value = research_keyword.get('keyword')
+    text = ''
+    if keyword_value is not None:
+        text, message = validate_keyword_text(keyword_value, empty_ok=True)
+        if message:
+            return None, _rejection(message, f'{field_prefix}.keyword')
 
-        keyword_value = research_keyword.get('keyword')
-        if keyword_value is None:
-            # A missing keyword is a skip (reported by partition_keywords),
-            # not a rejection — batch semantics.
-            text = ''
-        else:
-            # empty_ok: this route skips empty-after-trim entries instead of
-            # rejecting like manage-keywords does (bugs.md 3.3).
-            text, message = validate_keyword_text(keyword_value, empty_ok=True)
-            if message:
-                return _rejection(message, f'{field_prefix}.keyword')
-        texts.append(text)
+    for notes_field in NOTES_FIELDS:
+        notes_value = research_keyword.get(notes_field)
+        if notes_value is not None and not isinstance(notes_value, str):
+            return None, _rejection(f'{notes_field} must be a string', f'{field_prefix}.{notes_field}')
 
-        for notes_field in NOTES_FIELDS:
-            notes_value = research_keyword.get(notes_field)
-            if notes_value is not None and not isinstance(notes_value, str):
-                return _rejection(
-                    f'{notes_field} must be a string',
-                    f'{field_prefix}.{notes_field}',
-                )
+    if len(build_notes(research_keyword)) > MAX_NOTES_LENGTH:
+        return None, _rejection(
+            f'Keyword notes exceed maximum length of {MAX_NOTES_LENGTH} characters',
+            field_prefix,
+        )
+    return text, None
 
-        if len(build_notes(research_keyword)) > MAX_NOTES_LENGTH:
-            return _rejection(
-                f'Keyword notes exceed maximum length of {MAX_NOTES_LENGTH} characters',
-                field_prefix,
-            )
 
-    if not any(texts):
-        return _rejection('At least one non-empty keyword is required', 'keywords')
-
+def _resolve_status_and_priority(status, priority):
+    """Apply the defaults and allowed-value checks; ``(None, status, priority)`` or a rejection."""
     if status is not None and not isinstance(status, str):
         return _rejection('status must be a string', 'status')
     if priority is not None and not isinstance(priority, str):
@@ -239,6 +252,53 @@ def validate_request(keywords, status, priority):
         )
 
     return None, resolved_status, resolved_priority
+
+
+def validate_request(keywords, status, priority):
+    """Validate the complete promotion request before any DynamoDB access."""
+    if not isinstance(keywords, list) or not keywords:
+        return _rejection('At least one keyword is required', 'keywords')
+
+    if len(keywords) > MAX_KEYWORDS:
+        return _rejection(f'Maximum {MAX_KEYWORDS} keywords per request', 'keywords')
+
+    texts = []
+    for index, research_keyword in enumerate(keywords):
+        text, rejection = _validate_keyword_entry(index, research_keyword)
+        if rejection is not None:
+            return rejection
+        texts.append(text)
+
+    if not any(texts):
+        return _rejection('At least one non-empty keyword is required', 'keywords')
+
+    return _resolve_status_and_priority(status, priority)
+
+
+def load_keyword_items_by_identity(table):
+    """Load stored keyword items by normalized identity, preserving legacy ids."""
+    items_by_identity = {}
+    scan_params = {
+        'ProjectionExpression': '#id, #kw',
+        'ExpressionAttributeNames': {'#id': 'id', '#kw': 'keyword'},
+        'ConsistentRead': True,
+    }
+
+    while True:
+        response = table.scan(**scan_params)
+        for item in response.get('Items', []):
+            stored_id = item.get('id')
+            stored_keyword = item.get('keyword')
+            if not isinstance(stored_id, str) or not isinstance(stored_keyword, str):
+                continue
+            identity = normalize_keyword(stored_keyword)
+            if identity:
+                items_by_identity.setdefault(identity, item)
+
+        last_key = response.get('LastEvaluatedKey')
+        if not last_key:
+            return items_by_identity
+        scan_params['ExclusiveStartKey'] = last_key
 
 
 def partition_keywords(keywords, existing_keys):
@@ -272,6 +332,32 @@ def partition_keywords(keywords, existing_keys):
     return to_create, skipped
 
 
+def group_existing_keywords(table, existing_items, skipped, group_ids):
+    """Union groups into distinct stored duplicates and report actual additions."""
+    grouped_keywords = []
+    processed_identities = set()
+
+    for entry in skipped:
+        if entry['reason'] != REASON_DUPLICATE:
+            continue
+        identity = normalize_keyword(entry['keyword'])
+        if identity in processed_identities:
+            continue
+        processed_identities.add(identity)
+        existing_item = existing_items.get(identity)
+        if not existing_item:
+            continue
+        _updated, added_group_ids = add_keyword_groups(
+            table,
+            existing_item['id'],
+            group_ids,
+        )
+        if added_group_ids:
+            grouped_keywords.append(entry['keyword'])
+
+    return grouped_keywords
+
+
 def write_items(table, items):
     """Conditionally create items and report concurrent duplicate writes."""
     created_items = []
@@ -287,6 +373,28 @@ def write_items(table, items):
             })
 
     return created_items, skipped
+
+
+def write_grouped_items(table, items, group_ids):
+    """Create grouped items and attach groups when a concurrent creator wins."""
+    created_items = []
+    skipped = []
+    grouped_keywords = []
+
+    for item in items:
+        if put_keyword_if_absent(table, item):
+            created_items.append(item)
+            continue
+
+        skipped.append({
+            'keyword': item['keyword'],
+            'reason': REASON_DUPLICATE,
+        })
+        _updated, added_group_ids = add_keyword_groups(table, item['id'], group_ids)
+        if added_group_ids:
+            grouped_keywords.append(item['keyword'])
+
+    return created_items, skipped, grouped_keywords
 
 
 def create_items(to_create, status, priority):

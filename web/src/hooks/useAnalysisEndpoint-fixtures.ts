@@ -61,7 +61,8 @@ export function renderProbeEndpoint() {
 
 interface RecordedAnalysisRequest {
   signal: AbortSignal | undefined;
-  respond: (payload: unknown) => void;
+  /** Settle the request with `payload`, as a 200 unless a `status` is given. */
+  respond: (payload: unknown, status?: number) => void;
 }
 
 /**
@@ -77,14 +78,17 @@ function createDeferredMockFetch(options: { rejectOnAbort?: boolean } = {}) {
     const signal = init?.signal ?? undefined;
     return new Promise<Response>((resolve, reject) => {
       if (options.rejectOnAbort) {
+        // Reject with the signal's own reason, as fetch does. A hand-built
+        // `new DOMException(..., 'AbortError')` is jsdom's cross-realm class
+        // here and fails `instanceof Error`, which is not what a browser throws.
         signal?.addEventListener('abort', () => {
-          reject(new DOMException('The operation was aborted.', 'AbortError'));
+          reject(signal.reason as Error);
         });
       }
       requests.push({
         signal,
-        respond: (payload: unknown) => {
-          resolve(createMockJsonResponse(payload));
+        respond: (payload: unknown, status = 200) => {
+          resolve(createMockJsonResponse(payload, status));
         },
       });
     });
@@ -132,6 +136,31 @@ export function renderDeferredProbeEndpoint(options: { rejectOnAbort?: boolean }
   return {
     config,
     startFetch: (keyword: string) => rendered.startRequest((hook) => hook.fetchData(keyword)),
+    ...rendered,
+  };
+}
+
+
+/**
+ * The superseded-fetch scenario: start `first`, start `second` (which aborts
+ * `first`), then settle `second` with `payload`. Returns the still-pending
+ * promise of the stale fetch and the rendered hook so a spec can assert what
+ * happens when the stale one settles — or never does.
+ */
+export async function renderSupersededFetch(
+  options: {
+    rejectOnAbort?: boolean;
+    payload?: ProbeResponse 
+  } = {},
+) {
+  const rendered = renderDeferredProbeEndpoint({ rejectOnAbort: options.rejectOnAbort });
+  const stale = rendered.startFetch('first');
+  rendered.startFetch('second');
+  await act(async () => {
+    rendered.deferred.requests[1].respond(options.payload ?? newerProbeResponse);
+  });
+  return {
+    stale,
     ...rendered,
   };
 }

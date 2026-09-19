@@ -141,7 +141,6 @@ export function buildAgentJob(overrides: Partial<KeywordResearchItem> = {}): Key
     rounds: [
       {
         round: 1,
-        planned_at: '2026-09-18T10:00:10Z',
         strategy: 'Destination first',
         queries: [
           {
@@ -155,34 +154,25 @@ export function buildAgentJob(overrides: Partial<KeywordResearchItem> = {}): Key
             rationale: 'families',
           },
         ],
-        step_ids: ['r1-q1-perplexity', 'r1-q2-openai'],
         evaluation: {
           assessment: 'Audience is thin',
           decision: 'continue',
           reason: 'more to find',
-          next_queries: [{
-            query: 'hotel coruña con niños',
-            dimension: 'audience',
-            rationale: '',
-          }],
           candidate_count: 30,
         },
       },
       {
         round: 2,
-        planned_at: '2026-09-18T10:03:00Z',
         strategy: '',
         queries: [{
           query: 'hotel coruña con niños',
           dimension: 'audience',
           rationale: '',
         }],
-        step_ids: ['r2-q1-perplexity'],
         evaluation: {
           assessment: '',
           decision: 'stop',
           reason: 'Reached the maximum of 2 rounds.',
-          next_queries: [],
           candidate_count: 41,
         },
       },

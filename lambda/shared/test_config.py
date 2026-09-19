@@ -108,21 +108,17 @@ def test_raises_named_value_error_when_integer_setting_is_not_an_integer(
 ) -> None:
     with (
         patch.dict(os.environ, {setting_name: 'not-an-integer'}, clear=False),
-        pytest.raises(ValueError) as error,
+        pytest.raises(ValueError, match=rf'^{setting_name} must be an integer$'),
     ):
         LambdaConfig()
-
-    assert str(error.value) == f'{setting_name} must be an integer'
 
 
 def test_rejects_browser_session_timeout_below_60_seconds() -> None:
     with (
         patch.dict(os.environ, {'BROWSER_SESSION_TIMEOUT_SECONDS': '59'}, clear=False),
-        pytest.raises(ValueError) as error,
+        pytest.raises(ValueError, match=r'^BROWSER_SESSION_TIMEOUT_SECONDS must be at least 60$'),
     ):
         LambdaConfig()
-
-    assert str(error.value) == 'BROWSER_SESSION_TIMEOUT_SECONDS must be at least 60'
 
 
 def test_returns_60_when_browser_session_timeout_is_at_minimum() -> None:
@@ -153,11 +149,9 @@ def test_rejects_negative_freshness_setting(
 ) -> None:
     with (
         patch.dict(os.environ, {setting_name: '-1'}, clear=False),
-        pytest.raises(ValueError) as error,
+        pytest.raises(ValueError, match=rf'^{expected_message}$'),
     ):
         LambdaConfig()
-
-    assert str(error.value) == expected_message
 
 
 def test_returns_custom_cache_index_name_when_setting_is_configured() -> None:

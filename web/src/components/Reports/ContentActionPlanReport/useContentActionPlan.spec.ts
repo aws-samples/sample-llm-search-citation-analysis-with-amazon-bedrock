@@ -56,20 +56,21 @@ describe('useContentActionPlan', () => {
     expect(result.current.ready).toBe(true);
   });
 
-  it('reports ready=false when citation gaps are still loading', () => {
-    mockGaps.mockReturnValue(buildGapsSnapshot({
-      fetchCitationGaps,
-      loading: true,
-    }));
-    const { result } = renderHook(() => useContentActionPlan());
-    expect(result.current.ready).toBe(false);
-  });
-
-  it('reports ready=false when Content Studio is still loading', () => {
-    mockStudio.mockReturnValue(buildStudioSnapshot({
-      ...studioFetches,
-      loading: true,
-    }));
+  it.each<[source: string, stillLoading: () => void]>([
+    ['citation gaps are', () => {
+      mockGaps.mockReturnValue(buildGapsSnapshot({
+        fetchCitationGaps,
+        loading: true,
+      }));
+    }],
+    ['Content Studio is', () => {
+      mockStudio.mockReturnValue(buildStudioSnapshot({
+        ...studioFetches,
+        loading: true,
+      }));
+    }],
+  ])('reports ready=false while %s still loading', (_source, stillLoading) => {
+    stillLoading();
     const { result } = renderHook(() => useContentActionPlan());
     expect(result.current.ready).toBe(false);
   });

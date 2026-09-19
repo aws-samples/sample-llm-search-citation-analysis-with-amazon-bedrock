@@ -97,29 +97,19 @@ interface MockFetchOverrides {
 }
 
 export function createMockFetch(overrides: MockFetchOverrides = {}) {
+  const payloadsByUrl = new Map<string, unknown>([
+    [`${MOCK_API_BASE_URL}/stats`, overrides.stats ?? mockStats],
+    [`${MOCK_API_BASE_URL}/citations`, overrides.citations ?? mockCitations],
+    [`${MOCK_API_BASE_URL}/searches`, { searches: overrides.searches ?? mockSearches }],
+    [MOCK_AUTHORITATIVE_KEYWORDS_URL, overrides.authoritativeResponse ?? mockAuthoritativeKeywordsResponse],
+    [MOCK_KEYWORDS_URL, { keywords: overrides.keywords ?? mockKeywords }],
+  ]);
+
   return vi.fn((url: string): Promise<Response> => {
     if (overrides.shouldFail) {
       return Promise.resolve(createMockJsonResponse({}, overrides.failStatus ?? 500));
     }
-
-    if (url === `${MOCK_API_BASE_URL}/stats`) {
-      return Promise.resolve(createMockJsonResponse(overrides.stats ?? mockStats));
-    }
-    if (url === `${MOCK_API_BASE_URL}/citations`) {
-      return Promise.resolve(createMockJsonResponse(overrides.citations ?? mockCitations));
-    }
-    if (url === `${MOCK_API_BASE_URL}/searches`) {
-      return Promise.resolve(createMockJsonResponse({ searches: overrides.searches ?? mockSearches }));
-    }
-    if (url === MOCK_AUTHORITATIVE_KEYWORDS_URL) {
-      return Promise.resolve(createMockJsonResponse(
-        overrides.authoritativeResponse ?? mockAuthoritativeKeywordsResponse
-      ));
-    }
-    if (url === MOCK_KEYWORDS_URL) {
-      return Promise.resolve(createMockJsonResponse({ keywords: overrides.keywords ?? mockKeywords }));
-    }
-    return Promise.resolve(createMockJsonResponse({}));
+    return Promise.resolve(createMockJsonResponse(payloadsByUrl.has(url) ? payloadsByUrl.get(url) : {}));
   });
 }
 

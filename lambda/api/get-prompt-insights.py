@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any
 
 import boto3
@@ -23,9 +24,10 @@ from boto3.dynamodb.conditions import Key
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import success_response
+from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
+from shared.search_results import latest_run, scan_keyword_texts, search_results_table_name
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -33,27 +35,185 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-# Fail-fast: Required environment variables
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
-KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')  # Optional for fallback
+# The results table is required; the Keywords table is optional (no table -> no keywords).
+SEARCH_RESULTS_TABLE = search_results_table_name()
+KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')
+
+# Rank sentinel for a brand side that was never mentioned; reported as `best_rank: None`.
+_UNRANKED = 999
 
 
 def get_all_keywords() -> list[str]:
-    """Get all tracked keywords from Keywords table (small table, scan is acceptable)."""
+    """Get all tracked keywords from Keywords table (small table, scan is acceptable).
+
+    Any failure of the scan is logged with its traceback and reported as "no
+    keywords", which the handler turns into a 400.
+    """
     if not KEYWORDS_TABLE:
         return []
     try:
-        table = dynamodb.Table(KEYWORDS_TABLE)
-        # Keywords table is small (typically <100 items), scan is acceptable
-        # Using ProjectionExpression to minimize data transfer
-        response = table.scan(
-            ProjectionExpression='keyword',
-            Limit=500  # Cap to prevent runaway scans
-        )
-        return [item.get('keyword', '') for item in response.get('Items', []) if item.get('keyword')]
-    except Exception as e:
-        logger.error(f"Error getting keywords: {e}")
+        # Keywords table is small (typically <100 items); the projected scan
+        # is capped so it cannot run away.
+        return scan_keyword_texts(dynamodb.Table(KEYWORDS_TABLE))
+    except Exception:
+        logger.exception("Error getting keywords")
         return []
+
+
+def _fetch_recent_results(keywords: list[str]) -> list[dict[str, Any]]:
+    """Query the 20 most recent SearchResults rows for each of the first 50 keywords.
+
+    Querying by partition key is much more efficient than a scan. A keyword
+    whose query fails is logged (with its traceback) and skipped so one bad
+    partition cannot empty the whole view.
+    """
+    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
+    items: list[dict[str, Any]] = []
+    for keyword in keywords[:50]:  # Limit to 50 keywords for performance
+        try:
+            response = table.query(
+                KeyConditionExpression=Key('keyword').eq(keyword),
+                ScanIndexForward=False,  # Most recent first
+                Limit=20  # Get recent results per keyword
+            )
+            items.extend(response.get('Items', []))
+        except Exception:
+            logger.exception(f"Error querying keyword {keyword!r}")
+
+    logger.info(f"Queried {len(items)} total items across {len(keywords)} keywords")
+    return items
+
+
+def _group_by_keyword(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """Bucket rows by keyword, keeping the order in which keywords were first seen."""
+    keyword_results: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
+    for item in items:
+        keyword_results[item.get('keyword', '')].append(item)
+
+    logger.info(f"Found {len(keyword_results)} unique keywords")
+    return keyword_results
+
+
+@dataclass
+class _BrandPresence:
+    """Running tally of one brand side (first-party or competitors) across a keyword's latest run."""
+
+    mentions: int = 0
+    best_rank: int = _UNRANKED
+    providers: set[str] = field(default_factory=set)
+
+    def record(self, provider: str, brand: dict[str, Any]) -> None:
+        """Count one brand entry from `provider`'s response."""
+        self.mentions += to_int(brand.get('mention_count'), 1)
+        self.best_rank = min(self.best_rank, to_int(brand.get('rank'), _UNRANKED))
+        self.providers.add(provider)
+
+    def coverage(self, total_providers: int) -> float:
+        """Share of the run's providers that mentioned this side (0 for an empty run)."""
+        return len(self.providers) / total_providers if total_providers > 0 else 0
+
+    def as_dict(self, total_providers: int) -> dict[str, Any]:
+        """The per-side block of a prompt record."""
+        return {
+            'mentions': self.mentions,
+            'best_rank': self.best_rank if self.best_rank < _UNRANKED else None,
+            'provider_coverage': round(self.coverage(total_providers) * 100, 1),
+            'providers': list(self.providers),
+        }
+
+
+def _tally_brand_presence(latest_results: list[dict[str, Any]]) -> tuple[_BrandPresence, _BrandPresence]:
+    """Tally first-party and competitor mentions across one run, using the LLM-assigned classification."""
+    first_party = _BrandPresence()
+    competitors = _BrandPresence()
+    for result in latest_results:
+        provider = result.get('provider', '')
+        for brand in result.get('brands', []):
+            classification = brand.get('classification', 'other')
+            if classification == 'first_party':
+                first_party.record(provider, brand)
+            elif classification == 'competitor':
+                competitors.record(provider, brand)
+    return first_party, competitors
+
+
+def _classify_prompt(first_party: _BrandPresence, competitors: _BrandPresence, total_providers: int) -> dict[str, Any]:
+    """The prompt's `status` plus the score field that status carries.
+
+    Winning: first-party in the top 3 (`score`). Opportunity: competitors appear
+    but first-party does not (`opportunity_score`). Losing: first-party absent or
+    ranked below 5 (`improvement_potential`). Neutral: first-party at rank 4-5,
+    unscored; it is listed among the winning prompts.
+    """
+    fp_provider_coverage = first_party.coverage(total_providers)
+
+    if first_party.mentions > 0 and first_party.best_rank <= 3:
+        score = (
+            (fp_provider_coverage * 50) +
+            ((4 - first_party.best_rank) / 3 * 30) +
+            (min(first_party.mentions, 10) / 10 * 20)
+        )
+        return {'status': 'winning', 'score': round(score, 1)}
+
+    if first_party.mentions == 0 and competitors.mentions > 0:
+        opportunity_score = (
+            (competitors.coverage(total_providers) * 50) +
+            (min(competitors.mentions, 10) / 10 * 50)
+        )
+        return {'status': 'opportunity', 'opportunity_score': round(opportunity_score, 1)}
+
+    if first_party.mentions == 0 or first_party.best_rank > 5:
+        improvement_potential = (
+            100 - (fp_provider_coverage * 50) -
+            ((10 - min(first_party.best_rank, 10)) / 10 * 50)
+        )
+        return {'status': 'losing', 'improvement_potential': round(improvement_potential, 1)}
+
+    return {'status': 'neutral'}
+
+
+def _analyze_keyword(keyword: str, results: list[dict[str, Any]]) -> dict[str, Any]:
+    """Build one prompt record from the latest run of a keyword's search results."""
+    latest_ts, latest_results = latest_run(results)
+    total_providers = len(latest_results)
+    first_party, competitors = _tally_brand_presence(latest_results)
+    return {
+        'keyword': keyword,
+        'timestamp': latest_ts,
+        'first_party': first_party.as_dict(total_providers),
+        'competitors': competitors.as_dict(total_providers),
+        'total_providers': total_providers,
+        **_classify_prompt(first_party, competitors, total_providers),
+    }
+
+
+def _rank_prompts(prompts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Bucket prompts by status, rank each bucket by its score, and shape the insights payload.
+
+    Neutral prompts sit in the winning bucket (unscored, so after every scored
+    win) and count toward the win rate. Each bucket is cut to its top 20 while
+    the summary counts every prompt.
+    """
+    winning_prompts = [p for p in prompts if p['status'] in ('winning', 'neutral')]
+    losing_prompts = [p for p in prompts if p['status'] == 'losing']
+    opportunity_prompts = [p for p in prompts if p['status'] == 'opportunity']
+
+    winning_prompts.sort(key=lambda x: x.get('score', 0), reverse=True)
+    losing_prompts.sort(key=lambda x: x.get('improvement_potential', 0), reverse=True)
+    opportunity_prompts.sort(key=lambda x: x.get('opportunity_score', 0), reverse=True)
+
+    return {
+        'total_prompts_analyzed': len(prompts),
+        'winning_prompts': winning_prompts[:20],  # Top 20
+        'losing_prompts': losing_prompts[:20],
+        'opportunity_prompts': opportunity_prompts[:20],
+        'summary': {
+            'winning_count': len(winning_prompts),
+            'losing_count': len(losing_prompts),
+            'opportunity_count': len(opportunity_prompts),
+            'win_rate': round(len(winning_prompts) / len(prompts) * 100, 1) if prompts else 0
+        }
+    }
 
 
 def analyze_prompt_brand_correlation(config: dict[str, Any]) -> dict[str, Any]:
@@ -65,12 +225,10 @@ def analyze_prompt_brand_correlation(config: dict[str, Any]) -> dict[str, Any]:
     - Which prompts favor competitors
     - Opportunities where competitors appear but first-party doesn't
     """
-    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-
     # Get tracked brands — only first_party is needed to gate execution below.
-    # Classification is taken from brand.get('classification') per-mention inside
-    # the loop, so the lowercase lists that used to drive substring matching are
-    # no longer needed here.
+    # Classification is taken from brand.get('classification') per-mention in
+    # _tally_brand_presence, so the lowercase lists that used to drive substring
+    # matching are no longer needed here.
     tracked_brands = config.get("tracked_brands", {})
     first_party = [b.lower() for b in tracked_brands.get("first_party", [])]
 
@@ -83,141 +241,9 @@ def analyze_prompt_brand_correlation(config: dict[str, Any]) -> dict[str, Any]:
     if not keywords:
         return {"error": "No keywords configured"}
 
-    # Query search results by keyword (uses partition key - much more efficient than scan)
-    items = []
-    for keyword in keywords[:50]:  # Limit to 50 keywords for performance
-        try:
-            response = table.query(
-                KeyConditionExpression=Key('keyword').eq(keyword),
-                ScanIndexForward=False,  # Most recent first
-                Limit=20  # Get recent results per keyword
-            )
-            items.extend(response.get('Items', []))
-        except Exception as e:
-            logger.error(f"Error querying keyword {keyword!r}: {e}")
-            continue
-
-    logger.info(f"Queried {len(items)} total items across {len(keywords)} keywords")
-
-    # Group by keyword and get latest results
-    keyword_results = defaultdict(list)
-    for item in items:
-        keyword = item.get('keyword', '')
-        keyword_results[keyword].append(item)
-
-    logger.info(f"Found {len(keyword_results)} unique keywords")
-
-    # Analyze each keyword
-    winning_prompts = []  # First-party appears prominently
-    losing_prompts = []   # First-party doesn't appear or ranks low
-    opportunity_prompts = []  # Competitors appear but first-party doesn't
-
-    for keyword, results in keyword_results.items():
-        # Get latest timestamp
-        latest_ts = max(r.get('timestamp', '') for r in results)
-        latest_results = [r for r in results if r.get('timestamp') == latest_ts]
-
-        # Analyze brand presence
-        first_party_mentions = 0
-        first_party_best_rank = 999
-        first_party_providers = set()
-        competitor_mentions = 0
-        competitor_best_rank = 999
-        competitor_providers = set()
-        total_providers = len(latest_results)
-
-        for result in latest_results:
-            provider = result.get('provider', '')
-            brands = result.get('brands', [])
-
-            for brand in brands:
-                rank = to_int(brand.get('rank'), 999)
-                mentions = to_int(brand.get('mention_count'), 1)
-                classification = brand.get('classification', 'other')
-
-                # Use the LLM-assigned classification directly
-                if classification == 'first_party':
-                    first_party_mentions += mentions
-                    first_party_best_rank = min(first_party_best_rank, rank)
-                    first_party_providers.add(provider)
-                elif classification == 'competitor':
-                    competitor_mentions += mentions
-                    competitor_best_rank = min(competitor_best_rank, rank)
-                    competitor_providers.add(provider)
-
-        # Calculate scores
-        fp_provider_coverage = len(first_party_providers) / total_providers if total_providers > 0 else 0
-        comp_provider_coverage = len(competitor_providers) / total_providers if total_providers > 0 else 0
-
-        prompt_data = {
-            'keyword': keyword,
-            'timestamp': latest_ts,
-            'first_party': {
-                'mentions': first_party_mentions,
-                'best_rank': first_party_best_rank if first_party_best_rank < 999 else None,
-                'provider_coverage': round(fp_provider_coverage * 100, 1),
-                'providers': list(first_party_providers)
-            },
-            'competitors': {
-                'mentions': competitor_mentions,
-                'best_rank': competitor_best_rank if competitor_best_rank < 999 else None,
-                'provider_coverage': round(comp_provider_coverage * 100, 1),
-                'providers': list(competitor_providers)
-            },
-            'total_providers': total_providers
-        }
-
-        # Classify the prompt
-        if first_party_mentions > 0 and first_party_best_rank <= 3:
-            # Winning: First-party appears in top 3
-            prompt_data['status'] = 'winning'
-            prompt_data['score'] = round(
-                (fp_provider_coverage * 50) +
-                ((4 - first_party_best_rank) / 3 * 30) +
-                (min(first_party_mentions, 10) / 10 * 20),
-                1
-            )
-            winning_prompts.append(prompt_data)
-        elif first_party_mentions == 0 and competitor_mentions > 0:
-            # Opportunity: Competitors appear but first-party doesn't
-            prompt_data['status'] = 'opportunity'
-            prompt_data['opportunity_score'] = round(
-                (comp_provider_coverage * 50) +
-                (min(competitor_mentions, 10) / 10 * 50),
-                1
-            )
-            opportunity_prompts.append(prompt_data)
-        elif first_party_mentions == 0 or first_party_best_rank > 5:
-            # Losing: First-party doesn't appear or ranks poorly
-            prompt_data['status'] = 'losing'
-            prompt_data['improvement_potential'] = round(
-                100 - (fp_provider_coverage * 50) -
-                ((10 - min(first_party_best_rank, 10)) / 10 * 50),
-                1
-            )
-            losing_prompts.append(prompt_data)
-        else:
-            # Neutral: First-party appears but not prominently
-            prompt_data['status'] = 'neutral'
-            winning_prompts.append(prompt_data)
-
-    # Sort results
-    winning_prompts.sort(key=lambda x: x.get('score', 0), reverse=True)
-    losing_prompts.sort(key=lambda x: x.get('improvement_potential', 0), reverse=True)
-    opportunity_prompts.sort(key=lambda x: x.get('opportunity_score', 0), reverse=True)
-
-    return {
-        'total_prompts_analyzed': len(keyword_results),
-        'winning_prompts': winning_prompts[:20],  # Top 20
-        'losing_prompts': losing_prompts[:20],
-        'opportunity_prompts': opportunity_prompts[:20],
-        'summary': {
-            'winning_count': len(winning_prompts),
-            'losing_count': len(losing_prompts),
-            'opportunity_count': len(opportunity_prompts),
-            'win_rate': round(len(winning_prompts) / len(keyword_results) * 100, 1) if keyword_results else 0
-        }
-    }
+    keyword_results = _group_by_keyword(_fetch_recent_results(keywords))
+    prompts = [_analyze_keyword(keyword, results) for keyword, results in keyword_results.items()]
+    return _rank_prompts(prompts)
 
 
 @api_handler
@@ -235,6 +261,10 @@ def handler(event: dict[str, Any], context: Any, type: str = 'all', limit: int =
     """
     config = get_brand_config()
     insights = analyze_prompt_brand_correlation(config)
+    if 'error' in insights:
+        # A missing prerequisite (no first-party brand, no keywords) is the
+        # caller's configuration to fix, so it gets 400 with the actual reason.
+        return validation_error(insights['error'], event)
 
     # Filter by type if specified
     if type == 'winning':

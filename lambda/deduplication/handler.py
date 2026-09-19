@@ -239,11 +239,8 @@ def store_citations(keyword: str, citations: list[dict[str, Any]]) -> None:
                 "Stored citation: %s (priority %s)",
                 citation['normalized_url'], citation['priority'],
             )
-        except Exception as e:
-            logger.error(
-                "Error storing citation %s: %s",
-                citation['normalized_url'], e,
-            )
+        except Exception:
+            logger.exception("Error storing citation %s", citation['normalized_url'])
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:

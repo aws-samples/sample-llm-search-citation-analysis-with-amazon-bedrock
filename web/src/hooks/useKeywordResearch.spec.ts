@@ -220,7 +220,6 @@ describe('useKeywordResearch', () => {
       const partial = buildCompletedExpansionJob('job-1', 'best hotels');
       partial.status = 'partial';
       const retried = buildCompletedExpansionJob('job-1', 'best hotels');
-      retried.retry_count = 1;
       const { result } = renderResearch({ snapshots: { 'job-1': [retried] } });
 
       await act(async () => {
@@ -229,8 +228,12 @@ describe('useKeywordResearch', () => {
       });
 
       const call = findCall((c) => c.method === 'POST' && c.url.endsWith('/keyword-research/job-1/retry'));
-      expect(call).toBeDefined();
-      expect(result.current.activeJob?.retry_count).toBe(1);
+      expect(call).toStrictEqual({
+        url: 'https://api.test.com/keyword-research/job-1/retry',
+        method: 'POST',
+        body: '{}',
+      });
+      expect(result.current.activeJob?.status).toBe('completed');
       expect(result.current.expansionResult?.id).toBe('job-1');
     });
 

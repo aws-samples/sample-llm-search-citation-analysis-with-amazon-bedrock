@@ -1,7 +1,6 @@
 import type { BrandExpansionAllResult } from '../../types';
-import {
-  CloseIcon, WarningIcon 
-} from '../ui';
+import { WarningIcon } from '../ui';
+import { SuggestionPanelHeader } from './SuggestionPanelHeader';
 
 interface BrandExpansionPanelProps {
   readonly result: BrandExpansionAllResult;
@@ -49,24 +48,19 @@ export const BrandExpansionPanel = ({
 
   return (
     <div className={`mb-4 p-3 bg-white rounded-lg border ${colorScheme.border}`}>
-      <div className="flex items-start justify-between mb-2">
-        <div>
-          <h4 className={`text-sm font-medium ${colorScheme.text}`}>
-            Missing sub-brands for {isFirstParty ? 'your' : 'competitor'} brands
-          </h4>
-          {result.parent_companies && result.parent_companies.length > 0 && (
-            <p className={`text-xs ${colorScheme.subtext} mt-1`}>
-              Parent companies: {result.parent_companies.join(', ')}
-            </p>
-          )}
-          {result.notes && (
-            <p className="text-xs text-gray-500 mt-1">{result.notes}</p>
-          )}
-        </div>
-        <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
-          <CloseIcon className="w-4 h-4" />
-        </button>
-      </div>
+      <SuggestionPanelHeader
+        title={<>Missing sub-brands for {isFirstParty ? 'your' : 'competitor'} brands</>}
+        titleClassName={colorScheme.text}
+        notes={result.notes}
+        notesClassName="text-gray-500"
+        onDismiss={onCancel}
+      >
+        {result.parent_companies && result.parent_companies.length > 0 && (
+          <p className={`text-xs ${colorScheme.subtext} mt-1`}>
+            Parent companies: {result.parent_companies.join(', ')}
+          </p>
+        )}
+      </SuggestionPanelHeader>
 
       {result.duplicates_found && result.duplicates_found.length > 0 && (
         <div className={`mb-3 p-2 ${duplicatesBg} border rounded-lg`}>

@@ -18,23 +18,31 @@ meant an immediate user retry returned that same dead row *without* re-invoking
 
 These tests pin the fail-fast contract: mark the row terminal, return 503, and
 never execute the generation here.
+
+The module also characterises the two pipelines behind the endpoints —
+`generate_content_ideas` (ideas from brand visibility) and `generate_content`
+(the Bedrock prompt, its result shape and its error mapping) — so they can be
+restructured without changing what the dashboard sees.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
+import pytest
+
+from shared.models import BedrockInvocationError, ModelRole
+from shared.prompt_safety import untrusted_input_system_instruction
 from shared.self_invoke import SelfInvokeDispatchError
 from shared.utils import get_timestamp
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
-from testing.env import setdefault_env
+from testing.env import cleared_env, setdefault_env
 from testing.module_loader import load_handler_module
 
 setdefault_env({
     'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
-    'DYNAMODB_TABLE_CITATIONS': 'test-citations',
     'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
     'DYNAMODB_TABLE_CONTENT_STUDIO': 'test-content-studio',
     'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
@@ -159,3 +167,598 @@ class TestGenerationTimeoutSweep:
 
         assert row['status'] == 'generated'
         update.assert_not_called()
+
+
+
+# --- generate_content_ideas -------------------------------------------------
+
+_BRAND_CONFIG = {
+    'tracked_brands': {'first_party': ['Hotel Sol'], 'competitors': ['Rival Inn']},
+    'industry': 'general',
+}
+
+
+def _search_result(
+    keyword: str,
+    provider: str = 'openai',
+    *,
+    brands: list[dict] | None = None,
+    citations: list[str] | None = None,
+    timestamp: str = '2026-04-18T10:00:00Z',
+) -> dict:
+    """One SearchResults row as the search Lambda stores it."""
+    return {
+        'keyword': keyword,
+        'timestamp': timestamp,
+        'provider': provider,
+        'brands': brands or [],
+        'citations': citations or [],
+    }
+
+
+def _first_party(rank: int, sentiment: str = 'neutral') -> dict:
+    return {'name': 'Hotel Sol', 'rank': rank, 'sentiment': sentiment, 'classification': 'first_party'}
+
+
+def _competitor(name: str = 'Rival Inn', rank: int = 1) -> dict:
+    return {'name': name, 'rank': rank, 'sentiment': 'neutral', 'classification': 'competitor'}
+
+
+def _ideas(items: list[dict], config: dict | None = None) -> list[dict]:
+    """Run `generate_content_ideas` over `items` with the calendar-driven seasonal ideas switched off."""
+    with (
+        patch.object(_mod, 'load_recent_search_results', MagicMock(return_value=items)),
+        patch.object(_mod, '_get_seasonal_suggestions', MagicMock(return_value=[])),
+    ):
+        return _mod.generate_content_ideas(config or _BRAND_CONFIG)
+
+
+class TestGenerateContentIdeasPlaceholders:
+    """Before there is anything to analyse, the list carries a single non-actionable prompt."""
+
+    def test_asks_for_brand_configuration_when_no_first_party_brand_is_tracked(self):
+        ideas = _ideas([], config={'tracked_brands': {'first_party': [], 'competitors': ['Rival Inn']}})
+
+        assert [idea['type'] for idea in ideas] == ['configuration']
+        assert ideas[0]['title'] == 'Configure Your Brands First'
+        assert ideas[0]['actionable'] is False
+
+    def test_asks_for_a_first_analysis_when_no_search_results_exist(self):
+        ideas = _ideas([])
+
+        assert [idea['type'] for idea in ideas] == ['data']
+        assert ideas[0]['title'] == 'Run Your First Analysis'
+        assert ideas[0]['actionable'] is False
+
+
+class TestGenerateContentIdeasWithoutBrandData:
+    """Rows without extracted brands can only point at their citations."""
+
+    def test_offers_one_citation_analysis_per_keyword_with_deduplicated_urls(self):
+        items = [
+            _search_result('kw', citations=['https://a.example', 'https://b.example']),
+            _search_result('kw', provider='gemini', citations=['https://b.example', 'https://c.example']),
+        ]
+
+        ideas = _ideas(items)
+
+        assert [idea['type'] for idea in ideas] == ['citation_opportunity']
+        assert ideas[0]['description'] == 'Found 3 unique citations. Brand extraction not yet run for this data.'
+        assert sorted(ideas[0]['competitor_urls']) == ['https://a.example', 'https://b.example', 'https://c.example']
+
+    def test_skips_keywords_whose_rows_carry_no_citations(self):
+        items = [_search_result('cited', citations=['https://a.example']), _search_result('uncited')]
+
+        ideas = _ideas(items)
+
+        assert [idea['keyword'] for idea in ideas] == ['cited']
+
+    def test_skips_rows_with_a_blank_keyword(self):
+        items = [_search_result('', citations=['https://a.example']), _search_result('kw', citations=['https://b.example'])]
+
+        ideas = _ideas(items)
+
+        assert [idea['keyword'] for idea in ideas] == ['kw']
+
+    def test_caps_citation_opportunities_at_thirty(self):
+        items = [_search_result(f'kw{n:02d}', citations=['https://a.example']) for n in range(40)]
+
+        ideas = _ideas(items)
+
+        assert len(ideas) == 30
+
+
+class TestGenerateContentIdeasFromBrandVisibility:
+    """One keyword's latest results decide which of the five idea types it earns."""
+
+    def test_flags_a_visibility_gap_when_only_competitors_are_mentioned(self):
+        items = [_search_result('kw', brands=[_competitor('Rival Inn'), _competitor('Other Co', rank=2)])]
+
+        ideas = _ideas(items)
+
+        assert [(idea['type'], idea['priority']) for idea in ideas] == [('visibility_gap', 'high')]
+        assert ideas[0]['description'] == "Your brand doesn't appear but 2 competitors do."
+        assert ideas[0]['content_angle'] == 'comprehensive_guide'
+
+    def test_reports_the_competitors_and_providers_behind_a_visibility_gap(self):
+        items = [
+            _search_result('kw', provider='openai', brands=[_competitor('Rival Inn')], citations=['https://rival.example']),
+            _search_result('kw', provider='gemini', brands=[_competitor('Other Co')]),
+        ]
+
+        ideas = _ideas(items)
+
+        assert ideas[0]['competitor_brands'] == ['Rival Inn', 'Other Co']
+        assert ideas[0]['competitor_urls'] == ['https://rival.example']
+        assert sorted(ideas[0]['providers_missing']) == ['gemini', 'openai']
+
+    def test_suggests_a_ranking_improvement_when_first_party_trails_a_competitor(self):
+        items = [_search_result('kw', brands=[_competitor(rank=1), _first_party(rank=4)])]
+
+        ideas = _ideas(items)
+
+        assert [(idea['type'], idea['priority']) for idea in ideas] == [('ranking_improvement', 'medium')]
+        assert ideas[0]['current_rank'] == 4
+        assert ideas[0]['description'] == 'Your brand ranks #4. Create better content to reach #1.'
+        assert ideas[0]['content_angle'] == 'differentiation'
+
+    def test_lowers_the_ranking_improvement_priority_when_first_party_is_third(self):
+        items = [_search_result('kw', brands=[_competitor(rank=1), _first_party(rank=3)])]
+
+        ideas = _ideas(items)
+
+        assert [(idea['type'], idea['priority']) for idea in ideas] == [('ranking_improvement', 'low')]
+
+    def test_suggests_nothing_for_a_trailing_first_party_when_no_competitor_is_mentioned(self):
+        items = [_search_result('kw', brands=[_first_party(rank=5)])]
+
+        ideas = _ideas(items)
+
+        assert ideas == []
+
+    def test_suggests_leadership_maintenance_when_first_party_ranks_in_the_top_two(self):
+        items = [
+            _search_result('kw', provider='openai', brands=[_first_party(rank=1)], citations=['https://mine.example']),
+            _search_result('kw', provider='gemini', brands=[_first_party(rank=2), _competitor(rank=3)], citations=['https://rival.example']),
+        ]
+
+        ideas = _ideas(items)
+
+        assert [(idea['type'], idea['priority']) for idea in ideas] == [('leadership_maintenance', 'low')]
+        assert ideas[0]['description'] == "You're #1! Create fresh content to stay ahead of 1 competitors."
+        assert sorted(ideas[0]['competitor_urls']) == ['https://mine.example', 'https://rival.example']
+        assert ideas[0]['content_angle'] == 'thought_leadership'
+
+    def test_flags_a_provider_gap_when_first_party_is_missing_from_one_provider(self):
+        items = [
+            _search_result('kw', provider='openai', brands=[_first_party(rank=5)]),
+            _search_result('kw', provider='gemini'),
+        ]
+
+        ideas = _ideas(items)
+
+        assert [(idea['type'], idea['priority']) for idea in ideas] == [('provider_gap', 'medium')]
+        assert ideas[0]['title'] == 'Target Gemini for "kw"'
+        assert ideas[0]['providers_missing'] == ['gemini']
+        assert ideas[0]['providers_present'] == ['openai']
+
+    def test_flags_negative_sentiment_when_first_party_is_mentioned_negatively(self):
+        items = [_search_result('kw', brands=[_first_party(rank=5, sentiment='negative')])]
+
+        ideas = _ideas(items)
+
+        assert [(idea['type'], idea['priority']) for idea in ideas] == [('sentiment_improvement', 'high')]
+        assert ideas[0]['description'] == 'Your brand has negative sentiment in 1 provider(s). Create positive content.'
+        assert ideas[0]['content_angle'] == 'reputation_management'
+
+    def test_analyses_only_the_most_recent_results_for_a_keyword(self):
+        items = [
+            _search_result('kw', brands=[_first_party(rank=1)], timestamp='2026-04-01T00:00:00Z'),
+            _search_result('kw', brands=[_competitor()], timestamp='2026-04-18T00:00:00Z'),
+        ]
+
+        ideas = _ideas(items)
+
+        assert [idea['type'] for idea in ideas] == ['visibility_gap']
+
+    def test_skips_rows_with_a_blank_keyword(self):
+        items = [_search_result('', brands=[_competitor()]), _search_result('kw', brands=[_competitor()])]
+
+        ideas = _ideas(items)
+
+        assert [idea['keyword'] for idea in ideas] == ['kw']
+
+    def test_orders_ideas_by_priority_then_keyword(self):
+        items = [
+            _search_result('zeta', brands=[_competitor()]),
+            _search_result('alpha', brands=[_first_party(rank=1), _competitor(rank=2)]),
+            _search_result('beta', brands=[_competitor()]),
+        ]
+
+        ideas = _ideas(items)
+
+        assert [(idea['priority'], idea['keyword']) for idea in ideas] == [
+            ('high', 'beta'), ('high', 'zeta'), ('low', 'alpha'),
+        ]
+
+    def test_appends_the_seasonal_suggestions_for_the_analysed_keywords(self):
+        seasonal = {'type': 'seasonal_content', 'priority': 'medium', 'keyword': 'kw'}
+        items = [_search_result('kw', brands=[_first_party(rank=5)])]
+
+        with (
+            patch.object(_mod, 'load_recent_search_results', MagicMock(return_value=items)),
+            patch.object(_mod, '_get_seasonal_suggestions', MagicMock(return_value=[seasonal])) as suggest,
+        ):
+            ideas = _mod.generate_content_ideas(_BRAND_CONFIG)
+
+        assert ideas == [seasonal]
+        assert suggest.call_args == call(['kw'], _BRAND_CONFIG)
+
+    def test_caps_the_idea_list_at_fifty(self):
+        items = [_search_result(f'kw{n:02d}', brands=[_competitor()]) for n in range(60)]
+
+        ideas = _ideas(items)
+
+        assert len(ideas) == 50
+
+
+
+# --- generate_content --------------------------------------------------------
+
+_GENERATION_CONFIG = {'tracked_brands': {'first_party': ['Hotel Sol'], 'competitors': []}, 'industry': 'hotels'}
+_PREAMBLE = untrusted_input_system_instruction() + '\n\n'
+_KEYWORD_TAG = '<keyword>best hotels malaga</keyword>'
+_DEFAULT_OPENING = (
+    f'Create a comprehensive guide for the keyword {_KEYWORD_TAG} in the <industry>hotels</industry> '
+    'industry that positions <brand>Hotel Sol</brand> as an authority.'
+)
+_MODEL_OUTPUT = 'TITLE: Malaga Stays\nMETA: Best stays\n\nBody text\n\nHEADINGS: Where, When\nPOINTS:\n- Book early'
+
+
+class _ModelCallError(Exception):
+    """A non-throttling failure surfaced by the Bedrock client."""
+
+
+def _crawled_page(domain: str, preview: str = 'Rival body') -> dict:
+    """One entry as `get_crawled_content` returns it."""
+    return {
+        'url': f'https://{domain}/guide',
+        'title': f'{domain} guide',
+        'content_preview': preview,
+        'seo_analysis': {},
+        'domain': domain,
+    }
+
+
+def _run_generation(
+    idea: dict,
+    *,
+    config: dict | None = None,
+    bedrock: MagicMock | None = None,
+    crawled: list[dict] | None = None,
+) -> dict:
+    """Run `generate_content` with Bedrock and the crawled-content lookup stubbed out."""
+    with (
+        patch.object(_mod, 'get_crawled_content', MagicMock(return_value=crawled or [])),
+        patch.object(_mod, 'invoke_bedrock', bedrock or MagicMock(return_value=_MODEL_OUTPUT)),
+        cleared_env('BEDROCK_TIER_GENERATION'),
+    ):
+        return _mod.generate_content(idea, config or _GENERATION_CONFIG)
+
+
+def _prompt_for(idea: dict, *, config: dict | None = None, crawled: list[dict] | None = None) -> str:
+    """The prompt `generate_content` hands to Bedrock for `idea`."""
+    bedrock = MagicMock(return_value='')
+    _run_generation(idea, config=config, bedrock=bedrock, crawled=crawled)
+    return bedrock.call_args.args[0]
+
+
+class TestGenerateContentPrompt:
+    """What the model is asked, per content angle, with every user-controlled value tag-wrapped."""
+
+    @pytest.mark.parametrize(('content_angle', 'opening'), [
+        ('comprehensive_guide', _DEFAULT_OPENING),
+        ('not-a-known-angle', _DEFAULT_OPENING),
+        (
+            'differentiation',
+            f'Create a differentiated content piece for the keyword {_KEYWORD_TAG} '
+            'that positions <brand>Hotel Sol</brand> uniquely.',
+        ),
+        (
+            'thought_leadership',
+            f'Create thought leadership content for the keyword {_KEYWORD_TAG} '
+            "to maintain <brand>Hotel Sol</brand>'s #1 position.",
+        ),
+        (
+            'reputation_management',
+            f'Create positive, trust-building content for the keyword {_KEYWORD_TAG} '
+            "to improve <brand>Hotel Sol</brand>'s sentiment.",
+        ),
+        ('evergreen', f'Create comprehensive evergreen content for {_KEYWORD_TAG} that will rank year-round.'),
+    ])
+    def test_opens_with_the_safety_instruction_and_the_brief_for_the_angle(self, content_angle, opening):
+        prompt = _prompt_for({**IDEA, 'content_angle': content_angle})
+
+        assert prompt.startswith(_PREAMBLE + opening + '\n')
+
+    def test_addresses_the_missing_providers_in_the_provider_optimization_brief(self):
+        idea = {**IDEA, 'content_angle': 'provider_optimization', 'providers_missing': ['gemini', 'claude']}
+
+        prompt = _prompt_for(idea)
+
+        assert prompt.startswith(
+            f'{_PREAMBLE}Create content optimized for AI search engines '
+            f'(<provider>gemini</provider>, <provider>claude</provider>) for the keyword {_KEYWORD_TAG}.\n'
+        )
+
+    def test_ties_the_seasonal_brief_to_the_idea_theme(self):
+        prompt = _prompt_for({**IDEA, 'content_angle': 'seasonal', 'seasonal_theme': 'summer'})
+
+        assert prompt.startswith(f'{_PREAMBLE}Create seasonal content for {_KEYWORD_TAG} tied to <theme>summer</theme>.\n')
+        assert 'Focus on timeliness and capturing the <theme>summer</theme> moment for <brand>Hotel Sol</brand>.' in prompt
+
+    def test_defaults_the_seasonal_theme_to_the_current_season(self):
+        prompt = _prompt_for({**IDEA, 'content_angle': 'seasonal'})
+
+        assert 'tied to <theme>current season</theme>.' in prompt
+
+    def test_centres_the_trending_brief_on_the_idea_topic(self):
+        prompt = _prompt_for({**IDEA, 'content_angle': 'trending', 'trending_topic': 'Summer Deals'})
+
+        assert prompt.startswith(
+            f'{_PREAMBLE}Create trending content about <topic>Summer Deals</topic> '
+            'for the <industry>hotels</industry> industry.\n'
+        )
+
+    def test_falls_back_to_the_keyword_as_the_trending_topic(self):
+        prompt = _prompt_for({**IDEA, 'content_angle': 'trending'})
+
+        assert 'Create trending content about <topic>best hotels malaga</topic> for the <industry>hotels</industry> industry.' in prompt
+
+    def test_calls_the_brand_your_brand_when_no_first_party_brand_is_configured(self):
+        prompt = _prompt_for(IDEA, config={'industry': 'hotels'})
+
+        assert 'positions <brand>your brand</brand> as an authority.' in prompt
+
+    def test_embeds_each_crawled_competitor_page_as_wrapped_context(self):
+        prompt = _prompt_for(IDEA, crawled=[_crawled_page('rival.example'), _crawled_page('other.example', preview='')])
+
+        assert (
+            '\n\nCompetitor content analysis:\n'
+            '\n--- <domain>rival.example</domain> ---\n'
+            'Title: <title>rival.example guide</title>\n'
+            'Content preview: <content>Rival body</content>...\n'
+            '\n--- <domain>other.example</domain> ---\n'
+            'Title: <title>other.example guide</title>\n'
+            '\n\nGenerate:'
+        ) in prompt
+
+    def test_truncates_a_competitor_preview_to_a_thousand_characters(self):
+        prompt = _prompt_for(IDEA, crawled=[_crawled_page('rival.example', preview='a' * 1500)])
+
+        assert f'Content preview: <content>{"a" * 1000}</content>...\n' in prompt
+
+    def test_leaves_out_the_competitor_section_when_nothing_was_crawled(self):
+        prompt = _prompt_for(IDEA)
+
+        assert 'Competitor content analysis' not in prompt
+
+    def test_ends_with_the_output_language_instruction_for_a_non_english_language(self):
+        prompt = _prompt_for({**IDEA, 'output_language': 'Spanish'})
+
+        assert prompt.endswith(
+            '\n\nIMPORTANT: Write ALL content in <language>Spanish</language>. '
+            'The title, meta description, body, headings, and key points must all be in <language>Spanish</language>.'
+        )
+
+    @pytest.mark.parametrize('idea', [IDEA, {**IDEA, 'output_language': 'English'}, {**IDEA, 'output_language': ''}])
+    def test_adds_no_language_instruction_when_the_output_language_is_english_or_unset(self, idea):
+        prompt = _prompt_for(idea)
+
+        assert 'IMPORTANT: Write ALL content' not in prompt
+        assert prompt.endswith('POINTS: [3 key takeaways as bullet points]')
+
+    def test_assembles_the_default_brief_around_the_competitor_context(self):
+        """The one golden prompt: preamble, brief, embedded competitor block, format rules, language suffix."""
+        prompt = _prompt_for({**IDEA, 'output_language': 'Spanish'}, crawled=[_crawled_page('rival.example')])
+
+        assert prompt == (
+            f'{_PREAMBLE}{_DEFAULT_OPENING}\n'
+            '\n'
+            '\n\nCompetitor content analysis:\n'
+            '\n--- <domain>rival.example</domain> ---\n'
+            'Title: <title>rival.example guide</title>\n'
+            'Content preview: <content>Rival body</content>...\n'
+            '\n'
+            '\nGenerate:\n'
+            '1. An SEO-optimized headline\n'
+            '2. Executive summary (2-3 sentences)\n'
+            '3. Key sections with headers (5-7 sections)\n'
+            '4. Bullet points for each section\n'
+            '5. Call-to-action recommendations\n'
+            '6. SEO metadata (title, description, keywords)\n'
+            '\n'
+            'Make it comprehensive, authoritative, and better than competitor content.\n'
+            '\n'
+            'Format your response with clear sections:\n'
+            'TITLE: [Your title here]\n'
+            'META: [150 character meta description]\n'
+            '\n'
+            '[Your main content here with ## headings]\n'
+            '\n'
+            'HEADINGS: [List the H2 headings you used, comma separated]\n'
+            'POINTS: [3 key takeaways as bullet points]'
+            '\n\nIMPORTANT: Write ALL content in <language>Spanish</language>. '
+            'The title, meta description, body, headings, and key points must all be in <language>Spanish</language>.'
+        )
+
+
+class TestGenerateContentResult:
+    """The dict `_process_generation_async` persists, for a successful and a failed model call."""
+
+    def test_returns_the_parsed_content_alongside_the_raw_model_output(self):
+        result = _run_generation(IDEA)
+
+        assert result['success'] is True
+        assert result['raw_content'] == _MODEL_OUTPUT
+        assert result['content']['title'] == 'Malaga Stays'
+        assert result['content']['key_points'] == ['Book early']
+
+    def test_reports_the_generation_model_tier_and_the_requested_angle(self):
+        result = _run_generation({**IDEA, 'content_angle': 'evergreen'})
+
+        assert result['model'] == 'fast'
+        assert result['content_angle'] == 'evergreen'
+
+    def test_defaults_the_content_angle_to_comprehensive_guide(self):
+        result = _run_generation({'id': 'idea-1', 'keyword': 'best hotels malaga'})
+
+        assert result['content_angle'] == 'comprehensive_guide'
+
+    def test_counts_the_competitor_pages_that_fed_the_prompt(self):
+        result = _run_generation(IDEA, crawled=[_crawled_page('a.example'), _crawled_page('b.example')])
+
+        assert result['competitor_sources_used'] == 2
+
+    def test_asks_bedrock_for_the_generation_role_with_the_content_budget(self):
+        bedrock = MagicMock(return_value='')
+
+        _run_generation(IDEA, bedrock=bedrock)
+
+        assert bedrock.call_args.args[1] == ModelRole.GENERATION
+        assert bedrock.call_args.kwargs == {'max_tokens': 8000, 'temperature': 0.7}
+
+    def test_reports_throttling_when_bedrock_gives_up_retrying(self):
+        result = _run_generation(IDEA, bedrock=MagicMock(side_effect=BedrockInvocationError('throttled')))
+
+        assert result == {
+            'success': False,
+            'error': 'Too many requests. Please wait a moment and try again.',
+            'error_type': 'throttling',
+            'content_angle': 'comprehensive_guide',
+        }
+
+    @pytest.mark.parametrize(('message', 'error', 'error_type'), [
+        (
+            'An error occurred (AccessDeniedException) when calling Converse',
+            'Access denied to Bedrock model. Check IAM permissions.',
+            'access_denied',
+        ),
+        (
+            'ModelTimeoutException: model did not respond',
+            'AI model took too long to respond. Please try again with a simpler keyword.',
+            'timeout',
+        ),
+        ('ModelErrorException', 'AI model encountered an error. Please try again.', 'model_error'),
+        ('ValidationException: bad input', 'Invalid request to AI model. Please try a different keyword.', 'generation_error'),
+        ('ServiceUnavailable', 'AI service temporarily unavailable. Please try again later.', 'generation_error'),
+        ('InternalServerError', 'AI service temporarily unavailable. Please try again later.', 'generation_error'),
+        ('ResourceNotFoundException', 'AI model not found. Please contact support.', 'generation_error'),
+    ])
+    def test_translates_aws_error_codes_into_user_facing_messages(self, message, error, error_type):
+        result = _run_generation(IDEA, bedrock=MagicMock(side_effect=_ModelCallError(message)))
+
+        assert result == {
+            'success': False,
+            'error': error,
+            'error_type': error_type,
+            'content_angle': 'comprehensive_guide',
+        }
+
+    def test_prefers_the_access_denied_mapping_when_several_codes_appear(self):
+        error = _ModelCallError('ValidationException raised after AccessDeniedException')
+
+        result = _run_generation(IDEA, bedrock=MagicMock(side_effect=error))
+
+        assert result['error_type'] == 'access_denied'
+
+    def test_truncates_an_unrecognised_error_to_two_hundred_characters(self):
+        result = _run_generation(IDEA, bedrock=MagicMock(side_effect=_ModelCallError('x' * 250)))
+
+        assert result['error'] == 'Content generation failed: ' + 'x' * 200
+        assert result['error_type'] == 'generation_error'
+
+
+
+_STRUCTURED_RESPONSE = """Here is your article.
+TITLE: Best Hotels in Malaga for Families
+META: Family-friendly hotels in Malaga, from beachfront resorts to old-town boutiques.
+
+Malaga rewards families who stay near the sea.
+
+The old town suits short city breaks.
+HEADINGS: Where to Stay, When to Go, What It Costs
+KEY POINTS:
+- Beachfront hotels book out by March
+* Old-town hotels are quieter after 10pm
+3. Parking is scarce in the centre
+"""
+
+
+class TestParseGeneratedContent:
+    def test_extracts_the_title_after_the_first_title_marker(self):
+        assert _mod.parse_generated_content(_STRUCTURED_RESPONSE)['title'] == 'Best Hotels in Malaga for Families'
+
+    def test_extracts_the_meta_description_and_caps_it_at_160_characters(self):
+        long_meta = 'TITLE: T\nMETA: ' + 'm' * 200 + '\nBody'
+
+        assert _mod.parse_generated_content(long_meta)['meta_description'] == 'm' * 160
+
+    def test_accepts_meta_description_as_the_marker(self):
+        assert _mod.parse_generated_content('META_DESCRIPTION: Short and sweet\nBody')['meta_description'] == 'Short and sweet'
+
+    def test_matches_markers_regardless_of_case_and_indentation(self):
+        text = '  title: Lower Case Title\n  meta: lower meta\nBody'
+
+        result = _mod.parse_generated_content(text)
+
+        assert (result['title'], result['meta_description']) == ('Lower Case Title', 'lower meta')
+
+    def test_takes_the_body_between_the_meta_line_and_the_headings_marker(self):
+        body = _mod.parse_generated_content(_STRUCTURED_RESPONSE)['body']
+
+        assert body == 'Malaga rewards families who stay near the sea.\n\nThe old town suits short city breaks.'
+
+    def test_stops_the_body_at_a_points_marker_when_there_are_no_headings(self):
+        text = 'META: m\nFirst paragraph.\nKEY POINTS:\n- one'
+
+        assert _mod.parse_generated_content(text)['body'] == 'First paragraph.'
+
+    def test_falls_back_to_the_whole_text_as_body_when_no_meta_line_exists(self):
+        text = 'Just prose, no markers at all.\nSecond line.'
+
+        assert _mod.parse_generated_content(text)['body'] == text
+
+    def test_falls_back_to_the_whole_text_as_body_when_the_body_is_empty(self):
+        text = 'TITLE: T\nMETA: m\nHEADINGS: A, B'
+
+        assert _mod.parse_generated_content(text)['body'] == text
+
+    def test_splits_headings_on_commas_and_drops_blank_entries(self):
+        headings = _mod.parse_generated_content('HEADINGS: Where to Stay, , When to Go ,')['suggested_headings']
+
+        assert headings == ['Where to Stay', 'When to Go']
+
+    def test_leaves_headings_empty_when_the_marker_has_nothing_after_it(self):
+        assert _mod.parse_generated_content('SUGGESTED HEADINGS:\nBody')['suggested_headings'] == []
+
+    def test_collects_key_points_stripping_bullets_and_numbering(self):
+        points = _mod.parse_generated_content(_STRUCTURED_RESPONSE)['key_points']
+
+        assert points == [
+            'Beachfront hotels book out by March',
+            'Old-town hotels are quieter after 10pm',
+            'Parking is scarce in the centre',
+        ]
+
+    def test_skips_blank_and_marker_only_lines_among_the_key_points(self):
+        text = 'KEY POINTS:\n\n- \n- Real point\n   \n'
+
+        assert _mod.parse_generated_content(text)['key_points'] == ['Real point']
+
+    def test_returns_empty_fields_and_the_text_as_body_for_an_unstructured_answer(self):
+        result = _mod.parse_generated_content('plain answer')
+
+        assert result == {
+            'title': '', 'meta_description': '', 'body': 'plain answer', 'suggested_headings': [], 'key_points': [],
+        }

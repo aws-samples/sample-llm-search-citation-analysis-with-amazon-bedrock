@@ -4,10 +4,23 @@ import {
 import {
   render, screen, within 
 } from '@testing-library/react';
+import { expectRendersNothing } from '../../../../test/renderNothing';
 import { CoverageMapSection } from './CoverageMapSection';
 import {
   brief, buildGaps, idea
 } from './CoverageMapSection-fixtures';
+import type {
+  CitationGapsResponse,
+  ContentIdea,
+  ContentStudioHistory,
+} from '../../../../types';
+
+/**
+ * CoverageMapSection joins three data sources keyword-by-keyword:
+ * citation gaps, generated briefs (Content Studio history), and open
+ * ideas. The join + sort + status-label logic is the section's reason
+ * for existing — these tests pin every transition.
+ */
 
 describe('CoverageMapSection — joining gaps + briefs + ideas', () => {
   it('counts only briefs with status=generated against the briefCount column', () => {
@@ -79,68 +92,28 @@ describe('CoverageMapSection — joining gaps + briefs + ideas', () => {
 });
 
 describe('CoverageMapSection — status labels', () => {
-  it('labels keyword with gaps but no briefs and no ideas as Blocked', () => {
-    render(
-      <CoverageMapSection
-        gaps={buildGaps([{
-          keyword: 'shoes',
-          gap_count: 5,
-          high_priority_gaps: 2 
-        }])}
-        ideas={[]}
-        history={[]}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(screen.getByText('Blocked')).toBeInTheDocument();
-  });
+  const shoeGaps = buildGaps([{
+    keyword: 'shoes',
+    gap_count: 5,
+    high_priority_gaps: 2 
+  }]);
 
-  it('labels keyword with gaps + ideas but no briefs as Planned', () => {
+  it.each<[label: string, situation: string, gaps: CitationGapsResponse, ideas: ContentIdea[], history: ContentStudioHistory[]]>([
+    ['Blocked', 'gaps but no briefs and no ideas', shoeGaps, [], []],
+    ['Planned', 'gaps + ideas but no briefs', shoeGaps, [idea('i1', 'shoes')], []],
+    ['In progress', 'gaps + briefs', shoeGaps, [], [brief('h1', 'shoes', 'generated')]],
+    ['Covered', 'no gaps but briefs', buildGaps([]), [], [brief('h1', 'shoes', 'generated')]],
+  ])('labels the keyword %s when it has %s', (label, _situation, gaps, ideas, history) => {
     render(
       <CoverageMapSection
-        gaps={buildGaps([{
-          keyword: 'shoes',
-          gap_count: 5,
-          high_priority_gaps: 2 
-        }])}
-        ideas={[idea('i1', 'shoes')]}
-        history={[]}
+        gaps={gaps}
+        ideas={ideas}
+        history={history}
         loading={false}
         error={null}
       />,
     );
-    expect(screen.getByText('Planned')).toBeInTheDocument();
-  });
-
-  it('labels keyword with gaps + briefs as In progress', () => {
-    render(
-      <CoverageMapSection
-        gaps={buildGaps([{
-          keyword: 'shoes',
-          gap_count: 5,
-          high_priority_gaps: 2 
-        }])}
-        ideas={[]}
-        history={[brief('h1', 'shoes', 'generated')]}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(screen.getByText('In progress')).toBeInTheDocument();
-  });
-
-  it('labels keyword with no gaps but briefs as Covered', () => {
-    render(
-      <CoverageMapSection
-        gaps={buildGaps([])}
-        ideas={[]}
-        history={[brief('h1', 'shoes', 'generated')]}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(screen.getByText('Covered')).toBeInTheDocument();
+    expect(screen.getByText(label)).toBeInTheDocument();
   });
 });
 
@@ -175,16 +148,9 @@ describe('CoverageMapSection — sort + placeholder states', () => {
   });
 
   it('returns null (no section rendered) when there is no data at all', () => {
-    const { container } = render(
-      <CoverageMapSection
-        gaps={buildGaps([])}
-        ideas={[]}
-        history={[]}
-        loading={false}
-        error={null}
-      />,
+    expectRendersNothing(
+      <CoverageMapSection gaps={buildGaps([])} ideas={[]} history={[]} loading={false} error={null} />,
     );
-    expect(container.firstChild).toBeNull();
   });
 
   it('renders the loading placeholder when loading is true', () => {

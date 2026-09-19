@@ -42,13 +42,14 @@ import importlib.util
 import os
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from boto3.dynamodb.conditions import Key
 
 from shared.api_response import validation_error
 from shared.constants import MAX_KEYWORD_LENGTH
+from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
 
@@ -72,15 +73,19 @@ def keywords_table_name() -> str:
 
 @dataclass(frozen=True)
 class ReportScope:
-    """A resolved report scope: how it was asked for and which keywords it covers."""
+    """A resolved report scope: how it was asked for and which keywords it covers.
+
+    Every field is required on purpose: a default such as ``{'mode': 'all'}``
+    would let a caller silently widen a report to every keyword.
+    """
 
     kind: str
     """``keyword`` | ``group`` | ``keywords`` | ``all``."""
     keywords: tuple[str, ...]
     """Keyword texts, sorted case-insensitively, deduplicated."""
-    scope: dict[str, Any] = field(default_factory=lambda: {'mode': 'all'})
+    scope: dict[str, Any]
     """The canonical scope descriptor (same shape as trigger / schedule scopes)."""
-    label: str = 'all active keywords'
+    label: str
 
     @property
     def is_single_keyword(self) -> bool:
@@ -129,8 +134,9 @@ def parse_scope_params(params: dict[str, Any] | None, keywords_table: Any) -> tu
             return None, f'keyword_ids accepts at most {MAX_KEYWORD_IDS} ids'
         descriptor, error = validate_scope({'mode': 'keywords', 'keyword_ids': ids})
         kind = 'keywords'
-    if error:
-        return None, error.replace('scope.', '')
+    if descriptor is None:
+        # validate_scope returns exactly one of (descriptor, None) / (None, error).
+        return None, str(error).replace('scope.', '')
 
     resolved = resolve_scope(descriptor, keywords_table)
     keywords = tuple(item['keyword'] for item in resolved)
@@ -169,19 +175,12 @@ def query_keyword_rows(table: Any, keyword: str, projection: str) -> list[dict[s
     ``timestamp``; it never includes the LLM response text, so a 60-keyword
     group does not pull megabytes of prose through one 29s API request.
     """
-    params: dict[str, Any] = {
-        'KeyConditionExpression': Key('keyword').eq(keyword),
-        'ProjectionExpression': projection,
-        'ExpressionAttributeNames': {'#ts': 'timestamp'},
-    }
-    rows: list[dict[str, Any]] = []
-    while True:
-        response = table.query(**params)
-        rows.extend(response.get('Items', []))
-        last_key = response.get('LastEvaluatedKey')
-        if not last_key:
-            return rows
-        params['ExclusiveStartKey'] = last_key
+    return collect_all_items(
+        table.query,
+        KeyConditionExpression=Key('keyword').eq(keyword),
+        ProjectionExpression=projection,
+        ExpressionAttributeNames={'#ts': 'timestamp'},
+    )
 
 
 def load_sibling_function(anchor_file: str, filename: str, attr: str, alias_suffix: str) -> Callable:

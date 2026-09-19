@@ -1,7 +1,19 @@
 import { vi } from 'vitest';
+import { renderHook } from '@testing-library/react';
 import type {
   ContentIdea, ContentStudioHistory 
 } from '../types';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { useContentStudio } from './useContentStudio';
+
+/**
+ * Points the mocked network layer at `fetch` (the default Content Studio mock
+ * unless a spec hands in another) and renders the hook.
+ */
+export function renderContentStudio(fetch: ReturnType<typeof createMockFetch> = createMockFetch()) {
+  mockAuthenticatedFetch.mockImplementation(fetch);
+  return renderHook(() => useContentStudio());
+}
 
 export const mockContentIdea: ContentIdea = {
   id: 'idea-1',
@@ -19,7 +31,6 @@ export const mockContentHistory: ContentStudioHistory[] = [
   {
     id: 'content-1',
     keyword: 'best hotels',
-    idea_type: 'visibility_gap',
     idea_title: 'Top Hotels Guide',
     content_angle: 'comprehensive_guide',
     generated_content: {
@@ -29,7 +40,6 @@ export const mockContentHistory: ContentStudioHistory[] = [
       suggested_headings: ['Introduction', 'Top Hotels'],
       key_points: ['Unique amenities', 'Location benefits']
     },
-    raw_content: 'Generated article content',
     competitor_sources_used: 3,
     status: 'generated',
     created_at: '2024-01-01T00:00:00Z',
@@ -39,7 +49,6 @@ export const mockContentHistory: ContentStudioHistory[] = [
   {
     id: 'content-2',
     keyword: 'luxury resorts',
-    idea_type: 'ranking_improvement',
     idea_title: 'Luxury Resorts Review',
     content_angle: 'differentiation',
     generated_content: {
@@ -49,7 +58,6 @@ export const mockContentHistory: ContentStudioHistory[] = [
       suggested_headings: ['Overview', 'Features'],
       key_points: ['Premium services', 'Exclusive locations']
     },
-    raw_content: 'Luxury resort content',
     competitor_sources_used: 2,
     status: 'generating',
     created_at: '2024-01-02T00:00:00Z',

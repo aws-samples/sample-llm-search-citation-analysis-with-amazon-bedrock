@@ -131,6 +131,8 @@ export const useDashboardData = () => {
     const dashboardController = new AbortController();
     dashboardControllerRef.current = dashboardController;
     const { signal } = dashboardController;
+    const isCurrent = () => ownerMountedRef.current
+      && dashboardGenerationRef.current === dashboardGeneration;
 
     try {
       setLoading(true);
@@ -148,18 +150,12 @@ export const useDashboardData = () => {
       const jsonResults = await Promise.all(
         responses.map(async (response): Promise<unknown> => response.json())
       );
-      const dashboardRequestIsCurrent = ownerMountedRef.current
-        && dashboardGenerationRef.current === dashboardGeneration;
-
-      if (!dashboardRequestIsCurrent) return;
+      if (!isCurrent()) return;
 
       applyDashboardResults(jsonResults, keywordGeneration);
     } catch (fetchError) {
       if (isAbortError(fetchError)) return;
-
-      const dashboardRequestIsCurrent = ownerMountedRef.current
-        && dashboardGenerationRef.current === dashboardGeneration;
-      if (!dashboardRequestIsCurrent) return;
+      if (!isCurrent()) return;
 
       setError(getErrorMessage(fetchError, 'dashboard'));
       console.error('[dashboard] Error fetching data:', fetchError);
@@ -168,7 +164,7 @@ export const useDashboardData = () => {
       if (dashboardControllerRef.current === dashboardController) {
         dashboardControllerRef.current = null;
       }
-      if (ownerMountedRef.current && dashboardGenerationRef.current === dashboardGeneration) {
+      if (isCurrent()) {
         setLoading(false);
       }
     }
@@ -183,15 +179,15 @@ export const useDashboardData = () => {
     keywordControllerRef.current?.abort();
     const keywordController = new AbortController();
     keywordControllerRef.current = keywordController;
+    const isCurrent = () => ownerMountedRef.current
+      && keywordGenerationRef.current === keywordGeneration;
 
     try {
       const response = await authenticatedFetch(
         `${API_BASE_URL}/keywords?authoritative=true`,
         { signal: keywordController.signal }
       );
-      const keywordRequestIsCurrent = ownerMountedRef.current
-        && keywordGenerationRef.current === keywordGeneration;
-      if (!keywordRequestIsCurrent) return;
+      if (!isCurrent()) return;
 
       if (!response.ok) {
         throw new ApiRequestError(
@@ -201,9 +197,7 @@ export const useDashboardData = () => {
       }
 
       const payload: unknown = await response.json();
-      const parsedRequestIsCurrent = ownerMountedRef.current
-        && keywordGenerationRef.current === keywordGeneration;
-      if (!parsedRequestIsCurrent) return;
+      if (!isCurrent()) return;
 
       if (!isAuthoritativeKeywordsResponse(payload)) {
         throw new TypeError('Authoritative keywords API returned an invalid response');
@@ -211,9 +205,7 @@ export const useDashboardData = () => {
 
       setKeywords(payload.keywords);
     } catch (reconciliationError) {
-      const keywordRequestIsCurrent = ownerMountedRef.current
-        && keywordGenerationRef.current === keywordGeneration;
-      if (!isAbortError(reconciliationError) && keywordRequestIsCurrent) {
+      if (!isAbortError(reconciliationError) && isCurrent()) {
         console.error('[keywords] Error reconciling active keywords:', reconciliationError);
       }
     } finally {

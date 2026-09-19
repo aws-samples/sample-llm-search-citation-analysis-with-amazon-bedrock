@@ -187,7 +187,7 @@ def render_prompt_template(template: str, values: dict[str, str]) -> str:
     return rendered
 
 
-def html_to_text(html: str, max_chars: int = MAX_EXTRACTED_TEXT_LENGTH) -> str:
+def html_to_text(html: str | None, max_chars: int = MAX_EXTRACTED_TEXT_LENGTH) -> str:
     """Remove non-content HTML elements, normalize whitespace, and cap output."""
     if not isinstance(html, str) or max_chars <= 0:
         return ''
@@ -200,55 +200,53 @@ def html_to_text(html: str, max_chars: int = MAX_EXTRACTED_TEXT_LENGTH) -> str:
 
 def _required_text(
     idea: dict[str, Any], field: str, max_length: int
-) -> tuple[str | None, ContentBriefValidationIssue | None]:
+) -> str | ContentBriefValidationIssue:
     value = idea.get(field)
     if not isinstance(value, str):
-        return None, ContentBriefValidationIssue(field, f'{field} must be a string')
+        return ContentBriefValidationIssue(field, f'{field} must be a string')
     if not value.strip():
-        return None, ContentBriefValidationIssue(field, f'{field} is required')
+        return ContentBriefValidationIssue(field, f'{field} is required')
     if len(value) > max_length:
-        return None, ContentBriefValidationIssue(
+        return ContentBriefValidationIssue(
             field, f'{field} must be at most {max_length} characters'
         )
-    return value, None
+    return value
 
 
 def _optional_text(
     idea: dict[str, Any], field: str, max_length: int
-) -> tuple[str | None, ContentBriefValidationIssue | None]:
+) -> str | ContentBriefValidationIssue:
     value = idea.get(field, '')
     if not isinstance(value, str):
-        return None, ContentBriefValidationIssue(field, f'{field} must be a string')
+        return ContentBriefValidationIssue(field, f'{field} must be a string')
     if len(value) > max_length:
-        return None, ContentBriefValidationIssue(
+        return ContentBriefValidationIssue(
             field, f'{field} must be at most {max_length} characters'
         )
-    return value, None
+    return value
 
 
-def _validate_mode(idea: dict[str, Any]) -> tuple[str | None, ContentBriefValidationIssue | None]:
+def _validate_mode(idea: dict[str, Any]) -> str | ContentBriefValidationIssue:
     mode = idea.get('content_angle')
     if mode not in GROUP_BRIEF_MODES:
         allowed = ', '.join(GROUP_BRIEF_MODES)
-        return None, ContentBriefValidationIssue(
+        return ContentBriefValidationIssue(
             'content_angle', f'content_angle must be one of: {allowed}'
         )
-    return str(mode), None
+    return str(mode)
 
 
-def _validate_keyword_ids(
-    idea: dict[str, Any],
-) -> tuple[list[str] | None, ContentBriefValidationIssue | None]:
+def _validate_keyword_ids(idea: dict[str, Any]) -> list[str] | ContentBriefValidationIssue:
     keyword_ids, error = validate_id_list(
         idea.get('keyword_ids'), field='keyword_ids', limit=MAX_SELECTED_KEYWORDS
     )
     if error:
-        return None, ContentBriefValidationIssue('keyword_ids', error)
+        return ContentBriefValidationIssue('keyword_ids', error)
     if not keyword_ids:
-        return None, ContentBriefValidationIssue(
+        return ContentBriefValidationIssue(
             'keyword_ids', 'keyword_ids must contain between 1 and 50 active group members'
         )
-    return keyword_ids, None
+    return keyword_ids
 
 
 def _validate_landing_url(
@@ -272,58 +270,54 @@ def _validate_source_fields(
     idea: dict[str, Any],
     mode: str,
     url_validator: Callable[[str], tuple[bool, str]],
-) -> tuple[dict[str, str] | None, ContentBriefValidationIssue | None]:
-    landing_url, issue = _optional_text(idea, 'landing_url', MAX_LANDING_URL_LENGTH)
-    if issue:
-        return None, issue
-    current_copy, issue = _optional_text(idea, 'current_copy', MAX_CURRENT_COPY_LENGTH)
-    if issue:
-        return None, issue
+) -> dict[str, str] | ContentBriefValidationIssue:
+    landing_url = _optional_text(idea, 'landing_url', MAX_LANDING_URL_LENGTH)
+    if isinstance(landing_url, ContentBriefValidationIssue):
+        return landing_url
+    current_copy = _optional_text(idea, 'current_copy', MAX_CURRENT_COPY_LENGTH)
+    if isinstance(current_copy, ContentBriefValidationIssue):
+        return current_copy
     if mode == REWRITE_PASTED_COPY and not current_copy.strip():
-        return None, ContentBriefValidationIssue(
+        return ContentBriefValidationIssue(
             'current_copy', 'current_copy is required for rewrite pasted copy mode'
         )
     issue = _validate_landing_url(landing_url, mode, url_validator)
     if issue:
-        return None, issue
+        return issue
     return {
         'landing_url': landing_url.strip() if mode == IMPROVE_CURRENT_URL else '',
         'current_copy': current_copy if mode == REWRITE_PASTED_COPY else '',
-    }, None
+    }
 
 
 def _validate_group_brief_fields(
     idea: dict[str, Any],
     url_validator: Callable[[str], tuple[bool, str]],
-) -> tuple[dict[str, Any] | None, ContentBriefValidationIssue | None]:
-    client_id, issue = _required_text(idea, 'id', MAX_GROUP_ID_LENGTH)
-    if issue:
-        return None, issue
-    group_id, issue = _required_text(idea, 'group_id', MAX_GROUP_ID_LENGTH)
-    if issue:
-        return None, issue
-    mode, issue = _validate_mode(idea)
-    if issue:
-        return None, issue
-    keyword_ids, issue = _validate_keyword_ids(idea)
-    if issue:
-        return None, issue
-    source, issue = _validate_source_fields(idea, mode, url_validator)
-    if issue:
-        return None, issue
-    prompt_template, issue = _required_text(
-        idea, 'prompt_template', MAX_PROMPT_TEMPLATE_LENGTH
-    )
-    if issue:
-        return None, issue
+) -> dict[str, Any] | ContentBriefValidationIssue:
+    client_id = _required_text(idea, 'id', MAX_GROUP_ID_LENGTH)
+    if isinstance(client_id, ContentBriefValidationIssue):
+        return client_id
+    group_id = _required_text(idea, 'group_id', MAX_GROUP_ID_LENGTH)
+    if isinstance(group_id, ContentBriefValidationIssue):
+        return group_id
+    mode = _validate_mode(idea)
+    if isinstance(mode, ContentBriefValidationIssue):
+        return mode
+    keyword_ids = _validate_keyword_ids(idea)
+    if isinstance(keyword_ids, ContentBriefValidationIssue):
+        return keyword_ids
+    source = _validate_source_fields(idea, mode, url_validator)
+    if isinstance(source, ContentBriefValidationIssue):
+        return source
+    prompt_template = _required_text(idea, 'prompt_template', MAX_PROMPT_TEMPLATE_LENGTH)
+    if isinstance(prompt_template, ContentBriefValidationIssue):
+        return prompt_template
     template_error = validate_template_placeholders(prompt_template)
     if template_error:
-        return None, ContentBriefValidationIssue('prompt_template', template_error)
-    output_language, issue = _required_text(
-        idea, 'output_language', MAX_OUTPUT_LANGUAGE_LENGTH
-    )
-    if issue:
-        return None, issue
+        return ContentBriefValidationIssue('prompt_template', template_error)
+    output_language = _required_text(idea, 'output_language', MAX_OUTPUT_LANGUAGE_LENGTH)
+    if isinstance(output_language, ContentBriefValidationIssue):
+        return output_language
     return {
         'id': client_id.strip(),
         'group_id': group_id.strip(),
@@ -333,7 +327,7 @@ def _validate_group_brief_fields(
         'current_copy': source['current_copy'],
         'prompt_template': prompt_template,
         'output_language': output_language.strip(),
-    }, None
+    }
 
 
 def canonicalize_group_brief(
@@ -344,9 +338,9 @@ def canonicalize_group_brief(
     url_validator: Callable[[str], tuple[bool, str]] = validate_url_safe,
 ) -> tuple[dict[str, Any] | None, ContentBriefValidationIssue | None]:
     """Validate a request and replace client text with authoritative group data."""
-    fields, issue = _validate_group_brief_fields(idea, url_validator)
-    if issue:
-        return None, issue
+    fields = _validate_group_brief_fields(idea, url_validator)
+    if isinstance(fields, ContentBriefValidationIssue):
+        return None, fields
 
     group = groups_table.get_item(Key={'id': fields['group_id']}).get('Item')
     if not group:
@@ -409,23 +403,29 @@ def _declared_response_too_large(response: Any) -> bool:
         return False
 
 
+def _collect_bounded_body(response: Any) -> bytearray:
+    """Stream the response body, refusing non-byte chunks and oversized payloads."""
+    body = bytearray()
+    for chunk in response.iter_content(chunk_size=RESPONSE_CHUNK_SIZE):
+        if not chunk:
+            continue
+        if not isinstance(chunk, bytes):
+            raise ContentBriefFetchError('Could not read the landing URL content.')
+        if len(body) + len(chunk) > MAX_RESPONSE_CONTENT_LENGTH:
+            raise ContentBriefFetchError(
+                'The landing URL response is too large to process.'
+            )
+        body.extend(chunk)
+    return body
+
+
 def _read_bounded_response_text(response: Any) -> str:
     if _declared_response_too_large(response):
         response.close()
         raise ContentBriefFetchError('The landing URL response is too large to process.')
 
-    body = bytearray()
     try:
-        for chunk in response.iter_content(chunk_size=RESPONSE_CHUNK_SIZE):
-            if not chunk:
-                continue
-            if not isinstance(chunk, bytes):
-                raise ContentBriefFetchError('Could not read the landing URL content.')
-            if len(body) + len(chunk) > MAX_RESPONSE_CONTENT_LENGTH:
-                raise ContentBriefFetchError(
-                    'The landing URL response is too large to process.'
-                )
-            body.extend(chunk)
+        body = _collect_bounded_body(response)
     except ContentBriefFetchError:
         raise
     except Exception as error_cause:

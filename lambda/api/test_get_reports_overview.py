@@ -272,10 +272,6 @@ def test_handler_rejects_top_outside_allowed_range(overview_mod):
 # --- _load_sibling + cache-miss paths -------------------------------------
 
 
-class SiblingLoaderError(Exception):
-    """Raised by tests when the sibling-loader path is exercised."""
-
-
 def test_load_sibling_raises_import_error_when_spec_resolution_fails(overview_mod):
     # `spec_from_file_location` returns None for unloadable modules; the
     # loader must surface that as ImportError so callers don't accidentally

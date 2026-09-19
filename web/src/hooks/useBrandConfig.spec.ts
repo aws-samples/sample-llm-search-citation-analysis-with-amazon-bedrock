@@ -15,11 +15,12 @@ describe('useBrandConfig', () => {
   describe('initialization', () => {
     it('returns loading true initially', async () => {
       const { result } = renderBrandConfig();
+      const loadingAtMount = result.current.loading;
 
-      expect(result.current.loading).toBe(true);
-
-      // Wait for async operations to complete to avoid act() warning
+      // Let the initial load settle so no act() warning leaks into other tests
       await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(loadingAtMount).toBe(true);
     });
 
     it('fetches config and presets on mount', async () => {
@@ -174,12 +175,12 @@ describe('useBrandConfig', () => {
       });
     });
 
-    it('returns error result when API fails', async () => {
+    it('returns the HTTP failure as the error with no suggestions when the API fails', async () => {
       const { result } = await renderLoadedBrandConfig({ shouldFailExpand: true });
 
       const expansion = await act(() => result.current.expandBrand('TestBrand'));
 
-      expect(expansion.error).toBeTruthy();
+      expect(expansion.error).toBe('HTTP 500: Request failed');
       expect(expansion.suggestions).toStrictEqual([]);
     });
   });
@@ -209,12 +210,12 @@ describe('useBrandConfig', () => {
       });
     });
 
-    it('returns error result when API fails', async () => {
+    it('returns the HTTP failure as the error with no suggestions when the API fails', async () => {
       const { result } = await renderLoadedBrandConfig({ shouldFailExpandAll: true });
 
       const expansion = await act(() => result.current.expandAllBrands(['Brand1']));
 
-      expect(expansion.error).toBeTruthy();
+      expect(expansion.error).toBe('HTTP 500: Request failed');
       expect(expansion.suggestions).toStrictEqual([]);
     });
   });
@@ -243,12 +244,12 @@ describe('useBrandConfig', () => {
       });
     });
 
-    it('returns error result when API fails', async () => {
+    it('returns the HTTP failure as the error with no competitors when the API fails', async () => {
       const { result } = await renderLoadedBrandConfig({ shouldFailFindCompetitors: true });
 
       const discovery = await act(() => result.current.findCompetitors(['MyBrand']));
 
-      expect(discovery.error).toBeTruthy();
+      expect(discovery.error).toBe('HTTP 500: Request failed');
       expect(discovery.competitors).toStrictEqual([]);
     });
   });

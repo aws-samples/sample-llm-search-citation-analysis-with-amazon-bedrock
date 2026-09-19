@@ -33,9 +33,10 @@ describe('useProviderConfig', () => {
   it('sets error and returns default providers when fetch fails', async () => {
     const { result } = await renderLoadedProviderConfig({ shouldFail: true });
 
-    expect(result.current.error).toBeTruthy();
-    // Default providers
-    expect(result.current.providers).toHaveLength(4);
+    expect(result.current.error).toBe('Unable to connect to provider service');
+    expect(result.current.providers.map((provider) => provider.id)).toStrictEqual([
+      'openai', 'perplexity', 'gemini', 'claude',
+    ]);
   });
 
   it('returns true when updateProvider succeeds', async () => {

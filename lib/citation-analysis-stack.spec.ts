@@ -41,8 +41,7 @@ import {
   retentionForLogGroupName,
   statementActions,
   tokenValidityMinutes,
-  verbsNotIntegratedWith,
-  verbsWithoutCognitoAuthorizer,
+  unguardedVerbs,
   type ApiGatewayMethodSnapshot,
   type ApiMethodAuthSnapshot,
   type BucketLifecycleSnapshot,
@@ -709,6 +708,42 @@ describe('Keyword research state machine', () => {
     expect(synthesized.researchDefinitionRaw).toContain('"action":"fail_step"');
   });
 
+  it('passes attempt ownership and target round into planning', () => {
+    expect(synthesized.researchDefinitionRaw).toContain(
+      '"action":"plan","job_id.$":"$.job_id","retry.$":"$.retry","attempt.$":"$.attempt","expected_round.$":"$.expected_round","execution_arn.$":"$$.Execution.Id","execution_id.$":"$$.Execution.Name"'
+    );
+  });
+
+  it('passes attempt ownership and planned round into provider checkpoints', () => {
+    expect(synthesized.researchDefinitionRaw).toContain(
+      '"ItemSelector":{"action":"execute_step","job_id.$":"$.job_id","step_id.$":"$$.Map.Item.Value.step_id","provider.$":"$$.Map.Item.Value.provider","attempt.$":"$.attempt","expected_round.$":"$.expected_round","execution_arn.$":"$$.Execution.Id","execution_id.$":"$$.Execution.Name"}'
+    );
+  });
+
+  it('passes attempt ownership and planned round into evaluation', () => {
+    expect(synthesized.researchDefinitionRaw).toContain(
+      '"action":"evaluate","job_id.$":"$.job_id","attempt.$":"$.attempt","expected_round.$":"$.expected_round","execution_arn.$":"$$.Execution.Id","execution_id.$":"$$.Execution.Name"'
+    );
+  });
+
+  it('passes attempt ownership and evaluated round into finalization', () => {
+    expect(synthesized.researchDefinitionRaw).toContain(
+      '"action":"finalize","job_id.$":"$.job_id","attempt.$":"$.attempt","expected_round.$":"$.round","execution_arn.$":"$$.Execution.Id","execution_id.$":"$$.Execution.Name"'
+    );
+  });
+
+  it('passes attempt ownership and planned round into step failure checkpoints', () => {
+    expect(synthesized.researchDefinitionRaw).toContain(
+      '"action":"fail_step","job_id.$":"$.job_id","step_id.$":"$.step_id","provider.$":"$.provider","attempt.$":"$.attempt","expected_round.$":"$.expected_round","execution_arn.$":"$$.Execution.Id","execution_id.$":"$$.Execution.Name","error.$":"$.error"'
+    );
+  });
+
+  it('passes attempt ownership and observed round into whole-job failure checkpoints', () => {
+    expect(synthesized.researchDefinitionRaw).toContain(
+      '"action":"fail","job_id.$":"$.job_id","attempt.$":"$.attempt","expected_round.$":"$.expected_round","execution_arn.$":"$$.Execution.Id","execution_id.$":"$$.Execution.Name","error.$":"$.error"'
+    );
+  });
+
   it('marks the job failed when planning or finalizing crashes', () => {
     expect(synthesized.researchDefinitionRaw).toContain('"action":"fail"');
     expect(synthesized.researchDefinitionRaw).toContain('"Type":"Fail"');
@@ -779,8 +814,10 @@ describe('Keyword research routes', () => {
     const all = [...synthesized.keywordResearchIdMethods, ...synthesized.keywordResearchRetryMethods];
 
     expect(all).toHaveLength(3);
-    expect(verbsWithoutCognitoAuthorizer(all)).toStrictEqual([]);
-    expect(verbsNotIntegratedWith(all, synthesized.keywordMgmtFunctionId)).toStrictEqual([]);
+    expect(unguardedVerbs(all, synthesized.keywordMgmtFunctionId)).toStrictEqual({
+      withoutCognitoAuthorizer: [],
+      notIntegratedWithFunction: [],
+    });
   });
 });
 
@@ -828,8 +865,10 @@ describe('Research agent (2.5.0)', () => {
     const all = [...synthesized.keywordResearchAgentMethods, ...synthesized.researchTemplatesMethods, ...synthesized.researchTemplateIdMethods];
 
     expect(all).toHaveLength(5);
-    expect(verbsWithoutCognitoAuthorizer(all)).toStrictEqual([]);
-    expect(verbsNotIntegratedWith(all, synthesized.keywordMgmtFunctionId)).toStrictEqual([]);
+    expect(unguardedVerbs(all, synthesized.keywordMgmtFunctionId)).toStrictEqual({
+      withoutCognitoAuthorizer: [],
+      notIntegratedWithFunction: [],
+    });
   });
 });
 

@@ -127,33 +127,54 @@ export interface ResearchMockFetchOptions {
 export const runningJobResearchOptions: ResearchMockFetchOptions = {snapshots: { 'job-1': [buildJob({ status: 'running' })] },};
 
 /**
+ * Answers successive GET /keyword-research/{id} calls with `snapshots[id]` in
+ * order; the last snapshot repeats once the list is exhausted, and an id
+ * without snapshots answers 404.
+ */
+export function createJobSnapshotReplay(
+  snapshots: Record<string, KeywordResearchItem[]> = {}
+): (id: string) => Response {
+  const served: Record<string, number> = {};
+  return (id) => {
+    const list = snapshots[id] ?? [];
+    if (list.length === 0) return createMockJsonResponse({ error: 'Research not found' }, 404);
+    const index = Math.min(served[id] ?? 0, list.length - 1);
+    served[id] = index + 1;
+    return createMockJsonResponse(list[index]);
+  };
+}
+
+/**
  * Mock `authenticatedFetch` for the research API: starts return a pending job
  * with the next id from `pendingIds`, polls replay `snapshots[id]` in order,
  * `/retry` answers 202, `/history` and DELETE answer from fixtures.
  */
 export function createResearchMockFetch(options: ResearchMockFetchOptions = {}) {
   const remainingIds = [...(options.pendingIds ?? ['job-1'])];
-  const served: Record<string, number> = {};
+  const nextSnapshot = createJobSnapshotReplay(options.snapshots);
 
-  const nextSnapshot = (id: string): Response => {
-    const list = options.snapshots?.[id] ?? [];
-    if (list.length === 0) return createMockJsonResponse({ error: 'Research not found' }, 404);
-    const index = Math.min(served[id] ?? 0, list.length - 1);
-    served[id] = index + 1;
-    return createMockJsonResponse(list[index]);
+  /** POST /expand or /competitor: a pending job, or the scripted rejection. */
+  const startJob = (url: string): Response => {
+    if (options.startError) return createMockJsonResponse(options.startError, 400);
+    const id = remainingIds.shift() ?? 'job-pending';
+    const type = url.endsWith('/expand') ? 'expansion' : 'competitor';
+    return createMockJsonResponse(buildJob({
+      id,
+      type 
+    }), 202);
+  };
+
+  /** GET /keyword-research/{id}: the scripted raw response, else the next snapshot. */
+  const readJob = (url: string): Response => {
+    if (options.pollResponse) return options.pollResponse();
+    return nextSnapshot(url.slice(url.lastIndexOf('/') + 1));
   };
 
   return vi.fn<typeof authenticatedFetch>().mockImplementation((url, init) => {
     const method = init?.method ?? 'GET';
 
     if (method === 'POST' && (url.endsWith('/expand') || url.endsWith('/competitor'))) {
-      if (options.startError) return Promise.resolve(createMockJsonResponse(options.startError, 400));
-      const id = remainingIds.shift() ?? 'job-pending';
-      const type = url.endsWith('/expand') ? 'expansion' : 'competitor';
-      return Promise.resolve(createMockJsonResponse(buildJob({
-        id,
-        type 
-      }), 202));
+      return Promise.resolve(startJob(url));
     }
 
     if (method === 'POST' && url.endsWith('/retry')) {
@@ -167,11 +188,7 @@ export function createResearchMockFetch(options: ResearchMockFetchOptions = {}) 
       return Promise.resolve(createMockJsonResponse({ items: mockHistoryItems }));
     }
 
-    if (method === 'GET') {
-      if (options.pollResponse) return Promise.resolve(options.pollResponse());
-      const id = url.slice(url.lastIndexOf('/') + 1);
-      return Promise.resolve(nextSnapshot(id));
-    }
+    if (method === 'GET') return Promise.resolve(readJob(url));
 
     return Promise.resolve(createMockJsonResponse({ success: true }));
   });

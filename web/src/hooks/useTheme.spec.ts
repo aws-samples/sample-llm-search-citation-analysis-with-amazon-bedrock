@@ -2,9 +2,8 @@ import {
   describe, it, expect, vi, beforeEach 
 } from 'vitest';
 import {
-  renderHook, act 
-} from '@testing-library/react';
-import { useTheme } from './useTheme';
+  renderTheme, renderThemeSetTo, renderThemeToggledOnce 
+} from './useTheme-fixtures';
 import { createStorageMock } from '../test/storageMock';
 
 describe('useTheme', () => {
@@ -32,69 +31,53 @@ describe('useTheme', () => {
 
   describe('initial state', () => {
     it('returns system theme by default when no stored preference', () => {
-      const { result } = renderHook(() => useTheme());
+      const { result } = renderTheme();
       expect(result.current.theme).toBe('system');
     });
 
     it('returns stored theme from localStorage', () => {
       localStorageMock.store['theme'] = 'dark';
 
-      const { result } = renderHook(() => useTheme());
+      const { result } = renderTheme();
       expect(result.current.theme).toBe('dark');
     });
 
     it('returns light theme when stored', () => {
       localStorageMock.store['theme'] = 'light';
 
-      const { result } = renderHook(() => useTheme());
+      const { result } = renderTheme();
       expect(result.current.theme).toBe('light');
     });
 
     it('ignores invalid stored theme values', () => {
       localStorageMock.store['theme'] = 'invalid';
 
-      const { result } = renderHook(() => useTheme());
+      const { result } = renderTheme();
       expect(result.current.theme).toBe('system');
     });
   });
 
   describe('setTheme', () => {
     it('updates theme to dark', () => {
-      const { result } = renderHook(() => useTheme());
-
-      act(() => {
-        result.current.setTheme('dark');
-      });
+      const { result } = renderThemeSetTo('dark');
 
       expect(result.current.theme).toBe('dark');
     });
 
     it('updates theme to light', () => {
-      const { result } = renderHook(() => useTheme());
-
-      act(() => {
-        result.current.setTheme('light');
-      });
+      const { result } = renderThemeSetTo('light');
 
       expect(result.current.theme).toBe('light');
     });
 
     it('saves theme to localStorage', () => {
-      const { result } = renderHook(() => useTheme());
-
-      act(() => {
-        result.current.setTheme('dark');
-      });
+      renderThemeSetTo('dark');
 
       expect(localStorageMock.setItem).toHaveBeenCalledWith('theme', 'dark');
     });
 
     it('adds dark class to document when theme is dark', () => {
-      const { result } = renderHook(() => useTheme());
-
-      act(() => {
-        result.current.setTheme('dark');
-      });
+      renderThemeSetTo('dark');
 
       expect(document.documentElement.classList.contains('dark')).toBe(true);
     });
@@ -102,11 +85,7 @@ describe('useTheme', () => {
     it('removes dark class from document when theme is light', () => {
       document.documentElement.classList.add('dark');
 
-      const { result } = renderHook(() => useTheme());
-
-      act(() => {
-        result.current.setTheme('light');
-      });
+      renderThemeSetTo('light');
 
       expect(document.documentElement.classList.contains('dark')).toBe(false);
     });
@@ -116,11 +95,7 @@ describe('useTheme', () => {
     it('cycles from light to dark', () => {
       localStorageMock.store['theme'] = 'light';
 
-      const { result } = renderHook(() => useTheme());
-
-      act(() => {
-        result.current.toggleTheme();
-      });
+      const { result } = renderThemeToggledOnce();
 
       expect(result.current.theme).toBe('dark');
     });
@@ -128,22 +103,13 @@ describe('useTheme', () => {
     it('cycles from dark to system', () => {
       localStorageMock.store['theme'] = 'dark';
 
-      const { result } = renderHook(() => useTheme());
-
-      act(() => {
-        result.current.toggleTheme();
-      });
+      const { result } = renderThemeToggledOnce();
 
       expect(result.current.theme).toBe('system');
     });
 
     it('cycles from system to light', () => {
-      const { result } = renderHook(() => useTheme());
-      expect(result.current.theme).toBe('system');
-
-      act(() => {
-        result.current.toggleTheme();
-      });
+      const { result } = renderThemeToggledOnce();
 
       expect(result.current.theme).toBe('light');
     });
@@ -153,7 +119,7 @@ describe('useTheme', () => {
     it('returns true when theme is dark', () => {
       localStorageMock.store['theme'] = 'dark';
 
-      const { result } = renderHook(() => useTheme());
+      const { result } = renderTheme();
 
       expect(result.current.isDark).toBe(true);
     });
@@ -161,7 +127,7 @@ describe('useTheme', () => {
     it('returns false when theme is light', () => {
       localStorageMock.store['theme'] = 'light';
 
-      const { result } = renderHook(() => useTheme());
+      const { result } = renderTheme();
 
       expect(result.current.isDark).toBe(false);
     });
@@ -174,7 +140,7 @@ describe('useTheme', () => {
         removeEventListener: vi.fn(),
       }));
 
-      const { result } = renderHook(() => useTheme());
+      const { result } = renderTheme();
 
       // System prefers dark
       expect(result.current.isDark).toBe(true);
@@ -190,7 +156,7 @@ describe('useTheme', () => {
         removeEventListener: vi.fn(),
       }));
 
-      renderHook(() => useTheme());
+      renderTheme();
 
       expect(addEventListenerMock).toHaveBeenCalledWith('change', expect.any(Function));
     });
@@ -203,7 +169,7 @@ describe('useTheme', () => {
         removeEventListener: removeEventListenerMock,
       }));
 
-      const { unmount } = renderHook(() => useTheme());
+      const { unmount } = renderTheme();
 
       unmount();
 

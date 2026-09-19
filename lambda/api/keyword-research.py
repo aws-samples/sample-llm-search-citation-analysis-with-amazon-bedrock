@@ -31,6 +31,8 @@ import logging
 import os
 import sys
 import uuid
+from collections.abc import Callable
+from functools import wraps
 from typing import Any
 from urllib.parse import urlparse
 
@@ -43,6 +45,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.ai_clients import get_web_search_clients
 from shared.api_response import api_response, not_found_response, success_response, validation_error
+from shared.api_views import named_item_view
 from shared.auth import get_caller_identity
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
@@ -81,7 +84,10 @@ from shared.research_jobs import (
     TYPE_COMPETITOR,
     TYPE_EXPANSION,
     build_job_item,
+    checkpoint_terminal_result,
+    job_attempt,
     public_view,
+    retry_start_round,
 )
 from shared.stale_jobs import stale_elapsed_seconds
 from shared.url_validator import validate_url_safe
@@ -115,83 +121,161 @@ groups_table = dynamodb.Table(KEYWORD_GROUPS_TABLE)
 # Job bookkeeping
 # =============================================================================
 
-def _mark_research_failed(research_id: str, error: Exception) -> None:
-    """Record a job that could not be started; never let the bookkeeping write mask the error."""
-    with contextlib.suppress(Exception):
+def _is_conditional_failure(error: ClientError) -> bool:
+    return error.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException'
+
+
+def _replace_row(target: dict[str, Any], replacement: dict[str, Any]) -> None:
+    target.clear()
+    target.update(replacement)
+
+
+def _persist_terminal_attempt(
+    row: dict[str, Any],
+    message: str,
+    *,
+    require_unowned: bool = False,
+) -> bool:
+    """Persist a failed/partial attempt only while its observed state still owns the row."""
+    status, result = checkpoint_terminal_result(row)
+    timestamp = get_timestamp()
+    names = {'#s': 'status'}
+    values: dict[str, Any] = {
+        ':s': status,
+        ':observed_status': row.get('status'),
+        ':attempt': job_attempt(row),
+        ':e': message[:500],
+        ':ts': timestamp,
+    }
+    sets = ['#s = :s', 'error_message = :e', 'finished_at = :ts', 'updated_at = :ts']
+    for index, (field, value) in enumerate(result.items()):
+        placeholder = f':result{index}'
+        values[placeholder] = value
+        sets.append(f'{field} = {placeholder}')
+
+    condition = '#s = :observed_status AND (attempt = :attempt OR attribute_not_exists(attempt))'
+    values[':observed_revision'] = int(row.get('checkpoint_revision') or 0)
+    if 'checkpoint_revision' in row:
+        condition += ' AND checkpoint_revision = :observed_revision'
+    else:
+        condition += ' AND attribute_not_exists(checkpoint_revision)'
+    started_at = row.get('attempt_started_at')
+    if isinstance(started_at, str) and started_at:
+        values[':attempt_started_at'] = started_at
+        condition += ' AND attempt_started_at = :attempt_started_at'
+    if require_unowned:
+        condition += ' AND attribute_not_exists(execution_arn)'
+
+    try:
         research_table.update_item(
-            Key={'id': research_id},
-            UpdateExpression='SET #s = :s, error_message = :e, updated_at = :ts',
-            ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={':s': STATUS_FAILED, ':e': str(error)[:500], ':ts': get_timestamp()},
+            Key={'id': row['id']},
+            UpdateExpression=f"SET {', '.join(sets)}",
+            ConditionExpression=condition,
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
         )
+    except ClientError as exc:
+        if _is_conditional_failure(exc):
+            return False
+        raise
+
+    row.update(result)
+    row.update({'status': status, 'error_message': message[:500], 'finished_at': timestamp, 'updated_at': timestamp})
+    return True
+
+
+def _mark_research_failed(row: dict[str, Any], error: Exception) -> None:
+    """Fail only the unowned attempt whose execution could not be started."""
+    try:
+        _persist_terminal_attempt(row, str(error), require_unowned=True)
+    except Exception:
+        logger.exception('Could not record failed research dispatch for %s', row.get('id'))
 
 
 def _fail_if_research_timed_out(row: dict[str, Any]) -> None:
-    """Mark a non-terminal job failed once it has outlived the state machine.
+    """Conditionally expose checkpointed results when an active execution timed out."""
+    for _attempt in range(3):
+        if row.get('status') not in ACTIVE_STATUSES:
+            return
+        attempt_started = row.get('attempt_started_at') or row.get('retried_at') or row.get('created_at', '')
+        elapsed = stale_elapsed_seconds(attempt_started, RESEARCH_STALE_AFTER_SECONDS)
+        if elapsed is None:
+            return
 
-    The worker records every step outcome and ``Finalize`` records the job's,
-    so in normal operation nothing is ever left at ``pending``/``running``.
-    The one thing that leaves no trace in Python is the execution itself
-    dying — the state machine's 30-minute timeout, or an execution that never
-    started. This reader-side sweep is the safety net for that case only;
-    the threshold sits above the state machine timeout so a live job can
-    never be marked failed and then flip back.
+        message = f'Research timed out after {int(elapsed)} seconds. Retry to run the missing steps again.'
+        try:
+            if _persist_terminal_attempt(row, message):
+                logger.info(
+                    'Marked research %s attempt %s terminal after timeout (%ss)',
+                    row['id'],
+                    job_attempt(row),
+                    int(elapsed),
+                )
+                return
+        except Exception:
+            logger.exception('Could not sweep timed-out research %s', row.get('id'))
+            return
 
-    The clock starts at the current attempt (``retried_at`` for a retry),
-    not at ``created_at``, or every retry of an old job would be swept at
-    once. Mutates ``row`` in place so the response that triggers the sweep
-    reports the corrected status.
-    """
-    if row.get('status') not in ACTIVE_STATUSES:
-        return
+        current = research_table.get_item(Key={'id': row['id']}, ConsistentRead=True).get('Item')
+        if not current:
+            return
+        _replace_row(row, current)
 
-    attempt_started = row.get('retried_at') or row.get('created_at', '')
-    elapsed = stale_elapsed_seconds(attempt_started, RESEARCH_STALE_AFTER_SECONDS)
-    if elapsed is None:
-        return
 
-    message = f'Research timed out after {int(elapsed)} seconds. Retry to run the missing steps again.'
-    with contextlib.suppress(Exception):
+def _execution_id(execution_arn: str) -> str:
+    return execution_arn.rsplit(':', 1)[-1]
+
+
+def _record_execution_owner(job_id: str, attempt: int, execution_arn: str) -> None:
+    """Bind a started execution without overwriting a newer/terminal attempt."""
+    with contextlib.suppress(ClientError):
         research_table.update_item(
-            Key={'id': row['id']},
-            UpdateExpression='SET #s = :s, error_message = :e, updated_at = :ts',
+            Key={'id': job_id},
+            UpdateExpression='SET execution_arn = :arn, execution_id = :execution_id, updated_at = :ts',
+            ConditionExpression=(
+                'attempt = :attempt AND #s IN (:pending, :running) '
+                'AND (attribute_not_exists(execution_arn) OR execution_arn = :arn)'
+            ),
             ExpressionAttributeNames={'#s': 'status'},
-            ExpressionAttributeValues={':s': STATUS_FAILED, ':e': message, ':ts': get_timestamp()},
+            ExpressionAttributeValues={
+                ':attempt': attempt,
+                ':pending': STATUS_PENDING,
+                ':running': 'running',
+                ':arn': execution_arn,
+                ':execution_id': _execution_id(execution_arn),
+                ':ts': get_timestamp(),
+            },
         )
-    row['status'] = STATUS_FAILED
-    row['error_message'] = message
-    logger.info(f"Marked research {row['id']} as failed due to timeout ({int(elapsed)}s)")
 
 
-def _start_execution(job_id: str, attempt: int) -> str:
-    """Start one state machine execution for the job; returns the execution ARN.
-
-    Execution names must be unique per state machine, so retries get a
-    suffix. The input always carries ``retry`` because the Plan state reads
-    it with a JSONPath and a missing key would raise ``States.Runtime``.
-    """
-    name = job_id if attempt == 0 else f'{job_id}-r{attempt}'
+def _start_execution(job_id: str, attempt: int, expected_round: int) -> str:
+    """Start the execution for one immutable attempt and return its ARN."""
+    retry_count = attempt - 1
+    name = job_id if retry_count == 0 else f'{job_id}-r{retry_count}'
     response = stepfunctions.start_execution(
         stateMachineArn=RESEARCH_STATE_MACHINE_ARN,
         name=name,
-        input=json.dumps({'job_id': job_id, 'retry': attempt > 0}),
+        input=json.dumps({
+            'job_id': job_id,
+            'retry': retry_count > 0,
+            'attempt': attempt,
+            'expected_round': expected_round,
+        }),
     )
     return response['executionArn']
 
 
 def _start_job(job: dict[str, Any], event: dict[str, Any], label: str) -> dict[str, Any]:
-    """Persist the pending row, start its execution, answer 202."""
+    """Persist attempt one, start its execution, and answer 202."""
     research_table.put_item(Item=job)
     try:
-        _start_execution(job['id'], attempt=0)
+        execution_arn = _start_execution(job['id'], job_attempt(job), expected_round=1)
     except (ClientError, BotoCoreError) as exc:
-        # Running the work here instead would outlive API Gateway's 29s
-        # timeout. Fail fast and mark the row terminal so it does not sit at
-        # `pending` forever.
-        logger.error(f"Could not start research execution for {job['id']}: {exc}")
-        _mark_research_failed(job['id'], exc)
+        logger.exception('Could not start research execution for %s', job['id'])
+        _mark_research_failed(job, exc)
         return _unavailable_response(f'Could not start {label.lower()}. Please try again.', event)
 
+    _record_execution_owner(job['id'], job_attempt(job), execution_arn)
     return success_response({
         **public_view(job),
         'message': f"{label} started. Poll /keyword-research/{job['id']} for results.",
@@ -202,23 +286,26 @@ def _path_id(event: dict[str, Any]) -> str | None:
     return (event.get('pathParameters') or {}).get('id')
 
 
-def _load_research(event: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    """The job addressed by ``{id}``, swept for timeouts; returns ``(job, error_response)``.
+def _with_research(route: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    """Load the job addressed by ``{id}``, swept for timeouts, and hand it to ``route`` as ``job``.
 
-    ``(None, 400)`` without an id, ``(None, 404)`` for an unknown job. Every
-    route that reads a single job goes through here so they agree on those
-    answers and on when the stale sweep runs.
+    Answers 400 without an id and 404 for an unknown job. Every route that
+    reads a single job goes through here so they agree on those answers and
+    on when the stale sweep runs.
     """
-    job_id = _path_id(event)
-    if not job_id:
-        return None, validation_error('Research ID is required', event, 'id')
+    @wraps(route)
+    def wrapper(event: dict[str, Any], context: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        job_id = _path_id(event)
+        if not job_id:
+            return validation_error('Research ID is required', event, 'id')
 
-    job = research_table.get_item(Key={'id': job_id}).get('Item')
-    if not job:
-        return None, not_found_response(resource='Research', event=event)
+        job = research_table.get_item(Key={'id': job_id}, ConsistentRead=True).get('Item')
+        if not job:
+            return not_found_response(resource='Research', event=event)
 
-    _fail_if_research_timed_out(job)
-    return job, None
+        _fail_if_research_timed_out(job)
+        return route(event, context, *args, job=job, **kwargs)
+    return wrapper
 
 
 def _no_provider_response(event: dict[str, Any]) -> dict[str, Any]:
@@ -319,7 +406,7 @@ def _load_template(template_id: str) -> dict[str, Any]:
     builtin = builtin_template(template_id)
     if builtin:
         return builtin
-    item = templates_table.get_item(Key={'id': template_id}).get('Item')
+    item: dict[str, Any] | None = templates_table.get_item(Key={'id': template_id}).get('Item')
     if not item:
         raise TemplateNotFoundError(template_id)
     return _template_view(item)
@@ -337,6 +424,36 @@ def _resolve_template(template_id: str | None, system_prompt: str | None) -> dic
         'template_name': template['name'],
         'system_prompt': system_prompt or template['system_prompt'],
     }
+
+
+def _agent_brief_error(event: dict[str, Any], *, dimensions: Any, country: str, language: str) -> dict[str, Any] | None:
+    """The 400 for a malformed research brief (dimension list, market codes), else ``None``."""
+    if not isinstance(dimensions, list) or not dimensions:
+        return validation_error('Pick at least one expansion dimension', event, 'dimensions')
+    if any(not isinstance(dimension, str) for dimension in dimensions):
+        return validation_error('Every expansion dimension must be a string', event, 'dimensions')
+    if not _is_code(country):
+        return validation_error('country must be a two-letter country code (e.g. es)', event, 'country')
+    if not _is_code(language):
+        return validation_error('language must be a two-letter language code (e.g. es)', event, 'language')
+    return None
+
+
+def _agent_options_error(
+    event: dict[str, Any], body: dict, *, tracking_count: int, target_count: int, system_prompt: str | None, group_id: str | None,
+) -> dict[str, Any] | None:
+    """The 400 for an unusable tracking count, a blank prompt or an unknown group, else ``None``."""
+    if 'tracking_count' in body and (
+        body.get('tracking_count') is None or isinstance(body.get('tracking_count'), bool)
+    ):
+        return validation_error('tracking_count must be an integer', event, 'tracking_count')
+    if 'tracking_count' in body and tracking_count > target_count:
+        return validation_error('tracking_count cannot exceed target_count', event, 'tracking_count')
+    if system_prompt is not None and not system_prompt.strip():
+        return validation_error('system_prompt cannot be blank', event, 'system_prompt')
+    if group_id and not groups_table.get_item(Key={'id': group_id}).get('Item'):
+        return validation_error('Keyword group not found', event, 'group_id')
+    return None
 
 
 @parse_json_body
@@ -367,22 +484,11 @@ def _start_agent(
     run did. ``group_id`` is the group the proposal is meant for; it is
     validated here and used by the UI's "Add to group" action.
     """
-    if not isinstance(dimensions, list) or not dimensions:
-        return validation_error('Pick at least one expansion dimension', event, 'dimensions')
-    if not _is_code(country):
-        return validation_error('country must be a two-letter country code (e.g. es)', event, 'country')
-    if not _is_code(language):
-        return validation_error('language must be a two-letter language code (e.g. es)', event, 'language')
-    if 'tracking_count' in body and (
-        body.get('tracking_count') is None or isinstance(body.get('tracking_count'), bool)
-    ):
-        return validation_error('tracking_count must be an integer', event, 'tracking_count')
-    if 'tracking_count' in body and tracking_count > target_count:
-        return validation_error('tracking_count cannot exceed target_count', event, 'tracking_count')
-    if system_prompt is not None and not system_prompt.strip():
-        return validation_error('system_prompt cannot be blank', event, 'system_prompt')
-    if group_id and not groups_table.get_item(Key={'id': group_id}).get('Item'):
-        return validation_error('Keyword group not found', event, 'group_id')
+    error = _agent_brief_error(event, dimensions=dimensions, country=country, language=language) or _agent_options_error(
+        event, body, tracking_count=tracking_count, target_count=target_count, system_prompt=system_prompt, group_id=group_id,
+    )
+    if error:
+        return error
 
     try:
         template = _resolve_template(template_id, system_prompt)
@@ -423,9 +529,7 @@ def _start_agent(
 
 def _template_view(item: dict[str, Any]) -> dict[str, Any]:
     return {
-        'id': item['id'],
-        'name': item.get('name', ''),
-        'description': item.get('description', ''),
+        **named_item_view(item),
         **_profile_of(item),
         'system_prompt': item.get('system_prompt', ''),
         'builtin': False,
@@ -576,55 +680,89 @@ def _delete_template(event: dict[str, Any], context: Any) -> dict[str, Any]:
     return success_response({'message': 'Template deleted successfully'}, event)
 
 
-def _retry_research(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """POST /api/keyword-research/{id}/retry — re-run only the steps that did not complete.
-
-    Completed steps keep their results; the new execution plans the rest.
-    Only ``failed`` and ``partial`` jobs (including a stale job the sweep just
-    failed) can be retried — a running job is already doing the work.
-    """
-    job, error = _load_research(event)
-    if error:
-        return error
+@_with_research
+def _retry_research(event: dict[str, Any], context: Any, job: dict[str, Any]) -> dict[str, Any]:
+    """POST /api/keyword-research/{id}/retry — atomically claim one new attempt."""
     if job.get('status') not in (STATUS_FAILED, STATUS_PARTIAL):
         return validation_error('Only failed or partial research can be retried', event, 'status')
-
     if not get_web_search_clients():
         return _no_provider_response(event)
 
     job_id = job['id']
-    attempt = int(job.get('retry_count') or 0) + 1
+    observed_status = job['status']
+    observed_attempt = job_attempt(job)
+    observed_retry_count = int(job.get('retry_count') or 0)
+    next_attempt = observed_attempt + 1
+    next_retry_count = observed_retry_count + 1
+    expected_round = retry_start_round(job)
     timestamp = get_timestamp()
-    research_table.update_item(
-        Key={'id': job_id},
-        UpdateExpression='SET #s = :s, retry_count = :n, retried_at = :ts, updated_at = :ts REMOVE error_message, finished_at',
-        ExpressionAttributeNames={'#s': 'status'},
-        ExpressionAttributeValues={':s': STATUS_PENDING, ':n': attempt, ':ts': timestamp},
-    )
     try:
-        _start_execution(job_id, attempt)
+        claim = research_table.update_item(
+            Key={'id': job_id},
+            UpdateExpression=(
+                'SET #s = :pending, attempt = :next_attempt, retry_count = :next_retry_count, '
+                'attempt_started_at = :ts, retried_at = :ts, updated_at = :ts '
+                'REMOVE error_message, finished_at, execution_arn, execution_id, active_round'
+            ),
+            ConditionExpression=(
+                '#s = :observed_status '
+                'AND (attempt = :observed_attempt OR attribute_not_exists(attempt)) '
+                'AND (retry_count = :observed_retry_count OR attribute_not_exists(retry_count))'
+            ),
+            ExpressionAttributeNames={'#s': 'status'},
+            ExpressionAttributeValues={
+                ':pending': STATUS_PENDING,
+                ':observed_status': observed_status,
+                ':observed_attempt': observed_attempt,
+                ':observed_retry_count': observed_retry_count,
+                ':next_attempt': next_attempt,
+                ':next_retry_count': next_retry_count,
+                ':ts': timestamp,
+            },
+            ReturnValues='ALL_NEW',
+        )
+    except ClientError as exc:
+        if _is_conditional_failure(exc):
+            return validation_error('This research was already retried or changed. Refresh and try again.', event, 'status')
+        raise
+
+    attributes = claim.get('Attributes') if isinstance(claim, dict) else None
+    claimed = attributes if isinstance(attributes, dict) else {
+        **job,
+        'status': STATUS_PENDING,
+        'attempt': next_attempt,
+        'retry_count': next_retry_count,
+        'attempt_started_at': timestamp,
+        'retried_at': timestamp,
+        'updated_at': timestamp,
+    }
+    for field in ('error_message', 'finished_at', 'execution_arn', 'execution_id', 'active_round'):
+        claimed.pop(field, None)
+
+    try:
+        execution_arn = _start_execution(job_id, next_attempt, expected_round)
     except (ClientError, BotoCoreError) as exc:
-        logger.error(f"Could not start retry execution for {job_id}: {exc}")
-        _mark_research_failed(job_id, exc)
+        logger.exception('Could not start retry execution for %s attempt %s', job_id, next_attempt)
+        _mark_research_failed(claimed, exc)
         return _unavailable_response('Could not retry the research. Please try again.', event)
 
+    _record_execution_owner(job_id, next_attempt, execution_arn)
     return success_response({
         'id': job_id,
         'status': STATUS_PENDING,
-        'retry_count': attempt,
+        'attempt': next_attempt,
+        'retry_count': next_retry_count,
         'message': f'Retry started. Poll /keyword-research/{job_id} for results.',
     }, event, 202)
 
 
-def _get_research(event: dict[str, Any], context: Any) -> dict[str, Any]:
+@_with_research
+def _get_research(event: dict[str, Any], context: Any, job: dict[str, Any]) -> dict[str, Any]:
     """GET /api/keyword-research/{id} — the job with its steps and merged results.
 
     While the job runs, the merged result covers the steps completed so far,
     so the UI can show partial results before the last provider answers.
     """
-    job, error = _load_research(event)
-    if error:
-        return error
     return success_response(public_view(job), event)
 
 
@@ -689,5 +827,5 @@ def _delete_research(event: dict[str, Any], context: Any) -> dict[str, Any]:
     ('DELETE', None): _delete_research,
 })
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Route handler for API Gateway requests."""
-    pass  # Routes handle everything
+    """Route handler for API Gateway requests; routes handle everything, this body is never reached."""
+    ...

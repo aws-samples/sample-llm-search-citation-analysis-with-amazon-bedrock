@@ -11,9 +11,9 @@ Endpoints:
 """
 
 import json
-import logging
 import os
 import sys
+from collections.abc import Mapping
 from typing import Any
 from urllib.parse import unquote
 
@@ -24,9 +24,6 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, route_handler, validate
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 s3_client = boto3.client('s3')
 
@@ -125,6 +122,17 @@ def scope_key_to_root(key: str, root_prefix: str) -> tuple[str | None, str | Non
     return scoped, None
 
 
+def _list_objects(bucket: str, prefix: str) -> Mapping[str, Any]:
+    """One ``ListObjectsV2`` page under ``prefix`` with ``/`` as the delimiter.
+
+    The listing is handed on as an untyped mapping: boto3-stubs marks every
+    field of a listed object optional, while S3 always returns ``Key``,
+    ``Size`` and ``LastModified`` for objects and ``Prefix`` for common
+    prefixes, so the caller reads them without per-field narrowing.
+    """
+    return s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix, Delimiter='/')
+
+
 def list_prefixes(bucket: str, prefix: str = '', root_prefix: str = 'raw-responses/') -> dict[str, Any]:
     """
     List folders and files at a given S3 prefix.
@@ -140,11 +148,7 @@ def list_prefixes(bucket: str, prefix: str = '', root_prefix: str = 'raw-respons
     elif not prefix.startswith(root_prefix):
         prefix = root_prefix + prefix
 
-    response = s3_client.list_objects_v2(
-        Bucket=bucket,
-        Prefix=prefix,
-        Delimiter='/'
-    )
+    response = _list_objects(bucket, prefix)
 
     folders = []
     files = []
@@ -273,17 +277,15 @@ def _browse(event: dict[str, Any], context: Any, prefix: str, bucket: str) -> di
     return success_response(result, event)
 
 
-def _resolve_scoped_object(
-    event: dict[str, Any], key: str, bucket: str
-) -> tuple[str | None, str | None, dict[str, Any] | None]:
+def _resolve_scoped_object(event: dict[str, Any], key: str, bucket: str) -> tuple[str, str] | dict[str, Any]:
     """Unquote, validate and root-scope a caller-supplied object key.
 
     Shared by `_get_file` and `_get_download` so both routes apply the same
     containment gate before touching S3.
 
     Returns:
-        ``(actual_bucket, scoped_key, None)`` on success, or
-        ``(None, None, error_response)`` when the key or bucket is refused.
+        ``(actual_bucket, scoped_key)`` on success, or the 400 response to
+        send when the key or bucket is refused.
     """
     # URL decode the key. Unquote BEFORE validating so `%2e%2e%2f` is caught.
     key = unquote(key)
@@ -291,18 +293,19 @@ def _resolve_scoped_object(
     # Path traversal validation
     path_error = validate_s3_path(key)
     if path_error:
-        return None, None, validation_error(path_error, event, 'key')
+        return validation_error(path_error, event, 'key')
 
     # Get the actual bucket and its root prefix
     actual_bucket, root_prefix = get_bucket_and_prefix(bucket)
     if not actual_bucket:
-        return None, None, validation_error(f'Invalid bucket type: {bucket}', event, 'bucket')
+        return validation_error(f'Invalid bucket type: {bucket}', event, 'bucket')
 
     scoped_key, scope_error = scope_key_to_root(key, root_prefix)
-    if scope_error:
-        return None, None, validation_error(scope_error, event, 'key')
+    if scoped_key is None:
+        # scope_key_to_root answers exactly one of (key, None) / (None, message).
+        return validation_error(str(scope_error), event, 'key')
 
-    return actual_bucket, scoped_key, None
+    return actual_bucket, scoped_key
 
 
 @validate({
@@ -311,9 +314,10 @@ def _resolve_scoped_object(
 })
 def _get_file(event: dict[str, Any], context: Any, key: str, bucket: str) -> dict[str, Any]:
     """Get file content for the given S3 key, confined to the bucket's root prefix."""
-    actual_bucket, scoped_key, error = _resolve_scoped_object(event, key, bucket)
-    if error:
-        return error
+    target = _resolve_scoped_object(event, key, bucket)
+    if isinstance(target, dict):
+        return target
+    actual_bucket, scoped_key = target
 
     result = get_file_content(actual_bucket, scoped_key)
     return success_response(result, event)
@@ -330,9 +334,10 @@ def _get_download(event: dict[str, Any], context: Any, key: str, bucket: str) ->
     bearer-shareable — no Cognito token is needed to redeem it — so the key must
     be scoped before it is signed, not after.
     """
-    actual_bucket, scoped_key, error = _resolve_scoped_object(event, key, bucket)
-    if error:
-        return error
+    target = _resolve_scoped_object(event, key, bucket)
+    if isinstance(target, dict):
+        return target
+    actual_bucket, scoped_key = target
 
     url = generate_download_url(actual_bucket, scoped_key)
     # Echo the key that was actually signed, not the raw input.
@@ -349,9 +354,8 @@ def _get_download(event: dict[str, Any], context: Any, key: str, bucket: str) ->
     ('GET', '/download'): _get_download,
     ('GET', None): _browse,
 })
-def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
+def handler(event: dict[str, Any], context: Any):
     """
     API Gateway handler for browsing raw responses.
     Routes handled by @route_handler decorator.
     """
-    pass  # Routes handle everything

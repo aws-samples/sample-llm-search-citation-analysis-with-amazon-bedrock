@@ -17,9 +17,9 @@ const mockCitations = [
 ];
 
 describe('CitationsView', () => {
-  it('renders without crashing', () => {
+  it('shows the empty state when there are no citations', () => {
     render(<CitationsView citations={[]} />);
-    expect(document.body).toBeTruthy();
+    expect(screen.getByText('No citations yet')).toBeInTheDocument();
   });
 
   it('renders export button', () => {

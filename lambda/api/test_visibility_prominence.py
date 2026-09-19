@@ -22,6 +22,15 @@ def _brand(name: str, classification: str, rank=None, first_position=None) -> di
     }
 
 
+def _visibility_metrics(rows: list[dict], query_prompt_id: str | None = None) -> dict:
+    """Metrics for the ``hotels`` keyword when its stored answers are ``rows`` and four providers are enabled."""
+    with (
+        patch.object(_mod, 'query_keyword_rows', return_value=rows),
+        patch.object(_mod, 'get_enabled_provider_count', return_value=4),
+    ):
+        return _mod.get_visibility_metrics('hotels', {}, query_prompt_id=query_prompt_id)
+
+
 class TestVisibilityProminence:
     def test_uses_only_latest_run_answers_for_first_party_prominence(self) -> None:
         rows = [
@@ -55,11 +64,7 @@ class TestVisibilityProminence:
             },
         ]
 
-        with (
-            patch.object(_mod, 'query_keyword_rows', return_value=rows),
-            patch.object(_mod, 'get_enabled_provider_count', return_value=4),
-        ):
-            result = _mod.get_visibility_metrics('hotels', {})
+        result = _visibility_metrics(rows)
 
         assert result['prominence'] == {
             'answers': 4,
@@ -86,11 +91,7 @@ class TestVisibilityProminence:
             },
         ]
 
-        with (
-            patch.object(_mod, 'query_keyword_rows', return_value=rows),
-            patch.object(_mod, 'get_enabled_provider_count', return_value=4),
-        ):
-            result = _mod.get_visibility_metrics('hotels', {}, query_prompt_id='family')
+        result = _visibility_metrics(rows, query_prompt_id='family')
 
         assert result['prominence'] == {
             'answers': 1,

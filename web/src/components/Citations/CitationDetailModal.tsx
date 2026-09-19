@@ -21,7 +21,8 @@ interface SEOAnalysis {
   competitive_advantage?: string;
 }
 
-interface CrawledContent {
+/** A crawled citation page as `GET /crawled-content` returns it; the shape both the table and this modal work from. */
+export interface CrawledContent {
   normalized_url: string;
   title: string;
   summary: string;

@@ -10,16 +10,12 @@ Consolidates 5 separate Lambdas into one:
 - GET /api/raw-responses/* -> browse-raw-responses handler
 """
 
-import logging
 import sys
 
 # Shared layer path (populated by the Lambda layer at /opt/python)
 sys.path.insert(0, '/opt/python')
 
-from shared.router import HandlerLoader, dispatch_route
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+from shared.consolidated_router import route_map_handler
 
 ROUTE_MAP = {
     '/api/citations': 'get-citations.py',
@@ -29,9 +25,4 @@ ROUTE_MAP = {
     '/api/raw-responses': 'browse-raw-responses.py',
 }
 
-_handlers = HandlerLoader(__file__)
-
-
-def handler(event, context):
-    """Router handler that dispatches based on API Gateway resource path."""
-    return dispatch_route(event, context, ROUTE_MAP, _handlers, logger)
+handler = route_map_handler(__file__, ROUTE_MAP, __name__)

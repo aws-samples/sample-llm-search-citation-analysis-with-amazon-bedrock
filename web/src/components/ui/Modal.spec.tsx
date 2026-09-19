@@ -8,6 +8,17 @@ import {
   Modal, ConfirmModal, AlertModal 
 } from './Modal';
 
+/** Renders an open modal wired to a fresh `onClose` spy, and returns the spy. */
+function renderOpenModal() {
+  const onClose = vi.fn();
+  render(
+    <Modal isOpen={true} onClose={onClose}>
+      <p>Content</p>
+    </Modal>
+  );
+  return onClose;
+}
+
 describe('Modal', () => {
   beforeEach(() => {
     vi.spyOn(document, 'addEventListener');
@@ -49,25 +60,15 @@ describe('Modal', () => {
   });
 
   it('calls onClose when close button clicked', () => {
-    const onClose = vi.fn();
-    render(
-      <Modal isOpen={true} onClose={onClose}>
-        <p>Content</p>
-      </Modal>
-    );
-    
+    const onClose = renderOpenModal();
+
     fireEvent.click(screen.getByLabelText('Close modal'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('calls onClose when backdrop clicked', () => {
-    const onClose = vi.fn();
-    render(
-      <Modal isOpen={true} onClose={onClose}>
-        <p>Content</p>
-      </Modal>
-    );
-    
+    const onClose = renderOpenModal();
+
     const backdrop = document.querySelector('[aria-hidden="true"]');
     expect(backdrop).not.toBeNull();
     fireEvent.click(backdrop as Element);
@@ -75,13 +76,8 @@ describe('Modal', () => {
   });
 
   it('calls onClose when Escape key pressed', () => {
-    const onClose = vi.fn();
-    render(
-      <Modal isOpen={true} onClose={onClose}>
-        <p>Content</p>
-      </Modal>
-    );
-    
+    const onClose = renderOpenModal();
+
     fireEvent.keyDown(document, { key: 'Escape' });
     expect(onClose).toHaveBeenCalledTimes(1);
   });

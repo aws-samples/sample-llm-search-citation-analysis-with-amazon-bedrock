@@ -7,6 +7,9 @@ import { useBrandConfig } from '../../hooks/useBrandConfig';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { useProviderConfig } from '../../hooks/useProviderConfig';
 import { BrandConfigContent } from '../Brands/BrandConfigContent';
+import {
+  countTrackedBrands, describeIndustry 
+} from '../Brands/brandConfigSummary';
 import { AlertsConfig } from './AlertsConfig';
 import { ProvidersConfig } from './ProvidersConfig';
 import { UsersConfig } from './UsersConfig';
@@ -64,16 +67,91 @@ interface SettingsTabDefinition {
   needsAttention?: boolean;
 }
 
+interface SettingsTabInputs {
+  readonly keywords: Keyword[];
+  readonly brandConfig: Pick<ReturnType<typeof useBrandConfig>, 'config' | 'presets' | 'loading'>;
+  readonly providerConfig: Pick<ReturnType<typeof useProviderConfig>, 'providers' | 'loading'>;
+  readonly isAdmin: boolean;
+}
+
+/**
+ * Single source of truth for the tab bar (bugs.md §5): the button markup
+ * renders once from this list instead of hand-written copies. Attention
+ * bubbles mark setup that blocks analysis runs; they are suppressed while the
+ * underlying data is still loading to avoid flashing false alarms.
+ */
+function buildSettingsTabs({
+  keywords, brandConfig, providerConfig, isAdmin 
+}: SettingsTabInputs): SettingsTabDefinition[] {
+  const {
+    config, presets, loading: configLoading 
+  } = brandConfig;
+  const {
+    providers, loading: providersLoading 
+  } = providerConfig;
+  const configuredCount = providers.filter((provider) => provider.configured).length;
+  const enabledCount = providers.filter((provider) => provider.enabled && provider.configured).length;
+
+  return [
+    {
+      id: 'keywords',
+      label: 'Keywords',
+      badge: (
+        <span className="ml-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+          {keywords.length}
+        </span>
+      ),
+      needsAttention: keywords.length === 0,
+    },
+    {
+      id: 'brand-config',
+      label: 'Brand Tracking',
+      badge: (
+        <span className="hidden lg:inline ml-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+          {describeIndustry(config, presets)}
+        </span>
+      ),
+      needsAttention: !configLoading && countTrackedBrands(config, 'first_party') === 0,
+    },
+    {
+      id: 'query-prompts',
+      label: 'Personas',
+    },
+    {
+      id: 'providers',
+      label: 'AI Providers',
+      badge: (
+        <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${getProviderBadgeClass(enabledCount, configuredCount)}`}>
+          {enabledCount}/{providers.length}
+        </span>
+      ),
+      needsAttention: !providersLoading && configuredCount === 0,
+    },
+    {
+      id: 'alerts',
+      label: 'Alerts',
+    },
+    // Withheld until membership is confirmed, so the tab doesn't flash in for
+    // non-admins on the first paint.
+    ...(isAdmin ? [{
+      id: 'users',
+      label: 'Users',
+    } satisfies SettingsTabDefinition] : []),
+  ];
+}
+
 export const SettingsView = ({
   keywords, setKeywords, initialTab
 }: SettingsViewProps) => {
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? 'keywords');
+  const brandConfig = useBrandConfig();
   const {
     config, presets, loading: configLoading, saveConfig, expandAllBrands, findCompetitors
-  } = useBrandConfig();
+  } = brandConfig;
+  const providerConfig = useProviderConfig();
   const {
     providers, loading: providersLoading, updateProvider, refreshProviders
-  } = useProviderConfig();
+  } = providerConfig;
   // User management is Admin-only server-side; this only hides the entry point
   // so non-admins aren't shown a tab where every action returns 403.
   const {
@@ -89,67 +167,12 @@ export const SettingsView = ({
     }
   }, [isAdmin, isAdminLoading, activeTab]);
 
-  const industryName = config?.industry
-    ? presets?.[config.industry]?.name ?? config.industry
-    : 'Not configured';
-
-  const configuredCount = providers.filter((provider) => provider.configured).length;
-  const enabledCount = providers.filter((provider) => provider.enabled && provider.configured).length;
-
-  // Attention bubbles for setup that blocks analysis runs; suppressed while
-  // the underlying data is still loading to avoid flashing false alarms.
-  const keywordsNeedAttention = keywords.length === 0;
-  const brandNeedsAttention = !configLoading && (config?.tracked_brands.first_party.length ?? 0) === 0;
-  const providersNeedAttention = !providersLoading && configuredCount === 0;
-
-  // Single source of truth for the tab bar (bugs.md §5): the button markup
-  // below renders once from this list instead of hand-written copies.
-  const tabs: SettingsTabDefinition[] = [
-    {
-      id: 'keywords',
-      label: 'Keywords',
-      badge: (
-        <span className="ml-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
-          {keywords.length}
-        </span>
-      ),
-      needsAttention: keywordsNeedAttention,
-    },
-    {
-      id: 'brand-config',
-      label: 'Brand Tracking',
-      badge: (
-        <span className="hidden lg:inline ml-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
-          {industryName}
-        </span>
-      ),
-      needsAttention: brandNeedsAttention,
-    },
-    {
-      id: 'query-prompts',
-      label: 'Personas',
-    },
-    {
-      id: 'providers',
-      label: 'AI Providers',
-      badge: (
-        <span className={`ml-1 px-2 py-0.5 rounded-full text-xs ${getProviderBadgeClass(enabledCount, configuredCount)}`}>
-          {enabledCount}/{providers.length}
-        </span>
-      ),
-      needsAttention: providersNeedAttention,
-    },
-    {
-      id: 'alerts',
-      label: 'Alerts',
-    },
-    // Withheld until membership is confirmed, so the tab doesn't flash in for
-    // non-admins on the first paint.
-    ...(isAdmin ? [{
-      id: 'users',
-      label: 'Users',
-    } satisfies SettingsTabDefinition] : []),
-  ];
+  const tabs = buildSettingsTabs({
+    keywords,
+    brandConfig,
+    providerConfig,
+    isAdmin 
+  });
 
   return (
     <div className="space-y-6">

@@ -7,6 +7,9 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from functools import partial, wraps
 from typing import Any
 
 import boto3
@@ -153,28 +156,36 @@ def provider_health_fields(config: dict) -> dict:
     return fields
 
 
+def _error_code(error: ClientError) -> str | None:
+    """The AWS error code carried by a ``ClientError``."""
+    return error.response.get('Error', {}).get('Code')
+
+
+def _secret_status(response: Mapping[str, Any]) -> dict:
+    """Status of a secret that exists: configured with a masked key, or present but empty."""
+    api_key = json.loads(response['SecretString']).get('api_key', '') if 'SecretString' in response else ''
+    if not api_key:
+        return {'exists': True, 'has_value': False, 'masked_key': None}
+    created = response.get('CreatedDate')
+    return {
+        'exists': True,
+        'has_value': True,
+        # Mask the key for display
+        'masked_key': api_key[:4] + '...' + api_key[-4:] if len(api_key) > 8 else '****',
+        'last_updated': created.isoformat() if created else None,
+    }
+
+
 def get_secret_status(secret_name: str) -> dict:
     """Check if a secret exists and has a value."""
     try:
         response = secrets_client.get_secret_value(SecretId=secret_name)
-        if 'SecretString' in response:
-            secret_data = json.loads(response['SecretString'])
-            api_key = secret_data.get('api_key', '')
-            if api_key:
-                # Mask the key for display
-                masked = api_key[:4] + '...' + api_key[-4:] if len(api_key) > 8 else '****'
-                return {
-                    'exists': True,
-                    'has_value': True,
-                    'masked_key': masked,
-                    'last_updated': response.get('CreatedDate', '').isoformat() if response.get('CreatedDate') else None
-                }
-        return {'exists': True, 'has_value': False, 'masked_key': None}
     except ClientError as e:
-        if e.response['Error']['Code'] == 'ResourceNotFoundException':
+        if _error_code(e) == 'ResourceNotFoundException':
             return {'exists': False, 'has_value': False, 'masked_key': None}
-        logger.error("Error checking secret: %s", str(e))
+        logger.exception("Error checking secret")
         return {'exists': False, 'has_value': False}
+    return _secret_status(response)
 
 
 def get_provider_config(provider_id: str) -> dict:
@@ -183,8 +194,8 @@ def get_provider_config(provider_id: str) -> dict:
         table = dynamodb.Table(PROVIDER_CONFIG_TABLE)
         response = table.get_item(Key={'provider_id': provider_id})
         return response.get('Item', {'provider_id': provider_id, 'enabled': True})
-    except Exception as e:
-        logger.error(f"Error getting provider config: {e!s}")
+    except Exception:
+        logger.exception("Error getting provider config")
         return {'provider_id': provider_id, 'enabled': True}
 
 
@@ -192,43 +203,41 @@ def save_provider_config(provider_id: str, config: dict) -> bool:
     """Save provider config to DynamoDB."""
     try:
         table = dynamodb.Table(PROVIDER_CONFIG_TABLE)
-        item = {
+        table.put_item(Item={
             'provider_id': provider_id,
             'enabled': config.get('enabled', True),
-            'updated_at': get_timestamp()
-        }
-        table.put_item(Item=item)
-        return True
-    except Exception as e:
-        logger.error(f"Error saving provider config: {e!s}")
+            'updated_at': get_timestamp(),
+        })
+    except Exception:
+        logger.exception("Error saving provider config")
         return False
+    return True
+
+
+def _write_secret(secret_name: str, secret_value: str) -> str:
+    """Store ``secret_value``, creating the secret when it does not exist yet; returns the action taken."""
+    try:
+        secrets_client.put_secret_value(SecretId=secret_name, SecretString=secret_value)
+    except ClientError as e:
+        if _error_code(e) != 'ResourceNotFoundException':
+            raise
+        secrets_client.create_secret(
+            Name=secret_name,
+            SecretString=secret_value,
+            Description=f'API key for Citation Analysis - {secret_name}',
+        )
+        return 'created'
+    return 'updated'
 
 
 def update_api_key(secret_name: str, api_key: str) -> dict:
     """Create or update API key in Secrets Manager."""
     try:
-        secret_value = json.dumps({'api_key': api_key})
-
-        try:
-            # Try to update existing secret
-            secrets_client.put_secret_value(
-                SecretId=secret_name,
-                SecretString=secret_value
-            )
-            return {'success': True, 'action': 'updated'}
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'ResourceNotFoundException':
-                # Create new secret
-                secrets_client.create_secret(
-                    Name=secret_name,
-                    SecretString=secret_value,
-                    Description=f'API key for Citation Analysis - {secret_name}'
-                )
-                return {'success': True, 'action': 'created'}
-            raise
-    except Exception as e:
-        logger.error(f"Error updating API key: {e!s}")
+        action = _write_secret(secret_name, json.dumps({'api_key': api_key}))
+    except Exception:
+        logger.exception("Error updating API key")
         return {'success': False}
+    return {'success': True, 'action': action}
 
 
 def _bearer_json_headers(api_key: str) -> dict[str, str]:
@@ -237,6 +246,19 @@ def _bearer_json_headers(api_key: str) -> dict[str, str]:
         'Authorization': f'Bearer {api_key}',
         'Content-Type': 'application/json',
     }
+
+
+def _get(url: str, **kwargs: Any) -> dict[str, Any]:
+    """``requests.request`` keyword arguments for a GET probe."""
+    return {'method': 'get', 'url': url, **kwargs}
+
+
+def _post(url: str, **kwargs: Any) -> dict[str, Any]:
+    """``requests.request`` keyword arguments for a POST probe."""
+    return {'method': 'post', 'url': url, **kwargs}
+
+
+# --- Reading a probe response ---------------------------------------------
 
 
 def _probe_result(response: Any) -> dict:
@@ -248,147 +270,185 @@ def _probe_result(response: Any) -> dict:
     return {'valid': False, 'error': f'Unexpected status {response.status_code}'}
 
 
+def _status_result(response: Any) -> dict:
+    """Interpret a search-API probe: only a 200 proves the key."""
+    if response.status_code == 200:
+        return {'valid': True}
+    return {'valid': False, 'error': 'Invalid API key'}
+
+
+def _listing_result(response: Any, key: str) -> dict:
+    """Interpret a model-listing probe: a 200 whose body carries a ``key`` list proves the key."""
+    if response.status_code != 200:
+        return {'valid': False, 'error': 'Invalid API key'}
+    try:
+        data = response.json()
+    except ValueError:
+        # A 200 whose body is not JSON is not the listing we asked for; that
+        # is the "invalid response format" verdict, nothing to log.
+        return {'valid': False, 'error': 'Invalid response format'}
+    if isinstance(data, dict) and isinstance(data.get(key), list):
+        return {'valid': True}
+    return {'valid': False, 'error': 'Invalid response format'}
+
+
+def _claude_result(response: Any) -> dict:
+    """Interpret the Anthropic probe: a 400 on the probe model still proves auth passed."""
+    if response.status_code != 400:
+        return _probe_result(response)
+    try:
+        payload = response.json()
+    except ValueError:
+        # Anthropic answers 400 with a JSON error object; anything else means
+        # the probe never reached the API we expected.
+        return {'valid': False, 'error': 'Unexpected 400 response'}
+    error = payload.get('error', {}) if isinstance(payload, dict) else None
+    if not isinstance(error, dict):
+        return {'valid': False, 'error': 'Unexpected 400 response'}
+    if error.get('type') == 'authentication_error':
+        return {'valid': False, 'error': 'Invalid API key'}
+    return {'valid': True, 'note': 'Key accepted (model validation skipped)'}
+
+
+# --- The probe each provider answers ----------------------------------------
+
+# Listing models or running a one-result search answers within a few seconds;
+# the 1-token completions (Perplexity, Anthropic, Firecrawl) wait on a model
+# and are given twice as long. Both bound the outbound call so a stalled
+# provider cannot hold this Lambda for its full duration.
+_LISTING_PROBE_TIMEOUT = 5
+_COMPLETION_PROBE_TIMEOUT = 10
+
+
+def _openai_request(api_key: str) -> dict[str, Any]:
+    return _get('https://api.openai.com/v1/models', headers={'Authorization': f'Bearer {api_key}'})
+
+
+def _perplexity_request(api_key: str) -> dict[str, Any]:
+    # Perplexity has no cheap list endpoint, but /chat/completions
+    # returns 401 for bad keys immediately on a 1-token request.
+    # Cost: 1 input token + 1 output token if the key IS valid, so
+    # ≤ $0.001 per validation.
+    return _post(
+        'https://api.perplexity.ai/chat/completions',
+        headers=_bearer_json_headers(api_key),
+        json={
+            'model': 'sonar',
+            'messages': [{'role': 'user', 'content': 'ping'}],
+            'max_tokens': 1,
+        },
+    )
+
+
+def _gemini_request(api_key: str) -> dict[str, Any]:
+    return _get(
+        'https://generativelanguage.googleapis.com/v1beta/models',
+        headers={'x-goog-api-key': api_key},
+    )
+
+
+def _claude_request(api_key: str) -> dict[str, Any]:
+    # Anthropic /v1/messages returns 401 immediately on a bad key
+    # without consuming meaningful quota for a 1-token request.
+    return _post(
+        'https://api.anthropic.com/v1/messages',
+        headers={
+            'x-api-key': api_key,
+            'anthropic-version': '2023-06-01',
+            'content-type': 'application/json',
+        },
+        json={
+            'model': 'claude-haiku-4-5',
+            'max_tokens': 1,
+            'messages': [{'role': 'user', 'content': 'ping'}],
+        },
+    )
+
+
+def _brave_request(api_key: str) -> dict[str, Any]:
+    return _get(
+        'https://api.search.brave.com/res/v1/web/search',
+        headers={'X-Subscription-Token': api_key},
+        params={'q': 'test', 'count': 1},
+    )
+
+
+def _tavily_request(api_key: str) -> dict[str, Any]:
+    return _post(
+        'https://api.tavily.com/search',
+        json={'api_key': api_key, 'query': 'test', 'max_results': 1},
+    )
+
+
+def _exa_request(api_key: str) -> dict[str, Any]:
+    return _post(
+        'https://api.exa.ai/search',
+        headers={'x-api-key': api_key, 'Content-Type': 'application/json'},
+        json={'query': 'test', 'numResults': 1},
+    )
+
+
+def _serpapi_request(api_key: str) -> dict[str, Any]:
+    return _get(
+        'https://serpapi.com/search',
+        params={'api_key': api_key, 'q': 'test', 'num': 1, 'engine': 'google'},
+    )
+
+
+def _firecrawl_request(api_key: str) -> dict[str, Any]:
+    # Firecrawl's /v1/search endpoint returns 401 for bad keys on
+    # any request. limit=1 keeps credits usage minimal.
+    return _post(
+        'https://api.firecrawl.dev/v1/search',
+        headers=_bearer_json_headers(api_key),
+        json={'query': 'ping', 'limit': 1},
+    )
+
+
+@dataclass(frozen=True)
+class _KeyProbe:
+    """How one provider's key is validated: the request to send, and how to read the reply."""
+
+    request: Callable[[str], dict[str, Any]]
+    """``api_key`` → ``requests.request`` keyword arguments. Builders return
+    arguments rather than sending, so ``validate_api_key`` owns the single
+    ``requests`` import and the one timeout/error boundary."""
+    interpret: Callable[[Any], dict]
+    """HTTP response → ``{'valid': ..., ...}`` result."""
+    timeout: int = _LISTING_PROBE_TIMEOUT
+    """Seconds the probe may take before it is reported as timed out."""
+
+
+_KEY_PROBES: dict[str, _KeyProbe] = {
+    # LLM providers
+    'openai': _KeyProbe(_openai_request, partial(_listing_result, key='data')),
+    'perplexity': _KeyProbe(_perplexity_request, _probe_result, _COMPLETION_PROBE_TIMEOUT),
+    'gemini': _KeyProbe(_gemini_request, partial(_listing_result, key='models')),
+    'claude': _KeyProbe(_claude_request, _claude_result, _COMPLETION_PROBE_TIMEOUT),
+    # Search providers
+    'brave': _KeyProbe(_brave_request, _status_result),
+    'tavily': _KeyProbe(_tavily_request, _status_result),
+    'exa': _KeyProbe(_exa_request, _status_result),
+    'serpapi': _KeyProbe(_serpapi_request, _status_result),
+    'firecrawl': _KeyProbe(_firecrawl_request, _probe_result, _COMPLETION_PROBE_TIMEOUT),
+}
+
+
 def validate_api_key(provider_id: str, api_key: str) -> dict:
     """Validate API key by making a simple test request."""
     import requests
 
-    try:
-        if provider_id == 'openai':
-            response = requests.get(
-                'https://api.openai.com/v1/models',
-                headers={'Authorization': f'Bearer {api_key}'},
-                timeout=5
-            )
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    if 'data' in data and isinstance(data['data'], list):
-                        return {'valid': True}
-                except Exception:
-                    pass
-                return {'valid': False, 'error': 'Invalid response format'}
-            return {'valid': False, 'error': 'Invalid API key'}
-
-        elif provider_id == 'perplexity':
-            # Perplexity has no cheap list endpoint, but /chat/completions
-            # returns 401 for bad keys immediately on a 1-token request.
-            # Cost: 1 input token + 1 output token if the key IS valid, so
-            # ≤ $0.001 per validation.
-            response = requests.post(
-                'https://api.perplexity.ai/chat/completions',
-                headers=_bearer_json_headers(api_key),
-                json={
-                    'model': 'sonar',
-                    'messages': [{'role': 'user', 'content': 'ping'}],
-                    'max_tokens': 1,
-                },
-                timeout=10,
-            )
-            return _probe_result(response)
-
-        elif provider_id == 'gemini':
-            response = requests.get(
-                'https://generativelanguage.googleapis.com/v1beta/models',
-                headers={'x-goog-api-key': api_key},
-                timeout=5
-            )
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    if 'models' in data and isinstance(data['models'], list):
-                        return {'valid': True}
-                except Exception:
-                    pass
-                return {'valid': False, 'error': 'Invalid response format'}
-            return {'valid': False, 'error': 'Invalid API key'}
-
-        elif provider_id == 'claude':
-            # Anthropic /v1/messages returns 401 immediately on a bad key
-            # without consuming meaningful quota for a 1-token request.
-            response = requests.post(
-                'https://api.anthropic.com/v1/messages',
-                headers={
-                    'x-api-key': api_key,
-                    'anthropic-version': '2023-06-01',
-                    'content-type': 'application/json',
-                },
-                json={
-                    'model': 'claude-haiku-4-5',
-                    'max_tokens': 1,
-                    'messages': [{'role': 'user', 'content': 'ping'}],
-                },
-                timeout=10,
-            )
-            # 400 on bad model but valid key — still proves auth passed.
-            if response.status_code == 400:
-                try:
-                    err = response.json().get('error', {})
-                    if err.get('type') == 'authentication_error':
-                        return {'valid': False, 'error': 'Invalid API key'}
-                    return {'valid': True, 'note': 'Key accepted (model validation skipped)'}
-                except Exception:
-                    return {'valid': False, 'error': 'Unexpected 400 response'}
-            return _probe_result(response)
-
-        # Search providers validation
-        elif provider_id == 'brave':
-            response = requests.get(
-                'https://api.search.brave.com/res/v1/web/search',
-                headers={'X-Subscription-Token': api_key},
-                params={'q': 'test', 'count': 1},
-                timeout=5
-            )
-            if response.status_code == 200:
-                return {'valid': True}
-            return {'valid': False, 'error': 'Invalid API key'}
-
-        elif provider_id == 'tavily':
-            response = requests.post(
-                'https://api.tavily.com/search',
-                json={'api_key': api_key, 'query': 'test', 'max_results': 1},
-                timeout=5
-            )
-            if response.status_code == 200:
-                return {'valid': True}
-            return {'valid': False, 'error': 'Invalid API key'}
-
-        elif provider_id == 'exa':
-            response = requests.post(
-                'https://api.exa.ai/search',
-                headers={'x-api-key': api_key, 'Content-Type': 'application/json'},
-                json={'query': 'test', 'numResults': 1},
-                timeout=5
-            )
-            if response.status_code == 200:
-                return {'valid': True}
-            return {'valid': False, 'error': 'Invalid API key'}
-
-        elif provider_id == 'serpapi':
-            response = requests.get(
-                'https://serpapi.com/search',
-                params={'api_key': api_key, 'q': 'test', 'num': 1, 'engine': 'google'},
-                timeout=5
-            )
-            if response.status_code == 200:
-                return {'valid': True}
-            return {'valid': False, 'error': 'Invalid API key'}
-
-        elif provider_id == 'firecrawl':
-            # Firecrawl's /v1/search endpoint returns 401 for bad keys on
-            # any request. limit=1 keeps credits usage minimal.
-            response = requests.post(
-                'https://api.firecrawl.dev/v1/search',
-                headers=_bearer_json_headers(api_key),
-                json={'query': 'ping', 'limit': 1},
-                timeout=10,
-            )
-            return _probe_result(response)
-
+    probe = _KEY_PROBES.get(provider_id)
+    if probe is None:
         return {'valid': False, 'error': 'Unknown provider'}
+
+    try:
+        response = requests.request(timeout=probe.timeout, **probe.request(api_key))
+        return probe.interpret(response)
     except requests.Timeout:
         return {'valid': False, 'error': 'Validation request timed out'}
-    except Exception as e:
-        logger.error(f"Error validating API key for {provider_id}: {e!s}")
+    except Exception:
+        logger.exception(f"Error validating API key for {provider_id}")
         return {'valid': False, 'error': 'Validation failed'}
 
 
@@ -423,9 +483,26 @@ def handle_get_providers(event: dict, context: Any) -> dict:
     return success_response({'providers': providers}, event)
 
 
+def _with_known_provider(route: Callable[..., dict]) -> Callable[..., dict]:
+    """Resolve the ``{id}`` path parameter to a known provider before ``route`` runs.
+
+    The id reaches ``route`` as the ``provider_id`` keyword argument; an absent
+    or unknown id is answered with the 404 both parametric routes used to
+    build by hand.
+    """
+    @wraps(route)
+    def wrapper(event: dict, context: Any, *args: Any, **kwargs: Any) -> dict:
+        provider_id = (event.get('pathParameters') or {}).get('id')
+        if not provider_id or provider_id not in PROVIDERS:
+            return not_found_response(f'Provider {provider_id}', event)
+        return route(event, context, *args, provider_id=provider_id, **kwargs)
+    return wrapper
+
+
 @require_group(ADMIN_GROUP)
 @parse_json_body
-def handle_update_provider(event: dict, context: Any, body: dict | None = None) -> dict:
+@_with_known_provider
+def handle_update_provider(event: dict, context: Any, provider_id: str, body: dict | None = None) -> dict:
     """PUT /providers/{id} - Update provider configuration.
 
     Admin-only: this route writes Secrets Manager, and `configMgmtFunction`'s
@@ -433,12 +510,6 @@ def handle_update_provider(event: dict, context: Any, body: dict | None = None) 
     secret. An unprivileged caller could redirect provider billing or capture
     every prompt the system sends (AUDIT-2026-08-19 §0.3).
     """
-    path_params = event.get('pathParameters') or {}
-    provider_id = path_params.get('id')
-
-    if not provider_id or provider_id not in PROVIDERS:
-        return not_found_response(f'Provider {provider_id}', event)
-
     body = body or {}
 
     # Update enabled status
@@ -483,19 +554,14 @@ def handle_update_provider(event: dict, context: Any, body: dict | None = None) 
 
 @require_group(ADMIN_GROUP)
 @parse_json_body
-def handle_validate_key(event: dict, context: Any, body: dict | None = None) -> dict:
+@_with_known_provider
+def handle_validate_key(event: dict, context: Any, provider_id: str, body: dict | None = None) -> dict:
     """POST /providers/{id}/validate - Validate an API key without saving it.
 
     Admin-only: it makes billed outbound calls to nine third-party APIs with a
     caller-supplied key. `GET /providers` stays open because the dashboard
     needs provider status and it only ever returns masked keys.
     """
-    path_params = event.get('pathParameters') or {}
-    provider_id = path_params.get('id')
-
-    if not provider_id or provider_id not in PROVIDERS:
-        return not_found_response(f'Provider {provider_id}', event)
-
     body = body or {}
     api_key = body.get('api_key', '').strip()
     if not api_key:
@@ -520,5 +586,7 @@ def handler(event: dict, context: Any) -> dict:
     - GET /providers - List all providers with status
     - PUT /providers/{id} - Update provider config (enable/disable, API key)
     - POST /providers/{id}/validate - Validate API key without saving
+
+    Routes handle everything; this body is never reached.
     """
-    pass
+    ...

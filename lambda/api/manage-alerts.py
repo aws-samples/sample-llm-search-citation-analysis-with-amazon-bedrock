@@ -350,8 +350,10 @@ def _put_settings(
     body: Any,
 ) -> dict[str, Any]:
     settings, rejected = _validate_settings_update(body, event)
-    if rejected is not None or settings is None:
-        return rejected
+    if settings is None:
+        # The validator answers exactly one of (settings, None) / (None, rejection);
+        # the fallback only satisfies the type checker.
+        return rejected or validation_error('Invalid settings', event, 'body')
 
     updated_at = get_timestamp()
     dynamodb.Table(SETTINGS_TABLE).put_item(Item=convert_floats_to_decimal({
@@ -451,8 +453,10 @@ def _create_content_change(
     body: Any,
 ) -> dict[str, Any]:
     values, rejected = _validate_content_change(body, event)
-    if rejected is not None or values is None:
-        return rejected
+    if values is None:
+        # The validator answers exactly one of (values, None) / (None, rejection);
+        # the fallback only satisfies the type checker.
+        return rejected or validation_error('Invalid content change', event, 'body')
     group_id = values['group_id']
     if not dynamodb.Table(KEYWORD_GROUPS_TABLE).get_item(Key={'id': group_id}).get('Item'):
         return validation_error('Unknown keyword group id', event, 'group_id')
@@ -479,5 +483,5 @@ def _create_content_change(
     'GET': _list_alerts,
 })
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Route KPI alert API requests."""
-    pass
+    """Route KPI alert API requests; routes handle everything, this body is never reached."""
+    ...

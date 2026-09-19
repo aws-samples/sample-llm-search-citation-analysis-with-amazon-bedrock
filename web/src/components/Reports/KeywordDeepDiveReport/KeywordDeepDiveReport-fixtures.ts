@@ -3,7 +3,6 @@ export function settledData() {
     visibility: {
       keyword: 'best running shoes',
       timestamp: '2026-05-14T10:00:00Z',
-      total_brands: 0,
       total_mentions: 0,
       brands: [],
       first_party: [],

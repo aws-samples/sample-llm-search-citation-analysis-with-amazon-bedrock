@@ -22,6 +22,7 @@ from shared.content_brief import (
     REWRITE_PASTED_COPY,
     ContentBriefFetchError,
     ContentBriefTemplateError,
+    ContentBriefValidationIssue,
     build_group_brief_prompt,
     canonicalize_group_brief,
     fetch_landing_page_text,
@@ -29,6 +30,7 @@ from shared.content_brief import (
     render_prompt_template,
     validate_template_placeholders,
 )
+from testing.assertions import present
 from testing.content_brief_fixtures import build_group_brief
 from testing.dynamodb_stubs import fake_table
 
@@ -83,9 +85,9 @@ class TestGroupAndMembershipValidation:
         canonical, issue = canonicalize(build_group_brief())
 
         assert issue is None
-        assert canonical['group_name'] == 'Authoritative Group'
-        assert canonical['keyword'] == 'Authoritative Group'
-        assert canonical['keywords'] == ['authoritative keyword']
+        assert present(canonical)['group_name'] == 'Authoritative Group'
+        assert present(canonical)['keyword'] == 'Authoritative Group'
+        assert present(canonical)['keywords'] == ['authoritative keyword']
 
     def test_drops_unrecognized_client_fields_before_persistence(self) -> None:
         canonical, issue = canonicalize(
@@ -93,8 +95,8 @@ class TestGroupAndMembershipValidation:
         )
 
         assert issue is None
-        assert 'unbounded_client_field' not in canonical
-        assert canonical['title'] == 'Group Brief: Authoritative Group'
+        assert 'unbounded_client_field' not in present(canonical)
+        assert present(canonical)['title'] == 'Group Brief: Authoritative Group'
 
     def test_sorts_authoritative_keywords_when_selected_ids_arrive_out_of_order(self) -> None:
         members = [
@@ -106,8 +108,8 @@ class TestGroupAndMembershipValidation:
         )
 
         assert issue is None
-        assert canonical['keyword_ids'] == ['keyword-2', 'keyword-1']
-        assert canonical['keywords'] == ['Alpha', 'Zulu']
+        assert present(canonical)['keyword_ids'] == ['keyword-2', 'keyword-1']
+        assert present(canonical)['keywords'] == ['Alpha', 'Zulu']
 
     def test_returns_group_id_error_when_group_does_not_exist(self) -> None:
         groups_table = fake_table(get_item={})
@@ -121,8 +123,7 @@ class TestGroupAndMembershipValidation:
         )
 
         assert canonical is None
-        assert issue.field == 'group_id'
-        assert issue.message == 'Keyword group not found'
+        assert issue == ContentBriefValidationIssue('group_id', 'Keyword group not found')
         keywords_table.query.assert_not_called()
 
     def test_returns_keyword_ids_error_when_selected_id_is_not_a_group_member(self) -> None:
@@ -132,15 +133,17 @@ class TestGroupAndMembershipValidation:
         )
 
         assert canonical is None
-        assert issue.field == 'keyword_ids'
-        assert issue.message == 'keyword_ids must contain only active keywords in the selected group'
+        assert issue == ContentBriefValidationIssue(
+            'keyword_ids', 'keyword_ids must contain only active keywords in the selected group'
+        )
 
     def test_returns_keyword_ids_error_when_no_keyword_is_selected(self) -> None:
         canonical, issue = canonicalize(build_group_brief(keyword_ids=[]))
 
         assert canonical is None
-        assert issue.field == 'keyword_ids'
-        assert issue.message == 'keyword_ids must contain between 1 and 50 active group members'
+        assert issue == ContentBriefValidationIssue(
+            'keyword_ids', 'keyword_ids must contain between 1 and 50 active group members'
+        )
 
     def test_returns_keyword_ids_error_when_more_than_fifty_ids_are_selected(self) -> None:
         selected_ids = [f'keyword-{index}' for index in range(MAX_SELECTED_KEYWORDS + 1)]
@@ -148,15 +151,17 @@ class TestGroupAndMembershipValidation:
         canonical, issue = canonicalize(build_group_brief(keyword_ids=selected_ids))
 
         assert canonical is None
-        assert issue.field == 'keyword_ids'
-        assert issue.message == 'keyword_ids accepts at most 50 entries'
+        assert issue == ContentBriefValidationIssue(
+            'keyword_ids', 'keyword_ids accepts at most 50 entries'
+        )
 
     def test_returns_keyword_ids_error_when_an_id_exceeds_existing_constraint(self) -> None:
         canonical, issue = canonicalize(build_group_brief(keyword_ids=['x' * 65]))
 
         assert canonical is None
-        assert issue.field == 'keyword_ids'
-        assert issue.message == 'keyword_ids entries must be non-empty ids of at most 64 characters'
+        assert issue == ContentBriefValidationIssue(
+            'keyword_ids', 'keyword_ids entries must be non-empty ids of at most 64 characters'
+        )
 
 
 class TestModeAndSizeValidation:
@@ -169,8 +174,9 @@ class TestModeAndSizeValidation:
         )
 
         assert canonical is None
-        assert issue.field == 'landing_url'
-        assert issue.message == 'landing_url is required for improve current URL mode'
+        assert issue == ContentBriefValidationIssue(
+            'landing_url', 'landing_url is required for improve current URL mode'
+        )
 
     def test_rejects_unsafe_landing_url_before_group_lookup(self) -> None:
         groups_table = fake_table()
@@ -189,8 +195,9 @@ class TestModeAndSizeValidation:
         )
 
         assert canonical is None
-        assert issue.field == 'landing_url'
-        assert issue.message == 'landing_url is invalid: URL points to a restricted address'
+        assert issue == ContentBriefValidationIssue(
+            'landing_url', 'landing_url is invalid: URL points to a restricted address'
+        )
         groups_table.get_item.assert_not_called()
 
     def test_rejects_landing_url_beyond_request_limit(self) -> None:
@@ -199,8 +206,9 @@ class TestModeAndSizeValidation:
         )
 
         assert canonical is None
-        assert issue.field == 'landing_url'
-        assert issue.message == 'landing_url must be at most 2048 characters'
+        assert issue == ContentBriefValidationIssue(
+            'landing_url', 'landing_url must be at most 2048 characters'
+        )
 
     def test_requires_non_whitespace_copy_when_mode_rewrites_pasted_copy(self) -> None:
         canonical, issue = canonicalize(
@@ -212,8 +220,9 @@ class TestModeAndSizeValidation:
         )
 
         assert canonical is None
-        assert issue.field == 'current_copy'
-        assert issue.message == 'current_copy is required for rewrite pasted copy mode'
+        assert issue == ContentBriefValidationIssue(
+            'current_copy', 'current_copy is required for rewrite pasted copy mode'
+        )
 
     def test_rejects_current_copy_beyond_request_limit(self) -> None:
         canonical, issue = canonicalize(
@@ -221,8 +230,9 @@ class TestModeAndSizeValidation:
         )
 
         assert canonical is None
-        assert issue.field == 'current_copy'
-        assert issue.message == 'current_copy must be at most 20000 characters'
+        assert issue == ContentBriefValidationIssue(
+            'current_copy', 'current_copy must be at most 20000 characters'
+        )
 
     def test_rejects_template_beyond_request_limit(self) -> None:
         canonical, issue = canonicalize(
@@ -230,8 +240,9 @@ class TestModeAndSizeValidation:
         )
 
         assert canonical is None
-        assert issue.field == 'prompt_template'
-        assert issue.message == 'prompt_template must be at most 6000 characters'
+        assert issue == ContentBriefValidationIssue(
+            'prompt_template', 'prompt_template must be at most 6000 characters'
+        )
 
     def test_rejects_output_language_beyond_request_limit(self) -> None:
         canonical, issue = canonicalize(
@@ -239,8 +250,9 @@ class TestModeAndSizeValidation:
         )
 
         assert canonical is None
-        assert issue.field == 'output_language'
-        assert issue.message == 'output_language must be at most 100 characters'
+        assert issue == ContentBriefValidationIssue(
+            'output_language', 'output_language must be at most 100 characters'
+        )
 
     def test_clears_irrelevant_source_fields_when_create_new_mode_is_selected(self) -> None:
         validator = MagicMock(return_value=(False, 'invalid URL'))
@@ -253,18 +265,18 @@ class TestModeAndSizeValidation:
         )
 
         assert issue is None
-        assert canonical['landing_url'] == ''
-        assert canonical['current_copy'] == ''
+        assert present(canonical)['landing_url'] == ''
+        assert present(canonical)['current_copy'] == ''
         validator.assert_not_called()
 
     def test_rejects_unknown_mode(self) -> None:
         canonical, issue = canonicalize(build_group_brief(content_angle='unknown'))
 
         assert canonical is None
-        assert issue.field == 'content_angle'
-        assert issue.message == (
+        assert issue == ContentBriefValidationIssue(
+            'content_angle',
             'content_angle must be one of: improve_current_url, rewrite_pasted_copy, '
-            'create_new_landing_page'
+            'create_new_landing_page',
         )
 
 

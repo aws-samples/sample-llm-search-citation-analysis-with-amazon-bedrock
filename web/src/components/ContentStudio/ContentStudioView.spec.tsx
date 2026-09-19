@@ -30,43 +30,24 @@ vi.mock('./ContentIdeaCard', () => ({
   ),
 }));
 
-vi.mock('./GroupBriefForm', () => ({
-  GroupBriefForm: ({
-    keywords, onGenerate
-  }: {
-    keywords: Keyword[];
-    onGenerate: (idea: GroupBriefIdea) => Promise<boolean>;
-  }) => {
-    const idea: GroupBriefIdea = {
-      id: 'group-brief-1',
-      type: 'group_brief',
-      priority: 'medium',
-      title: 'Group Brief: Generic Group',
-      description: 'Create a complete landing page from selected active keywords.',
-      keyword: 'Generic Group',
-      source: 'group_brief',
-      actionable: true,
-      content_angle: 'create_new_landing_page',
-      group_id: 'group-1',
-      group_name: 'Generic Group',
-      keyword_ids: ['keyword-1'],
-      keywords: ['Alpha keyword'],
-      landing_url: '',
-      current_copy: '',
-      prompt_template: 'Create for {group} with {keywords}.',
-      output_language: 'English',
-      competitor_urls: [],
-    };
-    return (
+vi.mock('./GroupBriefForm', async () => {
+  const { buildGroupBriefIdea } = await import('./ContentStudioView-fixtures');
+  return {
+    GroupBriefForm: ({
+      keywords, onGenerate
+    }: {
+      keywords: Keyword[];
+      onGenerate: (idea: GroupBriefIdea) => Promise<boolean>;
+    }) => (
       <div>
         <span>Group brief received {keywords.length} keywords</span>
-        <button type="button" onClick={() => { void onGenerate(idea); }}>
+        <button type="button" onClick={() => { void onGenerate(buildGroupBriefIdea()); }}>
           Start mock group brief
         </button>
       </div>
-    );
-  },
-}));
+    ),
+  };
+});
 
 vi.mock('./ContentHistory', () => ({ ContentHistory: () => <div data-testid="content-history">History</div> }));
 

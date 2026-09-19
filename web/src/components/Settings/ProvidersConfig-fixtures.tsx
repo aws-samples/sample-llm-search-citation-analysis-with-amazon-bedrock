@@ -1,6 +1,9 @@
 import { vi } from 'vitest';
+import { render } from '@testing-library/react';
 import type { ProviderConfig } from '../../hooks/useProviderConfig';
-import type { ProvidersConfigProps } from './ProvidersConfig';
+import {
+  ProvidersConfig, type ProvidersConfigProps 
+} from './ProvidersConfig';
 
 /** Healthy Claude row: the baseline every health scenario deviates from. */
 const CLAUDE: ProviderConfig = {
@@ -50,4 +53,9 @@ export function buildProvidersConfigProps(
     isAdmin: true,
     ...overrides,
   };
+}
+
+/** Mounts the panel, loaded and as an admin, showing the given provider rows. */
+export function renderProvidersConfig(providers: ProviderConfig[]) {
+  return render(<ProvidersConfig {...buildProvidersConfigProps({ providers })} />);
 }

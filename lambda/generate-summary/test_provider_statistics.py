@@ -16,32 +16,28 @@ from __future__ import annotations
 
 import os
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from testing.module_loader import load_handler_module
+from testing.env import cleared_env
+from testing.module_loader import load_handler_module_offline
+from testing.provider_summary_fixtures import provider_bucket, provider_row
 
 _HANDLER_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 @pytest.fixture
 def summary():
-    """Provide a freshly imported summary module with a mocked S3 client and no configured bucket."""
-    s3 = MagicMock()
-
-    with patch('boto3.client', return_value=s3):
-        module = load_handler_module(_HANDLER_DIR, 'handler.py', 'generate_summary_handler_under_test')
-
-    module.s3_client = s3
-    module.SUMMARY_BUCKET = ''
-    return module, s3
+    """A freshly imported summary module with a stub S3 client and no bucket configured; yields ``(module, s3)``."""
+    with cleared_env('SUMMARY_BUCKET'):
+        module = load_handler_module_offline(_HANDLER_DIR, 'handler.py', 'generate_summary_handler_under_test')
+    return module, module.s3_client
 
 
 def post_crawl_keyword_result(
     keyword: str = 'best hotels malaga',
     result_count: int = 4,
-    by_provider: dict[str, dict[str, Any]] | None = None,
+    by_provider: dict[str, Any] | None = None,
     unique_citations: int = 2,
     crawled_success: int = 2,
 ) -> dict[str, Any]:
@@ -50,7 +46,8 @@ def post_crawl_keyword_result(
 
     Shape after CrawlCitations merges its output: dedup's payload (status,
     keyword, timestamp, deduplicated_citations, provider_summary) plus
-    `crawled_results`. There is deliberately no `results` key.
+    `crawled_results`. There is deliberately no `results` key. ``by_provider``
+    is typed loosely so the malformed-rollup tests can hand in non-dict entries.
     """
     if by_provider is None:
         by_provider = {
@@ -206,14 +203,8 @@ class TestRawSearchResultsStillSupported:
         raw = {
             'keyword': 'hotels malaga',
             'results': [
-                {
-                    'provider': 'openai',
-                    'citations': ['https://a.example', 'https://b.example'],
-                },
-                {
-                    'provider': 'perplexity',
-                    'citations': ['https://c.example'],
-                },
+                provider_row('openai', ['https://a.example', 'https://b.example']),
+                provider_row('perplexity', ['https://c.example']),
             ],
         }
 
@@ -226,10 +217,7 @@ class TestRawSearchResultsStillSupported:
         """Avoids double-counting if a future change reinstates `results`."""
         module, _ = summary
         both = post_crawl_keyword_result()
-        both['results'] = [{
-            'provider': 'openai',
-            'citations': ['https://a.example'],
-        }]
+        both['results'] = [provider_row('openai', ['https://a.example'])]
 
         stats = module.aggregate_statistics([both])
 
@@ -265,23 +253,8 @@ class TestReportIncludesProviderActivity:
         assert s3.put_object.call_args.kwargs['Bucket'] == 'test-keywords-bucket'
 
 
-def provider_bucket(
-    queries: int = 1,
-    citations: int = 4,
-    failures: int = 0,
-    error_categories: list[str] | None = None,
-) -> dict[str, Any]:
-    """One `providers_breakdown` entry, in the shape the dedup rollup produces."""
-    return {
-        'queries': queries,
-        'citations': citations,
-        'failures': failures,
-        'error_categories': error_categories if error_categories is not None else [],
-    }
-
-
-def stats_with(breakdown: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    """A minimal `aggregate_statistics` result carrying just a provider breakdown."""
+def stats_with(breakdown: dict[str, Any]) -> dict[str, Any]:
+    """A minimal `aggregate_statistics` result carrying just a provider breakdown (entries may be malformed on purpose)."""
     return {'providers_breakdown': breakdown}
 
 
@@ -395,29 +368,20 @@ class TestZeroCitationsIsNotAFailure:
     billing outage would hide inside the noise. Only a hard error counts.
     """
 
-    def test_reports_a_provider_with_no_citations_and_no_errors_as_healthy(self, summary) -> None:
+    @pytest.fixture
+    def empty_search_health(self, summary) -> dict[str, Any]:
+        """Health of a run whose only provider answered its query with no citations and no error."""
         module, _ = summary
-        stats = stats_with({'openai': provider_bucket(queries=1, citations=0, failures=0)})
+        return module.assess_provider_health(stats_with({'openai': provider_bucket(queries=1, citations=0, failures=0)}))
 
-        health = module.assess_provider_health(stats)
+    def test_reports_a_provider_with_no_citations_and_no_errors_as_healthy(self, empty_search_health) -> None:
+        assert empty_search_health['failed_providers'] == []
 
-        assert health['failed_providers'] == []
+    def test_does_not_mark_the_run_degraded_when_a_provider_found_nothing(self, empty_search_health) -> None:
+        assert empty_search_health['degraded'] is False
 
-    def test_does_not_mark_the_run_degraded_when_a_provider_found_nothing(self, summary) -> None:
-        module, _ = summary
-        stats = stats_with({'openai': provider_bucket(queries=1, citations=0, failures=0)})
-
-        health = module.assess_provider_health(stats)
-
-        assert health['degraded'] is False
-
-    def test_counts_a_provider_that_found_nothing_as_healthy(self, summary) -> None:
-        module, _ = summary
-        stats = stats_with({'openai': provider_bucket(queries=1, citations=0, failures=0)})
-
-        health = module.assess_provider_health(stats)
-
-        assert health['providers_healthy'] == 1
+    def test_counts_a_provider_that_found_nothing_as_healthy(self, empty_search_health) -> None:
+        assert empty_search_health['providers_healthy'] == 1
 
     def test_distinguishes_an_empty_search_from_a_failed_one(self, summary) -> None:
         """

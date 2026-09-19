@@ -11,14 +11,25 @@ import {
 } from '../../hooks/usePromoteKeywords';
 import type { CompetitorAnalysisResult } from '../../types';
 import { buildResult } from './CompetitorAnalysis-fixtures';
+import {
+  getPromoteButtonElement, selectKeywordCheckbox
+} from './expandedKeyword-fixtures';
 
-vi.mock('../../api/client', () => ({ apiPost: vi.fn() }));
+vi.mock('../../api/client', () => import('./apiClientMock-fixtures'));
 
-import { apiPost } from '../../api/client';
-
-const mockApiPost = vi.mocked(apiPost);
+import { mockApiPost } from './apiClientMock-fixtures';
 
 const promotionEndpoint = '/keywords/promote';
+
+const defaultProps = {
+  onAnalyze: vi.fn(),
+  loading: false,
+  result: null,
+  error: null,
+};
+
+const renderCompetitorResult = (result: CompetitorAnalysisResult) =>
+  render(<CompetitorAnalysis {...defaultProps} result={result} />);
 
 /**
  * A competitor result with all four sections populated by distinguishable
@@ -195,13 +206,6 @@ const promotionSuccessText = promotionSuccessMessage({
 });
 
 describe('CompetitorAnalysis', () => {
-  const defaultProps = {
-    onAnalyze: vi.fn(),
-    loading: false,
-    result: null,
-    error: null,
-  };
-
   describe('input form', () => {
     it('renders URL input field', () => {
       render(<CompetitorAnalysis {...defaultProps} />);
@@ -239,13 +243,13 @@ describe('CompetitorAnalysis', () => {
 
   describe('results display', () => {
     it('displays keyword count summary when result is present', () => {
-      render(<CompetitorAnalysis {...defaultProps} result={buildResult()} />);
+      renderCompetitorResult(buildResult());
 
       expect(screen.getByText('Total Keywords')).toBeInTheDocument();
     });
 
     it('displays section tabs when result is present', () => {
-      render(<CompetitorAnalysis {...defaultProps} result={buildResult()} />);
+      renderCompetitorResult(buildResult());
 
       // Check for the mobile-visible tab labels
       expect(screen.getByText('Primary')).toBeInTheDocument();
@@ -267,16 +271,13 @@ describe('CompetitorAnalysis', () => {
       async ({
         tabName, keywords, expectedOpportunityHeaders
       }) => {
-        render(<CompetitorAnalysis {...defaultProps} result={competitorResultFixture} />);
+        renderCompetitorResult(competitorResultFixture);
 
         await userEvent.click(screen.getByRole('button', { name: tabName }));
 
         expect(screen.getAllByRole('checkbox')).toHaveLength(keywords.length);
         expect(
-          keywords.map((keyword) => screen.getByRole(
-            'checkbox',
-            { name: `Select ${keyword.keyword}` }
-          ))
+          keywords.map((keyword) => selectKeywordCheckbox(keyword.keyword))
         ).toHaveLength(keywords.length);
         expect(screen.queryAllByRole('columnheader', { name: 'Opportunity' })).toHaveLength(
           expectedOpportunityHeaders
@@ -285,25 +286,19 @@ describe('CompetitorAnalysis', () => {
     );
 
     it('clears the selection when the active section changes', async () => {
-      render(<CompetitorAnalysis {...defaultProps} result={competitorResultFixture} />);
-      await userEvent.click(
-        screen.getByRole('checkbox', { name: `Select ${firstPrimaryKeyword.keyword}` })
-      );
+      renderCompetitorResult(competitorResultFixture);
+      await userEvent.click(selectKeywordCheckbox(firstPrimaryKeyword.keyword));
 
       await userEvent.click(screen.getByRole('button', { name: /Secondary Keywords/ }));
 
       expect(screen.getByText(`0 of ${SELECTION_LIMIT} keywords selected`)).toBeInTheDocument();
       expect(screen.queryAllByRole('checkbox', { checked: true })).toHaveLength(0);
-      expect(screen.getByRole('button', { name: 'Add to Keywords' })).toBeDisabled();
+      expect(getPromoteButtonElement()).toBeDisabled();
     });
 
     it('clears the selection when a new analysis result arrives', async () => {
-      const { rerender } = render(
-        <CompetitorAnalysis {...defaultProps} result={competitorResultFixture} />
-      );
-      await userEvent.click(
-        screen.getByRole('checkbox', { name: `Select ${firstPrimaryKeyword.keyword}` })
-      );
+      const { rerender } = renderCompetitorResult(competitorResultFixture);
+      await userEvent.click(selectKeywordCheckbox(firstPrimaryKeyword.keyword));
 
       rerender(<CompetitorAnalysis {...defaultProps} result={refreshedCompetitorResultFixture} />);
 
@@ -313,15 +308,11 @@ describe('CompetitorAnalysis', () => {
 
     it('sends a single promotion request that omits status and priority', async () => {
       mockApiPost.mockResolvedValue(promotionResponseFixture);
-      render(<CompetitorAnalysis {...defaultProps} result={competitorResultFixture} />);
+      renderCompetitorResult(competitorResultFixture);
 
-      await userEvent.click(
-        screen.getByRole('checkbox', { name: `Select ${firstPrimaryKeyword.keyword}` })
-      );
-      await userEvent.click(
-        screen.getByRole('checkbox', { name: `Select ${secondPrimaryKeyword.keyword}` })
-      );
-      await userEvent.click(screen.getByRole('button', { name: 'Add to Keywords' }));
+      await userEvent.click(selectKeywordCheckbox(firstPrimaryKeyword.keyword));
+      await userEvent.click(selectKeywordCheckbox(secondPrimaryKeyword.keyword));
+      await userEvent.click(getPromoteButtonElement());
       await screen.findByText(promotionSuccessText);
 
       expect(mockApiPost).toHaveBeenCalledTimes(1);

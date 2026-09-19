@@ -188,7 +188,7 @@ const DownloadIcon = () => (
   </svg>
 );
 
-interface PaginationHeaderProps {
+export interface PaginationHeaderProps {
   totalItems: number;
   showAll: boolean;
   startIndex: number;

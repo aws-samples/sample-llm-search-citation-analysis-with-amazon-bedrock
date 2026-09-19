@@ -5,6 +5,7 @@ serialization and run-time scope resolution against the Keywords table.
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -13,7 +14,7 @@ from shared import keyword_groups
 
 
 def _keyword(item_id: str, text: str, *, groups: set[str] | None = None, status: str = 'active') -> dict:
-    item = {'id': item_id, 'keyword': text, 'status': status}
+    item: dict[str, Any] = {'id': item_id, 'keyword': text, 'status': status}
     if groups:
         item['group_ids'] = set(groups)
     return item
@@ -26,7 +27,7 @@ def _table_with_active(items: list[dict], *, pages: int = 1) -> MagicMock:
     responses = []
     for index in range(pages):
         page = items[index * chunk:(index + 1) * chunk]
-        response = {'Items': page}
+        response: dict[str, Any] = {'Items': page}
         if index < pages - 1:
             response['LastEvaluatedKey'] = {'id': f'page-{index}'}
         responses.append(response)
@@ -64,6 +65,14 @@ class TestValidateIdList:
         _, error = keyword_groups.validate_id_list(['a', 'b', 'c'], field='group_ids', limit=2)
 
         assert error == 'group_ids accepts at most 2 entries'
+
+    def test_accepts_more_than_fifty_ids_when_no_request_limit_applies(self) -> None:
+        group_ids = [f'group-{index}' for index in range(51)]
+
+        ids, error = keyword_groups.validate_id_list(group_ids, field='group_ids')
+
+        assert error is None
+        assert ids == group_ids
 
 
 class TestValidateScope:
@@ -116,6 +125,37 @@ class TestSerializeKeywordItem:
         keyword_groups.serialize_keyword_item(item)
 
         assert isinstance(item['group_ids'], set)
+
+
+class TestAddKeywordGroups:
+    def test_returns_membership_union_when_new_group_is_added(self) -> None:
+        table = MagicMock()
+        table.update_item.return_value = {'Attributes': {
+            'id': 'legacy-id',
+            'keyword': 'hotels',
+            'group_ids': {'existing-group'},
+        }}
+
+        updated, added = keyword_groups.add_keyword_groups(
+            table,
+            'legacy-id',
+            {'destination-group'},
+        )
+
+        assert updated == {
+            'id': 'legacy-id',
+            'keyword': 'hotels',
+            'group_ids': {'existing-group', 'destination-group'},
+        }
+        assert added == {'destination-group'}
+        table.update_item.assert_called_once_with(
+            Key={'id': 'legacy-id'},
+            UpdateExpression='ADD group_ids :gids',
+            ConditionExpression='attribute_exists(#id)',
+            ExpressionAttributeNames={'#id': 'id'},
+            ExpressionAttributeValues={':gids': {'destination-group'}},
+            ReturnValues='ALL_OLD',
+        )
 
 
 class TestResolveScope:

@@ -34,9 +34,11 @@ from shared.research_agent import (
     parse_queries,
     parse_selection,
     planned_query_texts,
+    selected_dimensions,
     step_plan_fields,
     validate_noun,
 )
+from testing.assertions import present
 
 HOTEL_PROFILE = {
     'subject': 'hotel',
@@ -121,7 +123,7 @@ class TestBuildAgentConfig:
 
 class TestBuiltinTemplates:
     def test_hotels_keeps_the_legacy_id_and_the_verbatim_default_prompt(self):
-        template = builtin_template()
+        template = present(builtin_template())
         assert (template['id'], template['builtin'], template['system_prompt']) == (BUILTIN_TEMPLATE_ID, True, DEFAULT_SYSTEM_PROMPT)
 
     def test_lists_the_five_industries_hotels_first(self):
@@ -340,7 +342,7 @@ class TestParseEvaluation:
     def test_continue_keeps_the_new_queries(self):
         text = '{"assessment": "thin on audience", "decision": "continue", "reason": "more to find", "next_queries": [{"query": "hotel coruña con niños", "dimension": "audience"}]}'
 
-        evaluation = parse_evaluation(text, _config(), exclude_queries=set())
+        evaluation = present(parse_evaluation(text, _config(), exclude_queries=set()))
 
         assert evaluation['decision'] == 'continue'
         assert evaluation['next_queries'] == [{'query': 'hotel coruña con niños', 'dimension': 'audience', 'rationale': ''}]
@@ -348,14 +350,14 @@ class TestParseEvaluation:
     def test_continue_without_new_queries_becomes_stop(self):
         text = '{"decision": "continue", "reason": "x", "next_queries": [{"query": "hoteles coruña"}]}'
 
-        evaluation = parse_evaluation(text, _config(), exclude_queries={'hoteles coruña'})
+        evaluation = present(parse_evaluation(text, _config(), exclude_queries={'hoteles coruña'}))
 
         assert (evaluation['decision'], evaluation['next_queries']) == ('stop', [])
 
     def test_stop_discards_any_queries(self):
         text = '{"decision": "STOP", "reason": "saturated", "next_queries": [{"query": "leftover"}]}'
 
-        evaluation = parse_evaluation(text, _config(), exclude_queries=set())
+        evaluation = present(parse_evaluation(text, _config(), exclude_queries=set()))
 
         assert (evaluation['decision'], evaluation['next_queries'], evaluation['reason']) == ('stop', [], 'saturated')
 
@@ -372,7 +374,7 @@ class TestParseSelection:
     def test_enriches_selected_keywords_with_the_candidate_providers(self):
         text = '[{"keyword": "Hotel Coruña Playa", "dimension": "destination", "intent": "transactional", "competition": "high", "relevance": 9, "rationale": "beachfront demand"}]'
 
-        proposal = parse_selection(text, _config(), self._CANDIDATES)
+        proposal = present(parse_selection(text, _config(), self._CANDIDATES))
 
         assert proposal == [{
             'keyword': 'Hotel Coruña Playa', 'dimension': 'destination', 'intent': 'transactional',
@@ -382,24 +384,24 @@ class TestParseSelection:
     def test_fills_intent_and_competition_from_the_candidate_when_the_model_omits_them(self):
         text = '[{"keyword": "hotel coruña spa", "dimension": "hotel_attributes"}]'
 
-        proposal = parse_selection(text, _config(), self._CANDIDATES)
+        proposal = present(parse_selection(text, _config(), self._CANDIDATES))
 
         assert (proposal[0]['intent'], proposal[0]['competition'], proposal[0]['relevance']) == ('informational', 'medium', 5.0)
 
     def test_caps_the_proposal_at_the_target_count(self):
         text = '[' + ','.join(f'{{"keyword": "kw {index}"}}' for index in range(30)) + ']'
 
-        assert len(parse_selection(text, _config(target_count=12), [])) == 12
+        assert len(present(parse_selection(text, _config(target_count=12), []))) == 12
 
     def test_deduplicates_on_the_canonical_keyword(self):
         text = '[{"keyword": "Hotel Coruña"}, {"keyword": "hotel  coruña"}]'
 
-        assert len(parse_selection(text, _config(), [])) == 1
+        assert len(present(parse_selection(text, _config(), []))) == 1
 
     def test_clamps_relevance_into_zero_to_ten(self):
         text = '[{"keyword": "a", "relevance": 42}, {"keyword": "b", "relevance": -3}]'
 
-        assert [entry['relevance'] for entry in parse_selection(text, _config(), [])] == [10.0, 0.0]
+        assert [entry['relevance'] for entry in present(parse_selection(text, _config(), []))] == [10.0, 0.0]
 
     def test_none_when_nothing_usable_was_returned(self):
         assert parse_selection('[]', _config(), self._CANDIDATES) is None
@@ -545,3 +547,51 @@ class TestPlannedQueryTexts:
 
     def test_empty_without_rounds(self):
         assert planned_query_texts({}) == set()
+
+
+
+class TestRequestedDimensionEnforcement:
+    def test_preserves_requested_dimension_order_and_appends_other(self):
+        config = _config(dimensions=['audience', 'destination'])
+
+        assert selected_dimensions(config, include_other=True) == ['audience', 'destination', 'other']
+
+    def test_maps_known_but_unrequested_plan_dimension_to_other(self):
+        plan = present(parse_plan(
+            '{"queries": [{"query": "hotel spa coruña", "dimension": "hotel_attributes"}]}',
+            _config(dimensions=['destination']),
+        ))
+
+        assert plan['queries'][0]['dimension'] == 'other'
+
+    def test_maps_known_but_unrequested_evaluation_dimension_to_other(self):
+        evaluation = present(parse_evaluation(
+            '{"decision": "continue", "next_queries": [{"query": "hotel parejas", "dimension": "audience"}]}',
+            _config(dimensions=['destination']),
+            exclude_queries=set(),
+        ))
+
+        assert evaluation['next_queries'][0]['dimension'] == 'other'
+
+    def test_maps_known_but_unrequested_selected_dimension_to_other(self):
+        proposal = present(parse_selection(
+            '[{"keyword": "hotel con spa", "dimension": "hotel_attributes"}]',
+            _config(dimensions=['destination']),
+            [],
+        ))
+
+        assert proposal[0]['dimension'] == 'other'
+
+    def test_maps_known_but_unrequested_fallback_dimension_to_other(self):
+        proposal = fallback_selection(
+            _config(dimensions=['destination']),
+            [{'keyword': 'hotel familiar', 'dimension': 'audience'}],
+        )
+
+        assert proposal[0]['dimension'] == 'other'
+
+    def test_selection_prompt_advertises_only_requested_dimensions_and_other(self):
+        prompt = build_selection_prompt(_config(dimensions=['destination']), [])
+
+        assert 'one of: destination, other' in prompt
+        assert 'audience, trip_type' not in prompt

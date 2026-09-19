@@ -26,15 +26,15 @@ import {
 import {
   beachResortsFixture,
   expansionKeywordFixtures,
+  getPromoteButtonElement,
   luxuryHotelsFixture,
+  promoteKeyword,
   selectKeywordCheckbox,
 } from './expandedKeyword-fixtures';
 
-vi.mock('../../api/client', () => ({ apiPost: vi.fn() }));
+vi.mock('../../api/client', () => import('./apiClientMock-fixtures'));
 
-import { apiPost } from '../../api/client';
-
-const mockApiPost = vi.mocked(apiPost);
+import { mockApiPost } from './apiClientMock-fixtures';
 
 describe('KeywordExpansion', () => {
   describe('initial render', () => {
@@ -202,9 +202,6 @@ const renderExpansionWithResult = (
   />
 );
 
-const getPromoteButtonElement = () =>
-  screen.getByRole('button', { name: /add to keywords/i });
-
 describe('KeywordExpansion promotion UI', () => {
   beforeEach(() => {
     mockApiPost.mockReset();
@@ -224,8 +221,7 @@ describe('KeywordExpansion promotion UI', () => {
     mockApiPost.mockResolvedValue(promotionWireFixture);
     renderExpansionWithResult(expansionResultFixture);
 
-    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    await userEvent.click(getPromoteButtonElement());
+    await promoteKeyword(luxuryHotelsFixture.keyword);
 
     expect(mockApiPost).toHaveBeenCalledTimes(1);
     expect(mockApiPost).toHaveBeenCalledWith(
@@ -242,8 +238,7 @@ describe('KeywordExpansion promotion UI', () => {
     mockApiPost.mockImplementation(mockPendingRequest);
     renderExpansionWithResult(expansionResultFixture);
 
-    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    await userEvent.click(getPromoteButtonElement());
+    await promoteKeyword(luxuryHotelsFixture.keyword);
 
     expect(screen.getByText(/adding selected keywords/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /adding/i })).toBeDisabled();
@@ -253,8 +248,7 @@ describe('KeywordExpansion promotion UI', () => {
     mockApiPost.mockResolvedValue(promotionWireFixture);
     renderExpansionWithResult(expansionResultFixture);
 
-    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    await userEvent.click(getPromoteButtonElement());
+    await promoteKeyword(luxuryHotelsFixture.keyword);
 
     expect(await screen.findByText(successMessage)).toBeInTheDocument();
   });
@@ -283,8 +277,7 @@ describe('KeywordExpansion promotion UI', () => {
     const onKeywordsAdded = vi.fn();
     renderExpansionWithResult(expansionResultFixture, onKeywordsAdded);
 
-    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    await userEvent.click(getPromoteButtonElement());
+    await promoteKeyword(luxuryHotelsFixture.keyword);
     await screen.findByText(successMessage);
 
     expect(onKeywordsAdded).toHaveBeenCalledTimes(1);
@@ -296,8 +289,7 @@ describe('KeywordExpansion promotion UI', () => {
     const onKeywordsAdded = vi.fn();
     renderExpansionWithResult(expansionResultFixture, onKeywordsAdded);
 
-    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    await userEvent.click(getPromoteButtonElement());
+    await promoteKeyword(luxuryHotelsFixture.keyword);
     await screen.findByRole('alert');
 
     expect(onKeywordsAdded).not.toHaveBeenCalled();
@@ -307,8 +299,7 @@ describe('KeywordExpansion promotion UI', () => {
     mockApiPost.mockRejectedValue(new ApiRequestError('HTTP 500: Server Error', 500));
     renderExpansionWithResult(expansionResultFixture);
 
-    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    await userEvent.click(getPromoteButtonElement());
+    await promoteKeyword(luxuryHotelsFixture.keyword);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/adding keywords failed/i);
     expect(selectKeywordCheckbox(luxuryHotelsFixture.keyword)).toBeChecked();
@@ -319,8 +310,7 @@ describe('KeywordExpansion promotion UI', () => {
     mockApiPost.mockRejectedValue(createDefinitiveRejection(definitiveRejectionField));
     renderExpansionWithResult(expansionResultFixture);
 
-    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    await userEvent.click(getPromoteButtonElement());
+    await promoteKeyword(luxuryHotelsFixture.keyword);
 
     expect((await screen.findByRole('alert')).textContent)
       .toBe(`${definitiveRejectionMessage} (field: ${definitiveRejectionField})`);
@@ -330,8 +320,7 @@ describe('KeywordExpansion promotion UI', () => {
     mockApiPost.mockRejectedValue(createDefinitiveRejection());
     renderExpansionWithResult(expansionResultFixture);
 
-    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    await userEvent.click(getPromoteButtonElement());
+    await promoteKeyword(luxuryHotelsFixture.keyword);
 
     expect((await screen.findByRole('alert')).textContent).toBe(definitiveRejectionMessage);
   });
@@ -340,8 +329,7 @@ describe('KeywordExpansion promotion UI', () => {
     mockApiPost.mockRejectedValue(createDefinitiveRejection(definitiveRejectionField));
     renderExpansionWithResult(expansionResultFixture);
 
-    await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    await userEvent.click(getPromoteButtonElement());
+    await promoteKeyword(luxuryHotelsFixture.keyword);
     await screen.findByRole('alert');
 
     expect(selectKeywordCheckbox(luxuryHotelsFixture.keyword)).toBeChecked();

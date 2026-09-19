@@ -1,17 +1,20 @@
 import {
-  useId, useMemo, useState
+  useId, useState
 } from 'react';
 import { useBrandMentions } from '../../hooks/useBrandMentions';
 import { useBrandConfig } from '../../hooks/useBrandConfig';
-import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { BrandMentionsTable } from './BrandMentionsTable';
 import { BrandDetailModal } from './BrandDetailModal';
 import { BrandConfigPanel } from './BrandConfigPanel';
 import { exportBrandMentions } from './brandMentionsExport';
+import {
+  countTrackedBrands, describeIndustry 
+} from './brandConfigSummary';
 import { PersonaSelector } from '../Personas/PersonaSelector';
 import { Spinner } from '../ui/Spinner';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
 import { describeReportScope } from '../ui/reportScope';
+import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
 import type {
   Keyword, KeywordGroup, AggregatedBrand, BrandMentionsResponse, BrandConfig, ReportScope
 } from '../../types';
@@ -320,11 +323,9 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
     showConfig, setShowConfig, classificationFilter, setClassificationFilter,
     selectedPersonaId, setSelectedPersonaId, selectedTimestamp, setSelectedTimestamp
   } = useViewState();
-  const { groups } = useKeywordGroups();
-  const activeKeywords = useMemo(
-    () => keywords.filter((keyword) => !keyword.status || keyword.status === 'active'),
-    [keywords]
-  );
+  const {
+    activeKeywords, groups 
+  } = useKeywordScopeOptions(keywords);
   const scopeLabel = scope === null ? '' : describeReportScope(scope, groups);
 
   const {
@@ -344,14 +345,12 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
     setSelectedTimestamp(null);
   };
 
-  const industryName = config?.industry ? presets?.[config.industry]?.name ?? config.industry : 'Not configured';
-
   return (
     <div className="space-y-6">
       <Header
-        industryName={industryName}
-        firstPartyCount={config?.tracked_brands?.first_party?.length ?? 0}
-        competitorCount={config?.tracked_brands?.competitors?.length ?? 0}
+        industryName={describeIndustry(config, presets)}
+        firstPartyCount={countTrackedBrands(config, 'first_party')}
+        competitorCount={countTrackedBrands(config, 'competitors')}
         onConfigClick={() => setShowConfig(true)}
       />
       <ScopePanel keywords={activeKeywords} groups={groups} scope={scope} onChange={handleScopeChange} />

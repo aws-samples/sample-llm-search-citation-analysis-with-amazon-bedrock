@@ -27,7 +27,9 @@ import logging
 import os
 import random
 import time
+from collections.abc import Mapping
 from enum import StrEnum
+from typing import Any
 
 import boto3
 
@@ -197,13 +199,6 @@ def invoke_bedrock(
     for attempt in range(max_retries):
         try:
             response = client.converse(**request_kwargs)
-            content_blocks = (
-                response.get("output", {}).get("message", {}).get("content", [])
-            )
-            for block in content_blocks:
-                if "text" in block:
-                    return block["text"]
-            return ""
         except Exception as exc:
             error_str = str(exc)
             is_throttle = any(name in error_str for name in _THROTTLE_ERRORS)
@@ -219,7 +214,18 @@ def invoke_bedrock(
                 time.sleep(delay)
                 continue
             raise
+        return _first_text_block(response)
 
     raise BedrockInvocationError(
         f"Bedrock invocation failed after {max_retries} attempts for model {model_id}"
     )
+
+
+def _first_text_block(response: Mapping[str, Any]) -> str:
+    """The first ``text`` content block of a Converse response; ``""`` when there is none.
+
+    Reasoning blocks (``reasoningContent``) precede the answer when extended
+    thinking is on and are skipped.
+    """
+    content_blocks = response.get("output", {}).get("message", {}).get("content", [])
+    return next((block["text"] for block in content_blocks if "text" in block), "")

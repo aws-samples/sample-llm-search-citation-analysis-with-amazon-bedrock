@@ -1,24 +1,17 @@
 import {
   useEffect, useMemo, useState
 } from 'react';
-import type {
-  Keyword, KeywordExpansionResult, KeywordResearchItem
-} from '../../types';
+import type { KeywordExpansionResult } from '../../types';
 import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { KeywordResultsTable } from './KeywordResultsTable';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
 import { ResearchProgress } from './ResearchProgress';
+import type { ResearchRunViewProps } from './researchRunView';
 import { Spinner } from '../ui/Spinner';
 
-interface KeywordExpansionProps {
+interface KeywordExpansionProps extends ResearchRunViewProps {
   onExpand: (seedKeyword: string, industry: string, count: number) => Promise<void>;
-  loading: boolean;
   result: KeywordExpansionResult | null;
-  error: string | null;
-  /** The job being followed (running or just finished), for progress and retry. */
-  activeJob?: KeywordResearchItem | null;
-  onRetry?: (job: KeywordResearchItem) => void;
-  onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
 const INDUSTRIES = [
@@ -78,7 +71,6 @@ export const KeywordExpansion = ({
   const expandedKeywords = useMemo(() => result?.keywords ?? [], [result]);
   const promotion = usePromoteKeywords(expandedKeywords, onKeywordsAdded);
   const { clearSelection } = promotion;
-  const selectedKeywords = useMemo(() => new Set(promotion.selected), [promotion.selected]);
 
   useEffect(() => {
     clearSelection();
@@ -179,7 +171,7 @@ export const KeywordExpansion = ({
             title={`${result.keywords.length} keywords for "${result.seed_keyword}"`}
             subtitle={`Industry: ${result.industry}`}
             selectable
-            selected={selectedKeywords}
+            selected={promotion.selectedKeys}
             onToggle={promotion.toggle}
           />
         </>

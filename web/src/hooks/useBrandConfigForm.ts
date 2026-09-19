@@ -27,7 +27,7 @@ export interface BrandConfigFormInputs {
 }
 
 type BrandType = 'first_party' | 'competitor';
-type ConfigTab = 'settings' | 'prompt';
+export type ConfigTab = 'settings' | 'prompt';
 
 export interface BrandConfigExpansionState {
   selectedFirstPartyBrand: string | null;
@@ -91,6 +91,49 @@ export interface UseBrandConfigFormReturn {
   currentPreset: IndustryPresets[string] | undefined;
 }
 
+/** The stored part of the form; the prompt fields derive from it and the presets. */
+type BrandConfigFormValues = Omit<BrandConfigFormState, 'currentPrompt' | 'promptModified'>;
+
+function defaultFormValues(): BrandConfigFormValues {
+  return {
+    industry: 'hotels',
+    firstPartyBrands: [],
+    firstPartyDomains: [],
+    competitorBrands: [],
+    customEntityTypes: [],
+    includeSentiment: true,
+    includeRankingContext: true,
+    maxBrands: 20,
+    industryPrompts: {},
+  };
+}
+
+function trackedBrandsFromConfig(
+  config: BrandConfig,
+  defaults: BrandConfigFormValues
+): Pick<BrandConfigFormValues, 'firstPartyBrands' | 'competitorBrands'> {
+  return {
+    firstPartyBrands: config.tracked_brands?.first_party ?? defaults.firstPartyBrands,
+    competitorBrands: config.tracked_brands?.competitors ?? defaults.competitorBrands,
+  };
+}
+
+/** Editable values of a stored config; gaps in a partial config fall back to the defaults. */
+function formValuesFromConfig(config: BrandConfig | null): BrandConfigFormValues {
+  const defaults = defaultFormValues();
+  if (!config) return defaults;
+  return {
+    industry: config.industry || defaults.industry,
+    ...trackedBrandsFromConfig(config, defaults),
+    firstPartyDomains: config.first_party_domains ?? defaults.firstPartyDomains,
+    customEntityTypes: config.custom_entity_types ?? defaults.customEntityTypes,
+    includeSentiment: config.include_sentiment ?? defaults.includeSentiment,
+    includeRankingContext: config.include_ranking_context ?? defaults.includeRankingContext,
+    maxBrands: config.max_brands ?? defaults.maxBrands,
+    industryPrompts: config.industry_prompts ?? defaults.industryPrompts,
+  };
+}
+
 export function useBrandConfigForm(
   config: BrandConfig | null,
   presets: IndustryPresets | null
@@ -101,15 +144,16 @@ export function useBrandConfigForm(
   const [saved, setSaved] = useState(false);
 
   // Form data state
-  const [industry, setIndustry] = useState(config?.industry ?? 'hotels');
-  const [firstPartyBrands, setFirstPartyBrands] = useState<string[]>(config?.tracked_brands?.first_party ?? []);
-  const [firstPartyDomains, setFirstPartyDomains] = useState<string[]>(config?.first_party_domains ?? []);
-  const [competitorBrands, setCompetitorBrands] = useState<string[]>(config?.tracked_brands?.competitors ?? []);
-  const [customEntityTypes, setCustomEntityTypes] = useState<string[]>(config?.custom_entity_types ?? []);
-  const [includeSentiment, setIncludeSentiment] = useState(config?.include_sentiment ?? true);
-  const [includeRankingContext, setIncludeRankingContext] = useState(config?.include_ranking_context ?? true);
-  const [maxBrands, setMaxBrands] = useState(config?.max_brands ?? 20);
-  const [industryPrompts, setIndustryPrompts] = useState<Record<string, string>>(config?.industry_prompts ?? {});
+  const initialValues = formValuesFromConfig(config);
+  const [industry, setIndustry] = useState(initialValues.industry);
+  const [firstPartyBrands, setFirstPartyBrands] = useState(initialValues.firstPartyBrands);
+  const [firstPartyDomains, setFirstPartyDomains] = useState(initialValues.firstPartyDomains);
+  const [competitorBrands, setCompetitorBrands] = useState(initialValues.competitorBrands);
+  const [customEntityTypes, setCustomEntityTypes] = useState(initialValues.customEntityTypes);
+  const [includeSentiment, setIncludeSentiment] = useState(initialValues.includeSentiment);
+  const [includeRankingContext, setIncludeRankingContext] = useState(initialValues.includeRankingContext);
+  const [maxBrands, setMaxBrands] = useState(initialValues.maxBrands);
+  const [industryPrompts, setIndustryPrompts] = useState(initialValues.industryPrompts);
   const [currentPrompt, setCurrentPrompt] = useState('');
   const [promptModified, setPromptModified] = useState(false);
 
@@ -139,15 +183,16 @@ export function useBrandConfigForm(
   // Sync form state when config changes
   useEffect(() => {
     if (config) {
-      setIndustry(config.industry || 'hotels');
-      setFirstPartyBrands(config.tracked_brands?.first_party ?? []);
-      setFirstPartyDomains(config.first_party_domains ?? []);
-      setCompetitorBrands(config.tracked_brands?.competitors ?? []);
-      setCustomEntityTypes(config.custom_entity_types ?? []);
-      setIncludeSentiment(config.include_sentiment ?? true);
-      setIncludeRankingContext(config.include_ranking_context ?? true);
-      setMaxBrands(config.max_brands ?? 20);
-      setIndustryPrompts(config.industry_prompts ?? {});
+      const values = formValuesFromConfig(config);
+      setIndustry(values.industry);
+      setFirstPartyBrands(values.firstPartyBrands);
+      setFirstPartyDomains(values.firstPartyDomains);
+      setCompetitorBrands(values.competitorBrands);
+      setCustomEntityTypes(values.customEntityTypes);
+      setIncludeSentiment(values.includeSentiment);
+      setIncludeRankingContext(values.includeRankingContext);
+      setMaxBrands(values.maxBrands);
+      setIndustryPrompts(values.industryPrompts);
     }
   }, [config]);
 

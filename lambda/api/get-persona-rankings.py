@@ -12,7 +12,6 @@ import sys
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
@@ -20,6 +19,7 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, require_keyword, validate
 from shared.dynamo_decimal import to_int
+from shared.search_results import latest_run, query_keyword_items, search_results_table_name
 from shared.visibility_score import calculate_visibility_score, sentiment_to_score
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+SEARCH_RESULTS_TABLE = search_results_table_name()
 QUERY_PROMPTS_TABLE = os.environ['QUERY_PROMPTS_TABLE']
 
 
@@ -37,12 +37,12 @@ def sentiment_to_label(sentiments: list[str]) -> str:
     if not sentiments:
         return 'neutral'
 
-    counts = {}
+    counts: dict[str, int] = {}
     for s in sentiments:
         label = (s or 'neutral').lower()
         counts[label] = counts.get(label, 0) + 1
 
-    return max(counts, key=counts.get)
+    return max(counts, key=lambda label: counts[label])
 
 
 def fetch_persona_names() -> dict[str, str]:
@@ -53,16 +53,17 @@ def fetch_persona_names() -> dict[str, str]:
     """
     table = dynamodb.Table(QUERY_PROMPTS_TABLE)
     response = table.scan(ProjectionExpression='id, #n', ExpressionAttributeNames={'#n': 'name'})
-    items = response.get('Items', [])
+    items: list[dict[str, Any]] = response.get('Items', [])
 
     return {item['id']: item.get('name', 'Unknown Persona') for item in items}
 
 
-def get_valid_persona_ids() -> set:
+def get_valid_persona_ids() -> set[str]:
     """Return the set of all persona IDs stored in the QueryPrompts table."""
     table = dynamodb.Table(QUERY_PROMPTS_TABLE)
     response = table.scan(ProjectionExpression='id')
-    return {item['id'] for item in response.get('Items', [])}
+    items: list[dict[str, Any]] = response.get('Items', [])
+    return {item['id'] for item in items}
 
 
 
@@ -180,12 +181,7 @@ def get_persona_rankings(keyword: str, query_prompt_id: str | None = None) -> di
 
     If query_prompt_id is provided, returns only that persona's data.
     """
-    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-
-    response = table.query(
-        KeyConditionExpression=Key('keyword').eq(keyword)
-    )
-    items = response.get('Items', [])
+    items = query_keyword_items(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
 
     if not items:
         return {
@@ -196,8 +192,7 @@ def get_persona_rankings(keyword: str, query_prompt_id: str | None = None) -> di
         }
 
     # Use the latest timestamp only
-    latest_timestamp = max(item.get('timestamp', '') for item in items)
-    latest_items = [item for item in items if item.get('timestamp') == latest_timestamp]
+    _, latest_items = latest_run(items)
 
     # Determine total provider count from the data
     all_providers = {item.get('provider', 'unknown') for item in latest_items}

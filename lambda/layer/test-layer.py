@@ -80,15 +80,11 @@ def test_imports():
         # Test browser_tools import
         from shared.browser_tools import SimpleBrowserTools
         print("✅ Successfully imported SimpleBrowserTools")
-
-        return True
-
     except ImportError as e:
         print(f"❌ Import error: {e}")
         return False
-    except Exception as e:
-        print(f"❌ Error testing imports: {e}")
-        return False
+    else:
+        return True
 
 
 def test_dependencies():

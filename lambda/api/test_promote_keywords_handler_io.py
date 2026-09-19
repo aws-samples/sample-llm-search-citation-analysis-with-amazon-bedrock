@@ -27,11 +27,12 @@ Context:
     library is declared): its `scan` returns queued pages and its `put_item`
     records writes. Each invocation swaps the module-level `keywords_table` for
     the mock via `patch.object`; the handler is loaded through the
-    `promotion_handler` fixture (`testing.handler_fixtures.handler_fixture`).
+    `promotion_handler` fixture (`testing.promotion_fixtures`), which also
+    keeps the table env vars unset while the tests run.
 """
 
 import json
-import os
+from typing import Any
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -39,8 +40,8 @@ from botocore.exceptions import ClientError
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from testing.env import KEYWORDS_TABLE_ENV, cleared_env
-from testing.handler_fixtures import handler_fixture
+from testing.dynamodb_stubs import conditional_check_failure
+from testing.events import api_gateway_event, parse_response
 from testing.keyword_strategies import (
     BASE_TEXTS,
     CASE_TRANSFORMS,
@@ -48,30 +49,9 @@ from testing.keyword_strategies import (
     draw_mixed_request,
     variant,
 )
+from testing.promotion_fixtures import promotion_handler_fixture
 
-pytestmark = pytest.mark.usefixtures('table_env_cleared')
-
-
-# --- Import-boundary bootstrap ----------------------------------------------
-#
-# `promote-keywords.py` is hyphenated and builds a `boto3` DynamoDB resource at
-# import time, so it is loaded fresh under a module name unique to THIS file
-# with the table env vars set and `boto3` patched BEFORE the load. Every global
-# mutation is undone on teardown; nothing is autouse, so the pre-existing tests
-# in this directory are untouched.
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
-promotion_handler = handler_fixture(
-    _API_DIR, 'promote-keywords.py', 'promote_keywords_under_test_handler_io', env=KEYWORDS_TABLE_ENV
-)
-
-
-@pytest.fixture
-def table_env_cleared():
-    """Clear the Keywords table env vars around one test: the loaded handler must not re-read them."""
-    with cleared_env(*KEYWORDS_TABLE_ENV):
-        yield
+promotion_handler = promotion_handler_fixture('promote_keywords_under_test_handler_io')
 
 
 # The COMPLETE created item's field set, as `create_items` produces it.
@@ -95,7 +75,7 @@ def _scan_pages(text_pages):
     """
     pages = []
     for index, texts in enumerate(text_pages):
-        page = {'Items': [{'keyword': text} for text in texts]}
+        page: dict[str, Any] = {'Items': [{'keyword': text} for text in texts]}
         if index < len(text_pages) - 1:
             page['LastEvaluatedKey'] = {'id': f'page-{index}-last'}
         pages.append(page)
@@ -128,23 +108,16 @@ def _mutating_calls(*mocks):
 
 def _invoke(module, table, keywords, status=None, priority=None):
     """Invoke the handler against the mock table and decode its response."""
-    body = {'keywords': keywords}
+    body: dict[str, Any] = {'keywords': keywords}
     if status is not None:
         body['status'] = status
     if priority is not None:
         body['priority'] = priority
 
-    event = {
-        'httpMethod': 'POST',
-        'path': '/api/keywords/promote',
-        'headers': {},
-        'body': json.dumps(body),
-    }
-
     with patch.object(module, 'keywords_table', table):
-        response = module.handler(event, None)
+        response = module.handler(api_gateway_event('POST', '/api/keywords/promote', body=body), None)
 
-    return response['statusCode'], json.loads(response['body'])
+    return parse_response(response)
 
 
 def _supplied(drawn, allowed_values):
@@ -411,10 +384,7 @@ class TestPromotionPersistenceUnit:
             {'id': 'beta-id', 'keyword': 'beta'},
             {'id': 'gamma-id', 'keyword': 'gamma'},
         ]
-        conflict = ClientError(
-            {'Error': {'Code': 'ConditionalCheckFailedException', 'Message': 'duplicate'}},
-            'PutItem',
-        )
+        conflict = conditional_check_failure('PutItem', message='duplicate')
         table = _mock_table(put_side_effect=[None, conflict, None])
 
         result = promotion_handler.write_items(table, items)
@@ -463,10 +433,7 @@ class TestPromotionPersistenceUnit:
     def test_reports_actual_write_outcomes_when_a_concurrent_promotion_wins(
         self, promotion_handler
     ):
-        conflict = ClientError(
-            {'Error': {'Code': 'ConditionalCheckFailedException', 'Message': 'duplicate'}},
-            'PutItem',
-        )
+        conflict = conditional_check_failure('PutItem', message='duplicate')
         table = _mock_table(
             scan_pages=_scan_pages([['existing']]),
             put_side_effect=[None, conflict],

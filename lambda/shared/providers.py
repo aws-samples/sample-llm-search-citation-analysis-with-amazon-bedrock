@@ -64,6 +64,6 @@ def get_enabled_provider_count(table_name: str | None = None) -> int:
         configured = {item['provider_id']: item.get('enabled', True) for item in items}
         enabled_count = sum(1 for p in LLM_PROVIDERS if configured.get(p, True))
         return enabled_count if enabled_count > 0 else len(LLM_PROVIDERS)
-    except Exception as e:
-        logger.warning(f"Error getting provider config: {e}")
+    except Exception:
+        logger.exception("Error getting provider config")
         return len(LLM_PROVIDERS)

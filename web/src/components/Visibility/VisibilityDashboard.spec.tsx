@@ -7,7 +7,7 @@ import {
 import userEvent from '@testing-library/user-event';
 import { VisibilityDashboard } from './VisibilityDashboard';
 import type {
-  GroupVisibilityResponse, Keyword, VisibilityMetricsResponse
+  GroupVisibilityResponse, VisibilityMetricsResponse
 } from '../../types';
 
 vi.mock('../../hooks/useVisibilityMetrics', () => ({ useVisibilityMetrics: vi.fn() }));
@@ -25,6 +25,7 @@ import {
   buildKeywordGroup, buildKeywordGroupsHookResult
 } from '../../hooks/useKeywordGroups-fixtures';
 import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
+import { SCOPE_KEYWORDS } from '../ui/useKeywordScopeOptions-fixtures';
 import { exportGroupOverview } from './groupOverviewExport';
 
 const mockUseVisibilityMetrics = vi.mocked(useVisibilityMetrics);
@@ -32,20 +33,6 @@ const mockUseHistoricalTrends = vi.mocked(useHistoricalTrends);
 const mockUsePersonaRankings = vi.mocked(usePersonaRankings);
 const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
 const mockExportGroupOverview = vi.mocked(exportGroupOverview);
-
-const keywords: Keyword[] = [
-  {
-    id: 'kw-1',
-    keyword: 'hotels',
-    created_at: '2026-01-01T00:00:00Z',
-    group_ids: ['group-coruna']
-  },
-  {
-    id: 'kw-2',
-    keyword: 'resorts',
-    created_at: '2026-01-02T00:00:00Z'
-  },
-];
 
 const groups = [buildKeywordGroup()];
 
@@ -56,7 +43,6 @@ const groupVisibility: GroupVisibilityResponse = {
     keyword_count: 2
   },
   timestamp: '2026-09-18T10:00:00Z',
-  total_providers: 4,
   keywords_analyzed: 2,
   keywords_with_data: 1,
   keywords: [
@@ -67,7 +53,6 @@ const groupVisibility: GroupVisibilityResponse = {
       first_party_score: 72.5,
       competitor_score: 40.1,
       first_party_sov: 55,
-      competitor_sov: 45,
       first_party_providers: 3,
       total_mentions: 9,
       first_party_mentioned: true,
@@ -86,7 +71,6 @@ const groupVisibility: GroupVisibilityResponse = {
       first_party_score: 0,
       competitor_score: 0,
       first_party_sov: 0,
-      competitor_sov: 0,
       first_party_providers: 0,
       total_mentions: 0,
       first_party_mentioned: false,
@@ -131,7 +115,6 @@ const groupVisibility: GroupVisibilityResponse = {
 const keywordVisibility: VisibilityMetricsResponse = {
   keyword: 'hotels',
   timestamp: '2026-09-18T10:00:00Z',
-  total_brands: 1,
   total_mentions: 10,
   brands: [{
     name: 'Marriott',
@@ -140,7 +123,6 @@ const keywordVisibility: VisibilityMetricsResponse = {
     providers: ['openai'],
     total_mentions: 10,
     best_rank: 1,
-    avg_sentiment: 0.5,
     share_of_voice: 30,
     classification: 'first_party',
   }],
@@ -225,15 +207,15 @@ describe('VisibilityDashboard', () => {
   });
 
   describe('initial render', () => {
-    it('renders title and scope description', () => {
-      render(<VisibilityDashboard keywords={keywords} />);
+    it('renders title and description', () => {
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
       expect(screen.getByText('Visibility Dashboard')).toBeInTheDocument();
       expect(screen.getByText(/Track how visible your brand is/)).toBeInTheDocument();
     });
 
-    it('offers all keywords every group and each keyword in scope selector', () => {
-      render(<VisibilityDashboard keywords={keywords} />);
+    it('offers all keywords, every group and every keyword in the scope selector', () => {
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
       expect(renderedScopeOptionLabels('Analyze')).toStrictEqual(['All keywords', 'Hotel Coruña (1)', 'hotels', 'resorts']);
     });
@@ -242,7 +224,7 @@ describe('VisibilityDashboard', () => {
       const fetchVisibilityMetrics = mockVisibility(null);
       const fetchHistoricalTrends = mockTrends();
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
       expect(fetchVisibilityMetrics).toHaveBeenCalledWith({ kind: 'all' }, undefined);
       expect(fetchHistoricalTrends).toHaveBeenCalledWith({ kind: 'all' }, 'day', 30);
@@ -253,7 +235,7 @@ describe('VisibilityDashboard', () => {
     it('shows loading message when visibility is loading', () => {
       mockVisibility(null, { loading: true });
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
       expect(screen.getByText('Loading visibility data...')).toBeInTheDocument();
     });
@@ -261,7 +243,7 @@ describe('VisibilityDashboard', () => {
     it('shows loading message when trends are loading', () => {
       mockTrends({ loading: true });
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
       expect(screen.getByText('Loading visibility data...')).toBeInTheDocument();
     });
@@ -271,7 +253,7 @@ describe('VisibilityDashboard', () => {
     it('shows Citation rate only for the group visibility coverage KPI', () => {
       mockVisibility(groupVisibility);
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
       expect(screen.getByText('Citation rate')).toBeInTheDocument();
       expect(screen.queryByText('Coverage')).not.toBeInTheDocument();
@@ -280,7 +262,7 @@ describe('VisibilityDashboard', () => {
     it('shows rank-one top-three and mean-rank prominence values', () => {
       mockVisibility(groupVisibility);
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
       expect(screen.getByText('Prominence').parentElement).toHaveTextContent(
         'Prominence50%rank-#1 share · top-3 75% · mean rank 2'
@@ -290,7 +272,7 @@ describe('VisibilityDashboard', () => {
     it('shows best rank in the per-keyword table', () => {
       mockVisibility(groupVisibility);
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
       const keywordTable = screen.getByRole('table', { name: 'Keywords in this scope' });
 
       expect(within(keywordTable).getByRole('button', { name: 'Best rank' })).toBeInTheDocument();
@@ -301,7 +283,7 @@ describe('VisibilityDashboard', () => {
     it('lists keywords without data at the bottom with a hint', () => {
       mockVisibility(groupVisibility);
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
       const rows = within(screen.getByRole('table', { name: 'Keywords in this scope' })).getAllByRole('row');
 
       expect(rows[rows.length - 1]).toHaveTextContent('resortsNo analysis data yet');
@@ -310,7 +292,7 @@ describe('VisibilityDashboard', () => {
     it('keeps unavailable best ranks last in both sort directions', async () => {
       mockVisibility(rankSortingVisibility);
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
       const keywordTable = screen.getByRole('table', { name: 'Keywords in this scope' });
       await userEvent.click(within(keywordTable).getByRole('button', { name: 'Best rank' }));
 
@@ -333,7 +315,7 @@ describe('VisibilityDashboard', () => {
       mockVisibility(groupVisibility);
       const fetchHistoricalTrends = mockTrends();
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
       await userEvent.click(screen.getByRole('button', { name: '90 days' }));
 
       expect(fetchHistoricalTrends).toHaveBeenCalledWith({ kind: 'all' }, 'day', 90);
@@ -343,7 +325,7 @@ describe('VisibilityDashboard', () => {
       mockVisibility(groupVisibility);
       mockExportGroupOverview.mockResolvedValue();
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
       await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
 
       expect(mockExportGroupOverview).toHaveBeenCalledWith(groupVisibility, null, 'All keywords');
@@ -355,7 +337,7 @@ describe('VisibilityDashboard', () => {
       const fetchVisibilityMetrics = mockVisibility(null);
       const fetchHistoricalTrends = mockTrends();
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
       await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Analyze' }), 'keyword:resorts');
 
       expect(fetchVisibilityMetrics).toHaveBeenCalledWith({
@@ -371,7 +353,7 @@ describe('VisibilityDashboard', () => {
     it('fetches selected keyword group', async () => {
       const fetchVisibilityMetrics = mockVisibility(null);
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
       await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Analyze' }), 'group:group-coruna');
 
       expect(fetchVisibilityMetrics).toHaveBeenCalledWith({
@@ -383,7 +365,7 @@ describe('VisibilityDashboard', () => {
     it('renders brand ranking values for a single keyword', () => {
       mockVisibility(keywordVisibility);
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
       expect(screen.getByText('Brand Rankings')).toBeInTheDocument();
       expect(screen.getByText('Marriott')).toBeInTheDocument();
@@ -392,7 +374,7 @@ describe('VisibilityDashboard', () => {
     it('shows single-keyword prominence with rank context', () => {
       mockVisibility(keywordVisibility);
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
       expect(screen.getByText('Prominence')).toBeInTheDocument();
       expect(screen.getByText('50.0%')).toBeInTheDocument();
@@ -408,7 +390,7 @@ describe('VisibilityDashboard', () => {
         }],
       });
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
       expect(screen.getByText('—')).toBeInTheDocument();
       expect(screen.queryByText('999')).not.toBeInTheDocument();
@@ -420,7 +402,7 @@ describe('VisibilityDashboard', () => {
         brands: []
       });
 
-      render(<VisibilityDashboard keywords={keywords} />);
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
       expect(screen.getByText('No brand data available.')).toBeInTheDocument();
     });

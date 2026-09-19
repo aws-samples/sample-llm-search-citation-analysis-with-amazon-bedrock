@@ -4,25 +4,22 @@ from __future__ import annotations
 
 import json
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
-
-from testing.module_loader import load_handler_module
+from testing.handler_fixtures import handler_fixture
 
 _HANDLER_DIR = os.path.dirname(os.path.abspath(__file__))
 
-
-@pytest.fixture
-def summary_module():
-    with patch('boto3.client', MagicMock()), patch('boto3.resource', MagicMock()):
-        module = load_handler_module(
-            _HANDLER_DIR,
-            'handler.py',
-            'generate_summary_run_metadata_under_test',
-        )
-    module.SUMMARY_BUCKET = ''
-    return module
+# Function scope: one test swaps the module's S3 client and bucket, so every
+# test gets its own load. An empty ``SUMMARY_BUCKET`` keeps the handler off S3
+# even when the shell running the suite has a bucket configured.
+summary_module = handler_fixture(
+    _HANDLER_DIR,
+    'handler.py',
+    'generate_summary_run_metadata_under_test',
+    env={'SUMMARY_BUCKET': ''},
+    scope='function',
+)
 
 
 def _result(keyword: str, timestamp: str | None) -> dict:

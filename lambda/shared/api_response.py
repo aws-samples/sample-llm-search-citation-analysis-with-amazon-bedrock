@@ -55,10 +55,7 @@ def get_cors_origin() -> str:
     try:
         ssm = boto3.client('ssm')
         response = ssm.get_parameter(Name=param_name)
-        _cors_origin_cache = response['Parameter']['Value']
-        logger.info(f"CORS origin loaded: {_cors_origin_cache}")
-        return _cors_origin_cache
-    except ClientError as e:
+    except ClientError:
         # Fail closed for THIS request, but deliberately do NOT cache the
         # failure. The sentinel check above is `is not None`, so a cached ''
         # is indistinguishable from a successful lookup that returned '' —
@@ -68,8 +65,14 @@ def get_cors_origin() -> str:
         # single ERROR line at cold start (AUDIT-2026-08-19 §2.13).
         #
         # Leaving the cache unset means the next request retries SSM.
-        logger.error(f"Failed to get CORS origin from SSM: {e}")
+        logger.exception("Failed to get CORS origin from SSM")
         return ''
+
+    # SSM always returns Value for an existing parameter; the SDK types it
+    # as optional, and '' is this function's fail-closed value anyway.
+    _cors_origin_cache = response['Parameter'].get('Value', '')
+    logger.info(f"CORS origin loaded: {_cors_origin_cache}")
+    return _cors_origin_cache
 
 
 def get_cors_headers(request_origin: str | None = None) -> dict[str, str]:

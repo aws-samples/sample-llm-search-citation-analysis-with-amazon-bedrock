@@ -6,7 +6,9 @@ import { formatDate } from '../../formatting/dateFormatter';
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { safeHref } from '../../infrastructure';
 import { Spinner } from '../ui/Spinner';
+import { ClipboardIcon } from '../ui/ClipboardIcon';
 import { DownloadButton } from './DownloadButton';
+import { ViewerHeader } from './ViewerHeader';
 import { formatSize } from './fileSizeFormatter';
 
 interface FileViewerProps {
@@ -99,31 +101,19 @@ interface FileHeaderProps {
 const FileHeader = ({
   file, content, onCopy, onDownload 
 }: FileHeaderProps) => (
-  <div className="flex flex-col sm:flex-row sm:items-center justify-between bg-gray-50 rounded-lg p-4 gap-3">
-    <div className="min-w-0">
-      <h3 className="font-medium text-gray-900 truncate">{file.name}</h3>
-      <p className="text-xs sm:text-sm text-gray-500">
-        {formatSize(content.size)} • {formatDate(content.last_modified)}
-      </p>
-    </div>
-    <div className="flex items-center gap-2 shrink-0">
-      <button
-        onClick={onCopy}
-        className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1"
-      >
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1.5}
-            d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-          />
-        </svg>
-        <span className="sr-only sm:not-sr-only">Copy</span>
-      </button>
-      <DownloadButton onClick={onDownload} />
-    </div>
-  </div>
+  <ViewerHeader
+    name={file.name}
+    details={<>{formatSize(content.size)} • {formatDate(content.last_modified)}</>}
+  >
+    <button
+      onClick={onCopy}
+      className="px-3 py-1.5 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-1"
+    >
+      <ClipboardIcon className="w-4 h-4" />
+      <span className="sr-only sm:not-sr-only">Copy</span>
+    </button>
+    <DownloadButton onClick={onDownload} />
+  </ViewerHeader>
 );
 
 interface QuickInfoCardsProps {doc: RawResponseDocument;}

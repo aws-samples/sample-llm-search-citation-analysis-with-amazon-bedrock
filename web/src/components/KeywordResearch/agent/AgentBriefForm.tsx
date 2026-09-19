@@ -2,13 +2,16 @@ import {
   useId, useMemo, useState
 } from 'react';
 import type {
-  KeywordGroup, ResearchTemplate
+  AgentDimensionOption, KeywordGroup, ResearchTemplate
 } from '../../../types';
 import type {
   StartAgentRequest, TemplateChanges, TemplateDraft
 } from '../../../api/keywordResearch';
 import type { TemplateMutationOutcome } from '../../../hooks/useResearchTemplates';
 import { Spinner } from '../../ui/Spinner';
+import {
+  BRIEF_INPUT_CLASS, MarketSelect, TemplatePicker
+} from './AgentBriefFields';
 import { AgentTemplateEditor } from './AgentTemplateEditor';
 import {
   AGENT_DEFAULT_ROUNDS,
@@ -42,48 +45,40 @@ interface AgentBriefFormProps {
   readonly onDeleteTemplate: (id: string) => Promise<TemplateMutationOutcome>;
 }
 
-const INPUT_CLASS = 'w-full px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:opacity-50';
-
 /** Copy while the templates are still loading; every template replaces it with its own subject. */
 const LOADING_SUBJECT = 'business';
 
-function MarketSelect({
-  id, label, value, options, onChange
-}: {
-  readonly id: string;
-  readonly label: string;
-  readonly value: string;
-  readonly options: readonly {
-    code: string;
-    label: string 
-  }[];
-  readonly onChange: (code: string) => void;
-}) {
-  const listed = options.some((option) => option.code === value);
-  return (
-    <div>
-      <label htmlFor={id} className="block text-sm text-gray-600 mb-1">{label}</label>
-      <select id={id} value={listed ? value : 'other'} onChange={(event) => onChange(event.target.value === 'other' ? '' : event.target.value)} className={INPUT_CLASS}>
-        {options.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
-        <option value="other">Other code…</option>
-      </select>
-      {!listed && (
-        <input
-          type="text"
-          aria-label={`${label} code`}
-          value={value}
-          maxLength={2}
-          onChange={(event) => onChange(event.target.value.toLowerCase())}
-          placeholder="two-letter code"
-          className={`${INPUT_CLASS} mt-2`}
-        />
-      )}
-    </div>
-  );
+/** What the brief shows for the selected template: its catalogue, the ticked dimensions and the prompt the run would use. */
+interface SelectedTemplateBrief {
+  readonly catalog: readonly AgentDimensionOption[];
+  readonly catalogIds: string[];
+  readonly selectedDimensions: string[];
+  readonly promptText: string;
+  readonly promptDirty: boolean;
+  readonly subject: string;
 }
 
-function TemplateOptions({ templates }: { readonly templates: ResearchTemplate[] }) {
-  return <>{templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</>;
+/**
+ * Resolves the template-driven part of the brief. `dimensions` null means every
+ * catalogue dimension; `systemPrompt` null means the template's own prompt. The
+ * template is undefined while the list loads (or after the selected one was deleted).
+ */
+function selectedTemplateBrief(
+  template: ResearchTemplate | undefined,
+  dimensions: string[] | null,
+  systemPrompt: string | null
+): SelectedTemplateBrief {
+  const catalog = template?.dimensions ?? [];
+  const catalogIds = catalog.map((option) => option.id);
+  const promptText = systemPrompt ?? template?.system_prompt ?? '';
+  return {
+    catalog,
+    catalogIds,
+    selectedDimensions: dimensions ?? catalogIds,
+    promptText,
+    promptDirty: template !== undefined && promptText !== template.system_prompt,
+    subject: template?.subject ?? LOADING_SUBJECT,
+  };
 }
 
 /**
@@ -125,14 +120,9 @@ export function AgentBriefForm({
   const [submitted, setSubmitted] = useState(false);
 
   const template = templates.find((item) => item.id === templateId);
-  const catalog = template?.dimensions ?? [];
-  const catalogIds = catalog.map((option) => option.id);
-  const selectedDimensions = dimensions ?? catalogIds;
-  const promptText = systemPrompt ?? template?.system_prompt ?? '';
-  const promptDirty = template !== undefined && promptText !== template.system_prompt;
-  const subject = template?.subject ?? LOADING_SUBJECT;
-  const builtins = templates.filter((item) => item.builtin);
-  const saved = templates.filter((item) => !item.builtin);
+  const {
+    catalog, catalogIds, selectedDimensions, promptText, promptDirty, subject
+  } = selectedTemplateBrief(template, dimensions, systemPrompt);
 
   const problems = briefProblems({
     seed,
@@ -254,34 +244,21 @@ export function AgentBriefForm({
         </p>
       </div>
 
-      <div>
-        <label htmlFor={ids.template} className="block text-sm text-gray-600 mb-1">Industry template</label>
-        <div className="flex items-center gap-2">
-          <select id={ids.template} value={templateId} disabled={templatesLoading || templates.length === 0} onChange={(event) => selectTemplate(event.target.value)} className={INPUT_CLASS}>
-            <optgroup label="Industry templates">
-              <TemplateOptions templates={builtins} />
-            </optgroup>
-            {saved.length > 0 && (
-              <optgroup label="Your templates">
-                <TemplateOptions templates={saved} />
-              </optgroup>
-            )}
-          </select>
-          {templatesLoading && <Spinner size="sm" className="text-gray-400" />}
-        </div>
-        {template?.description && <p className="mt-1 text-xs text-gray-500">{template.description}</p>}
-        {promptDirty && (
-          <p className="mt-1 text-xs text-amber-700">
-            {'Using your edited instructions instead of the template\u2019s. '}
-            <button type="button" onClick={() => setSystemPrompt(null)} className="underline hover:text-amber-900">Reset to template</button>
-          </p>
-        )}
-      </div>
+      <TemplatePicker
+        id={ids.template}
+        templates={templates}
+        loading={templatesLoading}
+        value={templateId}
+        description={template?.description}
+        promptDirty={promptDirty}
+        onChange={selectTemplate}
+        onResetPrompt={() => setSystemPrompt(null)}
+      />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="md:col-span-1">
           <label htmlFor={ids.seed} className="block text-sm text-gray-600 mb-1">{subjectLabel(subject)} (or seed)</label>
-          <input id={ids.seed} type="text" value={seed} maxLength={200} onChange={(event) => setSeed(event.target.value)} placeholder={seedPlaceholder(subject)} className={INPUT_CLASS} />
+          <input id={ids.seed} type="text" value={seed} maxLength={200} onChange={(event) => setSeed(event.target.value)} placeholder={seedPlaceholder(subject)} className={BRIEF_INPUT_CLASS} />
         </div>
         <MarketSelect id={ids.country} label="Market (country)" value={country} options={COUNTRY_OPTIONS} onChange={setCountry} />
         <MarketSelect id={ids.language} label="Language" value={language} options={LANGUAGE_OPTIONS} onChange={setLanguage} />
@@ -317,7 +294,7 @@ export function AgentBriefForm({
           onChange={(event) => setInstruction(event.target.value)}
           rows={2}
           placeholder="e.g. also expand by events and seasons; skip branded terms"
-          className={INPUT_CLASS}
+          className={BRIEF_INPUT_CLASS}
         />
       </div>
 
@@ -332,7 +309,7 @@ export function AgentBriefForm({
             step={10}
             value={targetCount}
             onChange={(event) => updateTargetCount(event.target.value)}
-            className={INPUT_CLASS}
+            className={BRIEF_INPUT_CLASS}
           />
         </div>
         <div>
@@ -345,13 +322,13 @@ export function AgentBriefForm({
             step={1}
             value={trackingCountText}
             onChange={(event) => updateTrackingCount(event.target.value)}
-            className={INPUT_CLASS}
+            className={BRIEF_INPUT_CLASS}
           />
           <p className="mt-1 text-xs text-gray-500">Recommended active shortlist. This is a demand proxy, not measured search volume.</p>
         </div>
         <div>
           <label htmlFor={ids.rounds} className="block text-sm text-gray-600 mb-1">Research rounds</label>
-          <select id={ids.rounds} value={maxRounds} onChange={(event) => setMaxRounds(Number(event.target.value))} className={INPUT_CLASS}>
+          <select id={ids.rounds} value={maxRounds} onChange={(event) => setMaxRounds(Number(event.target.value))} className={BRIEF_INPUT_CLASS}>
             {Array.from({ length: AGENT_MAX_ROUNDS }, (_, index) => index + 1).map((rounds) => (
               <option key={rounds} value={rounds}>{rounds === 1 ? '1 round (fastest)' : `up to ${rounds} rounds`}</option>
             ))}
@@ -359,7 +336,7 @@ export function AgentBriefForm({
         </div>
         <div>
           <label htmlFor={ids.group} className="block text-sm text-gray-600 mb-1">Add results to group</label>
-          <select id={ids.group} value={groupId} onChange={(event) => setGroupId(event.target.value)} className={INPUT_CLASS}>
+          <select id={ids.group} value={groupId} onChange={(event) => setGroupId(event.target.value)} className={BRIEF_INPUT_CLASS}>
             <option value="">Choose later</option>
             {sortedGroups.map((group) => <option key={group.id} value={group.id}>{group.name} ({group.keyword_count})</option>)}
           </select>

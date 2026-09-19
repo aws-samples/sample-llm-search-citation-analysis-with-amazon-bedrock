@@ -17,43 +17,28 @@ as fact for a day.
 from __future__ import annotations
 
 import os
-import sys
 from typing import Any
-from unittest.mock import MagicMock, patch
 
-import pytest
-
-from testing.module_loader import load_handler_module
+from testing.handler_fixtures import handler_fixture
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
-_MODULE_NAME = 'self_reflection_under_test'
 
-_TEST_ENV = {
-    'DYNAMODB_TABLE_SELF_REFLECTION': 'test-self-reflection',
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
-    'QUERY_PROMPTS_TABLE': 'test-query-prompts',
-    'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brand-config',
-    'BRAND_CONFIG_TABLE': 'test-brand-config',
-    'CORS_ORIGIN_PARAM': '',
-}
-
-
-def _load_handler() -> Any:
-    """Import the hyphenated handler module with AWS clients mocked."""
-    aws = MagicMock()
-
-    with patch('boto3.client', return_value=aws), \
-         patch('boto3.resource', return_value=aws), \
-         patch.dict(os.environ, _TEST_ENV):
-        return load_handler_module(_API_DIR, 'self-reflection.py', _MODULE_NAME)
-
-
-@pytest.fixture
-def reflection():
-    """Provide the self-reflection module."""
-    module = _load_handler()
-    yield module
-    sys.modules.pop(_MODULE_NAME, None)
+# `self-reflection.py` builds its AWS clients at import, so it is loaded with
+# boto3 patched and the table env vars in place; only the pure brand lookup is
+# exercised here, so one load per module is enough.
+reflection = handler_fixture(
+    _API_DIR,
+    'self-reflection.py',
+    'self_reflection_under_test',
+    env={
+        'DYNAMODB_TABLE_SELF_REFLECTION': 'test-self-reflection',
+        'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
+        'QUERY_PROMPTS_TABLE': 'test-query-prompts',
+        'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brand-config',
+        'BRAND_CONFIG_TABLE': 'test-brand-config',
+        'CORS_ORIGIN_PARAM': '',
+    },
+)
 
 
 def brand_entry(name: str, rank: int, classification: str = 'competitor') -> dict[str, Any]:
@@ -80,8 +65,7 @@ class TestExactBrandMatching:
 
         found, rank = reflection.find_brand_in_results('marriott', brands)
 
-        assert found is not None
-        assert rank == 2
+        assert (found, rank) == (brands[0], 2)
 
     def test_matches_across_surrounding_whitespace(self, reflection) -> None:
         brands = [brand_entry('  Marriott  ', 2)]
@@ -171,5 +155,4 @@ class TestMissingAndMalformedEntries:
 
         found, rank = reflection.find_brand_in_results('Marriott', brands)
 
-        assert found is not None
-        assert rank is None
+        assert (found, rank) == (brands[0], None)

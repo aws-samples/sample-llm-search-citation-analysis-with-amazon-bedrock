@@ -36,6 +36,11 @@ class CachedCrawl(TypedDict):
     block_reason: NotRequired[str]
 
 
+# A row's stored verdict; 'error' rows only exist to hide older successes.
+_Verdict = Literal['success', 'blocked', 'error']
+_Candidate = tuple[_Verdict, Mapping[str, object]]
+
+
 def _scope_digest(*parts: str) -> str:
     payload = '\0'.join(parts).encode('utf-8')
     return hashlib.sha256(payload).hexdigest()
@@ -111,6 +116,123 @@ def _query_latest_scope(table: Any, index_name: str, cache_scope: str) -> Mappin
     return items[0]
 
 
+def _keyword_candidate(
+    table: Any,
+    index_name: str,
+    normalized_url: str,
+    keyword: str,
+) -> _Candidate | None:
+    """Return the newest keyword-scoped row when it carries a success or error verdict."""
+    row = _query_latest_scope(table, index_name, success_cache_scope(normalized_url, keyword))
+    if row is None:
+        return None
+    status = row.get('cache_status')
+    if status in ('success', 'error'):
+        return status, row
+    return None
+
+
+def _blocked_candidate(table: Any, index_name: str, normalized_url: str) -> _Candidate | None:
+    """Return the newest URL-scoped row when it carries a blocked verdict."""
+    row = _query_latest_scope(table, index_name, blocked_cache_scope(normalized_url))
+    if row is not None and row.get('cache_status') == 'blocked':
+        return 'blocked', row
+    return None
+
+
+def _load_candidates(
+    table: Any,
+    index_name: str,
+    normalized_url: str,
+    keyword: str,
+    *,
+    success_freshness_days: int,
+    blocked_freshness_days: int,
+) -> list[_Candidate]:
+    """Query each scope whose freshness window is open and keep the rows worth comparing."""
+    candidates: list[_Candidate] = []
+    if success_freshness_days > 0:
+        keyword_candidate = _keyword_candidate(table, index_name, normalized_url, keyword)
+        if keyword_candidate is not None:
+            candidates.append(keyword_candidate)
+    if blocked_freshness_days > 0:
+        blocked_candidate = _blocked_candidate(table, index_name, normalized_url)
+        if blocked_candidate is not None:
+            candidates.append(blocked_candidate)
+    return candidates
+
+
+def _read_candidates(
+    table: Any,
+    index_name: str,
+    normalized_url: str,
+    keyword: str,
+    *,
+    success_freshness_days: int,
+    blocked_freshness_days: int,
+) -> list[_Candidate]:
+    """Load the candidate rows, degrading transient read failures to a cache miss.
+
+    Permanent IAM/schema failures are re-raised as ``CrawlCacheConfigurationError``
+    so a broken cache cannot silently multiply paid browser sessions.
+    """
+    try:
+        return _load_candidates(
+            table,
+            index_name,
+            normalized_url,
+            keyword,
+            success_freshness_days=success_freshness_days,
+            blocked_freshness_days=blocked_freshness_days,
+        )
+    except Exception as exc:
+        error_code = _error_code(exc)
+        _emit_read_failure(error_code)
+        if error_code in _PERMANENT_CACHE_ERRORS:
+            raise CrawlCacheConfigurationError(
+                f'Crawl cache configuration error ({error_code})'
+            ) from exc
+        logger.warning(
+            'Crawl cache read failed; continuing with an uncached crawl (%s)',
+            error_code,
+        )
+        return []
+
+
+def _newest_candidate(
+    candidates: list[_Candidate],
+) -> tuple[_Verdict, Mapping[str, object], datetime] | None:
+    """Return the candidate with the latest valid timestamp, ignoring unparseable rows."""
+    timestamped: list[tuple[_Verdict, Mapping[str, object], datetime]] = []
+    for status, item in candidates:
+        crawled_at = _parse_timestamp(item.get('crawled_at'))
+        if crawled_at is not None:
+            timestamped.append((status, item, crawled_at))
+    return max(timestamped, key=lambda entry: entry[2], default=None)
+
+
+def _within_freshness_window(crawled_at: datetime, freshness_days: int, now: datetime | None) -> bool:
+    """A row is fresh when it is not from the future and younger than its window."""
+    current_time = datetime.now(UTC) if now is None else now
+    age = current_time - crawled_at
+    return timedelta(0) <= age < timedelta(days=freshness_days)
+
+
+def _cached_crawl(status: Literal['success', 'blocked'], item: Mapping[str, object]) -> CachedCrawl | None:
+    """Project a fresh row onto the compact fields Step Functions consumes."""
+    crawled_at = item.get('crawled_at')
+    if not isinstance(crawled_at, str):
+        return None
+    cached: CachedCrawl = {
+        'status': status,
+        'crawled_at': crawled_at,
+    }
+    block_reason = item.get('block_reason')
+    if status == 'blocked' and isinstance(block_reason, str) and block_reason:
+        cached['block_reason'] = block_reason
+    return cached
+
+
 def find_fresh_crawl(
     table: Any,
     index_name: str,
@@ -135,72 +257,23 @@ def find_fresh_crawl(
     if success_freshness_days <= 0 and blocked_freshness_days <= 0:
         return None
 
-    candidates: list[
-        tuple[Literal['success', 'blocked', 'error'], Mapping[str, object]]
-    ] = []
-    try:
-        if success_freshness_days > 0:
-            keyword_result = _query_latest_scope(
-                table,
-                index_name,
-                success_cache_scope(normalized_url, keyword),
-            )
-            if keyword_result is not None:
-                keyword_status = keyword_result.get('cache_status')
-                if keyword_status in ('success', 'error'):
-                    candidates.append((keyword_status, keyword_result))
-        if blocked_freshness_days > 0:
-            blocked_result = _query_latest_scope(
-                table,
-                index_name,
-                blocked_cache_scope(normalized_url),
-            )
-            if blocked_result is not None and blocked_result.get('cache_status') == 'blocked':
-                candidates.append(('blocked', blocked_result))
-    except Exception as exc:
-        error_code = _error_code(exc)
-        _emit_read_failure(error_code)
-        if error_code in _PERMANENT_CACHE_ERRORS:
-            raise CrawlCacheConfigurationError(
-                f'Crawl cache configuration error ({error_code})'
-            ) from exc
-        logger.warning(
-            'Crawl cache read failed; continuing with an uncached crawl (%s)',
-            error_code,
-        )
+    newest = _newest_candidate(_read_candidates(
+        table,
+        index_name,
+        normalized_url,
+        keyword,
+        success_freshness_days=success_freshness_days,
+        blocked_freshness_days=blocked_freshness_days,
+    ))
+    if newest is None:
         return None
 
-    valid: list[
-        tuple[Literal['success', 'blocked', 'error'], Mapping[str, object], datetime]
-    ] = []
-    for status, item in candidates:
-        parsed_timestamp = _parse_timestamp(item.get('crawled_at'))
-        if parsed_timestamp is not None:
-            valid.append((status, item, parsed_timestamp))
-    if not valid:
-        return None
-
-    status, item, crawled_at = max(valid, key=lambda entry: entry[2])
+    status, item, crawled_at = newest
     if status == 'error':
         return None
-
-    current_time = datetime.now(UTC) if now is None else now
     freshness_days = success_freshness_days if status == 'success' else blocked_freshness_days
-    age = current_time - crawled_at
-    if not timedelta(0) <= age < timedelta(days=freshness_days):
+    if not _within_freshness_window(crawled_at, freshness_days, now):
         return None
     if status == 'success' and item.get('analysis_status') != 'complete':
         return None
-
-    crawled_at_value = item.get('crawled_at')
-    if not isinstance(crawled_at_value, str):
-        return None
-
-    cached: CachedCrawl = {
-        'status': status,
-        'crawled_at': crawled_at_value,
-    }
-    block_reason = item.get('block_reason')
-    if status == 'blocked' and isinstance(block_reason, str) and block_reason:
-        cached['block_reason'] = block_reason
-    return cached
+    return _cached_crawl(status, item)

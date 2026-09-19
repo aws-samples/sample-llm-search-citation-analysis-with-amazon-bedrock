@@ -234,13 +234,14 @@ def list_statuses(rec_ids: list[str]) -> dict[str, dict[str, Any]]:
                     },
                 },
             )
-            for item in response.get('Responses', {}).get(table.name, []):
+            rows: list[dict[str, Any]] = response.get('Responses', {}).get(table.name, [])
+            for item in rows:
                 rid = item.get('recommendation_id')
                 if rid:
                     out[rid] = item
-        except Exception as exc:
+        except Exception:
             # The status feature is auxiliary — if the lookup fails, return
             # what we have and let the caller render recommendations
             # without status. Logged so an operator can investigate.
-            logger.warning(f'list_statuses failed for chunk {i}: {exc}')
+            logger.exception(f'list_statuses failed for chunk {i}')
     return out

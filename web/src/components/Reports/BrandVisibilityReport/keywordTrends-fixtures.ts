@@ -42,7 +42,6 @@ export function buildKeywordTrends(
     },
     period_type: 'day',
     days_analyzed: 30,
-    data_points: 0,
     trend_data: [],
     trend_direction: 'stable',
     summary: {

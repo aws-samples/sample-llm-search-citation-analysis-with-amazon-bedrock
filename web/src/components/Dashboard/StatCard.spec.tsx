@@ -21,7 +21,7 @@ describe('StatCard', () => {
     expect(screen.getByText('1,000,000')).toBeInTheDocument();
   });
 
-  it('displays zero value correctly', () => {
+  it('renders 0 when value is zero', () => {
     render(<StatCard title="Empty" value={0} icon={<SearchIcon />} />);
 
     expect(screen.getByText('0')).toBeInTheDocument();

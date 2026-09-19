@@ -102,7 +102,7 @@ def get_scope_visibility_metrics(scope: ReportScope, config: dict[str, Any], que
         try:
             return get_visibility_metrics(keyword, config, query_prompt_id=query_prompt_id, total_providers=total_providers)
         except Exception as exc:  # one broken partition must not sink the group
-            logger.warning(f"Visibility metrics failed for {keyword!r}: {exc}")
+            logger.exception(f"Visibility metrics failed for {keyword!r}")
             return {'error': str(exc)}
 
     per_keyword: list[dict[str, Any]] = []
@@ -138,7 +138,8 @@ def handler(event, context, brand=None, query_prompt_id=None, **scope_params):
         - query_prompt_id: Filter to specific persona
     """
     report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE), required=True)
-    if rejected:
+    if report_scope is None:
+        # A required scope resolves to exactly one of (scope, None) / (None, rejection).
         return rejected
 
     config = get_brand_config()

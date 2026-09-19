@@ -51,6 +51,12 @@ from shared.router import path_contains_segment
 
 logger = logging.getLogger(__name__)
 
+# The wrapper contract from the module docstring, named once so every
+# decorator's ``wrapper`` reads the same way: an API Gateway proxy event in,
+# a proxy response out.
+ApiEvent = dict[str, Any]
+ApiResponse = dict[str, Any]
+
 
 def api_handler(func: Callable) -> Callable:
     """
@@ -67,7 +73,7 @@ def api_handler(func: Callable) -> Callable:
             return success_response(data, event)
     """
     @wraps(func)
-    def wrapper(event: dict[str, Any], context: Any, *args, **kwargs) -> dict[str, Any]:
+    def wrapper(event: ApiEvent, context: Any, *args, **kwargs) -> ApiResponse:
         try:
             return func(event, context, *args, **kwargs)
         except Exception as e:
@@ -92,7 +98,7 @@ def parse_json_body(func: Callable) -> Callable:
             return success_response({'keyword': keyword}, event)
     """
     @wraps(func)
-    def wrapper(event: dict[str, Any], context: Any, *args, **kwargs) -> dict[str, Any]:
+    def wrapper(event: ApiEvent, context: Any, *args, **kwargs) -> ApiResponse:
         try:
             body = json.loads(event.get('body') or '{}')
         except json.JSONDecodeError:
@@ -101,6 +107,134 @@ def parse_json_body(func: Callable) -> Callable:
         kwargs['body'] = body
         return func(event, context, *args, **kwargs)
     return wrapper
+
+
+# =============================================================================
+# Field validation helpers (used by @validate)
+# =============================================================================
+
+# Methods whose payload arrives in the request body. Every other method reads
+# from the query string unless the schema entry names a ``source`` explicitly.
+_BODY_METHODS = frozenset({'POST', 'PUT', 'PATCH'})
+
+
+def _request_params(event: dict[str, Any], body: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Group the request mappings a field may be read from, keyed by schema ``source`` name."""
+    return {
+        'body': body,
+        'path': event.get('pathParameters') or {},
+        'query': event.get('queryStringParameters') or {},
+    }
+
+
+def _field_source(rules: dict[str, Any], http_method: str) -> str:
+    """An explicit ``source`` wins; otherwise writes read the body and everything else reads the query string."""
+    source = rules.get('source')
+    if source is not None:
+        return source
+    return 'body' if http_method in _BODY_METHODS else 'query'
+
+
+def _raw_field_value(
+    field_name: str,
+    rules: dict[str, Any],
+    request_params: dict[str, dict[str, Any]],
+    http_method: str,
+) -> Any:
+    """Read a field's raw value from its source, falling back to the schema ``default`` when absent."""
+    source = _field_source(rules, http_method)
+    # Unrecognised source names fall back to the query string (long-standing behaviour).
+    params = request_params.get(source, request_params['query'])
+    value = params.get(field_name)
+    if value is None and 'default' in rules:
+        value = rules['default']
+    return value
+
+
+def _coerce(value: Any, expected_type: type) -> Any:
+    """
+    Convert a raw request value to ``expected_type``.
+
+    Query-string values arrive as strings, so booleans accept ``true``/``1``/``yes``
+    and lists split on commas. Raises ``ValueError`` or ``TypeError`` when the
+    value cannot be converted; unknown types pass the value through unchanged.
+    """
+    if expected_type is int:
+        return int(value)
+    if expected_type is float:
+        return float(value)
+    if expected_type is bool:
+        if isinstance(value, str):
+            return value.lower() in ('true', '1', 'yes')
+        return bool(value)
+    if expected_type is str:
+        return str(value).strip()
+    if expected_type is list and isinstance(value, str):
+        return [v.strip() for v in value.split(',')]
+    return value
+
+
+def _string_length_error(field_name: str, rules: dict[str, Any], value: Any) -> str | None:
+    """Return the ``max_length``/``min_length`` violation for a string value, or ``None``."""
+    if not isinstance(value, str):
+        return None
+    max_length = rules.get('max_length')
+    if max_length and len(value) > max_length:
+        return f"{field_name} too long (max {max_length} characters)"
+    min_length = rules.get('min_length')
+    if min_length and len(value) < min_length:
+        return f"{field_name} too short (min {min_length} characters)"
+    return None
+
+
+def _numeric_range_error(field_name: str, rules: dict[str, Any], value: Any) -> str | None:
+    """Return the ``min``/``max`` violation for a numeric value, or ``None``."""
+    if not isinstance(value, (int, float)):
+        return None
+    min_val = rules.get('min')
+    if min_val is not None and value < min_val:
+        return f"{field_name} must be at least {min_val}"
+    max_val = rules.get('max')
+    if max_val is not None and value > max_val:
+        return f"{field_name} must be at most {max_val}"
+    return None
+
+
+def _choices_error(field_name: str, rules: dict[str, Any], value: Any) -> str | None:
+    """Return the ``choices`` violation, or ``None`` when the value is allowed (or no choices are set)."""
+    choices = rules.get('choices')
+    if choices and value not in choices:
+        return f"Invalid {field_name}. Must be one of: {', '.join(str(c) for c in choices)}"
+    return None
+
+
+def _validated_field(field_name: str, rules: dict[str, Any], value: Any) -> tuple[Any, str | None]:
+    """
+    Coerce and validate one field against its schema entry.
+
+    Returns ``(value, None)`` when every rule passes — ``value`` is the coerced
+    result, or ``None`` for an absent optional field — and ``(value, message)``
+    on the first rule that fails. Rules run in a fixed order: required, type,
+    string length, numeric range, choices.
+    """
+    if value is None:
+        if rules.get('required'):
+            return None, f"Missing required field: {field_name}"
+        return None, None
+
+    expected_type = rules.get('type')
+    if expected_type:
+        try:
+            value = _coerce(value, expected_type)
+        except (ValueError, TypeError):
+            return value, f"Invalid type for {field_name}: expected {expected_type.__name__}"
+
+    error = (
+        _string_length_error(field_name, rules, value)
+        or _numeric_range_error(field_name, rules, value)
+        or _choices_error(field_name, rules, value)
+    )
+    return value, error
 
 
 def validate(schema: dict[str, dict[str, Any]]) -> Callable:
@@ -137,120 +271,18 @@ def validate(schema: dict[str, dict[str, Any]]) -> Callable:
             # All params are validated and injected
             return success_response({'keyword': keyword}, event)
     """
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable) -> Callable[..., dict[str, Any]]:
         @wraps(func)
-        def wrapper(event: dict[str, Any], context: Any, *args, **kwargs) -> dict[str, Any]:
-            # Get data sources
-            body = kwargs.get('body', {})
-            query_params = event.get('queryStringParameters') or {}
-            path_params = event.get('pathParameters') or {}
+        def wrapper(event: ApiEvent, context: Any, *args, **kwargs) -> ApiResponse:
+            request_params = _request_params(event, kwargs.get('body', {}))
             http_method = event.get('httpMethod', 'GET').upper()
 
-            # Validate each field
+            # Fields are validated in schema order; the first failure wins.
             for field_name, rules in schema.items():
-                # Determine source (body for POST/PUT, query for GET)
-                source = rules.get('source')
-                if source is None:
-                    if http_method in ('POST', 'PUT', 'PATCH'):
-                        source = 'body'
-                    else:
-                        source = 'query'
-
-                # Get value from appropriate source
-                if source == 'body':
-                    value = body.get(field_name)
-                elif source == 'path':
-                    value = path_params.get(field_name)
-                else:  # query
-                    value = query_params.get(field_name)
-
-                # Apply default if value is None
-                if value is None and 'default' in rules:
-                    value = rules['default']
-
-                # Check required
-                if rules.get('required') and value is None:
-                    return validation_error(
-                        f"Missing required field: {field_name}",
-                        event,
-                        field_name
-                    )
-
-                # Skip further validation if value is None (optional field)
-                if value is None:
-                    kwargs[field_name] = None
-                    continue
-
-                # Type conversion and validation
-                expected_type = rules.get('type')
-                if expected_type:
-                    try:
-                        if expected_type is int:
-                            value = int(value)
-                        elif expected_type is float:
-                            value = float(value)
-                        elif expected_type is bool:
-                            if isinstance(value, str):
-                                value = value.lower() in ('true', '1', 'yes')
-                            else:
-                                value = bool(value)
-                        elif expected_type is str:
-                            value = str(value).strip()
-                        elif expected_type is list and isinstance(value, str):
-                            value = [v.strip() for v in value.split(',')]
-                    except (ValueError, TypeError):
-                        return validation_error(
-                            f"Invalid type for {field_name}: expected {expected_type.__name__}",
-                            event,
-                            field_name
-                        )
-
-                # String length validation
-                if isinstance(value, str):
-                    max_length = rules.get('max_length')
-                    if max_length and len(value) > max_length:
-                        return validation_error(
-                            f"{field_name} too long (max {max_length} characters)",
-                            event,
-                            field_name
-                        )
-
-                    min_length = rules.get('min_length')
-                    if min_length and len(value) < min_length:
-                        return validation_error(
-                            f"{field_name} too short (min {min_length} characters)",
-                            event,
-                            field_name
-                        )
-
-                # Numeric range validation
-                if isinstance(value, (int, float)):
-                    min_val = rules.get('min')
-                    if min_val is not None and value < min_val:
-                        return validation_error(
-                            f"{field_name} must be at least {min_val}",
-                            event,
-                            field_name
-                        )
-
-                    max_val = rules.get('max')
-                    if max_val is not None and value > max_val:
-                        return validation_error(
-                            f"{field_name} must be at most {max_val}",
-                            event,
-                            field_name
-                        )
-
-                # Choices validation
-                choices = rules.get('choices')
-                if choices and value not in choices:
-                    return validation_error(
-                        f"Invalid {field_name}. Must be one of: {', '.join(str(c) for c in choices)}",
-                        event,
-                        field_name
-                    )
-
-                # Inject validated value
+                raw_value = _raw_field_value(field_name, rules, request_params, http_method)
+                value, error = _validated_field(field_name, rules, raw_value)
+                if error is not None:
+                    return validation_error(error, event, field_name)
                 kwargs[field_name] = value
 
             return func(event, context, *args, **kwargs)
@@ -282,7 +314,7 @@ def optional_provider() -> dict[str, Any]:
 # Route Handler Decorator
 # =============================================================================
 
-def route_handler(routes: dict[str, Callable], inject_path_params: bool = False) -> Callable:
+def route_handler(routes: dict[str | tuple[str, str | None], Callable], inject_path_params: bool = False) -> Callable[[Callable], Callable[..., dict[str, Any]]]:
     """
     Decorator that routes requests by HTTP method to specific handler functions.
 
@@ -325,9 +357,9 @@ def route_handler(routes: dict[str, Callable], inject_path_params: bool = False)
         def handler(event, context):
             pass
     """
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable) -> Callable[..., dict[str, Any]]:
         @wraps(func)
-        def wrapper(event: dict[str, Any], context: Any, *args, **kwargs) -> dict[str, Any]:
+        def wrapper(event: ApiEvent, context: Any, *args, **kwargs) -> ApiResponse:
             method = event.get('httpMethod', 'GET').upper()
             path = event.get('path', '')
 
@@ -380,7 +412,7 @@ def cors_preflight(func: Callable) -> Callable:
             return success_response({'data': 'value'}, event)
     """
     @wraps(func)
-    def wrapper(event: dict[str, Any], context: Any, *args, **kwargs) -> dict[str, Any]:
+    def wrapper(event: ApiEvent, context: Any, *args, **kwargs) -> ApiResponse:
         method = event.get('httpMethod', '').upper()
 
         if method == 'OPTIONS':
@@ -452,7 +484,7 @@ def paginate(
     """
     def decorator(func: Callable) -> Callable:
         @wraps(func)
-        def wrapper(event: dict[str, Any], context: Any, *args, **kwargs) -> dict[str, Any]:
+        def wrapper(event: ApiEvent, context: Any, *args, **kwargs) -> ApiResponse:
             query_params = event.get('queryStringParameters') or {}
 
             # Parse limit

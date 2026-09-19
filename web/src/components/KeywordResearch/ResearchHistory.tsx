@@ -43,6 +43,10 @@ const getKeywordsForItem = (item: KeywordResearchItem): ResearchKeyword[] => {
   return [];
 };
 
+/** The analysed domain (or URL) of a competitor run; the seed of every other run. */
+const getItemTitle = (item: KeywordResearchItem): string | undefined =>
+  item.type === 'competitor' ? (item.domain ?? item.url) : (item.config?.seed ?? item.seed_keyword);
+
 export const ResearchHistory = ({
   history,
   loading,
@@ -165,12 +169,11 @@ const HistoryItem = ({
 }: HistoryItemProps) => {
   const keywords = useMemo(() => getKeywordsForItem(item), [item]);
   const hasKeywords = keywords.length > 0;
-  const itemTitle = item.type === 'competitor' ? (item.domain ?? item.url) : (item.config?.seed ?? item.seed_keyword);
+  const itemTitle = getItemTitle(item);
   const panelId = `research-history-keywords-${item.id}`;
 
   const promotion = usePromoteKeywords(keywords, onKeywordsAdded);
   const { clearSelection } = promotion;
-  const selectedKeywords = useMemo(() => new Set(promotion.selected), [promotion.selected]);
 
   useEffect(() => {
     clearSelection();
@@ -234,7 +237,7 @@ const HistoryItem = ({
             subtitle={`Industry: ${item.industry ?? 'general'}`}
             compact
             selectable
-            selected={selectedKeywords}
+            selected={promotion.selectedKeys}
             onToggle={promotion.toggle}
           />
         </div>

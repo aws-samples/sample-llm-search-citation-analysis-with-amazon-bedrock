@@ -1,15 +1,15 @@
 import {
-  useEffect, useMemo, useState 
+  useEffect, useState 
 } from 'react';
 import { useCitationGaps } from '../../hooks/useCitationGaps';
-import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import type {
-  Keyword, ReportScope 
+  CitationGap, CitationGapsResponse, Keyword, ReportScope 
 } from '../../types';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
 import {
   ALL_SCOPE, decodeReportScope, encodeReportScope 
 } from '../ui/reportScope';
+import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
 import { GapCard } from './GapCard';
 
 interface Props { readonly keywords: Array<Keyword>; }
@@ -78,13 +78,36 @@ function GapStats({
   );
 }
 
+/** The gaps a response carries: `gaps` for one keyword, `top_gaps` across keywords. */
+function gapsOf(data: CitationGapsResponse | null): CitationGap[] {
+  return data?.gaps ?? data?.top_gaps ?? [];
+}
+
+function GapList({
+  gaps, loading 
+}: {
+  readonly gaps: CitationGap[];
+  readonly loading: boolean 
+}) {
+  return (
+    <>
+      <div>
+        <h3 className="text-base sm:text-lg font-medium mb-3">Citation Gaps to Fill</h3>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {gaps.map(gap => <GapCard key={gap.url} gap={gap} />)}
+        </div>
+      </div>
+
+      {gaps.length === 0 && !loading && <div className="text-center py-8 text-gray-500">No citation gaps found. Great coverage!</div>}
+    </>
+  );
+}
+
 export function CitationGaps({ keywords }: Props) {
   const [scope, setScope] = useState<ReportScope>(ALL_SCOPE);
-  const { groups } = useKeywordGroups();
-  const activeKeywords = useMemo(
-    () => keywords.filter((keyword) => !keyword.status || keyword.status === 'active'),
-    [keywords]
-  );
+  const {
+    activeKeywords, groups 
+  } = useKeywordScopeOptions(keywords);
   const {
     data, loading, error, fetchCitationGaps 
   } = useCitationGaps();
@@ -94,7 +117,6 @@ export function CitationGaps({ keywords }: Props) {
     fetchCitationGaps(decodeReportScope(scopeKey), 20);
   }, [scopeKey, fetchCitationGaps]);
 
-  const gaps = data?.gaps ?? data?.top_gaps ?? [];
   const hasDomainSummary = data?.domain_summary && data.domain_summary.length > 0;
 
   return (
@@ -122,14 +144,7 @@ export function CitationGaps({ keywords }: Props) {
       {loading && <div className="text-center py-8 text-gray-500">Analyzing citation gaps...</div>}
       {error && <div className="text-center py-8 text-red-500">{error}</div>}
 
-      <div>
-        <h3 className="text-base sm:text-lg font-medium mb-3">Citation Gaps to Fill</h3>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {gaps.map(gap => <GapCard key={gap.url} gap={gap} />)}
-        </div>
-      </div>
-
-      {gaps.length === 0 && !loading && <div className="text-center py-8 text-gray-500">No citation gaps found. Great coverage!</div>}
+      <GapList gaps={gapsOf(data)} loading={loading} />
     </div>
   );
 }

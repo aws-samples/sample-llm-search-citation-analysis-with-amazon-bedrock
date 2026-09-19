@@ -15,11 +15,12 @@ from __future__ import annotations
 
 import os
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from testing.module_loader import load_handler_module
+from testing.module_loader import load_handler_module_offline
+from testing.provider_summary_fixtures import provider_row
 
 _HANDLER_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -32,56 +33,37 @@ _TEST_ENV = {
 
 @pytest.fixture
 def dedup():
-    """Provide a freshly imported dedup module with a mocked citations table."""
-    table = MagicMock()
-    resource = MagicMock()
-    resource.Table.return_value = table
-
-    with patch('boto3.resource', return_value=resource), patch.dict(os.environ, _TEST_ENV):
-        module = load_handler_module(_HANDLER_DIR, 'handler.py', 'deduplication_handler_under_test')
-
-    module.citations_table = table
-    return module
+    """A freshly imported dedup module whose citations table is an inert stub."""
+    with patch.dict(os.environ, _TEST_ENV):
+        return load_handler_module_offline(_HANDLER_DIR, 'handler.py', 'deduplication_handler_under_test')
 
 
-def provider_row(
-    provider: str,
-    citations: list[str],
-    query_prompt_id: str = 'default',
-) -> dict[str, Any]:
-    """Build one search-step result row, matching search/handler.py's shape."""
-    return {
-        'provider': provider,
-        'provider_type': 'llm',
-        'status': 'success',
-        'citation_count': len(citations),
-        'citations': citations,
-        'query_prompt_id': query_prompt_id,
-    }
+@pytest.fixture
+def two_provider_summary(dedup) -> dict[str, Any]:
+    """The rollup of one OpenAI row citing two URLs and one Perplexity row citing one."""
+    return dedup.summarize_providers([
+        provider_row('openai', ['https://a.example', 'https://b.example']),
+        provider_row('perplexity', ['https://c.example']),
+    ])
+
+
+@pytest.fixture
+def nine_credit_failures_summary(dedup) -> dict[str, Any]:
+    """The rollup of nine Claude rows that all failed on credit, as the 2026-08-14 run did."""
+    return dedup.summarize_providers([
+        {'provider': 'claude', 'status': 'error', 'error_category': 'insufficient_credit'}
+        for _ in range(9)
+    ])
 
 
 class TestSummarizeProviders:
     """The rollup function in isolation."""
 
-    def test_counts_one_query_per_provider_row(self, dedup) -> None:
-        results = [
-            provider_row('openai', ['https://a.example', 'https://b.example']),
-            provider_row('perplexity', ['https://c.example']),
-        ]
+    def test_counts_one_query_per_provider_row(self, two_provider_summary) -> None:
+        assert two_provider_summary['result_count'] == 2
 
-        summary = dedup.summarize_providers(results)
-
-        assert summary['result_count'] == 2
-
-    def test_totals_citations_per_provider(self, dedup) -> None:
-        results = [
-            provider_row('openai', ['https://a.example', 'https://b.example']),
-            provider_row('perplexity', ['https://c.example']),
-        ]
-
-        summary = dedup.summarize_providers(results)
-
-        assert summary['by_provider'] == {
+    def test_totals_citations_per_provider(self, two_provider_summary) -> None:
+        assert two_provider_summary['by_provider'] == {
             'openai': {
                 'queries': 1,
                 'citations': 2,
@@ -237,31 +219,17 @@ class TestErrorCategoriesSurviveTheRollup:
 
         assert summary['by_provider']['claude']['failures'] == 2
 
-    def test_records_a_repeated_category_only_once(self, dedup) -> None:
+    def test_records_a_repeated_category_only_once(self, nine_credit_failures_summary) -> None:
         """
         Nine keywords all failing on credit is one problem, not nine. A list
         that grew per row would be unbounded in the Step Functions state, which
         is the `States.DataLimitExceeded` risk this rollup exists to avoid.
         """
-        results = [
-            {'provider': 'claude', 'status': 'error', 'error_category': 'insufficient_credit'}
-            for _ in range(9)
-        ]
+        assert nine_credit_failures_summary['by_provider']['claude']['error_categories'] == ['insufficient_credit']
 
-        summary = dedup.summarize_providers(results)
-
-        assert summary['by_provider']['claude']['error_categories'] == ['insufficient_credit']
-
-    def test_records_nine_failures_when_all_nine_queries_error(self, dedup) -> None:
+    def test_records_nine_failures_when_all_nine_queries_error(self, nine_credit_failures_summary) -> None:
         """The count still has to reflect every failed query, unlike the category list."""
-        results = [
-            {'provider': 'claude', 'status': 'error', 'error_category': 'insufficient_credit'}
-            for _ in range(9)
-        ]
-
-        summary = dedup.summarize_providers(results)
-
-        assert summary['by_provider']['claude']['failures'] == 9
+        assert nine_credit_failures_summary['by_provider']['claude']['failures'] == 9
 
     def test_leaves_a_successful_provider_with_no_failures_recorded(self, dedup) -> None:
         """

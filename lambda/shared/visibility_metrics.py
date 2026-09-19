@@ -113,7 +113,6 @@ def _brand_metrics(
             'providers': list(providers),
             'total_mentions': mentions,
             'best_rank': best_rank,
-            'avg_sentiment': round(float(avg_sentiment), 2),
             'classification': data.get('classification', 'other'),
         })
 
@@ -164,7 +163,6 @@ def calculate_keyword_visibility(
     return {
         'keyword': keyword,
         'timestamp': timestamp,
-        'total_brands': len(brands),
         'total_mentions': total_mentions,
         'total_providers': total_providers,
         'brands': brands,

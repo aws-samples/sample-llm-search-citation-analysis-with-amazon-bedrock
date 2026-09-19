@@ -274,7 +274,7 @@ def generate_report(execution_id: str, counts: dict[str, Any], stats: dict[str, 
 
 
 def store_summary_in_s3(report: dict[str, Any], bucket: str) -> str | None:
-    """Store execution summary in S3."""
+    """Store execution summary in S3; returns the S3 URI, or ``None`` when the write failed."""
     execution_id = report['execution_id']
     timestamp = get_timestamp_compact()
     key = f"execution-summaries/{timestamp}-{execution_id}.json"
@@ -286,13 +286,13 @@ def store_summary_in_s3(report: dict[str, Any], bucket: str) -> str | None:
             Body=json.dumps(report, indent=2),
             ContentType='application/json'
         )
-
-        s3_uri = f"s3://{bucket}/{key}"
-        logger.info(f"Summary stored in S3: {s3_uri}")
-        return s3_uri
-    except Exception as e:
-        logger.error(f"Failed to store summary in S3: {e!s}")
+    except Exception:
+        logger.exception("Failed to store summary in S3")
         return None
+
+    s3_uri = f"s3://{bucket}/{key}"
+    logger.info(f"Summary stored in S3: {s3_uri}")
+    return s3_uri
 
 
 def handler(event: dict[str, Any] | list[Any], context: Any) -> dict[str, Any]:
@@ -384,9 +384,9 @@ def handler(event: dict[str, Any] | list[Any], context: Any) -> dict[str, Any]:
                 report['s3_location'] = s3_location
 
         logger.info(f"Execution summary generated: {report['status']}")
-
-        return report
-
     except Exception as e:
-        log_error(e, "generate summary handler", event)
+        # `log_error` sanitises a dict event; a raw Map list carries nothing to redact.
+        log_error(e, "generate summary handler", event if isinstance(event, dict) else None)
         raise
+
+    return report

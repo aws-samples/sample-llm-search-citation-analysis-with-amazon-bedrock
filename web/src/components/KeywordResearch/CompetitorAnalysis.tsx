@@ -1,12 +1,11 @@
 import {
   useEffect, useMemo, useState
 } from 'react';
-import type {
-  CompetitorAnalysisResult, Keyword, KeywordResearchItem
-} from '../../types';
+import type { CompetitorAnalysisResult } from '../../types';
 import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
 import { ResearchProgress } from './ResearchProgress';
+import type { ResearchRunViewProps } from './researchRunView';
 import {
   InputForm,
   SummaryCard,
@@ -16,15 +15,9 @@ import {
   type SectionId,
 } from './CompetitorAnalysisComponents';
 
-interface CompetitorAnalysisProps {
+interface CompetitorAnalysisProps extends ResearchRunViewProps {
   onAnalyze: (url: string) => Promise<void>;
-  loading: boolean;
   result: CompetitorAnalysisResult | null;
-  error: string | null;
-  /** The job being followed (running or just finished), for progress and retry. */
-  activeJob?: KeywordResearchItem | null;
-  onRetry?: (job: KeywordResearchItem) => void;
-  onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
 export const CompetitorAnalysis = ({
@@ -45,7 +38,6 @@ export const CompetitorAnalysis = ({
   );
   const promotion = usePromoteKeywords(currentKeywords, onKeywordsAdded);
   const { clearSelection } = promotion;
-  const selectedKeywords = useMemo(() => new Set(promotion.selected), [promotion.selected]);
 
   // Each section is a distinct set of research keywords, so a section switch clears
   // the selection just like a new result does: a promotion must never carry keywords
@@ -82,7 +74,7 @@ export const CompetitorAnalysis = ({
               keywords={currentKeywords}
               showOpportunity={activeSection === 'gaps'}
               selectable
-              selected={selectedKeywords}
+              selected={promotion.selectedKeys}
               onToggle={promotion.toggle}
             />
           </div>

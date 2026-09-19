@@ -25,12 +25,32 @@ layer and import cheaply at cold-start.
 from __future__ import annotations
 
 import os
+from typing import Literal, overload
+
+
+@overload
+def resolve_table_env(canonical_name: str, *legacy_names: str,
+                      required: Literal[True] = True) -> str: ...
+
+
+@overload
+def resolve_table_env(canonical_name: str, *legacy_names: str,
+                      required: Literal[False], default: str) -> str: ...
+
+
+@overload
+def resolve_table_env(canonical_name: str, *legacy_names: str,
+                      required: Literal[False], default: None = None) -> str | None: ...
 
 
 def resolve_table_env(canonical_name: str, *legacy_names: str,
                       required: bool = True,
                       default: str | None = None) -> str | None:
     """Resolve a DynamoDB table name from env vars with legacy fallback.
+
+    The overloads let the type checker see what callers already rely on:
+    ``required=True`` (the default) either returns a name or raises, and
+    ``required=False`` only yields ``None`` when no ``default`` is given.
 
     Args:
         canonical_name: The preferred env var name (must be

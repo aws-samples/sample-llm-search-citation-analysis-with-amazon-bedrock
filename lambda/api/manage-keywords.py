@@ -4,8 +4,8 @@ Manage Keywords API Lambda
 Handles POST, PUT, DELETE operations for keywords.
 """
 
-import logging
 import sys
+from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
@@ -32,9 +32,6 @@ from shared.keyword_store import (
 )
 from shared.utils import get_timestamp, load_keyword_identities, normalize_keyword
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
@@ -43,6 +40,17 @@ keywords_table = dynamodb.Table(KEYWORDS_TABLE)
 # Optional until every deployment carries the groups table.
 GROUPS_TABLE = resolve_table_env(KEYWORD_GROUPS_TABLE_ENV, required=False)
 groups_table = dynamodb.Table(GROUPS_TABLE) if GROUPS_TABLE else None
+
+# The optional metadata fields an update may carry, each with the attribute it
+# is written to -- a ``#`` name placeholder for ``region`` and ``language``,
+# which are DynamoDB reserved words -- and its value placeholder.
+_OPTIONAL_UPDATE_FIELDS = (
+    ('region', '#r', ':r'),
+    ('language', '#l', ':l'),
+    ('category', 'category', ':c'),
+    ('priority', 'priority', ':p'),
+    ('notes', 'notes', ':n'),
+)
 
 
 def _validated_group_ids(body, event):
@@ -70,7 +78,8 @@ def _validated_keyword(keyword, event):
 
     Delegates the shared sequence (type → surrogate check → trim → length)
     to ``shared.keyword_store`` — empty-after-trim rejects on this route
-    (bugs.md 3.3).
+    (bugs.md 3.3). Returns ``(text, None)`` or ``(None, error_response)``;
+    callers branch on ``text`` being ``None``.
     """
     text, message = validate_keyword_text(keyword)
     if message:
@@ -88,6 +97,44 @@ def _duplicate_response(event):
     return api_response(409, {'error': 'Keyword already exists'}, event)
 
 
+def _update_request(
+    text: str, status: str, stored_keyword: str, metadata: dict[str, Any], group_ids: list[str] | None
+) -> tuple[str, dict[str, str], dict[str, Any]]:
+    """The ``UpdateExpression`` and its attribute names and values for one keyword update.
+
+    ``metadata`` holds the request value of every field in
+    ``_OPTIONAL_UPDATE_FIELDS``; ``None`` leaves that attribute untouched.
+    ``group_ids`` is a string set, and DynamoDB cannot store an empty set, so
+    an empty list clears the attribute instead; ``None`` leaves memberships
+    alone.
+    """
+    update_expr = 'SET #kw = :k, #s = :st, updated_at = :u'
+    expr_names = {'#id': 'id', '#kw': 'keyword', '#s': 'status'}
+    expr_values: dict[str, Any] = {
+        ':expected_keyword': stored_keyword,
+        ':k': text,
+        ':st': status,
+        ':u': get_timestamp(),
+    }
+
+    for field, attribute, placeholder in _OPTIONAL_UPDATE_FIELDS:
+        value = metadata[field]
+        if value is None:
+            continue
+        update_expr += f', {attribute} = {placeholder}'
+        if attribute.startswith('#'):
+            expr_names[attribute] = field
+        expr_values[placeholder] = value
+
+    if group_ids:
+        update_expr += ', group_ids = :g'
+        expr_values[':g'] = set(group_ids)
+    elif group_ids is not None:
+        update_expr += ' REMOVE group_ids'
+
+    return update_expr, expr_names, expr_values
+
+
 @parse_json_body
 @validate({
     'keyword': {'required': True, 'source': 'body'},
@@ -100,7 +147,7 @@ def _duplicate_response(event):
 def create_keyword(event, context, body, keyword, region, language, category, priority, notes):
     """Create a keyword under its canonical deterministic identity."""
     text, error = _validated_keyword(keyword, event)
-    if error:
+    if text is None:
         return error
     group_ids, error = _validated_group_ids(body, event)
     if error:
@@ -143,7 +190,7 @@ def update_keyword(event, context, body, keyword, status, region, language, cate
         return validation_error('Keyword ID is required', event, 'id')
 
     text, error = _validated_keyword(keyword, event)
-    if error:
+    if text is None:
         return error
     group_ids, error = _validated_group_ids(body, event)
     if error:
@@ -157,61 +204,20 @@ def update_keyword(event, context, body, keyword, status, region, language, cate
         return api_response(404, {'error': 'Keyword not found'}, event)
 
     stored_keyword = existing.get('keyword')
-    if (
-        not isinstance(stored_keyword, str)
-        or normalize_keyword(stored_keyword) != normalize_keyword(text)
-    ):
+    if not isinstance(stored_keyword, str) or normalize_keyword(stored_keyword) != normalize_keyword(text):
         return api_response(
             409,
-            {
-                'error': (
-                    'Keyword identity cannot be changed; delete it and create '
-                    'a new keyword instead'
-                )
-            },
+            {'error': 'Keyword identity cannot be changed; delete it and create a new keyword instead'},
             event,
         )
 
-    timestamp = get_timestamp()
-    update_expr = 'SET #kw = :k, #s = :st, updated_at = :u'
-    expr_names = {
-        '#id': 'id',
-        '#kw': 'keyword',
-        '#s': 'status',
-    }
-    expr_values = {
-        ':expected_keyword': stored_keyword,
-        ':k': text,
-        ':st': status,
-        ':u': timestamp
-    }
-
-    if region is not None:
-        update_expr += ', #r = :r'
-        expr_names['#r'] = 'region'
-        expr_values[':r'] = region
-    if language is not None:
-        update_expr += ', #l = :l'
-        expr_names['#l'] = 'language'
-        expr_values[':l'] = language
-    if category is not None:
-        update_expr += ', category = :c'
-        expr_values[':c'] = category
-    if priority is not None:
-        update_expr += ', priority = :p'
-        expr_values[':p'] = priority
-    if notes is not None:
-        update_expr += ', notes = :n'
-        expr_values[':n'] = notes
-    # group_ids: a string set; DynamoDB cannot store an empty set, so an empty
-    # list clears the attribute instead.
-    if group_ids is not None:
-        if group_ids:
-            update_expr += ', group_ids = :g'
-            expr_values[':g'] = set(group_ids)
-        else:
-            update_expr += ' REMOVE group_ids'
-
+    update_expr, expr_names, expr_values = _update_request(
+        text,
+        status,
+        stored_keyword,
+        {'region': region, 'language': language, 'category': category, 'priority': priority, 'notes': notes},
+        group_ids,
+    )
     try:
         response = keywords_table.update_item(
             Key={'id': id},

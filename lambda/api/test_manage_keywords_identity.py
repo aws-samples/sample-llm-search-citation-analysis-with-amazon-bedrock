@@ -1,6 +1,5 @@
 """Identity and conditional-write tests for manual keyword management."""
 
-import json
 import os
 import sys
 from unittest.mock import patch
@@ -8,8 +7,9 @@ from unittest.mock import patch
 import pytest
 from botocore.exceptions import ClientError
 
-from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
+from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource, fake_table
 from testing.env import KEYWORDS_TABLE_ENV
+from testing.events import api_gateway_event, parse_response
 from testing.module_loader import load_handler_module
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -35,20 +35,15 @@ def manage_handler():
 
 
 def _invoke(module, table, method, body=None, keyword_id=None):
-    event = {
-        'httpMethod': method,
-        'path': '/api/keywords' if keyword_id is None else f'/api/keywords/{keyword_id}',
-        'pathParameters': {} if keyword_id is None else {'id': keyword_id},
-        'headers': {},
-        'body': None if body is None else json.dumps(body),
-    }
+    event = api_gateway_event(
+        method,
+        '/api/keywords' if keyword_id is None else f'/api/keywords/{keyword_id}',
+        body=body,
+        path_params={} if keyword_id is None else {'id': keyword_id},
+        headers={},
+    )
     with patch.object(module, 'keywords_table', table):
-        response = module.handler(event, None)
-    return response['statusCode'], json.loads(response['body'])
-
-
-def _conditional_error(code='ConditionalCheckFailedException'):
-    return ClientError({'Error': {'Code': code, 'Message': 'write failed'}}, 'PutItem')
+        return parse_response(module.handler(event, None))
 
 
 def test_returns_deterministic_id_when_manual_keyword_is_created(manage_handler):
@@ -85,7 +80,7 @@ def test_returns_409_without_writing_when_legacy_row_has_same_identity(manage_ha
 
 def test_returns_409_when_concurrent_create_occupies_deterministic_id(manage_handler):
     module, table = manage_handler
-    table.put_item.side_effect = _conditional_error()
+    table.put_item.side_effect = conditional_check_failure('PutItem')
 
     status_code, body = _invoke(module, table, 'POST', {'keyword': 'alpha'})
 
@@ -159,7 +154,7 @@ def test_returns_404_without_update_when_keyword_id_is_missing(manage_handler):
 
 def test_returns_404_when_delete_targets_missing_keyword(manage_handler):
     module, table = manage_handler
-    table.delete_item.side_effect = _conditional_error()
+    table.delete_item.side_effect = conditional_check_failure('DeleteItem')
 
     status_code, body = _invoke(module, table, 'DELETE', keyword_id='missing-id')
 
@@ -174,7 +169,9 @@ def test_returns_404_when_delete_targets_missing_keyword(manage_handler):
 
 def test_returns_sanitized_500_when_manual_create_has_service_failure(manage_handler):
     module, table = manage_handler
-    table.put_item.side_effect = _conditional_error('ProvisionedThroughputExceededException')
+    table.put_item.side_effect = ClientError(
+        {'Error': {'Code': 'ProvisionedThroughputExceededException', 'Message': 'write failed'}}, 'PutItem',
+    )
 
     status_code, body = _invoke(module, table, 'POST', {'keyword': 'alpha'})
 

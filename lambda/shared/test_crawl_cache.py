@@ -96,6 +96,31 @@ def test_returns_blocked_when_latest_url_scope_is_fresh():
     }
 
 
+def test_omits_block_reason_when_blocked_row_has_none():
+    row = _cache_row(cache_status='blocked')
+
+    result = _find(_table_with_scopes(blocked=row))
+
+    assert result == {'status': 'blocked', 'crawled_at': row['crawled_at']}
+
+
+def test_queries_only_url_scope_when_success_window_is_zero():
+    row = _cache_row(cache_status='blocked', block_reason='captcha')
+    table = MagicMock()
+    table.query.return_value = {'Items': [row]}
+
+    result = _find(table, success_days=0)
+
+    assert result == {
+        'status': 'blocked',
+        'crawled_at': row['crawled_at'],
+        'block_reason': 'captcha',
+    }
+    assert table.query.call_count == 1
+    condition = table.query.call_args.kwargs['KeyConditionExpression']
+    assert condition.get_expression()['values'][1] == blocked_cache_scope(_URL)
+
+
 def test_returns_newer_keyword_success_when_older_url_block_also_exists():
     success = _cache_row(crawled_at=_timestamp(age=timedelta(hours=1)))
     blocked = _cache_row(

@@ -70,6 +70,25 @@ export default {
       return false;
     }
 
+    // Matches `vi.fn(...)`, `vi.mock(...)` and any other call on the `vi` object
+    function isViCall(init) {
+      return (
+        init.type === 'CallExpression' &&
+        init.callee &&
+        init.callee.type === 'MemberExpression' &&
+        init.callee.object &&
+        init.callee.object.name === 'vi'
+      );
+    }
+
+    // Matches `() => {}` and `function () {}` initialisers
+    function isFunctionInit(init) {
+      return (
+        init.type === 'ArrowFunctionExpression' ||
+        init.type === 'FunctionExpression'
+      );
+    }
+
     return {
       // Detect: function myHelper() {}
       FunctionDeclaration(node) {
@@ -101,25 +120,13 @@ export default {
         if (isAllowedName(name)) return;
         
         // Only flag arrow functions and function expressions
-        const isFunction = 
-          node.init.type === 'ArrowFunctionExpression' ||
-          node.init.type === 'FunctionExpression';
-        
-        if (!isFunction) return;
+        if (!isFunctionInit(node.init)) return;
         
         // Skip if inside describe/it block
         if (isInsideDescribeOrIt(node)) return;
         
         // Skip vi.fn() assignments
-        if (
-          node.init.type === 'CallExpression' &&
-          node.init.callee &&
-          node.init.callee.type === 'MemberExpression' &&
-          node.init.callee.object &&
-          node.init.callee.object.name === 'vi'
-        ) {
-          return;
-        }
+        if (isViCall(node.init)) return;
 
         context.report({
           node,

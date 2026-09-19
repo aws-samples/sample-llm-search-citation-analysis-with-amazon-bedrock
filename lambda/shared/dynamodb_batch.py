@@ -1,5 +1,5 @@
 """
-DynamoDB parallel-query helpers.
+DynamoDB read helpers: parallel latest-per-key queries and page collection.
 
 Several handlers need the latest-by-sort-key row for each of N primary
 keys — a pattern DynamoDB's `BatchGetItem` can't express because it
@@ -7,11 +7,12 @@ requires the exact composite key, not "latest per partition". The
 alternative is N concurrent `Query` calls with a bounded thread pool.
 
 This module centralizes that pattern so callers don't spawn their own
-executors (audit item 16).
+executors (audit item 16), and the ``LastEvaluatedKey`` pagination loop
+every full read of a table or index otherwise re-implements.
 
 Usage:
 
-    from shared.dynamodb_batch import query_latest_per_key
+    from shared.dynamodb_batch import collect_all_items, query_latest_per_key
 
     results = query_latest_per_key(
         table=my_table,
@@ -21,13 +22,15 @@ Usage:
     )
     # results: dict[str, dict | None] — maps each partition value to the
     # latest item (or None if no rows).
+
+    rows = collect_all_items(my_table.query, IndexName='StatusIndex', KeyConditionExpression=...)
 """
 
 from __future__ import annotations
 
 import concurrent.futures
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 from boto3.dynamodb.conditions import Key
@@ -40,10 +43,27 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MAX_WORKERS = 10
 
 
+def collect_all_items(operation: Callable[..., Mapping[str, Any]], **params: Any) -> list[dict[str, Any]]:
+    """Every item a table's ``query`` or ``scan`` returns, following pagination.
+
+    DynamoDB pages at 1 MB: each page's ``LastEvaluatedKey`` becomes the next
+    call's ``ExclusiveStartKey`` until a page arrives without one. ``params``
+    are the keyword arguments of ``operation`` and are not mutated.
+    """
+    items: list[dict[str, Any]] = []
+    while True:
+        response = operation(**params)
+        items.extend(response.get('Items', []))
+        last_key = response.get('LastEvaluatedKey')
+        if not last_key:
+            return items
+        params['ExclusiveStartKey'] = last_key
+
+
 def query_latest_per_key(
     table: Any,
     partition_key_name: str,
-    partition_values: Iterable[str],
+    partition_values: Iterable[str | None],
     *,
     max_workers: int = _DEFAULT_MAX_WORKERS,
     limit: int = 1,
@@ -94,10 +114,10 @@ def query_latest_per_key(
             )
             items = response.get('Items', [])
             return value, (items[0] if items else None)
-        except Exception as e:
-            logger.error(
-                "query_latest_per_key failed for %s=%r: %s",
-                partition_key_name, value, e,
+        except Exception:
+            logger.exception(
+                "query_latest_per_key failed for %s=%r",
+                partition_key_name, value,
             )
             return value, None
 
@@ -108,17 +128,3 @@ def query_latest_per_key(
             results[value] = item
 
     return results
-
-
-
-def collect_all_items(operation: Any, **params: Any) -> list[dict[str, Any]]:
-    """Call a paginated DynamoDB query/scan operation through every page."""
-    items: list[dict[str, Any]] = []
-    request = dict(params)
-    while True:
-        response = operation(**request)
-        items.extend(response.get('Items', []))
-        last_key = response.get('LastEvaluatedKey')
-        if not last_key:
-            return items
-        request['ExclusiveStartKey'] = last_key

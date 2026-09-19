@@ -11,6 +11,8 @@ Covers:
 - Empty / None / malformed input returns None
 """
 
+from typing import Any
+
 from shared.llm_json import parse_llm_json
 
 
@@ -47,7 +49,8 @@ class TestObjectParsing:
         assert parse_llm_json('') is None
 
     def test_returns_none_for_none_input(self) -> None:
-        assert parse_llm_json(None) is None  # type: ignore[arg-type]
+        missing_response: Any = None
+        assert parse_llm_json(missing_response) is None
 
 
 class TestArrayParsing:

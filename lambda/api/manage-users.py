@@ -7,6 +7,8 @@ import concurrent.futures
 import logging
 import os
 import sys
+from collections.abc import Callable, Mapping
+from functools import wraps
 from typing import Any
 
 import boto3
@@ -34,8 +36,15 @@ cognito_client = boto3.client('cognito-idp')
 # Fail-fast: Required environment variables
 USER_POOL_ID = os.environ['USER_POOL_ID']
 
+_Route = Callable[..., dict[str, Any]]
 
-def format_user(user: dict) -> dict:
+
+def _iso(value: Any) -> str | None:
+    """ISO-8601 text for a Cognito timestamp, ``None`` when the field is absent."""
+    return value.isoformat() if value else None
+
+
+def format_user(user: Mapping[str, Any]) -> dict:
     """Format Cognito user response for frontend."""
     attributes = {attr['Name']: attr['Value'] for attr in user.get('Attributes', user.get('UserAttributes', []))}
 
@@ -45,10 +54,39 @@ def format_user(user: dict) -> dict:
         'email_verified': attributes.get('email_verified', 'false') == 'true',
         'status': user.get('UserStatus', 'UNKNOWN'),
         'enabled': user.get('Enabled', True),
-        'created_at': user.get('UserCreateDate').isoformat() if user.get('UserCreateDate') else None,
-        'updated_at': user.get('UserLastModifiedDate').isoformat() if user.get('UserLastModifiedDate') else None,
+        'created_at': _iso(user.get('UserCreateDate')),
+        'updated_at': _iso(user.get('UserLastModifiedDate')),
         'groups': []  # Will be populated separately if needed
     }
+
+
+def _group_names(response: Mapping[str, Any]) -> list[str]:
+    """The group names in a Cognito ``Groups`` listing."""
+    return [group['GroupName'] for group in response.get('Groups', [])]
+
+
+def _cognito_errors(failure: str) -> Callable[[_Route], _Route]:
+    """Answer the Cognito failures a user route lets escape.
+
+    ``UserNotFoundException`` becomes the 404 for the ``{username}`` in the
+    path; any other ``ClientError`` is logged with its traceback and answered
+    with a 500 carrying ``failure``. Routes keep their more specific mappings
+    (409 on ``UsernameExistsException``, 400 on ``InvalidParameterException``)
+    inline, ahead of this fall-through.
+    """
+    def decorate(route: _Route) -> _Route:
+        @wraps(route)
+        def wrapper(event: dict[str, Any], context: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            try:
+                return route(event, context, *args, **kwargs)
+            except cognito_client.exceptions.UserNotFoundException:
+                username = (event.get('pathParameters') or {}).get('username')
+                return not_found_response(f'User {username}', event)
+            except ClientError:
+                logger.exception(failure)
+                return api_response(500, {'error': failure}, event)
+        return wrapper
+    return decorate
 
 
 # Cap on how many Cognito pages we'll fetch in a single request. Each page
@@ -68,11 +106,12 @@ def _fetch_user_groups(username: str) -> list[str]:
         response = cognito_client.admin_list_groups_for_user(
             Username=username, UserPoolId=USER_POOL_ID,
         )
-        return [g['GroupName'] for g in response.get('Groups', [])]
     except ClientError:
         return []
+    return _group_names(response)
 
 
+@_cognito_errors('Failed to list users')
 def handle_list_users(event: dict, context: Any, limit: int, offset: int, **kwargs) -> dict:
     """GET /users - List all Cognito users with pagination.
 
@@ -81,60 +120,55 @@ def handle_list_users(event: dict, context: Any, limit: int, offset: int, **kwar
     per-user group lookup is N+1 — Cognito has no batch API — so we fan out
     with a ThreadPoolExecutor. See audit items 16 and 17.
     """
-    try:
-        users: list[dict] = []
-        pagination_token = None
-        pages_fetched = 0
+    users: list[dict] = []
+    pagination_token = None
+    pages_fetched = 0
 
-        while pages_fetched < _MAX_COGNITO_PAGES:
-            params: dict[str, Any] = {
-                'UserPoolId': USER_POOL_ID,
-                'Limit': 60,  # Max allowed by Cognito
-            }
-            if pagination_token:
-                params['PaginationToken'] = pagination_token
+    while pages_fetched < _MAX_COGNITO_PAGES:
+        params: dict[str, Any] = {
+            'UserPoolId': USER_POOL_ID,
+            'Limit': 60,  # Max allowed by Cognito
+        }
+        if pagination_token:
+            params['PaginationToken'] = pagination_token
 
-            response = cognito_client.list_users(**params)
-            users.extend([format_user(u) for u in response.get('Users', [])])
-            pagination_token = response.get('PaginationToken')
-            pages_fetched += 1
+        response = cognito_client.list_users(**params)
+        users.extend([format_user(u) for u in response.get('Users', [])])
+        pagination_token = response.get('PaginationToken')
+        pages_fetched += 1
 
-            if not pagination_token:
-                break
+        if not pagination_token:
+            break
 
-        truncated = pagination_token is not None
-        if truncated:
-            logger.warning(
-                "Cognito list_users hit the %d-page cap; returning %d users.",
-                _MAX_COGNITO_PAGES, len(users),
+    truncated = pagination_token is not None
+    if truncated:
+        logger.warning(
+            "Cognito list_users hit the %d-page cap; returning %d users.",
+            _MAX_COGNITO_PAGES, len(users),
+        )
+
+    # Parallel group lookup. Cognito has no batch API so we fan out —
+    # the previous serial loop was 50ms x N seconds linear.
+    if users:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_GROUPS_FANOUT) as pool:
+            results = pool.map(
+                _fetch_user_groups, [u['username'] for u in users]
             )
+            for user, groups in zip(users, results, strict=False):
+                user['groups'] = groups
 
-        # Parallel group lookup. Cognito has no batch API so we fan out —
-        # the previous serial loop was 50ms x N seconds linear.
-        if users:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=_GROUPS_FANOUT) as pool:
-                results = pool.map(
-                    _fetch_user_groups, [u['username'] for u in users]
-                )
-                for user, groups in zip(users, results, strict=False):
-                    user['groups'] = groups
+    # Apply offset/limit pagination against the fetched page set.
+    total = len(users)
+    paginated = users[offset:offset + limit]
 
-        # Apply offset/limit pagination against the fetched page set.
-        total = len(users)
-        paginated = users[offset:offset + limit]
-
-        return success_response({
-            'users': paginated,
-            'total': total,
-            'limit': limit,
-            'offset': offset,
-            'has_more': offset + limit < total,
-            'truncated': truncated,
-        }, event)
-
-    except ClientError as e:
-        logger.error(f"Error listing users: {e!s}")
-        return api_response(500, {'error': 'Failed to list users'}, event)
+    return success_response({
+        'users': paginated,
+        'total': total,
+        'limit': limit,
+        'offset': offset,
+        'has_more': offset + limit < total,
+        'truncated': truncated,
+    }, event)
 
 
 def _get_user_with_groups(username: str) -> dict:
@@ -153,10 +187,11 @@ def _get_user_with_groups(username: str) -> dict:
         Username=username,
         UserPoolId=USER_POOL_ID
     )
-    user['groups'] = [g['GroupName'] for g in groups_response.get('Groups', [])]
+    user['groups'] = _group_names(groups_response)
     return user
 
 
+@_cognito_errors('Failed to get user')
 def handle_get_user(event: dict, context: Any, **kwargs) -> dict:
     """GET /users/{username} - Get user details."""
     path_params = event.get('pathParameters') or {}
@@ -165,19 +200,11 @@ def handle_get_user(event: dict, context: Any, **kwargs) -> dict:
     if not username:
         return validation_error('Username required', event)
 
-    try:
-        user = _get_user_with_groups(username)
-
-        return success_response({'user': user}, event)
-
-    except cognito_client.exceptions.UserNotFoundException:
-        return not_found_response(f'User {username}', event)
-    except ClientError as e:
-        logger.error(f"Error getting user: {e!s}")
-        return api_response(500, {'error': 'Failed to get user'}, event)
+    return success_response({'user': _get_user_with_groups(username)}, event)
 
 
 @parse_json_body
+@_cognito_errors('Failed to invite user')
 def handle_invite_user(event: dict, context: Any, body: dict | None = None, **kwargs) -> dict:
     """POST /users - Invite a new user."""
     body = body or {}
@@ -205,35 +232,32 @@ def handle_invite_user(event: dict, context: Any, body: dict | None = None, **kw
             ],
             DesiredDeliveryMediums=['EMAIL']
         )
-
-        user = format_user(response['User'])
-
-        # Add to groups if specified
-        for group in groups:
-            try:
-                cognito_client.admin_add_user_to_group(
-                    UserPoolId=USER_POOL_ID,
-                    Username=email,
-                    GroupName=group
-                )
-            except ClientError as e:
-                logger.warning(f"Failed to add user to group {group}: {e!s}")
-
-        user['groups'] = groups
-
-        return success_response({
-            'user': user,
-            'message': 'User invited successfully. They will receive an email with login instructions.'
-        }, event)
-
     except cognito_client.exceptions.UsernameExistsException:
         return api_response(409, {'error': 'User with this email already exists'}, event)
-    except ClientError as e:
-        logger.error(f"Error inviting user: {e!s}")
-        return api_response(500, {'error': 'Failed to invite user'}, event)
+
+    user = format_user(response['User'])
+
+    # Add to groups if specified
+    for group in groups:
+        try:
+            cognito_client.admin_add_user_to_group(
+                UserPoolId=USER_POOL_ID,
+                Username=email,
+                GroupName=group
+            )
+        except ClientError as e:
+            logger.warning(f"Failed to add user to group {group}: {e!s}")
+
+    user['groups'] = groups
+
+    return success_response({
+        'user': user,
+        'message': 'User invited successfully. They will receive an email with login instructions.'
+    }, event)
 
 
 @parse_json_body
+@_cognito_errors('Failed to update user')
 def handle_update_user(event: dict, context: Any, body: dict | None = None, **kwargs) -> dict:
     """PUT /users/{username} - Update user (enable/disable, groups).
 
@@ -272,59 +296,51 @@ def handle_update_user(event: dict, context: Any, body: dict | None = None, **kw
         ):
             return validation_error('groups must be an array of strings', event, 'groups')
 
-    try:
-        # Enable/disable user
-        if 'enabled' in body:
-            if body['enabled']:
-                cognito_client.admin_enable_user(
-                    UserPoolId=USER_POOL_ID,
-                    Username=username
-                )
-            else:
-                cognito_client.admin_disable_user(
-                    UserPoolId=USER_POOL_ID,
-                    Username=username
-                )
-
-        # Update groups
-        if 'groups' in body:
-            new_groups = set(body['groups'])
-
-            # Get current groups
-            current_groups_response = cognito_client.admin_list_groups_for_user(
-                Username=username,
-                UserPoolId=USER_POOL_ID
+    # Enable/disable user
+    if 'enabled' in body:
+        if body['enabled']:
+            cognito_client.admin_enable_user(
+                UserPoolId=USER_POOL_ID,
+                Username=username
             )
-            current_groups = set(g['GroupName'] for g in current_groups_response.get('Groups', []))
+        else:
+            cognito_client.admin_disable_user(
+                UserPoolId=USER_POOL_ID,
+                Username=username
+            )
 
-            # Remove from groups no longer assigned
-            for group in current_groups - new_groups:
-                cognito_client.admin_remove_user_from_group(
-                    UserPoolId=USER_POOL_ID,
-                    Username=username,
-                    GroupName=group
-                )
+    # Update groups
+    if 'groups' in body:
+        new_groups = set(body['groups'])
 
-            # Add to new groups
-            for group in new_groups - current_groups:
-                cognito_client.admin_add_user_to_group(
-                    UserPoolId=USER_POOL_ID,
-                    Username=username,
-                    GroupName=group
-                )
+        # Get current groups
+        current_groups_response = cognito_client.admin_list_groups_for_user(
+            Username=username,
+            UserPoolId=USER_POOL_ID
+        )
+        current_groups = set(_group_names(current_groups_response))
 
-        # Get updated user
-        user = _get_user_with_groups(username)
+        # Remove from groups no longer assigned
+        for group in current_groups - new_groups:
+            cognito_client.admin_remove_user_from_group(
+                UserPoolId=USER_POOL_ID,
+                Username=username,
+                GroupName=group
+            )
 
-        return success_response({'user': user}, event)
+        # Add to new groups
+        for group in new_groups - current_groups:
+            cognito_client.admin_add_user_to_group(
+                UserPoolId=USER_POOL_ID,
+                Username=username,
+                GroupName=group
+            )
 
-    except cognito_client.exceptions.UserNotFoundException:
-        return not_found_response(f'User {username}', event)
-    except ClientError as e:
-        logger.error(f"Error updating user: {e!s}")
-        return api_response(500, {'error': 'Failed to update user'}, event)
+    # Get updated user
+    return success_response({'user': _get_user_with_groups(username)}, event)
 
 
+@_cognito_errors('Failed to delete user')
 def handle_delete_user(event: dict, context: Any, **kwargs) -> dict:
     """DELETE /users/{username} - Delete a user.
 
@@ -341,22 +357,16 @@ def handle_delete_user(event: dict, context: Any, **kwargs) -> dict:
         logger.warning("Refused self-deletion of %r", username)
         return forbidden_response('You cannot delete your own account', event)
 
-    try:
-        cognito_client.admin_delete_user(
-            UserPoolId=USER_POOL_ID,
-            Username=username
-        )
+    cognito_client.admin_delete_user(
+        UserPoolId=USER_POOL_ID,
+        Username=username
+    )
 
-        return success_response({'message': f'User {username} deleted successfully'}, event)
-
-    except cognito_client.exceptions.UserNotFoundException:
-        return not_found_response(f'User {username}', event)
-    except ClientError as e:
-        logger.error(f"Error deleting user: {e!s}")
-        return api_response(500, {'error': 'Failed to delete user'}, event)
+    return success_response({'message': f'User {username} deleted successfully'}, event)
 
 
 @parse_json_body
+@_cognito_errors('Failed to reset password')
 def handle_reset_password(event: dict, context: Any, body: dict | None = None, **kwargs) -> dict:
     """POST /users/{username}/reset-password - Reset user password."""
     path_params = event.get('pathParameters') or {}
@@ -371,42 +381,37 @@ def handle_reset_password(event: dict, context: Any, body: dict | None = None, *
             UserPoolId=USER_POOL_ID,
             Username=username
         )
-
-        return success_response({
-            'message': 'Password reset email sent to user'
-        }, event)
-
-    except cognito_client.exceptions.UserNotFoundException:
-        return not_found_response(f'User {username}', event)
     except cognito_client.exceptions.InvalidParameterException as e:
         # botocore's str(e) carries the full AWS request context; route it
         # through the sanitizer like every other error path in the codebase.
-        logger.error(f"Invalid parameter resetting password: {e!s}")
+        logger.exception("Invalid parameter resetting password")
         return api_response(400, {'error': sanitize_error_message(e)}, event)
-    except ClientError as e:
-        logger.error(f"Error resetting password: {e!s}")
-        return api_response(500, {'error': 'Failed to reset password'}, event)
+
+    return success_response({
+        'message': 'Password reset email sent to user'
+    }, event)
 
 
+def _group_summary(group: Mapping[str, Any]) -> dict[str, Any]:
+    """The dashboard's view of one Cognito group."""
+    return {
+        'name': group['GroupName'],
+        'description': group.get('Description', ''),
+        'precedence': group.get('Precedence', 0),
+    }
+
+
+@_cognito_errors('Failed to list groups')
 def handle_list_groups(event: dict, context: Any, **kwargs) -> dict:
     """GET /users/groups - List available groups."""
-    try:
-        response = cognito_client.list_groups(
-            UserPoolId=USER_POOL_ID,
-            Limit=60
-        )
+    response = cognito_client.list_groups(
+        UserPoolId=USER_POOL_ID,
+        Limit=60
+    )
 
-        groups = [{
-            'name': g['GroupName'],
-            'description': g.get('Description', ''),
-            'precedence': g.get('Precedence', 0)
-        } for g in response.get('Groups', [])]
+    groups = [_group_summary(group) for group in response.get('Groups', [])]
 
-        return success_response({'groups': groups}, event)
-
-    except ClientError as e:
-        logger.error(f"Error listing groups: {e!s}")
-        return api_response(500, {'error': 'Failed to list groups'}, event)
+    return success_response({'groups': groups}, event)
 
 
 def handle_get_users_route(event: dict, context: Any, **kwargs) -> dict:
@@ -462,5 +467,7 @@ def handler(event: dict, context: Any) -> dict:
     - PUT /users/{username} - Update user (enable/disable, groups)
     - DELETE /users/{username} - Delete user
     - POST /users/{username}/reset-password - Reset user password
+
+    Routes handle everything; this body is never reached.
     """
-    pass  # Routes handle everything
+    ...

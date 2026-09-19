@@ -106,6 +106,5 @@ class TestResolveTableEnv:
         """The helper enforces the DYNAMODB_TABLE_ prefix on the canonical
         arg. Accepting any name would defeat the whole point of the
         naming-consistency migration."""
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(ValueError, match="must use the DYNAMODB_TABLE_ prefix; got 'FOO_TABLE'"):
             env_vars.resolve_table_env('FOO_TABLE', 'FOO_LEGACY')
-        assert 'DYNAMODB_TABLE_' in str(excinfo.value)

@@ -109,3 +109,46 @@ class TestSuccessShaping:
 
         assert result['competitors'] == ['Meliá', 'Iberostar']
         assert result['first_party_brands'] == ['Barceló']
+
+
+
+class TestDefaultPrompt:
+    """`generate_default_prompt` is what the dashboard shows as each preset's editable starting point."""
+
+    def test_renders_the_mention_example_as_an_indented_json_array(self) -> None:
+        prompt = _mod.generate_default_prompt('Hotels & Hospitality', 'hotel recommendations', ['hotel chains'])
+
+        assert (
+            'Return ONLY a valid JSON array with no additional text. Format:\n'
+            '[\n'
+            '  {\n'
+            '    "name": "Brand Name",\n'
+            '    "parent_company": "Parent Company or null",\n'
+            '    "mention_count": 2,\n'
+            '    "first_position": 150,\n'
+            '    "rank": 1,\n'
+            '    "sentiment": "positive",\n'
+            '    "sentiment_reason": "Praised for quality and value",\n'
+            '    "ranking_context": "Recommended as top choice"\n'
+            '  }\n'
+            ']\n'
+            '\n'
+            'If no brands are found, return an empty array: []\n'
+        ) in prompt
+
+    def test_keeps_the_extractor_placeholders_as_double_braces(self) -> None:
+        prompt = _mod.generate_default_prompt('Hotels & Hospitality', 'hotel recommendations', ['hotel chains'])
+
+        assert prompt.endswith('TEXT TO ANALYZE:\n{{TEXT}}\n\nJSON OUTPUT:')
+        assert '{{TRACKED_BRANDS}}' in prompt
+        assert '{{SENTIMENT_FIELDS}}\n{{RANKING_CONTEXT_FIELD}}\n\n{{CUSTOM_INSTRUCTIONS}}' in prompt
+
+    def test_lists_each_entity_type_as_a_bullet(self) -> None:
+        prompt = _mod.generate_default_prompt('Hotels & Hospitality', 'hotel recommendations', ['hotel chains', 'resorts'])
+
+        assert 'ENTITY TYPES TO EXTRACT:\n- hotel chains\n- resorts\n' in prompt
+
+    def test_falls_back_to_a_generic_bullet_when_the_preset_lists_no_entity_types(self) -> None:
+        prompt = _mod.generate_default_prompt('Custom Industry', 'brand recommendations', [])
+
+        assert 'ENTITY TYPES TO EXTRACT:\n- Brand names and company names\n' in prompt

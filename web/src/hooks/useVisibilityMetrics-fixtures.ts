@@ -3,7 +3,6 @@ import type { VisibilityMetricsResponse } from '../types';
 export const mockVisibilityResponse: VisibilityMetricsResponse = {
   keyword: 'best hotels',
   timestamp: '2024-01-01T00:00:00Z',
-  total_brands: 2,
   total_mentions: 18,
   brands: [
     {
@@ -13,7 +12,6 @@ export const mockVisibilityResponse: VisibilityMetricsResponse = {
       providers: ['openai', 'perplexity', 'gemini'],
       total_mentions: 10,
       best_rank: 1,
-      avg_sentiment: 0.8,
       share_of_voice: 55.6,
       classification: 'first_party',
     },
@@ -24,7 +22,6 @@ export const mockVisibilityResponse: VisibilityMetricsResponse = {
       providers: ['openai', 'claude'],
       total_mentions: 8,
       best_rank: 2,
-      avg_sentiment: 0.6,
       share_of_voice: 44.4,
       classification: 'competitor',
     },

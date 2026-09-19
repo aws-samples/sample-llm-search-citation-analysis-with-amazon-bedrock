@@ -9,21 +9,26 @@
  */
 import type { ResearchKeyword } from '../types';
 
+/**
+ * Inclusive code-point ranges Python's `str.strip()` treats as whitespace,
+ * so the trim here matches `normalize_keyword` on the backend.
+ */
+const KEYWORD_BOUNDARY_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x0009, 0x000D],
+  [0x0020, 0x0020],
+  [0x0085, 0x0085],
+  [0x00A0, 0x00A0],
+  [0x1680, 0x1680],
+  [0x2000, 0x200A],
+  [0x2028, 0x2029],
+  [0x202F, 0x202F],
+  [0x205F, 0x205F],
+  [0x3000, 0x3000],
+  [0xFEFF, 0xFEFF],
+];
+
 function isKeywordBoundaryCodePoint(codePoint: number): boolean {
-  return (
-    (codePoint >= 0x0009 && codePoint <= 0x000D)
-    || codePoint === 0x0020
-    || codePoint === 0x0085
-    || codePoint === 0x00A0
-    || codePoint === 0x1680
-    || (codePoint >= 0x2000 && codePoint <= 0x200A)
-    || codePoint === 0x2028
-    || codePoint === 0x2029
-    || codePoint === 0x202F
-    || codePoint === 0x205F
-    || codePoint === 0x3000
-    || codePoint === 0xFEFF
-  );
+  return KEYWORD_BOUNDARY_RANGES.some(([first, last]) => codePoint >= first && codePoint <= last);
 }
 
 function isKeywordBoundaryCharacter(character: string): boolean {

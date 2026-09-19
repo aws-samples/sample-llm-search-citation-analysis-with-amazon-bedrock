@@ -15,8 +15,18 @@ REQUIRED_FIELDS = {"name", "description", "entity_types", "example_brands", "ext
 
 
 class TestIndustryPresetCatalog:
-    def test_catalog_is_not_empty(self) -> None:
-        assert len(industry_presets.INDUSTRY_PRESETS) > 0
+    def test_catalog_lists_the_eight_industries_plus_the_custom_fallback(self) -> None:
+        assert list(industry_presets.INDUSTRY_PRESETS) == [
+            "hotels",
+            "restaurants",
+            "airlines",
+            "retail",
+            "fashion",
+            "automotive",
+            "technology",
+            "finance",
+            "custom",
+        ]
 
     def test_custom_fallback_exists(self) -> None:
         """`get_preset` falls back to 'custom' for unknown industries —
@@ -31,9 +41,8 @@ class TestIndustryPresetCatalog:
 
     def test_every_preset_has_string_name(self) -> None:
         for industry_id, preset in industry_presets.INDUSTRY_PRESETS.items():
-            assert isinstance(preset["name"], str) and preset["name"], (
-                f"{industry_id!r} name is empty or non-string"
-            )
+            assert isinstance(preset["name"], str), f"{industry_id!r} name is non-string"
+            assert preset["name"], f"{industry_id!r} name is empty"
 
     def test_every_preset_entity_types_is_a_list(self) -> None:
         for industry_id, preset in industry_presets.INDUSTRY_PRESETS.items():

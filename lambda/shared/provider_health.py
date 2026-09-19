@@ -237,7 +237,7 @@ def record_provider_failure(
         failures = int(response.get('Attributes', {}).get('consecutive_failures', 0))
         outcome['consecutive_failures'] = failures
     except Exception as exc:
-        logger.error(
+        logger.exception(
             'provider_health_write_failed provider=%s category=%s error=%s',
             provider_id, category, type(exc).__name__,
         )
@@ -269,17 +269,17 @@ def _disable_provider(table: Any, provider_id: str, category: str, timestamp: st
                 ':true': True,
             },
         )
-        logger.error(
-            'provider_auto_disabled provider=%s category=%s after=%d consecutive failures',
-            provider_id, category, AUTO_DISABLE_THRESHOLD,
-        )
-        return True
     except Exception as exc:
-        logger.error(
+        logger.exception(
             'provider_auto_disable_failed provider=%s error=%s',
             provider_id, type(exc).__name__,
         )
         return False
+    logger.error(
+        'provider_auto_disabled provider=%s category=%s after=%d consecutive failures',
+        provider_id, category, AUTO_DISABLE_THRESHOLD,
+    )
+    return True
 
 
 def record_provider_success(table: Any, provider_id: str, *, now: str | None = None) -> None:
@@ -316,7 +316,7 @@ def record_provider_success(table: Any, provider_id: str, *, now: str | None = N
             },
         )
     except Exception as exc:
-        logger.warning(
+        logger.exception(
             'provider_health_success_write_failed provider=%s error=%s',
             provider_id, type(exc).__name__,
         )

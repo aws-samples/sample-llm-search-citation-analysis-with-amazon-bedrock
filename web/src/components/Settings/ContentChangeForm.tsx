@@ -1,8 +1,11 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import type { KeywordGroup } from '../../types';
+import type {
+  ContentChangeMarker, KeywordGroup
+} from '../../types';
 import { formatDate } from '../../formatting/dateFormatter';
 import { useContentChanges } from '../../hooks/useAlerts';
+import type { AlertMutationOutcome } from '../../hooks/useAlerts';
 import {
   MAX_CONTENT_CHANGE_DESCRIPTION_LENGTH,
   MAX_CONTENT_CHANGE_URL_LENGTH,
@@ -23,6 +26,86 @@ const EMPTY_CONTENT_CHANGE: ContentChangeFormValues = {
   description: '',
   url: '',
 };
+
+interface ErrorNoticeProps { readonly message: string | null; }
+
+function ErrorNotice({ message }: ErrorNoticeProps) {
+  if (message === null) return null;
+  return (
+    <p role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+      {message}
+    </p>
+  );
+}
+
+interface ContentChangeAvailabilityHintsProps {
+  readonly isAdmin: boolean;
+  readonly groupsLoading: boolean;
+  readonly groupsError: string | null;
+  readonly groupCount: number;
+}
+
+function ContentChangeAvailabilityHints({
+  isAdmin, groupsLoading, groupsError, groupCount
+}: ContentChangeAvailabilityHintsProps) {
+  return (
+    <>
+      {!isAdmin && (
+        <p className="mt-3 text-sm text-gray-600">Only administrators can record content changes.</p>
+      )}
+      {!groupsLoading && groupsError === null && groupCount === 0 && (
+        <p className="mt-3 text-sm text-gray-500">Create a keyword group before recording a content change.</p>
+      )}
+    </>
+  );
+}
+
+interface RecordOutcomeMessageProps { readonly outcome: AlertMutationOutcome | null; }
+
+function RecordOutcomeMessage({ outcome }: RecordOutcomeMessageProps) {
+  if (outcome === null) return null;
+  return (
+    <output
+      role={outcome.success ? undefined : 'alert'}
+      className={`mt-3 block rounded-lg border p-3 text-sm ${outcome.success
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        : 'border-red-200 bg-red-50 text-red-700'}`}
+    >
+      {outcome.message}
+    </output>
+  );
+}
+
+interface LatestMarkerCardProps {
+  readonly marker: ContentChangeMarker | null;
+  readonly loading: boolean;
+}
+
+function LatestMarkerCard({
+  marker, loading
+}: LatestMarkerCardProps) {
+  if (loading) return <output className="mt-4 block text-sm text-gray-500">Loading the latest marker…</output>;
+  if (marker === null) return null;
+  return (
+    <article className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+      <h5 className="text-sm font-semibold text-gray-900">Latest content change</h5>
+      <p className="mt-2 text-sm text-gray-700">{marker.description}</p>
+      <p className="mt-1 text-xs text-gray-500">
+        Marker {marker.id} · <time dateTime={marker.changed_at}>{formatDate(marker.changed_at)}</time>
+      </p>
+      {marker.url !== undefined && (
+        <a
+          href={marker.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-2 inline-block break-all text-sm text-blue-700 underline"
+        >
+          {marker.url}
+        </a>
+      )}
+    </article>
+  );
+}
 
 export function ContentChangeForm({
   groups, groupsLoading, groupsError, isAdmin
@@ -76,16 +159,8 @@ export function ContentChangeForm({
         can attribute a visibility gain to that content change.
       </p>
 
-      {groupsError !== null && (
-        <p role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {groupsError}
-        </p>
-      )}
-      {error !== null && (
-        <p role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </p>
-      )}
+      <ErrorNotice message={groupsError} />
+      <ErrorNotice message={error} />
 
       <form onSubmit={handleSubmit} noValidate className="mt-4 space-y-4">
         <fieldset disabled={controlsDisabled} className="space-y-4">
@@ -141,48 +216,20 @@ export function ContentChangeForm({
         </fieldset>
       </form>
 
-      {!isAdmin && (
-        <p className="mt-3 text-sm text-gray-600">Only administrators can record content changes.</p>
-      )}
-      {!groupsLoading && groupsError === null && groups.length === 0 && (
-        <p className="mt-3 text-sm text-gray-500">Create a keyword group before recording a content change.</p>
-      )}
+      <ContentChangeAvailabilityHints
+        isAdmin={isAdmin}
+        groupsLoading={groupsLoading}
+        groupsError={groupsError}
+        groupCount={groups.length}
+      />
       {validationError !== null && (
         <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {validationError}
         </p>
       )}
-      {recordOutcome !== null && (
-        <output
-          role={recordOutcome.success ? undefined : 'alert'}
-          className={`mt-3 block rounded-lg border p-3 text-sm ${recordOutcome.success
-            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-            : 'border-red-200 bg-red-50 text-red-700'}`}
-        >
-          {recordOutcome.message}
-        </output>
-      )}
+      <RecordOutcomeMessage outcome={recordOutcome} />
 
-      {loading && <output className="mt-4 block text-sm text-gray-500">Loading the latest marker…</output>}
-      {!loading && latestMarker !== null && (
-        <article className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
-          <h5 className="text-sm font-semibold text-gray-900">Latest content change</h5>
-          <p className="mt-2 text-sm text-gray-700">{latestMarker.description}</p>
-          <p className="mt-1 text-xs text-gray-500">
-            Marker {latestMarker.id} · <time dateTime={latestMarker.changed_at}>{formatDate(latestMarker.changed_at)}</time>
-          </p>
-          {latestMarker.url !== undefined && (
-            <a
-              href={latestMarker.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-2 inline-block break-all text-sm text-blue-700 underline"
-            >
-              {latestMarker.url}
-            </a>
-          )}
-        </article>
-      )}
+      <LatestMarkerCard marker={latestMarker} loading={loading} />
     </section>
   );
 }

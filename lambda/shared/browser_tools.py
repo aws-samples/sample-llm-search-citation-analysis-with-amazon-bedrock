@@ -19,12 +19,12 @@ import time
 
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
+# Import from BedrockAgentCore SDK. The ``None`` fallback makes the "SDK
+# missing" guard visible to the type checker at each use site.
 try:
     from bedrock_agentcore.tools.browser_client import BrowserClient
-    BEDROCK_AGENTCORE_AVAILABLE = True
 except ImportError:
     BrowserClient = None
-    BEDROCK_AGENTCORE_AVAILABLE = False
     logging.warning("BedrockAgentCore SDK not available - browser features will be limited")
 
 from shared.url_validator import validate_url_safe
@@ -32,6 +32,8 @@ from shared.utils import get_timestamp, get_timestamp_compact
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+_SESSION_NOT_INITIALIZED = 'Browser session not initialized - call initialize_browser_session() first'
 
 
 class BrowserConfigurationError(RuntimeError):
@@ -59,7 +61,7 @@ class SimpleBrowserTools:
         it is slower, omits the configured Web Bot Auth identity, and can leak a
         control-plane resource because session cleanup does not delete browsers.
         """
-        if not BEDROCK_AGENTCORE_AVAILABLE:
+        if BrowserClient is None:
             raise RuntimeError("BedrockAgentCore SDK not available")
 
         pre_created_browser_id = os.environ.get('BROWSER_ID')
@@ -74,20 +76,19 @@ class SimpleBrowserTools:
 
     def initialize_browser_session(self) -> Page:
         """Initialize an AgentCore session and attach synchronous Playwright."""
-        if not BEDROCK_AGENTCORE_AVAILABLE or BrowserClient is None:
+        if BrowserClient is None:
             raise RuntimeError("BedrockAgentCore SDK not available")
         if not self.browser_id:
             raise BrowserConfigurationError('create_browser must select BROWSER_ID before starting a session')
 
         self.browser_client = BrowserClient(region=self.config.region)
-        self.browser_client.identifier = self.browser_id
         self.session_id = self.browser_client.start(
             identifier=self.browser_id,
             name=f"citation_crawler_session_{get_timestamp_compact()}",
             session_timeout_seconds=self.config.browser_session_timeout,
         )
 
-        logger.info("AgentCore browser session started")
+        logger.info("AgentCore browser session started: %s", self.session_id)
         ws_url, headers = self.browser_client.generate_ws_headers()
 
         # AgentCore does not currently expose a documented readiness signal.
@@ -111,15 +112,15 @@ class SimpleBrowserTools:
         return self.page
 
     def _active_context(self) -> BrowserContext:
-        """Return the initialized context or fail with an actionable error."""
+        """The context of the running session; raises when no session was initialized."""
         if self.context is None:
-            raise RuntimeError('Browser session is not initialized')
+            raise RuntimeError(_SESSION_NOT_INITIALIZED)
         return self.context
 
     def _active_page(self) -> Page:
-        """Return the initialized page or fail with an actionable error."""
+        """The page of the running session; raises when no session was initialized."""
         if self.page is None:
-            raise RuntimeError('Browser session is not initialized')
+            raise RuntimeError(_SESSION_NOT_INITIALIZED)
         return self.page
 
     def _guard_document_request(self, route) -> None:
@@ -189,7 +190,7 @@ class SimpleBrowserTools:
 
         except Exception as exc:
             error_message = self._navigation_guard_error or str(exc)
-            logger.error("Navigation error: %s", error_message)
+            logger.exception("Navigation error: %s", error_message)
             return self._navigation_error_result(url, error_message)
 
     def _detect_captcha_block(self) -> bool:
@@ -197,8 +198,10 @@ class SimpleBrowserTools:
         try:
             page_text = self._active_page().evaluate("() => document.body.innerText") or ''
             normalized_text = page_text.lower() if isinstance(page_text, str) else ''
-        except Exception as exc:
-            logger.warning("Could not read page text for CAPTCHA detection: %s", exc)
+        except Exception:
+            # Detection must never turn an unreadable page into a "blocked"
+            # verdict, so any failure here answers "not a CAPTCHA".
+            logger.exception("Could not read page text for CAPTCHA detection")
             return False
 
         indicators = (
@@ -248,7 +251,7 @@ class SimpleBrowserTools:
             }
 
         except Exception as exc:
-            logger.error("Content extraction error: %s", exc)
+            logger.exception("Content extraction error")
             return {
                 "status": "error",
                 "error": str(exc),
@@ -268,7 +271,7 @@ class SimpleBrowserTools:
             }
 
         except Exception as exc:
-            logger.error("Screenshot error: %s", exc)
+            logger.exception("Screenshot error")
             return {
                 "status": "error",
                 "error": str(exc),

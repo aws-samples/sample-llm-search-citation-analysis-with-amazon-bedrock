@@ -4,6 +4,7 @@ import {
 import {
   render, screen 
 } from '@testing-library/react';
+import { expectRendersNothing } from '../../../../test/renderNothing';
 import { OutrankedKeywordsSection } from './OutrankedKeywordsSection';
 import { buildRollup } from './OutrankedKeywordsSection-fixtures';
 
@@ -122,14 +123,7 @@ describe('OutrankedKeywordsSection — empty + placeholder states', () => {
   });
 
   it('returns null when rollup is null', () => {
-    const { container } = render(
-      <OutrankedKeywordsSection
-        rollup={null}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(container.firstChild).toBeNull();
+    expectRendersNothing(<OutrankedKeywordsSection rollup={null} loading={false} error={null} />);
   });
 
   it('renders loading placeholder when loading is true', () => {

@@ -6,6 +6,7 @@ import { TopCitationTargetsSection } from './sections/TopCitationTargetsSection'
 import { CoverageMapSection } from './sections/CoverageMapSection';
 import { BriefsReadySection } from './sections/BriefsReadySection';
 import { SuggestedBriefsSection } from './sections/SuggestedBriefsSection';
+import type { ContentPlanSectionProps } from './sections/ContentPlanSectionProps';
 
 /**
  * Content Action Plan — the printable version of "what to build, what to
@@ -25,30 +26,28 @@ export function ContentActionPlanReport() {
 
   usePrintMode({ ready: data.ready });
 
+  // The sections that join all three sources wait for both fetches and
+  // surface whichever failed first.
+  const contentPlanProps: ContentPlanSectionProps = {
+    gaps: data.gaps,
+    ideas: data.ideas,
+    history: data.history,
+    loading: data.gapsLoading || data.studioLoading,
+    error: data.gapsError ?? data.studioError,
+  };
+
   return (
     <ReportLayout
       title="Content Action Plan"
       subtitle="Prioritised citation gaps paired with the briefs and ideas that fill them. For content and PR strategists planning the next sprint."
     >
-      <HeadlineSection
-        gaps={data.gaps}
-        ideas={data.ideas}
-        history={data.history}
-        loading={data.gapsLoading || data.studioLoading}
-        error={data.gapsError ?? data.studioError}
-      />
+      <HeadlineSection {...contentPlanProps} />
       <TopCitationTargetsSection
         gaps={data.gaps}
         loading={data.gapsLoading}
         error={data.gapsError}
       />
-      <CoverageMapSection
-        gaps={data.gaps}
-        ideas={data.ideas}
-        history={data.history}
-        loading={data.gapsLoading || data.studioLoading}
-        error={data.gapsError ?? data.studioError}
-      />
+      <CoverageMapSection {...contentPlanProps} />
       <BriefsReadySection
         history={data.history}
         loading={data.studioLoading}

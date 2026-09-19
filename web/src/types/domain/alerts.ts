@@ -223,23 +223,35 @@ export function isContentChangeMarker(candidate: unknown): candidate is ContentC
     && isPositiveIntegerWireValue(candidate.ttl);
 }
 
-export function isAlertItem(candidate: unknown): candidate is AlertItem {
-  return isRecord(candidate)
-    && isNonEmptyString(candidate.id)
+function hasAlertIdentity(candidate: Record<string, unknown>): boolean {
+  return isNonEmptyString(candidate.id)
     && isNonEmptyString(candidate.group_id)
     && isNonEmptyString(candidate.group_name)
     && isNonEmptyString(candidate.execution_id)
     && isTimestamp(candidate.created_at)
-    && isTimestamp(candidate.run_timestamp)
-    && isAlertType(candidate.type)
+    && isTimestamp(candidate.run_timestamp);
+}
+
+function hasAlertClassification(candidate: Record<string, unknown>): boolean {
+  return isAlertType(candidate.type)
     && isAlertSeverity(candidate.severity)
     && isAlertStatus(candidate.status)
     && (candidate.entity === undefined || isNonEmptyString(candidate.entity))
-    && isAlertMetricValue(candidate.previous)
+    && isNonEmptyString(candidate.message);
+}
+
+function hasAlertMetrics(candidate: Record<string, unknown>): boolean {
+  return isAlertMetricValue(candidate.previous)
     && isAlertMetricValue(candidate.current)
     && isAlertMetricValue(candidate.delta)
-    && isAlertMetricValue(candidate.threshold)
-    && isNonEmptyString(candidate.message)
+    && isAlertMetricValue(candidate.threshold);
+}
+
+export function isAlertItem(candidate: unknown): candidate is AlertItem {
+  return isRecord(candidate)
+    && hasAlertIdentity(candidate)
+    && hasAlertClassification(candidate)
+    && hasAlertMetrics(candidate)
     && (candidate.content_change === undefined || isContentChangeMarker(candidate.content_change));
 }
 

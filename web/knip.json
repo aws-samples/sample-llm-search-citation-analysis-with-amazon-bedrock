@@ -1,4 +1,11 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreExportsUsedInFile": true
+  "ignoreExportsUsedInFile": true,
+  "project": [
+    "src/**/*.{ts,tsx,css}!",
+    "!src/**/*.spec.{ts,tsx}!",
+    "!src/**/*-fixtures.{ts,tsx}!",
+    "!src/**/*Fixtures.{ts,tsx}!",
+    "!src/test/**!"
+  ]
 }

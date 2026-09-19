@@ -5,16 +5,16 @@ import {
   ReportSection,
   ReportTable,
   type ReportTableColumn,
-  gateSection,
 } from '../../layout';
+import {
+  gateKeywordTrendRows, type KeywordTrendRow
+} from './keywordTrendRows';
 
 interface Props {
   readonly trends: HistoricalTrendsResponse | null;
   readonly loading: boolean;
   readonly error: string | null;
 }
-
-type KeywordTrendRow = NonNullable<HistoricalTrendsResponse['keyword_trends']>[number];
 
 /**
  * Per-keyword leaderboard for the all-keywords variant. Sorted by current
@@ -53,21 +53,16 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<KeywordTrendRow>> = [
 export function PerKeywordTableSection({
   trends, loading, error 
 }: Props) {
-  const gate = gateSection({
+  const gate = gateKeywordTrendRows({
     title: 'Per-keyword leaderboard',
     loading,
     loadingMessage: 'Loading per-keyword rankings…',
     error,
-    value: trends,
+    trends,
   });
   if (!gate.ready) return gate.placeholder;
 
-  const rows = gate.value.keyword_trends ?? [];
-  if (rows.length === 0) {
-    return null;
-  }
-
-  const sorted = [...rows].sort((a, b) => b.current_score - a.current_score);
+  const sorted = [...gate.rows].sort((a, b) => b.current_score - a.current_score);
 
   return (
     <ReportSection

@@ -45,3 +45,16 @@ def api_gateway_event(
 def parse_response(response: Mapping[str, Any]) -> tuple[int, Any]:
     """``(statusCode, decoded JSON body)`` of a Lambda proxy response."""
     return response['statusCode'], json.loads(response['body'])
+
+
+def parse_response_lenient(response: Mapping[str, Any]) -> tuple[int, Any]:
+    """``parse_response`` for responses that may omit either field.
+
+    A missing ``statusCode`` reads as 200 and a missing or empty ``body`` as
+    ``{}`` — the shapes a ``cors_preflight`` short-circuit or a bare handler
+    stub returns. Prefer ``parse_response`` when the handler under test
+    always answers with both.
+    """
+    raw = response.get('body')
+    parsed = json.loads(raw) if isinstance(raw, str) and raw else {}
+    return response.get('statusCode', 200), parsed

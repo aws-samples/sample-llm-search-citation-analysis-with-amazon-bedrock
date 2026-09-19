@@ -17,7 +17,6 @@ const baseGap: CitationGap = {
   competitor_brands: [],
   providers: ['openai', 'perplexity', 'gemini'],
   first_party_brands: [],
-  gap_type: 'competitor_only',
 };
 
 describe('GapCard', () => {

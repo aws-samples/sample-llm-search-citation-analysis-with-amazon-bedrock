@@ -46,7 +46,7 @@ class QueryPromptReadError(Exception):
     """Raised when enabled query prompts cannot be read from DynamoDB."""
 
 
-def read_enabled_query_prompts() -> list[dict[str, str]]:
+def read_enabled_query_prompts() -> list[dict[str, Any]]:
     """
     Read enabled query prompts from DynamoDB.
 
@@ -80,16 +80,6 @@ def read_enabled_query_prompts() -> list[dict[str, str]]:
             KeyConditionExpression=Key('enabled').eq('true'),
             Limit=10
         )
-        prompts = [
-            {
-                'id': item['id'],
-                'name': item.get('name', ''),
-                'template': item.get('template', ''),
-            }
-            for item in response.get('Items', [])
-        ]
-        logger.info(f"Read {len(prompts)} enabled query prompts from DynamoDB")
-        return prompts
     except ClientError as e:
         if e.response.get('Error', {}).get('Code') == 'ResourceNotFoundException':
             logger.warning(
@@ -105,6 +95,17 @@ def read_enabled_query_prompts() -> list[dict[str, str]]:
         raise QueryPromptReadError(
             f"Could not read enabled query prompts from {QUERY_PROMPTS_TABLE}"
         ) from e
+
+    prompts = [
+        {
+            'id': item['id'],
+            'name': item.get('name', ''),
+            'template': item.get('template', ''),
+        }
+        for item in response.get('Items', [])
+    ]
+    logger.info(f"Read {len(prompts)} enabled query prompts from DynamoDB")
+    return prompts
 
 
 def resolve_query_prompts(event: dict[str, Any]) -> list:
@@ -128,11 +129,13 @@ def read_keywords_for_scope(scope: dict[str, Any]) -> list[str]:
     """
     try:
         table = dynamodb.Table(KEYWORDS_TABLE)
-        keywords = [item['keyword'] for item in resolve_scope(scope, table)]
-        logger.info(f"Resolved {len(keywords)} active keywords for {describe_scope(scope)}")
-        return keywords
+        items = resolve_scope(scope, table)
     except Exception as e:
-        raise Exception(f"Failed to read keywords from DynamoDB: {e!s}") from e
+        raise RuntimeError(f"Failed to read keywords from DynamoDB: {e!s}") from e
+
+    keywords = [item['keyword'] for item in items]
+    logger.info(f"Resolved {len(keywords)} active keywords for {describe_scope(scope)}")
+    return keywords
 
 
 def parse_s3_uri(s3_uri: str) -> tuple:
@@ -152,11 +155,9 @@ def read_keywords_from_s3(s3_uri: str) -> list[str]:
         content = response['Body'].read().decode('utf-8')
 
         # Parse keywords (one per line)
-        keywords = [line.strip() for line in content.split('\n')]
-
-        return keywords
+        return [line.strip() for line in content.split('\n')]
     except Exception as e:
-        raise Exception(f"Failed to read keywords from S3: {s3_uri}. Error: {e!s}") from e
+        raise RuntimeError(f"Failed to read keywords from S3: {s3_uri}. Error: {e!s}") from e
 
 
 def validate_keywords(keywords: list) -> list[str]:
@@ -181,6 +182,62 @@ def validate_keywords(keywords: list) -> list[str]:
 
         valid_keywords.append(stripped)
 
+    return valid_keywords
+
+
+def _keywords_for_scope_event(event: dict[str, Any]) -> list[str]:
+    """Case 0: a scope descriptor (group-aware schedules), resolved at run time."""
+    scope, scope_error = validate_scope(event.get('scope'))
+    if scope is None:
+        error = ValueError(f"Invalid scope: {scope_error}")
+        log_error(error, "parse keywords handler", event)
+        raise error
+    logger.info(f"Resolving keywords for scope {describe_scope(scope)}")
+    return read_keywords_for_scope(scope)
+
+
+def _keywords_from_event(event: dict[str, Any]) -> list:
+    """Load the raw keywords from whichever source the event names.
+
+    Raises ``ValueError`` when the event names none of the supported sources,
+    or carries an invalid scope.
+    """
+    if 'scope' in event:
+        return _keywords_for_scope_event(event)
+
+    # Case 1: Keywords from DynamoDB (scheduled runs)
+    if event.get('source') == 'dynamodb':
+        logger.info("Reading active keywords from DynamoDB (scheduled run)")
+        return read_keywords_from_dynamodb()
+
+    # Case 2: Keywords from S3 file
+    if 'keywords_file' in event:
+        s3_uri = event['keywords_file']
+        logger.info(f"Reading keywords from S3: {s3_uri}")
+        return read_keywords_from_s3(s3_uri)
+
+    # Case 3: Direct keywords array
+    if 'keywords' in event and isinstance(event['keywords'], list):
+        logger.info("Using keywords from direct array input")
+        return event['keywords']
+
+    # Case 4: Direct keywords string (newline-separated)
+    if 'keywords' in event and isinstance(event['keywords'], str):
+        logger.info("Parsing keywords from string input")
+        return event['keywords'].split('\n')
+
+    error = ValueError("Invalid input: must provide 'scope', 'source': 'dynamodb', 'keywords_file' (S3 URI), or 'keywords' (array/string)")
+    log_error(error, "parse keywords handler", event)
+    raise error
+
+
+def _valid_keywords_from_event(event: dict[str, Any]) -> list[str]:
+    """The event's keywords, validated; raises ``ValueError`` when none survive validation."""
+    valid_keywords = validate_keywords(_keywords_from_event(event))
+    if not valid_keywords:
+        error = ValueError("No valid keywords found. Keywords must be non-empty strings.")
+        log_error(error, "parse keywords validation", event)
+        raise error
     return valid_keywords
 
 
@@ -214,52 +271,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     logger.info(f"Received event: {json.dumps(event)}")
 
     try:
-        keywords = []
         timestamp = get_timestamp()
-
-        # Case 0: Scope descriptor (group-aware schedules), resolved at run time
-        if 'scope' in event:
-            scope, scope_error = validate_scope(event.get('scope'))
-            if scope_error:
-                error = ValueError(f"Invalid scope: {scope_error}")
-                log_error(error, "parse keywords handler", event)
-                raise error
-            logger.info(f"Resolving keywords for scope {describe_scope(scope)}")
-            keywords = read_keywords_for_scope(scope)
-
-        # Case 1: Keywords from DynamoDB (scheduled runs)
-        elif event.get('source') == 'dynamodb':
-            logger.info("Reading active keywords from DynamoDB (scheduled run)")
-            keywords = read_keywords_from_dynamodb()
-
-        # Case 2: Keywords from S3 file
-        elif 'keywords_file' in event:
-            s3_uri = event['keywords_file']
-            logger.info(f"Reading keywords from S3: {s3_uri}")
-            keywords = read_keywords_from_s3(s3_uri)
-
-        # Case 3: Direct keywords array
-        elif 'keywords' in event and isinstance(event['keywords'], list):
-            logger.info("Using keywords from direct array input")
-            keywords = event['keywords']
-
-        # Case 4: Direct keywords string (newline-separated)
-        elif 'keywords' in event and isinstance(event['keywords'], str):
-            logger.info("Parsing keywords from string input")
-            keywords = event['keywords'].split('\n')
-
-        else:
-            error = ValueError("Invalid input: must provide 'scope', 'source': 'dynamodb', 'keywords_file' (S3 URI), or 'keywords' (array/string)")
-            log_error(error, "parse keywords handler", event)
-            raise error
-
-        # Validate keywords
-        valid_keywords = validate_keywords(keywords)
-
-        if not valid_keywords:
-            error = ValueError("No valid keywords found. Keywords must be non-empty strings.")
-            log_error(error, "parse keywords validation", event)
-            raise error
+        valid_keywords = _valid_keywords_from_event(event)
 
         # No per-execution cap: the ProcessKeywords Map state bounds concurrency
         # and the state-machine timeout bounds duration. The former silent
@@ -283,9 +296,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         }
 
         logger.info(f"Successfully parsed {len(valid_keywords)} keywords")
-
-        return result
-
     except Exception as e:
         log_error(e, "parse keywords handler", event)
         raise
+
+    return result

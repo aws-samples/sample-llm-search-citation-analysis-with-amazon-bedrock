@@ -120,7 +120,6 @@ export interface ResearchStep {
   status: ResearchStepStatus;
   keyword_count: number;
   error_message?: string | null;
-  started_at?: string | null;
   finished_at?: string | null;
   /** Research agent: the round the step belongs to. */
   round?: number;
@@ -177,18 +176,14 @@ export interface AgentEvaluation {
   assessment: string;
   decision: 'continue' | 'stop';
   reason: string;
-  next_queries: PlannedQuery[];
   candidate_count?: number;
-  evaluated_at?: string;
 }
 
 /** One round of the agent trace: what was planned and how it was judged. */
 export interface AgentRound {
   round: number;
-  planned_at: string;
   strategy: string;
   queries: PlannedQuery[];
-  step_ids: string[];
   evaluation?: AgentEvaluation;
 }
 
@@ -234,7 +229,6 @@ export interface KeywordResearchItem {
   steps_total?: number;
   steps_done?: number;
   steps_failed?: number;
-  retry_count?: number;
   updated_at?: string;
   finished_at?: string;
   /** Research agent fields (absent on expansion / competitor jobs). */

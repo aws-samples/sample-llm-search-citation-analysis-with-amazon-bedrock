@@ -4,6 +4,7 @@ import {
 import {
   render, screen, within 
 } from '@testing-library/react';
+import { expectRendersNothing } from '../../../../test/renderNothing';
 import { MoversSection } from './MoversSection';
 import { buildKeywordTrends } from '../keywordTrends-fixtures';
 
@@ -127,14 +128,7 @@ describe('MoversSection — decliner list and empty handling', () => {
   });
 
   it('returns null (no section rendered) when keyword_trends is empty', () => {
-    const { container } = render(
-      <MoversSection
-        trends={buildKeywordTrends([])}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(container.firstChild).toBeNull();
+    expectRendersNothing(<MoversSection trends={buildKeywordTrends([])} loading={false} error={null} />);
   });
 
   it('returns null when no keyword has a non-zero change', () => {

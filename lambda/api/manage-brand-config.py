@@ -11,6 +11,7 @@ import logging
 import os
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import boto3
@@ -22,21 +23,19 @@ from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler, validate
 from shared.industry_presets import INDUSTRY_PRESETS as _BASE_PRESETS
+from shared.industry_presets import IndustryPreset
 from shared.industry_presets import get_preset as get_shared_preset
 from shared.llm_json import parse_llm_json
+
+# Centralized Bedrock invocation (ModelRole.ANALYSIS -> Sonnet by default)
+from shared.models import ModelRole, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
 from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'search'))
-
 dynamodb = boto3.resource('dynamodb')
-
-# Import centralized Bedrock invocation (ModelRole.ANALYSIS -> Sonnet by default)
-from shared.models import ModelRole, invoke_bedrock  # noqa: E402
 
 # Fail-fast: Required environment variables
 DYNAMODB_TABLE_BRAND_CONFIG = os.environ['DYNAMODB_TABLE_BRAND_CONFIG']
@@ -67,14 +66,28 @@ def _run_brand_prompt(
             return {**error_defaults, "error": "Empty response"}
 
         result = parse_llm_json(response_text, expect="object")
-        if result is None:
+        if not isinstance(result, dict):
             return {**error_defaults, "error": "Invalid response format"}
 
         return shape(result)
 
     except Exception as e:
-        logger.error(f"Error {log_context}: {e!s}")
+        logger.exception(f"Error {log_context}")
         return {**error_defaults, "error": str(e)}
+
+# The shape of one extracted mention, rendered into the default prompt as the
+# format example the model is asked to follow.
+_EXAMPLE_MENTION = {
+    "name": "Brand Name",
+    "parent_company": "Parent Company or null",
+    "mention_count": 2,
+    "first_position": 150,
+    "rank": 1,
+    "sentiment": "positive",
+    "sentiment_reason": "Praised for quality and value",
+    "ranking_context": "Recommended as top choice",
+}
+
 
 def generate_default_prompt(industry_name: str, extraction_focus: str, entity_types: list) -> str:
     """Generate a default extraction prompt for an industry."""
@@ -102,18 +115,7 @@ For each brand found, provide:
 {{{{CUSTOM_INSTRUCTIONS}}}}
 
 Return ONLY a valid JSON array with no additional text. Format:
-[
-  {{
-    "name": "Brand Name",
-    "parent_company": "Parent Company or null",
-    "mention_count": 2,
-    "first_position": 150,
-    "rank": 1,
-    "sentiment": "positive",
-    "sentiment_reason": "Praised for quality and value",
-    "ranking_context": "Recommended as top choice"
-  }}
-]
+{json.dumps([_EXAMPLE_MENTION], indent=2)}
 
 If no brands are found, return an empty array: []
 
@@ -129,7 +131,7 @@ JSON OUTPUT:"""
 # this file's copy and the extraction Lambda's.
 
 
-def _preset_with_prompt(preset: dict) -> dict:
+def _preset_with_prompt(preset: IndustryPreset) -> dict[str, Any]:
     """Decorate a shared preset with a `default_prompt` string.
 
     Dashboard clients consume both the structural fields and a ready-to-use
@@ -145,6 +147,27 @@ def _preset_with_prompt(preset: dict) -> dict:
             preset.get("entity_types", []),
         ),
     }
+
+
+@dataclass(frozen=True)
+class _IndustryContext:
+    """The industry facts the brand prompts are written against, already rendered as prose."""
+
+    name: str
+    entity_types: str
+    examples: str
+
+
+def _industry_context(industry: str) -> _IndustryContext:
+    """Render the preset for ``industry`` (``custom`` when unknown) for use inside a prompt."""
+    preset = get_shared_preset(industry)
+    entity_types = preset.get("entity_types", ["brands", "companies"])
+    example_brands = preset.get("example_brands", [])
+    return _IndustryContext(
+        name=preset.get("name", "General"),
+        entity_types=", ".join(entity_types) if entity_types else "brands and companies",
+        examples=", ".join(example_brands[:5]) if example_brands else "major brands in this industry",
+    )
 
 
 def normalize_brand(name: str) -> str:
@@ -192,11 +215,7 @@ def expand_brands(existing_brands: list, industry: str = "hotels", brand_type: s
             "error": "Please add at least one brand first"
         }
 
-    industry_preset = get_shared_preset(industry)
-    industry_name = industry_preset.get("name", "General")
-    entity_types = industry_preset.get("entity_types", ["brands", "companies"])
-
-    entity_types_str = ", ".join(entity_types) if entity_types else "brands and companies"
+    industry_context = _industry_context(industry)
     # Wrap each user-supplied brand in `<brand>` tags so malicious names
     # cannot escape into the surrounding prompt instructions.
     brands_list = ", ".join(wrap_user_input(b, "brand") for b in existing_brands if b)
@@ -209,10 +228,10 @@ def expand_brands(existing_brands: list, industry: str = "hotels", brand_type: s
 
     prompt = f"""{untrusted_input_system_instruction()}
 
-You are a brand expert for the {industry_name} industry.
+You are a brand expert for the {industry_context.name} industry.
 
 INDUSTRY CONTEXT:
-- Entity types: {entity_types_str}
+- Entity types: {industry_context.entity_types}
 
 BRANDS ALREADY BEING TRACKED (DO NOT INCLUDE THESE IN YOUR RESPONSE):
 {brands_list}
@@ -293,14 +312,7 @@ def expand_brand(brand_name: str, industry: str = "hotels", existing_brands: lis
     if existing_brands is None:
         existing_brands = []
 
-    industry_preset = get_shared_preset(industry)
-    industry_name = industry_preset.get("name", "General")
-    entity_types = industry_preset.get("entity_types", ["brands", "companies"])
-    example_brands = industry_preset.get("example_brands", [])
-
-    # Build industry-specific examples
-    entity_types_str = ", ".join(entity_types) if entity_types else "brands and companies"
-    examples_str = ", ".join(example_brands[:5]) if example_brands else "major brands in this industry"
+    industry_context = _industry_context(industry)
 
     # Wrap user-supplied brand names so a malicious entry cannot escape the prompt.
     exclude_str = (
@@ -311,11 +323,11 @@ def expand_brand(brand_name: str, industry: str = "hotels", existing_brands: lis
 
     prompt = f"""{untrusted_input_system_instruction()}
 
-You are a brand expert for the {industry_name} industry.
+You are a brand expert for the {industry_context.name} industry.
 
 INDUSTRY CONTEXT:
-- Entity types: {entity_types_str}
-- Example brands in this industry: {examples_str}
+- Entity types: {industry_context.entity_types}
+- Example brands in this industry: {industry_context.examples}
 
 ALREADY TRACKED (do NOT suggest these): {exclude_str}
 
@@ -383,15 +395,10 @@ def find_competitors(first_party_brands: list, industry: str = "hotels", existin
     if existing_competitors is None:
         existing_competitors = []
 
-    industry_preset = get_shared_preset(industry)
-    industry_name = industry_preset.get("name", "General")
-    entity_types = industry_preset.get("entity_types", ["brands", "companies"])
-    example_brands = industry_preset.get("example_brands", [])
+    industry_context = _industry_context(industry)
 
     # Wrap user-supplied brand names to neutralize injection attempts.
     brands_list = ", ".join(wrap_user_input(b, "brand") for b in first_party_brands if b)
-    entity_types_str = ", ".join(entity_types) if entity_types else "brands and companies"
-    examples_str = ", ".join(example_brands[:5]) if example_brands else "major brands in this industry"
 
     # Build exclusion list
     exclude_brands = first_party_brands + existing_competitors
@@ -402,11 +409,11 @@ def find_competitors(first_party_brands: list, industry: str = "hotels", existin
 
     prompt = f"""{untrusted_input_system_instruction()}
 
-You are a competitive intelligence expert for the {industry_name} industry.
+You are a competitive intelligence expert for the {industry_context.name} industry.
 
 INDUSTRY CONTEXT:
-- Entity types: {entity_types_str}
-- Example brands in this industry: {examples_str}
+- Entity types: {industry_context.entity_types}
+- Example brands in this industry: {industry_context.examples}
 
 FIRST-PARTY BRANDS (the user's brands): {brands_list}
 
@@ -423,7 +430,7 @@ Focus on:
 DO NOT include:
 - The first-party brands themselves or their sub-brands
 - Brands already being tracked (listed above)
-- Brands that don't directly compete in the {industry_name} space
+- Brands that don't directly compete in the {industry_context.name} space
 - Very small or niche players unless highly relevant
 - Generic terms
 
@@ -465,8 +472,8 @@ JSON OUTPUT:"""
     )
 
 
-def get_config() -> dict[str, Any]:
-    """Get the current brand configuration."""
+def get_config() -> dict[str, Any] | None:
+    """Get the current brand configuration, ``None`` before anything is saved."""
     table = dynamodb.Table(DYNAMODB_TABLE_BRAND_CONFIG)
     response = table.get_item(Key={'config_id': 'default'})
     return response.get('Item')
@@ -658,5 +665,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     POST /brand-config/find-competitors - Find competitors based on first-party brands
     PUT /brand-config - Update configuration
     DELETE /brand-config - Reset to defaults
+
+    Routes handle everything; this body is never reached.
     """
-    pass  # Routes handle everything
+    ...

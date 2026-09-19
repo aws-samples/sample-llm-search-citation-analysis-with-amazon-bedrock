@@ -47,6 +47,27 @@ const STATE_NAME_TO_STEP: Record<string, string> = {
   'GenerateSummary': 'GenerateSummary',
 };
 
+interface StepEvent {
+  type?: string;
+  timestamp?: string;
+  error?: string;
+}
+
+const STEP_STARTED_EVENT_TYPES = new Set(['TaskStarted', 'TaskScheduled', 'TaskStateEntered']);
+const STEP_SUCCEEDED_EVENT_TYPES = new Set(['TaskSucceeded', 'TaskStateExited', 'MapStateExited']);
+
+/**
+ * What an event means for its step. Checked in this order so a succeeded
+ * event that also carries an error still counts as succeeded; an event with
+ * an error but an unrelated type counts as failed.
+ */
+function stepEventKind(event: StepEvent): 'started' | 'succeeded' | 'failed' | undefined {
+  if (STEP_STARTED_EVENT_TYPES.has(event.type ?? '')) return 'started';
+  if (STEP_SUCCEEDED_EVENT_TYPES.has(event.type ?? '')) return 'succeeded';
+  if (event.type === 'TaskFailed' || event.error) return 'failed';
+  return undefined;
+}
+
 export function processExecutionData(execution: Execution | null): ProcessedExecution {
   if (!execution) {
     return {
@@ -70,11 +91,7 @@ export function processExecutionData(execution: Execution | null): ProcessedExec
   // Track the latest event timestamp for each step to handle retries correctly
   const stepLatestTimestamp: Record<number, string> = {};
 
-  const updateStep = (index: number, event: {
-    type?: string;
-    timestamp?: string;
-    error?: string 
-  }) => {
+  const updateStep = (index: number, event: StepEvent) => {
     const eventTimestamp = event.timestamp ?? '';
     const currentTimestamp = stepLatestTimestamp[index] ?? '';
     
@@ -84,7 +101,8 @@ export function processExecutionData(execution: Execution | null): ProcessedExec
     }
     stepLatestTimestamp[index] = eventTimestamp;
     
-    if (event.type === 'TaskStarted' || event.type === 'TaskScheduled' || event.type === 'TaskStateEntered') {
+    const kind = stepEventKind(event);
+    if (kind === 'started') {
       // When a step starts, mark all previous steps as completed
       markPreviousStepsCompleted(index);
       // Only set to running if not already completed
@@ -92,17 +110,15 @@ export function processExecutionData(execution: Execution | null): ProcessedExec
         steps[index].status = 'running';
         steps[index].startTime = event.timestamp;
       }
-    } else if (event.type === 'TaskSucceeded' || event.type === 'TaskStateExited' || event.type === 'MapStateExited') {
+    } else if (kind === 'succeeded') {
       // Mark as completed - this takes precedence over running/failed
       steps[index].status = 'completed';
       steps[index].endTime = event.timestamp;
-    } else if (event.type === 'TaskFailed' || event.error) {
+    } else if (kind === 'failed' && steps[index].status !== 'completed') {
       // Only mark as failed if not already completed (retries may have succeeded)
-      if (steps[index].status !== 'completed') {
-        steps[index].status = 'failed';
-        steps[index].error = event.error;
-        steps[index].endTime = event.timestamp;
-      }
+      steps[index].status = 'failed';
+      steps[index].error = event.error;
+      steps[index].endTime = event.timestamp;
     }
   };
 

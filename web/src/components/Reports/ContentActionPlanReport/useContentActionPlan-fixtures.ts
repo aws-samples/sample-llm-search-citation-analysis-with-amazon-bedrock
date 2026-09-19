@@ -77,7 +77,6 @@ export function buildCitationGaps(): CitationGapsResponse {
     covered_sources: [],
     domain_summary: [],
     summary: {
-      total_sources: 1,
       gap_count: 1,
       covered_count: 0,
       high_priority_gaps: 1,
@@ -92,7 +91,6 @@ export function buildCitationGaps(): CitationGapsResponse {
         provider_count: 2,
         first_party_brands: [],
         competitor_brands: ['Salomon'],
-        gap_type: 'competitor_only',
         priority: 'high',
         keyword: 'trail running shoes',
       },
@@ -119,7 +117,6 @@ function buildGeneratedBrief(id: string): ContentStudioHistory {
   return {
     id,
     keyword: 'trail running shoes',
-    idea_type: 'provider_gap',
     idea_title: `Brief ${id}`,
     content_angle: 'differentiation',
     generated_content: {
@@ -129,7 +126,6 @@ function buildGeneratedBrief(id: string): ContentStudioHistory {
       suggested_headings: ['Grip', 'Protection'],
       key_points: ['Lug depth', 'Rock plate'],
     },
-    raw_content: 'Generated body',
     competitor_sources_used: 1,
     status: 'generated',
     viewed: false,

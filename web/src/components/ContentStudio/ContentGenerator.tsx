@@ -4,6 +4,7 @@ import type {
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { Spinner } from '../ui/Spinner';
 import { CloseIcon } from '../ui';
+import { CopyButtonLabel } from './CopyButtonLabel';
 
 interface ContentGeneratorProps {
   idea: ContentIdea;
@@ -24,21 +25,7 @@ const CopyButton = ({
     onClick={onCopy}
     className="text-xs text-gray-500 hover:text-gray-700 flex items-center gap-1"
   >
-    {copied ? (
-      <>
-        <svg className="w-3.5 h-3.5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-        </svg>
-        Copied!
-      </>
-    ) : (
-      <>
-        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-        </svg>
-        Copy
-      </>
-    )}
+    <CopyButtonLabel copied={copied} iconClassName="w-3.5 h-3.5" label="Copy" />
   </button>
 );
 

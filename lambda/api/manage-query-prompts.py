@@ -9,6 +9,7 @@ import logging
 import os
 import sys
 import uuid
+from typing import Any
 
 import boto3
 
@@ -73,7 +74,7 @@ def list_prompts(event, context):
     # silently truncate the UI. 5x buffer is arbitrary but comfortable for
     # the business-soft-cap scale.
     response = query_prompts_table.scan(Limit=max(50, MAX_PROMPTS * 5))
-    items = response.get('Items', [])
+    items: list[dict[str, Any]] = response.get('Items', [])
     # Sort by created_at descending
     items.sort(key=lambda x: x.get('created_at', ''), reverse=True)
     return success_response(items, event)

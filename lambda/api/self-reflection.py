@@ -15,7 +15,9 @@ import logging
 import os
 import sys
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import Any
 
 import boto3
 from boto3.dynamodb.conditions import Attr, Key
@@ -26,6 +28,7 @@ from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, parse_json_body, require_keyword, validate
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
+from shared.search_results import latest_run, query_keyword_items, search_results_table_name
 from shared.utils import brand_names_match, get_brand_config, get_timestamp, utc_now
 
 logger = logging.getLogger(__name__)
@@ -33,7 +36,7 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+SEARCH_RESULTS_TABLE = search_results_table_name()
 SELF_REFLECTION_TABLE = os.environ['DYNAMODB_TABLE_SELF_REFLECTION']
 QUERY_PROMPTS_TABLE = os.environ['QUERY_PROMPTS_TABLE']
 CACHE_TTL_HOURS = 24
@@ -114,7 +117,7 @@ def _persona_key_prefix(query_prompt_id: str) -> str:
     return f"{_key_component(query_prompt_id)}#"
 
 
-def check_cache(keyword: str, brand: str, query_prompt_id: str):
+def check_cache(keyword: str, brand: str, query_prompt_id: str) -> dict[str, Any] | None:
     """Return a cached self-reflection result if one exists within the TTL window."""
     table = dynamodb.Table(SELF_REFLECTION_TABLE)
     response = table.query(
@@ -124,7 +127,7 @@ def check_cache(keyword: str, brand: str, query_prompt_id: str):
         ),
         ScanIndexForward=False, Limit=1
     )
-    items = response.get('Items', [])
+    items: list[dict[str, Any]] = response.get('Items', [])
     if not items:
         return None
     item = items[0]
@@ -138,24 +141,20 @@ def check_cache(keyword: str, brand: str, query_prompt_id: str):
     return None
 
 
-def fetch_search_data(keyword: str, query_prompt_id: str):
-    """Fetch the latest search response and brand data for a keyword + persona."""
-    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    response = table.query(KeyConditionExpression=Key('keyword').eq(keyword))
-    items = response.get('Items', [])
-    if not items:
-        return None, None
+def fetch_search_data(keyword: str, query_prompt_id: str) -> tuple[str, list[dict[str, Any]]]:
+    """The latest run's provider-tagged response texts and brand entries for a keyword + persona.
 
-    latest_ts = max(item.get('timestamp', '') for item in items)
+    ``('', [])`` when the keyword has no results, or none for that persona.
+    """
+    items = query_keyword_items(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
+    _, latest_items = latest_run(items)
     persona_items = [
-        item for item in items
-        if item.get('timestamp') == latest_ts
-        and (query_prompt_id in (None, '', 'all') or item.get('query_prompt_id', 'default') == query_prompt_id)
+        item for item in latest_items
+        if query_prompt_id in (None, '', 'all') or item.get('query_prompt_id', 'default') == query_prompt_id
     ]
-    if not persona_items:
-        return None, None
 
-    response_texts, all_brands = [], []
+    response_texts: list[str] = []
+    all_brands: list[dict[str, Any]] = []
     for item in persona_items[:4]:
         text = item.get('response', '')
         if text:
@@ -165,7 +164,7 @@ def fetch_search_data(keyword: str, query_prompt_id: str):
     return '\n\n'.join(response_texts), all_brands
 
 
-def find_brand_in_results(brand: str, brands_list: list):
+def find_brand_in_results(brand: str, brands_list: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, Any]:
     """Find a brand in the extracted brands list. Returns (brand_data, rank) or (None, None).
 
     Uses `brand_names_match` (normalized exact comparison), not substring
@@ -210,7 +209,7 @@ def store_reflection(keyword, brand, query_prompt_id, persona_name,
     return item
 
 
-def strip_internal_keys(item: dict) -> dict:
+def strip_internal_keys(item: dict[str, Any]) -> dict[str, Any]:
     """Remove DynamoDB composite keys from the API response."""
     cleaned = dict(item)
     cleaned.pop('keyword_brand', None)
@@ -342,6 +341,7 @@ def get_self_reflection(event, context, keyword, brand=None, query_prompt_id=Non
     """Retrieve stored self-reflection results with optional filters."""
     table = dynamodb.Table(SELF_REFLECTION_TABLE)
 
+    items: list[dict[str, Any]]
     if brand:
         key_cond = Key('keyword_brand').eq(_reflection_pk(keyword, brand))
         if query_prompt_id:
@@ -362,15 +362,19 @@ def get_self_reflection(event, context, keyword, brand=None, query_prompt_id=Non
 # Lambda handler
 # ---------------------------------------------------------------------------
 
+_METHOD_HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
+    'POST': post_self_reflection,
+    'GET': get_self_reflection,
+}
+
+
 @api_handler
 def handler(event, context):
     """
     POST /self-reflection  - Trigger a new analysis
     GET  /self-reflection   - Retrieve stored results
     """
-    method = event.get('httpMethod', 'GET').upper()
-    if method == 'POST':
-        return post_self_reflection(event, context)
-    elif method == 'GET':
-        return get_self_reflection(event, context)
-    return validation_error('Method not allowed', event)
+    method_handler = _METHOD_HANDLERS.get(event.get('httpMethod', 'GET').upper())
+    if method_handler is None:
+        return validation_error('Method not allowed', event)
+    return method_handler(event, context)

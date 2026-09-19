@@ -4,6 +4,7 @@ import {
 import {
   render, screen 
 } from '@testing-library/react';
+import { expectRendersNothing } from '../../../../test/renderNothing';
 import { OutreachTargetsSection } from './OutreachTargetsSection';
 import {
   buildRollup, buildSource
@@ -164,10 +165,7 @@ describe('OutreachTargetsSection — empty + placeholder states', () => {
   });
 
   it('returns null when rollup is null', () => {
-    const { container } = render(
-      <OutreachTargetsSection rollup={null} loading={false} error={null} />,
-    );
-    expect(container.firstChild).toBeNull();
+    expectRendersNothing(<OutreachTargetsSection rollup={null} loading={false} error={null} />);
   });
 
   it('renders loading placeholder when loading is true', () => {

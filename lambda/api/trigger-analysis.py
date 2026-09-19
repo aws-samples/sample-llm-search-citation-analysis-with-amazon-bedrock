@@ -5,24 +5,23 @@ Starts a Step Functions execution with keywords from DynamoDB.
 Uses efficient query with StatusIndex GSI instead of scan with filter.
 """
 
-import json
 import logging
 import os
 import sys
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from botocore.exceptions import BotoCoreError, ClientError
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
+from shared.analysis_runs import fetch_enabled_query_prompts, start_analysis_run
 from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import query_active_keywords
-from shared.utils import get_timestamp, get_timestamp_compact
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -45,6 +44,33 @@ keywords_table = dynamodb.Table(KEYWORDS_TABLE)
 query_prompts_table = dynamodb.Table(QUERY_PROMPTS_TABLE)
 
 
+def _scan_active_keywords() -> list[dict[str, Any]]:
+    """Every active keyword item by filtered Scan, following pagination (pre-StatusIndex deployments)."""
+    keywords: list[dict[str, Any]] = []
+    scan_params: dict[str, Any] = {
+        'FilterExpression': '#status = :status',
+        'ExpressionAttributeNames': {'#status': 'status'},
+        'ExpressionAttributeValues': {':status': 'active'},
+    }
+    while True:
+        response = keywords_table.scan(**scan_params)
+        keywords.extend(response.get('Items', []))
+        last_key = response.get('LastEvaluatedKey')
+        if not last_key:
+            return keywords
+        scan_params['ExclusiveStartKey'] = last_key
+
+
+def _active_keywords() -> list[dict[str, Any]]:
+    """Active keyword items from the StatusIndex GSI, falling back to a Scan where the index is missing."""
+    try:
+        return query_active_keywords(keywords_table)
+    except (BotoCoreError, ClientError) as gsi_error:
+        # Fallback to scan if GSI doesn't exist (for backwards compatibility)
+        logger.warning(f"StatusIndex GSI not available, falling back to scan: {gsi_error}")
+        return _scan_active_keywords()
+
+
 @api_handler
 @require_group(ADMIN_GROUP)
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -63,77 +89,16 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     (StatusIndex is read to the last page) and the ProcessKeywords Map bounds
     concurrency.
     """
-    try:
-        keywords = query_active_keywords(keywords_table)
-    except Exception as gsi_error:
-        # Fallback to scan if GSI doesn't exist (for backwards compatibility)
-        logger.warning(f"StatusIndex GSI not available, falling back to scan: {gsi_error}")
-        keywords = []
-        scan_params: dict[str, Any] = {
-            'FilterExpression': '#status = :status',
-            'ExpressionAttributeNames': {'#status': 'status'},
-            'ExpressionAttributeValues': {':status': 'active'},
-        }
-        while True:
-            response = keywords_table.scan(**scan_params)
-            keywords.extend(response.get('Items', []))
-            last_key = response.get('LastEvaluatedKey')
-            if not last_key:
-                break
-            scan_params['ExclusiveStartKey'] = last_key
-
+    keywords = _active_keywords()
     if not keywords:
         return validation_error('No active keywords found. Please add keywords first.', event)
 
-    # Format keywords for Step Functions
-    run_timestamp = get_timestamp()
-    keyword_list = [
-        {
-            'keyword': kw['keyword'],
-            'timestamp': run_timestamp
-        }
-        for kw in keywords
-        if kw.get('keyword')
-    ]
+    keyword_texts = [kw['keyword'] for kw in keywords if kw.get('keyword')]
+    query_prompts = fetch_enabled_query_prompts(query_prompts_table)
+    started = start_analysis_run(stepfunctions, STATE_MACHINE_ARN, 'analysis', keyword_texts, query_prompts)
 
-    # Fetch enabled query prompts
-    query_prompts = []
-    try:
-        prompts_response = query_prompts_table.query(
-            IndexName='EnabledIndex',
-            KeyConditionExpression=Key('enabled').eq('true'),
-            Limit=10
-        )
-        for p in prompts_response.get('Items', []):
-            query_prompts.append({
-                'id': p['id'],
-                'name': p.get('name', ''),
-                'template': p.get('template', ''),
-            })
-        logger.info(f"Found {len(query_prompts)} enabled query prompts")
-    except Exception as e:
-        logger.warning(f"Could not fetch query prompts, proceeding without them: {e}")
-
-    # Start Step Functions execution
-    execution_name = f"analysis-{get_timestamp_compact()}"
-
-    execution_response = stepfunctions.start_execution(
-        stateMachineArn=STATE_MACHINE_ARN,
-        name=execution_name,
-        input=json.dumps({
-            'keywords': keyword_list,
-            'query_prompts': query_prompts
-        })
-    )
-
-    prompt_count = len(query_prompts)
     result = {
-        'execution_arn': execution_response['executionArn'],
-        'execution_name': execution_name,
-        'start_date': execution_response['startDate'].isoformat(),
-        'keywords_count': len(keyword_list),
-        'query_prompts_count': prompt_count,
-        'message': f'Analysis started with {len(keyword_list)} keywords and {prompt_count} query prompts'
+        **started,
+        'message': f'Analysis started with {len(keyword_texts)} keywords and {len(query_prompts)} query prompts',
     }
-
     return success_response(result, event)

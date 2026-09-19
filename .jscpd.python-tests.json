@@ -1,6 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/kucherenko/jscpd/master/packages/jscpd/schema.json",
-  "minTokens": 50,
+  "minTokens": 40,
   "threshold": 0,
   "gitignore": true,
   "format": [
