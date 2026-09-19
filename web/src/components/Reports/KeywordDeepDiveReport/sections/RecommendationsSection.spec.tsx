@@ -5,33 +5,8 @@ import {
   render, screen 
 } from '@testing-library/react';
 import { RecommendationsSection } from './RecommendationsSection';
-import type {
-  Recommendation,
-  RecommendationsResponse,
-} from '../../../../types';
-
-/**
- * RecommendationsSection has non-trivial filtering logic: it pulls a
- * global recommendations list and narrows it to the report's keyword.
- * These tests pin the filtering rules end-to-end through render output
- * because the rules are easy to break with a regex tweak or a sort
- * change.
- */
-
-function buildRecResponse(
-  recs: Recommendation[],
-): RecommendationsResponse {
-  return {
-    generated_at: '2026-05-14T00:00:00Z',
-    recommendations: recs,
-    total_count: recs.length,
-    by_priority: {
-      high: recs.filter((r) => r.priority === 'high').length,
-      medium: recs.filter((r) => r.priority === 'medium').length,
-      low: recs.filter((r) => r.priority === 'low').length,
-    },
-  };
-}
+import { buildRecResponse } from './RecommendationsSection-fixtures';
+import type { Recommendation } from '../../../../types';
 
 const KEYWORD_SCOPED: Recommendation = {
   type: 'gap',

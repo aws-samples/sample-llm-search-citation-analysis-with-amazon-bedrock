@@ -9,10 +9,14 @@
 import { vi } from 'vitest';
 import type { authenticatedFetch } from '../infrastructure/auth';
 
-export function createMockJsonResponse(responsePayload: unknown, responseStatus = 200): Response {
+export function createMockJsonResponse(
+  responsePayload: unknown,
+  responseStatus = 200,
+  responseStatusText = responseStatus === 200 ? 'OK' : 'Request failed'
+): Response {
   return new Response(JSON.stringify(responsePayload), {
     status: responseStatus,
-    statusText: responseStatus === 200 ? 'OK' : 'Request failed',
+    statusText: responseStatusText,
     headers: { 'Content-Type': 'application/json' },
   });
 }

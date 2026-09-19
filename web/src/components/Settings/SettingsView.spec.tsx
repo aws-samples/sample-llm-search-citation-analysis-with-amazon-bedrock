@@ -1,8 +1,8 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi, beforeEach
 } from 'vitest';
 import {
-  render, screen 
+  render, screen
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SettingsView } from './SettingsView';
@@ -15,30 +15,30 @@ import {
 } from './SettingsView-fixtures';
 import { buildProviderConfigHookResult } from '../ProviderHealth/ProviderHealthBanner-fixtures';
 import {
-  createdKeywordFixture, existingKeywordFixture 
+  createdKeywordFixture, existingKeywordFixture
 } from '../Keywords/KeywordsManager-fixtures';
 
-vi.mock('../../hooks/useBrandConfig', () => ({useBrandConfig: vi.fn(),}));
-
-vi.mock('../../hooks/useProviderConfig', () => ({useProviderConfig: vi.fn(),}));
-
-vi.mock('../Keywords/KeywordsManager', () => ({KeywordsManager: () => <div data-testid="keywords-manager">Keywords Manager</div>,}));
-
-vi.mock('../Brands/BrandConfigContent', () => ({BrandConfigContent: () => <div data-testid="brand-config">Brand Config</div>,}));
-
-vi.mock('./UsersConfig', () => ({UsersConfig: () => <div data-testid="users-config">Users Config</div>,}));
-
-vi.mock('../../hooks/useIsAdmin', () => ({useIsAdmin: vi.fn(),}));
+vi.mock('../../hooks/useBrandConfig', () => ({ useBrandConfig: vi.fn() }));
+vi.mock('../../hooks/useProviderConfig', () => ({ useProviderConfig: vi.fn() }));
+vi.mock('../Keywords/KeywordsManager', () => ({ KeywordsManager: () => <div data-testid="keywords-manager">Keywords Manager</div> }));
+vi.mock('../Brands/BrandConfigContent', () => ({ BrandConfigContent: () => <div data-testid="brand-config">Brand Config</div> }));
+vi.mock('./AlertsConfig', () => ({
+  AlertsConfig: ({ isAdmin }: { isAdmin: boolean }) => (
+    <div data-testid="alerts-config">Alerts Config admin: {String(isAdmin)}</div>
+  ),
+}));
+vi.mock('./UsersConfig', () => ({ UsersConfig: () => <div data-testid="users-config">Users Config</div> }));
+vi.mock('../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
 
 import { useBrandConfig } from '../../hooks/useBrandConfig';
 import { useProviderConfig } from '../../hooks/useProviderConfig';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 
-const mockUseBrandConfig = useBrandConfig as ReturnType<typeof vi.fn>;
-const mockUseProviderConfig = useProviderConfig as ReturnType<typeof vi.fn>;
+const mockUseBrandConfig = vi.mocked(useBrandConfig);
+const mockUseProviderConfig = vi.mocked(useProviderConfig);
 const mockUseIsAdmin = vi.mocked(useIsAdmin);
 
-const NON_ADMIN_TABS = ['keywords', 'brand', 'providers'];
+const NON_ADMIN_TABS = ['keywords', 'brand', 'providers', 'alerts'];
 
 beforeEach(() => {
   mockUseBrandConfig.mockReturnValue(buildBrandConfigHookResult());
@@ -66,6 +66,20 @@ describe('SettingsView', () => {
       await userEvent.click(screen.getByRole('button', { name: /brand/i }));
 
       expect(screen.getByTestId('brand-config')).toBeInTheDocument();
+    });
+
+    it('switches to alerts config tab when clicked', async () => {
+      render(<SettingsView {...buildSettingsViewProps()} />);
+
+      await userEvent.click(screen.getByRole('button', { name: /alerts/i }));
+
+      expect(screen.getByTestId('alerts-config')).toHaveTextContent('Alerts Config admin: true');
+    });
+
+    it('marks the alerts tab as current when alerts are selected', () => {
+      render(<SettingsView {...buildSettingsViewProps({ initialTab: 'alerts' })} />);
+
+      expect(screen.getByRole('button', { name: /alerts/i })).toHaveAttribute('aria-current', 'page');
     });
 
     it('switches to users tab when clicked', async () => {
@@ -128,19 +142,11 @@ describe('SettingsView', () => {
 
       await userEvent.click(screen.getByRole('button', { name: /providers/i }));
 
-      // Providers tab content is rendered inline, not mocked
       expect(screen.getByText(/AI Providers/i)).toBeInTheDocument();
     });
   });
 
   describe('users tab visibility', () => {
-    /**
-     * The client-side half of AUDIT-2026-08-19 §0. Every route behind this tab
-     * is gated by `require_group('Admin')` server-side, so hiding it is a
-     * usability fix, not the security control — a non-admin who forces the tab
-     * open gets a 403 from every action inside it.
-     */
-
     it('hides the users tab from non-admin users', () => {
       mockUseIsAdmin.mockReturnValue(buildAdminMembership({ isAdmin: false }));
 
@@ -150,7 +156,6 @@ describe('SettingsView', () => {
     });
 
     it('hides the users tab while admin membership is still loading', () => {
-      /** Avoids flashing the tab in before the session resolves. */
       mockUseIsAdmin.mockReturnValue(buildAdminMembership({
         isAdmin: false,
         loading: true,
@@ -169,11 +174,15 @@ describe('SettingsView', () => {
       expect(screen.getByRole('button', { name: new RegExp(tab, 'i') })).toBeInTheDocument();
     });
 
+    it('passes read-only membership to alerts for non-admin users', () => {
+      mockUseIsAdmin.mockReturnValue(buildAdminMembership({ isAdmin: false }));
+
+      render(<SettingsView {...buildSettingsViewProps({ initialTab: 'alerts' })} />);
+
+      expect(screen.getByTestId('alerts-config')).toHaveTextContent('Alerts Config admin: false');
+    });
+
     it('falls back to keywords when a non-admin deep-links to the users tab', () => {
-      /**
-       * `initialTab` accepts the full SettingsTab union, so without this reset
-       * the tab bar would render with nothing selected and an empty panel.
-       */
       mockUseIsAdmin.mockReturnValue(buildAdminMembership({ isAdmin: false }));
 
       render(<SettingsView {...buildSettingsViewProps({ initialTab: 'users' })} />);
@@ -197,14 +206,7 @@ describe('SettingsView', () => {
   });
 });
 
-
 describe('SettingsView admin-only provider controls', () => {
-  /**
-   * PUT /api/providers/{id} writes Secrets Manager through a role with
-   * prefix-wide access to every provider key (AUDIT-2026-08-19 §0.3). The cards
-   * stay readable — only the controls that would 403 are withheld.
-   */
-
   beforeEach(() => {
     mockUseProviderConfig.mockReturnValue(
       buildProviderConfigHookResult({ providers: [buildConfiguredOpenAiProvider()] })
@@ -243,7 +245,6 @@ describe('SettingsView admin-only provider controls', () => {
   });
 
   it('shows the API key button to admin users', async () => {
-    /** Guards the hidden-control assertions from passing on a renamed label. */
     await renderProvidersTab();
 
     expect(screen.getByRole('button', { name: /Update Key/i })).toBeInTheDocument();

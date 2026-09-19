@@ -2,85 +2,18 @@ import {
   describe, expect, it, vi
 } from 'vitest';
 import {
-  render, screen, within
+  screen, within
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { AgentBriefForm } from './AgentBriefForm';
 import {
-  buildCafeTemplate, buildSavedTemplate, buildTemplate
-} from './agent-fixtures';
-import type {
-  KeywordGroup, ResearchTemplate
-} from '../../../types';
-
-const GROUPS: KeywordGroup[] = [
-  {
-    id: 'g2',
-    name: 'Zaragoza',
-    description: '',
-    keyword_count: 4,
-    created_at: '',
-    updated_at: '',
-  },
-  {
-    id: 'g1',
-    name: 'A Coruña',
-    description: '',
-    keyword_count: 12,
-    created_at: '',
-    updated_at: '',
-  },
-];
-
-const TEMPLATES = [buildTemplate(), buildCafeTemplate(), buildSavedTemplate()];
-
-const SAVED_COPY = buildCafeTemplate({
-  id: 't9',
-  name: 'Cafés (copy)',
-  builtin: false,
-});
-
-const DISCLOSURE = 'Customise the instructions or create your own template';
-
-function renderBriefForm() {
-  const handlers = {
-    onStart: vi.fn(() => Promise.resolve(null)),
-    onSaveTemplate: vi.fn(() => Promise.resolve({
-      success: true,
-      message: 'Template "Cafés (copy)" saved',
-      template: SAVED_COPY,
-    })),
-    onUpdateTemplate: vi.fn(() => Promise.resolve({
-      success: true,
-      message: 'updated',
-    })),
-    onDeleteTemplate: vi.fn(() => Promise.resolve({
-      success: true,
-      message: 'Template deleted',
-    })),
-  };
-  const form = (templates: ResearchTemplate[]) => (
-    <AgentBriefForm groups={GROUPS} templates={templates} templatesLoading={false} starting={false} {...handlers} />
-  );
-  const { rerender } = render(form(TEMPLATES));
-  return {
-    ...handlers,
-    rerenderWith: (templates: ResearchTemplate[]) => rerender(form(templates)),
-  };
-}
-
-function getTemplateSelect(): HTMLSelectElement {
-  return screen.getByLabelText<HTMLSelectElement>('Industry template');
-}
-
-function getPromptTextarea(): HTMLTextAreaElement {
-  return screen.getByLabelText<HTMLTextAreaElement>('Instructions (system prompt)');
-}
-
-async function fillSeedAndStart(seed: string): Promise<void> {
-  await userEvent.type(screen.getByLabelText(/\(or seed\)/), seed);
-  await userEvent.click(screen.getByRole('button', { name: 'Start research' }));
-}
+  DISCLOSURE,
+  fillSeedAndStart,
+  getPromptTextarea,
+  getTemplateSelect,
+  renderBriefForm,
+  SAVED_COPY,
+  TEMPLATES,
+} from './AgentBriefForm-fixtures';
 
 describe('AgentBriefForm', () => {
   it('groups the templates into industry and saved ones with the hotels built-in selected', () => {

@@ -44,3 +44,29 @@ export async function startCompetitorAnalysis(result: ResearchHookResult, url: s
     await vi.advanceTimersByTimeAsync(POLL_FAST_INTERVAL_MS);
   });
 }
+
+
+export interface RecordedCall {
+  url: string;
+  method: string;
+  body: string | undefined;
+}
+
+export function recordedCalls(): RecordedCall[] {
+  return mockAuthenticatedFetch.mock.calls.map((call) => {
+    const [url, init] = call as [string, RequestInit | undefined];
+    return {
+      url,
+      method: init?.method ?? 'GET',
+      body: typeof init?.body === 'string' ? init.body : undefined,
+    };
+  });
+}
+
+export function findCall(predicate: (call: RecordedCall) => boolean): RecordedCall | undefined {
+  return recordedCalls().find(predicate);
+}
+
+export function countJobPolls(): number {
+  return recordedCalls().filter((call) => call.method === 'GET' && /\/keyword-research\/[^/?]+$/.test(call.url)).length;
+}

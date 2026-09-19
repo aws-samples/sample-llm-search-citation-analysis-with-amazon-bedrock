@@ -168,14 +168,13 @@ export interface TemplateDraft {
   description?: string;
   /** Template the draft was derived from; the API copies its industry and any missing profile field. */
   baseTemplateId?: string;
-  industry?: string;
   subject?: string;
   audience?: string;
   dimensions?: AgentDimensionOption[];
 }
 
-/** The fields PUT /templates/{id} accepts: everything but the industry (fixed) and the base (creation only). */
-export type TemplateChanges = Omit<Partial<TemplateDraft>, 'baseTemplateId' | 'industry'>;
+/** The fields PUT /templates/{id} accepts: everything except the creation-only base. */
+export type TemplateChanges = Omit<Partial<TemplateDraft>, 'baseTemplateId'>;
 
 /** The optional draft fields in the API's names, sent only when the draft sets them. */
 function templateProfileBody(draft: TemplateChanges): Record<string, unknown> {
@@ -193,7 +192,6 @@ export async function createResearchTemplate(draft: TemplateDraft): Promise<Rese
     system_prompt: draft.systemPrompt,
     ...templateProfileBody(draft),
     ...(draft.baseTemplateId === undefined ? {} : { base_template_id: draft.baseTemplateId }),
-    ...(draft.industry === undefined ? {} : { industry: draft.industry }),
   }, { allowStructured4xx: true }));
 }
 

@@ -7,9 +7,14 @@ import {
 import userEvent from '@testing-library/user-event';
 import { ScheduleManager } from './ScheduleManager';
 import {
-  GROUP_CORUNA, GROUP_MARINO, buildSchedule, legacyKeywordSchedule, mockKeywords 
+  GROUP_CORUNA,
+  GROUP_MARINO,
+  buildProps,
+  buildSchedule,
+  legacyKeywordSchedule,
+  openCreateForm,
+  openEditForm,
 } from './ScheduleManager-fixtures';
-import type { Schedule } from '../../types';
 
 vi.mock('../../infrastructure', async () => {
   const actual: Record<string, unknown> = await vi.importActual('../../infrastructure');
@@ -48,24 +53,8 @@ const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
 
 const weeklySchedule = buildSchedule();
 
-function buildProps(overrides: { schedules?: Schedule[] } = {}) {
-  return {
-    schedules: overrides.schedules ?? [],
-    setSchedules: vi.fn(),
-    keywords: mockKeywords,
-  };
-}
-
 function mockGroups(groups = [GROUP_CORUNA, GROUP_MARINO]) {
   mockUseKeywordGroups.mockReturnValue(buildKeywordGroupsHookResult(groups));
-}
-
-async function openCreateForm() {
-  await userEvent.click(screen.getByRole('button', { name: /New Schedule/i }));
-}
-
-async function openEditForm(displayName: string) {
-  await userEvent.click(screen.getByRole('button', { name: `Edit schedule ${displayName}` }));
 }
 
 describe('ScheduleManager', () => {

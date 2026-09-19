@@ -5,16 +5,7 @@ import {
   render, screen 
 } from '@testing-library/react';
 import { OutrankedKeywordsSection } from './OutrankedKeywordsSection';
-import type { CompetitorRollup } from '../../../../api/reports';
-
-function buildRollup(rows: CompetitorRollup['outranked_keywords']): CompetitorRollup {
-  return {
-    competitor: 'Adidas',
-    outranked_keywords: rows,
-    exclusive_sources: [],
-    outreach_targets: [],
-  };
-}
+import { buildRollup } from './OutrankedKeywordsSection-fixtures';
 
 describe('OutrankedKeywordsSection — content', () => {
   it('renders each outranked keyword as a row in the table', () => {

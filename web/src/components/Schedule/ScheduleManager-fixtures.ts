@@ -1,6 +1,11 @@
+import { vi } from 'vitest';
+import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import type { ComponentProps } from 'react';
 import type {
-  Keyword, KeywordGroup, Schedule 
+  Keyword, KeywordGroup, Schedule
 } from '../../types';
+import type { ScheduleManager } from './ScheduleManager';
 
 export const GROUP_CORUNA: KeywordGroup = {
   id: 'group-coruna',
@@ -54,7 +59,7 @@ export function buildSchedule(overrides: Partial<Schedule> = {}): Schedule {
     },
     scope: {
       mode: 'groups',
-      group_ids: ['group-coruna'] 
+      group_ids: ['group-coruna']
     },
     scope_summary: '1 group(s)',
     keywords: [],
@@ -84,3 +89,21 @@ export const legacyKeywordSchedule: Schedule = buildSchedule({
   keywords: ['best hotels malaga', 'boutique hotels madrid'],
   legacy: true,
 });
+
+export function buildProps(
+  overrides: { schedules?: Schedule[] } = {}
+): ComponentProps<typeof ScheduleManager> {
+  return {
+    schedules: overrides.schedules ?? [],
+    setSchedules: vi.fn(),
+    keywords: mockKeywords,
+  };
+}
+
+export async function openCreateForm(): Promise<void> {
+  await userEvent.click(screen.getByRole('button', { name: /New Schedule/i }));
+}
+
+export async function openEditForm(displayName: string): Promise<void> {
+  await userEvent.click(screen.getByRole('button', { name: `Edit schedule ${displayName}` }));
+}

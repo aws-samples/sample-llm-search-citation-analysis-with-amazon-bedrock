@@ -5,26 +5,10 @@ import {
   renderHook, act 
 } from '@testing-library/react';
 import { useTheme } from './useTheme';
+import { createStorageMock } from '../test/storageMock';
 
 describe('useTheme', () => {
-  const localStorageMock: {
-    store: Record<string, string>;
-    getItem: ReturnType<typeof vi.fn>;
-    setItem: ReturnType<typeof vi.fn>;
-    clear: ReturnType<typeof vi.fn>;
-  } = {
-    store: {},
-    getItem: vi.fn((key: string): string | null => {
-      const value = localStorageMock.store[key];
-      return value ?? null;
-    }),
-    setItem: vi.fn((key: string, value: string): void => { 
-      localStorageMock.store[key] = value; 
-    }),
-    clear: vi.fn((): void => { 
-      Object.keys(localStorageMock.store).forEach(key => delete localStorageMock.store[key]); 
-    }),
-  };
+  const localStorageMock = createStorageMock();
 
   const matchMediaMock = vi.fn().mockImplementation((query: string) => ({
     matches: query.includes('dark') ? false : true,

@@ -6,18 +6,7 @@ import {
 } from '@testing-library/react';
 import { ImageViewer } from './ImageViewer';
 import { clickDownloadButton } from './DownloadButton-fixtures';
-import type { S3Item } from '../../types';
-
-function buildFile(overrides: Partial<S3Item> = {}): S3Item {
-  return {
-    name: 'screenshot.png',
-    path: 'screenshots/screenshot.png',
-    type: 'image',
-    size: 51200,
-    last_modified: '2024-01-15T10:30:00Z',
-    ...overrides,
-  };
-}
+import { buildFile } from './ImageViewer-fixtures';
 
 describe('ImageViewer', () => {
   const defaultProps = {

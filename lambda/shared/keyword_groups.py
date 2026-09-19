@@ -144,7 +144,7 @@ def query_active_keywords(keywords_table: Any) -> list[dict[str, Any]]:
         params['ExclusiveStartKey'] = last_key
 
 
-def _group_ids_of(item: dict[str, Any]) -> set[str]:
+def keyword_group_ids(item: dict[str, Any]) -> set[str]:
     raw = item.get('group_ids')
     if isinstance(raw, set | frozenset | list | tuple):
         return {str(value) for value in raw}
@@ -164,7 +164,7 @@ def resolve_scope(scope: dict[str, Any], keywords_table: Any) -> list[dict[str, 
 
     if mode == 'groups':
         wanted = set(scope.get('group_ids', []))
-        selected = [item for item in active if _group_ids_of(item) & wanted]
+        selected = [item for item in active if keyword_group_ids(item) & wanted]
     elif mode == 'keywords':
         wanted = set(scope.get('keyword_ids', []))
         selected = [item for item in active if item.get('id') in wanted]

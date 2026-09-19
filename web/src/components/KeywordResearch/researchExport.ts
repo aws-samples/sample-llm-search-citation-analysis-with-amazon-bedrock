@@ -1,4 +1,6 @@
-import { exportToExcel } from '../../exporters/excelGenerator';
+import {
+  exportToExcel, scopedExcelFileName
+} from '../../exporters/excelGenerator';
 import type { ResearchKeyword } from '../../types';
 
 /** Rows of the keyword research Excel sheet, in the table's current order. */
@@ -14,8 +16,7 @@ export function researchExcelRows(keywords: ResearchKeyword[]): Record<string, u
 }
 
 export function researchExcelFileName(title: string, date = new Date()): string {
-  const slug = title.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replaceAll(/^-|-$/g, '').slice(0, 60) || 'keywords';
-  return `keyword-research-${slug}-${date.toISOString().slice(0, 10)}.xlsx`;
+  return scopedExcelFileName('keyword-research', title, date, 60);
 }
 
 export async function exportResearchKeywords(keywords: ResearchKeyword[], title: string): Promise<void> {

@@ -2,6 +2,7 @@ import {
   beforeEach, describe, expect, it, vi
 } from 'vitest';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { createMockJsonResponse } from '../test/fetchResponses';
 import {
   apiDelete, apiGet, apiPost, apiPut, validateApiConfig
 } from './client';
@@ -53,14 +54,6 @@ const apiMethodCases = [
   },
 ] satisfies ApiMethodCase[];
 
-function jsonResponse(body: unknown, status: number, statusText: string): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    statusText,
-    headers: { 'Content-Type': 'application/json' },
-  });
-}
-
 describe('API response errors', () => {
   beforeEach(() => {
     mockAuthenticatedFetch.mockReset();
@@ -69,7 +62,7 @@ describe('API response errors', () => {
   it.each(apiMethodCases)(
     'uses only the HTTP fallback when $method receives a Cognito-like 400 without opt-in',
     async ({ request }) => {
-      const response = jsonResponse({
+      const response = createMockJsonResponse({
         error: 'NotAuthorizedException: Incorrect username or password',
         field: 'cognito.authentication',
       }, 400, 'Bad Request');
@@ -90,7 +83,7 @@ describe('API response errors', () => {
   it.each(apiMethodCases)(
     'throws trusted structured details when $method opts into a 4xx response',
     async ({ requestWithStructured4xx }) => {
-      mockAuthenticatedFetch.mockResolvedValue(jsonResponse({
+      mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
         error: 'Keyword is invalid',
         field: 'keywords[0].keyword',
       }, 400, 'Bad Request'));
@@ -109,7 +102,7 @@ describe('API response errors', () => {
   it.each(apiMethodCases)(
     'uses only the HTTP fallback when opted-in $method receives sensitive JSON in a 503 response',
     async ({ requestWithStructured4xx }) => {
-      const response = jsonResponse({
+      const response = createMockJsonResponse({
         error: 'Database credentials exposed: secret-value',
         field: 'internal.database.credentials',
       }, 503, 'Service Unavailable');
@@ -128,7 +121,7 @@ describe('API response errors', () => {
   );
 
   it('stores no field when an opted-in structured response omits it', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(jsonResponse(
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
       { error: 'Keyword conflicts with an active keyword' },
       409,
       'Conflict'
@@ -147,7 +140,7 @@ describe('API response errors', () => {
   });
 
   it('uses the HTTP fallback when an opted-in 4xx JSON error shape is invalid', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(jsonResponse({
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
       error: 'Keyword is invalid',
       field: 0,
     }, 400, 'Bad Request'));

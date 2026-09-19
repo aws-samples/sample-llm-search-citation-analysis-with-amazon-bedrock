@@ -8,7 +8,7 @@ Lambda role holds prefix-wide read *and* write over every provider secret
 (AUDIT-2026-08-19 §0.3).
 
 This file closes that hole with one table. Every mutating admin route across all
-seven handler modules is listed below and must:
+eight handler modules is listed below and must:
 
 1. Return 403 for an authenticated caller in the wrong group.
 2. Return 403 for an authenticated caller with no group claim at all — the
@@ -47,7 +47,12 @@ _SHARED_ENV = {
     'DYNAMODB_TABLE_PROVIDER_CONFIG': 'test-provider-config',
     'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brand-config',
     'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
+    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
     'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-query-prompts',
+    'DYNAMODB_TABLE_KPI_ALERTS': 'test-kpi-alerts',
+    'DYNAMODB_TABLE_ALERT_SETTINGS': 'test-alert-settings',
+    'DYNAMODB_TABLE_CONTENT_CHANGES': 'test-content-changes',
+    'KPI_ALERTS_TOPIC_ARN': 'arn:aws:sns:us-east-1:123456789012:test-kpi-alerts',
     'QUERY_PROMPTS_TABLE': 'test-query-prompts',
 }
 
@@ -111,6 +116,11 @@ MUTATING_ADMIN_ROUTES = [
           {'id': 'abc'}, {'name': 'Renamed'}),
     Route('manage-query-prompts.py', 'DELETE', '/api/query-prompts/abc', {'id': 'abc'}),
     Route('manage-query-prompts.py', 'PATCH', '/api/query-prompts/abc', {'id': 'abc'}),
+
+    # manage-alerts.py — settings alter notifications and markers feed alerts.
+    Route('manage-alerts.py', 'PUT', '/api/alerts/settings', body={}),
+    Route('manage-alerts.py', 'POST', '/api/alerts/alert-1/acknowledge', {'id': 'alert-1'}),
+    Route('manage-alerts.py', 'POST', '/api/alerts/content-changes', body={}),
 
     # Both trigger handlers — unbounded provider spend per request.
     Route('trigger-analysis.py', 'POST', '/api/trigger-analysis'),
@@ -189,7 +199,7 @@ def call(route: Route, groups: str | None) -> tuple[int, MagicMock]:
 
 @pytest.mark.parametrize('route', MUTATING_ADMIN_ROUTES, ids=str)
 class TestEveryMutatingRouteRequiresAdmin:
-    """One class, three invariants, applied to all 20 mutating admin routes."""
+    """One class, three invariants, applied to all 23 mutating admin routes."""
 
     def test_denies_a_caller_in_the_wrong_group(self, route: Route) -> None:
         status, _ = call(route, groups='Users')
@@ -220,8 +230,9 @@ class TestSuiteCoversEveryHandlerModule:
     just less coverage. These assertions make that visible.
     """
 
-    def test_covers_all_seven_admin_handler_modules(self) -> None:
+    def test_covers_all_eight_admin_handler_modules(self) -> None:
         assert sorted({route.module for route in MUTATING_ADMIN_ROUTES}) == [
+            'manage-alerts.py',
             'manage-brand-config.py',
             'manage-providers.py',
             'manage-query-prompts.py',

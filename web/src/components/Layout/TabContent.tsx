@@ -6,6 +6,7 @@ import { Spinner } from '../ui/Spinner';
 import {
   SearchIcon, LinkIcon, GlobeIcon, KeyIcon
 } from '../ui';
+import { AlertsPanel } from '../Dashboard/AlertsPanel';
 import { StatCard } from '../Dashboard/StatCard';
 import { ProviderChart } from '../Dashboard/ProviderChart';
 import { BrandChart } from '../Dashboard/BrandChart';
@@ -115,6 +116,7 @@ function QuickActions({
       <h3 className="text-sm font-medium text-gray-900 mb-4">Quick Actions</h3>
       <div className="flex flex-wrap gap-2 sm:gap-3">
         <button
+          type="button"
           onClick={() => setActiveTab('execution')}
           className="px-3 sm:px-4 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors flex items-center gap-2"
         >
@@ -125,6 +127,7 @@ function QuickActions({
           <span className="sm:hidden">Run</span>
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('brands')}
           className="px-3 sm:px-4 py-2 bg-gray-100 text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
         >
@@ -132,6 +135,7 @@ function QuickActions({
           <span className="sm:hidden">Brands</span>
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('citations')}
           className="px-3 sm:px-4 py-2 bg-gray-100 text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
         >
@@ -139,6 +143,7 @@ function QuickActions({
           <span className="sm:hidden">Citations</span>
         </button>
         <button
+          type="button"
           onClick={() => setActiveTab('settings')}
           className="px-3 sm:px-4 py-2 bg-gray-100 text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
         >
@@ -162,6 +167,7 @@ function DashboardContent({
     <ErrorBoundary>
       <DashboardStats stats={stats} />
       <DashboardCharts citations={citations} />
+      <AlertsPanel />
       <QuickActions citations={citations} keywords={keywords} setActiveTab={setActiveTab} />
     </ErrorBoundary>
   );

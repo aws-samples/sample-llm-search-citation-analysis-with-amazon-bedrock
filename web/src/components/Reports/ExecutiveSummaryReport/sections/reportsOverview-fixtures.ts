@@ -39,3 +39,33 @@ export function buildOverview({
     },
   };
 }
+
+export function buildRec(
+  title: string,
+  priority: 'high' | 'medium' | 'low',
+  overrides: Partial<Recommendation> = {},
+): Recommendation {
+  return {
+    type: 'gap',
+    priority,
+    title,
+    description: 'Description for ' + title,
+    action: 'Action for ' + title,
+    impact: 'Impact for ' + title,
+    ...overrides,
+  };
+}
+
+export function buildMover(
+  keyword: string,
+  change: number,
+  trendDirection: ReportsOverviewMover['trend_direction']
+): ReportsOverviewMover {
+  return {
+    keyword,
+    trend_direction: trendDirection,
+    current_score: 50 + change,
+    change,
+    change_percent: change * 2,
+  };
+}

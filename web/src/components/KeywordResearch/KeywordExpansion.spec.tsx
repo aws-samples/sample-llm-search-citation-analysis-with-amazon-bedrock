@@ -18,6 +18,12 @@ import type {
   Keyword, KeywordExpansionResult
 } from '../../types';
 import {
+  buildProps,
+  createDefinitiveRejection,
+  definitiveRejectionField,
+  definitiveRejectionMessage,
+} from './KeywordExpansion-fixtures';
+import {
   beachResortsFixture,
   expansionKeywordFixtures,
   luxuryHotelsFixture,
@@ -29,16 +35,6 @@ vi.mock('../../api/client', () => ({ apiPost: vi.fn() }));
 import { apiPost } from '../../api/client';
 
 const mockApiPost = vi.mocked(apiPost);
-
-function buildProps(overrides = {}) {
-  return {
-    onExpand: vi.fn(),
-    loading: false,
-    result: null,
-    error: null,
-    ...overrides,
-  };
-}
 
 describe('KeywordExpansion', () => {
   describe('initial render', () => {
@@ -95,13 +91,16 @@ describe('KeywordExpansion', () => {
     it('renders keyword results table', () => {
       render(<KeywordExpansion {...buildProps({
         result: {
+          id: 'research-1',
           seed_keyword: 'hotels',
+          industry: 'general',
+          keyword_count: 1,
           keywords: [
             {
               keyword: 'luxury hotels',
-              search_volume: 1000,
-              difficulty: 50,
-              relevance: 0.9 
+              intent: 'commercial',
+              competition: 'medium',
+              relevance: 0.9
             },
           ],
         },
@@ -173,17 +172,6 @@ const successMessage = promotionSuccessMessage({
   createdItems: [],
   skippedKeywords: [],
 });
-
-const definitiveRejectionMessage = 'Keyword cannot be promoted';
-const definitiveRejectionField = 'keywords[0].keyword';
-
-function createDefinitiveRejection(field?: string): ApiRequestError {
-  return new ApiRequestError(definitiveRejectionMessage, {
-    statusCode: 400,
-    responseMessage: definitiveRejectionMessage,
-    ...(field === undefined ? {} : { field }),
-  });
-}
 
 /** A request that never settles, so the in-flight state can be observed. */
 const mockPendingRequest = () => new Promise<never>(() => undefined);

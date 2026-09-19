@@ -20,6 +20,7 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import not_found_response, success_response
 from shared.decorators import api_handler, optional_provider, validate
 from shared.dynamo_decimal import to_int
+from shared.dynamodb_batch import collect_all_items
 from shared.scope_params import (
     SCOPE_QUERY_PARAMS,
     ReportScope,
@@ -228,17 +229,10 @@ def get_scope_brand_mentions(
 
 def _query_full_keyword_rows(table: Any, keyword: str) -> list[dict[str, Any]]:
     """Load every full response row in one keyword partition."""
-    rows: list[dict[str, Any]] = []
-    next_key: dict[str, Any] | None = None
-    while True:
-        query_params: dict[str, Any] = {'KeyConditionExpression': Key('keyword').eq(keyword)}
-        if next_key is not None:
-            query_params['ExclusiveStartKey'] = next_key
-        page = table.query(**query_params)
-        rows.extend(page.get('Items', []))
-        next_key = page.get('LastEvaluatedKey')
-        if not next_key:
-            return rows
+    return collect_all_items(
+        table.query,
+        KeyConditionExpression=Key('keyword').eq(keyword),
+    )
 
 
 @api_handler

@@ -24,7 +24,7 @@ export default {
     const filename = context.getFilename();
     
     // Only apply to test files
-    if (!filename.includes('.test.')) {
+    if (!filename.includes('.test.') && !filename.includes('.spec.')) {
       return {};
     }
 

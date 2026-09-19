@@ -5,82 +5,9 @@ import {
   render, screen, within 
 } from '@testing-library/react';
 import { CoverageMapSection } from './CoverageMapSection';
-import type {
-  CitationGapsResponse,
-  ContentIdea,
-  ContentStudioHistory,
-} from '../../../../types';
-
-/**
- * CoverageMapSection joins three data sources keyword-by-keyword:
- * citation gaps, generated briefs (Content Studio history), and open
- * ideas. The join + sort + status-label logic is the section's reason
- * for existing — these tests pin every transition.
- */
-
-function buildGaps(
-  summaries: Array<{
-    keyword: string;
-    gap_count: number;
-    high_priority_gaps: number 
-  }>,
-): CitationGapsResponse {
-  return {
-    summary: {
-      gap_count: summaries.reduce((acc, s) => acc + s.gap_count, 0),
-      high_priority_gaps: summaries.reduce((acc, s) => acc + s.high_priority_gaps, 0),
-      total_sources: 0,
-      covered_count: 0,
-      coverage_rate: 0,
-    },
-    keyword_summaries: summaries.map((s) => ({
-      keyword: s.keyword,
-      gap_count: s.gap_count,
-      high_priority_gaps: s.high_priority_gaps,
-      coverage_rate: 0,
-    })),
-    gaps: [],
-    covered_sources: [],
-    domain_summary: [],
-  };
-}
-
-function brief(id: string, keyword: string, status: 'generated' | 'pending' | 'failed' | 'generating'): ContentStudioHistory {
-  return {
-    id,
-    keyword,
-    idea_type: 'visibility_gap',
-    idea_title: id,
-    content_angle: 'comprehensive_guide',
-    generated_content: {
-      title: id,
-      meta_description: 'm',
-      body: 'b',
-      suggested_headings: [],
-      key_points: [],
-    },
-    raw_content: '',
-    competitor_sources_used: 0,
-    status,
-    viewed: false,
-    created_at: '2026-05-01T00:00:00Z',
-    updated_at: '2026-05-01T00:00:00Z',
-  };
-}
-
-function idea(id: string, keyword: string | null): ContentIdea {
-  return {
-    id,
-    type: 'visibility_gap',
-    priority: 'high',
-    title: id,
-    description: 'd',
-    keyword,
-    source: 'analysis',
-    actionable: true,
-    content_angle: 'comprehensive_guide',
-  };
-}
+import {
+  brief, buildGaps, idea
+} from './CoverageMapSection-fixtures';
 
 describe('CoverageMapSection — joining gaps + briefs + ideas', () => {
   it('counts only briefs with status=generated against the briefCount column', () => {

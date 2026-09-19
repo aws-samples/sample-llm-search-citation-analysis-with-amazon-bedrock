@@ -5,6 +5,7 @@ Routes:
 - GET/POST/PUT/DELETE/PATCH /api/query-prompts/* -> manage-query-prompts handler
 - GET/POST/DELETE /api/schedules/* -> manage-schedule handler
 - GET/PUT/POST /api/providers/* -> manage-providers handler
+- GET/PUT/POST /api/alerts/* -> manage-alerts handler
 """
 
 import logging
@@ -22,6 +23,7 @@ ROUTE_MAP = {
     '/api/query-prompts': 'manage-query-prompts.py',
     '/api/schedules': 'manage-schedule.py',
     '/api/providers': 'manage-providers.py',
+    '/api/alerts': 'manage-alerts.py',
 }
 
 _handlers = HandlerLoader(__file__)

@@ -6,8 +6,11 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  OnboardingModal, ONBOARDING_DISMISSED_STORAGE_KEY, ONBOARDING_COMPLETE_STORAGE_KEY 
+  OnboardingModal, ONBOARDING_DISMISSED_STORAGE_KEY, ONBOARDING_COMPLETE_STORAGE_KEY
 } from './OnboardingModal';
+import {
+  buildProps, buildStatus, localStorageMock
+} from './OnboardingModal-fixtures';
 
 vi.mock('../../hooks/useOnboardingStatus', () => ({useOnboardingStatus: vi.fn(),}));
 
@@ -18,41 +21,6 @@ import { useIsAdmin } from '../../hooks/useIsAdmin';
 
 const mockUseOnboardingStatus = useOnboardingStatus as ReturnType<typeof vi.fn>;
 const mockUseIsAdmin = useIsAdmin as ReturnType<typeof vi.fn>;
-
-const localStorageMock: {
-  store: Record<string, string>;
-  getItem: ReturnType<typeof vi.fn>;
-  setItem: ReturnType<typeof vi.fn>;
-} = {
-  store: {},
-  getItem: vi.fn((key: string): string | null => {
-    const value = localStorageMock.store[key];
-    return value ?? null;
-  }),
-  setItem: vi.fn((key: string, value: string): void => {
-    localStorageMock.store[key] = value;
-  }),
-};
-
-function buildProps(overrides = {}) {
-  return {
-    keywordsCount: 0,
-    hasRunAnalysis: false,
-    setActiveTab: vi.fn(),
-    onNavigateToSettings: vi.fn(),
-    ...overrides,
-  };
-}
-
-function buildStatus(overrides = {}) {
-  return {
-    providersConfigured: false,
-    brandConfigured: false,
-    scheduleConfigured: false,
-    personasConfigured: false,
-    ...overrides,
-  };
-}
 
 beforeEach(() => {
   Object.keys(localStorageMock.store).forEach((key) => delete localStorageMock.store[key]);
