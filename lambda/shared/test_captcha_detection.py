@@ -1,180 +1,336 @@
-"""
-Tests for the CAPTCHA detection logic in `browser_tools.SimpleBrowserTools`.
-
-Behaviour pinned by these tests:
-
-- The crawler DETECTS CAPTCHA-protected pages and reports them as
-  `status: "blocked", block_reason: "captcha"`.
-- The crawler does NOT solve, drag, or otherwise bypass the challenge.
-  The legitimate path is Web Bot Auth on Amazon Bedrock AgentCore Browser
-  (configured in CDK as `browserSigning: { enabled: true }`).
-- Detection covers the wording families seen in the wild (slide-to-verify,
-  human-verification, recaptcha-style "I am not a robot") with conservative
-  matching to avoid false positives.
-
-The live browser interaction can't run in unit tests; we mock the
-Playwright `page` and verify the public surface of `navigate_to_url` plus
-the `_detect_captcha_block` predicate directly.
-"""
+"""Tests for AgentCore browser lifecycle, safety, and CAPTCHA detection."""
 
 from __future__ import annotations
 
 import importlib
 import sys
 import types
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-# browser_tools imports playwright + bedrock_agentcore at module scope. Stub
-# them so the test runner doesn't need the real layer installed.
+# browser_tools imports Playwright and AgentCore at module scope. Stub only
+# those optional layer packages so the normal boto3 package remains available
+# to other test modules collected in the same process.
 _fake_playwright = types.ModuleType('playwright')
 _fake_sync_api = types.ModuleType('playwright.sync_api')
 for _name in ('Browser', 'BrowserContext', 'Page'):
     setattr(_fake_sync_api, _name, object)
-_fake_sync_api.sync_playwright = lambda: None
-_fake_playwright.sync_api = _fake_sync_api
+_fake_sync_api.__dict__['sync_playwright'] = lambda: None
+_fake_playwright.__dict__['sync_api'] = _fake_sync_api
 sys.modules.setdefault('playwright', _fake_playwright)
 sys.modules.setdefault('playwright.sync_api', _fake_sync_api)
 
-_fake_boto3 = types.ModuleType('boto3')
-_fake_boto3.resource = lambda *a, **kw: MagicMock()
-_fake_boto3.client = lambda *a, **kw: MagicMock()
-sys.modules.setdefault('boto3', _fake_boto3)
-
-# Stub the BedrockAgentCore SDK shape browser_tools imports lazily.
-_fake_bac = types.ModuleType('bedrock_agentcore')
-_fake_bac_tools = types.ModuleType('bedrock_agentcore.tools')
-_fake_bac_browser = types.ModuleType('bedrock_agentcore.tools.browser_client')
-_fake_bac_browser.BrowserClient = object
-_fake_bac_utils = types.ModuleType('bedrock_agentcore._utils')
-_fake_bac_endpoints = types.ModuleType('bedrock_agentcore._utils.endpoints')
-_fake_bac_endpoints.get_control_plane_endpoint = lambda *_a, **_k: 'https://example.invalid'
-sys.modules.setdefault('bedrock_agentcore', _fake_bac)
-sys.modules.setdefault('bedrock_agentcore.tools', _fake_bac_tools)
-sys.modules.setdefault('bedrock_agentcore.tools.browser_client', _fake_bac_browser)
-sys.modules.setdefault('bedrock_agentcore._utils', _fake_bac_utils)
-sys.modules.setdefault('bedrock_agentcore._utils.endpoints', _fake_bac_endpoints)
+_fake_agentcore = types.ModuleType('bedrock_agentcore')
+_fake_agentcore_tools = types.ModuleType('bedrock_agentcore.tools')
+_fake_agentcore_browser = types.ModuleType('bedrock_agentcore.tools.browser_client')
+_fake_agentcore_browser.__dict__['BrowserClient'] = object
+sys.modules.setdefault('bedrock_agentcore', _fake_agentcore)
+sys.modules.setdefault('bedrock_agentcore.tools', _fake_agentcore_tools)
+sys.modules.setdefault('bedrock_agentcore.tools.browser_client', _fake_agentcore_browser)
 
 from shared import browser_tools
 
 importlib.reload(browser_tools)
 
 
+class BrowserTestError(Exception):
+    """Browser failure injected by a test."""
+
+
 @pytest.fixture
 def tools_with_page():
-    """Build a SimpleBrowserTools-like object with a mocked Playwright page."""
-    tools = browser_tools.SimpleBrowserTools.__new__(
-        browser_tools.SimpleBrowserTools,
-    )
+    """Build browser tools with a mocked active Playwright page."""
+    config = SimpleNamespace(region='us-west-2', browser_session_timeout=330)
+    tools = browser_tools.SimpleBrowserTools(config)
+    tools.context = MagicMock()
     tools.page = MagicMock()
     return tools
 
 
-# --- _detect_captcha_block ---------------------------------------------
-
-
-def test_detects_slide_to_verify_phrasing(tools_with_page):
-    tools_with_page.page.evaluate.return_value = (
-        'Welcome. Please slide to verify before continuing.'
+@pytest.fixture
+def initialized_session(monkeypatch, tools_with_page):
+    """Arrange AgentCore and Playwright clients for session initialization."""
+    page = MagicMock()
+    context = MagicMock()
+    context.pages = [page]
+    browser = MagicMock()
+    browser.contexts = [context]
+    playwright = MagicMock()
+    playwright.chromium.connect_over_cdp.return_value = browser
+    playwright_factory = MagicMock()
+    playwright_factory.start.return_value = playwright
+    client = MagicMock()
+    client.start.return_value = 'session-123'
+    client.generate_ws_headers.return_value = (
+        'wss://agentcore.example/session',
+        {'Authorization': 'signed'},
     )
+    client_factory = MagicMock(return_value=client)
+
+    monkeypatch.setattr(browser_tools, 'BrowserClient', client_factory)
+    monkeypatch.setattr(browser_tools, 'sync_playwright', MagicMock(return_value=playwright_factory))
+    monkeypatch.setattr(browser_tools.time, 'sleep', MagicMock())
+    tools_with_page.browser_id = 'browser-123'
+
+    return SimpleNamespace(
+        browser=browser,
+        client=client,
+        client_factory=client_factory,
+        context=context,
+        page=page,
+        playwright=playwright,
+        tools=tools_with_page,
+    )
+
+
+def test_detects_slide_to_verify_when_page_contains_slider_challenge(tools_with_page):
+    tools_with_page.page.evaluate.return_value = 'Welcome. Please slide to verify before continuing.'
+
     assert tools_with_page._detect_captcha_block() is True
 
 
-def test_detects_drag_the_slider_phrasing(tools_with_page):
-    tools_with_page.page.evaluate.return_value = (
-        'Bot check: drag the slider to confirm.'
-    )
+def test_detects_drag_slider_when_page_contains_drag_challenge(tools_with_page):
+    tools_with_page.page.evaluate.return_value = 'Bot check: drag the slider to confirm.'
+
     assert tools_with_page._detect_captcha_block() is True
 
 
-def test_detects_recaptcha_style_human_verification(tools_with_page):
-    tools_with_page.page.evaluate.return_value = (
-        'Verify you are human to access the next page.'
-    )
+def test_detects_human_verification_when_page_contains_recaptcha_wording(tools_with_page):
+    tools_with_page.page.evaluate.return_value = 'Verify you are human to access the next page.'
+
     assert tools_with_page._detect_captcha_block() is True
 
 
-def test_detects_i_am_not_a_robot_checkbox_text(tools_with_page):
-    tools_with_page.page.evaluate.return_value = (
-        'Please tick: I am not a robot.'
-    )
+def test_detects_robot_checkbox_when_page_uses_mixed_case(tools_with_page):
+    tools_with_page.page.evaluate.return_value = 'Please tick: I AM NOT A ROBOT.'
+
     assert tools_with_page._detect_captcha_block() is True
 
 
-def test_returns_false_for_normal_content(tools_with_page):
+def test_returns_not_blocked_when_page_contains_normal_content(tools_with_page):
     tools_with_page.page.evaluate.return_value = (
         'The 10 best hotels in Barcelona for families travelling with kids.'
     )
+
     assert tools_with_page._detect_captcha_block() is False
 
 
-def test_returns_false_when_page_evaluate_raises(tools_with_page):
-    class PageEvalError(Exception):
-        pass
-    tools_with_page.page.evaluate.side_effect = PageEvalError('connection lost')
-    # The crawler should err on the side of "not a CAPTCHA" rather than
-    # mark a page as blocked because we couldn't read it.
+def test_returns_not_blocked_when_page_text_cannot_be_read(tools_with_page):
+    tools_with_page.page.evaluate.side_effect = BrowserTestError('connection lost')
+
     assert tools_with_page._detect_captcha_block() is False
 
 
-def test_match_is_case_insensitive(tools_with_page):
-    tools_with_page.page.evaluate.return_value = (
-        'PROVE YOU ARE NOT A ROBOT.'
-    )
-    assert tools_with_page._detect_captcha_block() is True
+def test_returns_not_blocked_when_page_body_has_no_text(tools_with_page):
+    tools_with_page.page.evaluate.return_value = None
+
+    assert tools_with_page._detect_captcha_block() is False
 
 
-# --- navigate_to_url --------------------------------------------------
-
-
-def test_navigate_returns_blocked_status_when_captcha_detected(tools_with_page):
+def test_returns_blocked_result_when_navigation_finds_captcha(tools_with_page, monkeypatch):
     tools_with_page.page.evaluate.return_value = 'slide to verify and continue'
+    monkeypatch.setattr(browser_tools, 'get_timestamp', MagicMock(return_value='2026-09-19T12:00:00Z'))
+
     result = tools_with_page.navigate_to_url('https://example.com/blocked')
-    assert result['status'] == 'blocked'
+
+    assert result == {
+        'status': 'blocked',
+        'url': 'https://example.com/blocked',
+        'block_reason': 'captcha',
+        'timestamp': '2026-09-19T12:00:00Z',
+    }
 
 
-def test_navigate_records_captcha_as_block_reason(tools_with_page):
-    tools_with_page.page.evaluate.return_value = 'slide to verify and continue'
-    result = tools_with_page.navigate_to_url('https://example.com/blocked')
-    assert result['block_reason'] == 'captcha'
-
-
-def test_navigate_records_blocked_url_in_result(tools_with_page):
-    tools_with_page.page.evaluate.return_value = 'slide to verify and continue'
-    result = tools_with_page.navigate_to_url('https://example.com/blocked')
-    assert result['url'] == 'https://example.com/blocked'
-
-
-def test_navigate_succeeds_on_normal_page(tools_with_page):
+def test_returns_success_result_when_navigation_finds_normal_page(tools_with_page, monkeypatch):
     tools_with_page.page.evaluate.return_value = 'Normal article content here.'
     tools_with_page.page.title.return_value = 'A regular page'
+    monkeypatch.setattr(browser_tools, 'get_timestamp', MagicMock(return_value='2026-09-19T12:00:00Z'))
+
     result = tools_with_page.navigate_to_url('https://example.com/article')
-    assert result['status'] == 'success'
-    assert result['title'] == 'A regular page'
+
+    assert result == {
+        'status': 'success',
+        'url': 'https://example.com/article',
+        'title': 'A regular page',
+        'timestamp': '2026-09-19T12:00:00Z',
+    }
 
 
-def test_navigate_does_not_attempt_to_drag_or_solve_on_captcha(tools_with_page):
+def test_installs_context_redirect_guard_before_navigation(tools_with_page, monkeypatch):
+    events: list[str] = []
+    tools_with_page.context.route.side_effect = lambda *_args: events.append('route')
+    tools_with_page.page.goto.side_effect = lambda *_args, **_kwargs: events.append('goto')
+    tools_with_page.page.evaluate.return_value = 'Normal article content here.'
+    tools_with_page.page.title.return_value = 'A regular page'
+    monkeypatch.setattr(browser_tools, 'get_timestamp', MagicMock(return_value='2026-09-19T12:00:00Z'))
+
+    tools_with_page.navigate_to_url('https://example.com/article')
+
+    assert events == ['route', 'goto']
+
+
+def test_returns_safety_error_when_delayed_document_redirect_is_aborted(tools_with_page):
+    def record_delayed_block(_milliseconds):
+        tools_with_page._navigation_guard_error = 'URL points to a restricted address'
+
+    tools_with_page.page.wait_for_timeout.side_effect = record_delayed_block
+
+    result = tools_with_page.navigate_to_url('https://example.com/article')
+
+    assert result == {
+        'status': 'error',
+        'url': 'https://example.com/article',
+        'error': 'URL points to a restricted address',
+    }
+
+
+def test_leaves_mouse_untouched_when_navigation_finds_captcha(tools_with_page):
     tools_with_page.page.evaluate.return_value = 'slide to verify'
+
     tools_with_page.navigate_to_url('https://example.com/blocked')
-    # Regression guard: the bypass code attempted to drag the mouse to
-    # solve the CAPTCHA. Verify no mouse interaction is invoked here.
-    assert tools_with_page.page.mouse.down.called is False
-    assert tools_with_page.page.mouse.up.called is False
+
+    tools_with_page.page.mouse.down.assert_not_called()
+    tools_with_page.page.mouse.up.assert_not_called()
 
 
-def test_handle_slider_challenge_method_is_removed():
-    # Regression guard: the previous bypass method should no longer exist
-    # on the class. If reintroduced this test fails so the change can be
-    # caught at review.
-    assert not hasattr(
-        browser_tools.SimpleBrowserTools, '_handle_slider_challenge',
+def test_exposes_no_slider_bypass_methods_when_browser_tools_are_loaded():
+    assert not hasattr(browser_tools.SimpleBrowserTools, '_handle_slider_challenge')
+    assert not hasattr(browser_tools.SimpleBrowserTools, '_compute_slider_drag_distance')
+
+
+def test_selects_precreated_browser_when_browser_id_is_configured(tools_with_page, monkeypatch):
+    monkeypatch.setenv('BROWSER_ID', 'browser-123')
+
+    result = tools_with_page.create_browser()
+
+    assert result == 'browser-123'
+    assert tools_with_page.browser_id == 'browser-123'
+
+
+def test_raises_configuration_error_when_browser_id_is_missing(tools_with_page, monkeypatch):
+    monkeypatch.delenv('BROWSER_ID', raising=False)
+
+    with pytest.raises(
+        browser_tools.BrowserConfigurationError,
+        match='BROWSER_ID is required; deploy the pre-created AgentCore browser before crawling',
+    ):
+        tools_with_page.create_browser()
+
+
+def test_passes_short_backstop_when_agentcore_session_starts(initialized_session):
+    initialized_session.tools.initialize_browser_session()
+
+    initialized_session.client.start.assert_called_once_with(
+        identifier='browser-123',
+        name=initialized_session.client.start.call_args.kwargs['name'],
+        session_timeout_seconds=330,
     )
 
 
-def test_compute_slider_drag_distance_method_is_removed():
-    # Regression guard for the dynamic drag-distance helper proposed in
-    # PR #33 (audit #31). Should not be present.
-    assert not hasattr(
-        browser_tools.SimpleBrowserTools, '_compute_slider_drag_distance',
+def test_attaches_playwright_with_agentcore_connection_when_session_starts(initialized_session):
+    result = initialized_session.tools.initialize_browser_session()
+
+    assert result is initialized_session.page
+    initialized_session.playwright.chromium.connect_over_cdp.assert_called_once_with(
+        'wss://agentcore.example/session',
+        headers={'Authorization': 'signed'},
     )
+
+
+def test_creates_page_when_agentcore_context_has_no_pages(initialized_session):
+    new_page = MagicMock()
+    initialized_session.context.pages = []
+    initialized_session.context.new_page.return_value = new_page
+
+    result = initialized_session.tools.initialize_browser_session()
+
+    assert result is new_page
+    initialized_session.context.new_page.assert_called_once_with()
+
+
+def test_raises_clear_error_when_agentcore_session_has_no_context(initialized_session):
+    initialized_session.browser.contexts = []
+
+    with pytest.raises(
+        RuntimeError,
+        match='AgentCore browser session returned no browser context',
+    ):
+        initialized_session.tools.initialize_browser_session()
+
+
+def test_aborts_document_request_when_redirect_destination_is_unsafe(tools_with_page, monkeypatch):
+    route = MagicMock()
+    route.request.resource_type = 'document'
+    route.request.url = 'http://169.254.169.254/latest/meta-data'
+    monkeypatch.setattr(
+        browser_tools,
+        'validate_url_safe',
+        MagicMock(return_value=(False, 'URL points to a restricted address')),
+    )
+
+    tools_with_page._guard_document_request(route)
+
+    route.abort.assert_called_once_with('blockedbyclient')
+    route.continue_.assert_not_called()
+    assert tools_with_page._navigation_guard_error == 'URL points to a restricted address'
+
+
+def test_continues_subresource_without_dns_check_when_request_is_not_document(tools_with_page, monkeypatch):
+    route = MagicMock()
+    route.request.resource_type = 'image'
+    validator = MagicMock()
+    monkeypatch.setattr(browser_tools, 'validate_url_safe', validator)
+
+    tools_with_page._guard_document_request(route)
+
+    route.continue_.assert_called_once_with()
+    validator.assert_not_called()
+
+
+def test_returns_empty_content_when_document_body_has_no_text(tools_with_page):
+    tools_with_page.page.title.return_value = 'Sparse page'
+    tools_with_page.page.url = 'https://example.com/sparse'
+    tools_with_page.page.evaluate.side_effect = [None, {}]
+
+    result = tools_with_page.extract_page_content()
+
+    assert result == {
+        'status': 'success',
+        'title': 'Sparse page',
+        'content': '',
+        'metadata': {},
+        'content_length': 0,
+        'url': 'https://example.com/sparse',
+    }
+
+
+def test_truncates_visible_content_when_page_exceeds_fifty_thousand_characters(tools_with_page):
+    tools_with_page.page.title.return_value = 'Long page'
+    tools_with_page.page.url = 'https://example.com/long'
+    tools_with_page.page.evaluate.side_effect = [('x' * 50001), {}]
+
+    result = tools_with_page.extract_page_content()
+
+    assert result['content'] == 'x' * 50000
+    assert result['content_length'] == 50000
+
+
+@pytest.mark.parametrize('failing_resource', ['browser', 'playwright', 'browser_client'])
+def test_attempts_every_cleanup_step_when_one_resource_fails(tools_with_page, failing_resource):
+    tools_with_page.browser = MagicMock()
+    tools_with_page.playwright = MagicMock()
+    tools_with_page.browser_client = MagicMock()
+    failure_method = {
+        'browser': tools_with_page.browser.close,
+        'playwright': tools_with_page.playwright.stop,
+        'browser_client': tools_with_page.browser_client.stop,
+    }[failing_resource]
+    failure_method.side_effect = BrowserTestError(f'{failing_resource} cleanup failed')
+
+    tools_with_page.cleanup()
+
+    tools_with_page.browser.close.assert_called_once_with()
+    tools_with_page.playwright.stop.assert_called_once_with()
+    tools_with_page.browser_client.stop.assert_called_once_with()

@@ -5,34 +5,37 @@ This is a Lambda-optimized version adapted from the enterprise-web-intelligence-
 It focuses on core crawling functionality needed for citation analysis.
 
 Uses synchronous Playwright API for Lambda compatibility.
-Supports pre-created custom browser with Web Bot Auth for reduced CAPTCHAs.
+Supports a pre-created custom browser with Web Bot Auth for reduced CAPTCHAs.
 
 NOTE: Nova Act integration was removed because the SDK is too large for Lambda layers (475MB+).
 The crawler relies on Web Bot Auth + Playwright for verification handling.
 For Nova Act support, consider using a container-based Lambda.
 """
 
+import base64
 import logging
 import os
 import time
-import uuid
 
-import boto3
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
-# Import from BedrockAgentCore SDK
 try:
-    from bedrock_agentcore._utils.endpoints import get_control_plane_endpoint
     from bedrock_agentcore.tools.browser_client import BrowserClient
     BEDROCK_AGENTCORE_AVAILABLE = True
 except ImportError:
+    BrowserClient = None
     BEDROCK_AGENTCORE_AVAILABLE = False
     logging.warning("BedrockAgentCore SDK not available - browser features will be limited")
 
+from shared.url_validator import validate_url_safe
 from shared.utils import get_timestamp, get_timestamp_compact
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+class BrowserConfigurationError(RuntimeError):
+    """Raised when required AgentCore browser configuration is absent."""
 
 
 class SimpleBrowserTools:
@@ -47,124 +50,129 @@ class SimpleBrowserTools:
         self.context: BrowserContext | None = None
         self.page: Page | None = None
         self.session_id = None
+        self._navigation_guard_error: str | None = None
 
     def create_browser(self) -> str:
-        """
-        Get or create a browser for crawling.
+        """Select the pre-created signed browser configured by CDK.
 
-        If BROWSER_ID environment variable is set, uses the pre-created browser
-        with Web Bot Auth enabled. Otherwise, creates a browser dynamically.
-
-        Pre-created browser benefits:
-        - Faster crawls (skip browser creation overhead ~10s per crawl)
-        - Consistent signing identity for Web Bot Auth
-        - Lower API costs
+        Dynamically creating a browser in a crawl is intentionally unsupported:
+        it is slower, omits the configured Web Bot Auth identity, and can leak a
+        control-plane resource because session cleanup does not delete browsers.
         """
         if not BEDROCK_AGENTCORE_AVAILABLE:
             raise RuntimeError("BedrockAgentCore SDK not available")
 
-        # Check for pre-created browser ID from environment
         pre_created_browser_id = os.environ.get('BROWSER_ID')
+        if not pre_created_browser_id:
+            raise BrowserConfigurationError(
+                'BROWSER_ID is required; deploy the pre-created AgentCore browser before crawling'
+            )
 
-        if pre_created_browser_id:
-            logger.info(f"Using pre-created browser with Web Bot Auth: {pre_created_browser_id}")
-            self.browser_id = pre_created_browser_id
-            return self.browser_id
-
-        # Fallback: Create browser dynamically (slower, no Web Bot Auth)
-        logger.info("Creating browser dynamically (no pre-created browser configured)...")
-
-        # Create control plane client
-        control_plane_url = get_control_plane_endpoint(self.config.region)
-        control_client = boto3.client(
-            "bedrock-agentcore-control",
-            region_name=self.config.region,
-            endpoint_url=control_plane_url
-        )
-
-        # Create browser
-        browser_name = f"citation_crawler_{uuid.uuid4().hex[:8]}"
-
-        response = control_client.create_browser(
-            name=browser_name,
-            networkConfiguration={
-                "networkMode": "PUBLIC"
-            }
-        )
-
-        self.browser_id = response["browserId"]
-        logger.info(f"Browser created dynamically: {self.browser_id}")
-
+        logger.info("Using pre-created AgentCore browser with Web Bot Auth")
+        self.browser_id = pre_created_browser_id
         return self.browser_id
 
     def initialize_browser_session(self) -> Page:
-        """Initialize browser session with Playwright (synchronous)."""
-        if not BEDROCK_AGENTCORE_AVAILABLE:
+        """Initialize an AgentCore session and attach synchronous Playwright."""
+        if not BEDROCK_AGENTCORE_AVAILABLE or BrowserClient is None:
             raise RuntimeError("BedrockAgentCore SDK not available")
+        if not self.browser_id:
+            raise BrowserConfigurationError('create_browser must select BROWSER_ID before starting a session')
 
-        # Create BrowserClient from SDK
         self.browser_client = BrowserClient(region=self.config.region)
         self.browser_client.identifier = self.browser_id
-
-        # Start a session
         self.session_id = self.browser_client.start(
             identifier=self.browser_id,
-            # UTC contract: get_timestamp_compact() — the previous naive
-            # datetime.now() stamped local server time (bugs.md 3.4).
             name=f"citation_crawler_session_{get_timestamp_compact()}",
-            session_timeout_seconds=self.config.browser_session_timeout
+            session_timeout_seconds=self.config.browser_session_timeout,
         )
 
-        logger.info(f"Session started: {self.session_id}")
-
-        # Get WebSocket headers
+        logger.info("AgentCore browser session started")
         ws_url, headers = self.browser_client.generate_ws_headers()
 
-        # Wait for browser initialization
+        # AgentCore does not currently expose a documented readiness signal.
+        # Keep the existing bounded delay until CDP-connect retry can be proven
+        # against the deployed SDK rather than guessing at a private API.
         time.sleep(10)
 
-        # Initialize Playwright (synchronous)
-        logger.info("Connecting Playwright...")
+        logger.info("Connecting Playwright")
         self.playwright = sync_playwright().start()
-
-        # Connect to the browser via CDP
         self.browser = self.playwright.chromium.connect_over_cdp(
             ws_url,
-            headers=headers
+            headers=headers,
         )
 
-        # Get context and page
+        if not self.browser.contexts:
+            raise RuntimeError('AgentCore browser session returned no browser context')
         self.context = self.browser.contexts[0]
-        self.page = self.context.pages[0]
+        self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
 
         logger.info("Playwright connected successfully")
-
         return self.page
 
+    def _active_context(self) -> BrowserContext:
+        """Return the initialized context or fail with an actionable error."""
+        if self.context is None:
+            raise RuntimeError('Browser session is not initialized')
+        return self.context
+
+    def _active_page(self) -> Page:
+        """Return the initialized page or fail with an actionable error."""
+        if self.page is None:
+            raise RuntimeError('Browser session is not initialized')
+        return self.page
+
+    def _guard_document_request(self, route) -> None:
+        """Abort any document navigation whose destination fails SSRF checks."""
+        request = route.request
+        if request.resource_type != 'document':
+            route.continue_()
+            return
+
+        is_safe, error_message = validate_url_safe(request.url)
+        if is_safe:
+            route.continue_()
+            return
+
+        self._navigation_guard_error = error_message
+        logger.warning("Blocked unsafe browser document navigation")
+        route.abort('blockedbyclient')
+
+    @property
+    def navigation_guard_error(self) -> str | None:
+        """Return any unsafe document destination observed by the route guard."""
+        return self._navigation_guard_error
+
+    @staticmethod
+    def _navigation_error_result(url: str, error_message: str) -> dict[str, str]:
+        return {
+            'status': 'error',
+            'url': url,
+            'error': error_message,
+        }
+
     def navigate_to_url(self, url: str) -> dict:
-        """Navigate to URL and return basic page information."""
+        """Navigate to a URL and return basic page information."""
         try:
-            logger.info(f"Navigating to: {url}")
+            page = self._active_page()
+            context = self._active_context()
+            logger.info("Navigating to cited page")
+            self._navigation_guard_error = None
+            context.route('**/*', self._guard_document_request)
+            page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
-            # Navigate with timeout
-            self.page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            if self._navigation_guard_error:
+                return self._navigation_error_result(url, self._navigation_guard_error)
 
-            # Wait for dynamic content
-            self.page.wait_for_timeout(3000)
+            page.wait_for_timeout(3000)
+            if self._navigation_guard_error:
+                return self._navigation_error_result(url, self._navigation_guard_error)
 
-            # Detect (don't bypass) CAPTCHA challenges. The crawler runs
-            # against an Amazon Bedrock AgentCore Browser configured with
-            # `browserSigning: { enabled: true }` (Web Bot Auth — see CDK
-            # `CrawlerBrowser` and the AWS blog post on the protocol). For
-            # domains that allow verified bots this typically prevents
-            # CAPTCHAs from being shown at all. For domains that still
-            # block our agent, we record the page as blocked and move on
-            # — we do NOT attempt to programmatically solve or bypass the
-            # challenge.
+            # Detection only. Web Bot Auth may prevent a challenge when the
+            # publisher permits verified bots; otherwise we record the block
+            # and never attempt to solve or bypass it.
             if self._detect_captcha_block():
-                logger.warning(
-                    f"CAPTCHA-protected page; recording as blocked: {url}"
-                )
+                logger.warning("CAPTCHA-protected page; recording as blocked")
                 return {
                     "status": "blocked",
                     "url": url,
@@ -172,46 +180,27 @@ class SimpleBrowserTools:
                     "timestamp": get_timestamp(),
                 }
 
-            title = self.page.title()
-
             return {
                 "status": "success",
                 "url": url,
-                "title": title,
-                "timestamp": get_timestamp()
+                "title": page.title(),
+                "timestamp": get_timestamp(),
             }
 
-        except Exception as e:
-            logger.error(f"Navigation error: {e}")
-            return {
-                "status": "error",
-                "url": url,
-                "error": str(e)
-            }
+        except Exception as exc:
+            error_message = self._navigation_guard_error or str(exc)
+            logger.error("Navigation error: %s", error_message)
+            return self._navigation_error_result(url, error_message)
 
     def _detect_captcha_block(self) -> bool:
-        """
-        Return True if the current page is a CAPTCHA / bot-challenge wall.
-
-        Detection only — never solves or bypasses. The crawler relies on
-        Amazon Bedrock AgentCore Browser's Web Bot Auth signing (configured
-        in the CDK) to reduce CAPTCHA encounters on domains that allow
-        verified bots. When a domain still gates us behind a CAPTCHA, we
-        respect that decision and record the page as blocked.
-
-        See: https://aws.amazon.com/blogs/machine-learning/reduce-captchas-for-ai-agents-browsing-the-web-with-web-bot-auth-preview-in-amazon-bedrock-agentcore-browser/
-        """
+        """Return whether the current page is a CAPTCHA or bot-challenge wall."""
         try:
-            page_text = self.page.evaluate(
-                "() => document.body.innerText"
-            ).lower()
+            page_text = self._active_page().evaluate("() => document.body.innerText") or ''
+            normalized_text = page_text.lower() if isinstance(page_text, str) else ''
         except Exception as exc:
-            logger.warning(f"Could not read page text for CAPTCHA detection: {exc}")
+            logger.warning("Could not read page text for CAPTCHA detection: %s", exc)
             return False
 
-        # Common phrasings that indicate a CAPTCHA / verification wall.
-        # Matched conservatively so a site that mentions "captcha" in
-        # documentation isn't false-flagged.
         indicators = (
             'slide to verify',
             'slide right to secure',
@@ -223,27 +212,23 @@ class SimpleBrowserTools:
             'i am not a robot',
             'please complete the security check',
         )
-        return any(indicator in page_text for indicator in indicators)
+        return any(indicator in normalized_text for indicator in indicators)
 
     def extract_page_content(self) -> dict:
-        """Extract main content from the current page."""
+        """Extract bounded visible content and basic metadata from the page."""
         try:
-            logger.info("Extracting page content...")
+            logger.info("Extracting page content")
+            page = self._active_page()
+            title = page.title()
+            evaluated_content = page.evaluate("() => document.body.innerText")
+            text_content = evaluated_content if isinstance(evaluated_content, str) else ''
 
-            # Get page title
-            title = self.page.title()
-
-            # Get text content (limited to avoid token overflow)
-            text_content = self.page.evaluate("() => document.body.innerText")
-
-            # Truncate to reasonable size
             max_chars = 50000
             if len(text_content) > max_chars:
                 text_content = text_content[:max_chars]
-                logger.warning(f"Content truncated to {max_chars} chars")
+                logger.warning("Content truncated to %s chars", max_chars)
 
-            # Get metadata
-            metadata = self.page.evaluate("""
+            metadata = page.evaluate("""
                 () => {
                     return {
                         description: document.querySelector('meta[name="description"]')?.content || '',
@@ -259,55 +244,57 @@ class SimpleBrowserTools:
                 "content": text_content,
                 "metadata": metadata,
                 "content_length": len(text_content),
-                "url": self.page.url
+                "url": page.url,
             }
 
-        except Exception as e:
-            logger.error(f"Content extraction error: {e}")
+        except Exception as exc:
+            logger.error("Content extraction error: %s", exc)
             return {
                 "status": "error",
-                "error": str(e)
+                "error": str(exc),
             }
 
     def take_screenshot(self) -> dict:
-        """Take a screenshot of the current page."""
+        """Take a full-page PNG screenshot of the current page."""
         try:
-            logger.info("Taking screenshot...")
-
-            # Take full page screenshot as base64
-            screenshot_bytes = self.page.screenshot(full_page=True, type="png")
-
-            import base64
+            logger.info("Taking screenshot")
+            screenshot_bytes = self._active_page().screenshot(full_page=True, type="png")
             screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
 
             return {
                 "status": "success",
                 "screenshot_base64": screenshot_base64,
-                "timestamp": get_timestamp()
+                "timestamp": get_timestamp(),
             }
 
-        except Exception as e:
-            logger.error(f"Screenshot error: {e}")
+        except Exception as exc:
+            logger.error("Screenshot error: %s", exc)
             return {
                 "status": "error",
-                "error": str(e)
+                "error": str(exc),
             }
 
-    def cleanup(self):
-        """Clean up browser resources."""
-        try:
-            if self.browser:
-                logger.info("Closing browser...")
+    def cleanup(self) -> None:
+        """Attempt every resource cleanup step independently."""
+        if self.browser:
+            try:
+                logger.info("Closing browser connection")
                 self.browser.close()
+            except Exception:
+                logger.exception("Could not close Playwright browser connection")
 
-            if self.playwright:
-                logger.info("Stopping Playwright...")
+        if self.playwright:
+            try:
+                logger.info("Stopping Playwright")
                 self.playwright.stop()
+            except Exception:
+                logger.exception("Could not stop Playwright")
 
-            if self.browser_client:
-                logger.info("Stopping session...")
+        if self.browser_client:
+            try:
+                logger.info("Stopping AgentCore browser session")
                 self.browser_client.stop()
+            except Exception:
+                logger.exception("Could not stop AgentCore browser session")
 
-            logger.info("Cleanup complete")
-        except Exception as e:
-            logger.error(f"Cleanup error: {e}")
+        logger.info("Cleanup complete")
