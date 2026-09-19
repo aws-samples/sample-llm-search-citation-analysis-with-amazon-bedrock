@@ -1,6 +1,8 @@
 import { vi } from 'vitest';
 import type { useContentStudio } from '../../hooks/useContentStudio';
-import type { ContentIdea } from '../../types';
+import type {
+  ContentIdea, GroupBriefIdea
+} from '../../types';
 
 type ContentStudioHookResult = ReturnType<typeof useContentStudio>;
 
@@ -30,11 +32,37 @@ export function buildActionableIdea(overrides: Partial<ContentIdea> = {}): Conte
     id: '1',
     type: 'visibility_gap',
     priority: 'high',
-    title: 'Hotels guide',
-    description: 'Cover the hotels keyword',
-    keyword: 'hotels',
-    source: 'https://example.com/hotels',
+    title: 'Search visibility guide',
+    description: 'Cover a useful cross-industry search topic',
+    keyword: 'product comparisons',
+    source: 'https://example.com/analysis',
     actionable: true,
+    ...overrides,
+  };
+}
+
+export function buildGroupBriefIdea(
+  overrides: Partial<GroupBriefIdea> = {}
+): GroupBriefIdea {
+  return {
+    id: 'group-brief-1',
+    type: 'group_brief',
+    priority: 'medium',
+    title: 'Group Brief: Generic Group',
+    description: 'Create a complete landing page from selected active keywords.',
+    keyword: 'Generic Group',
+    source: 'group_brief',
+    actionable: true,
+    content_angle: 'create_new_landing_page',
+    group_id: 'group-1',
+    group_name: 'Generic Group',
+    keyword_ids: ['keyword-1'],
+    keywords: ['Alpha keyword'],
+    landing_url: '',
+    current_copy: '',
+    prompt_template: 'Create for {group} with {keywords}.',
+    output_language: 'English',
+    competitor_urls: [],
     ...overrides,
   };
 }

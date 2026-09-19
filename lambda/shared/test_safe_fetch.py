@@ -59,6 +59,21 @@ class TestRedirectsAreStillFollowed:
         assert response.status_code == 200
         assert final_url == 'https://real-site.example/article'
 
+    def test_closes_streamed_redirect_before_requesting_next_hop(self) -> None:
+        redirect = response_stub(302, 'https://real-site.example/article')
+        final = response_stub(200)
+        with public_dns(), patch(
+            'shared.safe_fetch.requests.request', side_effect=[redirect, final]
+        ) as mock_request:
+            response, _, error = fetch_following_validated_redirects(
+                'https://wrapper.example/page', stream=True
+            )
+
+        assert error == ''
+        assert response is final
+        redirect.close.assert_called_once_with()
+        assert mock_request.call_args_list[0].kwargs['stream'] is True
+
     def test_follows_a_multi_hop_chain(self) -> None:
         hops = [
             response_stub(301, 'https://second.example/b'),

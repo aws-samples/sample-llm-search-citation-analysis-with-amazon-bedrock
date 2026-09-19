@@ -2407,6 +2407,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
         DYNAMODB_TABLE_CONTENT_STUDIO: contentStudioTable.tableName,
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
+        DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         DYNAMODB_TABLE_SELF_REFLECTION: selfReflectionTable.tableName,
         // Budget after which the reader-side sweep declares a generation dead.
         // MUST stay above this function's own 300s timeout: at the previous
@@ -2424,6 +2425,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     brandConfigTable.grantReadData(contentStudioFunction);
     contentStudioTable.grantReadWriteData(contentStudioFunction);
     keywordsTable.grantReadData(contentStudioFunction);
+    keywordGroupsTable.grantReadData(contentStudioFunction);
     selfReflectionTable.grantReadData(contentStudioFunction);
     // Grant Bedrock access for content generation using Converse API
     // Uses global.anthropic.claude-* inference profiles (Haiku 4.5 for speed)

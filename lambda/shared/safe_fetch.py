@@ -45,6 +45,7 @@ def fetch_following_validated_redirects(
     timeout: float = 5,
     headers: dict[str, str] | None = None,
     max_hops: int = MAX_REDIRECT_HOPS,
+    stream: bool = False,
 ) -> tuple[Any | None, str | None, str]:
     """
     Fetch ``url``, validating the URL at every redirect hop.
@@ -57,6 +58,9 @@ def fetch_following_validated_redirects(
             worst-case wall time is ``timeout * (max_hops + 1)``.
         headers: Optional request headers, sent on every hop.
         max_hops: Maximum redirects to follow before giving up.
+        stream: Leave the final response body unread so callers can enforce a
+            byte limit while consuming it. Redirect responses are still closed
+            before the next hop.
 
     Returns:
         ``(response, final_url, error)``. On success ``error`` is empty and both
@@ -81,6 +85,7 @@ def fetch_following_validated_redirects(
                 timeout=timeout,
                 headers=headers,
                 allow_redirects=False,
+                stream=stream,
             )
         except requests.RequestException as error:
             logger.warning('Request failed for validated URL: %s', type(error).__name__)
@@ -94,6 +99,11 @@ def fetch_following_validated_redirects(
             # A redirect status with no target: nothing further to follow, so
             # treat this response as final rather than erroring.
             return response, current_url, ''
+
+        # A streamed redirect body is never consumed; close it before opening
+        # the next hop so its connection is released promptly.
+        if stream:
+            response.close()
 
         # `Location` may be relative; resolve it against the current URL the
         # same way a browser would, so the next hop is validated as an
