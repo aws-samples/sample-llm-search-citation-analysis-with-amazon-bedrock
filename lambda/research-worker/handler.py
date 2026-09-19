@@ -69,6 +69,7 @@ from shared.research_agent import (
     build_search_prompt,
     build_selection_prompt,
     fallback_selection,
+    mark_tracking_subset,
     parse_evaluation,
     parse_plan,
     parse_selection,
@@ -780,13 +781,21 @@ def finalize(event: dict[str, Any]) -> dict[str, Any]:
         # `keywords` is the proposal the user reviews; the merged candidates
         # stay on the steps (and in the trace counts).
         proposal, source = _select_proposal(job, summary['keywords'])
+        proposal = mark_tracking_subset(proposal, job.get('config') or {})
+        actual_tracking_count = sum(entry['tracking'] for entry in proposal)
         values.update({
             ':kw': convert_floats_to_decimal(proposal),
             ':kc': len(proposal),
+            ':tc': actual_tracking_count,
             ':cc': summary['keyword_count'],
             ':src': source,
         })
-        sets += ['keywords = :kw', 'candidates_count = :cc', 'proposal_source = :src']
+        sets += [
+            'keywords = :kw',
+            'tracking_count = :tc',
+            'candidates_count = :cc',
+            'proposal_source = :src',
+        ]
     else:
         values[':kw'] = convert_floats_to_decimal(summary['keywords'])
         sets.append('keywords = :kw')

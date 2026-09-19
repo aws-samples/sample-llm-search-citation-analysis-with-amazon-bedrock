@@ -443,6 +443,23 @@ class TestPromotionPersistenceUnit:
 
         assert raised.value is error
 
+    def test_creates_mixed_status_keywords_in_one_request(
+        self, promotion_handler
+    ):
+        table = _mock_table(scan_pages=[{'Items': []}])
+        keywords = [
+            {'keyword': 'tracked term', 'status': 'active'},
+            {'keyword': 'library term', 'status': 'inactive'},
+        ]
+
+        status_code, body = _invoke(promotion_handler, table, keywords)
+
+        assert status_code == 200
+        assert [item['status'] for item in body['created_keywords']] == ['active', 'inactive']
+        assert [call_item.kwargs['Item']['status'] for call_item in table.put_item.call_args_list] == [
+            'active', 'inactive',
+        ]
+
     def test_reports_actual_write_outcomes_when_a_concurrent_promotion_wins(
         self, promotion_handler
     ):
@@ -540,6 +557,23 @@ class TestPromotionValidationUnit:
 
         assert status_code == 400, f'Expected 400, got {status_code}: {body}'
         assert body['field'] == 'keywords', f'Unexpected field {body.get("field")!r}'
+        table.scan.assert_not_called()
+        table.put_item.assert_not_called()
+
+
+    def test_request_is_rejected_before_any_write_when_one_keyword_status_is_invalid(
+        self, promotion_handler
+    ):
+        table = _mock_table()
+        keywords = [
+            {'keyword': 'tracked term', 'status': 'active'},
+            {'keyword': 'library term', 'status': 'archived'},
+        ]
+
+        status_code, body = _invoke(promotion_handler, table, keywords)
+
+        assert status_code == 400
+        assert body['field'] == 'keywords[1].status'
         table.scan.assert_not_called()
         table.put_item.assert_not_called()
 

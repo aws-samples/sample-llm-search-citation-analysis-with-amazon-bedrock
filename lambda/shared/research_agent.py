@@ -47,11 +47,34 @@ AGENT_DEFAULT_ROUNDS = 2
 AGENT_DEFAULT_TARGET_COUNT = 60
 AGENT_MIN_TARGET_COUNT = 10
 AGENT_MAX_TARGET_COUNT = 100
+AGENT_DEFAULT_TRACKING_COUNT = 15
+AGENT_MIN_TRACKING_COUNT = 1
+AGENT_MAX_TRACKING_COUNT = 50
 AGENT_SEED_MAX_LENGTH = 200
 AGENT_INSTRUCTION_MAX_LENGTH = 1000
 SYSTEM_PROMPT_MAX_LENGTH = 6000
 TEMPLATE_NAME_MAX_LENGTH = 100
 TEMPLATE_DESCRIPTION_MAX_LENGTH = 500
+
+# Tracking recommendation score (a demand proxy, never measured search volume):
+# relevance dominates at 100 points per 0-10 relevance point; intent adds
+# transactional=4, commercial=3, informational=2, navigational=1; every
+# additional unique provider adds 1; SerpAPI adds 1 because it represents
+# Google autocomplete, related-search and People Also Ask signals. Proposal
+# order is deliberately absent from the score and breaks exact ties only.
+TRACKING_RELEVANCE_WEIGHT = 100.0
+TRACKING_INTENT_BONUS = {
+    'transactional': 4.0,
+    'commercial': 3.0,
+    'informational': 2.0,
+    'navigational': 1.0,
+}
+TRACKING_PROVIDER_AGREEMENT_BONUS = 1.0
+TRACKING_SERPAPI_BONUS = 1.0
+TRACKING_CONVERSION_NUMERATOR = 3
+TRACKING_CONVERSION_DENOMINATOR = 5
+TRACKING_INFORMATIONAL_NUMERATOR = 1
+TRACKING_INFORMATIONAL_DENOMINATOR = 4
 
 # Provider id of the Google-signals step (SerpAPI related searches, People
 # Also Ask and autocomplete). Not an LLM: it contributes raw candidates the
@@ -401,14 +424,22 @@ def build_agent_config(
     subject: str,
     audience: str,
     dimension_catalog: list[dict[str, str]],
+    tracking_count: int | None = None,
 ) -> dict[str, Any]:
     """The request part of an agent job row (validated by the API first).
 
     The template's subject, audience and dimension catalogue are snapshotted
     so a later template edit never changes how an old run reads or renders.
+    Omitted tracking counts resolve against the target so old callers can ask
+    for fewer than the default 15 proposal entries.
     """
     catalog = [dict(dimension) for dimension in dimension_catalog]
     catalog_ids = [dimension['id'] for dimension in catalog]
+    resolved_tracking_count = (
+        min(AGENT_DEFAULT_TRACKING_COUNT, int(target_count))
+        if tracking_count is None
+        else int(tracking_count)
+    )
     return {
         'seed': seed.strip(),
         'country': country.strip().lower(),
@@ -416,12 +447,31 @@ def build_agent_config(
         'dimensions': [dimension_id for dimension_id in catalog_ids if dimension_id in dimensions],
         'instruction': instruction.strip(),
         'target_count': int(target_count),
+        'tracking_count': resolved_tracking_count,
         'max_rounds': int(max_rounds),
         'group_id': group_id or None,
         'subject': subject.strip(),
         'audience': audience.strip(),
         'dimension_catalog': catalog,
     }
+
+
+def config_tracking_count(config: dict[str, Any]) -> int:
+    """Resolved tracking count, tolerating absent or malformed legacy values."""
+    try:
+        target_count = int(config.get('target_count') or AGENT_DEFAULT_TARGET_COUNT)
+    except (TypeError, ValueError):
+        target_count = AGENT_DEFAULT_TARGET_COUNT
+    target_count = max(AGENT_MIN_TRACKING_COUNT, target_count)
+    legacy_default = min(AGENT_DEFAULT_TRACKING_COUNT, target_count)
+    try:
+        configured = int(config.get('tracking_count', legacy_default))
+    except (TypeError, ValueError):
+        return legacy_default
+    return max(
+        AGENT_MIN_TRACKING_COUNT,
+        min(configured, AGENT_MAX_TRACKING_COUNT, target_count),
+    )
 
 
 def config_subject(config: dict[str, Any]) -> str:
@@ -776,6 +826,184 @@ def fallback_selection(config: dict[str, Any], candidates: list[dict[str, Any]])
             'providers': list(entry.get('providers') or []),
         })
     return proposal
+
+
+def _tracking_providers(entry: dict[str, Any]) -> tuple[str, ...]:
+    """Unique provider ids available for one proposal entry."""
+    providers = entry.get('providers')
+    if not isinstance(providers, list):
+        return ()
+    return tuple(dict.fromkeys(
+        provider.strip().casefold()
+        for provider in providers
+        if isinstance(provider, str) and provider.strip()
+    ))
+
+
+def _tracking_score(entry: dict[str, Any]) -> float:
+    """Demand-proxy score using only relevance, intent and source signals."""
+    providers = _tracking_providers(entry)
+    agreement_count = max(0, len(providers) - 1)
+    intent = str(entry.get('intent') or '').strip().casefold()
+    score = (
+        _clean_relevance(entry.get('relevance'), 5.0) * TRACKING_RELEVANCE_WEIGHT
+        + TRACKING_INTENT_BONUS.get(intent, 0.0)
+        + agreement_count * TRACKING_PROVIDER_AGREEMENT_BONUS
+        + (TRACKING_SERPAPI_BONUS if SIGNALS_PROVIDER_ID in providers else 0.0)
+    )
+    return round(score, 2)
+
+
+def _tracking_seed_identity(value: Any) -> str:
+    """Canonical seed comparison after the proposal parser's whitespace cleanup."""
+    return normalize_keyword(' '.join(str(value or '').split()))
+
+
+def _tracking_reason(entry: dict[str, Any], seed_key: str) -> str:
+    """Concise explanation of the available signals behind a score."""
+    relevance = _clean_relevance(entry.get('relevance'), 5.0)
+    intent = str(entry.get('intent') or 'unknown').strip().casefold() or 'unknown'
+    providers = _tracking_providers(entry)
+    parts = []
+    if seed_key and _tracking_seed_identity(entry.get('keyword')) == seed_key:
+        parts.append('Exact seed match')
+    parts.extend((f'Relevance {relevance:g}/10', f'{intent} intent'))
+    if len(providers) > 1:
+        parts.append(f'{len(providers)}-provider agreement')
+    elif providers:
+        parts.append('1 provider')
+    if SIGNALS_PROVIDER_ID in providers:
+        parts.append('Google suggestion signals')
+    return '; '.join(parts) + '.'
+
+
+def _tracking_quota(total: int, numerator: int, denominator: int) -> int:
+    """Ceiling quota expressed with integers for deterministic boundaries."""
+    return (total * numerator + denominator - 1) // denominator
+
+
+def _select_tracking_index(
+    index: int,
+    proposal: list[dict[str, Any]],
+    selected: set[int],
+    selected_keys: set[str],
+    target: int,
+) -> bool:
+    """Select one still-available normalized identity without exceeding target."""
+    key = normalize_keyword(str(proposal[index].get('keyword') or ''))
+    if len(selected) >= target or not key or key in selected_keys:
+        return False
+    selected.add(index)
+    selected_keys.add(key)
+    return True
+
+
+def _fill_tracking_intent_quota(
+    proposal: list[dict[str, Any]],
+    ranked: list[int],
+    selected: set[int],
+    selected_keys: set[str],
+    target: int,
+    intents: frozenset[str],
+    quota: int,
+) -> None:
+    """Add best-scored entries until the requested funnel quota is met."""
+    selected_in_quota = sum(
+        str(proposal[index].get('intent') or '').casefold() in intents
+        for index in selected
+    )
+    for index in ranked:
+        if selected_in_quota >= quota:
+            return
+        intent = str(proposal[index].get('intent') or '').casefold()
+        if intent in intents and _select_tracking_index(
+            index, proposal, selected, selected_keys, target,
+        ):
+            selected_in_quota += 1
+
+
+def mark_tracking_subset(
+    proposal: list[dict[str, Any]], config: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Mark the deterministic, funnel-balanced tracking recommendation.
+
+    Selection order is exact seed, configured-dimension coverage, roughly 60%
+    commercial/transactional, roughly 25% informational, then score. The
+    proposal's model/fallback order breaks score ties and the returned proposal
+    stays in its original order. Competition is intentionally not scored: a
+    competitive term remains useful to monitor.
+    """
+    if not proposal:
+        return []
+    unique_count = len({
+        key for entry in proposal
+        if (key := normalize_keyword(str(entry.get('keyword') or '')))
+    })
+    target = min(config_tracking_count(config), unique_count)
+    scores = [_tracking_score(entry) for entry in proposal]
+    ranked = sorted(range(len(proposal)), key=lambda index: (-scores[index], index))
+    selected: set[int] = set()
+    selected_keys: set[str] = set()
+    seed_key = _tracking_seed_identity(config.get('seed'))
+
+    for index in ranked:
+        if _tracking_seed_identity(proposal[index].get('keyword')) == seed_key:
+            _select_tracking_index(index, proposal, selected, selected_keys, target)
+            break
+
+    covered_dimensions = {
+        str(proposal[index].get('dimension') or '') for index in selected
+    }
+    for dimension in _selected_dimensions(config):
+        if len(selected) >= target:
+            break
+        if dimension in covered_dimensions:
+            continue
+        for index in ranked:
+            if proposal[index].get('dimension') == dimension and _select_tracking_index(
+                index, proposal, selected, selected_keys, target,
+            ):
+                covered_dimensions.add(dimension)
+                break
+
+    _fill_tracking_intent_quota(
+        proposal,
+        ranked,
+        selected,
+        selected_keys,
+        target,
+        frozenset({'commercial', 'transactional'}),
+        _tracking_quota(
+            target,
+            TRACKING_CONVERSION_NUMERATOR,
+            TRACKING_CONVERSION_DENOMINATOR,
+        ),
+    )
+    _fill_tracking_intent_quota(
+        proposal,
+        ranked,
+        selected,
+        selected_keys,
+        target,
+        frozenset({'informational'}),
+        _tracking_quota(
+            target,
+            TRACKING_INFORMATIONAL_NUMERATOR,
+            TRACKING_INFORMATIONAL_DENOMINATOR,
+        ),
+    )
+    for index in ranked:
+        _select_tracking_index(index, proposal, selected, selected_keys, target)
+
+    return [
+        {
+            **entry,
+            'tracking': index in selected,
+            'tracking_score': scores[index],
+            'tracking_reason': _tracking_reason(entry, seed_key),
+        }
+        for index, entry in enumerate(proposal)
+    ]
 
 
 def planned_query_texts(job: dict[str, Any]) -> set[str]:

@@ -468,7 +468,8 @@ def _agent_job(**overrides) -> dict:
         'system_prompt': 'You are a hotel SEO researcher.',
         'config': {
             'seed': 'Hotel Gran Marino', 'country': 'es', 'language': 'es',
-            'dimensions': ['destination', 'audience'], 'instruction': '', 'target_count': 60, 'max_rounds': 2, 'group_id': None,
+            'dimensions': ['destination', 'audience'], 'instruction': '', 'target_count': 60,
+            'tracking_count': 15, 'max_rounds': 2, 'group_id': None,
         },
         'created_at': '2026-09-18T10:00:00Z',
         **overrides,
@@ -741,13 +742,21 @@ class TestAgentFinalize:
         assert bedrock.call_args.args[1] == _mod.ModelRole.RESEARCH_PLANNING
         assert result == {'job_id': 'job-a', 'status': 'completed', 'keyword_count': 1}
         assert [entry['keyword'] for entry in values[':kw']] == ['hotel coruña centro']
-        assert (values[':kc'], values[':cc'], values[':src']) == (1, 2, 'model')
+        assert (values[':kc'], values[':tc'], values[':cc'], values[':src']) == (1, 1, 2, 'model')
 
     def test_selected_keywords_keep_the_providers_that_proposed_them(self):
         _result, table, _bedrock = self._finalize(_round_one())
 
         proposal = table.update_item.call_args.kwargs['ExpressionAttributeValues'][':kw']
         assert proposal[0]['providers'] == ['perplexity']
+
+    def test_marks_the_model_proposal_with_tracking_explanations(self):
+        _result, table, _bedrock = self._finalize(_round_one())
+
+        proposal = table.update_item.call_args.kwargs['ExpressionAttributeValues'][':kw']
+        assert proposal[0]['tracking'] is True
+        assert proposal[0]['tracking_score'] == 904.0
+        assert proposal[0]['tracking_reason'] == 'Relevance 9/10; transactional intent; 1 provider.'
 
     def test_falls_back_to_the_top_candidates_when_the_selection_model_fails(self):
         class BedrockDown(Exception):
@@ -758,7 +767,8 @@ class TestAgentFinalize:
         values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
         assert result['status'] == 'completed'
         assert [entry['keyword'] for entry in values[':kw']] == ['hotel coruña centro', 'hoteles baratos coruña']
-        assert values[':src'] == 'fallback'
+        assert [entry['tracking'] for entry in values[':kw']] == [True, True]
+        assert (values[':src'], values[':tc']) == ('fallback', 2)
 
     def test_failed_job_without_candidates_skips_the_model(self):
         job = _round_one()
@@ -769,4 +779,5 @@ class TestAgentFinalize:
 
         bedrock.assert_not_called()
         assert result == {'job_id': 'job-a', 'status': 'failed', 'keyword_count': 0}
-        assert table.update_item.call_args.kwargs['ExpressionAttributeValues'][':src'] == 'none'
+        values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
+        assert (values[':src'], values[':tc']) == ('none', 0)

@@ -9,7 +9,9 @@ import {
   useState,
 } from 'react';
 import { promoteKeywords } from '../api/keywords';
-import type { PromotionOutcome } from '../api/keywords';
+import type {
+  PromoteKeywordEntry, PromotionOutcome
+} from '../api/keywords';
 import {
   clientRejectionMessage, getErrorMessage, isAbortError, isDefinitiveClientRejection
 } from '../infrastructure';
@@ -27,6 +29,7 @@ export const PROMOTION_SUCCESS_MESSAGE_MS = 5_000;
 export const SELECTION_LIMIT_MESSAGE =
   `Selection limit reached: at most ${SELECTION_LIMIT} keywords can be added at once.`;
 const EMPTY_SELECTION_MESSAGE = 'Select at least one keyword to add.';
+const EMPTY_PROPOSAL_MESSAGE = 'No proposal keywords are available to add.';
 const STALE_SELECTION_MESSAGE =
   'The research results changed. Review your selection and try again.';
 export const PROMOTION_TIMEOUT_MESSAGE =
@@ -49,6 +52,10 @@ export type SelectionAction =
   }
   | { type: 'clear' }
   | {
+    type: 'replace';
+    keywords: string[];
+  }
+  | {
     type: 'retain';
     available: string[];
   }
@@ -67,6 +74,14 @@ export const initialSelectionState: SelectionState = {
   selected: [],
   limitMessage: null,
 };
+
+function normalizedSelection(keywords: readonly string[]): SelectionState {
+  const uniqueKeys = [...new Set(keywords.map(keywordSelectionKey).filter(Boolean))];
+  return {
+    selected: uniqueKeys.slice(0, SELECTION_LIMIT),
+    limitMessage: uniqueKeys.length > SELECTION_LIMIT ? SELECTION_LIMIT_MESSAGE : null,
+  };
+}
 
 function toggleSelection(state: SelectionState, keyword: string): SelectionState {
   const key = keywordSelectionKey(keyword);
@@ -114,6 +129,8 @@ export function reduceSelection(state: SelectionState, action: SelectionAction):
       return toggleSelection(state, action.keyword);
     case 'clear':
       return initialSelectionState;
+    case 'replace':
+      return normalizedSelection(action.keywords);
     case 'retain': {
       const availableKeys = new Set(action.available.map(keywordSelectionKey));
       return {
@@ -137,18 +154,48 @@ function findResearchKeyword(
   );
 }
 
+interface PromotionFailure {
+  message: string;
+  reconcile: boolean;
+}
+
+function describePromotionFailure(requestError: unknown): PromotionFailure {
+  if (isAbortError(requestError)) {
+    return {
+      message: PROMOTION_TIMEOUT_MESSAGE,
+      reconcile: true,
+    };
+  }
+  if (isDefinitiveClientRejection(requestError)) {
+    return {
+      message: clientRejectionMessage(requestError, 'keywords', { includeField: true }),
+      reconcile: false,
+    };
+  }
+  return {
+    message: `Adding keywords failed to return a confirmed result: ${getErrorMessage(requestError, 'keywords')}. The server may still have completed; active keywords are being refreshed.`,
+    reconcile: true,
+  };
+}
+
+export type PromotionAction = 'selected' | 'proposal';
+
 export interface UsePromoteKeywords {
   selected: string[];
   selectedCount: number;
   atLimit: boolean;
   canPromote: boolean;
+  canPromoteProposal: boolean;
   submitting: boolean;
+  submittingAction: PromotionAction | null;
   error: string | null;
   limitMessage: string | null;
   outcome: PromotionOutcome | null;
   toggle: (keyword: string) => void;
   clearSelection: () => void;
+  replaceSelection: (keywords: readonly string[]) => void;
   promote: () => Promise<void>;
+  promoteProposal: () => Promise<void>;
 }
 
 const EMPTY_RESEARCH_KEYWORDS: ResearchKeyword[] = [];
@@ -166,7 +213,7 @@ export const usePromoteKeywords = (
 ): UsePromoteKeywords => {
   const groupIds = options.groupIds ?? NO_GROUPS;
   const [selectionState, dispatchSelection] = useReducer(reduceSelection, initialSelectionState);
-  const [submitting, setSubmitting] = useState(false);
+  const [submittingAction, setSubmittingAction] = useState<PromotionAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [outcome, setOutcome] = useState<PromotionOutcome | null>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -242,7 +289,7 @@ export const usePromoteKeywords = (
       available: availableKeys,
     });
 
-    if (cancelActiveRequest()) setSubmitting(false);
+    if (cancelActiveRequest()) setSubmittingAction(null);
   }, [availableKeys, cancelActiveRequest]);
 
   const toggle = useCallback((keyword: string) => {
@@ -252,17 +299,92 @@ export const usePromoteKeywords = (
     });
   }, []);
 
-  const clearSelection = useCallback(() => {
-    dispatchSelection({ type: 'clear' });
+  const replaceSelection = useCallback((keywords: readonly string[]) => {
+    dispatchSelection({
+      type: 'replace',
+      keywords: [...keywords],
+    });
     setError(null);
     clearSuccessTimer();
     setOutcome(null);
-    if (cancelActiveRequest()) setSubmitting(false);
+    if (cancelActiveRequest()) setSubmittingAction(null);
   }, [cancelActiveRequest, clearSuccessTimer]);
+
+  const clearSelection = useCallback(() => {
+    replaceSelection([]);
+  }, [replaceSelection]);
+
+  const performPromotion = useCallback(async (
+    requestedKeywords: PromoteKeywordEntry[],
+    action: PromotionAction,
+    reconcileAfterSuccess: boolean
+  ): Promise<void> => {
+    if (activeRequestRef.current !== null) return;
+
+    const controller = new AbortController();
+    activeRequestRef.current = controller;
+    setError(null);
+    clearSuccessTimer();
+    setOutcome(null);
+    setSubmittingAction(action);
+
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, PROMOTION_TIMEOUT_MS);
+    requestTimerRef.current = timeoutId;
+
+    try {
+      const result = await promoteKeywords({
+        keywords: requestedKeywords,
+        groupIds,
+        signal: controller.signal,
+      });
+
+      if (activeRequestRef.current !== controller || !mountedRef.current) return;
+
+      setOutcome(result);
+      successTimerRef.current = setTimeout(() => {
+        successTimerRef.current = null;
+        if (mountedRef.current) setOutcome(null);
+      }, PROMOTION_SUCCESS_MESSAGE_MS);
+
+      if (reconcileAfterSuccess) {
+        dispatchSelection({
+          type: 'reconcile',
+          created: result.createdKeywords,
+          skipped: result.skippedKeywords,
+        });
+      }
+
+      const createdActiveItems = action === 'proposal'
+        ? result.createdItems.filter((item) => item.status === 'active')
+        : result.createdItems;
+      if (createdActiveItems.length > 0) onKeywordsAdded?.(createdActiveItems);
+      requestKeywordReconciliation();
+    } catch (requestError) {
+      if (activeRequestRef.current !== controller || !mountedRef.current) return;
+
+      const failure = describePromotionFailure(requestError);
+      setError(failure.message);
+      if (failure.reconcile) requestKeywordReconciliation();
+      console.error('[keywords] Error promoting keywords:', requestError);
+    } finally {
+      if (activeRequestRef.current === controller) {
+        clearRequestTimer(timeoutId);
+        activeRequestRef.current = null;
+        if (mountedRef.current) setSubmittingAction(null);
+      }
+    }
+  }, [
+    groupIds,
+    onKeywordsAdded,
+    clearRequestTimer,
+    clearSuccessTimer,
+    requestKeywordReconciliation,
+  ]);
 
   const promote = useCallback(async (): Promise<void> => {
     if (activeRequestRef.current !== null) return;
-
     if (selected.length === 0) {
       setError(EMPTY_SELECTION_MESSAGE);
       return;
@@ -280,87 +402,46 @@ export const usePromoteKeywords = (
       return;
     }
 
-    const controller = new AbortController();
-    activeRequestRef.current = controller;
-    setError(null);
-    clearSuccessTimer();
-    setOutcome(null);
-    setSubmitting(true);
+    await performPromotion(
+      requestedKeywords.filter(
+        (keyword): keyword is ResearchKeyword => keyword !== undefined
+      ),
+      'selected',
+      true
+    );
+  }, [selected, availableUniqueKeywords, availableKeys, performPromotion]);
 
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-    }, PROMOTION_TIMEOUT_MS);
-    requestTimerRef.current = timeoutId;
-
-    try {
-      const result = await promoteKeywords({
-        keywords: requestedKeywords.filter(
-          (keyword): keyword is ResearchKeyword => keyword !== undefined
-        ),
-        groupIds,
-        signal: controller.signal,
-      });
-
-      if (activeRequestRef.current !== controller || !mountedRef.current) return;
-
-      setOutcome(result);
-      successTimerRef.current = setTimeout(() => {
-        successTimerRef.current = null;
-        if (mountedRef.current) setOutcome(null);
-      }, PROMOTION_SUCCESS_MESSAGE_MS);
-
-      dispatchSelection({
-        type: 'reconcile',
-        created: result.createdKeywords,
-        skipped: result.skippedKeywords,
-      });
-
-      if (result.createdItems.length > 0) {
-        onKeywordsAdded?.(result.createdItems);
-      }
-      requestKeywordReconciliation();
-    } catch (requestError) {
-      if (activeRequestRef.current !== controller || !mountedRef.current) return;
-
-      if (isAbortError(requestError)) {
-        setError(PROMOTION_TIMEOUT_MESSAGE);
-        requestKeywordReconciliation();
-      } else if (isDefinitiveClientRejection(requestError)) {
-        setError(clientRejectionMessage(requestError, 'keywords', { includeField: true }));
-      } else {
-        setError(`Adding keywords failed to return a confirmed result: ${getErrorMessage(requestError, 'keywords')}. The server may still have completed; active keywords are being refreshed.`);
-        requestKeywordReconciliation();
-      }
-      console.error('[keywords] Error promoting keywords:', requestError);
-    } finally {
-      if (activeRequestRef.current === controller) {
-        clearRequestTimer(timeoutId);
-        activeRequestRef.current = null;
-        if (mountedRef.current) setSubmitting(false);
-      }
+  const promoteProposal = useCallback(async (): Promise<void> => {
+    if (activeRequestRef.current !== null) return;
+    if (availableUniqueKeywords.length === 0) {
+      setError(EMPTY_PROPOSAL_MESSAGE);
+      return;
     }
-  }, [
-    selected,
-    availableUniqueKeywords,
-    availableKeys,
-    groupIds,
-    onKeywordsAdded,
-    clearRequestTimer,
-    clearSuccessTimer,
-    requestKeywordReconciliation,
-  ]);
 
+    const selectedKeys = new Set(selected);
+    const requestedKeywords: PromoteKeywordEntry[] = availableUniqueKeywords.map((keyword) => ({
+      ...keyword,
+      status: selectedKeys.has(keywordSelectionKey(keyword.keyword)) ? 'active' : 'inactive',
+    }));
+    await performPromotion(requestedKeywords, 'proposal', false);
+  }, [availableUniqueKeywords, selected, performPromotion]);
+
+  const submitting = submittingAction !== null;
   return {
     selected,
     selectedCount: selected.length,
     atLimit: selected.length === SELECTION_LIMIT,
     canPromote: selected.length > 0 && !submitting,
+    canPromoteProposal: availableUniqueKeywords.length > 0 && !submitting,
     submitting,
+    submittingAction,
     error,
     limitMessage,
     outcome,
     toggle,
     clearSelection,
+    replaceSelection,
     promote,
+    promoteProposal,
   };
 };

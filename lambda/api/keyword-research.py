@@ -50,10 +50,13 @@ from shared.env_vars import resolve_table_env
 from shared.research_agent import (
     AGENT_DEFAULT_ROUNDS,
     AGENT_DEFAULT_TARGET_COUNT,
+    AGENT_DEFAULT_TRACKING_COUNT,
     AGENT_INSTRUCTION_MAX_LENGTH,
     AGENT_MAX_ROUNDS,
     AGENT_MAX_TARGET_COUNT,
+    AGENT_MAX_TRACKING_COUNT,
     AGENT_MIN_TARGET_COUNT,
+    AGENT_MIN_TRACKING_COUNT,
     AGENT_SEED_MAX_LENGTH,
     BUILTIN_TEMPLATE_ID,
     GENERIC_TEMPLATE,
@@ -344,6 +347,7 @@ def _resolve_template(template_id: str | None, system_prompt: str | None) -> dic
     'dimensions': {'required': True, 'type': list, 'source': 'body'},
     'instruction': {'type': str, 'max_length': AGENT_INSTRUCTION_MAX_LENGTH, 'default': '', 'source': 'body'},
     'target_count': {'type': int, 'min': AGENT_MIN_TARGET_COUNT, 'max': AGENT_MAX_TARGET_COUNT, 'default': AGENT_DEFAULT_TARGET_COUNT, 'source': 'body'},
+    'tracking_count': {'type': int, 'min': AGENT_MIN_TRACKING_COUNT, 'max': AGENT_MAX_TRACKING_COUNT, 'default': AGENT_DEFAULT_TRACKING_COUNT, 'source': 'body'},
     'max_rounds': {'type': int, 'min': 1, 'max': AGENT_MAX_ROUNDS, 'default': AGENT_DEFAULT_ROUNDS, 'source': 'body'},
     'template_id': {'type': str, 'max_length': 100, 'source': 'body'},
     'system_prompt': {'type': str, 'max_length': SYSTEM_PROMPT_MAX_LENGTH, 'source': 'body'},
@@ -351,7 +355,8 @@ def _resolve_template(template_id: str | None, system_prompt: str | None) -> dic
 })
 def _start_agent(
     event: dict[str, Any], context: Any, body: dict, seed: str, country: str, language: str, dimensions: list,
-    instruction: str, target_count: int, max_rounds: int, template_id: str | None, system_prompt: str | None, group_id: str | None,
+    instruction: str, target_count: int, tracking_count: int, max_rounds: int, template_id: str | None,
+    system_prompt: str | None, group_id: str | None,
 ) -> dict[str, Any]:
     """POST /api/keyword-research/agent — start a research-agent job.
 
@@ -368,6 +373,12 @@ def _start_agent(
         return validation_error('country must be a two-letter country code (e.g. es)', event, 'country')
     if not _is_code(language):
         return validation_error('language must be a two-letter language code (e.g. es)', event, 'language')
+    if 'tracking_count' in body and (
+        body.get('tracking_count') is None or isinstance(body.get('tracking_count'), bool)
+    ):
+        return validation_error('tracking_count must be an integer', event, 'tracking_count')
+    if 'tracking_count' in body and tracking_count > target_count:
+        return validation_error('tracking_count cannot exceed target_count', event, 'tracking_count')
     if system_prompt is not None and not system_prompt.strip():
         return validation_error('system_prompt cannot be blank', event, 'system_prompt')
     if group_id and not groups_table.get_item(Key={'id': group_id}).get('Item'):
@@ -387,7 +398,10 @@ def _start_agent(
 
     config = build_agent_config(
         seed=seed, country=country, language=language, dimensions=dimensions, instruction=instruction,
-        target_count=target_count, max_rounds=max_rounds, group_id=group_id,
+        target_count=target_count,
+        tracking_count=tracking_count if 'tracking_count' in body else None,
+        max_rounds=max_rounds,
+        group_id=group_id,
         subject=template['subject'], audience=template['audience'], dimension_catalog=template['dimensions'],
     )
     request: dict[str, Any] = {

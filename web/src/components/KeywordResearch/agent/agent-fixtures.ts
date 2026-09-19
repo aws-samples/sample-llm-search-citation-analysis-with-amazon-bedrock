@@ -1,5 +1,5 @@
 import type {
-  AgentDimensionOption, KeywordResearchItem, ResearchKeyword, ResearchTemplate
+  AgentConfig, AgentDimensionOption, Keyword, KeywordResearchItem, ResearchKeyword, ResearchTemplate
 } from '../../../types';
 
 /** The hotels catalogue the built-in default template ships (and legacy runs are backfilled with). */
@@ -54,6 +54,34 @@ export const CAFE_DIMENSIONS: AgentDimensionOption[] = [
   },
 ];
 
+export const promotedActiveKeywordFixture = {
+  id: 'k1',
+  keyword: 'hotel coruña centro',
+  status: 'active',
+  created_at: '2026-09-18T10:07:00Z',
+} satisfies Keyword;
+
+export const promotedInactiveKeywordFixture = {
+  id: 'k2',
+  keyword: 'escapada coruña',
+  status: 'inactive',
+  created_at: '2026-09-18T10:07:00Z',
+} satisfies Keyword;
+
+export const selectedPromotionResponseFixture = {
+  created: 1,
+  skipped: 0,
+  created_keywords: [promotedActiveKeywordFixture],
+  skipped_keywords: [],
+};
+
+export const fullPromotionResponseFixture = {
+  created: 2,
+  skipped: 0,
+  created_keywords: [promotedActiveKeywordFixture, promotedInactiveKeywordFixture],
+  skipped_keywords: [],
+};
+
 export function buildAgentKeyword(overrides: Partial<ResearchKeyword> = {}): ResearchKeyword {
   return {
     keyword: 'hotel coruña centro',
@@ -62,7 +90,28 @@ export function buildAgentKeyword(overrides: Partial<ResearchKeyword> = {}): Res
     relevance: 9,
     dimension: 'destination',
     rationale: 'core demand',
+    tracking: true,
+    tracking_score: 904,
+    tracking_reason: 'Relevance 9/10; transactional intent; 1 provider.',
     providers: ['perplexity'],
+    ...overrides,
+  };
+}
+
+export function buildAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
+  return {
+    seed: 'Hotel Gran Marino',
+    country: 'es',
+    language: 'es',
+    dimensions: ['destination', 'audience'],
+    instruction: '',
+    target_count: 60,
+    tracking_count: 2,
+    max_rounds: 2,
+    group_id: 'g1',
+    subject: 'hotel',
+    audience: 'travellers',
+    dimension_catalog: HOTEL_DIMENSIONS,
     ...overrides,
   };
 }
@@ -77,6 +126,7 @@ export function buildAgentJob(overrides: Partial<KeywordResearchItem> = {}): Key
     status: 'completed',
     keyword_count: 3,
     candidates_count: 41,
+    tracking_count: 2,
     proposal_source: 'model',
     created_at: '2026-09-18T10:00:00Z',
     finished_at: '2026-09-18T10:06:00Z',
@@ -84,19 +134,7 @@ export function buildAgentJob(overrides: Partial<KeywordResearchItem> = {}): Key
     steps_total: 4,
     steps_done: 4,
     steps_failed: 0,
-    config: {
-      seed: 'Hotel Gran Marino',
-      country: 'es',
-      language: 'es',
-      dimensions: ['destination', 'audience'],
-      instruction: '',
-      target_count: 60,
-      max_rounds: 2,
-      group_id: 'g1',
-      subject: 'hotel',
-      audience: 'travellers',
-      dimension_catalog: HOTEL_DIMENSIONS,
-    },
+    config: buildAgentConfig(),
     template_id: 'builtin-default',
     template_name: 'Hotels',
     system_prompt: 'You are a hotel SEO researcher.',
@@ -195,6 +233,8 @@ export function buildAgentJob(overrides: Partial<KeywordResearchItem> = {}): Key
         relevance: 8,
         dimension: 'audience',
         rationale: 'family demand',
+        tracking_score: 805,
+        tracking_reason: 'Relevance 8/10; commercial intent; 2-provider agreement; Google suggestion signals.',
         providers: ['perplexity', 'serpapi'],
       }),
       buildAgentKeyword({
@@ -204,6 +244,9 @@ export function buildAgentJob(overrides: Partial<KeywordResearchItem> = {}): Key
         relevance: 6,
         dimension: 'weather',
         rationale: '',
+        tracking: false,
+        tracking_score: 602,
+        tracking_reason: 'Relevance 6/10; informational intent; 1 provider.',
         providers: ['openai'],
       }),
     ],

@@ -150,6 +150,22 @@ def build_notes(research_keyword):
     return '; '.join(parts)
 
 
+def _entry_status_error(index, research_keyword):
+    """Field-specific rejection for an invalid per-keyword status override."""
+    if 'status' not in research_keyword:
+        return None
+    status = research_keyword['status']
+    field = f'keywords[{index}].status'
+    if not isinstance(status, str):
+        return {'message': 'status must be a string', 'field': field}
+    if status not in ALLOWED_STATUSES:
+        return {
+            'message': f"Invalid status '{_echoed(status)}' (allowed: {', '.join(ALLOWED_STATUSES)})",
+            'field': field,
+        }
+    return None
+
+
 def validate_request(keywords, status, priority):
     """Validate the complete promotion request before any DynamoDB access."""
     if not isinstance(keywords, list) or not keywords:
@@ -163,6 +179,10 @@ def validate_request(keywords, status, priority):
         field_prefix = f'keywords[{index}]'
         if not isinstance(research_keyword, dict):
             return _rejection('Each keyword must be a JSON object', field_prefix)
+
+        entry_status_error = _entry_status_error(index, research_keyword)
+        if entry_status_error:
+            return entry_status_error, None, None
 
         keyword_value = research_keyword.get('keyword')
         if keyword_value is None:
@@ -270,14 +290,14 @@ def write_items(table, items):
 
 
 def create_items(to_create, status, priority):
-    """Build keyword-table items for accepted research keywords."""
+    """Build keyword-table items, applying each optional status override."""
     timestamp = get_timestamp()
 
     return [
         build_keyword_item(
             entry['keyword'],
             timestamp=timestamp,
-            status=status,
+            status=entry.get('status', status),
             priority=priority,
             notes=build_notes(entry),
         )
