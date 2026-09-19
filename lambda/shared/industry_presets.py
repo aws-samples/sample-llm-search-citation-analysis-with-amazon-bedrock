@@ -29,7 +29,17 @@ class IndustryPreset(TypedDict):
     extraction_focus: str
 
 
+DEFAULT_INDUSTRY_ID = "general"
+
+
 INDUSTRY_PRESETS: dict[str, IndustryPreset] = {
+    "general": {
+        "name": "General",
+        "description": "Track brands and companies in any industry",
+        "entity_types": [],
+        "example_brands": [],
+        "extraction_focus": "brand and company recommendations",
+    },
     "hotels": {
         "name": "Hotels & Hospitality",
         "description": "Track hotel brands, chains, and individual properties",

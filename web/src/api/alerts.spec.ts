@@ -9,12 +9,14 @@ import {
   fetchContentChanges,
   InvalidAlertRequestError,
   InvalidAlertResponseError,
+  sendTestNotification,
   updateAlertSettings,
 } from './alerts';
 import type { AlertAcknowledgement } from '../types';
 import {
   PUBLIC_DEFAULT_ALERT_SETTINGS,
   buildAlertSettings,
+  buildAlertTestNotificationResponse,
   buildAlertsResponse,
   buildContentChangeMarker,
   buildContentChangesResponse,
@@ -142,6 +144,36 @@ describe('alerts API', () => {
         '/alerts/settings',
         update,
         { allowStructured4xx: true }
+      );
+    });
+
+    it('posts an empty object when requesting a test notification', async () => {
+      const response = buildAlertTestNotificationResponse();
+      const controller = new AbortController();
+      mockApiPost.mockResolvedValue(response);
+
+      const received = await sendTestNotification(controller.signal);
+
+      expect(received).toStrictEqual(response);
+      expect(mockApiPost).toHaveBeenCalledWith(
+        '/alerts/test-notification',
+        {},
+        {
+          allowStructured4xx: true,
+          signal: controller.signal,
+        }
+      );
+    });
+
+    it('throws InvalidAlertResponseError when the test response is malformed', async () => {
+      mockApiPost.mockResolvedValue({
+        success: true,
+        message: 'Unexpected response',
+      });
+
+      await expect(sendTestNotification()).rejects.toThrow(InvalidAlertResponseError);
+      await expect(sendTestNotification()).rejects.toThrow(
+        'Alerts API returned an invalid test-notification response'
       );
     });
   });

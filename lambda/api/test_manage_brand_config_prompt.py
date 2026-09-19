@@ -12,7 +12,12 @@ from __future__ import annotations
 
 import json
 import os
+from unittest.mock import MagicMock
 
+import pytest
+
+from shared.industry_presets import DEFAULT_INDUSTRY_ID
+from testing.events import api_gateway_event, parse_response
 from testing.module_loader import load_handler_module
 
 # The table name the module reads at import time, so it loads without touching AWS.
@@ -152,3 +157,119 @@ class TestDefaultPrompt:
         prompt = _mod.generate_default_prompt('Custom Industry', 'brand recommendations', [])
 
         assert 'ENTITY TYPES TO EXTRACT:\n- Brand names and company names\n' in prompt
+
+
+
+class TestGenericIndustryDefaults:
+    def test_returns_general_when_config_has_not_been_saved(self, monkeypatch) -> None:
+        monkeypatch.setattr(_mod, 'get_config', lambda: None)
+        monkeypatch.setattr(_mod, 'get_timestamp', lambda: '2026-10-01T00:00:00Z')
+
+        status, payload = parse_response(_mod._get_config(api_gateway_event('GET', '/api/brand-config'), None))
+
+        assert status == 200
+        assert payload['industry'] == 'general'
+
+    def test_preserves_hotels_when_stored_config_selects_hotels(self, monkeypatch) -> None:
+        stored_config = {'config_id': 'default', 'industry': 'hotels'}
+        monkeypatch.setattr(_mod, 'get_config', lambda: stored_config)
+
+        status, payload = parse_response(_mod._get_config(api_gateway_event('GET', '/api/brand-config'), None))
+
+        assert status == 200
+        assert payload == stored_config
+
+    def test_resets_to_general_when_defaults_are_restored(self, monkeypatch) -> None:
+        saved_config = {
+            **_mod._default_config(),
+            'config_id': 'default',
+            'updated_at': '2026-10-01T00:00:00Z',
+        }
+        save_config = MagicMock(return_value=saved_config)
+        monkeypatch.setattr(_mod, 'save_config', save_config)
+        event = api_gateway_event(
+            'DELETE',
+            '/api/brand-config',
+            claims={'cognito:groups': _mod.ADMIN_GROUP},
+        )
+
+        status, payload = parse_response(_mod._reset_config(event, None))
+
+        assert status == 200
+        assert payload['config']['industry'] == 'general'
+        save_config.assert_called_once_with(_mod._default_config())
+
+    def test_uses_general_context_when_helper_industries_are_omitted(self, monkeypatch) -> None:
+        prompts: list[str] = []
+
+        def capture_prompt(prompt: str, *_args, **_kwargs) -> str:
+            prompts.append(prompt)
+            return '{}'
+
+        monkeypatch.setattr(_mod, 'invoke_bedrock', capture_prompt)
+
+        _mod.expand_brand('Acme')
+        _mod.expand_brands(['Acme'])
+        _mod.find_competitors(['Acme'])
+
+        assert 'You are a brand expert for the General industry.' in prompts[0]
+        assert 'You are a brand expert for the General industry.' in prompts[1]
+        assert 'You are a competitive intelligence expert for the General industry.' in prompts[2]
+
+    @pytest.mark.parametrize(
+        ('path', 'body', 'function_name', 'expected_arguments'),
+        [
+            pytest.param(
+                '/api/brand-config/expand',
+                {'brand_name': 'Acme'},
+                'expand_brand',
+                ('Acme', DEFAULT_INDUSTRY_ID, []),
+                id='expand-brand',
+            ),
+            pytest.param(
+                '/api/brand-config/expand-all',
+                {'existing_brands': ['Acme']},
+                'expand_brands',
+                (['Acme'], DEFAULT_INDUSTRY_ID, 'first_party'),
+                id='expand-all-brands',
+            ),
+            pytest.param(
+                '/api/brand-config/find-competitors',
+                {'first_party_brands': ['Acme']},
+                'find_competitors',
+                (['Acme'], DEFAULT_INDUSTRY_ID, []),
+                id='find-competitors',
+            ),
+        ],
+    )
+    def test_passes_general_when_request_omits_industry(
+        self,
+        monkeypatch,
+        path: str,
+        body: dict[str, object],
+        function_name: str,
+        expected_arguments: tuple[object, ...],
+    ) -> None:
+        operation = MagicMock(return_value={})
+        monkeypatch.setattr(_mod, function_name, operation)
+        event = api_gateway_event(
+            'POST',
+            path,
+            body=body,
+            claims={'cognito:groups': _mod.ADMIN_GROUP},
+            resource=path,
+        )
+
+        status, _payload = parse_response(_mod.handler(event, None))
+
+        assert status == 200
+        operation.assert_called_once_with(*expected_arguments)
+
+    def test_uses_custom_context_when_explicit_industry_is_unknown(self) -> None:
+        context = _mod._industry_context('legacy-industry')
+
+        assert context == _mod._IndustryContext(
+            name='Custom Industry',
+            entity_types='brands and companies',
+            examples='major brands in this industry',
+        )

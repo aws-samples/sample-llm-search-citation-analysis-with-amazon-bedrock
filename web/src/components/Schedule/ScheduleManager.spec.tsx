@@ -140,6 +140,16 @@ describe('ScheduleManager', () => {
   });
 
   describe('creating a schedule', () => {
+    it('shows a generic brand-analysis name example', async () => {
+      render(<ScheduleManager {...buildProps()} />);
+      await openCreateForm();
+
+      expect(screen.getByLabelText('Schedule name')).toHaveAttribute(
+        'placeholder',
+        'e.g. Weekly brand analysis'
+      );
+    });
+
     it('defaults to running all keywords daily at 09:00 UTC, enabled', async () => {
       render(<ScheduleManager {...buildProps()} />);
       await openCreateForm();

@@ -15,8 +15,9 @@ REQUIRED_FIELDS = {"name", "description", "entity_types", "example_brands", "ext
 
 
 class TestIndustryPresetCatalog:
-    def test_catalog_lists_the_eight_industries_plus_the_custom_fallback(self) -> None:
+    def test_catalog_lists_general_before_the_eight_industries_and_custom_fallback(self) -> None:
         assert list(industry_presets.INDUSTRY_PRESETS) == [
+            "general",
             "hotels",
             "restaurants",
             "airlines",
@@ -56,9 +57,20 @@ class TestIndustryPresetCatalog:
                 f"{industry_id!r} example_brands is not a list"
             )
 
+    def test_general_preset_has_the_canonical_generic_values(self) -> None:
+        assert industry_presets.INDUSTRY_PRESETS["general"] == {
+            "name": "General",
+            "description": "Track brands and companies in any industry",
+            "entity_types": [],
+            "example_brands": [],
+            "extraction_focus": "brand and company recommendations",
+        }
+
+    def test_default_industry_id_selects_general(self) -> None:
+        assert industry_presets.DEFAULT_INDUSTRY_ID == "general"
+
     def test_custom_preset_has_empty_entity_types_and_example_brands(self) -> None:
-        """`custom` is the fallback for deployments that haven't picked
-        an industry. Dashboard UX depends on it starting empty."""
+        """`custom` remains the fallback for unrecognized explicit ids."""
         custom = industry_presets.INDUSTRY_PRESETS["custom"]
         assert custom["entity_types"] == []
         assert custom["example_brands"] == []
@@ -79,10 +91,24 @@ class TestGetPreset:
         preset = industry_presets.get_preset("")
         assert preset["name"] == "Custom Industry"
 
-    def test_preserves_hotels_example_brands(self) -> None:
-        """Regression guard: example_brands are shown in the dashboard
-        industry selector. Losing them during consolidation would break
-        the UI."""
+    def test_preserves_hotels_preset_when_general_is_the_default(self) -> None:
         preset = industry_presets.get_preset("hotels")
-        assert "Marriott" in preset["example_brands"]
-        assert "Hilton" in preset["example_brands"]
+        assert preset == {
+            "name": "Hotels & Hospitality",
+            "description": "Track hotel brands, chains, and individual properties",
+            "entity_types": [
+                "hotel chains",
+                "hotel brands",
+                "individual properties",
+                "resorts",
+                "boutique hotels",
+            ],
+            "example_brands": [
+                "Marriott",
+                "Hilton",
+                "Hyatt",
+                "InterContinental",
+                "Four Seasons",
+            ],
+            "extraction_focus": "hotel and accommodation recommendations",
+        }

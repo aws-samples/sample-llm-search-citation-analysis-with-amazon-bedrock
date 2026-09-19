@@ -2,6 +2,13 @@ import type {
   BrandConfig, IndustryPresets 
 } from '../types';
 
+export const DEFAULT_BRAND_INDUSTRY = 'general';
+
+export const resolveBrandIndustryPreset = (
+  presets: IndustryPresets | null | undefined,
+  industry: string
+): IndustryPresets[string] | undefined => presets?.[industry] ?? presets?.custom;
+
 const generateDefaultPrompt = (
   industryName: string,
   extractionFocus: string,
@@ -56,6 +63,18 @@ JSON OUTPUT:`;
 };
 
 export const DEFAULT_PRESETS: IndustryPresets = {
+  general: {
+    name: 'General',
+    description: 'Track brands and companies in any industry',
+    entity_types: [],
+    example_brands: [],
+    extraction_focus: 'brand and company recommendations',
+    default_prompt: generateDefaultPrompt(
+      'General',
+      'brand and company recommendations',
+      []
+    ),
+  },
   hotels: {
     name: 'Hotels & Hospitality',
     description: 'Track hotel brands, chains, and individual properties',
@@ -164,7 +183,7 @@ export const DEFAULT_PRESETS: IndustryPresets = {
 
 export const DEFAULT_CONFIG: BrandConfig = {
   config_id: 'default',
-  industry: 'hotels',
+  industry: DEFAULT_BRAND_INDUSTRY,
   extract_brands: true,
   include_sentiment: true,
   include_ranking_context: true,

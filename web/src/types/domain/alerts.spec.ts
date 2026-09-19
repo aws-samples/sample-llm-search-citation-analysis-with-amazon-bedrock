@@ -4,6 +4,7 @@ import {
 import {
   isAlertAcknowledgement,
   isAlertSettings,
+  isAlertTestNotificationResponse,
   isAlertsResponse,
   isContentChangeMarker,
   isContentChangesResponse,
@@ -13,6 +14,7 @@ import {
   PUBLIC_DEFAULT_ALERT_SETTINGS,
   buildAlertItem,
   buildAlertSettings,
+  buildAlertTestNotificationResponse,
   buildAlertsResponse,
   buildContentChangeMarker,
   buildContentChangesResponse,
@@ -160,6 +162,31 @@ describe('alert runtime decoders', () => {
         id: 'alert-1',
         status: 'open',
       })).toBe(false);
+    });
+  });
+
+  describe('isAlertTestNotificationResponse', () => {
+    it('accepts the exact delivery-accepted response', () => {
+      expect(isAlertTestNotificationResponse(buildAlertTestNotificationResponse())).toBe(true);
+    });
+
+    it.each([
+      ['success is false', {
+        ...buildAlertTestNotificationResponse(),
+        success: false,
+      }],
+      ['the message differs', {
+        ...buildAlertTestNotificationResponse(),
+        message: 'Notification sent.',
+      }],
+      ['the message is missing', { success: true }],
+      ['an unknown field is present', {
+        ...buildAlertTestNotificationResponse(),
+        delivery_id: 'delivery-1',
+      }],
+      ['the payload is null', null],
+    ])('rejects the response when %s', (_condition, candidate) => {
+      expect(isAlertTestNotificationResponse(candidate)).toBe(false);
     });
   });
 

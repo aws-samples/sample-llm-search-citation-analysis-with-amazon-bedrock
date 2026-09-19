@@ -63,15 +63,28 @@ function ThresholdField({
 interface AlertSettingsFormProps {
   readonly settings: AlertSettings;
   readonly isAdmin: boolean;
+  readonly loading: boolean;
   readonly saving: boolean;
+  readonly testing: boolean;
   readonly onSave: (settings: AlertSettingsUpdate) => Promise<unknown>;
+  readonly onSendTestNotification: () => Promise<unknown>;
 }
 
 export function AlertSettingsForm({
-  settings, isAdmin, saving, onSave
+  settings,
+  isAdmin,
+  loading,
+  saving,
+  testing,
+  onSave,
+  onSendTestNotification,
 }: AlertSettingsFormProps) {
   const [values, setValues] = useState<AlertSettingsFormValues>(() => alertSettingsFormValues(settings));
   const [validationError, setValidationError] = useState<string | null>(null);
+  const busy = loading || saving || testing;
+  const hasConfirmedSubscription = settings.subscription_statuses.some(
+    (subscription) => subscription.status === 'confirmed'
+  );
 
   useEffect(() => {
     setValues(alertSettingsFormValues(settings));
@@ -97,7 +110,7 @@ export function AlertSettingsForm({
 
   return (
     <form onSubmit={handleSubmit} noValidate className="space-y-5">
-      <fieldset disabled={!isAdmin || saving} className="space-y-5">
+      <fieldset disabled={!isAdmin || busy} className="space-y-5">
         <legend className="sr-only">Alert delivery and thresholds</legend>
         <label className="flex items-start gap-3 rounded-lg border border-gray-200 p-4">
           <input
@@ -170,13 +183,24 @@ export function AlertSettingsForm({
           />
         </label>
 
-        <button
-          type="submit"
-          disabled={!isAdmin || saving}
-          className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {saving ? 'Saving…' : 'Save alert settings'}
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="submit"
+            className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save alert settings'}
+          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => { void onSendTestNotification(); }}
+              disabled={!hasConfirmedSubscription || busy}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Send test notification
+            </button>
+          )}
+        </div>
       </fieldset>
 
       {!isAdmin && (

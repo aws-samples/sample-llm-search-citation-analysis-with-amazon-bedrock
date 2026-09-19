@@ -1,9 +1,38 @@
 import { useAlertSettings } from '../../hooks/useAlerts';
+import type { AlertMutationOutcome } from '../../hooks/useAlerts';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { AlertSettingsForm } from './AlertSettingsForm';
 import { ContentChangeForm } from './ContentChangeForm';
 
 interface AlertsConfigProps { readonly isAdmin: boolean; }
+
+interface AlertOutcomeNoticeProps {
+  readonly outcome: AlertMutationOutcome;
+  readonly warnings?: readonly string[];
+}
+
+function AlertOutcomeNotice({
+  outcome, warnings = []
+}: AlertOutcomeNoticeProps) {
+  return (
+    <div
+      className={`rounded-lg border p-3 text-sm ${outcome.success
+        ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+        : 'border-red-200 bg-red-50 text-red-700'}`}
+    >
+      {outcome.success ? (
+        <output>{outcome.message}</output>
+      ) : (
+        <p role="alert">{outcome.message}</p>
+      )}
+      {warnings.length > 0 && (
+        <ul className="mt-2 list-disc space-y-1 pl-5">
+          {warnings.map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export function AlertsConfig({ isAdmin }: AlertsConfigProps) {
   const {
@@ -12,8 +41,11 @@ export function AlertsConfig({ isAdmin }: AlertsConfigProps) {
     error,
     saving,
     saveOutcome,
+    testing,
+    testOutcome,
     refresh,
     saveSettings,
+    sendTestNotification,
   } = useAlertSettings();
   const {
     groups,
@@ -33,7 +65,7 @@ export function AlertsConfig({ isAdmin }: AlertsConfigProps) {
         <button
           type="button"
           onClick={() => { void refresh(); }}
-          disabled={loading || saving}
+          disabled={loading || saving || testing}
           className="self-start rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
         >
           Refresh
@@ -52,29 +84,19 @@ export function AlertsConfig({ isAdmin }: AlertsConfigProps) {
         <AlertSettingsForm
           settings={settings}
           isAdmin={isAdmin}
+          loading={loading}
           saving={saving}
+          testing={testing}
           onSave={saveSettings}
+          onSendTestNotification={sendTestNotification}
         />
       )}
 
       {saveOutcome !== null && (
-        <div
-          className={`rounded-lg border p-3 text-sm ${saveOutcome.success
-            ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-            : 'border-red-200 bg-red-50 text-red-700'}`}
-        >
-          {saveOutcome.success ? (
-            <output>{saveOutcome.message}</output>
-          ) : (
-            <p role="alert">{saveOutcome.message}</p>
-          )}
-          {saveOutcome.warnings.length > 0 && (
-            <ul className="mt-2 list-disc space-y-1 pl-5">
-              {saveOutcome.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-            </ul>
-          )}
-        </div>
+        <AlertOutcomeNotice outcome={saveOutcome} warnings={saveOutcome.warnings} />
       )}
+
+      {testOutcome !== null && <AlertOutcomeNotice outcome={testOutcome} />}
 
       <ContentChangeForm
         groups={groups}

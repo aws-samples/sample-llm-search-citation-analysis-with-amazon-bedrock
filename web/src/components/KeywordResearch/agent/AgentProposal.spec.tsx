@@ -123,6 +123,15 @@ describe('AgentProposal', () => {
     expect(screen.getByLabelText('2 selected active tracked keywords, 1 unselected inactive library keywords')).toBeInTheDocument();
   });
 
+  it('explains generic ways to organise an optional keyword group', () => {
+    const job = buildAgentJob();
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+
+    expect(screen.getByText(
+      'Choose an optional group, for example by brand, market, campaign, or location.'
+    )).toBeInTheDocument();
+  });
+
   it('preselects the destination group from the run brief', () => {
     const job = buildAgentJob();
     render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);

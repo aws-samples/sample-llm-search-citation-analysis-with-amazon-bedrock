@@ -13,7 +13,18 @@ from testing.module_loader import load_handler_module
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def test_dispatches_alert_paths_to_manage_alerts_handler(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ('method', 'path'),
+    [
+        ('GET', '/api/alerts/settings'),
+        ('POST', '/api/alerts/test-notification'),
+    ],
+)
+def test_dispatches_alert_paths_to_manage_alerts_handler(
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    path: str,
+) -> None:
     router = load_handler_module(
         _API_DIR,
         'config-mgmt.py',
@@ -23,9 +34,9 @@ def test_dispatches_alert_paths_to_manage_alerts_handler(monkeypatch: pytest.Mon
     loader_get = MagicMock(return_value=child)
     monkeypatch.setattr(HandlerLoader, 'get', loader_get)
     event = {
-        'httpMethod': 'GET',
-        'resource': '/api/alerts/settings',
-        'path': '/api/alerts/settings',
+        'httpMethod': method,
+        'resource': path,
+        'path': path,
     }
 
     response = router.handler(event, None)

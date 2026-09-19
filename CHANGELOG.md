@@ -9,6 +9,38 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.13.0] - 2026-09-19
+
+Alert delivery can be tested from Settings, fresh installations start with an
+industry-neutral brand profile, and the crawler uses least-privilege AgentCore
+browser permissions.
+
+### Added
+
+- **Send test notification.** Administrators can send a fixed, server-generated
+  SNS test message after at least one persisted notification recipient has
+  confirmed its subscription. The action revalidates settings and subscription
+  state server-side, exposes pending/success/failure UI states, and never writes
+  a synthetic KPI alert.
+- A General brand preset for fresh, reset and omitted-industry configurations.
+  Existing stored Hotels configurations and the built-in Hotels research
+  template remain unchanged.
+
+### Changed
+
+- Generic screens use industry-neutral group, schedule, keyword-expansion and
+  query-prompt examples instead of assuming every account represents a hotel.
+- Runtime domain validation accepts arbitrary input explicitly and narrows it
+  safely, removing the final two Pyright argument suppressions.
+
+### Security
+
+- The crawler role no longer grants `bedrock-agentcore:*`, `bedrock:InvokeAgent`
+  or `bedrock:GetAgent` on all resources. It can only connect, start and stop
+  sessions on the pre-created AgentCore browser ARN.
+- The web mutation-testing toolchain overrides vulnerable `qs<=6.15.3` with
+  patched `qs@6.16.0`; no application runtime dependency uses this package.
+
 ## [2.12.0] - 2026-09-19
 
 Research-agent reliability fixes from the 2.5.0 follow-up, and every local

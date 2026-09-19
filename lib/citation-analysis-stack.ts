@@ -891,26 +891,8 @@ export class CitationAnalysisStack extends cdk.Stack {
       resources: [crawledContentTable.tableArn],
     }));
 
-    // Grant Crawler Lambda access to Bedrock for AgentCore and LLM summarization
+    // Grant Crawler Lambda access to Bedrock for LLM summarization.
     crawlerLambdaRole.addToPolicy(claudeInvokeModelStatement(this));
-
-    // Grant Crawler Lambda access to Bedrock AgentCore browser capabilities
-    crawlerLambdaRole.addToPolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'bedrock:InvokeAgent',
-        'bedrock:GetAgent',
-      ],
-      resources: ['*'], // AgentCore requires wildcard for browser sessions
-    }));
-
-    // Grant Crawler Lambda full access to Bedrock AgentCore for browser automation
-    // Using wildcard actions due to undocumented WebSocket stream permissions
-    crawlerLambdaRole.addToPolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: ['bedrock-agentcore:*'],
-      resources: ['*'],
-    }));
 
     // Screenshots are the only objects this function writes.
     screenshotsBucket.grantWrite(crawlerLambdaRole, 'screenshots/*');
@@ -1140,6 +1122,16 @@ export class CitationAnalysisStack extends cdk.Stack {
       },
       executionRoleArn: browserSigningRole.roleArn,
     });
+
+    crawlerLambdaRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'bedrock-agentcore:ConnectBrowserAutomationStream',
+        'bedrock-agentcore:StartBrowserSession',
+        'bedrock-agentcore:StopBrowserSession',
+      ],
+      resources: [crawlerBrowser.attrBrowserArn],
+    }));
 
     // Crawler Lambda Function - Uses ZIP deployment with crawler layer
     const crawlerLogGroup = new logs.LogGroup(this, 'CrawlerLogGroup', {
@@ -2092,7 +2084,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     contentChangesTable.grantReadWriteData(configMgmtFunction);
     configMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
-      actions: ['sns:ListSubscriptionsByTopic', 'sns:Subscribe'],
+      actions: ['sns:ListSubscriptionsByTopic', 'sns:Publish', 'sns:Subscribe'],
       resources: [kpiAlertsTopic.topicArn],
     }));
     configMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
@@ -2100,6 +2092,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       actions: ['sns:Unsubscribe'],
       resources: [`${kpiAlertsTopic.topicArn}:*`],
     }));
+    kpiAlertsKey.grantEncryptDecrypt(configMgmtFunction);
     // POST /api/schedules/{id}/run starts an analysis with the schedule's scope.
     stateMachine.grantStartExecution(configMgmtFunction);
     openaiSecret.grantRead(configMgmtFunction);
@@ -2652,6 +2645,9 @@ export class CitationAnalysisStack extends cdk.Stack {
     // KPI alert history, singleton settings, and explicit content markers.
     const alertsResource = apiResource.addResource('alerts');
     alertsResource.addMethod('GET', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+
+    const alertTestNotificationResource = alertsResource.addResource('test-notification');
+    alertTestNotificationResource.addMethod('POST', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
 
     const alertIdResource = alertsResource.addResource('{id}');
     const alertAcknowledgeResource = alertIdResource.addResource('acknowledge');

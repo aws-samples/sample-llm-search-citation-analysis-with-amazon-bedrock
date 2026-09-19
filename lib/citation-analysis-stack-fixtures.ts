@@ -244,6 +244,12 @@ export function statementActions(statement: unknown): string[] {
     .filter((entry): entry is string => typeof entry === 'string');
 }
 
+function statementResources(statement: unknown): unknown[] {
+  const resource = resolvePath(statement, ['Resource']);
+  if (resource === undefined) return [];
+  return Array.isArray(resource) ? resource : [resource];
+}
+
 function policyAttachedToRole(policy: unknown, roleLogicalId: string): boolean {
   const attachedRoles = resolvePath(policy, ['Properties', 'Roles']);
   return (Array.isArray(attachedRoles) ? attachedRoles : [])
@@ -557,15 +563,28 @@ export function extractRoleTableActions(
   return extractRoleActionsOn(template, roleLogicalId, tableLogicalId);
 }
 
+export interface IamPolicyStatementSnapshot {
+  actions: string[];
+  resources: unknown[];
+}
+
 export interface CrawlerInfrastructureSnapshot {
   crawledContentTableIndexes: unknown;
   crawlerEnvVars: Record<string, unknown>;
   crawlerRoleCrawledContentActions: string[];
+  crawlerBrowserLogicalId: string;
+  crawlerRoleBrowserStatements: IamPolicyStatementSnapshot[];
   browserSigningRoleActions: string[];
   browserSigningTrustConditions: unknown;
 }
 
-/** Crawler-specific synthesized values shared by the cache and signing-role suites. */
+function isCrawlerBrowserAction(action: string): boolean {
+  return action.startsWith('bedrock-agentcore:')
+    || action === 'bedrock:GetAgent'
+    || action === 'bedrock:InvokeAgent';
+}
+
+/** Crawler-specific synthesized values shared by the cache and browser-security suites. */
 export function extractCrawlerInfrastructureSnapshot(
   template: Template
 ): CrawlerInfrastructureSnapshot {
@@ -573,6 +592,18 @@ export function extractCrawlerInfrastructureSnapshot(
   const crawlerRoleName = 'CitationAnalysis-CrawlerLambdaRole';
   const crawledContentTableName = 'CitationAnalysis-CrawledContent';
   const browserSigningRoleName = 'CitationAnalysis-BrowserSigningRole';
+  const crawlerRoleId = findLogicalIdByName(
+    template,
+    'AWS::IAM::Role',
+    'RoleName',
+    crawlerRoleName
+  );
+  const crawlerBrowserLogicalId = findLogicalIdByName(
+    template,
+    'AWS::BedrockAgentCore::BrowserCustom',
+    'Name',
+    'citation_analysis_crawler'
+  );
   const browserSigningRoleId = findLogicalIdByName(
     template,
     'AWS::IAM::Role',
@@ -582,6 +613,12 @@ export function extractCrawlerInfrastructureSnapshot(
   const browserSigningRoles = template.findResources('AWS::IAM::Role', {
     Properties: { RoleName: browserSigningRoleName },
   });
+  const crawlerRoleBrowserStatements = allowStatementsOfRole(template, crawlerRoleId)
+    .filter((statement) => statementActions(statement).some(isCrawlerBrowserAction))
+    .map((statement) => ({
+      actions: sortedUnique(statementActions(statement)),
+      resources: statementResources(statement),
+    }));
 
   return {
     crawledContentTableIndexes: extractTableProperty(
@@ -595,6 +632,8 @@ export function extractCrawlerInfrastructureSnapshot(
       crawlerRoleName,
       crawledContentTableName
     ),
+    crawlerBrowserLogicalId,
+    crawlerRoleBrowserStatements,
     browserSigningRoleActions: sortedUnique(
       allowStatementsOfRole(template, browserSigningRoleId).flatMap(statementActions)
     ),

@@ -38,10 +38,13 @@ import { mockApiPost } from './apiClientMock-fixtures';
 
 describe('KeywordExpansion', () => {
   describe('initial render', () => {
-    it('renders seed keyword input', () => {
+    it('shows a generic project-management seed example', () => {
       render(<KeywordExpansion {...buildProps()} />);
 
-      expect(screen.getByPlaceholderText(/e\.g\., best hotels/i)).toBeInTheDocument();
+      expect(screen.getByRole('textbox')).toHaveAttribute(
+        'placeholder',
+        'e.g. project management software'
+      );
     });
 
     it('renders industry selector', () => {
@@ -62,13 +65,24 @@ describe('KeywordExpansion', () => {
       const onExpand = vi.fn();
       render(<KeywordExpansion {...buildProps({ onExpand })} />);
 
-      const input = screen.getByPlaceholderText(/e\.g\., best hotels/i);
+      const input = screen.getByRole('textbox');
       await userEvent.type(input, 'hotels');
 
       const button = screen.getByRole('button', { name: /find keywords/i });
       await userEvent.click(button);
 
       expect(onExpand).toHaveBeenCalledWith('hotels', 'general', 20);
+    });
+
+    it('submits Hotels when Hotels & Hospitality is selected', async () => {
+      const onExpand = vi.fn();
+      render(<KeywordExpansion {...buildProps({ onExpand })} />);
+
+      await userEvent.type(screen.getByRole('textbox'), 'boutique hotels');
+      await userEvent.selectOptions(screen.getByDisplayValue('General'), 'hotels');
+      await userEvent.click(screen.getByRole('button', { name: /find keywords/i }));
+
+      expect(onExpand).toHaveBeenCalledWith('boutique hotels', 'hotels', 20);
     });
 
     it('disables button when loading', () => {

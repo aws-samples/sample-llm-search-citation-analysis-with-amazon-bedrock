@@ -6,26 +6,36 @@ import {
 } from 'vitest';
 import { useBrandConfigForm } from './useBrandConfigForm';
 import {
-  buildBrandConfig, buildBrandConfigWithBrands 
+  GENERAL_AND_CUSTOM_PRESETS,
+  HOTEL_PRESETS,
+  buildBrandConfig,
+  buildBrandConfigWithBrands,
 } from './useBrandConfigFormFixtures';
-
-const HOTEL_PRESET = {
-  hotels: {
-    name: 'Hotels',
-    description: 'Hotel brands',
-    entity_types: ['hotel chains'],
-    example_brands: ['Marriott'],
-    extraction_focus: 'hotels',
-    default_prompt: 'Extract hotel brands from text.',
-  },
-};
 
 describe('useBrandConfigForm', () => {
   describe('initialization', () => {
-    it('returns default industry "hotels" when config is null', () => {
+    it('returns "general" when config is null', () => {
       const { result } = renderHook(() => useBrandConfigForm(null, null));
 
+      expect(result.current.form.industry).toBe('general');
+    });
+
+    it('preserves "hotels" when stored config selects Hotels', () => {
+      const config = buildBrandConfig({ industry: 'hotels' });
+
+      const { result } = renderHook(() => useBrandConfigForm(config, HOTEL_PRESETS));
+
       expect(result.current.form.industry).toBe('hotels');
+    });
+
+    it('uses Custom preset without rewriting an unknown stored industry', () => {
+      const config = buildBrandConfig({ industry: 'legacy-industry' });
+
+      const { result } = renderHook(() => useBrandConfigForm(config, GENERAL_AND_CUSTOM_PRESETS));
+
+      expect(result.current.form.industry).toBe('legacy-industry');
+      expect(result.current.currentPreset).toStrictEqual(GENERAL_AND_CUSTOM_PRESETS.custom);
+      expect(result.current.form.currentPrompt).toBe('Extract custom brand and company mentions.');
     });
 
     it('returns empty arrays for brands when config is null', () => {
@@ -135,7 +145,7 @@ describe('useBrandConfigForm', () => {
     });
 
     it('includes custom prompt in industry_prompts when prompt modified', () => {
-      const { result } = renderHook(() => useBrandConfigForm(null, HOTEL_PRESET));
+      const { result } = renderHook(() => useBrandConfigForm(buildBrandConfig({ industry: 'hotels' }), HOTEL_PRESETS));
 
       act(() => {
         result.current.handlePromptChange('Custom prompt text');
@@ -147,17 +157,27 @@ describe('useBrandConfigForm', () => {
     });
 
     it('excludes prompt from industry_prompts when prompt matches default', () => {
-      const { result } = renderHook(() => useBrandConfigForm(null, HOTEL_PRESET));
+      const { result } = renderHook(() => useBrandConfigForm(buildBrandConfig({ industry: 'hotels' }), HOTEL_PRESETS));
 
       const config = result.current.buildConfig();
 
       expect(config.industry_prompts).toStrictEqual({});
     });
+    it('omits an override when unknown industry uses the Custom default', () => {
+      const config = buildBrandConfig({ industry: 'legacy-industry' });
+      const { result } = renderHook(() => (
+        useBrandConfigForm(config, GENERAL_AND_CUSTOM_PRESETS)
+      ));
+
+      const builtConfig = result.current.buildConfig();
+
+      expect(builtConfig.industry_prompts).toStrictEqual({});
+    });
   });
 
   describe('handlePromptChange', () => {
     it('sets promptModified to true when prompt differs from default', () => {
-      const { result } = renderHook(() => useBrandConfigForm(null, HOTEL_PRESET));
+      const { result } = renderHook(() => useBrandConfigForm(buildBrandConfig({ industry: 'hotels' }), HOTEL_PRESETS));
 
       act(() => {
         result.current.handlePromptChange('Modified prompt');
@@ -167,10 +187,22 @@ describe('useBrandConfigForm', () => {
     });
 
     it('sets promptModified to false when prompt matches default', () => {
-      const { result } = renderHook(() => useBrandConfigForm(null, HOTEL_PRESET));
+      const { result } = renderHook(() => useBrandConfigForm(buildBrandConfig({ industry: 'hotels' }), HOTEL_PRESETS));
 
       act(() => {
         result.current.handlePromptChange('Extract hotel brands from text.');
+      });
+
+      expect(result.current.form.promptModified).toBe(false);
+    });
+    it('keeps Custom default unmodified when configured industry is unknown', () => {
+      const config = buildBrandConfig({ industry: 'legacy-industry' });
+      const { result } = renderHook(() => (
+        useBrandConfigForm(config, GENERAL_AND_CUSTOM_PRESETS)
+      ));
+
+      act(() => {
+        result.current.handlePromptChange('Extract custom brand and company mentions.');
       });
 
       expect(result.current.form.promptModified).toBe(false);
@@ -179,7 +211,7 @@ describe('useBrandConfigForm', () => {
 
   describe('resetPromptToDefault', () => {
     it('restores default prompt when called after modification', () => {
-      const { result } = renderHook(() => useBrandConfigForm(null, HOTEL_PRESET));
+      const { result } = renderHook(() => useBrandConfigForm(buildBrandConfig({ industry: 'hotels' }), HOTEL_PRESETS));
 
       act(() => {
         result.current.handlePromptChange('Custom prompt');
@@ -189,6 +221,22 @@ describe('useBrandConfigForm', () => {
       });
 
       expect(result.current.form.currentPrompt).toBe('Extract hotel brands from text.');
+      expect(result.current.form.promptModified).toBe(false);
+    });
+    it('restores Custom default when configured industry is unknown', () => {
+      const config = buildBrandConfig({
+        industry: 'legacy-industry',
+        industry_prompts: { 'legacy-industry': 'Stored legacy prompt' },
+      });
+      const { result } = renderHook(() => (
+        useBrandConfigForm(config, GENERAL_AND_CUSTOM_PRESETS)
+      ));
+
+      act(() => {
+        result.current.resetPromptToDefault();
+      });
+
+      expect(result.current.form.currentPrompt).toBe('Extract custom brand and company mentions.');
       expect(result.current.form.promptModified).toBe(false);
     });
   });

@@ -1,6 +1,7 @@
 import type {
   AlertItem,
   AlertSettings,
+  AlertTestNotificationResponse,
   AlertsResponse,
   ContentChangeMarker,
   ContentChangesResponse,
@@ -90,6 +91,13 @@ export function buildAlertSettings(overrides: Partial<AlertSettings> = {}): Aler
       status: 'confirmed',
     }],
     ...overrides,
+  };
+}
+
+export function buildAlertTestNotificationResponse(): AlertTestNotificationResponse {
+  return {
+    success: true,
+    message: 'Test notification accepted for delivery.',
   };
 }
 

@@ -2,7 +2,7 @@ import {
   expect, vi
 } from 'vitest';
 import {
-  renderHook, waitFor
+  act, renderHook, waitFor
 } from '@testing-library/react';
 import type {
   AlertSettings, AlertsResponse, ContentChangeMarker
@@ -12,10 +12,10 @@ import {
   buildAlertsResponse,
   buildContentChangeMarker,
 } from '../types/domain/alerts-fixtures';
-import { useOpenAlerts } from './useAlerts';
-import type {
-  useAlertSettings, useContentChanges
+import {
+  useAlertSettings, useOpenAlerts
 } from './useAlerts';
+import type { useContentChanges } from './useAlerts';
 
 export interface DeferredValue<TValue> {
   promise: Promise<TValue>;
@@ -38,10 +38,36 @@ export function createDeferredValue<TValue>(): DeferredValue<TValue> {
   };
 }
 
-export async function renderLoadedOpenAlerts() {
-  const rendered = renderHook(() => useOpenAlerts());
+async function renderLoadedHook<THookResult extends { loading: boolean }>(hook: () => THookResult) {
+  const rendered = renderHook(hook);
   await waitFor(() => expect(rendered.result.current.loading).toBe(false));
   return rendered;
+}
+
+export function renderLoadedOpenAlerts() {
+  return renderLoadedHook(() => useOpenAlerts());
+}
+
+export function renderLoadedAlertSettings() {
+  return renderLoadedHook(() => useAlertSettings());
+}
+
+class AlertHookFixtureError extends Error {
+  constructor() {
+    super('Alert hook action did not start synchronously');
+    this.name = 'AlertHookFixtureError';
+  }
+}
+
+export function beginHookRequest<TRequestResult>(
+  request: () => Promise<TRequestResult>
+): Promise<TRequestResult> {
+  const pending: { request?: Promise<TRequestResult> } = {};
+  act(() => {
+    pending.request = request();
+  });
+  if (pending.request === undefined) throw new AlertHookFixtureError();
+  return pending.request;
 }
 
 export function buildOpenAlertsHookResult(
@@ -74,11 +100,17 @@ export function buildAlertSettingsHookResult(
     error: null,
     saving: false,
     saveOutcome: null,
+    testing: false,
+    testOutcome: null,
     refresh: vi.fn(),
     saveSettings: vi.fn().mockResolvedValue({
       success: true,
       message: 'Alert settings saved.',
       warnings: [],
+    }),
+    sendTestNotification: vi.fn().mockResolvedValue({
+      success: true,
+      message: 'Test notification accepted for delivery.',
     }),
     ...overrides,
   };

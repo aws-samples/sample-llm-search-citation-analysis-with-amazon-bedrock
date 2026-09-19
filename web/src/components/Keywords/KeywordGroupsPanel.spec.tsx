@@ -47,6 +47,23 @@ function renderPanel(overrides: Partial<Parameters<typeof KeywordGroupsPanel>[0]
 }
 
 describe('KeywordGroupsPanel', () => {
+  it('describes reusable groups with generic examples', () => {
+    renderPanel();
+
+    expect(screen.getByText(
+      'Organise keywords into reusable groups, for example by brand, market, campaign, or location. A keyword can belong to several groups.'
+    )).toBeInTheDocument();
+  });
+
+  it('shows a generic campaign example in the new-group placeholder', () => {
+    renderPanel();
+
+    expect(screen.getByRole('textbox', { name: 'New group name' })).toHaveAttribute(
+      'placeholder',
+      'New group name (e.g. Spring campaign)'
+    );
+  });
+
   it('shows every group with its keyword count', () => {
     renderPanel();
 

@@ -6,17 +6,21 @@ import {
 } from '@testing-library/react';
 import { ApiRequestError } from '../infrastructure';
 import type {
-  AlertSettings, AlertsResponse
+  AlertSettings, AlertTestNotificationResponse, AlertsResponse
 } from '../types';
 import {
   buildAlertItem,
   buildAlertSettings,
+  buildAlertTestNotificationResponse,
   buildAlertsResponse,
   buildContentChangeMarker,
   buildContentChangesResponse,
 } from '../types/domain/alerts-fixtures';
 import {
-  createDeferredValue, renderLoadedOpenAlerts
+  beginHookRequest,
+  createDeferredValue,
+  renderLoadedAlertSettings,
+  renderLoadedOpenAlerts,
 } from './useAlerts-fixtures';
 import {
   useAlertSettings, useContentChanges, useOpenAlerts
@@ -28,6 +32,7 @@ vi.mock('../api/alerts', () => ({
   fetchAlerts: vi.fn(),
   fetchAlertSettings: vi.fn(),
   fetchContentChanges: vi.fn(),
+  sendTestNotification: vi.fn(),
   updateAlertSettings: vi.fn(),
 }));
 
@@ -37,6 +42,7 @@ import {
   fetchAlerts,
   fetchAlertSettings,
   fetchContentChanges,
+  sendTestNotification,
   updateAlertSettings,
 } from '../api/alerts';
 
@@ -45,6 +51,7 @@ const mockCreateContentChange = vi.mocked(createContentChange);
 const mockFetchAlerts = vi.mocked(fetchAlerts);
 const mockFetchAlertSettings = vi.mocked(fetchAlertSettings);
 const mockFetchContentChanges = vi.mocked(fetchContentChanges);
+const mockSendTestNotification = vi.mocked(sendTestNotification);
 const mockUpdateAlertSettings = vi.mocked(updateAlertSettings);
 
 class AlertRequestAbortError extends Error {
@@ -64,6 +71,7 @@ beforeEach(() => {
   });
   mockFetchAlertSettings.mockReset().mockResolvedValue(buildAlertSettings());
   mockUpdateAlertSettings.mockReset().mockResolvedValue(buildAlertSettings());
+  mockSendTestNotification.mockReset().mockResolvedValue(buildAlertTestNotificationResponse());
   mockFetchContentChanges.mockReset().mockResolvedValue(buildContentChangesResponse());
   mockCreateContentChange.mockReset().mockResolvedValue(buildContentChangeMarker());
 });
@@ -225,8 +233,7 @@ describe('useAlertSettings', () => {
       warnings: ['owner@example.com must confirm the subscription.'],
     });
     mockUpdateAlertSettings.mockResolvedValue(savedSettings);
-    const { result } = renderHook(() => useAlertSettings());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedAlertSettings();
 
     const outcome = await act(() => result.current.saveSettings(update));
 
@@ -250,8 +257,7 @@ describe('useAlertSettings', () => {
       thresholds: savedSettings.thresholds,
     };
     mockUpdateAlertSettings.mockReturnValue(deferredSave.promise);
-    const { result } = renderHook(() => useAlertSettings());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedAlertSettings();
     mockFetchAlertSettings.mockReturnValueOnce(deferredRefresh.promise);
 
     const pendingSaves: Promise<unknown>[] = [];
@@ -282,8 +288,7 @@ describe('useAlertSettings', () => {
     mockUpdateAlertSettings.mockReturnValue(deferredSave.promise);
     const {
       result, unmount
-    } = renderHook(() => useAlertSettings());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    } = await renderLoadedAlertSettings();
 
     const pendingSaves: Promise<unknown>[] = [];
     act(() => {
@@ -305,8 +310,7 @@ describe('useAlertSettings', () => {
       statusCode: 400,
       responseMessage: 'At least one threshold is required.',
     }));
-    const { result } = renderHook(() => useAlertSettings());
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedAlertSettings();
 
     const outcome = await act(() => result.current.saveSettings({
       enabled: true,
@@ -320,6 +324,216 @@ describe('useAlertSettings', () => {
       warnings: [],
     });
     expect(result.current.saveOutcome).toStrictEqual(outcome);
+  });
+
+  it('sets testing while the test notification request is pending', async () => {
+    const deferred = createDeferredValue<AlertTestNotificationResponse>();
+    mockSendTestNotification.mockReturnValue(deferred.promise);
+    const { result } = await renderLoadedAlertSettings();
+
+    const pendingSend = beginHookRequest(
+      result.current.sendTestNotification
+    );
+
+    expect(result.current.testing).toBe(true);
+    expect(result.current.testOutcome).toBeNull();
+    expect(mockSendTestNotification).toHaveBeenCalledWith(expect.any(AbortSignal));
+
+    await act(async () => {
+      deferred.resolve(buildAlertTestNotificationResponse());
+      await pendingSend;
+    });
+  });
+
+  it('stores the accepted outcome when the latest test request succeeds', async () => {
+    const { result } = await renderLoadedAlertSettings();
+
+    const outcome = await act(() => result.current.sendTestNotification());
+
+    expect(outcome).toStrictEqual({
+      success: true,
+      message: 'Test notification accepted for delivery.',
+    });
+    expect(result.current.testOutcome).toStrictEqual(outcome);
+    expect(result.current.testing).toBe(false);
+  });
+
+  it('replaces the prior save outcome when test delivery is accepted', async () => {
+    const { result } = await renderLoadedAlertSettings();
+    const settings = buildAlertSettings();
+    await act(() => result.current.saveSettings({
+      enabled: settings.enabled,
+      notification_emails: settings.notification_emails,
+      thresholds: settings.thresholds,
+    }));
+
+    await act(() => result.current.sendTestNotification());
+
+    expect(result.current.saveOutcome).toBeNull();
+    expect(result.current.testOutcome).toStrictEqual({
+      success: true,
+      message: 'Test notification accepted for delivery.',
+    });
+  });
+
+  it('clears the previous test outcome while a retry is pending', async () => {
+    const { result } = await renderLoadedAlertSettings();
+    await act(() => result.current.sendTestNotification());
+    const retryResponse = createDeferredValue<AlertTestNotificationResponse>();
+    mockSendTestNotification.mockReturnValueOnce(retryResponse.promise);
+
+    const pendingRetry = beginHookRequest(result.current.sendTestNotification);
+
+    expect(result.current.testOutcome).toBeNull();
+    await act(async () => {
+      retryResponse.resolve(buildAlertTestNotificationResponse());
+      await pendingRetry;
+    });
+  });
+
+  it.each([
+    [
+      'definitive client message',
+      new ApiRequestError('HTTP 400', {
+        statusCode: 400,
+        responseMessage: 'Confirm an email subscription before testing delivery.',
+      }),
+      'Confirm an email subscription before testing delivery.',
+    ],
+    [
+      'alert-safe fallback',
+      new ApiRequestError('HTTP 500', 500),
+      'Failed to process alert request',
+    ],
+  ])('stores the %s when the test request fails', async (_condition, failure, message) => {
+    mockSendTestNotification.mockRejectedValue(failure);
+    const { result } = await renderLoadedAlertSettings();
+
+    const outcome = await act(() => result.current.sendTestNotification());
+
+    expect(outcome).toStrictEqual({
+      success: false,
+      message,
+    });
+    expect(result.current.testOutcome).toStrictEqual(outcome);
+    expect(result.current.testing).toBe(false);
+  });
+
+  it('returns cancellation when a superseded test request aborts', async () => {
+    const abortedResponse = createDeferredValue<AlertTestNotificationResponse>();
+    const latestResponse = createDeferredValue<AlertTestNotificationResponse>();
+    mockSendTestNotification
+      .mockImplementationOnce((signal) => {
+        signal?.addEventListener('abort', () => {
+          abortedResponse.reject(new AlertRequestAbortError());
+        }, { once: true });
+        return abortedResponse.promise;
+      })
+      .mockReturnValueOnce(latestResponse.promise);
+    const { result } = await renderLoadedAlertSettings();
+
+    const abortedSend = beginHookRequest(result.current.sendTestNotification);
+    const latestSend = beginHookRequest(result.current.sendTestNotification);
+    const outcome = await abortedSend;
+    await act(async () => {
+      latestResponse.resolve(buildAlertTestNotificationResponse());
+      await latestSend;
+    });
+
+    expect(outcome).toStrictEqual({
+      success: false,
+      message: 'Test notification cancelled.',
+    });
+  });
+
+  it('keeps the latest request pending when stale success arrives first', async () => {
+    const staleResponse = createDeferredValue<AlertTestNotificationResponse>();
+    const latestResponse = createDeferredValue<AlertTestNotificationResponse>();
+    mockSendTestNotification
+      .mockReturnValueOnce(staleResponse.promise)
+      .mockReturnValueOnce(latestResponse.promise);
+    const { result } = await renderLoadedAlertSettings();
+
+    const staleSend = beginHookRequest(result.current.sendTestNotification);
+    const latestSend = beginHookRequest(result.current.sendTestNotification);
+    await act(async () => {
+      staleResponse.resolve(buildAlertTestNotificationResponse());
+      await staleSend;
+    });
+
+    expect(result.current.testing).toBe(true);
+    expect(result.current.testOutcome).toBeNull();
+
+    await act(async () => {
+      latestResponse.resolve(buildAlertTestNotificationResponse());
+      await latestSend;
+    });
+  });
+
+  it('preserves the latest outcome when an older test request settles last', async () => {
+    const older = createDeferredValue<AlertTestNotificationResponse>();
+    const latest = createDeferredValue<AlertTestNotificationResponse>();
+    mockSendTestNotification
+      .mockReturnValueOnce(older.promise)
+      .mockReturnValueOnce(latest.promise);
+    const { result } = await renderLoadedAlertSettings();
+
+    const olderSend = beginHookRequest(
+      result.current.sendTestNotification
+    );
+    const olderSignal = mockSendTestNotification.mock.calls[0][0];
+    const latestSend = beginHookRequest(
+      result.current.sendTestNotification
+    );
+    await act(async () => {
+      latest.resolve(buildAlertTestNotificationResponse());
+      await latestSend;
+    });
+    await act(async () => {
+      older.reject(new ApiRequestError('Older request failed', 500));
+      await olderSend;
+    });
+
+    expect(olderSignal?.aborted).toBe(true);
+    expect(result.current.testOutcome).toStrictEqual({
+      success: true,
+      message: 'Test notification accepted for delivery.',
+    });
+    expect(result.current.testing).toBe(false);
+  });
+
+  it('aborts an in-flight test notification when unmounted', async () => {
+    const deferred = createDeferredValue<AlertTestNotificationResponse>();
+    mockSendTestNotification.mockReturnValue(deferred.promise);
+    const {
+      result, unmount
+    } = await renderLoadedAlertSettings();
+
+    const pendingSend = beginHookRequest(
+      result.current.sendTestNotification
+    );
+    const signal = mockSendTestNotification.mock.calls[0][0];
+    unmount();
+    deferred.resolve(buildAlertTestNotificationResponse());
+    await pendingSend;
+
+    expect(signal?.aborted).toBe(true);
+    expect(result.current.testOutcome).toBeNull();
+  });
+  it('returns cancellation without a request when invoked after unmount', async () => {
+    const {
+      result, unmount
+    } = await renderLoadedAlertSettings();
+    const sendAfterUnmount = result.current.sendTestNotification;
+
+    unmount();
+    const outcome = await sendAfterUnmount();
+
+    expect(outcome).toStrictEqual({
+      success: false,
+      message: 'Test notification cancelled.',
+    });
+    expect(mockSendTestNotification.mock.calls).toStrictEqual([]);
   });
 });
 

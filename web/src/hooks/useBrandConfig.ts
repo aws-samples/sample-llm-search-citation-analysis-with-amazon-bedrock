@@ -8,7 +8,7 @@ import type {
   BrandConfig, IndustryPresets, BrandExpansionResult, BrandExpansionAllResult, CompetitorDiscoveryResult 
 } from '../types';
 import {
-  DEFAULT_CONFIG, DEFAULT_PRESETS 
+  DEFAULT_BRAND_INDUSTRY, DEFAULT_CONFIG, DEFAULT_PRESETS, resolveBrandIndustryPreset
 } from '../constants/brandConfigDefaults';
 
 interface BrandConfigResponse {config?: BrandConfig;}
@@ -111,6 +111,8 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
   const [presets, setPresets] = useState<IndustryPresets | null>(DEFAULT_PRESETS);
   const [loading, setLoading] = useState(true);
   const [error] = useState<string | null>(null);
+  const configuredIndustry = config?.industry ?? DEFAULT_BRAND_INDUSTRY;
+  const expansionIndustry = configuredIndustry === '' ? DEFAULT_BRAND_INDUSTRY : configuredIndustry;
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -192,7 +194,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
       if (config?.industry_prompts?.[industryKey]) {
         return config.industry_prompts[industryKey];
       }
-      return presets?.[industryKey]?.default_prompt ?? '';
+      return resolveBrandIndustryPreset(presets, industryKey)?.default_prompt ?? '';
     },
     [config, presets]
   );
@@ -202,7 +204,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
       try {
         const data = await readJson<ExpandBrandResponse>(await api.expandBrand({
           brand_name: brandName,
-          industry: config?.industry ?? 'hotels',
+          industry: expansionIndustry,
           existing_brands: existingBrands,
         }));
         return {
@@ -221,7 +223,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
         };
       }
     },
-    [config?.industry, api]
+    [expansionIndustry, api]
   );
 
   const expandAllBrands = useCallback(
@@ -229,7 +231,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
       try {
         const data = await readJson<ExpandAllBrandsResponse>(await api.expandAllBrands({
           existing_brands: existingBrands,
-          industry: config?.industry ?? 'hotels',
+          industry: expansionIndustry,
           brand_type: brandType,
         }));
         return {
@@ -250,7 +252,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
         };
       }
     },
-    [config?.industry, api]
+    [expansionIndustry, api]
   );
 
   const findCompetitors = useCallback(
@@ -258,7 +260,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
       try {
         const data = await readJson<FindCompetitorsResponse>(await api.findCompetitors({
           first_party_brands: firstPartyBrands,
-          industry: config?.industry ?? 'hotels',
+          industry: expansionIndustry,
           existing_competitors: existingCompetitors,
         }));
         return {
@@ -276,7 +278,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
         };
       }
     },
-    [config?.industry, api]
+    [expansionIndustry, api]
   );
 
   return {

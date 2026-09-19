@@ -82,6 +82,11 @@ export interface AlertSettingsUpdate {
   thresholds: AlertThresholds;
 }
 
+export interface AlertTestNotificationResponse {
+  success: true;
+  message: 'Test notification accepted for delivery.';
+}
+
 export interface ContentChangesResponse {
   items: ContentChangeMarker[];
   count: number;
@@ -300,6 +305,15 @@ export function isAlertSettings(candidate: unknown): candidate is AlertSettings 
     && Array.isArray(candidate.subscription_statuses)
     && candidate.subscription_statuses.every(isAlertSubscription)
     && (candidate.warnings === undefined || isStringArray(candidate.warnings));
+}
+
+export function isAlertTestNotificationResponse(
+  candidate: unknown
+): candidate is AlertTestNotificationResponse {
+  return isRecord(candidate)
+    && Object.keys(candidate).length === 2
+    && candidate.success === true
+    && candidate.message === 'Test notification accepted for delivery.';
 }
 
 export function isContentChangesResponse(candidate: unknown): candidate is ContentChangesResponse {
