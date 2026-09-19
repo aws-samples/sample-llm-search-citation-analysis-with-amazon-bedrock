@@ -132,4 +132,22 @@ describe('formatResearchFailureMessage', () => {
   it('leaves a bare number that is not a second count untouched', () => {
     expect(formatResearchFailureMessage('Attempt 3 failed')).toBe('Attempt 3 failed');
   });
+
+  it('explains a rate-limited search in plain words when the worker prefixes the provider', () => {
+    const raw = 'perplexity: 429 Client Error: Too Many Requests for url: https://api.perplexity.ai/chat/completions'
+      + ' | {"error":{"message":"Request rate limit exceeded, please try again later.","type":"request_rate_limit_exceeded","code":429}}';
+
+    expect(formatResearchFailureMessage(raw))
+      .toBe('Perplexity rate-limited one of the searches. The other searches completed; use Retry to re-run the throttled one.');
+  });
+
+  it('explains a rate-limited search generically when the step message carries no provider prefix', () => {
+    expect(formatResearchFailureMessage('429 Client Error: Too Many Requests for url: https://api.openai.com/v1/responses | {}'))
+      .toBe('A search provider rate-limited one of the searches. The other searches completed; use Retry to re-run the throttled one.');
+  });
+
+  it('leaves other HTTP client errors untouched', () => {
+    expect(formatResearchFailureMessage('perplexity: 401 Client Error: Unauthorized for url: https://api.perplexity.ai/chat/completions'))
+      .toBe('perplexity: 401 Client Error: Unauthorized for url: https://api.perplexity.ai/chat/completions');
+  });
 });
