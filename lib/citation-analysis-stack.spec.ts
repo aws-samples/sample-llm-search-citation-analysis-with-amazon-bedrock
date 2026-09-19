@@ -11,6 +11,7 @@ import {
   extractApiBackedFunctionTimeouts,
   extractApiMethods,
   extractBucketLifecycle,
+  extractCrawlerInfrastructureSnapshot,
   extractDefinitionTimeoutSeconds,
   extractFunctionMemorySize,
   extractFunctionRoleActions,
@@ -80,6 +81,7 @@ const synthesized: {
   researchWorkerTimeoutSeconds: number;
   researchWorkerLayerRefs: string[];
   keywordResearchTableIndexes: unknown;
+  crawledContentTableIndexes: unknown;
   keywordResearchTableTtl: unknown;
   keywordResearchIdMethods: ApiGatewayMethodSnapshot[];
   keywordResearchRetryMethods: ApiGatewayMethodSnapshot[];
@@ -99,6 +101,9 @@ const synthesized: {
   configMgmtStateMachineActions: string[];
   scopedReadFunctionEnvVars: Record<string, Record<string, unknown>>;
   crawlerEnvVars: Record<string, unknown>;
+  crawlerRoleCrawledContentActions: string[];
+  browserSigningRoleActions: string[];
+  browserSigningTrustConditions: unknown;
   parseKeywordsEnvVars: Record<string, unknown>;
   keywordMgmtEnvVars: Record<string, unknown>;
   executionMgmtEnvVars: Record<string, unknown>;
@@ -138,6 +143,7 @@ const synthesized: {
   researchWorkerTimeoutSeconds: Number.NaN,
   researchWorkerLayerRefs: [],
   keywordResearchTableIndexes: undefined,
+  crawledContentTableIndexes: undefined,
   keywordResearchTableTtl: undefined,
   keywordResearchIdMethods: [],
   keywordResearchRetryMethods: [],
@@ -157,6 +163,9 @@ const synthesized: {
   configMgmtStateMachineActions: [],
   scopedReadFunctionEnvVars: {},
   crawlerEnvVars: {},
+  crawlerRoleCrawledContentActions: [],
+  browserSigningRoleActions: [],
+  browserSigningTrustConditions: {},
   parseKeywordsEnvVars: {},
   keywordMgmtEnvVars: {},
   executionMgmtEnvVars: {},
@@ -233,7 +242,7 @@ beforeAll(() => {
   synthesized.researchWorkerLayerRefs = extractLambdaLayerRefs(template, RESEARCH_WORKER_FUNCTION_NAME);
   synthesized.keywordResearchTableIndexes = extractTableProperty(template, 'CitationAnalysis-KeywordResearch', 'GlobalSecondaryIndexes');
   synthesized.keywordResearchTableTtl = extractTableProperty(template, 'CitationAnalysis-KeywordResearch', 'TimeToLiveSpecification');
-  synthesized.crawlerEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-Crawler');
+  Object.assign(synthesized, extractCrawlerInfrastructureSnapshot(template));
   synthesized.parseKeywordsEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-ParseKeywords');
   synthesized.keywordMgmtEnvVars = extractLambdaEnvVars(template, KEYWORD_MGMT_FUNCTION_NAME);
   synthesized.executionMgmtEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-API-ExecutionMgmt');
@@ -1188,7 +1197,36 @@ describe('Search Lambda provider-health permissions', () => {
   });
 });
 
-describe('Crawler Lambda environment', () => {
+describe('Crawler Lambda environment and cache permissions', () => {
+  it('configures status-specific freshness and a short session backstop', () => {
+    expect(synthesized.crawlerEnvVars.CRAWL_FRESHNESS_DAYS).toBe('30');
+    expect(synthesized.crawlerEnvVars.CRAWL_BLOCKED_FRESHNESS_DAYS).toBe('3');
+    expect(synthesized.crawlerEnvVars.BROWSER_SESSION_TIMEOUT_SECONDS).toBe('330');
+    expect(synthesized.crawlerEnvVars.CRAWL_CACHE_INDEX_NAME).toBe('CacheScopeIndex');
+  });
+
+  it('projects only cache decision fields into the cache scope index', () => {
+    expect(synthesized.crawledContentTableIndexes).toContainEqual({
+      IndexName: 'CacheScopeIndex',
+      KeySchema: [
+        { AttributeName: 'cache_scope', KeyType: 'HASH' },
+        { AttributeName: 'crawled_at', KeyType: 'RANGE' },
+      ],
+      Projection: {
+        ProjectionType: 'INCLUDE',
+        NonKeyAttributes: ['cache_status', 'analysis_status', 'block_reason'],
+      },
+    });
+  });
+
+  it('allows only cache queries, artifact writes, and metadata refreshes', () => {
+    expect(synthesized.crawlerRoleCrawledContentActions).toStrictEqual([
+      'dynamodb:PutItem',
+      'dynamodb:Query',
+      'dynamodb:UpdateItem',
+    ]);
+  });
+
   it('does not include unused BROWSER_TIMEOUT_MS env var', () => {
     expect(synthesized.crawlerEnvVars).not.toHaveProperty('BROWSER_TIMEOUT_MS');
   });
@@ -1202,7 +1240,32 @@ describe('Crawler Lambda environment', () => {
   });
 });
 
+describe('AgentCore browser signing role', () => {
+  it('has no broad identity policy when service trust provides signing access', () => {
+    expect(synthesized.browserSigningRoleActions).toStrictEqual([]);
+  });
 
+  it('restricts service trust to browser resources in this account', () => {
+    expect(synthesized.browserSigningTrustConditions).toStrictEqual({
+      StringEquals: {
+        'aws:SourceAccount': { Ref: 'AWS::AccountId' },
+      },
+      ArnLike: {
+        'aws:SourceArn': {
+          'Fn::Join': ['', [
+            'arn:',
+            { Ref: 'AWS::Partition' },
+            ':bedrock-agentcore:',
+            { Ref: 'AWS::Region' },
+            ':',
+            { Ref: 'AWS::AccountId' },
+            ':*',
+          ]],
+        },
+      },
+    });
+  });
+});
 
 describe('KPI alert backend infrastructure', () => {
   const app = new cdk.App();

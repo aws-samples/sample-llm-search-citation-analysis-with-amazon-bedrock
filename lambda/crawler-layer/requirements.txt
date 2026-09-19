@@ -1,16 +1,21 @@
 # Browser automation layer for Crawler Lambda
 # Uses Bedrock AgentCore managed browsers (no local Chromium needed)
 
-# NOTE: boto3/botocore are provided by Lambda runtime - DO NOT include here
-# This saves ~27MB
+# Pin the remote-browser client stack to versions validated together.
+bedrock-agentcore==1.23.1
+playwright==1.63.0
+greenlet==3.5.6
+pyee==13.0.1
+websockets==17.1
 
-# Bedrock AgentCore SDK for managed browser sessions
-bedrock-agentcore>=0.1.0
+# AgentCore 1.23.1 requires boto3/botocore >=1.43.72, while the current
+# Lambda Python 3.12 runtime image provides 1.42.x. Bundle and pin a compatible
+# SDK in this layer so an AWS runtime refresh cannot silently break imports.
+boto3==1.43.98
+botocore==1.43.98
+s3transfer==0.19.2
+jmespath==1.1.0
 
-# Playwright as CDP client only (connects to AgentCore's remote Chrome)
-# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 must be set during install
-playwright>=1.40.0
-
-# NOTE: Nova Act SDK is too large for Lambda layers (475MB+ with dependencies)
-# The crawler uses Web Bot Auth + Playwright for verification handling instead
-# Nova Act is better suited for local development or container-based Lambdas
+# PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 is set by build-layer.sh. Playwright is
+# only a CDP client for AgentCore; no local browser binary belongs in Lambda.
+# Nova Act remains excluded because its dependency set requires a container.

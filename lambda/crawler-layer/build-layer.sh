@@ -1,27 +1,22 @@
 #!/bin/bash
 
-# Build script for Crawler Lambda Layer (Browser Tools)
-# This layer contains Playwright + AgentCore SDK for browser automation
-# Playwright is installed WITHOUT browser binaries (uses AgentCore managed browsers)
+# Build the Crawler Lambda Layer: AgentCore SDK + Playwright CDP client.
 
-set -e
+set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "Building Crawler Lambda Layer (Browser Tools)..."
-
 LAYER_DIR="python"
-rm -rf $LAYER_DIR
-mkdir -p $LAYER_DIR
+BUILT_WITH_DOCKER=false
 
-# Check if Docker is available and running
+echo "Building Crawler Lambda Layer (Browser Tools)..."
+rm -rf "$LAYER_DIR"
+mkdir -p "$LAYER_DIR"
+
 if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
+    BUILT_WITH_DOCKER=true
     echo "Using Docker to build for Linux compatibility..."
-    
-    # Use Amazon Linux 2023 image (matches Lambda Python 3.12 runtime)
-    # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 prevents downloading 400MB+ of browsers
-    # --platform linux/amd64 ensures x86_64 compatibility (Lambda default)
     docker run --rm \
         --platform linux/amd64 \
         --entrypoint "" \
@@ -30,13 +25,12 @@ if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
         -e PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 \
         public.ecr.aws/lambda/python:3.12 \
         pip install -r requirements.txt -t python/ --upgrade --no-cache-dir
-    
     echo "Docker build completed"
 else
-    echo "⚠️  Docker not running - using pip with --platform for Linux cross-compilation"
+    echo "Docker not running - using pip with Linux/Python 3.12 wheel constraints"
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 pip3 install \
         -r requirements.txt \
-        -t $LAYER_DIR \
+        -t "$LAYER_DIR" \
         --platform manylinux2014_x86_64 \
         --only-binary=:all: \
         --python-version 3.12 \
@@ -45,30 +39,46 @@ else
     echo "Cross-platform build completed"
 fi
 
-# Remove boto3/botocore - they're provided by Lambda runtime
-# This saves ~27MB
-echo "Removing boto3/botocore (provided by Lambda runtime)..."
-rm -rf $LAYER_DIR/boto3 $LAYER_DIR/boto3-*.dist-info
-rm -rf $LAYER_DIR/botocore $LAYER_DIR/botocore-*.dist-info
-rm -rf $LAYER_DIR/s3transfer $LAYER_DIR/s3transfer-*.dist-info
-rm -rf $LAYER_DIR/jmespath $LAYER_DIR/jmespath-*.dist-info
-
-# Copy shared Python modules (exclude test files from deployed layer)
+# Copy first-party modules after dependencies so source always wins.
 echo "Copying shared modules..."
-mkdir -p $LAYER_DIR/shared
-find ../shared -maxdepth 1 -name '*.py' ! -name 'test_*' -exec cp {} $LAYER_DIR/shared/ \;
-touch $LAYER_DIR/shared/__init__.py
+mkdir -p "$LAYER_DIR/shared"
+find ../shared -maxdepth 1 -name '*.py' ! -name 'test_*' -exec cp {} "$LAYER_DIR/shared/" \;
+touch "$LAYER_DIR/shared/__init__.py"
 
-# Show layer size
+# Browser downloads are unnecessary and can push the layer over Lambda's
+# uncompressed-size limit. Fail the build if Playwright ever adds one.
+if find "$LAYER_DIR" -type d -name '.local-browsers' -print -quit | grep -q .; then
+    echo "Browser binaries found in crawler layer; PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD was not honored" >&2
+    exit 1
+fi
+
+# Import inside the actual Lambda Python 3.12 image. This also proves the
+# bundled AWS SDK satisfies the pinned AgentCore requirement instead of
+# accidentally relying on the older SDK under /var/runtime.
+if [ "$BUILT_WITH_DOCKER" = true ]; then
+    echo "Running Lambda-runtime import smoke test..."
+    docker run --rm \
+        --platform linux/amd64 \
+        --entrypoint python \
+        -v "$(pwd)/$LAYER_DIR":/opt/python:ro \
+        -e PYTHONPATH=/opt/python \
+        -e AWS_EC2_METADATA_DISABLED=true \
+        -e AWS_ACCESS_KEY_ID=smoke \
+        -e AWS_SECRET_ACCESS_KEY=smoke \
+        public.ecr.aws/lambda/python:3.12 \
+        -c "import boto3, botocore, inspect, os; from bedrock_agentcore.tools.browser_client import BrowserClient; from playwright.sync_api import sync_playwright; size = sum(os.path.getsize(os.path.join(root, name)) for root, _, names in os.walk('/opt/python') for name in names); assert size < 250 * 1024 * 1024, f'crawler layer is {size} bytes'; assert boto3.__version__ == '1.43.98'; assert botocore.__version__ == '1.43.98'; client = BrowserClient(region='us-west-2'); required = {'identifier', 'name', 'session_timeout_seconds'}; assert required <= set(inspect.signature(client.start).parameters); assert callable(client.generate_ws_headers); assert callable(client.stop); assert sync_playwright"
+else
+    echo "Skipping Lambda-runtime import smoke test because Docker is unavailable"
+fi
+
 echo ""
 echo "Layer contents:"
-ls -la $LAYER_DIR/ | head -20
+ls -la "$LAYER_DIR/" | head -20
 echo ""
 echo "Shared modules:"
-ls -la $LAYER_DIR/shared/
+ls -la "$LAYER_DIR/shared/"
 echo ""
 echo "Layer size:"
-du -sh $LAYER_DIR/
-
+du -sh "$LAYER_DIR/"
 echo ""
-echo "✅ Crawler Lambda Layer built successfully"
+echo "Crawler Lambda Layer built successfully"

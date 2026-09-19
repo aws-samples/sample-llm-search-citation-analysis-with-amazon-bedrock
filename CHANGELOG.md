@@ -9,6 +9,50 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.11.0] - 2026-09-19
+
+AgentCore crawling now avoids repeat paid browser sessions through a
+status-aware DynamoDB freshness index and closes the security and lifecycle
+gaps found while porting the scraper architecture guide.
+
+### Added
+
+- A cache-first crawl path that checks compact, keyword-safe success and
+  URL-wide blocked verdicts before constructing AgentCore. Fully analysed
+  successes remain reusable for 30 days; blocked pages for 3 days; errors,
+  incomplete analysis, malformed/future timestamps and stale rows retry.
+- SSRF validation before paid browser startup and browser-context document
+  interception that aborts unsafe redirect destinations before navigation.
+- Focused crawler, cache, browser lifecycle and CDK coverage, plus a
+  Lambda-runtime layer smoke test for package compatibility, size and absence
+  of local browser binaries.
+
+### Changed
+
+- AgentCore sessions use a 330-second service backstop for the 300-second
+  crawler Lambda, require the pre-created signed `BROWSER_ID`, handle empty
+  browser contexts/pages defensively and attempt browser, Playwright and
+  AgentCore cleanup independently.
+- Cache reads and artifact writes use only the required DynamoDB actions;
+  screenshots are scoped to `screenshots/*`; and the browser signing role has
+  account/resource-conditioned service trust with no broad identity policy.
+- AgentCore, Playwright and runtime-critical dependencies are pinned. A
+  compatible boto3/botocore is bundled because AgentCore 1.23.1 requires a
+  newer SDK than the current Lambda Python 3.12 image provides.
+
+### Fixed
+
+- Early CAPTCHA detection remains `blocked` instead of becoming `error`, and
+  named block patterns take precedence over generic near-empty content.
+- Successful cache hits refresh current citation evidence in place without
+  changing artifact freshness; blocked cache hits return the original evidence
+  timestamp and never create synthetic rows that look like new crawls.
+- Browser capture is finalized and the AgentCore session stopped before block
+  persistence or Bedrock analysis, closing delayed-redirect races and avoiding
+  browser charges while the model processes already-extracted text.
+- A failure closing one browser resource no longer skips remaining cleanup,
+  and pages with no body text no longer fail extraction.
+
 ## [2.10.0] - 2026-09-19
 
 Complete keyword-group runs now create durable KPI baselines and actionable

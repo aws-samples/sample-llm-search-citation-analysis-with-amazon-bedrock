@@ -555,3 +555,51 @@ export function extractRoleTableActions(
 
   return extractRoleActionsOn(template, roleLogicalId, tableLogicalId);
 }
+
+export interface CrawlerInfrastructureSnapshot {
+  crawledContentTableIndexes: unknown;
+  crawlerEnvVars: Record<string, unknown>;
+  crawlerRoleCrawledContentActions: string[];
+  browserSigningRoleActions: string[];
+  browserSigningTrustConditions: unknown;
+}
+
+/** Crawler-specific synthesized values shared by the cache and signing-role suites. */
+export function extractCrawlerInfrastructureSnapshot(
+  template: Template
+): CrawlerInfrastructureSnapshot {
+  const crawlerFunctionName = 'CitationAnalysis-Crawler';
+  const crawlerRoleName = 'CitationAnalysis-CrawlerLambdaRole';
+  const crawledContentTableName = 'CitationAnalysis-CrawledContent';
+  const browserSigningRoleName = 'CitationAnalysis-BrowserSigningRole';
+  const browserSigningRoleId = findLogicalIdByName(
+    template,
+    'AWS::IAM::Role',
+    'RoleName',
+    browserSigningRoleName
+  );
+  const browserSigningRoles = template.findResources('AWS::IAM::Role', {
+    Properties: { RoleName: browserSigningRoleName },
+  });
+
+  return {
+    crawledContentTableIndexes: extractTableProperty(
+      template,
+      crawledContentTableName,
+      'GlobalSecondaryIndexes'
+    ),
+    crawlerEnvVars: extractLambdaEnvVars(template, crawlerFunctionName),
+    crawlerRoleCrawledContentActions: extractRoleTableActions(
+      template,
+      crawlerRoleName,
+      crawledContentTableName
+    ),
+    browserSigningRoleActions: sortedUnique(
+      allowStatementsOfRole(template, browserSigningRoleId).flatMap(statementActions)
+    ),
+    browserSigningTrustConditions: resolvePath(
+      browserSigningRoles[browserSigningRoleId],
+      ['Properties', 'AssumeRolePolicyDocument', 'Statement', '0', 'Condition']
+    ),
+  };
+}

@@ -136,26 +136,37 @@ class LayerNotBuiltError extends Error {
  * This bit for real: `auth.py`, `safe_fetch.py` and `stale_jobs.py` were all
  * added to source while the built layer still held the previous set.
  */
-function assertLayerContainsAllSharedModules(builtSharedPath: string): void {
+function assertLayerMatchesSharedModules(
+  builtSharedPath: string,
+  layerName: string,
+  buildCommand: string
+): void {
   const sourceSharedPath = path.join(__dirname, '../lambda/shared');
   if (!fs.existsSync(sourceSharedPath)) return;
 
   const expected = fs
     .readdirSync(sourceSharedPath)
     .filter((name) => name.endsWith('.py') && !name.startsWith('test_'));
-
   const built = fs.existsSync(builtSharedPath) ? fs.readdirSync(builtSharedPath) : [];
   const missing = expected.filter((name) => !built.includes(name));
+  const stale = expected.filter((name) => (
+    built.includes(name)
+    && !fs.readFileSync(path.join(sourceSharedPath, name))
+      .equals(fs.readFileSync(path.join(builtSharedPath, name)))
+  ));
 
-  if (missing.length > 0) {
-    throw new LayerNotBuiltError(
-      `Shared layer is stale — missing ${missing.join(', ')}.\n` +
-      'Every Lambda imports these from the layer, so deploying now would fail ' +
-      'at import time.\n' +
-      'Run: bash lambda/layer/build-layer.sh\n' +
-      'Or use scripts/deploy.sh which builds all layers automatically.'
-    );
-  }
+  if (missing.length === 0 && stale.length === 0) return;
+
+  const problems = [
+    ...(missing.length > 0 ? [`missing ${missing.join(', ')}`] : []),
+    ...(stale.length > 0 ? [`outdated ${stale.join(', ')}`] : []),
+  ].join('; ');
+  throw new LayerNotBuiltError(
+    `${layerName} layer is stale — ${problems}.\n` +
+    'Every Lambda imports these files from its deployed layer.\n' +
+    `Run: ${buildCommand}\n` +
+    'Or use scripts/deploy.sh which builds all layers automatically.'
+  );
 }
 
 /**
@@ -198,8 +209,11 @@ function apiLambdaLogGroup(scope: Construct, id: string, functionName: string): 
   });
 }
 
-/** A global secondary index of a stack table. Every index projects ALL attributes. */
-type CitationAnalysisIndexSpec = Pick<dynamodb.GlobalSecondaryIndexProps, 'indexName' | 'partitionKey' | 'sortKey'>;
+/** A global secondary index of a stack table. ALL remains the default projection. */
+type CitationAnalysisIndexSpec = Pick<
+  dynamodb.GlobalSecondaryIndexProps,
+  'indexName' | 'partitionKey' | 'sortKey' | 'projectionType' | 'nonKeyAttributes'
+>;
 
 /** The schema of one stack table; everything else is fixed by `citationAnalysisTable`. */
 interface CitationAnalysisTableSpec {
@@ -234,7 +248,10 @@ function citationAnalysisTable(scope: Construct, id: string, spec: CitationAnaly
   });
 
   for (const index of spec.globalSecondaryIndexes ?? []) {
-    table.addGlobalSecondaryIndex({ ...index, projectionType: dynamodb.ProjectionType.ALL });
+    table.addGlobalSecondaryIndex({
+      ...index,
+      projectionType: index.projectionType ?? dynamodb.ProjectionType.ALL,
+    });
   }
 
   return table;
@@ -423,6 +440,16 @@ export class CitationAnalysisStack extends cdk.Stack {
           indexName: 'KeywordIndex',
           partitionKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
           sortKey: { name: 'crawled_at', type: dynamodb.AttributeType.STRING },
+        },
+        // Compact freshness index. The hashed scope is URL+keyword for
+        // successful SEO analysis and URL-wide for publisher blocks, so one
+        // keyword's newer row cannot hide another keyword's reusable crawl.
+        {
+          indexName: 'CacheScopeIndex',
+          partitionKey: { name: 'cache_scope', type: dynamodb.AttributeType.STRING },
+          sortKey: { name: 'crawled_at', type: dynamodb.AttributeType.STRING },
+          projectionType: dynamodb.ProjectionType.INCLUDE,
+          nonKeyAttributes: ['cache_status', 'analysis_status', 'block_reason'],
         },
       ],
     });
@@ -831,11 +858,22 @@ export class CitationAnalysisStack extends cdk.Stack {
       ],
     });
 
-    // Grant Crawler Lambda write access to CrawledContent table
-    crawledContentTable.grantWriteData(crawlerLambdaRole);
-
-    // Grant Crawler Lambda read access to Citations table (to get citation metadata)
-    citationsTable.grantReadData(crawlerLambdaRole);
+    // Cache decisions query one compact GSI; artifact persistence and cache-hit
+    // metadata refresh touch only the base table. Keep this exact rather than
+    // granting delete, scan, batch-write, or arbitrary update access.
+    crawlerLambdaRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['dynamodb:Query'],
+      resources: [
+        crawledContentTable.tableArn,
+        `${crawledContentTable.tableArn}/index/CacheScopeIndex`,
+      ],
+    }));
+    crawlerLambdaRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['dynamodb:PutItem', 'dynamodb:UpdateItem'],
+      resources: [crawledContentTable.tableArn],
+    }));
 
     // Grant Crawler Lambda access to Bedrock for AgentCore and LLM summarization
     // Uses global.anthropic.claude-* inference profiles with Converse API
@@ -871,8 +909,8 @@ export class CitationAnalysisStack extends cdk.Stack {
       resources: ['*'],
     }));
 
-    // Grant Crawler Lambda write access to Screenshots bucket
-    screenshotsBucket.grantWrite(crawlerLambdaRole);
+    // Screenshots are the only objects this function writes.
+    screenshotsBucket.grantWrite(crawlerLambdaRole, 'screenshots/*');
 
     // IAM Role for Step Functions State Machine
     // Permissions: Invoke all Lambda functions
@@ -916,7 +954,11 @@ export class CitationAnalysisStack extends cdk.Stack {
         'Or use scripts/deploy.sh which builds all layers automatically.'
       );
     }
-    assertLayerContainsAllSharedModules(path.join(sharedLayerPythonPath, 'shared'));
+    assertLayerMatchesSharedModules(
+      path.join(sharedLayerPythonPath, 'shared'),
+      'Shared',
+      'bash lambda/layer/build-layer.sh'
+    );
     const sharedLayer = new lambda.LayerVersion(this, 'SharedLayer', {
       layerVersionName: 'CitationAnalysis-SharedLayer',
       code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/layer'), { exclude: PYTHON_ASSET_EXCLUDES }),
@@ -1041,6 +1083,11 @@ export class CitationAnalysisStack extends cdk.Stack {
         'Or use scripts/deploy.sh which builds all layers automatically.'
       );
     }
+    assertLayerMatchesSharedModules(
+      path.join(crawlerLayerPythonPath, 'shared'),
+      'Crawler',
+      'bash lambda/crawler-layer/build-layer.sh'
+    );
     const crawlerLayer = new lambda.LayerVersion(this, 'CrawlerLayer', {
       layerVersionName: 'CitationAnalysis-CrawlerLayer',
       code: lambda.Code.fromAsset(crawlerLayerPath, { exclude: PYTHON_ASSET_EXCLUDES }),
@@ -1058,21 +1105,26 @@ export class CitationAnalysisStack extends cdk.Stack {
     // - Lower API costs
     // - Centralized configuration in CDK
 
-    // IAM Role for Browser Signing (required for Web Bot Auth)
+    // IAM Role for Browser Signing (required for Web Bot Auth). AgentCore
+    // assumes it only for this account's browser resources; no identity policy
+    // is required on the signing role itself.
     const browserSigningRole = new iam.Role(this, 'BrowserSigningRole', {
       roleName: 'CitationAnalysis-BrowserSigningRole',
-      assumedBy: new iam.ServicePrincipal('bedrock-agentcore.amazonaws.com'),
+      assumedBy: new iam.ServicePrincipal('bedrock-agentcore.amazonaws.com', {
+        conditions: {
+          StringEquals: {
+            'aws:SourceAccount': this.account,
+          },
+          ArnLike: {
+            'aws:SourceArn': this.formatArn({
+              service: 'bedrock-agentcore',
+              resource: '*',
+            }),
+          },
+        },
+      }),
       description: 'Role for Bedrock AgentCore Browser signing (Web Bot Auth)',
     });
-
-    // Grant the browser signing role permission to sign requests
-    browserSigningRole.addToPolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'bedrock-agentcore:*',
-      ],
-      resources: ['*'],
-    }));
 
     const crawlerBrowser = new bedrockagentcore.CfnBrowserCustom(this, 'CrawlerBrowser', {
       name: 'citation_analysis_crawler',
@@ -1108,6 +1160,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_CRAWLED_CONTENT: crawledContentTable.tableName,
         SCREENSHOTS_BUCKET: screenshotsBucket.bucketName,
         BROWSER_ID: crawlerBrowser.attrBrowserId, // Pre-created browser with Web Bot Auth
+        BROWSER_SESSION_TIMEOUT_SECONDS: '330',
+        CRAWL_FRESHNESS_DAYS: '30',
+        CRAWL_BLOCKED_FRESHNESS_DAYS: '3',
+        CRAWL_CACHE_INDEX_NAME: 'CacheScopeIndex',
         ...bedrockTierEnv,
       },
     });

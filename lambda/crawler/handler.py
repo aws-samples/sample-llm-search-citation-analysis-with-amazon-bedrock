@@ -1,7 +1,4 @@
-"""
-Crawler Lambda Function
-Crawls cited pages using Bedrock AgentCore browser tools (no Playwright) and generates summaries.
-"""
+"""Crawler Lambda for AgentCore browser extraction and page analysis."""
 
 import json
 import logging
@@ -12,60 +9,40 @@ from typing import Any
 import boto3
 
 from shared.browser_tools import SimpleBrowserTools
-
-# Import shared modules from Lambda Layer
 from shared.config import LambdaConfig
+from shared.crawl_cache import (
+    CachedCrawl,
+    blocked_cache_scope,
+    find_fresh_crawl,
+    success_cache_scope,
+)
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
 from shared.step_function_response import log_error
-
-# Configure logging
+from shared.url_validator import validate_url_safe
 from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# Initialize config and clients
 config = LambdaConfig()
-dynamodb = boto3.resource('dynamodb', region_name=config.region)
-
-# Environment variables
+dynamodb: Any = boto3.resource('dynamodb', region_name=config.region)
 SCREENSHOTS_BUCKET = os.environ['SCREENSHOTS_BUCKET']
 
 
 def analyze_content_combined(content: str, title: str, url: str, keyword: str) -> tuple[str, dict[str, Any]]:
-    """
-    Generate summary AND SEO analysis in a single Bedrock call.
-    This reduces API calls by 50% and helps avoid throttling.
-
-    Args:
-        content: Page content
-        title: Page title
-        url: URL of the page
-        keyword: Search keyword that led to this citation
-
-    Returns:
-        Tuple of (summary, seo_analysis_dict)
-    """
+    """Generate summary and keyword-specific SEO analysis in one Bedrock call."""
     try:
-        logger.info(f"Analyzing content (summary + SEO) for {url}")
-
-        # Truncate content if too long
+        logger.info("Analyzing crawled content (summary + SEO)")
         max_content_length = 8000
         truncated_content = content[:max_content_length] if len(content) > max_content_length else content
 
-        # Wrap all untrusted inputs. Title and content came from scraped web
-        # pages; keyword and URL were ultimately user-supplied. A malicious
-        # page could attempt to exfiltrate prompt instructions through its
-        # own markup — the tagged boundary plus the system preamble neutralize
-        # that.
         url_tag = wrap_user_input(url, "url", max_length=2048)
         title_tag = wrap_user_input(title, "title")
         keyword_tag = wrap_user_input(keyword, "keyword")
         content_tag = wrap_user_input(truncated_content, "page_content", max_length=max_content_length + 200)
 
-        # Combined prompt for both summary and SEO analysis
         prompt = f"""{untrusted_input_system_instruction()}
 
 Analyze this web page and provide both a summary and SEO analysis.
@@ -94,10 +71,8 @@ SEO_ANALYSIS:
   "competitive_advantage": "what makes this page rank well"
 }}"""
 
-        # Use centralized Bedrock invocation (summarization role)
         response_text = invoke_bedrock(prompt, ModelRole.SUMMARIZATION, max_tokens=1200, temperature=0.3)
 
-        # Parse summary
         summary = ""
         if "SUMMARY:" in response_text:
             summary_start = response_text.find("SUMMARY:") + len("SUMMARY:")
@@ -106,50 +81,32 @@ SEO_ANALYSIS:
                 summary_end = response_text.find("{")
             summary = response_text[summary_start:summary_end].strip()
 
-        # Parse SEO analysis JSON via shared helper (handles markdown fences,
-        # truncation, and wrong-type responses consistently with other lambdas)
-        seo_analysis = parse_llm_json(response_text, expect="object") or {}
+        parsed_analysis = parse_llm_json(response_text, expect="object")
+        seo_analysis = parsed_analysis if isinstance(parsed_analysis, dict) else {}
         if not seo_analysis:
-            logger.warning(f"Could not parse SEO JSON for {url}")
+            logger.warning("Could not parse SEO JSON for crawled page")
 
-        logger.info(f"Combined analysis completed for {url}")
+        logger.info("Combined crawl analysis completed")
         return summary, seo_analysis
 
-    except Exception as e:
-        logger.error(f"Error in combined analysis for {url}: {e}")
+    except Exception as exc:
+        logger.error("Error in combined crawl analysis: %s", exc)
         return "", {}
 
 
 def upload_screenshot_to_s3(screenshot_base64: str, url: str, timestamp: str) -> str:
-    """
-    Upload screenshot to S3 with organized path structure.
-
-    Args:
-        screenshot_base64: Base64 encoded screenshot
-        url: URL of the page
-        timestamp: Timestamp of the crawl
-
-    Returns:
-        S3 URI of the uploaded screenshot
-    """
+    """Upload a base64-encoded screenshot under the crawler evidence prefix."""
     try:
         import base64
         from urllib.parse import urlparse
 
-        # Decode base64
         screenshot_bytes = base64.b64decode(screenshot_base64)
-
-        # Parse URL to create organized path
         parsed_url = urlparse(url)
         domain = parsed_url.netloc.replace('www.', '')
-
-        # Create S3 key with date-based organization
-        date_prefix = timestamp[:10]  # YYYY-MM-DD
+        date_prefix = timestamp[:10]
         s3_key = f"screenshots/{date_prefix}/{domain}/{timestamp}.png"
 
-        # Upload to S3
         s3_client = boto3.client('s3', region_name=config.region)
-
         s3_client.put_object(
             Bucket=SCREENSHOTS_BUCKET,
             Key=s3_key,
@@ -157,37 +114,31 @@ def upload_screenshot_to_s3(screenshot_base64: str, url: str, timestamp: str) ->
             ContentType='image/png',
             Metadata={
                 'url': url,
-                'timestamp': timestamp
-            }
+                'timestamp': timestamp,
+            },
         )
 
         s3_uri = f"s3://{SCREENSHOTS_BUCKET}/{s3_key}"
-        logger.info(f"Screenshot uploaded to {s3_uri}")
-
+        logger.info("Crawler screenshot uploaded")
         return s3_uri
 
-    except Exception as e:
-        logger.error(f"Error uploading screenshot: {e}")
+    except Exception as exc:
+        logger.error("Error uploading screenshot: %s", exc)
         return ""
 
 
 def _load_block_patterns() -> dict[str, list[str]]:
-    """Load the bot-detection pattern dictionary from `block_patterns.json`.
-
-    Cached at module import so there's one disk read per Lambda cold start.
-    See audit item 14 — these used to be 40+ hardcoded strings; extracting
-    them lets operators tune detection without a redeploy.
-    """
+    """Load the bundled block-page pattern dictionary once per cold start."""
     patterns_path = os.path.join(os.path.dirname(__file__), 'block_patterns.json')
     try:
-        with open(patterns_path, encoding='utf-8') as fh:
-            data = json.load(fh)
-    except (OSError, json.JSONDecodeError) as e:
-        logger.error("Failed to load block_patterns.json: %s", e)
+        with open(patterns_path, encoding='utf-8') as file_handle:
+            data = json.load(file_handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.error("Failed to load block_patterns.json: %s", exc)
         return {}
-    # Defensive validation — drop anything that isn't list[str].
+
     return {
-        reason: [s for s in patterns if isinstance(s, str)]
+        reason: [pattern for pattern in patterns if isinstance(pattern, str)]
         for reason, patterns in data.items()
         if isinstance(patterns, list)
     }
@@ -197,34 +148,15 @@ _BLOCK_PATTERNS = _load_block_patterns()
 
 
 def detect_blocked_page(content: str, title: str) -> tuple[bool, str | None]:
-    """
-    Detect if page is a bot detection/CAPTCHA page.
+    """Detect known publisher block pages without attempting any bypass."""
+    combined_text = f'{content} {title}'.lower()
+    for reason, indicators in _BLOCK_PATTERNS.items():
+        if any(indicator in combined_text for indicator in indicators):
+            return True, reason
 
-    Pattern lists live in ``block_patterns.json``. Iteration order matches
-    the JSON keys (Python dicts preserve insertion order), which
-    determines which reason wins when a page matches multiple categories.
-    Current ordering: captcha > access_denied > rate_limited > geo_blocked
-    > login_required.
-
-    Args:
-        content: Page content text
-        title: Page title
-
-    Returns:
-        Tuple of (is_blocked, block_reason)
-        block_reason is one of: captcha, access_denied, rate_limited, geo_blocked, login_required, empty_content
-    """
-    # Check for empty or near-empty content (likely blocked or failed to load)
     content_stripped = content.strip() if content else ''
     if len(content_stripped) < 100:
         return True, 'empty_content'
-
-    combined_text = (content + ' ' + title).lower()
-
-    for reason, indicators in _BLOCK_PATTERNS.items():
-        for indicator in indicators:
-            if indicator in combined_text:
-                return True, reason
 
     return False, None
 
@@ -243,190 +175,281 @@ def store_crawled_content(
     content_length: int | None = None,
     screenshot_s3_uri: str | None = None,
     seo_analysis: dict[str, Any] | None = None,
-    block_reason: str | None = None
+    block_reason: str | None = None,
+    analysis_status: str | None = None,
 ) -> None:
-    """
-    Store crawled content in DynamoDB.
+    """Append a crawl artifact to the URL-partitioned DynamoDB history."""
+    logger.info("Storing crawled content")
+    table = dynamodb.Table(config.crawled_content_table)
+    stored_keyword = keyword if keyword and keyword.strip() else 'unknown'
+    item: dict[str, Any] = {
+        'normalized_url': normalized_url,
+        'crawled_at': get_timestamp(),
+        'keyword': stored_keyword,
+        'title': title,
+        'content': content,
+        'summary': summary,
+        'citation_count': citation_count,
+        'citing_providers': citing_providers,
+        'status': status,
+    }
 
-    Args:
-        normalized_url: Normalized URL of the crawled page
-        keyword: Search keyword that led to this citation
-        title: Page title
-        content: Full page content
-        summary: LLM-generated summary
-        citation_count: Number of providers that cited this URL
-        citing_providers: List of provider names that cited this URL
-        status: Crawl status (success/blocked/error)
-        error_message: Error message if status is error or blocked
-        page_load_time_ms: Time taken to load the page
-        content_length: Length of extracted content
-        screenshot_s3_uri: S3 URI of the screenshot
-        seo_analysis: SEO analysis results
-        block_reason: Reason for block (captcha/access_denied/rate_limited/geo_blocked/login_required)
-    """
+    if page_load_time_ms is not None or content_length is not None:
+        item['metadata'] = {}
+        if page_load_time_ms is not None:
+            item['metadata']['page_load_time_ms'] = page_load_time_ms
+        if content_length is not None:
+            item['metadata']['content_length'] = content_length
+    if error_message:
+        item['error_message'] = error_message
+    if block_reason:
+        item['block_reason'] = block_reason
+    if screenshot_s3_uri:
+        item['screenshot_s3_uri'] = screenshot_s3_uri
+    if seo_analysis:
+        item['seo_analysis'] = seo_analysis
+    if analysis_status:
+        item['analysis_status'] = analysis_status
+    if status in {'success', 'error'}:
+        item['cache_scope'] = success_cache_scope(normalized_url, stored_keyword)
+        item['cache_status'] = status
+    elif status == 'blocked':
+        item['cache_scope'] = blocked_cache_scope(normalized_url)
+        item['cache_status'] = status
+
+    table.put_item(Item=item)
+    logger.info("Crawled content stored")
+
+
+def _cached_result(url: str, cached: CachedCrawl) -> dict[str, Any]:
+    """Build the compact Step Functions result for a cache hit."""
+    result: dict[str, Any] = {
+        'url': url,
+        'status': cached['status'],
+        'cached': True,
+        'crawled_at': cached['crawled_at'],
+    }
+    block_reason = cached.get('block_reason')
+    if block_reason:
+        result['block_reason'] = block_reason
+    logger.info("Crawl cache hit (%s)", cached['status'])
+    return result
+
+
+def _refresh_cached_citation_metadata(
+    table: Any,
+    url: str,
+    cached: CachedCrawl,
+    citation_count: int,
+    citing_providers: list[str],
+) -> None:
+    """Keep cache artifact citation metrics aligned with current evidence."""
     try:
-        logger.info(f"Storing crawled content for {normalized_url}")
+        table.update_item(
+            Key={
+                'normalized_url': url,
+                'crawled_at': cached['crawled_at'],
+            },
+            UpdateExpression='SET citation_count = :count, citing_providers = :providers',
+            ExpressionAttributeValues={
+                ':count': citation_count,
+                ':providers': citing_providers,
+            },
+        )
+    except Exception as exc:
+        logger.warning("Could not refresh cached citation metadata (%s)", type(exc).__name__)
 
-        table = dynamodb.Table(config.crawled_content_table)
 
-        # Ensure keyword is not empty (required for GSI)
-        if not keyword or keyword.strip() == '':
-            keyword = 'unknown'
+def _error_result(
+    *,
+    url: str,
+    keyword: str,
+    citation_count: int,
+    citing_providers: list[str],
+    error_message: str,
+    title: str = '',
+    page_load_time_ms: int | None = None,
+) -> dict[str, Any]:
+    """Persist and return one compact crawl error."""
+    store_crawled_content(
+        normalized_url=url,
+        keyword=keyword,
+        title=title,
+        content='',
+        summary='',
+        citation_count=citation_count,
+        citing_providers=citing_providers,
+        status='error',
+        error_message=error_message,
+        page_load_time_ms=page_load_time_ms,
+    )
+    return {
+        'url': url,
+        'status': 'error',
+        'error': error_message,
+    }
 
-        item = {
-            'normalized_url': normalized_url,
-            'crawled_at': get_timestamp(),
-            'keyword': keyword,
-            'title': title,
-            'content': content,
-            'summary': summary,
-            'citation_count': citation_count,
-            'citing_providers': citing_providers,
-            'status': status
-        }
 
-        # Add metadata if available
-        if page_load_time_ms is not None or content_length is not None:
-            item['metadata'] = {}
-            if page_load_time_ms is not None:
-                item['metadata']['page_load_time_ms'] = page_load_time_ms
-            if content_length is not None:
-                item['metadata']['content_length'] = content_length
-
-        # Add error message if present
-        if error_message:
-            item['error_message'] = error_message
-
-        # Add block reason if present
-        if block_reason:
-            item['block_reason'] = block_reason
-
-        # Add screenshot S3 URI if present
-        if screenshot_s3_uri:
-            item['screenshot_s3_uri'] = screenshot_s3_uri
-
-        # Add SEO analysis if present
-        if seo_analysis:
-            item['seo_analysis'] = seo_analysis
-
-        table.put_item(Item=item)
-        logger.info(f"Successfully stored crawled content for {normalized_url}")
-
-    except Exception as e:
-        logger.error(f"Error storing crawled content for {normalized_url}: {e}")
-        raise
+def _navigation_blocked_result(
+    *,
+    url: str,
+    keyword: str,
+    citation_count: int,
+    citing_providers: list[str],
+    block_reason: str,
+    page_load_time_ms: int,
+) -> dict[str, Any]:
+    """Persist an early navigation block without converting it to an error."""
+    store_crawled_content(
+        normalized_url=url,
+        keyword=keyword,
+        title='',
+        content='',
+        summary='',
+        citation_count=citation_count,
+        citing_providers=citing_providers,
+        status='blocked',
+        error_message=f'Bot detection - {block_reason}',
+        page_load_time_ms=page_load_time_ms,
+        block_reason=block_reason,
+    )
+    return {
+        'url': url,
+        'status': 'blocked',
+        'block_reason': block_reason,
+    }
 
 
 def crawl_citation(citation: dict[str, Any]) -> dict[str, Any]:
-    """
-    Crawl a single citation using browser tools (synchronous - no Playwright).
-
-    Args:
-        citation: Citation details including URL and metadata
-
-    Returns:
-        Dictionary with crawl results
-    """
-    url = citation.get('normalized_url')
-    keyword = citation.get('keyword', '')
+    """Return a cached verdict or crawl and persist one citation URL."""
+    raw_url = citation.get('normalized_url')
+    url = raw_url if isinstance(raw_url, str) else ''
+    raw_keyword = citation.get('keyword', '')
+    keyword = raw_keyword if isinstance(raw_keyword, str) and raw_keyword.strip() else 'unknown'
     citation_count = citation.get('citation_count', 0)
     citing_providers = citation.get('citing_providers', [])
+    browser_tools: SimpleBrowserTools | None = None
 
-    logger.info(f"Starting crawl for {url}")
-
-    browser_tools = SimpleBrowserTools(config)
-    start_time = time.time()
+    logger.info("Starting citation crawl")
 
     try:
-        # Create and initialize browser
+        is_safe, validation_error = validate_url_safe(url)
+        if not is_safe:
+            logger.warning("Citation URL rejected by crawler safety policy")
+            return _error_result(
+                url=url,
+                keyword=keyword,
+                citation_count=citation_count,
+                citing_providers=citing_providers,
+                error_message=validation_error,
+            )
+
+        table = dynamodb.Table(config.crawled_content_table)
+        cached = find_fresh_crawl(
+            table,
+            config.crawl_cache_index_name,
+            url,
+            keyword,
+            success_freshness_days=config.crawl_freshness_days,
+            blocked_freshness_days=config.crawl_blocked_freshness_days,
+        )
+        if cached is not None:
+            if cached['status'] == 'success':
+                _refresh_cached_citation_metadata(
+                    table,
+                    url,
+                    cached,
+                    citation_count,
+                    citing_providers,
+                )
+            return _cached_result(url, cached)
+
+        browser_tools = SimpleBrowserTools(config)
+        start_time = time.monotonic()
         browser_tools.create_browser()
         browser_tools.initialize_browser_session()
 
-        # Navigate to URL
         nav_result = browser_tools.navigate_to_url(url)
-
-        if nav_result["status"] != "success":
-            # Navigation failed
-            error_msg = nav_result.get('error', 'Navigation failed')
-            logger.error(f"Navigation failed for {url}: {error_msg}")
-
-            # Store error status
-            store_crawled_content(
-                normalized_url=url,
+        page_load_time_ms = int((time.monotonic() - start_time) * 1000)
+        if nav_result['status'] == 'blocked':
+            block_reason = nav_result.get('block_reason', 'captcha')
+            browser_tools.cleanup()
+            browser_tools = None
+            return _navigation_blocked_result(
+                url=url,
                 keyword=keyword,
-                title='',
-                content='',
-                summary='',
                 citation_count=citation_count,
                 citing_providers=citing_providers,
-                status='error',
-                error_message=error_msg
+                block_reason=block_reason,
+                page_load_time_ms=page_load_time_ms,
+            )
+        if nav_result['status'] != 'success':
+            error_message = nav_result.get('error', 'Navigation failed')
+            logger.error("Navigation failed: %s", error_message)
+            browser_tools.cleanup()
+            browser_tools = None
+            return _error_result(
+                url=url,
+                keyword=keyword,
+                citation_count=citation_count,
+                citing_providers=citing_providers,
+                error_message=error_message,
+                page_load_time_ms=page_load_time_ms,
             )
 
-            return {
-                'url': url,
-                'status': 'error',
-                'error': error_msg
-            }
-
-        # Calculate page load time
-        page_load_time_ms = int((time.time() - start_time) * 1000)
-
-        # Extract content
         content_result = browser_tools.extract_page_content()
-
-        if content_result["status"] != "success":
-            # Content extraction failed
-            error_msg = content_result.get('error', 'Content extraction failed')
-            logger.error(f"Content extraction failed for {url}: {error_msg}")
-
-            # Store error status
-            store_crawled_content(
-                normalized_url=url,
+        if content_result['status'] != 'success':
+            error_message = content_result.get('error', 'Content extraction failed')
+            logger.error("Content extraction failed: %s", error_message)
+            browser_tools.cleanup()
+            browser_tools = None
+            return _error_result(
+                url=url,
                 keyword=keyword,
-                title=nav_result.get('title', ''),
-                content='',
-                summary='',
                 citation_count=citation_count,
                 citing_providers=citing_providers,
-                status='error',
-                error_message=error_msg,
-                page_load_time_ms=page_load_time_ms
+                error_message=error_message,
+                title=nav_result.get('title', ''),
+                page_load_time_ms=page_load_time_ms,
             )
 
-            return {
-                'url': url,
-                'status': 'error',
-                'error': error_msg
-            }
-
-        # Extract data from results
         title = content_result.get('title', '')
         content = content_result.get('content', '')
         content_length = content_result.get('content_length', 0)
+        logger.info("Extracted %s visible characters", content_length)
 
-        logger.info(f"Successfully extracted content from {url} ({content_length} chars)")
-
-        # Take screenshot
-        screenshot_s3_uri = None
         screenshot_result = browser_tools.take_screenshot()
-        if screenshot_result["status"] == "success":
-            timestamp = get_timestamp()
-            screenshot_s3_uri = upload_screenshot_to_s3(
-                screenshot_result["screenshot_base64"],
-                url,
-                timestamp
+        if screenshot_result['status'] != 'success':
+            logger.warning("Screenshot capture failed: %s", screenshot_result.get('error'))
+
+        # Freeze the captured page before any external write or model work.
+        # This closes the final redirect race and stops paid AgentCore time
+        # while S3/Bedrock/DynamoDB consume already-extracted data.
+        browser_tools.cleanup()
+        navigation_guard_error = browser_tools.navigation_guard_error
+        browser_tools = None
+        if navigation_guard_error:
+            return _error_result(
+                url=url,
+                keyword=keyword,
+                citation_count=citation_count,
+                citing_providers=citing_providers,
+                error_message=navigation_guard_error,
+                title=title,
+                page_load_time_ms=page_load_time_ms,
             )
-        else:
-            logger.warning(f"Screenshot failed for {url}: {screenshot_result.get('error')}")
 
-        # Check if page is blocked by bot detection
+        screenshot_s3_uri = None
+        if screenshot_result['status'] == 'success':
+            screenshot_s3_uri = upload_screenshot_to_s3(
+                screenshot_result['screenshot_base64'],
+                url,
+                get_timestamp(),
+            )
+
         is_blocked, block_reason = detect_blocked_page(content, title)
-
         if is_blocked:
-            logger.warning(f"Page blocked for {url}: {block_reason}")
-
-            # Store blocked status with screenshot (evidence of block page)
+            logger.warning("Publisher block page detected (%s)", block_reason)
             store_crawled_content(
                 normalized_url=url,
                 keyword=keyword,
@@ -440,19 +463,16 @@ def crawl_citation(citation: dict[str, Any]) -> dict[str, Any]:
                 page_load_time_ms=page_load_time_ms,
                 content_length=content_length,
                 screenshot_s3_uri=screenshot_s3_uri,
-                block_reason=block_reason
+                block_reason=block_reason,
             )
-
             return {
                 'url': url,
                 'status': 'blocked',
-                'block_reason': block_reason
+                'block_reason': block_reason,
             }
 
-        # Generate summary AND SEO analysis in single Bedrock call (reduces API calls by 50%)
         summary, seo_analysis = analyze_content_combined(content, title, url, keyword)
-
-        # Store crawled content
+        analysis_status = 'complete' if summary and seo_analysis else 'failed'
         store_crawled_content(
             normalized_url=url,
             keyword=keyword,
@@ -465,64 +485,46 @@ def crawl_citation(citation: dict[str, Any]) -> dict[str, Any]:
             page_load_time_ms=page_load_time_ms,
             content_length=content_length,
             screenshot_s3_uri=screenshot_s3_uri,
-            seo_analysis=seo_analysis
+            seo_analysis=seo_analysis,
+            analysis_status=analysis_status,
         )
-
-        # Return minimal data to avoid Step Functions 256KB limit
-        # Full data is already stored in DynamoDB
         return {
             'url': url,
-            'status': 'success'
+            'status': 'success',
         }
 
-    except Exception as e:
-        logger.error(f"Error crawling {url}: {e}")
-
-        # Store error status
+    except Exception as exc:
+        if browser_tools is not None:
+            browser_tools.cleanup()
+            browser_tools = None
+        logger.error("Error crawling citation: %s", exc)
         try:
-            store_crawled_content(
-                normalized_url=url,
+            return _error_result(
+                url=url,
                 keyword=keyword,
-                title='',
-                content='',
-                summary='',
                 citation_count=citation_count,
                 citing_providers=citing_providers,
-                status='error',
-                error_message=str(e)
+                error_message=str(exc),
             )
         except Exception as store_error:
-            logger.error(f"Failed to store error status: {store_error}")
-
-        return {
-            'url': url,
-            'status': 'error',
-            'error': str(e)
-        }
+            logger.error("Failed to store crawler error status: %s", store_error)
+            return {
+                'url': url,
+                'status': 'error',
+                'error': str(exc),
+            }
 
     finally:
-        # Clean up browser resources
-        browser_tools.cleanup()
+        if browser_tools is not None:
+            browser_tools.cleanup()
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """
-    Lambda handler for crawling individual citations.
-
-    Args:
-        event: Input event containing citation details
-        context: Lambda context object
-
-    Returns:
-        Dictionary containing crawled content and metadata
-    """
-    logger.info(f"Received event: {json.dumps(event)}")
-
+    """Crawl one Step Functions citation item."""
+    logger.info("Received crawler event")
     citation = event.get('citation', {})
     url = citation.get('normalized_url')
 
-    # keyword is passed at the top level by the Map itemSelector,
-    # not inside the citation object from deduplication
     keyword_override = event.get('keyword', '')
     if keyword_override:
         citation['keyword'] = keyword_override
@@ -533,13 +535,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         raise error
 
     try:
-        # Run crawl function (synchronous - no async needed)
         result = crawl_citation(citation)
-
-        logger.info(f"Crawl completed for {url}: {result.get('status')}")
-
+        logger.info("Crawl completed with status %s", result.get('status'))
         return result
-
-    except Exception as e:
-        log_error(e, f"crawling URL {url}", event)
+    except Exception as exc:
+        log_error(exc, f"crawling URL {url}", event)
         raise
