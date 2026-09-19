@@ -1,6 +1,7 @@
-export type ContentIdeaType = 'visibility_gap' | 'ranking_improvement' | 'provider_gap' | 'configuration' | 'data' | 'self_reflection';
+export type ContentIdeaType = 'visibility_gap' | 'ranking_improvement' | 'provider_gap' | 'configuration' | 'data' | 'self_reflection' | 'group_brief';
 export type ContentPriority = 'high' | 'medium' | 'low';
-export type ContentAngle = 'comprehensive_guide' | 'differentiation' | 'provider_optimization';
+export type GroupBriefMode = 'improve_current_url' | 'rewrite_pasted_copy' | 'create_new_landing_page';
+export type ContentAngle = 'comprehensive_guide' | 'differentiation' | 'provider_optimization' | GroupBriefMode;
 export type ContentStatus = 'pending' | 'generating' | 'generated' | 'failed';
 
 export interface ContentIdea {
@@ -21,6 +22,28 @@ export interface ContentIdea {
   persona_name?: string;
   persona_id?: string;
   gap_reference?: string;
+  group_id?: string;
+  group_name?: string;
+  keyword_ids?: string[];
+  keywords?: string[];
+  landing_url?: string;
+  current_copy?: string;
+  prompt_template?: string;
+  output_language?: string;
+}
+
+export interface GroupBriefIdea extends ContentIdea {
+  type: 'group_brief';
+  keyword: string;
+  content_angle: GroupBriefMode;
+  group_id: string;
+  group_name: string;
+  keyword_ids: string[];
+  keywords: string[];
+  landing_url: string;
+  current_copy: string;
+  prompt_template: string;
+  output_language: string;
 }
 
 export interface GeneratedContent {

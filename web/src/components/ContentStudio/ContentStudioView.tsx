@@ -4,10 +4,16 @@ import {
 import { useContentStudio } from '../../hooks/useContentStudio';
 import { ContentIdeaCard } from './ContentIdeaCard';
 import { ContentHistory } from './ContentHistory';
+import { GroupBriefForm } from './GroupBriefForm';
+import { GROUP_BRIEF_LANGUAGES } from './GroupBriefForm-source';
 import { Spinner } from '../ui/Spinner';
-import type { ContentIdea } from '../../types';
+import type {
+  ContentIdea, GroupBriefIdea, Keyword
+} from '../../types';
 
-type TabType = 'ideas' | 'history';
+type TabType = 'ideas' | 'brief' | 'history';
+
+interface ContentStudioViewProps { readonly keywords: Keyword[]; }
 
 interface IdeasTabContentProps {
   loading: boolean;
@@ -85,11 +91,6 @@ interface ConfirmGenerateModalProps {
   readonly onCancel: () => void;
 }
 
-const COMMON_LANGUAGES = [
-  'English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese',
-  'Dutch', 'Catalan', 'Japanese', 'Chinese', 'Korean', 'Arabic',
-];
-
 function ConfirmGenerateModal({
   idea, onConfirm, onCancel
 }: ConfirmGenerateModalProps) {
@@ -129,7 +130,7 @@ function ConfirmGenerateModal({
                   onChange={e => setOutputLanguage(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
                 >
-                  {COMMON_LANGUAGES.map(lang => (
+                  {GROUP_BRIEF_LANGUAGES.map(lang => (
                     <option key={lang} value={lang}>{lang}</option>
                   ))}
                 </select>
@@ -206,7 +207,7 @@ const Tabs = ({
   activeTab, setActiveTab, highPriorityCount, unviewedCount, historyLength 
 }: TabsProps) => (
   <div className="border-b border-gray-200">
-    <nav className="flex gap-8">
+    <nav className="flex gap-8 overflow-x-auto">
       <button
         onClick={() => setActiveTab('ideas')}
         className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
@@ -221,6 +222,16 @@ const Tabs = ({
             {highPriorityCount} high priority
           </span>
         )}
+      </button>
+      <button
+        onClick={() => setActiveTab('brief')}
+        className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+          activeTab === 'brief'
+            ? 'border-gray-900 text-gray-900'
+            : 'border-transparent text-gray-500 hover:text-gray-700'
+        }`}
+      >
+        Group Brief
       </button>
       <button
         onClick={() => setActiveTab('history')}
@@ -258,7 +269,7 @@ const GeneratingIndicator = ({ keyword }: GeneratingIndicatorProps) => (
   </div>
 );
 
-export const ContentStudioView = () => {
+export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
   const [activeTab, setActiveTab] = useState<TabType>('ideas');
   const [selectedIdea, setSelectedIdea] = useState<ContentIdea | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -281,7 +292,9 @@ export const ContentStudioView = () => {
   useEffect(() => {
     if (activeTab === 'ideas') {
       fetchIdeas();
-    } else {
+      return;
+    }
+    if (activeTab === 'history') {
       fetchHistory();
     }
   }, [activeTab, fetchIdeas, fetchHistory]);
@@ -297,8 +310,8 @@ export const ContentStudioView = () => {
     setShowConfirmModal(false);
     const ideaWithLanguage = {
       ...pendingIdea,
-      output_language: outputLanguage 
-    };
+      output_language: outputLanguage
+    } satisfies ContentIdea;
     setSelectedIdea(ideaWithLanguage);
 
     const result = await generateContent(ideaWithLanguage);
@@ -311,6 +324,17 @@ export const ContentStudioView = () => {
     setPendingIdea(null);
   };
 
+  const handleGenerateGroupBrief = async (idea: GroupBriefIdea): Promise<boolean> => {
+    setSelectedIdea(idea);
+    const result = await generateContent(idea);
+    const generated = result?.success === true;
+    if (generated) {
+      setActiveTab('history');
+      setSelectedIdea(null);
+    }
+    return generated;
+  };
+
   const handleCancelGenerate = () => {
     setShowConfirmModal(false);
     setPendingIdea(null);
@@ -319,7 +343,9 @@ export const ContentStudioView = () => {
   const handleRefresh = () => {
     if (activeTab === 'ideas') {
       fetchIdeas();
-    } else {
+      return;
+    }
+    if (activeTab === 'history') {
       fetchHistory();
     }
   };
@@ -329,7 +355,9 @@ export const ContentStudioView = () => {
 
   return (
     <div className="space-y-6">
-      <Header loading={loading} onRefresh={handleRefresh} />
+      {activeTab === 'brief' ? null : (
+        <Header loading={loading} onRefresh={handleRefresh} />
+      )}
 
       <Tabs
         activeTab={activeTab}
@@ -357,6 +385,14 @@ export const ContentStudioView = () => {
           />
           <NonActionableIdeas ideas={ideas} />
         </div>
+      )}
+
+      {activeTab === 'brief' && (
+        <GroupBriefForm
+          keywords={keywords}
+          generating={generating}
+          onGenerate={handleGenerateGroupBrief}
+        />
       )}
 
       {activeTab === 'history' && (

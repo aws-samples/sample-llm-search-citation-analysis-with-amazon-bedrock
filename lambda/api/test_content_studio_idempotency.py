@@ -28,6 +28,7 @@ These tests pin:
 
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -46,8 +47,24 @@ setdefault_env({
     'DYNAMODB_TABLE_CITATIONS': 'test-citations',
     'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
     'DYNAMODB_TABLE_CONTENT_STUDIO': 'test-content-studio',
+    'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
+    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
 })
 _mod = load_handler_module(os.path.dirname(__file__), 'content-studio.py')
+
+_GROUP_IDEA = {
+    'id': 'brief-1',
+    'type': 'group_brief',
+    'keyword': 'Group One',
+    'group_id': 'group-1',
+    'keyword_ids': ['keyword-1', 'keyword-2'],
+    'keywords': ['alpha', 'beta'],
+    'content_angle': 'create_new_landing_page',
+    'landing_url': '',
+    'current_copy': '',
+    'prompt_template': 'Create for {group}',
+    'output_language': 'English',
+}
 
 
 class _FakeClientError(Exception):
@@ -107,6 +124,71 @@ class TestComputeIdempotencyKey:
         k1 = _mod._compute_idempotency_key({**base, 'output_language': 'English'})
         k2 = _mod._compute_idempotency_key({**base, 'output_language': 'Spanish'})
         assert k1 != k2
+
+    @pytest.mark.parametrize(
+        ('field', 'changed_value'),
+        [
+            ('group_id', 'group-2'),
+            ('content_angle', 'rewrite_pasted_copy'),
+            ('keyword_ids', ['keyword-1', 'keyword-3']),
+            ('keywords', ['alpha', 'gamma']),
+            ('landing_url', 'https://example.com/page'),
+            ('current_copy', 'different current copy'),
+            ('prompt_template', 'Different template for {group}'),
+        ],
+        ids=[
+            'group-id',
+            'mode',
+            'selected-ids',
+            'authoritative-keywords',
+            'landing-url',
+            'current-copy-hash',
+            'template-hash',
+        ],
+    )
+    def test_distinct_group_brief_dimension_produces_different_key(
+        self, field: str, changed_value: object
+    ) -> None:
+        fixed_time = datetime(2026, 4, 18, 12, 0, 0, tzinfo=UTC)
+        changed = {**_GROUP_IDEA, field: changed_value}
+
+        with patch.object(_mod, 'utc_now', return_value=fixed_time):
+            original_key = _mod._compute_idempotency_key(_GROUP_IDEA)
+            changed_key = _mod._compute_idempotency_key(changed)
+
+        assert original_key != changed_key
+
+    def test_reordered_group_keyword_ids_and_names_produce_same_key(self) -> None:
+        fixed_time = datetime(2026, 4, 18, 12, 0, 0, tzinfo=UTC)
+        reordered = {
+            **_GROUP_IDEA,
+            'keyword_ids': ['keyword-2', 'keyword-1'],
+            'keywords': ['beta', 'alpha'],
+        }
+
+        with patch.object(_mod, 'utc_now', return_value=fixed_time):
+            original_key = _mod._compute_idempotency_key(_GROUP_IDEA)
+            reordered_key = _mod._compute_idempotency_key(reordered)
+
+        assert original_key == reordered_key
+
+    def test_legacy_idea_key_keeps_original_dimensions(self) -> None:
+        idea = {
+            'id': 'idea-1',
+            'keyword': 'generic keyword',
+            'content_angle': 'comprehensive_guide',
+            'output_language': 'English',
+        }
+        fixed_time = datetime(2026, 4, 18, 12, 0, 0, tzinfo=UTC)
+        bucket = int(fixed_time.timestamp() // 300)
+        expected = hashlib.sha256(
+            f'idea-1|generic keyword|comprehensive_guide|English|{bucket}'.encode()
+        ).hexdigest()[:32]
+
+        with patch.object(_mod, 'utc_now', return_value=fixed_time):
+            actual = _mod._compute_idempotency_key(idea)
+
+        assert actual == expected
 
     def test_different_window_produces_different_key(self) -> None:
         """A user who re-triggers generation after the window expires

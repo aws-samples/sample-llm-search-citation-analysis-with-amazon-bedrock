@@ -9,6 +9,35 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.9.0] - 2026-09-19
+
+Content Studio can now create a group-level landing-page brief for any
+industry from the keywords being actively tracked.
+
+### Added
+
+- **Group Brief workflow.** Select a keyword group and 1–50 active member
+  keywords, then improve a current public URL, rewrite pasted copy, or create
+  a new landing page. Every mode produces title/meta/headings/body plus a
+  5–8-question FAQ section in the selected output language and reuses the
+  existing async generation history and document export.
+- **Configurable generation prompt.** Each mode starts with an industry-neutral
+  template that can be edited with allowlisted placeholders and reset. The
+  exact effective template is validated, bounded and snapshotted with the
+  generation so history remains reproducible.
+- **Bounded landing-page ingestion.** URL mode rejects unsafe addresses before
+  queuing, revalidates every redirect asynchronously, accepts HTML only,
+  streams with a hard decompressed-byte limit, removes non-content elements
+  and caps extracted text before sending it as untrusted model context.
+
+### Changed
+
+- The backend replaces client-supplied group/keyword text with authoritative
+  KeywordGroups and active Keywords records before persisting or generating;
+  selected ids outside the group are rejected before any write.
+- Content Studio gains read-only access to the existing KeywordGroups table.
+  No new table or always-on resource is introduced.
+
 ## [2.8.0] - 2026-09-19
 
 Research-agent proposals now include an explainable, configurable shortlist of

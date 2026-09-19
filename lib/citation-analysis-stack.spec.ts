@@ -695,6 +695,10 @@ const synthesized: {
   userPoolClientProps: Record<string, unknown>;
   userPoolGroupNames: string[];
   contentStudioConcurrency: number | undefined;
+  contentStudioKeywordGroupsEnvRef: string;
+  contentStudioKeywordGroupsTableId: string;
+  contentStudioKeywordGroupsActions: string[];
+  groupBriefTableNames: string[];
   keywordMgmtConcurrency: number | undefined;
   outputKeys: string[];
   apiBackedFunctionTimeouts: Record<string, number>;
@@ -749,6 +753,10 @@ const synthesized: {
   userPoolClientProps: {},
   userPoolGroupNames: [],
   contentStudioConcurrency: undefined,
+  contentStudioKeywordGroupsEnvRef: '',
+  contentStudioKeywordGroupsTableId: '',
+  contentStudioKeywordGroupsActions: [],
+  groupBriefTableNames: [],
   keywordMgmtConcurrency: undefined,
   outputKeys: [],
   apiBackedFunctionTimeouts: {},
@@ -862,6 +870,27 @@ beforeAll(() => {
   synthesized.userPoolClientProps = extractUserPoolClientProps(template);
   synthesized.userPoolGroupNames = extractUserPoolGroupNames(template);
 
+  const contentStudioEnvVars = extractLambdaEnvVars(template, CONTENT_STUDIO_FUNCTION_NAME);
+  const keywordGroupsTableId = findLogicalIdByName(
+    template,
+    'AWS::DynamoDB::Table',
+    'TableName',
+    'CitationAnalysis-KeywordGroups'
+  );
+  synthesized.contentStudioKeywordGroupsEnvRef = collectRefTargets(
+    contentStudioEnvVars.DYNAMODB_TABLE_KEYWORD_GROUPS
+  )[0] ?? '';
+  synthesized.contentStudioKeywordGroupsTableId = keywordGroupsTableId;
+  synthesized.contentStudioKeywordGroupsActions = extractFunctionRoleActionsOn(
+    template,
+    CONTENT_STUDIO_FUNCTION_NAME,
+    keywordGroupsTableId
+  );
+  synthesized.groupBriefTableNames = Object.values(
+    template.findResources('AWS::DynamoDB::Table')
+  )
+    .map((resource) => resolveString(resource, ['Properties', 'TableName']))
+    .filter((tableName) => /(?:Group|Content)Brief/u.test(tableName));
   synthesized.contentStudioConcurrency =
     extractReservedConcurrency(template, CONTENT_STUDIO_FUNCTION_NAME);
   synthesized.keywordMgmtConcurrency =
@@ -974,6 +1003,31 @@ describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
      * background. Since 2.2.0 it only starts executions and reads rows.
      */
     expect(synthesized.apiBackedFunctionTimeouts[KEYWORD_MGMT_FUNCTION_NAME]).toBe(GATEWAY_CEILING);
+  });
+});
+
+describe('Content Studio group brief infrastructure', () => {
+  it('points the group environment variable at the existing KeywordGroups table', () => {
+    expect(synthesized.contentStudioKeywordGroupsEnvRef).toBe(
+      synthesized.contentStudioKeywordGroupsTableId
+    );
+  });
+
+  it('grants Content Studio read-only access to KeywordGroups', () => {
+    expect(synthesized.contentStudioKeywordGroupsActions).toStrictEqual([
+      'dynamodb:BatchGetItem',
+      'dynamodb:ConditionCheckItem',
+      'dynamodb:DescribeTable',
+      'dynamodb:GetItem',
+      'dynamodb:GetRecords',
+      'dynamodb:GetShardIterator',
+      'dynamodb:Query',
+      'dynamodb:Scan',
+    ]);
+  });
+
+  it('adds no dedicated group brief table', () => {
+    expect(synthesized.groupBriefTableNames).toStrictEqual([]);
   });
 });
 

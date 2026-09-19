@@ -12,6 +12,7 @@ Endpoints:
 """
 
 import hashlib
+import json
 import logging
 import os
 import sys
@@ -28,6 +29,13 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import api_response, success_response, validation_error
 from shared.brand_visibility import classify_brand, load_recent_search_results, tracked_brand_names
 from shared.constants import MAX_KEYWORD_LENGTH
+from shared.content_brief import (
+    GROUP_BRIEF_TYPE,
+    ContentBriefFetchError,
+    ContentBriefTemplateError,
+    build_group_brief_prompt,
+    canonicalize_group_brief,
+)
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import query_latest_per_key
@@ -47,6 +55,8 @@ SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 CONTENT_STUDIO_TABLE = os.environ['DYNAMODB_TABLE_CONTENT_STUDIO']
+KEYWORDS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORDS']
+KEYWORD_GROUPS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORD_GROUPS']
 # Budget after which the reader-side sweep declares a generation dead. MUST
 # stay above this function's Lambda timeout (300s): the previous 240s default
 # marked a legitimate 241-300s run as `failed` while it was still running, and
@@ -402,10 +412,99 @@ def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
     return ideas[:50]  # Increased from 30 to 50
 
 
+def _invoke_content_generation(
+    prompt: str, content_angle: str, competitor_sources_used: int
+) -> dict[str, Any]:
+    """Invoke Bedrock and preserve the established Content Studio result shape."""
+    try:
+        generated_content = invoke_bedrock(
+            prompt,
+            ModelRole.GENERATION,
+            max_tokens=8000,
+            temperature=0.7,
+        )
+        return {
+            'success': True,
+            'content': parse_generated_content(generated_content),
+            'raw_content': generated_content,
+            'model': get_model_tier(ModelRole.GENERATION).value,
+            'content_angle': content_angle,
+            'competitor_sources_used': competitor_sources_used,
+        }
+    except BedrockInvocationError as error:
+        logger.error(f"Bedrock throttled after retries: {error}")
+        return {
+            'success': False,
+            'error': 'Too many requests. Please wait a moment and try again.',
+            'error_type': 'throttling',
+            'content_angle': content_angle,
+        }
+    except Exception as error:
+        error_msg = str(error)
+        logger.error(f"Bedrock generation failed: {error_msg}", exc_info=True)
+
+        if 'AccessDeniedException' in error_msg:
+            user_error = 'Access denied to Bedrock model. Check IAM permissions.'
+            error_type = 'access_denied'
+        elif 'ModelTimeoutException' in error_msg:
+            user_error = 'AI model took too long to respond. Please try again with a simpler keyword.'
+            error_type = 'timeout'
+        elif 'ModelErrorException' in error_msg:
+            user_error = 'AI model encountered an error. Please try again.'
+            error_type = 'model_error'
+        elif 'ValidationException' in error_msg:
+            user_error = 'Invalid request to AI model. Please try a different keyword.'
+            error_type = 'generation_error'
+        elif 'ServiceUnavailable' in error_msg or 'InternalServerError' in error_msg:
+            user_error = 'AI service temporarily unavailable. Please try again later.'
+            error_type = 'generation_error'
+        elif 'ResourceNotFoundException' in error_msg:
+            user_error = 'AI model not found. Please contact support.'
+            error_type = 'generation_error'
+        else:
+            user_error = f'Content generation failed: {error_msg[:200]}'
+            error_type = 'generation_error'
+
+        return {
+            'success': False,
+            'error': user_error,
+            'error_type': error_type,
+            'content_angle': content_angle,
+        }
+
+
+def _group_brief_generation(
+    idea: dict[str, Any], config: dict[str, Any], content_angle: str
+) -> dict[str, Any]:
+    """Build a group brief prompt, failing safely when its source cannot be read."""
+    try:
+        prompt, source_count = build_group_brief_prompt(idea, config)
+    except ContentBriefFetchError as error:
+        logger.warning("Group brief source fetch failed: %s", error)
+        return {
+            'success': False,
+            'error': str(error),
+            'error_type': 'source_fetch',
+            'content_angle': content_angle,
+        }
+    except ContentBriefTemplateError as error:
+        logger.warning("Group brief template rendering failed: %s", error)
+        return {
+            'success': False,
+            'error': str(error),
+            'error_type': 'template_validation',
+            'content_angle': content_angle,
+        }
+    return _invoke_content_generation(prompt, content_angle, source_count)
+
+
 def generate_content(idea: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
     """Generate content using Bedrock Claude based on idea and competitor analysis."""
-    keyword = idea.get('keyword', '')
     content_angle = idea.get('content_angle', 'comprehensive_guide')
+    if idea.get('type') == GROUP_BRIEF_TYPE:
+        return _group_brief_generation(idea, config, content_angle)
+
+    keyword = idea.get('keyword', '')
     competitor_urls = idea.get('competitor_urls', [])
 
     # Get competitor content for analysis
@@ -592,67 +691,7 @@ POINTS: [3 key takeaways as bullet points]"""
             f"The title, meta description, body, headings, and key points must all be in {output_language_tag}."
         )
 
-    try:
-        # Invoke shared Bedrock client with GENERATION role (Haiku default, tier-switchable)
-        generated_content = invoke_bedrock(
-            prompt,
-            ModelRole.GENERATION,
-            max_tokens=8000,
-            temperature=0.7,
-        )
-
-        parsed = parse_generated_content(generated_content)
-
-        return {
-            'success': True,
-            'content': parsed,
-            'raw_content': generated_content,
-            'model': get_model_tier(ModelRole.GENERATION).value,
-            'content_angle': content_angle,
-            'competitor_sources_used': len(competitor_content)
-        }
-
-    except BedrockInvocationError as e:
-        logger.error(f"Bedrock throttled after retries: {e}")
-        return {
-            'success': False,
-            'error': 'Too many requests. Please wait a moment and try again.',
-            'error_type': 'throttling',
-            'content_angle': content_angle
-        }
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"Bedrock generation failed: {error_msg}", exc_info=True)
-
-        # Provide user-friendly error messages based on AWS error codes in the message
-        if 'AccessDeniedException' in error_msg:
-            user_error = 'Access denied to Bedrock model. Check IAM permissions.'
-            error_type = 'access_denied'
-        elif 'ModelTimeoutException' in error_msg:
-            user_error = 'AI model took too long to respond. Please try again with a simpler keyword.'
-            error_type = 'timeout'
-        elif 'ModelErrorException' in error_msg:
-            user_error = 'AI model encountered an error. Please try again.'
-            error_type = 'model_error'
-        elif 'ValidationException' in error_msg:
-            user_error = 'Invalid request to AI model. Please try a different keyword.'
-            error_type = 'generation_error'
-        elif 'ServiceUnavailable' in error_msg or 'InternalServerError' in error_msg:
-            user_error = 'AI service temporarily unavailable. Please try again later.'
-            error_type = 'generation_error'
-        elif 'ResourceNotFoundException' in error_msg:
-            user_error = 'AI model not found. Please contact support.'
-            error_type = 'generation_error'
-        else:
-            user_error = f'Content generation failed: {error_msg[:200]}'
-            error_type = 'generation_error'
-
-        return {
-            'success': False,
-            'error': user_error,
-            'error_type': error_type,
-            'content_angle': content_angle
-        }
+    return _invoke_content_generation(prompt, content_angle, len(competitor_content))
 
 
 def parse_generated_content(text: str) -> dict[str, Any]:
@@ -751,13 +790,32 @@ def _compute_idempotency_key(idea: dict[str, Any], window_minutes: int = 5) -> s
     now_ts = utc_now().timestamp()
     bucket = int(now_ts // window_seconds)
 
-    payload = "|".join([
+    payload_parts = [
         str(idea.get("id", "")),
         str(idea.get("keyword", "")),
         str(idea.get("content_angle", "")),
         str(idea.get("output_language", "English")),
         str(bucket),
-    ])
+    ]
+    if idea.get('type') == GROUP_BRIEF_TYPE:
+        keyword_ids = idea.get('keyword_ids', [])
+        keywords = idea.get('keywords', [])
+        group_dimensions = {
+            'group_id': str(idea.get('group_id', '')),
+            'mode': str(idea.get('content_angle', '')),
+            'keyword_ids': sorted(str(value) for value in keyword_ids),
+            'keywords': sorted(str(value) for value in keywords),
+            'landing_url': str(idea.get('landing_url', '')),
+            'current_copy_hash': hashlib.sha256(
+                str(idea.get('current_copy', '')).encode('utf-8')
+            ).hexdigest(),
+            'prompt_template_hash': hashlib.sha256(
+                str(idea.get('prompt_template', '')).encode('utf-8')
+            ).hexdigest(),
+        }
+        payload_parts.append(json.dumps(group_dimensions, sort_keys=True, separators=(',', ':')))
+
+    payload = "|".join(payload_parts)
     digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
     return digest[:32]
 
@@ -995,6 +1053,21 @@ def _process_generation_async(content_id: str, idea: dict[str, Any]) -> None:
 })
 def _generate_content(event: dict[str, Any], context: Any, body: dict, idea: dict) -> dict[str, Any]:
     """POST /content-studio/generate - Start async content generation."""
+    if not isinstance(idea, dict):
+        return validation_error('idea must be an object', event, 'idea')
+
+    if idea.get('type') == GROUP_BRIEF_TYPE:
+        canonical_idea, issue = canonicalize_group_brief(
+            idea,
+            dynamodb.Table(KEYWORD_GROUPS_TABLE),
+            dynamodb.Table(KEYWORDS_TABLE),
+        )
+        if issue:
+            return validation_error(issue.message, event, issue.field)
+        if canonical_idea is None:
+            return validation_error('idea is invalid', event, 'idea')
+        idea = canonical_idea
+
     if not idea.get('keyword'):
         return validation_error('idea must have a keyword', event, 'keyword')
 

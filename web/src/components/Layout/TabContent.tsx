@@ -202,7 +202,7 @@ export function TabContent(props: TabContentProps) {
     'prompt-insights': <PromptInsights />,
     'citation-gaps': <CitationGaps keywords={keywords} />,
     recommendations: <Recommendations />,
-    'content-studio': <ContentStudioView />,
+    'content-studio': <ContentStudioView keywords={keywords} />,
     execution: <ExecutionMonitor execution={execution} triggerAnalysis={triggerAnalysis} keywordsCount={keywords.length} keywords={keywords} />,
     schedule: <ScheduleManager schedules={schedules} setSchedules={setSchedules} keywords={keywords} />,
     settings: <SettingsView keywords={keywords} setKeywords={setKeywords} initialTab={settingsInitialTab} />,

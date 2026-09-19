@@ -37,6 +37,8 @@ setdefault_env({
     'DYNAMODB_TABLE_CITATIONS': 'test-citations',
     'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
     'DYNAMODB_TABLE_CONTENT_STUDIO': 'test-content-studio',
+    'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
+    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
 })
 _mod = load_handler_module(os.path.dirname(__file__), 'content-studio.py', 'content_studio_dispatch_under_test')
 
