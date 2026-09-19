@@ -6,9 +6,22 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  AgentRunList, describeRunProgress
+  AgentRunList, describeRunProgress, runActionLabel
 } from './AgentRunList';
 import { buildAgentJob } from './agent-fixtures';
+import type {
+  KeywordResearchItem, ResearchStatus
+} from '../../../types';
+
+function renderRunList(jobs: KeywordResearchItem[]) {
+  const handlers = {
+    onSelect: vi.fn(),
+    onRetry: vi.fn(),
+    onDelete: vi.fn(),
+  };
+  render(<AgentRunList jobs={jobs} loading={false} {...handlers} />);
+  return handlers;
+}
 
 describe('describeRunProgress', () => {
   it('shows rounds, steps and candidates while a run is active', () => {
@@ -39,59 +52,92 @@ describe('describeRunProgress', () => {
   });
 });
 
+describe('runActionLabel', () => {
+  it.each<[ResearchStatus, string]>([
+    ['pending', 'View progress'],
+    ['running', 'View progress'],
+    ['processing', 'View progress'],
+    ['completed', 'View results'],
+    ['partial', 'View results'],
+    ['failed', 'View details'],
+  ])('offers "%s" → %s', (status, label) => {
+    expect(runActionLabel(status)).toBe(label);
+  });
+});
+
 describe('AgentRunList', () => {
-  const noop = vi.fn();
+  it('shows the status, seed, template, progress and proposal count of a run', () => {
+    renderRunList([buildAgentJob()]);
+
+    expect(screen.getByText('Completed')).toBeInTheDocument();
+    expect(screen.getByText('Hotel Gran Marino')).toBeInTheDocument();
+    expect(screen.getByText('· Hotels')).toBeInTheDocument();
+    expect(screen.getByText(/^2 rounds · 41 candidates · 3 proposed · /)).toBeInTheDocument();
+  });
+
+  it.each<[ResearchStatus, string]>([
+    ['running', 'View progress'],
+    ['completed', 'View results'],
+    ['partial', 'View results'],
+    ['failed', 'View details'],
+  ])('labels the primary button for a %s run "%s"', (status, label) => {
+    renderRunList([buildAgentJob({ status })]);
+
+    expect(screen.getByRole('button', { name: `${label} of Hotel Gran Marino` })).toBeInTheDocument();
+  });
+
+  it('opens the run from its primary button', async () => {
+    const handlers = renderRunList([buildAgentJob()]);
+
+    await userEvent.click(screen.getByRole('button', { name: /^View results/ }));
+
+    expect(handlers.onSelect).toHaveBeenCalledWith('job-a');
+  });
 
   it('offers a retry only for failed or partial runs', () => {
-    render(
-      <AgentRunList
-        jobs={[buildAgentJob({ id: 'ok' }), buildAgentJob({
-          id: 'bad',
-          status: 'partial',
-        })]}
-        selectedId={null}
-        loading={false}
-        onSelect={noop}
-        onRetry={noop}
-        onDelete={noop}
-      />
-    );
+    renderRunList([buildAgentJob({ id: 'ok' }), buildAgentJob({
+      id: 'bad',
+      status: 'partial',
+    })]);
 
     expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
   });
 
+  it('retries the run whose Retry button was clicked', async () => {
+    const failed = buildAgentJob({
+      id: 'bad',
+      status: 'failed',
+    });
+    const handlers = renderRunList([failed]);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(handlers.onRetry).toHaveBeenCalledWith(failed);
+  });
+
   it('hides delete while a run is still active', () => {
-    render(
-      <AgentRunList
-        jobs={[buildAgentJob({ status: 'running' })]}
-        selectedId={null}
-        loading={false}
-        onSelect={noop}
-        onRetry={noop}
-        onDelete={noop}
-      />
-    );
+    renderRunList([buildAgentJob({ status: 'running' })]);
 
     expect(screen.queryByRole('button', { name: /delete run/i })).toBeNull();
   });
 
-  it('opens a run when its card is clicked', async () => {
-    const onSelect = vi.fn();
-    render(
-      <AgentRunList jobs={[buildAgentJob()]} selectedId={null} loading={false} onSelect={onSelect} onRetry={noop} onDelete={noop} />
-    );
+  it('deletes a finished run from its Delete button', async () => {
+    const handlers = renderRunList([buildAgentJob()]);
 
-    await userEvent.click(screen.getByRole('button', {
-      name: /Hotel Gran Marino/,
-      pressed: false,
-    }));
+    await userEvent.click(screen.getByRole('button', { name: 'Delete run Hotel Gran Marino' }));
 
-    expect(onSelect).toHaveBeenCalledWith('job-a');
+    expect(handlers.onDelete).toHaveBeenCalledWith('job-a');
   });
 
   it('tells the user how to start when there are no runs', () => {
-    render(<AgentRunList jobs={[]} selectedId={null} loading={false} onSelect={noop} onRetry={noop} onDelete={noop} />);
+    renderRunList([]);
 
-    expect(screen.getByText(/No research runs yet/)).toBeInTheDocument();
+    expect(screen.getByText('No research runs yet. Start one with the brief above.')).toBeInTheDocument();
+  });
+
+  it('shows a loading state while the first list is fetched', () => {
+    render(<AgentRunList jobs={[]} loading onSelect={vi.fn()} onRetry={vi.fn()} onDelete={vi.fn()} />);
+
+    expect(screen.getByText('Loading runs…')).toBeInTheDocument();
   });
 });

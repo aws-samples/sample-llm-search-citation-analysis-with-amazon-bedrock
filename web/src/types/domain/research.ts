@@ -126,25 +126,35 @@ export interface ResearchStep {
   query_count?: number;
 }
 
-/** Expansion dimensions the research agent can plan queries for (R19). */
-export type AgentDimension =
-  | 'destination'
-  | 'location'
-  | 'points_of_interest'
-  | 'hotel_attributes'
-  | 'audience'
-  | 'trip_type';
+/**
+ * One expansion dimension a template offers (R19). `id` is what the brief
+ * sends and the model tags queries and keywords with; `label` is what the UI
+ * shows for it.
+ */
+export interface AgentDimensionOption {
+  id: string;
+  label: string;
+  description: string;
+}
 
-/** The brief an agent job was started with. */
+/**
+ * The brief an agent job was started with, plus the industry profile the
+ * template had at start time (`subject`, `audience`, `dimension_catalog`).
+ * `dimensions` holds catalogue ids. The API backfills the profile on rows
+ * written before 2.6.0.
+ */
 export interface AgentConfig {
   seed: string;
   country: string;
   language: string;
-  dimensions: AgentDimension[];
+  dimensions: string[];
   instruction: string;
   target_count: number;
   max_rounds: number;
   group_id: string | null;
+  subject: string;
+  audience: string;
+  dimension_catalog: AgentDimensionOption[];
 }
 
 /** One search query the agent planned, tagged with its dimension. */
@@ -174,11 +184,20 @@ export interface AgentRound {
   evaluation?: AgentEvaluation;
 }
 
-/** A saved (or the built-in) system prompt for the research agent. */
+/**
+ * An industry profile for the research agent: the built-ins (hotels,
+ * restaurants, cafés, retail, generic) or one the team saved. Besides the
+ * system prompt it names what is researched (`subject`), who searches for it
+ * (`audience`) and the expansion dimensions a brief can pick from.
+ */
 export interface ResearchTemplate {
   id: string;
   name: string;
   description: string;
+  industry: string;
+  subject: string;
+  audience: string;
+  dimensions: AgentDimensionOption[];
   system_prompt: string;
   builtin: boolean;
   created_by?: string | null;

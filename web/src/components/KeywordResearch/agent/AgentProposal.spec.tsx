@@ -8,7 +8,9 @@ import userEvent from '@testing-library/user-event';
 import {
   AgentProposal, groupProposalByDimension
 } from './AgentProposal';
-import { buildAgentJob } from './agent-fixtures';
+import {
+  CAFE_DIMENSIONS, HOTEL_DIMENSIONS, buildAgentJob, buildAgentKeyword
+} from './agent-fixtures';
 import { createMockJsonResponse } from '../../../test/fetchResponses';
 import type { KeywordGroup } from '../../../types';
 
@@ -45,15 +47,42 @@ const PROMOTED_KEYWORD = {
 };
 
 describe('groupProposalByDimension', () => {
-  it('orders sections by the form dimensions and puts unknown ones under Other', () => {
-    const sections = groupProposalByDimension(buildAgentJob().keywords ?? []);
+  it('orders sections by the catalogue and puts ids it does not know under Other, last', () => {
+    const sections = groupProposalByDimension(buildAgentJob().keywords ?? [], HOTEL_DIMENSIONS);
 
     expect(sections.map((section) => section.label)).toStrictEqual(['Destination', 'Audience', 'Other']);
     expect(sections[2].keywords.map((keyword) => keyword.keyword)).toStrictEqual(['escapada coruña']);
   });
 
+  it('labels sections with the wording of the catalogue it is given', () => {
+    const keywords = [
+      buildAgentKeyword({
+        keyword: 'cafetería centro coruña',
+        dimension: 'location',
+      }),
+      buildAgentKeyword({
+        keyword: 'brunch coruña',
+        dimension: 'menu',
+      }),
+      buildAgentKeyword({
+        keyword: 'hotel coruña',
+        dimension: 'destination',
+      }),
+    ];
+
+    const sections = groupProposalByDimension(keywords, CAFE_DIMENSIONS);
+
+    expect(sections.map((section) => [section.label, section.keywords.length])).toStrictEqual([['Menu & drinks', 1], ['Location', 1], ['Other', 1]]);
+  });
+
+  it('puts the model\'s other bucket under Other', () => {
+    const sections = groupProposalByDimension([buildAgentKeyword({ dimension: 'other' })], HOTEL_DIMENSIONS);
+
+    expect(sections.map((section) => section.id)).toStrictEqual(['other']);
+  });
+
   it('is empty for an empty proposal', () => {
-    expect(groupProposalByDimension([])).toStrictEqual([]);
+    expect(groupProposalByDimension([], HOTEL_DIMENSIONS)).toStrictEqual([]);
   });
 });
 
@@ -65,6 +94,20 @@ describe('AgentProposal', () => {
     expect(screen.getByRole('heading', { name: /3 proposed keywords/ })).toBeInTheDocument();
     expect(screen.getByText(/selected from 41 candidates/)).toBeInTheDocument();
     expect(screen.getAllByRole('table')).toHaveLength(3);
+  });
+
+  it('labels the sections from the run catalogue', () => {
+    const job = buildAgentJob();
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+
+    expect(screen.getAllByRole('heading', { level: 5 }).map((heading) => heading.textContent)).toStrictEqual(['Destination (1)', 'Audience (1)', 'Other (1)']);
+  });
+
+  it('explains that the list goes to a keyword group, whatever the industry', () => {
+    const job = buildAgentJob();
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+
+    expect(screen.getByText(/add them to a keyword group/)).toBeInTheDocument();
   });
 
   it('preselects the group the run was started for', () => {

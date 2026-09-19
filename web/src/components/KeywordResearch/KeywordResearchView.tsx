@@ -8,13 +8,13 @@ import { CompetitorAnalysis } from './CompetitorAnalysis';
 import { ResearchHistory } from './ResearchHistory';
 import { ResearchAgent } from './agent/ResearchAgent';
 
-type ResearchTab = 'agent' | 'expand' | 'competitor' | 'history';
+type ResearchTab = 'expand' | 'competitor' | 'history' | 'agent';
 
 const SHORT_LABELS: Record<ResearchTab, string> = {
-  agent: 'Agent',
   expand: 'Expand',
   competitor: 'Competitor',
   history: 'History',
+  agent: 'Agent',
 };
 
 interface KeywordResearchViewProps {
@@ -26,7 +26,7 @@ interface KeywordResearchViewProps {
 }
 
 export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProps = {}) => {
-  const [activeTab, setActiveTab] = useState<ResearchTab>('agent');
+  const [activeTab, setActiveTab] = useState<ResearchTab>('expand');
   const research = useKeywordResearch();
 
   // A retry from History jumps to the tab that shows the job's progress.
@@ -44,15 +44,6 @@ export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProp
     label: string;
     icon: React.ReactNode 
   }[] = [
-    {
-      id: 'agent',
-      label: 'Research Agent',
-      icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zm11 2l2 4.5 4.5 2-4.5 2-2 4.5-2-4.5L9.5 11.5 14 9.5 16 5zM8 16l1 2.5 2.5 1-2.5 1L8 23l-1-2.5-2.5-1 2.5-1L8 16z" />
-        </svg>
-      ),
-    },
     {
       id: 'expand',
       label: 'Related Keywords',
@@ -80,6 +71,15 @@ export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProp
         </svg>
       ),
     },
+    {
+      id: 'agent',
+      label: 'Research Agent',
+      icon: (
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zm11 2l2 4.5 4.5 2-4.5 2-2 4.5-2-4.5L9.5 11.5 14 9.5 16 5zM8 16l1 2.5 2.5 1-2.5 1L8 23l-1-2.5-2.5-1 2.5-1L8 16z" />
+        </svg>
+      ),
+    },
   ];
 
   return (
@@ -87,7 +87,7 @@ export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProp
       {/* Header */}
       <div>
         <p className="text-gray-600 text-sm">
-          Let the research agent plan and run a hotel&apos;s keyword research, expand seed terms, or analyze competitor websites.
+          Expand seed terms, analyze competitor websites, or let the research agent plan and run a business&apos;s keyword research.
         </p>
       </div>
 

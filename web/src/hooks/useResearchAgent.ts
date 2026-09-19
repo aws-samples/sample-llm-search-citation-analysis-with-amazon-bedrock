@@ -137,6 +137,7 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
     };
   }, [activeKey, reload]);
 
+  /** Start a run; it appears at the top of the list (the user opens it from there). */
   const start = useCallback(async (request: StartAgentRequest): Promise<KeywordResearchItem | null> => {
     setStarting(true);
     setError(null);
@@ -144,8 +145,6 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
       const job = await startResearchAgent(request);
       if (!mountedRef.current) return job;
       setJobs((prev) => replaceJob(prev, job));
-      setDetail(job);
-      setSelectedId(job.id);
       return job;
     } catch (err) {
       if (!mountedRef.current) return null;

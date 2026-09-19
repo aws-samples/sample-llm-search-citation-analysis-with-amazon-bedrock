@@ -12,7 +12,7 @@ import {
   apiDelete, apiGet, apiPost, apiPut
 } from './client';
 import type {
-  AgentDimension, KeywordResearchItem, ResearchTemplate
+  AgentDimensionOption, KeywordResearchItem, ResearchTemplate
 } from '../types';
 
 export class InvalidKeywordResearchResponseError extends TypeError {
@@ -67,7 +67,8 @@ export interface StartAgentRequest {
   seed: string;
   country: string;
   language: string;
-  dimensions: AgentDimension[];
+  /** Ids from the template's dimension catalogue, in catalogue order. */
+  dimensions: string[];
   instruction: string;
   targetCount: number;
   maxRounds: number;
@@ -123,7 +124,7 @@ export async function deleteKeywordResearch(id: string): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Agent system-prompt templates
+// Agent templates (industry profiles)
 // ---------------------------------------------------------------------------
 
 export function isResearchTemplate(value: unknown): value is ResearchTemplate {
@@ -131,7 +132,11 @@ export function isResearchTemplate(value: unknown): value is ResearchTemplate {
     && typeof value.id === 'string'
     && typeof value.name === 'string'
     && typeof value.system_prompt === 'string'
-    && typeof value.builtin === 'boolean';
+    && typeof value.builtin === 'boolean'
+    && typeof value.industry === 'string'
+    && typeof value.subject === 'string'
+    && typeof value.audience === 'string'
+    && Array.isArray(value.dimensions);
 }
 
 function decodeTemplate(payload: unknown): ResearchTemplate {
@@ -141,7 +146,7 @@ function decodeTemplate(payload: unknown): ResearchTemplate {
   return payload;
 }
 
-/** The built-in template first, then the saved ones by name. */
+/** The built-in templates first (in the API's order), then the saved ones by name. */
 export async function fetchResearchTemplates(signal?: AbortSignal): Promise<ResearchTemplate[]> {
   const payload = await apiGet<unknown>('/keyword-research/templates', { signal });
   if (!isRecord(payload) || !Array.isArray(payload.items)) {
@@ -150,25 +155,50 @@ export async function fetchResearchTemplates(signal?: AbortSignal): Promise<Rese
   return payload.items.filter(isResearchTemplate);
 }
 
+/**
+ * A template to save. The profile fields are optional: the API copies the
+ * missing ones from `baseTemplateId` (else from the generic built-in).
+ */
 export interface TemplateDraft {
   name: string;
   systemPrompt: string;
   description?: string;
+  /** Template the draft was derived from; the API copies its industry and any missing profile field. */
+  baseTemplateId?: string;
+  industry?: string;
+  subject?: string;
+  audience?: string;
+  dimensions?: AgentDimensionOption[];
+}
+
+/** The fields PUT /templates/{id} accepts: everything but the industry (fixed) and the base (creation only). */
+export type TemplateChanges = Omit<Partial<TemplateDraft>, 'baseTemplateId' | 'industry'>;
+
+/** The optional draft fields in the API's names, sent only when the draft sets them. */
+function templateProfileBody(draft: TemplateChanges): Record<string, unknown> {
+  return {
+    ...(draft.description === undefined ? {} : { description: draft.description }),
+    ...(draft.subject === undefined ? {} : { subject: draft.subject }),
+    ...(draft.audience === undefined ? {} : { audience: draft.audience }),
+    ...(draft.dimensions === undefined ? {} : { dimensions: draft.dimensions }),
+  };
 }
 
 export async function createResearchTemplate(draft: TemplateDraft): Promise<ResearchTemplate> {
   return decodeTemplate(await apiPost<unknown>('/keyword-research/templates', {
     name: draft.name,
     system_prompt: draft.systemPrompt,
-    ...(draft.description === undefined ? {} : { description: draft.description }),
+    ...templateProfileBody(draft),
+    ...(draft.baseTemplateId === undefined ? {} : { base_template_id: draft.baseTemplateId }),
+    ...(draft.industry === undefined ? {} : { industry: draft.industry }),
   }, { allowStructured4xx: true }));
 }
 
-export async function updateResearchTemplate(id: string, changes: Partial<TemplateDraft>): Promise<ResearchTemplate> {
+export async function updateResearchTemplate(id: string, changes: TemplateChanges): Promise<ResearchTemplate> {
   return decodeTemplate(await apiPut<unknown>(`/keyword-research/templates/${encodeURIComponent(id)}`, {
     ...(changes.name === undefined ? {} : { name: changes.name }),
     ...(changes.systemPrompt === undefined ? {} : { system_prompt: changes.systemPrompt }),
-    ...(changes.description === undefined ? {} : { description: changes.description }),
+    ...templateProfileBody(changes),
   }, { allowStructured4xx: true }));
 }
 

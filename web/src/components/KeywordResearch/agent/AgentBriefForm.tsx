@@ -1,13 +1,15 @@
 import {
-  useEffect, useId, useMemo, useState
+  useId, useMemo, useState
 } from 'react';
 import type {
-  AgentDimension, KeywordGroup, ResearchTemplate
+  KeywordGroup, ResearchTemplate
 } from '../../../types';
-import type { StartAgentRequest } from '../../../api/keywordResearch';
+import type {
+  StartAgentRequest, TemplateChanges, TemplateDraft
+} from '../../../api/keywordResearch';
 import type { TemplateMutationOutcome } from '../../../hooks/useResearchTemplates';
 import { Spinner } from '../../ui/Spinner';
-import { AgentPromptEditor } from './AgentPromptEditor';
+import { AgentTemplateEditor } from './AgentTemplateEditor';
 import {
   AGENT_DEFAULT_ROUNDS,
   AGENT_DEFAULT_TARGET_COUNT,
@@ -17,12 +19,13 @@ import {
   AGENT_MIN_TARGET_COUNT,
   BUILTIN_TEMPLATE_ID,
   COUNTRY_OPTIONS,
-  DEFAULT_DIMENSIONS,
-  DIMENSION_OPTIONS,
   LANGUAGE_OPTIONS,
   briefProblems,
   estimateAgentCost,
   formatAgentCost,
+  seedPlaceholder,
+  subjectHeading,
+  subjectLabel,
 } from './agentBrief';
 
 interface AgentBriefFormProps {
@@ -31,12 +34,15 @@ interface AgentBriefFormProps {
   readonly templatesLoading: boolean;
   readonly starting: boolean;
   readonly onStart: (request: StartAgentRequest) => Promise<unknown>;
-  readonly onSaveTemplate: (name: string, systemPrompt: string) => Promise<TemplateMutationOutcome>;
-  readonly onUpdateTemplate: (id: string, systemPrompt: string) => Promise<TemplateMutationOutcome>;
+  readonly onSaveTemplate: (draft: TemplateDraft) => Promise<TemplateMutationOutcome>;
+  readonly onUpdateTemplate: (id: string, changes: TemplateChanges) => Promise<TemplateMutationOutcome>;
   readonly onDeleteTemplate: (id: string) => Promise<TemplateMutationOutcome>;
 }
 
 const INPUT_CLASS = 'w-full px-4 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-gray-200 disabled:opacity-50';
+
+/** Copy while the templates are still loading; every template replaces it with its own subject. */
+const LOADING_SUBJECT = 'business';
 
 function MarketSelect({
   id, label, value, options, onChange
@@ -73,16 +79,22 @@ function MarketSelect({
   );
 }
 
+function TemplateOptions({ templates }: { readonly templates: ResearchTemplate[] }) {
+  return <>{templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</>;
+}
+
 /**
- * The brief the agent researches: hotel, market, expansion dimensions, a
- * free-text instruction, the target size and round budget, the destination
- * group and the (editable) system prompt. Shows the cost ceiling before the
- * run starts.
+ * The brief the agent researches, driven by an industry template: the
+ * business (seed), market, the template's expansion dimensions, a free-text
+ * instruction, the target size and round budget, the destination group and —
+ * behind a disclosure — the template editor. Shows the cost ceiling before
+ * the run starts.
  */
 export function AgentBriefForm({
   groups, templates, templatesLoading, starting, onStart, onSaveTemplate, onUpdateTemplate, onDeleteTemplate
 }: AgentBriefFormProps) {
   const ids = {
+    template: useId(),
     seed: useId(),
     country: useId(),
     language: useId(),
@@ -91,43 +103,90 @@ export function AgentBriefForm({
     rounds: useId(),
     group: useId(),
   };
+  const [templateId, setTemplateId] = useState(BUILTIN_TEMPLATE_ID);
   const [seed, setSeed] = useState('');
   const [country, setCountry] = useState('es');
   const [language, setLanguage] = useState('es');
-  const [dimensions, setDimensions] = useState<AgentDimension[]>([...DEFAULT_DIMENSIONS]);
+  // null = all of the template's dimensions (the default after every template switch).
+  const [dimensions, setDimensions] = useState<string[] | null>(null);
   const [instruction, setInstruction] = useState('');
   const [targetCount, setTargetCount] = useState(AGENT_DEFAULT_TARGET_COUNT);
   const [maxRounds, setMaxRounds] = useState(AGENT_DEFAULT_ROUNDS);
   const [groupId, setGroupId] = useState('');
-  const [templateId, setTemplateId] = useState(BUILTIN_TEMPLATE_ID);
-  const [systemPrompt, setSystemPrompt] = useState('');
+  // null = the template's own prompt; a string once the user edits it in this session.
+  const [systemPrompt, setSystemPrompt] = useState<string | null>(null);
+  const [notice, setNotice] = useState<TemplateMutationOutcome | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
-  // Load the built-in prompt once templates arrive; keep user edits after that.
-  useEffect(() => {
-    if (systemPrompt !== '' || templates.length === 0) return;
-    const template = templates.find((item) => item.id === templateId) ?? templates[0];
-    setTemplateId(template.id);
-    setSystemPrompt(template.system_prompt);
-  }, [templates, templateId, systemPrompt]);
+  const template = templates.find((item) => item.id === templateId);
+  const catalog = template?.dimensions ?? [];
+  const catalogIds = catalog.map((option) => option.id);
+  const selectedDimensions = dimensions ?? catalogIds;
+  const promptText = systemPrompt ?? template?.system_prompt ?? '';
+  const promptDirty = template !== undefined && promptText !== template.system_prompt;
+  const subject = template?.subject ?? LOADING_SUBJECT;
+  const builtins = templates.filter((item) => item.builtin);
+  const saved = templates.filter((item) => !item.builtin);
 
-  const problems = useMemo(() => briefProblems({
+  const problems = briefProblems({
     seed,
-    dimensions,
+    subject,
+    dimensions: selectedDimensions,
     country,
     language,
-    systemPrompt,
-  }), [seed, dimensions, country, language, systemPrompt]);
+    systemPrompt: promptText,
+  });
   const cost = useMemo(() => estimateAgentCost(maxRounds), [maxRounds]);
   const sortedGroups = useMemo(
     () => [...groups].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' })),
     [groups]
   );
-  const currentTemplate = templates.find((item) => item.id === templateId);
-  const promptEdited = currentTemplate !== undefined && currentTemplate.system_prompt !== systemPrompt;
 
-  const toggleDimension = (dimension: AgentDimension) => {
-    setDimensions((prev) => (prev.includes(dimension) ? prev.filter((item) => item !== dimension) : [...prev, dimension]));
+  /** Switch template: all its dimensions checked, its prompt unless the user edited theirs. */
+  const selectTemplate = (id: string) => {
+    setTemplateId(id);
+    setDimensions(null);
+    if (!promptDirty) setSystemPrompt(null);
+  };
+
+  const toggleDimension = (id: string) => {
+    setDimensions(selectedDimensions.includes(id) ? selectedDimensions.filter((item) => item !== id) : [...selectedDimensions, id]);
+  };
+
+  const recordOutcome = async (mutation: Promise<TemplateMutationOutcome>) => {
+    setNotice(null);
+    const outcome = await mutation;
+    setNotice(outcome);
+    return outcome;
+  };
+
+  const handleSaveAsNew = async (draft: TemplateDraft) => {
+    const outcome = await recordOutcome(onSaveTemplate(draft));
+    if (outcome.template) {
+      setTemplateId(outcome.template.id);
+      setDimensions(null);
+      setSystemPrompt(null);
+    }
+    return outcome;
+  };
+
+  const handleUpdate = async (changes: TemplateChanges) => {
+    const outcome = await recordOutcome(onUpdateTemplate(templateId, changes));
+    if (outcome.template) {
+      setDimensions(null);
+      setSystemPrompt(null);
+    }
+    return outcome;
+  };
+
+  const handleDelete = async () => {
+    const outcome = await recordOutcome(onDeleteTemplate(templateId));
+    if (outcome.success) {
+      setTemplateId(BUILTIN_TEMPLATE_ID);
+      setDimensions(null);
+      setSystemPrompt(null);
+    }
+    return outcome;
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -138,12 +197,12 @@ export function AgentBriefForm({
       seed: seed.trim(),
       country: country.trim().toLowerCase(),
       language: language.trim().toLowerCase(),
-      dimensions: DEFAULT_DIMENSIONS.filter((dimension) => dimensions.includes(dimension)),
+      dimensions: catalogIds.filter((id) => selectedDimensions.includes(id)),
       instruction: instruction.trim(),
       targetCount,
       maxRounds,
       templateId,
-      systemPrompt: promptEdited ? systemPrompt : null,
+      systemPrompt: promptDirty ? promptText : null,
       groupId: groupId === '' ? null : groupId,
     });
   };
@@ -151,16 +210,40 @@ export function AgentBriefForm({
   return (
     <form onSubmit={(event) => void handleSubmit(event)} className="bg-white rounded-lg border border-gray-200 p-6 space-y-5" aria-label="Research agent brief">
       <div>
-        <h3 className="text-sm font-medium text-gray-900">Research a hotel</h3>
+        <h3 className="text-sm font-medium text-gray-900">{subjectHeading(subject)}</h3>
         <p className="text-xs text-gray-500 mt-1">
-          The agent plans its own searches from this brief, runs them, judges the results and proposes the keywords the hotel should be visible for.
+          The agent plans its own searches from this brief, runs them, judges the results and proposes the keywords the {subject} should be visible for.
         </p>
+      </div>
+
+      <div>
+        <label htmlFor={ids.template} className="block text-sm text-gray-600 mb-1">Industry template</label>
+        <div className="flex items-center gap-2">
+          <select id={ids.template} value={templateId} disabled={templatesLoading || templates.length === 0} onChange={(event) => selectTemplate(event.target.value)} className={INPUT_CLASS}>
+            <optgroup label="Industry templates">
+              <TemplateOptions templates={builtins} />
+            </optgroup>
+            {saved.length > 0 && (
+              <optgroup label="Your templates">
+                <TemplateOptions templates={saved} />
+              </optgroup>
+            )}
+          </select>
+          {templatesLoading && <Spinner size="sm" className="text-gray-400" />}
+        </div>
+        {template?.description && <p className="mt-1 text-xs text-gray-500">{template.description}</p>}
+        {promptDirty && (
+          <p className="mt-1 text-xs text-amber-700">
+            {'Using your edited instructions instead of the template\u2019s. '}
+            <button type="button" onClick={() => setSystemPrompt(null)} className="underline hover:text-amber-900">Reset to template</button>
+          </p>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="md:col-span-1">
-          <label htmlFor={ids.seed} className="block text-sm text-gray-600 mb-1">Hotel (or seed)</label>
-          <input id={ids.seed} type="text" value={seed} maxLength={200} onChange={(event) => setSeed(event.target.value)} placeholder="e.g. Hotel Gran Marino" className={INPUT_CLASS} />
+          <label htmlFor={ids.seed} className="block text-sm text-gray-600 mb-1">{subjectLabel(subject)} (or seed)</label>
+          <input id={ids.seed} type="text" value={seed} maxLength={200} onChange={(event) => setSeed(event.target.value)} placeholder={seedPlaceholder(subject)} className={INPUT_CLASS} />
         </div>
         <MarketSelect id={ids.country} label="Market (country)" value={country} options={COUNTRY_OPTIONS} onChange={setCountry} />
         <MarketSelect id={ids.language} label="Language" value={language} options={LANGUAGE_OPTIONS} onChange={setLanguage} />
@@ -169,8 +252,8 @@ export function AgentBriefForm({
       <fieldset>
         <legend className="block text-sm text-gray-600 mb-2">Expand by</legend>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          {DIMENSION_OPTIONS.map((option) => {
-            const checked = dimensions.includes(option.id);
+          {catalog.map((option) => {
+            const checked = selectedDimensions.includes(option.id);
             return (
               <label
                 key={option.id}
@@ -179,7 +262,7 @@ export function AgentBriefForm({
                 <input type="checkbox" checked={checked} onChange={() => toggleDimension(option.id)} className="mt-0.5 h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-500" />
                 <span>
                   <span className="block text-sm font-medium text-gray-900">{option.label}</span>
-                  <span className="block text-xs text-gray-500">{option.hint}</span>
+                  <span className="block text-xs text-gray-500">{option.description}</span>
                 </span>
               </label>
             );
@@ -195,7 +278,7 @@ export function AgentBriefForm({
           maxLength={AGENT_INSTRUCTION_MAX_LENGTH}
           onChange={(event) => setInstruction(event.target.value)}
           rows={2}
-          placeholder="e.g. also expand by events and seasons; the hotel is adults-only"
+          placeholder="e.g. also expand by events and seasons; skip branded terms"
           className={INPUT_CLASS}
         />
       </div>
@@ -231,33 +314,26 @@ export function AgentBriefForm({
         </div>
       </div>
 
-      <AgentPromptEditor
-        templates={templates}
-        loading={templatesLoading}
-        templateId={templateId}
-        systemPrompt={systemPrompt}
-        onTemplateChange={(template) => {
-          setTemplateId(template.id);
-          setSystemPrompt(template.system_prompt);
-        }}
-        onPromptChange={setSystemPrompt}
-        onSaveAsNew={async (name) => {
-          const outcome = await onSaveTemplate(name, systemPrompt);
-          if (outcome.template) setTemplateId(outcome.template.id);
-          return outcome;
-        }}
-        onUpdate={() => onUpdateTemplate(templateId, systemPrompt)}
-        onDelete={async () => {
-          const outcome = await onDeleteTemplate(templateId);
-          if (outcome.success) {
-            const fallback = templates.find((item) => item.builtin) ?? templates[0];
-            setTemplateId(fallback.id);
-            setSystemPrompt(fallback.system_prompt);
-          }
-          return outcome;
-        }}
-        disabled={starting}
-      />
+      <details className="rounded-lg border border-gray-200 bg-gray-50">
+        <summary className="cursor-pointer select-none px-4 py-3 text-sm font-medium text-gray-900">Customise the instructions or create your own template</summary>
+        <div className="px-4 pb-4 space-y-3">
+          {template && (
+            <AgentTemplateEditor
+              key={template.id}
+              template={template}
+              systemPrompt={promptText}
+              onPromptChange={setSystemPrompt}
+              onSaveAsNew={handleSaveAsNew}
+              onUpdate={handleUpdate}
+              onDelete={handleDelete}
+              disabled={starting}
+            />
+          )}
+          {notice && (
+            <output className={`block text-sm ${notice.success ? 'text-green-700' : 'text-red-700'}`}>{notice.message}</output>
+          )}
+        </div>
+      </details>
 
       {submitted && problems.length > 0 && (
         <ul role="alert" className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700 list-disc list-inside">

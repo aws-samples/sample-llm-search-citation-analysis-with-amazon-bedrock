@@ -2,7 +2,7 @@ import {
   useEffect, useMemo, useState
 } from 'react';
 import type {
-  Keyword, KeywordGroup, KeywordResearchItem, ResearchKeyword
+  AgentDimensionOption, Keyword, KeywordGroup, KeywordResearchItem, ResearchKeyword
 } from '../../../types';
 import {
   SELECTION_LIMIT, promotionSuccessMessage, usePromoteKeywords
@@ -11,7 +11,7 @@ import { keywordSelectionKey } from '../../../hooks/keywordIdentity';
 import { Button } from '../../ui';
 import { Spinner } from '../../ui/Spinner';
 import {
-  DIMENSION_OPTIONS, dimensionLabel
+  OTHER_DIMENSION_ID, dimensionLabel, orderedDimensionIds, runCatalog
 } from './agentBrief';
 import { exportAgentRun } from './agentExport';
 
@@ -28,19 +28,19 @@ interface DimensionSection {
   keywords: ResearchKeyword[];
 }
 
-/** Group the proposal by dimension, in the form's dimension order, "Other" last. */
-export function groupProposalByDimension(keywords: ResearchKeyword[]): DimensionSection[] {
-  const order = [...DIMENSION_OPTIONS.map((option) => option.id), 'other'];
+/** Group the proposal by dimension in the catalogue's order; ids the catalogue does not know go under "Other", last. */
+export function groupProposalByDimension(keywords: ResearchKeyword[], catalog: readonly AgentDimensionOption[]): DimensionSection[] {
+  const order = orderedDimensionIds(catalog);
   const buckets = new Map<string, ResearchKeyword[]>();
   for (const keyword of keywords) {
-    const id = order.includes(keyword.dimension ?? '') ? (keyword.dimension ?? 'other') : 'other';
+    const id = order.includes(keyword.dimension ?? '') ? (keyword.dimension ?? OTHER_DIMENSION_ID) : OTHER_DIMENSION_ID;
     buckets.set(id, [...(buckets.get(id) ?? []), keyword]);
   }
   return order
     .filter((id) => buckets.has(id))
     .map((id) => ({
       id,
-      label: dimensionLabel(id),
+      label: dimensionLabel(id, catalog),
       keywords: buckets.get(id) ?? [],
     }));
 }
@@ -53,8 +53,9 @@ function relevanceClass(relevance: number): string {
 
 /**
  * The agent's final list, grouped by dimension with checkboxes, ready to be
- * added to the hotel's keyword group in one click (Epic E output) and
- * exported to Excel with its trace (R9).
+ * added to a keyword group in one click (Epic E output) and exported to
+ * Excel with its trace (R9). Section order and labels follow the run's own
+ * dimension catalogue.
  */
 export function AgentProposal({
   job, keywords, groups, onKeywordsAdded
@@ -67,7 +68,7 @@ export function AgentProposal({
     clearSelection, toggle, selected
   } = promotion;
   const selectedKeys = useMemo(() => new Set(selected), [selected]);
-  const sections = useMemo(() => groupProposalByDimension(keywords), [keywords]);
+  const sections = useMemo(() => groupProposalByDimension(keywords, runCatalog(job)), [keywords, job]);
   const groupName = groups.find((group) => group.id === groupId)?.name;
   const countText = promotion.selectedCount > 0 ? `${promotion.selectedCount} ` : '';
   const targetText = groupName === undefined ? '' : ` to “${groupName}”`;
@@ -115,7 +116,7 @@ export function AgentProposal({
             <p className="text-xs text-gray-500 mt-0.5">
               {job.proposal_source === 'fallback'
                 ? 'The selection model was unavailable; showing the top candidates by relevance.'
-                : 'Ranked by the agent; tick the ones to track and add them to the hotel\u2019s group.'}
+                : 'Ranked by the agent; tick the ones to track and add them to a keyword group.'}
             </p>
           </div>
           <Button type="button" variant="secondary" size="sm" disabled={exporting} onClick={() => void handleExport()}>

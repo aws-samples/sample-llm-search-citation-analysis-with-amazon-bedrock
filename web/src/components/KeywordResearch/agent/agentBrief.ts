@@ -1,9 +1,12 @@
 /**
- * Research-agent brief: the expansion dimensions, market options and the
+ * Research-agent brief: the market options, the template-driven copy and the
  * cost estimate shown before a run starts. Mirrors the limits in
- * `lambda/shared/research_agent.py`.
+ * `lambda/shared/research_agent.py`. Dimension labels always come from the
+ * template's catalogue (snapshotted on the run as `dimension_catalog`).
  */
-import type { AgentDimension } from '../../../types';
+import type {
+  AgentDimensionOption, KeywordResearchItem
+} from '../../../types';
 
 export const AGENT_MAX_QUERIES_PER_ROUND = 8;
 export const AGENT_MAX_ROUNDS = 3;
@@ -16,64 +19,53 @@ export const SYSTEM_PROMPT_MAX_LENGTH = 6000;
 export const SYSTEM_PROMPT_MIN_LENGTH = 20;
 export const BUILTIN_TEMPLATE_ID = 'builtin-default';
 
-export interface DimensionOption {
-  id: AgentDimension;
-  label: string;
-  hint: string;
+/** The model's catch-all bucket; never a catalogue id. */
+export const OTHER_DIMENSION_ID = 'other';
+
+/** Human label for a dimension id; the model's `other` bucket and ids the catalogue does not know read as "Other". */
+export function dimensionLabel(dimension: string | undefined, catalog: readonly AgentDimensionOption[]): string {
+  return catalog.find((option) => option.id === dimension)?.label ?? 'Other';
 }
 
-/** Order matches the customer's list (R19). */
-export const DIMENSION_OPTIONS: readonly DimensionOption[] = [
-  {
-    id: 'destination',
-    label: 'Destination',
-    hint: 'the city or region as a place to stay',
-  },
-  {
-    id: 'location',
-    label: 'Location / neighbourhood',
-    hint: '"hotel near …", landmarks and areas around the hotel',
-  },
-  {
-    id: 'points_of_interest',
-    label: 'Points of interest',
-    hint: 'attractions, venues and events people travel for',
-  },
-  {
-    id: 'hotel_attributes',
-    label: 'Hotel attributes',
-    hint: 'pool, spa, parking, pet friendly, sea view, breakfast…',
-  },
-  {
-    id: 'audience',
-    label: 'Audience',
-    hint: 'families, couples, business travellers, groups, solo',
-  },
-  {
-    id: 'trip_type',
-    label: 'Trip type',
-    hint: 'weekend break, honeymoon, conference, golf, beach holiday',
-  },
-];
-
-const DIMENSION_LABELS: Record<string, string> = Object.fromEntries(
-  DIMENSION_OPTIONS.map((option) => [option.id, option.label])
-);
-
-/** Human label for a dimension id; the model's `other` bucket and unknown ids read as "Other". */
-export function dimensionLabel(dimension: string | undefined): string {
-  if (dimension === undefined) return 'Other';
-  return DIMENSION_LABELS[dimension] ?? 'Other';
+/** The dimension catalogue a run was started with (backfilled by the API on legacy rows). */
+export function runCatalog(job: KeywordResearchItem): AgentDimensionOption[] {
+  return job.config?.dimension_catalog ?? [];
 }
 
-export const DEFAULT_DIMENSIONS: readonly AgentDimension[] = ['destination', 'location', 'points_of_interest', 'hotel_attributes', 'audience', 'trip_type'];
+/** Section order for a proposal: the catalogue's order, then the `other` bucket. */
+export function orderedDimensionIds(catalog: readonly AgentDimensionOption[]): string[] {
+  return [...catalog.map((option) => option.id), OTHER_DIMENSION_ID];
+}
+
+/** "café" → "Café", for labels that start a sentence or a field name. */
+export function subjectLabel(subject: string): string {
+  return subject.charAt(0).toLocaleUpperCase() + subject.slice(1);
+}
+
+/** "Research a hotel" / "Research an inn". */
+export function subjectHeading(subject: string): string {
+  const article = /^[aeiouáéíóú]/i.test(subject) ? 'an' : 'a';
+  return `Research ${article} ${subject}`;
+}
+
+const SEED_PLACEHOLDERS: Record<string, string> = {
+  hotel: 'e.g. Hotel Gran Marino',
+  restaurant: 'e.g. Casa Lucio',
+  café: 'e.g. Café Central',
+  store: 'e.g. Zara Gran Vía',
+};
+
+/** An example seed for the template's subject. */
+export function seedPlaceholder(subject: string): string {
+  return SEED_PLACEHOLDERS[subject.trim().toLocaleLowerCase()] ?? 'e.g. your business name';
+}
 
 export interface MarketOption {
   code: string;
   label: string;
 }
 
-/** Markets the hotel group sells in first; any other ISO code can be typed. */
+/** Markets offered first; any other ISO code can be typed. */
 export const COUNTRY_OPTIONS: readonly MarketOption[] = [
   {
     code: 'es',
@@ -199,13 +191,14 @@ export function formatAgentCost(estimate: AgentCostEstimate): string {
 /** Validation the form applies before calling the API (the API re-checks). */
 export function briefProblems(brief: {
   seed: string;
-  dimensions: readonly AgentDimension[];
+  subject: string;
+  dimensions: readonly string[];
   country: string;
   language: string;
   systemPrompt: string;
 }): string[] {
   const problems: string[] = [];
-  if (brief.seed.trim().length < 2) problems.push('Enter the hotel name (or a seed keyword).');
+  if (brief.seed.trim().length < 2) problems.push(`Enter the ${brief.subject} name (or a seed keyword).`);
   if (brief.dimensions.length === 0) problems.push('Pick at least one expansion dimension.');
   if (!/^[a-z]{2}$/i.test(brief.country.trim())) problems.push('Country must be a two-letter code (e.g. es).');
   if (!/^[a-z]{2}$/i.test(brief.language.trim())) problems.push('Language must be a two-letter code (e.g. es).');

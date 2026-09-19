@@ -114,7 +114,7 @@ describe('useResearchAgent', () => {
     expect(requests()[0]).toBe('GET /keyword-research/history?limit=50&type=agent');
   });
 
-  it('starting a run prepends it to the list and opens it', async () => {
+  it('starting a run prepends it to the list without opening it', async () => {
     const result = await renderAgentRuns({
       history: [buildAgentJob()],
       snapshots: {
@@ -130,7 +130,8 @@ describe('useResearchAgent', () => {
     });
 
     expect(result.current.jobs.map((job) => job.id)).toStrictEqual(['job-new', 'job-a']);
-    expect(result.current.selectedId).toBe('job-new');
+    expect(result.current.selectedId).toBeNull();
+    expect(result.current.selected).toBeNull();
   });
 
   it('re-reads active runs on the poll interval until they finish', async () => {
