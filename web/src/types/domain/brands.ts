@@ -40,7 +40,9 @@ export interface ProviderBrandData {
  * Brand appearance in a specific provider's response.
  */
 export interface BrandAppearance {
+  keyword: string;
   provider: string;
+  model: string;
   rank: number;
   mention_count: number;
   first_position: number;
@@ -97,6 +99,8 @@ export interface BrandMentionsResponse {
   /** Null for a group / all answer, which has no single keyword. */
   keyword: string | null;
   timestamp: string | null;
+  /** Distinct analysis runs represented by the loaded scope, newest first. */
+  available_runs: string[];
   /** Present on group / all answers. */
   scope?: ReportScopeInfo;
   keywords_analyzed?: number;
@@ -131,6 +135,6 @@ export interface IndustryPreset {
 }
 
 /**
- * Map of industry keys to their preset configurations.
+ * Map of industry keys to preset configurations.
  */
 export interface IndustryPresets {[key: string]: IndustryPreset;}

@@ -118,6 +118,7 @@ export function VisibilityDashboard({ keywords }: Props) {
             firstPartyScore={keywordVisibility.summary.first_party_avg_score}
             competitorScore={keywordVisibility.summary.competitor_avg_score}
             shareOfVoice={keywordVisibility.summary.first_party_total_sov}
+            prominence={keywordVisibility.prominence}
             trendDirection={trends?.trend_direction}
             trendChange={trends?.summary?.change}
           />
@@ -142,7 +143,7 @@ export function VisibilityDashboard({ keywords }: Props) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {keywordVisibility.brands.length > 0 ? keywordVisibility.brands.map((brand, i) => <BrandRow key={brand.name} brand={brand} index={i} />) : (
+                  {keywordVisibility.brands.length > 0 ? keywordVisibility.brands.map((brand, index) => <BrandRow key={brand.name} brand={brand} index={index} />) : (
                     <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No brand data available.</td></tr>
                   )}
                 </tbody>

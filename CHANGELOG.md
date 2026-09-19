@@ -9,6 +9,34 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.7.0] - 2026-09-19
+
+Brand reporting can now be exported and revisited by analysis run, while group
+visibility exposes citation rate and first-party prominence explicitly.
+
+### Added
+
+- **Brand Mentions Excel export.** The current scope, persona, provider and
+  classification result exports one row per keyword × brand × AI provider,
+  including model, rank, mention count, first position and sentiment.
+- **Brand Mentions run history.** A run selector lists the newest 50 analysis
+  timestamps and can reopen an exact shared run for one keyword, a keyword
+  group, selected keywords or all active keywords. Group results report how
+  many keywords participated in the chosen run.
+- **Prominence KPIs.** Visibility now reports first-party rank-#1 share,
+  top-three share, mean rank and mean first position per keyword and as an
+  equal-keyword group aggregate; invalid and unranked values stay out of the
+  calculation. Rank metrics are also carried into history and Excel exports.
+
+### Changed
+
+- The group visibility card formerly labelled "Coverage" is now "Citation
+  rate" (% of analysed keywords where a first-party brand is mentioned). The
+  API field remains `coverage_rate`; unrelated citation-gap coverage is
+  unchanged.
+- Group keyword detail includes the first-party best rank, and visibility
+  exports include citation-rate, prominence and historical-rank columns.
+
 ## [2.6.0] - 2026-09-19
 
 The research agent works for any industry, and every run keeps its results.

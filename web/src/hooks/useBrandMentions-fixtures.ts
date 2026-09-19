@@ -6,6 +6,7 @@ import {
 export const mockBrandMentionsResponse: BrandMentionsResponse = {
   keyword: 'test',
   timestamp: '2026-01-24T00:00:00Z',
+  available_runs: ['2026-01-24T00:00:00Z', '2026-01-10T00:00:00Z'],
   config: null,
   aggregated: {
     brands: [

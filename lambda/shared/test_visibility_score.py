@@ -1,11 +1,4 @@
-"""
-Tests for shared.visibility_score.
-
-The expected values below were captured from the three handler-local copies of
-the formula (get-visibility-metrics, get-persona-rankings, get-historical-trends)
-immediately before they were replaced by this module, so these tests pin the
-consolidation to the numbers the dashboard was already showing.
-"""
+"""Tests for shared.visibility_score."""
 
 from __future__ import annotations
 
@@ -38,8 +31,6 @@ class TestCalculateVisibilityScore:
         assert visibility_score.calculate_visibility_score(4, 50, 1, 1.0, 4) == 100.0
 
     def test_scores_an_unmentioned_brand_at_the_rank_floor_plus_neutral_sentiment(self) -> None:
-        # No providers, no mentions, unranked sentinel: only the capped rank
-        # minimum (3.0) and the neutral sentiment midpoint (5.0) remain.
         assert visibility_score.calculate_visibility_score(0, 0, 9999, 0.0, 4) == 8.0
 
     def test_drops_the_provider_term_when_no_providers_are_enabled(self) -> None:
@@ -111,13 +102,94 @@ class TestSentimentToScore:
         assert visibility_score.sentiment_to_score('weird') == 0.0
 
 
+class TestNormalizeRank:
+    @pytest.mark.parametrize(
+        ('value', 'expected'),
+        [
+            (1, 1),
+            ('3', 3),
+            (None, None),
+            (0, None),
+            (-1, None),
+            (1.5, None),
+            (999, None),
+            (float('nan'), None),
+        ],
+    )
+    def test_returns_only_positive_integer_ranks_below_the_unranked_sentinel(self, value, expected) -> None:
+        assert visibility_score.normalize_rank(value) == expected
 
-def _keyword_metrics(first_party_score, competitor_score, first_party_sov, brands, timestamp='2026-09-18T10:00:00Z'):
+
+class TestFirstPartyProminence:
+    def test_uses_each_answers_best_first_party_placement(self) -> None:
+        prominence = visibility_score.summarize_first_party_prominence([
+            [
+                {'rank': 4, 'first_position': 40},
+                {'rank': 1, 'first_position': 10},
+            ],
+            [{'rank': 3, 'first_position': 30}],
+            [{'rank': 999, 'first_position': 20}],
+            [],
+        ])
+
+        assert prominence == {
+            'answers': 4,
+            'mentioned_answers': 3,
+            'rank_1_share': 25.0,
+            'top_3_share': 50.0,
+            'mean_rank': 2.0,
+            'mean_first_position': 20.0,
+        }
+
+    def test_returns_unavailable_means_when_mentions_have_no_valid_placement(self) -> None:
+        prominence = visibility_score.summarize_first_party_prominence([
+            [{'rank': 999}],
+            [{'rank': None, 'first_position': float('nan')}],
+            [],
+        ])
+
+        assert prominence == {
+            'answers': 3,
+            'mentioned_answers': 2,
+            'rank_1_share': 0.0,
+            'top_3_share': 0.0,
+            'mean_rank': None,
+            'mean_first_position': None,
+        }
+
+
+def _prominence(
+    answers=0,
+    mentioned_answers=0,
+    rank_1_share=0.0,
+    top_3_share=0.0,
+    mean_rank=None,
+    mean_first_position=None,
+):
+    return {
+        'answers': answers,
+        'mentioned_answers': mentioned_answers,
+        'rank_1_share': rank_1_share,
+        'top_3_share': top_3_share,
+        'mean_rank': mean_rank,
+        'mean_first_position': mean_first_position,
+    }
+
+
+def _keyword_metrics(
+    first_party_score,
+    competitor_score,
+    first_party_sov,
+    brands,
+    timestamp='2026-09-18T10:00:00Z',
+    prominence=None,
+):
     return {
         'timestamp': timestamp,
         'total_mentions': sum(int(brand.get('total_mentions', 0)) for brand in brands),
         'brands': brands,
         'first_party': [brand for brand in brands if brand['classification'] == 'first_party'],
+        'prominence': prominence or _prominence(),
         'summary': {
             'first_party_avg_score': first_party_score,
             'competitor_avg_score': competitor_score,
@@ -129,8 +201,14 @@ def _keyword_metrics(first_party_score, competitor_score, first_party_sov, brand
 
 def _brand(name, classification, score, sov=10.0, providers=('openai',), mentions=1, rank=1):
     return {
-        'name': name, 'classification': classification, 'visibility_score': score, 'share_of_voice': sov,
-        'providers': list(providers), 'provider_count': len(providers), 'total_mentions': mentions, 'best_rank': rank,
+        'name': name,
+        'classification': classification,
+        'visibility_score': score,
+        'share_of_voice': sov,
+        'providers': list(providers),
+        'provider_count': len(providers),
+        'total_mentions': mentions,
+        'best_rank': rank,
     }
 
 
@@ -177,7 +255,12 @@ class TestGroupSummary:
 
     def test_provider_coverage_averages_first_party_engine_share(self) -> None:
         per_keyword = [
-            _keyword_metrics(80.0, 0.0, 100.0, [_brand('Mine', 'first_party', 80.0, providers=('openai', 'gemini', 'perplexity', 'claude'))]),
+            _keyword_metrics(
+                80.0,
+                0.0,
+                100.0,
+                [_brand('Mine', 'first_party', 80.0, providers=('openai', 'gemini', 'perplexity', 'claude'))],
+            ),
             _keyword_metrics(20.0, 0.0, 100.0, [_brand('Mine', 'first_party', 20.0, providers=('openai',))]),
         ]
 
@@ -194,6 +277,99 @@ class TestGroupSummary:
         assert (rows[0]['has_data'], rows[1]['has_data']) == (False, True)
         assert (rows[1]['first_party_score'], rows[1]['first_party_sov'], rows[1]['first_party_mentioned']) == (30.0, 25.0, True)
 
+    def test_per_keyword_rows_carry_answer_level_prominence(self) -> None:
+        metrics = _keyword_metrics(
+            30.0,
+            10.0,
+            25.0,
+            [_brand('Mine', 'first_party', 30.0, rank=2)],
+            prominence=_prominence(4, 3, 25.0, 50.0, 2.5, 18.0),
+        )
+
+        row = visibility_score.summarize_group_visibility(['keyword'], [metrics], total_providers=3)['keywords'][0]
+
+        assert {
+            key: row[key]
+            for key in (
+                'first_party_best_rank',
+                'answers',
+                'mentioned_answers',
+                'rank_1_share',
+                'top_3_share',
+                'mean_rank',
+                'mean_first_position',
+            )
+        } == {
+            'first_party_best_rank': 2,
+            'answers': 4,
+            'mentioned_answers': 3,
+            'rank_1_share': 25.0,
+            'top_3_share': 50.0,
+            'mean_rank': 2.5,
+            'mean_first_position': 18.0,
+        }
+
+    def test_prominence_averages_only_meaningful_keyword_values(self) -> None:
+        per_keyword = [
+            _keyword_metrics(
+                80.0,
+                0.0,
+                100.0,
+                [_brand('Mine', 'first_party', 80.0, rank=1)],
+                prominence=_prominence(4, 3, 25.0, 50.0, 2.0, 10.0),
+            ),
+            {'error': 'No data found for keyword'},
+            _keyword_metrics(
+                40.0,
+                0.0,
+                100.0,
+                [_brand('Mine', 'first_party', 40.0, rank=2)],
+                prominence=_prominence(2, 2, 0.0, 100.0, 3.0, 30.0),
+            ),
+            _keyword_metrics(
+                0.0,
+                0.0,
+                0.0,
+                [],
+                prominence=_prominence(0, 0, 100.0, 100.0, None, None),
+            ),
+        ]
+
+        group = visibility_score.summarize_group_visibility(['a', 'b', 'c', 'd'], per_keyword, total_providers=4)
+
+        assert {
+            key: group['summary'][key]
+            for key in (
+                'first_party_mean_best_rank',
+                'rank_1_share',
+                'top_3_share',
+                'mean_rank',
+                'mean_first_position',
+            )
+        } == {
+            'first_party_mean_best_rank': 1.5,
+            'rank_1_share': 12.5,
+            'top_3_share': 75.0,
+            'mean_rank': 2.5,
+            'mean_first_position': 20.0,
+        }
+
+    def test_unranked_sentinel_is_unavailable_in_group_rank_fields(self) -> None:
+        metrics = _keyword_metrics(
+            20.0,
+            0.0,
+            100.0,
+            [_brand('Mine', 'first_party', 20.0, rank=999)],
+            prominence=_prominence(1, 1, 0.0, 0.0, 999, None),
+        )
+
+        group = visibility_score.summarize_group_visibility(['a'], [metrics], total_providers=4)
+
+        assert group['keywords'][0]['first_party_best_rank'] is None
+        assert group['keywords'][0]['mean_rank'] is None
+        assert group['summary']['first_party_mean_best_rank'] is None
+        assert group['brands'][0]['best_rank'] is None
+
     def test_reports_the_latest_timestamp_across_keywords(self) -> None:
         per_keyword = [
             _keyword_metrics(1.0, 1.0, 1.0, [], timestamp='2026-09-01T00:00:00Z'),
@@ -204,12 +380,21 @@ class TestGroupSummary:
 
         assert summary['timestamp'] == '2026-09-18T00:00:00Z'
 
-    def test_is_all_zero_when_no_keyword_has_data(self) -> None:
+    def test_is_all_zero_or_unavailable_when_no_keyword_has_data(self) -> None:
         summary = visibility_score.summarize_group_visibility(['a'], [{'error': 'x'}], total_providers=3)
 
         assert summary['summary'] == {
-            'first_party_avg_score': 0.0, 'competitor_avg_score': 0.0, 'first_party_avg_sov': 0.0,
-            'competitor_avg_sov': 0.0, 'coverage_rate': 0.0, 'provider_coverage': 0.0,
+            'first_party_avg_score': 0.0,
+            'competitor_avg_score': 0.0,
+            'first_party_avg_sov': 0.0,
+            'competitor_avg_sov': 0.0,
+            'coverage_rate': 0.0,
+            'provider_coverage': 0.0,
+            'first_party_mean_best_rank': None,
+            'rank_1_share': 0.0,
+            'top_3_share': 0.0,
+            'mean_rank': None,
+            'mean_first_position': None,
         }
         assert summary['brands'] == []
 
@@ -248,4 +433,6 @@ class TestBrandsAcrossKeywords:
 
         brands = visibility_score.aggregate_brands_across_keywords(per_keyword)
 
-        assert [(brand['name'], brand['visibility_score'], brand['keyword_count']) for brand in brands] == [('Hotel X', 20.0, 2)]
+        assert [(brand['name'], brand['visibility_score'], brand['keyword_count']) for brand in brands] == [
+            ('Hotel X', 20.0, 2)
+        ]

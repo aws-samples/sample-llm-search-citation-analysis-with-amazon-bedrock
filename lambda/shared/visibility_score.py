@@ -22,6 +22,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from shared.constants import (
+    UNRANKED_SENTINEL,
     VISIBILITY_MENTION_LOG_BASE,
     VISIBILITY_MENTION_WEIGHT,
     VISIBILITY_PROVIDER_WEIGHT,
@@ -114,10 +115,10 @@ def calculate_sentiment_agnostic_visibility_score(
     )
 
 
+# ---------------------------------------------------------------------------
+# Share of voice, prominence and group (multi-keyword) summaries
+# ---------------------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Share of voice and group (multi-keyword) summaries — 2.4.0
-# ---------------------------------------------------------------------------
 
 def mean(values: Iterable[float]) -> float:
     """Arithmetic mean, 0.0 for an empty sequence (the KPI convention)."""
@@ -135,8 +136,96 @@ def calculate_share_of_voice(brand_mentions: dict[str, int], total_mentions: int
     }
 
 
+def _finite_number(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def normalize_rank(value: Any) -> int | None:
+    """Return a reporting-safe rank, excluding malformed and unranked values."""
+    number = _finite_number(value)
+    if number is None or not number.is_integer():
+        return None
+    rank = int(number)
+    return rank if 1 <= rank < UNRANKED_SENTINEL else None
+
+
+def _normalize_mean_rank(value: Any) -> float | None:
+    number = _finite_number(value)
+    if number is None or not 1 <= number < UNRANKED_SENTINEL:
+        return None
+    return number
+
+
+def _normalize_position(value: Any) -> float | None:
+    number = _finite_number(value)
+    if number is None or number < 0:
+        return None
+    return number
+
+
+def _rounded_available_mean(values: Iterable[float | None], digits: int = 2) -> float | None:
+    available = [value for value in values if value is not None and math.isfinite(value)]
+    return round(mean(available), digits) if available else None
+
+
+def summarize_first_party_prominence(
+    first_party_brands_by_answer: Iterable[Iterable[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Summarize first-party placement once per provider answer.
+
+    Rank shares use every answer as their denominator, including answers that
+    do not mention a first-party brand. Mean rank and first position use only
+    answers carrying the corresponding valid value.
+    """
+    answers = [list(brands) for brands in first_party_brands_by_answer]
+    answer_ranks: list[int] = []
+    answer_positions: list[float] = []
+    mentioned_answers = 0
+
+    for brands in answers:
+        if brands:
+            mentioned_answers += 1
+
+        ranks = [rank for brand in brands if (rank := normalize_rank(brand.get('rank'))) is not None]
+        if ranks:
+            answer_ranks.append(min(ranks))
+
+        positions = [
+            position
+            for brand in brands
+            if (position := _normalize_position(brand.get('first_position'))) is not None
+        ]
+        if positions:
+            answer_positions.append(min(positions))
+
+    answer_count = len(answers)
+    return {
+        'answers': answer_count,
+        'mentioned_answers': mentioned_answers,
+        'rank_1_share': round(sum(rank == 1 for rank in answer_ranks) / answer_count * 100, 1) if answer_count else 0.0,
+        'top_3_share': round(sum(rank <= 3 for rank in answer_ranks) / answer_count * 100, 1) if answer_count else 0.0,
+        'mean_rank': _rounded_available_mean(answer_ranks),
+        'mean_first_position': _rounded_available_mean(answer_positions),
+    }
+
+
 def _first_party_providers(metrics: dict[str, Any]) -> int:
     return max((int(brand.get('provider_count', 0)) for brand in metrics.get('first_party', [])), default=0)
+
+
+def _first_party_best_rank(metrics: dict[str, Any]) -> int | None:
+    ranks = [
+        rank
+        for brand in metrics.get('first_party', [])
+        if (rank := normalize_rank(brand.get('best_rank'))) is not None
+    ]
+    return min(ranks, default=None)
 
 
 def summarize_keyword_visibility(keyword: str, metrics: dict[str, Any] | None) -> dict[str, Any]:
@@ -153,8 +242,17 @@ def summarize_keyword_visibility(keyword: str, metrics: dict[str, Any] | None) -
             'first_party_providers': 0,
             'total_mentions': 0,
             'first_party_mentioned': False,
+            'first_party_best_rank': None,
+            'answers': 0,
+            'mentioned_answers': 0,
+            'rank_1_share': 0.0,
+            'top_3_share': 0.0,
+            'mean_rank': None,
+            'mean_first_position': None,
         }
+
     summary = metrics['summary']
+    prominence = metrics.get('prominence', {})
     return {
         'keyword': keyword,
         'has_data': True,
@@ -166,6 +264,13 @@ def summarize_keyword_visibility(keyword: str, metrics: dict[str, Any] | None) -
         'first_party_providers': _first_party_providers(metrics),
         'total_mentions': int(metrics.get('total_mentions', 0)),
         'first_party_mentioned': bool(metrics.get('first_party')),
+        'first_party_best_rank': _first_party_best_rank(metrics),
+        'answers': int(prominence.get('answers', 0)),
+        'mentioned_answers': int(prominence.get('mentioned_answers', 0)),
+        'rank_1_share': float(_finite_number(prominence.get('rank_1_share')) or 0.0),
+        'top_3_share': float(_finite_number(prominence.get('top_3_share')) or 0.0),
+        'mean_rank': _normalize_mean_rank(prominence.get('mean_rank')),
+        'mean_first_position': _normalize_position(prominence.get('mean_first_position')),
     }
 
 
@@ -197,9 +302,9 @@ def aggregate_brands_across_keywords(per_keyword: Iterable[dict[str, Any]]) -> l
             entry['sovs'].append(float(brand.get('share_of_voice', 0.0)))
             entry['providers'].update(brand.get('providers', []))
             entry['total_mentions'] += int(brand.get('total_mentions', 0))
-            rank = brand.get('best_rank')
-            if rank is not None and (entry['best_rank'] is None or int(rank) < entry['best_rank']):
-                entry['best_rank'] = int(rank)
+            rank = normalize_rank(brand.get('best_rank'))
+            if rank is not None and (entry['best_rank'] is None or rank < entry['best_rank']):
+                entry['best_rank'] = rank
             entry['keyword_count'] += 1
 
     brands = [
@@ -223,12 +328,13 @@ def aggregate_brands_across_keywords(per_keyword: Iterable[dict[str, Any]]) -> l
 def summarize_group_visibility(keywords: list[str], per_keyword: list[dict[str, Any]], total_providers: int) -> dict[str, Any]:
     """Group-level KPIs from per-keyword metrics (same order as ``keywords``).
 
-    Averages cover only keywords that have analysis data. Share of voice is
-    averaged, not summed: each keyword's shares already add up to 100%, so a
-    sum across keywords would exceed it and mean nothing.
+    Averages cover only keywords that have analysis data. Share of voice and
+    answer-level rank shares are averaged, not pooled, so each keyword keeps
+    the same weight in the group summary.
     """
     rows = [summarize_keyword_visibility(keyword, metrics) for keyword, metrics in zip(keywords, per_keyword, strict=True)]
     with_data = [row for row in rows if row['has_data']]
+    with_answers = [row for row in with_data if row['answers'] > 0]
     brands = aggregate_brands_across_keywords(metrics for metrics in per_keyword if metrics and 'summary' in metrics)
 
     coverage = mean(1.0 if row['first_party_mentioned'] else 0.0 for row in with_data) * 100
@@ -250,5 +356,14 @@ def summarize_group_visibility(keywords: list[str], per_keyword: list[dict[str, 
             'competitor_avg_sov': round(mean(row['competitor_sov'] for row in with_data), 2),
             'coverage_rate': round(coverage, 1),
             'provider_coverage': round(provider_coverage, 1),
+            'first_party_mean_best_rank': _rounded_available_mean(
+                row['first_party_best_rank'] for row in with_data
+            ),
+            'rank_1_share': round(mean(row['rank_1_share'] for row in with_answers), 1),
+            'top_3_share': round(mean(row['top_3_share'] for row in with_answers), 1),
+            'mean_rank': _rounded_available_mean(row['mean_rank'] for row in with_data),
+            'mean_first_position': _rounded_available_mean(
+                row['mean_first_position'] for row in with_data
+            ),
         },
     }

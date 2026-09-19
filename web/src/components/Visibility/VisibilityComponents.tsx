@@ -1,4 +1,8 @@
-import type { BrandVisibilityMetric } from '../../types';
+import type {
+  BrandVisibilityMetric, ProminenceMetrics
+} from '../../types';
+
+const UNRANKED_SENTINEL = 999;
 
 const getScoreColor = (score: number) => {
   if (score >= 70) return 'text-green-600';
@@ -6,17 +10,24 @@ const getScoreColor = (score: number) => {
   return 'text-red-600';
 };
 
-const getClassBadge = (c: string) => {
-  if (c === 'first_party') return 'bg-green-100 text-green-800';
-  if (c === 'competitor') return 'bg-red-100 text-red-800';
+const getClassBadge = (classification: string) => {
+  if (classification === 'first_party') return 'bg-green-100 text-green-800';
+  if (classification === 'competitor') return 'bg-red-100 text-red-800';
   return 'bg-gray-100 text-gray-800';
 };
 
+export function formatRank(rank: number | null | undefined): string {
+  if (rank === null || rank === undefined || !Number.isFinite(rank) || rank < 1 || rank >= UNRANKED_SENTINEL) {
+    return '—';
+  }
+  return Number.isInteger(rank) ? rank.toString() : rank.toFixed(1);
+}
+
 export function BrandRow({
-  brand, index 
+  brand, index
 }: {
   readonly brand: BrandVisibilityMetric;
-  readonly index: number 
+  readonly index: number
 }) {
   return (
     <tr className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
@@ -25,12 +36,12 @@ export function BrandRow({
         {brand.visibility_score}
       </td>
       <td className="px-4 py-3 text-sm text-gray-600">{brand.share_of_voice.toFixed(1)}%</td>
-      <td className="px-4 py-3 text-sm text-gray-600">{brand.best_rank ?? '-'}</td>
+      <td className="px-4 py-3 text-sm text-gray-600">{formatRank(brand.best_rank)}</td>
       <td className="px-4 py-3 text-sm text-gray-600">{brand.total_mentions}</td>
       <td className="px-4 py-3 text-sm">
         <div className="flex gap-1">
-          {brand.providers.map(p => (
-            <span key={p} className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs">{p}</span>
+          {brand.providers.map((provider) => (
+            <span key={provider} className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs">{provider}</span>
           ))}
         </div>
       </td>
@@ -69,17 +80,18 @@ interface SummaryCardsProps {
   readonly firstPartyScore: number | undefined;
   readonly competitorScore: number | undefined;
   readonly shareOfVoice: number | undefined;
+  readonly prominence: ProminenceMetrics | undefined;
   readonly trendDirection: string | undefined;
   readonly trendChange: number | undefined;
 }
 
 function ScoreCard({
-  label, score, borderColor, textColor 
+  label, score, borderColor, textColor
 }: {
   readonly label: string;
   readonly score: number | undefined;
   readonly borderColor: string;
-  readonly textColor?: string 
+  readonly textColor?: string
 }) {
   const color = textColor ?? getScoreColor(score ?? 0);
   return (
@@ -90,15 +102,30 @@ function ScoreCard({
   );
 }
 
+function ProminenceCard({ prominence }: { readonly prominence: ProminenceMetrics | undefined }) {
+  const rankOne = prominence ? `${prominence.rank_1_share.toFixed(1)}%` : 'N/A';
+  const topThree = prominence ? `${prominence.top_3_share.toFixed(1)}%` : 'N/A';
+  return (
+    <div className="bg-white p-3 sm:p-4 rounded-lg shadow border-l-4 border-fuchsia-500">
+      <div className="text-xs sm:text-sm text-gray-500">Prominence</div>
+      <div className="text-xl sm:text-2xl font-bold text-fuchsia-600">{rankOne}</div>
+      <div className="text-xs text-gray-400 mt-0.5">
+        rank-#1 share · top-3 {topThree} · mean rank {formatRank(prominence?.mean_rank)}
+      </div>
+    </div>
+  );
+}
+
 export function SummaryCards({
-  firstPartyScore, competitorScore, shareOfVoice, trendDirection, trendChange 
+  firstPartyScore, competitorScore, shareOfVoice, prominence, trendDirection, trendChange
 }: SummaryCardsProps) {
   const trendPrefix = (trendChange ?? 0) >= 0 ? '+' : '';
   return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4">
       <ScoreCard label="Your Avg Score" score={firstPartyScore} borderColor="border-green-500" />
       <ScoreCard label="Competitor Avg" score={competitorScore} borderColor="border-red-500" />
       <ScoreCard label="Share of Voice" score={shareOfVoice} borderColor="border-blue-500" textColor="text-blue-600" />
+      <ProminenceCard prominence={prominence} />
       <div className="bg-white p-3 sm:p-4 rounded-lg shadow border-l-4 border-purple-500">
         <div className="text-xs sm:text-sm text-gray-500">Trend</div>
         <div className="text-xl sm:text-2xl font-bold">
@@ -112,22 +139,22 @@ export function SummaryCards({
 interface TrendChartProps {
   readonly data: Array<{
     period: string;
-    visibility_score: number 
+    visibility_score: number
   }>;
   readonly title?: string;
 }
 
 export function TrendChart({
-  data, title = 'Visibility Trend (Last 30 Days)' 
+  data, title = 'Visibility Trend (Last 30 Days)'
 }: TrendChartProps) {
   return (
     <div className="bg-white p-4 rounded-lg shadow">
       <h3 className="text-lg font-medium mb-4">{title}</h3>
       <div className="h-48 flex items-end gap-1">
-        {data.map((point, i) => (
+        {data.map((point, index) => (
           <div key={point.period} className="flex-1 flex flex-col items-center">
             <div className="w-full bg-blue-500 rounded-t" style={{ height: `${(point.visibility_score / 100) * 180}px` }} title={`${point.period}: ${point.visibility_score}`} />
-            {i % 5 === 0 && <div className="text-xs text-gray-400 mt-1 transform -rotate-45">{point.period.slice(5)}</div>}
+            {index % 5 === 0 && <div className="text-xs text-gray-400 mt-1 transform -rotate-45">{point.period.slice(5)}</div>}
           </div>
         ))}
       </div>

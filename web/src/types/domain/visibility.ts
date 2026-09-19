@@ -1,6 +1,15 @@
 import type { BrandClassification } from './brands';
 import type { ReportScopeInfo } from './baseTypes';
 
+export interface ProminenceMetrics {
+  answers: number;
+  mentioned_answers: number;
+  rank_1_share: number;
+  top_3_share: number;
+  mean_rank: number | null;
+  mean_first_position: number | null;
+}
+
 export interface BrandVisibilityMetric {
   name: string;
   visibility_score: number;
@@ -22,6 +31,8 @@ export interface VisibilityMetricsResponse {
   first_party: BrandVisibilityMetric[];
   competitors: BrandVisibilityMetric[];
   others: BrandVisibilityMetric[];
+  /** Additive for compatibility with responses created before prominence. */
+  prominence?: ProminenceMetrics;
   summary: {
     first_party_avg_score: number;
     competitor_avg_score: number;
@@ -46,7 +57,7 @@ export interface GroupBrandVisibilityMetric {
 }
 
 /** One keyword's line in a group visibility summary. */
-export interface KeywordVisibilityRow {
+export interface KeywordVisibilityRow extends ProminenceMetrics {
   keyword: string;
   has_data: boolean;
   timestamp: string | null;
@@ -57,6 +68,7 @@ export interface KeywordVisibilityRow {
   first_party_providers: number;
   total_mentions: number;
   first_party_mentioned: boolean;
+  first_party_best_rank: number | null;
 }
 
 /**
@@ -85,6 +97,11 @@ export interface GroupVisibilityResponse {
     coverage_rate: number;
     /** Mean share of enabled providers mentioning a first-party brand. */
     provider_coverage: number;
+    first_party_mean_best_rank: number | null;
+    rank_1_share: number;
+    top_3_share: number;
+    mean_rank: number | null;
+    mean_first_position: number | null;
   };
 }
 
@@ -228,6 +245,13 @@ export interface TrendDataPoint {
   provider_count: number;
   best_rank: number | null;
   analysis_runs: number;
+  answers?: number;
+  mentioned_answers?: number;
+  rank_1_share?: number;
+  top_3_share?: number;
+  mean_rank?: number | null;
+  mean_first_position?: number | null;
+  keywords_with_data?: number;
 }
 
 export type PeriodType = 'day' | 'week' | 'month';

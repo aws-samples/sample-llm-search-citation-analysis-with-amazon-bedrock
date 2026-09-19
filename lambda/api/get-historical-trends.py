@@ -13,6 +13,7 @@ Features:
 
 import concurrent.futures
 import logging
+import math
 import os
 import sys
 from collections import defaultdict
@@ -42,7 +43,12 @@ from shared.scope_params import (
     scope_from_request,
 )
 from shared.utils import brand_names_match, get_brand_config, utc_now
-from shared.visibility_score import calculate_sentiment_agnostic_visibility_score, mean
+from shared.visibility_score import (
+    calculate_sentiment_agnostic_visibility_score,
+    mean,
+    normalize_rank,
+    summarize_first_party_prominence,
+)
 
 # Bounded parallelism for the per-keyword trend fan-out. 10 workers keeps the
 # DynamoDB RCU pressure reasonable on the SearchResults table while collapsing
@@ -56,6 +62,7 @@ _ALL_KEYWORDS_CAP = 20
 _SCOPE_KEYWORDS_CAP = 100
 
 # Only the fields the buckets use; the LLM response text stays in the table.
+# The projected brands include rank and first_position.
 _TREND_PROJECTION = '#ts, provider, brands'
 
 logger = logging.getLogger(__name__)
@@ -92,85 +99,75 @@ def get_trend_direction(values: list[float]) -> str:
 
     if slope > TREND_DIRECTION_IMPROVING_SLOPE:
         return 'improving'
-    elif slope < TREND_DIRECTION_DECLINING_SLOPE:
+    if slope < TREND_DIRECTION_DECLINING_SLOPE:
         return 'declining'
     return 'stable'
 
 
+def _is_first_party(brand: dict[str, Any], first_party: list[str]) -> bool:
+    classification = brand.get('classification')
+    name = str(brand.get('name', '')).lower()
+    return classification == 'first_party' or (
+        classification is None
+        and any(brand_names_match(name, configured_name) for configured_name in first_party)
+    )
+
+
+def _period_key(timestamp: str, period: str) -> str | None:
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+    except (ValueError, TypeError):
+        return None
+    if period == 'day':
+        return parsed.strftime('%Y-%m-%d')
+    if period == 'week':
+        return parsed.strftime('%Y-W%W')
+    return parsed.strftime('%Y-%m')
+
+
 def aggregate_by_period(items: list[dict], period: str, config: dict) -> list[dict]:
-    """
-    Aggregate search results by time period.
+    """Aggregate visibility and answer-level prominence by time period."""
+    tracked_brands = config.get('tracked_brands', {})
+    first_party = [str(brand).lower() for brand in tracked_brands.get('first_party', [])]
 
-    Args:
-        items: Search result items
-        period: 'day', 'week', or 'month'
-        config: Brand configuration
-    """
-    tracked_brands = config.get("tracked_brands", {})
-    first_party = [b.lower() for b in tracked_brands.get("first_party", [])]
-
-    # Group items by period
-    period_data = defaultdict(list)
-
+    period_data: dict[str, list[dict]] = defaultdict(list)
     for item in items:
-        timestamp = item.get('timestamp', '')
-        if not timestamp:
-            continue
-
-        try:
-            dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-
-            if period == 'day':
-                period_key = dt.strftime('%Y-%m-%d')
-            elif period == 'week':
-                # ISO week
-                period_key = dt.strftime('%Y-W%W')
-            else:  # month
-                period_key = dt.strftime('%Y-%m')
-
+        period_key = _period_key(item.get('timestamp', ''), period)
+        if period_key is not None:
             period_data[period_key].append(item)
-        except (ValueError, KeyError, TypeError):
-            continue
 
-    # Calculate metrics for each period. The enabled-provider count is the
-    # score denominator and does not change within a request, so resolve it
-    # once here rather than once per period bucket (each lookup is a table scan).
+    # The enabled-provider count is the score denominator and does not change
+    # within a request, so resolve it once rather than once per period bucket.
     total_providers = get_enabled_provider_count()
     trend_data = []
 
-    for period_key in sorted(period_data.keys()):
+    for period_key in sorted(period_data):
         items_in_period = period_data[period_key]
-
-        # Get unique timestamps (analysis runs)
-        timestamps = set(item.get('timestamp', '') for item in items_in_period)
-
-        # Aggregate first-party brand metrics
+        timestamps = {item.get('timestamp', '') for item in items_in_period}
         fp_mentions = 0
         fp_providers = set()
         fp_best_rank = UNRANKED_SENTINEL
-        total_searches = len(timestamps)
+        first_party_brands_by_answer: list[list[dict[str, Any]]] = []
 
         for item in items_in_period:
             provider = item.get('provider', '')
-            brands = item.get('brands', [])
+            answer_brands = [
+                brand for brand in item.get('brands', [])
+                if _is_first_party(brand, first_party)
+            ]
+            first_party_brands_by_answer.append(answer_brands)
 
-            for brand in brands:
-                name = brand.get('name', '').lower()
-                # Prefer LLM classification; fall back to exact name match
-                # only when classification is missing (see audit items 9, 22).
-                classification = brand.get('classification')
-                is_first_party = classification == 'first_party' or (
-                    classification is None
-                    and any(brand_names_match(name, fp) for fp in first_party)
-                )
-                if is_first_party:
-                    fp_mentions += to_int(brand.get('mention_count'), 1)
-                    fp_providers.add(provider)
-                    fp_best_rank = min(fp_best_rank, to_int(brand.get('rank'), UNRANKED_SENTINEL))
+            for brand in answer_brands:
+                fp_mentions += to_int(brand.get('mention_count'), 1)
+                fp_providers.add(provider)
+                rank = normalize_rank(brand.get('rank'))
+                if rank is not None:
+                    fp_best_rank = min(fp_best_rank, rank)
 
         visibility_score = calculate_sentiment_agnostic_visibility_score(
             len(fp_providers), fp_mentions, fp_best_rank, total_providers
         )
+        prominence = summarize_first_party_prominence(first_party_brands_by_answer)
 
         trend_data.append({
             'period': period_key,
@@ -178,24 +175,23 @@ def aggregate_by_period(items: list[dict], period: str, config: dict) -> list[di
             'total_mentions': fp_mentions,
             'provider_count': len(fp_providers),
             'best_rank': fp_best_rank if fp_best_rank < UNRANKED_SENTINEL else None,
-            'analysis_runs': total_searches
+            'analysis_runs': len(timestamps),
+            **prominence,
         })
 
     return trend_data
 
 
 def _fetch_keyword_items(keyword: str) -> list[dict]:
-    """Fetch raw search-result rows for a keyword. Pulled out for parallel
-    fan-out in ``get_all_keywords_trends`` — the rest of ``get_historical_trends``
-    is CPU-bound aggregation that's safe to run serially afterwards.
+    """Fetch raw search-result rows for a keyword for parallel fan-out.
 
-    Returns an empty list on query failure so a single bad keyword can't fail
-    the whole trends dashboard. Errors are logged for ops visibility.
+    Returns an empty list on query failure so one bad keyword cannot fail the
+    whole trends dashboard. Errors remain logged for operational visibility.
     """
     try:
         return query_keyword_rows(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword, _TREND_PROJECTION)
-    except Exception as e:
-        logger.error(f"Error fetching trend items for keyword {keyword!r}: {e}")
+    except Exception as exc:
+        logger.error(f"Error fetching trend items for keyword {keyword!r}: {exc}")
         return []
 
 
@@ -206,31 +202,21 @@ def _build_trend_from_items(
     period: str,
     days: int,
 ) -> dict[str, Any]:
-    """Build the trend payload from an already-fetched items list.
-
-    Extracted from ``get_historical_trends`` so the parallel fan-out can
-    collect queries first, then run the CPU-bound aggregation serially
-    on the main thread (avoiding the GIL contention that makes threading
-    unhelpful for pure-Python work).
-    """
+    """Build the trend payload from an already-fetched items list."""
     if not items:
         return {"error": f"No data found for keyword: {keyword}"}
 
-    # Filter to requested time range.
     cutoff = utc_now().replace(tzinfo=None) - timedelta(days=days)
     cutoff_str = cutoff.isoformat()
-
     filtered_items = [
         item for item in items
         if item.get('timestamp', '') >= cutoff_str
     ]
 
     if not filtered_items:
-        filtered_items = items  # Use all data if none in range
+        filtered_items = items
 
-    # Aggregate by period
     trend_data = aggregate_by_period(filtered_items, period, config)
-
     return {
         'keyword': keyword,
         'period_type': period,
@@ -240,12 +226,8 @@ def _build_trend_from_items(
 
 
 def summarize_series(trend_data: list[dict[str, Any]]) -> dict[str, Any]:
-    """Direction, period-over-period change and averages of one score series.
-
-    Shared by the single-keyword payload and the group series so both are
-    read the same way by the charts.
-    """
-    scores = [d['visibility_score'] for d in trend_data]
+    """Direction, period-over-period change and averages of one score series."""
+    scores = [data_point['visibility_score'] for data_point in trend_data]
     trend_direction = get_trend_direction(scores)
 
     if len(trend_data) >= 2:
@@ -273,26 +255,55 @@ def summarize_series(trend_data: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def build_group_series(trends: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Per-bucket mean of the first-party score across keywords.
+def _finite_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return number if math.isfinite(number) else None
 
-    A bucket's score averages only the keywords that have data in that
-    bucket; mentions and analysis runs are summed, provider count is the
-    widest coverage any keyword reached.
-    """
+
+def _mean_or_none(values: list[float]) -> float | None:
+    return round(mean(values), 2) if values else None
+
+
+def build_group_series(trends: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build an equal-keyword group series for each available period bucket."""
     buckets: dict[str, dict[str, Any]] = {}
     for trend in trends:
         for point in trend.get('trend_data', []):
             bucket = buckets.setdefault(point['period'], {
-                'scores': [], 'total_mentions': 0, 'provider_count': 0, 'best_rank': None, 'analysis_runs': 0,
+                'scores': [],
+                'total_mentions': 0,
+                'provider_count': 0,
+                'best_rank': None,
+                'analysis_runs': 0,
+                'answers': 0,
+                'mentioned_answers': 0,
+                'rank_1_shares': [],
+                'top_3_shares': [],
+                'mean_ranks': [],
+                'mean_first_positions': [],
             })
             bucket['scores'].append(float(point.get('visibility_score', 0)))
             bucket['total_mentions'] += int(point.get('total_mentions', 0))
             bucket['provider_count'] = max(bucket['provider_count'], int(point.get('provider_count', 0)))
-            rank = point.get('best_rank')
-            if rank is not None and (bucket['best_rank'] is None or int(rank) < bucket['best_rank']):
-                bucket['best_rank'] = int(rank)
+            rank = normalize_rank(point.get('best_rank'))
+            if rank is not None and (bucket['best_rank'] is None or rank < bucket['best_rank']):
+                bucket['best_rank'] = rank
             bucket['analysis_runs'] += int(point.get('analysis_runs', 0))
+            answers = int(point.get('answers', 0))
+            bucket['answers'] += answers
+            bucket['mentioned_answers'] += int(point.get('mentioned_answers', 0))
+            if answers > 0:
+                bucket['rank_1_shares'].append(float(point.get('rank_1_share', 0.0)))
+                bucket['top_3_shares'].append(float(point.get('top_3_share', 0.0)))
+            mean_rank = _finite_float(point.get('mean_rank'))
+            if mean_rank is not None and 1 <= mean_rank < UNRANKED_SENTINEL:
+                bucket['mean_ranks'].append(mean_rank)
+            mean_position = _finite_float(point.get('mean_first_position'))
+            if mean_position is not None and mean_position >= 0:
+                bucket['mean_first_positions'].append(mean_position)
 
     return [
         {
@@ -302,6 +313,12 @@ def build_group_series(trends: list[dict[str, Any]]) -> list[dict[str, Any]]:
             'provider_count': bucket['provider_count'],
             'best_rank': bucket['best_rank'],
             'analysis_runs': bucket['analysis_runs'],
+            'answers': bucket['answers'],
+            'mentioned_answers': bucket['mentioned_answers'],
+            'rank_1_share': round(mean(bucket['rank_1_shares']), 1),
+            'top_3_share': round(mean(bucket['top_3_shares']), 1),
+            'mean_rank': _mean_or_none(bucket['mean_ranks']),
+            'mean_first_position': _mean_or_none(bucket['mean_first_positions']),
             'keywords_with_data': len(bucket['scores']),
         }
         for period, bucket in sorted(buckets.items())
@@ -309,36 +326,25 @@ def build_group_series(trends: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def get_historical_trends(keyword: str, config: dict, period: str = 'day', days: int = 30) -> dict[str, Any]:
-    """Get historical trend data for a keyword.
-
-    Single-keyword entry point. Fetches + aggregates inline. For multi-keyword
-    dashboards use ``get_all_keywords_trends``, which parallelizes the query
-    step via ``_fetch_keyword_items``.
-    """
+    """Get historical trend data for a keyword."""
     items = _fetch_keyword_items(keyword)
     return _build_trend_from_items(keyword, items, config, period, days)
 
 
 def _trend_scope(scope: ReportScope | None) -> tuple[ReportScope, int]:
-    """The scope to fan out over (active keywords only) and the keyword cap that applies to it."""
+    """Resolve the active-keyword scope and its request cap."""
     if scope is None:
         return all_active_scope(dynamodb.Table(KEYWORDS_TABLE)), _ALL_KEYWORDS_CAP
     return scope, _SCOPE_KEYWORDS_CAP
 
 
-def get_all_keywords_trends(config: dict, period: str = 'day', days: int = 30, scope: ReportScope | None = None) -> dict[str, Any]:
-    """Trend summary across the active keywords of a scope (default: all).
-
-    DynamoDB queries are parallelized across up to ``_TRENDS_MAX_WORKERS``
-    workers to collapse the previous N sequential queries (audit item 16).
-    Aggregation runs serially afterwards on the main thread — it's pure
-    Python and the GIL makes threading unhelpful for that phase.
-
-    Besides the per-keyword `keyword_trends`, the payload carries the group
-    series (`trend_data`: per-bucket mean first-party score) with the same
-    `trend_direction` / `summary` block a single keyword has, so the group
-    overview charts it exactly like one keyword.
-    """
+def get_all_keywords_trends(
+    config: dict,
+    period: str = 'day',
+    days: int = 30,
+    scope: ReportScope | None = None,
+) -> dict[str, Any]:
+    """Trend summary across the active keywords of a scope (default: all)."""
     resolved, cap = _trend_scope(scope)
     keywords = list(resolved.keywords)
     keywords_to_query = keywords[:cap]
@@ -360,27 +366,21 @@ def get_all_keywords_trends(config: dict, period: str = 'day', days: int = 30, s
             **summarize_series([]),
         }
 
-    # Phase 1: parallel DynamoDB queries.
     workers = min(_TRENDS_MAX_WORKERS, len(keywords_to_query))
     items_by_keyword: dict[str, list[dict]] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
         future_to_keyword = {
-            pool.submit(_fetch_keyword_items, kw): kw
-            for kw in keywords_to_query
+            pool.submit(_fetch_keyword_items, keyword): keyword
+            for keyword in keywords_to_query
         }
         for future in concurrent.futures.as_completed(future_to_keyword):
-            kw = future_to_keyword[future]
+            keyword = future_to_keyword[future]
             try:
-                items_by_keyword[kw] = future.result()
-            except Exception as e:
-                # _fetch_keyword_items already catches and logs, but pool
-                # propagation quirks (e.g. interpreter shutdown) could still
-                # raise. Default to empty so aggregation treats it as
-                # "no data for this keyword".
-                logger.error(f"Trend fan-out future failed for {kw!r}: {e}")
-                items_by_keyword[kw] = []
+                items_by_keyword[keyword] = future.result()
+            except Exception as exc:
+                logger.error(f"Trend fan-out future failed for {keyword!r}: {exc}")
+                items_by_keyword[keyword] = []
 
-    # Phase 2: CPU-bound aggregation, serial on the main thread.
     keyword_trends = []
     full_trends = []
     for keyword in keywords_to_query:
@@ -396,13 +396,11 @@ def get_all_keywords_trends(config: dict, period: str = 'day', days: int = 30, s
                 'change_percent': trend['summary']['change_percent']
             })
 
-    # Sort by current score
-    keyword_trends.sort(key=lambda x: x['current_score'], reverse=True)
+    keyword_trends.sort(key=lambda item: item['current_score'], reverse=True)
 
-    # Calculate overall trends
-    improving = len([k for k in keyword_trends if k['trend_direction'] == 'improving'])
-    declining = len([k for k in keyword_trends if k['trend_direction'] == 'declining'])
-    stable = len([k for k in keyword_trends if k['trend_direction'] == 'stable'])
+    improving = len([item for item in keyword_trends if item['trend_direction'] == 'improving'])
+    declining = len([item for item in keyword_trends if item['trend_direction'] == 'declining'])
+    stable = len([item for item in keyword_trends if item['trend_direction'] == 'stable'])
 
     return {
         'scope': scope_block,
@@ -415,7 +413,7 @@ def get_all_keywords_trends(config: dict, period: str = 'day', days: int = 30, s
             'improving_count': improving,
             'declining_count': declining,
             'stable_count': stable,
-            'avg_score': round(mean(k['current_score'] for k in keyword_trends), 1),
+            'avg_score': round(mean(item['current_score'] for item in keyword_trends), 1),
         },
         **summarize_series(build_group_series(full_trends)),
     }
@@ -427,17 +425,14 @@ def get_all_keywords_trends(config: dict, period: str = 'day', days: int = 30, s
     'period': {'type': str, 'choices': ['day', 'week', 'month'], 'default': 'day'},
     'days': {'type': int, 'min': 1, 'max': 365, 'default': 30}
 })
-def handler(event: dict[str, Any], context: Any, period: str = 'day', days: int = 30, **scope_params: str | None) -> dict[str, Any]:
-    """
-    API handler for historical trends.
-
-    Query params:
-        - keyword: one keyword (single-keyword payload)
-        - group_id / keyword_ids: a keyword group or id set (group series + per-keyword trends)
-        - neither: every active keyword (capped at 20)
-        - period: 'day', 'week', or 'month' (default: day)
-        - days: Number of days to analyze (default: 30, max 365)
-    """
+def handler(
+    event: dict[str, Any],
+    context: Any,
+    period: str = 'day',
+    days: int = 30,
+    **scope_params: str | None,
+) -> dict[str, Any]:
+    """Return historical trends for one keyword or an aggregated scope."""
     report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE))
     if rejected:
         return rejected
