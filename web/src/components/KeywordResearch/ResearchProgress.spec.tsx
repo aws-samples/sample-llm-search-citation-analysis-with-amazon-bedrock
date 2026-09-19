@@ -9,6 +9,7 @@ import { ResearchProgress } from './ResearchProgress';
 import {
   buildJob, buildStep
 } from '../../hooks/useKeywordResearch-fixtures';
+import { HOTEL_DIMENSIONS } from './agent/agent-fixtures';
 
 const runningJob = buildJob({
   status: 'running',
@@ -120,6 +121,9 @@ describe('ResearchProgress for an agent run', () => {
       target_count: 60,
       max_rounds: 3,
       group_id: null,
+      subject: 'hotel',
+      audience: 'travellers',
+      dimension_catalog: HOTEL_DIMENSIONS,
     },
     steps: [
       buildStep('perplexity', {

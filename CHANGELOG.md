@@ -9,6 +9,50 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.6.0] - 2026-09-19
+
+The research agent works for any industry, and every run keeps its results.
+
+### Added
+
+- **Industry templates.** A template is now an industry profile — the noun for
+  what is researched (`subject`), the noun for who searches for it
+  (`audience`), the expansion dimensions the brief can pick from, and the
+  system prompt. Five built-ins ship: Hotels (unchanged prompt and dimensions,
+  keeps the id `builtin-default`), Restaurants, Cafés & coffee shops, Retail
+  stores, and "Any business" as the starting point for your own. Saving a
+  copy of any template and editing its name, subject, audience, dimensions
+  and instructions creates a custom template (`POST /api/keyword-research/templates`
+  with `base_template_id`, `subject`, `audience`, `dimensions`; `PUT` edits
+  them). Dimension ids are `^[a-z][a-z0-9_]{1,39}$`, 2–12 per template,
+  `other` reserved.
+- **Runs list with results.** The Research Agent tab shows the brief, then
+  every run with its status and progress. "View results" (or "View progress"
+  / "View details") opens the run in a modal: brief summary, the proposal
+  grouped by dimension with checkboxes, "Add keywords" to a keyword group,
+  Excel export, live progress and Retry where applicable, and the reasoning
+  trace collapsed. Several runs can run in parallel and each is reviewed from
+  its own row; starting a run no longer takes over the screen.
+- Template-driven brief: the industry picker sets the dimension checkboxes,
+  the seed label ("Restaurant (or seed)") and placeholder; the instructions
+  editor sits behind a disclosure so the runs stay visible.
+
+### Changed
+
+- The agent's prompts speak in the template's nouns ("what diners search for
+  around this restaurant") and list the template's dimensions; the brief wraps
+  the seed as `<subject>` instead of `<hotel>`. Hotel runs are unchanged in
+  substance. A run snapshots `subject`, `audience` and `dimension_catalog` in
+  its `config`, so later template edits never change how an old run reads;
+  the API backfills the hotel profile on runs from before 2.6.0.
+- `POST /api/keyword-research/agent` validates `dimensions` against the chosen
+  template's catalogue and answers 404 for an unknown `template_id` (it used to
+  fall back silently to the default prompt).
+- The Research Agent tab moved to the end of the Keyword Research tab bar;
+  Related Keywords is the default tab again. Dimension labels in the proposal,
+  the trace and the Excel export come from the run's own catalogue; the Excel
+  brief sheet says "Business" and adds "Subject" / "Audience" columns.
+
 ## [2.5.1] - 2026-09-19
 
 ### Fixed

@@ -8,7 +8,12 @@ from __future__ import annotations
 from shared.research_agent import (
     AGENT_MAX_QUERIES_PER_ROUND,
     BUILTIN_TEMPLATE_ID,
+    BUILTIN_TEMPLATES,
     DEFAULT_SYSTEM_PROMPT,
+    LEGACY_DIMENSION_CATALOG,
+    MAX_TEMPLATE_DIMENSIONS,
+    OTHER_DIMENSION,
+    RESTAURANT_TEMPLATE,
     assign_steps,
     build_agent_config,
     build_evaluate_prompt,
@@ -16,14 +21,23 @@ from shared.research_agent import (
     build_search_prompt,
     build_selection_prompt,
     builtin_template,
+    builtin_templates,
     fallback_selection,
+    normalise_dimensions,
     parse_evaluation,
     parse_plan,
     parse_queries,
     parse_selection,
     planned_query_texts,
     step_plan_fields,
+    validate_noun,
 )
+
+HOTEL_PROFILE = {
+    'subject': 'hotel',
+    'audience': 'travellers',
+    'dimension_catalog': LEGACY_DIMENSION_CATALOG,
+}
 
 
 def _config(**overrides) -> dict:
@@ -36,8 +50,31 @@ def _config(**overrides) -> dict:
         target_count=60,
         max_rounds=2,
         group_id=None,
+        **HOTEL_PROFILE,
     )
     return {**base, **overrides}
+
+
+def _restaurant_config() -> dict:
+    return build_agent_config(
+        seed='Casa Lucio',
+        country='es',
+        language='es',
+        dimensions=['cuisine', 'occasion'],
+        instruction='',
+        target_count=40,
+        max_rounds=1,
+        group_id=None,
+        subject=RESTAURANT_TEMPLATE.subject,
+        audience=RESTAURANT_TEMPLATE.audience,
+        dimension_catalog=[dimension.to_dict() for dimension in RESTAURANT_TEMPLATE.dimensions],
+    )
+
+
+def _legacy_config() -> dict:
+    """An agent row written before 2.6.0: no subject, audience or catalogue."""
+    config = _config()
+    return {key: value for key, value in config.items() if key not in ('subject', 'audience', 'dimension_catalog')}
 
 
 _QUERIES = [
@@ -48,7 +85,7 @@ _QUERIES = [
 
 
 class TestBuildAgentConfig:
-    def test_keeps_only_known_dimensions_in_form_order(self):
+    def test_keeps_only_catalogue_dimensions_in_catalogue_order(self):
         assert _config()['dimensions'] == ['destination', 'audience']
 
     def test_lowercases_country_and_language_codes(self):
@@ -58,11 +95,97 @@ class TestBuildAgentConfig:
     def test_stores_no_group_when_none_was_chosen(self):
         assert _config()['group_id'] is None
 
+    def test_snapshots_the_template_profile(self):
+        config = _restaurant_config()
 
-class TestBuiltinTemplate:
-    def test_is_read_only_and_carries_the_default_prompt(self):
+        assert (config['subject'], config['audience']) == ('restaurant', 'diners')
+        assert [dimension['id'] for dimension in config['dimension_catalog']] == [
+            'cuisine', 'location', 'occasion', 'menu_attributes', 'experience', 'audience', 'service',
+        ]
+
+
+class TestBuiltinTemplates:
+    def test_hotels_keeps_the_legacy_id_and_the_verbatim_default_prompt(self):
         template = builtin_template()
         assert (template['id'], template['builtin'], template['system_prompt']) == (BUILTIN_TEMPLATE_ID, True, DEFAULT_SYSTEM_PROMPT)
+
+    def test_lists_the_five_industries_hotels_first(self):
+        assert [template['id'] for template in builtin_templates()] == [
+            'builtin-default', 'builtin-restaurants', 'builtin-cafes', 'builtin-retail', 'builtin-generic',
+        ]
+
+    def test_every_builtin_has_a_well_formed_profile(self):
+        for template in BUILTIN_TEMPLATES:
+            view = template.to_view()
+            cleaned = normalise_dimensions(view['dimensions'])
+            assert cleaned == view['dimensions'], template.id
+            assert validate_noun(view['subject'], 'subject') is None, template.id
+            assert validate_noun(view['audience'], 'audience') is None, template.id
+
+    def test_every_builtin_prompt_names_its_subject_and_the_shared_rules(self):
+        for template in BUILTIN_TEMPLATES:
+            assert f'around ONE {template.subject}' in template.system_prompt, template.id
+            assert 'Always answer with the exact JSON shape you are asked for and nothing else.' in template.system_prompt, template.id
+
+    def test_unknown_builtin_id_is_none(self):
+        assert builtin_template('builtin-airlines') is None
+
+
+class TestNormaliseDimensions:
+    def test_cleans_ids_and_trims_text(self):
+        cleaned = normalise_dimensions([
+            {'id': ' Menu ', 'label': ' Menu & drinks ', 'description': ' coffee styles '},
+            {'id': 'location', 'label': 'Location'},
+        ])
+
+        assert cleaned == [
+            {'id': 'menu', 'label': 'Menu & drinks', 'description': 'coffee styles'},
+            {'id': 'location', 'label': 'Location', 'description': ''},
+        ]
+
+    def test_rejects_fewer_than_two_dimensions(self):
+        assert normalise_dimensions([{'id': 'menu', 'label': 'Menu'}]) == 'A template needs at least 2 dimensions'
+
+    def test_rejects_more_than_the_maximum(self):
+        too_many = [{'id': f'd{index}', 'label': 'D'} for index in range(MAX_TEMPLATE_DIMENSIONS + 1)]
+
+        assert normalise_dimensions(too_many) == f'A template can have at most {MAX_TEMPLATE_DIMENSIONS} dimensions'
+
+    def test_rejects_a_malformed_id(self):
+        result = normalise_dimensions([{'id': '1st', 'label': 'First'}, {'id': 'ok', 'label': 'Ok'}])
+
+        assert result == "Dimension id '1st' must be 2-40 characters: a letter, then letters, digits or underscores"
+
+    def test_rejects_the_reserved_other_id(self):
+        result = normalise_dimensions([{'id': 'other', 'label': 'Other'}, {'id': 'ok', 'label': 'Ok'}])
+
+        assert result == "'other' is reserved for keywords that fit no dimension"
+
+    def test_rejects_a_repeated_id(self):
+        result = normalise_dimensions([{'id': 'menu', 'label': 'Menu'}, {'id': 'MENU', 'label': 'Menu again'}])
+
+        assert result == "Dimension id 'menu' is repeated"
+
+    def test_rejects_a_missing_label(self):
+        result = normalise_dimensions([{'id': 'menu'}, {'id': 'ok', 'label': 'Ok'}])
+
+        assert result == "Dimension 'menu' needs a label of at most 60 characters"
+
+    def test_rejects_a_non_list(self):
+        assert normalise_dimensions({'id': 'menu'}) == 'dimensions must be a list'
+
+
+class TestValidateNoun:
+    def test_accepts_accented_words_and_short_phrases(self):
+        assert validate_noun('café', 'subject') is None
+        assert validate_noun('coffee drinkers', 'audience') is None
+
+    def test_rejects_punctuation_digits_and_empty_values(self):
+        message = 'subject must be a word or short phrase of 2 to 40 letters'
+
+        assert validate_noun('<hotel>', 'subject') == message
+        assert validate_noun('42', 'subject') == message
+        assert validate_noun('', 'subject') == message
 
 
 class TestAssignSteps:
@@ -106,7 +229,7 @@ class TestPrompts:
     def test_plan_prompt_wraps_the_seed_and_instruction_as_untrusted_input(self):
         prompt = build_plan_prompt(_config())
 
-        assert '<hotel>Hotel Gran Marino</hotel>' in prompt
+        assert 'Hotel / seed: <subject>Hotel Gran Marino</subject>' in prompt
         assert '<instruction>also expand by events</instruction>' in prompt
 
     def test_plan_prompt_lists_only_the_requested_dimensions(self):
@@ -116,11 +239,31 @@ class TestPrompts:
         assert '- audience:' in prompt
         assert '- trip_type:' not in prompt
 
+    def test_plan_prompt_speaks_in_the_template_nouns(self):
+        prompt = build_plan_prompt(_restaurant_config())
+
+        assert 'Restaurant / seed: <subject>Casa Lucio</subject>' in prompt
+        assert 'discover what diners search for around this restaurant' in prompt
+        assert '- cuisine: the cuisine, signature dishes' in prompt
+        assert '"dimension": "one of: cuisine, occasion, other"' in prompt
+
+    def test_legacy_config_still_reads_as_a_hotel_brief(self):
+        legacy = build_plan_prompt(_legacy_config())
+
+        assert legacy == build_plan_prompt(_config())
+
     def test_search_prompt_wraps_the_query_and_names_the_dimension(self):
         prompt = build_search_prompt(_config(), 'hotel familiar coruña', 'audience')
 
         assert '<query>hotel familiar coruña</query>' in prompt
         assert 'who is travelling' in prompt
+        assert 'You are researching search demand for a hotel.' in prompt
+
+    def test_search_prompt_describes_an_unknown_dimension_generically(self):
+        prompt = build_search_prompt(_restaurant_config(), 'mejor cocido madrid', 'trip_type')
+
+        assert 'Dimension of this query: the aspect the query is about' in prompt
+        assert 'keywords that diners actually search for' in prompt
 
     def test_evaluate_prompt_lists_candidates_with_their_sources(self):
         candidates = [{'keyword': 'hotel coruña playa', 'intent': 'commercial', 'competition': 'high', 'relevance': 8, 'dimension': 'destination', 'providers': ['openai', 'serpapi']}]
@@ -151,6 +294,9 @@ class TestParseQueries:
 
     def test_maps_unknown_dimensions_to_other(self):
         assert parse_queries([{'query': 'q', 'dimension': 'weather'}], ['destination'])[0]['dimension'] == 'other'
+
+    def test_maps_a_hotel_dimension_the_run_did_not_request_to_other(self):
+        assert parse_queries([{'query': 'q', 'dimension': 'trip_type'}], ['destination'])[0]['dimension'] == OTHER_DIMENSION
 
     def test_accepts_dimension_spelled_with_spaces_or_dashes(self):
         assert parse_queries([{'query': 'q', 'dimension': 'Points of interest'}], ['points_of_interest'])[0]['dimension'] == 'points_of_interest'

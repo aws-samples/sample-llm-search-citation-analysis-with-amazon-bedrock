@@ -9,7 +9,7 @@ steps are planned by a model instead of being "one step per provider":
         +------------------------- yes (round < max_rounds) -------+
                                                                    no -> Finalize (Bedrock selection)
 
-Round 1 is planned from the hotel/seed and the expansion dimensions the user
+Round 1 is planned from the subject (a hotel, restaurant, store...) and the expansion dimensions the user
 picked; every later round runs the queries the evaluator asked for. Each
 planned query becomes one step on one web-search provider (rotating through
 the configured providers), and — when a SerpAPI key is configured — one extra
@@ -29,6 +29,8 @@ import this module, so they never disagree on the config shape.
 
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from typing import Any
 
 from shared.llm_json import parse_llm_json
@@ -57,56 +59,329 @@ TEMPLATE_DESCRIPTION_MAX_LENGTH = 500
 SIGNALS_PROVIDER_ID = 'serpapi'
 SIGNALS_SECRET_NAME = 'serpapi-key'
 
-# Expansion dimensions the form offers (R19). ``other`` is what the model may
-# use for queries that fit none of them (e.g. a free-text instruction such as
-# "also expand by events and seasons").
-AGENT_DIMENSIONS: dict[str, str] = {
-    'destination': 'Destination — the city/region as a travel destination (hotels in <destination>, where to stay)',
-    'location': 'Location / neighbourhood — the immediate area, landmarks nearby, "hotel near ..." searches',
-    'points_of_interest': 'Points of interest — attractions, venues, events people travel for and look for a hotel close to',
-    'hotel_attributes': 'Hotel attributes — amenities and features (pool, spa, parking, pet friendly, sea view, breakfast)',
-    'audience': 'Audience type — who is travelling (families, couples, business travellers, groups, solo)',
-    'trip_type': 'Trip type — the occasion (weekend break, honeymoon, conference, golf, beach holiday, city break)',
-}
+# What the model may tag a query or keyword with when it fits none of the
+# template's dimensions (e.g. a free-text instruction such as "also expand by
+# events and seasons"). Reserved: a template cannot define a dimension with
+# this id.
 OTHER_DIMENSION = 'other'
-ALL_DIMENSIONS = (*AGENT_DIMENSIONS.keys(), OTHER_DIMENSION)
 
 # ---------------------------------------------------------------------------
-# Built-in template
+# Industry templates
+#
+# A template is an industry profile: the noun for the thing being researched
+# (``subject``), the noun for the people searching (``audience``), the
+# expansion dimensions the form offers, and the system prompt. Five built-ins
+# ship in code; users save copies of them (edited) as their own templates.
 # ---------------------------------------------------------------------------
 
-BUILTIN_TEMPLATE_ID = 'builtin-default'
+MIN_TEMPLATE_DIMENSIONS = 2
+MAX_TEMPLATE_DIMENSIONS = 12
+DIMENSION_LABEL_MAX_LENGTH = 60
+DIMENSION_DESCRIPTION_MAX_LENGTH = 200
+SUBJECT_MAX_LENGTH = 40
+DIMENSION_ID_PATTERN = re.compile(r'^[a-z][a-z0-9_]{1,39}$')
+# A plain word or short phrase: letters (accents included), spaces, hyphens,
+# apostrophes. Never digits only, never punctuation the prompt could misread.
+NOUN_PATTERN = re.compile(r"^[^\W\d_][\w' \-]{1,39}$")
 
-DEFAULT_SYSTEM_PROMPT = """You are a senior SEO keyword researcher for the hotel industry, working for a hotel group's marketing team.
 
-Your job is to research the search demand around ONE hotel and propose the keywords the hotel should be visible for in AI assistants and search engines.
+@dataclass(frozen=True)
+class DimensionSpec:
+    """One expansion dimension a template offers; ``description`` is what the model reads."""
 
-How you work:
-- Plan: turn the hotel, its market and the requested expansion dimensions into concrete web-search queries. Each query must target one dimension and look for what real travellers type (booking intent, "hotel near ...", "best hotels for ...", questions, comparisons).
-- Evaluate: after a round of searches, judge the candidate keywords for relevance to THIS hotel and market, search intent and competition. Decide whether another round would add materially different keywords (new dimensions, long-tail variants, seasonal or event-driven demand) or whether the list is saturated.
-- Select: produce the final list. Prefer keywords a traveller would actually search, in the market's language, with a mix of intents (commercial and transactional first, informational where the hotel can win). Drop duplicates and near-duplicates, branded competitor names, and generic terms with no local or hotel angle.
+    id: str
+    label: str
+    description: str
 
-Rules:
-- Stay strictly on the hotel, its destination and its audience. Never invent facts about the hotel that the brief does not state.
-- Keywords are short search phrases (2 to 7 words), lower case, no punctuation, one language per keyword.
-- Always answer with the exact JSON shape you are asked for and nothing else."""
+    def to_dict(self) -> dict[str, str]:
+        return {
+            'id': self.id,
+            'label': self.label,
+            'description': self.description,
+        }
 
-DEFAULT_TEMPLATE_NAME = 'Hotel keyword research (default)'
-DEFAULT_TEMPLATE_DESCRIPTION = (
-    'Built-in starting point: a hotel-industry SEO researcher that plans queries per expansion '
-    'dimension, evaluates each round and selects the final list.'
+
+@dataclass(frozen=True)
+class IndustryTemplate:
+    """A built-in template: read-only, shipped in code, listed before saved ones."""
+
+    id: str
+    industry: str
+    name: str
+    description: str
+    subject: str
+    audience: str
+    dimensions: tuple[DimensionSpec, ...]
+    system_prompt: str
+
+    def to_view(self) -> dict[str, Any]:
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'industry': self.industry,
+            'subject': self.subject,
+            'audience': self.audience,
+            'dimensions': [dimension.to_dict() for dimension in self.dimensions],
+            'system_prompt': self.system_prompt,
+            'builtin': True,
+        }
+
+
+# The system prompt is the same researcher persona for every industry; only
+# the industry-specific phrases differ, so the shared sentences live here once.
+_PROMPT_HOW_YOU_WORK = (
+    'How you work:\n'
+    '- Plan: turn the {subject}, its market and the requested expansion dimensions into concrete web-search queries. '
+    'Each query must target one dimension and look for what real {audience} type ({plan_examples}).\n'
+    '- Evaluate: after a round of searches, judge the candidate keywords for relevance to THIS {subject} and market, '
+    'search intent and competition. Decide whether another round would add materially different keywords '
+    '(new dimensions, long-tail variants, seasonal or event-driven demand) or whether the list is saturated.\n'
+    '- Select: produce the final list. Prefer keywords {audience_singular} would actually search, in the market\'s language, '
+    'with a mix of intents (commercial and transactional first, informational where the {subject} can win). '
+    'Drop duplicates and near-duplicates, {drop_clause}.'
+)
+_PROMPT_RULES = (
+    'Rules:\n'
+    '- {stay_clause} Never invent facts about the {subject} that the brief does not state.\n'
+    '- Keywords are short search phrases (2 to 7 words), lower case, no punctuation, one language per keyword.\n'
+    '- Always answer with the exact JSON shape you are asked for and nothing else.'
 )
 
 
-def builtin_template() -> dict[str, Any]:
-    """The read-only template every installation has (not stored in the table)."""
-    return {
-        'id': BUILTIN_TEMPLATE_ID,
-        'name': DEFAULT_TEMPLATE_NAME,
-        'description': DEFAULT_TEMPLATE_DESCRIPTION,
-        'system_prompt': DEFAULT_SYSTEM_PROMPT,
-        'builtin': True,
-    }
+def _system_prompt(
+    *,
+    persona: str,
+    subject: str,
+    audience: str,
+    audience_singular: str,
+    plan_examples: str,
+    drop_clause: str,
+    stay_clause: str,
+) -> str:
+    """Assemble an industry's system prompt from the shared researcher persona."""
+    intro = (
+        f'You are {persona}.\n\n'
+        f'Your job is to research the search demand around ONE {subject} and propose the keywords the {subject} '
+        'should be visible for in AI assistants and search engines.'
+    )
+    how = _PROMPT_HOW_YOU_WORK.format(
+        subject=subject, audience=audience, audience_singular=audience_singular,
+        plan_examples=plan_examples, drop_clause=drop_clause,
+    )
+    rules = _PROMPT_RULES.format(subject=subject, stay_clause=stay_clause)
+    return f'{intro}\n\n{how}\n\n{rules}'
+
+
+BUILTIN_TEMPLATE_ID = 'builtin-default'
+
+HOTEL_TEMPLATE = IndustryTemplate(
+    id=BUILTIN_TEMPLATE_ID,
+    industry='hotels',
+    name='Hotels',
+    description='A hotel-industry SEO researcher: destination, location, points of interest, amenities, audience and trip type.',
+    subject='hotel',
+    audience='travellers',
+    dimensions=(
+        DimensionSpec('destination', 'Destination', 'Destination — the city/region as a travel destination (hotels in <destination>, where to stay)'),
+        DimensionSpec('location', 'Location / neighbourhood', 'Location / neighbourhood — the immediate area, landmarks nearby, "hotel near ..." searches'),
+        DimensionSpec('points_of_interest', 'Points of interest', 'Points of interest — attractions, venues, events people travel for and look for a hotel close to'),
+        DimensionSpec('hotel_attributes', 'Hotel attributes', 'Hotel attributes — amenities and features (pool, spa, parking, pet friendly, sea view, breakfast)'),
+        DimensionSpec('audience', 'Audience', 'Audience type — who is travelling (families, couples, business travellers, groups, solo)'),
+        DimensionSpec('trip_type', 'Trip type', 'Trip type — the occasion (weekend break, honeymoon, conference, golf, beach holiday, city break)'),
+    ),
+    system_prompt=_system_prompt(
+        persona="a senior SEO keyword researcher for the hotel industry, working for a hotel group's marketing team",
+        subject='hotel',
+        audience='travellers',
+        audience_singular='a traveller',
+        plan_examples='booking intent, "hotel near ...", "best hotels for ...", questions, comparisons',
+        drop_clause='branded competitor names, and generic terms with no local or hotel angle',
+        stay_clause='Stay strictly on the hotel, its destination and its audience.',
+    ),
+)
+
+RESTAURANT_TEMPLATE = IndustryTemplate(
+    id='builtin-restaurants',
+    industry='restaurants',
+    name='Restaurants',
+    description='A restaurant SEO researcher: cuisine, location, occasion, menu and dietary needs, setting, audience and booking.',
+    subject='restaurant',
+    audience='diners',
+    dimensions=(
+        DimensionSpec('cuisine', 'Cuisine & dishes', 'the cuisine, signature dishes and food styles people search for (tapas, sushi, steakhouse, tasting menu)'),
+        DimensionSpec('location', 'Location / neighbourhood', 'the immediate area and landmarks, "restaurant near ..." and "where to eat in ..." searches'),
+        DimensionSpec('occasion', 'Occasion', 'the reason for the meal (romantic dinner, birthday, business lunch, brunch, group dinner, pre-theatre)'),
+        DimensionSpec('menu_attributes', 'Menu & dietary', 'menu features and dietary needs (vegan, gluten free, kids menu, wine list, set menu, halal)'),
+        DimensionSpec('experience', 'Experience & setting', 'atmosphere and setting (terrace, rooftop, sea view, live music, michelin, cheap eats, fine dining)'),
+        DimensionSpec('audience', 'Audience', 'who is eating out (families, couples, tourists, large groups, business diners)'),
+        DimensionSpec('service', 'Service & booking', 'how people want to eat (reservations, delivery, takeaway, private dining, late night, open on Sunday)'),
+    ),
+    system_prompt=_system_prompt(
+        persona="a senior SEO keyword researcher for the restaurant industry, working for a restaurant group's marketing team",
+        subject='restaurant',
+        audience='diners',
+        audience_singular='a diner',
+        plan_examples='"restaurant near ...", "best <cuisine> in ...", "where to eat ...", reservations, menus, reviews',
+        drop_clause="other restaurants' brand names, and generic recipes or cooking terms with no local or dining-out angle",
+        stay_clause='Stay strictly on the restaurant, its cuisine, its location and its audience.',
+    ),
+)
+
+CAFE_TEMPLATE = IndustryTemplate(
+    id='builtin-cafes',
+    industry='cafes',
+    name='Cafés & coffee shops',
+    description='A café and coffee-shop SEO researcher: menu and drinks, location, occasion, attributes, audience and products.',
+    subject='café',
+    audience='coffee drinkers',
+    dimensions=(
+        DimensionSpec('menu', 'Menu & drinks', 'coffee styles, drinks and food people look for (specialty coffee, flat white, matcha, brunch, pastries, vegan cake)'),
+        DimensionSpec('location', 'Location / neighbourhood', 'the immediate area and landmarks, "coffee near ..." and "best cafe in ..." searches'),
+        DimensionSpec('occasion', 'Occasion & use', 'why people go (work or study with wifi, breakfast, brunch, meeting a friend, afternoon tea, takeaway on the way to work)'),
+        DimensionSpec('attributes', 'Café attributes', 'features that decide the choice (wifi, terrace, pet friendly, laptop friendly, quiet, open early, open late)'),
+        DimensionSpec('audience', 'Audience', 'who is coming (remote workers, students, tourists, families with strollers, coffee enthusiasts)'),
+        DimensionSpec('products', 'Beans & products', 'things to buy (coffee beans, roastery, subscriptions, gift cards, merchandise)'),
+    ),
+    system_prompt=_system_prompt(
+        persona="a senior SEO keyword researcher for cafés and coffee shops, working for a café's marketing team",
+        subject='café',
+        audience='coffee drinkers',
+        audience_singular='a coffee drinker',
+        plan_examples='"coffee near ...", "best cafe for ...", "cafe with wifi ...", brunch and breakfast searches, questions',
+        drop_clause="other cafés' brand names, and home-brewing terms with no local angle",
+        stay_clause='Stay strictly on the café, its menu, its location and its audience.',
+    ),
+)
+
+RETAIL_TEMPLATE = IndustryTemplate(
+    id='builtin-retail',
+    industry='retail',
+    name='Retail stores',
+    description='A retail SEO researcher: products and categories, location, brands carried, shopping intent, services, occasion and audience.',
+    subject='store',
+    audience='shoppers',
+    dimensions=(
+        DimensionSpec('products', 'Products & categories', 'what the store sells, by category and product type (running shoes, kitchen appliances, kids clothing)'),
+        DimensionSpec('location', 'Location / neighbourhood', 'the immediate area, mall or high street, "<category> shop near ..." and "where to buy ... in ..." searches'),
+        DimensionSpec('brands', 'Brands carried', 'manufacturer brands and product lines shoppers search for that the store stocks'),
+        DimensionSpec('intent', 'Shopping intent', 'buying signals (buy, price, offers, sale, outlet, cheap, best, compare, second hand)'),
+        DimensionSpec('services', 'Services', 'how people shop (opening hours, click and collect, delivery, returns, repairs, gift wrapping, personal shopping)'),
+        DimensionSpec('occasion', 'Occasion & season', 'when people shop (christmas gifts, back to school, wedding, black friday, summer sale)'),
+        DimensionSpec('audience', 'Audience', 'who is shopping (parents, teenagers, professionals, tourists, gift buyers)'),
+    ),
+    system_prompt=_system_prompt(
+        persona="a senior SEO keyword researcher for retail, working for a store's marketing team",
+        subject='store',
+        audience='shoppers',
+        audience_singular='a shopper',
+        plan_examples='"<product> shop near ...", "buy <product> in <city>", price and offer searches, comparisons, questions',
+        drop_clause="other retailers' brand names, and generic product definitions with no buying or local angle",
+        stay_clause='Stay strictly on the store, what it sells, its location and its audience.',
+    ),
+)
+
+GENERIC_TEMPLATE = IndustryTemplate(
+    id='builtin-generic',
+    industry='generic',
+    name='Any business (start here to create your own)',
+    description=(
+        'An industry-neutral starting point: products and services, location, problems, attributes, audience and occasion. '
+        'Save a copy and edit it for your industry.'
+    ),
+    subject='business',
+    audience='customers',
+    dimensions=(
+        DimensionSpec('offering', 'Products & services', 'what the business offers, in the words customers use to search for it'),
+        DimensionSpec('location', 'Location / neighbourhood', 'the area it serves, landmarks nearby, "... near me" and "... in <city>" searches'),
+        DimensionSpec('problems', 'Problems & needs', 'the problems, questions and needs that lead people to look for this kind of business'),
+        DimensionSpec('attributes', 'Attributes & differentiators', 'features people filter on (price, quality, speed, opening hours, certifications, languages)'),
+        DimensionSpec('audience', 'Audience', 'who the customers are and how they describe themselves'),
+        DimensionSpec('occasion', 'Occasion & timing', 'when and why the need arises (seasons, events, life moments, urgency)'),
+    ),
+    system_prompt=_system_prompt(
+        persona="a senior SEO keyword researcher working for a business's marketing team",
+        subject='business',
+        audience='customers',
+        audience_singular='a customer',
+        plan_examples='"... near me", "best ... in <city>", prices, questions, comparisons',
+        drop_clause='competitor brand names, and generic terms with no local or business angle',
+        stay_clause='Stay strictly on the business, what it offers, its location and its audience.',
+    ),
+)
+
+BUILTIN_TEMPLATES: tuple[IndustryTemplate, ...] = (
+    HOTEL_TEMPLATE, RESTAURANT_TEMPLATE, CAFE_TEMPLATE, RETAIL_TEMPLATE, GENERIC_TEMPLATE,
+)
+_BUILTIN_BY_ID = {template.id: template for template in BUILTIN_TEMPLATES}
+
+# Kept as names for the callers that pin them; they describe the hotel template.
+DEFAULT_SYSTEM_PROMPT = HOTEL_TEMPLATE.system_prompt
+DEFAULT_TEMPLATE_NAME = HOTEL_TEMPLATE.name
+DEFAULT_TEMPLATE_DESCRIPTION = HOTEL_TEMPLATE.description
+
+# Agent rows written before 2.6.0 carry neither subject, audience nor a
+# dimension catalogue: they were all hotel runs.
+LEGACY_SUBJECT = HOTEL_TEMPLATE.subject
+LEGACY_AUDIENCE = HOTEL_TEMPLATE.audience
+LEGACY_DIMENSION_CATALOG: list[dict[str, str]] = [dimension.to_dict() for dimension in HOTEL_TEMPLATE.dimensions]
+
+
+def builtin_templates() -> list[dict[str, Any]]:
+    """Every read-only template, in display order (hotels first)."""
+    return [template.to_view() for template in BUILTIN_TEMPLATES]
+
+
+def builtin_template(template_id: str = BUILTIN_TEMPLATE_ID) -> dict[str, Any] | None:
+    """One built-in template as the API shows it, or ``None`` for an unknown id."""
+    template = _BUILTIN_BY_ID.get(template_id)
+    return template.to_view() if template else None
+
+
+def normalise_dimensions(raw: Any) -> list[dict[str, str]] | str:
+    """Clean a template's dimension list, or explain why it is invalid.
+
+    Returns ``[{'id', 'label', 'description'}]`` with ids lower-cased and text
+    trimmed, or an error message for the API to send back as a 400.
+    """
+    if not isinstance(raw, list):
+        return 'dimensions must be a list'
+    if len(raw) < MIN_TEMPLATE_DIMENSIONS:
+        return f'A template needs at least {MIN_TEMPLATE_DIMENSIONS} dimensions'
+    if len(raw) > MAX_TEMPLATE_DIMENSIONS:
+        return f'A template can have at most {MAX_TEMPLATE_DIMENSIONS} dimensions'
+    cleaned: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            return 'Each dimension must be an object with id, label and description'
+        dimension_id = str(entry.get('id') or '').strip().lower()
+        label = str(entry.get('label') or '').strip()
+        description = str(entry.get('description') or '').strip()
+        if not DIMENSION_ID_PATTERN.match(dimension_id):
+            return f"Dimension id '{dimension_id}' must be 2-40 characters: a letter, then letters, digits or underscores"
+        if dimension_id == OTHER_DIMENSION:
+            return f"'{OTHER_DIMENSION}' is reserved for keywords that fit no dimension"
+        if dimension_id in seen:
+            return f"Dimension id '{dimension_id}' is repeated"
+        if not label or len(label) > DIMENSION_LABEL_MAX_LENGTH:
+            return f"Dimension '{dimension_id}' needs a label of at most {DIMENSION_LABEL_MAX_LENGTH} characters"
+        if len(description) > DIMENSION_DESCRIPTION_MAX_LENGTH:
+            return f"Dimension '{dimension_id}' description exceeds {DIMENSION_DESCRIPTION_MAX_LENGTH} characters"
+        seen.add(dimension_id)
+        cleaned.append({
+            'id': dimension_id,
+            'label': label,
+            'description': description,
+        })
+    return cleaned
+
+
+def validate_noun(value: Any, field: str) -> str | None:
+    """Error message when ``value`` is not a usable subject/audience noun, else ``None``."""
+    if not isinstance(value, str) or not NOUN_PATTERN.match(value.strip()):
+        return f'{field} must be a word or short phrase of 2 to {SUBJECT_MAX_LENGTH} letters'
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -123,18 +398,57 @@ def build_agent_config(
     target_count: int,
     max_rounds: int,
     group_id: str | None,
+    subject: str,
+    audience: str,
+    dimension_catalog: list[dict[str, str]],
 ) -> dict[str, Any]:
-    """The request part of an agent job row (validated by the API first)."""
+    """The request part of an agent job row (validated by the API first).
+
+    The template's subject, audience and dimension catalogue are snapshotted
+    so a later template edit never changes how an old run reads or renders.
+    """
+    catalog = [dict(dimension) for dimension in dimension_catalog]
+    catalog_ids = [dimension['id'] for dimension in catalog]
     return {
         'seed': seed.strip(),
         'country': country.strip().lower(),
         'language': language.strip().lower(),
-        'dimensions': [dimension for dimension in AGENT_DIMENSIONS if dimension in dimensions],
+        'dimensions': [dimension_id for dimension_id in catalog_ids if dimension_id in dimensions],
         'instruction': instruction.strip(),
         'target_count': int(target_count),
         'max_rounds': int(max_rounds),
         'group_id': group_id or None,
+        'subject': subject.strip(),
+        'audience': audience.strip(),
+        'dimension_catalog': catalog,
     }
+
+
+def config_subject(config: dict[str, Any]) -> str:
+    return str(config.get('subject') or LEGACY_SUBJECT)
+
+
+def config_audience(config: dict[str, Any]) -> str:
+    return str(config.get('audience') or LEGACY_AUDIENCE)
+
+
+def config_catalog(config: dict[str, Any]) -> list[dict[str, str]]:
+    """The run's dimension catalogue; hotel runs from before 2.6.0 get the hotel one."""
+    catalog = config.get('dimension_catalog')
+    if isinstance(catalog, list) and catalog:
+        return [dimension for dimension in catalog if isinstance(dimension, dict) and dimension.get('id')]
+    return LEGACY_DIMENSION_CATALOG
+
+
+def catalog_ids(config: dict[str, Any]) -> list[str]:
+    return [str(dimension['id']) for dimension in config_catalog(config)]
+
+
+def dimension_description(config: dict[str, Any], dimension_id: str) -> str:
+    for dimension in config_catalog(config):
+        if dimension.get('id') == dimension_id:
+            return str(dimension.get('description') or dimension.get('label') or dimension_id)
+    return 'the aspect the query is about'
 
 
 def agent_step_id(round_number: int, index: int, provider_id: str) -> str:
@@ -191,13 +505,19 @@ def step_plan_fields(step: dict[str, Any]) -> dict[str, Any]:
 # Prompts
 # ---------------------------------------------------------------------------
 
+def _selected_dimensions(config: dict[str, Any]) -> list[str]:
+    """The dimension ids a run researches: the selected ones, else the whole catalogue."""
+    selected = config.get('dimensions')
+    return list(selected) if isinstance(selected, list) and selected else catalog_ids(config)
+
+
 def _brief(config: dict[str, Any]) -> str:
     """The user's brief, every field wrapped as untrusted input."""
-    dimensions = config.get('dimensions') or list(AGENT_DIMENSIONS)
-    dimension_lines = '\n'.join(f'- {name}: {AGENT_DIMENSIONS[name]}' for name in dimensions if name in AGENT_DIMENSIONS)
+    subject = config_subject(config)
+    dimension_lines = '\n'.join(f'- {name}: {dimension_description(config, name)}' for name in _selected_dimensions(config))
     instruction = (config.get('instruction') or '').strip()
     instruction_line = f"Extra instruction from the user: {wrap_user_input(instruction, 'instruction')}" if instruction else 'Extra instruction from the user: none'
-    return f"""Hotel / seed: {wrap_user_input(config.get('seed', ''), 'hotel')}
+    return f"""{subject[:1].upper()}{subject[1:]} / seed: {wrap_user_input(config.get('seed', ''), 'subject')}
 Market: country code {wrap_user_input(config.get('country', 'us'), 'country', max_length=10)}, language code {wrap_user_input(config.get('language', 'en'), 'language', max_length=10)} — keywords must be in this language and relevant to this market.
 Target: about {int(config.get('target_count') or AGENT_DEFAULT_TARGET_COUNT)} final keywords.
 Expansion dimensions to cover:
@@ -206,12 +526,14 @@ Expansion dimensions to cover:
 
 
 def build_plan_prompt(config: dict[str, Any]) -> str:
-    dimensions = config.get('dimensions') or list(AGENT_DIMENSIONS)
+    subject = config_subject(config)
+    audience = config_audience(config)
+    dimensions = _selected_dimensions(config)
     return f"""{untrusted_input_system_instruction()}
 
 {_brief(config)}
 
-Plan the first round of web research. Produce at most {AGENT_MAX_QUERIES_PER_ROUND} search queries, spread across the dimensions above, each one a query you would run in a search engine to discover what travellers search for around this hotel. Cover every requested dimension at least once when the budget allows.
+Plan the first round of web research. Produce at most {AGENT_MAX_QUERIES_PER_ROUND} search queries, spread across the dimensions above, each one a query you would run in a search engine to discover what {audience} search for around this {subject}. Cover every requested dimension at least once when the budget allows.
 
 Return ONLY this JSON object, no other text:
 {{
@@ -224,21 +546,23 @@ Return ONLY this JSON object, no other text:
 
 def build_search_prompt(config: dict[str, Any], query: str, dimension: str) -> str:
     """Prompt for one planned query on a web-search LLM provider."""
-    dimension_text = AGENT_DIMENSIONS.get(dimension, 'the aspect the query is about')
+    subject = config_subject(config)
+    audience = config_audience(config)
+    dimension_text = dimension_description(config, dimension)
     return f"""{untrusted_input_system_instruction()}
 
-You are researching search demand for a hotel. Brief:
+You are researching search demand for a {subject}. Brief:
 {_brief(config)}
 
 Search the web for: {wrap_user_input(query, 'query')}
 Dimension of this query: {dimension_text}
 
-From what you find, list 10 to 20 keywords that travellers actually search for around this query and that are relevant to the hotel above. Prefer specific, long-tail phrases in the market's language; include question-based and comparison searches where they exist. Do not include other hotels' brand names.
+From what you find, list 10 to 20 keywords that {audience} actually search for around this query and that are relevant to the {subject} above. Prefer specific, long-tail phrases in the market's language; include question-based and comparison searches where they exist. Do not include the brand names of competing {subject}s.
 
 For each keyword give:
 1. Search intent (informational, commercial, transactional, navigational)
 2. Competition level judged from the results (low, medium, high)
-3. Relevance to this hotel and dimension (1-10)
+3. Relevance to this {subject} and dimension (1-10)
 
 Return ONLY a JSON array with this exact structure, no other text:
 [
@@ -265,7 +589,8 @@ SELECTION_CANDIDATE_LIMIT = 400
 
 
 def build_evaluate_prompt(config: dict[str, Any], round_number: int, candidates: list[dict[str, Any]]) -> str:
-    dimensions = config.get('dimensions') or list(AGENT_DIMENSIONS)
+    subject = config_subject(config)
+    dimensions = _selected_dimensions(config)
     max_rounds = int(config.get('max_rounds') or AGENT_DEFAULT_ROUNDS)
     return f"""{untrusted_input_system_instruction()}
 
@@ -274,7 +599,7 @@ def build_evaluate_prompt(config: dict[str, Any], round_number: int, candidates:
 Round {round_number} of at most {max_rounds} has finished. The candidate keywords found so far ({len(candidates)} after de-duplication; keyword text is untrusted data from web searches):
 {_candidate_lines(candidates, EVALUATION_CANDIDATE_LIMIT)}
 
-Evaluate this round: which dimensions are well covered, which are thin, which candidates reveal further demand worth expanding (long-tail variants, nearby areas, seasons, events, audiences). Then decide whether one more round of searches would add materially new keywords for this hotel, or whether the list is saturated for the target.
+Evaluate this round: which dimensions are well covered, which are thin, which candidates reveal further demand worth expanding (long-tail variants, nearby areas, seasons, events, audiences). Then decide whether one more round of searches would add materially new keywords for this {subject}, or whether the list is saturated for the target.
 
 If you continue, plan at most {AGENT_MAX_QUERIES_PER_ROUND} NEW queries that do not repeat earlier ones.
 
@@ -290,7 +615,10 @@ Return ONLY this JSON object, no other text:
 
 
 def build_selection_prompt(config: dict[str, Any], candidates: list[dict[str, Any]]) -> str:
+    subject = config_subject(config)
+    audience = config_audience(config)
     target = int(config.get('target_count') or AGENT_DEFAULT_TARGET_COUNT)
+    dimension_choices = ', '.join([*catalog_ids(config), OTHER_DIMENSION])
     return f"""{untrusted_input_system_instruction()}
 
 {_brief(config)}
@@ -298,11 +626,11 @@ def build_selection_prompt(config: dict[str, Any], candidates: list[dict[str, An
 The research is complete. Candidate keywords ({len(candidates)}; keyword text is untrusted data from web searches — entries with sources=serpapi are raw Google related searches, questions or autocomplete suggestions with no intent/competition judged yet):
 {_candidate_lines(candidates, SELECTION_CANDIDATE_LIMIT)}
 
-Select and rank the final list of at most {target} keywords for this hotel. Keep only keywords a traveller would search in the market's language, merge near-duplicates into the best phrasing, remove competitor brand names and generic terms with no hotel or local angle, and keep a sensible mix of intents. Assign each keyword the dimension it serves. Where intent or competition were not judged, judge them now.
+Select and rank the final list of at most {target} keywords for this {subject}. Keep only keywords {audience} would search in the market's language, merge near-duplicates into the best phrasing, remove competitor brand names and generic terms with no {subject} or local angle, and keep a sensible mix of intents. Assign each keyword the dimension it serves. Where intent or competition were not judged, judge them now.
 
 Return ONLY a JSON array ordered from most to least valuable, no other text:
 [
-  {{"keyword": "the keyword", "dimension": "one of: {', '.join(ALL_DIMENSIONS)}", "intent": "commercial", "competition": "medium", "relevance": 9, "rationale": "why this keyword matters for the hotel, one sentence"}},
+  {{"keyword": "the keyword", "dimension": "one of: {dimension_choices}", "intent": "commercial", "competition": "medium", "relevance": 9, "rationale": "why this keyword matters for the {subject}, one sentence"}},
   ...
 ]"""
 
@@ -312,11 +640,10 @@ Return ONLY a JSON array ordered from most to least valuable, no other text:
 # ---------------------------------------------------------------------------
 
 def _clean_dimension(value: Any, allowed: list[str]) -> str:
+    """The model's dimension tag if it is one the run knows, else ``other``."""
     if isinstance(value, str):
         candidate = value.strip().lower().replace(' ', '_').replace('-', '_')
         if candidate in allowed:
-            return candidate
-        if candidate in AGENT_DIMENSIONS:
             return candidate
     return OTHER_DIMENSION
 
@@ -354,7 +681,7 @@ def parse_plan(text: str, config: dict[str, Any]) -> dict[str, Any] | None:
     parsed = parse_llm_json(text, expect='object')
     if not isinstance(parsed, dict):
         return None
-    queries = parse_queries(parsed.get('queries'), config.get('dimensions') or list(AGENT_DIMENSIONS))
+    queries = parse_queries(parsed.get('queries'), _selected_dimensions(config))
     if not queries:
         return None
     strategy = parsed.get('strategy')
@@ -371,7 +698,7 @@ def parse_evaluation(text: str, config: dict[str, Any], *, exclude_queries: set[
     if not isinstance(parsed, dict):
         return None
     decision = str(parsed.get('decision', '')).strip().lower()
-    next_queries = parse_queries(parsed.get('next_queries'), config.get('dimensions') or list(AGENT_DIMENSIONS), exclude=exclude_queries)
+    next_queries = parse_queries(parsed.get('next_queries'), _selected_dimensions(config), exclude=exclude_queries)
     if decision != 'continue' or not next_queries:
         decision = 'stop'
         next_queries = []
@@ -422,7 +749,7 @@ def parse_selection(text: str, config: dict[str, Any], candidates: list[dict[str
         rationale = entry.get('rationale')
         proposal.append({
             'keyword': keyword,
-            'dimension': _clean_dimension(entry.get('dimension'), list(ALL_DIMENSIONS)),
+            'dimension': _clean_dimension(entry.get('dimension'), catalog_ids(config)),
             'intent': str(entry.get('intent') or source.get('intent') or 'informational').strip().lower()[:40],
             'competition': str(entry.get('competition') or source.get('competition') or 'medium').strip().lower()[:40],
             'relevance': _clean_relevance(entry.get('relevance', source.get('relevance')), 5.0),
@@ -441,7 +768,7 @@ def fallback_selection(config: dict[str, Any], candidates: list[dict[str, Any]])
     for entry in candidates[:target]:
         proposal.append({
             'keyword': entry.get('keyword', ''),
-            'dimension': _clean_dimension(entry.get('dimension'), list(ALL_DIMENSIONS)),
+            'dimension': _clean_dimension(entry.get('dimension'), catalog_ids(config)),
             'intent': str(entry.get('intent') or 'informational').lower()[:40],
             'competition': str(entry.get('competition') or 'medium').lower()[:40],
             'relevance': _clean_relevance(entry.get('relevance'), 5.0),

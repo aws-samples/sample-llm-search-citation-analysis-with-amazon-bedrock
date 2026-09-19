@@ -50,19 +50,22 @@ from shared.env_vars import resolve_table_env
 from shared.research_agent import (
     AGENT_DEFAULT_ROUNDS,
     AGENT_DEFAULT_TARGET_COUNT,
-    AGENT_DIMENSIONS,
     AGENT_INSTRUCTION_MAX_LENGTH,
     AGENT_MAX_ROUNDS,
     AGENT_MAX_TARGET_COUNT,
     AGENT_MIN_TARGET_COUNT,
     AGENT_SEED_MAX_LENGTH,
     BUILTIN_TEMPLATE_ID,
-    DEFAULT_SYSTEM_PROMPT,
+    GENERIC_TEMPLATE,
+    SUBJECT_MAX_LENGTH,
     SYSTEM_PROMPT_MAX_LENGTH,
     TEMPLATE_DESCRIPTION_MAX_LENGTH,
     TEMPLATE_NAME_MAX_LENGTH,
     build_agent_config,
     builtin_template,
+    builtin_templates,
+    normalise_dimensions,
+    validate_noun,
 )
 from shared.research_jobs import (
     ACTIVE_STATUSES,
@@ -292,20 +295,45 @@ def _is_code(value: str) -> bool:
     return len(value) == 2 and value.isalpha() and value.isascii()
 
 
-def _resolve_system_prompt(template_id: str | None, system_prompt: str | None) -> tuple[str, str | None, str | None]:
-    """The prompt snapshot for a job: inline text wins, then the chosen template, then the default.
+class TemplateNotFoundError(Exception):
+    """The ``template_id`` a request named does not exist (built-in or saved)."""
 
-    Returns ``(system_prompt, template_id, template_name)``; ``None`` for the
-    name when the template no longer exists (the prompt text is still used).
-    """
-    if template_id is None or template_id == BUILTIN_TEMPLATE_ID:
-        builtin = builtin_template()
-        prompt = system_prompt or builtin['system_prompt']
-        return prompt, BUILTIN_TEMPLATE_ID, builtin['name']
+
+def _profile_of(item: dict[str, Any]) -> dict[str, Any]:
+    """The industry profile of a template view/row; saved rows from before 2.6.0 read as the generic one."""
+    fallback = GENERIC_TEMPLATE.to_view()
+    dimensions = item.get('dimensions')
+    return {
+        'industry': item.get('industry') or fallback['industry'],
+        'subject': item.get('subject') or fallback['subject'],
+        'audience': item.get('audience') or fallback['audience'],
+        'dimensions': [dict(dimension) for dimension in dimensions] if isinstance(dimensions, list) and dimensions else fallback['dimensions'],
+    }
+
+
+def _load_template(template_id: str) -> dict[str, Any]:
+    """A built-in or saved template as the API shows it; raises when neither exists."""
+    builtin = builtin_template(template_id)
+    if builtin:
+        return builtin
     item = templates_table.get_item(Key={'id': template_id}).get('Item')
     if not item:
-        return system_prompt or DEFAULT_SYSTEM_PROMPT, template_id, None
-    return system_prompt or item.get('system_prompt') or DEFAULT_SYSTEM_PROMPT, template_id, item.get('name')
+        raise TemplateNotFoundError(template_id)
+    return _template_view(item)
+
+
+def _resolve_template(template_id: str | None, system_prompt: str | None) -> dict[str, Any]:
+    """What a run snapshots from its template: prompt (inline text wins), name and industry profile.
+
+    ``template_id`` ``None`` means the hotel built-in, as before 2.6.0.
+    """
+    template = _load_template(template_id or BUILTIN_TEMPLATE_ID)
+    return {
+        **_profile_of(template),
+        'template_id': template['id'],
+        'template_name': template['name'],
+        'system_prompt': system_prompt or template['system_prompt'],
+    }
 
 
 @parse_json_body
@@ -327,16 +355,15 @@ def _start_agent(
 ) -> dict[str, Any]:
     """POST /api/keyword-research/agent — start a research-agent job.
 
-    The system prompt is snapshotted on the job (inline edit, else the chosen
-    template, else the built-in default) so later template edits never change
-    what a past run did. ``group_id`` is the group the proposal is meant for;
-    it is validated here and used by the UI's "Add to group" action.
+    The template decides what the run researches: its subject and audience
+    nouns, its dimension catalogue (the request's ``dimensions`` must come
+    from it) and its system prompt (an inline edit wins). All of it is
+    snapshotted on the job so later template edits never change what a past
+    run did. ``group_id`` is the group the proposal is meant for; it is
+    validated here and used by the UI's "Add to group" action.
     """
     if not isinstance(dimensions, list) or not dimensions:
         return validation_error('Pick at least one expansion dimension', event, 'dimensions')
-    unknown = [dimension for dimension in dimensions if dimension not in AGENT_DIMENSIONS]
-    if unknown:
-        return validation_error(f"Unknown dimensions: {', '.join(str(d) for d in unknown)}. Must be one of: {', '.join(AGENT_DIMENSIONS)}", event, 'dimensions')
     if not _is_code(country):
         return validation_error('country must be a two-letter country code (e.g. es)', event, 'country')
     if not _is_code(language):
@@ -346,25 +373,33 @@ def _start_agent(
     if group_id and not groups_table.get_item(Key={'id': group_id}).get('Item'):
         return validation_error('Keyword group not found', event, 'group_id')
 
+    try:
+        template = _resolve_template(template_id, system_prompt)
+    except TemplateNotFoundError:
+        return not_found_response(resource='Template', event=event)
+    allowed = [dimension['id'] for dimension in template['dimensions']]
+    unknown = [dimension for dimension in dimensions if dimension not in allowed]
+    if unknown:
+        return validation_error(f"Unknown dimensions: {', '.join(str(d) for d in unknown)}. Must be one of: {', '.join(allowed)}", event, 'dimensions')
+
     if not get_web_search_clients():
         return _no_provider_response(event)
 
-    prompt, resolved_template_id, template_name = _resolve_system_prompt(template_id, system_prompt)
     config = build_agent_config(
         seed=seed, country=country, language=language, dimensions=dimensions, instruction=instruction,
         target_count=target_count, max_rounds=max_rounds, group_id=group_id,
+        subject=template['subject'], audience=template['audience'], dimension_catalog=template['dimensions'],
     )
     request: dict[str, Any] = {
         # Top-level copies the history list and the UI read directly.
         'seed_keyword': config['seed'],
         'config': config,
-        'system_prompt': prompt,
-        'template_id': resolved_template_id,
+        'system_prompt': template['system_prompt'],
+        'template_id': template['template_id'],
+        'template_name': template['template_name'],
         'round': 0,
         'rounds': [],
     }
-    if template_name:
-        request['template_name'] = template_name
     created_by = get_caller_identity(event)
     if created_by:
         request['created_by'] = created_by
@@ -377,6 +412,7 @@ def _template_view(item: dict[str, Any]) -> dict[str, Any]:
         'id': item['id'],
         'name': item.get('name', ''),
         'description': item.get('description', ''),
+        **_profile_of(item),
         'system_prompt': item.get('system_prompt', ''),
         'builtin': False,
         'created_by': item.get('created_by'),
@@ -386,11 +422,40 @@ def _template_view(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _list_templates(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """GET /api/keyword-research/templates — the built-in template first, then saved ones by name."""
+    """GET /api/keyword-research/templates — the built-in industry templates first, then saved ones by name."""
     response = templates_table.scan(Limit=MAX_TEMPLATES)
     saved = sorted((_template_view(item) for item in response.get('Items', []) if item.get('id')), key=lambda item: item['name'].casefold())
-    items = [builtin_template(), *saved]
+    items = [*builtin_templates(), *saved]
     return success_response({'items': items, 'count': len(items)}, event)
+
+
+# The industry-profile fields a template create/update may carry; cleaned by
+# `_validated_profile_changes` after `@validate` has type-checked them.
+TEMPLATE_PROFILE_RULES: dict[str, dict[str, Any]] = {
+    'subject': {'type': str, 'max_length': SUBJECT_MAX_LENGTH, 'source': 'body'},
+    'audience': {'type': str, 'max_length': SUBJECT_MAX_LENGTH, 'source': 'body'},
+    'dimensions': {'type': list, 'source': 'body'},
+}
+
+
+def _validated_profile_changes(
+    event: dict[str, Any], *, subject: str | None, audience: str | None, dimensions: Any,
+) -> dict[str, Any]:
+    """The profile fields a create/update request sets, cleaned — or the 400 to answer with."""
+    changes: dict[str, Any] = {}
+    for field, value in (('subject', subject), ('audience', audience)):
+        if value is None:
+            continue
+        error = validate_noun(value, field)
+        if error:
+            return {'error': validation_error(error, event, field)}
+        changes[field] = value.strip()
+    if dimensions is not None:
+        cleaned = normalise_dimensions(dimensions)
+        if isinstance(cleaned, str):
+            return {'error': validation_error(cleaned, event, 'dimensions')}
+        changes['dimensions'] = cleaned
+    return changes
 
 
 @parse_json_body
@@ -398,17 +463,38 @@ def _list_templates(event: dict[str, Any], context: Any) -> dict[str, Any]:
     'name': {'required': True, 'type': str, 'min_length': 1, 'max_length': TEMPLATE_NAME_MAX_LENGTH, 'source': 'body'},
     'system_prompt': {'required': True, 'type': str, 'min_length': 20, 'max_length': SYSTEM_PROMPT_MAX_LENGTH, 'source': 'body'},
     'description': {'type': str, 'max_length': TEMPLATE_DESCRIPTION_MAX_LENGTH, 'default': '', 'source': 'body'},
+    'base_template_id': {'type': str, 'max_length': 100, 'source': 'body'},
+    **TEMPLATE_PROFILE_RULES,
 })
-def _create_template(event: dict[str, Any], context: Any, body: dict, name: str, system_prompt: str, description: str) -> dict[str, Any]:
-    """POST /api/keyword-research/templates — save an agent system prompt as a template."""
+def _create_template(
+    event: dict[str, Any], context: Any, body: dict, name: str, system_prompt: str, description: str,
+    base_template_id: str | None, subject: str | None, audience: str | None, dimensions: list | None,
+) -> dict[str, Any]:
+    """POST /api/keyword-research/templates — save an industry template.
+
+    Profile fields the request leaves out (industry, subject, audience,
+    dimensions) come from ``base_template_id`` — the template the user copied
+    — else from the generic built-in. ``industry`` is never free text.
+    """
     if templates_table.scan(Select='COUNT').get('Count', 0) >= MAX_TEMPLATES:
         return validation_error(f'Maximum of {MAX_TEMPLATES} templates allowed', event)
+    try:
+        base = _profile_of(_load_template(base_template_id)) if base_template_id else GENERIC_TEMPLATE.to_view()
+    except TemplateNotFoundError:
+        return not_found_response(resource='Template', event=event)
+    changes = _validated_profile_changes(event, subject=subject, audience=audience, dimensions=dimensions)
+    if 'error' in changes:
+        return changes['error']
     timestamp = get_timestamp()
     item: dict[str, Any] = {
         'id': str(uuid.uuid4()),
         'name': name,
         'description': description,
         'system_prompt': system_prompt,
+        'industry': base['industry'],
+        'subject': changes.get('subject', base['subject']),
+        'audience': changes.get('audience', base['audience']),
+        'dimensions': changes.get('dimensions', [dict(dimension) for dimension in base['dimensions']]),
         'created_at': timestamp,
         'updated_at': timestamp,
     }
@@ -424,19 +510,27 @@ def _create_template(event: dict[str, Any], context: Any, body: dict, name: str,
     'name': {'type': str, 'min_length': 1, 'max_length': TEMPLATE_NAME_MAX_LENGTH, 'source': 'body'},
     'system_prompt': {'type': str, 'min_length': 20, 'max_length': SYSTEM_PROMPT_MAX_LENGTH, 'source': 'body'},
     'description': {'type': str, 'max_length': TEMPLATE_DESCRIPTION_MAX_LENGTH, 'source': 'body'},
+    **TEMPLATE_PROFILE_RULES,
 })
-def _update_template(event: dict[str, Any], context: Any, body: dict, name: str | None, system_prompt: str | None, description: str | None) -> dict[str, Any]:
-    """PUT /api/keyword-research/templates/{id} — edit a saved template (the built-in one is read-only)."""
+def _update_template(
+    event: dict[str, Any], context: Any, body: dict, name: str | None, system_prompt: str | None, description: str | None,
+    subject: str | None, audience: str | None, dimensions: list | None,
+) -> dict[str, Any]:
+    """PUT /api/keyword-research/templates/{id} — edit a saved template (built-ins are read-only)."""
     template_id = _path_id(event)
     if not template_id:
         return validation_error('Template ID is required', event, 'id')
-    if template_id == BUILTIN_TEMPLATE_ID:
-        return validation_error('The built-in template cannot be edited; save a copy instead', event, 'id')
+    if builtin_template(template_id):
+        return validation_error('Built-in templates cannot be edited; save a copy instead', event, 'id')
     if not templates_table.get_item(Key={'id': template_id}).get('Item'):
         return not_found_response(resource='Template', event=event)
 
-    changes = {'name': name, 'system_prompt': system_prompt, 'description': description}
+    changes: dict[str, Any] = {'name': name, 'system_prompt': system_prompt, 'description': description}
     changes = {key: value for key, value in changes.items() if value is not None}
+    profile = _validated_profile_changes(event, subject=subject, audience=audience, dimensions=dimensions)
+    if 'error' in profile:
+        return profile['error']
+    changes.update(profile)
     if not changes:
         return validation_error('Nothing to update', event)
 
@@ -462,8 +556,8 @@ def _delete_template(event: dict[str, Any], context: Any) -> dict[str, Any]:
     template_id = _path_id(event)
     if not template_id:
         return validation_error('Template ID is required', event, 'id')
-    if template_id == BUILTIN_TEMPLATE_ID:
-        return validation_error('The built-in template cannot be deleted', event, 'id')
+    if builtin_template(template_id):
+        return validation_error('Built-in templates cannot be deleted', event, 'id')
     templates_table.delete_item(Key={'id': template_id})
     return success_response({'message': 'Template deleted successfully'}, event)
 

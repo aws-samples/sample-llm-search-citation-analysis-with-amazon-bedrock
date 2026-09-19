@@ -7,7 +7,9 @@ import {
   fetchResearchTemplates,
   updateResearchTemplate,
 } from '../api/keywordResearch';
-import type { TemplateDraft } from '../api/keywordResearch';
+import type {
+  TemplateChanges, TemplateDraft
+} from '../api/keywordResearch';
 import { getErrorMessage } from '../infrastructure';
 import type { ResearchTemplate } from '../types';
 
@@ -23,21 +25,27 @@ interface UseResearchTemplatesReturn {
   error: string | null;
   refresh: () => Promise<void>;
   create: (draft: TemplateDraft) => Promise<TemplateMutationOutcome>;
-  update: (id: string, changes: Partial<TemplateDraft>) => Promise<TemplateMutationOutcome>;
+  update: (id: string, changes: TemplateChanges) => Promise<TemplateMutationOutcome>;
   remove: (id: string) => Promise<TemplateMutationOutcome>;
 }
 
-function sortTemplates(templates: ResearchTemplate[]): ResearchTemplate[] {
-  return [...templates].sort((left, right) => {
-    if (left.builtin !== right.builtin) return left.builtin ? -1 : 1;
-    return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
-  });
+/**
+ * The API's order: built-ins first, as the API lists them (hotels,
+ * restaurants, …), then the saved templates by name. Applied after local
+ * mutations so a saved or renamed template lands where a reload would put it.
+ */
+function orderTemplates(templates: ResearchTemplate[]): ResearchTemplate[] {
+  const builtins = templates.filter((template) => template.builtin);
+  const saved = templates
+    .filter((template) => !template.builtin)
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
+  return [...builtins, ...saved];
 }
 
 /**
- * The research agent's system-prompt templates: the built-in one plus the
+ * The research agent's templates (industry profiles): the built-ins plus the
  * ones the team saved. Mutations update the list in place (the API answers
- * with the saved row) so the editor never shows a stale prompt.
+ * with the saved row) so the editor never shows a stale template.
  */
 export const useResearchTemplates = (): UseResearchTemplatesReturn => {
   const [templates, setTemplates] = useState<ResearchTemplate[]>([]);
@@ -57,7 +65,7 @@ export const useResearchTemplates = (): UseResearchTemplatesReturn => {
     try {
       const items = await fetchResearchTemplates();
       if (!mountedRef.current) return;
-      setTemplates(sortTemplates(items));
+      setTemplates(orderTemplates(items));
       setError(null);
     } catch (err) {
       if (!mountedRef.current) return;
@@ -75,7 +83,7 @@ export const useResearchTemplates = (): UseResearchTemplatesReturn => {
   const create = useCallback(async (draft: TemplateDraft): Promise<TemplateMutationOutcome> => {
     try {
       const template = await createResearchTemplate(draft);
-      if (mountedRef.current) setTemplates((prev) => sortTemplates([...prev, template]));
+      if (mountedRef.current) setTemplates((prev) => orderTemplates([...prev, template]));
       return {
         success: true,
         message: `Template "${template.name}" saved`,
@@ -90,11 +98,11 @@ export const useResearchTemplates = (): UseResearchTemplatesReturn => {
     }
   }, []);
 
-  const update = useCallback(async (id: string, changes: Partial<TemplateDraft>): Promise<TemplateMutationOutcome> => {
+  const update = useCallback(async (id: string, changes: TemplateChanges): Promise<TemplateMutationOutcome> => {
     try {
       const template = await updateResearchTemplate(id, changes);
       if (mountedRef.current) {
-        setTemplates((prev) => sortTemplates(prev.map((item) => (item.id === id ? template : item))));
+        setTemplates((prev) => orderTemplates(prev.map((item) => (item.id === id ? template : item))));
       }
       return {
         success: true,

@@ -32,6 +32,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from shared.research_agent import LEGACY_AUDIENCE, LEGACY_DIMENSION_CATALOG, LEGACY_SUBJECT
 from shared.utils import get_timestamp, normalize_keyword
 
 STATUS_PENDING = 'pending'
@@ -246,9 +247,28 @@ def public_view(job: dict[str, Any], *, include_raw: bool = False) -> dict[str, 
         if isinstance(step, dict)
     ]
     view['steps_total'] = int(job.get('steps_total') or len(view['steps']))
+    if job.get('type') == TYPE_AGENT and isinstance(view.get('config'), dict):
+        view['config'] = with_legacy_profile(view['config'])
     if job.get('status') in ACTIVE_STATUSES and steps:
         # Progressive results: merge whatever has completed so far.
         view.update(summarize_job(job))
     if include_raw and job.get('raw_response'):
         view['raw_response'] = job['raw_response']
     return view
+
+
+def with_legacy_profile(config: dict[str, Any]) -> dict[str, Any]:
+    """An agent config with subject, audience and dimension catalogue present.
+
+    Runs from before 2.6.0 stored none of the three; they were all hotel
+    runs, so the hotel template's values are what they researched with. The
+    stored row is never touched — only the API view is completed.
+    """
+    if config.get('dimension_catalog'):
+        return config
+    return {
+        **config,
+        'subject': config.get('subject') or LEGACY_SUBJECT,
+        'audience': config.get('audience') or LEGACY_AUDIENCE,
+        'dimension_catalog': [dict(dimension) for dimension in LEGACY_DIMENSION_CATALOG],
+    }

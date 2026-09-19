@@ -1,6 +1,58 @@
 import type {
-  KeywordResearchItem, ResearchKeyword, ResearchTemplate
+  AgentDimensionOption, KeywordResearchItem, ResearchKeyword, ResearchTemplate
 } from '../../../types';
+
+/** The hotels catalogue the built-in default template ships (and legacy runs are backfilled with). */
+export const HOTEL_DIMENSIONS: AgentDimensionOption[] = [
+  {
+    id: 'destination',
+    label: 'Destination',
+    description: 'the city or region as a place to stay',
+  },
+  {
+    id: 'location',
+    label: 'Location / neighbourhood',
+    description: '"hotel near …", landmarks and areas around the hotel',
+  },
+  {
+    id: 'points_of_interest',
+    label: 'Points of interest',
+    description: 'attractions, venues and events people travel for',
+  },
+  {
+    id: 'hotel_attributes',
+    label: 'Hotel attributes',
+    description: 'pool, spa, parking, pet friendly, sea view, breakfast…',
+  },
+  {
+    id: 'audience',
+    label: 'Audience',
+    description: 'families, couples, business travellers, groups, solo',
+  },
+  {
+    id: 'trip_type',
+    label: 'Trip type',
+    description: 'weekend break, honeymoon, conference, golf, beach holiday',
+  },
+];
+
+export const CAFE_DIMENSIONS: AgentDimensionOption[] = [
+  {
+    id: 'menu',
+    label: 'Menu & drinks',
+    description: 'specialty coffee, brunch, pastries, vegan options',
+  },
+  {
+    id: 'location',
+    label: 'Location',
+    description: '"café near …", neighbourhoods and landmarks',
+  },
+  {
+    id: 'occasion',
+    label: 'Occasion',
+    description: 'work-friendly, first date, with kids, late night',
+  },
+];
 
 export function buildAgentKeyword(overrides: Partial<ResearchKeyword> = {}): ResearchKeyword {
   return {
@@ -41,9 +93,12 @@ export function buildAgentJob(overrides: Partial<KeywordResearchItem> = {}): Key
       target_count: 60,
       max_rounds: 2,
       group_id: 'g1',
+      subject: 'hotel',
+      audience: 'travellers',
+      dimension_catalog: HOTEL_DIMENSIONS,
     },
     template_id: 'builtin-default',
-    template_name: 'Hotel keyword research (default)',
+    template_name: 'Hotels',
     system_prompt: 'You are a hotel SEO researcher.',
     rounds: [
       {
@@ -156,13 +211,48 @@ export function buildAgentJob(overrides: Partial<KeywordResearchItem> = {}): Key
   };
 }
 
+/** The built-in hotels template (`builtin-default`). */
 export function buildTemplate(overrides: Partial<ResearchTemplate> = {}): ResearchTemplate {
   return {
     id: 'builtin-default',
-    name: 'Hotel keyword research (default)',
-    description: 'Built-in starting point.',
+    name: 'Hotels',
+    description: 'Built-in starting point for hotels and resorts.',
+    industry: 'hotels',
+    subject: 'hotel',
+    audience: 'travellers',
+    dimensions: HOTEL_DIMENSIONS,
     system_prompt: 'You are a hotel SEO researcher for a hotel group.',
     builtin: true,
     ...overrides,
   };
+}
+
+/** The built-in cafés template — a different subject, audience and catalogue. */
+export function buildCafeTemplate(overrides: Partial<ResearchTemplate> = {}): ResearchTemplate {
+  return buildTemplate({
+    id: 'builtin-cafes',
+    name: 'Cafés',
+    description: 'Built-in starting point for cafés and coffee shops.',
+    industry: 'cafes',
+    subject: 'café',
+    audience: 'coffee drinkers',
+    dimensions: CAFE_DIMENSIONS,
+    system_prompt: 'You are an SEO researcher for independent cafés.',
+    ...overrides,
+  });
+}
+
+/** A template the team saved from the hotels built-in. */
+export function buildSavedTemplate(overrides: Partial<ResearchTemplate> = {}): ResearchTemplate {
+  return buildTemplate({
+    id: 't1',
+    name: 'Urban hotels',
+    description: 'City hotels for business travellers.',
+    system_prompt: 'You research urban hotels for business travellers.',
+    builtin: false,
+    created_by: 'ana',
+    created_at: '2026-09-17T09:00:00Z',
+    updated_at: '2026-09-17T09:00:00Z',
+    ...overrides,
+  });
 }

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from shared.research_agent import LEGACY_DIMENSION_CATALOG
 from shared.research_jobs import (
     RESEARCH_STALE_AFTER_SECONDS,
     RESEARCH_TTL_SECONDS,
@@ -279,3 +280,25 @@ class TestPublicView:
         step = public_view(self._running_job())['steps'][0]
 
         assert set(step) == {'step_id', 'provider', 'status', 'keyword_count', 'error_message', 'started_at', 'finished_at'}
+
+    def test_completes_the_industry_profile_of_a_legacy_agent_run(self):
+        job = {'id': 'job-a', 'type': 'agent', 'status': 'completed', 'config': {'seed': 'Hotel Gran Marino', 'dimensions': ['destination']}}
+
+        config = public_view(job)['config']
+
+        assert (config['subject'], config['audience']) == ('hotel', 'travellers')
+        assert config['dimension_catalog'] == LEGACY_DIMENSION_CATALOG
+        assert job['config'] == {'seed': 'Hotel Gran Marino', 'dimensions': ['destination']}
+
+    def test_keeps_the_snapshotted_profile_of_a_current_agent_run(self):
+        catalog = [{'id': 'menu', 'label': 'Menu & drinks', 'description': 'd'}, {'id': 'location', 'label': 'Location', 'description': 'd'}]
+        job = {'id': 'job-c', 'type': 'agent', 'status': 'completed', 'config': {'seed': 'Café Central', 'subject': 'café', 'audience': 'coffee drinkers', 'dimension_catalog': catalog}}
+
+        config = public_view(job)['config']
+
+        assert (config['subject'], config['audience'], config['dimension_catalog']) == ('café', 'coffee drinkers', catalog)
+
+    def test_leaves_non_agent_configs_alone(self):
+        job = {'id': 'job-e', 'type': 'expansion', 'status': 'completed', 'config': {'seed': 'hotel'}}
+
+        assert public_view(job)['config'] == {'seed': 'hotel'}

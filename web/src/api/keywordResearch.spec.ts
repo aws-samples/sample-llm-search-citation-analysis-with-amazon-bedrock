@@ -21,15 +21,12 @@ import {
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { createMockJsonResponse } from '../test/fetchResponses';
 
 
+/** Every request gets its own `Response`, so a body can be read once per call. */
 function respondWith(status: number, body: unknown): void {
-  mockAuthenticatedFetch.mockResolvedValue({
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: '',
-    json: () => Promise.resolve(body),
-  } satisfies Partial<Response> as Response);
+  mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(createMockJsonResponse(body, status)));
 }
 
 function lastRequest(): {
@@ -37,7 +34,7 @@ function lastRequest(): {
   init: RequestInit | undefined 
 } {
   const calls = mockAuthenticatedFetch.mock.calls;
-  const [url, init] = calls[calls.length - 1] as [string, RequestInit | undefined];
+  const [url, init] = calls[calls.length - 1];
   return {
     url,
     init 
@@ -192,6 +189,14 @@ const TEMPLATE = {
   id: 't1',
   name: 'Beach resorts',
   description: '',
+  industry: 'hotels',
+  subject: 'hotel',
+  audience: 'families',
+  dimensions: [{
+    id: 'beach',
+    label: 'Beach',
+    description: 'beachfront, sea view, water sports',
+  }],
   system_prompt: 'You research beach resorts for families.',
   builtin: false,
 };
@@ -243,15 +248,21 @@ describe('research agent client', () => {
     expect(body).not.toHaveProperty('group_id');
   });
 
-  it('lists templates and drops malformed entries', async () => {
-    respondWith(200, { items: [TEMPLATE, { id: 'broken' }] });
+  it('lists templates and drops entries without an industry profile', async () => {
+    respondWith(200, {
+      items: [TEMPLATE, {
+        ...TEMPLATE,
+        id: 'legacy',
+        dimensions: undefined,
+      }],
+    });
 
     const templates = await fetchResearchTemplates();
 
     expect(templates).toStrictEqual([TEMPLATE]);
   });
 
-  it('creates a template with the API field names', async () => {
+  it('creates a template with the API field names when only the prompt is given', async () => {
     respondWith(201, TEMPLATE);
 
     const created = await createResearchTemplate({
@@ -263,6 +274,32 @@ describe('research agent client', () => {
     expect(JSON.parse(String(lastRequest().init?.body))).toStrictEqual({
       name: 'Beach resorts',
       system_prompt: 'You research beach resorts for families.',
+    });
+  });
+
+  it('creates a template with its base and profile in the API field names', async () => {
+    respondWith(201, TEMPLATE);
+
+    await createResearchTemplate({
+      name: 'Beach resorts',
+      systemPrompt: 'You research beach resorts for families.',
+      description: 'Family beach hotels',
+      baseTemplateId: 'builtin-default',
+      industry: 'hotels',
+      subject: 'hotel',
+      audience: 'families',
+      dimensions: TEMPLATE.dimensions,
+    });
+
+    expect(JSON.parse(String(lastRequest().init?.body))).toStrictEqual({
+      name: 'Beach resorts',
+      system_prompt: 'You research beach resorts for families.',
+      description: 'Family beach hotels',
+      base_template_id: 'builtin-default',
+      industry: 'hotels',
+      subject: 'hotel',
+      audience: 'families',
+      dimensions: TEMPLATE.dimensions,
     });
   });
 
@@ -282,6 +319,24 @@ describe('research agent client', () => {
     expect(JSON.parse(String(init?.body))).toStrictEqual({ name: 'Renamed' });
   });
 
+  it('updates the profile fields in the API field names', async () => {
+    respondWith(200, TEMPLATE);
+
+    await updateResearchTemplate('t1', {
+      subject: 'resort',
+      audience: 'families',
+      dimensions: TEMPLATE.dimensions,
+      systemPrompt: 'You research beach resorts for families.',
+    });
+
+    expect(JSON.parse(String(lastRequest().init?.body))).toStrictEqual({
+      subject: 'resort',
+      audience: 'families',
+      dimensions: TEMPLATE.dimensions,
+      system_prompt: 'You research beach resorts for families.',
+    });
+  });
+
   it('deletes a template by id', async () => {
     respondWith(200, { message: 'deleted' });
 
@@ -299,6 +354,16 @@ describe('research agent client', () => {
     expect(isResearchTemplate({
       id: 't1',
       name: 'x' 
+    })).toBe(false);
+  });
+
+  it('rejects a template payload without the industry profile', () => {
+    expect(isResearchTemplate({
+      id: 't1',
+      name: 'Beach resorts',
+      description: '',
+      system_prompt: 'You research beach resorts for families.',
+      builtin: false,
     })).toBe(false);
   });
 });

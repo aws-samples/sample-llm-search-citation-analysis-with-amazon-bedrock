@@ -512,7 +512,7 @@ class TestAgentPlan:
 
         assert bedrock.call_args.args[1] == _mod.ModelRole.RESEARCH_PLANNING
         assert bedrock.call_args.kwargs['system'] == 'You are a hotel SEO researcher.'
-        assert '<hotel>Hotel Gran Marino</hotel>' in bedrock.call_args.args[0]
+        assert 'Hotel / seed: <subject>Hotel Gran Marino</subject>' in bedrock.call_args.args[0]
 
     def test_first_round_becomes_one_step_per_query_rotating_providers(self):
         result, _table = self._plan(_agent_job())

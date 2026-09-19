@@ -2,10 +2,12 @@ import {
   describe, it, expect, vi, beforeEach 
 } from 'vitest';
 import {
-  render, screen 
+  render, screen, within
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { KeywordResearchView } from './KeywordResearchView';
+import { buildAgentJob } from './agent/agent-fixtures';
+import type { KeywordResearchItem } from '../../types';
 
 vi.mock('../../hooks/useKeywordResearch', () => ({useKeywordResearch: vi.fn(),}));
 
@@ -13,7 +15,13 @@ vi.mock('./KeywordExpansion', () => ({KeywordExpansion: () => <div data-testid="
 
 vi.mock('./CompetitorAnalysis', () => ({CompetitorAnalysis: () => <div data-testid="competitor-analysis">Competitor Analysis</div>,}));
 
-vi.mock('./ResearchHistory', () => ({ResearchHistory: () => <div data-testid="research-history">Research History</div>,}));
+vi.mock('./ResearchHistory', () => ({
+  ResearchHistory: ({ onRetry }: { onRetry: (job: KeywordResearchItem) => void }) => (
+    <div data-testid="research-history">
+      <button type="button" onClick={() => onRetry(buildAgentJob({ status: 'failed' }))}>Retry agent run</button>
+    </div>
+  ),
+}));
 
 vi.mock('./agent/ResearchAgent', () => ({ResearchAgent: () => <div data-testid="research-agent">Research Agent</div>,}));
 
@@ -27,6 +35,7 @@ function buildMockResearch(overrides = {}) {
     analyzeCompetitor: vi.fn(),
     deleteResearch: vi.fn(),
     fetchHistory: vi.fn(),
+    retryResearch: vi.fn(),
     loading: false,
     historyLoading: false,
     error: null,
@@ -43,27 +52,31 @@ describe('KeywordResearchView', () => {
   });
 
   describe('tab navigation', () => {
-    it('renders the four tab buttons', () => {
+    it('orders the tabs with the research agent last', () => {
       render(<KeywordResearchView />);
 
-      expect(screen.getByRole('button', { name: /research agent/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /related keywords/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /competitor analysis/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /history/i })).toBeInTheDocument();
+      const tabs = within(screen.getByRole('navigation')).getAllByRole('button');
+      expect(tabs.map((tab) => tab.textContent)).toStrictEqual([
+        'Related KeywordsExpand',
+        'Competitor AnalysisCompetitor',
+        'HistoryHistory',
+        'Research AgentAgent',
+      ]);
     });
 
-    it('shows the research agent tab by default', () => {
+    it('shows related keywords by default', () => {
       render(<KeywordResearchView />);
-
-      expect(screen.getByTestId('research-agent')).toBeInTheDocument();
-    });
-
-    it('switches to keyword expansion when clicked', async () => {
-      render(<KeywordResearchView />);
-
-      await userEvent.click(screen.getByRole('button', { name: /related keywords/i }));
 
       expect(screen.getByTestId('keyword-expansion')).toBeInTheDocument();
+      expect(screen.queryByTestId('research-agent')).toBeNull();
+    });
+
+    it('switches to the research agent when its tab is clicked', async () => {
+      render(<KeywordResearchView />);
+
+      await userEvent.click(screen.getByRole('button', { name: /research agent/i }));
+
+      expect(screen.getByTestId('research-agent')).toBeInTheDocument();
     });
 
     it('switches to competitor analysis tab when clicked', async () => {
@@ -81,13 +94,25 @@ describe('KeywordResearchView', () => {
 
       expect(screen.getByTestId('research-history')).toBeInTheDocument();
     });
+
+    it('jumps to the research agent tab when an agent run is retried from History', async () => {
+      const research = buildMockResearch();
+      mockUseKeywordResearch.mockReturnValue(research);
+      render(<KeywordResearchView />);
+      await userEvent.click(screen.getByRole('button', { name: /history/i }));
+
+      await userEvent.click(screen.getByRole('button', { name: 'Retry agent run' }));
+
+      expect(screen.getByTestId('research-agent')).toBeInTheDocument();
+      expect(research.retryResearch).not.toHaveBeenCalled();
+    });
   });
 
   describe('header', () => {
-    it('displays description text', () => {
+    it('describes the three ways to research, agent last', () => {
       render(<KeywordResearchView />);
 
-      expect(screen.getByText(/let the research agent plan and run/i)).toBeInTheDocument();
+      expect(screen.getByText('Expand seed terms, analyze competitor websites, or let the research agent plan and run a business\'s keyword research.')).toBeInTheDocument();
     });
   });
 
