@@ -28,32 +28,26 @@ These tests pin:
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
-# Env vars the module reads at import time.
-os.environ.setdefault('DYNAMODB_TABLE_SEARCH_RESULTS', 'test-search')
-os.environ.setdefault('DYNAMODB_TABLE_CITATIONS', 'test-citations')
-os.environ.setdefault('DYNAMODB_TABLE_CRAWLED_CONTENT', 'test-crawled')
-os.environ.setdefault('DYNAMODB_TABLE_CONTENT_STUDIO', 'test-content-studio')
+import pytest
 
-_HERE = os.path.dirname(__file__)
-_MODULE_PATH = os.path.join(_HERE, 'content-studio.py')
+from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.env import setdefault_env
+from testing.module_loader import load_handler_module
 
-_LAMBDA_DIR = os.path.dirname(_HERE)
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-
-_spec = importlib.util.spec_from_file_location(
-    'content_studio_under_test', _MODULE_PATH
-)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules['content_studio_under_test'] = _mod
-_spec.loader.exec_module(_mod)
+# Table names the module reads at import time.
+setdefault_env({
+    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
+    'DYNAMODB_TABLE_CITATIONS': 'test-citations',
+    'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
+    'DYNAMODB_TABLE_CONTENT_STUDIO': 'test-content-studio',
+})
+_mod = load_handler_module(os.path.dirname(__file__), 'content-studio.py')
 
 
 class _FakeClientError(Exception):
@@ -122,7 +116,6 @@ class TestComputeIdempotencyKey:
         # This works because _compute_idempotency_key uses int(timestamp // window_seconds)
         # and we can simulate window rollover by patching utc_now across calls.
         real_utc_now = _mod.utc_now
-        from datetime import UTC, datetime
         fixed_early = datetime(2026, 4, 18, 12, 0, 0, tzinfo=UTC)
         fixed_later = datetime(2026, 4, 18, 12, 10, 0, tzinfo=UTC)
 
@@ -144,28 +137,35 @@ class TestComputeIdempotencyKey:
         assert all(c in '0123456789abcdef' for c in key)
 
 
+_IDEA = {'id': 'x', 'keyword': 'kw', 'content_angle': 'a'}
+
+
 class TestCreatePendingContent:
     """The conditional write + get_item fallback behaviour."""
 
-    def _fake_table(self, put_raises: Exception | None = None,
-                    get_item_return: dict | None = None) -> MagicMock:
+    @staticmethod
+    @contextmanager
+    def _table(put_raises: Exception | None = None,
+               get_item_return: dict | None = None) -> Iterator[MagicMock]:
+        """Point the module at a fake table and at `_FakeClientError` for the block.
+
+        `ClientError` is swapped so the handler's `except` catches the fake the
+        table raises instead of botocore's real hierarchy.
+        """
         table = MagicMock()
         if put_raises is not None:
             table.put_item.side_effect = put_raises
         table.get_item.return_value = {'Item': get_item_return} if get_item_return else {}
-        return table
-
-    def _patched_resource(self, table: MagicMock) -> MagicMock:
-        resource = MagicMock()
-        resource.Table.return_value = table
-        return resource
+        with (
+            patch.object(_mod, 'dynamodb', fake_dynamodb_resource(table)),
+            patch.object(_mod, 'ClientError', _FakeClientError),
+        ):
+            yield table
 
     def test_writes_new_row_with_deterministic_key_on_fresh_call(self) -> None:
-        table = self._fake_table()
-        resource = self._patched_resource(table)
         idea = {'id': 'idea-1', 'keyword': 'hotels', 'content_angle': 'comprehensive_guide'}
 
-        with patch.object(_mod, 'dynamodb', resource):
+        with self._table():
             item, created = _mod.create_pending_content(idea)
 
         assert created is True
@@ -175,11 +175,8 @@ class TestCreatePendingContent:
     def test_uses_conditional_expression_attribute_not_exists(self) -> None:
         """Regression guard: someone removing the ConditionExpression would
         re-introduce the duplicate-write bug."""
-        table = self._fake_table()
-        resource = self._patched_resource(table)
-
-        with patch.object(_mod, 'dynamodb', resource):
-            _mod.create_pending_content({'id': 'x', 'keyword': 'kw', 'content_angle': 'a'})
+        with self._table() as table:
+            _mod.create_pending_content(_IDEA)
 
         put_kwargs = table.put_item.call_args.kwargs
         assert put_kwargs['ConditionExpression'] == 'attribute_not_exists(id)'
@@ -194,12 +191,8 @@ class TestCreatePendingContent:
             'idea_id': 'idea-1',
         }
         error = _FakeClientError('ConditionalCheckFailedException')
-        table = self._fake_table(put_raises=error, get_item_return=existing_row)
-        resource = self._patched_resource(table)
 
-        # Point the module's ClientError at our fake so the except catches it.
-        with patch.object(_mod, 'dynamodb', resource), \
-             patch.object(_mod, 'ClientError', _FakeClientError):
+        with self._table(put_raises=error, get_item_return=existing_row):
             item, created = _mod.create_pending_content({
                 'id': 'idea-1', 'keyword': 'hotels', 'content_angle': 'a',
             })
@@ -211,46 +204,27 @@ class TestCreatePendingContent:
         """Only ConditionalCheckFailedException is the idempotent-hit case.
         Other DynamoDB errors must propagate."""
         error = _FakeClientError('ProvisionedThroughputExceededException')
-        table = self._fake_table(put_raises=error)
-        resource = self._patched_resource(table)
 
-        with patch.object(_mod, 'dynamodb', resource), \
-             patch.object(_mod, 'ClientError', _FakeClientError):
-            try:
-                _mod.create_pending_content({'id': 'x', 'keyword': 'kw', 'content_angle': 'a'})
-            except _FakeClientError:
-                # Expected: non-conditional error propagates.
-                pass
-            else:
-                raise AssertionError('Expected _FakeClientError to propagate')
+        with self._table(put_raises=error), pytest.raises(_FakeClientError):
+            _mod.create_pending_content(_IDEA)
 
     def test_raises_runtime_error_when_existing_item_disappears(self) -> None:
         """Very unlikely race: row existed when put failed, gone when we read
         back. Better to surface the race than silently continue with a
         fabricated record."""
         error = _FakeClientError('ConditionalCheckFailedException')
-        table = self._fake_table(put_raises=error, get_item_return=None)
-        resource = self._patched_resource(table)
 
-        with patch.object(_mod, 'dynamodb', resource), \
-             patch.object(_mod, 'ClientError', _FakeClientError):
-            try:
-                _mod.create_pending_content({'id': 'x', 'keyword': 'kw', 'content_angle': 'a'})
-            except RuntimeError as e:
-                assert 'disappeared' in str(e).lower()
-            else:
-                raise AssertionError('Expected RuntimeError on missing row')
+        with (
+            self._table(put_raises=error, get_item_return=None),
+            pytest.raises(RuntimeError, match=r'(?i)disappeared'),
+        ):
+            _mod.create_pending_content(_IDEA)
 
     def test_returned_tuple_order_is_item_then_created_flag(self) -> None:
         """Regression guard: callers unpack `item, created = ...`. Reversing
         the order would silently break every caller."""
-        table = self._fake_table()
-        resource = self._patched_resource(table)
-
-        with patch.object(_mod, 'dynamodb', resource):
-            result = _mod.create_pending_content({
-                'id': 'x', 'keyword': 'kw', 'content_angle': 'a',
-            })
+        with self._table():
+            result = _mod.create_pending_content(_IDEA)
 
         assert isinstance(result, tuple)
         assert len(result) == 2

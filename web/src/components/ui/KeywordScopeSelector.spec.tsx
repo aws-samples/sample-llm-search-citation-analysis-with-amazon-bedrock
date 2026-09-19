@@ -6,6 +6,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { KeywordScopeSelector } from './KeywordScopeSelector';
+import { renderedScopeOptionLabels } from './KeywordScopeSelector-fixtures';
 import type {
   Keyword, KeywordGroup 
 } from '../../types';
@@ -45,7 +46,7 @@ describe('KeywordScopeSelector', () => {
   it('lists all keywords, then groups with counts, then keywords, alphabetically', () => {
     render(<KeywordScopeSelector keywords={keywords} groups={groups} value={{ kind: 'all' }} onChange={vi.fn()} />);
 
-    expect(screen.getAllByRole('option').map((option) => option.textContent)).toStrictEqual([
+    expect(renderedScopeOptionLabels()).toStrictEqual([
       'All keywords', 'Hotel Coruña (3)', 'Hotel Marino (2)', 'Beach hotel coruna', 'spa hotel galicia',
     ]);
   });

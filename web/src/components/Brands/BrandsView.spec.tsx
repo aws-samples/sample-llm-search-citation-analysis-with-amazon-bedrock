@@ -1,10 +1,11 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   render, screen 
 } from '@testing-library/react';
 import { BrandsView } from './BrandsView';
+import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
 
 vi.mock('../../hooks/useBrandMentions', () => ({
   useBrandMentions: vi.fn(() => ({
@@ -22,25 +23,10 @@ vi.mock('../../hooks/useBrandConfig', () => ({
   })),
 }));
 
-vi.mock('../../hooks/useKeywordGroups', () => ({
-  useKeywordGroups: vi.fn(() => ({
-    groups: [{
-      id: 'group-coruna',
-      name: 'Hotel Coruña',
-      description: '',
-      keyword_count: 1,
-      created_at: '2026-01-01T00:00:00Z',
-      updated_at: '2026-01-01T00:00:00Z',
-    }],
-    loading: false,
-    error: null,
-    refresh: vi.fn(),
-    createGroup: vi.fn(),
-    renameGroup: vi.fn(),
-    removeGroup: vi.fn(),
-    changeMemberships: vi.fn(),
-  })),
-}));
+vi.mock('../../hooks/useKeywordGroups', async () => {
+  const { buildKeywordGroupsHookResult } = await import('../../hooks/useKeywordGroups-fixtures');
+  return { useKeywordGroups: vi.fn(() => buildKeywordGroupsHookResult()) };
+});
 
 const mockKeywords = [
   {
@@ -51,10 +37,6 @@ const mockKeywords = [
 ];
 
 describe('BrandsView', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('renders without crashing', () => {
     render(<BrandsView keywords={[]} />);
     expect(document.body).toBeTruthy();
@@ -67,9 +49,7 @@ describe('BrandsView', () => {
 
   it('offers the keyword, its group and all keywords as scopes', () => {
     render(<BrandsView keywords={mockKeywords} />);
-    expect(screen.getByRole('option', { name: 'hotels' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'Hotel Coruña (1)' })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: 'All keywords' })).toBeInTheDocument();
+    expect(renderedScopeOptionLabels()).toStrictEqual(['All keywords', 'Hotel Coruña (1)', 'hotels']);
   });
 
   it('asks to pick a scope before showing mentions', () => {

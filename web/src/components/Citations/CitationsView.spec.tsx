@@ -1,20 +1,12 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   render, screen 
 } from '@testing-library/react';
 import { CitationsView } from './CitationsView';
 
-// The barrel is stubbed to keep config/auth side effects out of the test;
-// urlSafety is pure, so its real exports are spread in unchanged.
-vi.mock('../../infrastructure', async () => ({
-  API_BASE_URL: 'https://api.test.com',
-  authenticatedFetch: vi.fn(),
-  ...(await vi.importActual<typeof import('../../infrastructure/urlSafety')>(
-    '../../infrastructure/urlSafety'
-  )),
-}));
+vi.mock('../../infrastructure', () => import('../../test/infrastructureMock'));
 
 const mockCitations = [
   {
@@ -25,10 +17,6 @@ const mockCitations = [
 ];
 
 describe('CitationsView', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('renders without crashing', () => {
     render(<CitationsView citations={[]} />);
     expect(document.body).toBeTruthy();

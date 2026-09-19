@@ -20,35 +20,21 @@ nondeterministic orchestration were reintroduced.
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import sys
 from typing import Any
 from unittest.mock import MagicMock
 
-# The module filename has a hyphen, which is not a valid Python identifier.
-# Load by file path and bind to a clean module name for pytest.
-_HERE = os.path.dirname(__file__)
-_MODULE_PATH = os.path.join(_HERE, 'get-citation-gaps.py')
+from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
+from testing.env import setdefault_env
+from testing.module_loader import load_handler_module
 
-# Mock env vars the module reads at import time so we can load without
-# touching AWS.
-os.environ.setdefault('DYNAMODB_TABLE_SEARCH_RESULTS', 'test-search')
-os.environ.setdefault('DYNAMODB_TABLE_CITATIONS', 'test-citations')
-os.environ.setdefault('DYNAMODB_TABLE_CRAWLED_CONTENT', 'test-crawled')
-
-# Put lambda/ on the path so `from shared...` imports in the module under
-# test resolve to the layer copies.
-_LAMBDA_DIR = os.path.dirname(_HERE)
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-
-_spec = importlib.util.spec_from_file_location('get_citation_gaps_query_under_test', _MODULE_PATH)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules['get_citation_gaps_query_under_test'] = _mod
-_spec.loader.exec_module(_mod)
+# Table names the module reads at import time, so it loads without touching AWS.
+setdefault_env({
+    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
+    'DYNAMODB_TABLE_CITATIONS': 'test-citations',
+    'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
+})
+_mod = load_handler_module(os.path.dirname(__file__), 'get-citation-gaps.py', 'get_citation_gaps_query_under_test')
 
 
 CONFIG: dict[str, Any] = {
@@ -69,13 +55,11 @@ def _search_item(ts: str, provider: str, citations: list[str], brands: list[dict
 
 def _fake_dynamodb(search_items: list[dict]) -> tuple[MagicMock, MagicMock]:
     """Fake boto3 resource: search table returns `search_items`, crawled table is empty."""
-    search_table = MagicMock()
-    search_table.query.return_value = {'Items': search_items}
-    crawled_table = MagicMock()
-    crawled_table.query.return_value = {'Items': []}
-    tables = {'test-search': search_table, 'test-crawled': crawled_table}
-    resource = MagicMock()
-    resource.Table.side_effect = lambda name: tables.get(name, MagicMock())
+    search_table = fake_table(query={'Items': search_items})
+    resource = fake_dynamodb_resource(by_name={
+        'test-search': search_table,
+        'test-crawled': fake_table(query={'Items': []}),
+    })
     return resource, search_table
 
 
@@ -135,11 +119,9 @@ class TestGapSemantics:
 class TestAllKeywordsOrchestration:
     @staticmethod
     def _fake_keywords_dynamodb(keywords: list[str]) -> MagicMock:
-        keywords_table = MagicMock()
-        keywords_table.query.return_value = {'Items': [{'id': k, 'keyword': k, 'status': 'active'} for k in keywords]}
-        resource = MagicMock()
-        resource.Table.return_value = keywords_table
-        return resource
+        return fake_dynamodb_resource(
+            fake_table(query={'Items': [{'id': k, 'keyword': k, 'status': 'active'} for k in keywords]})
+        )
 
     def test_analyzes_keywords_in_sorted_order_when_more_exist_than_limit(self, monkeypatch) -> None:
         monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'test-keywords')

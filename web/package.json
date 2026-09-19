@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "deadcode": "knip",
-    "deadcode:prod": "knip --production"
+    "deadcode:prod": "knip --production",
+    "validate": "npm run type-check && npm run test && npm run deadcode"
   },
   "dependencies": {
     "@aws-amplify/ui-react": "^6.15.2",

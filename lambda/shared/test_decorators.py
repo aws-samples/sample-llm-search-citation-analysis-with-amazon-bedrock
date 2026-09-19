@@ -16,32 +16,13 @@ a future decorator that forgets ``*args`` fails here rather than in production.
 
 from __future__ import annotations
 
-import importlib
 import json
-import os
-import sys
 from typing import Any
 
 import pytest
 
-# The shared package __init__ re-exports api_response as a function, which can
-# shadow the submodule. Point sys.path at lambda/ so `import shared.decorators`
-# resolves to the in-repo module.
-_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-_LAMBDA_DIR = os.path.join(_REPO, 'lambda')
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-
-decorators = importlib.import_module('shared.decorators')
-auth = importlib.import_module('shared.auth')
-
-api_handler = decorators.api_handler
-cors_preflight = decorators.cors_preflight
-paginate = decorators.paginate
-parse_json_body = decorators.parse_json_body
-route_handler = decorators.route_handler
-validate = decorators.validate
-require_group = auth.require_group
+from shared.auth import require_group
+from shared.decorators import api_handler, cors_preflight, paginate, parse_json_body, route_handler, validate
 
 PATH_PARAM = 'prompt-42'
 

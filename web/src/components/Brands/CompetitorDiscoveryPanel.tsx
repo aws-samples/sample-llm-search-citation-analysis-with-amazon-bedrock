@@ -1,5 +1,7 @@
 import type { CompetitorDiscoveryResult } from '../../types';
-import { CheckIcon } from '../ui';
+import {
+  CheckIcon, CloseIcon 
+} from '../ui';
 
 interface CompetitorDiscoveryPanelProps {
   readonly result: CompetitorDiscoveryResult;
@@ -38,9 +40,7 @@ export const CompetitorDiscoveryPanel = ({
           )}
         </div>
         <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
-          </svg>
+          <CloseIcon className="w-4 h-4" />
         </button>
       </div>
       <p className="text-xs text-gray-500 mb-2">Select competitors to track (none selected by default):</p>

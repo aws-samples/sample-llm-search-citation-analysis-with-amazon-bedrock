@@ -24,18 +24,23 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 from botocore.config import Config
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import success_response, validation_error
-from shared.constants import MAX_KEYWORD_LENGTH, UNRANKED_SENTINEL
+from shared.api_response import success_response
+from shared.constants import UNRANKED_SENTINEL
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.providers import get_enabled_provider_count
-from shared.scope_params import ReportScope, parse_scope_params
+from shared.scope_params import (
+    SCOPE_QUERY_PARAMS,
+    ReportScope,
+    keywords_table_name,
+    query_keyword_rows,
+    scope_from_request,
+)
 from shared.utils import get_brand_config
 from shared.visibility_score import (
     calculate_share_of_voice,
@@ -54,11 +59,7 @@ dynamodb = boto3.resource('dynamodb', config=Config(max_pool_connections=50))
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
-KEYWORDS_TABLE = (
-    os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    or os.environ.get('KEYWORDS_TABLE')
-    or 'CitationAnalysis-Keywords'
-)
+KEYWORDS_TABLE = keywords_table_name()
 
 # Parallel per-keyword fan-out for group scopes, and the most keywords one
 # group summary covers (the `keyword_ids` cap; keeps the request inside the
@@ -70,24 +71,6 @@ _SCOPE_KEYWORDS_CAP = 100
 # table. Without this a 60-keyword group would pull megabytes of prose
 # through a 29s API request.
 _METRICS_PROJECTION = '#ts, provider, brands, query_prompt_id'
-_METRICS_PROJECTION_NAMES = {'#ts': 'timestamp'}
-
-
-def _query_keyword_items(table: Any, keyword: str) -> list[dict[str, Any]]:
-    """Every result row for a keyword (projected), following pagination."""
-    params: dict[str, Any] = {
-        'KeyConditionExpression': Key('keyword').eq(keyword),
-        'ProjectionExpression': _METRICS_PROJECTION,
-        'ExpressionAttributeNames': _METRICS_PROJECTION_NAMES,
-    }
-    items: list[dict[str, Any]] = []
-    while True:
-        response = table.query(**params)
-        items.extend(response.get('Items', []))
-        last_key = response.get('LastEvaluatedKey')
-        if not last_key:
-            return items
-        params['ExclusiveStartKey'] = last_key
 
 
 def get_visibility_metrics(
@@ -97,8 +80,7 @@ def get_visibility_metrics(
     total_providers: int | None = None,
 ) -> dict[str, Any]:
     """Calculate visibility metrics for a keyword, optionally filtered by persona."""
-    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    items = _query_keyword_items(table, keyword)
+    items = query_keyword_rows(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword, _METRICS_PROJECTION)
 
     if not items:
         return {"error": "No data found for keyword"}
@@ -250,14 +232,11 @@ def get_scope_visibility_metrics(scope: ReportScope, config: dict[str, Any], que
 
 @api_handler
 @validate({
-    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
-    'group_id': {'type': str, 'max_length': 64},
-    'keyword_ids': {'type': str, 'max_length': 8000},
-    'scope': {'type': str, 'choices': ['all']},
+    **SCOPE_QUERY_PARAMS,
     'brand': {'type': str, 'max_length': 200},
     'query_prompt_id': {'type': str, 'max_length': 100},
 })
-def handler(event, context, keyword=None, group_id=None, keyword_ids=None, scope=None, brand=None, query_prompt_id=None):
+def handler(event, context, brand=None, query_prompt_id=None, **scope_params):
     """
     API handler for visibility metrics.
 
@@ -269,13 +248,9 @@ def handler(event, context, keyword=None, group_id=None, keyword_ids=None, scope
         - brand: Filter to specific brand (single keyword only)
         - query_prompt_id: Filter to specific persona
     """
-    report_scope, error = parse_scope_params(
-        {'keyword': keyword, 'group_id': group_id, 'keyword_ids': keyword_ids, 'scope': scope}, dynamodb.Table(KEYWORDS_TABLE)
-    )
-    if error:
-        return validation_error(error, event, 'scope')
-    if report_scope is None:
-        return validation_error('Provide keyword, group_id or keyword_ids', event, 'keyword')
+    report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE), required=True)
+    if rejected:
+        return rejected
 
     config = get_brand_config()
     if report_scope.is_single_keyword:

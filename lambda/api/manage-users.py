@@ -137,6 +137,26 @@ def handle_list_users(event: dict, context: Any, limit: int, offset: int, **kwar
         return api_response(500, {'error': 'Failed to list users'}, event)
 
 
+def _get_user_with_groups(username: str) -> dict:
+    """Fetch one Cognito user and populate its group membership.
+
+    Cognito errors (``UserNotFoundException``, ``ClientError``) propagate so
+    each route keeps its own error mapping.
+    """
+    response = cognito_client.admin_get_user(
+        UserPoolId=USER_POOL_ID,
+        Username=username
+    )
+    user = format_user(response)
+
+    groups_response = cognito_client.admin_list_groups_for_user(
+        Username=username,
+        UserPoolId=USER_POOL_ID
+    )
+    user['groups'] = [g['GroupName'] for g in groups_response.get('Groups', [])]
+    return user
+
+
 def handle_get_user(event: dict, context: Any, **kwargs) -> dict:
     """GET /users/{username} - Get user details."""
     path_params = event.get('pathParameters') or {}
@@ -146,18 +166,7 @@ def handle_get_user(event: dict, context: Any, **kwargs) -> dict:
         return validation_error('Username required', event)
 
     try:
-        response = cognito_client.admin_get_user(
-            UserPoolId=USER_POOL_ID,
-            Username=username
-        )
-        user = format_user(response)
-
-        # Get user groups
-        groups_response = cognito_client.admin_list_groups_for_user(
-            Username=username,
-            UserPoolId=USER_POOL_ID
-        )
-        user['groups'] = [g['GroupName'] for g in groups_response.get('Groups', [])]
+        user = _get_user_with_groups(username)
 
         return success_response({'user': user}, event)
 
@@ -305,17 +314,7 @@ def handle_update_user(event: dict, context: Any, body: dict | None = None, **kw
                 )
 
         # Get updated user
-        response = cognito_client.admin_get_user(
-            UserPoolId=USER_POOL_ID,
-            Username=username
-        )
-        user = format_user(response)
-
-        groups_response = cognito_client.admin_list_groups_for_user(
-            Username=username,
-            UserPoolId=USER_POOL_ID
-        )
-        user['groups'] = [g['GroupName'] for g in groups_response.get('Groups', [])]
+        user = _get_user_with_groups(username)
 
         return success_response({'user': user}, event)
 

@@ -2,6 +2,7 @@ import type {
   BrandConfig, IndustryPresets, BrandExpansionAllResult, CompetitorDiscoveryResult 
 } from '../../types';
 import { BrandConfigContent } from './BrandConfigContent';
+import { CloseIcon } from '../ui';
 
 interface BrandConfigPanelProps {
   config: BrandConfig | null;
@@ -37,9 +38,7 @@ export const BrandConfigPanel = ({
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 transition-colors"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <CloseIcon />
           </button>
         </div>
 

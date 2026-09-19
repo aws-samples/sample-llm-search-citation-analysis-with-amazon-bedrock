@@ -18,50 +18,35 @@ These tests would FAIL if the serial loop were reintroduced.
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import sys
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-# Load env vars the module reads at import.
+from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
+from testing.module_loader import load_handler_module
+
+# The table name the module reads at import.
 os.environ.setdefault('DYNAMODB_TABLE_SEARCH_RESULTS', 'test-search')
-
-_HERE = os.path.dirname(__file__)
-_MODULE_PATH = os.path.join(_HERE, 'get-historical-trends.py')
-
-_LAMBDA_DIR = os.path.dirname(_HERE)
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-if _HERE not in sys.path:
-    sys.path.insert(0, _HERE)
-
-_spec = importlib.util.spec_from_file_location(
-    'get_historical_trends_under_test', _MODULE_PATH
-)
-_mod = importlib.util.module_from_spec(_spec)
-sys.modules['get_historical_trends_under_test'] = _mod
-_spec.loader.exec_module(_mod)
+_mod = load_handler_module(os.path.dirname(__file__), 'get-historical-trends.py')
 
 
 class TestFetchKeywordItems:
     """`_fetch_keyword_items` is the I/O-only helper that gets fanned out."""
 
     def test_returns_items_from_dynamodb_query(self) -> None:
-        fake_table = MagicMock()
-        fake_table.query.return_value = {'Items': [{'timestamp': '2026-01-01T00:00:00Z'}]}
-        fake_resource = MagicMock()
-        fake_resource.Table.return_value = fake_table
+        fake_resource = fake_dynamodb_resource(
+            fake_table(query={'Items': [{'timestamp': '2026-01-01T00:00:00Z'}]})
+        )
         with patch.object(_mod, 'dynamodb', fake_resource):
             items = _mod._fetch_keyword_items('my-keyword')
         assert items == [{'timestamp': '2026-01-01T00:00:00Z'}]
 
     def test_returns_empty_list_when_query_raises(self) -> None:
         """A single bad keyword must not break the whole dashboard."""
-        fake_table = MagicMock()
-        fake_table.query.side_effect = Exception('throttled')
-        fake_resource = MagicMock()
-        fake_resource.Table.return_value = fake_table
-        with patch.object(_mod, 'dynamodb', fake_resource):
+        table = MagicMock()
+        table.query.side_effect = Exception('throttled')
+        with patch.object(_mod, 'dynamodb', fake_dynamodb_resource(table)):
             items = _mod._fetch_keyword_items('my-keyword')
         assert items == []
 
@@ -100,7 +85,8 @@ class TestBuildTrendFromItems:
 class TestGetAllKeywordsTrendsParallelFanOut:
     """The regression guards for the parallelization."""
 
-    def _fake_keyword_items(self, keyword: str) -> list[dict]:
+    @staticmethod
+    def _fake_keyword_items(keyword: str) -> list[dict]:
         """One trend item per keyword, enough to build a non-error trend."""
         return [
             {
@@ -114,37 +100,55 @@ class TestGetAllKeywordsTrendsParallelFanOut:
             }
         ]
 
+    @staticmethod
+    def _keywords_resource(count: int, search_table: MagicMock | None = None) -> MagicMock:
+        """A resource whose Keywords table lists `count` keywords (`kw0`, `kw1`, ...).
+
+        The keywords table answers every table name (the module resolved its
+        `KEYWORDS_TABLE` at import, so the name in play depends on the
+        environment at collection time); only the search table is routed by
+        its real name, when a test wants one.
+        """
+        keywords_table = fake_table(query={'Items': [{'keyword': f'kw{i}'} for i in range(count)]})
+        if search_table is None:
+            return fake_dynamodb_resource(keywords_table)
+        return fake_dynamodb_resource(keywords_table, by_name={_mod.SEARCH_RESULTS_TABLE: search_table})
+
+    @classmethod
+    @contextmanager
+    def _fan_out(cls, keyword_count: int,
+                 fetch: Callable[[str], list[dict]] | MagicMock | None = None,
+                 search_table: MagicMock | None = None) -> Iterator[MagicMock]:
+        """Stage `keyword_count` keywords with `_fetch_keyword_items` replaced.
+
+        `fetch` defaults to `_fake_keyword_items`; a `MagicMock` is installed
+        as-is so a test can inspect its calls. Yields a spy wrapping the real
+        `ThreadPoolExecutor`, the evidence that the fan-out ran in parallel.
+        """
+        if fetch is None:
+            fetch = MagicMock(side_effect=cls._fake_keyword_items)
+        elif not isinstance(fetch, MagicMock):
+            fetch = MagicMock(side_effect=fetch)
+        with (
+            patch.object(_mod, 'dynamodb', cls._keywords_resource(keyword_count, search_table)),
+            patch.dict(os.environ, {'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'}),
+            patch.object(_mod, '_fetch_keyword_items', fetch),
+            patch.object(_mod.concurrent.futures, 'ThreadPoolExecutor',
+                         wraps=_mod.concurrent.futures.ThreadPoolExecutor) as pool_spy,
+        ):
+            yield pool_spy
+
     def test_fetches_each_keyword_exactly_once(self) -> None:
         """Regression guard: the parallel fan-out must dedupe any accidental
         double-queries. The previous serial loop only called fetch once per
         keyword; we must preserve that."""
-        keywords_table = MagicMock()
-        keywords_table.query.return_value = {
-            'Items': [{'keyword': f'kw{i}'} for i in range(5)]
-        }
-        search_table = MagicMock()
+        counting_fetch = MagicMock(side_effect=self._fake_keyword_items)
 
-        def fake_resource_table(name: str):
-            if 'KEYWORD' in name.upper() or 'keyword' in name.lower():
-                return keywords_table
-            return search_table
-
-        fake_resource = MagicMock()
-        fake_resource.Table.side_effect = fake_resource_table
-
-        call_counter = {'count': 0}
-
-        def counting_fetch(keyword: str) -> list[dict]:
-            call_counter['count'] += 1
-            return self._fake_keyword_items(keyword)
-
-        with patch.object(_mod, 'dynamodb', fake_resource), \
-             patch.dict(os.environ, {'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'}), \
-             patch.object(_mod, '_fetch_keyword_items', side_effect=counting_fetch):
+        with self._fan_out(5, fetch=counting_fetch, search_table=MagicMock()):
             result = _mod.get_all_keywords_trends({}, 'day', 30)
 
         # 5 keywords → 5 fetches, no duplication.
-        assert call_counter['count'] == 5
+        assert counting_fetch.call_count == 5
         assert result['keywords_analyzed'] == 5
 
     def test_uses_thread_pool_for_parallel_fetching(self) -> None:
@@ -152,18 +156,7 @@ class TestGetAllKeywordsTrendsParallelFanOut:
         ThreadPoolExecutor would never be constructed. We assert the pool
         is used. This catches the whole class of "accidentally serial"
         regressions."""
-        keywords_table = MagicMock()
-        keywords_table.query.return_value = {
-            'Items': [{'keyword': f'kw{i}'} for i in range(3)]
-        }
-        fake_resource = MagicMock()
-        fake_resource.Table.return_value = keywords_table
-
-        with patch.object(_mod, 'dynamodb', fake_resource), \
-             patch.dict(os.environ, {'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'}), \
-             patch.object(_mod, '_fetch_keyword_items', side_effect=self._fake_keyword_items), \
-             patch.object(_mod.concurrent.futures, 'ThreadPoolExecutor',
-                         wraps=_mod.concurrent.futures.ThreadPoolExecutor) as pool_spy:
+        with self._fan_out(3) as pool_spy:
             _mod.get_all_keywords_trends({}, 'day', 30)
 
         pool_spy.assert_called_once()
@@ -172,18 +165,7 @@ class TestGetAllKeywordsTrendsParallelFanOut:
         """With more keywords than `_TRENDS_MAX_WORKERS`, the pool size is
         capped — otherwise we'd spawn 20+ threads and overshoot DynamoDB RCU.
         """
-        keywords_table = MagicMock()
-        keywords_table.query.return_value = {
-            'Items': [{'keyword': f'kw{i}'} for i in range(20)]
-        }
-        fake_resource = MagicMock()
-        fake_resource.Table.return_value = keywords_table
-
-        with patch.object(_mod, 'dynamodb', fake_resource), \
-             patch.dict(os.environ, {'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'}), \
-             patch.object(_mod, '_fetch_keyword_items', side_effect=self._fake_keyword_items), \
-             patch.object(_mod.concurrent.futures, 'ThreadPoolExecutor',
-                         wraps=_mod.concurrent.futures.ThreadPoolExecutor) as pool_spy:
+        with self._fan_out(20) as pool_spy:
             _mod.get_all_keywords_trends({}, 'day', 30)
 
         pool_spy.assert_called_once()
@@ -193,18 +175,7 @@ class TestGetAllKeywordsTrendsParallelFanOut:
     def test_caps_worker_count_at_keyword_count_when_fewer_than_max(self) -> None:
         """With fewer keywords than `_TRENDS_MAX_WORKERS`, size to keyword
         count. No point spinning up 10 threads for 3 items."""
-        keywords_table = MagicMock()
-        keywords_table.query.return_value = {
-            'Items': [{'keyword': f'kw{i}'} for i in range(3)]
-        }
-        fake_resource = MagicMock()
-        fake_resource.Table.return_value = keywords_table
-
-        with patch.object(_mod, 'dynamodb', fake_resource), \
-             patch.dict(os.environ, {'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'}), \
-             patch.object(_mod, '_fetch_keyword_items', side_effect=self._fake_keyword_items), \
-             patch.object(_mod.concurrent.futures, 'ThreadPoolExecutor',
-                         wraps=_mod.concurrent.futures.ThreadPoolExecutor) as pool_spy:
+        with self._fan_out(3) as pool_spy:
             _mod.get_all_keywords_trends({}, 'day', 30)
 
         _, kwargs = pool_spy.call_args
@@ -212,14 +183,9 @@ class TestGetAllKeywordsTrendsParallelFanOut:
 
     def test_returns_empty_payload_when_no_keywords(self) -> None:
         """Empty keyword set must not spin up the pool or fail."""
-        keywords_table = MagicMock()
-        keywords_table.query.return_value = {'Items': []}
-        fake_resource = MagicMock()
-        fake_resource.Table.return_value = keywords_table
+        mock_fetch = MagicMock()
 
-        with patch.object(_mod, 'dynamodb', fake_resource), \
-             patch.dict(os.environ, {'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'}), \
-             patch.object(_mod, '_fetch_keyword_items') as mock_fetch:
+        with self._fan_out(0, fetch=mock_fetch):
             result = _mod.get_all_keywords_trends({}, 'day', 30)
 
         mock_fetch.assert_not_called()
@@ -231,16 +197,7 @@ class TestGetAllKeywordsTrendsParallelFanOut:
         """`as_completed` returns futures in completion order, which is
         non-deterministic. The output must still cover every input keyword
         (sorting by current_score is applied at the end)."""
-        keywords_table = MagicMock()
-        keywords_table.query.return_value = {
-            'Items': [{'keyword': f'kw{i}'} for i in range(5)]
-        }
-        fake_resource = MagicMock()
-        fake_resource.Table.return_value = keywords_table
-
-        with patch.object(_mod, 'dynamodb', fake_resource), \
-             patch.dict(os.environ, {'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'}), \
-             patch.object(_mod, '_fetch_keyword_items', side_effect=self._fake_keyword_items):
+        with self._fan_out(5):
             result = _mod.get_all_keywords_trends({}, 'day', 30)
 
         returned_keywords = {t['keyword'] for t in result['keyword_trends']}
@@ -248,44 +205,22 @@ class TestGetAllKeywordsTrendsParallelFanOut:
 
     def test_caps_fan_out_at_twenty_keywords(self) -> None:
         """Dashboard breadth cap — unchanged from the serial implementation."""
-        keywords_table = MagicMock()
-        keywords_table.query.return_value = {
-            'Items': [{'keyword': f'kw{i}'} for i in range(50)]
-        }
-        fake_resource = MagicMock()
-        fake_resource.Table.return_value = keywords_table
+        counting_fetch = MagicMock(side_effect=self._fake_keyword_items)
 
-        call_counter = {'count': 0}
-
-        def counting_fetch(keyword: str) -> list[dict]:
-            call_counter['count'] += 1
-            return self._fake_keyword_items(keyword)
-
-        with patch.object(_mod, 'dynamodb', fake_resource), \
-             patch.dict(os.environ, {'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'}), \
-             patch.object(_mod, '_fetch_keyword_items', side_effect=counting_fetch):
+        with self._fan_out(50, fetch=counting_fetch):
             _mod.get_all_keywords_trends({}, 'day', 30)
 
-        assert call_counter['count'] == 20
+        assert counting_fetch.call_count == 20
 
     def test_individual_keyword_errors_dont_break_the_batch(self) -> None:
         """If `_fetch_keyword_items` returns [] for one keyword (its own
         try/except caught the error), the others still produce trends."""
-        keywords_table = MagicMock()
-        keywords_table.query.return_value = {
-            'Items': [{'keyword': f'kw{i}'} for i in range(3)]
-        }
-        fake_resource = MagicMock()
-        fake_resource.Table.return_value = keywords_table
-
         def mixed_fetch(keyword: str) -> list[dict]:
             if keyword == 'kw1':
                 return []  # Simulate the error-caught case
             return self._fake_keyword_items(keyword)
 
-        with patch.object(_mod, 'dynamodb', fake_resource), \
-             patch.dict(os.environ, {'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'}), \
-             patch.object(_mod, '_fetch_keyword_items', side_effect=mixed_fetch):
+        with self._fan_out(3, fetch=mixed_fetch):
             result = _mod.get_all_keywords_trends({}, 'day', 30)
 
         # 2 succeeded (kw0, kw2), 1 returned error payload (kw1) and was

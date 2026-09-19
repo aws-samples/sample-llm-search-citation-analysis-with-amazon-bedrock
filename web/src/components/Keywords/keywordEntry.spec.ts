@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import { ApiRequestError } from '../../infrastructure';
 import type { Keyword } from '../../types';
@@ -164,10 +164,6 @@ describe('buildBulkMessage', () => {
 });
 
 describe('processBulkKeyword', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('returns a success outcome with the parsed keyword', async () => {
     mockApiPost.mockResolvedValue(KEYWORD_FIXTURE);
 

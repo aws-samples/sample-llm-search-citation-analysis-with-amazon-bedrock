@@ -334,8 +334,6 @@ WEB_SEARCH_PROVIDERS: tuple[WebSearchProvider, ...] = (
     WebSearchProvider('gemini', 'gemini-key', GeminiClient, _run_gemini, _extract_gemini_text),
 )
 
-WEB_SEARCH_PROVIDER_IDS: tuple[str, ...] = tuple(provider.provider_id for provider in WEB_SEARCH_PROVIDERS)
-
 
 def get_web_search_provider(provider_id: str) -> WebSearchProvider | None:
     """Registry entry for ``provider_id``, or ``None`` for an unknown id."""

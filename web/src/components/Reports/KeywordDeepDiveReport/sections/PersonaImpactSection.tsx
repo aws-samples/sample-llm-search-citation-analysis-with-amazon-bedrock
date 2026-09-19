@@ -1,6 +1,12 @@
-import type { PersonaRankingsResponse } from '../../../../types';
-import { ReportSection } from '../../layout';
-import { SectionPlaceholder } from '../../layout/SectionPlaceholder';
+import type {
+  CrossPersonaBrandSummary, PersonaRankingsResponse 
+} from '../../../../types';
+import {
+  ReportSection,
+  ReportTable,
+  type ReportTableColumn,
+  gateSection,
+} from '../../layout';
 
 interface Props {
   readonly personas: PersonaRankingsResponse | null;
@@ -20,30 +26,47 @@ interface Props {
  */
 const MEANINGFUL_DELTA = 3;
 
+const COLUMNS: ReadonlyArray<ReportTableColumn<CrossPersonaBrandSummary>> = [
+  {
+    header: 'First-party brand',
+    cellClassName: 'font-medium',
+    render: (brand) => brand.name,
+  },
+  {
+    header: 'Best rank',
+    render: (brand) => brand.best_rank,
+  },
+  {
+    header: 'Worst rank',
+    render: (brand) => brand.worst_rank,
+  },
+  {
+    header: 'Δ',
+    render: (brand) => rankDelta(brand),
+  },
+  {
+    header: 'Best persona',
+    render: (brand) => brand.best_persona,
+  },
+];
+
 export function PersonaImpactSection({
   personas, loading, error 
 }: Props) {
-  if (loading) {
-    return (
-      <ReportSection title="Persona impact">
-        <SectionPlaceholder variant="loading" message="Loading persona breakdown…" />
-      </ReportSection>
-    );
-  }
+  const gate = gateSection({
+    title: 'Persona impact',
+    loading,
+    loadingMessage: 'Loading persona breakdown…',
+    error,
+    value: personas,
+  });
+  if (!gate.ready) return gate.placeholder;
 
-  if (error) {
-    return (
-      <ReportSection title="Persona impact">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
-
-  if (!personas || personas.personas.length <= 1) {
+  if (gate.value.personas.length <= 1) {
     return null;
   }
 
-  const firstParty = personas.cross_persona_summary.brands.filter(
+  const firstParty = gate.value.cross_persona_summary.brands.filter(
     (brand) => brand.classification === 'first_party',
   );
 
@@ -52,7 +75,7 @@ export function PersonaImpactSection({
   }
 
   const meaningful = firstParty.some(
-    (brand) => brand.worst_rank - brand.best_rank >= MEANINGFUL_DELTA,
+    (brand) => rankDelta(brand) >= MEANINGFUL_DELTA,
   );
 
   if (!meaningful) {
@@ -76,59 +99,20 @@ export function PersonaImpactSection({
       title="Persona impact"
       subtitle="Where in your persona library does this keyword perform best, and where does it slip?"
     >
-      <div className="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-800">
-            <tr>
-              <Th>First-party brand</Th>
-              <Th>Best rank</Th>
-              <Th>Worst rank</Th>
-              <Th>Δ</Th>
-              <Th>Best persona</Th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {firstParty.map((brand) => {
-              const delta = brand.worst_rank - brand.best_rank;
-              const highlight = delta >= MEANINGFUL_DELTA;
-              return (
-                <tr
-                  key={brand.name}
-                  className={highlight ? 'bg-amber-50 dark:bg-amber-950/20' : ''}
-                >
-                  <Td className="font-medium">{brand.name}</Td>
-                  <Td>{brand.best_rank}</Td>
-                  <Td>{brand.worst_rank}</Td>
-                  <Td>{delta}</Td>
-                  <Td>{brand.best_persona}</Td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <ReportTable
+        columns={COLUMNS}
+        rows={firstParty}
+        rowKey={(brand) => brand.name}
+        rowClassName={meaningfulDeltaRowClass}
+      />
     </ReportSection>
   );
 }
 
-function Th({ children }: { readonly children: React.ReactNode }) {
-  return (
-    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-      {children}
-    </th>
-  );
+function rankDelta(brand: CrossPersonaBrandSummary): number {
+  return brand.worst_rank - brand.best_rank;
 }
 
-function Td({
-  children,
-  className = '',
-}: {
-  readonly children: React.ReactNode;
-  readonly className?: string;
-}) {
-  return (
-    <td className={`px-3 py-2 text-gray-700 dark:text-gray-300 ${className}`}>
-      {children}
-    </td>
-  );
+function meaningfulDeltaRowClass(brand: CrossPersonaBrandSummary): string {
+  return rankDelta(brand) >= MEANINGFUL_DELTA ? 'bg-amber-50 dark:bg-amber-950/20' : '';
 }

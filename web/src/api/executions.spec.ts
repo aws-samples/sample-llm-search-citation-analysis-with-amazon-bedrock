@@ -1,26 +1,15 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   createSchedule, deleteSchedule, fetchSchedules, runSchedule, updateSchedule 
 } from './executions';
 import type { SchedulePayload } from './executions';
-
-vi.mock('./client', () => ({
-  apiGet: vi.fn(),
-  apiPost: vi.fn(),
-  apiPut: vi.fn(),
-  apiDelete: vi.fn(),
-}));
-
 import {
-  apiDelete, apiGet, apiPost, apiPut 
-} from './client';
+  mockApiDelete, mockApiGet, mockApiPost, mockApiPut
+} from './clientMock-fixtures';
 
-const mockApiGet = vi.mocked(apiGet);
-const mockApiPost = vi.mocked(apiPost);
-const mockApiPut = vi.mocked(apiPut);
-const mockApiDelete = vi.mocked(apiDelete);
+vi.mock('./client', () => import('./clientMock-fixtures'));
 
 const payload: SchedulePayload = {
   display_name: 'Hotel Coruña — weekly',
@@ -37,10 +26,6 @@ const payload: SchedulePayload = {
 };
 
 describe('executions API', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   describe('fetchSchedules', () => {
     it('requests /schedules with the abort signal', async () => {
       const controller = new AbortController();

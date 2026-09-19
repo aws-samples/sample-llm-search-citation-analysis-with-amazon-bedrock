@@ -17,8 +17,6 @@ the containment ones.
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
 import json
 import os
 import sys
@@ -27,8 +25,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.module_loader import load_handler_module
+
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.abspath(os.path.join(_API_DIR, '..'))
 _MODULE_NAME = 'browse_raw_responses_under_test'
 
 RESPONSES_BUCKET = 'test-raw-responses'
@@ -43,10 +42,6 @@ _TEST_ENV = {
 
 def _load_handler() -> tuple[Any, MagicMock]:
     """Import the hyphenated handler module with S3 mocked at import time."""
-    if _LAMBDA_DIR not in sys.path:
-        sys.path.insert(0, _LAMBDA_DIR)
-    sys.modules['shared.api_response'] = importlib.import_module('shared.api_response')
-
     s3 = MagicMock()
     s3.exceptions.NoSuchKey = type('NoSuchKey', (Exception,), {})
     s3.generate_presigned_url.return_value = 'https://signed.example/object'
@@ -60,14 +55,8 @@ def _load_handler() -> tuple[Any, MagicMock]:
         'ContentType': 'application/json',
     }
 
-    sys.modules.pop(_MODULE_NAME, None)
-    spec = importlib.util.spec_from_file_location(
-        _MODULE_NAME, os.path.join(_API_DIR, 'browse-raw-responses.py')
-    )
-    module = importlib.util.module_from_spec(spec)
-
     with patch('boto3.client', return_value=s3), patch.dict(os.environ, _TEST_ENV):
-        spec.loader.exec_module(module)
+        module = load_handler_module(_API_DIR, 'browse-raw-responses.py', _MODULE_NAME)
 
     module.s3_client = s3
     return module, s3

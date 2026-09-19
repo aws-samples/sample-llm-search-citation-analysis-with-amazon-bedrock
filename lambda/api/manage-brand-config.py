@@ -540,29 +540,35 @@ def _find_competitors(event: dict[str, Any], context: Any, body: dict, first_par
     return success_response(result, event)
 
 
+def _default_config() -> dict[str, Any]:
+    """Configuration served by GET before anything is saved and written by DELETE.
+
+    A fresh dict per call: `save_config` mutates its argument.
+    """
+    return {
+        'industry': 'hotels',
+        'extract_brands': True,
+        'include_sentiment': True,
+        'include_ranking_context': True,
+        'max_brands': 20,
+        'tracked_brands': {
+            'first_party': [],
+            'competitors': []
+        },
+        'first_party_domains': [],
+        'custom_entity_types': [],
+        'custom_prompt_additions': '',
+        'industry_prompts': {}
+    }
+
+
 def _get_config(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """GET /brand-config - Get current configuration."""
     config = get_config()
 
     if not config:
         # Return default config
-        config = {
-            'config_id': 'default',
-            'industry': 'hotels',
-            'extract_brands': True,
-            'include_sentiment': True,
-            'include_ranking_context': True,
-            'max_brands': 20,
-            'tracked_brands': {
-                'first_party': [],
-                'competitors': []
-            },
-            'first_party_domains': [],
-            'custom_entity_types': [],
-            'custom_prompt_additions': '',
-            'industry_prompts': {},
-            'created_at': get_timestamp()
-        }
+        config = {'config_id': 'default', **_default_config(), 'created_at': get_timestamp()}
 
     return success_response(config, event)
 
@@ -618,23 +624,7 @@ def _reset_config(event: dict[str, Any], context: Any) -> dict[str, Any]:
     Admin-only and destructive: it overwrites `tracked_brands`,
     `first_party_domains`, `custom_entity_types` and `industry_prompts`.
     """
-    default_config = {
-        'industry': 'hotels',
-        'extract_brands': True,
-        'include_sentiment': True,
-        'include_ranking_context': True,
-        'max_brands': 20,
-        'tracked_brands': {
-            'first_party': [],
-            'competitors': []
-        },
-        'first_party_domains': [],
-        'custom_entity_types': [],
-        'custom_prompt_additions': '',
-        'industry_prompts': {}
-    }
-
-    saved_config = save_config(default_config)
+    saved_config = save_config(_default_config())
 
     return success_response({
         'message': 'Configuration reset to defaults',

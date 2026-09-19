@@ -47,7 +47,6 @@ class SimpleBrowserTools:
         self.context: BrowserContext | None = None
         self.page: Page | None = None
         self.session_id = None
-        self._browser_created_dynamically = False
 
     def create_browser(self) -> str:
         """
@@ -70,7 +69,6 @@ class SimpleBrowserTools:
         if pre_created_browser_id:
             logger.info(f"Using pre-created browser with Web Bot Auth: {pre_created_browser_id}")
             self.browser_id = pre_created_browser_id
-            self._browser_created_dynamically = False
             return self.browser_id
 
         # Fallback: Create browser dynamically (slower, no Web Bot Auth)
@@ -95,7 +93,6 @@ class SimpleBrowserTools:
         )
 
         self.browser_id = response["browserId"]
-        self._browser_created_dynamically = True
         logger.info(f"Browser created dynamically: {self.browser_id}")
 
         return self.browser_id

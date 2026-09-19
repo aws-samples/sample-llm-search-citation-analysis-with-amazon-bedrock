@@ -8,7 +8,6 @@ import {
   encodeReportScope,
   isReportScopeAvailable,
   reportScopeParams,
-  reportScopesEqual,
 } from './reportScope';
 import type {
   Keyword, KeywordGroup 
@@ -119,21 +118,5 @@ describe('isReportScopeAvailable', () => {
       kind: 'keyword',
       keyword: 'gone' 
     }, keywords, groups)).toBe(false);
-  });
-});
-
-describe('reportScopesEqual', () => {
-  it('compares by value', () => {
-    expect(reportScopesEqual({
-      kind: 'group',
-      groupId: 'g1' 
-    }, {
-      kind: 'group',
-      groupId: 'g1' 
-    })).toBe(true);
-    expect(reportScopesEqual(ALL_SCOPE, {
-      kind: 'group',
-      groupId: 'g1' 
-    })).toBe(false);
   });
 });

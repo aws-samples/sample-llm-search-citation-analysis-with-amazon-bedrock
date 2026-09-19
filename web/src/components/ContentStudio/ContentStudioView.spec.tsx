@@ -6,6 +6,9 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ContentStudioView } from './ContentStudioView';
+import {
+  buildActionableIdea, buildContentStudioHookResult 
+} from './ContentStudioView-fixtures';
 
 vi.mock('../../hooks/useContentStudio', () => ({useContentStudio: vi.fn(),}));
 
@@ -19,25 +22,11 @@ vi.mock('./ContentHistory', () => ({ContentHistory: () => <div data-testid="cont
 
 import { useContentStudio } from '../../hooks/useContentStudio';
 
-const mockUseContentStudio = useContentStudio as ReturnType<typeof vi.fn>;
+const mockUseContentStudio = vi.mocked(useContentStudio);
 
 describe('ContentStudioView', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mockUseContentStudio.mockReturnValue({
-      ideas: [],
-      history: [],
-      unviewedCount: 0,
-      loading: false,
-      generating: false,
-      error: null,
-      fetchIdeas: vi.fn(),
-      fetchHistory: vi.fn(),
-      generateContent: vi.fn(),
-      markViewed: vi.fn(),
-      deleteContent: vi.fn(),
-      refreshGeneratingItems: vi.fn(),
-    });
+    mockUseContentStudio.mockReturnValue(buildContentStudioHookResult());
   });
 
   describe('initial render', () => {
@@ -51,20 +40,7 @@ describe('ContentStudioView', () => {
 
   describe('loading state', () => {
     it('shows loading message when loading with no ideas', () => {
-      mockUseContentStudio.mockReturnValue({
-        ideas: [],
-        history: [],
-        unviewedCount: 0,
-        loading: true,
-        generating: false,
-        error: null,
-        fetchIdeas: vi.fn(),
-        fetchHistory: vi.fn(),
-        generateContent: vi.fn(),
-        markViewed: vi.fn(),
-        deleteContent: vi.fn(),
-        refreshGeneratingItems: vi.fn(),
-      });
+      mockUseContentStudio.mockReturnValue(buildContentStudioHookResult({ loading: true }));
 
       render(<ContentStudioView />);
 
@@ -74,26 +50,7 @@ describe('ContentStudioView', () => {
 
   describe('with ideas', () => {
     it('renders idea cards for actionable ideas', () => {
-      mockUseContentStudio.mockReturnValue({
-        ideas: [
-          {
-            id: '1',
-            keyword: 'hotels',
-            actionable: true 
-          },
-        ],
-        history: [],
-        unviewedCount: 0,
-        loading: false,
-        generating: false,
-        error: null,
-        fetchIdeas: vi.fn(),
-        fetchHistory: vi.fn(),
-        generateContent: vi.fn(),
-        markViewed: vi.fn(),
-        deleteContent: vi.fn(),
-        refreshGeneratingItems: vi.fn(),
-      });
+      mockUseContentStudio.mockReturnValue(buildContentStudioHookResult({ ideas: [buildActionableIdea()] }));
 
       render(<ContentStudioView />);
 
@@ -101,21 +58,6 @@ describe('ContentStudioView', () => {
     });
 
     it('shows empty state when no actionable ideas', () => {
-      mockUseContentStudio.mockReturnValue({
-        ideas: [],
-        history: [],
-        unviewedCount: 0,
-        loading: false,
-        generating: false,
-        error: null,
-        fetchIdeas: vi.fn(),
-        fetchHistory: vi.fn(),
-        generateContent: vi.fn(),
-        markViewed: vi.fn(),
-        deleteContent: vi.fn(),
-        refreshGeneratingItems: vi.fn(),
-      });
-
       render(<ContentStudioView />);
 
       expect(screen.getByText(/No content ideas available/)).toBeInTheDocument();
@@ -124,21 +66,6 @@ describe('ContentStudioView', () => {
 
   describe('tab switching', () => {
     it('switches to history tab when clicked', async () => {
-      mockUseContentStudio.mockReturnValue({
-        ideas: [],
-        history: [],
-        unviewedCount: 0,
-        loading: false,
-        generating: false,
-        error: null,
-        fetchIdeas: vi.fn(),
-        fetchHistory: vi.fn(),
-        generateContent: vi.fn(),
-        markViewed: vi.fn(),
-        deleteContent: vi.fn(),
-        refreshGeneratingItems: vi.fn(),
-      });
-
       render(<ContentStudioView />);
 
       await userEvent.click(screen.getByText('Generated Content'));
@@ -149,20 +76,7 @@ describe('ContentStudioView', () => {
 
   describe('unviewed badge', () => {
     it('shows unviewed count badge on history tab', () => {
-      mockUseContentStudio.mockReturnValue({
-        ideas: [],
-        history: [],
-        unviewedCount: 5,
-        loading: false,
-        generating: false,
-        error: null,
-        fetchIdeas: vi.fn(),
-        fetchHistory: vi.fn(),
-        generateContent: vi.fn(),
-        markViewed: vi.fn(),
-        deleteContent: vi.fn(),
-        refreshGeneratingItems: vi.fn(),
-      });
+      mockUseContentStudio.mockReturnValue(buildContentStudioHookResult({ unviewedCount: 5 }));
 
       render(<ContentStudioView />);
 

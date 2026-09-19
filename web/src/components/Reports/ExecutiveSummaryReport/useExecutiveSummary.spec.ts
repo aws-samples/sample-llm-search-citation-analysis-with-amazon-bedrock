@@ -14,7 +14,6 @@ describe('useExecutiveSummary', () => {
   const fetchReportsOverview = vi.fn();
 
   beforeEach(() => {
-    vi.clearAllMocks();
     mockOverview.mockReturnValue({
       data: { overall_score: 60 },
       loading: false,

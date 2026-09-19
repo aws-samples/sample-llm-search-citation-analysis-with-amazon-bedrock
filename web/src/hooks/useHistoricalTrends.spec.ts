@@ -1,256 +1,122 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   renderHook, waitFor, act 
 } from '@testing-library/react';
 import { useHistoricalTrends } from './useHistoricalTrends';
 import {
-  mockSingleKeywordResponse, mockAllKeywordsResponse, createMockFetch 
+  mockSingleKeywordResponse, mockAllKeywordsResponse 
 } from './useHistoricalTrends-fixtures';
-
-vi.mock('../infrastructure', async () => {
-  const actual = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
-
-import { authenticatedFetch } from '../infrastructure';
-import type { ReportScope } from '../types';
+import {
+  createDeferredResponse,
+  createEndpointMockFetch,
+  createMockJsonResponse,
+  type EndpointMockFetchOptions,
+} from '../test/fetchResponses';
 import { ALL_SCOPE } from '../components/ui/reportScope';
+import {
+  groupScope, keywordScope 
+} from '../components/ui/reportScope-fixtures';
+import type { HistoricalTrendsResponse } from '../types';
 
-const mockAuthenticatedFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
-const kw = (keyword: string): ReportScope => ({
-  kind: 'keyword',
-  keyword 
-});
+type FetchHistoricalTrendsArgs = Parameters<ReturnType<typeof useHistoricalTrends>['fetchHistoricalTrends']>;
 
 describe('useHistoricalTrends', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+  it('starts with no data, not loading, and no error', () => {
+    const { result } = renderHook(() => useHistoricalTrends());
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  describe('initial state', () => {
-    it('returns null data initially', () => {
-      const { result } = renderHook(() => useHistoricalTrends());
-      expect(result.current.data).toBeNull();
-    });
-
-    it('returns loading false initially', () => {
-      const { result } = renderHook(() => useHistoricalTrends());
-      expect(result.current.loading).toBe(false);
-    });
-
-    it('returns null error initially', () => {
-      const { result } = renderHook(() => useHistoricalTrends());
-      expect(result.current.error).toBeNull();
+    expect(result.current).toStrictEqual({
+      data: null,
+      loading: false,
+      error: null,
+      fetchHistoricalTrends: expect.any(Function),
     });
   });
 
   describe('fetchHistoricalTrends', () => {
-    it('fetches and returns trends for keyword', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
+    it('sets loading true while the trends request is in flight', async () => {
+      const deferred = createDeferredResponse();
+      mockAuthenticatedFetch.mockReturnValue(deferred.promise);
       const { result } = renderHook(() => useHistoricalTrends());
 
-      const fetchResult: { value: typeof mockSingleKeywordResponse | null } = { value: null };
-      await act(async () => {
-        fetchResult.value = await result.current.fetchHistoricalTrends(kw('best hotels'));
-      });
-
-      expect(fetchResult.value?.keyword).toBe('best hotels');
-      expect(fetchResult.value?.trend_direction).toBe('improving');
-      expect(result.current.data).toStrictEqual(mockSingleKeywordResponse);
-    });
-
-    it('includes keyword in URL params when provided', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useHistoricalTrends());
-
-      await act(async () => {
-        await result.current.fetchHistoricalTrends(kw('best hotels'));
-      });
-
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).toContain('keyword=best+hotels');
-    });
-
-    it('fetches all keywords when no keyword provided', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ response: mockAllKeywordsResponse }));
-
-      const { result } = renderHook(() => useHistoricalTrends());
-
-      await act(async () => {
-        await result.current.fetchHistoricalTrends(ALL_SCOPE);
-      });
-
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).not.toContain('keyword=');
-    });
-
-    it('includes period in URL params', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useHistoricalTrends());
-
-      await act(async () => {
-        await result.current.fetchHistoricalTrends(kw('test'), 'week');
-      });
-
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).toContain('period=week');
-    });
-
-    it('includes days in URL params', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useHistoricalTrends());
-
-      await act(async () => {
-        await result.current.fetchHistoricalTrends(kw('test'), 'day', 60);
-      });
-
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).toContain('days=60');
-    });
-
-    it('uses default period of day', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useHistoricalTrends());
-
-      await act(async () => {
-        await result.current.fetchHistoricalTrends(kw('test'));
-      });
-
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).toContain('period=day');
-    });
-
-    it('uses default days of 30', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useHistoricalTrends());
-
-      await act(async () => {
-        await result.current.fetchHistoricalTrends(kw('test'));
-      });
-
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).toContain('days=30');
-    });
-
-    it('sets loading true while fetching', async () => {
-      // noop function for resolvePromise
-      const noop = () => {
-        // empty function
-      };
-      const resolvePromise: { fn: (value: unknown) => void } = { fn: noop };
-      
-      const promiseResolver = (resolve: (value: unknown) => void) => { 
-        resolvePromise.fn = resolve; 
-      };
-      
-      const mockImplementation = () => {
-        return new Promise(promiseResolver);
-      };
-      mockAuthenticatedFetch.mockImplementation(mockImplementation);
-
-      const { result } = renderHook(() => useHistoricalTrends());
-
-      act(() => { 
-        result.current.fetchHistoricalTrends(kw('test')); 
+      act(() => {
+        result.current.fetchHistoricalTrends(keywordScope('test'));
       });
       expect(result.current.loading).toBe(true);
 
-      const mockJsonResponse = () => Promise.resolve(mockSingleKeywordResponse);
-      const mockResponse = {
-        ok: true,
-        json: mockJsonResponse
-      };
-
       await act(async () => {
-        resolvePromise.fn(mockResponse);
+        deferred.resolve(createMockJsonResponse(mockSingleKeywordResponse));
       });
-
       await waitFor(() => expect(result.current.loading).toBe(false));
     });
 
-    it('sets error when fetch fails', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
-
+    it.each<[url: string, condition: string, args: FetchHistoricalTrendsArgs]>([
+      ['https://api.test.com/trends?keyword=best+hotels&period=day&days=30', 'only a keyword scope is given', [keywordScope('best hotels')]],
+      ['https://api.test.com/trends?keyword=test&period=week&days=30', 'a period is given', [keywordScope('test'), 'week']],
+      ['https://api.test.com/trends?keyword=test&period=day&days=60', 'a day count is given', [keywordScope('test'), 'day', 60]],
+      ['https://api.test.com/trends?group_id=grp-luxury&period=day&days=30', 'a group scope is given', [groupScope('grp-luxury')]],
+      ['https://api.test.com/trends?scope=all&period=day&days=30', 'the all-keywords scope is given', [ALL_SCOPE]],
+    ])('requests %s when %s', async (url, _condition, args) => {
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockSingleKeywordResponse));
       const { result } = renderHook(() => useHistoricalTrends());
 
-      await act(async () => {
-        await result.current.fetchHistoricalTrends(kw('test'));
-      });
+      await act(() => result.current.fetchHistoricalTrends(...args));
 
-      expect(result.current.error).toBeTruthy();
-      expect(result.current.data).toBeNull();
+      expect(mockAuthenticatedFetch).toHaveBeenCalledWith(url, { signal: expect.any(AbortSignal) });
     });
 
-    it('sets error when backend returns error response', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ errorResponse: { error: 'No data' } }));
-
+    it.each<[payload: string, response: HistoricalTrendsResponse, args: FetchHistoricalTrendsArgs]>([
+      ['single-keyword trend', mockSingleKeywordResponse, [keywordScope('best hotels')]],
+      ['all-keywords trend rollup', mockAllKeywordsResponse, [ALL_SCOPE]],
+    ])('returns and stores the %s when the response passes the trends type guard', async (_payload, response, args) => {
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(response));
       const { result } = renderHook(() => useHistoricalTrends());
 
-      await act(async () => {
-        await result.current.fetchHistoricalTrends(kw('test'));
-      });
+      const returned = await act(() => result.current.fetchHistoricalTrends(...args));
 
-      expect(result.current.error).toBeTruthy();
+      expect(returned).toStrictEqual(response);
+      expect(result.current).toStrictEqual({
+        data: response,
+        loading: false,
+        error: null,
+        fetchHistoricalTrends: expect.any(Function),
+      });
     });
 
-    it('sets error when response format is invalid', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ invalidResponse: true }));
-
+    it.each<[message: string, failure: string, options: EndpointMockFetchOptions<HistoricalTrendsResponse>]>([
+      ['Failed to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
+      ['Failed to load visibility metrics', 'response is a backend {error} body', { errorResponse: { error: 'No data' } }],
+      ['Invalid visibility request', 'payload fails the type guard', { invalidResponse: true }],
+    ])('resolves null and reports "%s" when the trends %s', async (message, _failure, options) => {
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(mockSingleKeywordResponse, options));
       const { result } = renderHook(() => useHistoricalTrends());
 
-      await act(async () => {
-        await result.current.fetchHistoricalTrends(kw('test'));
-      });
+      const returned = await act(() => result.current.fetchHistoricalTrends(keywordScope('test')));
 
-      expect(result.current.error).toBeTruthy();
+      expect(returned).toBeNull();
+      expect(result.current).toStrictEqual({
+        data: null,
+        loading: false,
+        error: message,
+        fetchHistoricalTrends: expect.any(Function),
+      });
     });
 
-    it('returns null when fetch fails', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
-
-      const { result } = renderHook(() => useHistoricalTrends());
-
-      const fetchResult: { value: typeof mockSingleKeywordResponse | null } = { value: null };
-      await act(async () => {
-        fetchResult.value = await result.current.fetchHistoricalTrends(kw('test'));
-      });
-
-      expect(fetchResult.value).toBeNull();
-    });
-
-    it('clears previous error on new fetch', async () => {
+    it('clears the previous error when a later trends fetch succeeds', async () => {
       mockAuthenticatedFetch
-        .mockImplementationOnce(createMockFetch({ shouldFail: true }))
-        .mockImplementationOnce(createMockFetch());
-
+        .mockResolvedValueOnce(createMockJsonResponse({}, 500))
+        .mockResolvedValueOnce(createMockJsonResponse(mockSingleKeywordResponse));
       const { result } = renderHook(() => useHistoricalTrends());
 
-      await act(async () => {
-        await result.current.fetchHistoricalTrends(kw('test'));
-      });
-      expect(result.current.error).toBeTruthy();
+      await act(() => result.current.fetchHistoricalTrends(keywordScope('test')));
+      expect(result.current.error).toBe('Failed to load visibility metrics');
 
-      await act(async () => {
-        await result.current.fetchHistoricalTrends(kw('test'));
-      });
+      await act(() => result.current.fetchHistoricalTrends(keywordScope('test')));
       expect(result.current.error).toBeNull();
     });
   });

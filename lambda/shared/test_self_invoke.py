@@ -18,10 +18,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import pytest
 
@@ -29,15 +28,33 @@ from shared import self_invoke
 from shared.self_invoke import SelfInvokeDispatchError, invoke_self_async
 
 
+@contextmanager
+def _lambda_env(function_name: str, fake_boto3: MagicMock) -> Iterator[None]:
+    """
+    The environment `invoke_self_async` reads: AWS_LAMBDA_FUNCTION_NAME set to
+    `function_name` ('' is a local run with nothing to dispatch to) and
+    `fake_boto3` standing in for boto3.
+    """
+    with (
+        patch.dict(os.environ, {'AWS_LAMBDA_FUNCTION_NAME': function_name}),
+        patch.object(self_invoke, 'boto3', fake_boto3),
+    ):
+        yield
+
+
+def _boto3_whose_invoke_raises(error: Exception) -> MagicMock:
+    """A boto3 stand-in whose Lambda client rejects every `invoke` with `error`."""
+    fake_boto3 = MagicMock()
+    fake_boto3.client.return_value.invoke.side_effect = error
+    return fake_boto3
+
+
 class TestInvokeSelfAsync:
     def test_runs_fallback_synchronously_when_no_function_name_is_set(self):
         fallback = MagicMock()
         fake_boto3 = MagicMock()
 
-        with (
-            patch.dict(os.environ, {'AWS_LAMBDA_FUNCTION_NAME': ''}),
-            patch.object(self_invoke, 'boto3', fake_boto3),
-        ):
+        with _lambda_env('', fake_boto3):
             invoke_self_async({'async_expand': True}, fallback, description='expand')
 
         fallback.assert_called_once_with()
@@ -47,10 +64,7 @@ class TestInvokeSelfAsync:
         fallback = MagicMock()
         fake_boto3 = MagicMock()
 
-        with (
-            patch.dict(os.environ, {'AWS_LAMBDA_FUNCTION_NAME': 'research-fn'}),
-            patch.object(self_invoke, 'boto3', fake_boto3),
-        ):
+        with _lambda_env('research-fn', fake_boto3):
             invoke_self_async(
                 {'async_expand': True, 'research_id': 'abc'},
                 fallback,
@@ -66,12 +80,10 @@ class TestInvokeSelfAsync:
 
     def test_logs_the_callers_description_when_the_invoke_call_fails(self, caplog):
         fallback = MagicMock()
-        fake_boto3 = MagicMock()
-        fake_boto3.client.return_value.invoke.side_effect = RuntimeError('denied')
+        fake_boto3 = _boto3_whose_invoke_raises(RuntimeError('denied'))
 
         with (
-            patch.dict(os.environ, {'AWS_LAMBDA_FUNCTION_NAME': 'research-fn'}),
-            patch.object(self_invoke, 'boto3', fake_boto3),
+            _lambda_env('research-fn', fake_boto3),
             caplog.at_level(logging.ERROR, logger='shared.self_invoke'),
             pytest.raises(SelfInvokeDispatchError),
         ):
@@ -101,42 +113,27 @@ class TestDispatchFailureFailsClosed:
     def test_raises_instead_of_running_the_job_on_the_callers_request(self):
         """The core guarantee: the long fallback must NOT be executed."""
         fallback = MagicMock()
-        fake_boto3 = MagicMock()
-        fake_boto3.client.return_value.invoke.side_effect = RuntimeError('denied')
+        fake_boto3 = _boto3_whose_invoke_raises(RuntimeError('denied'))
 
-        with (
-            patch.dict(os.environ, {'AWS_LAMBDA_FUNCTION_NAME': 'studio-fn'}),
-            patch.object(self_invoke, 'boto3', fake_boto3),
-            pytest.raises(SelfInvokeDispatchError),
-        ):
+        with _lambda_env('studio-fn', fake_boto3), pytest.raises(SelfInvokeDispatchError):
             invoke_self_async({'async_generation': True}, fallback, description='generation')
 
         fallback.assert_not_called()
 
     def test_error_names_the_operation_that_could_not_be_started(self):
         fallback = MagicMock()
-        fake_boto3 = MagicMock()
-        fake_boto3.client.return_value.invoke.side_effect = RuntimeError('denied')
+        fake_boto3 = _boto3_whose_invoke_raises(RuntimeError('denied'))
 
-        with (
-            patch.dict(os.environ, {'AWS_LAMBDA_FUNCTION_NAME': 'studio-fn'}),
-            patch.object(self_invoke, 'boto3', fake_boto3),
-            pytest.raises(SelfInvokeDispatchError, match='generation'),
-        ):
+        with _lambda_env('studio-fn', fake_boto3), pytest.raises(SelfInvokeDispatchError, match='generation'):
             invoke_self_async({'async_generation': True}, fallback, description='generation')
 
     def test_preserves_the_underlying_cause_for_diagnosis(self):
         """`raise ... from e` — losing the boto3 error would hide the reason."""
         fallback = MagicMock()
         original = RuntimeError('AccessDeniedException')
-        fake_boto3 = MagicMock()
-        fake_boto3.client.return_value.invoke.side_effect = original
+        fake_boto3 = _boto3_whose_invoke_raises(original)
 
-        with (
-            patch.dict(os.environ, {'AWS_LAMBDA_FUNCTION_NAME': 'studio-fn'}),
-            patch.object(self_invoke, 'boto3', fake_boto3),
-            pytest.raises(SelfInvokeDispatchError) as exc_info,
-        ):
+        with _lambda_env('studio-fn', fake_boto3), pytest.raises(SelfInvokeDispatchError) as exc_info:
             invoke_self_async({'async_generation': True}, fallback, description='generation')
 
         assert exc_info.value.__cause__ is original
@@ -150,10 +147,7 @@ class TestDispatchFailureFailsClosed:
         fallback = MagicMock()
         fake_boto3 = MagicMock()
 
-        with (
-            patch.dict(os.environ, {'AWS_LAMBDA_FUNCTION_NAME': ''}),
-            patch.object(self_invoke, 'boto3', fake_boto3),
-        ):
+        with _lambda_env('', fake_boto3):
             invoke_self_async({'async_generation': True}, fallback, description='generation')
 
         fallback.assert_called_once_with()
@@ -163,8 +157,7 @@ class TestDispatchFailureFailsClosed:
         fake_boto3 = MagicMock()
 
         with (
-            patch.dict(os.environ, {'AWS_LAMBDA_FUNCTION_NAME': 'studio-fn'}),
-            patch.object(self_invoke, 'boto3', fake_boto3),
+            _lambda_env('studio-fn', fake_boto3),
             caplog.at_level(logging.INFO, logger='shared.self_invoke'),
         ):
             invoke_self_async(

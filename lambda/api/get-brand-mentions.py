@@ -17,11 +17,16 @@ from boto3.dynamodb.conditions import Key
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import not_found_response, success_response, validation_error
-from shared.constants import MAX_KEYWORD_LENGTH
+from shared.api_response import not_found_response, success_response
 from shared.decorators import api_handler, optional_provider, validate
 from shared.dynamo_decimal import to_int
-from shared.scope_params import ReportScope, parse_scope_params
+from shared.scope_params import (
+    SCOPE_QUERY_PARAMS,
+    ReportScope,
+    keywords_table_name,
+    query_keyword_rows,
+    scope_from_request,
+)
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -31,17 +36,12 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
-KEYWORDS_TABLE = (
-    os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    or os.environ.get('KEYWORDS_TABLE')
-    or 'CitationAnalysis-Keywords'
-)
+KEYWORDS_TABLE = keywords_table_name()
 
 # Group aggregates fan out one projected Query per keyword (no LLM response
 # text), in parallel.
 _SCOPE_MAX_WORKERS = 10
 _SCOPE_PROJECTION = 'keyword, #ts, provider, brands, query_prompt_id'
-_SCOPE_PROJECTION_NAMES = {'#ts': 'timestamp'}
 
 
 def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -140,20 +140,7 @@ def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, An
 
 def _latest_run_items(keyword: str, query_prompt_id: str | None, provider: str | None) -> list[dict[str, Any]]:
     """The latest analysis run of one keyword (projected), persona/provider filtered."""
-    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    params: dict[str, Any] = {
-        'KeyConditionExpression': Key('keyword').eq(keyword),
-        'ProjectionExpression': _SCOPE_PROJECTION,
-        'ExpressionAttributeNames': _SCOPE_PROJECTION_NAMES,
-    }
-    items: list[dict[str, Any]] = []
-    while True:
-        response = table.query(**params)
-        items.extend(response.get('Items', []))
-        last_key = response.get('LastEvaluatedKey')
-        if not last_key:
-            break
-        params['ExclusiveStartKey'] = last_key
+    items = query_keyword_rows(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword, _SCOPE_PROJECTION)
     if not items:
         return []
     latest = max(item.get('timestamp', '') for item in items)
@@ -204,18 +191,14 @@ def get_scope_brand_mentions(
 
 @api_handler
 @validate({
-    'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
-    'group_id': {'type': str, 'max_length': 64},
-    'keyword_ids': {'type': str, 'max_length': 8000},
-    'scope': {'type': str, 'choices': ['all']},
+    **SCOPE_QUERY_PARAMS,
     'timestamp': {'type': str, 'max_length': 50},
     'provider': optional_provider(),
     'classification': {'type': str, 'choices': ['first_party', 'competitor', 'other']},
     'query_prompt_id': {'type': str, 'max_length': 100},
 })
-def handler(event: dict[str, Any], context: Any, keyword: str | None = None, group_id: str | None = None,
-            keyword_ids: str | None = None, scope: str | None = None, timestamp: str | None = None, provider: str | None = None,
-            classification: str | None = None, query_prompt_id: str | None = None) -> dict[str, Any]:
+def handler(event: dict[str, Any], context: Any, timestamp: str | None = None, provider: str | None = None,
+            classification: str | None = None, query_prompt_id: str | None = None, **scope_params: str | None) -> dict[str, Any]:
     """
     API handler to get brand mentions for a keyword or a keyword group.
 
@@ -242,13 +225,9 @@ def handler(event: dict[str, Any], context: Any, keyword: str | None = None, gro
             }
         }
     """
-    report_scope, error = parse_scope_params(
-        {'keyword': keyword, 'group_id': group_id, 'keyword_ids': keyword_ids, 'scope': scope}, dynamodb.Table(KEYWORDS_TABLE)
-    )
-    if error:
-        return validation_error(error, event, 'scope')
-    if report_scope is None:
-        return validation_error('Provide keyword, group_id or keyword_ids', event, 'keyword')
+    report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE), required=True)
+    if rejected:
+        return rejected
 
     # Get brand tracking configuration
     brand_config = get_brand_config()

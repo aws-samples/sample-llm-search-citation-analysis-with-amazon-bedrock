@@ -18,18 +18,26 @@ interface SimpleTooltipContext {
   readonly parsed: { readonly y: number | null };
 }
 
+interface KeywordTooltipCallbacks {
+  readonly label: (context: SimpleTooltipContext) => string;
+  readonly footer?: (tooltipItems: Array<{ readonly parsed: { readonly y: number | null } }>) => string;
+}
+
+/** "<dataset>: <value><unit>", e.g. "openai: 3 citations". */
+const datasetValueLabel = (unit = '') => (context: SimpleTooltipContext) =>
+  `${context.dataset.label ?? ''}: ${context.parsed.y ?? 0}${unit}`;
+
+const themedPlugins = (theme: ChartTheme, callbacks: KeywordTooltipCallbacks) => ({
+  legend: themedLegend(theme),
+  tooltip: {
+    ...themedTooltip(theme),
+    callbacks,
+  },
+});
+
 export const lineChartOptions = (theme: ChartTheme) => ({
   responsive: true,
-  plugins: {
-    legend: themedLegend(theme),
-    tooltip: {
-      ...themedTooltip(theme),
-      callbacks: {
-        label: (context: SimpleTooltipContext) =>
-          `${context.dataset.label ?? ''}: ${context.parsed.y ?? 0} citations`,
-      },
-    },
-  },
+  plugins: themedPlugins(theme, { label: datasetValueLabel(' citations') }),
   scales: {
     y: themedAxis(theme, { beginAtZero: true }),
     x: themedAxis(theme),
@@ -38,20 +46,13 @@ export const lineChartOptions = (theme: ChartTheme) => ({
 
 export const barChartOptions = (theme: ChartTheme) => ({
   responsive: true,
-  plugins: {
-    legend: themedLegend(theme),
-    tooltip: {
-      ...themedTooltip(theme),
-      callbacks: {
-        label: (context: SimpleTooltipContext) =>
-          `${context.dataset.label ?? ''}: ${context.parsed.y ?? 0}`,
-        footer: (tooltipItems: Array<{ readonly parsed: { readonly y: number | null } }>) => {
-          const total = tooltipItems.reduce((sum, item) => sum + (item.parsed.y ?? 0), 0);
-          return `Total: ${total}`;
-        },
-      },
+  plugins: themedPlugins(theme, {
+    label: datasetValueLabel(),
+    footer: (tooltipItems) => {
+      const total = tooltipItems.reduce((sum, item) => sum + (item.parsed.y ?? 0), 0);
+      return `Total: ${total}`;
     },
-  },
+  }),
   scales: {
     x: themedAxis(theme, { stacked: true }),
     y: themedAxis(theme, {

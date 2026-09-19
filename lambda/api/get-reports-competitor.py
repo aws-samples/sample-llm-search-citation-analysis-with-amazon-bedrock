@@ -41,7 +41,6 @@ Query params
 
 from __future__ import annotations
 
-import importlib.util
 import logging
 import math
 import os
@@ -58,6 +57,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, validate
+from shared.scope_params import load_sibling_function
 from shared.utils import get_brand_config, get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -75,24 +75,11 @@ KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')
 # import time and so unit tests can stub the helpers via the cache.
 # ----------------------------------------------------------------------
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
 _sibling_cache: dict[str, Callable] = {}
 
 
 def _load_sibling(filename: str, attr: str) -> Callable:
-    module_name = filename.replace('-', '_').replace('.py', '_for_competitor')
-    spec = importlib.util.spec_from_file_location(
-        module_name, os.path.join(_API_DIR, filename)
-    )
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load sibling module {filename!r}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    fn = getattr(module, attr, None)
-    if fn is None:
-        raise AttributeError(f"{filename} has no attribute {attr!r}")
-    return fn
+    return load_sibling_function(__file__, filename, attr, '_for_competitor')
 
 
 def _gap_helper() -> Callable:

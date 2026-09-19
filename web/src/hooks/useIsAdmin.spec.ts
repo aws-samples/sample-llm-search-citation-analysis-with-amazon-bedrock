@@ -1,10 +1,9 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi 
 } from 'vitest';
-import {
-  renderHook, waitFor 
-} from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { useIsAdmin } from './useIsAdmin';
+import { renderResolvedIsAdmin } from './useIsAdmin-fixtures';
 
 class SessionReadError extends Error {
   constructor(message: string) {
@@ -14,65 +13,57 @@ class SessionReadError extends Error {
 }
 
 describe('useIsAdmin', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   describe('membership resolution', () => {
-    it('reports admin when the Admin group is present', async () => {
-      const { result } = renderHook(() => useIsAdmin(vi.fn().mockResolvedValue(['Admin'])));
+    const membershipCases = [
+      {
+        outcome: 'admin',
+        condition: 'the Admin group is present',
+        groups: ['Admin'],
+        expectedIsAdmin: true,
+      },
+      {
+        outcome: 'admin',
+        condition: 'Admin appears alongside other groups',
+        groups: ['Users', 'Admin'],
+        expectedIsAdmin: true,
+      },
+      {
+        outcome: 'non-admin',
+        condition: 'only the Users group is present',
+        groups: ['Users'],
+        expectedIsAdmin: false,
+      },
+      {
+        outcome: 'non-admin',
+        condition: 'the user belongs to no groups',
+        groups: [],
+        expectedIsAdmin: false,
+      },
+    ];
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
+    it.each(membershipCases)('reports $outcome when $condition', async ({
+      groups, expectedIsAdmin 
+    }) => {
+      const { result } = await renderResolvedIsAdmin(vi.fn().mockResolvedValue(groups));
 
-      expect(result.current.isAdmin).toBe(true);
-    });
-
-    it('reports admin when Admin appears alongside other groups', async () => {
-      const getGroups = vi.fn().mockResolvedValue(['Users', 'Admin']);
-
-      const { result } = renderHook(() => useIsAdmin(getGroups));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      expect(result.current.isAdmin).toBe(true);
-    });
-
-    it('reports non-admin when only the Users group is present', async () => {
-      const { result } = renderHook(() => useIsAdmin(vi.fn().mockResolvedValue(['Users'])));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      expect(result.current.isAdmin).toBe(false);
-    });
-
-    it('reports non-admin when the user belongs to no groups', async () => {
-      const { result } = renderHook(() => useIsAdmin(vi.fn().mockResolvedValue([])));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      expect(result.current.isAdmin).toBe(false);
+      expect(result.current.isAdmin).toBe(expectedIsAdmin);
     });
   });
 
   describe('exact group matching', () => {
-    it('reports non-admin for a group whose name merely contains Admin', async () => {
-      const getGroups = vi.fn().mockResolvedValue(['Admins', 'NotAdmin', 'Administrators']);
+    const lookalikeCases = [
+      {
+        condition: 'a group whose name merely contains Admin',
+        groups: ['Admins', 'NotAdmin', 'Administrators'],
+      },
+      {
+        condition: 'a lowercase variant of the group name',
+        groups: ['admin'],
+      },
+    ];
 
-      const { result } = renderHook(() => useIsAdmin(getGroups));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
-      expect(result.current.isAdmin).toBe(false);
-    });
-
-    it('reports non-admin for a lowercase variant of the group name', async () => {
-      const { result } = renderHook(() => useIsAdmin(vi.fn().mockResolvedValue(['admin'])));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
+    it.each(lookalikeCases)('reports non-admin for $condition', async ({ groups }) => {
+      const { result } = await renderResolvedIsAdmin(vi.fn().mockResolvedValue(groups));
 
       expect(result.current.isAdmin).toBe(false);
     });
@@ -87,12 +78,9 @@ describe('useIsAdmin', () => {
     });
 
     it('reports non-admin when reading the session throws', async () => {
-      const getGroups = vi.fn().mockRejectedValue(new SessionReadError('no session'));
       vi.spyOn(console, 'error').mockImplementation(vi.fn());
 
-      const { result } = renderHook(() => useIsAdmin(getGroups));
-
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      const { result } = await renderResolvedIsAdmin(vi.fn().mockRejectedValue(new SessionReadError('no session')));
 
       expect(result.current.isAdmin).toBe(false);
     });
@@ -105,10 +93,9 @@ describe('useIsAdmin', () => {
       const getGroups = vi.fn().mockRejectedValue(new SessionReadError('no session'));
       vi.spyOn(console, 'error').mockImplementation(vi.fn());
 
-      const { result } = renderHook(() => useIsAdmin(getGroups));
+      const { result } = await renderResolvedIsAdmin(getGroups);
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
-
+      expect(result.current.loading).toBe(false);
       expect(getGroups).toHaveBeenCalledWith();
     });
   });

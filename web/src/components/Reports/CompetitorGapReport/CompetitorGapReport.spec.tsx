@@ -90,7 +90,6 @@ function renderAt(path: string, competitors: string[] = ['Adidas', 'Asics']) {
 
 describe('CompetitorGapReport', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockGap.mockReturnValue(POPULATED_DATA);
   });
 

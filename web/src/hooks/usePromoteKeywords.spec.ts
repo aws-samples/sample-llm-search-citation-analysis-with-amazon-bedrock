@@ -14,9 +14,12 @@ import {
   SELECTION_LIMIT_MESSAGE,
 } from './usePromoteKeywords';
 import {
+  abortedPromotionRequest,
   availableKeywordFixtures,
   createMockPromotionRequest,
   createdKeywordItemFixture,
+  renderPendingPromotion,
+  renderSelectedPromotion,
   replacementAvailableKeywordFixtures,
 } from './usePromoteKeywords-fixtures';
 
@@ -127,7 +130,6 @@ interface EnablementFixture {
 
 describe('Property 13: Promotion trigger is enabled exactly when a non-empty selection exists', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockApiPost.mockReturnValue(new Promise(vi.fn()));
   });
 
@@ -200,10 +202,6 @@ describe('Property 13: Promotion trigger is enabled exactly when a non-empty sel
 });
 
 describe('Property 14: Successful promotion clears created keywords and retains skipped ones', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   const reconciliationFixtures = [
     {
       scenario: 'every selected keyword was created',
@@ -351,16 +349,12 @@ describe('promotionSuccessMessage', () => {
 
 describe('promotion request safety', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockApiPost.mockReturnValue(new Promise(vi.fn()));
   });
 
   it('sends one request when promotion is triggered twice before rendering updates', () => {
-    const { result } = renderHook(() => usePromoteKeywords(availableKeywordFixtures));
+    const { result } = renderSelectedPromotion();
 
-    act(() => {
-      result.current.toggle('alpha');
-    });
     act(() => {
       void result.current.promote();
       void result.current.promote();
@@ -370,41 +364,18 @@ describe('promotion request safety', () => {
   });
 
   it('aborts the pending request when the hook unmounts', () => {
-    const {
-      result, unmount
-    } = renderHook(() => usePromoteKeywords(availableKeywordFixtures));
+    const { unmount } = renderPendingPromotion();
 
-    act(() => {
-      result.current.toggle('alpha');
-    });
-    act(() => {
-      void result.current.promote();
-    });
     unmount();
 
-    expect(mockApiPost).toHaveBeenCalledWith(
-      '/keywords/promote',
-      { keywords: availableKeywordFixtures },
-      {
-        signal: expect.objectContaining({ aborted: true }),
-        allowStructured4xx: true,
-      }
-    );
+    expect(mockApiPost).toHaveBeenCalledWith(...abortedPromotionRequest);
   });
 
   it('clears the request timeout when the hook unmounts during promotion', () => {
     const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
-    const {
-      result, unmount
-    } = renderHook(() => usePromoteKeywords(availableKeywordFixtures));
-
-    act(() => {
-      result.current.toggle('alpha');
-    });
-    act(() => {
-      void result.current.promote();
-    });
+    const { unmount } = renderPendingPromotion();
     const callsBeforeUnmount = clearTimeoutSpy.mock.calls.length;
+
     unmount();
 
     expect(clearTimeoutSpy).toHaveBeenCalledTimes(callsBeforeUnmount + 1);
@@ -414,47 +385,20 @@ describe('promotion request safety', () => {
   it('cancels stale promotion when available keywords change', () => {
     const {
       result, rerender
-    } = renderHook(
-      ({ availableKeywords }) => usePromoteKeywords(availableKeywords),
-      { initialProps: { availableKeywords: availableKeywordFixtures } }
-    );
+    } = renderPendingPromotion();
 
-    act(() => {
-      result.current.toggle('alpha');
-    });
-    act(() => {
-      void result.current.promote();
-    });
     rerender({ availableKeywords: replacementAvailableKeywordFixtures });
 
-    expect(mockApiPost).toHaveBeenCalledWith(
-      '/keywords/promote',
-      { keywords: availableKeywordFixtures },
-      {
-        signal: expect.objectContaining({ aborted: true }),
-        allowStructured4xx: true,
-      }
-    );
+    expect(mockApiPost).toHaveBeenCalledWith(...abortedPromotionRequest);
     expect(result.current.selected).toStrictEqual([]);
     expect(result.current.submitting).toBe(false);
   });
 
   it('clears the request timeout when available keywords change during promotion', () => {
     const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
-    const {
-      result, rerender
-    } = renderHook(
-      ({ availableKeywords }) => usePromoteKeywords(availableKeywords),
-      { initialProps: { availableKeywords: availableKeywordFixtures } }
-    );
-
-    act(() => {
-      result.current.toggle('alpha');
-    });
-    act(() => {
-      void result.current.promote();
-    });
+    const { rerender } = renderPendingPromotion();
     const callsBeforeRerender = clearTimeoutSpy.mock.calls.length;
+
     rerender({ availableKeywords: replacementAvailableKeywordFixtures });
 
     expect(clearTimeoutSpy).toHaveBeenCalledTimes(callsBeforeRerender + 1);
@@ -462,26 +406,13 @@ describe('promotion request safety', () => {
   });
 
   it('aborts the pending request when the selection is cleared', () => {
-    const { result } = renderHook(() => usePromoteKeywords(availableKeywordFixtures));
+    const { result } = renderPendingPromotion();
 
-    act(() => {
-      result.current.toggle('alpha');
-    });
-    act(() => {
-      void result.current.promote();
-    });
     act(() => {
       result.current.clearSelection();
     });
 
-    expect(mockApiPost).toHaveBeenCalledWith(
-      '/keywords/promote',
-      { keywords: availableKeywordFixtures },
-      {
-        signal: expect.objectContaining({ aborted: true }),
-        allowStructured4xx: true,
-      }
-    );
+    expect(mockApiPost).toHaveBeenCalledWith(...abortedPromotionRequest);
     expect(result.current.submitting).toBe(false);
   });
 
@@ -491,17 +422,8 @@ describe('promotion request safety', () => {
     mockApiPost.mockReturnValue(promotionRequest.promise);
     const {
       result, rerender
-    } = renderHook(
-      ({ availableKeywords }) => usePromoteKeywords(availableKeywords, onKeywordsAdded),
-      { initialProps: { availableKeywords: availableKeywordFixtures } }
-    );
+    } = renderPendingPromotion({ onKeywordsAdded });
 
-    act(() => {
-      result.current.toggle('alpha');
-    });
-    act(() => {
-      void result.current.promote();
-    });
     rerender({ availableKeywords: replacementAvailableKeywordFixtures });
     await act(async () => {
       promotionRequest.resolve();
@@ -518,19 +440,8 @@ describe('promotion request safety', () => {
     const promotionRequest = createMockPromotionRequest();
     const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
     mockApiPost.mockReturnValue(promotionRequest.promise);
-    const {
-      result, rerender
-    } = renderHook(
-      ({ availableKeywords }) => usePromoteKeywords(availableKeywords),
-      { initialProps: { availableKeywords: availableKeywordFixtures } }
-    );
+    const { rerender } = renderPendingPromotion();
 
-    act(() => {
-      result.current.toggle('alpha');
-    });
-    act(() => {
-      void result.current.promote();
-    });
     rerender({ availableKeywords: replacementAvailableKeywordFixtures });
     const callsAfterCancellation = clearTimeoutSpy.mock.calls.length;
     await act(async () => {

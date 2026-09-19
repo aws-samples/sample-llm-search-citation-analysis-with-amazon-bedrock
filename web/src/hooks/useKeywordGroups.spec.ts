@@ -1,5 +1,5 @@
 import {
-  afterEach, beforeEach, describe, expect, it, vi
+  beforeEach, describe, expect, it, vi 
 } from 'vitest';
 import {
   act, renderHook, waitFor
@@ -38,7 +38,6 @@ const mockMemberships = vi.mocked(updateGroupMemberships);
 
 describe('useKeywordGroups', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     vi.spyOn(console, 'error').mockImplementation(vi.fn());
     mockFetch.mockResolvedValue([
       buildGroup({
@@ -50,10 +49,6 @@ describe('useKeywordGroups', () => {
         name: 'coruña' 
       }),
     ]);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
   });
 
   it('loads groups on mount sorted by name ignoring case', async () => {

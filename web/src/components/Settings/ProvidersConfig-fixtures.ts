@@ -23,6 +23,22 @@ export function buildProviderConfig(overrides: Partial<ProviderConfig> = {}): Pr
   };
 }
 
+/**
+ * Claude as production found it on 2026-08-19: out of credit, still nominally
+ * enabled, and failing every request since 10:00Z.
+ */
+export function buildCreditExhaustedProvider(
+  overrides: Partial<ProviderConfig> = {}
+): ProviderConfig {
+  return buildProviderConfig({
+    last_error: 'Your credit balance is too low',
+    last_error_at: '2026-08-19T10:00:00Z',
+    last_error_category: 'insufficient_credit',
+    consecutive_failures: 3,
+    ...overrides,
+  });
+}
+
 export function buildProvidersConfigProps(
   overrides: Partial<ProvidersConfigProps> = {}
 ): ProvidersConfigProps {

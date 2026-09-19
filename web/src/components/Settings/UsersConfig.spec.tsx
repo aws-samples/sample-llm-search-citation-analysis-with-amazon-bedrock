@@ -46,7 +46,6 @@ function buildMockHook(overrides = {}) {
 
 describe('UsersConfig', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockUseUserManagement.mockReturnValue(buildMockHook());
   });
 

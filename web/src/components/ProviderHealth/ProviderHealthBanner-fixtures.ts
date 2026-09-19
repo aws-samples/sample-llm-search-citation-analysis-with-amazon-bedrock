@@ -1,38 +1,13 @@
 import { vi } from 'vitest';
 import type { ProviderConfig } from '../../hooks/useProviderConfig';
+import {
+  buildCreditExhaustedProvider, buildProviderConfig 
+} from '../Settings/ProvidersConfig-fixtures';
 
-const CLAUDE: ProviderConfig = {
-  id: 'claude',
-  name: 'Claude',
-  description: 'Claude with web search',
-  model: 'claude-sonnet-4-5',
-  docs_url: 'https://console.anthropic.com',
-  enabled: true,
-  configured: true,
-  masked_key: 'sk-ant-...xyz',
-  last_updated: '2026-08-01T00:00:00Z',
-  last_success_at: '2026-08-19T10:00:00Z',
+/** The banner reads the same provider rows the Settings panel does. */
+export {
+  buildProviderConfig as buildBannerProvider, buildCreditExhaustedProvider 
 };
-
-export function buildBannerProvider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
-  return {
-    ...CLAUDE,
-    ...overrides,
-  };
-}
-
-/** Claude as production found it: out of credit and still nominally enabled. */
-export function buildCreditExhaustedProvider(
-  overrides: Partial<ProviderConfig> = {}
-): ProviderConfig {
-  return buildBannerProvider({
-    last_error: 'Your credit balance is too low',
-    last_error_at: '2026-08-19T11:00:00Z',
-    last_error_category: 'insufficient_credit',
-    consecutive_failures: 3,
-    ...overrides,
-  });
-}
 
 interface ProviderConfigHookResult {
   providers: ProviderConfig[];

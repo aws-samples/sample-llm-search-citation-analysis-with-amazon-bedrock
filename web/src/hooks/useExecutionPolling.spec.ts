@@ -12,28 +12,12 @@ import {
   createMockFetch,
 } from './useExecutionPolling-fixtures';
 
-vi.mock('../infrastructure', async () => {
-  const actual = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { authenticatedFetch } from '../infrastructure';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
-const mockAuthenticatedFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
 
 describe('useExecutionPolling', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('returns null execution initially', () => {
     const { result } = renderHook(() => useExecutionPolling());
 
@@ -41,56 +25,38 @@ describe('useExecutionPolling', () => {
     expect(result.current.isRunning).toBe(false);
   });
 
-  it('returns success result when triggerAnalysis succeeds', async () => {
+  it('resolves a success result naming the keyword count when triggerAnalysis succeeds', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
     const { result } = renderHook(() => useExecutionPolling());
 
-    const triggerResult = {
-      success: false,
-      message: '' 
-    };
-    await act(async () => {
-      const res = await result.current.triggerAnalysis();
-      triggerResult.success = res.success;
-      triggerResult.message = res.message;
-    });
+    const triggerResult = await act(() => result.current.triggerAnalysis());
 
-    expect(triggerResult.success).toBe(true);
-    expect(triggerResult.message).toContain('5 keywords');
+    expect(triggerResult).toStrictEqual({
+      success: true,
+      message: 'Analysis started with 5 keywords!',
+    });
   });
 
-  it('sets execution state after triggering analysis', async () => {
+  it('starts monitoring the new execution after triggering analysis', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
     const { result } = renderHook(() => useExecutionPolling());
 
-    await act(async () => {
-      await result.current.triggerAnalysis();
-    });
+    await act(() => result.current.triggerAnalysis());
 
-    expect(result.current.execution).not.toBeNull();
     expect(result.current.execution?.arn).toBe(mockExecutionArn);
     expect(result.current.isRunning).toBe(true);
   });
 
-  it('returns failure result when triggerAnalysis fails', async () => {
+  it('resolves a failure result carrying the backend error when triggerAnalysis fails', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch({ triggerSuccess: false }));
-
     const { result } = renderHook(() => useExecutionPolling());
 
-    const triggerResult = {
-      success: true,
-      message: '' 
-    };
-    await act(async () => {
-      const res = await result.current.triggerAnalysis();
-      triggerResult.success = res.success;
-      triggerResult.message = res.message;
-    });
+    const triggerResult = await act(() => result.current.triggerAnalysis());
 
-    expect(triggerResult.success).toBe(false);
-    expect(triggerResult.message).toBeTruthy();
+    expect(triggerResult).toStrictEqual({
+      success: false,
+      message: 'Trigger failed',
+    });
   });
 
   it('posts the scope to the keyword-specific endpoint when a scope is provided', async () => {
@@ -133,29 +99,13 @@ describe('useExecutionPolling', () => {
     expect(triggerCall).toBeDefined();
   });
 
-  it('sets execution status to SUCCEEDED when API returns SUCCEEDED', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({statusResponse: createMockStatusResponse('SUCCEEDED'),}));
-
+  it.each(['SUCCEEDED', 'FAILED'])('stops running and mirrors the status when the API reports %s', async (status) => {
+    mockAuthenticatedFetch.mockImplementation(createMockFetch({ statusResponse: createMockStatusResponse(status) }));
     const { result } = renderHook(() => useExecutionPolling());
 
-    await act(async () => {
-      await result.current.triggerAnalysis();
-    });
+    await act(() => result.current.triggerAnalysis());
 
-    expect(result.current.execution?.status).toBe('SUCCEEDED');
-    expect(result.current.isRunning).toBe(false);
-  });
-
-  it('sets execution status to FAILED when API returns FAILED', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch({statusResponse: createMockStatusResponse('FAILED'),}));
-
-    const { result } = renderHook(() => useExecutionPolling());
-
-    await act(async () => {
-      await result.current.triggerAnalysis();
-    });
-
-    expect(result.current.execution?.status).toBe('FAILED');
+    expect(result.current.execution?.status).toBe(status);
     expect(result.current.isRunning).toBe(false);
   });
 
@@ -176,13 +126,11 @@ describe('useExecutionPolling', () => {
 
 describe('useExecutionPolling polling lifecycle', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     vi.useFakeTimers();
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.restoreAllMocks();
   });
 
   it('stops polling and fires onComplete exactly once after a terminal status', async () => {

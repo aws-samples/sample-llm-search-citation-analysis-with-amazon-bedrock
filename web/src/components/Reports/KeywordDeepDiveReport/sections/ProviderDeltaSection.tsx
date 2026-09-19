@@ -1,6 +1,13 @@
-import type { BrandMentionsResponse } from '../../../../types';
-import { ReportSection } from '../../layout';
-import { SectionPlaceholder } from '../../layout/SectionPlaceholder';
+import type {
+  AggregatedBrand, BrandMentionsResponse 
+} from '../../../../types';
+import {
+  ReportSection,
+  ReportSectionPlaceholder,
+  ReportTable,
+  type ReportTableColumn,
+  gateSection,
+} from '../../layout';
 
 interface Props {
   readonly mentions: BrandMentionsResponse | null;
@@ -19,35 +26,23 @@ interface Props {
 export function ProviderDeltaSection({
   mentions, loading, error 
 }: Props) {
-  if (loading) {
-    return (
-      <ReportSection title="Provider differences">
-        <SectionPlaceholder variant="loading" message="Loading provider data…" />
-      </ReportSection>
-    );
-  }
+  const gate = gateSection({
+    title: 'Provider differences',
+    loading,
+    loadingMessage: 'Loading provider data…',
+    error,
+    value: mentions,
+  });
+  if (!gate.ready) return gate.placeholder;
 
-  if (error) {
-    return (
-      <ReportSection title="Provider differences">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
-
-  if (!mentions) {
-    return null;
-  }
-
-  const firstParty = mentions.aggregated.first_party_brands;
+  const firstParty = gate.value.aggregated.first_party_brands;
   if (firstParty.length === 0) {
     return (
-      <ReportSection title="Provider differences">
-        <SectionPlaceholder
-          variant="empty"
-          message="No first-party brand mentions for this keyword. Either the brand isn't appearing in any AI response, or no first-party brands are configured."
-        />
-      </ReportSection>
+      <ReportSectionPlaceholder
+        title="Provider differences"
+        variant="empty"
+        message="No first-party brand mentions for this keyword. Either the brand isn't appearing in any AI response, or no first-party brands are configured."
+      />
     );
   }
 
@@ -61,59 +56,37 @@ export function ProviderDeltaSection({
       title="Provider differences"
       subtitle="Where each AI engine ranks your first-party brands."
     >
-      <div className="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
-        <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700 text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-800">
-            <tr>
-              <Th>Brand</Th>
-              {providers.map((provider) => (
-                <Th key={provider}>{provider}</Th>
-              ))}
-              <Th>Best rank</Th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {firstParty.map((brand) => (
-              <tr key={brand.name}>
-                <Td className="font-medium">{brand.name}</Td>
-                {providers.map((provider) => {
-                  const appearance = brand.appearances.find(
-                    (a) => a.provider === provider,
-                  );
-                  return (
-                    <Td key={provider}>
-                      {appearance ? `#${appearance.rank}` : '—'}
-                    </Td>
-                  );
-                })}
-                <Td className="font-medium">#{brand.best_rank}</Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <ReportTable
+        columns={providerColumns(providers)}
+        rows={firstParty}
+        rowKey={(brand) => brand.name}
+      />
     </ReportSection>
   );
 }
 
-function Th({ children }: { readonly children: React.ReactNode }) {
-  return (
-    <th className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400">
-      {children}
-    </th>
-  );
+function providerColumns(
+  providers: ReadonlyArray<string>,
+): ReadonlyArray<ReportTableColumn<AggregatedBrand>> {
+  return [
+    {
+      header: 'Brand',
+      cellClassName: 'font-medium',
+      render: (brand) => brand.name,
+    },
+    ...providers.map((provider): ReportTableColumn<AggregatedBrand> => ({
+      header: provider,
+      render: (brand) => rankOn(brand, provider),
+    })),
+    {
+      header: 'Best rank',
+      cellClassName: 'font-medium',
+      render: (brand) => `#${brand.best_rank}`,
+    },
+  ];
 }
 
-function Td({
-  children,
-  className = '',
-}: {
-  readonly children: React.ReactNode;
-  readonly className?: string;
-}) {
-  return (
-    <td className={`px-3 py-2 text-gray-700 dark:text-gray-300 ${className}`}>
-      {children}
-    </td>
-  );
+function rankOn(brand: AggregatedBrand, provider: string): string {
+  const appearance = brand.appearances.find((a) => a.provider === provider);
+  return appearance ? `#${appearance.rank}` : '—';
 }

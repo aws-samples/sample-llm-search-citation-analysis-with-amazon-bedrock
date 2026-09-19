@@ -1,4 +1,3 @@
-import { vi } from 'vitest';
 import type { CitationGapsResponse } from '../types';
 
 export const mockCitationGapsResponse: CitationGapsResponse = {
@@ -80,39 +79,3 @@ export const mockAllKeywordsResponse: CitationGapsResponse = {
     },
   ],
 };
-
-export function createMockFetch(options: {
-  response?: CitationGapsResponse;
-  shouldFail?: boolean;
-  failStatus?: number;
-  errorResponse?: { error: string };
-  invalidResponse?: boolean;
-} = {}) {
-  return vi.fn().mockImplementation(() => {
-    if (options.shouldFail) {
-      return Promise.resolve({
-        ok: false,
-        status: options.failStatus ?? 500,
-      });
-    }
-
-    if (options.errorResponse) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.errorResponse),
-      });
-    }
-
-    if (options.invalidResponse) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ invalid: 'data' }),
-      });
-    }
-
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve(options.response ?? mockCitationGapsResponse),
-    });
-  });
-}

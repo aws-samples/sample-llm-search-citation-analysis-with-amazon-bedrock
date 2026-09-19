@@ -24,15 +24,11 @@ Two behaviours carry the whole fix, and both are pinned here:
 
 from __future__ import annotations
 
-import os
-import sys
 from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock
 
 from botocore.exceptions import ClientError
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from shared.provider_health import (
     AUTO_DISABLE_THRESHOLD,
@@ -74,6 +70,16 @@ def _table(consecutive_failures: int = 1) -> MagicMock:
     table.update_item.return_value = {
         'Attributes': {'consecutive_failures': Decimal(consecutive_failures)}
     }
+    return table
+
+
+def _table_whose_disable_write_fails() -> MagicMock:
+    """A table that echoes a third terminal failure, then throttles the follow-up `enabled = false` write."""
+    table = _table(consecutive_failures=3)
+    table.update_item.side_effect = [
+        {'Attributes': {'consecutive_failures': Decimal(3)}},
+        ClientError({'Error': {'Code': 'ThrottlingException'}}, 'UpdateItem'),
+    ]
     return table
 
 
@@ -522,22 +528,14 @@ class TestBookkeepingNeverMasksTheOriginalFailure:
         Same swallow pattern one call deeper. `auto_disabled` must describe what
         actually happened, so a failed disable is never reported as a success.
         """
-        table = _table(consecutive_failures=3)
-        table.update_item.side_effect = [
-            {'Attributes': {'consecutive_failures': Decimal(3)}},
-            ClientError({'Error': {'Code': 'ThrottlingException'}}, 'UpdateItem'),
-        ]
+        table = _table_whose_disable_write_fails()
 
         outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
 
         assert outcome['auto_disabled'] is False
 
     def test_still_reports_the_failure_count_when_the_disable_write_fails(self):
-        table = _table(consecutive_failures=3)
-        table.update_item.side_effect = [
-            {'Attributes': {'consecutive_failures': Decimal(3)}},
-            ClientError({'Error': {'Code': 'ThrottlingException'}}, 'UpdateItem'),
-        ]
+        table = _table_whose_disable_write_fails()
 
         outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
 

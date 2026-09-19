@@ -7,7 +7,7 @@ import {
 import userEvent from '@testing-library/user-event';
 import { VisibilityDashboard } from './VisibilityDashboard';
 import type {
-  GroupVisibilityResponse, Keyword, KeywordGroup, VisibilityMetricsResponse 
+  GroupVisibilityResponse, Keyword, VisibilityMetricsResponse 
 } from '../../types';
 
 vi.mock('../../hooks/useVisibilityMetrics', () => ({ useVisibilityMetrics: vi.fn() }));
@@ -20,6 +20,10 @@ import { useVisibilityMetrics } from '../../hooks/useVisibilityMetrics';
 import { useHistoricalTrends } from '../../hooks/useHistoricalTrends';
 import { usePersonaRankings } from '../../hooks/usePersonaRankings';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
+import {
+  buildKeywordGroup, buildKeywordGroupsHookResult 
+} from '../../hooks/useKeywordGroups-fixtures';
+import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
 import { exportGroupOverview } from './groupOverviewExport';
 
 const mockUseVisibilityMetrics = vi.mocked(useVisibilityMetrics);
@@ -42,14 +46,7 @@ const keywords: Keyword[] = [
   },
 ];
 
-const groups: KeywordGroup[] = [{
-  id: 'group-coruna',
-  name: 'Hotel Coruña',
-  description: '',
-  keyword_count: 1,
-  created_at: '2026-01-01T00:00:00Z',
-  updated_at: '2026-01-01T00:00:00Z',
-}];
+const groups = [buildKeywordGroup()];
 
 const groupVisibility: GroupVisibilityResponse = {
   scope: {
@@ -152,32 +149,28 @@ function mockVisibility(data: GroupVisibilityResponse | VisibilityMetricsRespons
   return fetchVisibilityMetrics;
 }
 
+function mockTrends(overrides: { loading?: boolean } = {}) {
+  const fetchHistoricalTrends = vi.fn();
+  mockUseHistoricalTrends.mockReturnValue({
+    data: null,
+    loading: overrides.loading ?? false,
+    error: null,
+    fetchHistoricalTrends,
+  });
+  return fetchHistoricalTrends;
+}
+
 describe('VisibilityDashboard', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     mockVisibility(null);
-    mockUseHistoricalTrends.mockReturnValue({
-      data: null,
-      loading: false,
-      error: null,
-      fetchHistoricalTrends: vi.fn(),
-    });
+    mockTrends();
     mockUsePersonaRankings.mockReturnValue({
       data: null,
       loading: false,
       error: null,
       fetchPersonaRankings: vi.fn(),
     });
-    mockUseKeywordGroups.mockReturnValue({
-      groups,
-      loading: false,
-      error: null,
-      refresh: vi.fn(),
-      createGroup: vi.fn(),
-      renameGroup: vi.fn(),
-      removeGroup: vi.fn(),
-      changeMemberships: vi.fn(),
-    });
+    mockUseKeywordGroups.mockReturnValue(buildKeywordGroupsHookResult(groups));
   });
 
   describe('initial render', () => {
@@ -191,21 +184,12 @@ describe('VisibilityDashboard', () => {
     it('offers all keywords, every group and every keyword in the scope selector', () => {
       render(<VisibilityDashboard keywords={keywords} />);
 
-      expect(screen.getByRole('option', { name: 'All keywords' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'Hotel Coruña (1)' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'hotels' })).toBeInTheDocument();
-      expect(screen.getByRole('option', { name: 'resorts' })).toBeInTheDocument();
+      expect(renderedScopeOptionLabels('Analyze')).toStrictEqual(['All keywords', 'Hotel Coruña (1)', 'hotels', 'resorts']);
     });
 
     it('loads the all-keywords overview by default', () => {
       const fetchVisibilityMetrics = mockVisibility(null);
-      const fetchHistoricalTrends = vi.fn();
-      mockUseHistoricalTrends.mockReturnValue({
-        data: null,
-        loading: false,
-        error: null,
-        fetchHistoricalTrends,
-      });
+      const fetchHistoricalTrends = mockTrends();
 
       render(<VisibilityDashboard keywords={keywords} />);
 
@@ -224,12 +208,7 @@ describe('VisibilityDashboard', () => {
     });
 
     it('shows loading message when trends is loading', () => {
-      mockUseHistoricalTrends.mockReturnValue({
-        data: null,
-        loading: true,
-        error: null,
-        fetchHistoricalTrends: vi.fn(),
-      });
+      mockTrends({ loading: true });
 
       render(<VisibilityDashboard keywords={keywords} />);
 
@@ -259,13 +238,7 @@ describe('VisibilityDashboard', () => {
 
     it('re-fetches the history when the range changes', async () => {
       mockVisibility(groupVisibility);
-      const fetchHistoricalTrends = vi.fn();
-      mockUseHistoricalTrends.mockReturnValue({
-        data: null,
-        loading: false,
-        error: null,
-        fetchHistoricalTrends,
-      });
+      const fetchHistoricalTrends = mockTrends();
 
       render(<VisibilityDashboard keywords={keywords} />);
       await userEvent.click(screen.getByRole('button', { name: '90 days' }));
@@ -287,13 +260,7 @@ describe('VisibilityDashboard', () => {
   describe('per-keyword mode', () => {
     it('fetches the keyword when one is selected', async () => {
       const fetchVisibilityMetrics = mockVisibility(null);
-      const fetchHistoricalTrends = vi.fn();
-      mockUseHistoricalTrends.mockReturnValue({
-        data: null,
-        loading: false,
-        error: null,
-        fetchHistoricalTrends,
-      });
+      const fetchHistoricalTrends = mockTrends();
 
       render(<VisibilityDashboard keywords={keywords} />);
       await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Analyze' }), 'keyword:resorts');

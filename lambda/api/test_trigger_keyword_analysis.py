@@ -3,27 +3,20 @@ Tests for trigger-keyword-analysis.py (scope-aware subset runs) and the
 cap-free active-keyword read in trigger-analysis.py.
 """
 
-import importlib.util
 import json
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))  # lambda/
+from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.events import api_gateway_event, parse_response
+from testing.module_loader import load_handler_module
 
 mock_keywords_table = MagicMock()
 mock_prompts_table = MagicMock()
 mock_stepfunctions = MagicMock()
-
-
-def _table_for(name):
-    return mock_prompts_table if name == 'test-prompts' else mock_keywords_table
-
-
-mock_dynamodb = MagicMock()
-mock_dynamodb.Table.side_effect = _table_for
+mock_dynamodb = fake_dynamodb_resource(mock_keywords_table, by_name={'test-prompts': mock_prompts_table})
 
 _ENV = {
     'STATE_MACHINE_ARN': 'arn:aws:states:us-east-1:123456789012:stateMachine:test',
@@ -35,12 +28,9 @@ _ENV = {
 
 
 def _load(filename, module_name):
-    spec = importlib.util.spec_from_file_location(module_name, os.path.join(os.path.dirname(__file__), filename))
-    module = importlib.util.module_from_spec(spec)
     with patch('boto3.resource', return_value=mock_dynamodb), patch('boto3.client', return_value=mock_stepfunctions), \
             patch.dict(os.environ, _ENV):
-        spec.loader.exec_module(module)
-    return module
+        return load_handler_module(os.path.dirname(__file__), filename, module_name)
 
 
 _subset = _load('trigger-keyword-analysis.py', 'trigger_keyword_analysis_under_test')
@@ -51,17 +41,7 @@ def make_event(body=None, groups='Admin'):
     claims = {'cognito:username': 'admin@example.com'}
     if groups is not None:
         claims['cognito:groups'] = groups
-    return {
-        'httpMethod': 'POST',
-        'path': '/api/trigger-keyword-analysis',
-        'headers': {'origin': 'http://localhost:3000'},
-        'body': json.dumps(body) if body is not None else None,
-        'requestContext': {'authorizer': {'claims': claims}},
-    }
-
-
-def parse_response(result):
-    return result['statusCode'], json.loads(result['body'])
+    return api_gateway_event('POST', '/api/trigger-keyword-analysis', body=body, claims=claims)
 
 
 def _started_input():

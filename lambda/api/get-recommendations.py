@@ -20,17 +20,17 @@ from collections import defaultdict
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
+from shared.brand_visibility import classify_brand, load_recent_search_results, tracked_brand_names
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
-from shared.utils import brand_names_match, get_brand_config, get_timestamp, recommendation_id
+from shared.utils import get_brand_config, get_timestamp, recommendation_id
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -41,7 +41,6 @@ dynamodb = boto3.resource('dynamodb')
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
-KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')  # Optional for fallback
 
 
 def generate_rule_based_recommendations(config: dict[str, Any], keywords: list[str] | None = None) -> list[dict[str, Any]]:
@@ -53,12 +52,8 @@ def generate_rule_based_recommendations(config: dict[str, Any], keywords: list[s
     keywords are discovered from the Keywords table.
     """
     recommendations = []
-    search_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
 
-    # Get tracked brands
-    tracked_brands = config.get("tracked_brands", {})
-    first_party = [b.lower() for b in tracked_brands.get("first_party", [])]
-    competitors = [b.lower() for b in tracked_brands.get("competitors", [])]
+    first_party, competitors = tracked_brand_names(config)
 
     if not first_party:
         recommendations.append({
@@ -71,39 +66,8 @@ def generate_rule_based_recommendations(config: dict[str, Any], keywords: list[s
         })
         return recommendations
 
-    # Get keywords from Keywords table (small, efficient scan)
-    # Then query SearchResults by keyword (uses partition key)
-    keywords_table_name = os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    keywords = list(keywords) if keywords is not None else []
-    if not keywords and keywords_table_name:
-        keywords_table = dynamodb.Table(keywords_table_name)
-        kw_response = keywords_table.scan(
-            ProjectionExpression='keyword',
-            FilterExpression='#status = :status',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={':status': 'active'},
-            Limit=100
-        )
-        keywords = [item.get('keyword', '') for item in kw_response.get('Items', []) if item.get('keyword')]
-
-    if not keywords:
-        # Fallback: scan with limit
-        response = search_table.scan(Limit=500)
-        items = response.get('Items', [])
-    else:
-        # Query by each keyword (more efficient for large tables)
-        items = []
-        for keyword in keywords[:20]:  # Limit to 20 keywords for performance
-            try:
-                response = search_table.query(
-                    KeyConditionExpression=Key('keyword').eq(keyword),
-                    ScanIndexForward=False,
-                    Limit=20  # Get recent results per keyword
-                )
-                items.extend(response.get('Items', []))
-            except Exception as e:
-                logger.error(f"Error querying keyword {keyword!r}: {e}")
-                continue
+    # Limit to 20 keywords for performance
+    items = load_recent_search_results(dynamodb, SEARCH_RESULTS_TABLE, max_keywords=20, keywords=keywords)
 
     if not items:
         recommendations.append({
@@ -144,26 +108,17 @@ def generate_rule_based_recommendations(config: dict[str, Any], keywords: list[s
             brands = result.get('brands', [])
 
             for brand in brands:
-                name = brand.get('name', '').lower()
                 rank = to_int(brand.get('rank'), 999)
 
                 # Prefer the LLM-assigned classification. Fall back to exact
                 # brand-name match (never substring — see audit item 9, 22).
-                classification = brand.get('classification')
-                is_first_party = classification == 'first_party' or (
-                    classification is None
-                    and any(brand_names_match(name, fp) for fp in first_party)
-                )
-                is_competitor = classification == 'competitor' or (
-                    classification is None
-                    and any(brand_names_match(name, c) for c in competitors)
-                )
+                classification = classify_brand(brand, first_party, competitors)
 
-                if is_first_party:
+                if classification == 'first_party':
                     fp_found = True
                     fp_best_rank = min(fp_best_rank, rank)
                     fp_providers.add(provider)
-                elif is_competitor:
+                elif classification == 'competitor':
                     comp_mentions += 1
 
         # Track provider gaps

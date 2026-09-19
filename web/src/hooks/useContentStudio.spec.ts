@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   renderHook, waitFor, act 
@@ -8,34 +8,28 @@ import { useContentStudio } from './useContentStudio';
 import {
   mockContentIdea, createMockFetch 
 } from './useContentStudio-fixtures';
+import {
+  createDeferredResponse, createMockJsonResponse 
+} from '../test/fetchResponses';
 
 interface GenerateResult {
   success: boolean;
   id: string;
 }
 
-vi.mock('../infrastructure', async () => {
-  const actual = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { authenticatedFetch } from '../infrastructure';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
-const mockAuthenticatedFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
+type ContentStudioHook = ReturnType<typeof useContentStudio>;
+
+/** The two boolean-returning mutations, so their success and failure paths share one table. */
+const mutationOperations: [operation: string, run: (hook: ContentStudioHook) => Promise<boolean>][] = [
+  ['markViewed', (hook) => hook.markViewed('content-1')],
+  ['deleteContent', (hook) => hook.deleteContent('content-1')],
+];
 
 describe('useContentStudio', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   describe('initial state', () => {
     it('returns empty ideas array initially', () => {
       const { result } = renderHook(() => useContentStudio());
@@ -75,25 +69,8 @@ describe('useContentStudio', () => {
     });
 
     it('sets loading true while fetching', async () => {
-      const mockResponse = {
-        ok: true,
-        json: () => Promise.resolve({
-          ideas: [],
-          total_count: 0,
-          generated_at: '' 
-        }) 
-      };
-
-      const deferred = {
-        promise: null as Promise<unknown> | null,
-        resolve: null as ((value: unknown) => void) | null
-      };
-
-      deferred.promise = new Promise(resolve => {
-        deferred.resolve = resolve;
-      });
-
-      mockAuthenticatedFetch.mockImplementation(() => deferred.promise as Promise<unknown>);
+      const deferred = createDeferredResponse();
+      mockAuthenticatedFetch.mockImplementation(() => deferred.promise);
 
       const { result } = renderHook(() => useContentStudio());
 
@@ -101,7 +78,11 @@ describe('useContentStudio', () => {
       expect(result.current.loading).toBe(true);
 
       await act(async () => {
-        deferred.resolve?.(mockResponse);
+        deferred.resolve(createMockJsonResponse({
+          ideas: [],
+          total_count: 0,
+          generated_at: '' 
+        }));
       });
 
       await waitFor(() => expect(result.current.loading).toBe(false));
@@ -189,67 +170,23 @@ describe('useContentStudio', () => {
     });
   });
 
-  describe('markViewed', () => {
-    it('returns true when mark viewed succeeds', async () => {
+  describe('markViewed and deleteContent', () => {
+    it.each(mutationOperations)('%s resolves true when the server accepts the request', async (_operation, run) => {
       mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
       const { result } = renderHook(() => useContentStudio());
 
-      const mutations = { success: false };
-      await act(async () => {
-        mutations.success = await result.current.markViewed('content-1');
-      });
+      const success = await act(() => run(result.current));
 
-      expect(mutations.success).toBe(true);
+      expect(success).toBe(true);
     });
 
-    it('returns false when mark viewed fails', async () => {
-      const mockFailResponse = {
-        ok: false,
-        status: 500 
-      };
-      mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(mockFailResponse));
-
+    it.each(mutationOperations)('%s resolves false when the server rejects the request', async (_operation, run) => {
+      mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({}, 500));
       const { result } = renderHook(() => useContentStudio());
 
-      const mutations = { success: false };
-      await act(async () => {
-        mutations.success = await result.current.markViewed('content-1');
-      });
+      const success = await act(() => run(result.current));
 
-      expect(mutations.success).toBe(false);
-    });
-  });
-
-  describe('deleteContent', () => {
-    it('returns true when delete succeeds', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-      const { result } = renderHook(() => useContentStudio());
-
-      const mutations = { success: false };
-      await act(async () => {
-        mutations.success = await result.current.deleteContent('content-1');
-      });
-
-      expect(mutations.success).toBe(true);
-    });
-
-    it('returns false when delete fails', async () => {
-      const mockFailResponse = {
-        ok: false,
-        status: 500 
-      };
-      mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(mockFailResponse));
-
-      const { result } = renderHook(() => useContentStudio());
-
-      const mutations = { success: true };
-      await act(async () => {
-        mutations.success = await result.current.deleteContent('content-1');
-      });
-
-      expect(mutations.success).toBe(false);
+      expect(success).toBe(false);
     });
   });
 

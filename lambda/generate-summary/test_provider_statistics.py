@@ -14,46 +14,28 @@ The central test feeds the *real* post-crawl element shape — notably WITHOUT a
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.module_loader import load_handler_module
+
 _HANDLER_DIR = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.abspath(os.path.join(_HANDLER_DIR, '..'))
-_MODULE_NAME = 'generate_summary_handler_under_test'
-
-
-def _load_handler() -> tuple[Any, MagicMock]:
-    """Import the summary handler with S3 mocked at module scope."""
-    if _LAMBDA_DIR not in sys.path:
-        sys.path.insert(0, _LAMBDA_DIR)
-
-    s3 = MagicMock()
-
-    sys.modules.pop(_MODULE_NAME, None)
-    spec = importlib.util.spec_from_file_location(
-        _MODULE_NAME, os.path.join(_HANDLER_DIR, 'handler.py')
-    )
-    module = importlib.util.module_from_spec(spec)
-
-    with patch('boto3.client', return_value=s3):
-        spec.loader.exec_module(module)
-
-    module.s3_client = s3
-    return module, s3
 
 
 @pytest.fixture
 def summary():
-    """Provide the summary module with a mocked S3 client."""
-    module, s3 = _load_handler()
+    """Provide a freshly imported summary module with a mocked S3 client and no configured bucket."""
+    s3 = MagicMock()
+
+    with patch('boto3.client', return_value=s3):
+        module = load_handler_module(_HANDLER_DIR, 'handler.py', 'generate_summary_handler_under_test')
+
+    module.s3_client = s3
     module.SUMMARY_BUCKET = ''
-    yield module, s3
-    sys.modules.pop(_MODULE_NAME, None)
+    return module, s3
 
 
 def post_crawl_keyword_result(
@@ -592,8 +574,9 @@ class TestTheProductionIncidentEndToEnd:
     no longer describe it as a clean run.
     """
 
-    def test_does_not_report_the_incident_run_as_completed(self, summary) -> None:
-        """The single assertion that would have surfaced the outage on day one."""
+    @pytest.fixture
+    def report(self, summary) -> dict[str, Any]:
+        """The 2026-08-14 execution, replayed through the real handler."""
         module, _ = summary
         event = {
             'execution_id': 'exec-2026-08-14',
@@ -602,85 +585,40 @@ class TestTheProductionIncidentEndToEnd:
             )],
         }
 
-        report = module.handler(event, None)
+        return module.handler(event, None)
 
+    def test_does_not_report_the_incident_run_as_completed(self, report) -> None:
+        """The single assertion that would have surfaced the outage on day one."""
         assert report['status'] != 'completed'
 
-    def test_reports_the_incident_run_as_completed_degraded(self, summary) -> None:
-        module, _ = summary
-        event = {
-            'execution_id': 'exec-2026-08-14',
-            'keyword_results': [post_crawl_keyword_result(
-                result_count=9, by_provider=incident_breakdown(),
-            )],
-        }
-
-        report = module.handler(event, None)
-
+    def test_reports_the_incident_run_as_completed_degraded(self, report) -> None:
         assert report['status'] == 'completed_degraded'
 
-    def test_names_claude_as_the_failed_provider(self, summary) -> None:
-        module, _ = summary
-        event = {
-            'execution_id': 'exec-2026-08-14',
-            'keyword_results': [post_crawl_keyword_result(
-                result_count=9, by_provider=incident_breakdown(),
-            )],
-        }
-
-        report = module.handler(event, None)
-
+    def test_names_claude_as_the_failed_provider(self, report) -> None:
         health = report['summary']['provider_health']
+
         assert [entry['provider'] for entry in health['failed_providers']] == ['claude']
 
-    def test_reports_why_claude_failed(self, summary) -> None:
+    def test_reports_why_claude_failed(self, report) -> None:
         """
         `insufficient_credit` is what turns the report into an action: top up
         the Anthropic account. Without the category the user only knows Claude
         is quiet.
         """
-        module, _ = summary
-        event = {
-            'execution_id': 'exec-2026-08-14',
-            'keyword_results': [post_crawl_keyword_result(
-                result_count=9, by_provider=incident_breakdown(),
-            )],
-        }
-
-        report = module.handler(event, None)
-
         health = report['summary']['provider_health']
+
         assert health['failed_providers'][0]['error_categories'] == ['insufficient_credit']
 
-    def test_reports_eight_of_nine_providers_healthy(self, summary) -> None:
-        module, _ = summary
-        event = {
-            'execution_id': 'exec-2026-08-14',
-            'keyword_results': [post_crawl_keyword_result(
-                result_count=9, by_provider=incident_breakdown(),
-            )],
-        }
-
-        report = module.handler(event, None)
-
+    def test_reports_eight_of_nine_providers_healthy(self, report) -> None:
         health = report['summary']['provider_health']
+
         assert (health['providers_total'], health['providers_healthy']) == (9, 8)
 
-    def test_still_reports_every_keyword_as_successful(self, summary) -> None:
+    def test_still_reports_every_keyword_as_successful(self, report) -> None:
         """
         Keyword counting was never wrong, and this test says so. The pipeline
         genuinely did finish for every keyword — which is why `success_rate`
         alone could never have caught this, and why provider health had to
         become a separate signal rather than a correction to the old one.
         """
-        module, _ = summary
-        event = {
-            'execution_id': 'exec-2026-08-14',
-            'keyword_results': [post_crawl_keyword_result(
-                result_count=9, by_provider=incident_breakdown(),
-            )],
-        }
-
-        report = module.handler(event, None)
-
         assert report['summary']['keywords']['success_rate'] == 100.0

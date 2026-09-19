@@ -52,7 +52,3 @@ export function isReportScopeAvailable(scope: ReportScope, keywords: Keyword[], 
   if (scope.kind === 'keyword') return keywords.some((keyword) => keyword.keyword === scope.keyword);
   return true;
 }
-
-export function reportScopesEqual(left: ReportScope, right: ReportScope): boolean {
-  return encodeReportScope(left) === encodeReportScope(right);
-}

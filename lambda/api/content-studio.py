@@ -20,13 +20,13 @@ from collections import defaultdict
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, success_response, validation_error
+from shared.brand_visibility import classify_brand, load_recent_search_results, tracked_brand_names
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
 from shared.dynamo_decimal import to_int
@@ -35,7 +35,7 @@ from shared.models import BedrockInvocationError, ModelRole, get_model_tier, inv
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
 from shared.self_invoke import SelfInvokeDispatchError, invoke_self_async
 from shared.stale_jobs import stale_elapsed_seconds
-from shared.utils import brand_names_match, extract_domain, get_brand_config, get_timestamp, utc_now
+from shared.utils import extract_domain, get_brand_config, get_timestamp, utc_now
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -47,7 +47,6 @@ SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 CONTENT_STUDIO_TABLE = os.environ['DYNAMODB_TABLE_CONTENT_STUDIO']
-KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')  # Optional for fallback
 # Budget after which the reader-side sweep declares a generation dead. MUST
 # stay above this function's Lambda timeout (300s): the previous 240s default
 # marked a legitimate 241-300s run as `failed` while it was still running, and
@@ -200,11 +199,7 @@ def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
     """Generate content ideas from multiple sources."""
     ideas = []
 
-    search_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-
-    tracked_brands = config.get("tracked_brands", {})
-    first_party = [b.lower() for b in tracked_brands.get("first_party", [])]
-    competitors = [b.lower() for b in tracked_brands.get("competitors", [])]
+    first_party, competitors = tracked_brand_names(config)
 
     if not first_party:
         return [{
@@ -219,39 +214,8 @@ def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
             'actionable': False
         }]
 
-    # Get keywords from Keywords table (small, efficient scan)
-    # Then query SearchResults by keyword (uses partition key)
-    keywords_table_name = os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    keywords = []
-    if keywords_table_name:
-        keywords_table = dynamodb.Table(keywords_table_name)
-        kw_response = keywords_table.scan(
-            ProjectionExpression='keyword',
-            FilterExpression='#status = :status',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={':status': 'active'},
-            Limit=100
-        )
-        keywords = [item.get('keyword', '') for item in kw_response.get('Items', []) if item.get('keyword')]
-
-    if not keywords:
-        # Fallback: scan with limit
-        response = search_table.scan(Limit=500)
-        items = response.get('Items', [])
-    else:
-        # Query by each keyword (more efficient for large tables)
-        items = []
-        for keyword in keywords[:30]:  # Limit to 30 keywords for performance
-            try:
-                response = search_table.query(
-                    KeyConditionExpression=Key('keyword').eq(keyword),
-                    ScanIndexForward=False,
-                    Limit=20  # Get recent results per keyword
-                )
-                items.extend(response.get('Items', []))
-            except Exception as e:
-                logger.error(f"Error querying keyword {keyword!r}: {e}")
-                continue
+    # Limit to 30 keywords for performance
+    items = load_recent_search_results(dynamodb, SEARCH_RESULTS_TABLE, max_keywords=30)
 
     if not items:
         return [{
@@ -322,29 +286,20 @@ def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
             all_citations.extend(citations)
 
             for brand in brands:
-                name = brand.get('name', '').lower()
                 rank = to_int(brand.get('rank'), 999)
                 sentiment = brand.get('sentiment', 'neutral')
 
                 # Prefer LLM classification; fall back to exact name match
                 # when missing. See audit items 9 and 22 for the substring
                 # collision bugs this replaces.
-                classification = brand.get('classification')
-                is_first_party = classification == 'first_party' or (
-                    classification is None
-                    and any(brand_names_match(name, fp) for fp in first_party)
-                )
-                is_competitor = classification == 'competitor' or (
-                    classification is None
-                    and any(brand_names_match(name, c) for c in competitors)
-                )
+                classification = classify_brand(brand, first_party, competitors)
 
-                if is_first_party:
+                if classification == 'first_party':
                     fp_found = True
                     fp_best_rank = min(fp_best_rank, rank)
                     fp_providers.add(provider)
                     fp_sentiment.append(sentiment)
-                elif is_competitor:
+                elif classification == 'competitor':
                     comp_mentions.append({'name': brand.get('name'), 'rank': rank, 'provider': provider})
                     competitor_citations.extend(citations)
 

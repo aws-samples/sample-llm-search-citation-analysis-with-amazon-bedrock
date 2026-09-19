@@ -430,6 +430,57 @@ npm run deploy:full    # Deploy + clear CloudFront cache
 npm run clear-cache    # Clear CloudFront cache only
 ```
 
+### Validation
+
+`npm run validate` from the repo root runs every quality gate for the CDK app,
+the web dashboard, the Lambda code and their tests, and stops at the first
+failure:
+
+```bash
+npm run validate           # lint -> build -> tests -> duplication -> dead code -> web -> python
+```
+
+The individual gates:
+
+```bash
+npm run lint               # ESLint over the CDK app and web/src
+npm run build              # tsc (CDK app)
+npm run test               # Vitest (CDK stack tests)
+npm run duplication        # jscpd over bin, lib and web/src (production code)
+npm run duplication:tests  # jscpd over *.spec.ts(x) and *-fixtures.ts(x)
+npm run deadcode           # knip (CDK app)
+npm run validate:web       # web/: type-check -> Vitest -> knip
+npm run validate:python    # lambda/: ruff -> vulture -> jscpd (code, tests) -> pytest
+```
+
+Duplication is checked by [jscpd](https://github.com/kucherenko/jscpd) with
+`minTokens: 50` and four configs, all at threshold `0`: `.jscpd.json` (`bin/`,
+`lib/`, `web/src/`), `.jscpd.tests.json` (spec and fixture files),
+`.jscpd.python.json` (`lambda/`, `scripts/`) and `.jscpd.python-tests.json`
+(`test_*.py`, `conftest.py`). The codebase carries no clones, and a new 50-token
+duplicate fails the run. Fix the duplication rather than raising the threshold:
+shared test builders live in `web/src/test/` (`infrastructureMock.ts`,
+`fetchResponses.ts`), in the `*-fixtures.ts` file next to the module under
+test, and for Python in `lambda/testing/` (handler module loader, DynamoDB
+stubs, API Gateway events, env fixtures) with `lambda/conftest.py` putting
+`lambda/` and the built layer on `sys.path` for every test.
+
+The Python gate needs the toolchain from `lambda/requirements-dev.txt` — put
+it in a repo-local `.venv` (`python3 -m venv .venv && .venv/bin/pip install -r
+lambda/requirements-dev.txt`) and the scripts pick it up — plus the built
+shared layer (`bash lambda/layer/build-layer.sh`) for the runtime libraries
+the tests import.
+
+Dead code is checked by [knip](https://knip.dev) for TypeScript (`knip.json`
+covers the CDK app, `web/knip.json` the dashboard; `ts-node` sits in the root
+`ignoreDependencies` because its only caller is the `app` command in
+`cdk.json`, which knip does not read) and by [vulture](https://github.com/jendrikseipp/vulture)
+for Python (`scripts/lint-python.sh --dead-code`, 80% confidence). Both run
+inside `npm run validate`. Stricter advisory views that ignore test-only usage:
+`npm run deadcode:prod` in `web/`, and vulture with `*/test_*` added to its
+exclude list — a production symbol that only its own tests still call is dead
+code by this project's policy.
+
 ## License
 
 This library is licensed under the MIT-0 License. See the [LICENSE](LICENSE) file.

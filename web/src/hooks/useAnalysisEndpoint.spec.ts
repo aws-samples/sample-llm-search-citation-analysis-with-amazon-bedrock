@@ -1,46 +1,31 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi 
 } from 'vitest';
+import { act } from '@testing-library/react';
 import {
-  renderHook, act 
-} from '@testing-library/react';
-import { useAnalysisEndpoint } from './useAnalysisEndpoint';
+  createEndpointMockFetch,
+  createMockJsonResponse,
+  createMockMalformedResponse,
+  type EndpointMockFetchOptions,
+} from '../test/fetchResponses';
 import {
-  buildProbeEndpoint,
-  createMockFetch,
-  createDeferredMockFetch,
+  renderProbeEndpoint,
+  renderDeferredProbeEndpoint,
   probeResponse,
   newerProbeResponse,
   ProbeRequestError,
   type ProbeResponse,
 } from './useAnalysisEndpoint-fixtures';
 
-vi.mock('../infrastructure', async () => {
-  const actual = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { authenticatedFetch } from '../infrastructure';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
-const mockAuthenticatedFetch = authenticatedFetch as ReturnType<typeof vi.fn>;
 
 describe('useAnalysisEndpoint', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   describe('initial state', () => {
     it('returns null data, loading false, and null error before any fetch', () => {
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
+      const { result } = renderProbeEndpoint();
 
       expect(result.current.data).toBeNull();
       expect(result.current.loading).toBe(false);
@@ -50,148 +35,102 @@ describe('useAnalysisEndpoint', () => {
 
   describe('fetchData', () => {
     it('stores and resolves the payload when the response passes the type guard', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(probeResponse));
+      const { result } = renderProbeEndpoint();
 
-      const holder: { value: ProbeResponse | null } = { value: null };
-      await act(async () => {
-        holder.value = await result.current.fetchData('best hotels');
-      });
+      const returned = await act(() => result.current.fetchData('best hotels'));
 
-      expect(holder.value).toStrictEqual(probeResponse);
+      expect(returned).toStrictEqual(probeResponse);
       expect(result.current.data).toStrictEqual(probeResponse);
       expect(result.current.error).toBeNull();
     });
 
     it('requests the built path and params against the API base URL', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(probeResponse));
+      const { result } = renderProbeEndpoint();
 
-      await act(async () => {
-        await result.current.fetchData('best hotels');
-      });
+      await act(() => result.current.fetchData('best hotels'));
 
-      const url = mockAuthenticatedFetch.mock.calls[0][0] as string;
-      expect(url).toBe('https://api.test.com/probe?keyword=best+hotels');
+      expect(mockAuthenticatedFetch.mock.calls[0][0]).toBe('https://api.test.com/probe?keyword=best+hotels');
     });
 
     it('passes an abort signal to authenticatedFetch', () => {
-      const deferred = createDeferredMockFetch();
-      mockAuthenticatedFetch.mockImplementation(deferred.impl);
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
+      const {
+        deferred, startFetch 
+      } = renderDeferredProbeEndpoint();
 
-      act(() => {
-        result.current.fetchData('best hotels');
-      });
+      startFetch('best hotels');
 
       expect(deferred.requests[0].signal).toBeInstanceOf(AbortSignal);
     });
 
-    it('sets the error state and resolves null when the response status is not ok', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
+    it.each<[failure: string, response: Response]>([
+      ['the response status is not ok', createMockJsonResponse({}, 500)],
+      ['the response body is not JSON', createMockMalformedResponse()],
+    ])('sets the error state and resolves null when %s', async (_failure, response) => {
+      mockAuthenticatedFetch.mockResolvedValue(response);
+      const { result } = renderProbeEndpoint();
 
-      const holder: { value: ProbeResponse | null } = { value: probeResponse };
-      await act(async () => {
-        holder.value = await result.current.fetchData('best hotels');
-      });
+      const returned = await act(() => result.current.fetchData('best hotels'));
 
-      expect(holder.value).toBeNull();
+      expect(returned).toBeNull();
       expect(result.current.error).toBeTruthy();
       expect(result.current.data).toBeNull();
     });
 
-    it('surfaces the backend {error} body message through the response error factory', async () => {
+    it.each<[message: string, body: string, options: EndpointMockFetchOptions<ProbeResponse>]>([
+      ['probe quota exceeded', 'a backend {error} body', { errorResponse: { error: 'probe quota exceeded' } }],
+      ['Invalid response format', 'a payload that fails the type guard', { invalidResponse: true }],
+    ])('logs a response-factory error reading "%s" when the response is %s', async (message, _body, options) => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(vi.fn());
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ response: { error: 'probe quota exceeded' } }));
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(probeResponse, options));
+      const { result } = renderProbeEndpoint();
 
-      await act(async () => {
-        await result.current.fetchData('best hotels');
-      });
+      await act(() => result.current.fetchData('best hotels'));
 
       const logged = consoleErrorSpy.mock.calls[0][1] as Error;
       expect(logged).toBeInstanceOf(ProbeRequestError);
-      expect(logged.message).toBe('probe quota exceeded');
+      expect(logged.message).toBe(message);
       expect(result.current.error).toBeTruthy();
-      consoleErrorSpy.mockRestore();
-    });
-
-    it('reports the invalid-format failure when the payload fails the type guard', async () => {
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(vi.fn());
-      mockAuthenticatedFetch.mockImplementation(createMockFetch({ response: { unrelated: true } }));
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
-
-      await act(async () => {
-        await result.current.fetchData('best hotels');
-      });
-
-      const logged = consoleErrorSpy.mock.calls[0][1] as Error;
-      expect(logged.message).toBe('Invalid response format');
-      expect(result.current.error).toBeTruthy();
-      consoleErrorSpy.mockRestore();
     });
   });
 
   describe('concurrent fetches', () => {
     it('aborts the previous in-flight request when a new fetch starts', () => {
-      const deferred = createDeferredMockFetch();
-      mockAuthenticatedFetch.mockImplementation(deferred.impl);
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
+      const {
+        deferred, startFetch 
+      } = renderDeferredProbeEndpoint();
 
-      act(() => {
-        result.current.fetchData('first');
-      });
-      act(() => {
-        result.current.fetchData('second');
-      });
+      startFetch('first');
+      startFetch('second');
 
       expect(deferred.requests[0].signal?.aborted).toBe(true);
       expect(deferred.requests[1].signal?.aborted).toBe(false);
     });
 
     it('resolves null for the aborted fetch and leaves the error state null', async () => {
-      const deferred = createDeferredMockFetch({ rejectOnAbort: true });
-      mockAuthenticatedFetch.mockImplementation(deferred.impl);
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
+      const {
+        deferred, result, startFetch 
+      } = renderDeferredProbeEndpoint({ rejectOnAbort: true });
 
-      const aborted: { promise: Promise<ProbeResponse | null> | null } = { promise: null };
-      act(() => {
-        aborted.promise = result.current.fetchData('first');
-      });
-      act(() => {
-        result.current.fetchData('second');
-      });
+      const aborted = startFetch('first');
+      startFetch('second');
       await act(async () => {
         deferred.requests[1].respond(probeResponse);
       });
 
-      await expect(aborted.promise).resolves.toBeNull();
+      await expect(aborted).resolves.toBeNull();
       expect(result.current.error).toBeNull();
       expect(result.current.data).toStrictEqual(probeResponse);
     });
 
     it('ignores a stale response that resolves after a newer request', async () => {
-      const deferred = createDeferredMockFetch();
-      mockAuthenticatedFetch.mockImplementation(deferred.impl);
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
+      const {
+        deferred, result, startFetch 
+      } = renderDeferredProbeEndpoint();
 
-      const stale: { promise: Promise<ProbeResponse | null> | null } = { promise: null };
-      act(() => {
-        stale.promise = result.current.fetchData('first');
-      });
-      act(() => {
-        result.current.fetchData('second');
-      });
+      const stale = startFetch('first');
+      startFetch('second');
       await act(async () => {
         deferred.requests[1].respond(newerProbeResponse);
       });
@@ -199,22 +138,17 @@ describe('useAnalysisEndpoint', () => {
         deferred.requests[0].respond(probeResponse);
       });
 
-      await expect(stale.promise).resolves.toBeNull();
+      await expect(stale).resolves.toBeNull();
       expect(result.current.data).toStrictEqual(newerProbeResponse);
     });
 
     it('keeps loading set until the current request settles', async () => {
-      const deferred = createDeferredMockFetch();
-      mockAuthenticatedFetch.mockImplementation(deferred.impl);
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
+      const {
+        deferred, result, startFetch 
+      } = renderDeferredProbeEndpoint();
 
-      act(() => {
-        result.current.fetchData('first');
-      });
-      act(() => {
-        result.current.fetchData('second');
-      });
+      startFetch('first');
+      startFetch('second');
 
       await act(async () => {
         deferred.requests[0].respond(probeResponse);
@@ -230,16 +164,11 @@ describe('useAnalysisEndpoint', () => {
 
   describe('unmount', () => {
     it('aborts the active request when the component unmounts', () => {
-      const deferred = createDeferredMockFetch();
-      mockAuthenticatedFetch.mockImplementation(deferred.impl);
-      const config = buildProbeEndpoint();
       const {
-        result, unmount 
-      } = renderHook(() => useAnalysisEndpoint(config));
+        deferred, startFetch, unmount 
+      } = renderDeferredProbeEndpoint();
 
-      act(() => {
-        result.current.fetchData('best hotels');
-      });
+      startFetch('best hotels');
       unmount();
 
       expect(deferred.requests[0].signal?.aborted).toBe(true);
@@ -248,34 +177,27 @@ describe('useAnalysisEndpoint', () => {
 
   describe('runRequest', () => {
     it('leaves stored data untouched when a secondary request resolves', async () => {
-      mockAuthenticatedFetch.mockImplementation(createMockFetch());
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
+      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(probeResponse));
+      const {
+        result, config 
+      } = renderProbeEndpoint();
 
-      const holder: { value: ProbeResponse | null } = { value: null };
-      await act(async () => {
-        holder.value = await result.current.runRequest({
-          path: '/probe',
-          params: new URLSearchParams({ keyword: 'secondary' }),
-        }, config);
-      });
+      const returned = await act(() => result.current.runRequest({
+        path: '/probe',
+        params: new URLSearchParams({ keyword: 'secondary' }),
+      }, config));
 
-      expect(holder.value).toStrictEqual(probeResponse);
+      expect(returned).toStrictEqual(probeResponse);
       expect(result.current.data).toBeNull();
     });
 
     it('aborts an in-flight secondary request when a new fetch starts', () => {
-      const deferred = createDeferredMockFetch();
-      mockAuthenticatedFetch.mockImplementation(deferred.impl);
-      const config = buildProbeEndpoint();
-      const { result } = renderHook(() => useAnalysisEndpoint(config));
+      const {
+        deferred, config, startRequest, startFetch 
+      } = renderDeferredProbeEndpoint();
 
-      act(() => {
-        result.current.runRequest({ path: '/probe' }, config);
-      });
-      act(() => {
-        result.current.fetchData('next');
-      });
+      startRequest((hook) => hook.runRequest({ path: '/probe' }, config));
+      startFetch('next');
 
       expect(deferred.requests[0].signal?.aborted).toBe(true);
     });

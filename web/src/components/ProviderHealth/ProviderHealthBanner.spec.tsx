@@ -22,7 +22,6 @@ const mockUseProviderConfig = vi.mocked(useProviderConfig);
 
 describe('ProviderHealthBanner', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     sessionStorage.clear();
     mockUseProviderConfig.mockReturnValue(buildProviderConfigHookResult());
   });

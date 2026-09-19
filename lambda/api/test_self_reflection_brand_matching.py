@@ -16,7 +16,6 @@ as fact for a day.
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import sys
 from typing import Any
@@ -24,8 +23,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.module_loader import load_handler_module
+
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.abspath(os.path.join(_API_DIR, '..'))
 _MODULE_NAME = 'self_reflection_under_test'
 
 _TEST_ENV = {
@@ -40,23 +40,12 @@ _TEST_ENV = {
 
 def _load_handler() -> Any:
     """Import the hyphenated handler module with AWS clients mocked."""
-    if _LAMBDA_DIR not in sys.path:
-        sys.path.insert(0, _LAMBDA_DIR)
-
     aws = MagicMock()
-
-    sys.modules.pop(_MODULE_NAME, None)
-    spec = importlib.util.spec_from_file_location(
-        _MODULE_NAME, os.path.join(_API_DIR, 'self-reflection.py')
-    )
-    module = importlib.util.module_from_spec(spec)
 
     with patch('boto3.client', return_value=aws), \
          patch('boto3.resource', return_value=aws), \
          patch.dict(os.environ, _TEST_ENV):
-        spec.loader.exec_module(module)
-
-    return module
+        return load_handler_module(_API_DIR, 'self-reflection.py', _MODULE_NAME)
 
 
 @pytest.fixture

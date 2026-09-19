@@ -4,6 +4,10 @@ import {
 import {
   renderHook, waitFor, act 
 } from '@testing-library/react';
+import {
+  createDeferredResponse, createMockJsonResponse 
+} from '../test/fetchResponses';
+import { POLL_FAST_INTERVAL_MS } from './researchPolling';
 import { useKeywordResearch } from './useKeywordResearch';
 import {
   mockHistoryItems,
@@ -11,23 +15,17 @@ import {
   buildStep,
   buildCompletedExpansionJob,
   buildCompletedCompetitorJob,
-  createResearchMockFetch,
+  runningJobResearchOptions,
 } from './useKeywordResearch-fixtures';
+import {
+  renderResearch, startCompetitorAnalysis, startExpansion 
+} from './useKeywordResearch-harness-fixtures';
 
-vi.mock('../infrastructure', async () => {
-  const actual: Record<string, unknown> = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { authenticatedFetch } from '../infrastructure';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
-const mockAuthenticatedFetch = vi.mocked(authenticatedFetch);
 
-const POLL_TICK_MS = 3000;
 const ACTIVE_JOB_STORAGE_KEY = 'keywordResearch.activeJob';
 
 interface RecordedCall {
@@ -57,46 +55,40 @@ function countJobPolls(): number {
 
 describe('useKeywordResearch', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     localStorage.clear();
     vi.useFakeTimers();
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.restoreAllMocks();
   });
 
   describe('initial state', () => {
     it('returns loading false initially', () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch());
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch();
       expect(result.current.loading).toBe(false);
     });
 
     it('returns null results and no active job initially', () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch());
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch();
       expect(result.current.expansionResult).toBeNull();
       expect(result.current.competitorResult).toBeNull();
       expect(result.current.activeJob).toBeNull();
     });
 
     it('returns empty history initially', () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch());
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch();
       expect(result.current.history).toStrictEqual([]);
     });
   });
 
   describe('expandKeywords', () => {
     it('sends the seed keyword, industry and count to the expand endpoint', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({snapshots: { 'job-1': [buildCompletedExpansionJob('job-1', 'test keyword')] },}));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ snapshots: { 'job-1': [buildCompletedExpansionJob('job-1', 'test keyword')] } });
 
       await act(async () => {
         void result.current.expandKeywords('test keyword', 'retail', 30);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
+        await vi.advanceTimersByTimeAsync(POLL_FAST_INTERVAL_MS);
       });
 
       const call = findCall((c) => c.method === 'POST' && c.url.endsWith('/keyword-research/expand'));
@@ -108,13 +100,9 @@ describe('useKeywordResearch', () => {
     });
 
     it('exposes the pending job as the active job before the first poll', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({snapshots: { 'job-1': [buildJob({ status: 'running' })] },}));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch(runningJobResearchOptions);
 
-      await act(async () => {
-        void result.current.expandKeywords('best hotels', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(0);
-      });
+      await startExpansion(result, 0);
 
       expect(result.current.activeJob?.id).toBe('job-1');
       expect(result.current.activeJob?.status).toBe('pending');
@@ -122,13 +110,9 @@ describe('useKeywordResearch', () => {
     });
 
     it('sets the expansion result when a poll finds the completed job', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({snapshots: { 'job-1': [buildCompletedExpansionJob('job-1', 'best hotels')] },}));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ snapshots: { 'job-1': [buildCompletedExpansionJob('job-1', 'best hotels')] } });
 
-      await act(async () => {
-        void result.current.expandKeywords('best hotels', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
-      });
+      await startExpansion(result);
 
       expect(result.current.expansionResult).toStrictEqual({
         id: 'job-1',
@@ -154,13 +138,9 @@ describe('useKeywordResearch', () => {
         steps_done: 1,
         steps: [buildStep('perplexity'), buildStep('openai', { status: 'running' }), buildStep('gemini', { status: 'pending' })],
       });
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({snapshots: { 'job-1': [running, buildCompletedExpansionJob('job-1', 'best hotels')] },}));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ snapshots: { 'job-1': [running, buildCompletedExpansionJob('job-1', 'best hotels')] } });
 
-      await act(async () => {
-        void result.current.expandKeywords('best hotels', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
-      });
+      await startExpansion(result);
 
       expect(result.current.activeJob?.steps_done).toBe(1);
       expect(result.current.activeJob?.steps?.map((step) => step.status)).toStrictEqual(['completed', 'running', 'pending']);
@@ -173,13 +153,9 @@ describe('useKeywordResearch', () => {
       partial.steps_total = 2;
       partial.steps_failed = 1;
       partial.error_message = 'perplexity: 401 invalid_api_key';
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({ snapshots: { 'job-1': [partial] } }));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ snapshots: { 'job-1': [partial] } });
 
-      await act(async () => {
-        void result.current.expandKeywords('best hotels', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
-      });
+      await startExpansion(result);
 
       expect(result.current.expansionResult?.keywords).toHaveLength(1);
       expect(result.current.activeJob?.status).toBe('partial');
@@ -191,13 +167,9 @@ describe('useKeywordResearch', () => {
         status: 'failed',
         error_message: 'openai: timeout; perplexity: 401' 
       });
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({ snapshots: { 'job-1': [failed] } }));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ snapshots: { 'job-1': [failed] } });
 
-      await act(async () => {
-        void result.current.expandKeywords('best hotels', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
-      });
+      await startExpansion(result);
 
       expect(result.current.error).toBe('openai: timeout; perplexity: 401');
       expect(result.current.expansionResult).toBeNull();
@@ -205,19 +177,16 @@ describe('useKeywordResearch', () => {
     });
 
     it('shows the server rejection when the job cannot be started', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({ startError: { error: 'Invalid keyword' } }));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ startError: { error: 'Invalid keyword' } });
 
-      await act(async () => {
-        await result.current.expandKeywords('test', 'hospitality', 10);
-      });
+      await act(() => result.current.expandKeywords('test', 'hospitality', 10));
 
       expect(result.current.error).toBe('Invalid keyword');
       expect(result.current.loading).toBe(false);
     });
 
     it('clears the previous result and active job when a new expansion starts', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({
+      const { result } = renderResearch({
         pendingIds: ['job-1', 'job-2'],
         snapshots: {
           'job-1': [buildCompletedExpansionJob('job-1', 'first')],
@@ -226,19 +195,12 @@ describe('useKeywordResearch', () => {
             status: 'running' 
           })],
         },
-      }));
-      const { result } = renderHook(() => useKeywordResearch());
-
-      await act(async () => {
-        void result.current.expandKeywords('first', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
       });
+
+      await startExpansion(result, POLL_FAST_INTERVAL_MS, 'first');
       expect(result.current.expansionResult?.id).toBe('job-1');
 
-      await act(async () => {
-        void result.current.expandKeywords('second', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(0);
-      });
+      await startExpansion(result, 0, 'second');
 
       expect(result.current.expansionResult).toBeNull();
       expect(result.current.activeJob?.id).toBe('job-2');
@@ -247,26 +209,18 @@ describe('useKeywordResearch', () => {
 
   describe('analyzeCompetitor', () => {
     it('sends the URL to the competitor endpoint', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({snapshots: { 'job-1': [buildCompletedCompetitorJob('job-1', 'https://test.com/page')] },}));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ snapshots: { 'job-1': [buildCompletedCompetitorJob('job-1', 'https://test.com/page')] } });
 
-      await act(async () => {
-        void result.current.analyzeCompetitor('https://test.com/page');
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
-      });
+      await startCompetitorAnalysis(result, 'https://test.com/page');
 
       const call = findCall((c) => c.method === 'POST' && c.url.endsWith('/keyword-research/competitor'));
       expect(JSON.parse(call?.body ?? '{}')).toStrictEqual({ url: 'https://test.com/page' });
     });
 
     it('maps the completed job analysis onto the competitor result', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({snapshots: { 'job-1': [buildCompletedCompetitorJob('job-1', 'https://competitor.com')] },}));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ snapshots: { 'job-1': [buildCompletedCompetitorJob('job-1', 'https://competitor.com')] } });
 
-      await act(async () => {
-        void result.current.analyzeCompetitor('https://competitor.com');
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
-      });
+      await startCompetitorAnalysis(result, 'https://competitor.com');
 
       expect(result.current.competitorResult?.url).toBe('https://competitor.com');
       expect(result.current.competitorResult?.industry).toBe('hospitality');
@@ -275,12 +229,9 @@ describe('useKeywordResearch', () => {
     });
 
     it('shows the server rejection when the URL is refused', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({ startError: { error: 'Invalid URL' } }));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ startError: { error: 'Invalid URL' } });
 
-      await act(async () => {
-        await result.current.analyzeCompetitor('invalid');
-      });
+      await act(() => result.current.analyzeCompetitor('invalid'));
 
       expect(result.current.error).toBe('Invalid URL');
     });
@@ -292,12 +243,11 @@ describe('useKeywordResearch', () => {
       partial.status = 'partial';
       const retried = buildCompletedExpansionJob('job-1', 'best hotels');
       retried.retry_count = 1;
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({ snapshots: { 'job-1': [retried] } }));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ snapshots: { 'job-1': [retried] } });
 
       await act(async () => {
         void result.current.retryResearch(partial);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
+        await vi.advanceTimersByTimeAsync(POLL_FAST_INTERVAL_MS);
       });
 
       const call = findCall((c) => c.method === 'POST' && c.url.endsWith('/keyword-research/job-1/retry'));
@@ -309,8 +259,7 @@ describe('useKeywordResearch', () => {
     it('shows the job while the retry is pending', async () => {
       const partial = buildCompletedExpansionJob('job-1', 'best hotels');
       partial.status = 'partial';
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({snapshots: { 'job-1': [buildJob({ status: 'running' })] },}));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch(runningJobResearchOptions);
 
       await act(async () => {
         void result.current.retryResearch(partial);
@@ -328,13 +277,12 @@ describe('useKeywordResearch', () => {
         id: 'job-9',
         type: 'expansion' 
       }));
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({snapshots: { 'job-9': [buildCompletedExpansionJob('job-9', 'resumed')] },}));
 
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ snapshots: { 'job-9': [buildCompletedExpansionJob('job-9', 'resumed')] } });
       expect(result.current.loading).toBe(true);
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
+        await vi.advanceTimersByTimeAsync(POLL_FAST_INTERVAL_MS);
       });
 
       expect(result.current.expansionResult?.seed_keyword).toBe('resumed');
@@ -342,13 +290,9 @@ describe('useKeywordResearch', () => {
     });
 
     it('remembers the job while it is still running', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({snapshots: { 'job-1': [buildJob({ status: 'running' })] },}));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch(runningJobResearchOptions);
 
-      await act(async () => {
-        void result.current.expandKeywords('best hotels', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
-      });
+      await startExpansion(result);
 
       expect(JSON.parse(localStorage.getItem(ACTIVE_JOB_STORAGE_KEY) ?? '{}')).toStrictEqual({
         id: 'job-1',
@@ -358,9 +302,8 @@ describe('useKeywordResearch', () => {
 
     it('ignores a malformed stored job', () => {
       localStorage.setItem(ACTIVE_JOB_STORAGE_KEY, '{"id": 7}');
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch());
 
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch();
 
       expect(result.current.loading).toBe(false);
       expect(countJobPolls()).toBe(0);
@@ -369,23 +312,17 @@ describe('useKeywordResearch', () => {
 
   describe('fetchHistory', () => {
     it('fetches and sets history', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch());
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch();
 
-      await act(async () => {
-        await result.current.fetchHistory();
-      });
+      await act(() => result.current.fetchHistory());
 
       expect(result.current.history).toStrictEqual(mockHistoryItems);
     });
 
     it('includes the type filter in the URL when provided', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch());
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch();
 
-      await act(async () => {
-        await result.current.fetchHistory('expansion');
-      });
+      await act(() => result.current.fetchHistory('expansion'));
 
       const call = findCall((c) => c.url.includes('/keyword-research/history'));
       expect(call?.url).toContain('type=expansion');
@@ -394,21 +331,15 @@ describe('useKeywordResearch', () => {
     it('sets historyLoading true while fetching', async () => {
       // waitFor needs real timers.
       vi.useRealTimers();
-      const pending: { resolve: (value: Response) => void } = { resolve: vi.fn() };
-      mockAuthenticatedFetch.mockImplementation(() => new Promise<Response>((resolve) => {
-        pending.resolve = resolve;
-      }));
+      const pendingHistory = createDeferredResponse();
+      mockAuthenticatedFetch.mockImplementation(() => pendingHistory.promise);
       const { result } = renderHook(() => useKeywordResearch());
 
       act(() => { void result.current.fetchHistory(); });
       expect(result.current.historyLoading).toBe(true);
 
       await act(async () => {
-        pending.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve({ items: [] }) 
-        } satisfies Partial<Response> as Response);
+        pendingHistory.resolve(createMockJsonResponse({ items: [] }));
       });
 
       await waitFor(() => expect(result.current.historyLoading).toBe(false));
@@ -417,26 +348,18 @@ describe('useKeywordResearch', () => {
 
   describe('deleteResearch', () => {
     it('removes the deleted item from history', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch());
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch();
 
-      await act(async () => {
-        await result.current.fetchHistory();
-      });
-      await act(async () => {
-        await result.current.deleteResearch('research-1');
-      });
+      await act(() => result.current.fetchHistory());
+      await act(() => result.current.deleteResearch('research-1'));
 
       expect(result.current.history.map((item) => item.id)).toStrictEqual(['research-2']);
     });
 
     it('calls the DELETE endpoint for the given id', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch());
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch();
 
-      await act(async () => {
-        await result.current.deleteResearch('research-123');
-      });
+      await act(() => result.current.deleteResearch('research-123'));
 
       const call = findCall((c) => c.method === 'DELETE');
       expect(call?.url).toBe('https://api.test.com/keyword-research/research-123');
@@ -449,114 +372,73 @@ describe('useKeywordResearch', () => {
   // to get a bogus timeout).
   describe('polling lifecycle (AUDIT 2.20)', () => {
     it('surfaces an auth error after the first poll when the session expires', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({
-        pollResponse: () => ({
-          ok: false,
-          status: 401,
-          json: () => Promise.resolve({}) 
-        }),
-      }));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ pollResponse: () => createMockJsonResponse({}, 401) });
 
-      await act(async () => {
-        void result.current.expandKeywords('best hotels', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
-      });
+      await startExpansion(result);
 
       expect(result.current.error).toBe('Authentication required for keyword research');
       expect(result.current.loading).toBe(false);
     });
 
     it('stops polling after an auth failure instead of retrying until timeout', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({
-        pollResponse: () => ({
-          ok: false,
-          status: 401,
-          json: () => Promise.resolve({}) 
-        }),
-      }));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ pollResponse: () => createMockJsonResponse({}, 401) });
 
-      await act(async () => {
-        void result.current.expandKeywords('best hotels', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 5);
-      });
+      await startExpansion(result, POLL_FAST_INTERVAL_MS * 5);
 
       expect(countJobPolls()).toBe(1);
     });
 
     it('stops polling when the job was deleted underneath it', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({ snapshots: {} }));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({ snapshots: {} });
 
-      await act(async () => {
-        void result.current.expandKeywords('best hotels', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 3);
-      });
+      await startExpansion(result, POLL_FAST_INTERVAL_MS * 3);
 
       expect(countJobPolls()).toBe(1);
       expect(result.current.error).toBe('Research data not found');
     });
 
     it('keeps polling through a transient server error', async () => {
-      const responses = [
-        {
-          ok: false,
-          status: 503,
-          json: () => Promise.resolve({}) 
-        },
-        {
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve(buildCompletedExpansionJob('job-1', 'best hotels')) 
-        },
+      const pollResponses = [
+        createMockJsonResponse({}, 503),
+        createMockJsonResponse(buildCompletedExpansionJob('job-1', 'best hotels')),
       ];
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({pollResponse: () => responses.shift() ?? responses[0],}));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch({pollResponse: () => pollResponses.shift() ?? createMockJsonResponse({}, 503),});
 
-      await act(async () => {
-        void result.current.expandKeywords('best hotels', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 2);
-      });
+      await startExpansion(result, POLL_FAST_INTERVAL_MS * 2);
 
       expect(countJobPolls()).toBe(2);
       expect(result.current.expansionResult?.id).toBe('job-1');
     });
 
     it('stops polling when the component unmounts mid-poll', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({snapshots: { 'job-1': [buildJob({ status: 'running' })] },}));
       const {
         result, unmount 
-      } = renderHook(() => useKeywordResearch());
+      } = renderResearch(runningJobResearchOptions);
 
-      await act(async () => {
-        void result.current.expandKeywords('best hotels', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
-      });
+      await startExpansion(result);
       expect(countJobPolls()).toBe(1);
 
       unmount();
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS * 5);
+        await vi.advanceTimersByTimeAsync(POLL_FAST_INTERVAL_MS * 5);
       });
 
       expect(countJobPolls()).toBe(1);
     });
 
     it('drops the superseded poll when a newer expansion starts', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({
+      const { result } = renderResearch({
         pendingIds: ['job-1', 'job-2'],
         snapshots: {
           'job-1': [buildCompletedExpansionJob('job-1', 'first seed')],
           'job-2': [buildCompletedExpansionJob('job-2', 'second seed')],
         },
-      }));
-      const { result } = renderHook(() => useKeywordResearch());
+      });
 
       await act(async () => {
         void result.current.expandKeywords('first seed', 'hospitality', 10);
         void result.current.expandKeywords('second seed', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(POLL_TICK_MS);
+        await vi.advanceTimersByTimeAsync(POLL_FAST_INTERVAL_MS);
       });
 
       // Only the second generation polled; the first exited without fetching.
@@ -566,13 +448,9 @@ describe('useKeywordResearch', () => {
     });
 
     it('slows down to ten-second polls after the first minute', async () => {
-      mockAuthenticatedFetch.mockImplementation(createResearchMockFetch({snapshots: { 'job-1': [buildJob({ status: 'running' })] },}));
-      const { result } = renderHook(() => useKeywordResearch());
+      const { result } = renderResearch(runningJobResearchOptions);
 
-      await act(async () => {
-        void result.current.expandKeywords('best hotels', 'hospitality', 10);
-        await vi.advanceTimersByTimeAsync(60_000);
-      });
+      await startExpansion(result, 60_000);
       expect(countJobPolls()).toBe(20);
 
       await act(async () => {

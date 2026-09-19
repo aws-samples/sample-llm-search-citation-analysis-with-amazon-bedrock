@@ -9,26 +9,15 @@ Covers:
 - list_statuses degrades gracefully when env var is missing
 """
 
-import importlib
-import importlib.util
 import json
 import os
-import sys
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Mount shared layer / fall back to lambda/ source tree.
-_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-_LAYER_PY = os.path.join(_REPO, 'lambda', 'layer', 'python')
-_LAMBDA_DIR = os.path.join(_REPO, 'lambda')
-if os.path.isdir(_LAYER_PY) and _LAYER_PY not in sys.path:
-    sys.path.insert(0, _LAYER_PY)
-elif _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-
-_layer_api_response = importlib.import_module('shared.api_response')
-sys.modules['shared.api_response'] = _layer_api_response
+from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.module_loader import load_handler_module
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -36,23 +25,15 @@ _API_DIR = os.path.dirname(os.path.abspath(__file__))
 def _load_module():
     """Load recommendation-status.py with boto3 patched out."""
     mock_table = MagicMock()
-    mock_dynamodb = MagicMock()
-    mock_dynamodb.Table.return_value = mock_table
+    mock_dynamodb = fake_dynamodb_resource(mock_table)
     # batch_get_item lives on the resource itself
     mock_dynamodb.batch_get_item.return_value = {'Responses': {}}
 
-    spec = importlib.util.spec_from_file_location(
-        'recommendation_status_under_test',
-        os.path.join(_API_DIR, 'recommendation-status.py'),
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules['recommendation_status_under_test'] = mod
-
-    with patch.dict(os.environ, {
-        'RECOMMENDATION_STATUS_TABLE': 'test-rec-status',
-    }):
-        with patch('boto3.resource', return_value=mock_dynamodb):
-            spec.loader.exec_module(mod)
+    with (
+        patch.dict(os.environ, {'RECOMMENDATION_STATUS_TABLE': 'test-rec-status'}),
+        patch('boto3.resource', return_value=mock_dynamodb),
+    ):
+        mod = load_handler_module(_API_DIR, 'recommendation-status.py')
 
     # Override the module-level dynamodb reference so subsequent
     # invocations use the mock too.
@@ -162,7 +143,6 @@ def test_post_persists_status_with_updated_at_and_ttl(loaded):
 
 
 def test_post_sets_ttl_approximately_90_days_in_the_future(loaded):
-    import time
     mod, table, _ddb = loaded
     mod.handler(_post_event('abc', {'status': 'in_progress'}), None)
     item = table.put_item.call_args.kwargs['Item']

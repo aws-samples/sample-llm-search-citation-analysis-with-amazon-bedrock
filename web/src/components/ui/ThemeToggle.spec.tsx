@@ -2,7 +2,7 @@ import {
   render, screen, fireEvent 
 } from '@testing-library/react';
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -13,10 +13,6 @@ import { useTheme } from '../../hooks/useTheme';
 const mockUseTheme = useTheme as ReturnType<typeof vi.fn>;
 
 describe('ThemeToggle', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('displays light mode label when theme is light', () => {
     mockUseTheme.mockReturnValue({
       theme: 'light',

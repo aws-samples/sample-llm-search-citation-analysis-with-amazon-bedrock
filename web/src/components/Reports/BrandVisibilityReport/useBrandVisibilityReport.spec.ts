@@ -9,24 +9,17 @@ vi.mock('../../../hooks/useHistoricalTrends', () => ({useHistoricalTrends: vi.fn
 
 import { useVisibilityMetrics } from '../../../hooks/useVisibilityMetrics';
 import { useHistoricalTrends } from '../../../hooks/useHistoricalTrends';
-import type { ReportScope } from '../../../types';
 import { ALL_SCOPE } from '../../ui/reportScope';
+import { keywordScope as kw } from '../../ui/reportScope-fixtures';
 
 const mockVisibility = useVisibilityMetrics as ReturnType<typeof vi.fn>;
 const mockTrends = useHistoricalTrends as ReturnType<typeof vi.fn>;
-
-
-const kw = (keyword: string): ReportScope => ({
-  kind: 'keyword',
-  keyword 
-});
 
 describe('useBrandVisibilityReport', () => {
   const fetchVisibilityMetrics = vi.fn();
   const fetchHistoricalTrends = vi.fn();
 
   beforeEach(() => {
-    vi.clearAllMocks();
     mockVisibility.mockReturnValue({
       data: {
         keyword: 'shoes',

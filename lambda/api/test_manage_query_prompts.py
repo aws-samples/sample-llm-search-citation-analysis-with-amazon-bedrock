@@ -6,43 +6,23 @@ Covers:
 - Validation ({keyword} placeholder, max prompts, field limits)
 """
 
-import importlib
 import json
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Mock shared modules before importing the handler
-# The Lambda layer normally puts shared/ at /opt/python/shared/
-# We need the parent of shared/ on the path so `from shared.xxx import` works
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))  # lambda/
+from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.module_loader import load_handler_module
 
-# Mock the DynamoDB table at module level
+# Mock the DynamoDB table at module level; boto3.resource is patched before
+# the handler module's import-time code runs.
 mock_table = MagicMock()
-mock_dynamodb = MagicMock()
-mock_dynamodb.Table.return_value = mock_table
+mock_dynamodb = fake_dynamodb_resource(mock_table)
 
-# Pre-patch boto3 before the handler module imports it
-_original_boto3_resource = None
-
-def _mock_boto3_resource(*args, **kwargs):
-    return mock_dynamodb
-
-# Import the handler module (has hyphens in filename)
-import importlib.util
-
-_handler_spec = importlib.util.spec_from_file_location(
-    'manage_query_prompts',
-    os.path.join(os.path.dirname(__file__), 'manage-query-prompts.py')
-)
-_handler_mod = importlib.util.module_from_spec(_handler_spec)
-
-# Patch boto3.resource before exec_module runs module-level code
-with patch('boto3.resource', side_effect=_mock_boto3_resource):
+with patch('boto3.resource', return_value=mock_dynamodb):
     with patch.dict(os.environ, {'QUERY_PROMPTS_TABLE': 'test-table', 'CORS_ORIGIN_PARAM': ''}):
-        _handler_spec.loader.exec_module(_handler_mod)
+        _handler_mod = load_handler_module(os.path.dirname(__file__), 'manage-query-prompts.py', 'manage_query_prompts')
 
 # Point the module's table reference to our mock
 _handler_mod.query_prompts_table = mock_table
@@ -91,6 +71,13 @@ def handler_module():
     """Provide the handler module with mocked DynamoDB."""
     _handler_mod.query_prompts_table = mock_table
     yield _handler_mod
+
+
+def _stored_prompt(enabled, toggled_to=None):
+    """Stage prompt `abc` as stored with `enabled`, and the row a toggle would return."""
+    mock_table.get_item.return_value = {'Item': {'id': 'abc', 'enabled': enabled}}
+    if toggled_to is not None:
+        mock_table.update_item.return_value = {'Attributes': {'id': 'abc', 'enabled': toggled_to}}
 
 
 class TestCreatePrompt:
@@ -165,12 +152,7 @@ class TestTogglePrompt:
 
     def test_toggle_enabled_to_disabled(self, handler_module):
         """Toggling an enabled prompt disables it."""
-        mock_table.get_item.return_value = {
-            'Item': {'id': 'abc', 'enabled': 'true'}
-        }
-        mock_table.update_item.return_value = {
-            'Attributes': {'id': 'abc', 'enabled': 'false'}
-        }
+        _stored_prompt('true', toggled_to='false')
         event = make_event('PATCH', path_params={'id': 'abc'})
         result = handler_module.handler(event, {})
         status, _ = parse_response(result)
@@ -181,12 +163,7 @@ class TestTogglePrompt:
 
     def test_toggle_disabled_to_enabled(self, handler_module):
         """Toggling a disabled prompt enables it."""
-        mock_table.get_item.return_value = {
-            'Item': {'id': 'abc', 'enabled': 'false'}
-        }
-        mock_table.update_item.return_value = {
-            'Attributes': {'id': 'abc', 'enabled': 'true'}
-        }
+        _stored_prompt('false', toggled_to='true')
         event = make_event('PATCH', path_params={'id': 'abc'})
         result = handler_module.handler(event, {})
         status, _ = parse_response(result)
@@ -363,10 +340,7 @@ class TestTogglePromptAdminPath:
     """
 
     def test_toggles_an_enabled_prompt_to_disabled(self, handler_module):
-        mock_table.get_item.return_value = {'Item': {'id': 'abc', 'enabled': 'true'}}
-        mock_table.update_item.return_value = {
-            'Attributes': {'id': 'abc', 'enabled': 'false'}
-        }
+        _stored_prompt('true', toggled_to='false')
         event = make_event('PATCH', path_params={'id': 'abc'})
 
         status, body = parse_response(handler_module.handler(event, {}))
@@ -375,7 +349,7 @@ class TestTogglePromptAdminPath:
         assert body['enabled'] == 'false'
 
     def test_toggles_against_the_path_id(self, handler_module):
-        mock_table.get_item.return_value = {'Item': {'id': 'abc', 'enabled': 'true'}}
+        _stored_prompt('true')
         event = make_event('PATCH', path_params={'id': 'abc'})
 
         handler_module.handler(event, {})
