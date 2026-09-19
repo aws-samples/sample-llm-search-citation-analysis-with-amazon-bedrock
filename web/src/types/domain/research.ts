@@ -77,6 +77,12 @@ export interface ResearchKeyword {
   dimension?: string;
   /** Research agent: why the final selection kept this keyword. */
   rationale?: string;
+  /** Research agent: whether this keyword is in the recommended tracked subset. */
+  tracking?: boolean;
+  /** Demand-proxy score based on available relevance, intent and source signals. */
+  tracking_score?: number;
+  /** Concise explanation of the available signals behind the tracking score. */
+  tracking_reason?: string;
   /** Where a provider found the keyword (free text). */
   source?: string;
 }
@@ -150,6 +156,8 @@ export interface AgentConfig {
   dimensions: string[];
   instruction: string;
   target_count: number;
+  /** Requested recommendation size; absent only on legacy jobs. */
+  tracking_count?: number;
   max_rounds: number;
   group_id: string | null;
   subject: string;
@@ -239,6 +247,8 @@ export interface KeywordResearchItem {
   template_name?: string;
   /** Candidates found before the final selection. */
   candidates_count?: number;
+  /** Actual number of proposal entries marked for tracking after finalization. */
+  tracking_count?: number;
   /** How the final list was produced: by the model, or the top candidates when it failed. */
   proposal_source?: 'model' | 'fallback' | 'none';
   created_by?: string;

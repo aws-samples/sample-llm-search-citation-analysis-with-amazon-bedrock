@@ -14,6 +14,9 @@ export const AGENT_DEFAULT_ROUNDS = 2;
 export const AGENT_DEFAULT_TARGET_COUNT = 60;
 export const AGENT_MIN_TARGET_COUNT = 10;
 export const AGENT_MAX_TARGET_COUNT = 100;
+export const AGENT_DEFAULT_TRACKING_COUNT = 15;
+export const AGENT_MIN_TRACKING_COUNT = 1;
+export const AGENT_MAX_TRACKING_COUNT = 50;
 export const AGENT_INSTRUCTION_MAX_LENGTH = 1000;
 export const SYSTEM_PROMPT_MAX_LENGTH = 6000;
 export const SYSTEM_PROMPT_MIN_LENGTH = 20;
@@ -195,6 +198,8 @@ export function briefProblems(brief: {
   dimensions: readonly string[];
   country: string;
   language: string;
+  targetCount: number;
+  trackingCount: number;
   systemPrompt: string;
 }): string[] {
   const problems: string[] = [];
@@ -202,6 +207,10 @@ export function briefProblems(brief: {
   if (brief.dimensions.length === 0) problems.push('Pick at least one expansion dimension.');
   if (!/^[a-z]{2}$/i.test(brief.country.trim())) problems.push('Country must be a two-letter code (e.g. es).');
   if (!/^[a-z]{2}$/i.test(brief.language.trim())) problems.push('Language must be a two-letter code (e.g. es).');
+  if (brief.trackingCount < AGENT_MIN_TRACKING_COUNT || brief.trackingCount > AGENT_MAX_TRACKING_COUNT) {
+    problems.push(`Tracking keywords must be between ${AGENT_MIN_TRACKING_COUNT} and ${AGENT_MAX_TRACKING_COUNT}.`);
+  }
+  if (brief.trackingCount > brief.targetCount) problems.push('Tracking keywords cannot exceed target keywords.');
   if (brief.systemPrompt.trim().length < SYSTEM_PROMPT_MIN_LENGTH) problems.push('The agent instructions are too short.');
   if (brief.systemPrompt.length > SYSTEM_PROMPT_MAX_LENGTH) problems.push(`The agent instructions exceed ${SYSTEM_PROMPT_MAX_LENGTH} characters.`);
   return problems;

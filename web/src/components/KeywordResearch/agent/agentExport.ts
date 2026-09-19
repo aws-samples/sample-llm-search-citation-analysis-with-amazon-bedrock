@@ -4,8 +4,14 @@ import type {
 } from '../../../types';
 import { researchExcelFileName } from '../researchExport';
 import {
-  dimensionLabel, runCatalog
+  AGENT_DEFAULT_TRACKING_COUNT, dimensionLabel, runCatalog
 } from './agentBrief';
+
+function trackingExportLabel(tracking: boolean | undefined): string {
+  if (tracking === true) return 'Recommended';
+  if (tracking === false) return 'Library';
+  return '';
+}
 
 /** Proposal sheet rows, grouped the way the review table shows them; labels from the run's catalogue. */
 export function proposalExcelRows(keywords: ResearchKeyword[], catalog: readonly AgentDimensionOption[]): Record<string, unknown>[] {
@@ -13,6 +19,9 @@ export function proposalExcelRows(keywords: ResearchKeyword[], catalog: readonly
     Rank: index + 1,
     Keyword: keyword.keyword,
     Dimension: dimensionLabel(keyword.dimension, catalog),
+    Tracking: trackingExportLabel(keyword.tracking),
+    'Tracking score': keyword.tracking_score ?? '',
+    'Tracking reason': keyword.tracking_reason ?? '',
     Intent: keyword.intent ?? '',
     Competition: keyword.competition ?? '',
     Relevance: keyword.relevance ?? '',
@@ -36,9 +45,29 @@ export function traceExcelRows(job: KeywordResearchItem): Record<string, unknown
   })));
 }
 
+interface TrackingBriefCounts {
+  configured: number | '';
+  actual: number | '';
+}
+
+function trackingBriefCounts(job: KeywordResearchItem): TrackingBriefCounts {
+  const config = job.config;
+  const configured = config === undefined
+    ? ''
+    : config.tracking_count ?? Math.min(AGENT_DEFAULT_TRACKING_COUNT, config.target_count);
+  const proposal = job.keywords ?? [];
+  const marked = proposal.filter((keyword) => keyword.tracking === true).length;
+  const hasMarks = proposal.some((keyword) => keyword.tracking !== undefined);
+  return {
+    configured,
+    actual: job.tracking_count ?? (hasMarks ? marked : ''),
+  };
+}
+
 export function briefExcelRows(job: KeywordResearchItem): Record<string, unknown>[] {
   const config = job.config;
   const catalog = runCatalog(job);
+  const tracking = trackingBriefCounts(job);
   return [{
     Business: config?.seed ?? job.seed_keyword ?? '',
     Subject: config?.subject ?? '',
@@ -48,6 +77,9 @@ export function briefExcelRows(job: KeywordResearchItem): Record<string, unknown
     Dimensions: (config?.dimensions ?? []).map((dimension) => dimensionLabel(dimension, catalog)).join(', '),
     Instruction: config?.instruction ?? '',
     'Target keywords': config?.target_count ?? '',
+    'Configured tracking keywords': tracking.configured,
+    'Actual tracking keywords': tracking.actual,
+    'Tracking interpretation': 'Demand proxy based on available signals; not measured search volume.',
     'Max rounds': config?.max_rounds ?? '',
     Template: job.template_name ?? '',
     Status: job.status ?? '',
@@ -65,7 +97,10 @@ export async function exportAgentRun(job: KeywordResearchItem, keywords: Researc
     {
       name: 'Proposal',
       data: proposalExcelRows(keywords, runCatalog(job)),
-      columns: [{ wch: 6 }, { wch: 45 }, { wch: 22 }, { wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 60 }, { wch: 28 }],
+      columns: [
+        { wch: 6 }, { wch: 45 }, { wch: 22 }, { wch: 16 }, { wch: 14 }, { wch: 60 },
+        { wch: 16 }, { wch: 14 }, { wch: 10 }, { wch: 60 }, { wch: 28 },
+      ],
     },
     {
       name: 'Trace',
@@ -75,7 +110,11 @@ export async function exportAgentRun(job: KeywordResearchItem, keywords: Researc
     {
       name: 'Brief',
       data: briefExcelRows(job),
-      columns: [{ wch: 28 }, { wch: 14 }, { wch: 18 }, { wch: 8 }, { wch: 8 }, { wch: 45 }, { wch: 45 }, { wch: 10 }, { wch: 10 }, { wch: 28 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 22 }],
+      columns: [
+        { wch: 28 }, { wch: 14 }, { wch: 18 }, { wch: 8 }, { wch: 8 }, { wch: 45 },
+        { wch: 45 }, { wch: 10 }, { wch: 14 }, { wch: 14 }, { wch: 70 }, { wch: 10 },
+        { wch: 28 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 22 }, { wch: 22 },
+      ],
     },
   ], researchExcelFileName(title));
 }

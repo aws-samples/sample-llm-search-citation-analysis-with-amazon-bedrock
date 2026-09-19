@@ -6,7 +6,9 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AgentRunDetail } from './AgentRunDetail';
-import { buildAgentJob } from './agent-fixtures';
+import {
+  buildAgentConfig, buildAgentJob
+} from './agent-fixtures';
 import type { KeywordResearchItem } from '../../../types';
 
 vi.mock('../../../infrastructure', () => import('../../../test/infrastructureMock'));
@@ -25,6 +27,29 @@ describe('AgentRunDetail', () => {
     expect(screen.getByText('Destination, Audience')).toBeInTheDocument();
     expect(screen.getByText('ES · es')).toBeInTheDocument();
     expect(screen.getByText('Hotels')).toBeInTheDocument();
+  });
+
+  it('summarises tracking configuration against the actual recommendation count', () => {
+    renderDetail(buildAgentJob());
+
+    expect(screen.getByText('2 configured · 2 recommended · demand proxy, not measured volume')).toBeInTheDocument();
+  });
+
+  it('uses the target-bounded tracking default for a legacy brief', () => {
+    const job = buildAgentJob({
+      tracking_count: undefined,
+      keywords: (buildAgentJob().keywords ?? []).map((keyword) => ({
+        ...keyword,
+        tracking: undefined,
+      })),
+      config: buildAgentConfig({
+        target_count: 10,
+        tracking_count: undefined,
+      }),
+    });
+    renderDetail(job);
+
+    expect(screen.getByText('10 configured · demand proxy, not measured volume')).toBeInTheDocument();
   });
 
   it('puts the proposal right before the collapsed reasoning trace when the run has finished', () => {

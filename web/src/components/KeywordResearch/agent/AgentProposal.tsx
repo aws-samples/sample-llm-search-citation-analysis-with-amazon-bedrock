@@ -51,11 +51,17 @@ function relevanceClass(relevance: number): string {
   return 'text-gray-400';
 }
 
+function trackingLabel(keyword: ResearchKeyword): string {
+  if (keyword.tracking === true) return 'Recommended';
+  if (keyword.tracking === false) return 'Library';
+  return 'Not scored (legacy run)';
+}
+
 /**
- * The agent's final list, grouped by dimension with checkboxes, ready to be
- * added to a keyword group in one click (Epic E output) and exported to
- * Excel with its trace (R9). Section order and labels follow the run's own
- * dimension catalogue.
+ * The agent's final list, grouped by dimension with adjustable tracking
+ * checkboxes. Recommended terms start selected. Operators can either add only
+ * that active selection or save the whole proposal in one mixed-status request
+ * (selected active, unselected inactive), preserving the chosen group.
  */
 export function AgentProposal({
   job, keywords, groups, onKeywordsAdded
@@ -63,20 +69,23 @@ export function AgentProposal({
   const [groupId, setGroupId] = useState(job.config?.group_id ?? '');
   const [exporting, setExporting] = useState(false);
   const groupIds = useMemo(() => (groupId === '' ? [] : [groupId]), [groupId]);
+  const recommendedKeywords = useMemo(
+    () => keywords.filter((keyword) => keyword.tracking === true).map((keyword) => keyword.keyword),
+    [keywords]
+  );
   const promotion = usePromoteKeywords(keywords, onKeywordsAdded, { groupIds });
   const {
-    clearSelection, toggle, selected
+    replaceSelection, toggle, selected
   } = promotion;
   const selectedKeys = useMemo(() => new Set(selected), [selected]);
   const sections = useMemo(() => groupProposalByDimension(keywords, runCatalog(job)), [keywords, job]);
   const groupName = groups.find((group) => group.id === groupId)?.name;
-  const countText = promotion.selectedCount > 0 ? `${promotion.selectedCount} ` : '';
   const targetText = groupName === undefined ? '' : ` to “${groupName}”`;
-  const addLabel = `Add ${countText}keywords${targetText}`;
+  const inactiveCount = keywords.length - promotion.selectedCount;
 
   useEffect(() => {
-    clearSelection();
-  }, [job.id, clearSelection]);
+    replaceSelection(recommendedKeywords);
+  }, [job.id, recommendedKeywords, replaceSelection]);
 
   useEffect(() => {
     setGroupId(job.config?.group_id ?? '');
@@ -93,8 +102,8 @@ export function AgentProposal({
     setExporting(true);
     try {
       await exportAgentRun(job, keywords);
-    } catch (err) {
-      console.error('[research-agent] Error exporting run:', err);
+    } catch (exportError) {
+      console.error('[research-agent] Error exporting run:', exportError);
     } finally {
       setExporting(false);
     }
@@ -115,8 +124,11 @@ export function AgentProposal({
             </h4>
             <p className="text-xs text-gray-500 mt-0.5">
               {job.proposal_source === 'fallback'
-                ? 'The selection model was unavailable; showing the top candidates by relevance.'
-                : 'Ranked by the agent; tick the ones to track and add them to a keyword group.'}
+                ? 'The selection model was unavailable; showing the deterministic fallback proposal.'
+                : 'Ranked by the agent; adjust the recommended tracking subset before adding keywords.'}
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Tracking recommendations are a demand proxy based on relevance, intent, provider agreement and Google signals—not measured search volume.
             </p>
           </div>
           <Button type="button" variant="secondary" size="sm" disabled={exporting} onClick={() => void handleExport()}>
@@ -124,7 +136,7 @@ export function AgentProposal({
           </Button>
         </div>
 
-        <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+        <div className="flex flex-col lg:flex-row lg:items-end gap-3">
           <div className="flex-1">
             <label htmlFor={`agent-group-${job.id}`} className="block text-xs text-gray-600 mb-1">Keyword group</label>
             <select
@@ -139,15 +151,42 @@ export function AgentProposal({
                 .map((group) => <option key={group.id} value={group.id}>{group.name} ({group.keyword_count})</option>)}
             </select>
           </div>
-          <p className="text-sm text-gray-600 sm:pb-2">{promotion.selectedCount} of {SELECTION_LIMIT} selected</p>
-          <Button type="button" disabled={!promotion.canPromote} onClick={() => void promotion.promote()}>
-            {promotion.submitting ? (
-              <>
-                <Spinner size="sm" />
-                Adding…
-              </>
-            ) : addLabel}
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={recommendedKeywords.length === 0 || promotion.submitting}
+            onClick={() => replaceSelection(recommendedKeywords)}
+          >
+            Reset to recommended ({recommendedKeywords.length})
           </Button>
+        </div>
+
+        <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 space-y-2">
+          <p
+            className="text-sm text-gray-700"
+            aria-label={`${promotion.selectedCount} selected active tracked keywords, ${inactiveCount} unselected inactive library keywords`}
+          >
+            <strong>{promotion.selectedCount}</strong> selected → active tracked keywords · <strong>{inactiveCount}</strong> unselected → inactive library keywords
+          </p>
+          <p className="text-xs text-gray-500">Selection limit: {SELECTION_LIMIT}. Inactive library keywords stay in the group but are excluded from analysis runs.</p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button type="button" disabled={!promotion.canPromote} onClick={() => void promotion.promote()}>
+              {promotion.submittingAction === 'selected' ? (
+                <>
+                  <Spinner size="sm" />
+                  Adding selected…
+                </>
+              ) : `Add selected as active (${promotion.selectedCount})${targetText}`}
+            </Button>
+            <Button type="button" variant="secondary" disabled={!promotion.canPromoteProposal} onClick={() => void promotion.promoteProposal()}>
+              {promotion.submittingAction === 'proposal' ? (
+                <>
+                  <Spinner size="sm" />
+                  Adding full proposal…
+                </>
+              ) : `Add full proposal (${promotion.selectedCount} active, ${inactiveCount} inactive)${targetText}`}
+            </Button>
+          </div>
         </div>
 
         <output className="block space-y-1">
@@ -176,10 +215,11 @@ export function AgentProposal({
                     <tr className="text-left text-xs text-gray-500">
                       <th className="w-8 py-1" scope="col"><span className="sr-only">Select</span></th>
                       <th className="py-1 pr-3 font-medium" scope="col">Keyword</th>
+                      <th className="py-1 pr-3 font-medium" scope="col">Tracking recommendation</th>
                       <th className="py-1 pr-3 font-medium" scope="col">Intent</th>
                       <th className="py-1 pr-3 font-medium" scope="col">Competition</th>
                       <th className="py-1 pr-3 font-medium" scope="col">Relevance</th>
-                      <th className="py-1 pr-3 font-medium hidden lg:table-cell" scope="col">Why</th>
+                      <th className="py-1 pr-3 font-medium hidden lg:table-cell" scope="col">Why proposed</th>
                       <th className="py-1 font-medium hidden md:table-cell" scope="col">Sources</th>
                     </tr>
                   </thead>
@@ -193,6 +233,11 @@ export function AgentProposal({
                             <input type="checkbox" checked={checked} onChange={() => toggle(keyword.keyword)} aria-label={`Select ${keyword.keyword}`} className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-500" />
                           </td>
                           <td className="py-1.5 pr-3 font-medium text-gray-900">{keyword.keyword}</td>
+                          <td className="py-1.5 pr-3 text-gray-600 max-w-sm">
+                            <span className={keyword.tracking === true ? 'font-medium text-green-700' : ''}>{trackingLabel(keyword)}</span>
+                            {keyword.tracking_score !== undefined && <span className="block text-xs">Score {keyword.tracking_score}</span>}
+                            {keyword.tracking_reason && <span className="block text-xs text-gray-500">{keyword.tracking_reason}</span>}
+                          </td>
                           <td className="py-1.5 pr-3 text-gray-600 capitalize">{keyword.intent}</td>
                           <td className="py-1.5 pr-3 text-gray-600 capitalize">{keyword.competition}</td>
                           <td className={`py-1.5 pr-3 font-medium ${relevanceClass(keyword.relevance)}`}>{keyword.relevance}</td>

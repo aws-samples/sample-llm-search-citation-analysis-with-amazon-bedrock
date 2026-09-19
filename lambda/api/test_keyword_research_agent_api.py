@@ -98,10 +98,30 @@ class TestStartAgent:
         item = started['research_table'].put_item.call_args.kwargs['Item']
         assert item['config'] == {
             'seed': 'Hotel Gran Marino', 'country': 'es', 'language': 'es', 'dimensions': ['destination', 'audience'],
-            'instruction': 'also events', 'target_count': 50, 'max_rounds': 2, 'group_id': None,
+            'instruction': 'also events', 'target_count': 50, 'tracking_count': 15, 'max_rounds': 2, 'group_id': None,
             'subject': 'hotel', 'audience': 'travellers', 'dimension_catalog': LEGACY_DIMENSION_CATALOG,
         }
         assert (item['seed_keyword'], item['rounds'], item['created_by']) == ('Hotel Gran Marino', [], 'bastian')
+
+    def test_persists_an_explicit_tracking_count(self, started):
+        _mod.handler(_agent_event(tracking_count=12), None)
+
+        config = started['research_table'].put_item.call_args.kwargs['Item']['config']
+        assert config['tracking_count'] == 12
+
+    def test_resolves_an_omitted_tracking_count_to_a_shorter_target(self, started):
+        _mod.handler(_agent_event(target_count=10), None)
+
+        config = started['research_table'].put_item.call_args.kwargs['Item']['config']
+        assert config['tracking_count'] == 10
+
+    def test_rejects_an_explicit_tracking_count_above_the_target(self, started):
+        response = _mod.handler(_agent_event(target_count=10, tracking_count=11), None)
+
+        assert response['statusCode'] == 400
+        assert _body(response)['field'] == 'tracking_count'
+        assert _body(response)['error'] == 'tracking_count cannot exceed target_count'
+        started['research_table'].put_item.assert_not_called()
 
     def test_snapshots_the_industry_profile_of_the_chosen_template(self, started):
         _mod.handler(_agent_event(template_id='builtin-cafes', dimensions=['menu', 'occasion']), None)
@@ -199,6 +219,10 @@ class TestStartAgent:
         ({'country': 'spain'}, 'country'),
         ({'language': '1'}, 'language'),
         ({'target_count': 5}, 'target_count'),
+        ({'tracking_count': 0}, 'tracking_count'),
+        ({'tracking_count': 51}, 'tracking_count'),
+        ({'tracking_count': None}, 'tracking_count'),
+        ({'tracking_count': True}, 'tracking_count'),
         ({'max_rounds': 4}, 'max_rounds'),
         ({'seed': 'x'}, 'seed'),
         ({'system_prompt': '   '}, 'system_prompt'),

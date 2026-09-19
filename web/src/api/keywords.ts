@@ -6,8 +6,13 @@ import type {
   Keyword, KeywordExtended, ResearchKeyword
 } from '../types';
 
-interface PromoteKeywordsOptions {
-  keywords: ResearchKeyword[];
+export type PromoteKeywordEntry = ResearchKeyword & {
+  /** Overrides the request-level status for this keyword only. */
+  status?: NonNullable<Keyword['status']>;
+};
+
+export interface PromoteKeywordsOptions {
+  keywords: PromoteKeywordEntry[];
   status?: NonNullable<Keyword['status']>;
   priority?: NonNullable<KeywordExtended['priority']>;
   /** Keyword groups the new keywords join (e.g. the hotel a research run was for). */

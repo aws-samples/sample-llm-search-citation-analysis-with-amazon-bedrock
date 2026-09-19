@@ -32,7 +32,12 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from shared.research_agent import LEGACY_AUDIENCE, LEGACY_DIMENSION_CATALOG, LEGACY_SUBJECT
+from shared.research_agent import (
+    LEGACY_AUDIENCE,
+    LEGACY_DIMENSION_CATALOG,
+    LEGACY_SUBJECT,
+    config_tracking_count,
+)
 from shared.utils import get_timestamp, normalize_keyword
 
 STATUS_PENDING = 'pending'
@@ -258,16 +263,21 @@ def public_view(job: dict[str, Any], *, include_raw: bool = False) -> dict[str, 
 
 
 def with_legacy_profile(config: dict[str, Any]) -> dict[str, Any]:
-    """An agent config with subject, audience and dimension catalogue present.
+    """An agent config with its profile and resolved tracking count present.
 
-    Runs from before 2.6.0 stored none of the three; they were all hotel
-    runs, so the hotel template's values are what they researched with. The
-    stored row is never touched — only the API view is completed.
+    Runs from before 2.6.0 stored none of the profile fields; they were all
+    hotel runs. Runs from before tracking recommendations stored no
+    ``tracking_count``; they read as ``min(15, target_count)``. The stored row
+    is never touched — only the API view is completed.
     """
-    if config.get('dimension_catalog'):
-        return config
-    return {
+    completed = {
         **config,
+        'tracking_count': config_tracking_count(config),
+    }
+    if config.get('dimension_catalog'):
+        return completed
+    return {
+        **completed,
         'subject': config.get('subject') or LEGACY_SUBJECT,
         'audience': config.get('audience') or LEGACY_AUDIENCE,
         'dimension_catalog': [dict(dimension) for dimension in LEGACY_DIMENSION_CATALOG],

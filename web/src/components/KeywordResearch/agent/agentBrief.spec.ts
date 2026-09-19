@@ -23,6 +23,8 @@ const VALID_BRIEF = {
   dimensions: ['destination'] as const,
   country: 'es',
   language: 'es',
+  targetCount: 60,
+  trackingCount: 15,
   systemPrompt: 'You are a hotel SEO researcher for a hotel group.',
 };
 
@@ -164,6 +166,32 @@ describe('briefProblems', () => {
       'Country must be a two-letter code (e.g. es).',
       'Language must be a two-letter code (e.g. es).',
     ]);
+  });
+
+  it('rejects a tracking count above the proposal target', () => {
+    expect(briefProblems({
+      ...VALID_BRIEF,
+      dimensions: [...VALID_BRIEF.dimensions],
+      targetCount: 10,
+      trackingCount: 11,
+    })).toStrictEqual(['Tracking keywords cannot exceed target keywords.']);
+  });
+
+  it.each([
+    {
+      trackingCount: 0,
+      position: 'below',
+    },
+    {
+      trackingCount: 51,
+      position: 'above',
+    },
+  ])('rejects a tracking count when it is $position the supported range', ({ trackingCount }) => {
+    expect(briefProblems({
+      ...VALID_BRIEF,
+      dimensions: [...VALID_BRIEF.dimensions],
+      trackingCount,
+    })).toStrictEqual(['Tracking keywords must be between 1 and 50.']);
   });
 
   it('rejects instructions that are too short', () => {

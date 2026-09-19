@@ -18,9 +18,11 @@ import {
   availableKeywordFixtures,
   createMockPromotionRequest,
   createdKeywordItemFixture,
+  fullProposalKeywordFixtures,
   renderPendingPromotion,
   renderSelectedPromotion,
   replacementAvailableKeywordFixtures,
+  successfulFullProposalResponseFixture,
 } from './usePromoteKeywords-fixtures';
 
 import type {
@@ -112,6 +114,23 @@ describe('Property 12: Selection toggling never exceeds the 500-item cap', () =>
       expect(finalState.selected.length).toBeLessThanOrEqual(SELECTION_LIMIT);
     }
   );
+});
+
+describe('recommended selection replacement', () => {
+  it('replaces the current selection with normalized unique recommendation keys', () => {
+    const selection = reduceSelection({
+      selected: ['old'],
+      limitMessage: SELECTION_LIMIT_MESSAGE,
+    }, {
+      type: 'replace',
+      keywords: [' Alpha ', 'ＡＬＰＨＡ', 'beta'],
+    });
+
+    expect(selection).toStrictEqual({
+      selected: ['alpha', 'beta'],
+      limitMessage: null,
+    });
+  });
 });
 
 /**
@@ -345,6 +364,92 @@ describe('promotionSuccessMessage', () => {
       expect(message).toBe(expectedMessage);
     }
   );
+});
+
+describe('full proposal promotion', () => {
+  it('sends the full proposal with per-keyword statuses in one grouped request', async () => {
+    mockApiPost.mockResolvedValue(successfulFullProposalResponseFixture);
+    const onKeywordsAdded = vi.fn();
+    const { result } = renderHook(() => usePromoteKeywords(
+      fullProposalKeywordFixtures,
+      onKeywordsAdded,
+      { groupIds: ['g1'] }
+    ));
+    act(() => {
+      result.current.replaceSelection(['alpha']);
+    });
+
+    await act(async () => {
+      await result.current.promoteProposal();
+    });
+
+    expect(mockApiPost).toHaveBeenCalledTimes(1);
+    expect(mockApiPost).toHaveBeenCalledWith(
+      '/keywords/promote',
+      {
+        keywords: [
+          {
+            ...fullProposalKeywordFixtures[0],
+            status: 'active',
+          },
+          {
+            ...fullProposalKeywordFixtures[1],
+            status: 'inactive',
+          },
+        ],
+        group_ids: ['g1'],
+      },
+      {
+        signal: expect.objectContaining({ aborted: false }),
+        allowStructured4xx: true,
+      }
+    );
+    expect(onKeywordsAdded).toHaveBeenCalledWith([createdKeywordItemFixture]);
+  });
+
+  it('keeps the adjusted active selection after the full proposal is added', async () => {
+    mockApiPost.mockResolvedValue(successfulFullProposalResponseFixture);
+    const { result } = renderHook(() => usePromoteKeywords(fullProposalKeywordFixtures));
+    act(() => {
+      result.current.replaceSelection(['alpha']);
+    });
+
+    await act(async () => {
+      await result.current.promoteProposal();
+    });
+
+    expect(result.current.selected).toStrictEqual(['alpha']);
+    expect(result.current.outcome).toStrictEqual({
+      created: 2,
+      skipped: 0,
+      createdKeywords: ['alpha', 'beta'],
+      createdItems: successfulFullProposalResponseFixture.created_keywords,
+      skippedKeywords: [],
+    });
+  });
+
+  it('marks every proposal term inactive when the active selection is empty', async () => {
+    mockApiPost.mockResolvedValue(successfulFullProposalResponseFixture);
+    const { result } = renderHook(() => usePromoteKeywords(fullProposalKeywordFixtures));
+
+    await act(async () => {
+      await result.current.promoteProposal();
+    });
+
+    expect(mockApiPost).toHaveBeenCalledWith(
+      '/keywords/promote',
+      {
+        keywords: fullProposalKeywordFixtures.map((keyword) => ({
+          ...keyword,
+          status: 'inactive',
+        })),
+      },
+      {
+        signal: expect.objectContaining({ aborted: false }),
+        allowStructured4xx: true,
+      }
+    );
+  });
 });
 
 describe('promotion request safety', () => {

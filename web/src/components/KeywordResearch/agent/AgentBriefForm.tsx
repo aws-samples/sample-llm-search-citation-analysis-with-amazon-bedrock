@@ -13,10 +13,13 @@ import { AgentTemplateEditor } from './AgentTemplateEditor';
 import {
   AGENT_DEFAULT_ROUNDS,
   AGENT_DEFAULT_TARGET_COUNT,
+  AGENT_DEFAULT_TRACKING_COUNT,
   AGENT_INSTRUCTION_MAX_LENGTH,
   AGENT_MAX_ROUNDS,
   AGENT_MAX_TARGET_COUNT,
+  AGENT_MAX_TRACKING_COUNT,
   AGENT_MIN_TARGET_COUNT,
+  AGENT_MIN_TRACKING_COUNT,
   BUILTIN_TEMPLATE_ID,
   COUNTRY_OPTIONS,
   LANGUAGE_OPTIONS,
@@ -100,6 +103,7 @@ export function AgentBriefForm({
     language: useId(),
     instruction: useId(),
     target: useId(),
+    tracking: useId(),
     rounds: useId(),
     group: useId(),
   };
@@ -111,6 +115,8 @@ export function AgentBriefForm({
   const [dimensions, setDimensions] = useState<string[] | null>(null);
   const [instruction, setInstruction] = useState('');
   const [targetCount, setTargetCount] = useState(AGENT_DEFAULT_TARGET_COUNT);
+  const [trackingCountText, setTrackingCountText] = useState(String(AGENT_DEFAULT_TRACKING_COUNT));
+  const trackingCount = Number(trackingCountText);
   const [maxRounds, setMaxRounds] = useState(AGENT_DEFAULT_ROUNDS);
   const [groupId, setGroupId] = useState('');
   // null = the template's own prompt; a string once the user edits it in this session.
@@ -134,6 +140,8 @@ export function AgentBriefForm({
     dimensions: selectedDimensions,
     country,
     language,
+    targetCount,
+    trackingCount,
     systemPrompt: promptText,
   });
   const cost = useMemo(() => estimateAgentCost(maxRounds), [maxRounds]);
@@ -151,6 +159,35 @@ export function AgentBriefForm({
 
   const toggleDimension = (id: string) => {
     setDimensions(selectedDimensions.includes(id) ? selectedDimensions.filter((item) => item !== id) : [...selectedDimensions, id]);
+  };
+
+  const updateTargetCount = (value: string) => {
+    const resolved = Math.min(
+      AGENT_MAX_TARGET_COUNT,
+      Math.max(AGENT_MIN_TARGET_COUNT, Number(value) || AGENT_MIN_TARGET_COUNT)
+    );
+    setTargetCount(resolved);
+    setTrackingCountText((current) => {
+      if (current === '') return current;
+      return String(Math.min(Number(current), resolved));
+    });
+  };
+
+  const updateTrackingCount = (value: string) => {
+    if (value === '') {
+      setTrackingCountText('');
+      return;
+    }
+    const parsedTrackingCount = Number(value);
+    const numericTrackingCount = Number.isFinite(parsedTrackingCount)
+      ? Math.trunc(parsedTrackingCount)
+      : AGENT_MIN_TRACKING_COUNT;
+    const resolvedTrackingCount = Math.min(
+      AGENT_MAX_TRACKING_COUNT,
+      targetCount,
+      Math.max(AGENT_MIN_TRACKING_COUNT, numericTrackingCount)
+    );
+    setTrackingCountText(String(resolvedTrackingCount));
   };
 
   const recordOutcome = async (mutation: Promise<TemplateMutationOutcome>) => {
@@ -200,6 +237,7 @@ export function AgentBriefForm({
       dimensions: catalogIds.filter((id) => selectedDimensions.includes(id)),
       instruction: instruction.trim(),
       targetCount,
+      trackingCount,
       maxRounds,
       templateId,
       systemPrompt: promptDirty ? promptText : null,
@@ -283,7 +321,7 @@ export function AgentBriefForm({
         />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div>
           <label htmlFor={ids.target} className="block text-sm text-gray-600 mb-1">Target keywords</label>
           <input
@@ -293,9 +331,23 @@ export function AgentBriefForm({
             max={AGENT_MAX_TARGET_COUNT}
             step={10}
             value={targetCount}
-            onChange={(event) => setTargetCount(Math.min(AGENT_MAX_TARGET_COUNT, Math.max(AGENT_MIN_TARGET_COUNT, Number(event.target.value) || AGENT_MIN_TARGET_COUNT)))}
+            onChange={(event) => updateTargetCount(event.target.value)}
             className={INPUT_CLASS}
           />
+        </div>
+        <div>
+          <label htmlFor={ids.tracking} className="block text-sm text-gray-600 mb-1">Tracking keywords</label>
+          <input
+            id={ids.tracking}
+            type="number"
+            min={AGENT_MIN_TRACKING_COUNT}
+            max={Math.min(AGENT_MAX_TRACKING_COUNT, targetCount)}
+            step={1}
+            value={trackingCountText}
+            onChange={(event) => updateTrackingCount(event.target.value)}
+            className={INPUT_CLASS}
+          />
+          <p className="mt-1 text-xs text-gray-500">Recommended active shortlist. This is a demand proxy, not measured search volume.</p>
         </div>
         <div>
           <label htmlFor={ids.rounds} className="block text-sm text-gray-600 mb-1">Research rounds</label>

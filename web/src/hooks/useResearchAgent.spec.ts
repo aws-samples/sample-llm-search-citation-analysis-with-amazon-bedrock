@@ -92,6 +92,7 @@ const START_REQUEST: StartAgentRequest = {
   dimensions: ['destination'],
   instruction: '',
   targetCount: 60,
+  trackingCount: 15,
   maxRounds: 2,
   templateId: 'builtin-default',
   systemPrompt: null,

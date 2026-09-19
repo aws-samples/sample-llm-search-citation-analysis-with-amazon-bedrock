@@ -21,6 +21,11 @@ export const replacementAvailableKeywordFixtures = [{
   relevance: 70,
 }] satisfies ResearchKeyword[];
 
+export const fullProposalKeywordFixtures = [
+  availableKeywordFixtures[0],
+  replacementAvailableKeywordFixtures[0],
+] satisfies ResearchKeyword[];
+
 export const createdKeywordItemFixture = {
   id: 'keyword-1',
   keyword: 'alpha',
@@ -38,6 +43,20 @@ export const successfulPromotionResponseFixture = {
   created: 1,
   skipped: 0,
   created_keywords: [createdKeywordItemFixture],
+  skipped_keywords: [],
+};
+
+export const inactiveKeywordItemFixture = {
+  ...createdKeywordItemFixture,
+  id: 'keyword-2',
+  keyword: 'beta',
+  status: 'inactive',
+};
+
+export const successfulFullProposalResponseFixture = {
+  created: 2,
+  skipped: 0,
+  created_keywords: [createdKeywordItemFixture, inactiveKeywordItemFixture],
   skipped_keywords: [],
 };
 
@@ -59,7 +78,10 @@ export function createMockPromotionRequest() {
 
 type PromotionRequestArguments = [
   endpoint: string,
-  body: { keywords: ResearchKeyword[] },
+  body: {
+    keywords: ResearchKeyword[];
+    status?: string;
+  },
   options: {
     signal: unknown;
     allowStructured4xx: boolean 

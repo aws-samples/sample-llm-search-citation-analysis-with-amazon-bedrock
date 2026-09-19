@@ -9,6 +9,37 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.8.0] - 2026-09-19
+
+Research-agent proposals now include an explainable, configurable shortlist of
+keywords to track in recurring visibility analyses.
+
+### Added
+
+- **Representative tracking subset.** Each run recommends 15 tracking keywords
+  by default (configurable from 1–50 and capped by the proposal target). The
+  deterministic selector starts with the exact seed, covers the configured
+  dimensions, targets roughly 60% commercial/transactional and 25%
+  informational intent, then fills by a demand-proxy score.
+- **Explainable proxy scoring.** Relevance is the largest input; independent
+  provider agreement and Google autocomplete/related/PAA signals add demand
+  confidence, while intent prioritises conversion terms. Proposal order breaks
+  ties. Competition is deliberately not penalised because competitive head
+  terms are useful to monitor. The UI and Excel export state explicitly that
+  this is not measured search volume.
+- The proposal review preselects the recommendation, shows each term's score
+  and evidence, and can reset edited selections to the agent's shortlist.
+
+### Changed
+
+- Research results can add only the selected terms as active tracking keywords,
+  or add the full proposal in one request: selected terms are active and the
+  remainder are inactive library terms in the same keyword group. Inactive
+  terms stay out of scheduled analyses until activated.
+- `POST /api/keywords/promote` accepts an optional status on each keyword while
+  retaining the request-level status and active default for existing callers;
+  the entire request is validated before any write.
+
 ## [2.7.0] - 2026-09-19
 
 Brand reporting can now be exported and revisited by analysis run, while group

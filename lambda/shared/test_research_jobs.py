@@ -288,7 +288,21 @@ class TestPublicView:
 
         assert (config['subject'], config['audience']) == ('hotel', 'travellers')
         assert config['dimension_catalog'] == LEGACY_DIMENSION_CATALOG
+        assert config['tracking_count'] == 15
         assert job['config'] == {'seed': 'Hotel Gran Marino', 'dimensions': ['destination']}
+
+    def test_caps_a_legacy_tracking_default_at_the_saved_target(self):
+        job = {
+            'id': 'job-a',
+            'type': 'agent',
+            'status': 'completed',
+            'config': {'seed': 'Hotel Gran Marino', 'target_count': 10},
+        }
+
+        config = public_view(job)['config']
+
+        assert config['tracking_count'] == 10
+        assert 'tracking_count' not in job['config']
 
     def test_keeps_the_snapshotted_profile_of_a_current_agent_run(self):
         catalog = [{'id': 'menu', 'label': 'Menu & drinks', 'description': 'd'}, {'id': 'location', 'label': 'Location', 'description': 'd'}]

@@ -5,7 +5,10 @@ the schema checks applied to the planner / evaluator / selection answers.
 
 from __future__ import annotations
 
+import pytest
+
 from shared.research_agent import (
+    AGENT_DEFAULT_TRACKING_COUNT,
     AGENT_MAX_QUERIES_PER_ROUND,
     BUILTIN_TEMPLATE_ID,
     BUILTIN_TEMPLATES,
@@ -22,7 +25,9 @@ from shared.research_agent import (
     build_selection_prompt,
     builtin_template,
     builtin_templates,
+    config_tracking_count,
     fallback_selection,
+    mark_tracking_subset,
     normalise_dimensions,
     parse_evaluation,
     parse_plan,
@@ -41,15 +46,18 @@ HOTEL_PROFILE = {
 
 
 def _config(**overrides) -> dict:
+    target_count = overrides.pop('target_count', 60)
+    tracking_count = overrides.pop('tracking_count', None)
     base = build_agent_config(
         seed='Hotel Gran Marino',
         country='ES',
         language='es',
         dimensions=['destination', 'audience', 'bogus'],
         instruction='also expand by events',
-        target_count=60,
+        target_count=target_count,
         max_rounds=2,
         group_id=None,
+        tracking_count=tracking_count,
         **HOTEL_PROFILE,
     )
     return {**base, **overrides}
@@ -72,9 +80,10 @@ def _restaurant_config() -> dict:
 
 
 def _legacy_config() -> dict:
-    """An agent row written before 2.6.0: no subject, audience or catalogue."""
+    """An agent row written before profile and tracking configuration existed."""
     config = _config()
-    return {key: value for key, value in config.items() if key not in ('subject', 'audience', 'dimension_catalog')}
+    legacy_fields = ('subject', 'audience', 'dimension_catalog', 'tracking_count')
+    return {key: value for key, value in config.items() if key not in legacy_fields}
 
 
 _QUERIES = [
@@ -94,6 +103,12 @@ class TestBuildAgentConfig:
 
     def test_stores_no_group_when_none_was_chosen(self):
         assert _config()['group_id'] is None
+
+    def test_stores_the_default_tracking_count_when_target_allows_it(self):
+        assert _config()['tracking_count'] == AGENT_DEFAULT_TRACKING_COUNT
+
+    def test_caps_an_omitted_tracking_count_at_a_shorter_target(self):
+        assert _config(target_count=10)['tracking_count'] == 10
 
     def test_snapshots_the_template_profile(self):
         config = _restaurant_config()
@@ -398,6 +413,128 @@ class TestFallbackSelection:
 
         assert [entry['keyword'] for entry in proposal] == ['kw 0', 'kw 1', 'kw 2', 'kw 3', 'kw 4']
         assert proposal[0] == {'keyword': 'kw 0', 'dimension': 'other', 'intent': 'informational', 'competition': 'medium', 'relevance': 10.0, 'rationale': '', 'providers': ['gemini']}
+
+
+def _tracking_entry(
+    keyword: str,
+    *,
+    relevance: float = 5,
+    intent: str = 'informational',
+    competition: str = 'medium',
+    dimension: str = 'other',
+    providers: list[str] | None = None,
+) -> dict:
+    return {
+        'keyword': keyword,
+        'dimension': dimension,
+        'intent': intent,
+        'competition': competition,
+        'relevance': relevance,
+        'rationale': '',
+        'providers': providers or ['openai'],
+    }
+
+
+class TestMarkTrackingSubset:
+    def test_marks_exactly_the_configured_count_when_the_proposal_is_longer(self):
+        proposal = [
+            _tracking_entry('book hotel coruña', relevance=9, intent='transactional'),
+            _tracking_entry('best hotel coruña', relevance=8, intent='commercial'),
+            _tracking_entry('what to do coruña', relevance=7),
+        ]
+
+        marked = mark_tracking_subset(proposal, _config(tracking_count=2))
+
+        assert [entry['tracking'] for entry in marked] == [True, True, False]
+        assert sum(entry['tracking'] for entry in marked) == 2
+
+    def test_marks_every_entry_when_the_proposal_is_shorter_than_the_count(self):
+        proposal = [_tracking_entry('one'), _tracking_entry('two')]
+
+        marked = mark_tracking_subset(proposal, _config(tracking_count=15))
+
+        assert [entry['tracking'] for entry in marked] == [True, True]
+
+    def test_includes_the_exact_normalized_seed_before_a_higher_scored_candidate(self):
+        proposal = [
+            _tracking_entry('  HOTEL   GRAN MARINO ', relevance=1),
+            _tracking_entry('book hotel coruña', relevance=10, intent='transactional'),
+        ]
+
+        marked = mark_tracking_subset(proposal, _config(tracking_count=1))
+
+        assert [entry['tracking'] for entry in marked] == [True, False]
+        assert marked[0]['tracking_reason'].startswith('Exact seed match;')
+
+    def test_reserves_the_best_candidate_in_each_configured_dimension_when_count_permits(self):
+        proposal = [
+            _tracking_entry('seed hotel', relevance=2, dimension='destination'),
+            _tracking_entry('weak family hotel', relevance=3, dimension='audience'),
+            _tracking_entry('best family hotel', relevance=9, dimension='audience'),
+            _tracking_entry('weekend hotel', relevance=7, dimension='trip_type'),
+            _tracking_entry('highest other', relevance=10),
+        ]
+        config = _config(
+            seed='seed hotel',
+            dimensions=['destination', 'audience', 'trip_type'],
+            tracking_count=3,
+        )
+
+        marked = mark_tracking_subset(proposal, config)
+
+        assert [entry['keyword'] for entry in marked if entry['tracking']] == [
+            'seed hotel', 'best family hotel', 'weekend hotel',
+        ]
+
+    def test_balances_conversion_and_informational_intents_before_score_fill(self):
+        proposal = [
+            *[_tracking_entry(f'convert {index}', relevance=5, intent='commercial') for index in range(5)],
+            *[_tracking_entry(f'inform {index}', relevance=4) for index in range(2)],
+            _tracking_entry('navigate first', relevance=10, intent='navigational'),
+            _tracking_entry('navigate second', relevance=9, intent='navigational'),
+        ]
+
+        marked = mark_tracking_subset(proposal, _config(dimensions=['destination'], tracking_count=8))
+        selected_intents = [entry['intent'] for entry in marked if entry['tracking']]
+
+        assert selected_intents == [
+            'commercial', 'commercial', 'commercial', 'commercial', 'commercial',
+            'informational', 'informational', 'navigational',
+        ]
+
+    def test_proposal_order_breaks_equal_source_signal_scores(self):
+        proposal = [
+            _tracking_entry('provider agreement', relevance=8, providers=['openai', 'gemini']),
+            _tracking_entry('google signals', relevance=8, providers=['serpapi']),
+            _tracking_entry('single provider', relevance=8, providers=['openai']),
+        ]
+
+        marked = mark_tracking_subset(proposal, _config(dimensions=['destination'], tracking_count=1))
+
+        assert [entry['tracking_score'] for entry in marked] == [803.0, 803.0, 802.0]
+        assert [entry['tracking'] for entry in marked] == [True, False, False]
+        assert marked[0]['tracking_reason'] == 'Relevance 8/10; informational intent; 2-provider agreement.'
+        assert marked[1]['tracking_reason'] == 'Relevance 8/10; informational intent; 1 provider; Google suggestion signals.'
+
+    def test_does_not_penalize_high_competition_when_available_signals_tie(self):
+        proposal = [
+            _tracking_entry('competitive term', relevance=8, competition='high'),
+            _tracking_entry('easy term', relevance=8, competition='low'),
+        ]
+
+        marked = mark_tracking_subset(proposal, _config(dimensions=['destination'], tracking_count=1))
+
+        assert [entry['tracking_score'] for entry in marked] == [802.0, 802.0]
+        assert [entry['tracking'] for entry in marked] == [True, False]
+
+    @pytest.mark.parametrize(('config', 'expected'), [
+        ({'target_count': 9}, 9),
+        ({'target_count': 60, 'tracking_count': 'invalid'}, 15),
+    ])
+    def test_returns_target_bounded_default_when_tracking_count_is_unusable(
+        self, config, expected
+    ):
+        assert config_tracking_count(config) == expected
 
 
 class TestPlannedQueryTexts:

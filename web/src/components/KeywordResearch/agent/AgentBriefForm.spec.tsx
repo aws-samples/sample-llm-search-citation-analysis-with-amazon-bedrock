@@ -131,6 +131,7 @@ describe('AgentBriefForm', () => {
       dimensions: ['menu', 'location', 'occasion'],
       instruction: '',
       targetCount: 60,
+      trackingCount: 15,
       maxRounds: 2,
       templateId: 'builtin-cafes',
       systemPrompt: null,
@@ -227,6 +228,32 @@ describe('AgentBriefForm', () => {
     expect(handlers.onDeleteTemplate).toHaveBeenCalledWith('t1');
     expect(getTemplateSelect()).toHaveValue('builtin-default');
     expect(screen.getByText('Template deleted')).toBeInTheDocument();
+  });
+
+  it('shows the default tracking recommendation as a demand proxy', () => {
+    renderBriefForm();
+
+    expect(screen.getByLabelText('Tracking keywords')).toHaveValue(15);
+    expect(screen.getByText('Recommended active shortlist. This is a demand proxy, not measured search volume.')).toBeInTheDocument();
+  });
+
+  it('caps tracking keywords when the proposal target is reduced', async () => {
+    renderBriefForm();
+
+    await userEvent.clear(screen.getByLabelText('Target keywords'));
+
+    expect(screen.getByLabelText('Target keywords')).toHaveValue(10);
+    expect(screen.getByLabelText('Tracking keywords')).toHaveValue(10);
+  });
+
+  it('starts the run with an adjusted tracking count', async () => {
+    const handlers = renderBriefForm();
+    await userEvent.clear(screen.getByLabelText('Tracking keywords'));
+    await userEvent.type(screen.getByLabelText('Tracking keywords'), '2');
+
+    await fillSeedAndStart('Hotel Gran Marino');
+
+    expect(handlers.onStart).toHaveBeenCalledWith(expect.objectContaining({ trackingCount: 2 }));
   });
 
   it('offers the groups sorted by name with the choose-later default', () => {

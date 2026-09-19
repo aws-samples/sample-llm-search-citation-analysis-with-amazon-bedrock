@@ -10,7 +10,7 @@ import { ResearchProgress } from '../ResearchProgress';
 import { AgentProposal } from './AgentProposal';
 import { AgentTrace } from './AgentTrace';
 import {
-  dimensionLabel, runCatalog, subjectLabel
+  AGENT_DEFAULT_TRACKING_COUNT, dimensionLabel, runCatalog, subjectLabel
 } from './agentBrief';
 
 interface AgentRunDetailProps {
@@ -24,11 +24,20 @@ function BriefSummary({ job }: { readonly job: KeywordResearchItem }) {
   const config = job.config;
   if (!config) return null;
   const catalog = runCatalog(job);
+  const configuredTrackingCount = config.tracking_count
+    ?? Math.min(AGENT_DEFAULT_TRACKING_COUNT, config.target_count);
+  const hasTrackingMarks = (job.keywords ?? []).some((keyword) => keyword.tracking !== undefined);
+  const markedTrackingCount = (job.keywords ?? []).filter((keyword) => keyword.tracking === true).length;
+  const actualTrackingCount = job.tracking_count ?? (hasTrackingMarks ? markedTrackingCount : undefined);
+  const trackingSummary = actualTrackingCount === undefined
+    ? `${configuredTrackingCount} configured · demand proxy, not measured volume`
+    : `${configuredTrackingCount} configured · ${actualTrackingCount} recommended · demand proxy, not measured volume`;
   const items: [string, string][] = [
     ['Market', `${config.country.toUpperCase()} · ${config.language}`],
     ['Researched as', `${subjectLabel(config.subject)} · for ${config.audience}`],
     ['Expand by', config.dimensions.map((dimension) => dimensionLabel(dimension, catalog)).join(', ')],
     ['Target', `${config.target_count} keywords · up to ${config.max_rounds} round${config.max_rounds === 1 ? '' : 's'}`],
+    ['Tracking', trackingSummary],
   ];
   if (config.instruction) items.push(['Instruction', config.instruction]);
   if (job.template_name) items.push(['Template', job.template_name]);

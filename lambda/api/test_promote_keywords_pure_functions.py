@@ -501,6 +501,26 @@ class TestCreateItemsStatusProperty:
             )
 
 
+class TestCreateItemsStatusOverrideUnit:
+    def test_builds_each_item_with_its_resolved_status(
+        self, promotion_handler
+    ):
+        to_create = [
+            {'keyword': 'active term', 'status': 'active'},
+            {'keyword': 'inactive term', 'status': 'inactive'},
+            {'keyword': 'paused term', 'status': 'paused'},
+            {'keyword': 'request default term'},
+        ]
+
+        items = promotion_handler.create_items(
+            to_create, 'paused', promotion_handler.DEFAULT_PRIORITY
+        )
+
+        assert [item['status'] for item in items] == [
+            'active', 'inactive', 'paused', 'paused',
+        ]
+
+
 class TestCreateItemsPriorityProperty:
     """
     **Property 9: Priority resolution applies to every created item**
@@ -582,6 +602,24 @@ class TestValidateRequestProperty:
         assert error['field'] == expected_field, (
             f'Expected offending field {expected_field!r}, got {error["field"]!r}'
         )
+
+
+class TestValidateKeywordStatusOverrideUnit:
+    @pytest.mark.parametrize(('value', 'message'), [
+        ('archived', "Invalid status 'archived' (allowed: active, inactive, paused)"),
+        (None, 'status must be a string'),
+        (1, 'status must be a string'),
+    ])
+    def test_rejects_an_invalid_per_keyword_status_with_its_entry_field(
+        self, promotion_handler, value, message
+    ):
+        error, status, priority = promotion_handler.validate_request(
+            [{'keyword': 'hotel coruña', 'status': value}], None, None
+        )
+
+        assert error == {'message': message, 'field': 'keywords[0].status'}
+        assert status is None
+        assert priority is None
 
 
 # --- Property tests: build_notes --------------------------------------------

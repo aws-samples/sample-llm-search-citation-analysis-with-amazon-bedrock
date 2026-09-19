@@ -71,6 +71,8 @@ export interface StartAgentRequest {
   dimensions: string[];
   instruction: string;
   targetCount: number;
+  /** Number of proposal terms the agent should recommend for active tracking. */
+  trackingCount: number;
   maxRounds: number;
   /** Template the prompt came from; the API snapshots the resolved prompt on the job. */
   templateId: string | null;
@@ -89,6 +91,7 @@ export async function startResearchAgent(request: StartAgentRequest): Promise<Ke
     dimensions: request.dimensions,
     instruction: request.instruction,
     target_count: request.targetCount,
+    tracking_count: request.trackingCount,
     max_rounds: request.maxRounds,
     ...(request.templateId === null ? {} : { template_id: request.templateId }),
     ...(request.systemPrompt === null ? {} : { system_prompt: request.systemPrompt }),

@@ -16,6 +16,9 @@ describe('proposalExcelRows', () => {
       Rank: 1,
       Keyword: 'hotel coruña centro',
       Dimension: 'Destination',
+      Tracking: 'Recommended',
+      'Tracking score': 904,
+      'Tracking reason': 'Relevance 9/10; transactional intent; 1 provider.',
       Intent: 'transactional',
       Competition: 'high',
       Relevance: 9,
@@ -23,6 +26,14 @@ describe('proposalExcelRows', () => {
       Sources: 'perplexity',
     });
     expect(rows[1].Sources).toBe('perplexity, serpapi');
+  });
+
+  it('exports unselected recommendations as library terms with their explanation', () => {
+    const rows = proposalExcelRows(buildAgentJob().keywords ?? [], HOTEL_DIMENSIONS);
+
+    expect(rows[2].Tracking).toBe('Library');
+    expect(rows[2]['Tracking score']).toBe(602);
+    expect(rows[2]['Tracking reason']).toBe('Relevance 6/10; informational intent; 1 provider.');
   });
 
   it('labels a dimension the catalogue does not know as Other', () => {
@@ -86,6 +97,14 @@ describe('briefExcelRows', () => {
     expect(row.Subject).toBe('hotel');
     expect(row.Dimensions).toBe('Destination, Audience');
     expect(row.Candidates).toBe(41);
+  });
+
+  it('records the tracking brief without claiming measured volume', () => {
+    const [row] = briefExcelRows(buildAgentJob());
+
+    expect(row['Configured tracking keywords']).toBe(2);
+    expect(row['Actual tracking keywords']).toBe(2);
+    expect(row['Tracking interpretation']).toBe('Demand proxy based on available signals; not measured search volume.');
   });
 
   it('records who the run was for and how the list was selected', () => {
