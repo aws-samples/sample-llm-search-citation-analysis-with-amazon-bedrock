@@ -3,8 +3,12 @@
   "minTokens": 50,
   "threshold": 0,
   "gitignore": true,
-  "format": ["python"],
-  "reporters": ["console"],
+  "format": [
+    "python"
+  ],
+  "reporters": [
+    "console"
+  ],
   "ignore": [
     "**/node_modules/**",
     "**/layer/python/**",
@@ -12,7 +16,6 @@
     "**/.deps/**",
     "**/__pycache__/**",
     "**/test_*.py",
-    "**/conftest.py",
-    "lambda/api/keyword-research.py"
+    "**/conftest.py"
   ]
 }

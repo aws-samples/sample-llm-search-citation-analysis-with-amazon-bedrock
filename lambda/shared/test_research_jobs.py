@@ -11,11 +11,7 @@ and the research worker rely on.
 
 from __future__ import annotations
 
-import os
-import sys
 from decimal import Decimal
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from shared.research_jobs import (
     RESEARCH_STALE_AFTER_SECONDS,

@@ -18,40 +18,19 @@ job back. These tests pin the contract the frontend and the worker rely on:
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
 
-os.environ.setdefault('KEYWORD_RESEARCH_TABLE', 'test-keyword-research')
-os.environ.setdefault('RESEARCH_STATE_MACHINE_ARN', 'arn:aws:states:us-west-2:123456789012:stateMachine:research')
-os.environ.setdefault('DYNAMODB_TABLE_RESEARCH_TEMPLATES', 'test-research-templates')
-os.environ.setdefault('DYNAMODB_TABLE_KEYWORD_GROUPS', 'test-keyword-groups')
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.dirname(_HERE)
-for _path in (_LAMBDA_DIR, _HERE):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
-# Third-party runtime deps (requests, bs4) live in the built layer, not the
-# dev venv. Appended, so `shared` still resolves from source first.
-_LAYER_PY = os.path.join(_LAMBDA_DIR, 'layer', 'python')
-if os.path.isdir(_LAYER_PY) and _LAYER_PY not in sys.path:
-    sys.path.append(_LAYER_PY)
-
 from shared.utils import get_timestamp
+from testing.env import KEYWORD_RESEARCH_ENV, setdefault_env
+from testing.module_loader import load_handler_module_offline
 
-with patch('boto3.resource', MagicMock()), patch('boto3.client', MagicMock()):
-    _spec = importlib.util.spec_from_file_location(
-        'keyword_research_lifecycle_under_test', os.path.join(_HERE, 'keyword-research.py')
-    )
-    _mod = importlib.util.module_from_spec(_spec)
-    sys.modules['keyword_research_lifecycle_under_test'] = _mod
-    _spec.loader.exec_module(_mod)
+setdefault_env(KEYWORD_RESEARCH_ENV)
+_mod = load_handler_module_offline(os.path.dirname(__file__), 'keyword-research.py', 'keyword_research_lifecycle_under_test')
 
 # Well above the 30-minute state machine timeout.
 STATE_MACHINE_TIMEOUT_SECONDS = 30 * 60
@@ -115,14 +94,24 @@ def _statuses_written(table: MagicMock) -> list[str]:
     ]
 
 
+def _collaborators(**overrides: MagicMock):
+    """Stub the handler's collaborators for a start that succeeds; ``overrides`` swap single ones.
+
+    ``_collaborators(stepfunctions=_start_fails())`` keeps the configured
+    provider and the inert table but makes the dispatch fail.
+    """
+    return patch.multiple(_mod, **{
+        'research_table': MagicMock(),
+        'get_web_search_clients': _configured(),
+        'stepfunctions': _start_succeeds(),
+        **overrides,
+    })
+
+
 class TestStartDispatchFailure:
     @pytest.mark.parametrize('event', [_expand_event(), _competitor_event()])
     def test_returns_503_when_the_execution_cannot_be_started(self, event):
-        with (
-            patch.object(_mod, 'research_table', MagicMock()),
-            patch.object(_mod, 'get_web_search_clients', _configured()),
-            patch.object(_mod, 'stepfunctions', _start_fails()),
-        ):
+        with _collaborators(stepfunctions=_start_fails()):
             response = _mod.handler(event, None)
 
         assert response['statusCode'] == 503
@@ -131,21 +120,13 @@ class TestStartDispatchFailure:
         """A row left `pending` has nothing that will ever advance it."""
         table = MagicMock()
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_web_search_clients', _configured()),
-            patch.object(_mod, 'stepfunctions', _start_fails()),
-        ):
+        with _collaborators(research_table=table, stepfunctions=_start_fails()):
             _mod.handler(_expand_event(), None)
 
         assert 'failed' in _statuses_written(table)
 
     def test_returns_400_when_no_provider_is_configured(self):
-        with (
-            patch.object(_mod, 'research_table', MagicMock()),
-            patch.object(_mod, 'get_web_search_clients', MagicMock(return_value=[])),
-            patch.object(_mod, 'stepfunctions', _start_succeeds()),
-        ):
+        with _collaborators(get_web_search_clients=MagicMock(return_value=[])):
             response = _mod.handler(_expand_event(), None)
 
         assert response['statusCode'] == 400
@@ -153,11 +134,7 @@ class TestStartDispatchFailure:
 
 class TestStartSuccess:
     def test_returns_202_with_a_pending_job(self):
-        with (
-            patch.object(_mod, 'research_table', MagicMock()),
-            patch.object(_mod, 'get_web_search_clients', _configured()),
-            patch.object(_mod, 'stepfunctions', _start_succeeds()),
-        ):
+        with _collaborators():
             response = _mod.handler(_expand_event(), None)
 
         body = json.loads(response['body'])
@@ -168,11 +145,7 @@ class TestStartSuccess:
     def test_persists_the_pending_row_with_the_request_fields(self):
         table = MagicMock()
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_web_search_clients', _configured()),
-            patch.object(_mod, 'stepfunctions', _start_succeeds()),
-        ):
+        with _collaborators(research_table=table):
             response = _mod.handler(_expand_event(), None)
 
         item = table.put_item.call_args.kwargs['Item']
@@ -185,11 +158,7 @@ class TestStartSuccess:
     def test_starts_the_execution_named_after_the_job_with_retry_false(self):
         stepfunctions = _start_succeeds()
 
-        with (
-            patch.object(_mod, 'research_table', MagicMock()),
-            patch.object(_mod, 'get_web_search_clients', _configured()),
-            patch.object(_mod, 'stepfunctions', stepfunctions),
-        ):
+        with _collaborators(stepfunctions=stepfunctions):
             response = _mod.handler(_expand_event(), None)
 
         job_id = json.loads(response['body'])['id']
@@ -200,12 +169,7 @@ class TestStartSuccess:
     def test_competitor_job_records_the_normalised_url_and_domain(self):
         table = MagicMock()
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'validate_url_safe', MagicMock(return_value=(True, None))),
-            patch.object(_mod, 'get_web_search_clients', _configured()),
-            patch.object(_mod, 'stepfunctions', _start_succeeds()),
-        ):
+        with _collaborators(research_table=table, validate_url_safe=MagicMock(return_value=(True, None))):
             response = _mod.handler(_competitor_event(), None)
 
         item = table.put_item.call_args.kwargs['Item']
@@ -213,11 +177,7 @@ class TestStartSuccess:
         assert (item['type'], item['url'], item['domain']) == ('competitor', 'https://example.com/rooms', 'example.com')
 
     def test_points_clients_at_the_job_route_rather_than_a_status_route(self):
-        with (
-            patch.object(_mod, 'research_table', MagicMock()),
-            patch.object(_mod, 'get_web_search_clients', _configured()),
-            patch.object(_mod, 'stepfunctions', _start_succeeds()),
-        ):
+        with _collaborators():
             response = _mod.handler(_expand_event(), None)
 
         body = json.loads(response['body'])
@@ -279,6 +239,14 @@ class TestRetry:
             },
         }
 
+    def _retry(self, job: dict, stepfunctions: MagicMock | None = None) -> tuple[dict, MagicMock, MagicMock]:
+        """``POST /job-1/retry`` against a table holding ``job``; returns ``(response, table, stepfunctions)``."""
+        table = _table_with(job)
+        stepfunctions = stepfunctions or _start_succeeds()
+        with _collaborators(research_table=table, stepfunctions=stepfunctions):
+            response = _mod.handler(_id_event('POST', 'job-1', '/retry'), None)
+        return response, table, stepfunctions
+
     def test_returns_404_for_an_unknown_job(self):
         with (
             patch.object(_mod, 'research_table', _table_with(None)),
@@ -291,27 +259,14 @@ class TestRetry:
     @pytest.mark.parametrize('status', ['running', 'pending', 'completed'])
     def test_refuses_jobs_that_are_not_failed_or_partial(self, status):
         job = {**self._failed_job(status), 'created_at': get_timestamp()}
-        stepfunctions = _start_succeeds()
 
-        with (
-            patch.object(_mod, 'research_table', _table_with(job)),
-            patch.object(_mod, 'get_web_search_clients', _configured()),
-            patch.object(_mod, 'stepfunctions', stepfunctions),
-        ):
-            response = _mod.handler(_id_event('POST', 'job-1', '/retry'), None)
+        response, _table, stepfunctions = self._retry(job)
 
         assert response['statusCode'] == 400
         stepfunctions.start_execution.assert_not_called()
 
     def test_starts_a_uniquely_named_execution_with_retry_true(self):
-        stepfunctions = _start_succeeds()
-
-        with (
-            patch.object(_mod, 'research_table', _table_with(self._failed_job())),
-            patch.object(_mod, 'get_web_search_clients', _configured()),
-            patch.object(_mod, 'stepfunctions', stepfunctions),
-        ):
-            response = _mod.handler(_id_event('POST', 'job-1', '/retry'), None)
+        response, _table, stepfunctions = self._retry(self._failed_job())
 
         call = stepfunctions.start_execution.call_args.kwargs
         assert response['statusCode'] == 202
@@ -319,14 +274,7 @@ class TestRetry:
         assert json.loads(call['input']) == {'job_id': 'job-1', 'retry': True}
 
     def test_resets_the_job_to_pending_and_records_the_attempt(self):
-        table = _table_with(self._failed_job())
-
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_web_search_clients', _configured()),
-            patch.object(_mod, 'stepfunctions', _start_succeeds()),
-        ):
-            response = _mod.handler(_id_event('POST', 'job-1', '/retry'), None)
+        response, table, _stepfunctions = self._retry(self._failed_job())
 
         values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
         assert (values[':s'], values[':n']) == ('pending', 2)
@@ -336,27 +284,14 @@ class TestRetry:
     def test_allows_retrying_a_stale_running_job_the_sweep_just_failed(self):
         """A job whose execution died is retryable without waiting for another read."""
         job = {**self._failed_job('running'), 'retry_count': 0}
-        stepfunctions = _start_succeeds()
 
-        with (
-            patch.object(_mod, 'research_table', _table_with(job)),
-            patch.object(_mod, 'get_web_search_clients', _configured()),
-            patch.object(_mod, 'stepfunctions', stepfunctions),
-        ):
-            response = _mod.handler(_id_event('POST', 'job-1', '/retry'), None)
+        response, _table, stepfunctions = self._retry(job)
 
         assert response['statusCode'] == 202
         assert stepfunctions.start_execution.call_args.kwargs['name'] == 'job-1-r1'
 
     def test_returns_503_and_marks_failed_when_the_retry_cannot_start(self):
-        table = _table_with(self._failed_job())
-
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_web_search_clients', _configured()),
-            patch.object(_mod, 'stepfunctions', _start_fails()),
-        ):
-            response = _mod.handler(_id_event('POST', 'job-1', '/retry'), None)
+        response, table, _stepfunctions = self._retry(self._failed_job(), stepfunctions=_start_fails())
 
         assert response['statusCode'] == 503
         assert _statuses_written(table)[-1] == 'failed'

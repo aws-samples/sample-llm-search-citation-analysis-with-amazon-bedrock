@@ -11,12 +11,7 @@ Covers:
 - Empty / None / malformed input returns None
 """
 
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(__file__))
-
-from llm_json import parse_llm_json
+from shared.llm_json import parse_llm_json
 
 
 class TestObjectParsing:

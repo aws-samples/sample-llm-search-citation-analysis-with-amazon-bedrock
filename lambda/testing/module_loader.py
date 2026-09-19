@@ -9,6 +9,7 @@ import importlib.util
 import os
 import sys
 from types import ModuleType
+from unittest.mock import MagicMock, patch
 
 
 def module_name_for(filename: str, suffix: str = '_under_test') -> str:
@@ -32,3 +33,17 @@ def load_handler_module(directory: str, filename: str, module_name: str | None =
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def load_handler_module_offline(directory: str, filename: str, module_name: str | None = None) -> ModuleType:
+    """``load_handler_module`` with ``boto3.resource`` / ``boto3.client`` stubbed while the file executes.
+
+    For handlers that build their AWS clients at import time and whose tests
+    swap the module-level clients afterwards with ``patch.object``; the stubs
+    are inert ``MagicMock`` objects and the patches end when the load does.
+    """
+    with (
+        patch('boto3.resource', MagicMock(name='boto3.resource')),
+        patch('boto3.client', MagicMock(name='boto3.client')),
+    ):
+        return load_handler_module(directory, filename, module_name)

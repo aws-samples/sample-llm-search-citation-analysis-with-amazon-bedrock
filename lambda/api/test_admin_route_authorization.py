@@ -26,29 +26,16 @@ this file only asserts uniform denial.
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import sys
 from typing import Any, NamedTuple
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.dirname(_API_DIR)
+from testing.module_loader import load_handler_module, module_name_for
 
-# Make `from shared.xxx import` resolve (the layer puts shared/ at /opt/python/).
-#
-# `os.path.abspath` matters: an unnormalized `lambda/api/..` entry here makes
-# Python resolve the `shared` package through it, so every `shared` submodule
-# gets an unnormalized `__file__`. `shared/test_keyword_identity.py` derives its
-# fixture path with `Path(__file__).parents[2]`, which does not collapse `..`,
-# and would look for `test-fixtures/` under `lambda/api/`. This file is
-# alphabetically first in `lambda/api/`, so it is the one that imports `shared`
-# first and fixes the package path for the whole session.
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
+_API_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Env each module needs to import. All modules fail fast on missing table names,
 # and CORS_ORIGIN_PARAM='' keeps `get_cors_origin` from reaching SSM.
@@ -153,16 +140,10 @@ def _load(filename: str) -> LoadedModule:
     aws.exceptions.ResourceNotFoundException = type('ResourceNotFoundException', (Exception,), {})
     aws.exceptions.ConflictException = type('ConflictException', (Exception,), {})
 
-    spec = importlib.util.spec_from_file_location(
-        filename.replace('-', '_').removesuffix('.py'),
-        os.path.join(_API_DIR, filename),
-    )
-    module = importlib.util.module_from_spec(spec)
-
     with patch('boto3.client', side_effect=lambda *a, **k: aws), \
          patch('boto3.resource', side_effect=lambda *a, **k: aws), \
          patch.dict(os.environ, _SHARED_ENV):
-        spec.loader.exec_module(module)
+        module = load_handler_module(_API_DIR, filename, module_name_for(filename, '_admin_authz'))
 
     return LoadedModule(module, aws)
 

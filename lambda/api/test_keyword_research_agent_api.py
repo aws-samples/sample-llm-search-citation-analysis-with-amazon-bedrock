@@ -11,35 +11,18 @@ Tests for the research-agent routes of `keyword-research.py`:
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-os.environ.setdefault('KEYWORD_RESEARCH_TABLE', 'test-keyword-research')
-os.environ.setdefault('RESEARCH_STATE_MACHINE_ARN', 'arn:aws:states:us-west-2:123456789012:stateMachine:research')
-os.environ.setdefault('DYNAMODB_TABLE_RESEARCH_TEMPLATES', 'test-research-templates')
-os.environ.setdefault('DYNAMODB_TABLE_KEYWORD_GROUPS', 'test-keyword-groups')
-
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.dirname(_HERE)
-for _path in (_LAMBDA_DIR, _HERE):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
-_LAYER_PY = os.path.join(_LAMBDA_DIR, 'layer', 'python')
-if os.path.isdir(_LAYER_PY) and _LAYER_PY not in sys.path:
-    sys.path.append(_LAYER_PY)
-
 from shared.research_agent import BUILTIN_TEMPLATE_ID, DEFAULT_SYSTEM_PROMPT
+from testing.env import KEYWORD_RESEARCH_ENV, setdefault_env
+from testing.module_loader import load_handler_module_offline
 
-with patch('boto3.resource', MagicMock()), patch('boto3.client', MagicMock()):
-    _spec = importlib.util.spec_from_file_location('keyword_research_agent_api_under_test', os.path.join(_HERE, 'keyword-research.py'))
-    _mod = importlib.util.module_from_spec(_spec)
-    sys.modules['keyword_research_agent_api_under_test'] = _mod
-    _spec.loader.exec_module(_mod)
+setdefault_env(KEYWORD_RESEARCH_ENV)
+_mod = load_handler_module_offline(os.path.dirname(__file__), 'keyword-research.py', 'keyword_research_agent_api_under_test')
 
 _CLAIMS = {'requestContext': {'authorizer': {'claims': {'cognito:username': 'bastian', 'email': 'bastian@example.com'}}}}
 

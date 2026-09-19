@@ -5,13 +5,6 @@ the schema checks applied to the planner / evaluator / selection answers.
 
 from __future__ import annotations
 
-import os
-import sys
-
-_LAMBDA_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-
 from shared.research_agent import (
     AGENT_MAX_QUERIES_PER_ROUND,
     BUILTIN_TEMPLATE_ID,

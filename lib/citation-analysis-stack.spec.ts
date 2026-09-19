@@ -112,19 +112,22 @@ function findStateMachineLogicalId(template: Template, stateMachineName: string)
   return Object.keys(stateMachines)[0] ?? '';
 }
 
+/** Logical id of the IAM role a Lambda function (found by FunctionName) executes as. */
+function findFunctionRoleLogicalId(template: Template, functionName: string): string {
+  const functions = template.findResources('AWS::Lambda::Function', {
+    Properties: { FunctionName: functionName },
+  });
+  return collectGetAttTargets(
+    resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Role'])
+  )[0] ?? '';
+}
+
 /**
  * Every IAM action a Lambda function's role is allowed on one resource (by
  * logical id, matched through Ref or Fn::GetAtt), deduplicated and sorted.
  */
 function extractFunctionRoleActionsOn(template: Template, functionName: string, resourceLogicalId: string): string[] {
-  const functions = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const roleLogicalId = collectGetAttTargets(
-    resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Role'])
-  )[0] ?? '';
-
-  return extractRoleActionsOn(template, roleLogicalId, resourceLogicalId);
+  return extractRoleActionsOn(template, findFunctionRoleLogicalId(template, functionName), resourceLogicalId);
 }
 
 /** Collect every logical ID referenced by a Ref anywhere in a node. */
@@ -286,23 +289,9 @@ function extractMemorySizesByLogicalIdPrefix(template: Template, prefix: string)
 
 /** Every IAM action a Lambda function's role is allowed, on any resource. */
 function extractFunctionRoleActions(template: Template, functionName: string): string[] {
-  const functions = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const roleLogicalId = collectGetAttTargets(
-    resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Role'])
-  )[0] ?? '';
-  const actions = Object.values(template.findResources('AWS::IAM::Policy'))
-    .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
-    .flatMap((policy) => {
-      const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
-      return (Array.isArray(statements) ? statements : []).flatMap((statement) => {
-        if (resolveString(statement, ['Effect']) !== 'Allow') return [];
-        const action = resolvePath(statement, ['Action']);
-        return (Array.isArray(action) ? action : [action]).filter((entry): entry is string => typeof entry === 'string');
-      });
-    });
-  return [...new Set(actions)].sort((left, right) => left.localeCompare(right));
+  return sortedUnique(
+    allowStatementsOfRole(template, findFunctionRoleLogicalId(template, functionName)).flatMap(statementActions)
+  );
 }
 
 /** The top-level `TimeoutSeconds` of a state machine definition, NaN when absent. */
@@ -425,6 +414,20 @@ function extractApiMethods(template: Template, resourceId: string): ApiGatewayMe
       authorizerId: resolveString(method, ['Properties', 'AuthorizerId', 'Ref']),
     }];
   });
+}
+
+/** The verbs among `methods` that are not behind the Cognito user pool authorizer. */
+function verbsWithoutCognitoAuthorizer(methods: ApiGatewayMethodSnapshot[]): string[] {
+  return methods
+    .filter((method) => method.authorizationType !== COGNITO_AUTH)
+    .map((method) => method.httpMethod);
+}
+
+/** The verbs among `methods` whose integration is not the Lambda function with logical id `functionLogicalId`. */
+function verbsNotIntegratedWith(methods: ApiGatewayMethodSnapshot[], functionLogicalId: string): string[] {
+  return methods
+    .filter((method) => !method.integrationUri.includes(functionLogicalId))
+    .map((method) => method.httpMethod);
 }
 
 function retentionDaysOf(logGroups: Record<string, unknown>, logicalId: string): number {
@@ -589,19 +592,32 @@ function policyAttachedToRole(policy: unknown, roleLogicalId: string): boolean {
     .some((roleRef) => resolveString(roleRef, ['Ref']) === roleLogicalId);
 }
 
-/**
- * The Action entries of one Allow statement whose Resource targets the given
- * logical id, through either Fn::GetAtt (ARNs) or Ref.
- */
-function statementActionsOn(statement: unknown, resourceLogicalId: string): string[] {
-  if (resolveString(statement, ['Effect']) !== 'Allow') return [];
-  const resource = resolvePath(statement, ['Resource']);
-  const targets = [...collectGetAttTargets(resource), ...collectRefTargets(resource)];
-  if (!targets.includes(resourceLogicalId)) return [];
+/** Every Allow statement of the AWS::IAM::Policy resources attached to one role. */
+function allowStatementsOfRole(template: Template, roleLogicalId: string): unknown[] {
+  return Object.values(template.findResources('AWS::IAM::Policy'))
+    .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
+    .flatMap((policy): unknown[] => {
+      const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
+      return (Array.isArray(statements) ? statements : [])
+        .filter((statement) => resolveString(statement, ['Effect']) === 'Allow');
+    });
+}
 
+/** The Action entries of one statement, which carries either a single string or a list. */
+function statementActions(statement: unknown): string[] {
   const action = resolvePath(statement, ['Action']);
   return (Array.isArray(action) ? action : [action])
     .filter((entry): entry is string => typeof entry === 'string');
+}
+
+/** Whether a statement's Resource targets the logical id, through either Fn::GetAtt (ARNs) or Ref. */
+function statementTargets(statement: unknown, resourceLogicalId: string): boolean {
+  const resource = resolvePath(statement, ['Resource']);
+  return [...collectGetAttTargets(resource), ...collectRefTargets(resource)].includes(resourceLogicalId);
+}
+
+function sortedUnique(values: string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
 }
 
 /**
@@ -609,15 +625,11 @@ function statementActionsOn(statement: unknown, resourceLogicalId: string): stri
  * (both by logical id), deduplicated and sorted.
  */
 function extractRoleActionsOn(template: Template, roleLogicalId: string, resourceLogicalId: string): string[] {
-  const actions = Object.values(template.findResources('AWS::IAM::Policy'))
-    .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
-    .flatMap((policy) => {
-      const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
-      return (Array.isArray(statements) ? statements : [])
-        .flatMap((statement) => statementActionsOn(statement, resourceLogicalId));
-    });
-
-  return [...new Set(actions)].sort((left, right) => left.localeCompare(right));
+  return sortedUnique(
+    allowStatementsOfRole(template, roleLogicalId)
+      .filter((statement) => statementTargets(statement, resourceLogicalId))
+      .flatMap(statementActions)
+  );
 }
 
 /**
@@ -1284,8 +1296,8 @@ describe('Keyword research routes', () => {
     const all = [...synthesized.keywordResearchIdMethods, ...synthesized.keywordResearchRetryMethods];
 
     expect(all).toHaveLength(3);
-    expect(all.every((method) => method.authorizationType === COGNITO_AUTH)).toBe(true);
-    expect(all.every((method) => method.integrationUri.includes(synthesized.keywordMgmtFunctionId))).toBe(true);
+    expect(verbsWithoutCognitoAuthorizer(all)).toStrictEqual([]);
+    expect(verbsNotIntegratedWith(all, synthesized.keywordMgmtFunctionId)).toStrictEqual([]);
   });
 });
 
@@ -1333,8 +1345,8 @@ describe('Research agent (2.5.0)', () => {
     const all = [...synthesized.keywordResearchAgentMethods, ...synthesized.researchTemplatesMethods, ...synthesized.researchTemplateIdMethods];
 
     expect(all).toHaveLength(5);
-    expect(all.every((method) => method.authorizationType === COGNITO_AUTH)).toBe(true);
-    expect(all.every((method) => method.integrationUri.includes(synthesized.keywordMgmtFunctionId))).toBe(true);
+    expect(verbsWithoutCognitoAuthorizer(all)).toStrictEqual([]);
+    expect(verbsNotIntegratedWith(all, synthesized.keywordMgmtFunctionId)).toStrictEqual([]);
   });
 });
 

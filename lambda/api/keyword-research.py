@@ -196,6 +196,25 @@ def _path_id(event: dict[str, Any]) -> str | None:
     return (event.get('pathParameters') or {}).get('id')
 
 
+def _load_research(event: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """The job addressed by ``{id}``, swept for timeouts; returns ``(job, error_response)``.
+
+    ``(None, 400)`` without an id, ``(None, 404)`` for an unknown job. Every
+    route that reads a single job goes through here so they agree on those
+    answers and on when the stale sweep runs.
+    """
+    job_id = _path_id(event)
+    if not job_id:
+        return None, validation_error('Research ID is required', event, 'id')
+
+    job = research_table.get_item(Key={'id': job_id}).get('Item')
+    if not job:
+        return None, not_found_response(resource='Research', event=event)
+
+    _fail_if_research_timed_out(job)
+    return job, None
+
+
 def _no_provider_response(event: dict[str, Any]) -> dict[str, Any]:
     """400 with the actual reason.
 
@@ -456,21 +475,16 @@ def _retry_research(event: dict[str, Any], context: Any) -> dict[str, Any]:
     Only ``failed`` and ``partial`` jobs (including a stale job the sweep just
     failed) can be retried — a running job is already doing the work.
     """
-    job_id = _path_id(event)
-    if not job_id:
-        return validation_error('Research ID is required', event, 'id')
-
-    job = research_table.get_item(Key={'id': job_id}).get('Item')
-    if not job:
-        return not_found_response(resource='Research', event=event)
-
-    _fail_if_research_timed_out(job)
+    job, error = _load_research(event)
+    if error:
+        return error
     if job.get('status') not in (STATUS_FAILED, STATUS_PARTIAL):
         return validation_error('Only failed or partial research can be retried', event, 'status')
 
     if not get_web_search_clients():
         return _no_provider_response(event)
 
+    job_id = job['id']
     attempt = int(job.get('retry_count') or 0) + 1
     timestamp = get_timestamp()
     research_table.update_item(
@@ -500,15 +514,9 @@ def _get_research(event: dict[str, Any], context: Any) -> dict[str, Any]:
     While the job runs, the merged result covers the steps completed so far,
     so the UI can show partial results before the last provider answers.
     """
-    job_id = _path_id(event)
-    if not job_id:
-        return validation_error('Research ID is required', event, 'id')
-
-    job = research_table.get_item(Key={'id': job_id}).get('Item')
-    if not job:
-        return not_found_response(resource='Research', event=event)
-
-    _fail_if_research_timed_out(job)
+    job, error = _load_research(event)
+    if error:
+        return error
     return success_response(public_view(job), event)
 
 

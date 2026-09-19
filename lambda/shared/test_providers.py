@@ -14,14 +14,10 @@ item 28). These tests pin the semantic contract both callers relied on:
 from __future__ import annotations
 
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
-# Load by bare name to avoid triggering shared/__init__.py's boto3 import.
-sys.path.insert(0, os.path.dirname(__file__))
-
-import providers  # type: ignore[import-not-found]
-from config import LLM_PROVIDERS, SEARCH_PROVIDERS  # type: ignore[import-not-found]
+from shared import providers
+from shared.config import LLM_PROVIDERS, SEARCH_PROVIDERS
 
 
 class TestGetEnabledProviderCount:

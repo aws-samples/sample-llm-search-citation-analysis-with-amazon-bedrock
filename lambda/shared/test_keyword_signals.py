@@ -6,18 +6,9 @@ candidates.
 
 from __future__ import annotations
 
-import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-_LAMBDA_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-_LAYER_PY = os.path.join(_LAMBDA_DIR, 'layer', 'python')
-if os.path.isdir(_LAYER_PY) and _LAYER_PY not in sys.path:
-    sys.path.append(_LAYER_PY)
 
 from shared import keyword_signals
 

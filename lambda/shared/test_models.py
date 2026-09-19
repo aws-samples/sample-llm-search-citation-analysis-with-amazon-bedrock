@@ -11,16 +11,15 @@ Covers:
 - Non-throttling errors propagate immediately
 """
 
-import importlib
 import os
-import sys
 from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Ensure the local shared directory is importable
-sys.path.insert(0, os.path.dirname(__file__))
+from testing.module_loader import load_handler_module
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 @pytest.fixture(autouse=True)
@@ -34,12 +33,8 @@ def clear_bedrock_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 
 @pytest.fixture
 def models_module():
-    """Import a fresh copy of models so module-level state is reset."""
-    import models
-    importlib.reload(models)
-    # Reset lazy client between tests
-    models._bedrock_client = None
-    return models
+    """Execute a fresh copy of models.py so module-level state (the lazy client) is reset."""
+    return load_handler_module(_HERE, 'models.py', 'models_under_test')
 
 
 # =============================================================================
@@ -160,23 +155,24 @@ class TestInvokeBedrockThinkingBudget:
         }
         return client
 
-    def test_omits_additional_fields_when_tier_is_fast(self, models_module) -> None:
+    def _converse_kwargs(self, models_module, role, **invoke_kwargs) -> dict:
+        """The kwargs ``converse`` received for one ``invoke_bedrock("hi", role, ...)`` call."""
         client = self._mock_converse_success()
         models_module._bedrock_client = client
 
-        models_module.invoke_bedrock("hi", models_module.ModelRole.GENERATION)
+        models_module.invoke_bedrock("hi", role, **invoke_kwargs)
 
-        kwargs = client.converse.call_args.kwargs
+        return client.converse.call_args.kwargs
+
+    def test_omits_additional_fields_when_tier_is_fast(self, models_module) -> None:
+        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.GENERATION)
+
         assert "additionalModelRequestFields" not in kwargs
 
     def test_includes_thinking_budget_when_tier_is_balanced(self, models_module) -> None:
-        client = self._mock_converse_success()
-        models_module._bedrock_client = client
+        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.ANALYSIS)
 
-        models_module.invoke_bedrock("hi", models_module.ModelRole.ANALYSIS)
-
-        extra = client.converse.call_args.kwargs["additionalModelRequestFields"]
-        assert extra == {"thinking": {"type": "enabled", "budget_tokens": 2000}}
+        assert kwargs["additionalModelRequestFields"] == {"thinking": {"type": "enabled", "budget_tokens": 2000}}
 
     def test_forces_temperature_one_and_grows_max_tokens_when_thinking_is_on(self, models_module) -> None:
         """
@@ -184,50 +180,33 @@ class TestInvokeBedrockThinkingBudget:
         budget against maxTokens. With temperature 0 (every ANALYSIS caller)
         the balanced tier answered a ValidationException on every call.
         """
-        client = self._mock_converse_success()
-        models_module._bedrock_client = client
+        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.ANALYSIS, max_tokens=2000, temperature=0)
 
-        models_module.invoke_bedrock("hi", models_module.ModelRole.ANALYSIS, max_tokens=2000, temperature=0)
-
-        assert client.converse.call_args.kwargs["inferenceConfig"] == {"maxTokens": 4000, "temperature": 1.0}
+        assert kwargs["inferenceConfig"] == {"maxTokens": 4000, "temperature": 1.0}
 
     def test_keeps_the_callers_temperature_when_thinking_is_off(self, models_module) -> None:
-        client = self._mock_converse_success()
-        models_module._bedrock_client = client
+        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.GENERATION, max_tokens=1200, temperature=0.3)
 
-        models_module.invoke_bedrock("hi", models_module.ModelRole.GENERATION, max_tokens=1200, temperature=0.3)
-
-        assert client.converse.call_args.kwargs["inferenceConfig"] == {"maxTokens": 1200, "temperature": 0.3}
+        assert kwargs["inferenceConfig"] == {"maxTokens": 1200, "temperature": 0.3}
 
     def test_uses_deep_budget_when_tier_override_set_to_deep(
         self, models_module, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setenv("BEDROCK_TIER_ANALYSIS", "deep")
-        client = self._mock_converse_success()
-        models_module._bedrock_client = client
 
-        models_module.invoke_bedrock("hi", models_module.ModelRole.ANALYSIS)
+        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.ANALYSIS)
 
-        extra = client.converse.call_args.kwargs["additionalModelRequestFields"]
-        assert extra == {"thinking": {"type": "enabled", "budget_tokens": 8000}}
+        assert kwargs["additionalModelRequestFields"] == {"thinking": {"type": "enabled", "budget_tokens": 8000}}
 
     def test_disables_thinking_when_caller_passes_thinking_false(self, models_module) -> None:
-        client = self._mock_converse_success()
-        models_module._bedrock_client = client
+        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.ANALYSIS, thinking=False)
 
-        models_module.invoke_bedrock("hi", models_module.ModelRole.ANALYSIS, thinking=False)
-
-        kwargs = client.converse.call_args.kwargs
         assert "additionalModelRequestFields" not in kwargs
 
     def test_enables_thinking_when_caller_forces_on_for_fast_tier(self, models_module) -> None:
-        client = self._mock_converse_success()
-        models_module._bedrock_client = client
+        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.GENERATION, thinking=True)
 
-        models_module.invoke_bedrock("hi", models_module.ModelRole.GENERATION, thinking=True)
-
-        extra = client.converse.call_args.kwargs["additionalModelRequestFields"]
-        assert extra == {"thinking": {"type": "enabled", "budget_tokens": 2000}}
+        assert kwargs["additionalModelRequestFields"] == {"thinking": {"type": "enabled", "budget_tokens": 2000}}
 
 
 # =============================================================================

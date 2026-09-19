@@ -20,27 +20,25 @@ Context:
     dispatch is asserted without executing a real worker or reaching AWS.
 """
 
-import importlib
-import importlib.util
 import os
 import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.module_loader import load_handler_module
+
 # --- Import-boundary bootstrap ----------------------------------------------
 #
 # `keyword-mgmt.py` is hyphenated and its sub-handlers build AWS clients at
-# import time, so it is loaded fresh via `spec_from_file_location` under a module
+# import time, so it is loaded fresh via `load_handler_module` under a module
 # name unique to THIS file (the `_load_router` pattern from `test_routers_404.py`)
-# with the layer `shared` on `sys.path`, env vars set, and `boto3` patched BEFORE
-# the load. The `HandlerLoader` cache is seeded with a `MagicMock` per
-# sub-handler, so dispatch is asserted without executing a real worker or
-# reaching AWS. Every global mutation is undone on teardown; nothing is autouse.
+# with env vars set and `boto3` patched BEFORE the load. The `HandlerLoader`
+# cache is seeded with a `MagicMock` per sub-handler, so dispatch is asserted
+# without executing a real worker or reaching AWS. Every global mutation is
+# undone on teardown; nothing is autouse.
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO = os.path.abspath(os.path.join(_API_DIR, '..', '..'))
-_LAYER_PY = os.path.join(_REPO, 'lambda', 'layer', 'python')
 
 _KEYWORD_MGMT_ROUTER_FILE = 'keyword-mgmt.py'
 _KEYWORD_MGMT_MODULE_NAME = 'keyword_mgmt_under_test_promote_routing'
@@ -65,24 +63,6 @@ _KEYWORD_MGMT_SUB_HANDLERS = (
 )
 
 
-def _load_keyword_mgmt_router():
-    """Load `keyword-mgmt.py` fresh under this file's unique module name.
-
-    `shared/__init__.py` re-exports `api_response` as a function, shadowing the
-    submodule, so the real module object is bound explicitly.
-    """
-    if _LAYER_PY not in sys.path:
-        sys.path.insert(0, _LAYER_PY)
-    sys.modules['shared.api_response'] = importlib.import_module('shared.api_response')
-    sys.modules.pop(_KEYWORD_MGMT_MODULE_NAME, None)
-    spec = importlib.util.spec_from_file_location(
-        _KEYWORD_MGMT_MODULE_NAME, os.path.join(_API_DIR, _KEYWORD_MGMT_ROUTER_FILE)
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 @pytest.fixture
 def keyword_mgmt_router():
     """Fresh `keyword-mgmt.py` router with every sub-handler stubbed distinctly.
@@ -97,7 +77,7 @@ def keyword_mgmt_router():
         patch('boto3.resource', MagicMock(name='boto3.resource')),
         patch('boto3.client', MagicMock(name='boto3.client')),
     ):
-        module = _load_keyword_mgmt_router()
+        module = load_handler_module(_API_DIR, _KEYWORD_MGMT_ROUTER_FILE, _KEYWORD_MGMT_MODULE_NAME)
         stubs = {}
         for name in _KEYWORD_MGMT_SUB_HANDLERS:
             stub = MagicMock(name=f'{name}_handler')

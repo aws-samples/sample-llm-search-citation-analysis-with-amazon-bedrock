@@ -197,10 +197,6 @@ const TEMPLATE = {
 };
 
 describe('research agent client', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('starts an agent run with the brief in the API field names', async () => {
     respondWith(202, {
       ...PENDING_JOB,

@@ -1,5 +1,5 @@
 import {
-  beforeEach, describe, expect, it, vi
+  describe, expect, it, vi
 } from 'vitest';
 import {
   render, screen, waitFor
@@ -9,23 +9,15 @@ import {
   AgentProposal, groupProposalByDimension
 } from './AgentProposal';
 import { buildAgentJob } from './agent-fixtures';
+import { createMockJsonResponse } from '../../../test/fetchResponses';
 import type { KeywordGroup } from '../../../types';
 
-vi.mock('../../../infrastructure', async () => {
-  const actual: Record<string, unknown> = await vi.importActual('../../../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../../../infrastructure', () => import('../../../test/infrastructureMock'));
 
 vi.mock('./agentExport', () => ({ exportAgentRun: vi.fn(() => Promise.resolve()) }));
 
-import { authenticatedFetch } from '../../../infrastructure';
+import { mockAuthenticatedFetch } from '../../../test/infrastructureMock';
 import { exportAgentRun } from './agentExport';
-
-const mockAuthenticatedFetch = vi.mocked(authenticatedFetch);
 
 const GROUPS: KeywordGroup[] = [
   {
@@ -46,23 +38,11 @@ const GROUPS: KeywordGroup[] = [
   },
 ];
 
-function respondPromotion(): void {
-  mockAuthenticatedFetch.mockResolvedValue({
-    ok: true,
-    status: 200,
-    statusText: '',
-    json: () => Promise.resolve({
-      created: 1,
-      skipped: 0,
-      created_keywords: [{
-        id: 'k1',
-        keyword: 'hotel coruña centro',
-        status: 'active',
-      }],
-      skipped_keywords: [],
-    }),
-  } satisfies Partial<Response> as Response);
-}
+const PROMOTED_KEYWORD = {
+  id: 'k1',
+  keyword: 'hotel coruña centro',
+  status: 'active',
+};
 
 describe('groupProposalByDimension', () => {
   it('orders sections by the form dimensions and puts unknown ones under Other', () => {
@@ -78,10 +58,6 @@ describe('groupProposalByDimension', () => {
 });
 
 describe('AgentProposal', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
   it('renders one section per dimension with the candidate count', () => {
     const job = buildAgentJob();
     render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
@@ -100,7 +76,12 @@ describe('AgentProposal', () => {
   });
 
   it('promotes the ticked keywords into the chosen group', async () => {
-    respondPromotion();
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
+      created: 1,
+      skipped: 0,
+      created_keywords: [PROMOTED_KEYWORD],
+      skipped_keywords: [],
+    }));
     const job = buildAgentJob();
     const onKeywordsAdded = vi.fn();
     render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} onKeywordsAdded={onKeywordsAdded} />);
@@ -109,15 +90,11 @@ describe('AgentProposal', () => {
     await userEvent.click(screen.getByRole('button', { name: /add 1 keywords to “Hotel Gran Marino”/i }));
 
     await waitFor(() => {
-      expect(onKeywordsAdded).toHaveBeenCalledWith([{
-        id: 'k1',
-        keyword: 'hotel coruña centro',
-        status: 'active',
-      }]);
+      expect(onKeywordsAdded).toHaveBeenCalledWith([PROMOTED_KEYWORD]);
     });
-    const [url, init] = mockAuthenticatedFetch.mock.calls[0] as [string, RequestInit];
+    const [url, init] = mockAuthenticatedFetch.mock.calls[0];
     expect(url).toBe('https://api.test.com/keywords/promote');
-    expect(JSON.parse(String(init.body))).toStrictEqual({
+    expect(JSON.parse(String(init?.body))).toStrictEqual({
       keywords: [expect.objectContaining({ keyword: 'hotel coruña centro' })],
       group_ids: ['g1'],
     });

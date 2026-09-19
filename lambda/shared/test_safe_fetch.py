@@ -14,27 +14,13 @@ changed is that each destination is checked before the next request.
 
 from __future__ import annotations
 
-import importlib
-import os
-import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# The shared package __init__ re-exports api_response as a function, which can
-# shadow the submodule. Point sys.path at lambda/ so `import shared.safe_fetch`
-# resolves to the in-repo module.
-_REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
-_LAMBDA_DIR = os.path.join(_REPO, 'lambda')
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-
-safe_fetch = importlib.import_module('shared.safe_fetch')
-
-fetch_following_validated_redirects = safe_fetch.fetch_following_validated_redirects
-host_matches = safe_fetch.host_matches
-MAX_REDIRECT_HOPS = safe_fetch.MAX_REDIRECT_HOPS
+from shared import safe_fetch
+from shared.safe_fetch import MAX_REDIRECT_HOPS, fetch_following_validated_redirects, host_matches
 
 PUBLIC_IP = '93.184.216.34'
 INTERNAL_REDIRECT = 'http://169.254.169.254/latest/meta-data/'

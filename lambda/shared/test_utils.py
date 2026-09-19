@@ -14,17 +14,10 @@ The helpers under test:
 
 from __future__ import annotations
 
-import os
 import re
-import sys
 from datetime import UTC, datetime, timedelta
 
-# Match the pattern used by test_llm_json / test_url_validator / test_router:
-# insert the shared/ dir onto sys.path so the module loads by bare name,
-# which avoids pytest walking up into shared/__init__.py (which pulls boto3).
-sys.path.insert(0, os.path.dirname(__file__))
-
-import utils  # type: ignore[import-not-found]
+from shared import utils
 
 
 class TestGetTimestamp:

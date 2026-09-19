@@ -10,13 +10,9 @@ tests pin the consolidated behavior each caller relies on.
 from __future__ import annotations
 
 import json
-import os
-import sys
 from decimal import Decimal
 
 import pytest
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from shared.dynamo_decimal import DecimalEncoder, convert_floats_to_decimal, to_int
 

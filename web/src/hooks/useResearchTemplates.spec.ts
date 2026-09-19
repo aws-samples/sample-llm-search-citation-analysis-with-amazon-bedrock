@@ -6,28 +6,13 @@ import {
 } from '@testing-library/react';
 import { useResearchTemplates } from './useResearchTemplates';
 import { buildTemplate } from '../components/KeywordResearch/agent/agent-fixtures';
+import {
+  createEndpointMockFetch, createMockJsonResponse
+} from '../test/fetchResponses';
 
-vi.mock('../infrastructure', async () => {
-  const actual: Record<string, unknown> = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { authenticatedFetch } from '../infrastructure';
-
-const mockAuthenticatedFetch = vi.mocked(authenticatedFetch);
-
-function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: '',
-    json: () => Promise.resolve(body),
-  } satisfies Partial<Response> as Response;
-}
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 const SAVED = buildTemplate({
   id: 't1',
@@ -36,32 +21,35 @@ const SAVED = buildTemplate({
   system_prompt: 'You research urban hotels for business travellers.',
 });
 
+interface TemplatesHookResult { current: ReturnType<typeof useResearchTemplates> }
+
+/** Renders the hook and waits for the initial template list to arrive. */
+async function renderLoadedTemplates(): Promise<TemplatesHookResult> {
+  const { result } = renderHook(() => useResearchTemplates());
+  await waitFor(() => {
+    expect(result.current.loading).toBe(false);
+  });
+  return result;
+}
+
 describe('useResearchTemplates', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-    mockAuthenticatedFetch.mockResolvedValue(jsonResponse(200, { items: [SAVED, buildTemplate()] }));
+    mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch({ items: [SAVED, buildTemplate()] }));
   });
 
   it('loads templates with the built-in one first', async () => {
-    const { result } = renderHook(() => useResearchTemplates());
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
+    const result = await renderLoadedTemplates();
 
     expect(result.current.templates.map((template) => template.id)).toStrictEqual(['builtin-default', 't1']);
   });
 
   it('adds a saved template to the list sorted by name', async () => {
-    const { result } = renderHook(() => useResearchTemplates());
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(201, buildTemplate({
+    const result = await renderLoadedTemplates();
+    mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse(buildTemplate({
       id: 't2',
       name: 'Beach resorts',
       builtin: false,
-    })));
+    }), 201));
 
     const outcome = await act(() => result.current.create({
       name: 'Beach resorts',
@@ -73,11 +61,8 @@ describe('useResearchTemplates', () => {
   });
 
   it('replaces the edited template in place', async () => {
-    const { result } = renderHook(() => useResearchTemplates());
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(200, {
+    const result = await renderLoadedTemplates();
+    mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse({
       ...SAVED,
       system_prompt: 'Updated prompt text for urban hotels.',
     }));
@@ -88,11 +73,8 @@ describe('useResearchTemplates', () => {
   });
 
   it('removes a deleted template from the list', async () => {
-    const { result } = renderHook(() => useResearchTemplates());
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(200, { message: 'deleted' }));
+    const result = await renderLoadedTemplates();
+    mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse({ message: 'deleted' }));
 
     const outcome = await act(() => result.current.remove('t1'));
 
@@ -104,11 +86,8 @@ describe('useResearchTemplates', () => {
   });
 
   it('reports a rejected save without touching the list', async () => {
-    const { result } = renderHook(() => useResearchTemplates());
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-    mockAuthenticatedFetch.mockResolvedValueOnce(jsonResponse(400, { error: 'system_prompt too short (min 20 characters)' }));
+    const result = await renderLoadedTemplates();
+    mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse({ error: 'system_prompt too short (min 20 characters)' }, 400));
 
     const outcome = await act(() => result.current.create({
       name: 'x',

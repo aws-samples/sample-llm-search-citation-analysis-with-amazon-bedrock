@@ -8,87 +8,88 @@ import {
   AGENT_POLL_INTERVAL_MS, useResearchAgent
 } from './useResearchAgent';
 import { buildAgentJob } from '../components/KeywordResearch/agent/agent-fixtures';
+import { createMockJsonResponse } from '../test/fetchResponses';
+import type { StartAgentRequest } from '../api/keywordResearch';
 import type { KeywordResearchItem } from '../types';
 
-vi.mock('../infrastructure', async () => {
-  const actual: Record<string, unknown> = await vi.importActual('../infrastructure');
-  return {
-    ...actual,
-    API_BASE_URL: 'https://api.test.com',
-    authenticatedFetch: vi.fn(),
-  };
-});
+vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { authenticatedFetch } from '../infrastructure';
-
-const mockAuthenticatedFetch = vi.mocked(authenticatedFetch);
-
-function jsonResponse(status: number, body: unknown): Response {
-  return {
-    ok: status >= 200 && status < 300,
-    status,
-    statusText: '',
-    json: () => Promise.resolve(body),
-  } satisfies Partial<Response> as Response;
-}
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 interface AgentApiScript {
   history?: KeywordResearchItem[];
   /** Successive GET /{id} answers per id; the last one repeats. */
   snapshots?: Record<string, KeywordResearchItem[]>;
-  started?: KeywordResearchItem;
+  /** Makes POST /agent fail with this structured 4xx body. */
+  startError?: { error: string };
 }
+
+interface AgentHookResult { current: ReturnType<typeof useResearchAgent> }
 
 function scriptAgentApi(script: AgentApiScript): void {
   const served: Record<string, number> = {};
-  mockAuthenticatedFetch.mockImplementation((url: string, init?: RequestInit) => {
+  mockAuthenticatedFetch.mockImplementation((url, init) => {
     const method = init?.method ?? 'GET';
     if (method === 'GET' && url.includes('/keyword-research/history')) {
-      return Promise.resolve(jsonResponse(200, { items: script.history ?? [] }));
+      return Promise.resolve(createMockJsonResponse({ items: script.history ?? [] }));
     }
     if (method === 'POST' && url.endsWith('/keyword-research/agent')) {
-      return Promise.resolve(jsonResponse(202, script.started ?? buildAgentJob({
+      if (script.startError) return Promise.resolve(createMockJsonResponse(script.startError, 400));
+      return Promise.resolve(createMockJsonResponse(buildAgentJob({
         id: 'job-new',
         status: 'pending',
-      })));
+      }), 202));
     }
     if (method === 'POST' && url.endsWith('/retry')) {
-      return Promise.resolve(jsonResponse(202, {
+      return Promise.resolve(createMockJsonResponse({
         id: 'job-a',
         status: 'pending',
-      }));
+      }, 202));
     }
     if (method === 'DELETE') {
-      return Promise.resolve(jsonResponse(200, { message: 'deleted' }));
+      return Promise.resolve(createMockJsonResponse({ message: 'deleted' }));
     }
     const id = url.slice(url.lastIndexOf('/') + 1);
     const list = script.snapshots?.[id] ?? [];
-    if (list.length === 0) return Promise.resolve(jsonResponse(404, { error: 'Research not found' }));
+    if (list.length === 0) return Promise.resolve(createMockJsonResponse({ error: 'Research not found' }, 404));
     const index = Math.min(served[id] ?? 0, list.length - 1);
     served[id] = index + 1;
-    return Promise.resolve(jsonResponse(200, list[index]));
+    return Promise.resolve(createMockJsonResponse(list[index]));
   });
 }
 
 function requests(): string[] {
-  return mockAuthenticatedFetch.mock.calls.map((call) => {
-    const [url, init] = call as [string, RequestInit | undefined];
-    return `${init?.method ?? 'GET'} ${url.replace('https://api.test.com', '')}`;
-  });
+  return mockAuthenticatedFetch.mock.calls.map(([url, init]) => `${init?.method ?? 'GET'} ${url.replace('https://api.test.com', '')}`);
 }
 
-/** Let pending API promises settle under fake timers. */
-async function flush(): Promise<void> {
+/** Lets `ms` of fake time pass; with 0, pending API promises settle. */
+async function advanceBy(ms: number): Promise<void> {
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(ms);
   });
 }
 
-const START_REQUEST = {
+/** Scripts the agent API, renders the hook and lets the history load settle. */
+async function renderAgentRuns(script: AgentApiScript): Promise<AgentHookResult> {
+  scriptAgentApi(script);
+  const { result } = renderHook(() => useResearchAgent());
+  await advanceBy(0);
+  return result;
+}
+
+/** Opens a run and lets its detail load. */
+async function openRun(result: AgentHookResult, id: string): Promise<void> {
+  act(() => {
+    result.current.select(id);
+  });
+  await advanceBy(0);
+}
+
+const START_REQUEST: StartAgentRequest = {
   seed: 'Hotel Gran Marino',
   country: 'es',
   language: 'es',
-  dimensions: ['destination'] as const,
+  dimensions: ['destination'],
   instruction: '',
   targetCount: 60,
   maxRounds: 2,
@@ -100,7 +101,6 @@ const START_REQUEST = {
 describe('useResearchAgent', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.clearAllMocks();
   });
 
   afterEach(() => {
@@ -108,33 +108,25 @@ describe('useResearchAgent', () => {
   });
 
   it('lists the agent runs from history on mount', async () => {
-    scriptAgentApi({ history: [buildAgentJob()] });
+    const result = await renderAgentRuns({ history: [buildAgentJob()] });
 
-    const { result } = renderHook(() => useResearchAgent());
-
-    await flush();
     expect(result.current.jobs.map((job) => job.id)).toStrictEqual(['job-a']);
     expect(requests()[0]).toBe('GET /keyword-research/history?limit=50&type=agent');
   });
 
   it('starting a run prepends it to the list and opens it', async () => {
-    scriptAgentApi({
+    const result = await renderAgentRuns({
       history: [buildAgentJob()],
       snapshots: {
         'job-new': [buildAgentJob({
           id: 'job-new',
           status: 'pending',
-        })] 
+        })],
       },
     });
-    const { result } = renderHook(() => useResearchAgent());
-    await flush();
 
     await act(async () => {
-      await result.current.start({
-        ...START_REQUEST,
-        dimensions: [...START_REQUEST.dimensions],
-      });
+      await result.current.start(START_REQUEST);
     });
 
     expect(result.current.jobs.map((job) => job.id)).toStrictEqual(['job-new', 'job-a']);
@@ -142,13 +134,12 @@ describe('useResearchAgent', () => {
   });
 
   it('re-reads active runs on the poll interval until they finish', async () => {
-    const running = buildAgentJob({
-      id: 'job-r',
-      status: 'running',
-      keyword_count: 5,
-    });
-    scriptAgentApi({
-      history: [running],
+    const result = await renderAgentRuns({
+      history: [buildAgentJob({
+        id: 'job-r',
+        status: 'running',
+        keyword_count: 5,
+      })],
       snapshots: {
         'job-r': [
           buildAgentJob({
@@ -160,56 +151,40 @@ describe('useResearchAgent', () => {
             id: 'job-r',
             status: 'completed',
           }),
-        ] 
+        ],
       },
     });
-    const { result } = renderHook(() => useResearchAgent());
-    await flush();
     expect(result.current.jobs).toHaveLength(1);
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(AGENT_POLL_INTERVAL_MS);
-    });
+    await advanceBy(AGENT_POLL_INTERVAL_MS);
     expect(result.current.jobs[0].keyword_count).toBe(20);
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(AGENT_POLL_INTERVAL_MS);
-    });
+    await advanceBy(AGENT_POLL_INTERVAL_MS);
     expect(result.current.jobs[0].status).toBe('completed');
 
     const polls = requests().filter((request) => request === 'GET /keyword-research/job-r').length;
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(AGENT_POLL_INTERVAL_MS * 2);
-    });
+    await advanceBy(AGENT_POLL_INTERVAL_MS * 2);
     expect(requests().filter((request) => request === 'GET /keyword-research/job-r')).toHaveLength(polls);
   });
 
   it('opening a run loads its full detail including the prompt', async () => {
-    const listed = buildAgentJob({ system_prompt: undefined });
-    scriptAgentApi({
-      history: [listed],
+    const result = await renderAgentRuns({
+      history: [buildAgentJob({ system_prompt: undefined })],
       snapshots: { 'job-a': [buildAgentJob({ system_prompt: 'the snapshot' })] },
     });
-    const { result } = renderHook(() => useResearchAgent());
-    await flush();
     expect(result.current.jobs).toHaveLength(1);
 
-    act(() => {
-      result.current.select('job-a');
-    });
+    await openRun(result, 'job-a');
 
-    await flush();
     expect(result.current.selected?.system_prompt).toBe('the snapshot');
   });
 
   it('retrying a run marks it pending and re-reads it', async () => {
     const partial = buildAgentJob({ status: 'partial' });
-    scriptAgentApi({
+    const result = await renderAgentRuns({
       history: [partial],
       snapshots: { 'job-a': [buildAgentJob({ status: 'running' })] },
     });
-    const { result } = renderHook(() => useResearchAgent());
-    await flush();
     expect(result.current.jobs).toHaveLength(1);
 
     await act(async () => {
@@ -222,16 +197,12 @@ describe('useResearchAgent', () => {
   });
 
   it('deleting the opened run closes it', async () => {
-    scriptAgentApi({
+    const result = await renderAgentRuns({
       history: [buildAgentJob()],
       snapshots: { 'job-a': [buildAgentJob()] },
     });
-    const { result } = renderHook(() => useResearchAgent());
-    await flush();
     expect(result.current.jobs).toHaveLength(1);
-    act(() => {
-      result.current.select('job-a');
-    });
+    await openRun(result, 'job-a');
 
     await act(async () => {
       await result.current.remove('job-a');
@@ -242,17 +213,15 @@ describe('useResearchAgent', () => {
   });
 
   it('surfaces a start failure as an error and keeps the list', async () => {
-    scriptAgentApi({ history: [buildAgentJob()] });
-    mockAuthenticatedFetch.mockImplementationOnce(() => Promise.resolve(jsonResponse(200, { items: [buildAgentJob()] })));
-    const { result } = renderHook(() => useResearchAgent());
-    await flush();
+    const result = await renderAgentRuns({
+      history: [buildAgentJob()],
+      startError: { error: 'Keyword group not found' },
+    });
     expect(result.current.jobs).toHaveLength(1);
-    mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(jsonResponse(400, { error: 'Keyword group not found' })));
 
     await act(async () => {
       await result.current.start({
         ...START_REQUEST,
-        dimensions: [...START_REQUEST.dimensions],
         groupId: 'nope',
       });
     });

@@ -91,6 +91,24 @@ one-click promotion into the hotel's keyword group and Excel export.
   plain-string messages. The routes now return the real reason (400 "No API
   keys configured…", 503 "Could not start…").
 
+### Changed (zero-duplication follow-through)
+
+- The nine clones 2.4.2 deferred as this feature's files (`keyword-research.py`,
+  `test_keyword_research_job_lifecycle.py`, `test_research_worker.py`,
+  `test_models.py`) are gone, along with the eight TypeScript and three
+  further Python clones the feature itself introduced; the four temporary
+  entries in the Python jscpd `ignore` lists are removed. All four
+  duplication gates run at threshold `0` with no exemptions.
+- `keyword-research.py`: `_retry_research` and `_get_research` share
+  `_load_research` (path id → GetItem → 404 → stale sweep); same routes,
+  responses and status codes.
+- The feature's specs and tests use the shared foundations
+  (`web/src/test/infrastructureMock`, `fetchResponses`, `lambda/conftest.py`,
+  `lambda/testing/` — which gains `load_handler_module_offline` and
+  `KEYWORD_RESEARCH_ENV`), and the last 33 legacy Lambda tests drop their
+  redundant per-file `sys.path` shims, two of which put the built layer
+  ahead of the source tree.
+
 ## [2.4.2] - 2026-09-18
 
 Zero-duplication refactor of the Lambda (Python) code and its tests, with
@@ -148,14 +166,13 @@ shared modules).
   `_browser_created_dynamically` attribute (`shared/browser_tools.py`): no
   readers anywhere.
 
-### Deferred
+### Deferred (resolved in 2.5.0)
 
-- Nine clones inside files owned by the open research-agent PR (#113) —
+- Nine clones inside files owned by the then-open research-agent PR (#113) —
   `api/keyword-research.py`, `api/test_keyword_research_job_lifecycle.py`,
-  `research-worker/test_research_worker.py`, `shared/test_models.py` — are
+  `research-worker/test_research_worker.py`, `shared/test_models.py` — were
   temporarily listed in the two Python jscpd configs' `ignore` so the gate
-  stays at threshold `0` without editing that PR's files. Clear them and drop
-  the four entries when #113 rebases onto this.
+  stayed at threshold `0` without editing that PR's files. Cleared in 2.5.0.
 
 ## [2.4.1] - 2026-09-18
 

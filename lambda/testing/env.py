@@ -18,6 +18,15 @@ KEYWORDS_TABLE_ENV: Mapping[str, str] = {
     'KEYWORDS_TABLE': 'test-keywords-table',
 }
 
+# What the keyword-research handler resolves at import: its job table, the
+# state machine it starts, and the templates / groups tables it reads.
+KEYWORD_RESEARCH_ENV: Mapping[str, str] = {
+    'KEYWORD_RESEARCH_TABLE': 'test-keyword-research',
+    'RESEARCH_STATE_MACHINE_ARN': 'arn:aws:states:us-west-2:123456789012:stateMachine:research',
+    'DYNAMODB_TABLE_RESEARCH_TEMPLATES': 'test-research-templates',
+    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
+}
+
 
 def setdefault_env(defaults: Mapping[str, str]) -> None:
     """``os.environ.setdefault`` for every pair, for modules loaded at collection time.

@@ -13,32 +13,17 @@ Tests for the ResearchWorker Lambda (keyword research state machine steps).
 
 from __future__ import annotations
 
-import importlib.util
 import os
-import sys
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-_LAMBDA_DIR = os.path.dirname(_HERE)
-if _LAMBDA_DIR not in sys.path:
-    sys.path.insert(0, _LAMBDA_DIR)
-# Third-party runtime deps (requests, bs4) live in the built layer, not the
-# dev venv. Appended, so `shared` still resolves from source first.
-_LAYER_PY = os.path.join(_LAMBDA_DIR, 'layer', 'python')
-if os.path.isdir(_LAYER_PY) and _LAYER_PY not in sys.path:
-    sys.path.append(_LAYER_PY)
-
 from shared.ai_clients import WEB_SEARCH_PROVIDERS
+from testing.module_loader import load_handler_module_offline
 
-with patch('boto3.resource', MagicMock()):
-    _spec = importlib.util.spec_from_file_location('research_worker_under_test', os.path.join(_HERE, 'handler.py'))
-    _mod = importlib.util.module_from_spec(_spec)
-    sys.modules['research_worker_under_test'] = _mod
-    _spec.loader.exec_module(_mod)
+_mod = load_handler_module_offline(os.path.dirname(__file__), 'handler.py', 'research_worker_under_test')
 
 _PERPLEXITY, _OPENAI, _GEMINI = WEB_SEARCH_PROVIDERS
 
@@ -76,6 +61,23 @@ def _step_writes(table: MagicMock) -> list[dict]:
         for call in table.update_item.call_args_list
         if ':step' in call.kwargs.get('ExpressionAttributeValues', {})
     ]
+
+
+def _execute_step(job: dict, event: dict, *, api_key: str | None = 'sk-test', **collaborators: MagicMock) -> tuple[dict, MagicMock]:
+    """Run one ``execute_step`` event against a table holding ``job``; returns ``(result, table)``.
+
+    ``api_key`` is what ``get_api_key`` answers for the step's provider;
+    ``collaborators`` stub the provider call itself (``run_web_search=...`` or
+    ``fetch_google_signals=...``).
+    """
+    table = _table_with(job)
+    with (
+        patch.object(_mod, 'research_table', table),
+        patch.object(_mod, 'get_api_key', MagicMock(return_value=api_key)),
+        patch.multiple(_mod, **collaborators),
+    ):
+        result = _mod.handler(event, None)
+    return result, table
 
 
 class TestPlan:
@@ -200,19 +202,13 @@ class TestPlan:
 
 
 class TestExecuteStep:
-    def _event(self, provider: str = 'openai') -> dict:
-        return {'action': 'execute_step', 'job_id': 'job-1', 'step_id': f'r1-{provider}', 'provider': provider}
+    def _event(self, provider: str = 'openai', job_id: str = 'job-1') -> dict:
+        return {'action': 'execute_step', 'job_id': job_id, 'step_id': f'r1-{provider}', 'provider': provider}
 
     def test_writes_the_parsed_keywords_to_the_step(self):
-        table = _table_with(_expansion_job())
         response_text = '[{"keyword": "hotel malaga centro", "intent": "commercial", "relevance": 9.5}]'
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', MagicMock(return_value=response_text)),
-        ):
-            result = _mod.handler(self._event(), None)
+        result, table = _execute_step(_expansion_job(), self._event(), run_web_search=MagicMock(return_value=response_text))
 
         final = _step_writes(table)[-1]
         assert result['status'] == 'completed'
@@ -221,28 +217,14 @@ class TestExecuteStep:
         assert final['keyword_count'] == 1
 
     def test_marks_the_step_running_before_calling_the_provider(self):
-        table = _table_with(_expansion_job())
-
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', MagicMock(return_value='[]')),
-        ):
-            _mod.handler(self._event(), None)
+        _result, table = _execute_step(_expansion_job(), self._event(), run_web_search=MagicMock(return_value='[]'))
 
         first, last = _step_writes(table)
         assert first['status'] == 'running'
         assert last['status'] == 'completed'
 
     def test_writes_each_step_under_its_own_key(self):
-        table = _table_with(_expansion_job())
-
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', MagicMock(return_value='[]')),
-        ):
-            _mod.handler(self._event('gemini'), None)
+        _result, table = _execute_step(_expansion_job(), self._event('gemini'), run_web_search=MagicMock(return_value='[]'))
 
         call = table.update_item.call_args.kwargs
         assert call['UpdateExpression'] == 'SET steps.#sid = :step, updated_at = :ts'
@@ -251,38 +233,23 @@ class TestExecuteStep:
     def test_bounds_in_process_retries_to_the_step_budget(self):
         run = MagicMock(return_value='[]')
 
-        with (
-            patch.object(_mod, 'research_table', _table_with(_expansion_job())),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', run),
-        ):
-            _mod.handler(self._event(), None)
+        _execute_step(_expansion_job(), self._event(), run_web_search=run)
 
         assert run.call_args.kwargs['max_retries'] == 2
 
     def test_asks_the_provider_for_the_requested_count_about_the_seed(self):
         run = MagicMock(return_value='[]')
 
-        with (
-            patch.object(_mod, 'research_table', _table_with(_expansion_job(count=30))),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', run),
-        ):
-            _mod.handler(self._event(), None)
+        _execute_step(_expansion_job(count=30), self._event(), run_web_search=run)
 
         prompt = run.call_args.args[2]
         assert 'Find 30 related keywords' in prompt
         assert '<seed_keyword>hotel malaga</seed_keyword>' in prompt
 
     def test_records_a_provider_error_on_the_step_instead_of_raising(self):
-        table = _table_with(_expansion_job())
+        run = MagicMock(side_effect=RuntimeError('401 Unauthorized | invalid_api_key'))
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', MagicMock(side_effect=RuntimeError('401 Unauthorized | invalid_api_key'))),
-        ):
-            result = _mod.handler(self._event('perplexity'), None)
+        result, table = _execute_step(_expansion_job(), self._event('perplexity'), run_web_search=run)
 
         final = _step_writes(table)[-1]
         assert result['status'] == 'failed'
@@ -290,70 +257,42 @@ class TestExecuteStep:
         assert final['error_message'] == '401 Unauthorized | invalid_api_key'
 
     def test_treats_unparseable_output_as_a_failed_step_not_an_empty_success(self):
-        table = _table_with(_expansion_job())
+        run = MagicMock(return_value='Sorry, I cannot help with that.')
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', MagicMock(return_value='Sorry, I cannot help with that.')),
-        ):
-            _mod.handler(self._event(), None)
+        _result, table = _execute_step(_expansion_job(), self._event(), run_web_search=run)
 
         final = _step_writes(table)[-1]
         assert final['status'] == 'failed'
         assert 'no parseable' in final['error_message']
 
     def test_fails_the_step_when_the_provider_key_is_missing(self):
-        table = _table_with(_expansion_job())
+        run = MagicMock()
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value=None)),
-            patch.object(_mod, 'run_web_search', MagicMock()) as run,
-        ):
-            _mod.handler(self._event('perplexity'), None)
+        _result, table = _execute_step(_expansion_job(), self._event('perplexity'), api_key=None, run_web_search=run)
 
         run.assert_not_called()
         assert _step_writes(table)[-1]['error_message'] == 'perplexity is not configured'
 
     def test_keeps_only_entries_that_carry_a_keyword(self):
-        table = _table_with(_expansion_job())
         response_text = '[{"keyword": "ok"}, {"intent": "none"}, "junk", {"keyword": 7}]'
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', MagicMock(return_value=response_text)),
-        ):
-            _mod.handler(self._event(), None)
+        _result, table = _execute_step(_expansion_job(), self._event(), run_web_search=MagicMock(return_value=response_text))
 
         assert _step_writes(table)[-1]['keywords'] == [{'keyword': 'ok'}]
 
     def test_truncates_the_raw_response_kept_on_the_step(self):
-        table = _table_with(_expansion_job())
         response_text = '[]' + ' ' * 10_000
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', MagicMock(return_value=response_text)),
-        ):
-            _mod.handler(self._event(), None)
+        _result, table = _execute_step(_expansion_job(), self._event(), run_web_search=MagicMock(return_value=response_text))
 
         assert len(_step_writes(table)[-1]['raw_response']) == 5000
 
     def test_competitor_step_merges_defaults_and_attaches_the_scraped_elements(self):
         page = {'success': True, 'title': 'Rooms', 'meta_description': 'Sea view', 'h1_tags': ['Stay'], 'h2_tags': []}
-        table = _table_with(_competitor_job(page_data=page))
         response_text = '{"industry": "hospitality", "primary_keywords": [{"keyword": "sea view hotel", "relevance": 8}]}'
         run = MagicMock(return_value=response_text)
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', run),
-        ):
-            _mod.handler({'action': 'execute_step', 'job_id': 'job-2', 'step_id': 'r1-openai', 'provider': 'openai'}, None)
+        _result, table = _execute_step(_competitor_job(page_data=page), self._event(job_id='job-2'), run_web_search=run)
 
         analysis = _step_writes(table)[-1]['analysis']
         assert analysis['industry'] == 'hospitality'
@@ -362,15 +301,10 @@ class TestExecuteStep:
         assert '<page_title>Rooms</page_title>' in run.call_args.args[2]
 
     def test_competitor_step_counts_keywords_across_categories(self):
-        table = _table_with(_competitor_job(page_data={'success': False}))
         response_text = '{"primary_keywords": [{"keyword": "a"}], "longtail_keywords": [{"keyword": "b"}, {"keyword": "c"}]}'
+        run = MagicMock(return_value=response_text)
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', MagicMock(return_value=response_text)),
-        ):
-            _mod.handler({'action': 'execute_step', 'job_id': 'job-2', 'step_id': 'r1-openai', 'provider': 'openai'}, None)
+        _result, table = _execute_step(_competitor_job(page_data={'success': False}), self._event(job_id='job-2'), run_web_search=run)
 
         assert _step_writes(table)[-1]['keyword_count'] == 3
 
@@ -663,16 +597,20 @@ class TestAgentExecuteStep:
             ]},
         })
 
+    def _query_step(self, run: MagicMock) -> tuple[dict, MagicMock]:
+        """Execute the planned ``r1-q2-openai`` query step with ``run`` as the provider call."""
+        event = {'action': 'execute_step', 'job_id': 'job-a', 'step_id': 'r1-q2-openai', 'provider': 'openai'}
+        return _execute_step(self._job_with_step(), event, run_web_search=run)
+
+    def _signals_step(self, signals: MagicMock) -> tuple[dict, MagicMock]:
+        """Execute the round's ``r1-signals-serpapi`` step with ``signals`` as ``fetch_google_signals``."""
+        event = {'action': 'execute_step', 'job_id': 'job-a', 'step_id': 'r1-signals-serpapi', 'provider': 'serpapi'}
+        return _execute_step(self._job_with_step(), event, api_key='serp-key', fetch_google_signals=signals)
+
     def test_searches_the_planned_query_and_tags_keywords_with_its_dimension(self):
-        table = _table_with(self._job_with_step())
         run = MagicMock(return_value='[{"keyword": "hotel coruña con niños", "intent": "commercial", "competition": "low", "relevance": 8}]')
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', run),
-        ):
-            result = _mod.handler({'action': 'execute_step', 'job_id': 'job-a', 'step_id': 'r1-q2-openai', 'provider': 'openai'}, None)
+        result, table = self._query_step(run)
 
         assert result['status'] == 'completed'
         assert '<query>hotel familiar coruña</query>' in run.call_args.args[2]
@@ -680,29 +618,16 @@ class TestAgentExecuteStep:
         assert final['keywords'][0]['dimension'] == 'audience'
 
     def test_every_status_write_keeps_the_planned_query(self):
-        table = _table_with(self._job_with_step())
-
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', MagicMock(return_value='[]')),
-        ):
-            _mod.handler({'action': 'execute_step', 'job_id': 'job-a', 'step_id': 'r1-q2-openai', 'provider': 'openai'}, None)
+        _result, table = self._query_step(MagicMock(return_value='[]'))
 
         running, completed = _step_writes(table)
         assert (running['query'], running['dimension'], running['round'], running['status']) == ('hotel familiar coruña', 'audience', 1, 'running')
         assert (completed['query'], completed['rationale'], completed['status']) == ('hotel familiar coruña', 'families', 'completed')
 
     def test_signals_step_collects_google_signals_for_every_query_of_the_round(self):
-        table = _table_with(self._job_with_step())
         signals = MagicMock(side_effect=lambda _key, query, **_kw: [{'keyword': f'{query} barato', 'source': 'google autocomplete', 'relevance': 5, 'intent': '', 'competition': ''}])
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='serp-key')),
-            patch.object(_mod, 'fetch_google_signals', signals),
-        ):
-            result = _mod.handler({'action': 'execute_step', 'job_id': 'job-a', 'step_id': 'r1-signals-serpapi', 'provider': 'serpapi'}, None)
+        result, table = self._signals_step(signals)
 
         final = _step_writes(table)[-1]
         assert result['status'] == 'completed'
@@ -712,29 +637,16 @@ class TestAgentExecuteStep:
         assert signals.call_args.kwargs == {'country': 'es', 'language': 'es'}
 
     def test_signals_step_keeps_the_queries_that_worked_and_records_the_rest_as_warnings(self):
-        table = _table_with(self._job_with_step())
         signals = MagicMock(side_effect=[ValueError('429 rate limited'), [{'keyword': 'hoteles coruña baratos', 'source': 'google autocomplete', 'relevance': 5, 'intent': '', 'competition': ''}]])
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='serp-key')),
-            patch.object(_mod, 'fetch_google_signals', signals),
-        ):
-            result = _mod.handler({'action': 'execute_step', 'job_id': 'job-a', 'step_id': 'r1-signals-serpapi', 'provider': 'serpapi'}, None)
+        result, table = self._signals_step(signals)
 
         final = _step_writes(table)[-1]
         assert (result['status'], final['keyword_count']) == ('completed', 1)
         assert final['warnings'] == ['hotel familiar coruña: 429 rate limited']
 
     def test_signals_step_fails_when_no_query_produced_anything(self):
-        table = _table_with(self._job_with_step())
-
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='serp-key')),
-            patch.object(_mod, 'fetch_google_signals', MagicMock(side_effect=ValueError('401 invalid key'))),
-        ):
-            result = _mod.handler({'action': 'execute_step', 'job_id': 'job-a', 'step_id': 'r1-signals-serpapi', 'provider': 'serpapi'}, None)
+        result, table = self._signals_step(MagicMock(side_effect=ValueError('401 invalid key')))
 
         final = _step_writes(table)[-1]
         assert result['status'] == 'failed'

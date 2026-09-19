@@ -9,15 +9,9 @@ consolidation to the numbers the dashboard was already showing.
 
 from __future__ import annotations
 
-import os
-import sys
-
 import pytest
 
-# Load by bare name to avoid triggering shared/__init__.py's boto3 import.
-sys.path.insert(0, os.path.dirname(__file__))
-
-import visibility_score  # type: ignore[import-not-found]
+from shared import visibility_score
 
 
 class TestCalculateVisibilityScore:

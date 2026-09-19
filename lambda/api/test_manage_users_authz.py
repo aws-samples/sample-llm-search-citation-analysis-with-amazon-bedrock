@@ -20,17 +20,16 @@ Also covers the route regression where `('GET', None)` shadowed
 
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
-import sys
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-# Make `from shared.xxx import` resolve (layer puts shared/ at /opt/python/shared/)
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))  # lambda/
+from testing.module_loader import load_handler_module
+
+_API_DIR = os.path.dirname(os.path.abspath(__file__))
 
 CALLER = 'admin@example.com'
 OTHER_USER = 'victim@example.com'
@@ -53,12 +52,6 @@ def _mock_boto3_client(*args, **kwargs):
     return mock_cognito
 
 
-_handler_spec = importlib.util.spec_from_file_location(
-    'manage_users',
-    os.path.join(os.path.dirname(__file__), 'manage-users.py')
-)
-_handler_mod = importlib.util.module_from_spec(_handler_spec)
-
 _test_env = {
     'USER_POOL_ID': 'us-east-1_testpool',
     'CORS_ORIGIN_PARAM': '',
@@ -66,7 +59,7 @@ _test_env = {
 
 with patch('boto3.client', side_effect=_mock_boto3_client):
     with patch.dict(os.environ, _test_env):
-        _handler_spec.loader.exec_module(_handler_mod)
+        _handler_mod = load_handler_module(_API_DIR, 'manage-users.py', 'manage_users')
 
 _handler_mod.cognito_client = mock_cognito
 
