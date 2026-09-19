@@ -120,6 +120,18 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
     config: 'Dashboard not configured properly',
     unknown: 'Failed to load dashboard data',
   },
+  alerts: {
+    network: 'Unable to load alerts',
+    auth: 'Authentication required to view alerts',
+    permission: 'Changing alerts requires an administrator',
+    not_found: 'Alert data was not found',
+    validation: 'Invalid alert configuration',
+    rate_limit: 'Alert requests limited. Please wait',
+    server: 'Failed to process alert request',
+    timeout: 'Alert operation timed out',
+    config: 'Alert service not configured',
+    unknown: 'Failed to process alert request',
+  },
   brands: {
     network: 'Unable to load brand mentions',
     auth: 'Authentication required to view brands',

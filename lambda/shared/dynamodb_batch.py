@@ -108,3 +108,17 @@ def query_latest_per_key(
             results[value] = item
 
     return results
+
+
+
+def collect_all_items(operation: Any, **params: Any) -> list[dict[str, Any]]:
+    """Call a paginated DynamoDB query/scan operation through every page."""
+    items: list[dict[str, Any]] = []
+    request = dict(params)
+    while True:
+        response = operation(**request)
+        items.extend(response.get('Items', []))
+        last_key = response.get('LastEvaluatedKey')
+        if not last_key:
+            return items
+        request['ExclusiveStartKey'] = last_key

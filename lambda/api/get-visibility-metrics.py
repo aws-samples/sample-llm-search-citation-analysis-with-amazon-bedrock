@@ -31,9 +31,7 @@ from botocore.config import Config
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
-from shared.constants import UNRANKED_SENTINEL
 from shared.decorators import api_handler, validate
-from shared.dynamo_decimal import to_int
 from shared.providers import get_enabled_provider_count
 from shared.scope_params import (
     SCOPE_QUERY_PARAMS,
@@ -43,14 +41,8 @@ from shared.scope_params import (
     scope_from_request,
 )
 from shared.utils import get_brand_config
-from shared.visibility_score import (
-    calculate_share_of_voice,
-    calculate_visibility_score,
-    mean,
-    sentiment_to_score,
-    summarize_first_party_prominence,
-    summarize_group_visibility,
-)
+from shared.visibility_metrics import METRICS_PROJECTION, calculate_keyword_visibility
+from shared.visibility_score import summarize_group_visibility
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -69,9 +61,8 @@ KEYWORDS_TABLE = keywords_table_name()
 _SCOPE_MAX_WORKERS = 10
 _SCOPE_KEYWORDS_CAP = 100
 
-# Only the fields the metrics use; the full LLM response text stays in the
-# table. The projected brands include rank and first_position.
-_METRICS_PROJECTION = '#ts, provider, brands, query_prompt_id'
+# Shared with the exact-run alert worker; the API keeps selecting latest rows.
+_METRICS_PROJECTION = METRICS_PROJECTION
 
 
 def get_visibility_metrics(
@@ -80,132 +71,22 @@ def get_visibility_metrics(
     query_prompt_id: str | None = None,
     total_providers: int | None = None,
 ) -> dict[str, Any]:
-    """Calculate visibility metrics for a keyword, optionally filtered by persona."""
-    items = query_keyword_rows(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword, _METRICS_PROJECTION)
-
+    """Calculate the established API payload for a keyword's latest run."""
+    items = query_keyword_rows(
+        dynamodb.Table(SEARCH_RESULTS_TABLE),
+        keyword,
+        _METRICS_PROJECTION,
+    )
     if not items:
-        return {"error": "No data found for keyword"}
-
-    # Aggregate brand data
-    brand_data = {}  # brand_name -> {providers, mentions, ranks, sentiments}
-    total_mentions = 0
-
-    # Get latest timestamp for current metrics
-    latest_timestamp = max(item.get('timestamp', '') for item in items)
-    latest_items = [item for item in items if item.get('timestamp') == latest_timestamp]
-
-    # Filter by persona if specified
-    if query_prompt_id:
-        latest_items = [item for item in latest_items if item.get('query_prompt_id', 'default') == query_prompt_id]
-
-    first_party_brands_by_answer = [
-        [brand for brand in item.get('brands', []) if brand.get('classification') == 'first_party']
-        for item in latest_items
-    ]
-    prominence = summarize_first_party_prominence(first_party_brands_by_answer)
-
-    for item in latest_items:
-        provider = item.get('provider', 'unknown')
-        brands = item.get('brands', [])
-
-        for brand in brands:
-            name = brand.get('name', '').lower()
-            if not name:
-                continue
-
-            # Use the classification from brand extraction if available
-            brand_classification = brand.get('classification', 'other')
-
-            if name not in brand_data:
-                brand_data[name] = {
-                    'original_name': brand.get('name'),
-                    'classification': brand_classification,  # Store original classification
-                    'providers': set(),
-                    'mentions': 0,
-                    'ranks': [],
-                    'sentiments': []
-                }
-
-            brand_data[name]['providers'].add(provider)
-            mention_count = to_int(brand.get('mention_count'), 1)
-            brand_data[name]['mentions'] += mention_count
-            brand_data[name]['ranks'].append(to_int(brand.get('rank'), UNRANKED_SENTINEL))
-            if brand.get('sentiment'):
-                brand_data[name]['sentiments'].append(sentiment_to_score(brand.get('sentiment')))
-
-            total_mentions += mention_count
-
-    # Get enabled provider count for visibility calculation (the group
-    # summary passes it in once instead of reading ProviderConfig per keyword)
+        return {'error': 'No data found for keyword'}
     if total_providers is None:
         total_providers = get_enabled_provider_count()
-
-    # Calculate metrics for each brand
-    brand_metrics = []
-    for data in brand_data.values():
-        provider_count = len(data['providers'])
-        best_rank = min(data['ranks']) if data['ranks'] else UNRANKED_SENTINEL
-        avg_sentiment = sum(data['sentiments']) / len(data['sentiments']) if data['sentiments'] else 0.0
-
-        # Ensure all values are native Python types
-        mentions = to_int(data['mentions'], 0)
-
-        visibility_score = calculate_visibility_score(
-            provider_count=provider_count,
-            total_mentions=mentions,
-            best_rank=best_rank,
-            avg_sentiment_score=float(avg_sentiment),
-            total_providers=total_providers
-        )
-
-        # Use the classification from brand extraction (already determined during search)
-        classification = data.get('classification', 'other')
-
-        brand_metrics.append({
-            'name': data['original_name'],
-            'visibility_score': visibility_score,
-            'provider_count': provider_count,
-            'providers': list(data['providers']),
-            'total_mentions': mentions,
-            'best_rank': best_rank,
-            'avg_sentiment': round(float(avg_sentiment), 2),
-            'classification': classification
-        })
-
-    # Sort by visibility score
-    brand_metrics.sort(key=lambda x: x['visibility_score'], reverse=True)
-
-    # Calculate share of voice
-    brand_mentions = {b['name']: b['total_mentions'] for b in brand_metrics}
-    share_of_voice = calculate_share_of_voice(brand_mentions, total_mentions)
-
-    # Add share of voice to each brand
-    for brand in brand_metrics:
-        brand['share_of_voice'] = share_of_voice.get(brand['name'], 0)
-
-    # Separate by classification
-    first_party_metrics = [b for b in brand_metrics if b['classification'] == 'first_party']
-    competitor_metrics = [b for b in brand_metrics if b['classification'] == 'competitor']
-    other_metrics = [b for b in brand_metrics if b['classification'] == 'other']
-
-    return {
-        'keyword': keyword,
-        'timestamp': latest_timestamp,
-        'total_brands': len(brand_metrics),
-        'total_mentions': total_mentions,
-        'total_providers': total_providers,
-        'brands': brand_metrics,
-        'first_party': first_party_metrics,
-        'competitors': competitor_metrics,
-        'others': other_metrics,
-        'prominence': prominence,
-        'summary': {
-            'first_party_avg_score': round(mean(b['visibility_score'] for b in first_party_metrics), 1),
-            'competitor_avg_score': round(mean(b['visibility_score'] for b in competitor_metrics), 1),
-            'first_party_total_sov': round(sum(b['share_of_voice'] for b in first_party_metrics), 2),
-            'competitor_total_sov': round(sum(b['share_of_voice'] for b in competitor_metrics), 2)
-        }
-    }
+    return calculate_keyword_visibility(
+        keyword,
+        items,
+        total_providers,
+        query_prompt_id=query_prompt_id,
+    )
 
 
 def get_scope_visibility_metrics(scope: ReportScope, config: dict[str, Any], query_prompt_id: str | None = None) -> dict[str, Any]:

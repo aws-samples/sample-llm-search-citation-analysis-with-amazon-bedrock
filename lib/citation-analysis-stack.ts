@@ -2,9 +2,11 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as sns from 'aws-cdk-lib/aws-sns';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
@@ -542,6 +544,50 @@ export class CitationAnalysisStack extends cdk.Stack {
       tableName: 'CitationAnalysis-RecommendationStatus',
       partitionKey: { name: 'recommendation_id', type: dynamodb.AttributeType.STRING },
       timeToLiveAttribute: 'ttl',
+    });
+
+    // Complete, exact-run KPI snapshots. The timestamp sort key makes the
+    // immediately preceding complete snapshot a bounded Query.
+    const kpiSnapshotsTable = citationAnalysisTable(this, 'KpiSnapshotsTable', {
+      tableName: 'CitationAnalysis-KpiSnapshots',
+      partitionKey: { name: 'group_id', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'snapshot_at', type: dynamodb.AttributeType.STRING },
+      timeToLiveAttribute: 'ttl',
+    });
+
+    // Durable alert instances, queried newest-first by their open or
+    // acknowledged lifecycle state rather than through a table scan.
+    const kpiAlertsTable = citationAnalysisTable(this, 'KpiAlertsTable', {
+      tableName: 'CitationAnalysis-KpiAlerts',
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+      timeToLiveAttribute: 'ttl',
+      globalSecondaryIndexes: [{
+        indexName: 'StatusCreatedIndex',
+        partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
+        sortKey: { name: 'created_at', type: dynamodb.AttributeType.STRING },
+      }],
+    });
+
+    const alertSettingsTable = citationAnalysisTable(this, 'AlertSettingsTable', {
+      tableName: 'CitationAnalysis-AlertSettings',
+      partitionKey: { name: 'config_id', type: dynamodb.AttributeType.STRING },
+    });
+
+    const contentChangesTable = citationAnalysisTable(this, 'ContentChangesTable', {
+      tableName: 'CitationAnalysis-ContentChanges',
+      partitionKey: { name: 'group_id', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'changed_at', type: dynamodb.AttributeType.STRING },
+      timeToLiveAttribute: 'ttl',
+    });
+
+    // Topic delivery and every table above are request-priced; no provisioned
+    // throughput or continuously running compute is introduced. The AWS-managed
+    // SNS key adds no monthly customer-managed-key charge.
+    const kpiAlertsKey = kms.Alias.fromAliasName(this, 'KpiAlertsSnsKey', 'alias/aws/sns');
+    const kpiAlertsTopic = new sns.Topic(this, 'KpiAlertsTopic', {
+      topicName: 'CitationAnalysis-KpiAlerts',
+      displayName: 'Citation Analysis KPI Alerts',
+      masterKey: kpiAlertsKey,
     });
 
     // ========================================
@@ -1088,6 +1134,46 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Grant GenerateSummary Lambda write access to keywords bucket (for storing summaries)
     keywordsBucket.grantWrite(generateSummaryFunction);
 
+    const kpiAlertsLogGroup = new logs.LogGroup(this, 'KpiAlertsLogGroup', {
+      logGroupName: '/aws/lambda/CitationAnalysis-KpiAlerts',
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+
+    const kpiAlertsFunction = new lambda.Function(this, 'KpiAlertsFunction', {
+      functionName: 'CitationAnalysis-KpiAlerts',
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'handler.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/kpi-alerts'), { exclude: PYTHON_ASSET_EXCLUDES }),
+      layers: [sharedLayer],
+      timeout: cdk.Duration.seconds(300),
+      memorySize: 512,
+      description: 'Record complete KPI snapshots and evaluate post-run alerts',
+      logGroup: kpiAlertsLogGroup,
+      environment: {
+        DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
+        DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
+        DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
+        DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
+        DYNAMODB_TABLE_KPI_SNAPSHOTS: kpiSnapshotsTable.tableName,
+        DYNAMODB_TABLE_KPI_ALERTS: kpiAlertsTable.tableName,
+        DYNAMODB_TABLE_ALERT_SETTINGS: alertSettingsTable.tableName,
+        DYNAMODB_TABLE_CONTENT_CHANGES: contentChangesTable.tableName,
+        KPI_ALERTS_TOPIC_ARN: kpiAlertsTopic.topicArn,
+      },
+    });
+
+    searchResultsTable.grantReadData(kpiAlertsFunction);
+    keywordsTable.grantReadData(kpiAlertsFunction);
+    keywordGroupsTable.grantReadData(kpiAlertsFunction);
+    providerConfigTable.grantReadData(kpiAlertsFunction);
+    kpiSnapshotsTable.grantReadWriteData(kpiAlertsFunction);
+    kpiAlertsTable.grantWriteData(kpiAlertsFunction);
+    alertSettingsTable.grantReadData(kpiAlertsFunction);
+    contentChangesTable.grantReadData(kpiAlertsFunction);
+    kpiAlertsTopic.grantPublish(kpiAlertsFunction);
+    kpiAlertsKey.grantEncryptDecrypt(kpiAlertsFunction);
+
     // ========================================
     // Step Functions State Machine
     // ========================================
@@ -1201,12 +1287,40 @@ export class CitationAnalysisStack extends cdk.Stack {
       retryOnServiceExceptions: true,
     });
 
-    // 9. Define the complete workflow
+    // 9. Evaluate exact-run KPI alerts without replacing the generated report.
+    const kpiAlertsTask = new tasks.LambdaInvoke(this, 'KpiAlerts', {
+      lambdaFunction: kpiAlertsFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        'execution_id.$': '$$.Execution.Name',
+        'execution_input.$': '$$.Execution.Input',
+        'report.$': '$',
+      }),
+      payloadResponseOnly: true,
+      resultPath: '$.alerts',
+      retryOnServiceExceptions: true,
+    });
+
+    const kpiAlertsFailed = new stepfunctions.Pass(this, 'KpiAlertsFailed', {
+      result: stepfunctions.Result.fromObject({
+        status: 'failed',
+        message: 'KPI alert evaluation failed; the analysis report is preserved.',
+      }),
+      resultPath: '$.alerts',
+    });
+
+    kpiAlertsTask.addCatch(kpiAlertsFailed, {
+      errors: ['States.ALL'],
+      resultPath: stepfunctions.JsonPath.DISCARD,
+    });
+
+    // 10. Define the complete workflow. Both alert branches retain every
+    // GenerateSummary field and add only the top-level alerts block.
     const definition = parseKeywordsTask
       .next(processKeywordsMap)
-      .next(generateSummaryTask);
+      .next(generateSummaryTask)
+      .next(kpiAlertsTask);
 
-    // 10. Create the State Machine
+    // 11. Create the State Machine
 
     // Execution history log group for the workflow.
     //
@@ -1797,7 +1911,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       },
     });
 
-    // Consolidated Config Management Lambda (query-prompts + schedules + providers)
+    // Consolidated Config Management Lambda (query-prompts, schedules, providers, and KPI alerts)
     const configMgmtFunction = new lambda.Function(this, 'ConfigMgmtFunction', {
       functionName: 'CitationAnalysis-API-ConfigMgmt',
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -1807,17 +1921,22 @@ export class CitationAnalysisStack extends cdk.Stack {
         'manage-query-prompts.py',
         'manage-schedule.py',
         'manage-providers.py',
+        'manage-alerts.py',
       ]),
       layers: [sharedLayer],
       timeout: cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
       memorySize: 256,
-      description: 'API: Consolidated query prompts, schedules, and provider config',
+      description: 'API: Consolidated query prompts, schedules, providers, and KPI alerts',
       logGroup: apiLambdaLogGroup(this, 'ConfigMgmtLogGroup', 'CitationAnalysis-API-ConfigMgmt'),
       environment: {
         // Audit #12 canonical names.
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
         DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
-        // Schedules validate their group scope against the groups table.
+        DYNAMODB_TABLE_KPI_ALERTS: kpiAlertsTable.tableName,
+        DYNAMODB_TABLE_ALERT_SETTINGS: alertSettingsTable.tableName,
+        DYNAMODB_TABLE_CONTENT_CHANGES: contentChangesTable.tableName,
+        KPI_ALERTS_TOPIC_ARN: kpiAlertsTopic.topicArn,
+        // Schedules and content-change markers validate group ids.
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         // Legacy names, dropped once rollout verified.
         QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
@@ -1902,6 +2021,19 @@ export class CitationAnalysisStack extends cdk.Stack {
     queryPromptsTable.grantReadWriteData(configMgmtFunction);
     providerConfigTable.grantReadWriteData(configMgmtFunction);
     keywordGroupsTable.grantReadData(configMgmtFunction);
+    kpiAlertsTable.grantReadWriteData(configMgmtFunction);
+    alertSettingsTable.grantReadWriteData(configMgmtFunction);
+    contentChangesTable.grantReadWriteData(configMgmtFunction);
+    configMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['sns:ListSubscriptionsByTopic', 'sns:Subscribe'],
+      resources: [kpiAlertsTopic.topicArn],
+    }));
+    configMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['sns:Unsubscribe'],
+      resources: [`${kpiAlertsTopic.topicArn}:*`],
+    }));
     // POST /api/schedules/{id}/run starts an analysis with the schedule's scope.
     stateMachine.grantStartExecution(configMgmtFunction);
     openaiSecret.grantRead(configMgmtFunction);
@@ -2485,6 +2617,22 @@ export class CitationAnalysisStack extends cdk.Stack {
     
     const providerValidateResource = providerIdResource.addResource('validate');
     providerValidateResource.addMethod('POST', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+
+    // KPI alert history, singleton settings, and explicit content markers.
+    const alertsResource = apiResource.addResource('alerts');
+    alertsResource.addMethod('GET', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+
+    const alertIdResource = alertsResource.addResource('{id}');
+    const alertAcknowledgeResource = alertIdResource.addResource('acknowledge');
+    alertAcknowledgeResource.addMethod('POST', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+
+    const alertSettingsResource = alertsResource.addResource('settings');
+    alertSettingsResource.addMethod('GET', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+    alertSettingsResource.addMethod('PUT', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+
+    const contentChangesResource = alertsResource.addResource('content-changes');
+    contentChangesResource.addMethod('GET', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+    contentChangesResource.addMethod('POST', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
 
     // ========================================
     // User Management API

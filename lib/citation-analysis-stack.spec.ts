@@ -783,6 +783,7 @@ const WORKER_LOG_GROUP_NAMES = [
   '/aws/lambda/CitationAnalysis-Deduplication',
   '/aws/lambda/CitationAnalysis-Crawler',
   '/aws/lambda/CitationAnalysis-GenerateSummary',
+  '/aws/lambda/CitationAnalysis-KpiAlerts',
   '/aws/lambda/CitationAnalysis-ResearchWorker',
 ];
 
@@ -1560,7 +1561,7 @@ describe('Health check function', () => {
  * function without an explicit log group silently opts into keeping every log
  * line forever.
  *
- * The twelve API functions now declare their groups the way the five Step
+ * The twelve API functions now declare their groups the way the Step
  * Functions workers always did. The one asymmetry is deliberate and is what the
  * deletion-policy test below pins: those twelve groups already exist in the
  * deployed account, so they carry `Retain` to keep CloudFormation's import path
@@ -1613,7 +1614,7 @@ describe('API Lambda log retention', () => {
     expect([...policies]).toStrictEqual([RETAIN]);
   });
 
-  it('keeps the five Step Functions workers at 30 days', () => {
+  it('keeps every Step Functions worker at 30 days', () => {
     /** The functions that were already correct stay correct. */
     const retentions = [...synthesized.workerLogGroupRetention.values()];
 
@@ -1779,5 +1780,284 @@ describe('Crawler Lambda environment', () => {
 
   it('does not include unused NOVA_ACT_SECRET_NAME env var', () => {
     expect(synthesized.crawlerEnvVars).not.toHaveProperty('NOVA_ACT_SECRET_NAME');
+  });
+});
+
+
+
+describe('KPI alert backend infrastructure', () => {
+  const app = new cdk.App();
+  const template = Template.fromStack(new CitationAnalysisStack(app, 'KpiAlertTestStack'));
+
+  const tableNames = [
+    'CitationAnalysis-KpiSnapshots',
+    'CitationAnalysis-KpiAlerts',
+    'CitationAnalysis-AlertSettings',
+    'CitationAnalysis-ContentChanges',
+  ];
+
+  it('creates the four tables with their exact key schemas', () => {
+    const schemas = Object.fromEntries(
+      tableNames.map((name) => [name, extractTableKeySchema(template, name)])
+    );
+
+    expect(schemas).toStrictEqual({
+      'CitationAnalysis-KpiSnapshots': [
+        { AttributeName: 'group_id', KeyType: 'HASH' },
+        { AttributeName: 'snapshot_at', KeyType: 'RANGE' },
+      ],
+      'CitationAnalysis-KpiAlerts': [
+        { AttributeName: 'id', KeyType: 'HASH' },
+      ],
+      'CitationAnalysis-AlertSettings': [
+        { AttributeName: 'config_id', KeyType: 'HASH' },
+      ],
+      'CitationAnalysis-ContentChanges': [
+        { AttributeName: 'group_id', KeyType: 'HASH' },
+        { AttributeName: 'changed_at', KeyType: 'RANGE' },
+      ],
+    });
+  });
+
+  it('uses on-demand retained tables with point-in-time recovery', () => {
+    const resources = tableNames.map((name) => {
+      const matches = template.findResources('AWS::DynamoDB::Table', {
+        Properties: { TableName: name },
+      });
+      return Object.values(matches)[0];
+    });
+
+    expect(resources.map((resource) => resolvePath(resource, ['Properties', 'BillingMode'])))
+      .toStrictEqual(Array(4).fill('PAY_PER_REQUEST'));
+    expect(resources.map((resource) => resolvePath(resource, ['Properties', 'PointInTimeRecoverySpecification', 'PointInTimeRecoveryEnabled'])))
+      .toStrictEqual(Array(4).fill(true));
+    expect(resources.map((resource) => resolvePath(resource, ['DeletionPolicy'])))
+      .toStrictEqual(Array(4).fill(RETAIN));
+  });
+
+  it('expires snapshots alerts and content changes through ttl', () => {
+    const ttlByTable = Object.fromEntries(
+      tableNames.map((name) => [name, extractTableProperty(template, name, 'TimeToLiveSpecification')])
+    );
+
+    expect(ttlByTable).toStrictEqual({
+      'CitationAnalysis-KpiSnapshots': { AttributeName: 'ttl', Enabled: true },
+      'CitationAnalysis-KpiAlerts': { AttributeName: 'ttl', Enabled: true },
+      'CitationAnalysis-AlertSettings': undefined,
+      'CitationAnalysis-ContentChanges': { AttributeName: 'ttl', Enabled: true },
+    });
+  });
+
+  it('indexes alerts by status and creation time', () => {
+    expect(extractTableProperty(template, 'CitationAnalysis-KpiAlerts', 'GlobalSecondaryIndexes'))
+      .toStrictEqual([{
+        IndexName: 'StatusCreatedIndex',
+        KeySchema: [
+          { AttributeName: 'status', KeyType: 'HASH' },
+          { AttributeName: 'created_at', KeyType: 'RANGE' },
+        ],
+        Projection: { ProjectionType: 'ALL' },
+      }]);
+  });
+
+  it('creates one named SNS topic without static subscriptions', () => {
+    const topics = template.findResources('AWS::SNS::Topic', {
+      Properties: { TopicName: 'CitationAnalysis-KpiAlerts' },
+    });
+
+    expect(Object.keys(topics)).toHaveLength(1);
+    expect(template.findResources('AWS::SNS::Subscription')).toStrictEqual({});
+  });
+
+  it('encrypts the topic with the request-priced AWS-managed SNS key', () => {
+    const topics = template.findResources('AWS::SNS::Topic', {
+      Properties: { TopicName: 'CitationAnalysis-KpiAlerts' },
+    });
+    const topic = Object.values(topics)[0];
+
+    expect(JSON.stringify(resolvePath(topic, ['Properties', 'KmsMasterKeyId'])))
+      .toContain('alias/aws/sns');
+  });
+
+  it('configures the KPI worker for Python with the shared layer and bounded runtime', () => {
+    expect(extractFunctionTimeout(template, 'CitationAnalysis-KpiAlerts')).toBe(300);
+    expect(extractFunctionMemorySize(template, 'CitationAnalysis-KpiAlerts')).toBe(512);
+    expect(extractLambdaLayerRefs(template, 'CitationAnalysis-KpiAlerts')).toHaveLength(1);
+  });
+
+  it('hands every source and durable resource identifier to the KPI worker', () => {
+    const environment = extractLambdaEnvVars(template, 'CitationAnalysis-KpiAlerts');
+
+    expect(Object.keys(environment).sort((left, right) => left.localeCompare(right))).toStrictEqual([
+      'DYNAMODB_TABLE_ALERT_SETTINGS',
+      'DYNAMODB_TABLE_CONTENT_CHANGES',
+      'DYNAMODB_TABLE_KEYWORD_GROUPS',
+      'DYNAMODB_TABLE_KEYWORDS',
+      'DYNAMODB_TABLE_KPI_ALERTS',
+      'DYNAMODB_TABLE_KPI_SNAPSHOTS',
+      'DYNAMODB_TABLE_PROVIDER_CONFIG',
+      'DYNAMODB_TABLE_SEARCH_RESULTS',
+      'KPI_ALERTS_TOPIC_ARN',
+    ]);
+  });
+
+  it('grants the KPI worker publish only on the alert topic', () => {
+    const topicId = findLogicalIdByName(
+      template,
+      'AWS::SNS::Topic',
+      'TopicName',
+      'CitationAnalysis-KpiAlerts'
+    );
+
+    expect(extractFunctionRoleActionsOn(template, 'CitationAnalysis-KpiAlerts', topicId))
+      .toStrictEqual(['sns:Publish']);
+  });
+
+  it('grants the KPI worker read access to every source table', () => {
+    const sourceTables = [
+      'CitationAnalysis-SearchResults',
+      'CitationAnalysis-Keywords',
+      'CitationAnalysis-KeywordGroups',
+      'CitationAnalysis-ProviderConfig',
+      'CitationAnalysis-AlertSettings',
+      'CitationAnalysis-ContentChanges',
+    ];
+    const missing = sourceTables.filter((tableName) => {
+      const tableId = findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', tableName);
+      const actions = extractFunctionRoleActionsOn(template, 'CitationAnalysis-KpiAlerts', tableId);
+      return !actions.includes('dynamodb:GetItem') || !actions.includes('dynamodb:Query');
+    });
+
+    expect(missing).toStrictEqual([]);
+  });
+
+  it('grants the KPI worker read-write snapshots and write-only alert records', () => {
+    const snapshotsId = findLogicalIdByName(
+      template, 'AWS::DynamoDB::Table', 'TableName', 'CitationAnalysis-KpiSnapshots'
+    );
+    const alertsId = findLogicalIdByName(
+      template, 'AWS::DynamoDB::Table', 'TableName', 'CitationAnalysis-KpiAlerts'
+    );
+    const snapshotActions = extractFunctionRoleActionsOn(template, 'CitationAnalysis-KpiAlerts', snapshotsId);
+    const alertActions = extractFunctionRoleActionsOn(template, 'CitationAnalysis-KpiAlerts', alertsId);
+
+    expect(snapshotActions).toContain('dynamodb:GetItem');
+    expect(snapshotActions).toContain('dynamodb:PutItem');
+    expect(alertActions).toContain('dynamodb:PutItem');
+    expect(alertActions).not.toContain('dynamodb:Query');
+  });
+
+  it('grants the KPI worker source reads and snapshot-alert writes', () => {
+    const actions = extractFunctionRoleActions(template, 'CitationAnalysis-KpiAlerts');
+
+    expect(actions).toContain('dynamodb:Query');
+    expect(actions).toContain('dynamodb:Scan');
+    expect(actions).toContain('dynamodb:PutItem');
+    expect(actions).not.toContain('sns:Subscribe');
+  });
+
+  it('hands alert resources to ConfigMgmt and no publish permission', () => {
+    const environment = extractLambdaEnvVars(template, CONFIG_MGMT_FUNCTION_NAME);
+    const actions = extractFunctionRoleActions(template, CONFIG_MGMT_FUNCTION_NAME);
+
+    expect(environment).toHaveProperty('DYNAMODB_TABLE_KPI_ALERTS');
+    expect(environment).toHaveProperty('DYNAMODB_TABLE_ALERT_SETTINGS');
+    expect(environment).toHaveProperty('DYNAMODB_TABLE_CONTENT_CHANGES');
+    expect(actions).not.toContain('sns:Publish');
+  });
+
+  it('grants ConfigMgmt read-write access to all alert API tables', () => {
+    const tableNamesForApi = [
+      'CitationAnalysis-KpiAlerts',
+      'CitationAnalysis-AlertSettings',
+      'CitationAnalysis-ContentChanges',
+    ];
+    const missing = tableNamesForApi.filter((tableName) => {
+      const tableId = findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', tableName);
+      const actions = extractFunctionRoleActionsOn(template, CONFIG_MGMT_FUNCTION_NAME, tableId);
+      return !actions.includes('dynamodb:GetItem') || !actions.includes('dynamodb:PutItem');
+    });
+
+    expect(missing).toStrictEqual([]);
+  });
+
+  it('grants ConfigMgmt only subscription-management SNS actions for this topic', () => {
+    const topicId = findLogicalIdByName(
+      template,
+      'AWS::SNS::Topic',
+      'TopicName',
+      'CitationAnalysis-KpiAlerts'
+    );
+
+    expect(extractFunctionRoleActionsOn(template, CONFIG_MGMT_FUNCTION_NAME, topicId))
+      .toStrictEqual(['sns:ListSubscriptionsByTopic', 'sns:Subscribe', 'sns:Unsubscribe']);
+  });
+
+  it('restricts unsubscribe to subscription ARNs under the alert topic', () => {
+    const roleId = findFunctionRoleLogicalId(template, CONFIG_MGMT_FUNCTION_NAME);
+    const unsubscribe = allowStatementsOfRole(template, roleId)
+      .find((statement) => statementActions(statement).includes('sns:Unsubscribe'));
+    const resource = JSON.stringify(resolvePath(unsubscribe, ['Resource']));
+
+    expect(statementActions(unsubscribe)).toStrictEqual(['sns:Unsubscribe']);
+    expect(resource).toContain(':*');
+    expect(resource).not.toBe('"*"');
+  });
+
+  it('exposes the exact authenticated alert routes through ConfigMgmt', () => {
+    const alertRoutes = extractApiAuthSnapshots(template)
+      .filter((route) => route.path.startsWith('/api/alerts'))
+      .sort((left, right) => `${left.path} ${left.httpMethod}`.localeCompare(`${right.path} ${right.httpMethod}`));
+
+    expect(alertRoutes.map((route) => `${route.httpMethod} ${route.path}`)).toStrictEqual([
+      'GET /api/alerts',
+      'POST /api/alerts/{id}/acknowledge',
+      'GET /api/alerts/content-changes',
+      'POST /api/alerts/content-changes',
+      'GET /api/alerts/settings',
+      'PUT /api/alerts/settings',
+    ]);
+    expect(alertRoutes.every((route) => route.authorizationType === COGNITO_AUTH)).toBe(true);
+    expect(alertRoutes.every((route) => route.authorizerId !== '')).toBe(true);
+  });
+
+  it('integrates every alert route with the consolidated ConfigMgmt Lambda', () => {
+    const alertsId = findApiResourceId(template, 'alerts');
+    const alertId = findApiResourceId(template, '{id}', alertsId);
+    const routeIds = [
+      alertsId,
+      findApiResourceId(template, 'acknowledge', alertId),
+      findApiResourceId(template, 'settings', alertsId),
+      findApiResourceId(template, 'content-changes', alertsId),
+    ];
+    const methods = routeIds.flatMap((resourceId) => extractApiMethods(template, resourceId));
+    const configFunctionId = findLambdaLogicalId(template, CONFIG_MGMT_FUNCTION_NAME);
+
+    expect(methods).toHaveLength(6);
+    expect(methods.every((method) => method.integrationUri.includes(configFunctionId))).toBe(true);
+  });
+
+  it('passes execution id whole input and generated report to the alert task', () => {
+    const definition = extractStateMachineDefinition(template, WORKFLOW_STATE_MACHINE);
+
+    expect(definition).toContain('"execution_id.$":"$$.Execution.Name"');
+    expect(definition).toContain('"execution_input.$":"$$.Execution.Input"');
+    expect(definition).toContain('"report.$":"$"');
+  });
+
+  it('preserves the report and adds alerts on successful evaluation', () => {
+    const definition = extractStateMachineDefinition(template, WORKFLOW_STATE_MACHINE);
+
+    expect(definition).toContain('"Next":"KpiAlerts"');
+    expect(definition).toContain('"ResultPath":"$.alerts"');
+  });
+
+  it('catches every alert failure and records a failure block', () => {
+    const definition = extractStateMachineDefinition(template, WORKFLOW_STATE_MACHINE);
+
+    expect(definition).toContain('"ErrorEquals":["States.ALL"]');
+    expect(definition).toContain('"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":null,"Next":"KpiAlertsFailed"}]');
+    expect(definition).toContain('"Next":"KpiAlertsFailed"');
+    expect(definition).toContain('"message":"KPI alert evaluation failed; the analysis report is preserved."');
   });
 });
