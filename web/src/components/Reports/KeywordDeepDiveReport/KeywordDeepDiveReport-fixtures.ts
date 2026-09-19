@@ -1,0 +1,38 @@
+export function settledData() {
+  return {
+    visibility: {
+      keyword: 'best running shoes',
+      timestamp: '2026-05-14T10:00:00Z',
+      total_brands: 0,
+      total_mentions: 0,
+      brands: [],
+      first_party: [],
+      competitors: [],
+      others: [],
+      summary: {
+        first_party_avg_score: 42,
+        competitor_avg_score: 38,
+        first_party_total_sov: 12,
+        competitor_total_sov: 50,
+      },
+    },
+    visibilityError: null,
+    visibilityLoading: false,
+    trends: null,
+    trendsError: null,
+    trendsLoading: false,
+    personas: null,
+    personasError: null,
+    personasLoading: false,
+    mentions: null,
+    mentionsError: null,
+    mentionsLoading: false,
+    gaps: null,
+    gapsError: null,
+    gapsLoading: false,
+    recommendations: null,
+    recommendationsError: null,
+    recommendationsLoading: false,
+    ready: true,
+  };
+}

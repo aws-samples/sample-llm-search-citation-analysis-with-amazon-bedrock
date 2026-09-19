@@ -8,7 +8,13 @@ import { brandMentionsExportResponse } from './brandMentionsExport-fixtures';
 
 const mocks = vi.hoisted(() => ({exportToExcel: vi.fn(),}));
 
-vi.mock('../../exporters/excelGenerator', () => ({exportToExcel: mocks.exportToExcel,}));
+vi.mock('../../exporters/excelGenerator', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../exporters/excelGenerator')>();
+  return {
+    ...actual,
+    exportToExcel: mocks.exportToExcel,
+  };
+});
 
 describe('brandMentionsExcelRows', () => {
   it('returns one exact row for each keyword brand provider appearance', () => {

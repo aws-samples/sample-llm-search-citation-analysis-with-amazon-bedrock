@@ -5,24 +5,9 @@ import {
   render, screen 
 } from '@testing-library/react';
 import { NextActionsSection } from './NextActionsSection';
-import { buildOverview } from './reportsOverview-fixtures';
-import type { Recommendation } from '../../../../types';
-
-function buildRec(
-  title: string,
-  priority: 'high' | 'medium' | 'low',
-  overrides: Partial<Recommendation> = {},
-): Recommendation {
-  return {
-    type: 'gap',
-    priority,
-    title,
-    description: 'Description for ' + title,
-    action: 'Action for ' + title,
-    impact: 'Impact for ' + title,
-    ...overrides,
-  };
-}
+import {
+  buildOverview, buildRec
+} from './reportsOverview-fixtures';
 
 describe('NextActionsSection — content', () => {
   it('renders each recommendation title as an h3', () => {

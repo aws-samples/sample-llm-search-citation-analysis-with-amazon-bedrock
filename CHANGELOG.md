@@ -42,6 +42,12 @@ in-app alerts, with optional pay-per-delivery email notifications.
   failure block; the original analysis report and execution success remain
   intact.
 
+### Fixed
+
+- Cleanup now shares request lifecycle and export filename primitives, removes
+  the ignored template-draft industry field, and corrects the dashboard
+  `remark-parse@^11.0.0` manifest range to match the lockfile for clean installs.
+
 ## [2.9.0] - 2026-09-19
 
 Content Studio can now create a group-level landing-page brief for any

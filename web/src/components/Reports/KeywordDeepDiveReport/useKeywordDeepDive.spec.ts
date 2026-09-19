@@ -5,6 +5,8 @@ import {
   renderHook, act 
 } from '@testing-library/react';
 import { useKeywordDeepDive } from './useKeywordDeepDive';
+import { settledSlice } from './useKeywordDeepDive-fixtures';
+
 
 vi.mock('../../../hooks/useVisibilityMetrics', () => ({useVisibilityMetrics: vi.fn(),}));
 vi.mock('../../../hooks/useHistoricalTrends', () => ({useHistoricalTrends: vi.fn(),}));
@@ -26,14 +28,6 @@ const mockPersonas = usePersonaRankings as ReturnType<typeof vi.fn>;
 const mockMentions = useBrandMentions as ReturnType<typeof vi.fn>;
 const mockGaps = useCitationGaps as ReturnType<typeof vi.fn>;
 const mockRecommendations = useRecommendations as ReturnType<typeof vi.fn>;
-
-function settledSlice(data: unknown) {
-  return {
-    data,
-    loading: false,
-    error: null 
-  };
-}
 
 describe('useKeywordDeepDive', () => {
   const fetchVisibility = vi.fn();

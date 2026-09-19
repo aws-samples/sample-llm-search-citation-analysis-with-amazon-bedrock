@@ -1,4 +1,6 @@
-import { exportToExcel } from '../../exporters/excelGenerator';
+import {
+  exportToExcel, scopedExcelFileName
+} from '../../exporters/excelGenerator';
 import type { BrandMentionsResponse } from '../../types';
 
 const BRAND_MENTION_COLUMNS = [
@@ -29,8 +31,7 @@ export function brandMentionsExcelRows(data: BrandMentionsResponse): Record<stri
 }
 
 export function brandMentionsFileName(scopeLabel: string, date = new Date()): string {
-  const slug = scopeLabel.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replaceAll(/^-|-$/g, '') || 'keywords';
-  return `brand-mentions-${slug}-${date.toISOString().slice(0, 10)}.xlsx`;
+  return scopedExcelFileName('brand-mentions', scopeLabel, date);
 }
 
 export async function exportBrandMentions(

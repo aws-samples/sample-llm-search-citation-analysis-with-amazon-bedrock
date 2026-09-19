@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
 from typing import Any
 
 from shared.constants import UNRANKED_SENTINEL
@@ -79,7 +78,7 @@ def _bounded_number(
     maximum: float,
 ) -> tuple[float | None, str | None]:
     value = settings.get(name)
-    if isinstance(value, bool) or not isinstance(value, (int, float, Decimal)):
+    if isinstance(value, (bool, str)):
         return None, f'{name} must be a finite number'
     number = finite_number(value)
     if number is None:
@@ -361,14 +360,3 @@ def build_alert_item(
         'ttl': ttl_for_timestamp(created_at),
         **specification,
     }
-
-
-def decimal_item(value: Any) -> Any:
-    """Recursively convert floats to DynamoDB-safe Decimal values."""
-    if isinstance(value, float):
-        return Decimal(str(value))
-    if isinstance(value, dict):
-        return {key: decimal_item(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [decimal_item(item) for item in value]
-    return value

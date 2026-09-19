@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -14,6 +13,9 @@ from shared.content_brief import (
     IMPROVE_CURRENT_URL,
     ContentBriefFetchError,
 )
+from testing.content_brief_fixtures import build_group_brief
+from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
+from testing.events import api_gateway_event, parse_response
 from testing.module_loader import load_handler_module
 
 for environment_name, table_name in (
@@ -30,38 +32,12 @@ _mod = load_handler_module(
 )
 
 
-def build_group_brief(**overrides: object) -> dict[str, object]:
-    """Return a complete create-new request with intentionally stale client text."""
-    idea: dict[str, object] = {
-        'id': 'brief-client-id',
-        'type': 'group_brief',
-        'priority': 'medium',
-        'title': 'Group Brief: stale name',
-        'description': 'Create a landing page from selected keywords.',
-        'keyword': 'stale name',
-        'source': 'group_brief',
-        'actionable': True,
-        'content_angle': CREATE_NEW_LANDING_PAGE,
-        'group_id': 'group-1',
-        'group_name': 'stale name',
-        'keyword_ids': ['keyword-2', 'keyword-1'],
-        'keywords': ['stale beta', 'stale alpha'],
-        'landing_url': '',
-        'current_copy': '',
-        'prompt_template': DEFAULT_PROMPT_TEMPLATES[CREATE_NEW_LANDING_PAGE],
-        'output_language': 'English',
-        'competitor_urls': [],
-    }
-    idea.update(overrides)
-    return idea
-
-
 def generation_event(idea: dict[str, object]) -> dict[str, object]:
-    return {
-        'httpMethod': 'POST',
-        'path': '/content-studio/generate',
-        'body': json.dumps({'idea': idea}),
-    }
+    return api_gateway_event(
+        'POST',
+        '/content-studio/generate',
+        body={'idea': idea},
+    )
 
 
 def dynamodb_with_group(
@@ -70,21 +46,18 @@ def dynamodb_with_group(
     members: list[dict[str, object]] | None = None,
 ) -> tuple[MagicMock, MagicMock]:
     group_item = {'id': 'group-1', 'name': 'Authoritative Group'} if group is None else group
-    groups_table = MagicMock()
-    groups_table.get_item = MagicMock(return_value={'Item': group_item})
+    groups_table = fake_table(get_item={'Item': group_item})
     active_members = [
         {'id': 'keyword-1', 'keyword': 'Alpha', 'group_ids': {'group-1'}},
         {'id': 'keyword-2', 'keyword': 'Beta', 'group_ids': {'group-1'}},
     ] if members is None else members
-    keywords_table = MagicMock()
-    keywords_table.query = MagicMock(return_value={'Items': active_members})
-    content_table = MagicMock()
-    resource = MagicMock()
-    resource.Table.side_effect = {
+    keywords_table = fake_table(query={'Items': active_members})
+    content_table = fake_table()
+    resource = fake_dynamodb_resource(by_name={
         'test-keyword-groups': groups_table,
         'test-keywords': keywords_table,
         'test-content-studio': content_table,
-    }.get
+    })
     return resource, content_table
 
 
@@ -98,11 +71,15 @@ class TestGroupBriefGenerateRoute:
     def test_persists_authoritative_group_and_keyword_values_before_dispatch(self) -> None:
         resource, content_table = dynamodb_with_group()
         dispatch = MagicMock()
+        idea = build_group_brief(
+            keyword_ids=['keyword-2', 'keyword-1'],
+            keywords=['stale beta', 'stale alpha'],
+        )
 
         with patch.object(_mod, 'dynamodb', resource), patch.object(
             _mod, 'invoke_self_async', dispatch
         ):
-            response = _mod._generate_content(generation_event(build_group_brief()), None)
+            response = _mod._generate_content(generation_event(idea), None)
 
         persisted = content_table.put_item.call_args.kwargs['Item']['idea_data']
         dispatched = dispatch.call_args.args[0]['idea']
@@ -132,8 +109,8 @@ class TestGroupBriefGenerateRoute:
 
         response = generate_response(build_group_brief(), resource)
 
-        body = json.loads(response['body'])
-        assert response['statusCode'] == 400
+        status, body = parse_response(response)
+        assert status == 400
         assert body == {
             'error': 'keyword_ids must contain only active keywords in the selected group',
             'field': 'keyword_ids',
@@ -147,8 +124,8 @@ class TestGroupBriefGenerateRoute:
             build_group_brief(prompt_template='Use {industry}'), resource
         )
 
-        body = json.loads(response['body'])
-        assert response['statusCode'] == 400
+        status, body = parse_response(response)
+        assert status == 400
         assert body == {
             'error': 'prompt_template contains unknown placeholder(s): industry',
             'field': 'prompt_template',
@@ -165,16 +142,15 @@ class TestGroupBriefGenerateRoute:
 
         response = generate_response(idea, resource)
 
-        body = json.loads(response['body'])
-        assert response['statusCode'] == 400
+        status, body = parse_response(response)
+        assert status == 400
         assert body['field'] == 'landing_url'
         assert body['error'] == 'landing_url is invalid: URL points to a restricted address'
         content_table.put_item.assert_not_called()
 
     def test_keeps_legacy_idea_dispatch_contract_unchanged(self) -> None:
-        content_table = MagicMock()
-        resource = MagicMock()
-        resource.Table.return_value = content_table
+        content_table = fake_table()
+        resource = fake_dynamodb_resource(content_table)
         dispatch = MagicMock()
         legacy_idea = {
             'id': 'legacy-1',
@@ -188,8 +164,8 @@ class TestGroupBriefGenerateRoute:
         ):
             response = _mod._generate_content(generation_event(legacy_idea), None)
 
-        body = json.loads(response['body'])
-        assert response['statusCode'] == 200
+        status, body = parse_response(response)
+        assert status == 200
         assert body['keyword'] == 'generic keyword'
         assert dispatch.call_args.args[0]['idea'] == legacy_idea
         assert resource.Table.call_args.args == ('test-content-studio',)
@@ -278,7 +254,7 @@ def test_group_brief_requires_bounded_contract_field(field: str) -> None:
     with patch.object(_mod, 'dynamodb', resource):
         response = _mod._generate_content(generation_event(idea), None)
 
-    body = json.loads(response['body'])
-    assert response['statusCode'] == 400
+    status, body = parse_response(response)
+    assert status == 400
     assert body['field'] == field
     content_table.put_item.assert_not_called()

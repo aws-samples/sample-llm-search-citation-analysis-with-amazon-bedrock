@@ -1,5 +1,5 @@
 import {
-  useCallback, useEffect, useRef, useState 
+  useCallback, useState
 } from 'react';
 import {
   API_BASE_URL,
@@ -7,6 +7,7 @@ import {
   getErrorMessage,
   isAbortError,
 } from '../infrastructure';
+import { useLatestRequest } from './useLatestRequest';
 
 /**
  * Error payload the analysis API returns with HTTP 200 for domain
@@ -53,15 +54,15 @@ export interface AnalysisEndpointConfig<TArgs extends readonly unknown[], TRespo
  * (visibility, trends, citation gaps, persona rankings, competitor
  * rollup, reports overview, self-reflection, prompt insights).
  *
- * Owns the `data`/`loading`/`error` state triple and the concurrency
- * guarantees the individual hooks were missing:
- * - each fetch aborts the previous in-flight request via AbortController
- *   and passes the signal to `authenticatedFetch`;
- * - a monotonic generation counter guards every state write, so a
- *   response that ignores the abort can never overwrite newer results;
+ * Owns the `data`/`loading`/`error` state triple and uses
+ * `useLatestRequest` for its concurrency guarantees:
+ * - each fetch aborts the previous in-flight request and passes the signal
+ *   to `authenticatedFetch`;
+ * - request generations guard every state write, so a response that ignores
+ *   the abort can never overwrite newer results;
  * - unmount aborts the active request and blocks further state writes;
  * - an aborted fetch resolves null without touching the error state;
- * - `loading` only clears when the current generation settles.
+ * - `loading` only clears when the current request settles.
  *
  * Pass a module-level config object so the returned callbacks keep a
  * stable identity across renders (consumers list them in effect deps).
@@ -74,20 +75,9 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
   const [data, setData] = useState<TResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const generationRef = useRef(0);
-  const controllerRef = useRef<AbortController | null>(null);
-  const unmountedRef = useRef(false);
-
-  useEffect(() => {
-    unmountedRef.current = false;
-    return () => {
-      unmountedRef.current = true;
-      generationRef.current += 1;
-      controllerRef.current?.abort();
-    };
-  }, []);
-
+  const {
+    beginRequest, isMounted
+  } = useLatestRequest();
   const { errorContext } = config;
 
   const runRequest = useCallback(async <TResult>(
@@ -95,15 +85,9 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
     contract: AnalysisResponseContract<TResult>,
     applyResult?: (result: TResult) => void,
   ): Promise<TResult | null> => {
-    if (unmountedRef.current) return null;
+    if (!isMounted()) return null;
 
-    controllerRef.current?.abort();
-    const controller = new AbortController();
-    controllerRef.current = controller;
-    generationRef.current += 1;
-    const generation = generationRef.current;
-    const isCurrent = () => generation === generationRef.current && !unmountedRef.current;
-
+    const latestRequest = beginRequest();
     setLoading(true);
     setError(null);
 
@@ -111,7 +95,7 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
       const query = request.params ? `?${request.params.toString()}` : '';
       const response = await authenticatedFetch(`${API_BASE_URL}${request.path}${query}`, {
         ...request.init,
-        signal: controller.signal,
+        signal: latestRequest.signal,
       });
       if (!response.ok) throw contract.createHttpError(response.status);
 
@@ -122,20 +106,21 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
       if (!contract.isValidResponse(json)) {
         throw contract.createResponseError('Invalid response format');
       }
-      if (!isCurrent()) return null;
+      if (!latestRequest.isCurrent()) return null;
       applyResult?.(json);
       return json;
     } catch (err) {
       if (isAbortError(err)) return null;
       console.error(contract.logMessage, err);
-      if (isCurrent()) {
+      if (latestRequest.isCurrent()) {
         setError(getErrorMessage(err, errorContext));
       }
       return null;
     } finally {
-      if (isCurrent()) setLoading(false);
+      if (latestRequest.isCurrent()) setLoading(false);
+      latestRequest.finish();
     }
-  }, [errorContext]);
+  }, [beginRequest, errorContext, isMounted]);
 
   const fetchData = useCallback(
     (...args: TArgs) => runRequest(config.buildRequest(...args), config, result => {

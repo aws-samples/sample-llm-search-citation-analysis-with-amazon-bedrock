@@ -4,7 +4,6 @@ import {
 import {
   render, screen, waitFor
 } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import {
   apiDelete, apiPost, apiPut
 } from '../../api/client';
@@ -25,6 +24,10 @@ import {
   extendedCreatedKeywordFixture,
   FAILED_BULK_KEYWORD,
   malformedKeywordFixture,
+  submitBulk,
+  submitCreate,
+  submitDelete,
+  submitUpdate,
   UPDATE_CONFLICT_MESSAGE,
   updatedKeywordFixture,
 } from './KeywordsManager-fixtures';
@@ -49,52 +52,6 @@ vi.mock('../../api/keywordGroups', () => ({
 const mockApiDelete = vi.mocked(apiDelete);
 const mockApiPost = vi.mocked(apiPost);
 const mockApiPut = vi.mocked(apiPut);
-
-async function submitCreate(keyword = createdKeywordFixture.keyword) {
-  const user = userEvent.setup();
-  const input = screen.getByPlaceholderText('Enter new keyword...');
-  await user.type(input, keyword);
-  await user.click(screen.getByRole('button', { name: 'Add' }));
-  return input;
-}
-
-function getKeywordActionButtons() {
-  return [
-    screen.getByRole('button', { name: `Edit ${existingKeywordFixture.keyword}` }),
-    screen.getByRole('button', { name: `Delete ${existingKeywordFixture.keyword}` }),
-  ];
-}
-
-async function submitUpdate() {
-  const user = userEvent.setup();
-  const [editButton] = getKeywordActionButtons();
-  await user.click(editButton);
-
-  const input = screen.getByDisplayValue(existingKeywordFixture.keyword);
-  await user.clear(input);
-  await user.type(input, updatedKeywordFixture.keyword);
-  await user.click(screen.getByRole('button', { name: 'Save' }));
-  return input;
-}
-
-async function submitDelete() {
-  const user = userEvent.setup();
-  const [, deleteButton] = getKeywordActionButtons();
-  await user.click(deleteButton);
-  await user.click(screen.getByRole('button', { name: 'Delete' }));
-}
-
-async function submitBulk() {
-  const user = userEvent.setup();
-  await user.click(screen.getByRole('button', { name: 'Bulk Entry' }));
-  const input = screen.getByPlaceholderText('Enter multiple keywords (one per line)');
-  await user.type(
-    input,
-    `${bulkCreatedKeywordFixture.keyword}\n${FAILED_BULK_KEYWORD}`
-  );
-  await user.click(screen.getByRole('button', { name: 'Add All' }));
-  return input;
-}
 
 describe('KeywordsManager', () => {
   beforeEach(() => {

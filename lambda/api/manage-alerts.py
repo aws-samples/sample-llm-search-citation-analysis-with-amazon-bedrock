@@ -22,8 +22,8 @@ from shared.decorators import (
     route_handler,
     validate,
 )
+from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.kpi_alerts import (
-    decimal_item,
     deterministic_content_change_id,
     resolve_settings,
     ttl_for_timestamp,
@@ -354,7 +354,7 @@ def _put_settings(
         return rejected
 
     updated_at = get_timestamp()
-    dynamodb.Table(SETTINGS_TABLE).put_item(Item=decimal_item({
+    dynamodb.Table(SETTINGS_TABLE).put_item(Item=convert_floats_to_decimal({
         'config_id': 'default',
         **settings,
         'updated_at': updated_at,

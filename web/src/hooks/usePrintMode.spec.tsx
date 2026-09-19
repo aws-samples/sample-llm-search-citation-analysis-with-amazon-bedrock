@@ -1,10 +1,9 @@
 import { renderHook } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import type { ReactNode } from 'react';
 import {
   describe, it, expect, vi, beforeEach, afterEach,
 } from 'vitest';
 import { usePrintMode } from './usePrintMode';
+import { wrapperAt } from './usePrintMode-fixtures';
 
 /**
  * `usePrintMode` reads `?print=1` from the current URL and, when present
@@ -18,13 +17,6 @@ import { usePrintMode } from './usePrintMode';
  *    is closed),
  *  - the configurable delay actually controls when the print fires.
  */
-
-const wrapperAt = (path: string) => {
-  const Wrapper = ({ children }: { children: ReactNode }) => (
-    <MemoryRouter initialEntries={[path]}>{children}</MemoryRouter>
-  );
-  return Wrapper;
-};
 
 describe('usePrintMode', () => {
   beforeEach(() => {

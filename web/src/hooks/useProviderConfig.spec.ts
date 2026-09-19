@@ -6,17 +6,12 @@ import {
 } from '@testing-library/react';
 import { useProviderConfig } from './useProviderConfig';
 import {
-  mockProviders, renderLoadedProviderConfig 
+  countProviderListRequests, mockProviders, renderLoadedProviderConfig
 } from './useProviderConfig-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
-
-
-function countProviderListRequests(): number {
-  return mockAuthenticatedFetch.mock.calls.filter(([url]) => url.endsWith('/providers')).length;
-}
 
 describe('useProviderConfig', () => {
   it('returns loading true initially', () => {

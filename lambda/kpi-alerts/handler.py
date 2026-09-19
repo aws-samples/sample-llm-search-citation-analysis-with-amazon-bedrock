@@ -16,12 +16,12 @@ from boto3.dynamodb.conditions import Key
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
+from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.dynamodb_batch import collect_all_items
 from shared.keyword_groups import keyword_group_ids, query_active_keywords
 from shared.kpi_alerts import (
     build_alert_item,
     compare_snapshots,
-    decimal_item,
     resolve_settings,
     ttl_for_timestamp,
 )
@@ -283,7 +283,7 @@ def _content_change(
 def _put_new_alert(item: dict[str, Any]) -> bool:
     try:
         dynamodb.Table(ALERTS_TABLE).put_item(
-            Item=decimal_item(item),
+            Item=convert_floats_to_decimal(item),
             ConditionExpression='attribute_not_exists(id)',
         )
         return True
@@ -418,7 +418,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             if previous is not None and settings.get('enabled')
             else None
         )
-        dynamodb.Table(SNAPSHOTS_TABLE).put_item(Item=decimal_item(snapshot))
+        dynamodb.Table(SNAPSHOTS_TABLE).put_item(Item=convert_floats_to_decimal(snapshot))
         snapshots_recorded += 1
         groups_evaluated += 1
 

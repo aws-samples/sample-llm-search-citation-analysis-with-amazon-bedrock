@@ -13,6 +13,7 @@ from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.handler_fixtures import handler_fixture
 
 _HANDLER_DIR = os.path.dirname(os.path.abspath(__file__))
+_SUMMARY_HANDLER_DIR = os.path.join(os.path.dirname(_HANDLER_DIR), 'generate-summary')
 _RUN_TIMESTAMP = '2026-10-01T10:00:00Z'
 _ENV = {
     'DYNAMODB_TABLE_SEARCH_RESULTS': 'search',
@@ -31,6 +32,12 @@ worker_module = handler_fixture(
     'handler.py',
     'kpi_alert_worker_under_test',
     env=_ENV,
+)
+summary_module = handler_fixture(
+    _SUMMARY_HANDLER_DIR,
+    'handler.py',
+    'generate_summary_for_kpi_alerts_under_test',
+    env={},
 )
 
 
@@ -141,6 +148,47 @@ class TestRunEligibility:
         assert result['reason'] == 'report_not_comparable'
         assert resource.method_calls == []
 
+    def test_skips_generate_summary_degraded_report_before_reading_tables(
+        self,
+        worker_module,
+        summary_module,
+    ) -> None:
+        summary_module.SUMMARY_BUCKET = ''
+        report = summary_module.handler({
+            'execution_id': 'exec-1',
+            'keyword_results': [{
+                'status': 'success',
+                'keyword': 'shared keyword',
+                'timestamp': _RUN_TIMESTAMP,
+                'provider_summary': {
+                    'result_count': 2,
+                    'by_provider': {
+                        'openai': {'queries': 1, 'citations': 1},
+                        'claude': {'queries': 1, 'citations': 0, 'failures': 1},
+                    },
+                },
+                'deduplicated_citations': [],
+                'crawled_results': [],
+            }],
+        }, None)
+        event = _event()
+        event['report'] = report
+        resource = MagicMock()
+        worker_module.dynamodb = resource
+
+        result = worker_module.handler(event, None)
+
+        assert report['status'] == 'completed_degraded'
+        assert result == {
+            'status': 'skipped',
+            'reason': 'report_not_comparable',
+            'groups_evaluated': 0,
+            'snapshots_recorded': 0,
+            'alerts_created': 0,
+            'skipped_partial': 0,
+        }
+        assert resource.method_calls == []
+
     def test_skips_ambiguous_timestamp_without_reading_tables(self, worker_module) -> None:
         event = _event()
         event['report']['run_metadata']['timestamp'] = None
@@ -238,6 +286,30 @@ class TestCompleteSnapshotEvaluation:
         ) == ('group-1', _RUN_TIMESTAMP, 1822384800)
         assert alerts.put_item.call_count == 0
         assert result['alerts_created'] == 0
+
+    def test_persists_nested_snapshot_metrics_as_decimals(self, worker_module) -> None:
+        snapshots, _alerts, resource = _single_group_tables()
+
+        with (
+            _complete_group_patches(
+                worker_module,
+                resource,
+                {**DEFAULT_ALERT_SETTINGS, 'enabled': False},
+                _visibility(),
+            ),
+            patch.object(worker_module, '_previous_snapshot', return_value=None),
+            patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
+        ):
+            worker_module.handler(_event(), None)
+
+        stored_snapshot = snapshots.put_item.call_args.kwargs['Item']
+        assert stored_snapshot['summary']['first_party_avg_score'] == Decimal('60.0')
+        assert stored_snapshot['keywords'] == [{
+            'keyword': 'shared keyword',
+            'first_party_mentioned': True,
+            'best_rank': 2,
+            'mean_rank': Decimal('2.0'),
+        }]
 
     def test_persists_exact_alert_shape_with_compared_run_timestamp(self, worker_module) -> None:
         _snapshots, alerts, resource = _single_group_tables()

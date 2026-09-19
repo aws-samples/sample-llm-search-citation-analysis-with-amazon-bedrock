@@ -222,17 +222,37 @@ class TestSettingsValidation:
 
     def test_accepts_decimal_thresholds_at_inclusive_bounds(self) -> None:
         candidate = _settings(
+            citation_rate_drop=Decimal('0.1'),
+            position_loss=Decimal('2.5'),
+            competitor_top_n=10,
+            improvement_after_content_change=Decimal('100.0'),
+        )
+
+        settings, error, field = validate_settings(candidate)
+
+        assert settings == _settings(
             citation_rate_drop=0.1,
             position_loss=2.5,
             competitor_top_n=10,
             improvement_after_content_change=100.0,
         )
-
-        settings, error, field = validate_settings(candidate)
-
-        assert settings == candidate
         assert error is None
         assert field is None
+
+    @pytest.mark.parametrize(
+        'field_name',
+        [
+            'citation_rate_drop',
+            'position_loss',
+            'improvement_after_content_change',
+        ],
+    )
+    def test_rejects_boolean_numeric_thresholds(self, field_name: str) -> None:
+        settings, error, field = validate_settings(_settings(**{field_name: True}))
+
+        assert settings is None
+        assert error == f'{field_name} must be a finite number'
+        assert field == field_name
 
     @pytest.mark.parametrize('email', ['', 'missing-at.example.com', 'a@localhost', 'two@@example.com'])
     def test_rejects_invalid_email_addresses(self, email: str) -> None:

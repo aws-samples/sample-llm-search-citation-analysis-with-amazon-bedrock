@@ -7,6 +7,8 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.module_loader import load_handler_module
 
@@ -225,6 +227,38 @@ class TestBuildGroupSeries:
             'mean_first_position': 20.0,
             'keywords_with_data': 3,
         }]
+
+    @pytest.mark.parametrize(
+        ('field_name', 'boolean_value'),
+        [
+            pytest.param('mean_rank', True, id='mean-rank'),
+            pytest.param('mean_first_position', False, id='mean-first-position'),
+        ],
+    )
+    def test_returns_unavailable_group_mean_when_source_value_is_boolean(
+        self,
+        field_name: str,
+        boolean_value: bool,
+    ) -> None:
+        point = {
+            'period': '2026-09-18',
+            'visibility_score': 60.0,
+            'total_mentions': 1,
+            'provider_count': 1,
+            'best_rank': None,
+            'analysis_runs': 1,
+            'answers': 1,
+            'mentioned_answers': 1,
+            'rank_1_share': 0.0,
+            'top_3_share': 0.0,
+            'mean_rank': None,
+            'mean_first_position': None,
+        }
+        point[field_name] = boolean_value
+
+        group_series = _mod.build_group_series([{'trend_data': [point]}])
+
+        assert group_series[0][field_name] is None
 
 
 class TestGetAllKeywordsTrendsParallelFanOut:
