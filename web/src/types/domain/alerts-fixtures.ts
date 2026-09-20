@@ -1,11 +1,51 @@
 import type {
   AlertItem,
   AlertSettings,
+  AlertSubscriptionStatus,
   AlertTestNotificationResponse,
   AlertsResponse,
+  AlertSeverity,
+  AlertStatus,
+  AlertType,
   ContentChangeMarker,
   ContentChangesResponse,
 } from './alerts';
+
+export const VALID_ALERT_TYPES = [
+  'citation_rate_drop',
+  'position_loss',
+  'new_competitor_top',
+  'keyword_lost_mention',
+  'improvement_after_content_change',
+] satisfies readonly AlertType[];
+
+export const VALID_ALERT_SEVERITIES = [
+  'info',
+  'warning',
+  'critical',
+] satisfies readonly AlertSeverity[];
+
+export const VALID_ALERT_STATUSES = [
+  'open',
+  'acknowledged',
+] satisfies readonly AlertStatus[];
+
+export const VALID_SUBSCRIPTION_STATUSES = [
+  'confirmed',
+  'pending_confirmation',
+  'not_subscribed',
+  'unknown',
+] satisfies readonly AlertSubscriptionStatus[];
+
+function buildCandidate(
+  base: object,
+  overrides: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    ...base,
+    ...overrides,
+  };
+}
 
 export function buildContentChangeMarker(
   overrides: Partial<ContentChangeMarker> = {}
@@ -19,6 +59,12 @@ export function buildContentChangeMarker(
     ttl: '1822384800',
     ...overrides,
   };
+}
+
+export function buildContentChangeMarkerCandidate(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return buildCandidate(buildContentChangeMarker(), overrides);
 }
 
 export const BACKEND_ALERT_WIRE_FIXTURE = {
@@ -49,6 +95,12 @@ export function buildAlertItem(overrides: Partial<AlertItem> = {}): AlertItem {
     ...BACKEND_ALERT_WIRE_FIXTURE,
     ...overrides,
   };
+}
+
+export function buildAlertItemCandidate(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return buildCandidate(BACKEND_ALERT_WIRE_FIXTURE, overrides);
 }
 
 export function buildAlertsResponse(
@@ -92,6 +144,25 @@ export function buildAlertSettings(overrides: Partial<AlertSettings> = {}): Aler
     }],
     ...overrides,
   };
+}
+
+export function buildAlertSettingsCandidate(
+  overrides: Record<string, unknown> = {}
+): Record<string, unknown> {
+  return buildCandidate(buildAlertSettings(), overrides);
+}
+
+export function buildAlertSettingsWithThreshold(
+  thresholdName: string,
+  thresholdValue: unknown
+): Record<string, unknown> {
+  const settings = buildAlertSettings();
+  return buildAlertSettingsCandidate({
+    thresholds: {
+      ...settings.thresholds,
+      [thresholdName]: thresholdValue,
+    },
+  });
 }
 
 export function buildAlertTestNotificationResponse(): AlertTestNotificationResponse {

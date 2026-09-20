@@ -9,6 +9,27 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.13.1] - 2026-09-19
+
+Mutation testing now pins the observable alert and generic-brand behavior added
+in 2.13.0, and brand portfolio expansion no longer accepts an inert type.
+
+### Added
+
+- Patch-scoped Python mutation runs (`scripts/mutate-python.sh --patch`) with
+  Python 3.12 enforcement, source snapshot restoration, deterministic cleanup
+  and the exact Mutmut patch parser dependency.
+- Focused mutation specifications for alert decoders, request and hook
+  lifecycles, settings forms, generic defaults/copy and brand prompt behavior.
+
+### Fixed
+
+- First-party and competitor portfolio expansion now send distinct ownership
+  and exclusion rules to the model instead of accepting `brand_type` without
+  using it.
+- Alert and brand hooks explicitly settle cancellation, cleanup and reset paths
+  that mutation testing showed were under-specified.
+
 ## [2.13.0] - 2026-09-19
 
 Alert delivery can be tested from Settings, fresh installations start with an

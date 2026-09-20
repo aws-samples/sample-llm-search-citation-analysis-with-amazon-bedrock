@@ -12,19 +12,26 @@ import {
 } from './alertFormModel';
 import type { AlertSettingsFormValues } from './alertFormModel';
 
-const SUBSCRIPTION_LABELS: Record<AlertSubscriptionStatus, string> = {
-  confirmed: 'Confirmed',
-  pending_confirmation: 'Pending confirmation',
-  not_subscribed: 'Not subscribed',
-  unknown: 'Unknown',
+// Stryker disable next-line ObjectLiteral: replacing the Tailwind-only status palette has no behavioral effect
+const SUBSCRIPTION_CLASSES: Record<AlertSubscriptionStatus, string> = {
+  // Stryker disable next-line StringLiteral: confirmed status colors are presentation-only
+  confirmed: 'rounded border px-2 py-0.5 text-xs font-medium bg-emerald-50 text-emerald-700 border-emerald-200',
+  // Stryker disable next-line StringLiteral: pending status colors are presentation-only
+  pending_confirmation: 'rounded border px-2 py-0.5 text-xs font-medium bg-amber-50 text-amber-800 border-amber-200',
+  // Stryker disable next-line StringLiteral: unsubscribed status colors are presentation-only
+  not_subscribed: 'rounded border px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700 border-gray-200',
+  // Stryker disable next-line StringLiteral: unknown status colors are presentation-only
+  unknown: 'rounded border px-2 py-0.5 text-xs font-medium bg-red-50 text-red-700 border-red-200',
 };
 
-const SUBSCRIPTION_CLASSES: Record<AlertSubscriptionStatus, string> = {
-  confirmed: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  pending_confirmation: 'bg-amber-50 text-amber-800 border-amber-200',
-  not_subscribed: 'bg-gray-100 text-gray-700 border-gray-200',
-  unknown: 'bg-red-50 text-red-700 border-red-200',
-};
+function subscriptionLabel(status: AlertSubscriptionStatus): string {
+  return {
+    confirmed: 'Confirmed',
+    pending_confirmation: 'Pending confirmation',
+    not_subscribed: 'Not subscribed',
+    unknown: 'Unknown',
+  }[status];
+}
 
 interface ThresholdFieldProps {
   readonly id: string;
@@ -225,8 +232,8 @@ export function AlertSettingsForm({
             {settings.subscription_statuses.map((subscription) => (
               <li key={subscription.email} className="flex flex-wrap items-center justify-between gap-2 text-sm">
                 <span className="break-all text-gray-700">{subscription.email}</span>
-                <output className={`rounded border px-2 py-0.5 text-xs font-medium ${SUBSCRIPTION_CLASSES[subscription.status]}`}>
-                  {SUBSCRIPTION_LABELS[subscription.status]}
+                <output className={SUBSCRIPTION_CLASSES[subscription.status]}>
+                  {subscriptionLabel(subscription.status)}
                 </output>
               </li>
             ))}

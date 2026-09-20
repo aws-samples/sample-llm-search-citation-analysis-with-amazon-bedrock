@@ -1,11 +1,11 @@
 import {
-  useState, useEffect, useCallback 
+  useState, useEffect, useCallback
 } from 'react';
 import {
-  API_BASE_URL, authenticatedFetch, ApiRequestError 
+  API_BASE_URL, authenticatedFetch, ApiRequestError
 } from '../infrastructure';
 import type {
-  BrandConfig, IndustryPresets, BrandExpansionResult, BrandExpansionAllResult, CompetitorDiscoveryResult 
+  BrandConfig, IndustryPresets, BrandExpansionResult, BrandExpansionAllResult, CompetitorDiscoveryResult
 } from '../types';
 import {
   DEFAULT_BRAND_INDUSTRY, DEFAULT_CONFIG, DEFAULT_PRESETS, resolveBrandIndustryPreset
@@ -30,7 +30,7 @@ interface ExpandAllBrandsResponse {
   duplicates_found?: Array<{
     brand: string;
     duplicate_of: string;
-    reason: string 
+    reason: string
   }>;
   notes?: string;
   error?: string;
@@ -52,17 +52,17 @@ export interface BrandConfigApi {
   expandBrand: (body: {
     brand_name: string;
     industry: string;
-    existing_brands: string[] 
+    existing_brands: string[]
   }) => Promise<Response>;
   expandAllBrands: (body: {
     existing_brands: string[];
     industry: string;
-    brand_type: string 
+    brand_type: string
   }) => Promise<Response>;
   findCompetitors: (body: {
     first_party_brands: string[];
     industry: string;
-    existing_competitors: string[] 
+    existing_competitors: string[]
   }) => Promise<Response>;
 }
 
@@ -107,19 +107,18 @@ async function readJson<T>(response: Response): Promise<T> {
  * @param api - Optional API implementation for testing
  */
 export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
-  const [config, setConfig] = useState<BrandConfig | null>(DEFAULT_CONFIG);
+  const [config, setConfig] = useState<BrandConfig>(DEFAULT_CONFIG);
   const [presets, setPresets] = useState<IndustryPresets | null>(DEFAULT_PRESETS);
   const [loading, setLoading] = useState(true);
   const [error] = useState<string | null>(null);
-  const configuredIndustry = config?.industry ?? DEFAULT_BRAND_INDUSTRY;
-  const expansionIndustry = configuredIndustry === '' ? DEFAULT_BRAND_INDUSTRY : configuredIndustry;
+  const expansionIndustry = config.industry === '' ? DEFAULT_BRAND_INDUSTRY : config.industry;
 
   const fetchConfig = useCallback(async () => {
     try {
       const data = await readJson<BrandConfig>(await api.fetchConfig());
       setConfig({
         ...DEFAULT_CONFIG,
-        ...data 
+        ...data
       });
     } catch {
       // Use default config if API fails (e.g., not deployed yet)
@@ -141,7 +140,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
 
   useEffect(() => {
     const controller = new AbortController();
-    
+
     const loadData = async () => {
       setLoading(true);
       await Promise.all([fetchConfig(), fetchPresets()]);
@@ -150,7 +149,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
       }
     };
     loadData();
-    
+
     return () => controller.abort();
   }, [fetchConfig, fetchPresets]);
 
@@ -166,7 +165,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
         const data = await response.json() as BrandConfigResponse;
         setConfig({
           ...DEFAULT_CONFIG,
-          ...data.config 
+          ...data.config
         });
       }
     } catch {
@@ -178,7 +177,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
     const mergedConfig = {
       ...DEFAULT_CONFIG,
       ...config,
-      ...newConfig 
+      ...newConfig
     };
     setConfig(mergedConfig);
     await adoptServerConfig(() => api.saveConfig(newConfig), 'Could not save to API, config saved locally only');
@@ -191,7 +190,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
 
   const getPromptForIndustry = useCallback(
     (industryKey: string): string => {
-      if (config?.industry_prompts?.[industryKey]) {
+      if (config.industry_prompts[industryKey]) {
         return config.industry_prompts[industryKey];
       }
       return resolveBrandIndustryPreset(presets, industryKey)?.default_prompt ?? '';

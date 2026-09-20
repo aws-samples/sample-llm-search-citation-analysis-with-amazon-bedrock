@@ -98,32 +98,6 @@ export interface CreateContentChangeRequest {
   url?: string;
 }
 
-const ALERT_TYPES = [
-  'citation_rate_drop',
-  'position_loss',
-  'new_competitor_top',
-  'keyword_lost_mention',
-  'improvement_after_content_change',
-] satisfies readonly AlertType[];
-
-const ALERT_SEVERITIES = [
-  'info',
-  'warning',
-  'critical',
-] satisfies readonly AlertSeverity[];
-
-const ALERT_STATUSES = [
-  'open',
-  'acknowledged',
-] satisfies readonly AlertStatus[];
-
-const SUBSCRIPTION_STATUSES = [
-  'confirmed',
-  'pending_confirmation',
-  'not_subscribed',
-  'unknown',
-] satisfies readonly AlertSubscriptionStatus[];
-
 function isRecord(candidate: unknown): candidate is Record<string, unknown> {
   return candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate);
 }
@@ -137,15 +111,15 @@ function isStringArray(candidate: unknown): candidate is string[] {
 }
 
 function isFiniteNumber(candidate: unknown): candidate is number {
-  return typeof candidate === 'number' && Number.isFinite(candidate);
+  return typeof candidate === 'number' && globalThis.isFinite(candidate);
 }
 
 function isNumberInRange(candidate: unknown, minimum: number, maximum: number): candidate is number {
   return isFiniteNumber(candidate) && candidate >= minimum && candidate <= maximum;
 }
 
-function isNonNegativeInteger(candidate: unknown): candidate is number {
-  return isFiniteNumber(candidate) && Number.isInteger(candidate) && candidate >= 0;
+function isInteger(candidate: unknown): candidate is number {
+  return isFiniteNumber(candidate) && Number.isInteger(candidate);
 }
 
 function isIntegerInRange(candidate: unknown, minimum: number, maximum: number): candidate is number {
@@ -179,8 +153,7 @@ export function isNotificationEmail(candidate: string): boolean {
 export function isHttpUrl(candidate: string): boolean {
   try {
     const parsedUrl = new URL(candidate);
-    return (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:')
-      && parsedUrl.hostname.length > 0;
+    return parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:';
   } catch {
     return false;
   }
@@ -192,23 +165,28 @@ function isOptionalHttpUrl(candidate: unknown): candidate is string | undefined 
 }
 
 function isAlertType(candidate: unknown): candidate is AlertType {
-  return typeof candidate === 'string'
-    && ALERT_TYPES.some((alertType) => alertType === candidate);
+  return candidate === 'citation_rate_drop'
+    || candidate === 'position_loss'
+    || candidate === 'new_competitor_top'
+    || candidate === 'keyword_lost_mention'
+    || candidate === 'improvement_after_content_change';
 }
 
 function isAlertSeverity(candidate: unknown): candidate is AlertSeverity {
-  return typeof candidate === 'string'
-    && ALERT_SEVERITIES.some((severity) => severity === candidate);
+  return candidate === 'info'
+    || candidate === 'warning'
+    || candidate === 'critical';
 }
 
 function isAlertStatus(candidate: unknown): candidate is AlertStatus {
-  return typeof candidate === 'string'
-    && ALERT_STATUSES.some((status) => status === candidate);
+  return candidate === 'open' || candidate === 'acknowledged';
 }
 
 function isSubscriptionStatus(candidate: unknown): candidate is AlertSubscriptionStatus {
-  return typeof candidate === 'string'
-    && SUBSCRIPTION_STATUSES.some((status) => status === candidate);
+  return candidate === 'confirmed'
+    || candidate === 'pending_confirmation'
+    || candidate === 'not_subscribed'
+    || candidate === 'unknown';
 }
 
 function isAlertMetricValue(candidate: unknown): candidate is AlertMetricValue {
@@ -264,7 +242,7 @@ export function isAlertsResponse(candidate: unknown): candidate is AlertsRespons
   return isRecord(candidate)
     && Array.isArray(candidate.items)
     && candidate.items.every(isAlertItem)
-    && isNonNegativeInteger(candidate.count)
+    && isInteger(candidate.count)
     && candidate.count >= candidate.items.length;
 }
 
@@ -320,6 +298,6 @@ export function isContentChangesResponse(candidate: unknown): candidate is Conte
   return isRecord(candidate)
     && Array.isArray(candidate.items)
     && candidate.items.every(isContentChangeMarker)
-    && isNonNegativeInteger(candidate.count)
+    && isInteger(candidate.count)
     && candidate.count >= candidate.items.length;
 }

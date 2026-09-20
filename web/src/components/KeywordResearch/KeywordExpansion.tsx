@@ -18,47 +18,47 @@ interface KeywordExpansionProps extends ResearchRunViewProps {
 const INDUSTRIES = [
   {
     value: 'general',
-    label: 'General' 
+    label: 'General'
   },
   {
     value: 'hotels',
-    label: 'Hotels & Hospitality' 
+    label: 'Hotels & Hospitality'
   },
   {
     value: 'restaurants',
-    label: 'Restaurants & Food' 
+    label: 'Restaurants & Food'
   },
   {
     value: 'airlines',
-    label: 'Airlines & Travel' 
+    label: 'Airlines & Travel'
   },
   {
     value: 'retail',
-    label: 'Retail & E-commerce' 
+    label: 'Retail & E-commerce'
   },
   {
     value: 'fashion',
-    label: 'Fashion & Apparel' 
+    label: 'Fashion & Apparel'
   },
   {
     value: 'automotive',
-    label: 'Automotive' 
+    label: 'Automotive'
   },
   {
     value: 'technology',
-    label: 'Technology & SaaS' 
+    label: 'Technology & SaaS'
   },
   {
     value: 'finance',
-    label: 'Finance & Banking' 
+    label: 'Finance & Banking'
   },
   {
     value: 'healthcare',
-    label: 'Healthcare' 
+    label: 'Healthcare'
   },
   {
     value: 'real-estate',
-    label: 'Real Estate' 
+    label: 'Real Estate'
   },
 ];
 
@@ -96,7 +96,7 @@ export const KeywordExpansion = ({
                 type="text"
                 value={seedKeyword}
                 onChange={(e) => setSeedKeyword(e.target.value)}
-                placeholder="e.g. project management software"
+                placeholder={'e.g. project management software'}
                 className="w-full px-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
               />
             </div>
@@ -113,7 +113,7 @@ export const KeywordExpansion = ({
               </select>
             </div>
           </div>
-          
+
           <div className="flex flex-col sm:flex-row sm:items-end gap-3 sm:gap-4">
             <div className="w-full sm:w-auto">
               <label className="block text-sm text-gray-600 mb-1">Number of Keywords</label>
