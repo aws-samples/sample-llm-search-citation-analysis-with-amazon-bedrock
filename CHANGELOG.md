@@ -9,6 +9,45 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.2.0] - 2026-09-18
+
+Fixes keyword research reporting "Research request timed out" for runs that had
+actually completed. Minor rather than patch because the fix adds an API route,
+which is a backwards-compatible change for API clients.
+
+### Fixed
+
+- Keyword expansion and competitor analysis no longer time out in the UI while
+  the run succeeds in the background. The poll looked for its row inside
+  `GET /api/keyword-research/history?type=…&limit=50`, which scans DynamoDB
+  with a `Limit`; DynamoDB applies `Limit` *before* `FilterExpression`, so the
+  scanned window is an arbitrary slice of the table in partition-key hash
+  order, not the newest rows (`_get_history` only sorts by `created_at`
+  afterwards, over what the scan already returned). Once a table held more rows
+  than that window, a freshly completed row was frequently absent from the page
+  the poll inspected, the poll exhausted its 40 attempts, and the UI reported a
+  timeout while the row sat in DynamoDB as `completed`. Table volume alone
+  decided it, so the failure only appeared on installations with real usage
+  history and never on a fresh deployment. Measured on a table of 147 rows:
+  `/history` returned 49 of them and omitted the row being polled.
+
+### Added
+
+- `GET /api/keyword-research/{id}` returns a single research row, read by
+  partition key. The UI polls this instead of the history list, so resolving a
+  run no longer depends on table size. It applies the same stale-job sweep as
+  `/history` (a non-terminal row past the worker budget reports `failed`),
+  omits `raw_response`, and answers 404 for an unknown id — which the client
+  treats as "not ready yet", covering the window before the worker's first
+  write.
+
+### Notes
+
+- `GET /api/keyword-research/history` keeps its bounded scan. It still shows an
+  arbitrary subset on large tables, which now only affects how much the History
+  tab lists; a GSI on `type` + `created_at` would be the proper fix and is not
+  in this release.
+
 ## [2.1.0] - 2026-09-18
 
 Keyword groups: organise keywords into folders (typically one per hotel or

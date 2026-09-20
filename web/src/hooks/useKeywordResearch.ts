@@ -125,8 +125,8 @@ async function findResearchItem(options: ResearchPollOptions): Promise<KeywordRe
 }
 
 /**
- * Poll the research row until the job completes, fails, or
- * times out. Returns null when `isCancelled` reports the poll was superseded
+ * Poll the research row until the job completes, fails, or times out.
+ * Returns null when `isCancelled` reports the poll was superseded
  * by a newer call or the component unmounted — previously polling ran to the
  * full 2 minutes with no cancellation path at all (AUDIT 2.20).
  */
