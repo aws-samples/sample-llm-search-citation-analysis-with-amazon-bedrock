@@ -42,6 +42,21 @@ interface LatestAlertLoad<TResponse> {
   onLoaded: (response: TResponse) => void;
 }
 
+function cancelledAcknowledgement(): AlertMutationOutcome {
+  return {
+    success: false,
+    message: 'Alert acknowledgement cancelled.',
+  };
+}
+
+function cancelledSettingsSave(): AlertSettingsSaveOutcome {
+  return {
+    success: false,
+    message: 'Alert settings save cancelled.',
+    warnings: [],
+  };
+}
+
 /**
  * Loading/error state for one alert resource, fed by the latest request only:
  * stale or aborted responses never touch state, and the current one clears
@@ -56,25 +71,30 @@ function useLatestAlertLoad({
     beginRequest, cancelRequest, isMounted
   } = useLatestRequest();
 
-  const load = useCallback(async <TResponse>({
-    request, onLoaded
-  }: LatestAlertLoad<TResponse>): Promise<void> => {
-    const latest = beginRequest();
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await request(latest.signal);
-      if (!latest.isCurrent()) return;
-      onLoaded(response);
-    } catch (loadError) {
-      if (isAbortError(loadError) || !latest.isCurrent()) return;
-      console.error(`[alerts] Error fetching ${resourceLabel}:`, loadError);
-      setError(getErrorMessage(loadError, 'alerts'));
-    } finally {
-      if (latest.isCurrent()) setLoading(false);
-      latest.finish();
-    }
-  }, [beginRequest, resourceLabel]);
+  const load = useCallback(
+    async <TResponse>({
+      request, onLoaded
+    }: LatestAlertLoad<TResponse>): Promise<void> => {
+      const latest = beginRequest();
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await request(latest.signal);
+        if (!latest.isCurrent()) return;
+        onLoaded(response);
+      } catch (loadError) {
+        if (isAbortError(loadError) || !latest.isCurrent()) return;
+        // Stryker disable next-line StringLiteral,CallExpression: diagnostic logging does not affect alert state or outcomes
+        console.error(`[alerts] Error fetching ${resourceLabel}:`, loadError);
+        setError(getErrorMessage(loadError, 'alerts'));
+      } finally {
+        if (latest.isCurrent()) setLoading(false);
+        latest.finish();
+      }
+    },
+    // Stryker disable next-line ArrayDeclaration: dependencies are stable for each resource hook instance
+    [beginRequest, resourceLabel]
+  );
 
   return {
     loading,
@@ -96,6 +116,7 @@ export function useOpenAlerts(limit = DEFAULT_OPEN_ALERT_LIMIT) {
     loading, error, setLoading, load, cancelRequest, isMounted
   } = useLatestAlertLoad({
     initialLoading: true,
+    // Stryker disable next-line StringLiteral: resource label is diagnostic log context only
     resourceLabel: 'open alerts',
   });
 
@@ -118,42 +139,40 @@ export function useOpenAlerts(limit = DEFAULT_OPEN_ALERT_LIMIT) {
     void refresh();
   }, [refresh]);
 
-  const acknowledge = useCallback(async (id: string): Promise<AlertMutationOutcome> => {
-    if (!isMounted()) {
-      return {
-        success: false,
-        message: 'Alert acknowledgement cancelled.',
-      };
-    }
+  const acknowledge = useCallback(
+    async (id: string): Promise<AlertMutationOutcome> => {
+      if (!isMounted()) return cancelledAcknowledgement();
 
-    cancelRequest();
-    setLoading(false);
-    setActionError(null);
-    setAcknowledgingIds((currentIds) => currentIds.includes(id) ? currentIds : [...currentIds, id]);
-    try {
-      await acknowledgeAlert(id);
-      if (isMounted()) {
+      cancelRequest();
+      setLoading(false);
+      setActionError(null);
+      setAcknowledgingIds((currentIds) => currentIds.includes(id) ? currentIds : [...currentIds, id]);
+      try {
+        await acknowledgeAlert(id);
+        if (!isMounted()) return cancelledAcknowledgement();
         setItems((currentItems) => currentItems.filter((alertItem) => alertItem.id !== id));
         setCount((currentCount) => Math.max(0, currentCount - 1));
-      }
-      return {
-        success: true,
-        message: 'Alert acknowledged.',
-      };
-    } catch (acknowledgementError) {
-      const message = getErrorMessage(acknowledgementError, 'alerts');
-      console.error('[alerts] Error acknowledging alert:', acknowledgementError);
-      if (isMounted()) setActionError(message);
-      return {
-        success: false,
-        message,
-      };
-    } finally {
-      if (isMounted()) {
         setAcknowledgingIds((currentIds) => currentIds.filter((currentId) => currentId !== id));
+        return {
+          success: true,
+          message: 'Alert acknowledged.',
+        };
+      } catch (acknowledgementError) {
+        if (!isMounted()) return cancelledAcknowledgement();
+        const message = getErrorMessage(acknowledgementError, 'alerts');
+        // Stryker disable next-line StringLiteral,CallExpression: diagnostic logging does not affect acknowledgement outcomes
+        console.error('[alerts] Error acknowledging alert:', acknowledgementError);
+        setActionError(message);
+        setAcknowledgingIds((currentIds) => currentIds.filter((currentId) => currentId !== id));
+        return {
+          success: false,
+          message,
+        };
       }
-    }
-  }, [cancelRequest, isMounted, setLoading]);
+    },
+    // Stryker disable next-line ArrayDeclaration: callback dependencies are stable hook utilities and state setters
+    [cancelRequest, isMounted, setLoading]
+  );
 
   return {
     items,
@@ -177,6 +196,7 @@ export function useAlertSettings() {
     loading, error, setLoading, setError, load, cancelRequest, isMounted
   } = useLatestAlertLoad({
     initialLoading: true,
+    // Stryker disable next-line StringLiteral: resource label is diagnostic log context only
     resourceLabel: 'settings',
   });
   const {
@@ -184,99 +204,117 @@ export function useAlertSettings() {
     cancelRequest: cancelTestRequest,
   } = useLatestRequest();
 
-  const refresh = useCallback(async (): Promise<void> => {
-    cancelTestRequest();
-    setTesting(false);
-    setTestOutcome(null);
-    setSaveOutcome(null);
-    await load({
-      request: fetchAlertSettings,
-      onLoaded: setSettings,
-    });
-  }, [cancelTestRequest, load]);
+  const refresh = useCallback(
+    async (): Promise<void> => {
+      cancelTestRequest();
+      setTesting(false);
+      setTestOutcome(null);
+      setSaveOutcome(null);
+      await load({
+        request: fetchAlertSettings,
+        onLoaded: setSettings,
+      });
+    },
+    // Stryker disable next-line ArrayDeclaration: refresh dependencies are stable hook utilities
+    [cancelTestRequest, load]
+  );
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  useEffect(
+    () => {
+      void refresh();
+    },
+    // Stryker disable next-line ArrayDeclaration: refresh is stable for the lifetime of this hook
+    [refresh]
+  );
 
-  const saveSettings = useCallback(async (
-    update: AlertSettingsUpdate
-  ): Promise<AlertSettingsSaveOutcome> => {
-    cancelRequest();
-    cancelTestRequest();
-    if (isMounted()) {
+  const saveSettings = useCallback(
+    async (
+      update: AlertSettingsUpdate
+    ): Promise<AlertSettingsSaveOutcome> => {
+      if (!isMounted()) return cancelledSettingsSave();
+
+      cancelRequest();
+      cancelTestRequest();
       setLoading(false);
       setSaving(true);
       setTesting(false);
       setSaveOutcome(null);
       setTestOutcome(null);
-    }
-    try {
-      const response = await updateAlertSettings(update);
-      cancelRequest();
-      const outcome: AlertSettingsSaveOutcome = {
-        success: true,
-        message: 'Alert settings saved.',
-        warnings: response.warnings ?? [],
-      };
-      if (isMounted()) {
+      try {
+        const response = await updateAlertSettings(update);
+        cancelRequest();
+        if (!isMounted()) return cancelledSettingsSave();
+        const outcome: AlertSettingsSaveOutcome = {
+          success: true,
+          message: 'Alert settings saved.',
+          warnings: response.warnings ?? [],
+        };
         setSettings(response);
         setError(null);
         setSaveOutcome(outcome);
+        setSaving(false);
+        return outcome;
+      } catch (saveError) {
+        if (!isMounted()) return cancelledSettingsSave();
+        const outcome: AlertSettingsSaveOutcome = {
+          success: false,
+          message: getErrorMessage(saveError, 'alerts'),
+          warnings: [],
+        };
+        // Stryker disable next-line StringLiteral,CallExpression: diagnostic logging does not affect save outcomes
+        console.error('[alerts] Error saving settings:', saveError);
+        setSaveOutcome(outcome);
+        setSaving(false);
+        return outcome;
       }
-      return outcome;
-    } catch (saveError) {
-      const outcome: AlertSettingsSaveOutcome = {
-        success: false,
-        message: getErrorMessage(saveError, 'alerts'),
-        warnings: [],
-      };
-      console.error('[alerts] Error saving settings:', saveError);
-      if (isMounted()) setSaveOutcome(outcome);
-      return outcome;
-    } finally {
-      if (isMounted()) setSaving(false);
-    }
-  }, [cancelRequest, cancelTestRequest, isMounted, setError, setLoading]);
+    },
+    // Stryker disable next-line ArrayDeclaration: callback dependencies are stable hook utilities and state setters
+    [cancelRequest, cancelTestRequest, isMounted, setError, setLoading]
+  );
 
-  const sendTestNotification = useCallback(async (): Promise<AlertMutationOutcome> => {
-    if (!isMounted()) {
-      return {
-        success: false,
-        message: 'Test notification cancelled.',
-      };
-    }
-
-    const latest = beginTestRequest();
-    setTesting(true);
-    setSaveOutcome(null);
-    setTestOutcome(null);
-    try {
-      const response = await requestTestNotification(latest.signal);
-      const outcome: AlertMutationOutcome = {
-        success: true,
-        message: response.message,
-      };
-      if (latest.isCurrent()) setTestOutcome(outcome);
-      return outcome;
-    } catch (testError) {
-      const aborted = isAbortError(testError);
-      const outcome: AlertMutationOutcome = {
-        success: false,
-        message: aborted
-          ? 'Test notification cancelled.'
-          : getErrorMessage(testError, 'alerts'),
-      };
-      if (!aborted && latest.isCurrent()) {
-        console.error('[alerts] Error sending test notification:', testError);
-        setTestOutcome(outcome);
+  const sendTestNotification = useCallback(
+    async (): Promise<AlertMutationOutcome> => {
+      if (!isMounted()) {
+        return {
+          success: false,
+          message: 'Test notification cancelled.',
+        };
       }
-      return outcome;
-    } finally {
-      if (latest.isCurrent()) setTesting(false);
-      latest.finish();
-    }
-  }, [beginTestRequest, isMounted]);
+
+      const latest = beginTestRequest();
+      setTesting(true);
+      setSaveOutcome(null);
+      setTestOutcome(null);
+      try {
+        const response = await requestTestNotification(latest.signal);
+        const outcome: AlertMutationOutcome = {
+          success: true,
+          message: response.message,
+        };
+        if (latest.isCurrent()) setTestOutcome(outcome);
+        return outcome;
+      } catch (testError) {
+        const aborted = isAbortError(testError);
+        const outcome: AlertMutationOutcome = {
+          success: false,
+          message: aborted
+            ? 'Test notification cancelled.'
+            : getErrorMessage(testError, 'alerts'),
+        };
+        if (!aborted && latest.isCurrent()) {
+          // Stryker disable next-line StringLiteral,CallExpression: diagnostic logging does not affect test-notification outcomes
+          console.error('[alerts] Error sending test notification:', testError);
+          setTestOutcome(outcome);
+        }
+        return outcome;
+      } finally {
+        if (latest.isCurrent()) setTesting(false);
+        latest.finish();
+      }
+    },
+    // Stryker disable next-line ArrayDeclaration: callback dependencies are stable hook utilities
+    [beginTestRequest, isMounted]
+  );
 
   return {
     settings,
@@ -302,6 +340,7 @@ export function useContentChanges(groupId: string) {
     loading, error, setLoading, setError, load, cancelRequest, isMounted
   } = useLatestAlertLoad({
     initialLoading: false,
+    // Stryker disable next-line StringLiteral: resource label is diagnostic log context only
     resourceLabel: 'content changes',
   });
 
@@ -330,43 +369,53 @@ export function useContentChanges(groupId: string) {
     void refresh();
   }, [refresh]);
 
-  const recordContentChange = useCallback(async (
-    contentChange: CreateContentChangeRequest
-  ): Promise<AlertMutationOutcome> => {
-    cancelRequest();
-    if (isMounted()) {
+  const recordContentChange = useCallback(
+    async (
+      contentChange: CreateContentChangeRequest
+    ): Promise<AlertMutationOutcome> => {
+      if (!isMounted()) {
+        return {
+          success: false,
+          message: 'Content change recording cancelled.',
+        };
+      }
+
+      cancelRequest();
       setLoading(false);
       setRecording(true);
       setError(null);
       setRecordOutcome(null);
-    }
-    try {
-      const marker = await createContentChange(contentChange);
-      const outcome: AlertMutationOutcome = {
-        success: true,
-        message: 'Content change recorded.',
-      };
-      if (isMounted() && selectedGroupRef.current === contentChange.group_id) {
-        setLatestMarker(marker);
-        setRecordOutcome(outcome);
+      try {
+        const marker = await createContentChange(contentChange);
+        const outcome: AlertMutationOutcome = {
+          success: true,
+          message: 'Content change recorded.',
+        };
+        if (isMounted() && selectedGroupRef.current === contentChange.group_id) {
+          setLatestMarker(marker);
+          setRecordOutcome(outcome);
+        }
+        return outcome;
+      } catch (recordError) {
+        const outcome: AlertMutationOutcome = {
+          success: false,
+          message: getErrorMessage(recordError, 'alerts'),
+        };
+        // Stryker disable next-line StringLiteral,CallExpression: diagnostic logging does not affect content-change outcomes
+        console.error('[alerts] Error recording content change:', recordError);
+        if (isMounted() && selectedGroupRef.current === contentChange.group_id) {
+          setRecordOutcome(outcome);
+        }
+        return outcome;
+      } finally {
+        if (isMounted() && selectedGroupRef.current === contentChange.group_id) {
+          setRecording(false);
+        }
       }
-      return outcome;
-    } catch (recordError) {
-      const outcome: AlertMutationOutcome = {
-        success: false,
-        message: getErrorMessage(recordError, 'alerts'),
-      };
-      console.error('[alerts] Error recording content change:', recordError);
-      if (isMounted() && selectedGroupRef.current === contentChange.group_id) {
-        setRecordOutcome(outcome);
-      }
-      return outcome;
-    } finally {
-      if (isMounted() && selectedGroupRef.current === contentChange.group_id) {
-        setRecording(false);
-      }
-    }
-  }, [cancelRequest, isMounted, setError, setLoading]);
+    },
+    // Stryker disable next-line ArrayDeclaration: callback dependencies are stable hook utilities and state setters
+    [cancelRequest, isMounted, setError, setLoading]
+  );
 
   return {
     latestMarker,

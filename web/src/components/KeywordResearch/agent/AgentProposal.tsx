@@ -204,7 +204,7 @@ const DestinationGroupRow = ({
           .map((group) => <option key={group.id} value={group.id}>{group.name} ({group.keyword_count})</option>)}
       </select>
       <p className="mt-1 text-xs text-gray-500">
-        Choose an optional group, for example by brand, market, campaign, or location.
+        {'Choose an optional group, for example by brand, market, campaign, or location.'}
       </p>
     </div>
     <Button

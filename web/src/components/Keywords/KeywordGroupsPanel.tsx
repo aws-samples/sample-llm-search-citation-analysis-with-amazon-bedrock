@@ -23,9 +23,8 @@ interface KeywordGroupsPanelProps {
 }
 
 /**
- * Keyword groups ("folders", e.g. one per hotel): create, rename, delete, and
- * pick which group the keyword list is filtered to. Deleting a group only
- * detaches its keywords — the keywords themselves are kept.
+ * Creates, renames and deletes reusable keyword groups, and selects which
+ * group filters the keyword list. Deleting a group only detaches its keywords.
  */
 export const KeywordGroupsPanel = ({
   groups, loading, totalKeywords, ungroupedCount, filter,
@@ -78,7 +77,9 @@ export const KeywordGroupsPanel = ({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Keyword Groups</h2>
-          <p className="text-sm text-gray-500">Organise keywords into reusable groups, for example by brand, market, campaign, or location. A keyword can belong to several groups.</p>
+          <p className="text-sm text-gray-500">
+            {'Organise keywords into reusable groups, for example by brand, market, campaign, or location. A keyword can belong to several groups.'}
+          </p>
         </div>
       </div>
 
@@ -89,7 +90,7 @@ export const KeywordGroupsPanel = ({
           value={newName}
           onChange={(event) => setNewName(event.target.value)}
           onKeyDown={(event) => { if (event.key === 'Enter') void submitCreate(); }}
-          placeholder="New group name (e.g. Spring campaign)"
+          placeholder={'New group name (e.g. Spring campaign)'}
           disabled={busy}
           className="flex-1 px-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 text-sm"
         />

@@ -1,8 +1,8 @@
 import {
-  useState, useEffect, useCallback 
+  useState, useEffect, useCallback
 } from 'react';
 import type {
-  BrandConfig, IndustryPresets, BrandExpansionAllResult, CompetitorDiscoveryResult 
+  BrandConfig, IndustryPresets, BrandExpansionAllResult, CompetitorDiscoveryResult
 } from '../types';
 import {
   DEFAULT_BRAND_INDUSTRY, resolveBrandIndustryPreset
@@ -50,9 +50,9 @@ export interface UseBrandConfigFormReturn {
   ui: {
     activeTab: ConfigTab;
     saving: boolean;
-    saved: boolean 
+    saved: boolean
   };
-  
+
   // Form setters
   setIndustry: (v: string) => void;
   setFirstPartyBrands: (v: string[]) => void;
@@ -62,16 +62,16 @@ export interface UseBrandConfigFormReturn {
   setIncludeSentiment: (v: boolean) => void;
   setIncludeRankingContext: (v: boolean) => void;
   setMaxBrands: (v: number) => void;
-  
+
   // Input setters
   setNewFirstParty: (v: string) => void;
   setNewFirstPartyDomain: (v: string) => void;
   setNewCompetitor: (v: string) => void;
   setNewEntityType: (v: string) => void;
-  
+
   // UI setters
   setActiveTab: (v: ConfigTab) => void;
-  
+
   // Expansion setters
   setSelectedFirstPartyBrand: (v: string | null) => void;
   setSelectedCompetitorBrand: (v: string | null) => void;
@@ -80,14 +80,14 @@ export interface UseBrandConfigFormReturn {
   setCompetitorDiscoveryResult: (v: CompetitorDiscoveryResult | null) => void;
   setPendingExpansionBrands: (v: string[]) => void;
   setExpansionTarget: (v: BrandType | null) => void;
-  
+
   // Actions
   handlePromptChange: (newPrompt: string) => void;
   resetPromptToDefault: () => void;
   buildConfig: () => BrandConfig;
   setSaving: (v: boolean) => void;
   setSaved: (v: boolean) => void;
-  
+
   // Utilities
   normalizeBrand: (name: string) => string;
   brandExists: (brand: string, brandList: string[]) => boolean;
@@ -177,10 +177,10 @@ export function useBrandConfigForm(
 
   const currentPreset = resolveBrandIndustryPreset(presets, industry);
 
-  const normalizeBrand = useCallback((name: string): string => 
+  const normalizeBrand = useCallback((name: string): string =>
     name.normalize('NFD').replaceAll(/[\u0300-\u036F]/gi, '').toLowerCase().trim(), []);
 
-  const brandExists = useCallback((brand: string, brandList: string[]): boolean => 
+  const brandExists = useCallback((brand: string, brandList: string[]): boolean =>
     brandList.some(existing => normalizeBrand(existing) === normalizeBrand(brand)), [normalizeBrand]);
 
   // Sync form state when config changes
@@ -214,23 +214,20 @@ export function useBrandConfigForm(
   }, [presets, industry]);
 
   const resetPromptToDefault = useCallback(() => {
-    const defaultPrompt = resolveBrandIndustryPreset(presets, industry)?.default_prompt ?? '';
-    setCurrentPrompt(defaultPrompt);
     setIndustryPrompts(prev => Object.fromEntries(Object.entries(prev).filter(([key]) => key !== industry)));
-    setPromptModified(false);
-  }, [presets, industry]);
+  }, [industry]);
 
   const buildConfig = useCallback((): BrandConfig => {
     const defaultPrompt = resolveBrandIndustryPreset(presets, industry)?.default_prompt ?? '';
     const finalPrompts = currentPrompt === defaultPrompt ? industryPrompts : {
       ...industryPrompts,
-      [industry]: currentPrompt 
+      [industry]: currentPrompt
     };
     return {
       industry,
       tracked_brands: {
         first_party: firstPartyBrands,
-        competitors: competitorBrands 
+        competitors: competitorBrands
       },
       first_party_domains: firstPartyDomains,
       custom_entity_types: customEntityTypes,
@@ -255,13 +252,13 @@ export function useBrandConfigForm(
       maxBrands,
       industryPrompts,
       currentPrompt,
-      promptModified 
+      promptModified
     },
     inputs: {
       newFirstParty,
       newFirstPartyDomain,
       newCompetitor,
-      newEntityType 
+      newEntityType
     },
     expansion: {
       selectedFirstPartyBrand,
@@ -270,12 +267,12 @@ export function useBrandConfigForm(
       expansionAllResult,
       competitorDiscoveryResult,
       pendingExpansionBrands,
-      expansionTarget 
+      expansionTarget
     },
     ui: {
       activeTab,
       saving,
-      saved 
+      saved
     },
     setIndustry,
     setFirstPartyBrands,

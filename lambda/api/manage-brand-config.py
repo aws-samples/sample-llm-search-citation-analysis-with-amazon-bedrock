@@ -12,7 +12,7 @@ import os
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import boto3
 
@@ -204,7 +204,25 @@ def find_duplicates(brands: list) -> list:
     return duplicates
 
 
-def expand_brands(existing_brands: list, industry: str = DEFAULT_INDUSTRY_ID, brand_type: str = "first_party") -> dict[str, Any]:
+BrandPortfolio = Literal["first_party", "competitor"]
+
+_BRAND_PORTFOLIO_PROMPT: dict[BrandPortfolio, tuple[str, str]] = {
+    "first_party": (
+        "FIRST-PARTY",
+        "Do NOT suggest competitor brands owned by different companies",
+    ),
+    "competitor": (
+        "COMPETITOR",
+        "Do NOT suggest tracked first-party brands or unrelated competitor companies",
+    ),
+}
+
+
+def expand_brands(
+    existing_brands: list,
+    industry: str = DEFAULT_INDUSTRY_ID,
+    brand_type: BrandPortfolio = "first_party",
+) -> dict[str, Any]:
     """
     Use LLM to expand ALL existing brands into related sub-brands, variations, and owned properties.
     Returns deduplicated suggestions and flags existing duplicates.
@@ -212,7 +230,7 @@ def expand_brands(existing_brands: list, industry: str = DEFAULT_INDUSTRY_ID, br
     Args:
         existing_brands: List of brands already added
         industry: Industry context for better suggestions
-        brand_type: 'first_party' or 'competitor' - affects the prompt
+        brand_type: Portfolio being expanded; selects ownership/exclusion rules
     """
     if not existing_brands:
         return {
@@ -222,6 +240,7 @@ def expand_brands(existing_brands: list, industry: str = DEFAULT_INDUSTRY_ID, br
             "error": "Please add at least one brand first"
         }
 
+    portfolio_label, portfolio_exclusion_rule = _BRAND_PORTFOLIO_PROMPT[brand_type]
     industry_context = _industry_context(industry)
     # Wrap each user-supplied brand in `<brand>` tags so malicious names
     # cannot escape into the surrounding prompt instructions.
@@ -240,7 +259,7 @@ You are a brand expert for the {industry_context.name} industry.
 INDUSTRY CONTEXT:
 - Entity types: {industry_context.entity_types}
 
-BRANDS ALREADY BEING TRACKED (DO NOT INCLUDE THESE IN YOUR RESPONSE):
+{portfolio_label} BRANDS ALREADY BEING TRACKED (DO NOT INCLUDE THESE IN YOUR RESPONSE):
 {brands_list}
 
 Your task: Find MISSING sub-brands, brand tiers, and variations that belong to the same parent companies as the brands above.
@@ -254,7 +273,7 @@ For each brand in the list above, think about:
 CRITICAL RULES:
 - ONLY suggest brands that are NOT in the "already tracked" list above
 - ONLY suggest brands owned by the SAME parent companies
-- Do NOT suggest competitor brands (brands owned by different companies)
+- {portfolio_exclusion_rule}
 - Do NOT repeat any brand from the existing list, even with different spelling
 
 Return ONLY a JSON object:
@@ -529,7 +548,14 @@ def _expand_brand(event: dict[str, Any], context: Any, body: dict, brand_name: s
     'industry': {'type': str, 'max_length': 50, 'default': DEFAULT_INDUSTRY_ID, 'source': 'body'},
     'brand_type': {'type': str, 'choices': ['first_party', 'competitor'], 'default': 'first_party', 'source': 'body'}
 })
-def _expand_all_brands(event: dict[str, Any], context: Any, body: dict, existing_brands: list, industry: str, brand_type: str) -> dict[str, Any]:
+def _expand_all_brands(
+    event: dict[str, Any],
+    context: Any,
+    body: dict,
+    existing_brands: list,
+    industry: str,
+    brand_type: BrandPortfolio,
+) -> dict[str, Any]:
     """POST /brand-config/expand-all - Expand ALL brands to find missing sub-brands."""
     if not existing_brands:
         return validation_error('Please add at least one brand first', event, 'existing_brands')

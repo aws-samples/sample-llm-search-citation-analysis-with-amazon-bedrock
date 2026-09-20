@@ -2,53 +2,17 @@ import {
   describe, expect, it, vi
 } from 'vitest';
 import {
-  render, screen, waitFor
+  screen, waitFor
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { KeywordGroupsPanel } from './KeywordGroupsPanel';
-import type { GroupFilter } from './KeywordGroupsPanel';
-import { buildGroup } from '../../api/keywordGroups-fixtures';
-
-const groups = [
-  buildGroup({
-    id: 'coruna',
-    name: 'Hotel Coruña',
-    keyword_count: 3 
-  }),
-  buildGroup({
-    id: 'marino',
-    name: 'Hotel Gran Marino',
-    keyword_count: 0 
-  }),
-];
-
-function renderPanel(overrides: Partial<Parameters<typeof KeywordGroupsPanel>[0]> = {}) {
-  const props = {
-    groups,
-    loading: false,
-    totalKeywords: 5,
-    ungroupedCount: 2,
-    filter: 'all' as GroupFilter,
-    onFilterChange: vi.fn(),
-    onCreate: vi.fn(() => Promise.resolve({
-      success: true,
-      message: 'ok' 
-    })),
-    onRename: vi.fn(() => Promise.resolve({
-      success: true,
-      message: 'ok' 
-    })),
-    onDelete: vi.fn(),
-    onNotify: vi.fn(),
-    ...overrides,
-  };
-  render(<KeywordGroupsPanel {...props} />);
-  return props;
-}
+import {
+  KEYWORD_GROUPS,
+  renderKeywordGroupsPanel,
+} from './KeywordGroupsPanel-fixtures';
 
 describe('KeywordGroupsPanel', () => {
   it('describes reusable groups with generic examples', () => {
-    renderPanel();
+    renderKeywordGroupsPanel();
 
     expect(screen.getByText(
       'Organise keywords into reusable groups, for example by brand, market, campaign, or location. A keyword can belong to several groups.'
@@ -56,7 +20,7 @@ describe('KeywordGroupsPanel', () => {
   });
 
   it('shows a generic campaign example in the new-group placeholder', () => {
-    renderPanel();
+    renderKeywordGroupsPanel();
 
     expect(screen.getByRole('textbox', { name: 'New group name' })).toHaveAttribute(
       'placeholder',
@@ -65,7 +29,7 @@ describe('KeywordGroupsPanel', () => {
   });
 
   it('shows every group with its keyword count', () => {
-    renderPanel();
+    renderKeywordGroupsPanel();
 
     expect(screen.getByRole('button', { name: 'Hotel Coruña (3)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Hotel Gran Marino (0)' })).toBeInTheDocument();
@@ -74,7 +38,7 @@ describe('KeywordGroupsPanel', () => {
   });
 
   it('creates a group from the trimmed input and clears the field on success', async () => {
-    const props = renderPanel();
+    const props = renderKeywordGroupsPanel();
     const user = userEvent.setup();
     const input = screen.getByRole('textbox', { name: 'New group name' });
 
@@ -86,11 +50,11 @@ describe('KeywordGroupsPanel', () => {
   });
 
   it('surfaces a failed creation through onNotify and keeps the typed name', async () => {
-    const props = renderPanel({
-      onCreate: vi.fn(() => Promise.resolve({
+    const props = renderKeywordGroupsPanel({
+      onCreate: vi.fn().mockResolvedValue({
         success: false,
-        message: 'A keyword group with this name already exists' 
-      })),
+        message: 'A keyword group with this name already exists'
+      }),
     });
     const user = userEvent.setup();
     const input = screen.getByRole('textbox', { name: 'New group name' });
@@ -106,7 +70,7 @@ describe('KeywordGroupsPanel', () => {
   });
 
   it('selects a group as the active filter when its chip is clicked', async () => {
-    const props = renderPanel();
+    const props = renderKeywordGroupsPanel();
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Hotel Coruña (3)' }));
 
@@ -114,7 +78,7 @@ describe('KeywordGroupsPanel', () => {
   });
 
   it('renames a group inline', async () => {
-    const props = renderPanel();
+    const props = renderKeywordGroupsPanel();
     const user = userEvent.setup();
 
     await user.click(screen.getByRole('button', { name: 'Rename group Hotel Coruña' }));
@@ -126,10 +90,10 @@ describe('KeywordGroupsPanel', () => {
   });
 
   it('asks the parent to delete the group with the full group record', async () => {
-    const props = renderPanel();
+    const props = renderKeywordGroupsPanel();
 
     await userEvent.setup().click(screen.getByRole('button', { name: 'Delete group Hotel Gran Marino' }));
 
-    expect(props.onDelete).toHaveBeenCalledWith(groups[1]);
+    expect(props.onDelete).toHaveBeenCalledWith(KEYWORD_GROUPS[1]);
   });
 });

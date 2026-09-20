@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event';
 import {
   AgentProposal, groupProposalByDimension
 } from './AgentProposal';
+import { AGENT_PROPOSAL_GROUPS } from './AgentProposal-fixtures';
 import {
   CAFE_DIMENSIONS,
   HOTEL_DIMENSIONS,
@@ -18,7 +19,6 @@ import {
   selectedPromotionResponseFixture,
 } from './agent-fixtures';
 import { createMockJsonResponse } from '../../../test/fetchResponses';
-import type { KeywordGroup } from '../../../types';
 
 vi.mock('../../../infrastructure', () => import('../../../test/infrastructureMock'));
 
@@ -26,25 +26,6 @@ vi.mock('./agentExport', () => ({ exportAgentRun: vi.fn(() => Promise.resolve())
 
 import { mockAuthenticatedFetch } from '../../../test/infrastructureMock';
 import { exportAgentRun } from './agentExport';
-
-const GROUPS: KeywordGroup[] = [
-  {
-    id: 'g1',
-    name: 'Hotel Gran Marino',
-    description: '',
-    keyword_count: 12,
-    created_at: '',
-    updated_at: '',
-  },
-  {
-    id: 'g2',
-    name: 'Hotel Atlántico',
-    description: '',
-    keyword_count: 4,
-    created_at: '',
-    updated_at: '',
-  },
-];
 
 describe('groupProposalByDimension', () => {
   it('orders sections by the catalogue and puts unknown ids under Other last', () => {
@@ -89,7 +70,7 @@ describe('groupProposalByDimension', () => {
 describe('AgentProposal', () => {
   it('renders one section per dimension with the candidate count', () => {
     const job = buildAgentJob();
-    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={AGENT_PROPOSAL_GROUPS} />);
 
     expect(screen.getByRole('heading', { name: /3 proposed keywords/ })).toBeInTheDocument();
     expect(screen.getByText(/selected from 41 candidates/)).toBeInTheDocument();
@@ -98,14 +79,14 @@ describe('AgentProposal', () => {
 
   it('labels the sections from the run catalogue', () => {
     const job = buildAgentJob();
-    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={AGENT_PROPOSAL_GROUPS} />);
 
     expect(screen.getAllByRole('heading', { level: 5 }).map((heading) => heading.textContent)).toStrictEqual(['Destination (1)', 'Audience (1)', 'Other (1)']);
   });
 
   it('shows the tracking recommendation evidence for each proposal term', () => {
     const job = buildAgentJob();
-    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={AGENT_PROPOSAL_GROUPS} />);
 
     expect(screen.getAllByText('Recommended')).toHaveLength(2);
     expect(screen.getByText('Score 904')).toBeInTheDocument();
@@ -115,7 +96,7 @@ describe('AgentProposal', () => {
 
   it('preselects the recommended subset with its status counts', () => {
     const job = buildAgentJob();
-    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={AGENT_PROPOSAL_GROUPS} />);
 
     expect(screen.getByLabelText('Select hotel coruña centro')).toBeChecked();
     expect(screen.getByLabelText('Select hotel coruña con niños')).toBeChecked();
@@ -125,7 +106,7 @@ describe('AgentProposal', () => {
 
   it('explains generic ways to organise an optional keyword group', () => {
     const job = buildAgentJob();
-    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={AGENT_PROPOSAL_GROUPS} />);
 
     expect(screen.getByText(
       'Choose an optional group, for example by brand, market, campaign, or location.'
@@ -134,7 +115,7 @@ describe('AgentProposal', () => {
 
   it('preselects the destination group from the run brief', () => {
     const job = buildAgentJob();
-    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={AGENT_PROPOSAL_GROUPS} />);
 
     expect(screen.getByLabelText('Keyword group')).toHaveValue('g1');
     expect(screen.getByRole('button', { name: /add selected as active \(2\) to “Hotel Gran Marino”/i })).toBeEnabled();
@@ -143,7 +124,7 @@ describe('AgentProposal', () => {
   it('adds only the adjusted selection as active tracked keywords', async () => {
     mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(selectedPromotionResponseFixture));
     const job = buildAgentJob();
-    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={AGENT_PROPOSAL_GROUPS} />);
 
     await userEvent.click(screen.getByLabelText('Select hotel coruña con niños'));
     await userEvent.click(screen.getByRole('button', { name: /add selected as active \(1\) to “Hotel Gran Marino”/i }));
@@ -163,7 +144,7 @@ describe('AgentProposal', () => {
     mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(fullPromotionResponseFixture));
     const job = buildAgentJob();
     const onKeywordsAdded = vi.fn();
-    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} onKeywordsAdded={onKeywordsAdded} />);
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={AGENT_PROPOSAL_GROUPS} onKeywordsAdded={onKeywordsAdded} />);
 
     await userEvent.click(screen.getByRole('button', { name: /add full proposal \(2 active, 1 inactive\) to “Hotel Gran Marino”/i }));
 
@@ -193,7 +174,7 @@ describe('AgentProposal', () => {
 
   it('restores the backend recommendation when reset is selected', async () => {
     const job = buildAgentJob();
-    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={AGENT_PROPOSAL_GROUPS} />);
     await userEvent.click(screen.getByLabelText('Select hotel coruña centro'));
     await userEvent.click(screen.getByLabelText('Select escapada coruña'));
 
@@ -208,7 +189,7 @@ describe('AgentProposal', () => {
 
   it('updates only one dimension when its section control is used', async () => {
     const job = buildAgentJob();
-    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={AGENT_PROPOSAL_GROUPS} />);
 
     await userEvent.click(screen.getAllByRole('button', { name: 'Clear section' })[0]);
     expect(screen.getByLabelText('1 selected active tracked keywords, 2 unselected inactive library keywords')).toBeInTheDocument();
@@ -219,7 +200,7 @@ describe('AgentProposal', () => {
 
   it('explains when the proposal uses the deterministic fallback', () => {
     const job = buildAgentJob({ proposal_source: 'fallback' });
-    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={AGENT_PROPOSAL_GROUPS} />);
 
     expect(screen.getByText(/selection model was unavailable/i)).toBeInTheDocument();
   });
@@ -232,7 +213,7 @@ describe('AgentProposal', () => {
       tracking_score: undefined,
       tracking_reason: undefined,
     }));
-    render(<AgentProposal job={job} keywords={legacyKeywords} groups={GROUPS} />);
+    render(<AgentProposal job={job} keywords={legacyKeywords} groups={AGENT_PROPOSAL_GROUPS} />);
 
     expect(screen.getAllByText('Not scored (legacy run)')).toHaveLength(3);
     expect(screen.getByRole('button', { name: 'Reset to recommended (0)' })).toBeDisabled();
@@ -241,7 +222,7 @@ describe('AgentProposal', () => {
 
   it('exports the run with its proposal', async () => {
     const job = buildAgentJob();
-    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={GROUPS} />);
+    render(<AgentProposal job={job} keywords={job.keywords ?? []} groups={AGENT_PROPOSAL_GROUPS} />);
 
     await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
 

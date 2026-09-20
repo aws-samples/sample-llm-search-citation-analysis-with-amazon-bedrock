@@ -1,3 +1,5 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   expect, vi
 } from 'vitest';
@@ -5,7 +7,12 @@ import {
   act, renderHook, waitFor
 } from '@testing-library/react';
 import type {
-  AlertSettings, AlertsResponse, ContentChangeMarker
+  AlertAcknowledgement,
+  AlertSettings,
+  AlertSettingsUpdate,
+  AlertsResponse,
+  ContentChangeMarker,
+  CreateContentChangeRequest,
 } from '../types';
 import {
   buildAlertSettings,
@@ -13,9 +20,25 @@ import {
   buildContentChangeMarker,
 } from '../types/domain/alerts-fixtures';
 import {
-  useAlertSettings, useOpenAlerts
+  useAlertSettings, useContentChanges, useOpenAlerts
 } from './useAlerts';
-import type { useContentChanges } from './useAlerts';
+
+export const ALERT_SETTINGS_UPDATE = {
+  enabled: false,
+  notification_emails: ['owner@example.com'],
+  thresholds: {
+    citation_rate_drop: 12,
+    position_loss: 4,
+    competitor_top_n: 3,
+    improvement_after_content_change: 9,
+  },
+} satisfies AlertSettingsUpdate;
+
+export const CONTENT_CHANGE_REQUEST = {
+  group_id: 'group-north',
+  description: 'Published revised guidance',
+  url: 'https://example.com/guidance',
+} satisfies CreateContentChangeRequest;
 
 export interface DeferredValue<TValue> {
   promise: Promise<TValue>;
@@ -38,6 +61,39 @@ export function createDeferredValue<TValue>(): DeferredValue<TValue> {
   };
 }
 
+export async function resolveDeferredValue<TValue>(
+  deferred: DeferredValue<TValue>,
+  value: TValue,
+  pending: Promise<unknown>
+): Promise<void> {
+  await act(async () => {
+    deferred.resolve(value);
+    await pending;
+  });
+}
+
+export async function rejectDeferredValue<TValue>(
+  deferred: DeferredValue<TValue>,
+  reason: unknown,
+  pending: Promise<unknown>
+): Promise<void> {
+  await act(async () => {
+    deferred.reject(reason);
+    await pending;
+  });
+}
+
+export function resolveSavedSettings(
+  deferred: DeferredValue<AlertSettings>,
+  pending: Promise<unknown>
+): Promise<void> {
+  return resolveDeferredValue(
+    deferred,
+    buildAlertSettings(ALERT_SETTINGS_UPDATE),
+    pending
+  );
+}
+
 async function renderLoadedHook<THookResult extends { loading: boolean }>(hook: () => THookResult) {
   const rendered = renderHook(hook);
   await waitFor(() => expect(rendered.result.current.loading).toBe(false));
@@ -50,6 +106,59 @@ export function renderLoadedOpenAlerts() {
 
 export function renderLoadedAlertSettings() {
   return renderLoadedHook(() => useAlertSettings());
+}
+
+export function renderLoadedContentChanges(groupId = 'group-north') {
+  return renderLoadedHook(() => useContentChanges(groupId));
+}
+
+export function renderContentChangesForGroup(groupId = 'group-north') {
+  return renderHook(
+    ({ selectedGroupId }) => useContentChanges(selectedGroupId),
+    { initialProps: { selectedGroupId: groupId } }
+  );
+}
+
+export function beginContentChangeRecord(
+  hook: ReturnType<typeof useContentChanges>,
+  request: CreateContentChangeRequest = CONTENT_CHANGE_REQUEST
+) {
+  return beginHookRequest(() => hook.recordContentChange(request));
+}
+
+export function buildAlertAcknowledgement(id: string): AlertAcknowledgement {
+  return {
+    success: true,
+    id,
+    status: 'acknowledged',
+  };
+}
+
+function openAlertsInitialStateProbe() {
+  const state = useOpenAlerts();
+  return `loading:${String(state.loading)};acknowledging:${state.acknowledgingIds.join(',')}`;
+}
+
+function alertSettingsInitialStateProbe() {
+  const state = useAlertSettings();
+  return `loading:${String(state.loading)};saving:${String(state.saving)};testing:${String(state.testing)}`;
+}
+
+function contentChangesInitialStateProbe() {
+  const state = useContentChanges('');
+  return `loading:${String(state.loading)};recording:${String(state.recording)}`;
+}
+
+export function renderOpenAlertsInitialState(): string {
+  return renderToStaticMarkup(createElement(openAlertsInitialStateProbe));
+}
+
+export function renderAlertSettingsInitialState(): string {
+  return renderToStaticMarkup(createElement(alertSettingsInitialStateProbe));
+}
+
+export function renderContentChangesInitialState(): string {
+  return renderToStaticMarkup(createElement(contentChangesInitialStateProbe));
 }
 
 class AlertHookFixtureError extends Error {

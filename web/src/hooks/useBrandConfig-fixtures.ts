@@ -1,13 +1,13 @@
 import { expect } from 'vitest';
 import {
-  renderHook, waitFor 
+  renderHook, waitFor
 } from '@testing-library/react';
 import type {
-  BrandConfig, IndustryPresets 
+  BrandConfig, IndustryPresets
 } from '../types';
 import { createMockEndpoint } from './injectableApi-fixtures';
 import {
-  useBrandConfig, type BrandConfigApi 
+  useBrandConfig, type BrandConfigApi
 } from './useBrandConfig';
 
 export const mockBrandConfig: BrandConfig = {
@@ -53,6 +53,8 @@ const mockPresets: IndustryPresets = {
   },
 };
 
+export const PRESETS_WITHOUT_CUSTOM = { hospitality: mockPresets.hospitality } satisfies IndustryPresets;
+
 /** Payload of `POST /brand-config/expand` for the fixture brand. */
 const mockBrandExpansion = {
   main_brand: 'TestBrand',
@@ -78,8 +80,9 @@ const mockCompetitorDiscovery = {
 };
 
 interface BrandConfigMockApiOptions {
-  /** Stored config returned by GET and echoed back by POST `/brand-config`. */
-  configResponse?: BrandConfig;
+  /** Partial stored config returned by GET and echoed back by POST `/brand-config`. */
+  configResponse?: Partial<BrandConfig>;
+  presetsResponse?: IndustryPresets;
   shouldFailConfig?: boolean;
   shouldFailPresets?: boolean;
   shouldFailSave?: boolean;
@@ -91,9 +94,10 @@ interface BrandConfigMockApiOptions {
 
 function createMockApi(options: BrandConfigMockApiOptions = {}) {
   const storedConfig = options.configResponse ?? mockBrandConfig;
+  const presets = options.presetsResponse ?? mockPresets;
   return {
     fetchConfig: createMockEndpoint(options.shouldFailConfig, storedConfig),
-    fetchPresets: createMockEndpoint(options.shouldFailPresets, { presets: mockPresets }),
+    fetchPresets: createMockEndpoint(options.shouldFailPresets, { presets }),
     saveConfig: createMockEndpoint(options.shouldFailSave, { config: storedConfig }),
     deleteConfig: createMockEndpoint(options.shouldFailDelete, { config: {} }),
     expandBrand: createMockEndpoint(options.shouldFailExpand, mockBrandExpansion),

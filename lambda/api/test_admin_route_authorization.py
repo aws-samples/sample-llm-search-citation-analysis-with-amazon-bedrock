@@ -150,6 +150,9 @@ def _load(filename: str) -> LoadedModule:
     aws.exceptions.InvalidParameterException = type('InvalidParameterException', (Exception,), {})
     aws.exceptions.ResourceNotFoundException = type('ResourceNotFoundException', (Exception,), {})
     aws.exceptions.ConflictException = type('ConflictException', (Exception,), {})
+    # If an authorization mutation reaches the alert handler, terminate its
+    # pagination so the denial assertions fail promptly instead of hanging.
+    aws.list_subscriptions_by_topic.return_value = {'Subscriptions': []}
 
     with patch('boto3.client', side_effect=lambda *a, **k: aws), \
          patch('boto3.resource', side_effect=lambda *a, **k: aws), \

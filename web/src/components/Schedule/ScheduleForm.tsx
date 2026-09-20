@@ -52,7 +52,7 @@ export const ScheduleForm = ({
           type="text"
           value={formData.display_name}
           maxLength={100}
-          placeholder="e.g. Weekly brand analysis"
+          placeholder={'e.g. Weekly brand analysis'}
           onChange={(e) => updateFormField('display_name', e.target.value)}
           className={INPUT_CLASS}
         />
@@ -161,11 +161,11 @@ function submitLabel(mode: ScheduleFormMode, saving: boolean): string {
 }
 
 const FormField = ({
-  label, htmlFor, children 
+  label, htmlFor, children
 }: {
   label: string;
   htmlFor: string;
-  children: React.ReactNode 
+  children: React.ReactNode
 }) => (
   <div>
     <label htmlFor={htmlFor} className="block text-sm font-medium text-gray-700 mb-1">{label}</label>
@@ -185,11 +185,11 @@ interface ScheduleScopeFieldProps {
 function scopeForMode(mode: ScopeMode, previous: AnalysisScope): AnalysisScope {
   if (mode === 'groups') return {
     mode,
-    group_ids: previous.mode === 'groups' ? previous.group_ids : [] 
+    group_ids: previous.mode === 'groups' ? previous.group_ids : []
   };
   if (mode === 'keywords') return {
     mode,
-    keyword_ids: previous.mode === 'keywords' ? previous.keyword_ids : [] 
+    keyword_ids: previous.mode === 'keywords' ? previous.keyword_ids : []
   };
   return { mode: 'all' };
 }
@@ -200,27 +200,27 @@ function scopeForMode(mode: ScopeMode, previous: AnalysisScope): AnalysisScope {
  * added to a group later are included automatically.
  */
 const ScheduleScopeField = ({
-  scope, onChange, keywords, groups 
+  scope, onChange, keywords, groups
 }: ScheduleScopeFieldProps) => {
   const options: {
     mode: ScopeMode;
     label: string;
-    hint: string 
+    hint: string
   }[] = [
     {
       mode: 'all',
       label: 'All keywords',
-      hint: 'every active keyword at run time' 
+      hint: 'every active keyword at run time'
     },
     {
       mode: 'groups',
       label: 'Keyword groups',
-      hint: 'whatever is in the selected groups when it runs' 
+      hint: 'whatever is in the selected groups when it runs'
     },
     {
       mode: 'keywords',
       label: 'Specific keywords',
-      hint: 'a fixed selection' 
+      hint: 'a fixed selection'
     },
   ];
 
@@ -247,7 +247,7 @@ const ScheduleScopeField = ({
           selectedIds={scope.group_ids}
           onChange={(groupIds) => onChange({
             mode: 'groups',
-            group_ids: groupIds 
+            group_ids: groupIds
           })}
         />
       )}
@@ -259,7 +259,7 @@ const ScheduleScopeField = ({
             selectedIds={scope.keyword_ids}
             onChange={(keywordIds) => onChange({
               mode: 'keywords',
-              keyword_ids: keywordIds 
+              keyword_ids: keywordIds
             })}
           />
         </div>
@@ -275,7 +275,7 @@ interface GroupPickerProps {
 }
 
 const GroupPicker = ({
-  groups, selectedIds, onChange 
+  groups, selectedIds, onChange
 }: GroupPickerProps) => {
   if (groups.length === 0) {
     return (

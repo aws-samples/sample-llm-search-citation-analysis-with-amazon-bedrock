@@ -41,3 +41,5 @@ bedrock-agentcore==1.23.1
 # the file in place and runs an explicit test command, which fits tests living
 # beside the code; 3.x expects an importable package copied into mutants/.
 mutmut==2.5.1
+# Exact dependency declared by mutmut 2.5.1's `patch` extra.
+whatthepatch==0.0.6

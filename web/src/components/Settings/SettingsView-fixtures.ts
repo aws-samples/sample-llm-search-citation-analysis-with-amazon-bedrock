@@ -24,7 +24,7 @@ export function buildBrandConfigHookResult(
   overrides: Partial<BrandConfigHookResult> = {}
 ): BrandConfigHookResult {
   return {
-    config: null,
+    config: DEFAULT_CONFIG,
     presets: {},
     loading: false,
     error: null,
