@@ -7,6 +7,8 @@ and the research worker rely on.
 - merged competitor analyses union each category without duplicates
 - the final status follows the step outcomes (completed / partial / failed)
 - the public view strips raw responses and exposes progressive results
+- a step checkpoint keeps its `round` and `attempt` after a DynamoDB round
+  trip, which the worker's conditional writes depend on
 """
 
 from __future__ import annotations
@@ -345,6 +347,77 @@ class TestPublicView:
         job = {'id': 'job-e', 'type': 'expansion', 'status': 'completed', 'config': {'seed': 'hotel'}}
 
         assert public_view(job)['config'] == {'seed': 'hotel'}
+
+
+class TestStepCheckpointSurvivesTheDynamoRoundTrip:
+    """REGRESSION: `round` and `attempt` must survive being read back as Decimal.
+
+    DynamoDB returns numbers as Decimal, and `bound_step_result` gated these two
+    fields on `isinstance(value, int)`, which a Decimal fails — so they were
+    dropped from every step the worker had reloaded.
+
+    That stranded all provider work. `execute_step` reloads the job, marks the
+    step running and persists it with `SET steps.#sid = :step`, replacing the
+    whole step map, so the stored step lost its `round`. The terminal write then
+    guards on `steps.#sid.#step_round = :expected_round`, which an absent
+    attribute cannot satisfy: the conditional update failed, `_write_step`
+    returned False, and the caller dropped the finished result without retrying.
+    Steps stayed `running` until finalize reported "did not finish" for every
+    provider — including providers that had returned content.
+
+    Every pre-existing `bound_step_result` test passed `round` as a native int,
+    which is why the suite stayed green while keyword research could not
+    complete a single step.
+    """
+
+    def test_keeps_round_and_attempt_when_they_arrive_as_decimal(self):
+        result = bound_step_result({
+            'provider': 'perplexity',
+            'status': 'running',
+            'round': Decimal('1'),
+            'attempt': Decimal('2'),
+        })
+
+        assert (result['round'], result['attempt']) == (1, 2)
+
+    def test_normalizes_decimal_to_int_so_the_stored_guard_compares_numerically(self):
+        result = bound_step_result({'provider': 'openai', 'status': 'running', 'round': Decimal('3')})
+
+        assert isinstance(result['round'], int)
+
+    def test_keeps_round_and_attempt_when_they_arrive_as_native_int(self):
+        result = bound_step_result({
+            'provider': 'gemini',
+            'status': 'completed',
+            'round': 2,
+            'attempt': 1,
+        })
+
+        assert (result['round'], result['attempt']) == (2, 1)
+
+    def test_omits_round_and_attempt_when_absent(self):
+        result = bound_step_result({'provider': 'openai', 'status': 'pending'})
+
+        assert 'round' not in result
+        assert 'attempt' not in result
+
+    def test_rejects_booleans(self):
+        """`True` is an `int` in Python; a boolean round is malformed, not round 1."""
+        result = bound_step_result({'provider': 'openai', 'status': 'pending', 'round': True, 'attempt': False})
+
+        assert 'round' not in result
+        assert 'attempt' not in result
+
+    def test_a_running_checkpoint_rewritten_from_storage_still_carries_its_round(self):
+        """The exact sequence that stranded steps: plan -> store -> reload -> rewrite."""
+        planned = bound_step_result({'provider': 'openai', 'status': 'pending', 'round': 1, 'attempt': 1})
+        # What `_load_job` hands back for that same step.
+        reloaded = {key: (Decimal(str(value)) if key in ('round', 'attempt') else value)
+                    for key, value in planned.items()}
+
+        rewritten = bound_step_result({**reloaded, 'status': 'running', 'started_at': '2026-09-20T20:00:00Z'})
+
+        assert rewritten['round'] == 1, 'the terminal write guards on this attribute'
 
 
 class TestPersistenceBudgets:

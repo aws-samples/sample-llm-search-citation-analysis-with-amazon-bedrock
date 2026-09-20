@@ -28,10 +28,19 @@ if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
     echo "Docker build completed"
 else
     echo "Docker not running - using pip with Linux/Python 3.12 wheel constraints"
+    # Two platform tags, because manylinux2014 alone cannot resolve this
+    # requirements set: greenlet 3.5.6 publishes only
+    # manylinux_2_24/manylinux_2_28 and musllinux wheels for cp312, so pip
+    # reported "no matching distribution" and the documented no-Docker path
+    # was unusable. The Python 3.12 Lambda runtime is Amazon Linux 2023
+    # (glibc 2.34), which satisfies manylinux_2_28's glibc >= 2.28, and naming
+    # both tags only widens what pip may accept — packages that ship
+    # manylinux2014 still resolve to it.
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 pip3 install \
         -r requirements.txt \
         -t "$LAYER_DIR" \
         --platform manylinux2014_x86_64 \
+        --platform manylinux_2_28_x86_64 \
         --only-binary=:all: \
         --python-version 3.12 \
         --upgrade \

@@ -469,9 +469,16 @@ def bound_step_result(step: dict[str, Any]) -> dict[str, Any]:
         if text:
             bounded[field] = text
     for field in ('round', 'attempt'):
+        # Decimal, not just int: a step reloaded from DynamoDB carries these as
+        # Decimal, and dropping them leaves the stored step without a `round`
+        # for the worker's `steps.#sid.#step_round` write guard to match, which
+        # stranded every provider step. See
+        # `TestStepCheckpointSurvivesTheDynamoRoundTrip`.
+        # `to_int` is deliberately not used: its 0 default would invent a round
+        # for an absent field, and absent must stay absent.
         value = step.get(field)
-        if isinstance(value, int) and not isinstance(value, bool):
-            bounded[field] = value
+        if isinstance(value, (int, Decimal)) and not isinstance(value, bool):
+            bounded[field] = int(value)
 
     queries, queries_truncated = _bounded_queries(step.get('queries'))
     strings_truncated = strings_truncated or queries_truncated

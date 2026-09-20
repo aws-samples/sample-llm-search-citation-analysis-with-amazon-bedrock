@@ -9,6 +9,46 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.13.2] - 2026-09-20
+
+Keyword research could not complete a single provider step on a deployed stack.
+Also repairs the documented Docker-free layer build, which could not install the
+pinned dependency set.
+
+### Fixed
+
+- Keyword research reported `Failed — 0 of 3 providers finished` with
+  `did not finish` for every provider, even providers that had returned
+  content. `bound_step_result` kept a step's `round` and `attempt` only when
+  they were `isinstance(value, int)`, and DynamoDB returns numbers as
+  `Decimal`, so both were dropped from any step the worker had reloaded.
+  `execute_step` reloads the job, marks the step running and persists it with
+  `SET steps.#sid = :step`, replacing the whole step map — so the stored step
+  lost its `round`. The terminal write then guards on
+  `steps.#sid.#step_round = :expected_round`, which an absent attribute cannot
+  satisfy, so the conditional update failed, `_write_step` returned `False`,
+  and the caller discarded the finished provider result without retrying. Steps
+  stayed `running` until finalize reported `did not finish`. Deterministic, not
+  a race: no step could ever commit. Both `round` and `attempt` now accept
+  `Decimal` and are normalized to `int`; absent stays absent and booleans are
+  still rejected.
+- `lambda/crawler-layer/build-layer.sh` can build without Docker again. The
+  no-Docker path requested `manylinux2014_x86_64` wheels only, and the pinned
+  `greenlet==3.5.6` publishes just `manylinux_2_24`/`manylinux_2_28` and
+  `musllinux` wheels for cp312, so pip failed with "no matching distribution"
+  and the fallback the README advertises was unusable. It now also accepts
+  `manylinux_2_28_x86_64`, which the Python 3.12 Lambda runtime (Amazon Linux
+  2023, glibc 2.34) satisfies; packages shipping `manylinux2014` still resolve
+  to it.
+
+### Notes
+
+- `_write_step` still discards a result when its conditional update fails,
+  rather than retrying against a fresh read. That silence is what made this bug
+  invisible in logs — the Lambdas ended cleanly and the state machine reported
+  `SUCCEEDED`. Left as is here because the failing guard was the defect; a
+  retry or a logged warning on conditional failure would be a separate change.
+
 ## [2.13.1] - 2026-09-19
 
 Mutation testing now pins the observable alert and generic-brand behavior added
