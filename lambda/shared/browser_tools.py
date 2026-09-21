@@ -291,7 +291,11 @@ class SimpleBrowserTools:
         if context is not None:
             try:
                 logger.info("Removing browser request routes")
-                context.unroute_all(behavior="wait")
+                # "ignoreErrors", never "wait": waiting blocks until every in-flight
+                # handler settles, which hung a crawl for 4.5 minutes until the Lambda
+                # sandbox killed it. Errors from handlers still running after teardown
+                # are swallowed instead of logged.
+                context.unroute_all(behavior="ignoreErrors")
             except Exception:
                 logger.exception("Could not remove browser request routes")
 
