@@ -25,6 +25,7 @@ import * as bedrockagentcore from 'aws-cdk-lib/aws-bedrockagentcore';
 import * as path from 'path';
 import * as fs from 'fs';
 import { Auth } from './constructs/auth';
+import { BedrockModelAccess } from './constructs/bedrock-model-access';
 
 /**
  * Bedrock model tier defaults per task role.
@@ -287,6 +288,11 @@ function citationAnalysisBucket(stack: cdk.Stack, id: string, spec: CitationAnal
  * bedrock:Converse), and global cross-region inference requires all three ARN
  * patterns per AWS docs: the regional inference profile, the regional
  * foundation model and the global foundation model (no region/account).
+ *
+ * Anthropic models are AWS Marketplace products. This statement deliberately
+ * does NOT grant `aws-marketplace:Subscribe`: the account-level subscription is
+ * created once at deploy time by the BedrockModelAccess construct, so the
+ * runtime roles never need Marketplace permissions of their own.
  */
 function claudeInvokeModelStatement(stack: cdk.Stack): iam.PolicyStatement {
   return new iam.PolicyStatement({
@@ -341,6 +347,28 @@ function readPositiveIntegerContext(scope: Construct, key: string, fallback: num
   }
   return value;
 }
+
+/**
+ * Read a non-empty string from CDK context (`-c key=value` or cdk.json),
+ * falling back to `fallback` when absent or blank.
+ */
+function readStringContext(scope: Construct, key: string, fallback: string): string {
+  const raw: unknown = scope.node.tryGetContext(key);
+  return typeof raw === 'string' && raw.trim() !== '' ? raw : fallback;
+}
+
+/**
+ * Foundation models the stack's Lambdas invoke, as plain model IDs. These are
+ * the `global.`-stripped forms of `_TIER_MODELS` in lambda/shared/models.py —
+ * the runtime calls the global inference profile, but an AWS Marketplace
+ * subscription is per foundation model. Kept in lockstep with that file by a
+ * test in lib/citation-analysis-stack.spec.ts.
+ */
+const CLAUDE_FOUNDATION_MODEL_IDS = [
+  'anthropic.claude-haiku-4-5-20251001-v1:0',
+  'anthropic.claude-sonnet-4-6',
+  'anthropic.claude-opus-4-7',
+];
 
 function createApiLambdaCode(handlerFileName: string): lambda.Code {
   const apiPath = path.join(__dirname, '../lambda/api');
@@ -422,6 +450,34 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Dev mode: `cdk deploy --context dev=true` adds http://localhost:5173 as allowed CORS origin
     const devMode = this.node.tryGetContext('dev') === 'true';
+
+    // Anthropic models need account-level enablement before the first call:
+    // the one-time use-case form and an AWS Marketplace subscription per model.
+    // Without this a fresh account's first Converse fails with
+    // "not authorized to perform the required AWS Marketplace actions".
+    // Company details are overridable: `cdk deploy -c anthropicCompanyName=... `.
+    const bedrockModelAccess = new BedrockModelAccess(this, 'BedrockModelAccess', {
+      useCase: {
+        companyName: readStringContext(this, 'anthropicCompanyName', 'Citation Analysis System'),
+        companyWebsite: readStringContext(this, 'anthropicCompanyWebsite', 'https://aws.amazon.com/bedrock/'),
+        intendedUsers: '0',
+        industryOption: readStringContext(this, 'anthropicIndustry', 'Technology'),
+        useCases: readStringContext(
+          this,
+          'anthropicUseCases',
+          'Marketing analytics: track how AI assistants cite and mention brands, '
+          + 'summarise crawled pages and draft content briefs for internal teams.'
+        ),
+      },
+      modelIds: CLAUDE_FOUNDATION_MODEL_IDS,
+      modelRegion: this.region,
+    });
+
+    new cdk.CfnOutput(this, 'BedrockModelsEnabled', {
+      value: bedrockModelAccess.subscribedModelIds.join(', '),
+      description: 'Anthropic models this deployment subscribed for the account',
+    });
+
 
     // DynamoDB Table: SearchResults
     // Stores raw search results from each AI provider

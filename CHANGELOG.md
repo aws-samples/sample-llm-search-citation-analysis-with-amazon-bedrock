@@ -9,6 +9,32 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.15.0] - 2026-09-21
+
+### Added
+
+- Anthropic model access is now provisioned by the deployment. A new
+  `BedrockModelAccess` construct submits the one-time Anthropic use-case form
+  (us-east-1) and creates the AWS Marketplace agreement for each Claude model
+  the stack invokes, so a brand-new AWS account no longer needs manual console
+  steps before the first Bedrock call. Previously the first call in such an
+  account failed with `AccessDeniedException ... not authorized to perform the
+  required AWS Marketplace actions (aws-marketplace:ViewSubscriptions,
+  aws-marketplace:Subscribe)`, because Bedrock creates the subscription
+  just-in-time using the calling role's permissions. Only the deploy-time
+  provisioning Lambda holds Marketplace permissions; the roles that serve
+  traffic still hold `bedrock:InvokeModel` alone.
+- Company details on the use-case form are overridable via CDK context
+  (`anthropicCompanyName`, `anthropicCompanyWebsite`, `anthropicIndustry`,
+  `anthropicUseCases`), and a `BedrockModelsEnabled` stack output records which
+  models were subscribed.
+
+### Changed
+
+- A CDK test now reads `_TIER_MODELS` from `lambda/shared/models.py` and fails
+  when the subscribed model list drifts from the models the runtime resolves, so
+  a tier upgrade cannot ship a model the account has no agreement for.
+
 ## [2.14.3] - 2026-09-21
 
 ### Changed

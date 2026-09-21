@@ -38,6 +38,7 @@ import {
   findLambdaLogicalId,
   findLogicalIdByName,
   findStateMachineLogicalId,
+  pythonTierFoundationModelIds,
   resolvePath,
   resolveString,
   retentionForLogGroupName,
@@ -1992,5 +1993,79 @@ describe('Content Studio scopes batches and saved templates', () => {
   it('keeps every Cognito route integrated with the API function only', () => {
     expect(snapshot.routes.every((route) => route.integrationUri.includes(snapshot.functionLogicalId))).toBe(true);
     expect(snapshot.routes.every((route) => !route.integrationUri.includes(snapshot.workerFunctionLogicalId))).toBe(true);
+  });
+});
+
+
+describe('Bedrock model access (Anthropic account enablement)', () => {
+  const app = new cdk.App();
+  const template = Template.fromStack(new CitationAnalysisStack(app, 'BedrockAccessStack'));
+  const agreementRoleActions = extractFunctionRoleActions(template, 'CitationAnalysis-BedrockModelAgreement');
+
+  it('subscribes exactly the foundation models lambda/shared/models.py resolves', () => {
+    const subscribed = Object.values(template.findResources('AWS::CloudFormation::CustomResource'))
+      .map((resource) => resolvePath(resource, ['Properties', 'modelId']))
+      .filter((modelId): modelId is string => typeof modelId === 'string')
+      .sort((left, right) => left.localeCompare(right));
+
+    expect(subscribed).toStrictEqual(pythonTierFoundationModelIds());
+  });
+
+  it('creates the agreements in the stack region, where the Lambdas call Bedrock', () => {
+    const regions = Object.values(template.findResources('AWS::CloudFormation::CustomResource'))
+      .filter((resource) => typeof resolvePath(resource, ['Properties', 'modelId']) === 'string')
+      .map((resource) => resolvePath(resource, ['Properties', 'region']));
+
+    expect(regions).toStrictEqual(regions.map(() => ({ Ref: 'AWS::Region' })));
+    expect(regions).toHaveLength(pythonTierFoundationModelIds().length);
+  });
+
+  it('lets the agreement handler read availability, list offers and create agreements', () => {
+    expect(agreementRoleActions).toContain('bedrock:GetFoundationModelAvailability');
+    expect(agreementRoleActions).toContain('bedrock:ListFoundationModelAgreementOffers');
+    expect(agreementRoleActions).toContain('bedrock:CreateFoundationModelAgreement');
+  });
+
+  it('grants the agreement handler Marketplace subscribe only for Bedrock-initiated calls', () => {
+    const marketplace = allowStatementsOfRole(
+      template,
+      findFunctionRoleLogicalId(template, 'CitationAnalysis-BedrockModelAgreement')
+    ).filter((statement) => statementActions(statement).includes('aws-marketplace:Subscribe'));
+
+    expect(marketplace).toHaveLength(1);
+    expect(statementActions(marketplace[0])).toStrictEqual([
+      'aws-marketplace:ViewSubscriptions',
+      'aws-marketplace:Subscribe',
+    ]);
+    expect(resolvePath(marketplace[0], ['Condition', 'StringEquals', 'aws:CalledViaLast']))
+      .toBe('bedrock.amazonaws.com');
+  });
+
+  it('keeps Marketplace permissions off the runtime roles that serve traffic', () => {
+    const runtimeFunctions = [
+      'CitationAnalysis-API-ContentStudio',
+      'CitationAnalysis-ResearchWorker',
+      'CitationAnalysis-Search',
+    ];
+
+    const marketplaceGrants = runtimeFunctions.filter((functionName) =>
+      extractFunctionRoleActions(template, functionName)
+        .some((action) => action.startsWith('aws-marketplace:')));
+
+    expect(marketplaceGrants).toStrictEqual([]);
+  });
+
+  it('submits the use case before any agreement, since the form gates subscription', () => {
+    const agreements = Object.entries(template.findResources('AWS::CloudFormation::CustomResource'))
+      .filter(([, resource]) => typeof resolvePath(resource, ['Properties', 'modelId']) === 'string');
+    const useCaseLogicalId = Object.keys(
+      template.findResources('Custom::AWS')
+    )[0];
+
+    expect(agreements.length).toBeGreaterThan(0);
+    expect(agreements.every(([, resource]) => {
+      const dependsOn = resolvePath(resource, ['DependsOn']);
+      return (Array.isArray(dependsOn) ? dependsOn : [dependsOn]).includes(useCaseLogicalId);
+    })).toBe(true);
   });
 });
