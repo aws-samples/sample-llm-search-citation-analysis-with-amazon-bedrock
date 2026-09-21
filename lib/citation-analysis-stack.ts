@@ -458,15 +458,14 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Company details are overridable: `cdk deploy -c anthropicCompanyName=... `.
     const bedrockModelAccess = new BedrockModelAccess(this, 'BedrockModelAccess', {
       useCase: {
-        companyName: readStringContext(this, 'anthropicCompanyName', 'Citation Analysis System'),
+        companyName: readStringContext(this, 'anthropicCompanyName', 'Citation Analysis'),
         companyWebsite: readStringContext(this, 'anthropicCompanyWebsite', 'https://aws.amazon.com/bedrock/'),
         intendedUsers: '0',
         industryOption: readStringContext(this, 'anthropicIndustry', 'Technology'),
         useCases: readStringContext(
           this,
           'anthropicUseCases',
-          'Marketing analytics: track how AI assistants cite and mention brands, '
-          + 'summarise crawled pages and draft content briefs for internal teams.'
+          'Summarize content and generate new marketing content.'
         ),
       },
       modelIds: CLAUDE_FOUNDATION_MODEL_IDS,

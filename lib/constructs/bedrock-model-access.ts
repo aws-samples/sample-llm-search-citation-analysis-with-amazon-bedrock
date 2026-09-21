@@ -185,14 +185,18 @@ export class BedrockModelAccess extends Construct {
     validate(props.useCase, props.modelIds);
     this.subscribedModelIds = [...props.modelIds];
 
-    const formData = cdk.Fn.base64(JSON.stringify({
+    // The SDK's formData is a blob. CDK's custom-resource runtime turns a string
+    // parameter into bytes with TextEncoder().encode(), so this must be the plain
+    // JSON text: wrapping it in Fn.base64 would submit base64 *text* as the blob
+    // body and store a doubly-encoded form.
+    const formData = JSON.stringify({
       companyName: props.useCase.companyName,
       companyWebsite: props.useCase.companyWebsite,
       intendedUsers: props.useCase.intendedUsers,
       industryOption: props.useCase.industryOption,
       otherIndustryOption: props.useCase.otherIndustryOption ?? '',
       useCases: props.useCase.useCases,
-    }));
+    });
 
     const submitUseCase = new cr.AwsCustomResource(this, 'SubmitAnthropicUseCase', {
       onCreate: {

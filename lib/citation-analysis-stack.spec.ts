@@ -2055,6 +2055,25 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
     expect(marketplaceGrants).toStrictEqual([]);
   });
 
+  it('submits the use-case form as plain JSON, the bytes the blob parameter expects', () => {
+    const call = Object.values(template.findResources('Custom::AWS'))
+      .map((resource) => resolvePath(resource, ['Properties', 'Create']))
+      .find((create): create is string => typeof create === 'string'
+        && create.includes('putUseCaseForModelAccess'));
+
+    expect(call).toBeDefined();
+    const parsed = JSON.parse(call ?? '{}') as { parameters?: { formData?: string }; region?: string };
+    expect(JSON.parse(parsed.parameters?.formData ?? '{}')).toStrictEqual({
+      companyName: 'Citation Analysis',
+      companyWebsite: 'https://aws.amazon.com/bedrock/',
+      intendedUsers: '0',
+      industryOption: 'Technology',
+      otherIndustryOption: '',
+      useCases: 'Summarize content and generate new marketing content.',
+    });
+    expect(parsed.region).toBe('us-east-1');
+  });
+
   it('submits the use case before any agreement, since the form gates subscription', () => {
     const agreements = Object.entries(template.findResources('AWS::CloudFormation::CustomResource'))
       .filter(([, resource]) => typeof resolvePath(resource, ['Properties', 'modelId']) === 'string');

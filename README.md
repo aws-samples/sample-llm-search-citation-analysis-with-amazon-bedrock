@@ -291,7 +291,7 @@ Notes for fresh accounts:
 
 - The account needs a verified payment method and a billing country Anthropic supports, or the Marketplace agreement cannot be created. The deployment reports such a model as unavailable and continues rather than failing.
 - Subscriptions and the form submission are account state: they are not removed when the stack is deleted.
-- The company details submitted on the form default to generic values and can be overridden at deploy time: `cdk deploy -c anthropicCompanyName="Acme" -c anthropicCompanyWebsite="https://acme.example" -c anthropicIndustry="Retail" -c anthropicUseCases="..."`.
+- The company details submitted on the form default to `Citation Analysis` / `Technology` / "Summarize content and generate new marketing content." and can be overridden at deploy time: `cdk deploy -c anthropicCompanyName="Acme" -c anthropicCompanyWebsite="https://acme.example" -c anthropicIndustry="Retail" -c anthropicUseCases="..."`.
 - `global.anthropic.claude-opus-4-7` (the optional `deep` tier) is not offered on demand to every account. The default tiers only use Haiku 4.5 and Sonnet 4.6, so this affects you only if you set `BEDROCK_TIER_*=deep`.
 
 ### Retry Logic
