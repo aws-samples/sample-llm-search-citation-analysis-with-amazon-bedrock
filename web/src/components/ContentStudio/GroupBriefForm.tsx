@@ -78,11 +78,11 @@ function KeywordSelection({
           const checked = selectedIds.has(keyword.id);
           const selectionFull = selectedCount >= GROUP_BRIEF_MAX_KEYWORDS;
           return (
-            <label
-              key={keyword.id}
-              className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-gray-50"
-            >
+            <label key={keyword.id} htmlFor={`group-brief-keyword-${keyword.id}`} className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-gray-50">
               <input
+                id={`group-brief-keyword-${keyword.id}`}
+                name="group-brief-keyword-ids"
+                value={keyword.id}
                 type="checkbox"
                 checked={checked}
                 onChange={() => onToggle(keyword.id)}
@@ -284,6 +284,7 @@ export function GroupBriefForm({
           </label>
           <select
             id="group-brief-group"
+            name="group-brief-group"
             value={groupId}
             onChange={(event) => handleGroupChange(event.target.value)}
             disabled={generating}
@@ -318,12 +319,14 @@ export function GroupBriefForm({
           {GROUP_BRIEF_MODE_OPTIONS.map((option) => (
             <label
               key={option.value}
+              htmlFor={`group-brief-mode-${option.value}`}
               className={`cursor-pointer rounded-lg border p-3 ${
                 mode === option.value ? 'border-gray-900 bg-gray-50' : 'border-gray-200'
               }`}
             >
               <span className="flex items-center gap-2 text-sm font-medium text-gray-900">
                 <input
+                  id={`group-brief-mode-${option.value}`}
                   type="radio"
                   name="group-brief-mode"
                   value={option.value}
@@ -346,6 +349,7 @@ export function GroupBriefForm({
           </label>
           <input
             id="group-brief-url"
+            name="group-brief-url"
             type="url"
             value={landingUrl}
             onChange={(event) => setLandingUrl(event.target.value)}
@@ -365,6 +369,7 @@ export function GroupBriefForm({
           </label>
           <textarea
             id="group-brief-copy"
+            name="group-brief-copy"
             value={currentCopy}
             onChange={(event) => setCurrentCopy(event.target.value)}
             maxLength={GROUP_BRIEF_MAX_COPY_LENGTH}
@@ -394,6 +399,7 @@ export function GroupBriefForm({
           </label>
           <select
             id="group-brief-language"
+            name="group-brief-language"
             value={outputLanguage}
             onChange={(event) => setOutputLanguage(event.target.value)}
             disabled={generating}

@@ -33,6 +33,7 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 
+from shared.content_brief import CONTENT_OUTPUT_CONTRACT
 from shared.models import BedrockInvocationError, ModelRole
 from shared.prompt_safety import untrusted_input_system_instruction
 from shared.self_invoke import SelfInvokeDispatchError
@@ -412,7 +413,11 @@ _DEFAULT_OPENING = (
     f'Create a comprehensive guide for the keyword {_KEYWORD_TAG} in the <industry>hotels</industry> '
     'industry that positions <brand>Hotel Sol</brand> as an authority.'
 )
-_MODEL_OUTPUT = 'TITLE: Malaga Stays\nMETA: Best stays\n\nBody text\n\nHEADINGS: Where, When\nPOINTS:\n- Book early'
+_MODEL_OUTPUT = (
+    'TITLE: Malaga Stays\nMETA: Best stays\n\n'
+    'Body text with enough useful detail to remain a valid generated Content Studio draft.\n\n'
+    'HEADINGS: Where, When\nPOINTS:\n- Book early'
+)
 
 
 class _ModelCallError(Exception):
@@ -543,54 +548,54 @@ class TestGenerateContentPrompt:
 
         assert 'Competitor content analysis' not in prompt
 
-    def test_ends_with_the_output_language_instruction_for_a_non_english_language(self):
+    def test_places_the_output_language_instruction_before_the_json_contract(self):
         prompt = _prompt_for({**IDEA, 'output_language': 'Spanish'})
 
-        assert prompt.endswith(
+        assert (
             '\n\nIMPORTANT: Write ALL content in <language>Spanish</language>. '
-            'The title, meta description, body, headings, and key points must all be in <language>Spanish</language>.'
-        )
+            'The title, meta description, body, headings, and key points must all be in '
+            f'<language>Spanish</language>.\n\n{CONTENT_OUTPUT_CONTRACT}'
+        ) in prompt
+        assert prompt.endswith(CONTENT_OUTPUT_CONTRACT)
 
     @pytest.mark.parametrize('idea', [IDEA, {**IDEA, 'output_language': 'English'}, {**IDEA, 'output_language': ''}])
     def test_adds_no_language_instruction_when_the_output_language_is_english_or_unset(self, idea):
         prompt = _prompt_for(idea)
 
         assert 'IMPORTANT: Write ALL content' not in prompt
-        assert prompt.endswith('POINTS: [3 key takeaways as bullet points]')
+        assert prompt.endswith(CONTENT_OUTPUT_CONTRACT)
+
+    @pytest.mark.parametrize('content_angle', [
+        'comprehensive_guide',
+        'differentiation',
+        'provider_optimization',
+        'thought_leadership',
+        'reputation_management',
+        'seasonal',
+        'trending',
+        'evergreen',
+        'not-a-known-angle',
+    ])
+    def test_appends_one_exact_json_contract_for_every_content_angle(self, content_angle):
+        prompt = _prompt_for({**IDEA, 'content_angle': content_angle})
+
+        assert prompt.endswith(CONTENT_OUTPUT_CONTRACT)
+        assert prompt.count(CONTENT_OUTPUT_CONTRACT) == 1
 
     def test_assembles_the_default_brief_around_the_competitor_context(self):
-        """The one golden prompt: preamble, brief, embedded competitor block, format rules, language suffix."""
-        prompt = _prompt_for({**IDEA, 'output_language': 'Spanish'}, crawled=[_crawled_page('rival.example')])
+        prompt = _prompt_for(
+            {**IDEA, 'output_language': 'Spanish'},
+            crawled=[_crawled_page('rival.example')],
+        )
 
-        assert prompt == (
-            f'{_PREAMBLE}{_DEFAULT_OPENING}\n'
-            '\n'
-            '\n\nCompetitor content analysis:\n'
+        assert prompt.startswith(
+            f'{_PREAMBLE}{_DEFAULT_OPENING}\n\n\n\nCompetitor content analysis:\n'
             '\n--- <domain>rival.example</domain> ---\n'
             'Title: <title>rival.example guide</title>\n'
-            'Content preview: <content>Rival body</content>...\n'
-            '\n'
-            '\nGenerate:\n'
-            '1. An SEO-optimized headline\n'
-            '2. Executive summary (2-3 sentences)\n'
-            '3. Key sections with headers (5-7 sections)\n'
-            '4. Bullet points for each section\n'
-            '5. Call-to-action recommendations\n'
-            '6. SEO metadata (title, description, keywords)\n'
-            '\n'
-            'Make it comprehensive, authoritative, and better than competitor content.\n'
-            '\n'
-            'Format your response with clear sections:\n'
-            'TITLE: [Your title here]\n'
-            'META: [150 character meta description]\n'
-            '\n'
-            '[Your main content here with ## headings]\n'
-            '\n'
-            'HEADINGS: [List the H2 headings you used, comma separated]\n'
-            'POINTS: [3 key takeaways as bullet points]'
-            '\n\nIMPORTANT: Write ALL content in <language>Spanish</language>. '
-            'The title, meta description, body, headings, and key points must all be in <language>Spanish</language>.'
+            'Content preview: <content>Rival body</content>...\n\n\nGenerate:\n'
         )
+        assert 'Make it comprehensive, authoritative, and better than competitor content.' in prompt
+        assert prompt.endswith(CONTENT_OUTPUT_CONTRACT)
 
 
 class TestGenerateContentResult:
@@ -729,10 +734,10 @@ class TestParseGeneratedContent:
 
         assert _mod.parse_generated_content(text)['body'] == text
 
-    def test_falls_back_to_the_whole_text_as_body_when_the_body_is_empty(self):
+    def test_excludes_markers_when_the_legacy_body_is_empty(self):
         text = 'TITLE: T\nMETA: m\nHEADINGS: A, B'
 
-        assert _mod.parse_generated_content(text)['body'] == text
+        assert _mod.parse_generated_content(text)['body'] == ''
 
     def test_splits_headings_on_commas_and_drops_blank_entries(self):
         headings = _mod.parse_generated_content('HEADINGS: Where to Stay, , When to Go ,')['suggested_headings']
@@ -762,3 +767,318 @@ class TestParseGeneratedContent:
         assert result == {
             'title': '', 'meta_description': '', 'body': 'plain answer', 'suggested_headings': [], 'key_points': [],
         }
+
+
+
+_JSON_BODY = (
+    '## Overview\n\nThis complete Markdown body contains enough useful detail '
+    'to remain a valid Content Studio draft.'
+)
+_EMPTY_PARSED_CONTENT = {
+    'title': '',
+    'meta_description': '',
+    'body': '',
+    'suggested_headings': [],
+    'key_points': [],
+}
+_VALID_JSON_CONTRACT = {
+    'title': 'Fenced title',
+    'meta_description': 'Fenced description',
+    'body': _JSON_BODY,
+    'suggested_headings': ['Overview'],
+    'key_points': ['First point'],
+}
+
+
+class TestJsonOutputContractParsing:
+    def test_normalizes_exact_fields_when_model_returns_json(self):
+        response = json.dumps({
+            'title': '  JSON title  ',
+            'meta_description': 'm' * 170,
+            'body': f'  {_JSON_BODY}  ',
+            'suggested_headings': [' Overview ', '', 7],
+            'key_points': [' First point ', None, ''],
+        })
+
+        result = _mod.parse_generated_content(response)
+
+        assert result == {
+            'title': 'JSON title',
+            'meta_description': 'm' * 160,
+            'body': _JSON_BODY,
+            'suggested_headings': ['Overview'],
+            'key_points': ['First point'],
+        }
+
+    def test_parses_exact_fields_when_json_is_wrapped_in_markdown_fence(self):
+        response = f'```json\n{json.dumps(_VALID_JSON_CONTRACT)}\n```'
+
+        result = _mod.parse_generated_content(response)
+
+        assert result == _VALID_JSON_CONTRACT
+
+    def test_normalizes_contract_when_generic_fence_consumes_the_response(self):
+        response = f'```\n{json.dumps(_VALID_JSON_CONTRACT)}\n```'
+
+        result = _mod.parse_generated_content(response)
+
+        assert result == _VALID_JSON_CONTRACT
+
+    def test_normalizes_contract_when_common_preamble_precedes_json_fence(self):
+        response = f'Here is the JSON:\n```json\n{json.dumps(_VALID_JSON_CONTRACT)}\n```'
+
+        result = _mod.parse_generated_content(response)
+
+        assert result == _VALID_JSON_CONTRACT
+
+    def test_returns_empty_content_when_the_whole_json_object_is_unrelated(self):
+        response = json.dumps({
+            'schema': 'article',
+            'properties': {'headline': 'A schema example'},
+        })
+
+        result = _mod.parse_generated_content(response)
+
+        assert result == _EMPTY_PARSED_CONTENT
+
+    def test_returns_empty_content_when_whole_json_has_metadata_without_body(self):
+        response = json.dumps({'title': 'Metadata is not a draft'})
+
+        result = _mod.parse_generated_content(response)
+
+        assert result == _EMPTY_PARSED_CONTENT
+
+    def test_returns_empty_content_when_body_json_has_a_non_contract_field(self):
+        response = json.dumps({
+            'body': _JSON_BODY,
+            'debug': 'Unexpected model metadata',
+        })
+
+        result = _mod.parse_generated_content(response)
+
+        assert result == _EMPTY_PARSED_CONTENT
+
+
+class TestLegacyOutputFallback:
+    def test_preserves_entire_markdown_when_title_json_is_embedded_between_prose(self):
+        response = """# JSON authoring notes
+
+The model may return this metadata example:
+{"title": "Example title"}
+
+Keep the explanation after the sample as part of the document."""
+
+        result = _mod.parse_generated_content(response)
+
+        assert result == (_EMPTY_PARSED_CONTENT | {'body': response})
+
+    def test_preserves_entire_markdown_when_long_body_json_is_an_embedded_code_sample(self):
+        embedded_contract = json.dumps({'body': _JSON_BODY})
+        response = f"""# Content contract example
+
+Use this sample when documenting the response format:
+```json
+{embedded_contract}
+```
+
+This explanation after the sample must also remain in the document."""
+
+        result = _mod.parse_generated_content(response)
+
+        assert result == (_EMPTY_PARSED_CONTENT | {'body': response})
+
+    def test_preserves_markdown_body_when_it_contains_unrelated_embedded_json(self):
+        response = f"""# Malaga hotel guide
+
+{_JSON_BODY}
+
+```json
+{{"tracking": {{"enabled": true}}}}
+```
+
+Use these recommendations when planning a family stay."""
+
+        result = _mod.parse_generated_content(response)
+
+        assert result == (_EMPTY_PARSED_CONTENT | {'body': response})
+
+    def test_parses_observed_bold_markdown_response_without_markers_or_preamble_in_body(self):
+        response = f"""Here is the requested draft.
+**TITLE:** Bold title
+**META:** Bold description
+
+{_JSON_BODY}
+
+**HEADINGS:** Overview, Details
+**POINTS:**
+- First point
+- Second point"""
+
+        result = _mod.parse_generated_content(response)
+
+        assert result == {
+            'title': 'Bold title',
+            'meta_description': 'Bold description',
+            'body': _JSON_BODY,
+            'suggested_headings': ['Overview', 'Details'],
+            'key_points': ['First point', 'Second point'],
+        }
+
+    def test_parses_underscored_markers_without_markers_in_body(self):
+        response = f"""Preamble that must not become content.
+__TITLE:__ Underscored title
+_META:_ Underscored description
+
+{_JSON_BODY}
+
+__HEADINGS:__ Overview, Details
+_POINTS:_ First point, Second point"""
+
+        result = _mod.parse_generated_content(response)
+
+        assert result == {
+            'title': 'Underscored title',
+            'meta_description': 'Underscored description',
+            'body': _JSON_BODY,
+            'suggested_headings': ['Overview', 'Details'],
+            'key_points': ['First point', 'Second point'],
+        }
+
+
+def _invalid_output_result(raw_content: str) -> dict:
+    """Return the exact failed-generation contract for unusable model output."""
+    return {
+        'success': False,
+        'error': 'The AI response did not contain a usable content draft. Please try again.',
+        'error_type': 'invalid_output',
+        'content_angle': 'comprehensive_guide',
+        'raw_content': raw_content,
+    }
+
+
+class TestGeneratedOutputValidation:
+    def test_keeps_body_only_contract_json_generated_with_structured_metadata_warning(self):
+        raw_content = json.dumps({'body': _JSON_BODY})
+
+        result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
+
+        assert result['success'] is True
+        assert result['content']['body'] == _JSON_BODY
+        assert result['content_warning'] == {
+            'code': 'incomplete_metadata',
+            'message': 'This draft is usable, but some generated metadata is incomplete.',
+            'missing_fields': [
+                'title', 'meta_description', 'suggested_headings', 'key_points'
+            ],
+        }
+        assert result['raw_content'] == raw_content
+
+    def test_rejects_truncated_json_looking_output_instead_of_using_it_as_the_body(self):
+        raw_content = (
+            '{"title": "Truncated draft", "body": "## Overview\\n\\n'
+            'This incomplete response has enough readable text to pass the body length threshold.'
+        )
+
+        result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
+
+        assert result == _invalid_output_result(raw_content)
+
+    def test_rejects_output_when_preamble_precedes_truncated_json_fence(self):
+        raw_content = (
+            'Here is the JSON:\n```json\n'
+            '{"title": "Truncated draft", "body": "## Overview\\n\\n'
+            'This fenced response was truncated despite containing enough readable text.'
+        )
+
+        result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
+
+        assert result == _invalid_output_result(raw_content)
+
+    def test_rejects_output_when_complete_contract_has_an_unclosed_json_fence(self):
+        raw_content = f'```json\n{json.dumps(_VALID_JSON_CONTRACT)}'
+
+        result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
+
+        assert result == _invalid_output_result(raw_content)
+
+    def test_rejects_output_when_raw_contract_json_has_trailing_prose(self):
+        raw_content = json.dumps({'body': _JSON_BODY}) + '\nI hope this draft helps.'
+
+        result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
+
+        assert result == _invalid_output_result(raw_content)
+
+    def test_rejects_a_whole_unrelated_json_object_instead_of_using_it_as_the_body(self):
+        raw_content = json.dumps({
+            'article_schema': 'This unrelated value is deliberately long enough to look useful.',
+            'sections': ['Overview', 'Recommendations'],
+        })
+
+        result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
+
+        assert result == _invalid_output_result(raw_content)
+
+    def test_fails_generation_and_preserves_raw_content_when_body_is_unusable(self):
+        raw_content = 'TITLE: Empty draft\nMETA: Missing body\nHEADINGS: Intro\nPOINTS:\n- None'
+
+        result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
+
+        assert result == _invalid_output_result(raw_content)
+
+    def test_persists_structured_warning_with_generated_content(self):
+        table = fake_table()
+        warning = {
+            'code': 'incomplete_metadata',
+            'message': 'This draft is usable, but some generated metadata is incomplete.',
+            'missing_fields': ['title'],
+        }
+        generation_result = {
+            'content': {'body': _JSON_BODY},
+            'raw_content': _JSON_BODY,
+            'model': 'fast',
+            'competitor_sources_used': 0,
+            'content_warning': warning,
+        }
+
+        with patch.object(_mod, 'dynamodb', fake_dynamodb_resource(table)):
+            _mod.update_content_status('content-1', 'generated', generation_result)
+
+        values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
+        assert values[':content_warning'] == warning
+
+    def test_persists_raw_content_when_unusable_output_marks_generation_failed(self):
+        table = fake_table()
+
+        with patch.object(_mod, 'dynamodb', fake_dynamodb_resource(table)):
+            _mod.update_content_status(
+                'content-1',
+                'failed',
+                {'error': 'Invalid output', 'raw_content': 'raw invalid response'},
+            )
+
+        values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
+        assert values[':raw'] == 'raw invalid response'
+
+    def test_reports_content_present_when_generated_title_is_missing_but_body_exists(self):
+        row = {
+            'id': 'content-1',
+            'status': 'generated',
+            'keyword': 'keyword',
+            'generated_content': {'title': ' ', 'body': _JSON_BODY},
+            'content_warning': {
+                'code': 'incomplete_metadata',
+                'message': 'Incomplete metadata',
+                'missing_fields': ['title'],
+            },
+        }
+        event = {
+            'path': '/content-studio/status/content-1',
+            'pathParameters': {'id': 'content-1'},
+        }
+
+        with patch.object(_mod, 'get_content_by_id', return_value=row):
+            response = _mod._get_content_status(event, None)
+
+        body = json.loads(response['body'])
+        assert body['has_content'] is True
+        assert body['content_warning'] == row['content_warning']

@@ -9,6 +9,28 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.13.2] - 2026-09-20
+
+Production validation hardened the analysis, research, content-generation and
+reporting paths while removing browser and crawler diagnostics discovered in a
+full authenticated smoke test.
+
+### Fixed
+
+- Research Agent checkpoints now preserve DynamoDB numeric fields and never
+  report a terminal result that was not persisted.
+- Citation Gap aggregation enriches only the final deduplicated result set,
+  avoiding nested DynamoDB fan-out and API Gateway timeouts; gateway-generated
+  failures also retain CORS and the UI no longer presents errors as empty data.
+- Content Studio uses one structured output contract with tolerant legacy
+  parsing, preserves useful partial drafts with explicit warnings, and renders
+  reliable title and content fallbacks.
+- Crawler extraction handles body-less documents and drains Playwright route
+  callbacks before shutdown, preventing cancelled-task cleanup diagnostics.
+- Form controls across insights, search, execution, schedules, settings,
+  keyword research and Content Studio have stable identities and associated
+  labels for browser accessibility tooling.
+
 ## [2.13.1] - 2026-09-19
 
 Mutation testing now pins the observable alert and generic-brand behavior added

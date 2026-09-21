@@ -1070,6 +1070,114 @@ class TestAgentDimensionCheckpoint:
 
 
 
+class TestStepCheckpointPersistence:
+    def _job_with_decimal_metadata(self, status: str = 'pending') -> dict:
+        return _expansion_job(
+            status='running',
+            round=Decimal('1'),
+            active_round=Decimal('1'),
+            steps={
+                'r1-openai': {
+                    'provider': 'openai',
+                    'status': status,
+                    'round': Decimal('1'),
+                    'attempt': Decimal('1'),
+                },
+            },
+        )
+
+    def _event(self, action: str = 'execute_step') -> dict:
+        return {
+            'action': action,
+            'job_id': 'job-1',
+            'step_id': 'r1-openai',
+            'provider': 'openai',
+        }
+
+    def _terminal_race_table(self, persisted_step: dict) -> MagicMock:
+        job = self._job_with_decimal_metadata()
+        table = _table_with(job)
+        current = {**job, 'steps': {'r1-openai': persisted_step}}
+        table.get_item.side_effect = [{'Item': job}, {'Item': current}]
+        table.update_item.side_effect = [
+            {},
+            conditional_check_failure(message='terminal checkpoint won elsewhere'),
+        ]
+        return table
+
+    def _execute_with_table(self, table: MagicMock) -> dict:
+        with (
+            patch.object(_mod, 'research_table', table),
+            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
+            patch.object(_mod, 'run_web_search', MagicMock(return_value='[{"keyword": "losing keyword"}]')),
+        ):
+            return _handle(self._event(), None)
+
+    def test_persists_completed_keywords_when_step_metadata_was_loaded_as_decimal(self):
+        response = '[{"keyword": "persisted keyword", "relevance": 8}]'
+
+        result, table = _execute_step(
+            self._job_with_decimal_metadata(),
+            self._event(),
+            run_web_search=MagicMock(return_value=response),
+        )
+
+        running, completed = _step_writes(table)
+        assert result['status'] == 'completed'
+        assert (running['round'], running['attempt']) == (1, 1)
+        assert completed['keywords'] == [{'keyword': 'persisted keyword', 'relevance': 8}]
+        assert (completed['round'], completed['attempt']) == (1, 1)
+
+    def test_raises_checkpoint_conflict_when_rejected_terminal_write_leaves_persisted_step_running(self):
+        persisted = {
+            'provider': 'openai',
+            'status': 'running',
+            'round': Decimal('1'),
+            'attempt': Decimal('1'),
+        }
+        table = self._terminal_race_table(persisted)
+
+        with pytest.raises(
+            _mod.CheckpointConflictError,
+            match="Research job job-1 step r1-openai terminal checkpoint conflicted with persisted status 'running'",
+        ):
+            self._execute_with_table(table)
+
+        assert table.update_item.call_count == 2
+
+    def test_raises_checkpoint_conflict_when_rejected_fail_step_write_leaves_persisted_step_running(self):
+        job = self._job_with_decimal_metadata(status='running')
+        table = _table_with(job)
+        table.get_item.side_effect = [{'Item': job}, {'Item': job}]
+        table.update_item.side_effect = conditional_check_failure(message='terminal checkpoint changed')
+        event = {**self._event('fail_step'), 'error': {'Error': 'States.Timeout'}}
+
+        with patch.object(_mod, 'research_table', table):
+            with pytest.raises(
+                _mod.CheckpointConflictError,
+                match="Research job job-1 step r1-openai terminal checkpoint conflicted with persisted status 'running'",
+            ):
+                _handle(event, None)
+
+        assert table.update_item.call_count == 1
+
+    def test_returns_failed_when_another_invocation_persisted_the_terminal_winner(self):
+        persisted = {
+            'provider': 'openai',
+            'status': 'failed',
+            'round': Decimal('1'),
+            'attempt': Decimal('1'),
+            'error_message': 'winner failed first',
+        }
+        table = self._terminal_race_table(persisted)
+
+        result = self._execute_with_table(table)
+
+        assert result['status'] == 'failed'
+        assert table.update_item.call_count == 2
+        assert table.get_item.call_count == 2
+
+
 class TestCheckpointRaces:
     def test_same_execution_plan_claim_loser_reuses_the_winning_claim(self):
         pending = _expansion_job(

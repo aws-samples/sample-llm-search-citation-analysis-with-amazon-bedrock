@@ -1,14 +1,14 @@
 import type {
-  Keyword, KeywordGroup, ExecutionEvent, Execution 
+  Keyword, KeywordGroup, ExecutionEvent, Execution
 } from '../../types';
 import {
-  formatDate, formatTime 
+  formatDate, formatTime
 } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
 import { KeywordScopePicker } from '../ui/KeywordScopePicker';
 import { PlayIcon } from '../ui';
 import type {
-  StepState, ProcessedExecution 
+  StepState, ProcessedExecution
 } from '../../formatting/executionProcessor';
 
 const getStatusStyle = (status: string): string => {
@@ -132,6 +132,8 @@ export const TriggerSection = ({
         <div className="mb-4">
           <p className="text-sm text-gray-600 mb-2">Select keywords (optional)</p>
           <KeywordScopePicker
+            idPrefix="execution-keyword-scope"
+            name="execution-keyword-ids"
             keywords={activeKeywords}
             groups={groups}
             selectedIds={selectedIds}
@@ -158,7 +160,7 @@ interface GroupQuickRunProps {
 
 /** One-click "run this whole group" buttons; resolved server-side at run time. */
 const GroupQuickRun = ({
-  groups, disabled, onRunGroup 
+  groups, disabled, onRunGroup
 }: GroupQuickRunProps) => (
   <div className="mb-4">
     <p className="text-sm text-gray-600 mb-2">Run a whole keyword group</p>
@@ -187,7 +189,7 @@ interface TriggerButtonProps {
 }
 
 const TriggerButton = ({
-  keywordsCount, isRunning, isStarting, onTriggerAnalysis 
+  keywordsCount, isRunning, isStarting, onTriggerAnalysis
 }: TriggerButtonProps) => (
   <>
     <button
@@ -224,7 +226,7 @@ interface ExecutionStatusProps {
 }
 
 export const ExecutionStatus = ({
-  execution, processedExecution, duration, isRunning 
+  execution, processedExecution, duration, isRunning
 }: ExecutionStatusProps) => (
   <div className="bg-white rounded-lg border border-gray-200">
     <ExecutionHeader execution={execution} duration={duration} />
@@ -235,11 +237,11 @@ export const ExecutionStatus = ({
 
 interface ExecutionHeaderProps {
   execution: Execution;
-  duration: string | null; 
+  duration: string | null;
 }
 
 const ExecutionHeader = ({
-  execution, duration 
+  execution, duration
 }: ExecutionHeaderProps) => (
   <div className="p-4 sm:p-6 border-b border-gray-200">
     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3 mb-4">
@@ -298,11 +300,11 @@ const StepLegend = () => (
 
 interface StepItemProps {
   step: StepState;
-  isLast: boolean; 
+  isLast: boolean;
 }
 
 const StepItem = ({
-  step, isLast 
+  step, isLast
 }: StepItemProps) => (
   <div className="flex items-center">
     <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border min-w-[140px] ${getStepStyle(step.status)}`}>
@@ -318,11 +320,11 @@ const StepItem = ({
 
 interface ExecutionLogsProps {
   logs: ExecutionEvent[];
-  isRunning: boolean; 
+  isRunning: boolean;
 }
 
 const ExecutionLogs = ({
-  logs, isRunning 
+  logs, isRunning
 }: ExecutionLogsProps) => (
   <div className="p-4 sm:p-6">
     <div className="flex justify-between items-center mb-4">

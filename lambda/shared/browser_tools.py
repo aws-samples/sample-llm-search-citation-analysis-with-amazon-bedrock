@@ -33,7 +33,8 @@ from shared.utils import get_timestamp, get_timestamp_compact
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-_SESSION_NOT_INITIALIZED = 'Browser session not initialized - call initialize_browser_session() first'
+_SESSION_NOT_INITIALIZED = "Browser session not initialized - call initialize_browser_session() first"
+_BODY_TEXT_JAVASCRIPT = "() => document.body?.innerText ?? ''"
 
 
 class BrowserConfigurationError(RuntimeError):
@@ -64,10 +65,10 @@ class SimpleBrowserTools:
         if BrowserClient is None:
             raise RuntimeError("BedrockAgentCore SDK not available")
 
-        pre_created_browser_id = os.environ.get('BROWSER_ID')
+        pre_created_browser_id = os.environ.get("BROWSER_ID")
         if not pre_created_browser_id:
             raise BrowserConfigurationError(
-                'BROWSER_ID is required; deploy the pre-created AgentCore browser before crawling'
+                "BROWSER_ID is required; deploy the pre-created AgentCore browser before crawling"
             )
 
         logger.info("Using pre-created AgentCore browser with Web Bot Auth")
@@ -79,7 +80,7 @@ class SimpleBrowserTools:
         if BrowserClient is None:
             raise RuntimeError("BedrockAgentCore SDK not available")
         if not self.browser_id:
-            raise BrowserConfigurationError('create_browser must select BROWSER_ID before starting a session')
+            raise BrowserConfigurationError("create_browser must select BROWSER_ID before starting a session")
 
         self.browser_client = BrowserClient(region=self.config.region)
         self.session_id = self.browser_client.start(
@@ -104,7 +105,7 @@ class SimpleBrowserTools:
         )
 
         if not self.browser.contexts:
-            raise RuntimeError('AgentCore browser session returned no browser context')
+            raise RuntimeError("AgentCore browser session returned no browser context")
         self.context = self.browser.contexts[0]
         self.page = self.context.pages[0] if self.context.pages else self.context.new_page()
 
@@ -123,10 +124,15 @@ class SimpleBrowserTools:
             raise RuntimeError(_SESSION_NOT_INITIALIZED)
         return self.page
 
+    def _read_body_text(self) -> str:
+        """Read visible text while allowing documents whose body is still absent."""
+        page_text = self._active_page().evaluate(_BODY_TEXT_JAVASCRIPT)
+        return page_text if isinstance(page_text, str) else ""
+
     def _guard_document_request(self, route) -> None:
         """Abort any document navigation whose destination fails SSRF checks."""
         request = route.request
-        if request.resource_type != 'document':
+        if request.resource_type != "document":
             route.continue_()
             return
 
@@ -137,7 +143,7 @@ class SimpleBrowserTools:
 
         self._navigation_guard_error = error_message
         logger.warning("Blocked unsafe browser document navigation")
-        route.abort('blockedbyclient')
+        route.abort("blockedbyclient")
 
     @property
     def navigation_guard_error(self) -> str | None:
@@ -147,9 +153,9 @@ class SimpleBrowserTools:
     @staticmethod
     def _navigation_error_result(url: str, error_message: str) -> dict[str, str]:
         return {
-            'status': 'error',
-            'url': url,
-            'error': error_message,
+            "status": "error",
+            "url": url,
+            "error": error_message,
         }
 
     def navigate_to_url(self, url: str) -> dict:
@@ -159,7 +165,7 @@ class SimpleBrowserTools:
             context = self._active_context()
             logger.info("Navigating to cited page")
             self._navigation_guard_error = None
-            context.route('**/*', self._guard_document_request)
+            context.route("**/*", self._guard_document_request)
             page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
             if self._navigation_guard_error:
@@ -195,25 +201,17 @@ class SimpleBrowserTools:
 
     def _detect_captcha_block(self) -> bool:
         """Return whether the current page is a CAPTCHA or bot-challenge wall."""
-        try:
-            page_text = self._active_page().evaluate("() => document.body.innerText") or ''
-            normalized_text = page_text.lower() if isinstance(page_text, str) else ''
-        except Exception:
-            # Detection must never turn an unreadable page into a "blocked"
-            # verdict, so any failure here answers "not a CAPTCHA".
-            logger.exception("Could not read page text for CAPTCHA detection")
-            return False
-
+        normalized_text = self._read_body_text().lower()
         indicators = (
-            'slide to verify',
-            'slide right to secure',
-            'slide right to access',
-            'drag the slider',
-            'slide to unlock',
-            'verify you are human',
-            'prove you are not a robot',
-            'i am not a robot',
-            'please complete the security check',
+            "slide to verify",
+            "slide right to secure",
+            "slide right to access",
+            "drag the slider",
+            "slide to unlock",
+            "verify you are human",
+            "prove you are not a robot",
+            "i am not a robot",
+            "please complete the security check",
         )
         return any(indicator in normalized_text for indicator in indicators)
 
@@ -223,8 +221,7 @@ class SimpleBrowserTools:
             logger.info("Extracting page content")
             page = self._active_page()
             title = page.title()
-            evaluated_content = page.evaluate("() => document.body.innerText")
-            text_content = evaluated_content if isinstance(evaluated_content, str) else ''
+            text_content = self._read_body_text()
 
             max_chars = 50000
             if len(text_content) > max_chars:
@@ -262,7 +259,7 @@ class SimpleBrowserTools:
         try:
             logger.info("Taking screenshot")
             screenshot_bytes = self._active_page().screenshot(full_page=True, type="png")
-            screenshot_base64 = base64.b64encode(screenshot_bytes).decode('utf-8')
+            screenshot_base64 = base64.b64encode(screenshot_bytes).decode("utf-8")
 
             return {
                 "status": "success",
@@ -278,26 +275,45 @@ class SimpleBrowserTools:
             }
 
     def cleanup(self) -> None:
-        """Attempt every resource cleanup step independently."""
-        if self.browser:
+        """Detach and independently release every browser resource exactly once."""
+        context = self.context
+        browser = self.browser
+        playwright = self.playwright
+        browser_client = self.browser_client
+
+        self.page = None
+        self.context = None
+        self.browser = None
+        self.playwright = None
+        self.browser_client = None
+        self.session_id = None
+
+        if context is not None:
+            try:
+                logger.info("Removing browser request routes")
+                context.unroute_all(behavior="wait")
+            except Exception:
+                logger.exception("Could not remove browser request routes")
+
+        if browser is not None:
             try:
                 logger.info("Closing browser connection")
-                self.browser.close()
+                browser.close()
             except Exception:
                 logger.exception("Could not close Playwright browser connection")
 
-        if self.playwright:
+        if playwright is not None:
             try:
                 logger.info("Stopping Playwright")
-                self.playwright.stop()
+                playwright.stop()
             except Exception:
                 logger.exception("Could not stop Playwright")
 
-        if self.browser_client:
+        if browser_client is not None:
             try:
                 logger.info("Stopping AgentCore browser session")
-                self.browser_client.stop()
+                browser_client.stop()
             except Exception:
                 logger.exception("Could not stop AgentCore browser session")
 
-        logger.info("Cleanup complete")
+        logger.info("Browser cleanup attempts complete")

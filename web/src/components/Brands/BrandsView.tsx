@@ -1,6 +1,4 @@
-import {
-  useId, useState
-} from 'react';
+import { useState } from 'react';
 import { useBrandMentions } from '../../hooks/useBrandMentions';
 import { useBrandConfig } from '../../hooks/useBrandConfig';
 import { BrandMentionsTable } from './BrandMentionsTable';
@@ -8,7 +6,7 @@ import { BrandDetailModal } from './BrandDetailModal';
 import { BrandConfigPanel } from './BrandConfigPanel';
 import { exportBrandMentions } from './brandMentionsExport';
 import {
-  countTrackedBrands, describeIndustry 
+  countTrackedBrands, describeIndustry
 } from './brandConfigSummary';
 import { PersonaSelector } from '../Personas/PersonaSelector';
 import { Spinner } from '../ui/Spinner';
@@ -144,7 +142,6 @@ const BrandReportControls = ({
   selectedTimestamp: string | null;
   onTimestampChange: (timestamp: string | null) => void;
 }) => {
-  const runSelectorId = useId();
   const [exporting, setExporting] = useState(false);
 
   const handleExport = async () => {
@@ -161,9 +158,10 @@ const BrandReportControls = ({
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
-        <label htmlFor={runSelectorId} className="block text-xs font-medium text-gray-500 mb-1.5">Analysis run</label>
+        <label htmlFor="brands-analysis-run" className="block text-xs font-medium text-gray-500 mb-1.5">Analysis run</label>
         <select
-          id={runSelectorId}
+          id="brands-analysis-run"
+          name="brands-analysis-run"
           value={selectedTimestamp ?? ''}
           onChange={(event) => onTimestampChange(event.target.value || null)}
           className="min-w-64 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white"
@@ -324,7 +322,7 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
     selectedPersonaId, setSelectedPersonaId, selectedTimestamp, setSelectedTimestamp
   } = useViewState();
   const {
-    activeKeywords, groups 
+    activeKeywords, groups
   } = useKeywordScopeOptions(keywords);
   const scopeLabel = scope === null ? '' : describeReportScope(scope, groups);
 
@@ -354,7 +352,12 @@ export const BrandsView = ({ keywords }: BrandsViewProps) => {
         onConfigClick={() => setShowConfig(true)}
       />
       <ScopePanel keywords={activeKeywords} groups={groups} scope={scope} onChange={handleScopeChange} />
-      <PersonaSelector selectedPersonaId={selectedPersonaId} onPersonaChange={handlePersonaChange} />
+      <PersonaSelector
+        id="brands-persona-filter"
+        name="brands-persona-filter"
+        selectedPersonaId={selectedPersonaId}
+        onPersonaChange={handlePersonaChange}
+      />
       {selectedPersonaId && (
         <div className="text-xs text-gray-500 px-1">Filtering by persona</div>
       )}

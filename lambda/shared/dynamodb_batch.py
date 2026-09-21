@@ -67,59 +67,55 @@ def query_latest_per_key(
     *,
     max_workers: int = _DEFAULT_MAX_WORKERS,
     limit: int = 1,
+    projection_expression: str | None = None,
+    expression_attribute_names: Mapping[str, str] | None = None,
 ) -> dict[str, dict | None]:
     """Fetch the latest item for each partition-key value in parallel.
 
     ``DynamoDB.Table.query`` with ``ScanIndexForward=False`` returns items
     in descending sort-key order; paired with ``Limit=1`` it gives the
     latest row for that partition. Calls fan out through a thread pool so
-    wall-clock time stays ~constant regardless of the number of keys
-    (up to the executor's max workers).
+    wall-clock time stays roughly constant regardless of the number of keys,
+    up to ``max_workers``.
 
-    Args:
-        table: boto3 DynamoDB Table resource.
-        partition_key_name: Name of the table's partition key attribute.
-        partition_values: Iterable of values to query. Duplicates are
-            collapsed; order is preserved. Falsy values (``None``,
-            ``""``) are dropped before the fan-out — callers that
-            want them surfaced as errors should filter upstream.
-        max_workers: Upper bound on concurrent queries. Default 10.
-        limit: Items to return per partition (kept as ``limit`` to keep the
-            door open for top-N variants later; keep at 1 for the
-            "latest row" semantics).
-
-    Returns:
-        Dict mapping each partition value to the latest item found, or
-        None if the partition had no rows / the query raised. Errors are
-        logged, not raised — a single bad partition must not fail the
-        whole request.
+    Duplicate values are collapsed in first-seen order. Falsy values are
+    omitted. Optional projection arguments are forwarded to every query so
+    callers can avoid transferring attributes they do not consume. One
+    partition failure is logged and represented by ``None`` without failing
+    successful partitions.
     """
-    # Preserve order, drop duplicates.
     seen: set[str] = set()
     ordered_values: list[str] = []
-    for v in partition_values:
-        if v and v not in seen:
-            seen.add(v)
-            ordered_values.append(v)
+    for value in partition_values:
+        if value and value not in seen:
+            seen.add(value)
+            ordered_values.append(value)
 
     if not ordered_values:
         return {}
 
     def _query_one(value: str) -> tuple[str, dict | None]:
+        query_params: dict[str, Any] = {
+            'KeyConditionExpression': Key(partition_key_name).eq(value),
+            'Limit': limit,
+            'ScanIndexForward': False,
+        }
+        if projection_expression is not None:
+            query_params['ProjectionExpression'] = projection_expression
+        if expression_attribute_names is not None:
+            query_params['ExpressionAttributeNames'] = dict(expression_attribute_names)
+
         try:
-            response = table.query(
-                KeyConditionExpression=Key(partition_key_name).eq(value),
-                Limit=limit,
-                ScanIndexForward=False,
-            )
-            items = response.get('Items', [])
-            return value, (items[0] if items else None)
+            response = table.query(**query_params)
         except Exception:
             logger.exception(
-                "query_latest_per_key failed for %s=%r",
+                'query_latest_per_key failed for %s=%r',
                 partition_key_name, value,
             )
             return value, None
+
+        items = response.get('Items', [])
+        return value, (items[0] if items else None)
 
     workers = min(max_workers, len(ordered_values))
     results: dict[str, dict | None] = {}

@@ -156,6 +156,18 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
     config: 'Visibility tracking not configured',
     unknown: 'Failed to load visibility metrics',
   },
+  citationGaps: {
+    network: 'Unable to load citation gaps',
+    auth: 'Authentication required to view citation gaps',
+    permission: 'You do not have permission to view citation gaps',
+    not_found: 'Citation gap data not found',
+    validation: 'Invalid citation gap request',
+    rate_limit: 'Citation gap requests limited. Please wait',
+    server: 'Failed to load citation gaps',
+    timeout: 'Citation gap analysis timed out',
+    config: 'Citation gap analysis is not configured',
+    unknown: 'Failed to load citation gaps',
+  },
   content: {
     network: 'Unable to connect to content service',
     auth: 'Authentication required for content generation',

@@ -1,6 +1,9 @@
 import type { ContentStudioHistory } from '../../../../types';
 import {
-  ReportSection, SectionPlaceholder 
+  formatContentWarning, getContentTitle
+} from '../../../ContentStudio/contentPresentation';
+import {
+  ReportSection, SectionPlaceholder
 } from '../../layout';
 
 interface Props {
@@ -21,7 +24,7 @@ const MAX_BRIEFS = 8;
  * not the operational queue.
  */
 export function BriefsReadySection({
-  history, loading, error 
+  history, loading, error
 }: Props) {
   if (loading) {
     return (
@@ -78,7 +81,7 @@ function BriefCard({ item }: { readonly item: ContentStudioHistory }) {
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-            {generated?.title ?? item.idea_title}
+            {getContentTitle(item)}
           </h3>
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Target keyword: {item.keyword}
@@ -88,6 +91,12 @@ function BriefCard({ item }: { readonly item: ContentStudioHistory }) {
           {new Date(item.created_at).toLocaleDateString()}
         </span>
       </div>
+      {item.content_warning && (
+        <output className="block rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+          <span className="font-semibold">Needs review: </span>
+          {formatContentWarning(item.content_warning)}
+        </output>
+      )}
       {generated?.meta_description && (
         <p className="text-sm text-gray-700 dark:text-gray-300 mt-2">
           {generated.meta_description}

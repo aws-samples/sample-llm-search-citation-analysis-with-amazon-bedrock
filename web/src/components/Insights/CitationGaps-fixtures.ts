@@ -27,7 +27,7 @@ export function buildCitationGapsHookResult(
     data: null,
     loading: false,
     error: null,
-    fetchCitationGaps: vi.fn(),
+    fetchCitationGaps: vi.fn().mockResolvedValue(null),
     ...overrides,
   };
 }

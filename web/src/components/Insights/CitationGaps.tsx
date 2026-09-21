@@ -1,13 +1,13 @@
 import {
-  useEffect, useState 
+  useEffect, useRef, useState
 } from 'react';
 import { useCitationGaps } from '../../hooks/useCitationGaps';
 import type {
-  CitationGap, CitationGapsResponse, Keyword, ReportScope 
+  CitationGap, CitationGapsResponse, Keyword, ReportScope
 } from '../../types';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
 import {
-  ALL_SCOPE, decodeReportScope, encodeReportScope 
+  ALL_SCOPE, decodeReportScope, encodeReportScope
 } from '../ui/reportScope';
 import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
 import { GapCard } from './GapCard';
@@ -15,11 +15,11 @@ import { GapCard } from './GapCard';
 interface Props { readonly keywords: Array<Keyword>; }
 
 function StatCard({
-  value, label, color 
+  value, label, color
 }: {
   readonly value: number | string;
   readonly label: string;
-  readonly color: string 
+  readonly color: string
 }) {
   return (
     <div className="bg-white p-3 sm:p-4 rounded-lg shadow">
@@ -33,19 +33,19 @@ function DomainSummary({ domains }: {
   readonly domains: Array<{
     domain: string;
     gap_count: number;
-    total_citations: number 
-  }> 
+    total_citations: number
+  }>
 }) {
   return (
     <div className="bg-white p-4 rounded-lg shadow">
       <h3 className="text-lg font-medium mb-3">Top Domains with Gaps</h3>
       <div className="space-y-2">
-        {domains.slice(0, 10).map(d => (
-          <div key={d.domain} className="flex justify-between items-center py-2 border-b border-gray-100">
-            <span className="font-medium text-gray-700">{d.domain}</span>
+        {domains.slice(0, 10).map(domain => (
+          <div key={domain.domain} className="flex justify-between items-center py-2 border-b border-gray-100">
+            <span className="font-medium text-gray-700">{domain.domain}</span>
             <div className="flex gap-4 text-sm">
-              <span className="text-red-600">{d.gap_count} gaps</span>
-              <span className="text-gray-400">{d.total_citations} citations</span>
+              <span className="text-red-600">{domain.gap_count} gaps</span>
+              <span className="text-gray-400">{domain.total_citations} citations</span>
             </div>
           </div>
         ))}
@@ -62,11 +62,11 @@ interface GapSummary {
 }
 
 function GapStats({
-  summary, totalGaps, totalHighPriority 
+  summary, totalGaps, totalHighPriority
 }: {
   readonly summary?: GapSummary;
   readonly totalGaps?: number;
-  readonly totalHighPriority?: number 
+  readonly totalHighPriority?: number
 }) {
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -79,45 +79,90 @@ function GapStats({
 }
 
 /** The gaps a response carries: `gaps` for one keyword, `top_gaps` across keywords. */
-function gapsOf(data: CitationGapsResponse | null): CitationGap[] {
-  return data?.gaps ?? data?.top_gaps ?? [];
+function gapsOf(data: CitationGapsResponse): CitationGap[] {
+  return data.gaps ?? data.top_gaps ?? [];
 }
 
-function GapList({
-  gaps, loading 
-}: {
-  readonly gaps: CitationGap[];
-  readonly loading: boolean 
-}) {
+function GapList({ gaps }: { readonly gaps: CitationGap[] }) {
   return (
     <>
       <div>
         <h3 className="text-base sm:text-lg font-medium mb-3">Citation Gaps to Fill</h3>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {gaps.map(gap => <GapCard key={gap.url} gap={gap} />)}
+          {gaps.map(gap => (
+            <GapCard key={`${gap.keyword ?? 'single'}:${gap.url}`} gap={gap} />
+          ))}
         </div>
       </div>
 
-      {gaps.length === 0 && !loading && <div className="text-center py-8 text-gray-500">No citation gaps found. Great coverage!</div>}
+      {gaps.length === 0 && (
+        <div className="text-center py-8 text-gray-500">No citation gaps found. Great coverage!</div>
+      )}
+    </>
+  );
+}
+
+function CitationGapResults({
+  data, loading, error
+}: {
+  readonly data: CitationGapsResponse | null;
+  readonly loading: boolean;
+  readonly error: string | null;
+}) {
+  if (loading) {
+    return <div className="text-center py-8 text-gray-500">Analyzing citation gaps...</div>;
+  }
+  if (error) {
+    return <div className="text-center py-8 text-red-500">{error}</div>;
+  }
+  if (!data) return null;
+
+  const gaps = gapsOf(data);
+  return (
+    <>
+      <GapStats
+        summary={data.summary}
+        totalGaps={data.total_gaps}
+        totalHighPriority={data.total_high_priority}
+      />
+      {(data.domain_summary?.length ?? 0) > 0 && <DomainSummary domains={data.domain_summary} />}
+      <GapList gaps={gaps} />
     </>
   );
 }
 
 export function CitationGaps({ keywords }: Props) {
   const [scope, setScope] = useState<ReportScope>(ALL_SCOPE);
+  const [scopeRequestPending, setScopeRequestPending] = useState(false);
+  const scopeRequestSequence = useRef(0);
   const {
-    activeKeywords, groups 
+    activeKeywords, groups
   } = useKeywordScopeOptions(keywords);
   const {
-    data, loading, error, fetchCitationGaps 
+    data, loading, error, fetchCitationGaps
   } = useCitationGaps();
   const scopeKey = encodeReportScope(scope);
 
   useEffect(() => {
-    fetchCitationGaps(decodeReportScope(scopeKey), 20);
+    const requestSequence = scopeRequestSequence.current;
+    const requestStatus = { active: true };
+    const request = fetchCitationGaps(decodeReportScope(scopeKey), 20);
+    void Promise.resolve(request).finally(() => {
+      if (requestStatus.active && requestSequence > 0 && requestSequence === scopeRequestSequence.current) {
+        setScopeRequestPending(false);
+      }
+    });
+    return () => {
+      requestStatus.active = false;
+    };
   }, [scopeKey, fetchCitationGaps]);
 
-  const hasDomainSummary = data?.domain_summary && data.domain_summary.length > 0;
+  const selectScope = (nextScope: ReportScope) => {
+    if (encodeReportScope(nextScope) === scopeKey) return;
+    scopeRequestSequence.current += 1;
+    setScopeRequestPending(true);
+    setScope(nextScope);
+  };
 
   return (
     <div className="space-y-6">
@@ -131,21 +176,17 @@ export function CitationGaps({ keywords }: Props) {
             keywords={activeKeywords}
             groups={groups}
             value={scope}
-            onChange={setScope}
+            onChange={selectScope}
             label="Filter by keyword or group"
           />
         </div>
       </div>
 
-      {data && <GapStats summary={data.summary} totalGaps={data.total_gaps} totalHighPriority={data.total_high_priority} />}
-
-      {hasDomainSummary && <DomainSummary domains={data.domain_summary} />}
-
-      {loading && <div className="text-center py-8 text-gray-500">Analyzing citation gaps...</div>}
-      {error && <div className="text-center py-8 text-red-500">{error}</div>}
-
-      <GapList gaps={gapsOf(data)} loading={loading} />
+      <CitationGapResults
+        data={data}
+        loading={loading || scopeRequestPending}
+        error={error}
+      />
     </div>
   );
 }
-

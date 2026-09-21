@@ -1,5 +1,3 @@
-
-
 interface PaginationControlsProps {
   currentPage: number;
   totalPages: number;
@@ -27,8 +25,10 @@ export const PaginationControls = ({
     <div className="p-3 sm:p-4 border-b border-gray-200">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm">
         <div className="flex items-center gap-2">
-          <span className="text-gray-500">Show:</span>
+          <label htmlFor="citations-items-per-page" className="text-gray-500">Show:</label>
           <select
+            id="citations-items-per-page"
+            name="citations-items-per-page"
             value={itemsPerPage}
             onChange={(e) => onItemsPerPageChange(Number(e.target.value))}
             className="px-2 sm:px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"

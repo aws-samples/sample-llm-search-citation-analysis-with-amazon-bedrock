@@ -267,6 +267,17 @@ def _bounded_text(value: Any, limit: int) -> tuple[str, bool]:
     return _utf8_prefix(value, limit)
 
 
+def _canonical_integral(value: Any) -> int | None:
+    """Return a stable Python integer for persisted integral metadata."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, Decimal) and value.is_finite() and value == value.to_integral_value():
+        return int(value)
+    return None
+
+
 def _relevance(value: Any) -> float:
     try:
         return float(value)
@@ -469,8 +480,8 @@ def bound_step_result(step: dict[str, Any]) -> dict[str, Any]:
         if text:
             bounded[field] = text
     for field in ('round', 'attempt'):
-        value = step.get(field)
-        if isinstance(value, int) and not isinstance(value, bool):
+        value = _canonical_integral(step.get(field))
+        if value is not None:
             bounded[field] = value
 
     queries, queries_truncated = _bounded_queries(step.get('queries'))

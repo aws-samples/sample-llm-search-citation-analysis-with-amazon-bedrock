@@ -1,5 +1,6 @@
 /// <reference types="vitest" />
 import { readFileSync } from 'node:fs';
+import { configDefaults } from 'vitest/config';
 import {
   defineConfig, loadEnv
 } from 'vite';
@@ -70,6 +71,7 @@ export default defineConfig(({ mode }) => {
       }
       : undefined,
     test: {
+      exclude: [...configDefaults.exclude, '**/.stryker-tmp/**'],
       globals: true,
       environment: 'jsdom',
       setupFiles: './src/test/setup.ts',
@@ -87,7 +89,10 @@ export default defineConfig(({ mode }) => {
       // the build spend ~90% of its time in the terser plugin (the
       // PLUGIN_TIMINGS build warning).
       chunkSizeWarningLimit: 1000,
-      rollupOptions: {output: {manualChunks: vendorChunk,},},
+      rollupOptions: {
+        checks: {pluginTimings: false,},
+        output: {manualChunks: vendorChunk,},
+      },
     },
   };
 });

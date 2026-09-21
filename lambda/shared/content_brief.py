@@ -121,14 +121,16 @@ _MODE_INSTRUCTIONS = {
     ),
 }
 
-_STRUCTURED_OUTPUT_FOOTER = """Format your response with clear sections:
-TITLE: [Your title here]
-META: [150 character meta description]
-
-[Your complete landing-page body here with ## headings and a useful FAQ section containing 5-8 questions and answers]
-
-HEADINGS: [List the H2 headings you used, comma separated]
-POINTS: [3 key takeaways as bullet points]"""
+CONTENT_OUTPUT_CONTRACT = """Return JSON only: exactly one JSON object with no Markdown fence, preamble, commentary, or trailing text.
+Use exactly this schema and all five keys:
+{
+  "title": "string",
+  "meta_description": "string of at most 160 characters",
+  "body": "complete Markdown body as a JSON string",
+  "suggested_headings": ["string"],
+  "key_points": ["string"]
+}
+The title, meta_description, and body values must be strings. The suggested_headings and key_points values must be arrays containing only strings. Encode body line breaks as JSON escapes. Put only the useful draft in body; do not include response labels or introductory prose."""
 
 _MANDATORY_OUTPUT_REQUIREMENTS = """Regardless of the editable template, return one complete landing-page draft grounded in the selected keywords. Include an SEO title, meta description, clear headings, substantial body copy, and a useful FAQ section with 5-8 questions and answers. Do not invent business-specific claims, statistics, certifications, prices, or guarantees that are absent from the source data."""
 
@@ -557,13 +559,14 @@ def build_group_brief_prompt(
         f'Required mode behavior: {mode_instruction}\n\n'
         f'{_MANDATORY_OUTPUT_REQUIREMENTS}\n\n'
         f'Write every output field and the complete body in {language}.\n\n'
-        f'{_STRUCTURED_OUTPUT_FOOTER}'
+        f'{CONTENT_OUTPUT_CONTRACT}'
     )
     return prompt, source_count
 
 
 __all__ = [
     'ALLOWED_PLACEHOLDERS',
+    'CONTENT_OUTPUT_CONTRACT',
     'CREATE_NEW_LANDING_PAGE',
     'DEFAULT_PROMPT_TEMPLATES',
     'GROUP_BRIEF_MODES',

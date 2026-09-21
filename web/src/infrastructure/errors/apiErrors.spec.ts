@@ -213,6 +213,21 @@ describe('getErrorMessage', () => {
 
     expect(message).toBe('Keyword already exists');
   });
+
+  it('returns citation-gap network copy when the browser fetch fails', () => {
+    expect(getErrorMessage(new TypeError('Failed to fetch'), 'citationGaps'))
+      .toBe('Unable to load citation gaps');
+  });
+
+  it('returns citation-gap server copy when the API responds with 500', () => {
+    expect(getErrorMessage(new ApiRequestError('HTTP 500', 500), 'citationGaps'))
+      .toBe('Failed to load citation gaps');
+  });
+
+  it('returns citation-gap timeout copy when the gateway responds with 504', () => {
+    expect(getErrorMessage(new ApiRequestError('HTTP 504', 504), 'citationGaps'))
+      .toBe('Citation gap analysis timed out');
+  });
 });
 
 describe('isAbortError', () => {

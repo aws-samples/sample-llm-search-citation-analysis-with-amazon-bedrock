@@ -7,6 +7,7 @@ export const BRIEF_INPUT_CLASS = 'w-full px-4 py-2 border border-gray-200 rounde
 
 interface MarketSelectProps {
   readonly id: string;
+  readonly name: string;
   readonly label: string;
   readonly value: string;
   readonly options: readonly MarketOption[];
@@ -15,26 +16,31 @@ interface MarketSelectProps {
 
 /** Country or language: the listed markets, or "Other code…" with a free two-letter code. */
 export function MarketSelect({
-  id, label, value, options, onChange
+  id, name, label, value, options, onChange
 }: MarketSelectProps) {
   const listed = options.some((option) => option.code === value);
+  const otherCodeId = `research-agent-${name}-other-code`;
   return (
     <div>
       <label htmlFor={id} className="block text-sm text-gray-600 mb-1">{label}</label>
-      <select id={id} value={listed ? value : 'other'} onChange={(event) => onChange(event.target.value === 'other' ? '' : event.target.value)} className={BRIEF_INPUT_CLASS}>
+      <select id={id} name={name} value={listed ? value : 'other'} onChange={(event) => onChange(event.target.value === 'other' ? '' : event.target.value)} className={BRIEF_INPUT_CLASS}>
         {options.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
         <option value="other">Other code…</option>
       </select>
       {!listed && (
-        <input
-          type="text"
-          aria-label={`${label} code`}
-          value={value}
-          maxLength={2}
-          onChange={(event) => onChange(event.target.value.toLowerCase())}
-          placeholder="two-letter code"
-          className={`${BRIEF_INPUT_CLASS} mt-2`}
-        />
+        <>
+          <label htmlFor={otherCodeId} className="sr-only">{label} code</label>
+          <input
+            id={otherCodeId}
+            name={`${name}-other-code`}
+            type="text"
+            value={value}
+            maxLength={2}
+            onChange={(event) => onChange(event.target.value.toLowerCase())}
+            placeholder="two-letter code"
+            className={`${BRIEF_INPUT_CLASS} mt-2`}
+          />
+        </>
       )}
     </div>
   );

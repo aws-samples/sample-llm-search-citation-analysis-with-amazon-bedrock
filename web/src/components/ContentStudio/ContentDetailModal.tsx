@@ -5,6 +5,9 @@ import type { ContentStudioHistory } from '../../types';
 import { Spinner } from '../ui/Spinner';
 import { exportToDocx } from '../../exporters/documentGenerator';
 import { CopyButtonLabel } from './CopyButtonLabel';
+import {
+  formatContentWarning, getContentTitle
+} from './contentPresentation';
 
 interface ContentDetailModalProps {
   item: ContentStudioHistory;
@@ -20,7 +23,12 @@ export const ContentDetailModal = ({
   const [exporting, setExporting] = useState(false);
 
   const content = item.generated_content;
-  const fullContent = `# ${content?.title ?? ''}\n\n${content?.meta_description ?? ''}\n\n${content?.body ?? ''}`;
+  const displayTitle = getContentTitle(item);
+  const displayContent = {
+    ...content,
+    title: displayTitle,
+  };
+  const fullContent = `# ${displayTitle}\n\n${content?.meta_description ?? ''}\n\n${content?.body ?? ''}`;
 
   const handleExportDocx = async () => {
     if (!content) return;
@@ -28,8 +36,8 @@ export const ContentDetailModal = ({
 
     try {
       await exportToDocx({
-        content,
-        keyword: item.keyword 
+        content: displayContent,
+        keyword: item.keyword
       });
     } catch (error) {
       console.error('Error exporting to DOCX:', error);
@@ -46,7 +54,7 @@ export const ContentDetailModal = ({
         <div className="relative bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
           <ContentDetailHeader
             item={item}
-            content={content}
+            title={displayTitle}
             viewMode={viewMode}
             setViewMode={setViewMode}
             exporting={exporting}
@@ -55,7 +63,11 @@ export const ContentDetailModal = ({
             copied={copied}
             onClose={onClose}
           />
-          <ContentDetailBody content={content} viewMode={viewMode} />
+          <ContentDetailBody
+            content={content}
+            contentWarning={item.content_warning}
+            viewMode={viewMode}
+          />
         </div>
       </div>
     </div>
@@ -64,7 +76,7 @@ export const ContentDetailModal = ({
 
 interface ContentDetailHeaderProps {
   item: ContentStudioHistory;
-  content: ContentStudioHistory['generated_content'];
+  title: string;
   viewMode: 'preview' | 'raw';
   setViewMode: (mode: 'preview' | 'raw') => void;
   exporting: boolean;
@@ -75,12 +87,12 @@ interface ContentDetailHeaderProps {
 }
 
 const ContentDetailHeader = ({
-  item, content, viewMode, setViewMode, exporting, onExportDocx, onCopy, copied, onClose
+  item, title, viewMode, setViewMode, exporting, onExportDocx, onCopy, copied, onClose
 }: ContentDetailHeaderProps) => (
   <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
     <div className="flex-1 min-w-0 pr-4">
       <h2 className="text-lg font-semibold text-gray-900 truncate">
-        {content?.title ?? item.idea_title}
+        {title}
       </h2>
       <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
         <span className="flex items-center gap-1">
@@ -114,7 +126,7 @@ interface ViewModeToggleProps {
 }
 
 const ViewModeToggle = ({
-  viewMode, setViewMode 
+  viewMode, setViewMode
 }: ViewModeToggleProps) => (
   <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
     <button
@@ -146,7 +158,7 @@ interface ExportButtonProps {
 }
 
 const ExportButton = ({
-  exporting, onExport 
+  exporting, onExport
 }: ExportButtonProps) => (
   <button
     onClick={onExport}
@@ -171,7 +183,7 @@ interface CopyButtonProps {
 }
 
 const CopyButton = ({
-  copied, onCopy 
+  copied, onCopy
 }: CopyButtonProps) => (
   <button
     onClick={onCopy}
@@ -187,6 +199,7 @@ const CloseButton = ({ onClose }: CloseButtonProps) => (
   <button
     onClick={onClose}
     className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+    aria-label="Close content details"
   >
     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
@@ -194,15 +207,29 @@ const CloseButton = ({ onClose }: CloseButtonProps) => (
   </button>
 );
 
+interface ContentWarningBannerProps {contentWarning: ContentStudioHistory['content_warning'];}
+
+const ContentWarningBanner = ({ contentWarning }: ContentWarningBannerProps) => {
+  if (!contentWarning) return null;
+  return (
+    <output className="block rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+      {formatContentWarning(contentWarning)}
+    </output>
+  );
+};
+
 interface ContentDetailBodyProps {
   content: ContentStudioHistory['generated_content'];
+  contentWarning: ContentStudioHistory['content_warning'];
   viewMode: 'preview' | 'raw';
 }
 
 const ContentDetailBody = ({
-  content, viewMode 
+  content, contentWarning, viewMode
 }: ContentDetailBodyProps) => (
   <div className="overflow-y-auto max-h-[calc(90vh-80px)] p-6 space-y-6">
+    <ContentWarningBanner contentWarning={contentWarning} />
+
     {content?.meta_description && (
       <div className="bg-gray-50 rounded-lg p-4">
         <span className="text-xs font-medium text-gray-500 uppercase tracking-wider">Meta Description</span>

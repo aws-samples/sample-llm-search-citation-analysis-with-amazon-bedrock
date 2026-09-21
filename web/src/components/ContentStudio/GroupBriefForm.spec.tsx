@@ -49,6 +49,125 @@ describe('GroupBriefForm', () => {
     expect(screen.getByText('No keyword groups yet')).toBeInTheDocument();
   });
 
+  it('associates always-visible fields with group-brief identities', () => {
+    renderGroupBriefForm();
+
+    const fields = ['Keyword group', 'Output language'].map((label) => (
+      screen.getByLabelText<HTMLSelectElement>(label)
+    ));
+
+    expect(fields.map((field) => ({
+      id: field.id,
+      labelFor: field.labels?.[0]?.htmlFor,
+      name: field.name,
+    }))).toStrictEqual([
+      {
+        id: 'group-brief-group',
+        labelFor: 'group-brief-group',
+        name: 'group-brief-group',
+      },
+      {
+        id: 'group-brief-language',
+        labelFor: 'group-brief-language',
+        name: 'group-brief-language',
+      },
+    ]);
+  });
+
+  it('gives generation modes exact accessible submission metadata', () => {
+    renderGroupBriefForm();
+
+    const modes = screen.getAllByRole<HTMLInputElement>('radio');
+
+    expect(modes.map((mode) => ({
+      id: mode.id,
+      labelFor: mode.labels?.[0]?.htmlFor,
+      name: mode.name,
+      value: mode.value,
+    }))).toStrictEqual([
+      {
+        id: 'group-brief-mode-improve_current_url',
+        labelFor: 'group-brief-mode-improve_current_url',
+        name: 'group-brief-mode',
+        value: 'improve_current_url',
+      },
+      {
+        id: 'group-brief-mode-rewrite_pasted_copy',
+        labelFor: 'group-brief-mode-rewrite_pasted_copy',
+        name: 'group-brief-mode',
+        value: 'rewrite_pasted_copy',
+      },
+      {
+        id: 'group-brief-mode-create_new_landing_page',
+        labelFor: 'group-brief-mode-create_new_landing_page',
+        name: 'group-brief-mode',
+        value: 'create_new_landing_page',
+      },
+    ]);
+  });
+
+  it('gives keyword checkboxes unique ids with one plural name', async () => {
+    renderGroupBriefForm();
+
+    await selectGroupForBrief();
+
+    const checkboxes = screen.getAllByRole<HTMLInputElement>('checkbox');
+
+    expect(checkboxes.map((checkbox) => ({
+      id: checkbox.id,
+      labelFor: checkbox.labels?.[0]?.htmlFor,
+      name: checkbox.name,
+      value: checkbox.value,
+    }))).toStrictEqual([
+      {
+        id: 'group-brief-keyword-keyword-1',
+        labelFor: 'group-brief-keyword-keyword-1',
+        name: 'group-brief-keyword-ids',
+        value: 'keyword-1',
+      },
+      {
+        id: 'group-brief-keyword-keyword-2',
+        labelFor: 'group-brief-keyword-keyword-2',
+        name: 'group-brief-keyword-ids',
+        value: 'keyword-2',
+      },
+    ]);
+  });
+
+  it('associates the URL field with its group-brief identity', async () => {
+    renderGroupBriefForm();
+
+    await userEvent.click(screen.getByRole('radio', { name: /Improve current URL/u }));
+    const landingUrl = screen.getByLabelText<HTMLInputElement>('Current landing URL');
+
+    expect({
+      id: landingUrl.id,
+      labelFor: landingUrl.labels?.[0]?.htmlFor,
+      name: landingUrl.name,
+    }).toStrictEqual({
+      id: 'group-brief-url',
+      labelFor: 'group-brief-url',
+      name: 'group-brief-url',
+    });
+  });
+
+  it('associates the copy field with its group-brief identity', async () => {
+    renderGroupBriefForm();
+
+    await userEvent.click(screen.getByRole('radio', { name: /Rewrite pasted copy/u }));
+    const currentCopy = screen.getByLabelText<HTMLTextAreaElement>('Current copy');
+
+    expect({
+      id: currentCopy.id,
+      labelFor: currentCopy.labels?.[0]?.htmlFor,
+      name: currentCopy.name,
+    }).toStrictEqual({
+      id: 'group-brief-copy',
+      labelFor: 'group-brief-copy',
+      name: 'group-brief-copy',
+    });
+  });
+
   it('selects every active member when a group is selected', async () => {
     renderGroupBriefForm();
 

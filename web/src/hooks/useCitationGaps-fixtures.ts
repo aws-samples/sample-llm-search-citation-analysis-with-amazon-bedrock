@@ -1,4 +1,9 @@
+import { vi } from 'vitest';
 import type { CitationGapsResponse } from '../types';
+
+export function setupCitationGapsConsoleErrorMock() {
+  vi.spyOn(console, 'error').mockImplementation(vi.fn());
+}
 
 export const mockCitationGapsResponse: CitationGapsResponse = {
   gaps: [
