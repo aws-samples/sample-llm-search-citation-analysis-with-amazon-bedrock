@@ -104,6 +104,7 @@ const synthesized: {
   researchWorkerRoleActions: string[];
   healthCheckMemorySize: number;
   statsInsightsMemorySize: number;
+  citationsContentMemorySize: number;
   bucketDeploymentMemorySizes: number[];
   gatewayResponses: GatewayResponseSnapshot[];
   schedulesMethods: ApiGatewayMethodSnapshot[];
@@ -171,6 +172,7 @@ const synthesized: {
   researchWorkerRoleActions: [],
   healthCheckMemorySize: Number.NaN,
   statsInsightsMemorySize: Number.NaN,
+  citationsContentMemorySize: Number.NaN,
   bucketDeploymentMemorySizes: [],
   gatewayResponses: [],
   schedulesMethods: [],
@@ -299,6 +301,7 @@ beforeAll(() => {
   synthesized.researchWorkerRoleActions = extractFunctionRoleActions(template, RESEARCH_WORKER_FUNCTION_NAME);
   synthesized.healthCheckMemorySize = extractFunctionMemorySize(template, 'CitationAnalysis-API-Health');
   synthesized.statsInsightsMemorySize = extractFunctionMemorySize(template, 'CitationAnalysis-API-StatsInsights');
+  synthesized.citationsContentMemorySize = extractFunctionMemorySize(template, 'CitationAnalysis-API-CitationsContent');
   synthesized.bucketDeploymentMemorySizes = extractMemorySizesByLogicalIdPrefix(template, 'CustomCDKBucketDeployment');
   synthesized.gatewayResponses = Object.values(
     template.findResources('AWS::ApiGateway::GatewayResponse')
@@ -904,6 +907,14 @@ describe('Lambda memory headroom (2.5.0 audit)', () => {
 
   it('gives the dashboard bucket deployment handler 512 MB', () => {
     expect(synthesized.bucketDeploymentMemorySizes).toStrictEqual([512]);
+  });
+
+  /**
+   * 7-day CloudWatch REPORT peaks on 2026-09-21: CitationsContent reached
+   * 153 MB (60% of 256 MB), the highest ratio of any function.
+   */
+  it('gives CitationsContent 512 MB after its peak reached 60% of the previous 256 MB', () => {
+    expect(synthesized.citationsContentMemorySize).toBe(512);
   });
 });
 

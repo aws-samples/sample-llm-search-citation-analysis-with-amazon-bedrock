@@ -9,6 +9,15 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.14.3] - 2026-09-21
+
+### Changed
+
+- `CitationAnalysis-API-CitationsContent` Lambda memory doubled from 256 MB to
+  512 MB. A 7-day CloudWatch REPORT sweep showed its peak at 153 MB (60% of
+  256 MB), the highest ratio of any function; every other function sat at or
+  below 45%.
+
 ## [2.14.2] - 2026-09-21
 
 ### Fixed
