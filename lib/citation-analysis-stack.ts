@@ -1913,7 +1913,9 @@ export class CitationAnalysisStack extends cdk.Stack {
       ]),
       layers: [sharedLayer],
       timeout: cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
-      memorySize: 256,
+      // 7-day CloudWatch REPORT peak on 2026-09-21 was 153 MB (60% of 256 MB),
+      // the highest ratio of any function — doubled for headroom.
+      memorySize: 512,
       description: 'API: Consolidated citations, URL breakdown, searches, crawled content, and raw responses',
       logGroup: apiLambdaLogGroup(this, 'CitationsContentLogGroup', 'CitationAnalysis-API-CitationsContent'),
       environment: {
