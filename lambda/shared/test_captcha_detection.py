@@ -359,46 +359,41 @@ def test_truncates_visible_content_when_page_exceeds_fifty_thousand_characters(t
 
 def _record_cleanup_events(cleanup_runtime) -> list[str]:
     events: list[str] = []
-    cleanup_runtime.context.unroute_all.side_effect = (
-        lambda **kwargs: events.append(f"unroute:{kwargs['behavior']}")
-    )
     cleanup_runtime.browser.close.side_effect = lambda: events.append("browser")
     cleanup_runtime.playwright.stop.side_effect = lambda: events.append("playwright")
     cleanup_runtime.browser_client.stop.side_effect = lambda: events.append("browser_client")
     return events
 
 
-def _cleanup_call_counts(cleanup_runtime) -> tuple[int, int, int, int]:
+def _cleanup_call_counts(cleanup_runtime) -> tuple[int, int, int]:
     return (
-        cleanup_runtime.context.unroute_all.call_count,
         cleanup_runtime.browser.close.call_count,
         cleanup_runtime.playwright.stop.call_count,
         cleanup_runtime.browser_client.stop.call_count,
     )
 
 
-def test_removes_routes_without_waiting_for_in_flight_handlers_when_cleanup_runs(cleanup_runtime):
+def test_releases_resources_in_shutdown_order_when_cleanup_runs(cleanup_runtime):
     events = _record_cleanup_events(cleanup_runtime)
-
-    cleanup_runtime.tools.cleanup()
-
-    assert events == ["unroute:ignoreErrors", "browser", "playwright", "browser_client"]
-
-
-def test_continues_resource_shutdown_when_route_drain_fails(cleanup_runtime):
-    events = _record_cleanup_events(cleanup_runtime)
-    cleanup_runtime.context.unroute_all.side_effect = BrowserTestError("route cleanup failed")
 
     cleanup_runtime.tools.cleanup()
 
     assert events == ["browser", "playwright", "browser_client"]
 
 
+def test_never_calls_the_page_to_remove_routes_when_cleanup_runs(cleanup_runtime):
+    # A hung page never answers unroute_all, which stalled crawls until the
+    # Lambda timeout; teardown must not depend on the page responding.
+    cleanup_runtime.tools.cleanup()
+
+    cleanup_runtime.context.unroute_all.assert_not_called()
+
+
 def test_does_not_release_resources_again_when_cleanup_repeats(cleanup_runtime):
     cleanup_runtime.tools.cleanup()
     cleanup_runtime.tools.cleanup()
 
-    assert _cleanup_call_counts(cleanup_runtime) == (1, 1, 1, 1)
+    assert _cleanup_call_counts(cleanup_runtime) == (1, 1, 1)
 
 
 def test_clears_resource_references_when_cleanup_finishes(cleanup_runtime):
@@ -433,7 +428,7 @@ def test_attempts_every_cleanup_step_when_one_resource_fails(cleanup_runtime, fa
 
     cleanup_runtime.tools.cleanup()
 
-    assert _cleanup_call_counts(cleanup_runtime) == (1, 1, 1, 1)
+    assert _cleanup_call_counts(cleanup_runtime) == (1, 1, 1)
 
 
 _NOT_INITIALIZED = "Browser session not initialized - call initialize_browser_session() first"
