@@ -277,6 +277,23 @@ The default OpenAI model is `gpt-5-mini` (cost-effective, supports web search). 
 
 Content generation (Content Studio) and ranking self-reflection both use Amazon Bedrock Claude Haiku 4.5. This runs on your AWS account and does not require an external API key. Self-reflection results are cached in a dedicated DynamoDB table with a 24-hour TTL to avoid repeated LLM calls for the same keyword, brand, and persona combination.
 
+#### Anthropic model access (handled automatically)
+
+Anthropic models on Bedrock sit behind three gates, and IAM permission is only one of them:
+
+1. `bedrock:InvokeModel` on the model — granted per Lambda role by the stack.
+2. The Anthropic one-time use-case form — once per AWS account, us-east-1 only.
+3. An AWS Marketplace subscription per model — once per AWS account.
+
+The deployment closes gates 2 and 3 itself (the `BedrockModelAccess` construct), so a brand-new AWS account needs no manual console steps. Without that, the first call in a fresh account fails with `AccessDeniedException ... not authorized to perform the required AWS Marketplace actions (aws-marketplace:ViewSubscriptions, aws-marketplace:Subscribe)`, because Bedrock otherwise tries to create the subscription just-in-time using the calling Lambda role's permissions.
+
+Notes for fresh accounts:
+
+- The account needs a verified payment method and a billing country Anthropic supports, or the Marketplace agreement cannot be created. The deployment reports such a model as unavailable and continues rather than failing.
+- Subscriptions and the form submission are account state: they are not removed when the stack is deleted.
+- The company details submitted on the form default to `Citation Analysis` / `Technology` / "Summarize content and generate new marketing content." and can be overridden at deploy time: `cdk deploy -c anthropicCompanyName="Acme" -c anthropicCompanyWebsite="https://acme.example" -c anthropicIndustry="Retail" -c anthropicUseCases="..."`.
+- `global.anthropic.claude-opus-4-7` (the optional `deep` tier) is not offered on demand to every account. The default tiers only use Haiku 4.5 and Sonnet 4.6, so this affects you only if you set `BEDROCK_TIER_*=deep`.
+
 ### Retry Logic
 - All API clients implement exponential backoff (5 retries, ~35s max wait)
 - Handles rate limits (429), server errors (5xx), timeouts, and connection errors
