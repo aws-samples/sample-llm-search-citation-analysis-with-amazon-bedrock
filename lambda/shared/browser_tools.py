@@ -276,28 +276,21 @@ class SimpleBrowserTools:
 
     def cleanup(self) -> None:
         """Detach and independently release every browser resource exactly once."""
-        context = self.context
         browser = self.browser
         playwright = self.playwright
         browser_client = self.browser_client
 
+        # Routes are deliberately NOT removed here. `unroute_all` (any behavior)
+        # needs a round-trip to the page, and a page that has already stopped
+        # responding (every observed case followed a screenshot timeout) never
+        # answers — the crawl then hangs until the Lambda timeout. Closing the
+        # connection drops the routes; late handler diagnostics are only noise.
         self.page = None
         self.context = None
         self.browser = None
         self.playwright = None
         self.browser_client = None
         self.session_id = None
-
-        if context is not None:
-            try:
-                logger.info("Removing browser request routes")
-                # "ignoreErrors", never "wait": waiting blocks until every in-flight
-                # handler settles, which hung a crawl for 4.5 minutes until the Lambda
-                # sandbox killed it. Errors from handlers still running after teardown
-                # are swallowed instead of logged.
-                context.unroute_all(behavior="ignoreErrors")
-            except Exception:
-                logger.exception("Could not remove browser request routes")
 
         if browser is not None:
             try:

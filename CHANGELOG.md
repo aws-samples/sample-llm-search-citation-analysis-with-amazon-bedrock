@@ -9,6 +9,19 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.14.2] - 2026-09-21
+
+### Fixed
+
+- Crawler cleanup no longer calls `unroute_all` at all. The 2.14.1 change to
+  `behavior="ignoreErrors"` was not sufficient: the call needs a round-trip to
+  the page, and a page that has stopped responding (every observed hang
+  followed a 30-second screenshot timeout) never answers, so the crawl still
+  stalled until the Lambda timeout. Closing the browser connection drops the
+  routes; the late-handler diagnostics the call was meant to silence are
+  only log noise. The crawler ran 140 invocations with zero errors the day
+  before `unroute_all` was introduced in 2.13.2.
+
 ## [2.14.1] - 2026-09-21
 
 ### Fixed
