@@ -377,12 +377,12 @@ def _cleanup_call_counts(cleanup_runtime) -> tuple[int, int, int, int]:
     )
 
 
-def test_uses_required_resource_shutdown_order_when_cleanup_runs(cleanup_runtime):
+def test_removes_routes_without_waiting_for_in_flight_handlers_when_cleanup_runs(cleanup_runtime):
     events = _record_cleanup_events(cleanup_runtime)
 
     cleanup_runtime.tools.cleanup()
 
-    assert events == ["unroute:wait", "browser", "playwright", "browser_client"]
+    assert events == ["unroute:ignoreErrors", "browser", "playwright", "browser_client"]
 
 
 def test_continues_resource_shutdown_when_route_drain_fails(cleanup_runtime):

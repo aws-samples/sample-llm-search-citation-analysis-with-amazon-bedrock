@@ -9,6 +9,17 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.14.1] - 2026-09-21
+
+### Fixed
+
+- Crawler cleanup no longer waits for in-flight browser route handlers.
+  `unroute_all(behavior="wait")`, introduced in 2.13.2 to silence teardown
+  diagnostics, could block indefinitely; one crawl hung for 4.5 minutes after
+  extracting the page and was killed at the Lambda timeout, discarding the
+  content until the workflow retry re-crawled it. Routes are now removed with
+  `behavior="ignoreErrors"`, which still suppresses late handler errors.
+
 ## [2.14.0] - 2026-09-21
 
 Content Studio briefs can target keyword or group scopes, run as a batch of
