@@ -13,6 +13,7 @@ interface ApiErrorResponse {
 interface ApiRequestOptions {
   signal?: AbortSignal;
   allowStructured4xx?: boolean;
+  acceptedJsonStatuses?: readonly number[];
 }
 
 interface ApiGetOptions extends ApiRequestOptions { params?: Record<string, string>; }
@@ -70,10 +71,14 @@ async function createApiRequestError(
   });
 }
 
+function acceptsJsonStatus(response: Response, options: ApiRequestOptions): boolean {
+  return options.acceptedJsonStatuses?.includes(response.status) === true;
+}
+
 /**
  * The request pipeline every verb shares: one authenticated fetch carrying the
- * caller's abort signal, an `ApiRequestError` for any non-2xx status, and the
- * decoded JSON body otherwise.
+ * caller's abort signal, an `ApiRequestError` for any unaccepted non-2xx status,
+ * and the decoded JSON body otherwise.
  */
 async function requestJson<T>(
   url: string,
@@ -85,7 +90,7 @@ async function requestJson<T>(
     signal: options.signal,
   });
 
-  if (!response.ok) {
+  if (!response.ok && !acceptsJsonStatus(response, options)) {
     throw await createApiRequestError(response, options.allowStructured4xx === true);
   }
 

@@ -1,17 +1,4 @@
-"""
-Tests for shared.self_invoke.invoke_self_async.
-
-The helper replaces the three copy-pasted async self-invocation blocks
-(bugs.md 3.4: keyword-research expand + competitor, content-studio
-generation). These tests pin the shared contract:
-
-- no ``AWS_LAMBDA_FUNCTION_NAME`` (local runs) -> synchronous fallback,
-  no invoke attempted
-- happy path -> exactly one Event invocation of the current function with
-  the JSON payload; fallback untouched; optional success log emitted
-- invoke failure -> logged, then ``SelfInvokeDispatchError`` raised. It does
-  NOT fall back to running the job inline; see ``TestDispatchFailureFailsClosed``.
-"""
+"""Tests for fail-closed asynchronous Lambda invocation."""
 
 from __future__ import annotations
 
@@ -23,6 +10,7 @@ from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 from shared import self_invoke
 from shared.self_invoke import SelfInvokeDispatchError, invoke_self_async
@@ -30,141 +18,166 @@ from shared.self_invoke import SelfInvokeDispatchError, invoke_self_async
 
 @contextmanager
 def _lambda_env(function_name: str, fake_boto3: MagicMock) -> Iterator[None]:
-    """
-    The environment `invoke_self_async` reads: AWS_LAMBDA_FUNCTION_NAME set to
-    `function_name` ('' is a local run with nothing to dispatch to) and
-    `fake_boto3` standing in for boto3.
-    """
     with (
-        patch.dict(os.environ, {'AWS_LAMBDA_FUNCTION_NAME': function_name}),
-        patch.object(self_invoke, 'boto3', fake_boto3),
+        patch.dict(os.environ, {"AWS_LAMBDA_FUNCTION_NAME": function_name}),
+        patch.object(self_invoke, "boto3", fake_boto3),
     ):
         yield
 
 
-def _boto3_whose_invoke_raises(error: Exception) -> MagicMock:
-    """A boto3 stand-in whose Lambda client rejects every `invoke` with `error`."""
+def _invoke_error(message: str) -> ClientError:
+    return ClientError(
+        {
+            "Error": {
+                "Code": "AccessDeniedException",
+                "Message": message,
+            }
+        },
+        "Invoke",
+    )
+
+
+def _boto3_whose_invoke_raises(error: ClientError) -> MagicMock:
     fake_boto3 = MagicMock()
     fake_boto3.client.return_value.invoke.side_effect = error
     return fake_boto3
 
 
 class TestInvokeSelfAsync:
-    def test_runs_fallback_synchronously_when_no_function_name_is_set(self):
+    def test_runs_fallback_synchronously_when_no_function_name_is_set(self) -> None:
         fallback = MagicMock()
         fake_boto3 = MagicMock()
 
-        with _lambda_env('', fake_boto3):
-            invoke_self_async({'async_expand': True}, fallback, description='expand')
+        with _lambda_env("", fake_boto3):
+            invoke_self_async({"async_expand": True}, fallback, description="expand")
 
         fallback.assert_called_once_with()
         fake_boto3.client.assert_not_called()
 
-    def test_invokes_current_function_as_event_with_json_payload(self):
+    def test_invokes_current_function_as_event_with_json_payload(self) -> None:
         fallback = MagicMock()
         fake_boto3 = MagicMock()
 
-        with _lambda_env('research-fn', fake_boto3):
+        with _lambda_env("research-fn", fake_boto3):
             invoke_self_async(
-                {'async_expand': True, 'research_id': 'abc'},
+                {"async_expand": True, "research_id": "abc"},
                 fallback,
-                description='expand',
+                description="expand",
             )
 
         fake_boto3.client.return_value.invoke.assert_called_once_with(
-            FunctionName='research-fn',
-            InvocationType='Event',
-            Payload=json.dumps({'async_expand': True, 'research_id': 'abc'}),
+            FunctionName="research-fn",
+            InvocationType="Event",
+            Payload=json.dumps({"async_expand": True, "research_id": "abc"}),
         )
         fallback.assert_not_called()
 
-    def test_logs_the_callers_description_when_the_invoke_call_fails(self, caplog):
+    def test_invokes_explicit_function_with_preencoded_payload(self) -> None:
+        lambda_client = MagicMock()
+        payload = {"legacy_generation": True}
+
+        invoke_self_async(
+            payload,
+            None,
+            description="generation",
+            function_name="content-worker",
+            payload_bytes=b'{"legacy_generation":true}',
+            lambda_client=lambda_client,
+        )
+
+        lambda_client.invoke.assert_called_once_with(
+            FunctionName="content-worker",
+            InvocationType="Event",
+            Payload=b'{"legacy_generation":true}',
+        )
+
+    def test_logs_callers_description_when_invoke_fails(self, caplog: pytest.LogCaptureFixture) -> None:
         fallback = MagicMock()
-        fake_boto3 = _boto3_whose_invoke_raises(RuntimeError('denied'))
+        fake_boto3 = _boto3_whose_invoke_raises(_invoke_error("denied"))
 
         with (
-            _lambda_env('research-fn', fake_boto3),
-            caplog.at_level(logging.ERROR, logger='shared.self_invoke'),
+            _lambda_env("research-fn", fake_boto3),
+            caplog.at_level(logging.ERROR, logger="shared.self_invoke"),
             pytest.raises(SelfInvokeDispatchError),
         ):
-            invoke_self_async({'async_expand': True}, fallback, description='expand')
+            invoke_self_async({"async_expand": True}, fallback, description="expand")
 
-        assert 'Failed to trigger async expand: denied' in caplog.text
+        assert "Failed to trigger async expand" in caplog.text
 
 
 class TestDispatchFailureFailsClosed:
-    """
-    REGRESSION (AUDIT-2026-08-19 §2.9).
-
-    This helper used to catch every exception from `invoke` and call
-    `fallback()` — and the fallbacks callers pass in ARE the long jobs
-    (`_process_generation_async`, `_process_expand_sync`,
-    `_process_competitor_sync`). A failed dispatch therefore ran a multi-minute
-    LLM job inline on an API-Gateway request: the client got a 504 at the
-    gateway's hard 29s ceiling, while the function kept going to its own 300s
-    timeout, billed the model call, and wrote the result nobody could see.
-
-    The endpoint's whole reason for being async was defeated by its own error
-    handler, and the test that used to live here asserted exactly that as the
-    intended contract ("falls back synchronously when the invoke call fails"),
-    which is why it went unnoticed.
-    """
-
-    def test_raises_instead_of_running_the_job_on_the_callers_request(self):
-        """The core guarantee: the long fallback must NOT be executed."""
+    def test_raises_instead_of_running_job_on_callers_request(self) -> None:
         fallback = MagicMock()
-        fake_boto3 = _boto3_whose_invoke_raises(RuntimeError('denied'))
+        fake_boto3 = _boto3_whose_invoke_raises(_invoke_error("denied"))
 
-        with _lambda_env('studio-fn', fake_boto3), pytest.raises(SelfInvokeDispatchError):
-            invoke_self_async({'async_generation': True}, fallback, description='generation')
+        with _lambda_env("studio-fn", fake_boto3), pytest.raises(SelfInvokeDispatchError):
+            invoke_self_async(
+                {"async_generation": True},
+                fallback,
+                description="generation",
+            )
 
         fallback.assert_not_called()
 
-    def test_error_names_the_operation_that_could_not_be_started(self):
+    def test_error_names_operation_that_could_not_start(self) -> None:
         fallback = MagicMock()
-        fake_boto3 = _boto3_whose_invoke_raises(RuntimeError('denied'))
+        fake_boto3 = _boto3_whose_invoke_raises(_invoke_error("denied"))
 
-        with _lambda_env('studio-fn', fake_boto3), pytest.raises(SelfInvokeDispatchError, match='generation'):
-            invoke_self_async({'async_generation': True}, fallback, description='generation')
+        with _lambda_env("studio-fn", fake_boto3), pytest.raises(
+            SelfInvokeDispatchError,
+            match="generation",
+        ):
+            invoke_self_async(
+                {"async_generation": True},
+                fallback,
+                description="generation",
+            )
 
-    def test_preserves_the_underlying_cause_for_diagnosis(self):
-        """`raise ... from e` — losing the boto3 error would hide the reason."""
+    def test_preserves_underlying_cause_for_diagnosis(self) -> None:
         fallback = MagicMock()
-        original = RuntimeError('AccessDeniedException')
+        original = _invoke_error("AccessDeniedException")
         fake_boto3 = _boto3_whose_invoke_raises(original)
 
-        with _lambda_env('studio-fn', fake_boto3), pytest.raises(SelfInvokeDispatchError) as exc_info:
-            invoke_self_async({'async_generation': True}, fallback, description='generation')
+        with _lambda_env("studio-fn", fake_boto3), pytest.raises(
+            SelfInvokeDispatchError
+        ) as exc_info:
+            invoke_self_async(
+                {"async_generation": True},
+                fallback,
+                description="generation",
+            )
 
         assert exc_info.value.__cause__ is original
 
-    def test_still_runs_inline_outside_lambda_where_no_async_path_exists(self):
-        """
-        The local/test case must keep working: with no
-        AWS_LAMBDA_FUNCTION_NAME there is nothing to dispatch to, so inline
-        execution is correct rather than a silent downgrade.
-        """
+    def test_runs_inline_outside_lambda_when_no_async_path_exists(self) -> None:
         fallback = MagicMock()
         fake_boto3 = MagicMock()
 
-        with _lambda_env('', fake_boto3):
-            invoke_self_async({'async_generation': True}, fallback, description='generation')
+        with _lambda_env("", fake_boto3):
+            invoke_self_async(
+                {"async_generation": True},
+                fallback,
+                description="generation",
+            )
 
         fallback.assert_called_once_with()
 
-    def test_emits_the_success_log_only_after_a_successful_invoke(self, caplog):
+    def test_emits_success_log_only_after_successful_invoke(
+        self,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
         fallback = MagicMock()
         fake_boto3 = MagicMock()
 
         with (
-            _lambda_env('studio-fn', fake_boto3),
-            caplog.at_level(logging.INFO, logger='shared.self_invoke'),
+            _lambda_env("studio-fn", fake_boto3),
+            caplog.at_level(logging.INFO, logger="shared.self_invoke"),
         ):
             invoke_self_async(
-                {'async_generation': True},
+                {"async_generation": True},
                 fallback,
-                description='generation',
-                success_log='Triggered async generation for content_id=abc',
+                description="generation",
+                success_log="Triggered async generation for content_id=abc",
             )
 
-        assert 'Triggered async generation for content_id=abc' in caplog.text
+        assert "Triggered async generation for content_id=abc" in caplog.text

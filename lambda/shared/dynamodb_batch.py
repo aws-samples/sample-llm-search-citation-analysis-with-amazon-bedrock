@@ -1,18 +1,21 @@
 """
-DynamoDB read helpers: parallel latest-per-key queries and page collection.
+DynamoDB read helpers: exact-key batch reads, latest-per-key queries, and pages.
 
-Several handlers need the latest-by-sort-key row for each of N primary
-keys — a pattern DynamoDB's `BatchGetItem` can't express because it
-requires the exact composite key, not "latest per partition". The
-alternative is N concurrent `Query` calls with a bounded thread pool.
-
-This module centralizes that pattern so callers don't spawn their own
-executors (audit item 16), and the ``LastEvaluatedKey`` pagination loop
-every full read of a table or index otherwise re-implements.
+Several handlers need either exact primary-key rows through ``BatchGetItem`` or
+the latest-by-sort-key row for each of N primary keys. This module centralizes
+those patterns, including DynamoDB's required retry loop for unprocessed batch
+keys, so callers do not implement subtly different completeness semantics.
 
 Usage:
 
-    from shared.dynamodb_batch import collect_all_items, query_latest_per_key
+    from shared.dynamodb_batch import batch_get_items, collect_all_items, query_latest_per_key
+
+    items = batch_get_items(
+        dynamodb_resource,
+        'ExampleTable',
+        [{'id': 'one'}, {'id': 'two'}],
+        consistent_read=True,
+    )
 
     results = query_latest_per_key(
         table=my_table,
@@ -30,6 +33,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import time
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
@@ -41,6 +45,55 @@ logger = logging.getLogger(__name__)
 # (3000 read units, 1000 write units at 1 RCU each for strongly-consistent
 # reads). 10 workers x O(1 query per worker) is safe for any table.
 _DEFAULT_MAX_WORKERS = 10
+_BATCH_GET_MAX_ATTEMPTS = 3
+_BATCH_GET_BASE_DELAY_SECONDS = 0.05
+
+
+class BatchGetUnprocessedError(RuntimeError):
+    """DynamoDB still had unprocessed keys after the bounded retry budget."""
+
+
+def batch_get_items(
+    resource: Any,
+    table_name: str,
+    keys: list[dict[str, Any]],
+    *,
+    consistent_read: bool = False,
+    max_attempts: int = _BATCH_GET_MAX_ATTEMPTS,
+    base_delay_seconds: float = _BATCH_GET_BASE_DELAY_SECONDS,
+) -> list[dict[str, Any]]:
+    """Fetch exact keys and retry only the keys DynamoDB leaves unprocessed.
+
+    ``BatchGetItem`` does not preserve request order, so callers that need a
+    stable order must join the returned rows back to their requested keys. A
+    response with missing rows is valid; exhausting retries with unprocessed
+    keys is not, because those keys are unknown rather than absent.
+    """
+    if not keys:
+        return []
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+
+    request: dict[str, Any] = {"Keys": keys}
+    if consistent_read:
+        request["ConsistentRead"] = True
+    items: list[dict[str, Any]] = []
+
+    for attempt in range(max_attempts):
+        response = resource.batch_get_item(RequestItems={table_name: request})
+        items.extend(response.get("Responses", {}).get(table_name, []))
+        unprocessed = response.get("UnprocessedKeys", {}).get(table_name, {})
+        unprocessed_keys = unprocessed.get("Keys", [])
+        if not unprocessed_keys:
+            return items
+        if attempt + 1 == max_attempts:
+            raise BatchGetUnprocessedError(f"{len(unprocessed_keys)} keys remained unprocessed for {table_name}")
+        time.sleep(base_delay_seconds * (2**attempt))
+        request = {**unprocessed, "Keys": unprocessed_keys}
+        if consistent_read:
+            request["ConsistentRead"] = True
+
+    return items
 
 
 def collect_all_items(operation: Callable[..., Mapping[str, Any]], **params: Any) -> list[dict[str, Any]]:
@@ -53,11 +106,11 @@ def collect_all_items(operation: Callable[..., Mapping[str, Any]], **params: Any
     items: list[dict[str, Any]] = []
     while True:
         response = operation(**params)
-        items.extend(response.get('Items', []))
-        last_key = response.get('LastEvaluatedKey')
+        items.extend(response.get("Items", []))
+        last_key = response.get("LastEvaluatedKey")
         if not last_key:
             return items
-        params['ExclusiveStartKey'] = last_key
+        params["ExclusiveStartKey"] = last_key
 
 
 def query_latest_per_key(

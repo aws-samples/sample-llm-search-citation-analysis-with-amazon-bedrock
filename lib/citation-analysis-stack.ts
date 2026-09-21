@@ -2,6 +2,10 @@ import * as cdk from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as lambdaEventSources from 'aws-cdk-lib/aws-lambda-event-sources';
+import * as events from 'aws-cdk-lib/aws-events';
+import * as eventTargets from 'aws-cdk-lib/aws-events-targets';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as kms from 'aws-cdk-lib/aws-kms';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -46,29 +50,20 @@ const bedrockTierEnv = {
 } as const;
 
 /**
- * Concurrency ceiling for the function that invokes itself asynchronously.
- *
- * `contentStudioFunction` re-invokes itself via `shared/self_invoke.py` to run
- * long work in the background. Async Lambda invocations are retried twice by
- * default, so without a ceiling a bug in a self-invoke guard becomes an
- * invocation storm: it consumes the account's entire concurrency pool —
- * starving every other function in the stack, including `manage-users` —
- * while billing an LLM call per invocation (AUDIT-2026-08-19 §2.4).
- *
- * 10 is deliberately generous for the expected load (a marketing team, not
- * public traffic) while bounding a runaway loop to 10 concurrent executions
- * instead of the account default of ~1000. Note this also *reserves* the
- * capacity, guaranteeing the function can always run.
- *
- * `keywordMgmtFunction` carried the same cap until 2.2.0, when keyword
- * research moved to its own Step Functions state machine
- * (`CitationAnalysis-KeywordResearch`) and the function stopped invoking
- * itself. Its jobs now scale with the state machine, not with this ceiling.
- *
- * If legitimate users start seeing 429s on content generation, raise this —
- * do not remove it.
+ * Bound concurrent Content Studio model calls without reserving API capacity.
+ * DynamoDB Streams retries failed records, while this worker ceiling limits
+ * both account-wide contention and accidental model spend.
  */
-const SELF_INVOKING_FUNCTION_CONCURRENCY = 10;
+const CONTENT_STUDIO_WORKER_FUNCTION_NAME = 'CitationAnalysis-ContentStudioWorker';
+const CONTENT_STUDIO_WORKER_CONCURRENCY = 10;
+// First rollout compatibility: old code can still self-invoke while Lambda
+// configuration and code update sequentially. Remove these only after the old
+// async queue and execution environments have drained in a later rollout.
+const CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS = 300;
+const CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY = 10;
+const CONTENT_STUDIO_STREAM_RETRY_ATTEMPTS = 2;
+const CONTENT_STUDIO_STREAM_MAX_RECORD_AGE_MINUTES = 60;
+const CONTENT_STUDIO_RECONCILE_INTERVAL_MINUTES = 5;
 
 /**
  * API Gateway's REST API integration timeout: a hard 29 seconds, not raisable.
@@ -82,17 +77,15 @@ const SELF_INVOKING_FUNCTION_CONCURRENCY = 10;
  * failure then surfaces as a Lambda timeout — visible in the function's own
  * Duration/Errors metrics — instead of only as an opaque gateway 504.
  *
- * Two deliberate exceptions, both documented at their definitions:
- *   - `contentStudioFunction` also runs as its own async worker via
- *     `shared/self_invoke.py`. That path is NOT behind API Gateway and
- *     legitimately needs minutes.
+ * Two deliberate exceptions are documented at their definitions:
+ *   - `contentStudioFunction` temporarily retains its old worker timeout while
+ *     pre-rollout self-invocations drain through the new forwarding handler.
  *   - `selfReflectionFunction` persists its result as the last step of a
  *     synchronous Bedrock call, so a 504 today is still recoverable from the
  *     cache it writes. Capping it at 29s would turn a slow request into
  *     permanent loss.
  *
- * Functions invoked by Step Functions (parse-keywords, search, deduplication,
- * crawler, generate-summary, research-worker) are not subject to this at all.
+ * Functions invoked by streams or Step Functions are not subject to this.
  */
 const API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS = 29;
 
@@ -222,6 +215,8 @@ interface CitationAnalysisTableSpec {
   sortKey?: dynamodb.Attribute;
   /** Epoch-seconds attribute after which DynamoDB expires the item. Omitted for tables that keep every row. */
   timeToLiveAttribute?: string;
+  /** Optional stream image used by durable event-driven workers. */
+  stream?: dynamodb.StreamViewType;
   /**
    * Added in the order listed. The order is load-bearing: it fixes the order of
    * the template's AttributeDefinitions, and a reorder is a table diff on deploy.
@@ -245,6 +240,7 @@ function citationAnalysisTable(scope: Construct, id: string, spec: CitationAnaly
     pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
     removalPolicy: cdk.RemovalPolicy.RETAIN,
     timeToLiveAttribute: spec.timeToLiveAttribute,
+    stream: spec.stream,
   });
 
   for (const index of spec.globalSecondaryIndexes ?? []) {
@@ -568,9 +564,36 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     // DynamoDB Table: ContentStudio
-    // Stores generated content ideas and content
+    // Stores generated content ideas and content. History merges bounded,
+    // newest-first status queries; batch status reads exact manifest child ids.
+    const contentStudioCreatedAtSortKey: dynamodb.Attribute = {
+      name: 'created_at',
+      type: dynamodb.AttributeType.STRING,
+    };
     const contentStudioTable = citationAnalysisTable(this, 'ContentStudioTable', {
       tableName: 'CitationAnalysis-ContentStudio',
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+      stream: dynamodb.StreamViewType.NEW_IMAGE,
+      globalSecondaryIndexes: [
+        {
+          indexName: 'StatusCreatedIndex',
+          partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
+          sortKey: contentStudioCreatedAtSortKey,
+        },
+      ],
+    });
+
+    // Durable batch authority. Child ids stay ordered in the manifest so status
+    // reads never depend on secondary-index propagation or discovery.
+    const contentBriefBatchesTable = citationAnalysisTable(this, 'ContentBriefBatchesTable', {
+      tableName: 'CitationAnalysis-ContentBriefBatches',
+      partitionKey: { name: 'batch_id', type: dynamodb.AttributeType.STRING },
+    });
+
+    // Saved Content Studio prompt templates. Built-ins remain in code; every
+    // generated row snapshots its exact effective prompt and provenance.
+    const contentBriefTemplatesTable = citationAnalysisTable(this, 'ContentBriefTemplatesTable', {
+      tableName: 'CitationAnalysis-ContentBriefTemplates',
       partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
     });
 
@@ -2555,76 +2578,227 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Content Studio API
     // ========================================
 
-    // Content Studio Lambda
+    const contentStudioEnvironment = {
+      DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
+      DYNAMODB_TABLE_CRAWLED_CONTENT: crawledContentTable.tableName,
+      DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
+      DYNAMODB_TABLE_CONTENT_STUDIO: contentStudioTable.tableName,
+      DYNAMODB_TABLE_CONTENT_BRIEF_BATCHES: contentBriefBatchesTable.tableName,
+      DYNAMODB_TABLE_CONTENT_BRIEF_TEMPLATES: contentBriefTemplatesTable.tableName,
+      DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
+      DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
+      CONTENT_STUDIO_WORKER_FUNCTION_NAME: CONTENT_STUDIO_WORKER_FUNCTION_NAME,
+      GENERATION_TIMEOUT_SECONDS: '360',
+      ...bedrockTierEnv,
+    };
+    const contentStudioStatusIndexArn = `${contentStudioTable.tableArn}/index/StatusCreatedIndex`;
+    const keywordsStatusIndexArn = `${keywordsTable.tableArn}/index/StatusIndex`;
+
+    // New requests only persist stream-owned rows. This first rollout keeps
+    // the old timeout and concurrency cap because CloudFormation updates
+    // Lambda configuration before code: old async_generation code must remain
+    // runnable until the forwarding handler is active and its queue drains.
     const contentStudioFunction = new lambda.Function(this, 'ContentStudioFunction', {
       functionName: 'CitationAnalysis-API-ContentStudio',
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'content-studio.handler',
       code: createApiLambdaCode('content-studio.py'),
       layers: [sharedLayer],
+      timeout: cdk.Duration.seconds(CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS),
+      memorySize: 512,
+      reservedConcurrentExecutions: CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY,
+      description: 'API: Content Studio - ideas and durable content queues',
+      logGroup: apiLambdaLogGroup(this, 'ContentStudioLogGroup', 'CitationAnalysis-API-ContentStudio'),
+      environment: contentStudioEnvironment,
+    });
+    contentStudioFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Query', 'dynamodb:Scan'],
+      resources: [searchResultsTable.tableArn],
+    }));
+    contentStudioFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:GetItem'],
+      resources: [brandConfigTable.tableArn, keywordGroupsTable.tableArn],
+    }));
+    contentStudioFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'dynamodb:BatchGetItem',
+        'dynamodb:DeleteItem',
+        'dynamodb:GetItem',
+        'dynamodb:PutItem',
+        // Temporary legacy drain: old history code scanned this table before
+        // the StatusCreatedIndex reader was active.
+        'dynamodb:Scan',
+        'dynamodb:UpdateItem',
+      ],
+      resources: [contentStudioTable.tableArn],
+    }));
+    contentStudioFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Query'],
+      resources: [contentStudioStatusIndexArn],
+    }));
+    contentStudioFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:GetItem', 'dynamodb:PutItem'],
+      resources: [contentBriefBatchesTable.tableArn],
+    }));
+    contentStudioFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: [
+        'dynamodb:DeleteItem',
+        'dynamodb:GetItem',
+        'dynamodb:PutItem',
+        'dynamodb:Scan',
+        'dynamodb:UpdateItem',
+      ],
+      resources: [contentBriefTemplatesTable.tableArn],
+    }));
+    contentStudioFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Scan'],
+      resources: [keywordsTable.tableArn],
+    }));
+    contentStudioFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Query'],
+      resources: [keywordsStatusIndexArn],
+    }));
+    // Temporary legacy drain: old async workers query crawled sources and
+    // invoke Bedrock until every pre-rollout event reaches the new forwarder.
+    contentStudioFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Query'],
+      resources: [crawledContentTable.tableArn],
+    }));
+    contentStudioFunction.addToRolePolicy(claudeInvokeModelStatement(this));
+
+    const contentStudioWorkerLogGroup = new logs.LogGroup(this, 'ContentStudioWorkerLogGroup', {
+      logGroupName: '/aws/lambda/CitationAnalysis-ContentStudioWorker',
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+    });
+    const contentStudioWorkerFunction = new lambda.Function(this, 'ContentStudioWorkerFunction', {
+      functionName: CONTENT_STUDIO_WORKER_FUNCTION_NAME,
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'content-studio.handler',
+      code: createApiLambdaCode('content-studio.py'),
+      layers: [sharedLayer],
       timeout: cdk.Duration.seconds(300),
       memorySize: 512,
-      // Self-invokes for async content generation — see the constant's comment.
-      reservedConcurrentExecutions: SELF_INVOKING_FUNCTION_CONCURRENCY,
-      description: 'API: Content Studio - ideas and content generation',
-      logGroup: apiLambdaLogGroup(this, 'ContentStudioLogGroup', 'CitationAnalysis-API-ContentStudio'),
-      environment: {
-        DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
-        DYNAMODB_TABLE_CITATIONS: citationsTable.tableName,
-        DYNAMODB_TABLE_CRAWLED_CONTENT: crawledContentTable.tableName,
-        DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
-        DYNAMODB_TABLE_CONTENT_STUDIO: contentStudioTable.tableName,
-        DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
-        DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
-        DYNAMODB_TABLE_SELF_REFLECTION: selfReflectionTable.tableName,
-        // Budget after which the reader-side sweep declares a generation dead.
-        // MUST stay above this function's own 300s timeout: at the previous
-        // 240s a legitimate 241-300s run was marked `failed` while still
-        // running, then flipped back to `generated` on completion
-        // (AUDIT-2026-08-19 §2.9). 60s of headroom absorbs async queue delay
-        // between the row being written and the worker actually starting.
-        GENERATION_TIMEOUT_SECONDS: '360',
-        ...bedrockTierEnv,
-      },
+      reservedConcurrentExecutions: CONTENT_STUDIO_WORKER_CONCURRENCY,
+      description: 'Worker: stream-backed Content Studio generation and recovery',
+      logGroup: contentStudioWorkerLogGroup,
+      environment: contentStudioEnvironment,
     });
-    searchResultsTable.grantReadData(contentStudioFunction);
-    citationsTable.grantReadData(contentStudioFunction);
-    crawledContentTable.grantReadData(contentStudioFunction);
-    brandConfigTable.grantReadData(contentStudioFunction);
-    contentStudioTable.grantReadWriteData(contentStudioFunction);
-    keywordsTable.grantReadData(contentStudioFunction);
-    keywordGroupsTable.grantReadData(contentStudioFunction);
-    selfReflectionTable.grantReadData(contentStudioFunction);
-    // Grant Bedrock access for content generation using Converse API
-    // Uses global.anthropic.claude-* inference profiles (Haiku 4.5 for speed)
-    contentStudioFunction.addToRolePolicy(claudeInvokeModelStatement(this));
-    
-    // Grant permission to invoke itself asynchronously for background content generation
-    // Use ARN pattern to avoid circular dependency
+    contentStudioWorkerFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:GetItem', 'dynamodb:UpdateItem'],
+      resources: [contentStudioTable.tableArn],
+    }));
+    contentStudioWorkerFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Query'],
+      resources: [contentStudioStatusIndexArn],
+    }));
+    contentStudioWorkerFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:GetItem'],
+      resources: [brandConfigTable.tableArn],
+    }));
+    contentStudioWorkerFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['dynamodb:Query'],
+      resources: [crawledContentTable.tableArn],
+    }));
+    contentStudioWorkerFunction.addToRolePolicy(claudeInvokeModelStatement(this));
+
+    // Phase-one compatibility keeps both exact API targets: old code can
+    // still invoke itself during the configuration-before-code update, while
+    // the new handler forwards those queued events to the worker. New request
+    // paths never call either target directly.
+    const stack = cdk.Stack.of(this);
+    const contentStudioApiFunctionArn = stack.formatArn({
+      service: 'lambda',
+      resource: 'function',
+      resourceName: 'CitationAnalysis-API-ContentStudio',
+      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+    });
+    const contentStudioWorkerFunctionArn = stack.formatArn({
+      service: 'lambda',
+      resource: 'function',
+      resourceName: CONTENT_STUDIO_WORKER_FUNCTION_NAME,
+      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+    });
     contentStudioFunction.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
       actions: ['lambda:InvokeFunction'],
-      resources: [`arn:aws:lambda:${this.region}:${this.account}:function:CitationAnalysis-API-ContentStudio`],
+      resources: [contentStudioApiFunctionArn, contentStudioWorkerFunctionArn],
+    }));
+    contentStudioWorkerFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['lambda:InvokeFunction'],
+      resources: [contentStudioWorkerFunctionArn],
     }));
 
-    // Content Studio API Routes
+    const contentStudioStreamDlq = new sqs.Queue(this, 'ContentStudioStreamDlq', {
+      queueName: 'CitationAnalysis-ContentStudioStreamDLQ',
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      enforceSSL: true,
+      retentionPeriod: cdk.Duration.days(14),
+    });
+    contentStudioWorkerFunction.addEventSource(
+      new lambdaEventSources.DynamoEventSource(contentStudioTable, {
+        startingPosition: lambda.StartingPosition.TRIM_HORIZON,
+        batchSize: 1,
+        retryAttempts: CONTENT_STUDIO_STREAM_RETRY_ATTEMPTS,
+        maxRecordAge: cdk.Duration.minutes(CONTENT_STUDIO_STREAM_MAX_RECORD_AGE_MINUTES),
+        onFailure: new lambdaEventSources.SqsDlq(contentStudioStreamDlq),
+        filters: [{
+          pattern: JSON.stringify({
+            eventName: ['INSERT'],
+            dynamodb: {
+              NewImage: {
+                generation_transport: { S: ['dynamodb_stream_v1'] },
+                status: { S: ['pending'] },
+              },
+            },
+          }),
+        }],
+      })
+    );
+
+    const contentStudioReconcileRule = new events.Rule(this, 'ContentStudioReconcileRule', {
+      ruleName: 'CitationAnalysis-ContentStudioReconcile',
+      schedule: events.Schedule.rate(
+        cdk.Duration.minutes(CONTENT_STUDIO_RECONCILE_INTERVAL_MINUTES)
+      ),
+    });
+    contentStudioReconcileRule.addTarget(new eventTargets.LambdaFunction(
+      contentStudioWorkerFunction,
+      { event: events.RuleTargetInput.fromObject({ action: 'reconcile' }) }
+    ));
+
+    // Content Studio API Routes. Every method keeps the shared Cognito options;
+    // generation begins only after its pending row is durably inserted.
     const contentStudioResource = apiResource.addResource('content-studio');
     const contentStudioIdeasResource = contentStudioResource.addResource('ideas');
     contentStudioIdeasResource.addMethod('GET', new apigateway.LambdaIntegration(contentStudioFunction, integrationOptions), methodOptions);
-    
+
     const contentStudioGenerateResource = contentStudioResource.addResource('generate');
     contentStudioGenerateResource.addMethod('POST', new apigateway.LambdaIntegration(contentStudioFunction, integrationOptions), methodOptions);
-    
+
+    const contentStudioGenerateBatchResource = contentStudioResource.addResource('generate-batch');
+    contentStudioGenerateBatchResource.addMethod('POST', new apigateway.LambdaIntegration(contentStudioFunction, integrationOptions), methodOptions);
+
     const contentStudioStatusResource = contentStudioResource.addResource('status');
     const contentStudioStatusIdResource = contentStudioStatusResource.addResource('{id}');
     contentStudioStatusIdResource.addMethod('GET', new apigateway.LambdaIntegration(contentStudioFunction, integrationOptions), methodOptions);
-    
+
     const contentStudioViewedResource = contentStudioResource.addResource('viewed');
     contentStudioViewedResource.addMethod('POST', new apigateway.LambdaIntegration(contentStudioFunction, integrationOptions), methodOptions);
-    
+
     const contentStudioHistoryResource = contentStudioResource.addResource('history');
     contentStudioHistoryResource.addMethod('GET', new apigateway.LambdaIntegration(contentStudioFunction, integrationOptions), methodOptions);
-    
+
+    const contentStudioTemplatesResource = contentStudioResource.addResource('templates');
+    contentStudioTemplatesResource.addMethod('GET', new apigateway.LambdaIntegration(contentStudioFunction, integrationOptions), methodOptions);
+    contentStudioTemplatesResource.addMethod('POST', new apigateway.LambdaIntegration(contentStudioFunction, integrationOptions), methodOptions);
+    const contentStudioTemplateIdResource = contentStudioTemplatesResource.addResource('{id}');
+    contentStudioTemplateIdResource.addMethod('PUT', new apigateway.LambdaIntegration(contentStudioFunction, integrationOptions), methodOptions);
+    contentStudioTemplateIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(contentStudioFunction, integrationOptions), methodOptions);
+
+    const contentStudioBatchesResource = contentStudioResource.addResource('batches');
+    const contentStudioBatchIdResource = contentStudioBatchesResource.addResource('{batch_id}');
+    contentStudioBatchIdResource.addMethod('GET', new apigateway.LambdaIntegration(contentStudioFunction, integrationOptions), methodOptions);
+
     const contentStudioIdResource = contentStudioResource.addResource('{id}');
     contentStudioIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(contentStudioFunction, integrationOptions), methodOptions);
 

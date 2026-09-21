@@ -3,11 +3,9 @@ import type {
 } from '../../types';
 
 export function getContentTitle(item: ContentStudioHistory): string {
-  return (
-    item.generated_content?.title?.trim()
-    || item.idea_title.trim()
-    || item.keyword.trim()
-  );
+  // `||`, not `??`: an empty generated title must fall through to the idea title.
+  const generatedTitle = item.generated_content?.title.trim() ?? '';
+  return generatedTitle || item.idea_title.trim() || item.keyword.trim();
 }
 
 export function formatContentWarning(warning: ContentWarning): string {

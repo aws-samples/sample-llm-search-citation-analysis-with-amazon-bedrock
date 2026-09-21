@@ -120,6 +120,24 @@ describe('API response errors', () => {
     }
   );
 
+  it('returns JSON when POST explicitly accepts a 503 domain response', async () => {
+    const responseBody = {
+      success: false,
+      error: 'Could not start content generation. Please try again.',
+    };
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
+      responseBody,
+      503,
+      'Service Unavailable'
+    ));
+
+    await expect(apiPost<unknown>(
+      '/test',
+      requestBodyFixture,
+      { acceptedJsonStatuses: [503] }
+    )).resolves.toStrictEqual(responseBody);
+  });
+
   it('stores no field when an opted-in structured response omits it', async () => {
     mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
       { error: 'Keyword conflicts with an active keyword' },

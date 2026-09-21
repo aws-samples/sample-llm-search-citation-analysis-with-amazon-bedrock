@@ -1,35 +1,13 @@
-"""
-Regression tests for content-studio async generation idempotency (audit #23).
+"""Content Studio deterministic-ID and conditional-insert regression tests.
 
-Background — the previous implementation generated a fresh `uuid.uuid4()`
-primary key on every call to `create_pending_content`. If API Gateway
-retried a POST (default behavior on read timeouts) or a user double-clicked
-the generate button, two rows were created with two separate UUIDs and
-two separate async Lambda self-invocations fired. The client saw two
-results, and Bedrock got billed twice for the same work.
-
-The fix:
-- `_compute_idempotency_key(idea)` derives a deterministic 32-char hex
-  key from idea_id + keyword + content_angle + output_language + a
-  rounded 5-minute time bucket.
-- `create_pending_content` uses that key as the DynamoDB primary key with
-  a conditional `attribute_not_exists(id)` put. Duplicates hit the
-  condition, fall back to a `get_item`, and return `(existing, created=False)`.
-- `_generate_content` skips the async Lambda invocation when
-  `created is False` so retries don't spawn duplicate generations.
-
-These tests pin:
-- Same idea + same window → same key → same row
-- Same idea + different window → different key → new row (user-intent re-run)
-- Different idea data → different key even in same window
-- Conditional-check failure paths return the existing row
-- Caller skips async invocation on idempotent hit
+Legacy idea cards retain five-minute regeneration buckets. Combined group briefs
+omit the bucket so retries remain stable until the client intentionally supplies
+a new run ID. Every path uses ``attribute_not_exists(id)`` for atomic insertion.
 """
 
 from __future__ import annotations
 
 import hashlib
-import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -37,19 +15,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.content_studio_fixtures import (
+    content_studio_resource,
+    load_content_studio_module,
+    stateful_content_table,
+)
 from testing.dynamodb_stubs import fake_dynamodb_resource
-from testing.env import setdefault_env
-from testing.module_loader import load_handler_module
 
-# Table names the module reads at import time.
-setdefault_env({
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
-    'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
-    'DYNAMODB_TABLE_CONTENT_STUDIO': 'test-content-studio',
-    'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
-    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
-})
-_mod = load_handler_module(os.path.dirname(__file__), 'content-studio.py')
+_mod = load_content_studio_module('content_studio_idempotency_under_test')
 
 _GROUP_IDEA = {
     'id': 'brief-1',
@@ -209,6 +182,40 @@ class TestComputeIdempotencyKey:
         # Sanity: our patch didn't accidentally break utc_now globally.
         assert _mod.utc_now is real_utc_now
 
+    def test_group_brief_reuses_same_row_across_thirty_minutes(self) -> None:
+        table, rows = stateful_content_table()
+        resource = content_studio_resource(content_table=table)
+        early = datetime(2026, 4, 18, 12, 0, 0, tzinfo=UTC)
+        later = datetime(2026, 4, 18, 12, 30, 0, tzinfo=UTC)
+
+        with patch.object(_mod, 'dynamodb', resource), patch.object(
+            _mod, 'utc_now', return_value=early
+        ):
+            first = _mod._queue_canonical_idea(_GROUP_IDEA)
+        with patch.object(_mod, 'dynamodb', resource), patch.object(
+            _mod, 'utc_now', return_value=later
+        ):
+            second = _mod._queue_canonical_idea(_GROUP_IDEA)
+
+        assert first.outcome == 'accepted'
+        assert second.outcome == 'existing'
+        assert second.item['id'] == first.item['id']
+        assert len(rows) == 1
+
+    def test_group_brief_creates_new_row_when_client_id_changes(self) -> None:
+        table, rows = stateful_content_table()
+        resource = content_studio_resource(content_table=table)
+        next_run = {**_GROUP_IDEA, 'id': 'brief-2'}
+
+        with patch.object(_mod, 'dynamodb', resource):
+            first = _mod._queue_canonical_idea(_GROUP_IDEA)
+            second = _mod._queue_canonical_idea(next_run)
+
+        assert first.outcome == 'accepted'
+        assert second.outcome == 'accepted'
+        assert first.item['id'] != second.item['id']
+        assert len(rows) == 2
+
     def test_returns_thirty_two_char_hex(self) -> None:
         """DynamoDB keys must be predictable length. 32 hex chars = 128 bits
         of collision resistance, plenty for this use case."""
@@ -271,15 +278,23 @@ class TestCreatePendingContent:
             'keyword': 'hotels',
             'idea_id': 'idea-1',
         }
+        idea = {
+            'id': 'idea-1',
+            'keyword': 'hotels',
+            'content_angle': 'a',
+        }
+        expected_id = _mod._compute_idempotency_key(idea)
         error = _FakeClientError('ConditionalCheckFailedException')
 
-        with self._table(put_raises=error, get_item_return=existing_row):
-            item, created = _mod.create_pending_content({
-                'id': 'idea-1', 'keyword': 'hotels', 'content_angle': 'a',
-            })
+        with self._table(put_raises=error, get_item_return=existing_row) as table:
+            item, created = _mod.create_pending_content(idea)
 
         assert created is False
         assert item == existing_row
+        table.get_item.assert_called_once_with(
+            Key={'id': expected_id},
+            ConsistentRead=True,
+        )
 
     def test_reraises_non_conditional_client_errors(self) -> None:
         """Only ConditionalCheckFailedException is the idempotent-hit case.

@@ -1,4 +1,4 @@
-import { vi } from 'vitest';
+import { buildContentStudioHookResult } from '../../ContentStudio/ContentStudioView-fixtures';
 import type { useCitationGaps } from '../../../hooks/useCitationGaps';
 import type { useContentStudio } from '../../../hooks/useContentStudio';
 import type {
@@ -32,20 +32,13 @@ export function buildStudioSnapshot({
   briefCount = 0,
   loading = false,
 }: StudioSeed): StudioHookResult {
-  return {
+  return buildContentStudioHookResult({
     ideas: Array.from({ length: ideaCount }, (_, i) => buildIdea(`idea-${i}`)),
     history: Array.from({ length: briefCount }, (_, i) => buildGeneratedBrief(`brief-${i}`)),
     loading,
     fetchIdeas,
     fetchHistory,
-    error: null,
-    unviewedCount: 0,
-    generating: false,
-    generateContent: vi.fn(),
-    markViewed: vi.fn(),
-    deleteContent: vi.fn(),
-    refreshGeneratingItems: vi.fn(),
-  };
+  });
 }
 
 interface GapsSeed {

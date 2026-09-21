@@ -28,10 +28,14 @@ if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
     echo "Docker build completed"
 else
     echo "Docker not running - using pip with Linux/Python 3.12 wheel constraints"
+    # greenlet (a Playwright dependency) ships no manylinux2014 wheel for
+    # cp312, only manylinux_2_28; the Lambda Python 3.12 runtime (AL2023,
+    # glibc 2.34) accepts both tags.
     PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 pip3 install \
         -r requirements.txt \
         -t "$LAYER_DIR" \
         --platform manylinux2014_x86_64 \
+        --platform manylinux_2_28_x86_64 \
         --only-binary=:all: \
         --python-version 3.12 \
         --upgrade \
