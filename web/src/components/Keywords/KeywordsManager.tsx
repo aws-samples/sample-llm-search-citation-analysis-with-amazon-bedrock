@@ -26,13 +26,17 @@ import { BulkGroupBar } from './KeywordGroupAssignment';
 import {
   CREATE_ERROR_MESSAGE,
   UPDATE_ERROR_MESSAGE,
+  ACTIVE_KEYWORD_STATUS,
   DELETE_ERROR_MESSAGE,
+  PAUSED_KEYWORD_STATUS,
+  STATUS_ERROR_MESSAGE,
   buildBulkMessage,
   buildCreateKeywordBody,
   collectBulkResults,
   getBulkAlert,
   getSafeErrorMessage,
   isDuplicateKeyword,
+  isKeywordActive,
   parseBulkKeywords,
   parseKeywordResponse,
   processBulkKeyword,
@@ -206,6 +210,60 @@ export const KeywordsManager = ({
     setKeywords(keywords.filter((item) => item.id !== id));
   };
 
+  /**
+   * Activate or pause keywords.
+   *
+   * Only the status changes: `keyword` is sent because the API requires it and
+   * refuses a different canonical identity, which makes this a no-op on the
+   * text. Each keyword is one PUT, so a partial failure leaves the successful
+   * ones changed — reported rather than rolled back, since the alternative is
+   * silently discarding work the user asked for.
+   */
+  const setKeywordStatus = async (targets: readonly Keyword[], active: boolean) => {
+    if (targets.length === 0) return;
+    const status = active ? ACTIVE_KEYWORD_STATUS : PAUSED_KEYWORD_STATUS;
+
+    setSaving(true);
+    try {
+      const updated = new Map<string, Keyword>();
+      const failures: string[] = [];
+      for (const target of targets) {
+        try {
+          const response = await apiPut<unknown>(
+            `/keywords/${target.id}`,
+            {
+              keyword: target.keyword,
+              status,
+            },
+            { allowStructured4xx: true }
+          );
+          const data = parseKeywordResponse(response);
+          updated.set(data.id, data);
+        } catch (error) {
+          console.error('Error changing keyword status:', error);
+          failures.push(target.keyword);
+        }
+      }
+
+      if (updated.size > 0) {
+        setKeywords(keywords.map((item) => updated.get(item.id) ?? item));
+        setBulkSelectedIds(new Set());
+      }
+      if (failures.length > 0) {
+        showAlert(
+          'Error',
+          `${STATUS_ERROR_MESSAGE} for ${failures.length} of ${targets.length}: ${failures.join(', ')}`,
+          'error'
+        );
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const selectedKeywords = keywords.filter((item) => bulkSelectedIds.has(item.id));
+  const pausedSelectedCount = selectedKeywords.filter((item) => !isKeywordActive(item)).length;
+
   const deleteGroup = async (group: KeywordGroup) => {
     const outcome = await removeGroup(group.id);
     if (!outcome.success) {
@@ -318,6 +376,13 @@ export const KeywordsManager = ({
         onAddToGroup={(group) => { void applyBulk(group, 'add'); }}
         onRemoveFromGroup={(group) => { void applyBulk(group, 'remove'); }}
         onClearSelection={() => setBulkSelectedIds(new Set())}
+        pausedSelectedCount={pausedSelectedCount}
+        onActivateSelected={() => {
+          void setKeywordStatus(selectedKeywords.filter((item) => !isKeywordActive(item)), true);
+        }}
+        onPauseSelected={() => {
+          void setKeywordStatus(selectedKeywords.filter(isKeywordActive), false);
+        }}
       />
 
       <KeywordList
@@ -340,6 +405,8 @@ export const KeywordsManager = ({
         onToggleMembership={toggleMembership}
         membershipBusy={saving}
         emptyMessage={emptyMessage}
+        onSetKeywordStatus={(keyword, active) => { void setKeywordStatus([keyword], active); }}
+        statusBusy={saving}
       />
 
       <ConfirmModal

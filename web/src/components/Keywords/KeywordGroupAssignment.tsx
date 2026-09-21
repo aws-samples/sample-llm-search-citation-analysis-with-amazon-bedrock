@@ -77,11 +77,16 @@ interface BulkGroupBarProps {
   readonly onAddToGroup: (group: KeywordGroup) => void;
   readonly onRemoveFromGroup: (group: KeywordGroup) => void;
   readonly onClearSelection: () => void;
+  /** How many of the ticked keywords a run currently skips. */
+  readonly pausedSelectedCount?: number;
+  readonly onActivateSelected?: () => void;
+  readonly onPauseSelected?: () => void;
 }
 
-/** Bulk membership actions for the keywords ticked in the list. */
+/** Bulk membership and status actions for the keywords ticked in the list. */
 export const BulkGroupBar = ({
   selectedCount, groups, busy, onAddToGroup, onRemoveFromGroup, onClearSelection,
+  pausedSelectedCount = 0, onActivateSelected, onPauseSelected,
 }: BulkGroupBarProps) => {
   const [groupId, setGroupId] = useState('');
   const chosen = groups.find((group) => group.id === groupId);
@@ -117,6 +122,30 @@ export const BulkGroupBar = ({
       >
         Remove from group
       </button>
+      {onActivateSelected && (
+        <button
+          type="button"
+          disabled={busy || pausedSelectedCount === 0}
+          onClick={onActivateSelected}
+          // The count is in the label because activating is the expensive
+          // direction: each active keyword is queried against every provider on
+          // the next run, so "Activate 40" should not be a silent click.
+          title={pausedSelectedCount === 0 ? 'Every selected keyword is already active' : undefined}
+          className="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Activate{pausedSelectedCount > 0 ? ` ${pausedSelectedCount}` : ''}
+        </button>
+      )}
+      {onPauseSelected && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onPauseSelected}
+          className="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Pause
+        </button>
+      )}
       <button type="button" onClick={onClearSelection} className="text-gray-500 hover:text-gray-900 sm:ml-auto">
         Clear selection
       </button>

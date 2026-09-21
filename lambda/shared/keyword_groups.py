@@ -34,6 +34,12 @@ MAX_SCOPE_IDS = 1000
 SCOPE_MODES = ('all', 'groups', 'keywords')
 _SCOPE_ID_FIELDS = {'groups': 'group_ids', 'keywords': 'keyword_ids'}
 
+# The only status an analysis run will accept. Anything that reports "how many
+# keywords would this scope run" has to agree with `resolve_scope`, which
+# returns active keywords in every mode, so the value lives here rather than as
+# a literal in each caller.
+ACTIVE_KEYWORD_STATUS = 'active'
+
 
 def normalize_group_name(name: str) -> str:
     """Case-insensitive, whitespace-collapsed identity used for uniqueness."""
@@ -142,7 +148,7 @@ def query_active_keywords(keywords_table: Any) -> list[dict[str, Any]]:
     return collect_all_items(
         keywords_table.query,
         IndexName='StatusIndex',
-        KeyConditionExpression=Key('status').eq('active'),
+        KeyConditionExpression=Key('status').eq(ACTIVE_KEYWORD_STATUS),
     )
 
 

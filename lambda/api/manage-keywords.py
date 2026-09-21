@@ -108,14 +108,24 @@ def _update_request(
     an empty list clears the attribute instead; ``None`` leaves memberships
     alone.
     """
-    update_expr = 'SET #kw = :k, #s = :st, updated_at = :u'
-    expr_names = {'#id': 'id', '#kw': 'keyword', '#s': 'status'}
+    update_expr = 'SET #kw = :k, updated_at = :u'
+    expr_names = {'#id': 'id', '#kw': 'keyword'}
     expr_values: dict[str, Any] = {
         ':expected_keyword': stored_keyword,
         ':k': text,
-        ':st': status,
         ':u': get_timestamp(),
     }
+
+    # Omitted means "leave the status alone", like every other optional field
+    # below. `status` used to default to 'active' and be written on every
+    # update, so renaming a paused keyword silently activated it — and an
+    # activated keyword is queried against every provider on the next run, so
+    # the edit quietly added spend. Research promotes unselected proposals as
+    # inactive, which is exactly the population a rename would resurrect.
+    if status is not None:
+        update_expr += ', #s = :st'
+        expr_names['#s'] = 'status'
+        expr_values[':st'] = status
 
     for field, attribute, placeholder in _OPTIONAL_UPDATE_FIELDS:
         value = metadata[field]
@@ -177,7 +187,8 @@ def create_keyword(event, context, body, keyword, region, language, category, pr
 @parse_json_body
 @validate({
     'keyword': {'required': True, 'source': 'body'},
-    'status': {'choices': list(ALLOWED_KEYWORD_STATUSES), 'default': 'active', 'source': 'body'},
+    # No default: absent must mean "unchanged", not "active". See `_update_request`.
+    'status': {'choices': list(ALLOWED_KEYWORD_STATUSES), 'source': 'body'},
     'region': {'type': str, 'max_length': 50, 'source': 'body'},
     'language': {'type': str, 'max_length': 10, 'source': 'body'},
     'category': {'type': str, 'max_length': 100, 'source': 'body'},

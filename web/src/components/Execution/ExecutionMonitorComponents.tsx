@@ -100,7 +100,10 @@ export const TriggerSection = ({
   onSelectionChange, onTriggerAnalysis, onRunGroup, isAdmin,
 }: TriggerSectionProps) => {
   const getKeywordCountText = (): string => {
-    if (selectedIds.length === 0) return `All ${keywordsCount} active keywords`;
+    // `activeKeywords`, not `keywordsCount`: the latter is every keyword in the
+    // library, so an install with paused keywords was told it would run "All 53
+    // active keywords" when a no-selection run resolves to the active ones only.
+    if (selectedIds.length === 0) return `All ${activeKeywords.length} active keywords`;
     const plural = selectedIds.length > 1 ? 's' : '';
     return `${selectedIds.length} keyword${plural} selected`;
   };
@@ -171,6 +174,10 @@ const GroupQuickRun = ({
           type="button"
           onClick={() => onRunGroup(group)}
           disabled={disabled || group.keyword_count === 0}
+          // The count is of active members, so 0 means the group holds only
+          // paused keywords and a run would resolve to nothing. Say so, rather
+          // than leaving a dead button with no explanation.
+          title={group.keyword_count === 0 ? `${group.name} has no active keywords to run` : undefined}
           className="px-3 py-1.5 text-sm rounded-lg border border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {group.name}

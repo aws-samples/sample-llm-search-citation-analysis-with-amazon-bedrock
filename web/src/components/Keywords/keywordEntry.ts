@@ -29,6 +29,22 @@ export type BulkKeywordResult =
 export const CREATE_ERROR_MESSAGE = 'Failed to add keyword';
 export const UPDATE_ERROR_MESSAGE = 'Failed to update keyword';
 export const DELETE_ERROR_MESSAGE = 'Failed to delete keyword';
+export const STATUS_ERROR_MESSAGE = 'Failed to change keyword status';
+
+/** The status an analysis run accepts; mirrors `ACTIVE_KEYWORD_STATUS` on the API. */
+export const ACTIVE_KEYWORD_STATUS = 'active';
+/** What a keyword excluded from runs is set to when paused from the list. */
+export const PAUSED_KEYWORD_STATUS = 'inactive';
+
+/**
+ * Whether an analysis run would include this keyword.
+ *
+ * A missing `status` counts as active, matching the API: rows predate the
+ * field, and the group counter and keyword picker read them the same way.
+ */
+export function isKeywordActive(keyword: Keyword): boolean {
+  return !keyword.status || keyword.status === ACTIVE_KEYWORD_STATUS;
+}
 
 export class InvalidKeywordResponseError extends TypeError {
   constructor() {

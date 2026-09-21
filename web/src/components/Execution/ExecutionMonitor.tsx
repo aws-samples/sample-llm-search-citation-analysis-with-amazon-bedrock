@@ -11,6 +11,7 @@ import { calculateDuration } from '../../formatting/dateFormatter';
 import { useAlertModal } from '../../hooks/useAlertModal';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
+import { isKeywordActive } from '../Keywords/keywordEntry';
 import { AlertModal } from '../ui/Modal';
 import { processExecutionData } from '../../formatting/executionProcessor';
 import {
@@ -73,7 +74,8 @@ export const ExecutionMonitor = ({
   } = useAlertModal();
   const { groups } = useKeywordGroups();
 
-  const activeKeywords = keywords.filter((k) => !k.status || k.status === 'active');
+  // Same rule the keyword list and the API use, kept in one place.
+  const activeKeywords = keywords.filter(isKeywordActive);
 
   const runWithPreflight = async (scope: AnalysisScope | undefined) => {
     setIsStarting(true);
