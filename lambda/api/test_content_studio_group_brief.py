@@ -218,7 +218,7 @@ class TestGroupBriefAsyncGeneration:
 META: Example description
 
 ## Overview
-Useful body.
+Useful body with enough detail to remain a valid generated draft for Content Studio users.
 
 HEADINGS: Overview, FAQ
 POINTS:
@@ -234,7 +234,7 @@ POINTS:
         assert result['content'] == {
             'title': 'Example title',
             'meta_description': 'Example description',
-            'body': '## Overview\nUseful body.',
+            'body': '## Overview\nUseful body with enough detail to remain a valid generated draft for Content Studio users.',
             'suggested_headings': ['Overview', 'FAQ'],
             'key_points': ['First point', 'Second point'],
         }

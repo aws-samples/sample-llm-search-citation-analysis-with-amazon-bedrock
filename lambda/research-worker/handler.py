@@ -118,7 +118,7 @@ class AgentPlanningError(RuntimeError):
 
 
 class CheckpointConflictError(RuntimeError):
-    """Checkpoint aggregation kept racing active step writes."""
+    """A checkpoint write kept racing another active invocation."""
 
 
 # =============================================================================
@@ -452,13 +452,25 @@ def _error_text(error: Any) -> str:
     return text[:ERROR_MESSAGE_LIMIT]
 
 
-def _step_result(job: dict[str, Any], event: dict[str, Any], step_id: str, default: str) -> dict[str, Any]:
+def _step_result(
+    job: dict[str, Any],
+    event: dict[str, Any],
+    step_id: str,
+    default: str | None,
+) -> dict[str, Any]:
     step = (job.get('steps') or {}).get(step_id) or {}
     status = step.get('status') if isinstance(step, dict) else None
+    if status not in STEP_TERMINAL_STATUSES:
+        if default is None:
+            raise CheckpointConflictError(
+                f"Research job {event['job_id']} step {step_id} terminal checkpoint "
+                f'conflicted with persisted status {status!r}',
+            )
+        status = default
     return {
         **_base_result(event, _event_round(event) or 1),
         'step_id': step_id,
-        'status': status if status in STEP_TERMINAL_STATUSES else default,
+        'status': status,
     }
 
 
@@ -957,7 +969,7 @@ def execute_step(event: dict[str, Any]) -> dict[str, Any]:
         step,
         allowed_statuses=(STEP_PENDING, STEP_RUNNING),
     ):
-        return _step_result(_load_job(job_id), event, step_id, step['status'])
+        return _step_result(_load_job(job_id), event, step_id, None)
     logger.info('Step %s of job %s committed %s', step_id, job_id, step['status'])
     return _step_result({**job, 'steps': {**job.get('steps', {}), step_id: step}}, event, step_id, step['status'])
 
@@ -989,7 +1001,7 @@ def fail_step(event: dict[str, Any]) -> dict[str, Any]:
         step,
         allowed_statuses=(STEP_PENDING, STEP_RUNNING),
     ):
-        return _step_result(_load_job(job_id), event, step_id, STEP_FAILED)
+        return _step_result(_load_job(job_id), event, step_id, None)
     return {**_base_result(event, _event_round(event) or 1), 'step_id': step_id, 'status': STEP_FAILED}
 
 

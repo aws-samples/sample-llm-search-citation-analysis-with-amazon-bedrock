@@ -8,6 +8,8 @@ import type {
 export const UNGROUPED_SECTION_ID = '__ungrouped__';
 
 interface KeywordScopePickerProps {
+  readonly idPrefix: string;
+  readonly name: string;
   readonly keywords: Keyword[];
   readonly groups: KeywordGroup[];
   /** Selected keyword ids. */
@@ -62,12 +64,14 @@ function sectionState(section: Section, selected: Set<string>): SectionState {
  * the execution page used, which required Cmd+F to find anything.
  */
 export const KeywordScopePicker = ({
-  keywords, groups, selectedIds, onChange, disabled = false,
+  idPrefix, name, keywords, groups, selectedIds, onChange, disabled = false,
 }: KeywordScopePickerProps) => {
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const selected = useMemo(() => new Set(selectedIds), [selectedIds]);
   const needle = search.trim().toLocaleLowerCase();
+  const searchId = `${idPrefix}-search`;
+  const sectionName = `${idPrefix}-section-ids`;
 
   const sections = useMemo(() => buildSections(keywords, groups), [keywords, groups]);
   const visibleSections = useMemo(
@@ -119,9 +123,11 @@ export const KeywordScopePicker = ({
   return (
     <div className="border border-gray-200 rounded-lg bg-gray-50">
       <div className="flex flex-col sm:flex-row sm:items-center gap-2 p-3 border-b border-gray-200">
+        <label htmlFor={searchId} className="sr-only">Search keywords</label>
         <input
+          id={searchId}
+          name={searchId}
           type="search"
-          aria-label="Search keywords"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search keywords..."
@@ -147,12 +153,18 @@ export const KeywordScopePicker = ({
         {visibleSections.map((section) => {
           const state = sectionState(section, selected);
           const isCollapsed = collapsed.has(section.id);
+          const sectionCheckboxId = `${idPrefix}-section-${section.id}`;
           return (
             <section key={section.id} aria-label={section.name}>
               <div className="flex items-center gap-2 px-3 py-2 bg-white">
+                <label htmlFor={sectionCheckboxId} className="sr-only">
+                  Select all in {section.name}
+                </label>
                 <input
+                  id={sectionCheckboxId}
+                  name={sectionName}
+                  value={section.id}
                   type="checkbox"
-                  aria-label={`Select all in ${section.name}`}
                   checked={state === 'all'}
                   ref={(element) => { if (element) element.indeterminate = state === 'some'; }}
                   onChange={() => toggleSection(section)}
@@ -171,18 +183,28 @@ export const KeywordScopePicker = ({
               </div>
               {!isCollapsed && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 px-3 pb-3">
-                  {section.keywords.map((keyword) => (
-                    <label key={`${section.id}:${keyword.id}`} className="flex items-center gap-2 p-1.5 hover:bg-white rounded cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selected.has(keyword.id)}
-                        onChange={() => toggleKeyword(keyword.id)}
-                        disabled={disabled}
-                        className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900"
-                      />
-                      <span className="text-sm text-gray-700 truncate">{keyword.keyword}</span>
-                    </label>
-                  ))}
+                  {section.keywords.map((keyword) => {
+                    const keywordId = `${idPrefix}-section-${section.id}-keyword-${keyword.id}`;
+                    return (
+                      <label
+                        key={`${section.id}:${keyword.id}`}
+                        htmlFor={keywordId}
+                        className="flex items-center gap-2 p-1.5 hover:bg-white rounded cursor-pointer"
+                      >
+                        <input
+                          id={keywordId}
+                          name={name}
+                          value={keyword.id}
+                          type="checkbox"
+                          checked={selected.has(keyword.id)}
+                          onChange={() => toggleKeyword(keyword.id)}
+                          disabled={disabled}
+                          className="w-4 h-4 text-gray-900 rounded border-gray-300 focus:ring-gray-900"
+                        />
+                        <span className="text-sm text-gray-700 truncate">{keyword.keyword}</span>
+                      </label>
+                    );
+                  })}
                 </div>
               )}
             </section>

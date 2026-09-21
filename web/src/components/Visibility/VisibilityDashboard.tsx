@@ -1,21 +1,21 @@
 import {
-  useEffect, useState 
+  useEffect, useState
 } from 'react';
 import { useVisibilityMetrics } from '../../hooks/useVisibilityMetrics';
 import { useHistoricalTrends } from '../../hooks/useHistoricalTrends';
 import { usePersonaRankings } from '../../hooks/usePersonaRankings';
 import type {
-  GroupVisibilityResponse, Keyword, ReportScope, VisibilityMetricsResponse, VisibilityResponse 
+  GroupVisibilityResponse, Keyword, ReportScope, VisibilityMetricsResponse, VisibilityResponse
 } from '../../types';
 import { isGroupVisibilityResponse } from '../../types/domain/visibility';
 import {
-  GroupOverview, type HistoryRangeDays 
+  GroupOverview, type HistoryRangeDays
 } from './GroupOverview';
 import { KeywordVisibilityPanel } from './KeywordVisibilityPanel';
 import { PersonaSelector } from '../Personas/PersonaSelector';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
 import {
-  ALL_SCOPE, decodeReportScope, describeReportScope, encodeReportScope, isReportScopeAvailable 
+  ALL_SCOPE, decodeReportScope, describeReportScope, encodeReportScope, isReportScopeAvailable
 } from '../ui/reportScope';
 import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
 
@@ -31,18 +31,18 @@ function splitVisibility(visibility: VisibilityResponse | null): SplitVisibility
   if (visibility === null) {
     return {
       groupVisibility: null,
-      keywordVisibility: null 
+      keywordVisibility: null
     };
   }
   if (isGroupVisibilityResponse(visibility)) {
     return {
       groupVisibility: visibility,
-      keywordVisibility: null 
+      keywordVisibility: null
     };
   }
   return {
     groupVisibility: null,
-    keywordVisibility: visibility 
+    keywordVisibility: visibility
   };
 }
 
@@ -57,16 +57,16 @@ export function VisibilityDashboard({ keywords }: Props) {
   const [rangeDays, setRangeDays] = useState<HistoryRangeDays>(30);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(null);
   const {
-    activeKeywords, groups 
+    activeKeywords, groups
   } = useKeywordScopeOptions(keywords);
   const {
-    data: visibility, loading: visLoading, error: visError, fetchVisibilityMetrics 
+    data: visibility, loading: visLoading, error: visError, fetchVisibilityMetrics
   } = useVisibilityMetrics();
   const {
-    data: trends, loading: trendsLoading, fetchHistoricalTrends 
+    data: trends, loading: trendsLoading, fetchHistoricalTrends
   } = useHistoricalTrends();
   const {
-    data: personaRankings, fetchPersonaRankings 
+    data: personaRankings, fetchPersonaRankings
   } = usePersonaRankings();
 
   // A deleted group or keyword falls back to the whole account.
@@ -93,7 +93,7 @@ export function VisibilityDashboard({ keywords }: Props) {
   }, [scopeKey, fetchPersonaRankings]);
 
   const {
-    groupVisibility, keywordVisibility 
+    groupVisibility, keywordVisibility
   } = splitVisibility(visibility);
 
   return (
@@ -111,7 +111,12 @@ export function VisibilityDashboard({ keywords }: Props) {
             onChange={setScope}
             label="Analyze"
           />
-          <PersonaSelector selectedPersonaId={selectedPersonaId} onPersonaChange={setSelectedPersonaId} />
+          <PersonaSelector
+            id="visibility-persona-filter"
+            name="visibility-persona-filter"
+            selectedPersonaId={selectedPersonaId}
+            onPersonaChange={setSelectedPersonaId}
+          />
         </div>
       </div>
 

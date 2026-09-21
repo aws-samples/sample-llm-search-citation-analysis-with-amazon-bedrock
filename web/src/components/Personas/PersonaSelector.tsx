@@ -13,12 +13,14 @@ interface QueryPrompt {
 }
 
 interface PersonaSelectorProps {
+  readonly id: string;
+  readonly name: string;
   readonly selectedPersonaId: string | null;
   readonly onPersonaChange: (personaId: string | null) => void;
 }
 
 export function PersonaSelector({
-  selectedPersonaId, onPersonaChange 
+  id, name, selectedPersonaId, onPersonaChange
 }: PersonaSelectorProps) {
   const [personas, setPersonas] = useState<QueryPrompt[]>([]);
 
@@ -45,8 +47,10 @@ export function PersonaSelector({
 
   return (
     <div>
-      <label className="block text-xs font-medium text-gray-500 mb-1.5">Filter by persona</label>
+      <label htmlFor={id} className="block text-xs font-medium text-gray-500 mb-1.5">Filter by persona</label>
       <select
+        id={id}
+        name={name}
         value={selectedPersonaId ?? ''}
         onChange={handleChange}
         className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 text-sm bg-gray-50"

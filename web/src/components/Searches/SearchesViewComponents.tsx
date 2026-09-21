@@ -68,7 +68,7 @@ interface StatsCardsProps {
 }
 
 export const StatsCards = ({
-  totalSearches, keywordCount, totalCitations 
+  totalSearches, keywordCount, totalCitations
 }: StatsCardsProps) => (
   <div className="grid grid-cols-3 gap-3 sm:gap-4">
     <StatCard label="Total Searches" value={totalSearches.toLocaleString()} />
@@ -78,10 +78,10 @@ export const StatsCards = ({
 );
 
 const StatCard = ({
-  label, value 
+  label, value
 }: {
   label: string;
-  value: string | number 
+  value: string | number
 }) => (
   <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
     <div className="text-xs sm:text-sm text-gray-500">{label}</div>
@@ -99,7 +99,7 @@ interface FiltersSectionProps {
   providers: string[];
   promptNames: {
     id: string;
-    name: string 
+    name: string
   }[];
   onClear: () => void;
   onExport: () => void;
@@ -214,8 +214,10 @@ export const PaginationHeader = ({
   <div className="p-3 sm:p-4 border-b border-gray-200">
     <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm">
       <div className="flex items-center gap-2">
-        <span className="text-gray-500">Show:</span>
+        <label htmlFor="searches-items-per-page" className="text-gray-500">Show:</label>
         <select
+          id="searches-items-per-page"
+          name="searches-items-per-page"
           value={itemsPerPage}
           onChange={(e) => onItemsPerPageChange(Number(e.target.value))}
           className="px-2 sm:px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
@@ -249,7 +251,7 @@ interface PaginationControlsProps {
 }
 
 const PaginationControls = ({
-  currentPage, totalPages, setCurrentPage 
+  currentPage, totalPages, setCurrentPage
 }: PaginationControlsProps) => (
   <div className="flex items-center gap-1 overflow-x-auto">
     <PageButton label="First" onClick={() => setCurrentPage(1)} disabled={currentPage === 1} />
@@ -261,11 +263,11 @@ const PaginationControls = ({
 );
 
 const PageButton = ({
-  label, onClick, disabled 
+  label, onClick, disabled
 }: {
   label: string;
   onClick: () => void;
-  disabled: boolean 
+  disabled: boolean
 }) => (
   <button
     onClick={onClick}
@@ -284,7 +286,7 @@ interface KeywordRowProps {
 }
 
 export const KeywordRow = ({
-  group, isExpanded, onToggle, onSelect 
+  group, isExpanded, onToggle, onSelect
 }: KeywordRowProps) => (
   <>
     <tr className="hover:bg-gray-50">

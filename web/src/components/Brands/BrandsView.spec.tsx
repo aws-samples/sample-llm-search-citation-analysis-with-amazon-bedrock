@@ -48,14 +48,18 @@ import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtu
 
 vi.mock('../Personas/PersonaSelector', () => ({
   PersonaSelector: ({
-    selectedPersonaId, onPersonaChange
+    id, name, selectedPersonaId, onPersonaChange
   }: {
+    id: string;
+    name: string;
     selectedPersonaId: string | null;
     onPersonaChange: (personaId: string | null) => void;
   }) => (
     <button
       type="button"
       aria-label="Choose reporting persona"
+      data-field-id={id}
+      data-field-name={name}
       onClick={() => onPersonaChange('persona-a')}
     >
       {selectedPersonaId ?? 'All Personas'}
@@ -105,6 +109,20 @@ describe('BrandsView', () => {
     expect(screen.getByText('No keywords available.')).toBeInTheDocument();
   });
 
+  it('supplies a brands-specific identity to the persona selector', () => {
+    render(<BrandsView keywords={brandKeywordsFixture} />);
+
+    const personaSelector = screen.getByRole('button', { name: 'Choose reporting persona' });
+
+    expect({
+      id: personaSelector.getAttribute('data-field-id'),
+      name: personaSelector.getAttribute('data-field-name'),
+    }).toStrictEqual({
+      id: 'brands-persona-filter',
+      name: 'brands-persona-filter',
+    });
+  });
+
   it('offers Latest and exact run values when a scope is selected', () => {
     render(<BrandsView keywords={brandKeywordsFixture} />);
     selectBrandScope();
@@ -130,6 +148,23 @@ describe('BrandsView', () => {
       },
     ]);
     expect(runSelector).toHaveValue('');
+  });
+
+  it('associates the analysis-run label with a brands-specific identity', () => {
+    render(<BrandsView keywords={brandKeywordsFixture} />);
+    selectBrandScope();
+
+    const runSelector = screen.getByLabelText<HTMLSelectElement>('Analysis run');
+
+    expect({
+      id: runSelector.id,
+      labelFor: runSelector.labels?.[0]?.htmlFor,
+      name: runSelector.name,
+    }).toStrictEqual({
+      id: 'brands-analysis-run',
+      labelFor: 'brands-analysis-run',
+      name: 'brands-analysis-run',
+    });
   });
 
   it('passes the historical timestamp to the data hook when a run is selected', () => {

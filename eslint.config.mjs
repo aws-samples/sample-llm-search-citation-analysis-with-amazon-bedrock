@@ -52,6 +52,7 @@ export default tseslint.config(
       '**/.worktrees/**',
       '**/.venv/**',
       '**/coverage/**',
+      '**/.stryker-tmp/**',
     ],
   },
   eslintComments.recommended,

@@ -667,15 +667,41 @@ class TestTrendsScopeRouting:
 # /citation-gaps
 # ---------------------------------------------------------------------------
 
+GAPS_CONFIG = {
+    'tracked_brands': {
+        'first_party': ['Hotel Coruna'],
+        'competitors': ['Rival Inn'],
+    },
+}
+
+
 @pytest.fixture(scope='module')
 def gaps():
     return _load('get-citation-gaps.py')
 
 
+@pytest.fixture(params=[
+    pytest.param({'scope': 'all'}, id='all-scope'),
+    pytest.param({'group_id': 'coruna'}, id='group-scope'),
+])
+def missing_first_party_aggregate(gaps, request):
+    resource, _ = _fake_dynamodb()
+    keyword_analysis = MagicMock()
+    enrichment = MagicMock()
+    with (
+        patch.object(gaps, 'dynamodb', resource),
+        patch.object(gaps, 'get_brand_config', return_value={'tracked_brands': {}}),
+        patch.object(gaps, '_build_citation_gap_result', keyword_analysis),
+        patch.object(gaps, '_enrich_sources', enrichment),
+    ):
+        response = gaps.handler(_event(request.param), None)
+    return response, keyword_analysis, enrichment
+
+
 class TestCitationGapsScope:
     @staticmethod
     def _analyze(gaps, params: dict, summary: dict) -> tuple[list[str], dict]:
-        """Call the handler with `analyze_citation_gaps` recording its keywords.
+        """Call the handler with `_build_citation_gap_result` recording its keywords.
 
         Every keyword answers `summary`; returns the keywords analysed, in call
         order, and the decoded response body.
@@ -689,8 +715,8 @@ class TestCitationGapsScope:
 
         with (
             patch.object(gaps, 'dynamodb', resource),
-            patch.object(gaps, 'get_brand_config', return_value={}),
-            patch.object(gaps, 'analyze_citation_gaps', record),
+            patch.object(gaps, 'get_brand_config', return_value=GAPS_CONFIG),
+            patch.object(gaps, '_build_citation_gap_result', record),
         ):
             body = _body(gaps.handler(_event(params), None))
         return analyzed, body
@@ -713,6 +739,47 @@ class TestCitationGapsScope:
 
         assert analyzed == ['best hotels galicia', 'hotel coruna spa']
         assert body['scope']['kind'] == 'all'
+
+    def test_returns_missing_first_party_error_when_aggregate_scope_has_no_first_party_brand(
+        self,
+        missing_first_party_aggregate,
+    ):
+        response, _, _ = missing_first_party_aggregate
+
+        assert response['statusCode'] == 200
+        assert _body(response) == {'error': 'No first-party brands configured'}
+
+    def test_omits_keyword_analysis_when_aggregate_scope_has_no_first_party_brand(
+        self,
+        missing_first_party_aggregate,
+    ):
+        _, keyword_analysis, _ = missing_first_party_aggregate
+
+        keyword_analysis.assert_not_called()
+
+    def test_omits_enrichment_when_aggregate_scope_has_no_first_party_brand(
+        self,
+        missing_first_party_aggregate,
+    ):
+        _, _, enrichment = missing_first_party_aggregate
+
+        enrichment.assert_not_called()
+
+    def test_keeps_successful_group_summary_when_another_keyword_has_no_data(self, gaps):
+        resource, _ = _fake_dynamodb()
+        with (
+            patch.object(gaps, 'dynamodb', resource),
+            patch.object(gaps, 'get_brand_config', return_value=GAPS_CONFIG),
+            patch.object(gaps, '_enrich_sources', MagicMock()),
+        ):
+            body = _body(gaps.handler(_event({'group_id': 'marino'}), None))
+
+        assert body['keyword_summaries'] == [{
+            'keyword': 'best hotels galicia',
+            'gap_count': 0,
+            'high_priority_gaps': 0,
+            'coverage_rate': 0,
+        }]
 
 
 # ---------------------------------------------------------------------------

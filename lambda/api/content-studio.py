@@ -15,6 +15,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import uuid
 from collections import defaultdict
@@ -31,6 +32,7 @@ from shared.api_response import api_response, success_response, validation_error
 from shared.brand_visibility import classify_brand, load_recent_search_results, tracked_brand_names
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.content_brief import (
+    CONTENT_OUTPUT_CONTRACT,
     GROUP_BRIEF_TYPE,
     ContentBriefFetchError,
     ContentBriefTemplateError,
@@ -626,18 +628,10 @@ Generate:
 5. Call-to-action recommendations
 6. SEO metadata (title, description, keywords)
 
-Make it comprehensive, authoritative, and better than competitor content.
+Make it comprehensive, authoritative, and better than competitor content."""
 
-Format your response with clear sections:
-TITLE: [Your title here]
-META: [150 character meta description]
-
-[Your main content here with ## headings]
-
-HEADINGS: [List the H2 headings you used, comma separated]
-POINTS: [3 key takeaways as bullet points]"""
-
-    return prompt + _output_language_instruction(idea)
+    language_instruction = _output_language_instruction(idea)
+    return f'{prompt}{language_instruction}\n\n{CONTENT_OUTPUT_CONTRACT}'
 
 
 # Ordered ``(AWS error codes, user-facing message, error_type)`` rows for
@@ -665,36 +659,51 @@ def _describe_generation_error(error_msg: str) -> tuple[str, str]:
     return f'Content generation failed: {error_msg[:200]}', 'generation_error'
 
 
-def _generation_failure(error: str, error_type: str, content_angle: str) -> dict[str, Any]:
-    """The failed-generation result that `_process_generation_async` persists on the row."""
-    return {
+def _generation_failure(
+    error: str,
+    error_type: str,
+    content_angle: str,
+    *,
+    raw_content: str | None = None,
+) -> dict[str, Any]:
+    """Build the failed-generation result persisted on the Content Studio row."""
+    result: dict[str, Any] = {
         'success': False,
         'error': error,
         'error_type': error_type,
-        'content_angle': content_angle
+        'content_angle': content_angle,
     }
+    if raw_content is not None:
+        result['raw_content'] = raw_content
+    return result
 
 
 def _invoke_content_generation(
     prompt: str, content_angle: str, competitor_sources_used: int
 ) -> dict[str, Any]:
-    """Invoke Bedrock and preserve the established Content Studio result shape."""
+    """Invoke Bedrock, normalize its output, and preserve the raw response."""
     try:
-        # Invoke shared Bedrock client with GENERATION role (Haiku default, tier-switchable)
         generated_content = invoke_bedrock(
             prompt,
             ModelRole.GENERATION,
             max_tokens=8000,
             temperature=0.7,
         )
-        return {
-            'success': True,
-            'content': parse_generated_content(generated_content),
-            'raw_content': generated_content,
-            'model': get_model_tier(ModelRole.GENERATION).value,
-            'content_angle': content_angle,
-            'competitor_sources_used': competitor_sources_used,
-        }
+        content = parse_generated_content(generated_content)
+        content_warning = _metadata_warning(content)
+        if not _has_usable_body(content['body']):
+            logger.warning(
+                "Content generation returned an unusable body angle=%s preview=%r",
+                content_angle,
+                generated_content[:300],
+            )
+            return _generation_failure(
+                'The AI response did not contain a usable content draft. Please try again.',
+                'invalid_output',
+                content_angle,
+                raw_content=generated_content,
+            )
+
     except BedrockInvocationError:
         logger.exception("Bedrock throttled after retries")
         return _generation_failure(
@@ -705,6 +714,23 @@ def _invoke_content_generation(
         logger.error(f"Bedrock generation failed: {error_msg}", exc_info=True)
         user_error, error_type = _describe_generation_error(error_msg)
         return _generation_failure(user_error, error_type, content_angle)
+    else:
+        result: dict[str, Any] = {
+            'success': True,
+            'content': content,
+            'raw_content': generated_content,
+            'model': get_model_tier(ModelRole.GENERATION).value,
+            'content_angle': content_angle,
+            'competitor_sources_used': competitor_sources_used,
+        }
+        if content_warning is not None:
+            result['content_warning'] = content_warning
+            logger.warning(
+                "Content generation metadata is incomplete angle=%s missing_fields=%s",
+                content_angle,
+                content_warning['missing_fields'],
+            )
+        return result
 
 
 def _group_brief_generation(
@@ -734,67 +760,240 @@ def generate_content(idea: dict[str, Any], config: dict[str, Any]) -> dict[str, 
     return _invoke_content_generation(prompt, content_angle, len(competitor_content))
 
 
-def _marker_value(lines: list[str], *markers: str) -> str:
-    """The text after the first line that starts with one of ``markers`` (case-insensitive), or ``''``."""
-    for line in lines:
-        upper = line.strip().upper()
-        if any(upper.startswith(marker) for marker in markers):
-            return line.split(':', 1)[1].strip()
-    return ''
+_MIN_USABLE_BODY_CHARACTERS = 40
+_INCOMPLETE_METADATA_MESSAGE = (
+    'This draft is usable, but some generated metadata is incomplete.'
+)
+_LEGACY_MARKER_PATTERN = re.compile(
+    r'^\s*(?P<opening>\*{1,2}|_{1,2})?\s*'
+    r'(?P<label>TITLE|META(?:_DESCRIPTION)?|HEADINGS|(?:KEY[ _])?POINTS)'
+    r'\s*(?:\*{1,2}|_{1,2})?\s*:\s*(?:\*{1,2}|_{1,2})?\s*'
+    r'(?P<value>.*?)\s*$',
+    re.IGNORECASE,
+)
 
 
-def _body_between_meta_and_lists(lines: list[str]) -> str:
-    """Everything after the META line up to the first HEADINGS/POINTS marker."""
-    in_body = False
-    body_lines = []
-    for line in lines:
-        upper_line = line.strip().upper()
-        if upper_line.startswith('META'):
-            in_body = True
-            continue
-        if in_body and ('HEADINGS:' in upper_line or 'POINTS:' in upper_line):
+def _normalized_string(payload: dict[str, Any], field_name: str) -> str:
+    """Return a trimmed string field, rejecting coercion from other JSON types."""
+    value = payload.get(field_name)
+    return value.strip() if isinstance(value, str) else ''
+
+
+def _normalized_string_list(payload: dict[str, Any], field_name: str) -> list[str]:
+    """Return trimmed, non-blank string members from a JSON array."""
+    value = payload.get(field_name)
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
+
+def _normalize_json_content(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize the exact Content Studio JSON fields without type coercion."""
+    return {
+        'title': _normalized_string(payload, 'title'),
+        'meta_description': _normalized_string(payload, 'meta_description')[:160],
+        'body': _normalized_string(payload, 'body'),
+        'suggested_headings': _normalized_string_list(payload, 'suggested_headings'),
+        'key_points': _normalized_string_list(payload, 'key_points'),
+    }
+
+
+def _legacy_marker(line: str) -> tuple[str, str] | None:
+    """Return a normalized marker and value for plain or emphasized legacy labels."""
+    match = _LEGACY_MARKER_PATTERN.match(line)
+    if match is None:
+        return None
+    label = match.group('label').upper().replace('_', ' ').replace('  ', ' ')
+    if label == 'META DESCRIPTION':
+        label = 'META'
+    elif label == 'KEY POINTS':
+        label = 'POINTS'
+    value = match.group('value').strip().strip('*_').strip()
+    return label, value
+
+
+def _clean_legacy_list_item(value: str) -> str:
+    """Remove one Markdown bullet or numeric prefix from a legacy list value."""
+    cleaned = re.sub(r'^\s*(?:[-*+]|\d+[.)])\s*', '', value).strip()
+    return cleaned.strip('*_').strip()
+
+
+def _inline_legacy_items(value: str) -> list[str]:
+    """Split a comma- or semicolon-separated marker value into clean items."""
+    unwrapped = value.strip().removeprefix('[').removesuffix(']')
+    return [
+        cleaned
+        for part in re.split(r'[,;]', unwrapped)
+        if (cleaned := _clean_legacy_list_item(part))
+    ]
+
+
+def _legacy_list(
+    lines: list[str], markers: dict[int, tuple[str, str]], label: str
+) -> list[str]:
+    """Read an inline or multiline legacy HEADINGS/POINTS list."""
+    marker_entry = next(
+        ((index, value) for index, (marker, value) in markers.items() if marker == label),
+        None,
+    )
+    if marker_entry is None:
+        return []
+
+    marker_index, inline_value = marker_entry
+    items = _inline_legacy_items(inline_value) if inline_value else []
+    for index in range(marker_index + 1, len(lines)):
+        if index in markers:
             break
-        if in_body:
-            body_lines.append(line)
-    return '\n'.join(body_lines).strip()
+        cleaned = _clean_legacy_list_item(lines[index])
+        if cleaned:
+            items.append(cleaned)
+    return items
 
 
-def _suggested_headings(lines: list[str]) -> list[str]:
-    """The comma-separated headings on the first HEADINGS line, blanks dropped."""
-    for line in lines:
-        if 'HEADINGS:' in line.strip().upper():
-            after = line.split(':', 1)[1].strip() if ':' in line else ''
-            return [h.strip() for h in after.split(',') if h.strip()]
-    return []
+def _parse_legacy_content(text: str) -> dict[str, Any]:
+    """Parse the one supported marker fallback while excluding labels and preamble."""
+    lines = text.splitlines()
+    markers = {
+        index: marker
+        for index, line in enumerate(lines)
+        if (marker := _legacy_marker(line)) is not None
+    }
+
+    def marker_value(label: str) -> str:
+        return next((value for marker, value in markers.values() if marker == label), '')
+
+    metadata_indexes = [
+        index for index, (label, _value) in markers.items() if label in {'TITLE', 'META'}
+    ]
+    body_start = max(metadata_indexes) + 1 if metadata_indexes else 0
+    list_indexes = [
+        index
+        for index, (label, _value) in markers.items()
+        if label in {'HEADINGS', 'POINTS'} and index >= body_start
+    ]
+    body_end = min(list_indexes) if list_indexes else len(lines)
+    body = '\n'.join(
+        line
+        for index, line in enumerate(lines[body_start:body_end], start=body_start)
+        if index not in markers
+    ).strip()
+
+    return {
+        'title': marker_value('TITLE'),
+        'meta_description': marker_value('META')[:160],
+        'body': body,
+        'suggested_headings': _legacy_list(lines, markers, 'HEADINGS'),
+        'key_points': _legacy_list(lines, markers, 'POINTS'),
+    }
 
 
-def _key_points(lines: list[str]) -> list[str]:
-    """Every non-blank line after the POINTS marker, with bullets and numbering stripped."""
-    in_points = False
-    points = []
-    for line in lines:
-        if 'POINTS:' in line.strip().upper():
-            in_points = True
-            continue
-        if in_points and line.strip():
-            clean = line.strip().lstrip('-*0123456789. ')
-            if clean:
-                points.append(clean)
-    return points
+def _metadata_warning(content: dict[str, Any]) -> dict[str, Any] | None:
+    """Describe omitted contract fields without hiding an otherwise usable draft."""
+    metadata_fields = ('title', 'meta_description', 'suggested_headings', 'key_points')
+    missing_fields = [field_name for field_name in metadata_fields if not content[field_name]]
+    if not missing_fields:
+        return None
+    return {
+        'code': 'incomplete_metadata',
+        'message': _INCOMPLETE_METADATA_MESSAGE,
+        'missing_fields': missing_fields,
+    }
+
+
+_CONTENT_STUDIO_CONTRACT_KEYS = frozenset({
+    'title',
+    'meta_description',
+    'body',
+    'suggested_headings',
+    'key_points',
+})
+_JSON_PREAMBLE_PATTERN = re.compile(
+    r"^(?:sure,\s*)?(?:"
+    r"here(?: is|'s)\s+(?:(?:the|your)\s+)?(?:requested\s+)?json"
+    r"(?:\s+(?:response|output|object))?"
+    r"|json(?:\s+(?:response|output))?(?:\s+follows)?"
+    r")\s*:?\s*$",
+    re.IGNORECASE,
+)
+_TERMINAL_JSON_FENCE_PATTERN = re.compile(r'\n```[ \t]*\Z')
+
+
+def _without_json_preamble(text: str) -> tuple[str, bool]:
+    """Remove one short, allowlisted LLM JSON-introduction line."""
+    first_line, _separator, remainder = text.partition('\n')
+    is_preamble = (
+        len(first_line) <= 80
+        and _JSON_PREAMBLE_PATTERN.fullmatch(first_line.strip()) is not None
+    )
+    return (remainder.lstrip(), True) if is_preamble else (text, False)
+
+
+def _json_envelope_candidate(text: str) -> tuple[bool, str]:
+    """Return JSON intent and the complete payload only for a whole-response envelope."""
+    candidate, had_preamble = _without_json_preamble(text.strip())
+    if candidate.startswith(('{', '[')):
+        return True, candidate
+
+    opening_fence, _separator, fenced_content = candidate.partition('\n')
+    normalized_fence = opening_fence.strip().lower()
+    if normalized_fence in {'```', '```json'}:
+        fenced_candidate = fenced_content.lstrip()
+        declares_json = normalized_fence == '```json'
+        starts_as_json = fenced_candidate.startswith(('{', '['))
+        if declares_json or had_preamble or starts_as_json:
+            closing_fence = _TERMINAL_JSON_FENCE_PATTERN.search(fenced_candidate)
+            if closing_fence is None:
+                return True, ''
+            return True, fenced_candidate[:closing_fence.start()].strip()
+
+    return (True, candidate) if had_preamble else (False, '')
+
+
+def _is_content_studio_contract_payload(payload: Any) -> bool:
+    """Return whether JSON has a body and no fields outside the output contract."""
+    return (
+        isinstance(payload, dict)
+        and 'body' in payload
+        and set(payload).issubset(_CONTENT_STUDIO_CONTRACT_KEYS)
+    )
+
+
+def _parse_json_envelope(candidate: str) -> dict[str, Any]:
+    """Strictly parse one complete JSON envelope into normalized contract content."""
+    try:
+        parsed: Any = json.loads(candidate)
+    except json.JSONDecodeError:
+        return _normalize_json_content({})
+    if not _is_content_studio_contract_payload(parsed):
+        return _normalize_json_content({})
+    return _normalize_json_content(parsed)
+
+
+def _parse_generated_content(
+    text: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Use whole-response contract JSON, preserving all other Markdown as legacy content."""
+    is_json_envelope, candidate = _json_envelope_candidate(text)
+    content = (
+        _parse_json_envelope(candidate)
+        if is_json_envelope
+        else _parse_legacy_content(text)
+    )
+    return content, _metadata_warning(content)
+
+
+def _has_usable_body(body: Any) -> bool:
+    """Return whether a normalized body contains enough readable draft content."""
+    if not isinstance(body, str):
+        return False
+    readable_characters = re.sub(r'[\W_]+', '', body, flags=re.UNICODE)
+    return len(readable_characters) >= _MIN_USABLE_BODY_CHARACTERS
 
 
 def parse_generated_content(text: str) -> dict[str, Any]:
-    """Parse the structured content from LLM response."""
-    lines = text.split('\n')
-    # If no structured body found, use the whole text
-    body = _body_between_meta_and_lists(lines) or text
-    return {
-        'title': _marker_value(lines, 'TITLE:'),
-        'meta_description': _marker_value(lines, 'META:', 'META_DESCRIPTION:')[:160],
-        'body': body,
-        'suggested_headings': _suggested_headings(lines),
-        'key_points': _key_points(lines),
-    }
+    """Return normalized generated content for compatibility with existing callers."""
+    content, _warning = _parse_generated_content(text)
+    return content
 
 
 def _compute_idempotency_key(idea: dict[str, Any], window_minutes: int = 5) -> str:
@@ -934,21 +1133,36 @@ def update_content_status(content_id: str, status: str, generation_result: dict[
     timestamp = get_timestamp()
 
     update_expr = 'SET #status = :status, updated_at = :updated_at'
-    expr_values = {
+    expr_values: dict[str, Any] = {
         ':status': status,
         ':updated_at': timestamp
     }
     expr_names = {'#status': 'status'}
 
     if generation_result and status == 'generated':
-        update_expr += ', generated_content = :content, raw_content = :raw, model = :model, competitor_sources_used = :sources'
+        update_expr += (
+            ', generated_content = :content, raw_content = :raw, model = :model, '
+            'competitor_sources_used = :sources'
+        )
         expr_values[':content'] = generation_result.get('content', {})
         expr_values[':raw'] = generation_result.get('raw_content', '')
         expr_values[':model'] = generation_result.get('model', '')
         expr_values[':sources'] = generation_result.get('competitor_sources_used', 0)
+        content_warning = generation_result.get('content_warning')
+        if isinstance(content_warning, dict):
+            update_expr += ', content_warning = :content_warning'
+            expr_values[':content_warning'] = content_warning
     elif status == 'failed':
         update_expr += ', error_message = :error'
-        expr_values[':error'] = generation_result.get('error', 'Unknown error') if generation_result else 'Unknown error'
+        expr_values[':error'] = (
+            generation_result.get('error', 'Unknown error')
+            if generation_result
+            else 'Unknown error'
+        )
+        raw_content = generation_result.get('raw_content') if generation_result else None
+        if isinstance(raw_content, str):
+            update_expr += ', raw_content = :raw'
+            expr_values[':raw'] = raw_content
 
     try:
         table.update_item(
@@ -1182,6 +1396,16 @@ def _generate_content(event: dict[str, Any], context: Any, body: dict, idea: dic
     }, event)
 
 
+def _has_generated_content(content: Any) -> bool:
+    """Return whether a stored generated-content object has a useful title or body."""
+    if not isinstance(content, dict):
+        return False
+    return any(
+        isinstance(content.get(field_name), str) and bool(content[field_name].strip())
+        for field_name in ('title', 'body')
+    )
+
+
 def _get_content_status(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """GET /content-studio/status/{id} - Get content generation status."""
     path_params = event.get('pathParameters') or {}
@@ -1211,7 +1435,8 @@ def _get_content_status(event: dict[str, Any], context: Any) -> dict[str, Any]:
         'keyword': content.get('keyword'),
         'created_at': content.get('created_at'),
         'updated_at': content.get('updated_at'),
-        'has_content': bool(content.get('generated_content', {}).get('title')),
+        'has_content': _has_generated_content(content.get('generated_content')),
+        'content_warning': content.get('content_warning'),
         'error_message': content.get('error_message')
     }, event)
 

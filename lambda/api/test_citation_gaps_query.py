@@ -1,28 +1,18 @@
 """
 Regression tests for the citation-gaps query shape and orchestration.
 
-Background — these tests pin the fix for the 2026-08-19 E2E finding:
-    GET /api/citation-gaps took ~60s. analyze_citation_gaps re-read each
-    keyword's ENTIRE SearchResults history (every run x provider x persona,
-    each item carrying the full LLM response text) with an unbounded
-    ascending query, then discarded everything but the latest run. Past
-    DynamoDB's 1MB page limit the "latest" run was silently computed from
-    the OLDEST page (stale results). The all-keywords path then repeated
-    this sequentially for every keyword, in nondeterministic set order.
-
-    The fix queries newest-first with a small Limit and a projection that
-    excludes the response text, and fans the per-keyword analyses out to a
-    thread pool with deterministic (sorted) keyword selection.
-
-These tests would FAIL if the unbounded ascending query or the sequential
-nondeterministic orchestration were reintroduced.
+The endpoint must isolate the latest SearchResults run with a bounded projected
+read, classify and rank without crawl enrichment, slice the response, and only
+then enrich the deduplicated URLs that can reach the client. The all-keywords
+path must do the same after its global top-30 selection so it never recreates a
+nested keyword-by-URL query fan-out.
 """
 
 from __future__ import annotations
 
 import os
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.env import setdefault_env
@@ -54,7 +44,7 @@ def _search_item(ts: str, provider: str, citations: list[str], brands: list[dict
 
 
 def _fake_dynamodb(search_items: list[dict], crawled_items: list[dict] | None = None) -> tuple[MagicMock, MagicMock]:
-    """Fake boto3 resource: search table returns `search_items`, crawled table returns `crawled_items` (default empty)."""
+    """Fake boto3 resource: search and crawl tables answer the supplied rows."""
     search_table = fake_table(query={'Items': search_items})
     resource = fake_dynamodb_resource(by_name={
         'test-search': search_table,
@@ -64,10 +54,45 @@ def _fake_dynamodb(search_items: list[dict], crawled_items: list[dict] | None = 
 
 
 def _analyze(monkeypatch, search_items: list[dict], crawled_items: list[dict] | None = None) -> dict:
-    """Analyse keyword `kw` over a SearchResults table answering `search_items` (and `crawled_items`)."""
+    """Analyse keyword ``kw`` over the supplied SearchResults and crawl rows."""
     fake, _ = _fake_dynamodb(search_items, crawled_items)
     monkeypatch.setattr(_mod, 'dynamodb', fake)
     return _mod.analyze_citation_gaps('kw', CONFIG)
+
+
+def _gap(url: str, *, citation_count: int = 1) -> dict[str, Any]:
+    return {
+        'url': url,
+        'domain': 'shared.example',
+        'citation_count': citation_count,
+        'providers': ['openai'],
+        'provider_count': 1,
+        'first_party_brands': [],
+        'competitor_brands': ['Rival Hotel'],
+        'priority': 'medium',
+    }
+
+
+def _keyword_result(gaps: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        'gaps': gaps,
+        'summary': {
+            'gap_count': len(gaps),
+            'covered_count': 0,
+            'high_priority_gaps': 0,
+            'coverage_rate': 0,
+        },
+    }
+
+
+def _oversized_search_fixture() -> tuple[list[str], list[str], MagicMock]:
+    gap_urls = [f'https://gap.example/{index:02d}' for index in range(51)]
+    covered_urls = [f'https://covered.example/{index:02d}' for index in range(21)]
+    fake, _ = _fake_dynamodb([
+        _search_item('2026-08-19T00:00:00', 'openai', gap_urls, [COMPETITOR_BRAND]),
+        _search_item('2026-08-19T00:00:00', 'openai', covered_urls, [FIRST_PARTY_BRAND]),
+    ])
+    return gap_urls, covered_urls, fake
 
 
 class TestLatestRunQueryShape:
@@ -91,7 +116,7 @@ class TestLatestRunQueryShape:
         result = _analyze(monkeypatch, [newest, older])
 
         assert result['timestamp'] == '2026-08-19T00:00:00'
-        assert [g['url'] for g in result['gaps']] == ['https://new.com/x']
+        assert [gap['url'] for gap in result['gaps']] == ['https://new.com/x']
 
 
 class TestGapSemantics:
@@ -111,6 +136,24 @@ class TestGapSemantics:
 
         assert result['summary']['gap_count'] == 0
         assert result['summary']['covered_count'] == 1
+
+    def test_ranks_high_priority_source_before_more_cited_medium_source(self, monkeypatch) -> None:
+        result = _analyze(monkeypatch, [
+            _search_item(
+                '2026-08-19T00:00:00',
+                'openai',
+                ['https://medium.example/x'] * 5 + ['https://high.example/x'],
+                [COMPETITOR_BRAND],
+            ),
+            _search_item('2026-08-19T00:00:00', 'gemini', ['https://high.example/x'], [COMPETITOR_BRAND]),
+        ])
+
+        assert [
+            (gap['url'], gap['priority'], gap['citation_count']) for gap in result['gaps']
+        ] == [
+            ('https://high.example/x', 'high', 2),
+            ('https://medium.example/x', 'medium', 5),
+        ]
 
 
 class TestSourceClassification:
@@ -192,11 +235,84 @@ class TestSourceClassification:
         ]
 
 
+class TestFinalResponseEnrichment:
+    def test_projects_only_consumed_crawl_fields_when_enriching_returned_urls(self, monkeypatch) -> None:
+        table = MagicMock()
+        resource = MagicMock()
+        resource.Table.return_value = table
+        latest_per_key = MagicMock(return_value={})
+        monkeypatch.setattr(_mod, 'dynamodb', resource)
+        monkeypatch.setattr(_mod, 'query_latest_per_key', latest_per_key)
+
+        _mod._batch_crawled_info(['https://gap.example/x'])
+
+        latest_per_key.assert_called_once_with(
+            table=table,
+            partition_key_name='normalized_url',
+            partition_values=['https://gap.example/x'],
+            max_workers=10,
+            projection_expression='#title, #seo, #authority, #crawled',
+            expression_attribute_names={
+                '#title': 'title',
+                '#seo': 'seo_analysis',
+                '#authority': 'domain_authority',
+                '#crawled': 'crawled_at',
+            },
+        )
+
+    def test_returns_every_selected_gap_when_crawl_metadata_is_partially_unavailable(self, monkeypatch) -> None:
+        urls = ['https://available.example/x', 'https://failed.example/x']
+        fake, _ = _fake_dynamodb([
+            _search_item('2026-08-19T00:00:00', 'openai', urls, [COMPETITOR_BRAND]),
+        ])
+        monkeypatch.setattr(_mod, 'dynamodb', fake)
+        monkeypatch.setattr(
+            _mod,
+            '_batch_crawled_info',
+            MagicMock(return_value={urls[0]: {'title': 'Available crawl'}}),
+        )
+
+        result = _mod.analyze_citation_gaps('kw', CONFIG)
+
+        assert [gap['url'] for gap in result['gaps']] == urls
+        assert result['gaps'][0]['title'] == 'Available crawl'
+        assert 'title' not in result['gaps'][1]
+
+    def test_enriches_only_returned_urls_when_candidates_exceed_response_slices(self, monkeypatch) -> None:
+        gap_urls, covered_urls, fake = _oversized_search_fixture()
+        crawled_info = MagicMock(return_value={})
+        monkeypatch.setattr(_mod, 'dynamodb', fake)
+        monkeypatch.setattr(_mod, '_batch_crawled_info', crawled_info)
+
+        result = _mod.analyze_citation_gaps('kw', CONFIG)
+
+        crawled_info.assert_called_once_with([*gap_urls[:50], *covered_urls[:20]])
+        assert [gap['url'] for gap in result['gaps']] == gap_urls[:50]
+        assert [source['url'] for source in result['covered_sources']] == covered_urls[:20]
+
+    def test_preserves_unsliced_summary_counts_when_response_lists_are_truncated(self, monkeypatch) -> None:
+        fake = _oversized_search_fixture()[2]
+        monkeypatch.setattr(_mod, 'dynamodb', fake)
+        monkeypatch.setattr(_mod, '_batch_crawled_info', MagicMock(return_value={}))
+
+        result = _mod.analyze_citation_gaps('kw', CONFIG)
+
+        assert result['summary'] == {
+            'gap_count': 51,
+            'covered_count': 21,
+            'high_priority_gaps': 0,
+            'coverage_rate': 29.2,
+        }
+        assert result['domain_summary'] == [
+            {'domain': 'gap.example', 'gap_count': 51, 'total_citations': 51},
+        ]
+
+
 class TestAllKeywordsOrchestration:
     @staticmethod
     def _fake_keywords_dynamodb(keywords: list[str]) -> MagicMock:
         return fake_dynamodb_resource(
-            fake_table(query={'Items': [{'id': k, 'keyword': k, 'status': 'active'} for k in keywords]})
+            fake_table(query={'Items': [{'id': keyword, 'keyword': keyword, 'status': 'active'} for keyword in keywords]})
         )
 
     def test_analyzes_keywords_in_sorted_order_when_more_exist_than_limit(self, monkeypatch) -> None:
@@ -204,11 +320,11 @@ class TestAllKeywordsOrchestration:
         monkeypatch.setattr(_mod, 'dynamodb', self._fake_keywords_dynamodb(['zeta', 'alpha', 'mid']))
         analyzed: list[str] = []
 
-        def record(kw: str, _config: dict) -> dict:
-            analyzed.append(kw)
-            return {'summary': {'gap_count': 0, 'high_priority_gaps': 0, 'coverage_rate': 0}, 'gaps': []}
+        def record(keyword: str, _config: dict) -> dict:
+            analyzed.append(keyword)
+            return _keyword_result([])
 
-        monkeypatch.setattr(_mod, 'analyze_citation_gaps', record)
+        monkeypatch.setattr(_mod, '_build_citation_gap_result', record)
 
         _mod.analyze_all_keywords_gaps(CONFIG, limit=2)
 
@@ -219,15 +335,56 @@ class TestAllKeywordsOrchestration:
         monkeypatch.setattr(_mod, 'dynamodb', self._fake_keywords_dynamodb(['kw-a', 'kw-b']))
         gap_counts = {'kw-a': 3, 'kw-b': 7}
 
-        def per_keyword(kw: str, _config: dict) -> dict:
-            return {
-                'summary': {'gap_count': gap_counts[kw], 'high_priority_gaps': 0, 'coverage_rate': 0},
-                'gaps': [],
-            }
+        def per_keyword(keyword: str, _config: dict) -> dict:
+            result = _keyword_result([])
+            result['summary']['gap_count'] = gap_counts[keyword]
+            return result
 
-        monkeypatch.setattr(_mod, 'analyze_citation_gaps', per_keyword)
+        monkeypatch.setattr(_mod, '_build_citation_gap_result', per_keyword)
 
         result = _mod.analyze_all_keywords_gaps(CONFIG, limit=2)
 
-        by_keyword = {s['keyword']: s['gap_count'] for s in result['keyword_summaries']}
+        by_keyword = {summary['keyword']: summary['gap_count'] for summary in result['keyword_summaries']}
         assert by_keyword == {'kw-a': 3, 'kw-b': 7}
+
+    def test_enriches_only_globally_returned_urls_when_more_than_thirty_qualify(self, monkeypatch) -> None:
+        keywords = [f'kw-{index}' for index in range(7)]
+        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'test-keywords')
+        monkeypatch.setattr(_mod, 'dynamodb', self._fake_keywords_dynamodb(keywords))
+
+        def per_keyword(keyword: str, _config: dict) -> dict:
+            return _keyword_result([
+                _gap(f'https://{keyword}.example/{index}') for index in range(5)
+            ])
+
+        crawled_info = MagicMock(return_value={})
+        monkeypatch.setattr(_mod, '_build_citation_gap_result', per_keyword)
+        monkeypatch.setattr(_mod, '_batch_crawled_info', crawled_info)
+
+        result = _mod.analyze_all_keywords_gaps(CONFIG, limit=7)
+
+        expected_urls = [
+            f'https://kw-{keyword_index}.example/{gap_index}'
+            for keyword_index in range(6)
+            for gap_index in range(5)
+        ]
+        crawled_info.assert_called_once_with(expected_urls)
+        assert [gap['url'] for gap in result['top_gaps']] == expected_urls
+
+    def test_reuses_one_crawl_lookup_for_every_returned_occurrence_when_keywords_share_a_url(self, monkeypatch) -> None:
+        shared_url = 'https://shared.example/article'
+        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'test-keywords')
+        monkeypatch.setattr(_mod, 'dynamodb', self._fake_keywords_dynamodb(['beta', 'alpha']))
+        monkeypatch.setattr(
+            _mod,
+            '_build_citation_gap_result',
+            lambda _keyword, _config: _keyword_result([_gap(shared_url)]),
+        )
+        crawled_info = MagicMock(return_value={shared_url: {'title': 'Shared article'}})
+        monkeypatch.setattr(_mod, '_batch_crawled_info', crawled_info)
+
+        result = _mod.analyze_all_keywords_gaps(CONFIG, limit=2)
+
+        assert crawled_info.mock_calls == [call([shared_url])]
+        assert [gap['keyword'] for gap in result['top_gaps']] == ['alpha', 'beta']
+        assert [gap['title'] for gap in result['top_gaps']] == ['Shared article', 'Shared article']

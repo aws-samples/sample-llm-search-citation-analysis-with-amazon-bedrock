@@ -170,6 +170,8 @@ export function AgentTemplateEditor({
             <li key={row.key} className="rounded-lg border border-gray-200 bg-white p-2">
               <div className="grid grid-cols-1 sm:grid-cols-[1fr_2fr_auto] gap-2 items-start">
                 <input
+                  id={`template-dimension-${row.key}-label`}
+                  name="dimension-label"
                   type="text"
                   aria-label="Dimension label"
                   value={row.label}
@@ -180,6 +182,8 @@ export function AgentTemplateEditor({
                   className={INPUT_CLASS}
                 />
                 <input
+                  id={`template-dimension-${row.key}-description`}
+                  name="dimension-description"
                   type="text"
                   aria-label="Dimension description"
                   value={row.description}

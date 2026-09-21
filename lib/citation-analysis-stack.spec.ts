@@ -74,6 +74,12 @@ const IA_STORAGE_CLASS = 'STANDARD_IA';
 const IA_TRANSITION_DAYS = 90;
 const ACCESS_LOGS_EXPIRY_DAYS = 90;
 
+interface GatewayResponseSnapshot {
+  responseType: string;
+  statusCode: string;
+  responseParameters: unknown;
+}
+
 const synthesized: {
   definitionRaw: string;
   researchDefinitionRaw: string;
@@ -92,7 +98,9 @@ const synthesized: {
   researchWorkerEnvVars: Record<string, unknown>;
   researchWorkerRoleActions: string[];
   healthCheckMemorySize: number;
+  statsInsightsMemorySize: number;
   bucketDeploymentMemorySizes: number[];
+  gatewayResponses: GatewayResponseSnapshot[];
   schedulesMethods: ApiGatewayMethodSnapshot[];
   scheduleIdMethods: ApiGatewayMethodSnapshot[];
   scheduleRunMethods: ApiGatewayMethodSnapshot[];
@@ -156,7 +164,9 @@ const synthesized: {
   researchWorkerEnvVars: {},
   researchWorkerRoleActions: [],
   healthCheckMemorySize: Number.NaN,
+  statsInsightsMemorySize: Number.NaN,
   bucketDeploymentMemorySizes: [],
+  gatewayResponses: [],
   schedulesMethods: [],
   scheduleIdMethods: [],
   scheduleRunMethods: [],
@@ -281,7 +291,15 @@ beforeAll(() => {
   synthesized.researchWorkerEnvVars = extractLambdaEnvVars(template, RESEARCH_WORKER_FUNCTION_NAME);
   synthesized.researchWorkerRoleActions = extractFunctionRoleActions(template, RESEARCH_WORKER_FUNCTION_NAME);
   synthesized.healthCheckMemorySize = extractFunctionMemorySize(template, 'CitationAnalysis-API-Health');
+  synthesized.statsInsightsMemorySize = extractFunctionMemorySize(template, 'CitationAnalysis-API-StatsInsights');
   synthesized.bucketDeploymentMemorySizes = extractMemorySizesByLogicalIdPrefix(template, 'CustomCDKBucketDeployment');
+  synthesized.gatewayResponses = Object.values(
+    template.findResources('AWS::ApiGateway::GatewayResponse')
+  ).map((response) => ({
+    responseType: resolveString(response, ['Properties', 'ResponseType']),
+    statusCode: resolveString(response, ['Properties', 'StatusCode']),
+    responseParameters: resolvePath(response, ['Properties', 'ResponseParameters']),
+  }));
 
   const schedulesId = findApiResourceId(template, 'schedules');
   const scheduleId = findApiResourceId(template, '{name}', schedulesId);
@@ -1637,5 +1655,42 @@ describe('KPI alert backend infrastructure', () => {
     expect(definition).toContain('"Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":null,"Next":"KpiAlertsFailed"}]');
     expect(definition).toContain('"Next":"KpiAlertsFailed"');
     expect(definition).toContain('"message":"KPI alert evaluation failed; the analysis report is preserved."');
+  });
+});
+
+
+describe('Citation Gaps gateway failure visibility', () => {
+  const failureResponseTypes = new Set(['DEFAULT_5XX', 'INTEGRATION_TIMEOUT']);
+
+  it('exposes default server failures and integration timeouts as HTTP responses when the stack is synthesized', () => {
+    const failures = synthesized.gatewayResponses
+      .filter((response) => failureResponseTypes.has(response.responseType))
+      .map(({ responseType, statusCode }) => ({
+        responseType,
+        statusCode,
+      }))
+      .sort((left, right) => left.responseType.localeCompare(right.responseType));
+
+    expect(failures).toStrictEqual([
+      { responseType: 'DEFAULT_5XX', statusCode: '' },
+      { responseType: 'INTEGRATION_TIMEOUT', statusCode: '504' },
+    ]);
+  });
+
+  it('reuses restricted CORS headers when gateway failures bypass Lambda responses', () => {
+    const restrictedHeaders = synthesized.gatewayResponses.find(
+      (response) => response.responseType === 'UNAUTHORIZED'
+    )?.responseParameters;
+    const failureHeaders = synthesized.gatewayResponses
+      .filter((response) => failureResponseTypes.has(response.responseType))
+      .map((response) => response.responseParameters);
+
+    expect(restrictedHeaders).toBeDefined();
+    expect(failureHeaders).toStrictEqual([restrictedHeaders, restrictedHeaders]);
+    expect(JSON.stringify(failureHeaders)).not.toContain("'*'");
+  });
+
+  it('keeps StatsInsights at 512 MB when measured memory remains below seventy percent', () => {
+    expect(synthesized.statsInsightsMemorySize).toBe(512);
   });
 });

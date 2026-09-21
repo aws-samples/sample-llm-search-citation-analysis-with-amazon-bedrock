@@ -36,11 +36,14 @@ from shared.scope_params import (
 )
 from shared.utils import extract_domain, get_brand_config
 
-# Raised connection pool: the all-keywords path fans out
-# _KEYWORD_ANALYSIS_WORKERS keyword threads, each running up to 10
-# parallel CrawledContent queries (query_latest_per_key). botocore's
-# default pool of 10 would serialize that fan-out at the HTTP layer.
-dynamodb = boto3.resource('dynamodb', config=Config(max_pool_connections=50))
+# Classification runs in at most six threads, then final response enrichment
+# runs in a separate pool capped at ten. The phases never nest, so ten is both
+# the DynamoDB HTTP connection ceiling and the endpoint's maximum I/O fan-out.
+CRAWLED_CONTENT_MAX_WORKERS = 10
+dynamodb = boto3.resource(
+    'dynamodb',
+    config=Config(max_pool_connections=CRAWLED_CONTENT_MAX_WORKERS),
+)
 
 KEYWORDS_TABLE = keywords_table_name()
 
@@ -50,9 +53,8 @@ KEYWORDS_TABLE = keywords_table_name()
 # covers a full run while keeping the read small.
 LATEST_RUN_ITEM_LIMIT = 50
 
-# Concurrency for the all-keywords analysis loop. Keyword analyses are
-# I/O bound (DynamoDB queries), so a small pool cuts wall-clock roughly
-# linearly; kept modest to stay within the connection pool above.
+# Concurrency for SearchResults classification in the all-keywords path.
+# Crawl enrichment starts only after this pool has closed.
 _KEYWORD_ANALYSIS_WORKERS = 6
 
 # Fail-fast: Required environment variables
@@ -76,55 +78,38 @@ def is_first_party_domain(domain: object, config: dict[str, Any]) -> bool:
     which produced false positives that silently flipped competitor URLs into
     the first-party bucket. That fallback is removed — if a deployment wants
     a domain treated as first-party, it must be in the config.
-
-    Args:
-        domain: Hostname to test (may be lowercase or mixed case; leading
-            `www.` is tolerated).
-        config: Brand config dict. Only `first_party_domains` is read.
-
-    Returns:
-        True if the domain matches the allow-list exactly or as a subdomain.
     """
     if not domain or not isinstance(domain, str):
         return False
 
-    # Normalize both sides: lowercase and strip leading www.
     domain_lower = domain.lower().lstrip('.')
     if domain_lower.startswith('www.'):
         domain_lower = domain_lower[4:]
 
     first_party_domains = config.get('first_party_domains', []) or []
-    for fp in first_party_domains:
-        if not fp or not isinstance(fp, str):
+    for first_party_domain in first_party_domains:
+        if not first_party_domain or not isinstance(first_party_domain, str):
             continue
-        fp_norm = fp.lower().lstrip('.')
-        if fp_norm.startswith('www.'):
-            fp_norm = fp_norm[4:]
-        if not fp_norm:
+        normalized_first_party = first_party_domain.lower().lstrip('.')
+        if normalized_first_party.startswith('www.'):
+            normalized_first_party = normalized_first_party[4:]
+        if not normalized_first_party:
             continue
 
-        # Exact host match.
-        if domain_lower == fp_norm:
+        if domain_lower == normalized_first_party:
             return True
-        # Subdomain match — require the '.' boundary so 'evilexample.com'
-        # does NOT match 'example.com'.
-        if domain_lower.endswith('.' + fp_norm):
+        if domain_lower.endswith('.' + normalized_first_party):
             return True
 
     return False
 
 
 def _batch_crawled_info(urls: list[str]) -> dict[str, dict[str, Any]]:
-    """Fetch the latest CrawledContent row for each URL in parallel.
+    """Fetch only consumed fields from the latest crawl row of each URL.
 
-    Returns a dict mapping each input URL to its shaped crawled-info
-    payload (only the fields consumed by `analyze_citation_gaps`).
-    Missing URLs get no entry so callers can safely `map.get(url, {})`.
-
-    Replaces the per-URL `get_crawled_content_info` call that used to
-    live inside `analyze_citation_gaps`'s loop (audit item 16).
-    Per-URL query failures are logged inside `query_latest_per_key`
-    and surface here as missing keys in the returned dict.
+    URL queries are deduplicated by ``query_latest_per_key`` and bounded to ten
+    workers. Missing rows and per-URL failures produce no metadata entry, so a
+    partial crawl-table failure never discards an otherwise valid gap.
     """
     if not urls:
         return {}
@@ -134,6 +119,14 @@ def _batch_crawled_info(urls: list[str]) -> dict[str, dict[str, Any]]:
         table=table,
         partition_key_name='normalized_url',
         partition_values=urls,
+        max_workers=CRAWLED_CONTENT_MAX_WORKERS,
+        projection_expression='#title, #seo, #authority, #crawled',
+        expression_attribute_names={
+            '#title': 'title',
+            '#seo': 'seo_analysis',
+            '#authority': 'domain_authority',
+            '#crawled': 'crawled_at',
+        },
     )
 
     shaped: dict[str, dict[str, Any]] = {}
@@ -149,34 +142,38 @@ def _batch_crawled_info(urls: list[str]) -> dict[str, dict[str, Any]]:
     return shaped
 
 
+def _enrich_sources(sources: list[dict[str, Any]]) -> None:
+    """Attach crawl metadata after final response selection.
+
+    Repeated URLs remain repeated response records, including their keyword
+    attribution, but share one crawl lookup.
+    """
+    urls = list(dict.fromkeys(source['url'] for source in sources))
+    crawled_info = _batch_crawled_info(urls)
+    for source in sources:
+        source.update(crawled_info.get(source['url'], {}))
+
+
 def fuzzy_match_brand(brand_name: str, parent_company: str, tracked_list: list[str]) -> bool:
-    """
-    Fuzzy match a brand against a list of tracked brands.
-    Uses intelligent matching to handle variations like "Brand Premium" matching "Brand".
-    """
+    """Fuzzy-match one extracted brand against tracked brand names."""
     brand_name_lower = brand_name.lower()
-    parent_company_lower = (parent_company or "").lower()
+    parent_company_lower = (parent_company or '').lower()
 
     for tracked in tracked_list:
         tracked_lower = tracked.lower()
-        # Extract key words from tracked brand
         tracked_words = set(tracked_lower.split())
 
-        # Direct substring match
         if tracked_lower in brand_name_lower or brand_name_lower in tracked_lower:
             return True
 
-        # Parent company match
         if parent_company_lower and (tracked_lower in parent_company_lower or parent_company_lower in tracked_lower):
             return True
 
-        # Word overlap match (e.g., "Brand" matches "Brand Garden Inn")
-        significant_words = [w for w in tracked_words if len(w) > 3]
+        significant_words = [word for word in tracked_words if len(word) > 3]
         for word in significant_words:
             if word in brand_name_lower:
                 return True
 
-        # Check if brand contains the core brand name
         core_brand = tracked_words - {'hotels', 'hotel', 'international', 'group', 'inc', 'corp', 'company'}
         for core in core_brand:
             if len(core) > 3 and core in brand_name_lower:
@@ -188,11 +185,7 @@ def fuzzy_match_brand(brand_name: str, parent_company: str, tracked_list: list[s
 def _classify_mentioned_brands(
     brands: list[dict[str, Any]], first_party_list: list[str], competitors_list: list[str]
 ) -> tuple[set[str], set[str]]:
-    """Split one answer's brand mentions into ``(first_party, competitor)`` names.
-
-    The LLM ``classification`` from brand extraction is the primary signal;
-    a brand without one falls back to fuzzy matching against the tracked lists.
-    """
+    """Split one answer's brand mentions into first-party and competitor names."""
     mentioned_first_party: set[str] = set()
     mentioned_competitors: set[str] = set()
 
@@ -201,12 +194,10 @@ def _classify_mentioned_brands(
         parent_company = brand.get('parent_company', '')
         classification = brand.get('classification', '')
 
-        # Primary: use LLM classification
         if classification == 'first_party':
             mentioned_first_party.add(brand_name)
         elif classification == 'competitor':
             mentioned_competitors.add(brand_name)
-        # Fallback: use fuzzy matching against tracked brands
         elif fuzzy_match_brand(brand_name, parent_company, first_party_list):
             mentioned_first_party.add(brand_name)
         elif fuzzy_match_brand(brand_name, parent_company, competitors_list):
@@ -218,12 +209,12 @@ def _classify_mentioned_brands(
 def _map_sources_to_brands(
     latest_items: list[dict[str, Any]], first_party_list: list[str], competitors_list: list[str]
 ) -> dict[str, dict[str, Any]]:
-    """Index a run's citations by URL: the providers citing it, how often, and the brands those answers mentioned."""
+    """Index citations by URL with provider, count, and mentioned-brand data."""
     source_brand_map: dict[str, dict[str, Any]] = defaultdict(lambda: {
         'first_party': set(),
         'competitors': set(),
         'providers': set(),
-        'citation_count': 0
+        'citation_count': 0,
     })
 
     for item in latest_items:
@@ -232,7 +223,6 @@ def _map_sources_to_brands(
             item.get('brands', []), first_party_list, competitors_list
         )
 
-        # Map citations to brands
         for citation in item.get('citations', []):
             domain = extract_domain(citation)
             source_brand_map[citation]['providers'].add(provider)
@@ -247,26 +237,14 @@ def _map_sources_to_brands(
 def _gaps_and_covered_sources(
     source_brand_map: dict[str, dict[str, Any]], config: dict[str, Any]
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Sort the third-party sources into ranked ``(gaps, covered_sources)`` lists.
-
-    A gap cites competitors but no first-party brand; a covered source cites
-    the first-party brand. Neutral sources (neither) are not actionable
-    opportunities and are dropped. First-party domains are never gaps: your
-    own website URLs are excluded before the crawled-content lookup.
-    """
+    """Classify and rank third-party sources without crawl enrichment."""
     third_party = {
         url: data for url, data in source_brand_map.items()
         if not is_first_party_domain(data['domain'], config)
     }
 
-    # Batch-fetch crawled content for all relevant URLs up front. The
-    # previous per-URL query inside the loop was O(N) round-trips to
-    # DynamoDB (audit item 16); this collapses it to ~1 RTT worth of
-    # parallel work.
-    crawled_info_map = _batch_crawled_info(list(third_party))
-
-    gaps = []
-    covered_sources = []
+    gaps: list[dict[str, Any]] = []
+    covered_sources: list[dict[str, Any]] = []
 
     for url, data in third_party.items():
         source_info = {
@@ -276,55 +254,44 @@ def _gaps_and_covered_sources(
             'providers': list(data['providers']),
             'provider_count': len(data['providers']),
             'first_party_brands': list(data['first_party']),
-            'competitor_brands': list(data['competitors'])
+            'competitor_brands': list(data['competitors']),
         }
-        # Pull crawled info from the prefetched batch.
-        source_info.update(crawled_info_map.get(url, {}))
 
         if data['competitors'] and not data['first_party']:
-            # Gap: competitors mentioned but not first-party
-            # These are high-value opportunities - sources citing competitors but not you
             source_info['priority'] = 'high' if len(data['providers']) >= 2 else 'medium'
             gaps.append(source_info)
         elif data['first_party']:
-            # Covered: first-party is mentioned on this third-party source
             covered_sources.append(source_info)
 
-    # Sort gaps by priority and citation count
     priority_order = {'high': 0, 'medium': 1, 'low': 2}
-    gaps.sort(key=lambda x: (priority_order.get(x.get('priority', 'low'), 2), -x['citation_count']))
-    covered_sources.sort(key=lambda x: -x['citation_count'])
+    gaps.sort(key=lambda source: (
+        priority_order.get(source.get('priority', 'low'), 2),
+        -source['citation_count'],
+    ))
+    covered_sources.sort(key=lambda source: -source['citation_count'])
 
     return gaps, covered_sources
 
 
-def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any]:
-    """
-    Analyze citation gaps for a keyword.
+def _first_party_brand_error(config: dict[str, Any]) -> dict[str, str] | None:
+    """Return the public error contract when first-party brands are missing."""
+    tracked_brands = config.get('tracked_brands', {})
+    if tracked_brands.get('first_party', []):
+        return None
+    return {'error': 'No first-party brands configured'}
 
-    Identifies sources that cite competitors but not first-party brands.
-    Uses the 'classification' field from brand extraction (LLM-based) as primary,
-    with fuzzy matching as fallback.
-    """
+
+def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Build one keyword response with final slices but without crawl metadata."""
+    configuration_error = _first_party_brand_error(config)
+    if configuration_error is not None:
+        return configuration_error
+
     search_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
+    tracked_brands = config.get('tracked_brands', {})
+    first_party_list = [brand.lower() for brand in tracked_brands.get('first_party', [])]
+    competitors_list = [brand.lower() for brand in tracked_brands.get('competitors', [])]
 
-    # Get tracked brands for fallback matching
-    tracked_brands = config.get("tracked_brands", {})
-    first_party_list = [b.lower() for b in tracked_brands.get("first_party", [])]
-    competitors_list = [b.lower() for b in tracked_brands.get("competitors", [])]
-
-    if not first_party_list:
-        return {"error": "No first-party brands configured"}
-
-    # Query search results for keyword — newest first, bounded, and
-    # projected down to the fields the analysis reads. The partition
-    # accumulates one item per provider x persona per run, each carrying
-    # the FULL LLM response text; the previous unbounded ascending query
-    # re-read that entire history per request (~1MB/keyword), which
-    # dominated this endpoint's ~60s latency. Worse, once a partition
-    # exceeded DynamoDB's 1MB page, "latest" was computed from the
-    # OLDEST page, silently returning stale runs. Descending + Limit
-    # fixes both; the projection drops the response text we never read.
     response = search_table.query(
         KeyConditionExpression=Key('keyword').eq(keyword),
         ScanIndexForward=False,
@@ -335,69 +302,67 @@ def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any
     items: list[dict[str, Any]] = response.get('Items', [])
 
     if not items:
-        return {"error": f"No data found for keyword: {keyword}"}
+        return {'error': f'No data found for keyword: {keyword}'}
 
-    # Get latest results (items are newest-first, so the max timestamp
-    # is in this window by construction)
-    latest_ts = max(item.get('timestamp', '') for item in items)
-    latest_items = [item for item in items if item.get('timestamp') == latest_ts]
+    latest_timestamp = max(item.get('timestamp', '') for item in items)
+    latest_items = [item for item in items if item.get('timestamp') == latest_timestamp]
 
     source_brand_map = _map_sources_to_brands(latest_items, first_party_list, competitors_list)
     gaps, covered_sources = _gaps_and_covered_sources(source_brand_map, config)
 
-    # Group gaps by domain
-    domain_gaps = defaultdict(list)
+    domain_gaps: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for gap in gaps:
         domain_gaps[gap['domain']].append(gap)
 
-    # Calculate summary stats
-    high_priority_gaps = [g for g in gaps if g.get('priority') == 'high']
+    high_priority_gaps = [gap for gap in gaps if gap.get('priority') == 'high']
 
     return {
         'keyword': keyword,
-        'timestamp': latest_ts,
-        'gaps': gaps[:50],  # Top 50 gaps
-        'covered_sources': covered_sources[:20],  # Top 20 covered
+        'timestamp': latest_timestamp,
+        'gaps': gaps[:50],
+        'covered_sources': covered_sources[:20],
         'domain_summary': [
             {
                 'domain': domain,
                 'gap_count': len(urls),
-                'total_citations': sum(u['citation_count'] for u in urls)
+                'total_citations': sum(url['citation_count'] for url in urls),
             }
-            for domain, urls in sorted(domain_gaps.items(), key=lambda x: -len(x[1]))[:20]
+            for domain, urls in sorted(domain_gaps.items(), key=lambda item: -len(item[1]))[:20]
         ],
         'summary': {
             'gap_count': len(gaps),
             'covered_count': len(covered_sources),
             'high_priority_gaps': len(high_priority_gaps),
-            'coverage_rate': round(len(covered_sources) / len(source_brand_map) * 100, 1) if source_brand_map else 0
-        }
+            'coverage_rate': round(len(covered_sources) / len(source_brand_map) * 100, 1) if source_brand_map else 0,
+        },
     }
 
 
-def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10, scope: ReportScope | None = None) -> dict[str, Any]:
-    """Analyze citation gaps across the active keywords of a scope (default: all).
+def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Analyze one keyword and enrich only its returned response slices."""
+    result = _build_citation_gap_result(keyword, config)
+    if 'error' in result:
+        return result
 
-    A group / id scope covers every keyword it resolves to (up to the scope
-    cap); the unscoped dashboard keeps `limit` as its breadth knob.
-    """
+    _enrich_sources([*result['gaps'], *result['covered_sources']])
+    return result
+
+
+def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10, scope: ReportScope | None = None) -> dict[str, Any]:
+    """Analyze citation gaps across the active keywords of a scope."""
+    configuration_error = _first_party_brand_error(config)
+    if configuration_error is not None:
+        return configuration_error
+
     keywords_table = dynamodb.Table(KEYWORDS_TABLE)
     resolved = scope if scope is not None else all_active_scope(keywords_table)
     keywords = sorted(resolved.keywords, key=str.casefold)
-    # A group / id scope is analysed in full (each analysis is a SearchResults
-    # query plus a CrawledContent fan-out, so `all` keeps `limit` as its guard).
     if scope is not None and scope.kind != 'all':
         limit = max(limit, len(keywords))
 
-    # Analyze keywords in parallel — each analysis is I/O bound (one
-    # SearchResults query + a CrawledContent fan-out), so the previous
-    # strictly sequential loop multiplied per-keyword latency by `limit`.
-    # sorted() above makes WHICH keywords get analyzed deterministic when
-    # more exist than `limit` (set order used to vary per invocation).
-    # pool.map preserves input order, so response ordering is unchanged.
     selected_keywords = keywords[:limit]
-    all_gaps = []
-    keyword_summaries = []
+    all_gaps: list[dict[str, Any]] = []
+    keyword_summaries: list[dict[str, Any]] = []
 
     if not selected_keywords:
         results: list[dict[str, Any]] = []
@@ -405,7 +370,7 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10, scope: Re
         workers = min(_KEYWORD_ANALYSIS_WORKERS, len(selected_keywords))
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             results = list(pool.map(
-                lambda kw: analyze_citation_gaps(kw, config),
+                lambda keyword: _build_citation_gap_result(keyword, config),
                 selected_keywords,
             ))
 
@@ -415,33 +380,32 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10, scope: Re
                 'keyword': keyword,
                 'gap_count': result['summary']['gap_count'],
                 'high_priority_gaps': result['summary']['high_priority_gaps'],
-                'coverage_rate': result['summary']['coverage_rate']
+                'coverage_rate': result['summary']['coverage_rate'],
             })
-            # Add top gaps from this keyword
             for gap in result['gaps'][:5]:
                 gap['keyword'] = keyword
                 all_gaps.append(gap)
 
-    # Sort all gaps by priority
     priority_order = {'high': 0, 'medium': 1, 'low': 2}
-    all_gaps.sort(key=lambda x: (priority_order.get(x.get('priority', 'low'), 2), -x['citation_count']))
+    all_gaps.sort(key=lambda gap: (
+        priority_order.get(gap.get('priority', 'low'), 2),
+        -gap['citation_count'],
+    ))
+    top_gaps = all_gaps[:30]
+    _enrich_sources(top_gaps)
 
     return {
         'scope': resolved.describe(),
         'keywords_analyzed': len(keyword_summaries),
-        'keyword_summaries': sorted(keyword_summaries, key=lambda x: -x['high_priority_gaps']),
-        'top_gaps': all_gaps[:30],
-        'total_gaps': sum(k['gap_count'] for k in keyword_summaries),
-        'total_high_priority': sum(k['high_priority_gaps'] for k in keyword_summaries)
+        'keyword_summaries': sorted(keyword_summaries, key=lambda summary: -summary['high_priority_gaps']),
+        'top_gaps': top_gaps,
+        'total_gaps': sum(summary['gap_count'] for summary in keyword_summaries),
+        'total_high_priority': sum(summary['high_priority_gaps'] for summary in keyword_summaries),
     }
 
 
 def gaps_for_scope(scope: ReportScope | None, config: dict[str, Any], limit: int) -> dict[str, Any]:
-    """One keyword's gap analysis for a single-keyword scope; the fan-out over the scope's keywords otherwise.
-
-    ``None`` is the unscoped dashboard request: every active keyword, ``limit``
-    of them analysed.
-    """
+    """Return one-keyword analysis or a rollup for the requested scope."""
     if scope is not None and scope.is_single_keyword:
         return analyze_citation_gaps(scope.keywords[0], config)
     return analyze_all_keywords_gaps(config, limit, scope=scope)
@@ -450,18 +414,10 @@ def gaps_for_scope(scope: ReportScope | None, config: dict[str, Any], limit: int
 @api_handler
 @validate({
     **SCOPE_QUERY_PARAMS,
-    'limit': {'type': int, 'min': 1, 'max': 100, 'default': 10}
+    'limit': {'type': int, 'min': 1, 'max': 100, 'default': 10},
 })
 def handler(event: dict[str, Any], context: Any, limit: int = 10, **scope_params: str | None) -> dict[str, Any]:
-    """
-    API handler for citation gap analysis.
-
-    Query params:
-        - keyword: one keyword to analyze
-        - group_id / keyword_ids: analyze every active keyword of a group / id set
-        - neither: analyze across all active keywords
-        - limit: Number of keywords to analyze when unscoped (default: 10)
-    """
+    """Return citation gaps for one keyword, a group, explicit ids, or all active keywords."""
     report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE))
     if rejected:
         return rejected

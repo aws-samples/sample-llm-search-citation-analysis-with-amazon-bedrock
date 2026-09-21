@@ -51,12 +51,19 @@ export interface GeneratedContent {
   key_points: string[];
 }
 
+export interface ContentWarning {
+  code: 'incomplete_metadata';
+  message: string;
+  missing_fields: string[];
+}
+
 export interface ContentStudioHistory {
   id: string;
   keyword: string;
   idea_title: string;
   content_angle: string;
   generated_content: GeneratedContent;
+  content_warning?: ContentWarning;
   competitor_sources_used: number;
   status: ContentStatus;
   viewed: boolean;

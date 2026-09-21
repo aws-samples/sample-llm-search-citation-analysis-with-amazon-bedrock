@@ -2994,6 +2994,21 @@ def delete_waf(waf, arn):
       statusCode: '403',
       responseHeaders: gatewayResponseCorsHeaders,
     });
+
+    // Integration failures never reach the Lambda response helper. Give both
+    // the timeout-specific 504 and the generic server-error fallback the same
+    // restricted CORS headers so browsers expose their HTTP status instead of
+    // masking them as an opaque CORS/network failure.
+    api.addGatewayResponse('IntegrationTimeout', {
+      type: apigateway.ResponseType.INTEGRATION_TIMEOUT,
+      statusCode: '504',
+      responseHeaders: gatewayResponseCorsHeaders,
+    });
+
+    api.addGatewayResponse('DefaultServerError', {
+      type: apigateway.ResponseType.DEFAULT_5XX,
+      responseHeaders: gatewayResponseCorsHeaders,
+    });
     
     // Update Cognito User Pool Client callback URLs with CloudFront domain
     const cfnUserPoolClient = auth.userPoolClient.node.defaultChild as cdk.aws_cognito.CfnUserPoolClient;

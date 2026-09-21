@@ -347,6 +347,40 @@ class TestPublicView:
         assert public_view(job)['config'] == {'seed': 'hotel'}
 
 
+class TestBoundStepResult:
+    def test_returns_canonical_ints_when_step_metadata_contains_ints_or_integral_decimals(self):
+        results = [
+            bound_step_result({'round': round_number, 'attempt': attempt})
+            for round_number, attempt in ((4, 5), (Decimal('4'), Decimal('5')))
+        ]
+
+        assert [(result['round'], result['attempt']) for result in results] == [(4, 5), (4, 5)]
+        assert [(type(result['round']), type(result['attempt'])) for result in results] == [
+            (int, int),
+            (int, int),
+        ]
+
+    def test_omits_step_metadata_when_values_are_not_integral_ints_or_decimals(self):
+        invalid_values = (
+            True,
+            1.0,
+            Decimal('1.5'),
+            Decimal('NaN'),
+            Decimal('Infinity'),
+            Decimal('-Infinity'),
+        )
+        results = [bound_step_result({'round': value, 'attempt': value}) for value in invalid_values]
+
+        assert [('round' in result, 'attempt' in result) for result in results] == [
+            (False, False),
+            (False, False),
+            (False, False),
+            (False, False),
+            (False, False),
+            (False, False),
+        ]
+
+
 class TestPersistenceBudgets:
     def test_keeps_highest_ranked_candidates_when_step_result_exceeds_its_budget(self):
         result = bound_step_result({

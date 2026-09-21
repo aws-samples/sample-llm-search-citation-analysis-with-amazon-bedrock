@@ -21,7 +21,7 @@ function isCitationGapsResponse(data: unknown): data is CitationGapsResponse {
 }
 
 const citationGapsEndpoint = {
-  errorContext: 'visibility',
+  errorContext: 'citationGaps',
   logMessage: '[citationGaps] Error fetching citation gaps:',
   isValidResponse: isCitationGapsResponse,
   createHttpError: (status: number) => new ApiRequestError('Failed to fetch citation gaps', status),

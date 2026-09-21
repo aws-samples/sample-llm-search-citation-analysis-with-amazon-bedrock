@@ -49,6 +49,7 @@ export const ScheduleForm = ({
       <FormField label="Schedule name" htmlFor="schedule-display-name">
         <input
           id="schedule-display-name"
+          name="schedule-display-name"
           type="text"
           value={formData.display_name}
           maxLength={100}
@@ -60,6 +61,7 @@ export const ScheduleForm = ({
       <FormField label="Frequency" htmlFor="schedule-frequency">
         <select
           id="schedule-frequency"
+          name="schedule-frequency"
           value={formData.frequency}
           onChange={(e) => {
             if (isScheduleFrequency(e.target.value)) updateFormField('frequency', e.target.value);
@@ -74,6 +76,7 @@ export const ScheduleForm = ({
       <FormField label="Time" htmlFor="schedule-time">
         <input
           id="schedule-time"
+          name="schedule-time"
           type="time"
           value={formData.time}
           onChange={(e) => updateFormField('time', e.target.value)}
@@ -83,6 +86,7 @@ export const ScheduleForm = ({
       <FormField label="Timezone" htmlFor="schedule-timezone">
         <input
           id="schedule-timezone"
+          name="schedule-timezone"
           type="text"
           list={TIMEZONE_LIST_ID}
           value={formData.timezone}
@@ -98,6 +102,7 @@ export const ScheduleForm = ({
         <FormField label="Day of week" htmlFor="schedule-day-of-week">
           <select
             id="schedule-day-of-week"
+            name="schedule-day-of-week"
             value={formData.day_of_week}
             onChange={(e) => updateFormField('day_of_week', e.target.value)}
             className={INPUT_CLASS}
@@ -110,6 +115,7 @@ export const ScheduleForm = ({
         <FormField label={`Day of month (1-${MAX_DAY_OF_MONTH})`} htmlFor="schedule-day-of-month">
           <input
             id="schedule-day-of-month"
+            name="schedule-day-of-month"
             type="number"
             min="1"
             max={MAX_DAY_OF_MONTH}
@@ -120,8 +126,13 @@ export const ScheduleForm = ({
         </FormField>
       )}
       <div className="sm:col-span-2">
-        <label className="flex items-center gap-2 text-sm text-gray-700">
+        <label
+          htmlFor="schedule-enabled"
+          className="flex items-center gap-2 text-sm text-gray-700"
+        >
           <input
+            id="schedule-enabled"
+            name="schedule-enabled"
             type="checkbox"
             checked={formData.enabled}
             onChange={(e) => updateFormField('enabled', e.target.checked)}
@@ -228,18 +239,27 @@ const ScheduleScopeField = ({
     <fieldset className="sm:col-span-2">
       <legend className="block text-sm font-medium text-gray-700 mb-1">Keywords to analyse</legend>
       <div className="flex flex-col gap-2">
-        {options.map((option) => (
-          <label key={option.mode} className="flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="radio"
-              name="schedule-scope-mode"
-              checked={scope.mode === option.mode}
-              onChange={() => onChange(scopeForMode(option.mode, scope))}
-            />
-            {option.label}
-            <span className="text-xs text-gray-500">({option.hint})</span>
-          </label>
-        ))}
+        {options.map((option) => {
+          const optionId = `schedule-scope-mode-${option.mode}`;
+          return (
+            <label
+              key={option.mode}
+              htmlFor={optionId}
+              className="flex items-center gap-2 text-sm text-gray-700"
+            >
+              <input
+                id={optionId}
+                type="radio"
+                name="schedule-scope-mode"
+                value={option.mode}
+                checked={scope.mode === option.mode}
+                onChange={() => onChange(scopeForMode(option.mode, scope))}
+              />
+              {option.label}
+              <span className="text-xs text-gray-500">({option.hint})</span>
+            </label>
+          );
+        })}
       </div>
       {scope.mode === 'groups' && (
         <GroupPicker
@@ -254,6 +274,8 @@ const ScheduleScopeField = ({
       {scope.mode === 'keywords' && (
         <div className="mt-2">
           <KeywordScopePicker
+            idPrefix="schedule-keyword-scope"
+            name="schedule-keyword-ids"
             keywords={keywords}
             groups={groups}
             selectedIds={scope.keyword_ids}
@@ -292,18 +314,28 @@ const GroupPicker = ({
   return (
     <div className="mt-2">
       <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg bg-white p-3 grid grid-cols-1 sm:grid-cols-2 gap-1">
-        {groups.map((group) => (
-          <label key={group.id} className="flex items-center gap-2 text-sm text-gray-700 py-0.5">
-            <input
-              type="checkbox"
-              checked={selectedIds.includes(group.id)}
-              onChange={() => toggle(group.id)}
-              aria-label={`Include group ${group.name}`}
-            />
-            <span className="truncate">{group.name}</span>
-            <span className="text-xs text-gray-400">({group.keyword_count})</span>
-          </label>
-        ))}
+        {groups.map((group) => {
+          const groupId = `schedule-group-${group.id}`;
+          return (
+            <label
+              key={group.id}
+              htmlFor={groupId}
+              className="flex items-center gap-2 text-sm text-gray-700 py-0.5"
+            >
+              <input
+                id={groupId}
+                name="schedule-group-ids"
+                value={group.id}
+                type="checkbox"
+                checked={selectedIds.includes(group.id)}
+                onChange={() => toggle(group.id)}
+                aria-label={`Include group ${group.name}`}
+              />
+              <span className="truncate">{group.name}</span>
+              <span className="text-xs text-gray-400">({group.keyword_count})</span>
+            </label>
+          );
+        })}
       </div>
       <p className="mt-1 text-xs text-gray-500">{selectedIds.length} group(s) selected</p>
     </div>

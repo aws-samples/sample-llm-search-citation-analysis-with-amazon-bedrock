@@ -87,7 +87,6 @@ const POPULATED = {
         suggested_headings: [],
         key_points: ['Cushioning matters most', 'Drop affects gait'],
       },
-      raw_content: '',
       competitor_sources_used: 3,
       status: 'generated',
       viewed: false,

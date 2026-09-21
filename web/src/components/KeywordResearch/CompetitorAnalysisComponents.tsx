@@ -88,12 +88,14 @@ export const InputForm = ({
 }: InputFormProps) => (
   <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
     <h3 className="text-sm font-medium text-gray-900 mb-2">Analyze Competitor Website</h3>
-    <p className="text-xs text-gray-500 mb-4">
+    <label htmlFor="competitor-analysis-url" className="block text-xs text-gray-500 mb-4">
       Enter a competitor's URL to discover keywords they're targeting and find content gaps.
-    </p>
+    </label>
     <form onSubmit={onSubmit} className="flex flex-col sm:flex-row gap-3 sm:gap-4">
       <div className="flex-1">
         <input
+          id="competitor-analysis-url"
+          name="competitor-url"
           type="text"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
@@ -293,12 +295,17 @@ const KeywordRow = ({
   keyword: kw, showOpportunity, selectable = false, selected, onToggle
 }: KeywordRowProps) => {
   const { copy } = useClipboardCopy();
+  const selectionId = `competitor-keyword-${encodeURIComponent(keywordSelectionKey(kw.keyword))}`;
 
   return (
     <tr className="hover:bg-gray-50">
       {selectable && (
         <td className="px-6 py-4">
+          <label htmlFor={selectionId} className="sr-only">Select {kw.keyword}</label>
           <input
+            id={selectionId}
+            name="competitor-keywords"
+            value={kw.keyword}
             type="checkbox"
             checked={selected?.has(keywordSelectionKey(kw.keyword)) ?? false}
             onChange={() => onToggle?.(kw.keyword)}

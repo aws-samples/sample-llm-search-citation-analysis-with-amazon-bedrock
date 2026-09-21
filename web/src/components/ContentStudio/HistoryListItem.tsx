@@ -1,6 +1,9 @@
 import type { ContentStudioHistory } from '../../types';
 import { formatDate } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
+import {
+  formatContentWarning, getContentTitle
+} from './contentPresentation';
 
 interface HistoryListItemProps {
   item: ContentStudioHistory;
@@ -59,46 +62,43 @@ const getContainerClass = (item: ContentStudioHistory): string => {
 };
 
 export const HistoryListItem = ({
-  item, deletingId, onSelect, onDelete 
-}: HistoryListItemProps) => {
-  return (
-    <div
-      key={item.id}
-      onClick={() => onSelect(item)}
-      className={getContainerClass(item)}
-    >
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
-          <div className={`p-2 rounded-lg shrink-0 ${getIconContainerClass(item)}`}>
-            {getStatusIcon(item)}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <h3 className="font-medium text-gray-900 truncate text-sm sm:text-base">
-                {item.generated_content?.title ?? item.idea_title}
-              </h3>
-              <StatusBadge item={item} />
-            </div>
-            <ItemMetadata item={item} />
-          </div>
+  item, deletingId, onSelect, onDelete
+}: HistoryListItemProps) => (
+  <div
+    onClick={() => onSelect(item)}
+    className={getContainerClass(item)}
+  >
+    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0">
+        <div className={`p-2 rounded-lg shrink-0 ${getIconContainerClass(item)}`}>
+          {getStatusIcon(item)}
         </div>
-
-        <div className="flex items-center gap-2 self-end sm:self-auto">
-          <DeleteButton
-            itemId={item.id}
-            deletingId={deletingId}
-            onDelete={onDelete}
-          />
-          <svg className="w-5 h-5 text-gray-400 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" />
-          </svg>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h3 className="font-medium text-gray-900 truncate text-sm sm:text-base">
+              {getContentTitle(item)}
+            </h3>
+            <StatusBadge item={item} />
+          </div>
+          <ItemMetadata item={item} />
         </div>
       </div>
 
-      <ItemPreview item={item} />
+      <div className="flex items-center gap-2 self-end sm:self-auto">
+        <DeleteButton
+          itemId={item.id}
+          deletingId={deletingId}
+          onDelete={onDelete}
+        />
+        <svg className="w-5 h-5 text-gray-400 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" />
+        </svg>
+      </div>
     </div>
-  );
-};
+
+    <ItemPreview item={item} />
+  </div>
+);
 
 const StatusBadge = ({ item }: { item: ContentStudioHistory }) => {
   if (!item.viewed && item.status === 'generated') {
@@ -154,10 +154,10 @@ interface DeleteButtonProps {
 }
 
 const DeleteButton = ({
-  itemId, deletingId, onDelete 
+  itemId, deletingId, onDelete
 }: DeleteButtonProps) => (
   <button
-    onClick={(e) => onDelete(itemId, e)}
+    onClick={(event) => onDelete(itemId, event)}
     disabled={deletingId === itemId}
     className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
     title="Delete"
@@ -172,30 +172,30 @@ const DeleteButton = ({
   </button>
 );
 
-const ItemPreview = ({ item }: { item: ContentStudioHistory }) => {
-  if (item.status === 'generated' && item.generated_content?.meta_description) {
-    return (
+const ItemPreview = ({ item }: { item: ContentStudioHistory }) => (
+  <>
+    {item.status === 'generated' && item.content_warning && (
+      <output className="block text-sm text-amber-700 mt-3">
+        {formatContentWarning(item.content_warning)}
+      </output>
+    )}
+
+    {item.status === 'generated' && item.generated_content?.meta_description && (
       <p className="text-sm text-gray-500 mt-3 line-clamp-2">
         {item.generated_content.meta_description}
       </p>
-    );
-  }
+    )}
 
-  if (item.status === 'failed' && item.error_message) {
-    return (
+    {item.status === 'failed' && item.error_message && (
       <p className="text-sm text-red-600 mt-3">
         Error: {item.error_message}
       </p>
-    );
-  }
+    )}
 
-  if (item.status === 'pending' || item.status === 'generating') {
-    return (
+    {(item.status === 'pending' || item.status === 'generating') && (
       <p className="text-sm text-blue-600 mt-3">
         Content is being generated. This may take up to a minute...
       </p>
-    );
-  }
-
-  return null;
-};
+    )}
+  </>
+);

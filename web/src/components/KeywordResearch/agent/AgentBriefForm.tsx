@@ -260,8 +260,8 @@ export function AgentBriefForm({
           <label htmlFor={ids.seed} className="block text-sm text-gray-600 mb-1">{subjectLabel(subject)} (or seed)</label>
           <input id={ids.seed} type="text" value={seed} maxLength={200} onChange={(event) => setSeed(event.target.value)} placeholder={seedPlaceholder(subject)} className={BRIEF_INPUT_CLASS} />
         </div>
-        <MarketSelect id={ids.country} label="Market (country)" value={country} options={COUNTRY_OPTIONS} onChange={setCountry} />
-        <MarketSelect id={ids.language} label="Language" value={language} options={LANGUAGE_OPTIONS} onChange={setLanguage} />
+        <MarketSelect id={ids.country} name="country" label="Market (country)" value={country} options={COUNTRY_OPTIONS} onChange={setCountry} />
+        <MarketSelect id={ids.language} name="language" label="Language" value={language} options={LANGUAGE_OPTIONS} onChange={setLanguage} />
       </div>
 
       <fieldset>
@@ -269,12 +269,14 @@ export function AgentBriefForm({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
           {catalog.map((option) => {
             const checked = selectedDimensions.includes(option.id);
+            const checkboxId = `research-agent-dimension-${option.id}`;
             return (
               <label
                 key={option.id}
+                htmlFor={checkboxId}
                 className={`flex items-start gap-2 rounded-lg border px-3 py-2 cursor-pointer transition-colors ${checked ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:border-gray-300'}`}
               >
-                <input type="checkbox" checked={checked} onChange={() => toggleDimension(option.id)} className="mt-0.5 h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-500" />
+                <input id={checkboxId} name="dimensions" value={option.id} type="checkbox" checked={checked} onChange={() => toggleDimension(option.id)} className="mt-0.5 h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-500" />
                 <span>
                   <span className="block text-sm font-medium text-gray-900">{option.label}</span>
                   <span className="block text-xs text-gray-500">{option.description}</span>

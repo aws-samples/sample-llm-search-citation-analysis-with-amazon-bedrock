@@ -1,14 +1,16 @@
 import {
-  describe, it, expect, vi 
+  afterEach, beforeEach, describe, it, expect, vi
 } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useCitationGaps } from './useCitationGaps';
 import {
-  mockCitationGapsResponse, mockAllKeywordsResponse 
+  mockCitationGapsResponse,
+  mockAllKeywordsResponse,
+  setupCitationGapsConsoleErrorMock
 } from './useCitationGaps-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
 import {
-  ALL_SCOPE, groupScope, keywordScope 
+  ALL_SCOPE, groupScope, keywordScope
 } from '../components/ui/reportScope-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -16,7 +18,13 @@ vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 type FetchCitationGapsArgs = Parameters<ReturnType<typeof useCitationGaps>['fetchCitationGaps']>;
 
 describe('useCitationGaps', () => {
-  it('starts with no data, not loading, and no error', () => {
+  beforeEach(setupCitationGapsConsoleErrorMock);
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('returns an idle state when no citation-gap request has started', () => {
     const { result } = renderHook(() => useCitationGaps());
 
     expect(result.current).toStrictEqual({
@@ -45,9 +53,21 @@ describe('useCitationGaps', () => {
       ['all-keywords citation gap rollup', mockAllKeywordsResponse, [ALL_SCOPE]],
     ],
     failures: [
-      ['Failed to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
-      ['Failed to load visibility metrics', 'response is a backend {error} body', { errorResponse: { error: 'No brand config found' } }],
-      ['Invalid visibility request', 'payload fails the type guard', { invalidResponse: true }],
+      ['Failed to load citation gaps', 'request returns a server error', { shouldFail: true }],
+      [
+        'Citation gap analysis timed out',
+        'gateway returns an integration timeout',
+        {
+          shouldFail: true,
+          failStatus: 504,
+        },
+      ],
+      [
+        'Failed to load citation gaps',
+        'response is a backend {error} body',
+        { errorResponse: { error: 'No brand config found' } },
+      ],
+      ['Invalid citation gap request', 'payload fails the type guard', { invalidResponse: true }],
     ],
   });
 });

@@ -18,8 +18,13 @@ export const ExtractionOptions = ({
   <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
     <h3 className="text-sm font-semibold text-gray-900 mb-3">Extraction Options</h3>
     <div className="space-y-3">
-      <label className="flex items-center gap-3">
+      <label
+        htmlFor="brands-extraction-include-sentiment"
+        className="flex items-center gap-3"
+      >
         <input
+          id="brands-extraction-include-sentiment"
+          name="brands-extraction-include-sentiment"
           type="checkbox"
           checked={includeSentiment}
           onChange={(e) => onSentimentChange(e.target.checked)}
@@ -27,8 +32,13 @@ export const ExtractionOptions = ({
         />
         <span className="text-sm text-gray-700">Include sentiment analysis</span>
       </label>
-      <label className="flex items-center gap-3">
+      <label
+        htmlFor="brands-extraction-include-ranking-context"
+        className="flex items-center gap-3"
+      >
         <input
+          id="brands-extraction-include-ranking-context"
+          name="brands-extraction-include-ranking-context"
           type="checkbox"
           checked={includeRankingContext}
           onChange={(e) => onRankingContextChange(e.target.checked)}
@@ -37,9 +47,10 @@ export const ExtractionOptions = ({
         <span className="text-sm text-gray-700">Include ranking context</span>
       </label>
       <div className="flex items-center gap-3">
-        <label htmlFor="max-brands" className="text-sm text-gray-700">Max brands per response:</label>
+        <label htmlFor="brands-extraction-max-brands" className="text-sm text-gray-700">Max brands per response:</label>
         <input
-          id="max-brands"
+          id="brands-extraction-max-brands"
+          name="brands-extraction-max-brands"
           type="number"
           value={maxBrands}
           onChange={(e) => onMaxBrandsChange(parseInt(e.target.value, 10) || 20)}
