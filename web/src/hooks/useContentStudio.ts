@@ -1,64 +1,49 @@
 import {
-  useState, useCallback, useEffect, useRef
+  useCallback, useEffect, useRef, useState
 } from 'react';
 import {
-  API_BASE_URL,
-  authenticatedFetch,
-  getErrorMessage,
-  ApiRequestError,
+  deleteGeneratedContent,
+  fetchContentHistory as requestContentHistory,
+  fetchContentIdeas as requestContentIdeas,
+  fetchContentStatus,
+  markContentViewed,
+  startContentBriefBatch,
+  startContentGeneration,
+} from '../api/contentStudio';
+import {
+  getErrorMessage, isDefinitiveClientRejection
 } from '../infrastructure';
 import type {
-  ContentIdea, ContentStudioHistory, ContentStatus
+  ContentBriefBatchRequest,
+  ContentBriefBatchStartResponse,
+  ContentGenerationIdea,
+  ContentIdea,
+  ContentStatus,
+  ContentStudioHistory,
+  GenerateContentResponse,
 } from '../types';
+import { useContentStudioBatchTracking } from './useContentStudioBatchTracking';
 
 const GENERATING_POLL_INTERVAL = 10000;
 const MAX_CONSECUTIVE_STATUS_FAILURES = 3;
 const STATUS_POLLING_ERROR = 'Unable to check content generation status after 3 attempts. Refresh to try again.';
 
-type GenerateContentResponse = Pick<ContentStudioHistory, 'id' | 'status' | 'keyword'> & {
-  success: boolean;
-  error?: string;
-};
-
-interface ContentHistoryResponse {
-  history: ContentStudioHistory[];
-  unviewed_count: number;
-}
-
-type ContentStatusResponse = Pick<ContentStudioHistory, 'id' | 'status'>;
-
-interface PollingOwner {
-  readonly token: symbol;
-  readonly controller: AbortController;
-  inFlight: boolean;
-  historyRefreshInFlight: boolean;
-}
-
-interface HistoryRequestOwner {
-  readonly controller: AbortController;
-  readonly pollingToken: symbol | undefined;
-}
-
-function isContentIdeasResponse(data: unknown): data is { ideas: ContentIdea[] } { return typeof data === 'object' && data !== null && 'ideas' in data; }
-
-function isGenerateContentResponse(data: unknown): data is GenerateContentResponse { return typeof data === 'object' && data !== null && 'id' in data && 'status' in data; }
-
-function isContentHistoryResponse(data: unknown): data is ContentHistoryResponse { return typeof data === 'object' && data !== null && 'history' in data; }
-
-function isContentStatus(value: unknown): value is ContentStatus { return value === 'pending' || value === 'generating' || value === 'generated' || value === 'failed'; }
-
-function isContentStatusResponse(data: unknown): data is ContentStatusResponse { return typeof data === 'object' && data !== null && 'id' in data && 'status' in data && typeof data.id === 'string' && isContentStatus(data.status); }
-
-function isGeneratingItem(item: ContentStudioHistory): boolean {
-  return item.status === 'pending' || item.status === 'generating';
+function isIndependentlyGenerating(item: ContentStudioHistory): boolean {
+  return item.batch_id === undefined
+    && (item.status === 'pending' || item.status === 'generating');
 }
 
 function isPollableItem(
   item: ContentStudioHistory,
   failureCounts: ReadonlyMap<string, number>
 ): boolean {
-  return isGeneratingItem(item)
+  return isIndependentlyGenerating(item)
     && (failureCounts.get(item.id) ?? 0) < MAX_CONSECUTIVE_STATUS_FAILURES;
+}
+
+function isStructuredBatchRejection(requestError: unknown): boolean {
+  return isDefinitiveClientRejection(requestError)
+    && requestError.responseMessage !== undefined;
 }
 
 export function useContentStudio() {
@@ -69,121 +54,84 @@ export function useContentStudio() {
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pollingError, setPollingError] = useState<string | null>(null);
-  const historyRef = useRef<ContentStudioHistory[]>([]);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollingOwnerRef = useRef<PollingOwner | null>(null);
-  const historyRequestRef = useRef<HistoryRequestOwner | null>(null);
+  const itemPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const latestIdeasReadRef = useRef<symbol | null>(null);
+  const latestHistoryReadRef = useRef<symbol | null>(null);
+  const historyRequestRef = useRef<AbortController | null>(null);
+  const latestGenerationRef = useRef<symbol | null>(null);
+  const itemStatusPollRef = useRef<AbortController | null>(null);
   const pollingFailureCountsRef = useRef(new Map<string, number>());
-  const mountedRef = useRef(true);
+  const loadingOperationsRef = useRef(new Set<symbol>());
+  const generationOperationsRef = useRef(new Set<symbol>());
+  // Stryker disable next-line BooleanLiteral: The setup effect establishes mounted state before consumer effects or events can start work.
+  const mountedRef = useRef(false);
 
-  const stopPolling = useCallback(() => {
-    const pollingOwner = pollingOwnerRef.current;
-    pollingOwnerRef.current = null;
-    if (pollingRef.current !== null) {
-      clearInterval(pollingRef.current);
-      pollingRef.current = null;
-    }
-    if (pollingOwner === null) return;
-    pollingOwner.controller.abort();
-
-    const historyRequest = historyRequestRef.current;
-    if (historyRequest?.pollingToken === pollingOwner.token) {
-      historyRequest.controller.abort();
-      historyRequestRef.current = null;
-      if (mountedRef.current) setLoading(false);
-    }
-  }, []);
-
+  // Stryker disable ArrayDeclaration: This mount lifecycle intentionally runs once per setup and cleanup cycle.
   useEffect(() => {
     mountedRef.current = true;
     return () => {
+      // Stryker disable next-line BooleanLiteral: Cleanup and StrictMode setup are synchronous; operation tokens are the observable stale-work guard.
       mountedRef.current = false;
-      stopPolling();
-      historyRequestRef.current?.controller.abort();
+      latestIdeasReadRef.current = null;
+      latestHistoryReadRef.current = null;
+      historyRequestRef.current?.abort();
       historyRequestRef.current = null;
+      latestGenerationRef.current = null;
+      loadingOperationsRef.current.clear();
+      generationOperationsRef.current.clear();
     };
-  }, [stopPolling]);
-
-  const pollingCanCommit = useCallback((pollingOwner: PollingOwner): boolean => (
-    mountedRef.current
-    && pollingOwnerRef.current === pollingOwner
-    && pollingOwner.controller.signal.aborted === false
-  ), []);
-
-  const historyRequestCanCommit = useCallback((requestOwner: HistoryRequestOwner): boolean => {
-    const pollingRequestIsCurrent = requestOwner.pollingToken === undefined
-      || pollingOwnerRef.current?.token === requestOwner.pollingToken;
-    return mountedRef.current
-      && historyRequestRef.current === requestOwner
-      && requestOwner.controller.signal.aborted === false
-      && pollingRequestIsCurrent;
   }, []);
+  // Stryker restore ArrayDeclaration
 
-  const checkContentStatus = useCallback(async (
-    id: string,
-    signal: AbortSignal
-  ): Promise<ContentStatusResponse> => {
-    const response = await authenticatedFetch(
-      `${API_BASE_URL}/content-studio/status/${id}`,
-      { signal }
-    );
-    if (!response.ok) {
-      throw new ApiRequestError(`Status check failed with HTTP ${response.status}`, response.status);
-    }
-
-    const json: unknown = await response.json();
-    if (!isContentStatusResponse(json) || json.id !== id) {
-      throw new ApiRequestError('Invalid content status response');
-    }
-    return json;
-  }, []);
-
-  const fetchHistoryRequest = useCallback(async (
-    limit: number,
-    pollingToken?: symbol
-  ): Promise<ContentStudioHistory[]> => {
-    historyRequestRef.current?.controller.abort();
-    const requestOwner: HistoryRequestOwner = {
-      controller: new AbortController(),
-      pollingToken,
-    };
-    historyRequestRef.current = requestOwner;
+  // Stryker disable ArrayDeclaration: This callback closes only over stable refs and React state setters.
+  const beginLoading = useCallback((): symbol => {
+    const operation = Symbol();
+    loadingOperationsRef.current.add(operation);
     setLoading(true);
+    return operation;
+  }, []);
+  // Stryker restore ArrayDeclaration
+
+  // Stryker disable ArrayDeclaration: This callback closes only over stable refs and React state setters.
+  const finishLoading = useCallback((operation: symbol): void => {
+    loadingOperationsRef.current.delete(operation);
+    // Stryker disable next-line ConditionalExpression: React discards state updates after real unmount; StrictMode stale work is token-gated.
+    if (mountedRef.current) setLoading(loadingOperationsRef.current.size > 0);
+  }, []);
+  // Stryker restore ArrayDeclaration
+
+  const fetchHistory = useCallback(async (
+    limit = 20
+  ): Promise<ContentStudioHistory[]> => {
+    historyRequestRef.current?.abort();
+    const controller = new AbortController();
+    historyRequestRef.current = controller;
+    const operation = beginLoading();
+    latestHistoryReadRef.current = operation;
     setError(null);
-
     try {
-      const params = new URLSearchParams({ limit: limit.toString() });
-      const response = await authenticatedFetch(
-        `${API_BASE_URL}/content-studio/history?${params}`,
-        { signal: requestOwner.controller.signal }
-      );
-      if (!response.ok) throw new ApiRequestError(`HTTP ${response.status}`, response.status);
-
-      const json: unknown = await response.json();
-      if (!isContentHistoryResponse(json)) {
-        throw new ApiRequestError('Invalid response format');
-      }
-      if (!historyRequestCanCommit(requestOwner)) return [];
-      historyRef.current = json.history;
-      setHistory(json.history);
-      setUnviewedCount(json.unviewed_count);
-      return json.history;
-    } catch (caughtError) {
-      if (!historyRequestCanCommit(requestOwner)) return [];
-      setError(getErrorMessage(caughtError, 'content'));
-      console.error('[content] Error fetching history:', caughtError);
+      const response = await requestContentHistory(limit, controller.signal);
+      if (!mountedRef.current || latestHistoryReadRef.current !== operation) return [];
+      setHistory(response.history);
+      setUnviewedCount(response.unviewedCount);
+      return response.history;
+    } catch (requestError) {
+      if (!mountedRef.current || latestHistoryReadRef.current !== operation) return [];
+      setError(getErrorMessage(requestError, 'content'));
+      console.error('[content] Error fetching history:', requestError);
       return [];
     } finally {
-      if (historyRequestRef.current === requestOwner) {
-        historyRequestRef.current = null;
-        if (mountedRef.current) setLoading(false);
-      }
+      if (historyRequestRef.current === controller) historyRequestRef.current = null;
+      finishLoading(operation);
     }
-  }, [historyRequestCanCommit]);
+  }, [beginLoading, finishLoading]);
 
-  const fetchHistory = useCallback(async (limit = 20): Promise<ContentStudioHistory[]> => (
-    fetchHistoryRequest(limit)
-  ), [fetchHistoryRequest]);
+  const {
+    activeBatches,
+    registerBatchCandidate,
+    discardBatchCandidate,
+    trackBatchStart,
+  } = useContentStudioBatchTracking(fetchHistory, mountedRef);
 
   const recordStatusFailure = useCallback((contentId: string, caughtError: unknown) => {
     const previousFailures = pollingFailureCountsRef.current.get(contentId) ?? 0;
@@ -204,229 +152,246 @@ export function useContentStudio() {
 
   const processStatusResults = useCallback((
     generatingItems: readonly ContentStudioHistory[],
-    statusResults: readonly PromiseSettledResult<ContentStatusResponse>[]
+    statusResults: readonly PromiseSettledResult<ContentStatus>[]
   ): boolean => {
-    const terminalResponses = statusResults.flatMap((statusResult, index) => {
+    const terminalStatuses = new Map<string, ContentStatus>();
+    statusResults.forEach((statusResult, index) => {
       const generatingItem = generatingItems[index];
       if ('reason' in statusResult) {
         recordStatusFailure(generatingItem.id, statusResult.reason);
-        return [];
+        return;
       }
       pollingFailureCountsRef.current.delete(generatingItem.id);
-      const statusChanged = statusResult.value.status !== generatingItem.status;
-      const terminal = ['generated', 'failed'].includes(statusResult.value.status);
-      return statusChanged && terminal ? [statusResult.value] : [];
+      const statusChanged = statusResult.value !== generatingItem.status;
+      const terminal = statusResult.value === 'generated' || statusResult.value === 'failed';
+      if (statusChanged && terminal) terminalStatuses.set(generatingItem.id, statusResult.value);
     });
-    if (terminalResponses.length === 0) return false;
+    if (terminalStatuses.size === 0) return false;
 
-    const currentHistory = historyRef.current;
-    const updatedHistory = currentHistory.map((historyItem) => {
-      const terminalResponse = terminalResponses.find(({ id }) => id === historyItem.id);
-      return terminalResponse !== undefined && isGeneratingItem(historyItem)
+    setHistory((current) => current.map((historyItem) => {
+      const terminalStatus = terminalStatuses.get(historyItem.id);
+      return terminalStatus !== undefined && isIndependentlyGenerating(historyItem)
         ? {
           ...historyItem,
-          status: terminalResponse.status,
+          status: terminalStatus,
         }
         : historyItem;
-    });
-    if (updatedHistory.every((historyItem, index) => historyItem === currentHistory[index])) {
-      return false;
-    }
-    historyRef.current = updatedHistory;
-    setHistory(updatedHistory);
+    }));
     return true;
   }, [recordStatusFailure]);
 
-  const pollGeneratingItems = useCallback(async (pollingOwner: PollingOwner) => {
-    if (!pollingCanCommit(pollingOwner) || pollingOwner.inFlight) return;
-    const generatingItems = historyRef.current.filter((item) => (
+  const stopItemPolling = useCallback(() => {
+    const itemStatusPoll = itemStatusPollRef.current;
+    itemStatusPollRef.current = null;
+    itemStatusPoll?.abort();
+    if (itemPollingRef.current !== null) {
+      clearInterval(itemPollingRef.current);
+      itemPollingRef.current = null;
+    }
+  }, []);
+
+  const pollGeneratingItems = useCallback(async () => {
+    if (itemStatusPollRef.current !== null) return;
+    const generatingItems = history.filter((item) => (
       isPollableItem(item, pollingFailureCountsRef.current)
     ));
     if (generatingItems.length === 0) {
-      stopPolling();
+      stopItemPolling();
       return;
     }
 
-    pollingOwner.inFlight = true;
+    const itemStatusPoll = new AbortController();
+    itemStatusPollRef.current = itemStatusPoll;
     try {
-      const statusResults = await Promise.allSettled(
-        generatingItems.map((item) => (
-          checkContentStatus(item.id, pollingOwner.controller.signal)
-        ))
-      );
-      if (!pollingCanCommit(pollingOwner)) return;
+      const statusResults = await Promise.allSettled(generatingItems.map((item) => (
+        fetchContentStatus(item.id, itemStatusPoll.signal)
+      )));
+      if (itemStatusPollRef.current !== itemStatusPoll) return;
       const hasTerminalTransition = processStatusResults(generatingItems, statusResults);
-      if (hasTerminalTransition) {
-        pollingOwner.historyRefreshInFlight = true;
-        await fetchHistoryRequest(20, pollingOwner.token);
-      }
-      const hasPollableItems = historyRef.current.some((item) => (
+      if (hasTerminalTransition) await fetchHistory();
+      const hasPollableItems = history.some((item) => (
         isPollableItem(item, pollingFailureCountsRef.current)
       ));
-      if (pollingCanCommit(pollingOwner) && !hasPollableItems) stopPolling();
+      if (itemStatusPollRef.current === itemStatusPoll && !hasPollableItems) stopItemPolling();
     } finally {
-      pollingOwner.historyRefreshInFlight = false;
-      pollingOwner.inFlight = false;
+      if (itemStatusPollRef.current === itemStatusPoll) itemStatusPollRef.current = null;
     }
-  }, [
-    checkContentStatus,
-    fetchHistoryRequest,
-    pollingCanCommit,
-    processStatusResults,
-    stopPolling,
-  ]);
+  }, [fetchHistory, history, processStatusResults, stopItemPolling]);
 
-  const startPolling = useCallback(() => {
-    if (!mountedRef.current || pollingOwnerRef.current !== null) return;
-    const hasPollableItems = historyRef.current.some((item) => (
+  const startItemPolling = useCallback(() => {
+    if (itemPollingRef.current !== null) return;
+    const hasPollableItems = history.some((item) => (
       isPollableItem(item, pollingFailureCountsRef.current)
     ));
     if (!hasPollableItems) return;
 
-    const pollingOwner: PollingOwner = {
-      token: Symbol(),
-      controller: new AbortController(),
-      inFlight: false,
-      historyRefreshInFlight: false,
-    };
-    pollingOwnerRef.current = pollingOwner;
-    pollingRef.current = setInterval(() => {
-      void pollGeneratingItems(pollingOwner);
-    }, GENERATING_POLL_INTERVAL);
-    void pollGeneratingItems(pollingOwner);
-  }, [pollGeneratingItems]);
+    itemPollingRef.current = setInterval(
+      () => void pollGeneratingItems(),
+      GENERATING_POLL_INTERVAL
+    );
+    void pollGeneratingItems();
+  }, [history, pollGeneratingItems]);
 
   useEffect(() => {
-    const activeIds = new Set(history.filter(isGeneratingItem).map((item) => item.id));
+    const activeIds = new Set(history.filter(isIndependentlyGenerating).map((item) => item.id));
     for (const contentId of pollingFailureCountsRef.current.keys()) {
       if (!activeIds.has(contentId)) pollingFailureCountsRef.current.delete(contentId);
     }
     const hasExhaustedItem = [...pollingFailureCountsRef.current.values()]
       .some((failureCount) => failureCount >= MAX_CONSECUTIVE_STATUS_FAILURES);
     if (!hasExhaustedItem) setPollingError(null);
-    if (activeIds.size === 0) {
-      pollingFailureCountsRef.current.clear();
-      if (pollingOwnerRef.current?.historyRefreshInFlight !== true) stopPolling();
-      return;
-    }
-    startPolling();
-  }, [history, startPolling, stopPolling]);
+    startItemPolling();
+    return stopItemPolling;
+  }, [history, startItemPolling, stopItemPolling]);
 
   const fetchIdeas = useCallback(async (): Promise<ContentIdea[]> => {
-    setLoading(true);
+    const operation = beginLoading();
+    latestIdeasReadRef.current = operation;
     setError(null);
-
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/content-studio/ideas`);
-      if (!response.ok) throw new ApiRequestError('Failed to fetch content ideas', response.status);
-
-      const json: unknown = await response.json();
-      if (!isContentIdeasResponse(json)) {
-        throw new ApiRequestError('Invalid response format');
-      }
-      setIdeas(json.ideas);
-      return json.ideas;
-    } catch (caughtError) {
-      setError(getErrorMessage(caughtError, 'content'));
-      console.error('[content] Error fetching ideas:', caughtError);
+      const response = await requestContentIdeas();
+      if (!mountedRef.current || latestIdeasReadRef.current !== operation) return [];
+      setIdeas(response);
+      return response;
+    } catch (requestError) {
+      if (!mountedRef.current || latestIdeasReadRef.current !== operation) return [];
+      setError(getErrorMessage(requestError, 'content'));
+      console.error('[content] Error fetching ideas:', requestError);
       return [];
     } finally {
-      setLoading(false);
+      finishLoading(operation);
     }
-  }, []);
+  }, [beginLoading, finishLoading]);
 
-  const generateContent = useCallback(async (idea: ContentIdea): Promise<GenerateContentResponse | null> => {
+  // Stryker disable ArrayDeclaration: This callback closes only over stable refs and React state setters.
+  const beginGeneration = useCallback((): symbol => {
+    const operation = Symbol();
+    generationOperationsRef.current.add(operation);
+    latestGenerationRef.current = operation;
     setGenerating(true);
     setError(null);
+    return operation;
+  }, []);
+  // Stryker restore ArrayDeclaration
 
+  // Stryker disable ArrayDeclaration: This callback closes only over stable refs and React state setters.
+  const finishGeneration = useCallback((operation: symbol): void => {
+    generationOperationsRef.current.delete(operation);
+    // Stryker disable next-line ConditionalExpression: React discards state updates after real unmount; StrictMode stale work is token-gated.
+    if (mountedRef.current) setGenerating(generationOperationsRef.current.size > 0);
+  }, []);
+  // Stryker restore ArrayDeclaration
+
+  // Stryker disable ArrayDeclaration: This callback reads only stable refs.
+  const generationCanReport = useCallback((operation: symbol): boolean => (
+    mountedRef.current && latestGenerationRef.current === operation
+  ), []);
+  // Stryker restore ArrayDeclaration
+
+  // Stryker disable ArrayDeclaration: All dependencies have stable callback identities proven by lifecycle race tests.
+  const generateContent = useCallback(async (
+    idea: ContentGenerationIdea
+  ): Promise<GenerateContentResponse | null> => {
+    const operation = beginGeneration();
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/content-studio/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idea })
-      });
-
-      const json: unknown = await response.json();
-      if (!isGenerateContentResponse(json)) {
-        throw new ApiRequestError('Invalid response format');
+      return await startContentGeneration(idea);
+    } catch (requestError) {
+      if (generationCanReport(operation)) {
+        setError(getErrorMessage(requestError, 'content'));
       }
-      if (!response.ok) {
-        throw new ApiRequestError(json.error ?? `HTTP ${response.status}`, response.status);
-      }
-
-      await fetchHistory();
-      return json;
-    } catch (caughtError) {
-      setError(getErrorMessage(caughtError, 'content'));
-      console.error('[content] Error generating content:', caughtError);
+      console.error('[content] Error starting content generation:', requestError);
       return null;
     } finally {
-      setGenerating(false);
+      finishGeneration(operation);
     }
-  }, [fetchHistory]);
+  }, [beginGeneration, finishGeneration, generationCanReport]);
+  // Stryker restore ArrayDeclaration
+
+  // Stryker disable ArrayDeclaration: Every dependency is a stable hook callback or ref-backed lifecycle function.
+  const generateContentBatch = useCallback(async (
+    request: ContentBriefBatchRequest
+  ): Promise<ContentBriefBatchStartResponse | null> => {
+    const operation = beginGeneration();
+    const candidate = registerBatchCandidate(request.batch_id);
+    try {
+      const response = await startContentBriefBatch(request);
+      if (!response.success) {
+        discardBatchCandidate(candidate);
+        if (response.error !== undefined && generationCanReport(operation)) {
+          setError(response.error);
+        }
+        return response;
+      }
+      if (!mountedRef.current || !generationOperationsRef.current.has(operation)) {
+        return response;
+      }
+      trackBatchStart(response, candidate);
+      return response;
+    } catch (requestError) {
+      if (isStructuredBatchRejection(requestError)) {
+        discardBatchCandidate(candidate);
+      }
+      if (generationCanReport(operation)) {
+        setError(getErrorMessage(requestError, 'content'));
+      }
+      console.error('[content] Error starting Content Brief batch:', requestError);
+      return null;
+    } finally {
+      finishGeneration(operation);
+    }
+  }, [
+    beginGeneration,
+    discardBatchCandidate,
+    finishGeneration,
+    generationCanReport,
+    registerBatchCandidate,
+    trackBatchStart,
+  ]);
+  // Stryker restore ArrayDeclaration
 
   const markViewed = useCallback(async (id: string): Promise<boolean> => {
     try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/content-studio/viewed`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id })
-      });
-      if (!response.ok) throw new ApiRequestError(`HTTP ${response.status}`, response.status);
-
-      setHistory((previous) => {
-        const updatedHistory = previous.map((item) => (
-          item.id === id
-            ? {
-              ...item,
-              viewed: true
-            }
-            : item
-        ));
-        historyRef.current = updatedHistory;
-        return updatedHistory;
-      });
-      setUnviewedCount((previous) => Math.max(0, previous - 1));
+      await markContentViewed(id);
+      if (!mountedRef.current) return true;
+      setHistory((current) => current.map((item) => (
+        item.id === id ? {
+          ...item,
+          viewed: true,
+        } : item
+      )));
+      setUnviewedCount((current) => Math.max(0, current - 1));
       return true;
-    } catch (caughtError) {
-      console.error('[content] Error marking content as viewed:', caughtError);
+    } catch (requestError) {
+      console.error('[content] Error marking content as viewed:', requestError);
       return false;
     }
   }, []);
 
   const deleteContent = useCallback(async (id: string): Promise<boolean> => {
     try {
-      const response = await authenticatedFetch(
-        `${API_BASE_URL}/content-studio/${id}`,
-        { method: 'DELETE' }
-      );
-      if (!response.ok) throw new ApiRequestError(`HTTP ${response.status}`, response.status);
-
-      const deletedItem = historyRef.current.find((item) => item.id === id);
-      setHistory((previous) => {
-        const updatedHistory = previous.filter((item) => item.id !== id);
-        historyRef.current = updatedHistory;
-        return updatedHistory;
-      });
-      if (deletedItem && !deletedItem.viewed) {
-        setUnviewedCount((previous) => Math.max(0, previous - 1));
+      await deleteGeneratedContent(id);
+      if (!mountedRef.current) return true;
+      const deletedItem = history.find((item) => item.id === id);
+      setHistory((current) => current.filter((item) => item.id !== id));
+      if (deletedItem !== undefined && !deletedItem.viewed) {
+        setUnviewedCount((current) => Math.max(0, current - 1));
       }
       return true;
-    } catch (caughtError) {
-      setError(getErrorMessage(caughtError, 'content'));
-      console.error('[content] Error deleting content:', caughtError);
+    } catch (requestError) {
+      if (mountedRef.current) setError(getErrorMessage(requestError, 'content'));
+      console.error('[content] Error deleting content:', requestError);
       return false;
     }
-  }, []);
+  }, [history]);
 
   const refreshGeneratingItems = useCallback(() => {
-    stopPolling();
+    stopItemPolling();
     pollingFailureCountsRef.current.clear();
     if (!mountedRef.current) return;
     setError(null);
     setPollingError(null);
-    startPolling();
-  }, [startPolling, stopPolling]);
+    startItemPolling();
+  }, [startItemPolling, stopItemPolling]);
 
   return {
     ideas,
@@ -435,11 +400,13 @@ export function useContentStudio() {
     loading,
     generating,
     error: pollingError ?? error,
+    activeBatches,
     fetchIdeas,
     generateContent,
+    generateContentBatch,
     fetchHistory,
     markViewed,
     deleteContent,
-    refreshGeneratingItems
+    refreshGeneratingItems,
   };
 }

@@ -1,32 +1,9 @@
-"""
-Fire-and-forget Lambda self-invocation.
+"""Fail-closed asynchronous Lambda invocation with rollout compatibility.
 
-Async endpoints (keyword expansion, competitor analysis, content generation)
-return immediately and re-invoke their own function with
-``InvocationType='Event'`` to do the work in the background. The pattern —
-read ``AWS_LAMBDA_FUNCTION_NAME``, invoke, run synchronously when the name is
-unset (local testing) — was copy-pasted three times (bugs.md 3.4). This is the
-single implementation.
-
-Why a dispatch failure is NOT run inline (AUDIT-2026-08-19 §2.9)
----------------------------------------------------------------
-This helper used to catch every exception from ``invoke`` and call
-``fallback()``, and the fallbacks callers pass in *are the long jobs
-themselves* (``_process_generation_async``, ``_process_expand_sync``,
-``_process_competitor_sync``). So a failed dispatch silently converted an
-API-Gateway request into a full inline LLM job:
-
-- API Gateway's integration timeout is a hard 29s, so the client received a
-  504 and lost the response.
-- The Lambda kept running to its own much longer timeout (300s for Content
-  Studio), finished the work, billed the model call, and wrote the result.
-- The only trace was one ERROR line. The endpoint's entire reason for being
-  async — not blocking the client on a multi-minute job — was defeated by its
-  own error handler.
-
-Dispatch failure now raises ``SelfInvokeDispatchError`` so the caller must
-decide what the client sees. Callers mark their job row failed and return 503,
-which is honest: the work definitively did not start, and the user can retry.
+``invoke_self_async`` remains available while pre-rollout Content Studio code can
+still run against a newly built shared layer. New Content Studio code supplies
+an explicit worker target; old callers continue to resolve their own function
+name from the Lambda environment. Dispatch failures never run paid work inline.
 """
 
 from __future__ import annotations
@@ -38,65 +15,55 @@ from collections.abc import Callable
 from typing import Any
 
 import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 
 logger = logging.getLogger(__name__)
 
 
 class SelfInvokeDispatchError(RuntimeError):
-    """Raised when the background invocation could not be dispatched.
-
-    Callers must handle this: the background job has NOT started and never
-    will. Mark the job record failed and tell the client, rather than letting
-    the row sit in a non-terminal state that nothing will ever advance.
-    """
+    """Raised when an asynchronous Lambda event was not accepted."""
 
 
 def invoke_self_async(
     payload: dict[str, Any],
-    fallback: Callable[[], None],
+    fallback: Callable[[], None] | None,
     *,
     description: str,
     success_log: str | None = None,
-) -> None:
-    """Invoke the current Lambda asynchronously.
+    function_name: str | None = None,
+    payload_bytes: bytes | str | None = None,
+    lambda_client: Any | None = None,
+) -> dict[str, Any] | None:
+    """Invoke one Lambda asynchronously without falling back after failure.
 
-    Args:
-        payload: Event payload for the async invocation. The dispatch keys
-            (``async_expand`` / ``async_competitor`` / ``async_generation``)
-            are the caller's contract with its own handler.
-        fallback: Zero-argument synchronous fallback, used **only** when no
-            function name is available — i.e. outside Lambda, where no async
-            path exists at all. It is deliberately not used to paper over a
-            failed dispatch; see the module docstring.
-        description: Short label for the failure log and error message.
-        success_log: Optional message logged after a successful invoke.
-
-    Raises:
-        SelfInvokeDispatchError: the invoke call failed, so the background
-            job did not start.
+    The optional target, encoded payload, and client preserve the legacy helper
+    contract while allowing a new handler to forward old events to a dedicated
+    worker. When no target exists outside Lambda, an explicitly supplied local
+    fallback remains the only meaningful execution path.
     """
-    function_name = os.environ.get('AWS_LAMBDA_FUNCTION_NAME', '')
-    if not function_name:
-        # Not running in Lambda (local runs, tests). There is no async path to
-        # dispatch to, so inline execution is the only meaningful behavior.
+    target = function_name if function_name is not None else os.environ.get(
+        "AWS_LAMBDA_FUNCTION_NAME", ""
+    )
+    if not target:
+        if fallback is None:
+            raise SelfInvokeDispatchError(f"Could not resolve async {description} target")
         fallback()
-        return
+        return None
 
-    lambda_client = boto3.client('lambda')
+    client = lambda_client if lambda_client is not None else boto3.client("lambda")
+    encoded = payload_bytes if payload_bytes is not None else json.dumps(payload)
     try:
-        lambda_client.invoke(
-            FunctionName=function_name,
-            InvocationType='Event',
-            Payload=json.dumps(payload),
+        response = client.invoke(
+            FunctionName=target,
+            InvocationType="Event",
+            Payload=encoded,
         )
-    except Exception as e:
-        # Do NOT fall back to running the job here: this call is on the
-        # client's synchronous request and the job outlives the 29s gateway
-        # timeout. Fail fast instead.
-        logger.exception(f"Failed to trigger async {description}: {e}")
+    except (BotoCoreError, ClientError, TypeError, ValueError) as error:
+        logger.exception("Failed to trigger async %s: %s", description, error)
         raise SelfInvokeDispatchError(
             f"Could not start background {description}"
-        ) from e
+        ) from error
 
     if success_log:
         logger.info(success_log)
+    return dict(response)

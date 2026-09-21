@@ -299,6 +299,57 @@ export function extractFunctionRoleActionsOn(
   );
 }
 
+function statementTargetsExactGetAtt(
+  statement: unknown,
+  resourceLogicalId: string,
+  attribute: string
+): boolean {
+  return statementResources(statement).some((resource) => {
+    const getAtt = resolvePath(resource, ['Fn::GetAtt']);
+    return Array.isArray(getAtt)
+      && getAtt[0] === resourceLogicalId
+      && getAtt[1] === attribute;
+  });
+}
+
+function statementTargetsIndex(
+  statement: unknown,
+  tableLogicalId: string,
+  indexName: string
+): boolean {
+  return statementResources(statement).some((resource) => (
+    collectGetAttTargets(resource).includes(tableLogicalId)
+      && JSON.stringify(resource).includes(`/index/${indexName}`)
+  ));
+}
+
+function extractFunctionRoleActionsMatching(
+  template: Template,
+  functionName: string,
+  predicate: (statement: unknown) => boolean
+): string[] {
+  const roleId = findFunctionRoleLogicalId(template, functionName);
+  return sortedUnique(
+    allowStatementsOfRole(template, roleId)
+      .filter(predicate)
+      .flatMap(statementActions)
+  );
+}
+
+function extractFunctionStatementsForAction(
+  template: Template,
+  functionName: string,
+  action: string
+): IamPolicyStatementSnapshot[] {
+  const roleId = findFunctionRoleLogicalId(template, functionName);
+  return allowStatementsOfRole(template, roleId)
+    .filter((statement) => statementActions(statement).includes(action))
+    .map((statement) => ({
+      actions: sortedUnique(statementActions(statement)),
+      resources: statementResources(statement),
+    }));
+}
+
 export function extractFunctionRoleActions(template: Template, functionName: string): string[] {
   return sortedUnique(
     allowStatementsOfRole(template, findFunctionRoleLogicalId(template, functionName)).flatMap(statementActions)
@@ -641,5 +692,427 @@ export function extractCrawlerInfrastructureSnapshot(
       browserSigningRoles[browserSigningRoleId],
       ['Properties', 'AssumeRolePolicyDocument', 'Statement', '0', 'Condition']
     ),
+  };
+}
+
+
+export const STATUS_CREATED_INDEX_SCHEMA = {
+  IndexName: 'StatusCreatedIndex',
+  KeySchema: [
+    { AttributeName: 'status', KeyType: 'HASH' },
+    { AttributeName: 'created_at', KeyType: 'RANGE' },
+  ],
+  Projection: { ProjectionType: 'ALL' },
+};
+
+export interface ContentStudioRouteSnapshot extends ApiMethodAuthSnapshot {
+  integrationUri: string;
+}
+
+export interface ContentStudioEventSourceSnapshot {
+  batchSize: number | undefined;
+  startingPosition: string;
+  retryAttempts: number | undefined;
+  maxRecordAgeSeconds: number | undefined;
+  filterPatterns: string[];
+  tableLogicalIds: string[];
+  functionLogicalIds: string[];
+  onFailureQueueLogicalIds: string[];
+}
+
+export interface ContentStudioStreamDlqSnapshot {
+  logicalId: string;
+  queueName: string;
+  retentionSeconds: number | undefined;
+  sqsManagedSseEnabled: boolean | undefined;
+  sslEnforced: boolean;
+  workerActions: string[];
+  alarmCount: number;
+}
+
+export interface ContentStudioReconcileRuleSnapshot {
+  scheduleExpression: string;
+  state: string;
+  targetInput: string;
+  functionLogicalIds: string[];
+}
+
+export interface ContentStudioInfrastructureSnapshot {
+  contentTableLogicalId: string;
+  contentTableIndexes: unknown;
+  contentTableStream: unknown;
+  batchTableLogicalId: string;
+  batchTableKeySchema: unknown;
+  batchTableIndexes: unknown;
+  batchTableBillingMode: unknown;
+  batchTablePointInTimeRecovery: unknown;
+  batchTableDeletionPolicy: string;
+  batchTableActions: string[];
+  templateTableKeySchema: unknown;
+  templateTableIndexes: unknown;
+  templateTableBillingMode: unknown;
+  templateTablePointInTimeRecovery: unknown;
+  templateTableDeletionPolicy: string;
+  environment: Record<string, unknown>;
+  workerEnvironment: Record<string, unknown>;
+  templateTableActions: string[];
+  routes: ContentStudioRouteSnapshot[];
+  functionLogicalId: string;
+  workerFunctionLogicalId: string;
+  apiTimeout: number;
+  workerTimeout: number;
+  apiHandler: string;
+  workerHandler: string;
+  apiLayerRefs: string[];
+  workerLayerRefs: string[];
+  apiRoleActions: string[];
+  workerRoleActions: string[];
+  apiContentTableActions: string[];
+  apiContentStatusIndexActions: string[];
+  workerContentTableActions: string[];
+  workerContentBaseActions: string[];
+  workerContentStatusIndexActions: string[];
+  workerContentStreamActions: string[];
+  apiCrawledContentTableActions: string[];
+  workerBrandConfigTableActions: string[];
+  workerCrawledContentTableActions: string[];
+  workerTemplateTableActions: string[];
+  workerBatchTableActions: string[];
+  apiInvokeStatements: IamPolicyStatementSnapshot[];
+  workerInvokeStatements: IamPolicyStatementSnapshot[];
+  streamDlq: ContentStudioStreamDlqSnapshot;
+  reconcileRule: ContentStudioReconcileRuleSnapshot;
+  reservedConcurrency: number | undefined;
+  workerReservedConcurrency: number | undefined;
+  eventSource: ContentStudioEventSourceSnapshot;
+}
+
+/** Content Studio storage, permissions, routes, and worker wiring as synthesized. */
+export function extractContentStudioInfrastructureSnapshot(
+  template: Template
+): ContentStudioInfrastructureSnapshot {
+  const functionName = 'CitationAnalysis-API-ContentStudio';
+  const workerFunctionName = 'CitationAnalysis-ContentStudioWorker';
+  const contentTableName = 'CitationAnalysis-ContentStudio';
+  const contentTableLogicalId = findLogicalIdByName(
+    template,
+    'AWS::DynamoDB::Table',
+    'TableName',
+    contentTableName
+  );
+  const brandConfigTableLogicalId = findLogicalIdByName(
+    template,
+    'AWS::DynamoDB::Table',
+    'TableName',
+    'CitationAnalysis-BrandConfig'
+  );
+  const crawledContentTableLogicalId = findLogicalIdByName(
+    template,
+    'AWS::DynamoDB::Table',
+    'TableName',
+    'CitationAnalysis-CrawledContent'
+  );
+  const streamDlqName = 'CitationAnalysis-ContentStudioStreamDLQ';
+  const streamDlqLogicalId = findLogicalIdByName(
+    template,
+    'AWS::SQS::Queue',
+    'QueueName',
+    streamDlqName
+  );
+  const streamDlqResources = template.findResources('AWS::SQS::Queue', {
+    Properties: { QueueName: streamDlqName },
+  });
+  const streamDlqResource = streamDlqResources[streamDlqLogicalId];
+  const reconcileRuleName = 'CitationAnalysis-ContentStudioReconcile';
+  const reconcileRuleLogicalId = findLogicalIdByName(
+    template,
+    'AWS::Events::Rule',
+    'Name',
+    reconcileRuleName
+  );
+  const reconcileRules = template.findResources('AWS::Events::Rule', {
+    Properties: { Name: reconcileRuleName },
+  });
+  const reconcileRuleResource = reconcileRules[reconcileRuleLogicalId];
+  const reconcileTargets = resolvePath(reconcileRuleResource, ['Properties', 'Targets']);
+  const firstReconcileTarget = resolvePath(reconcileTargets, ['0']);
+  const batchTableName = 'CitationAnalysis-ContentBriefBatches';
+  const batchTableId = findLogicalIdByName(
+    template,
+    'AWS::DynamoDB::Table',
+    'TableName',
+    batchTableName
+  );
+  const batchTables = template.findResources('AWS::DynamoDB::Table', {
+    Properties: { TableName: batchTableName },
+  });
+  const batchTable = batchTables[batchTableId];
+  const templateTableName = 'CitationAnalysis-ContentBriefTemplates';
+  const templateTableId = findLogicalIdByName(
+    template,
+    'AWS::DynamoDB::Table',
+    'TableName',
+    templateTableName
+  );
+  const templateTables = template.findResources('AWS::DynamoDB::Table', {
+    Properties: { TableName: templateTableName },
+  });
+  const templateTable = templateTables[templateTableId];
+  const apiFunctions = template.findResources('AWS::Lambda::Function', {
+    Properties: { FunctionName: functionName },
+  });
+  const workerFunctions = template.findResources('AWS::Lambda::Function', {
+    Properties: { FunctionName: workerFunctionName },
+  });
+  const functionLogicalId = Object.keys(apiFunctions)[0] ?? '';
+  const workerFunctionLogicalId = Object.keys(workerFunctions)[0] ?? '';
+  const apiFunction = apiFunctions[functionLogicalId];
+  const workerFunction = workerFunctions[workerFunctionLogicalId];
+  const mappings = Object.values(template.findResources('AWS::Lambda::EventSourceMapping'));
+  const eventSourceMapping = mappings.find((mapping) =>
+    collectGetAttTargets(resolvePath(mapping, ['Properties', 'EventSourceArn']))
+      .includes(contentTableLogicalId)
+  );
+  const filters = resolvePath(eventSourceMapping, ['Properties', 'FilterCriteria', 'Filters']);
+  const eventSourceBatchSize = resolvePath(eventSourceMapping, ['Properties', 'BatchSize']);
+  const eventSourceRetryAttempts = resolvePath(
+    eventSourceMapping,
+    ['Properties', 'MaximumRetryAttempts']
+  );
+  const eventSourceMaxRecordAge = resolvePath(
+    eventSourceMapping,
+    ['Properties', 'MaximumRecordAgeInSeconds']
+  );
+  const onFailureDestination = resolvePath(
+    eventSourceMapping,
+    ['Properties', 'DestinationConfig', 'OnFailure', 'Destination']
+  );
+  const resourcePaths = buildResourcePaths(template);
+  const routes = Object.values(
+    template.findResources('AWS::ApiGateway::Method')
+  ).flatMap((method): ContentStudioRouteSnapshot[] => {
+    const httpMethod = resolveString(method, ['Properties', 'HttpMethod']);
+    const resourceId = resolveString(method, ['Properties', 'ResourceId', 'Ref']);
+    const routePath = resourcePaths.get(resourceId) ?? '/';
+    if (httpMethod === PREFLIGHT_METHOD || !routePath.startsWith('/api/content-studio')) {
+      return [];
+    }
+    return [{
+      path: routePath,
+      httpMethod,
+      authorizationType: resolveString(method, ['Properties', 'AuthorizationType']),
+      authorizerId: resolveString(method, ['Properties', 'AuthorizerId', 'Ref']),
+      integrationUri: JSON.stringify(
+        resolvePath(method, ['Properties', 'Integration', 'Uri'])
+      ) ?? '',
+    }];
+  });
+  const streamDlqRetention = resolvePath(
+    streamDlqResource,
+    ['Properties', 'MessageRetentionPeriod']
+  );
+  const streamDlqSse = resolvePath(
+    streamDlqResource,
+    ['Properties', 'SqsManagedSseEnabled']
+  );
+  const streamDlqSslEnforced = Object.values(
+    template.findResources('AWS::SQS::QueuePolicy')
+  ).some((policy) => (
+    JSON.stringify(policy).includes('aws:SecureTransport')
+      && JSON.stringify(policy).includes('false')
+      && [
+        ...collectGetAttTargets(policy),
+        ...collectRefTargets(policy),
+      ].includes(streamDlqLogicalId)
+  ));
+  const streamDlqAlarmCount = Object.values(
+    template.findResources('AWS::CloudWatch::Alarm')
+  ).filter((alarm) => [
+    ...collectGetAttTargets(alarm),
+    ...collectRefTargets(alarm),
+  ].includes(streamDlqLogicalId)).length;
+
+  return {
+    contentTableLogicalId,
+    contentTableIndexes: extractTableProperty(
+      template,
+      contentTableName,
+      'GlobalSecondaryIndexes'
+    ),
+    contentTableStream: extractTableProperty(
+      template,
+      contentTableName,
+      'StreamSpecification'
+    ),
+    batchTableLogicalId: batchTableId,
+    batchTableKeySchema: extractTableKeySchema(template, batchTableName),
+    batchTableIndexes: extractTableProperty(
+      template,
+      batchTableName,
+      'GlobalSecondaryIndexes'
+    ),
+    batchTableBillingMode: resolvePath(batchTable, ['Properties', 'BillingMode']),
+    batchTablePointInTimeRecovery: resolvePath(
+      batchTable,
+      ['Properties', 'PointInTimeRecoverySpecification', 'PointInTimeRecoveryEnabled']
+    ),
+    batchTableDeletionPolicy: resolveString(batchTable, ['DeletionPolicy']),
+    batchTableActions: extractFunctionRoleActionsOn(
+      template,
+      functionName,
+      batchTableId
+    ),
+    templateTableKeySchema: extractTableKeySchema(template, templateTableName),
+    templateTableIndexes: extractTableProperty(
+      template,
+      templateTableName,
+      'GlobalSecondaryIndexes'
+    ),
+    templateTableBillingMode: resolvePath(templateTable, ['Properties', 'BillingMode']),
+    templateTablePointInTimeRecovery: resolvePath(
+      templateTable,
+      ['Properties', 'PointInTimeRecoverySpecification', 'PointInTimeRecoveryEnabled']
+    ),
+    templateTableDeletionPolicy: resolveString(templateTable, ['DeletionPolicy']),
+    environment: extractLambdaEnvVars(template, functionName),
+    workerEnvironment: extractLambdaEnvVars(template, workerFunctionName),
+    templateTableActions: extractFunctionRoleActionsOn(
+      template,
+      functionName,
+      templateTableId
+    ),
+    routes,
+    functionLogicalId,
+    workerFunctionLogicalId,
+    apiTimeout: extractFunctionTimeout(template, functionName),
+    workerTimeout: extractFunctionTimeout(template, workerFunctionName),
+    apiHandler: resolveString(apiFunction, ['Properties', 'Handler']),
+    workerHandler: resolveString(workerFunction, ['Properties', 'Handler']),
+    apiLayerRefs: extractLambdaLayerRefs(template, functionName),
+    workerLayerRefs: extractLambdaLayerRefs(template, workerFunctionName),
+    apiRoleActions: extractFunctionRoleActions(template, functionName),
+    workerRoleActions: extractFunctionRoleActions(template, workerFunctionName),
+    apiContentTableActions: extractFunctionRoleActionsMatching(
+      template,
+      functionName,
+      (statement) => statementTargetsExactGetAtt(statement, contentTableLogicalId, 'Arn')
+    ),
+    apiContentStatusIndexActions: extractFunctionRoleActionsMatching(
+      template,
+      functionName,
+      (statement) => statementTargetsIndex(statement, contentTableLogicalId, 'StatusCreatedIndex')
+    ),
+    workerContentTableActions: extractFunctionRoleActionsOn(
+      template,
+      workerFunctionName,
+      contentTableLogicalId
+    ),
+    workerContentBaseActions: extractFunctionRoleActionsMatching(
+      template,
+      workerFunctionName,
+      (statement) => statementTargetsExactGetAtt(statement, contentTableLogicalId, 'Arn')
+    ),
+    workerContentStatusIndexActions: extractFunctionRoleActionsMatching(
+      template,
+      workerFunctionName,
+      (statement) => statementTargetsIndex(statement, contentTableLogicalId, 'StatusCreatedIndex')
+    ),
+    workerContentStreamActions: extractFunctionRoleActionsMatching(
+      template,
+      workerFunctionName,
+      (statement) => statementTargetsExactGetAtt(statement, contentTableLogicalId, 'StreamArn')
+    ),
+    apiCrawledContentTableActions: extractFunctionRoleActionsOn(
+      template,
+      functionName,
+      crawledContentTableLogicalId
+    ),
+    workerBrandConfigTableActions: extractFunctionRoleActionsOn(
+      template,
+      workerFunctionName,
+      brandConfigTableLogicalId
+    ),
+    workerCrawledContentTableActions: extractFunctionRoleActionsOn(
+      template,
+      workerFunctionName,
+      crawledContentTableLogicalId
+    ),
+    workerTemplateTableActions: extractFunctionRoleActionsOn(
+      template,
+      workerFunctionName,
+      templateTableId
+    ),
+    workerBatchTableActions: extractFunctionRoleActionsOn(
+      template,
+      workerFunctionName,
+      batchTableId
+    ),
+    apiInvokeStatements: extractFunctionStatementsForAction(
+      template,
+      functionName,
+      'lambda:InvokeFunction'
+    ),
+    workerInvokeStatements: extractFunctionStatementsForAction(
+      template,
+      workerFunctionName,
+      'lambda:InvokeFunction'
+    ),
+    streamDlq: {
+      logicalId: streamDlqLogicalId,
+      queueName: resolveString(streamDlqResource, ['Properties', 'QueueName']),
+      retentionSeconds: typeof streamDlqRetention === 'number'
+        ? streamDlqRetention
+        : undefined,
+      sqsManagedSseEnabled: typeof streamDlqSse === 'boolean'
+        ? streamDlqSse
+        : undefined,
+      sslEnforced: streamDlqSslEnforced,
+      workerActions: extractFunctionRoleActionsOn(
+        template,
+        workerFunctionName,
+        streamDlqLogicalId
+      ),
+      alarmCount: streamDlqAlarmCount,
+    },
+    reconcileRule: {
+      scheduleExpression: resolveString(
+        reconcileRuleResource,
+        ['Properties', 'ScheduleExpression']
+      ),
+      state: resolveString(reconcileRuleResource, ['Properties', 'State']),
+      targetInput: resolveString(firstReconcileTarget, ['Input']),
+      functionLogicalIds: [
+        ...collectGetAttTargets(resolvePath(firstReconcileTarget, ['Arn'])),
+        ...collectRefTargets(resolvePath(firstReconcileTarget, ['Arn'])),
+      ],
+    },
+    reservedConcurrency: extractReservedConcurrency(template, functionName),
+    workerReservedConcurrency: extractReservedConcurrency(template, workerFunctionName),
+    eventSource: {
+      batchSize: typeof eventSourceBatchSize === 'number'
+        ? eventSourceBatchSize
+        : undefined,
+      startingPosition: resolveString(eventSourceMapping, ['Properties', 'StartingPosition']),
+      retryAttempts: typeof eventSourceRetryAttempts === 'number'
+        ? eventSourceRetryAttempts
+        : undefined,
+      maxRecordAgeSeconds: typeof eventSourceMaxRecordAge === 'number'
+        ? eventSourceMaxRecordAge
+        : undefined,
+      filterPatterns: Array.isArray(filters)
+        ? filters.map((filter) => resolveString(filter, ['Pattern']))
+        : [],
+      tableLogicalIds: collectGetAttTargets(
+        resolvePath(eventSourceMapping, ['Properties', 'EventSourceArn'])
+      ),
+      functionLogicalIds: [
+        ...collectGetAttTargets(resolvePath(eventSourceMapping, ['Properties', 'FunctionName'])),
+        ...collectRefTargets(resolvePath(eventSourceMapping, ['Properties', 'FunctionName'])),
+      ],
+      onFailureQueueLogicalIds: [
+        ...collectGetAttTargets(onFailureDestination),
+        ...collectRefTargets(onFailureDestination),
+      ],
+    },
   };
 }

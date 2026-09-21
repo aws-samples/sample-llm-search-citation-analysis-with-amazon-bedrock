@@ -1,34 +1,8 @@
-"""
-REGRESSION (AUDIT-2026-08-19 §2.9): a failed async dispatch must not run the
-generation on the client's request.
-
-`POST /content-studio/generate` is async by design — it writes a `pending` row,
-fires a self-invocation, and returns immediately so the client can poll. But
-`shared/self_invoke.py` used to catch every exception from `invoke` and call the
-fallback, and the fallback here IS `_process_generation_async`. So when dispatch
-failed, the full Bedrock generation ran inline on an API-Gateway request:
-
-- the client got a 504 at the gateway's hard 29s ceiling and lost the response
-- the function kept running toward its 300s timeout, billed the model call, and
-  wrote the result nobody would see
-
-Worse, the row was left `pending` while the idempotency key (a 5-minute bucket)
-meant an immediate user retry returned that same dead row *without* re-invoking
-— so the obvious recovery action did nothing.
-
-These tests pin the fail-fast contract: mark the row terminal, return 503, and
-never execute the generation here.
-
-The module also characterises the two pipelines behind the endpoints —
-`generate_content_ideas` (ideas from brand visibility) and `generate_content`
-(the Bedrock prompt, its result shape and its error mapping) — so they can be
-restructured without changing what the dashboard sees.
-"""
+"""Content Studio durable queue, timeout, idea, and generation tests."""
 
 from __future__ import annotations
 
 import json
-import os
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -36,102 +10,67 @@ import pytest
 from shared.content_brief import CONTENT_OUTPUT_CONTRACT
 from shared.models import BedrockInvocationError, ModelRole
 from shared.prompt_safety import untrusted_input_system_instruction
-from shared.self_invoke import SelfInvokeDispatchError
 from shared.utils import get_timestamp
+from testing.content_studio_fixtures import (
+    load_content_studio_module,
+    queue_content_for_test,
+    stateful_content_table,
+)
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
-from testing.env import cleared_env, setdefault_env
-from testing.module_loader import load_handler_module
+from testing.env import cleared_env
 
-setdefault_env({
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
-    'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
-    'DYNAMODB_TABLE_CONTENT_STUDIO': 'test-content-studio',
-    'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
-    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
-})
-_mod = load_handler_module(os.path.dirname(__file__), 'content-studio.py', 'content_studio_dispatch_under_test')
+_mod = load_content_studio_module('content_studio_dispatch_under_test')
 
 
 IDEA = {'id': 'idea-1', 'keyword': 'best hotels malaga', 'content_angle': 'comprehensive_guide'}
 
 
-def _generate_event() -> dict:
-    return {
-        'httpMethod': 'POST',
-        'path': '/content-studio/generate',
-        'body': json.dumps({'idea': IDEA}),
-    }
+class TestDurableQueueAcceptance:
+    def test_returns_pending_after_durable_insert(self) -> None:
+        table, rows = stateful_content_table()
 
+        status, body = queue_content_for_test(_mod, IDEA, table)
 
-def _failing_dispatch() -> MagicMock:
-    """An `invoke_self_async` whose dispatch fails outright."""
-    return MagicMock(side_effect=SelfInvokeDispatchError('boom'))
+        assert status == 200
+        assert body["status"] == "pending"
+        assert rows[body["id"]]["generation_transport"] == "dynamodb_stream_v1"
 
+    def test_returns_existing_row_when_same_request_is_repeated(self) -> None:
+        table, rows = stateful_content_table()
 
-def _generate(dispatch: MagicMock, update_content_status: MagicMock | None = None) -> dict:
-    """Run `_generate_content` over a fresh pending row with `dispatch` as `invoke_self_async`."""
-    # A resource whose table accepts the pending write as a fresh row.
-    dynamodb = fake_dynamodb_resource(fake_table(get_item={}))
-    with (
-        patch.object(_mod, 'dynamodb', dynamodb),
-        patch.object(_mod, 'update_content_status', update_content_status or MagicMock()),
-        patch.object(_mod, 'invoke_self_async', dispatch),
-    ):
-        return _mod._generate_content(_generate_event(), None)
+        first_status, first = queue_content_for_test(_mod, IDEA, table)
+        second_status, second = queue_content_for_test(_mod, IDEA, table)
 
+        assert (first_status, second_status) == (200, 200)
+        assert second["id"] == first["id"]
+        assert second["idempotent_hit"] is True
+        assert len(rows) == 1
 
-class TestDispatchFailureReturns503:
-    def test_returns_503_when_the_generation_cannot_be_dispatched(self):
-        response = _generate(_failing_dispatch())
-
-        assert response['statusCode'] == 503
-
-    def test_does_not_run_the_generation_on_the_request(self):
-        """
-        The whole point: `_process_generation_async` must not execute here.
-        It is the callable handed to `invoke_self_async` as the fallback, so a
-        helper that resumed falling back would trip this.
-        """
+    def test_does_not_process_generation_on_request_after_insert(self) -> None:
+        table, _ = stateful_content_table()
         process = MagicMock()
 
-        with patch.object(_mod, '_process_generation_async', process):
-            _generate(_failing_dispatch())
+        with patch.object(_mod, "_process_generation_async", process):
+            status, body = queue_content_for_test(_mod, IDEA, table)
 
+        assert status == 200
+        assert body["status"] == "pending"
         process.assert_not_called()
 
-    def test_marks_the_row_failed_so_a_retry_is_not_blocked_by_idempotency(self):
-        """
-        The row must not stay `pending`: within the 5-minute idempotency window
-        a retry returns the existing row without re-invoking, so a non-terminal
-        row would make the failure permanent and invisible.
-        """
-        update = MagicMock()
+    def test_does_not_invoke_worker_directly_when_new_request_inserts_stream_row(self) -> None:
+        table, _ = stateful_content_table()
+        invoke_worker = MagicMock()
 
-        _generate(_failing_dispatch(), update_content_status=update)
+        with patch.object(_mod, "_invoke_worker", invoke_worker):
+            status, body = queue_content_for_test(_mod, IDEA, table)
 
-        assert update.call_args.args[1] == 'failed'
-
-    def test_reports_the_failed_status_in_the_response_body(self):
-        response = _generate(_failing_dispatch())
-
-        body = json.loads(response['body'])
-        assert body['status'] == 'failed'
-
-    def test_returns_pending_and_202_style_success_when_dispatch_works(self):
-        """Control: the happy path must be untouched by the new guard."""
-        response = _generate(MagicMock())
-
-        body = json.loads(response['body'])
-        assert body['status'] == 'pending'
+        assert status == 200
+        assert body["status"] == "pending"
+        invoke_worker.assert_not_called()
 
 
 class TestGenerationTimeoutSweep:
-    """
-    A Lambda timeout is a SIGKILL, so `_process_generation_async`'s `except`
-    never runs. The reader-side sweep is the only thing that makes such a death
-    observable — and its threshold must sit ABOVE the function's own timeout,
-    or it marks live jobs failed and they flip back to `generated` on finish.
-    """
+    """Legacy rows still time out; stream-owned rows rely on event redelivery."""
 
     def test_sweep_threshold_exceeds_the_lambda_timeout(self):
         """
@@ -167,6 +106,22 @@ class TestGenerationTimeoutSweep:
             _mod._fail_if_generation_timed_out(row)
 
         assert row['status'] == 'generated'
+        update.assert_not_called()
+
+    def test_leaves_stream_owned_row_retryable_after_timeout(self) -> None:
+        row = {
+            'id': 'abc',
+            'status': 'generating',
+            'generation_transport': 'dynamodb_stream',
+            'generation_owner': 'stream-event-1',
+            'created_at': '2020-01-01T00:00:00Z',
+        }
+        update = MagicMock()
+
+        with patch.object(_mod, 'update_content_status', update):
+            _mod._fail_if_generation_timed_out(row)
+
+        assert row['status'] == 'generating'
         update.assert_not_called()
 
 

@@ -1,4 +1,4 @@
-"""Validation, source extraction, and prompt rendering for Content Studio group briefs."""
+"""Validation, source extraction, and prompt rendering for Content Studio briefs."""
 
 from __future__ import annotations
 
@@ -25,12 +25,17 @@ GROUP_BRIEF_MODES = (
     REWRITE_PASTED_COPY,
     CREATE_NEW_LANDING_PAGE,
 )
+CONTENT_BRIEF_SCOPE_MODES = ('groups', 'keywords')
 
 MAX_SELECTED_KEYWORDS = 50
+MAX_BATCH_KEYWORDS = 10
 MAX_LANDING_URL_LENGTH = 2048
 MAX_CURRENT_COPY_LENGTH = 20_000
 MAX_PROMPT_TEMPLATE_LENGTH = 6000
 MAX_OUTPUT_LANGUAGE_LENGTH = 100
+MAX_TEMPLATE_NAME_LENGTH = 100
+MAX_TEMPLATE_DESCRIPTION_LENGTH = 500
+MAX_CONTENT_BRIEF_TEMPLATES = 100
 MAX_EXTRACTED_TEXT_LENGTH = 8000
 MAX_HTML_INPUT_LENGTH = 1_000_000
 MAX_RESPONSE_CONTENT_LENGTH = 2_000_000
@@ -44,6 +49,7 @@ FETCH_REDIRECT_HOPS = 3
 ALLOWED_PLACEHOLDERS = frozenset({
     'brand',
     'group',
+    'scope',
     'keywords',
     'current_copy',
     'landing_summary',
@@ -65,7 +71,7 @@ _HTML_CONTENT_TYPES = frozenset({'text/html', 'application/xhtml+xml'})
 _USER_AGENT = 'Mozilla/5.0 (compatible; ContentStudioBot/1.0)'
 
 DEFAULT_PROMPT_TEMPLATES = {
-    IMPROVE_CURRENT_URL: """Improve the existing landing page for {brand} and the keyword group {group}.
+    IMPROVE_CURRENT_URL: """Improve the existing landing page for {brand} and the scope {scope}.
 
 Target keywords:
 {keywords}
@@ -80,7 +86,7 @@ Mode requirement:
 {mode_instructions}
 
 Create a substantially improved, useful page rather than a light edit. Preserve accurate facts from the source, strengthen search intent coverage, and organize the draft for readers. Write in {output_language}.""",
-    REWRITE_PASTED_COPY: """Rewrite the supplied landing-page copy for {brand} and the keyword group {group}.
+    REWRITE_PASTED_COPY: """Rewrite the supplied landing-page copy for {brand} and the scope {scope}.
 
 Target keywords:
 {keywords}
@@ -95,7 +101,7 @@ Mode requirement:
 {mode_instructions}
 
 Retain accurate source facts while improving clarity, structure, usefulness, and natural keyword coverage. Write in {output_language}.""",
-    CREATE_NEW_LANDING_PAGE: """Create a new landing page for {brand} and the keyword group {group}.
+    CREATE_NEW_LANDING_PAGE: """Create a new landing page for {brand} and the scope {scope}.
 
 Target keywords:
 {keywords}
@@ -107,6 +113,21 @@ Mode requirement:
 {mode_instructions}
 
 Build the page from the selected keyword intent without assuming a specific industry or inventing unverifiable facts. Write in {output_language}.""",
+}
+
+_BUILTIN_TEMPLATE_DETAILS = {
+    IMPROVE_CURRENT_URL: (
+        'Improve current URL',
+        'Rewrite and improve an existing landing page using its fetched source text.',
+    ),
+    REWRITE_PASTED_COPY: (
+        'Rewrite pasted copy',
+        'Rewrite supplied landing-page copy while preserving accurate source facts.',
+    ),
+    CREATE_NEW_LANDING_PAGE: (
+        'Create new landing page',
+        'Create a complete landing page from the selected keyword scope.',
+    ),
 }
 
 _MODE_INSTRUCTIONS = {
@@ -149,6 +170,33 @@ class ContentBriefFetchError(RuntimeError):
 
 class ContentBriefTemplateError(ValueError):
     """A validated-template invariant failed during rendering."""
+
+
+def builtin_content_brief_templates() -> list[dict[str, Any]]:
+    """Return the three immutable templates in stable mode order."""
+    templates: list[dict[str, Any]] = []
+    for mode in GROUP_BRIEF_MODES:
+        name, description = _BUILTIN_TEMPLATE_DETAILS[mode]
+        templates.append({
+            'id': f"builtin-{mode.replace('_', '-')}",
+            'name': name,
+            'description': description,
+            'content_angle': mode,
+            'prompt_template': DEFAULT_PROMPT_TEMPLATES[mode],
+            'builtin': True,
+            'created_by': None,
+            'created_at': None,
+            'updated_at': None,
+        })
+    return templates
+
+
+def builtin_content_brief_template(template_id: str) -> dict[str, Any] | None:
+    """Return one immutable template, or ``None`` when its id is unknown."""
+    return next(
+        (template for template in builtin_content_brief_templates() if template['id'] == template_id),
+        None,
+    )
 
 
 def validate_template_placeholders(template: str) -> str | None:
@@ -238,7 +286,7 @@ def _validate_mode(idea: dict[str, Any]) -> str | ContentBriefValidationIssue:
     return str(mode)
 
 
-def _validate_keyword_ids(idea: dict[str, Any]) -> list[str] | ContentBriefValidationIssue:
+def _legacy_keyword_ids(idea: dict[str, Any]) -> list[str] | ContentBriefValidationIssue:
     keyword_ids, error = validate_id_list(
         idea.get('keyword_ids'), field='keyword_ids', limit=MAX_SELECTED_KEYWORDS
     )
@@ -249,6 +297,66 @@ def _validate_keyword_ids(idea: dict[str, Any]) -> list[str] | ContentBriefValid
             'keyword_ids', 'keyword_ids must contain between 1 and 50 active group members'
         )
     return keyword_ids
+
+
+def _scope_shape_issue(scope: dict[str, Any], mode: str, field: str) -> ContentBriefValidationIssue | None:
+    expected = {'mode', field}
+    if set(scope) != expected:
+        return ContentBriefValidationIssue(
+            'scope', f'scope for {mode} mode must contain exactly mode and {field}'
+        )
+    return None
+
+
+def _validate_scope_descriptor(
+    value: Any,
+) -> dict[str, Any] | ContentBriefValidationIssue:
+    if not isinstance(value, dict):
+        return ContentBriefValidationIssue('scope', 'scope must be an object')
+    mode = value.get('mode')
+    if mode not in CONTENT_BRIEF_SCOPE_MODES:
+        return ContentBriefValidationIssue(
+            'scope.mode', 'scope.mode must be one of: groups, keywords'
+        )
+    field = 'group_ids' if mode == 'groups' else 'keyword_ids'
+    shape_issue = _scope_shape_issue(value, mode, field)
+    if shape_issue:
+        return shape_issue
+    limit = 1 if mode == 'groups' else MAX_SELECTED_KEYWORDS
+    ids, error = validate_id_list(value.get(field), field=f'scope.{field}', limit=limit)
+    if error:
+        return ContentBriefValidationIssue(f'scope.{field}', error)
+    if mode == 'groups' and len(ids or []) != 1:
+        return ContentBriefValidationIssue(
+            'scope.group_ids', 'scope.group_ids must contain exactly one id'
+        )
+    if mode == 'keywords' and not ids:
+        return ContentBriefValidationIssue(
+            'scope.keyword_ids', 'scope.keyword_ids must contain between 1 and 50 active keyword ids'
+        )
+    return {'mode': mode, field: ids}
+
+
+def _normalized_scope(
+    idea: dict[str, Any],
+) -> tuple[dict[str, Any], str | None, ContentBriefValidationIssue | None]:
+    if 'scope' in idea:
+        scope = _validate_scope_descriptor(idea.get('scope'))
+        if isinstance(scope, ContentBriefValidationIssue):
+            return {}, None, scope
+        return scope, None, None
+
+    group_id = _required_text(idea, 'group_id', MAX_GROUP_ID_LENGTH)
+    if isinstance(group_id, ContentBriefValidationIssue):
+        return {}, None, group_id
+    keyword_ids = _legacy_keyword_ids(idea)
+    if isinstance(keyword_ids, ContentBriefValidationIssue):
+        return {}, None, keyword_ids
+    return (
+        {'keyword_ids': keyword_ids},
+        group_id.strip(),
+        None,
+    )
 
 
 def _validate_landing_url(
@@ -292,6 +400,19 @@ def _validate_source_fields(
     }
 
 
+def _selected_scope_template_issue(
+    prompt_template: str,
+    scope: dict[str, Any],
+    legacy_group_id: str | None,
+) -> ContentBriefValidationIssue | None:
+    if legacy_group_id is None and scope['mode'] == 'keywords' and '{group}' in prompt_template:
+        return ContentBriefValidationIssue(
+            'prompt_template',
+            'prompt_template cannot use {group} with a selected-keyword scope; use {scope} instead',
+        )
+    return None
+
+
 def _validate_group_brief_fields(
     idea: dict[str, Any],
     url_validator: Callable[[str], tuple[bool, str]],
@@ -299,15 +420,12 @@ def _validate_group_brief_fields(
     client_id = _required_text(idea, 'id', MAX_GROUP_ID_LENGTH)
     if isinstance(client_id, ContentBriefValidationIssue):
         return client_id
-    group_id = _required_text(idea, 'group_id', MAX_GROUP_ID_LENGTH)
-    if isinstance(group_id, ContentBriefValidationIssue):
-        return group_id
+    scope, legacy_group_id, scope_issue = _normalized_scope(idea)
+    if scope_issue:
+        return scope_issue
     mode = _validate_mode(idea)
     if isinstance(mode, ContentBriefValidationIssue):
         return mode
-    keyword_ids = _validate_keyword_ids(idea)
-    if isinstance(keyword_ids, ContentBriefValidationIssue):
-        return keyword_ids
     source = _validate_source_fields(idea, mode, url_validator)
     if isinstance(source, ContentBriefValidationIssue):
         return source
@@ -317,19 +435,128 @@ def _validate_group_brief_fields(
     template_error = validate_template_placeholders(prompt_template)
     if template_error:
         return ContentBriefValidationIssue('prompt_template', template_error)
+    template_scope_issue = _selected_scope_template_issue(
+        prompt_template, scope, legacy_group_id
+    )
+    if template_scope_issue:
+        return template_scope_issue
     output_language = _required_text(idea, 'output_language', MAX_OUTPUT_LANGUAGE_LENGTH)
     if isinstance(output_language, ContentBriefValidationIssue):
         return output_language
     return {
         'id': client_id.strip(),
-        'group_id': group_id.strip(),
+        'scope': scope,
+        'legacy_group_id': legacy_group_id,
         'content_angle': mode,
-        'keyword_ids': keyword_ids,
         'landing_url': source['landing_url'],
         'current_copy': source['current_copy'],
         'prompt_template': prompt_template,
         'output_language': output_language.strip(),
     }
+
+
+def _authoritative_group(
+    groups_table: Any, group_id: str, field: str
+) -> tuple[dict[str, Any] | None, ContentBriefValidationIssue | None]:
+    group = groups_table.get_item(Key={'id': group_id}).get('Item')
+    if not group:
+        return None, ContentBriefValidationIssue(field, 'Keyword group not found')
+    group_name = group.get('name')
+    if not isinstance(group_name, str) or not group_name.strip():
+        return None, ContentBriefValidationIssue(field, 'Keyword group is unavailable')
+    return {'id': group_id, 'name': group_name.strip()}, None
+
+
+def _members_by_id(members: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {
+        member['id']: member
+        for member in members
+        if isinstance(member.get('id'), str)
+        and isinstance(member.get('keyword'), str)
+        and member['keyword'].strip()
+    }
+
+
+def _sorted_members(members: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return sorted(
+        members,
+        key=lambda member: (member['keyword'].casefold(), member['id']),
+    )
+
+
+def _resolve_new_group_scope(
+    scope: dict[str, Any], groups_table: Any, keywords_table: Any
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, ContentBriefValidationIssue | None]:
+    group_id = scope['group_ids'][0]
+    group, issue = _authoritative_group(groups_table, group_id, 'scope.group_ids')
+    if issue:
+        return [], None, issue
+    members = _sorted_members(resolve_scope(scope, keywords_table))
+    if not members:
+        return [], None, ContentBriefValidationIssue(
+            'scope.group_ids', 'Keyword group has no active keywords'
+        )
+    if len(members) > MAX_SELECTED_KEYWORDS:
+        return [], None, ContentBriefValidationIssue(
+            'scope.group_ids', 'Keyword group has more than 50 active keywords'
+        )
+    return members, group, None
+
+
+def _resolve_selected_scope(
+    scope: dict[str, Any], keywords_table: Any
+) -> tuple[list[dict[str, Any]], ContentBriefValidationIssue | None]:
+    members = resolve_scope(scope, keywords_table)
+    by_id = _members_by_id(members)
+    selected_ids = scope['keyword_ids']
+    if any(keyword_id not in by_id for keyword_id in selected_ids):
+        return [], ContentBriefValidationIssue(
+            'scope.keyword_ids',
+            'scope.keyword_ids must contain only active existing keywords',
+        )
+    return _sorted_members([by_id[keyword_id] for keyword_id in selected_ids]), None
+
+
+def _resolve_legacy_scope(
+    fields: dict[str, Any], groups_table: Any, keywords_table: Any
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, ContentBriefValidationIssue | None]:
+    group_id = fields['legacy_group_id']
+    group, issue = _authoritative_group(groups_table, group_id, 'group_id')
+    if issue:
+        return [], None, issue
+    active_members = resolve_scope(
+        {'mode': 'groups', 'group_ids': [group_id]}, keywords_table
+    )
+    by_id = _members_by_id(active_members)
+    selected_ids = fields['scope']['keyword_ids']
+    if any(keyword_id not in by_id for keyword_id in selected_ids):
+        return [], None, ContentBriefValidationIssue(
+            'keyword_ids',
+            'keyword_ids must contain only active keywords in the selected group',
+        )
+    members = _sorted_members([by_id[keyword_id] for keyword_id in selected_ids])
+    return members, group, None
+
+
+def _resolve_brief_scope(
+    fields: dict[str, Any], groups_table: Any, keywords_table: Any
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, ContentBriefValidationIssue | None]:
+    if fields['legacy_group_id'] is not None:
+        return _resolve_legacy_scope(fields, groups_table, keywords_table)
+    if fields['scope']['mode'] == 'groups':
+        return _resolve_new_group_scope(fields['scope'], groups_table, keywords_table)
+    members, issue = _resolve_selected_scope(fields['scope'], keywords_table)
+    return members, None, issue
+
+
+def _scope_label(
+    members: list[dict[str, Any]], group: dict[str, Any] | None
+) -> str:
+    if group is not None:
+        return group['name']
+    if len(members) == 1:
+        return members[0]['keyword']
+    return f'{len(members)} selected keywords'
 
 
 def canonicalize_group_brief(
@@ -339,62 +566,67 @@ def canonicalize_group_brief(
     *,
     url_validator: Callable[[str], tuple[bool, str]] = validate_url_safe,
 ) -> tuple[dict[str, Any] | None, ContentBriefValidationIssue | None]:
-    """Validate a request and replace client text with authoritative group data."""
+    """Validate a request and replace all scope display text with authoritative data."""
     fields = _validate_group_brief_fields(idea, url_validator)
     if isinstance(fields, ContentBriefValidationIssue):
         return None, fields
 
-    group = groups_table.get_item(Key={'id': fields['group_id']}).get('Item')
-    if not group:
-        return None, ContentBriefValidationIssue('group_id', 'Keyword group not found')
-    group_name = group.get('name')
-    if not isinstance(group_name, str) or not group_name.strip():
-        return None, ContentBriefValidationIssue('group_id', 'Keyword group is unavailable')
+    members, group, issue = _resolve_brief_scope(fields, groups_table, keywords_table)
+    if issue:
+        return None, issue
 
-    active_members = resolve_scope(
-        {'mode': 'groups', 'group_ids': [fields['group_id']]}, keywords_table
+    keyword_ids = [member['id'] for member in members]
+    keywords = [member['keyword'] for member in members]
+    scope = (
+        {'mode': 'groups', 'group_ids': [group['id']]}
+        if group is not None and fields['legacy_group_id'] is None
+        else {'mode': 'keywords', 'keyword_ids': keyword_ids}
     )
-    members_by_id = {
-        member['id']: member
-        for member in active_members
-        if isinstance(member.get('id'), str) and isinstance(member.get('keyword'), str)
-    }
-    selected_ids = fields['keyword_ids']
-    if any(keyword_id not in members_by_id for keyword_id in selected_ids):
-        return None, ContentBriefValidationIssue(
-            'keyword_ids',
-            'keyword_ids must contain only active keywords in the selected group',
-        )
-
-    selected_members = sorted(
-        (members_by_id[keyword_id] for keyword_id in selected_ids),
-        key=lambda member: (member['keyword'].casefold(), member['id']),
-    )
-    keyword_noun = 'keyword' if len(selected_members) == 1 else 'keywords'
-    canonical = {
+    label = _scope_label(members, group)
+    canonical: dict[str, Any] = {
         'id': fields['id'],
         'type': GROUP_BRIEF_TYPE,
         'priority': 'medium',
-        'title': f'Group Brief: {group_name}',
+        'title': f'Group Brief: {label}',
         'description': (
-            f'Generate a complete landing page from {len(selected_members)} '
-            f'selected active {keyword_noun}.'
+            f'Generate a complete landing page from {len(members)} selected active keywords.'
         ),
-        'keyword': group_name,
+        'keyword': label,
         'source': GROUP_BRIEF_TYPE,
         'actionable': True,
         'content_angle': fields['content_angle'],
-        'group_id': fields['group_id'],
-        'group_name': group_name,
-        'keyword_ids': [member['id'] for member in selected_members],
-        'keywords': [member['keyword'] for member in selected_members],
+        'scope': scope,
+        'scope_label': label,
+        'keyword_ids': keyword_ids,
+        'keywords': keywords,
         'landing_url': fields['landing_url'],
         'current_copy': fields['current_copy'],
         'prompt_template': fields['prompt_template'],
         'output_language': fields['output_language'],
         'competitor_urls': [],
     }
+    if group is not None:
+        canonical['group_id'] = group['id']
+        canonical['group_name'] = group['name']
     return canonical, None
+
+
+def single_keyword_brief(
+    canonical: dict[str, Any], *, idea_id: str, keyword_id: str, keyword: str
+) -> dict[str, Any]:
+    """Derive one canonical batch child from an already validated parent brief."""
+    child = dict(canonical)
+    child.update({
+        'id': idea_id,
+        'title': f'Group Brief: {keyword}',
+        'description': 'Generate a complete landing page from 1 selected active keyword.',
+        'keyword': keyword,
+        'scope': {'mode': 'keywords', 'keyword_ids': [keyword_id]},
+        'scope_label': keyword,
+        'keyword_ids': [keyword_id],
+        'keywords': [keyword],
+    })
+    return child
 
 
 def _declared_response_too_large(response: Any) -> bool:
@@ -508,7 +740,7 @@ def _source_content(idea: dict[str, Any]) -> tuple[str, str, int]:
 def _required_context(
     template: str, replacements: dict[str, str], mode: str
 ) -> str:
-    required_names = ['brand', 'group', 'keywords']
+    required_names = ['brand', 'scope', 'keywords']
     if mode != CREATE_NEW_LANDING_PAGE:
         required_names.extend(['current_copy', 'landing_summary'])
     missing = [
@@ -519,14 +751,27 @@ def _required_context(
     return '\n'.join(missing)
 
 
+def _idea_scope_label(idea: dict[str, Any]) -> str:
+    """Return current or legacy authoritative scope text, refusing absent context."""
+    for field in ('scope_label', 'group_name', 'keyword'):
+        value = idea.get(field)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    raise ContentBriefTemplateError('Content brief scope label is unavailable')
+
+
 def build_group_brief_prompt(
     idea: dict[str, Any], config: dict[str, Any]
 ) -> tuple[str, int]:
-    """Build a safety-wrapped group brief prompt and report fetched source count."""
+    """Build a safety-wrapped content brief prompt and report fetched source count."""
     current_copy, landing_summary, source_count = _source_content(idea)
+    scope_label = _idea_scope_label(idea)
+    group_name = idea.get('group_name')
+    group_label = group_name if isinstance(group_name, str) and group_name.strip() else scope_label
     replacements = {
         'brand': wrap_user_input(_brand_name(config), 'brand'),
-        'group': wrap_user_input(idea['group_name'], 'group', max_length=100),
+        'group': wrap_user_input(group_label, 'group'),
+        'scope': wrap_user_input(scope_label, 'scope', max_length=MAX_KEYWORD_LENGTH),
         'keywords': wrap_user_input(
             ', '.join(idea['keywords']),
             'keywords',
@@ -566,26 +811,34 @@ def build_group_brief_prompt(
 
 __all__ = [
     'ALLOWED_PLACEHOLDERS',
+    'CONTENT_BRIEF_SCOPE_MODES',
     'CONTENT_OUTPUT_CONTRACT',
     'CREATE_NEW_LANDING_PAGE',
     'DEFAULT_PROMPT_TEMPLATES',
     'GROUP_BRIEF_MODES',
     'GROUP_BRIEF_TYPE',
     'IMPROVE_CURRENT_URL',
+    'MAX_BATCH_KEYWORDS',
+    'MAX_CONTENT_BRIEF_TEMPLATES',
     'MAX_CURRENT_COPY_LENGTH',
     'MAX_EXTRACTED_TEXT_LENGTH',
     'MAX_LANDING_URL_LENGTH',
     'MAX_OUTPUT_LANGUAGE_LENGTH',
     'MAX_PROMPT_TEMPLATE_LENGTH',
     'MAX_SELECTED_KEYWORDS',
+    'MAX_TEMPLATE_DESCRIPTION_LENGTH',
+    'MAX_TEMPLATE_NAME_LENGTH',
     'REWRITE_PASTED_COPY',
     'ContentBriefFetchError',
     'ContentBriefTemplateError',
     'ContentBriefValidationIssue',
     'build_group_brief_prompt',
+    'builtin_content_brief_template',
+    'builtin_content_brief_templates',
     'canonicalize_group_brief',
     'fetch_landing_page_text',
     'html_to_text',
     'render_prompt_template',
+    'single_keyword_brief',
     'validate_template_placeholders',
 ]

@@ -8,8 +8,12 @@ import { GroupBriefForm } from './GroupBriefForm';
 import { GROUP_BRIEF_LANGUAGES } from './GroupBriefForm-source';
 import { Spinner } from '../ui/Spinner';
 import type {
-  ContentIdea, GroupBriefIdea, Keyword
+  ContentBriefBatchRequest,
+  ContentIdea,
+  GroupBriefIdea,
+  Keyword,
 } from '../../types';
+import { ContentBriefBatchProgress } from './ContentBriefBatchProgress';
 
 type TabType = 'ideas' | 'brief' | 'history';
 
@@ -170,7 +174,7 @@ interface HeaderProps {
 }
 
 const Header = ({
-  loading, onRefresh 
+  loading, onRefresh
 }: HeaderProps) => (
   <div className="flex items-center justify-between">
     <div>
@@ -204,7 +208,7 @@ interface TabsProps {
 }
 
 const Tabs = ({
-  activeTab, setActiveTab, highPriorityCount, unviewedCount, historyLength 
+  activeTab, setActiveTab, highPriorityCount, unviewedCount, historyLength
 }: TabsProps) => (
   <div className="border-b border-gray-200">
     <nav className="flex gap-8 overflow-x-auto">
@@ -231,7 +235,7 @@ const Tabs = ({
             : 'border-transparent text-gray-500 hover:text-gray-700'
         }`}
       >
-        Group Brief
+        Content Brief
       </button>
       <button
         onClick={() => setActiveTab('history')}
@@ -263,7 +267,7 @@ const GeneratingIndicator = ({ keyword }: GeneratingIndicatorProps) => (
   <div className="fixed bottom-4 right-4 bg-gray-900 text-white px-4 py-3 rounded-lg shadow-lg flex items-center gap-3 z-50">
     <Spinner size="sm" />
     <div>
-      <p className="text-sm font-medium">Generating content...</p>
+      <p className="text-sm font-medium">Starting content generation...</p>
       <p className="text-xs text-gray-300">&quot;{keyword}&quot;</p>
     </div>
   </div>
@@ -282,8 +286,10 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
     loading,
     generating,
     error,
+    activeBatches,
     fetchIdeas,
     generateContent,
+    generateContentBatch,
     fetchHistory,
     markViewed,
     deleteContent
@@ -325,14 +331,19 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
   };
 
   const handleGenerateGroupBrief = async (idea: GroupBriefIdea): Promise<boolean> => {
-    setSelectedIdea(idea);
     const result = await generateContent(idea);
     const generated = result?.success === true;
-    if (generated) {
-      setActiveTab('history');
-      setSelectedIdea(null);
-    }
+    if (generated) setActiveTab('history');
     return generated;
+  };
+
+  const handleGenerateGroupBriefBatch = async (
+    request: ContentBriefBatchRequest
+  ): Promise<boolean> => {
+    const result = await generateContentBatch(request);
+    const accepted = result?.success === true;
+    if (accepted) setActiveTab('history');
+    return accepted;
   };
 
   const handleCancelGenerate = () => {
@@ -392,16 +403,22 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
           keywords={keywords}
           generating={generating}
           onGenerate={handleGenerateGroupBrief}
+          onGenerateBatch={handleGenerateGroupBriefBatch}
         />
       )}
 
       {activeTab === 'history' && (
-        <ContentHistory
-          history={history}
-          loading={loading}
-          onDelete={deleteContent}
-          onMarkViewed={markViewed}
-        />
+        <div className="space-y-4">
+          {activeBatches.map((batch) => (
+            <ContentBriefBatchProgress key={batch.batch_id} batch={batch} />
+          ))}
+          <ContentHistory
+            history={history}
+            loading={loading}
+            onDelete={deleteContent}
+            onMarkViewed={markViewed}
+          />
+        </div>
       )}
 
       {generating && selectedIdea?.keyword && (

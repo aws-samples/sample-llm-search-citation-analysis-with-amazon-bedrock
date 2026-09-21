@@ -1,6 +1,12 @@
 """
 Tests for shared.dynamodb_batch.
 
+``batch_get_items`` — the exact-key semantics manifest callers depend on:
+- Empty input short-circuits
+- Unprocessed keys are retried with bounded exponential backoff
+- Processed rows are retained across retries
+- Exhausted unprocessed keys raise instead of looking absent
+
 ``query_latest_per_key`` collapses duplicate keys, preserves first-seen order,
 uses a bounded executor, projects only caller-requested attributes, and treats
 one failed partition as missing without discarding successful partitions.
@@ -12,6 +18,8 @@ one failed partition as missing without discarding successful partitions.
 from __future__ import annotations
 
 from unittest.mock import MagicMock, call, patch
+
+import pytest
 
 from shared import dynamodb_batch
 
@@ -33,6 +41,102 @@ def _fake_table_with_items(per_key_items: dict[str, list[dict]]) -> MagicMock:
 
     table.query.side_effect = _side_effect
     return table
+
+
+class TestBatchGetItems:
+    def test_returns_empty_list_when_no_keys_requested(self) -> None:
+        resource = MagicMock()
+
+        result = dynamodb_batch.batch_get_items(resource, "table", [])
+
+        assert result == []
+        resource.batch_get_item.assert_not_called()
+
+    def test_returns_processed_rows_when_no_keys_are_unprocessed(self) -> None:
+        resource = MagicMock()
+        resource.batch_get_item.return_value = {
+            "Responses": {"table": [{"id": "two"}, {"id": "one"}]},
+        }
+
+        result = dynamodb_batch.batch_get_items(
+            resource,
+            "table",
+            [{"id": "one"}, {"id": "two"}],
+            consistent_read=True,
+        )
+
+        assert result == [{"id": "two"}, {"id": "one"}]
+        resource.batch_get_item.assert_called_once_with(
+            RequestItems={
+                "table": {
+                    "Keys": [{"id": "one"}, {"id": "two"}],
+                    "ConsistentRead": True,
+                },
+            }
+        )
+
+    def test_returns_all_rows_when_unprocessed_keys_succeed_on_retry(self) -> None:
+        resource = MagicMock()
+        resource.batch_get_item.side_effect = [
+            {
+                "Responses": {"table": [{"id": "one"}]},
+                "UnprocessedKeys": {
+                    "table": {"Keys": [{"id": "two"}]},
+                },
+            },
+            {"Responses": {"table": [{"id": "two"}]}},
+        ]
+
+        with patch.object(dynamodb_batch.time, "sleep") as sleep:
+            result = dynamodb_batch.batch_get_items(
+                resource,
+                "table",
+                [{"id": "one"}, {"id": "two"}],
+                consistent_read=True,
+            )
+
+        assert result == [{"id": "one"}, {"id": "two"}]
+        assert resource.batch_get_item.call_args_list == [
+            call(
+                RequestItems={
+                    "table": {
+                        "Keys": [{"id": "one"}, {"id": "two"}],
+                        "ConsistentRead": True,
+                    },
+                }
+            ),
+            call(
+                RequestItems={
+                    "table": {
+                        "Keys": [{"id": "two"}],
+                        "ConsistentRead": True,
+                    },
+                }
+            ),
+        ]
+        sleep.assert_called_once_with(0.05)
+
+    def test_raises_batch_get_error_when_unprocessed_keys_exhaust_retries(self) -> None:
+        resource = MagicMock()
+        resource.batch_get_item.return_value = {
+            "UnprocessedKeys": {"table": {"Keys": [{"id": "one"}]}},
+        }
+
+        with (
+            patch.object(dynamodb_batch.time, "sleep"),
+            pytest.raises(
+                dynamodb_batch.BatchGetUnprocessedError,
+                match="1 keys remained unprocessed for table",
+            ),
+        ):
+            dynamodb_batch.batch_get_items(
+                resource,
+                "table",
+                [{"id": "one"}],
+                max_attempts=2,
+            )
+
+        assert resource.batch_get_item.call_count == 2
 
 
 class TestQueryLatestPerKey:
@@ -121,7 +225,7 @@ class TestQueryLatestPerKey:
         urls = [f'u{index}' for index in range(25)]
         table = _fake_table_with_items({url: [{'id': url}] for url in urls})
         executor = MagicMock()
-        executor.__enter__.return_value.map.side_effect = lambda operation, values: map(operation, values)
+        executor.__enter__.return_value.map.side_effect = map
 
         with patch.object(
             dynamodb_batch.concurrent.futures,
@@ -178,7 +282,7 @@ class TestCollectAllItems:
             {'Items': []},
         ])
 
-        dynamodb_batch.collect_all_items(operation, IndexName='StatusIndex')
+        dynamodb_batch.collect_all_items(operation, IndexName="StatusIndex")
 
         assert [page_call.kwargs for page_call in operation.call_args_list] == [
             {'IndexName': 'StatusIndex'},
@@ -196,15 +300,15 @@ class TestCollectAllItems:
 
         result = dynamodb_batch.collect_all_items(
             operation,
-            KeyConditionExpression='pk = value',
+            KeyConditionExpression="pk = value",
         )
 
-        assert result == [{'id': 'first'}, {'id': 'second'}]
+        assert result == [{"id": "first"}, {"id": "second"}]
         assert operation.call_args_list == [
-            call(KeyConditionExpression='pk = value'),
+            call(KeyConditionExpression="pk = value"),
             call(
-                KeyConditionExpression='pk = value',
-                ExclusiveStartKey={'pk': 'first'},
+                KeyConditionExpression="pk = value",
+                ExclusiveStartKey={"pk": "first"},
             ),
         ]
 

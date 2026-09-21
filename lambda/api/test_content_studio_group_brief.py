@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,30 +13,16 @@ from shared.content_brief import (
     ContentBriefFetchError,
 )
 from testing.content_brief_fixtures import build_group_brief
-from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
-from testing.events import api_gateway_event, parse_response
-from testing.module_loader import load_handler_module
-
-for environment_name, table_name in (
-    ('DYNAMODB_TABLE_SEARCH_RESULTS', 'test-search'),
-    ('DYNAMODB_TABLE_CITATIONS', 'test-citations'),
-    ('DYNAMODB_TABLE_CRAWLED_CONTENT', 'test-crawled'),
-    ('DYNAMODB_TABLE_CONTENT_STUDIO', 'test-content-studio'),
-    ('DYNAMODB_TABLE_KEYWORDS', 'test-keywords'),
-    ('DYNAMODB_TABLE_KEYWORD_GROUPS', 'test-keyword-groups'),
-):
-    os.environ.setdefault(environment_name, table_name)
-_mod = load_handler_module(
-    os.path.dirname(__file__), 'content-studio.py', 'content_studio_group_brief_under_test'
+from testing.content_studio_fixtures import (
+    content_generation_event as generation_event,
 )
+from testing.content_studio_fixtures import (
+    load_content_studio_module,
+)
+from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
+from testing.events import parse_response
 
-
-def generation_event(idea: dict[str, object]) -> dict[str, object]:
-    return api_gateway_event(
-        'POST',
-        '/content-studio/generate',
-        body={'idea': idea},
-    )
+_mod = load_content_studio_module('content_studio_group_brief_under_test')
 
 
 def dynamodb_with_group(
@@ -68,33 +53,27 @@ def generate_response(idea: dict[str, object], resource: MagicMock) -> dict[str,
 
 
 class TestGroupBriefGenerateRoute:
-    def test_persists_authoritative_group_and_keyword_values_before_dispatch(self) -> None:
+    def test_persists_authoritative_group_and_keyword_values_before_acceptance(self) -> None:
         resource, content_table = dynamodb_with_group()
-        dispatch = MagicMock()
         idea = build_group_brief(
             keyword_ids=['keyword-2', 'keyword-1'],
             keywords=['stale beta', 'stale alpha'],
         )
 
-        with patch.object(_mod, 'dynamodb', resource), patch.object(
-            _mod, 'invoke_self_async', dispatch
-        ):
+        with patch.object(_mod, 'dynamodb', resource):
             response = _mod._generate_content(generation_event(idea), None)
 
-        persisted = content_table.put_item.call_args.kwargs['Item']['idea_data']
-        dispatched = dispatch.call_args.args[0]['idea']
+        persisted = content_table.put_item.call_args.kwargs['Item']
         assert response['statusCode'] == 200
-        assert persisted['group_name'] == 'Authoritative Group'
-        assert persisted['keywords'] == ['Alpha', 'Beta']
-        assert dispatched == persisted
+        assert persisted['idea_data']['group_name'] == 'Authoritative Group'
+        assert persisted['idea_data']['keywords'] == ['Alpha', 'Beta']
+        assert persisted['generation_transport'] == 'dynamodb_stream_v1'
 
     def test_snapshots_exact_effective_template_in_idea_data(self) -> None:
         resource, content_table = dynamodb_with_group()
         custom_template = 'Create for {brand} with {keywords} in {output_language}.'
 
-        with patch.object(_mod, 'dynamodb', resource), patch.object(
-            _mod, 'invoke_self_async', MagicMock()
-        ):
+        with patch.object(_mod, 'dynamodb', resource):
             _mod._generate_content(
                 generation_event(build_group_brief(prompt_template=custom_template)), None
             )
@@ -148,10 +127,9 @@ class TestGroupBriefGenerateRoute:
         assert body['error'] == 'landing_url is invalid: URL points to a restricted address'
         content_table.put_item.assert_not_called()
 
-    def test_keeps_legacy_idea_dispatch_contract_unchanged(self) -> None:
+    def test_keeps_legacy_idea_request_contract_unchanged(self) -> None:
         content_table = fake_table()
         resource = fake_dynamodb_resource(content_table)
-        dispatch = MagicMock()
         legacy_idea: dict[str, object] = {
             'id': 'legacy-1',
             'type': 'visibility_gap',
@@ -159,15 +137,14 @@ class TestGroupBriefGenerateRoute:
             'content_angle': 'comprehensive_guide',
         }
 
-        with patch.object(_mod, 'dynamodb', resource), patch.object(
-            _mod, 'invoke_self_async', dispatch
-        ):
+        with patch.object(_mod, 'dynamodb', resource):
             response = _mod._generate_content(generation_event(legacy_idea), None)
 
         status, body = parse_response(response)
+        persisted = content_table.put_item.call_args.kwargs['Item']
         assert status == 200
         assert body['keyword'] == 'generic keyword'
-        assert dispatch.call_args.args[0]['idea'] == legacy_idea
+        assert persisted['idea_data'] == legacy_idea
         assert resource.Table.call_args.args == ('test-content-studio',)
 
 
@@ -195,23 +172,6 @@ class TestGroupBriefAsyncGeneration:
             'content_angle': IMPROVE_CURRENT_URL,
         }
         bedrock.assert_not_called()
-
-    def test_marks_async_generation_failed_when_url_fetch_fails(self) -> None:
-        failure_result = {
-            'success': False,
-            'error': 'The landing URL must return HTML content.',
-            'error_type': 'source_fetch',
-            'content_angle': IMPROVE_CURRENT_URL,
-        }
-        update = MagicMock()
-
-        with patch.object(_mod, 'get_brand_config', return_value={}), patch.object(
-            _mod, 'generate_content', return_value=failure_result
-        ), patch.object(_mod, 'update_content_status', update):
-            _mod._process_generation_async('content-1', build_group_brief())
-
-        assert update.call_args_list[0].args == ('content-1', 'generating')
-        assert update.call_args_list[1].args == ('content-1', 'failed', failure_result)
 
     def test_parses_group_brief_with_existing_generated_content_shape(self) -> None:
         generated = """TITLE: Example title

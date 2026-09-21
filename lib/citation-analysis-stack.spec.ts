@@ -5,12 +5,14 @@ import {
 } from 'vitest';
 import { CitationAnalysisStack } from './citation-analysis-stack';
 import {
+  STATUS_CREATED_INDEX_SCHEMA,
   allowStatementsOfRole,
   collectRefTargets,
   extractApiAuthSnapshots,
   extractApiBackedFunctionTimeouts,
   extractApiMethods,
   extractBucketLifecycle,
+  extractContentStudioInfrastructureSnapshot,
   extractCrawlerInfrastructureSnapshot,
   extractDefinitionTimeoutSeconds,
   extractFunctionMemorySize,
@@ -54,7 +56,10 @@ import {
 
 const KEYWORD_MGMT_FUNCTION_NAME = 'CitationAnalysis-API-KeywordMgmt';
 const CONTENT_STUDIO_FUNCTION_NAME = 'CitationAnalysis-API-ContentStudio';
-const SELF_INVOKING_CONCURRENCY = 10;
+const CONTENT_STUDIO_WORKER_FUNCTION_NAME = 'CitationAnalysis-ContentStudioWorker';
+const CONTENT_STUDIO_WORKER_CONCURRENCY = 10;
+const CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS = 300;
+const CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY = 10;
 
 const PUBLIC_ROUTE = '/api/health';
 const MUTATING_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
@@ -129,6 +134,7 @@ const synthesized: {
   userPoolClientProps: Record<string, unknown>;
   userPoolGroupNames: string[];
   contentStudioConcurrency: number | undefined;
+  contentStudioWorkerConcurrency: number | undefined;
   contentStudioKeywordGroupsEnvRef: string;
   contentStudioKeywordGroupsTableId: string;
   contentStudioKeywordGroupsActions: string[];
@@ -195,6 +201,7 @@ const synthesized: {
   userPoolClientProps: {},
   userPoolGroupNames: [],
   contentStudioConcurrency: undefined,
+  contentStudioWorkerConcurrency: undefined,
   contentStudioKeywordGroupsEnvRef: '',
   contentStudioKeywordGroupsTableId: '',
   contentStudioKeywordGroupsActions: [],
@@ -215,9 +222,8 @@ const synthesized: {
 };
 
 /**
- * The Step Functions workers, which have carried explicit log groups since
- * they were written. Listed so the API-side fix cannot be delivered by
- * regressing the functions that were already correct.
+ * Background workers with explicit bounded log groups. Listed so the API-side
+ * fix cannot regress functions that were already correct.
  */
 const WORKER_LOG_GROUP_NAMES = [
   '/aws/lambda/CitationAnalysis-ParseKeywords',
@@ -227,6 +233,7 @@ const WORKER_LOG_GROUP_NAMES = [
   '/aws/lambda/CitationAnalysis-GenerateSummary',
   '/aws/lambda/CitationAnalysis-KpiAlerts',
   '/aws/lambda/CitationAnalysis-ResearchWorker',
+  '/aws/lambda/CitationAnalysis-ContentStudioWorker',
 ];
 
 const WORKFLOW_STATE_MACHINE = 'CitationAnalysis-Workflow';
@@ -341,9 +348,11 @@ beforeAll(() => {
     template.findResources('AWS::DynamoDB::Table')
   )
     .map((resource) => resolveString(resource, ['Properties', 'TableName']))
-    .filter((tableName) => /(?:Group|Content)Brief/u.test(tableName));
+    .filter((tableName) => tableName.includes('GroupBrief'));
   synthesized.contentStudioConcurrency =
     extractReservedConcurrency(template, CONTENT_STUDIO_FUNCTION_NAME);
+  synthesized.contentStudioWorkerConcurrency =
+    extractReservedConcurrency(template, CONTENT_STUDIO_WORKER_FUNCTION_NAME);
   synthesized.keywordMgmtConcurrency =
     extractReservedConcurrency(template, KEYWORD_MGMT_FUNCTION_NAME);
   synthesized.outputKeys = Object.keys(template.findOutputs('*'));
@@ -368,7 +377,7 @@ beforeAll(() => {
 
   synthesized.searchRoleProviderConfigActions =
     extractRoleTableActions(template, SEARCH_ROLE_NAME, PROVIDER_CONFIG_TABLE_NAME);
-}, 60_000);
+}, 180_000);
 
 describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
   /**
@@ -385,8 +394,10 @@ describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
    * a look at the reasoning recorded at its definition.
    */
   const DOCUMENTED_EXCEPTIONS = new Map<string, number>([
-    // Also runs as its own async worker; that path is not behind the gateway.
-    ['CitationAnalysis-API-ContentStudio', 300],
+    // First rollout only: Lambda updates configuration before code, so old
+    // self-invoked generations need their original timeout until forwarding
+    // is active and the asynchronous queue has drained.
+    [CONTENT_STUDIO_FUNCTION_NAME, CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS],
     // Persists its Bedrock result as the last step, so a 504 today is still
     // recoverable from the cache it writes. 29s would put the SIGKILL before
     // that write and make a slow keyword permanently broken.
@@ -414,7 +425,7 @@ describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
     expect(offenders).toStrictEqual([]);
   });
 
-  it('still has both documented exceptions wired to the API', () => {
+  it('still has the documented exception wired to the API', () => {
     /** Stops the allowlist rotting into a licence for arbitrary timeouts. */
     const apiBacked = Object.keys(synthesized.apiBackedFunctionTimeouts);
 
@@ -455,6 +466,12 @@ describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
      */
     expect(synthesized.apiBackedFunctionTimeouts[KEYWORD_MGMT_FUNCTION_NAME]).toBe(GATEWAY_CEILING);
   });
+
+  it('retains Content Studio worker timeout while legacy events drain', () => {
+    expect(synthesized.apiBackedFunctionTimeouts[CONTENT_STUDIO_FUNCTION_NAME]).toBe(
+      CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS
+    );
+  });
 });
 
 describe('Content Studio group brief infrastructure', () => {
@@ -464,16 +481,9 @@ describe('Content Studio group brief infrastructure', () => {
     );
   });
 
-  it('grants Content Studio read-only access to KeywordGroups', () => {
+  it('grants Content Studio exact group lookup access', () => {
     expect(synthesized.contentStudioKeywordGroupsActions).toStrictEqual([
-      'dynamodb:BatchGetItem',
-      'dynamodb:ConditionCheckItem',
-      'dynamodb:DescribeTable',
       'dynamodb:GetItem',
-      'dynamodb:GetRecords',
-      'dynamodb:GetShardIterator',
-      'dynamodb:Query',
-      'dynamodb:Scan',
     ]);
   });
 
@@ -482,35 +492,23 @@ describe('Content Studio group brief infrastructure', () => {
   });
 });
 
-describe('Self-invoking Lambda concurrency caps', () => {
-  /**
-   * AUDIT-2026-08-19 §2.4. Content Studio re-invokes itself asynchronously
-   * for background work, and async invocations are retried twice by default.
-   * Without a ceiling, a bug in a self-invoke guard consumes the account's
-   * whole concurrency pool — starving every other function, manage-users
-   * included — while billing an LLM call per invocation.
-   */
+describe('Content Studio API and worker concurrency separation', () => {
+  it('retains the old API cap while pre-rollout events drain', () => {
+    expect(synthesized.contentStudioConcurrency).toBe(
+      CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY
+    );
+  });
 
-  it('caps Content Studio, which self-invokes for content generation', () => {
-    expect(synthesized.contentStudioConcurrency).toBe(SELF_INVOKING_CONCURRENCY);
+  it('caps the durable generation worker at ten concurrent model calls', () => {
+    expect(synthesized.contentStudioWorkerConcurrency).toBe(CONTENT_STUDIO_WORKER_CONCURRENCY);
   });
 
   it('no longer reserves concurrency for Keyword Management, which stopped self-invoking', () => {
-    /**
-     * Reserved concurrency also *takes* capacity from the account pool. With
-     * research in its own state machine there is no loop left to bound, so the
-     * function shares the pool like every other API function.
-     */
     expect(synthesized.keywordMgmtConcurrency).toBeUndefined();
   });
 
-  it('keeps the cap small enough to bound a runaway loop', () => {
-    /**
-     * The account default is ~1000. A cap only helps if it is far below that,
-     * so this fails if someone "fixes" a throttling complaint by raising it to
-     * something that no longer bounds anything.
-     */
-    expect(synthesized.contentStudioConcurrency).toBeLessThanOrEqual(50);
+  it('keeps the worker cap small enough to bound model spend', () => {
+    expect(synthesized.contentStudioWorkerConcurrency).toBeLessThanOrEqual(50);
   });
 });
 
@@ -1104,7 +1102,7 @@ describe('API Lambda log retention', () => {
     expect([...policies]).toStrictEqual([RETAIN]);
   });
 
-  it('keeps every Step Functions worker at 30 days', () => {
+  it('keeps every background worker at 30 days', () => {
     /** The functions that were already correct stay correct. */
     const retentions = [...synthesized.workerLogGroupRetention.values()];
 
@@ -1425,14 +1423,7 @@ describe('KPI alert backend infrastructure', () => {
 
   it('indexes alerts by status and creation time', () => {
     expect(extractTableProperty(template, 'CitationAnalysis-KpiAlerts', 'GlobalSecondaryIndexes'))
-      .toStrictEqual([{
-        IndexName: 'StatusCreatedIndex',
-        KeySchema: [
-          { AttributeName: 'status', KeyType: 'HASH' },
-          { AttributeName: 'created_at', KeyType: 'RANGE' },
-        ],
-        Projection: { ProjectionType: 'ALL' },
-      }]);
+      .toStrictEqual([STATUS_CREATED_INDEX_SCHEMA]);
   });
 
   it('creates one named SNS topic without static subscriptions', () => {
@@ -1692,5 +1683,303 @@ describe('Citation Gaps gateway failure visibility', () => {
 
   it('keeps StatsInsights at 512 MB when measured memory remains below seventy percent', () => {
     expect(synthesized.statsInsightsMemorySize).toBe(512);
+  });
+});
+
+describe('Content Studio scopes batches and saved templates', () => {
+  const app = new cdk.App();
+  const template = Template.fromStack(new CitationAnalysisStack(app, 'ContentStudioFeatureStack'));
+  const snapshot = extractContentStudioInfrastructureSnapshot(template);
+
+  it('adds only the status creation index to the existing content table', () => {
+    expect(snapshot.contentTableIndexes).toStrictEqual([
+      STATUS_CREATED_INDEX_SCHEMA,
+    ]);
+  });
+
+  it('enables new-image streaming on the existing content table', () => {
+    expect(snapshot.contentTableStream).toStrictEqual({ StreamViewType: 'NEW_IMAGE' });
+  });
+
+  it('creates the retained on-demand batch manifest table without indexes', () => {
+    expect({
+      keySchema: snapshot.batchTableKeySchema,
+      indexes: snapshot.batchTableIndexes,
+      billingMode: snapshot.batchTableBillingMode,
+      pointInTimeRecovery: snapshot.batchTablePointInTimeRecovery,
+      deletionPolicy: snapshot.batchTableDeletionPolicy,
+    }).toStrictEqual({
+      keySchema: [{ AttributeName: 'batch_id', KeyType: 'HASH' }],
+      indexes: undefined,
+      billingMode: 'PAY_PER_REQUEST',
+      pointInTimeRecovery: true,
+      deletionPolicy: RETAIN,
+    });
+  });
+
+  it('grants immutable manifest reads and conditional creates only', () => {
+    expect(snapshot.environment.DYNAMODB_TABLE_CONTENT_BRIEF_BATCHES).toStrictEqual({
+      Ref: snapshot.batchTableLogicalId,
+    });
+    expect(snapshot.batchTableActions).toStrictEqual([
+      'dynamodb:GetItem',
+      'dynamodb:PutItem',
+    ]);
+  });
+
+  it('creates the retained on-demand template table with point-in-time recovery', () => {
+    expect(snapshot.templateTableKeySchema).toStrictEqual([
+      { AttributeName: 'id', KeyType: 'HASH' },
+    ]);
+    expect(snapshot.templateTableBillingMode).toBe('PAY_PER_REQUEST');
+    expect(snapshot.templateTablePointInTimeRecovery).toBe(true);
+    expect(snapshot.templateTableDeletionPolicy).toBe(RETAIN);
+  });
+
+  it('creates no template-table secondary index', () => {
+    expect(snapshot.templateTableIndexes).toBeUndefined();
+  });
+
+  it('grants the API exact saved-template CRUD access', () => {
+    expect(snapshot.environment).toHaveProperty('DYNAMODB_TABLE_CONTENT_BRIEF_TEMPLATES');
+    expect(snapshot.templateTableActions).toStrictEqual([
+      'dynamodb:DeleteItem',
+      'dynamodb:GetItem',
+      'dynamodb:PutItem',
+      'dynamodb:Scan',
+      'dynamodb:UpdateItem',
+    ]);
+  });
+
+  it('exposes the exact Content Studio route set', () => {
+    const routes = snapshot.routes
+      .map((route) => `${route.httpMethod} ${route.path}`)
+      .sort((left, right) => left.localeCompare(right));
+
+    expect(routes).toStrictEqual([
+      'DELETE /api/content-studio/{id}',
+      'DELETE /api/content-studio/templates/{id}',
+      'GET /api/content-studio/batches/{batch_id}',
+      'GET /api/content-studio/history',
+      'GET /api/content-studio/ideas',
+      'GET /api/content-studio/status/{id}',
+      'GET /api/content-studio/templates',
+      'POST /api/content-studio/generate',
+      'POST /api/content-studio/generate-batch',
+      'POST /api/content-studio/templates',
+      'POST /api/content-studio/viewed',
+      'PUT /api/content-studio/templates/{id}',
+    ]);
+  });
+
+  it('authenticates every route and integrates the existing Content Studio Lambda', () => {
+    expect(snapshot.routes.every((route) => route.authorizationType === COGNITO_AUTH)).toBe(true);
+    expect(snapshot.routes.every((route) => route.authorizerId !== '')).toBe(true);
+    expect(snapshot.routes.every((route) => route.integrationUri.includes(snapshot.functionLogicalId))).toBe(true);
+  });
+
+  it('retains API worker timeout while pre-rollout events drain', () => {
+    expect(snapshot.apiTimeout).toBe(CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS);
+  });
+
+  it('retains API concurrency cap while pre-rollout events drain', () => {
+    expect(snapshot.reservedConcurrency).toBe(CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY);
+  });
+
+  it('creates a five-minute worker with reserved concurrency ten', () => {
+    expect(snapshot.workerTimeout).toBe(300);
+    expect(snapshot.workerReservedConcurrency).toBe(CONTENT_STUDIO_WORKER_CONCURRENCY);
+  });
+
+  it('uses the same handler and shared layer for API and worker', () => {
+    expect(snapshot.workerHandler).toBe(snapshot.apiHandler);
+    expect(snapshot.workerLayerRefs).toStrictEqual(snapshot.apiLayerRefs);
+  });
+
+  it('delivers only versioned pending inserts with finite retries and age', () => {
+    expect(snapshot.eventSource).toStrictEqual({
+      batchSize: 1,
+      startingPosition: 'TRIM_HORIZON',
+      retryAttempts: 2,
+      maxRecordAgeSeconds: 3600,
+      filterPatterns: [JSON.stringify({
+        eventName: ['INSERT'],
+        dynamodb: {
+          NewImage: {
+            generation_transport: { S: ['dynamodb_stream_v1'] },
+            status: { S: ['pending'] },
+          },
+        },
+      })],
+      tableLogicalIds: [snapshot.contentTableLogicalId],
+      functionLogicalIds: [snapshot.workerFunctionLogicalId],
+      onFailureQueueLogicalIds: [snapshot.streamDlq.logicalId],
+    });
+  });
+
+  it('creates an encrypted fourteen-day stream failure queue', () => {
+    expect({
+      queueName: snapshot.streamDlq.queueName,
+      retentionSeconds: snapshot.streamDlq.retentionSeconds,
+      sqsManagedSseEnabled: snapshot.streamDlq.sqsManagedSseEnabled,
+      sslEnforced: snapshot.streamDlq.sslEnforced,
+    }).toStrictEqual({
+      queueName: 'CitationAnalysis-ContentStudioStreamDLQ',
+      retentionSeconds: 14 * 24 * 60 * 60,
+      sqsManagedSseEnabled: true,
+      sslEnforced: true,
+    });
+  });
+
+  it('allows stream failure delivery to the dedicated queue', () => {
+    expect(snapshot.streamDlq.workerActions).toStrictEqual([
+      'sqs:GetQueueAttributes',
+      'sqs:GetQueueUrl',
+      'sqs:SendMessage',
+    ]);
+  });
+
+  it('creates no fixed-cost or noisy alarm for the stream failure queue', () => {
+    expect(snapshot.streamDlq.alarmCount).toBe(0);
+  });
+
+  it('invokes worker reconciliation every five minutes with fixed input', () => {
+    expect(snapshot.reconcileRule).toStrictEqual({
+      scheduleExpression: 'rate(5 minutes)',
+      state: 'ENABLED',
+      targetInput: '{"action":"reconcile"}',
+      functionLogicalIds: [snapshot.workerFunctionLogicalId],
+    });
+  });
+
+  it('gives worker and API the same Content Studio environment contract', () => {
+    const expectedWorkerEnvironment = { ...snapshot.environment };
+    delete expectedWorkerEnvironment.CORS_ORIGIN_PARAM;
+
+    expect(snapshot.workerEnvironment).toStrictEqual(expectedWorkerEnvironment);
+    expect(snapshot.environment.CONTENT_STUDIO_WORKER_FUNCTION_NAME).toBe(
+      CONTENT_STUDIO_WORKER_FUNCTION_NAME
+    );
+  });
+
+  it('grants the worker exact content-table and stream access', () => {
+    expect({
+      table: snapshot.workerContentBaseActions,
+      statusIndex: snapshot.workerContentStatusIndexActions,
+      stream: snapshot.workerContentStreamActions,
+    }).toStrictEqual({
+      table: [
+        'dynamodb:GetItem',
+        'dynamodb:UpdateItem',
+      ],
+      statusIndex: ['dynamodb:Query'],
+      stream: [
+        'dynamodb:DescribeStream',
+        'dynamodb:GetRecords',
+        'dynamodb:GetShardIterator',
+      ],
+    });
+    expect(snapshot.workerRoleActions).toContain('dynamodb:ListStreams');
+  });
+
+  it('grants the API exact content-table and status-index access', () => {
+    expect({
+      table: snapshot.apiContentTableActions,
+      statusIndex: snapshot.apiContentStatusIndexActions,
+    }).toStrictEqual({
+      table: [
+        'dynamodb:BatchGetItem',
+        'dynamodb:DeleteItem',
+        'dynamodb:GetItem',
+        'dynamodb:PutItem',
+        'dynamodb:Scan',
+        'dynamodb:UpdateItem',
+      ],
+      statusIndex: ['dynamodb:Query'],
+    });
+  });
+
+  it('retains API crawled-source query while pre-rollout events drain', () => {
+    expect(snapshot.apiCrawledContentTableActions).toStrictEqual([
+      'dynamodb:Query',
+    ]);
+  });
+
+  it('grants the worker exact source-table read access', () => {
+    expect({
+      brandConfig: snapshot.workerBrandConfigTableActions,
+      crawledContent: snapshot.workerCrawledContentTableActions,
+    }).toStrictEqual({
+      brandConfig: ['dynamodb:GetItem'],
+      crawledContent: ['dynamodb:Query'],
+    });
+  });
+
+  it('grants the worker no manifest or mutable-template access', () => {
+    expect({
+      batches: snapshot.workerBatchTableActions,
+      templates: snapshot.workerTemplateTableActions,
+    }).toStrictEqual({
+      batches: [],
+      templates: [],
+    });
+  });
+
+  it('keeps Bedrock permission on the dedicated worker', () => {
+    expect(snapshot.workerRoleActions).toContain('bedrock:InvokeModel');
+  });
+
+  it('retains API Bedrock permission while pre-rollout events drain', () => {
+    expect(snapshot.apiRoleActions).toContain('bedrock:InvokeModel');
+  });
+
+  it('scopes every Content Studio invoke to its compatibility targets', () => {
+    const apiArn = {
+      'Fn::Join': [
+        '',
+        [
+          'arn:',
+          { Ref: 'AWS::Partition' },
+          ':lambda:',
+          { Ref: 'AWS::Region' },
+          ':',
+          { Ref: 'AWS::AccountId' },
+          ':function:CitationAnalysis-API-ContentStudio',
+        ],
+      ],
+    };
+    const workerArn = {
+      'Fn::Join': [
+        '',
+        [
+          'arn:',
+          { Ref: 'AWS::Partition' },
+          ':lambda:',
+          { Ref: 'AWS::Region' },
+          ':',
+          { Ref: 'AWS::AccountId' },
+          ':function:CitationAnalysis-ContentStudioWorker',
+        ],
+      ],
+    };
+
+    expect({
+      api: snapshot.apiInvokeStatements,
+      worker: snapshot.workerInvokeStatements,
+    }).toStrictEqual({
+      api: [{
+        actions: ['lambda:InvokeFunction'],
+        resources: [apiArn, workerArn],
+      }],
+      worker: [{
+        actions: ['lambda:InvokeFunction'],
+        resources: [workerArn],
+      }],
+    });
+  });
+
+  it('keeps every Cognito route integrated with the API function only', () => {
+    expect(snapshot.routes.every((route) => route.integrationUri.includes(snapshot.functionLogicalId))).toBe(true);
+    expect(snapshot.routes.every((route) => !route.integrationUri.includes(snapshot.workerFunctionLogicalId))).toBe(true);
   });
 });

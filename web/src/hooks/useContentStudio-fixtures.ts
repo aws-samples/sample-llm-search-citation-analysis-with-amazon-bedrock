@@ -1,65 +1,33 @@
-import { vi } from 'vitest';
+import {
+  StrictMode, createElement, useEffect, type ReactNode
+} from 'react';
 import {
   act, renderHook
 } from '@testing-library/react';
+import { vi } from 'vitest';
+import {
+  apiBatchStartResponse, apiBatchStatusResponse
+} from '../api/contentStudio-fixtures';
+import {
+  ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY,
+  CONTENT_STUDIO_BATCH_STORAGE_VERSION,
+  readStoredContentStudioBatchCandidates,
+  type ContentStudioBatchCandidate,
+} from '../api/contentStudioBatchStorage';
 import type { authenticatedFetch } from '../infrastructure/auth';
 import type {
-  ContentIdea, ContentStatus, ContentStudioHistory
+  ContentBriefBatchRequest,
+  ContentBriefBatchStartResponse,
+  ContentBriefBatchStatusResponse,
+  ContentIdea,
+  ContentStatus,
+  ContentStudioHistory,
 } from '../types';
 import {
-  createDeferredResponse,
-  createMockJsonResponse,
-  type DeferredResponse,
+  createDeferredResponse, createMockJsonResponse
 } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import { useContentStudio } from './useContentStudio';
-
-export type StatusFailure = 'http' | 'network' | 'invalid';
-
-interface StatusResponse {
-  readonly id: string;
-  readonly status: ContentStatus;
-}
-
-interface MockFetchOptions {
-  ideasResponse?: { ideas: ContentIdea[] };
-  historyResponse?: {
-    history: ContentStudioHistory[];
-    total_count: number;
-    unviewed_count: number;
-  };
-  generateResponse?: {
-    success: boolean;
-    id: string;
-    status: string;
-    keyword: string;
-    error?: string;
-  };
-  statusResponse?: StatusResponse;
-  statusResponses?: Readonly<Record<string, StatusResponse>>;
-  statusFailure?: StatusFailure;
-  statusFailures?: Readonly<Record<string, StatusFailure>>;
-  historyRefreshFailureDelayMs?: number;
-  shouldFail?: boolean;
-  shouldFailGenerate?: boolean;
-}
-
-export interface DeferredStatusRequest {
-  readonly contentId: string;
-  readonly signal: AbortSignal | null;
-  readonly response: DeferredResponse;
-}
-
-export function setupContentStudioConsoleErrorMock() {
-  vi.spyOn(console, 'error').mockImplementation(vi.fn());
-}
-
-export function renderContentStudio(
-  fetch: ReturnType<typeof createMockFetch> = createMockFetch()
-) {
-  mockAuthenticatedFetch.mockImplementation(fetch);
-  return renderHook(() => useContentStudio());
-}
 
 export const mockContentIdea: ContentIdea = {
   id: 'idea-1',
@@ -73,30 +41,6 @@ export const mockContentIdea: ContentIdea = {
   actionable: true,
 };
 
-export function buildPollingHistoryItem(
-  id: string,
-  status: ContentStatus = 'generating'
-): ContentStudioHistory {
-  return {
-    id,
-    keyword: `keyword-${id}`,
-    idea_title: `Idea ${id}`,
-    content_angle: 'comprehensive_guide',
-    generated_content: {
-      title: `Title ${id}`,
-      meta_description: `Description ${id}`,
-      body: `Body ${id}`,
-      suggested_headings: ['Overview'],
-      key_points: ['First point'],
-    },
-    competitor_sources_used: 0,
-    status,
-    created_at: '2024-01-02T00:00:00Z',
-    updated_at: '2024-01-02T00:00:00Z',
-    viewed: true,
-  };
-}
-
 export const mockContentHistory: ContentStudioHistory[] = [
   {
     id: 'content-1',
@@ -108,7 +52,7 @@ export const mockContentHistory: ContentStudioHistory[] = [
       meta_description: 'Comprehensive guide to the best hotels',
       body: 'Generated article content',
       suggested_headings: ['Introduction', 'Top Hotels'],
-      key_points: ['Unique amenities', 'Location benefits']
+      key_points: ['Unique amenities', 'Location benefits'],
     },
     competitor_sources_used: 3,
     status: 'generated',
@@ -116,217 +60,371 @@ export const mockContentHistory: ContentStudioHistory[] = [
     updated_at: '2024-01-01T00:00:00Z',
     viewed: false,
   },
-  buildPollingHistoryItem('content-2'),
+  {
+    id: 'content-2',
+    keyword: 'luxury resorts',
+    idea_title: 'Luxury Resorts Review',
+    content_angle: 'differentiation',
+    competitor_sources_used: 0,
+    status: 'generating',
+    created_at: '2024-01-02T00:00:00Z',
+    updated_at: '2024-01-02T00:00:00Z',
+    viewed: true,
+  },
 ];
 
-function requestedContentId(url: string): string {
+export const mockBatchStartResponse: ContentBriefBatchStartResponse = {
+  ...apiBatchStartResponse,
+  batch_id: 'batch-1',
+  accepted_count: 2,
+  existing_count: 0,
+  failed_count: 0,
+  children: apiBatchStartResponse.children.map((child) => ({
+    ...child,
+    status: 'pending',
+  })),
+};
+
+export const mockBatchStatusResponse: ContentBriefBatchStatusResponse = {
+  ...apiBatchStatusResponse,
+  batch_id: 'batch-1',
+};
+
+export const mockBatchRequest = {
+  batch_id: 'batch-1',
+  scope: {
+    mode: 'keywords',
+    keyword_ids: ['keyword-1', 'keyword-2'],
+  },
+  brief: {
+    content_angle: 'create_new_landing_page',
+    landing_url: '',
+    current_copy: '',
+    template_id: 'builtin-create-new-landing-page',
+    prompt_template: 'Create a brief for {scope}.',
+    output_language: 'English',
+  },
+} satisfies ContentBriefBatchRequest;
+
+interface MockFetchOptions {
+  ideasResponse?: unknown;
+  historyResponse?: unknown;
+  generateResponse?: unknown;
+  batchStartResponse?: unknown;
+  batchStatusResponse?: unknown;
+  batchStatusResponses?: Readonly<Record<string, unknown>>;
+  missingBatchIds?: readonly string[];
+  statusResponse?: unknown;
+  shouldFail?: boolean;
+  shouldFailGenerate?: boolean;
+  shouldFailBatchStart?: boolean;
+  shouldFailBatchStatus?: boolean;
+}
+
+function payloadOrDefault(payload: unknown, fallback: unknown): unknown {
+  return payload === undefined ? fallback : payload;
+}
+
+export function buildContentHistoryPayload(
+  history: readonly ContentStudioHistory[] = mockContentHistory
+): unknown {
+  return {
+    history: history.map((item) => ({
+      ...item,
+      generated_content: item.generated_content ?? {},
+    })),
+    total_count: history.length,
+    unviewed_count: history.filter((item) => !item.viewed).length,
+  };
+}
+
+function requestedBatchId(url: string): string {
   return decodeURIComponent(url.slice(url.lastIndexOf('/') + 1));
 }
 
-function contentGenerationResponse(options: MockFetchOptions): Promise<Response> {
-  if (options.shouldFailGenerate) {
-    return Promise.resolve(createMockJsonResponse({ error: 'Generation failed' }, 500));
+function batchStatusResponse(url: string, options: MockFetchOptions): Response {
+  const batchId = requestedBatchId(url);
+  if (options.missingBatchIds?.includes(batchId) === true) {
+    return createMockJsonResponse({ error: 'Batch not found' }, 404, 'Not Found');
   }
-  return Promise.resolve(createMockJsonResponse(options.generateResponse ?? {
-    success: true,
-    id: 'new-content-1',
-    status: 'pending',
-    keyword: 'test'
-  }));
+  if (options.shouldFailBatchStatus === true) {
+    return createMockJsonResponse({ error: 'Batch status failed' }, 500);
+  }
+  const mapped = options.batchStatusResponses?.[batchId];
+  const fallback = options.batchStatusResponse ?? {
+    ...mockBatchStatusResponse,
+    batch_id: batchId,
+  };
+  return createMockJsonResponse(payloadOrDefault(mapped, fallback));
 }
 
-function contentStatusResponse(
+function readResponse(url: string, options: MockFetchOptions): Response | undefined {
+  if (url.includes('/ideas')) {
+    return createMockJsonResponse(payloadOrDefault(options.ideasResponse, {
+      ideas: [mockContentIdea],
+      total_count: 1,
+      generated_at: '2024-01-01',
+    }));
+  }
+  if (url.includes('/history')) {
+    return createMockJsonResponse(payloadOrDefault(
+      options.historyResponse,
+      buildContentHistoryPayload()
+    ));
+  }
+  if (url.includes('/batches/')) return batchStatusResponse(url, options);
+  if (url.includes('/status/')) {
+    return createMockJsonResponse(payloadOrDefault(options.statusResponse, {
+      id: 'content-2',
+      status: 'generating',
+    }));
+  }
+  return undefined;
+}
+
+function writeResponse(
   url: string,
+  method: string,
   options: MockFetchOptions
-): Promise<Response> {
-  const contentId = requestedContentId(url);
-  const statusFailure = options.statusFailures?.[contentId] ?? options.statusFailure;
-  if (statusFailure === 'network') {
-    return Promise.reject(new TypeError('Network unavailable'));
+): Response {
+  if (url.includes('/generate-batch') && method === 'POST') {
+    if (options.shouldFailBatchStart === true) {
+      return createMockJsonResponse({ error: 'Batch start failed' }, 500);
+    }
+    return createMockJsonResponse(payloadOrDefault(
+      options.batchStartResponse,
+      mockBatchStartResponse
+    ), 202);
   }
-  if (statusFailure === 'http') {
-    return Promise.resolve(createMockJsonResponse({}, 503));
+  if (url.endsWith('/generate') && method === 'POST') {
+    if (options.shouldFailGenerate === true) {
+      return createMockJsonResponse({ error: 'Generation failed' }, 500);
+    }
+    return createMockJsonResponse(payloadOrDefault(options.generateResponse, {
+      success: true,
+      id: 'new-content-1',
+      status: 'pending',
+      keyword: 'test',
+    }));
   }
-  if (statusFailure === 'invalid') {
-    return Promise.resolve(createMockJsonResponse({ status: 'unknown' }));
-  }
-  return Promise.resolve(createMockJsonResponse(
-    options.statusResponses?.[contentId]
-      ?? options.statusResponse
-      ?? {
-        id: contentId,
-        status: 'generated'
-      }
-  ));
-}
-
-function contentHistoryResponse(
-  options: MockFetchOptions,
-  requestCount: { value: number }
-): Promise<Response> {
-  const isRefresh = requestCount.value > 0;
-  requestCount.value += 1;
-  if (isRefresh && options.historyRefreshFailureDelayMs !== undefined) {
-    return new Promise<Response>((resolve) => {
-      setTimeout(() => {
-        resolve(createMockJsonResponse({}, 500));
-      }, options.historyRefreshFailureDelayMs);
+  if (url.includes('/viewed')) {
+    return createMockJsonResponse({
+      success: true,
+      id: 'content-1',
     });
   }
-  return Promise.resolve(createMockJsonResponse(options.historyResponse ?? {
-    history: mockContentHistory,
-    total_count: 2,
-    unviewed_count: 1
-  }));
+  if (method === 'DELETE') {
+    return createMockJsonResponse({
+      success: true,
+      message: 'Content deleted successfully',
+    });
+  }
+  return createMockJsonResponse({});
 }
 
 export function createMockFetch(options: MockFetchOptions = {}) {
-  if (options.shouldFail) {
-    return vi.fn<typeof authenticatedFetch>().mockResolvedValue(
-      createMockJsonResponse({}, 500)
-    );
-  }
-  const historyRequestCount = { value: 0 };
   return vi.fn<typeof authenticatedFetch>().mockImplementation((input, init) => {
+    if (options.shouldFail === true) {
+      return Promise.resolve(createMockJsonResponse({}, 500));
+    }
     const url = String(input);
-    if (url.includes('/ideas')) {
-      return Promise.resolve(createMockJsonResponse(options.ideasResponse ?? {
-        ideas: [mockContentIdea],
-        total_count: 1,
-        generated_at: '2024-01-01'
-      }));
-    }
-    if (url.includes('/history')) {
-      return contentHistoryResponse(options, historyRequestCount);
-    }
-    if (url.includes('/generate') && init?.method === 'POST') {
-      return contentGenerationResponse(options);
-    }
-    if (url.includes('/status/')) return contentStatusResponse(url, options);
-    if (url.includes('/viewed')) {
-      return Promise.resolve(createMockJsonResponse({ success: true }));
-    }
-    if (init?.method === 'DELETE') {
-      return Promise.resolve(createMockJsonResponse({ success: true }));
-    }
-    return Promise.resolve(createMockJsonResponse({}));
+    const response = readResponse(url, options);
+    if (response !== undefined) return Promise.resolve(response);
+    return Promise.resolve(writeResponse(url, init?.method ?? 'GET', options));
   });
 }
 
-export function createDeferredStatusFetch(
-  historyResponses: readonly (readonly ContentStudioHistory[])[]
+interface StrictModeBoundaryProps { readonly children: ReactNode; }
+
+export function contentStudioStrictModeBoundary({ children }: StrictModeBoundaryProps) {
+  return createElement(StrictMode, null, children);
+}
+
+export function renderContentStudio(
+  fetch: ReturnType<typeof createMockFetch> = createMockFetch()
 ) {
-  const statusRequests: DeferredStatusRequest[] = [];
-  const historyResponseIndex = { value: 0 };
-  const fallbackHistory = historyResponses[historyResponses.length - 1] ?? [];
-  const fetch = vi.fn<typeof authenticatedFetch>().mockImplementation((input, init) => {
-    const url = String(input);
-    if (url.includes('/history')) {
-      const selectedHistory = historyResponses[historyResponseIndex.value] ?? fallbackHistory;
-      historyResponseIndex.value += 1;
-      return Promise.resolve(createMockJsonResponse({
-        history: selectedHistory,
-        total_count: selectedHistory.length,
-        unviewed_count: selectedHistory.filter((item) => !item.viewed).length,
-      }));
-    }
-    if (url.includes('/status/')) {
-      const response = createDeferredResponse();
-      statusRequests.push({
-        contentId: requestedContentId(url),
-        signal: init?.signal ?? null,
-        response,
-      });
-      return response.promise;
-    }
-    return Promise.resolve(createMockJsonResponse({}));
-  });
+  mockAuthenticatedFetch.mockImplementation(fetch);
+  return renderHook(() => useContentStudio());
+}
+
+export function renderContentStudioInStrictMode(
+  fetch: ReturnType<typeof createMockFetch> = createMockFetch()
+) {
+  mockAuthenticatedFetch.mockImplementation(fetch);
+  return renderHook(
+    () => useContentStudio(),
+    {wrapper: contentStudioStrictModeBoundary,}
+  );
+}
+
+function useContentStudioWithInitialHistory() {
+  const contentStudio = useContentStudio();
+  useEffect(() => {
+    void contentStudio.fetchHistory();
+  }, [contentStudio.fetchHistory]);
+  return contentStudio;
+}
+
+export function renderInitialHistoryInStrictMode(
+  fetch: ReturnType<typeof createMockFetch> = createMockFetch()
+) {
+  mockAuthenticatedFetch.mockImplementation(fetch);
+  return renderHook(
+    () => useContentStudioWithInitialHistory(),
+    {wrapper: contentStudioStrictModeBoundary,}
+  );
+}
+
+export function storeActiveContentStudioBatchCandidates(
+  candidates: readonly ContentStudioBatchCandidate[]
+): void {
+  localStorage.setItem(
+    ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY,
+    JSON.stringify({
+      version: CONTENT_STUDIO_BATCH_STORAGE_VERSION,
+      entries: candidates,
+    })
+  );
+}
+
+export function storeActiveContentStudioBatchIds(
+  batchIds: readonly string[],
+  registeredAt = Date.now()
+): void {
+  storeActiveContentStudioBatchCandidates(batchIds.map((batchId) => ({
+    id: batchId,
+    registeredAt,
+  })));
+}
+
+export function storedActiveContentStudioBatchCandidates(): ContentStudioBatchCandidate[] {
+  return readStoredContentStudioBatchCandidates();
+}
+
+export function storedActiveContentStudioBatchIds(): string[] {
+  return storedActiveContentStudioBatchCandidates().map((candidate) => candidate.id);
+}
+
+export function buildTerminalBatchStartResponse(
+  batchId: string
+): ContentBriefBatchStartResponse {
   return {
-    fetch,
-    statusRequests
+    ...mockBatchStartResponse,
+    batch_id: batchId,
+    accepted_count: 0,
+    existing_count: 2,
+    failed_count: 0,
+    children: [
+      {
+        ...mockBatchStartResponse.children[0],
+        status: 'generated',
+        idempotent_hit: true,
+      },
+      {
+        ...mockBatchStartResponse.children[1],
+        status: 'failed',
+        idempotent_hit: true,
+      },
+    ],
   };
 }
 
-export async function settleDeferredStatusBatch(
-  statusRequests: readonly DeferredStatusRequest[],
-  outcomes: readonly (ContentStatus | 'network-failure')[]
-): Promise<void> {
-  await act(async () => {
-    outcomes.forEach((outcome, index) => {
-      const statusRequest = statusRequests[index];
-      if (outcome === 'network-failure') {
-        statusRequest.response.reject(new TypeError('Item unavailable'));
-        return;
-      }
-      statusRequest.response.resolve(createMockJsonResponse({
-        id: statusRequest.contentId,
-        status: outcome,
-      }));
-    });
-    await vi.advanceTimersByTimeAsync(0);
-  });
-}
-
-export async function renderContentStudioWithDeferredPolling(
-  historyResponses: readonly (readonly ContentStudioHistory[])[]
-) {
-  vi.useFakeTimers();
-  const deferredStatusFetch = createDeferredStatusFetch(historyResponses);
-  const renderedHook = renderContentStudio(deferredStatusFetch.fetch);
-  await act(async () => {
-    await renderedHook.result.current.fetchHistory();
-  });
+export function buildGeneratingBatchStartResponse(
+  batchId = 'batch-1'
+): ContentBriefBatchStartResponse {
   return {
-    ...renderedHook,
-    deferredStatusFetch
+    ...mockBatchStartResponse,
+    batch_id: batchId,
+    children: mockBatchStartResponse.children.map((child) => ({
+      ...child,
+      status: 'generating' satisfies ContentStatus,
+    })),
   };
 }
 
-export async function unmountContentStudioWithActiveStatusRequest() {
-  const renderedHook = await renderContentStudioWithDeferredPolling([[
-    buildPollingHistoryItem('content-a'),
-  ]]);
-  const activeRequest = renderedHook.deferredStatusFetch.statusRequests[0];
-  renderedHook.unmount();
+export function buildRunningBatchStatusResponse(
+  overrides: Partial<ContentBriefBatchStatusResponse> = {}
+): ContentBriefBatchStatusResponse {
   return {
-    activeRequest,
-    deferredStatusFetch: renderedHook.deferredStatusFetch
-  };
-}
-
-export async function renderContentStudioAfterStatusFailureLimit(
-  statusFailure: StatusFailure
-) {
-  vi.useFakeTimers();
-  const generatingHistory = mockContentHistory.slice(1);
-  const renderedHook = renderContentStudio(createMockFetch({
-    statusFailure,
-    historyResponse: {
-      history: generatingHistory,
-      total_count: 1,
-      unviewed_count: 0,
+    ...mockBatchStatusResponse,
+    children: mockBatchStatusResponse.children.map((child) => ({
+      ...child,
+      status: 'generating' satisfies ContentStatus,
+      has_content: false,
+      error_message: null,
+    })),
+    counts: {
+      pending: 0,
+      generating: 2,
+      generated: 0,
+      failed: 0,
+      missing: 0,
+      total: 2,
     },
-  }));
-
-  await act(async () => {
-    await renderedHook.result.current.fetchHistory();
-  });
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(20_000);
-  });
-  return renderedHook;
+    ...overrides,
+  };
 }
 
-export function countContentStatusRequests(contentId?: string): number {
-  return mockAuthenticatedFetch.mock.calls.filter(([input]) => {
-    const url = String(input);
-    return url.includes('/status/')
-      && (contentId === undefined || requestedContentId(url) === contentId);
-  }).length;
+export function buildRunningBatchStatusFor(
+  batchId: string
+): ContentBriefBatchStatusResponse {
+  return buildRunningBatchStatusResponse({ batch_id: batchId });
 }
 
-export function countContentHistoryRequests(): number {
-  return mockAuthenticatedFetch.mock.calls.filter(
-    ([input]) => String(input).includes('/history')
-  ).length;
+export function renderRunningBatchContentStudio() {
+  const batchStatusResponse = buildRunningBatchStatusResponse();
+  const fetch = createMockFetch({ batchStatusResponse });
+  return {
+    ...renderContentStudio(fetch),
+    fetch,
+  };
+}
+
+export function batchStatusRequestUrls(
+  fetch: ReturnType<typeof createMockFetch>,
+  batchId = 'batch-1'
+): string[] {
+  return fetch.mock.calls
+    .map(([url]) => String(url))
+    .filter((url) => url.includes(`/batches/${batchId}`));
+}
+
+export function renderConcurrentBatchStarts() {
+  const firstStart = createDeferredResponse();
+  const secondStart = createDeferredResponse();
+  mockAuthenticatedFetch
+    .mockImplementation(() => Promise.resolve(
+      createMockJsonResponse(buildContentHistoryPayload([]))
+    ))
+    .mockReturnValueOnce(firstStart.promise)
+    .mockReturnValueOnce(secondStart.promise);
+  const rendered = renderHook(() => useContentStudio());
+  const pendingBatches: {
+    first: Promise<ContentBriefBatchStartResponse | null>;
+    second: Promise<ContentBriefBatchStartResponse | null>;
+  } = {
+    first: Promise.resolve(null),
+    second: Promise.resolve(null),
+  };
+  act(() => {
+    pendingBatches.first = rendered.result.current.generateContentBatch(
+      buildMockBatchRequest('batch-1')
+    );
+    pendingBatches.second = rendered.result.current.generateContentBatch(
+      buildMockBatchRequest('batch-2')
+    );
+  });
+  return {
+    ...rendered,
+    firstStart,
+    secondStart,
+    pendingBatches,
+  };
+}
+
+export function buildMockBatchRequest(batchId: string): ContentBriefBatchRequest {
+  return {
+    ...mockBatchRequest,
+    batch_id: batchId,
+  };
 }

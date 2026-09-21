@@ -24,10 +24,6 @@ export const ContentDetailModal = ({
 
   const content = item.generated_content;
   const displayTitle = getContentTitle(item);
-  const displayContent = {
-    ...content,
-    title: displayTitle,
-  };
   const fullContent = `# ${displayTitle}\n\n${content?.meta_description ?? ''}\n\n${content?.body ?? ''}`;
 
   const handleExportDocx = async () => {
@@ -36,7 +32,10 @@ export const ContentDetailModal = ({
 
     try {
       await exportToDocx({
-        content: displayContent,
+        content: {
+          ...content,
+          title: displayTitle,
+        },
         keyword: item.keyword
       });
     } catch (error) {
