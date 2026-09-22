@@ -7,6 +7,7 @@ import { CitationAnalysisStack } from './citation-analysis-stack';
 import {
   STATUS_CREATED_INDEX_SCHEMA,
   allowStatementsOfRole,
+  allowStatementsOfTemplate,
   collectRefTargets,
   extractApiAuthSnapshots,
   extractApiBackedFunctionTimeouts,
@@ -37,7 +38,9 @@ import {
   findFunctionRoleLogicalId,
   findLambdaLogicalId,
   findLogicalIdByName,
+  findModelAgreements,
   findStateMachineLogicalId,
+  findUseCaseSubmission,
   pythonTierFoundationModelIds,
   resolvePath,
   resolveString,
@@ -2003,8 +2006,8 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
   const agreementRoleActions = extractFunctionRoleActions(template, 'CitationAnalysis-BedrockModelAgreement');
 
   it('subscribes exactly the foundation models lambda/shared/models.py resolves', () => {
-    const subscribed = Object.values(template.findResources('AWS::CloudFormation::CustomResource'))
-      .map((resource) => resolvePath(resource, ['Properties', 'modelId']))
+    const subscribed = findModelAgreements(template)
+      .map(([, resource]) => resolvePath(resource, ['Properties', 'modelId']))
       .filter((modelId): modelId is string => typeof modelId === 'string')
       .sort((left, right) => left.localeCompare(right));
 
@@ -2012,9 +2015,8 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
   });
 
   it('creates the agreements in the stack region, where the Lambdas call Bedrock', () => {
-    const regions = Object.values(template.findResources('AWS::CloudFormation::CustomResource'))
-      .filter((resource) => typeof resolvePath(resource, ['Properties', 'modelId']) === 'string')
-      .map((resource) => resolvePath(resource, ['Properties', 'region']));
+    const regions = findModelAgreements(template)
+      .map(([, resource]) => resolvePath(resource, ['Properties', 'region']));
 
     expect(regions).toStrictEqual(regions.map(() => ({ Ref: 'AWS::Region' })));
     expect(regions).toHaveLength(pythonTierFoundationModelIds().length);
@@ -2056,14 +2058,10 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
   });
 
   it('submits the use-case form as plain JSON, the bytes the blob parameter expects', () => {
-    const call = Object.values(template.findResources('Custom::AWS'))
-      .map((resource) => resolvePath(resource, ['Properties', 'Create']))
-      .find((create): create is string => typeof create === 'string'
-        && create.includes('putUseCaseForModelAccess'));
+    const parsed = findUseCaseSubmission(template);
 
-    expect(call).toBeDefined();
-    const parsed = JSON.parse(call ?? '{}') as { parameters?: { formData?: string }; region?: string };
-    expect(JSON.parse(parsed.parameters?.formData ?? '{}')).toStrictEqual({
+    expect(parsed).toBeDefined();
+    expect(JSON.parse(parsed?.parameters?.formData ?? '{}')).toStrictEqual({
       companyName: 'Citation Analysis',
       companyWebsite: 'https://aws.amazon.com/bedrock/',
       intendedUsers: '0',
@@ -2071,12 +2069,11 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
       otherIndustryOption: '',
       useCases: 'Summarize content and generate new marketing content.',
     });
-    expect(parsed.region).toBe('us-east-1');
+    expect(parsed?.region).toBe('us-east-1');
   });
 
   it('submits the use case before any agreement, since the form gates subscription', () => {
-    const agreements = Object.entries(template.findResources('AWS::CloudFormation::CustomResource'))
-      .filter(([, resource]) => typeof resolvePath(resource, ['Properties', 'modelId']) === 'string');
+    const agreements = findModelAgreements(template);
     const useCaseLogicalId = Object.keys(
       template.findResources('Custom::AWS')
     )[0];
@@ -2086,5 +2083,63 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
       const dependsOn = resolvePath(resource, ['DependsOn']);
       return (Array.isArray(dependsOn) ? dependsOn : [dependsOn]).includes(useCaseLogicalId);
     })).toBe(true);
+  });
+
+  /**
+   * 2.15.1. The submission is best-effort account provisioning, and an account
+   * can refuse it in more ways than a fixed list can name: a previous
+   * submission, an org-level grant, an AWS-internal account ("Internal Accounts
+   * should not submit use case details"), an SCP. 2.15.0 listed
+   * `ValidationException|ConflictException`, so every other refusal rolled the
+   * whole stack back — an AWS-internal account could not deploy at all.
+   *
+   * CDK's custom-resource runtime tests this regex against the SDK error's
+   * `name`, so the property to hold is that every error name matches.
+   */
+  it('tolerates any refusal of the use-case form instead of failing the deployment', () => {
+    const pattern = findUseCaseSubmission(template)?.ignoreErrorCodesMatching;
+
+    expect(pattern).toBeDefined();
+    const unmatched = [
+      'AccessDeniedException',
+      'ValidationException',
+      'ConflictException',
+      'ThrottlingException',
+      'InternalServerException',
+      'ResourceNotFoundException',
+    ].filter((errorName) => !new RegExp(pattern ?? '(?!)').test(errorName));
+
+    expect(unmatched).toStrictEqual([]);
+  });
+});
+
+
+/**
+ * 2.15.1. Not every account wants deploy-time provisioning: some have Anthropic
+ * access granted by their organization, some refuse the use-case form outright,
+ * and some would rather no deploy-time role held `aws-marketplace:Subscribe`.
+ */
+describe('Bedrock model access opt-out (-c skipModelProvisioning=true)', () => {
+  const app = new cdk.App({ context: { skipModelProvisioning: 'true' } });
+  const template = Template.fromStack(new CitationAnalysisStack(app, 'SkipModelProvisioningStack'));
+
+  it('submits no use-case form and creates no model agreements', () => {
+    expect(findUseCaseSubmission(template)).toBeUndefined();
+    expect(findModelAgreements(template)).toStrictEqual([]);
+  });
+
+  it('leaves no role in the stack holding Marketplace permissions', () => {
+    const marketplace = allowStatementsOfTemplate(template)
+      .filter((statement) => statementActions(statement)
+        .some((action) => action.startsWith('aws-marketplace:')));
+
+    expect(marketplace).toStrictEqual([]);
+  });
+
+  it('reports in the stack output that nothing was subscribed', () => {
+    const outputs = template.findOutputs('BedrockModelsEnabled');
+
+    expect(resolvePath(outputs, ['BedrockModelsEnabled', 'Value']))
+      .toBe('none (skipModelProvisioning)');
   });
 });
