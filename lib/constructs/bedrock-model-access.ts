@@ -67,28 +67,31 @@ const MINIMUM_USE_CASE_LENGTH = 10;
 const USE_CASE_FORM_REGION = 'us-east-1';
 
 /**
- * Which error codes to tolerate when submitting the use-case form: the refusals
- * that mean the form is not ours to submit, and only those.
+ * Which error names to tolerate when submitting the use-case form: everything
+ * except the two transient ones.
  *
  * `ignoreErrorCodesMatching` is a regex CDK tests against the SDK error's
- * `name`. Naming only `ValidationException` and `ConflictException` made every
- * other refusal fatal, which left 2.15.0 unable to deploy into an AWS-internal
- * account at all ("Internal Accounts should not submit use case details");
- * `ConflictException` is not even modelled for this operation. The API models
- * exactly four errors, which split cleanly in two:
+ * `name`, so this is a negative lookahead rather than an allowlist. An
+ * allowlist has to name every way an account can refuse the form — a previous
+ * submission, an org-level grant, an AWS-internal account ("Internal Accounts
+ * should not submit use case details"), an SCP denying
+ * `bedrock:PutUseCaseForModelAccess` — and 2.15.0 proved that unwinnable: it
+ * named `ValidationException|ConflictException` (the latter is not even
+ * modelled for this operation) and an internal account's refusal, whose name we
+ * still have no way to observe, rolled the whole stack back.
  *
- *   - `ValidationException`, `AccessDeniedException` — deterministic refusals.
- *     A previous submission, an org-level grant, an AWS-internal account, an SCP
- *     denying `bedrock:PutUseCaseForModelAccess`. Re-running the deployment
- *     would get the same answer, and none is a reason to roll a stack back.
- *   - `ThrottlingException`, `InternalServerException` — transient. These must
- *     stay fatal: the submission runs `onCreate` only, under a fixed physical
- *     ID, so a tolerated error is never retried on a later deploy. Swallowing
- *     one would leave a genuinely fresh account permanently unprovisioned and
- *     silent, which is the failure this construct exists to prevent. Failing
- *     loudly costs a `cdk deploy` retry and keeps that guarantee.
+ * Inverting it removes the guesswork. Any refusal, named or not, is tolerated:
+ * none of them is a reason to fail a deployment, and the Marketplace agreements
+ * created next report their own outcome per model. The two transient errors stay
+ * fatal, because the submission runs `onCreate` only under a fixed physical ID,
+ * so a tolerated error is never retried on a later deploy — swallowing one would
+ * leave a genuinely fresh account permanently unprovisioned and silent, the
+ * failure this construct exists to prevent. The AWS SDK already retries both
+ * before surfacing them, so reaching here means they persisted, and a failed
+ * deploy the operator can retry beats an account that quietly never works.
  */
-const TOLERATED_USE_CASE_REFUSALS = 'ValidationException|AccessDeniedException';
+const TOLERATE_EVERY_REFUSAL_BUT_TRANSIENT =
+  '^(?!ThrottlingException$|InternalServerException$)';
 
 function validate(useCase: AnthropicUseCase, modelIds: string[]): void {
   if (!useCase.companyName.trim()) {
@@ -229,7 +232,7 @@ export class BedrockModelAccess extends Construct {
         parameters: { formData },
         physicalResourceId: cr.PhysicalResourceId.of('anthropic-use-case-submission'),
         region: USE_CASE_FORM_REGION,
-        ignoreErrorCodesMatching: TOLERATED_USE_CASE_REFUSALS,
+        ignoreErrorCodesMatching: TOLERATE_EVERY_REFUSAL_BUT_TRANSIENT,
       },
       policy: cr.AwsCustomResourcePolicy.fromStatements([
         new iam.PolicyStatement({

@@ -49,8 +49,8 @@ class TestListGroups:
             {'id': 'g1', 'name': 'coruna', 'description': 'Galicia', 'created_at': 't', 'updated_at': 't'},
         ]}
         mock_keywords_table.scan.return_value = {'Items': [
-            {'group_ids': {'g1', 'g2'}},
-            {'group_ids': {'g1'}},
+            {'group_ids': {'g1', 'g2'}, 'status': 'active'},
+            {'group_ids': {'g1'}, 'status': 'active'},
             {},
         ]}
 
@@ -87,12 +87,20 @@ class TestListGroups:
         counts = {group['name']: group['keyword_count'] for group in body['groups']}
         assert counts == {'Branson': 0, 'St Louis': 1}
 
-    def test_treats_a_member_without_a_status_as_active(self):
-        """Rows predating the status field are active in the list and the picker."""
+    def test_excludes_a_member_without_a_status_because_no_run_can_resolve_it(self):
+        """Rows predating the status field are absent from the sparse StatusIndex.
+
+        `resolve_scope` queries that index, so such a row can never be resolved
+        by a run. Counting it would promise work the scope cannot deliver — the
+        same mismatch the active-only count exists to remove.
+        """
         mock_groups_table.scan.return_value = {'Items': [
             {'id': 'g1', 'name': 'Legacy', 'description': '', 'created_at': 't', 'updated_at': 't'},
         ]}
-        mock_keywords_table.scan.return_value = {'Items': [{'group_ids': {'g1'}}]}
+        mock_keywords_table.scan.return_value = {'Items': [
+            {'group_ids': {'g1'}},
+            {'group_ids': {'g1'}, 'status': 'active'},
+        ]}
 
         status, body = parse_response(_mod.handler(make_event('GET'), None))
 

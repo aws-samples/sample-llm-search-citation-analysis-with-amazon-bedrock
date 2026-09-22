@@ -2087,22 +2087,26 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
 
   /**
    * 2.15.1 unblocked AWS-internal accounts, which refuse the form with a name
-   * outside `ValidationException|ConflictException` (the latter is not even
-   * modelled for this operation). 2.15.2 keeps that fix but stops short of
-   * tolerating everything: the submission runs `onCreate` only under a fixed
-   * physical ID, so a tolerated error is never retried, and swallowing a
+   * we have no way to observe from here. 2.16.1 stops guessing at that name: the
+   * pattern tolerates every refusal and excludes only the two transient errors,
+   * which must stay fatal because the submission runs `onCreate` only under a
+   * fixed physical ID — a tolerated error is never retried, so swallowing a
    * transient one would leave a fresh account permanently unprovisioned and
-   * silent — the failure the construct exists to prevent.
+   * silent, the failure the construct exists to prevent.
    *
    * CDK's custom-resource runtime tests this regex against the SDK error's
-   * `name`, so both halves of the split are asserted by name.
+   * `name`, so both sides of the split are asserted by name.
    */
-  it('tolerates the deterministic refusals of the use-case form', () => {
+  it('tolerates every refusal of the use-case form, including names it cannot predict', () => {
     const pattern = findUseCaseSubmission(template)?.ignoreErrorCodesMatching;
 
     expect(pattern).toBeDefined();
-    const unmatched = ['ValidationException', 'AccessDeniedException']
-      .filter((errorName) => !new RegExp(pattern ?? '(?!)').test(errorName));
+    const unmatched = [
+      'ValidationException',
+      'AccessDeniedException',
+      'ConflictException',
+      'SomeUnannouncedRefusalException',
+    ].filter((errorName) => !new RegExp(pattern ?? '(?!)').test(errorName));
 
     expect(unmatched).toStrictEqual([]);
   });

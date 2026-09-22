@@ -39,11 +39,15 @@ export const PAUSED_KEYWORD_STATUS = 'inactive';
 /**
  * Whether an analysis run would include this keyword.
  *
- * A missing `status` counts as active, matching the API: rows predate the
- * field, and the group counter and keyword picker read them the same way.
+ * A missing `status` counts as paused, not active. Runs resolve keywords
+ * through the `StatusIndex` GSI, which is sparse: an item carrying no `status`
+ * attribute is absent from the index, so no run can ever pick it up. Showing it
+ * as active would promise a run that never happens; showing it as paused gives
+ * the row an Activate button, and activating writes the attribute that puts it
+ * in the index. The group counter on the API applies the same rule.
  */
 export function isKeywordActive(keyword: Keyword): boolean {
-  return !keyword.status || keyword.status === ACTIVE_KEYWORD_STATUS;
+  return keyword.status === ACTIVE_KEYWORD_STATUS;
 }
 
 export class InvalidKeywordResponseError extends TypeError {

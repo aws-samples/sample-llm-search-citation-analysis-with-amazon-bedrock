@@ -68,7 +68,7 @@ class _InvalidGroupName(ValueError):
 
 
 def _member_counts() -> dict[str, int]:
-    """Count *active* keyword memberships per group id from the Keywords table.
+    """Count *runnable* keyword memberships per group id from the Keywords table.
 
     Active only, because every consumer of `keyword_count` is asking "how much
     would running this group do": `resolve_scope` returns active keywords in
@@ -79,8 +79,12 @@ def _member_counts() -> dict[str, int]:
     "No active keywords match the selected scope (1 group(s))" — the count
     promising work the scope could never resolve.
 
-    A keyword with no `status` is treated as active, matching the keyword list
-    and the picker (rows predating the status field).
+    A keyword with no `status` counts as *not* runnable. `resolve_scope` reads
+    the `StatusIndex` GSI, which is sparse: an item that carries no `status`
+    attribute is absent from the index and can never be resolved by a run.
+    Counting it would recreate exactly the mismatch above for rows predating
+    the field. The keyword list marks such a row Paused for the same reason,
+    and activating it writes the attribute, which puts it in the index.
     """
     counts: dict[str, int] = {}
     for item in collect_all_items(
@@ -88,7 +92,7 @@ def _member_counts() -> dict[str, int]:
         ProjectionExpression='group_ids, #status',
         ExpressionAttributeNames={'#status': 'status'},
     ):
-        if item.get('status', ACTIVE_KEYWORD_STATUS) != ACTIVE_KEYWORD_STATUS:
+        if item.get('status') != ACTIVE_KEYWORD_STATUS:
             continue
         for group_id in item.get('group_ids') or ():
             counts[group_id] = counts.get(group_id, 0) + 1

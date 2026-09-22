@@ -2,6 +2,7 @@ import {
   describe, it, expect, vi 
 } from 'vitest';
 import { ApiRequestError } from '../../infrastructure';
+import { buildKeyword } from '../../api/keywordGroups-fixtures';
 import type { Keyword } from '../../types';
 import {
   CREATE_ERROR_MESSAGE,
@@ -11,6 +12,7 @@ import {
   getBulkAlert,
   getSafeErrorMessage,
   isDuplicateKeyword,
+  isKeywordActive,
   parseBulkKeywords,
   parseKeywordResponse,
   processBulkKeyword,
@@ -64,6 +66,26 @@ describe('getSafeErrorMessage', () => {
 
   it('returns the fallback when the error is not an api error', () => {
     expect(getSafeErrorMessage(new TypeError('boom'), 'fallback')).toBe('fallback');
+  });
+});
+
+describe('isKeywordActive', () => {
+  it('counts an explicitly active keyword as one a run resolves', () => {
+    expect(isKeywordActive(buildKeyword({ status: 'active' }))).toBe(true);
+  });
+
+  it('counts a paused keyword as one no run resolves', () => {
+    expect(isKeywordActive(buildKeyword({ status: 'inactive' }))).toBe(false);
+  });
+
+  /**
+   * Runs resolve keywords through the sparse `StatusIndex` GSI, so a row with no
+   * `status` attribute is absent from the index and can never be picked up.
+   * Reporting it active would promise a run that never happens; reporting it
+   * paused gives the row an Activate button that writes the attribute.
+   */
+  it('counts a keyword with no status as paused, matching the sparse run index', () => {
+    expect(isKeywordActive(buildKeyword({ status: undefined }))).toBe(false);
   });
 });
 

@@ -9,6 +9,35 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.16.1] - 2026-09-22
+
+Two known gaps closed, both cases where a number or a tolerance did not match
+what the system actually does.
+
+### Fixed
+
+- The use-case form no longer depends on guessing which error name an account
+  refuses it with. 2.15.0 named `ValidationException|ConflictException` (the
+  latter is not even modelled for this operation) and an AWS-internal account's
+  refusal rolled the whole stack back; 2.15.2 added `AccessDeniedException` on
+  the reasoning that a deterministic policy refusal must use it, which was still
+  a guess. The pattern is now a negative lookahead: every refusal is tolerated,
+  named or not, and only `ThrottlingException` and `InternalServerException`
+  stay fatal. Those two must stay fatal because the submission runs `onCreate`
+  only under a fixed physical ID, so a tolerated error is never retried on a
+  later deploy — swallowing a transient one would leave a genuinely fresh
+  account permanently unprovisioned and silent.
+- A keyword carrying no `status` attribute is now reported as paused rather than
+  active, on both sides. Runs resolve keywords through the `StatusIndex` GSI,
+  which is sparse: an item with no `status` is absent from the index and no run
+  can ever pick it up. 2.16.0 counted such a row in `keyword_count` and the
+  keyword list showed it as active, which recreated the mismatch that release
+  set out to remove — a number promising work the scope could not deliver. The
+  row now shows a `Paused` badge, and activating it writes the attribute that
+  puts it in the index. No keyword in a current install is affected: rows only
+  lack `status` if they predate the field, and `create_keyword` has always set
+  it.
+
 ## [2.16.0] - 2026-09-22
 
 A paused keyword used to be invisible and unfixable: nothing in the UI said a
