@@ -4,6 +4,9 @@ import {
 import {
   render, screen, waitFor
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import type { Keyword } from '../../types';
+import { STATUS_ERROR_MESSAGE } from './keywordEntry';
 import {
   apiDelete, apiPost, apiPut
 } from '../../api/client';
@@ -380,6 +383,138 @@ describe('KeywordsManager', () => {
       await waitFor(() => {
         expect(requestSequence.firstSettledBeforeSecondStarted).toBe(true);
       });
+    });
+  });
+
+  /**
+   * Paused keywords were invisible and unfixable here.
+   *
+   * Research promotes every unselected proposal as inactive, so an install can
+   * hold far more paused keywords than active ones. The list showed no status
+   * at all and offered no way to change it, so the only symptom a user saw was
+   * a keyword group that refused to run.
+   */
+  describe('keyword status', () => {
+    const pausedKeyword = {
+      ...existingKeywordFixture,
+      id: 'keyword-paused',
+      keyword: 'suite hotels in branson mo',
+      status: 'inactive',
+    } satisfies Keyword;
+
+    it('marks a paused keyword in the list', () => {
+      render(<KeywordsManager {...createKeywordsManagerProps([pausedKeyword])} />);
+
+      expect(screen.getByText('Paused')).toBeInTheDocument();
+    });
+
+    it('does not mark an active keyword', () => {
+      render(<KeywordsManager {...createKeywordsManagerProps([existingKeywordFixture])} />);
+
+      expect(screen.queryByText('Paused')).not.toBeInTheDocument();
+    });
+
+    it('activates a paused keyword without changing its text', async () => {
+      const props = createKeywordsManagerProps([pausedKeyword]);
+      mockApiPut.mockResolvedValue({
+        ...pausedKeyword,
+        status: 'active',
+      });
+      render(<KeywordsManager {...props} />);
+
+      await userEvent.click(screen.getByRole('button', { name: `Activate ${pausedKeyword.keyword}` }));
+
+      await waitFor(() => {
+        expect(mockApiPut).toHaveBeenCalledWith(
+          `/keywords/${pausedKeyword.id}`,
+          {
+            keyword: pausedKeyword.keyword,
+            status: 'active',
+          },
+          { allowStructured4xx: true }
+        );
+      });
+      expect(props.setKeywords).toHaveBeenCalledWith([{
+        ...pausedKeyword,
+        status: 'active',
+      }]);
+    });
+
+    it('pauses an active keyword', async () => {
+      const props = createKeywordsManagerProps([existingKeywordFixture]);
+      mockApiPut.mockResolvedValue({
+        ...existingKeywordFixture,
+        status: 'inactive',
+      });
+      render(<KeywordsManager {...props} />);
+
+      await userEvent.click(screen.getByRole('button', { name: `Pause ${existingKeywordFixture.keyword}` }));
+
+      await waitFor(() => {
+        expect(mockApiPut).toHaveBeenCalledWith(
+          `/keywords/${existingKeywordFixture.id}`,
+          {
+            keyword: existingKeywordFixture.keyword,
+            status: 'inactive',
+          },
+          { allowStructured4xx: true }
+        );
+      });
+    });
+
+    it('activates every paused keyword ticked in the list, and counts them on the button', async () => {
+      const secondPaused = {
+        ...pausedKeyword,
+        id: 'keyword-paused-2',
+        keyword: 'top rated family hotels in branson mo',
+      } satisfies Keyword;
+      const props = createKeywordsManagerProps([pausedKeyword, secondPaused, existingKeywordFixture]);
+      mockApiPut.mockImplementation((path: string) => Promise.resolve(
+        path.endsWith(pausedKeyword.id)
+          ? {
+            ...pausedKeyword,
+            status: 'active',
+          }
+          : {
+            ...secondPaused,
+            status: 'active',
+          }
+      ));
+      render(<KeywordsManager {...props} />);
+
+      await userEvent.click(screen.getByRole('checkbox', { name: `Select ${pausedKeyword.keyword}` }));
+      await userEvent.click(screen.getByRole('checkbox', { name: `Select ${secondPaused.keyword}` }));
+
+      // The count sits on the label so nobody activates a research backlog
+      // blind: each active keyword is queried against every provider per run.
+      await userEvent.click(screen.getByRole('button', { name: 'Activate 2' }));
+
+      await waitFor(() => {
+        expect(mockApiPut).toHaveBeenCalledTimes(2);
+      });
+    });
+
+    it('offers nothing to activate when every ticked keyword is already active', async () => {
+      render(<KeywordsManager {...createKeywordsManagerProps([existingKeywordFixture])} />);
+
+      await userEvent.click(screen.getByRole('checkbox', { name: `Select ${existingKeywordFixture.keyword}` }));
+
+      expect(screen.getByRole('button', { name: 'Activate' })).toBeDisabled();
+    });
+
+    it('reports the keyword whose status change failed and leaves the list alone', async () => {
+      const props = createKeywordsManagerProps([pausedKeyword]);
+      mockApiPut.mockRejectedValue(createTransportError());
+      render(<KeywordsManager {...props} />);
+
+      await userEvent.click(screen.getByRole('button', { name: `Activate ${pausedKeyword.keyword}` }));
+
+      // Names the keyword and the tally, so a partial bulk failure says which
+      // ones did not change rather than just that something went wrong.
+      expect(
+        await screen.findByText(`${STATUS_ERROR_MESSAGE} for 1 of 1: ${pausedKeyword.keyword}`)
+      ).toBeInTheDocument();
+      expect(props.setKeywords).not.toHaveBeenCalled();
     });
   });
 });

@@ -139,6 +139,55 @@ def test_updates_display_text_when_canonical_keyword_identity_is_unchanged(manag
     )
 
 
+def test_leaves_a_paused_keyword_paused_when_the_update_omits_status(manage_handler):
+    """REGRESSION: an edit that says nothing about status must not activate.
+
+    `status` defaulted to 'active' and was written on every update, so renaming
+    a paused keyword resurrected it — and an active keyword is queried against
+    every provider on the next run, so the rename quietly added spend. Research
+    promotes unselected proposals as inactive, which is exactly the population a
+    rename would have activated.
+    """
+    module, table = manage_handler
+    existing = {'id': 'alpha-id', 'keyword': 'alpha', 'status': 'inactive'}
+    table.get_item.return_value = {'Item': existing}
+    table.update_item.return_value = {'Attributes': existing}
+
+    status_code, _ = _invoke(module, table, 'PUT', {'keyword': 'alpha'}, keyword_id='alpha-id')
+
+    assert status_code == 200
+    kwargs = table.update_item.call_args.kwargs
+    assert ':st' not in kwargs['ExpressionAttributeValues']
+    assert '#s' not in kwargs['UpdateExpression']
+
+
+def test_sets_status_when_the_update_asks_for_one(manage_handler):
+    module, table = manage_handler
+    existing = {'id': 'alpha-id', 'keyword': 'alpha', 'status': 'inactive'}
+    table.get_item.return_value = {'Item': existing}
+    table.update_item.return_value = {'Attributes': {**existing, 'status': 'active'}}
+
+    status_code, body = _invoke(
+        module, table, 'PUT', {'keyword': 'alpha', 'status': 'active'}, keyword_id='alpha-id'
+    )
+
+    assert status_code == 200
+    assert body['status'] == 'active'
+    assert table.update_item.call_args.kwargs['ExpressionAttributeValues'][':st'] == 'active'
+
+
+def test_rejects_an_unknown_status_without_updating(manage_handler):
+    module, table = manage_handler
+    table.get_item.return_value = {'Item': {'id': 'alpha-id', 'keyword': 'alpha', 'status': 'active'}}
+
+    status_code, _ = _invoke(
+        module, table, 'PUT', {'keyword': 'alpha', 'status': 'archived'}, keyword_id='alpha-id'
+    )
+
+    assert status_code == 400
+    table.update_item.assert_not_called()
+
+
 def test_returns_404_without_update_when_keyword_id_is_missing(manage_handler):
     module, table = manage_handler
     table.get_item.return_value = {}

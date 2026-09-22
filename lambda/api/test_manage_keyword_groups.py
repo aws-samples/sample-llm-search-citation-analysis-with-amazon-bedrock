@@ -60,6 +60,45 @@ class TestListGroups:
         assert body['count'] == 2
         assert [(g['name'], g['keyword_count']) for g in body['groups']] == [('coruna', 2), ('Marino', 1)]
 
+    def test_counts_only_active_members_so_the_number_matches_what_a_run_resolves(self):
+        """REGRESSION: a group of paused keywords looked runnable and then failed.
+
+        `resolve_scope` returns active keywords in every mode, so a count that
+        included paused members promised work the scope could not resolve: the
+        Run Analysis button stayed enabled on a group whose members were all
+        paused, and the run came back "No active keywords match the selected
+        scope (1 group(s))".
+        """
+        mock_groups_table.scan.return_value = {'Items': [
+            {'id': 'g1', 'name': 'Branson', 'description': '', 'created_at': 't', 'updated_at': 't'},
+            {'id': 'g2', 'name': 'St Louis', 'description': '', 'created_at': 't', 'updated_at': 't'},
+        ]}
+        mock_keywords_table.scan.return_value = {'Items': [
+            # Every Branson member is paused; St Louis keeps one active member.
+            {'group_ids': {'g1'}, 'status': 'inactive'},
+            {'group_ids': {'g1'}, 'status': 'paused'},
+            {'group_ids': {'g1', 'g2'}, 'status': 'inactive'},
+            {'group_ids': {'g2'}, 'status': 'active'},
+        ]}
+
+        status, body = parse_response(_mod.handler(make_event('GET'), None))
+
+        assert status == 200
+        counts = {group['name']: group['keyword_count'] for group in body['groups']}
+        assert counts == {'Branson': 0, 'St Louis': 1}
+
+    def test_treats_a_member_without_a_status_as_active(self):
+        """Rows predating the status field are active in the list and the picker."""
+        mock_groups_table.scan.return_value = {'Items': [
+            {'id': 'g1', 'name': 'Legacy', 'description': '', 'created_at': 't', 'updated_at': 't'},
+        ]}
+        mock_keywords_table.scan.return_value = {'Items': [{'group_ids': {'g1'}}]}
+
+        status, body = parse_response(_mod.handler(make_event('GET'), None))
+
+        assert status == 200
+        assert body['groups'][0]['keyword_count'] == 1
+
     def test_returns_an_empty_list_when_no_groups_exist(self):
         status, body = parse_response(_mod.handler(make_event('GET'), None))
 

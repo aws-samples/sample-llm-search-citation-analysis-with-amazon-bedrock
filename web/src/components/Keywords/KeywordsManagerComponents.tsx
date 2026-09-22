@@ -8,6 +8,7 @@ import {
 import {
   PencilIcon, TrashIcon 
 } from '../ui';
+import { isKeywordActive } from './keywordEntry';
 
 export interface KeywordInputSectionProps {
   isBulkMode: boolean;
@@ -156,6 +157,9 @@ export interface KeywordListProps {
   onToggleMembership?: (keyword: Keyword, group: KeywordGroup, member: boolean) => void;
   membershipBusy?: boolean;
   emptyMessage?: string;
+  /** Activate or pause one keyword; omitted hides the per-row control. */
+  onSetKeywordStatus?: (keyword: Keyword, active: boolean) => void;
+  statusBusy?: boolean;
 }
 
 export const KeywordList = ({
@@ -163,6 +167,7 @@ export const KeywordList = ({
   onStartEdit, onUpdateKeyword, onCancelEdit, onDeleteKeyword,
   groups = [], bulkSelectedIds, onToggleBulkSelect, groupMenuKeywordId = null,
   onToggleGroupMenu, onToggleMembership, membershipBusy = false, emptyMessage,
+  onSetKeywordStatus, statusBusy = false,
 }: KeywordListProps) => {
   const groupsById = new Map(groups.map((group) => [group.id, group]));
   return (
@@ -195,6 +200,8 @@ export const KeywordList = ({
                 />
               ) : null}
               onOpenGroups={onToggleGroupMenu ? () => onToggleGroupMenu(keyword.id) : undefined}
+              onSetStatus={onSetKeywordStatus ? (active) => onSetKeywordStatus(keyword, active) : undefined}
+              statusBusy={statusBusy}
             />
           ))}
         </div>
@@ -230,12 +237,15 @@ interface KeywordItemProps {
   onToggleBulkSelect?: () => void;
   groupMenu: ReactNode;
   onOpenGroups?: () => void;
+  onSetStatus?: (active: boolean) => void;
+  statusBusy?: boolean;
 }
 
 const KeywordItem = ({
   keyword, isEditing, editText, setEditText,
   onStartEdit, onUpdateKeyword, onCancelEdit, onDeleteKeyword,
   groupsById, bulkSelected, onToggleBulkSelect, groupMenu, onOpenGroups,
+  onSetStatus, statusBusy,
 }: KeywordItemProps) => (
   <div className={`flex flex-wrap items-center gap-3 p-3 border rounded-lg hover:bg-gray-50 transition-colors ${bulkSelected ? 'border-gray-900 bg-gray-50' : 'border-gray-200'}`}>
     {onToggleBulkSelect && !isEditing && (
@@ -261,6 +271,8 @@ const KeywordItem = ({
         onStartEdit={onStartEdit}
         onDeleteKeyword={onDeleteKeyword}
         onOpenGroups={onOpenGroups}
+        onSetStatus={onSetStatus}
+        statusBusy={statusBusy}
       />
     )}
     {groupMenu}
@@ -297,17 +309,48 @@ interface DisplayViewProps {
   onStartEdit: () => void;
   onDeleteKeyword: () => void;
   onOpenGroups?: () => void;
+  onSetStatus?: (active: boolean) => void;
+  statusBusy?: boolean;
 }
 
+/**
+ * Marks a keyword that analysis runs skip.
+ *
+ * Only rendered when paused: an "Active" badge on every row would be noise,
+ * and active is the state the rest of the UI already assumes. Research
+ * promotes unselected proposals as inactive, so an install can hold far more
+ * paused keywords than active ones with nothing on screen saying so — which is
+ * how a group of paused keywords came to look runnable.
+ */
+const PausedBadge = () => (
+  <span
+    className="px-1.5 py-0.5 text-xs rounded border border-amber-200 bg-amber-50 text-amber-700"
+    title="Paused keywords stay in their groups but are skipped by analysis runs"
+  >
+    Paused
+  </span>
+);
+
 const DisplayView = ({
-  keyword, groupsById, onStartEdit, onDeleteKeyword, onOpenGroups 
+  keyword, groupsById, onStartEdit, onDeleteKeyword, onOpenGroups, onSetStatus, statusBusy = false,
 }: DisplayViewProps) => (
   <>
     <span className="flex-1 flex flex-wrap items-center gap-2 text-sm text-gray-900">
-      <span>{keyword.keyword}</span>
+      <span className={isKeywordActive(keyword) ? undefined : 'text-gray-500'}>{keyword.keyword}</span>
+      {!isKeywordActive(keyword) && <PausedBadge />}
       <KeywordGroupChips keyword={keyword} groupsById={groupsById} />
     </span>
     <span className="text-xs text-gray-400">{new Date(keyword.created_at).toLocaleDateString()}</span>
+    {onSetStatus && (
+      <button
+        onClick={() => onSetStatus(!isKeywordActive(keyword))}
+        disabled={statusBusy}
+        aria-label={isKeywordActive(keyword) ? `Pause ${keyword.keyword}` : `Activate ${keyword.keyword}`}
+        className="px-2 py-1 text-xs text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {isKeywordActive(keyword) ? 'Pause' : 'Activate'}
+      </button>
+    )}
     {onOpenGroups && (
       <button
         onClick={onOpenGroups}

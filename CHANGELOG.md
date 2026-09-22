@@ -9,6 +9,57 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.16.0] - 2026-09-22
+
+A paused keyword used to be invisible and unfixable: nothing in the UI said a
+keyword was paused, nothing could activate it, and a group of paused keywords
+still advertised its members and offered a Run Analysis button that failed.
+Keyword status is now shown and editable, and group counts mean "keywords this
+scope will run".
+
+### Added
+
+- The keyword list marks paused keywords with a `Paused` badge, so a keyword
+  that no analysis run will pick up no longer looks identical to one that will.
+  Keyword research adds expanded keywords it did not select as paused, which is
+  where most of them come from.
+- Each keyword row has a Pause/Activate button, and the bulk bar activates or
+  pauses every selected keyword at once (`Activate 5` counts the paused ones in
+  the selection). Activating a keyword puts it back into every run, so the bulk
+  action reports which keywords it could not update instead of failing silently.
+
+### Fixed
+
+- `PUT /keywords/{id}` activated a paused keyword whenever the request left
+  `status` out: the schema defaulted the field to `'active'` and the update
+  always wrote it. Renaming a keyword or changing its groups therefore put it
+  back into every analysis run. An omitted `status` now leaves the stored value
+  alone; only an explicit `status` changes it.
+- Running a keyword group whose members are all paused failed with
+  `No active keywords match the selected scope (1 group(s))`. `resolve_scope`
+  returns active keywords in every mode, but `keyword_count` on a group counted
+  every membership regardless of status, so a group of paused keywords
+  advertised "(5)" and kept its Run Analysis button enabled. The button already
+  disables itself at a count of 0; counting only active members is what makes
+  that guard fire. Content Studio, which labels the same number "active
+  keywords", is now telling the truth as well. A keyword with no `status` still
+  counts as active, matching the keyword list and the picker.
+- The Run Citation Analysis summary said "All 53 active keywords" while
+  counting the whole keyword library. A run with no selection resolves to
+  active keywords only, so the line now reports that count.
+- A group button disabled for having no active keywords explains itself on
+  hover instead of being inert with no reason given.
+
+### Changed
+
+- `ACTIVE_KEYWORD_STATUS` in `shared/keyword_groups` replaces the `'active'`
+  literal that `query_active_keywords` and the group counter each carried, so
+  the status an analysis run accepts is defined once.
+- `keywordEntry` exports `ACTIVE_KEYWORD_STATUS`, `PAUSED_KEYWORD_STATUS` and
+  `isKeywordActive`, replacing the `'active'` literals the keyword list and
+  Content Studio compared against separately.
+- Both lockfiles carried `2.14.2` while their `package.json` had moved on; they
+  now read the released version.
 ## [2.15.2] - 2026-09-22
 
 ### Changed

@@ -35,6 +35,7 @@ from shared.decorators import api_handler, parse_json_body, route_handler, valid
 from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import (
+    ACTIVE_KEYWORD_STATUS,
     KEYWORD_GROUPS_TABLE_ENV,
     MAX_GROUP_DESCRIPTION_LENGTH,
     MAX_GROUP_NAME_LENGTH,
@@ -67,9 +68,28 @@ class _InvalidGroupName(ValueError):
 
 
 def _member_counts() -> dict[str, int]:
-    """Count keyword memberships per group id from the Keywords table."""
+    """Count *active* keyword memberships per group id from the Keywords table.
+
+    Active only, because every consumer of `keyword_count` is asking "how much
+    would running this group do": `resolve_scope` returns active keywords in
+    all modes, the Run Analysis group buttons disable themselves on a count of
+    0, and Content Studio labels the number "active keywords". Counting paused
+    members made a group of inactive keywords look runnable, so the button
+    stayed enabled and the run came back
+    "No active keywords match the selected scope (1 group(s))" — the count
+    promising work the scope could never resolve.
+
+    A keyword with no `status` is treated as active, matching the keyword list
+    and the picker (rows predating the status field).
+    """
     counts: dict[str, int] = {}
-    for item in collect_all_items(keywords_table.scan, ProjectionExpression='group_ids'):
+    for item in collect_all_items(
+        keywords_table.scan,
+        ProjectionExpression='group_ids, #status',
+        ExpressionAttributeNames={'#status': 'status'},
+    ):
+        if item.get('status', ACTIVE_KEYWORD_STATUS) != ACTIVE_KEYWORD_STATUS:
+            continue
         for group_id in item.get('group_ids') or ():
             counts[group_id] = counts.get(group_id, 0) + 1
     return counts
