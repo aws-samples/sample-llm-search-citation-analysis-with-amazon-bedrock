@@ -2086,30 +2086,35 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
   });
 
   /**
-   * 2.15.1. The submission is best-effort account provisioning, and an account
-   * can refuse it in more ways than a fixed list can name: a previous
-   * submission, an org-level grant, an AWS-internal account ("Internal Accounts
-   * should not submit use case details"), an SCP. 2.15.0 listed
-   * `ValidationException|ConflictException`, so every other refusal rolled the
-   * whole stack back — an AWS-internal account could not deploy at all.
+   * 2.15.1 unblocked AWS-internal accounts, which refuse the form with a name
+   * outside `ValidationException|ConflictException` (the latter is not even
+   * modelled for this operation). 2.15.2 keeps that fix but stops short of
+   * tolerating everything: the submission runs `onCreate` only under a fixed
+   * physical ID, so a tolerated error is never retried, and swallowing a
+   * transient one would leave a fresh account permanently unprovisioned and
+   * silent — the failure the construct exists to prevent.
    *
    * CDK's custom-resource runtime tests this regex against the SDK error's
-   * `name`, so the property to hold is that every error name matches.
+   * `name`, so both halves of the split are asserted by name.
    */
-  it('tolerates any refusal of the use-case form instead of failing the deployment', () => {
+  it('tolerates the deterministic refusals of the use-case form', () => {
     const pattern = findUseCaseSubmission(template)?.ignoreErrorCodesMatching;
 
     expect(pattern).toBeDefined();
-    const unmatched = [
-      'AccessDeniedException',
-      'ValidationException',
-      'ConflictException',
-      'ThrottlingException',
-      'InternalServerException',
-      'ResourceNotFoundException',
-    ].filter((errorName) => !new RegExp(pattern ?? '(?!)').test(errorName));
+    const unmatched = ['ValidationException', 'AccessDeniedException']
+      .filter((errorName) => !new RegExp(pattern ?? '(?!)').test(errorName));
 
     expect(unmatched).toStrictEqual([]);
+  });
+
+  it('still fails the deployment on a transient error, which is never retried', () => {
+    const pattern = findUseCaseSubmission(template)?.ignoreErrorCodesMatching;
+
+    expect(pattern).toBeDefined();
+    const wronglyTolerated = ['ThrottlingException', 'InternalServerException']
+      .filter((errorName) => new RegExp(pattern ?? '(?!)').test(errorName));
+
+    expect(wronglyTolerated).toStrictEqual([]);
   });
 });
 
