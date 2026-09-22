@@ -9,6 +9,24 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.15.2] - 2026-09-22
+
+### Changed
+
+- The use-case form now tolerates `ValidationException` and
+  `AccessDeniedException` rather than every error. 2.15.1 tolerated all of them
+  to unblock AWS-internal accounts, which also swallowed the two transient
+  errors the operation can return, `ThrottlingException` and
+  `InternalServerException`. The submission runs `onCreate` only under a fixed
+  physical ID, so a tolerated error is never retried on a later deploy: a
+  transient failure would have left a genuinely fresh account permanently
+  unprovisioned and silent, which is the failure this construct exists to
+  prevent. The deterministic refusals — a previous submission, an
+  organization-level grant, an AWS-internal account, an SCP denying
+  `bedrock:PutUseCaseForModelAccess` — are the two that stay tolerated, so
+  internal accounts still deploy. A transient failure now costs a `cdk deploy`
+  retry instead of a silently unprovisioned account.
+
 ## [2.15.1] - 2026-09-22
 
 Deploy-time Anthropic provisioning no longer takes the stack down with it when
