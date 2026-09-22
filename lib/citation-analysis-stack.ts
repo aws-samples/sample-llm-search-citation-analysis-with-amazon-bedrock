@@ -358,6 +358,16 @@ function readStringContext(scope: Construct, key: string, fallback: string): str
 }
 
 /**
+ * Read a flag from CDK context, defaulting to false. `-c key=true` on the
+ * command line arrives as the string `'true'`, while the same key in cdk.json
+ * can be a real boolean, so both count.
+ */
+function readFlagContext(scope: Construct, key: string): boolean {
+  const raw: unknown = scope.node.tryGetContext(key);
+  return raw === true || raw === 'true';
+}
+
+/**
  * Foundation models the stack's Lambdas invoke, as plain model IDs. These are
  * the `global.`-stripped forms of `_TIER_MODELS` in lambda/shared/models.py —
  * the runtime calls the global inference profile, but an AWS Marketplace
@@ -369,6 +379,50 @@ const CLAUDE_FOUNDATION_MODEL_IDS = [
   'anthropic.claude-sonnet-4-6',
   'anthropic.claude-opus-4-7',
 ];
+
+/** `BedrockModelsEnabled` output when provisioning was opted out of. */
+const SKIPPED_MODEL_PROVISIONING = 'none (skipModelProvisioning)';
+
+/**
+ * Deploy-time Anthropic account enablement: the one-time use-case form and an
+ * AWS Marketplace subscription per model. Without it a fresh account's first
+ * Converse call fails with "not authorized to perform the required AWS
+ * Marketplace actions", because Bedrock creates the subscription just-in-time
+ * using the calling Lambda role's permissions.
+ *
+ * Skipped by `-c skipModelProvisioning=true`. An account whose Anthropic access
+ * is granted elsewhere — an organization policy, an AWS-internal account, a
+ * platform team that provisions model access separately — gains nothing from
+ * the calls and may prefer that no deploy-time role hold
+ * `aws-marketplace:Subscribe` at all.
+ *
+ * Company details on the form are overridable:
+ * `cdk deploy -c anthropicCompanyName=...`.
+ */
+function provisionBedrockModelAccess(stack: cdk.Stack): void {
+  const modelAccess = readFlagContext(stack, 'skipModelProvisioning')
+    ? undefined
+    : new BedrockModelAccess(stack, 'BedrockModelAccess', {
+      useCase: {
+        companyName: readStringContext(stack, 'anthropicCompanyName', 'Citation Analysis'),
+        companyWebsite: readStringContext(stack, 'anthropicCompanyWebsite', 'https://aws.amazon.com/bedrock/'),
+        intendedUsers: '0',
+        industryOption: readStringContext(stack, 'anthropicIndustry', 'Technology'),
+        useCases: readStringContext(
+          stack,
+          'anthropicUseCases',
+          'Summarize content and generate new marketing content.'
+        ),
+      },
+      modelIds: CLAUDE_FOUNDATION_MODEL_IDS,
+      modelRegion: stack.region,
+    });
+
+  new cdk.CfnOutput(stack, 'BedrockModelsEnabled', {
+    value: modelAccess?.subscribedModelIds.join(', ') ?? SKIPPED_MODEL_PROVISIONING,
+    description: 'Anthropic models this deployment subscribed for the account',
+  });
+}
 
 function createApiLambdaCode(handlerFileName: string): lambda.Code {
   const apiPath = path.join(__dirname, '../lambda/api');
@@ -451,31 +505,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Dev mode: `cdk deploy --context dev=true` adds http://localhost:5173 as allowed CORS origin
     const devMode = this.node.tryGetContext('dev') === 'true';
 
-    // Anthropic models need account-level enablement before the first call:
-    // the one-time use-case form and an AWS Marketplace subscription per model.
-    // Without this a fresh account's first Converse fails with
-    // "not authorized to perform the required AWS Marketplace actions".
-    // Company details are overridable: `cdk deploy -c anthropicCompanyName=... `.
-    const bedrockModelAccess = new BedrockModelAccess(this, 'BedrockModelAccess', {
-      useCase: {
-        companyName: readStringContext(this, 'anthropicCompanyName', 'Citation Analysis'),
-        companyWebsite: readStringContext(this, 'anthropicCompanyWebsite', 'https://aws.amazon.com/bedrock/'),
-        intendedUsers: '0',
-        industryOption: readStringContext(this, 'anthropicIndustry', 'Technology'),
-        useCases: readStringContext(
-          this,
-          'anthropicUseCases',
-          'Summarize content and generate new marketing content.'
-        ),
-      },
-      modelIds: CLAUDE_FOUNDATION_MODEL_IDS,
-      modelRegion: this.region,
-    });
-
-    new cdk.CfnOutput(this, 'BedrockModelsEnabled', {
-      value: bedrockModelAccess.subscribedModelIds.join(', '),
-      description: 'Anthropic models this deployment subscribed for the account',
-    });
+    provisionBedrockModelAccess(this);
 
 
     // DynamoDB Table: SearchResults

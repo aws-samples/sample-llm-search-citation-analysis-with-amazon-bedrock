@@ -66,6 +66,28 @@ const MINIMUM_USE_CASE_LENGTH = 10;
 /** us-east-1 is the only endpoint that serves PutUseCaseForModelAccess. */
 const USE_CASE_FORM_REGION = 'us-east-1';
 
+/**
+ * Which error codes to tolerate when submitting the use-case form: all of them.
+ *
+ * `ignoreErrorCodesMatching` is a regex CDK tests against the SDK error's
+ * `name`, and an allowlist of names is the wrong shape for this call. Every way
+ * an account can refuse the form means the form is not ours to submit: a
+ * previous submission, an org-level grant, an AWS-internal account ("Internal
+ * Accounts should not submit use case details"), an SCP that denies
+ * `bedrock:PutUseCaseForModelAccess`. None of them is a reason to roll back a
+ * deployment. Naming only `ValidationException` and `ConflictException` made
+ * every unanticipated refusal fatal, which left 2.15.0 unable to deploy into an
+ * AWS-internal account at all.
+ *
+ * Tolerating the refusal costs no visibility. The form exists only to gate the
+ * Marketplace agreements created next, and each of those reports its own
+ * outcome per model — `ALREADY_AVAILABLE`, `NO_OFFERS`, `UNAVAILABLE` — in the
+ * agreement handler's log group. If model access really is missing, the first
+ * Bedrock call reports a clear AccessDenied, which beats handing the customer
+ * no stack at all. That is the same trade the agreement handler already makes.
+ */
+const TOLERATE_ANY_USE_CASE_REFUSAL = '.*';
+
 function validate(useCase: AnthropicUseCase, modelIds: string[]): void {
   if (!useCase.companyName.trim()) {
     throw new AnthropicUseCaseError('companyName is required for the Anthropic use-case form');
@@ -205,10 +227,7 @@ export class BedrockModelAccess extends Construct {
         parameters: { formData },
         physicalResourceId: cr.PhysicalResourceId.of('anthropic-use-case-submission'),
         region: USE_CASE_FORM_REGION,
-        // Accounts that already have Anthropic access (a previous submission,
-        // an org-level grant, an AWS-internal account) reject the call. That is
-        // success for our purposes; a real permission problem still fails.
-        ignoreErrorCodesMatching: 'ValidationException|ConflictException',
+        ignoreErrorCodesMatching: TOLERATE_ANY_USE_CASE_REFUSAL,
       },
       policy: cr.AwsCustomResourcePolicy.fromStatements([
         new iam.PolicyStatement({

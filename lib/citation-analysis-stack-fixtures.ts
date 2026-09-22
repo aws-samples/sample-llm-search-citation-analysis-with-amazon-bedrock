@@ -267,14 +267,27 @@ function policyAttachedToRole(policy: unknown, roleLogicalId: string): boolean {
     .some((roleRef) => resolveString(roleRef, ['Ref']) === roleLogicalId);
 }
 
+function allowStatementsOfPolicies(policies: unknown[]): unknown[] {
+  return policies.flatMap((policy): unknown[] => {
+    const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
+    return (Array.isArray(statements) ? statements : [])
+      .filter((statement) => resolveString(statement, ['Effect']) === 'Allow');
+  });
+}
+
 export function allowStatementsOfRole(template: Template, roleLogicalId: string): unknown[] {
-  return Object.values(template.findResources('AWS::IAM::Policy'))
-    .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
-    .flatMap((policy): unknown[] => {
-      const statements = resolvePath(policy, ['Properties', 'PolicyDocument', 'Statement']);
-      return (Array.isArray(statements) ? statements : [])
-        .filter((statement) => resolveString(statement, ['Effect']) === 'Allow');
-    });
+  return allowStatementsOfPolicies(
+    Object.values(template.findResources('AWS::IAM::Policy'))
+      .filter((policy) => policyAttachedToRole(policy, roleLogicalId))
+  );
+}
+
+/**
+ * Every Allow statement in the template, whichever role holds it. Use when the
+ * question is whether a permission exists anywhere at all.
+ */
+export function allowStatementsOfTemplate(template: Template): unknown[] {
+  return allowStatementsOfPolicies(Object.values(template.findResources('AWS::IAM::Policy')));
 }
 
 function statementTargets(statement: unknown, resourceLogicalId: string): boolean {
@@ -1151,3 +1164,38 @@ export function pythonTierFoundationModelIds(): string[] {
     .map((match) => match[1].replace(/^global\./, ''))
     .sort((left, right) => left.localeCompare(right));
 }
+
+
+/**
+ * The `Create` payload of the Anthropic use-case submission, parsed. Returns
+ * undefined when the stack synthesized no submission at all, which is what
+ * `-c skipModelProvisioning=true` is expected to produce.
+ */
+export function findUseCaseSubmission(template: Template): {
+  parameters?: { formData?: string };
+  region?: string;
+  ignoreErrorCodesMatching?: string;
+} | undefined {
+  const create = Object.values(template.findResources('Custom::AWS'))
+    .map((resource) => resolvePath(resource, ['Properties', 'Create']))
+    .find((payload): payload is string => typeof payload === 'string'
+      && payload.includes('putUseCaseForModelAccess'));
+
+  return create === undefined ? undefined : JSON.parse(create) as {
+    parameters?: { formData?: string };
+    region?: string;
+    ignoreErrorCodesMatching?: string;
+  };
+}
+
+/**
+ * The per-model Marketplace agreement custom resources, keyed by logical id.
+ * Identified by carrying a `modelId` property, which separates them from the
+ * other CloudFormation custom resources in the template.
+ */
+export function findModelAgreements(template: Template): [string, unknown][] {
+  return Object.entries(template.findResources('AWS::CloudFormation::CustomResource'))
+    .filter(([, resource]) => typeof resolvePath(resource, ['Properties', 'modelId']) === 'string');
+}
+
+
