@@ -10,25 +10,30 @@ import {
 import { TriggerSection } from './ExecutionMonitorComponents';
 
 describe('TriggerSection', () => {
-  it('applies execution-specific identities to the shared keyword picker', () => {
-    render(
-      <TriggerSection
-        selectedIds={[]}
-        keywordsCount={1}
-        activeKeywords={[buildKeyword({
+  const renderTriggerSection = (props: Partial<Parameters<typeof TriggerSection>[0]> = {}) => render(
+    <TriggerSection
+      selectedIds={[]}
+      keywordsCount={53}
+      activeKeywords={[
+        buildKeyword({
           id: 'keyword-1',
           keyword: 'accessible hotels',
           group_ids: [],
-        })]}
-        groups={[]}
-        isRunning={false}
-        isStarting={false}
-        onSelectionChange={vi.fn()}
-        onTriggerAnalysis={vi.fn()}
-        onRunGroup={vi.fn()}
-        isAdmin
-      />
-    );
+        }),
+      ]}
+      groups={[]}
+      isRunning={false}
+      isStarting={false}
+      onSelectionChange={vi.fn()}
+      onTriggerAnalysis={vi.fn()}
+      onRunGroup={vi.fn()}
+      isAdmin
+      {...props}
+    />
+  );
+
+  it('applies execution-specific identities to the shared keyword picker', () => {
+    renderTriggerSection({ keywordsCount: 1 });
 
     const search = screen.getByLabelText<HTMLInputElement>('Search keywords');
     const keyword = screen.getByRole<HTMLInputElement>('checkbox', { name: 'accessible hotels' });
@@ -65,28 +70,6 @@ describe('TriggerSection', () => {
    * keywords offered an enabled button that failed with "No active keywords
    * match the selected scope (1 group(s))".
    */
-  const renderTriggerSection = (props: Partial<Parameters<typeof TriggerSection>[0]> = {}) => render(
-    <TriggerSection
-      selectedIds={[]}
-      keywordsCount={53}
-      activeKeywords={[
-        buildKeyword({
-          id: 'keyword-1',
-          keyword: 'accessible hotels',
-          group_ids: [],
-        }),
-      ]}
-      groups={[]}
-      isRunning={false}
-      isStarting={false}
-      onSelectionChange={vi.fn()}
-      onTriggerAnalysis={vi.fn()}
-      onRunGroup={vi.fn()}
-      isAdmin
-      {...props}
-    />
-  );
-
   it('summarizes a no-selection run by the active keywords it will resolve, not the library size', () => {
     renderTriggerSection();
 
