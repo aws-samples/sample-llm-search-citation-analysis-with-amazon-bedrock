@@ -293,6 +293,15 @@ Notes for fresh accounts:
 - Subscriptions and the form submission are account state: they are not removed when the stack is deleted.
 - The company details submitted on the form default to `Citation Analysis` / `Technology` / "Summarize content and generate new marketing content." and can be overridden at deploy time: `cdk deploy -c anthropicCompanyName="Acme" -c anthropicCompanyWebsite="https://acme.example" -c anthropicIndustry="Retail" -c anthropicUseCases="..."`.
 - `global.anthropic.claude-opus-4-7` (the optional `deep` tier) is not offered on demand to every account. The default tiers only use Haiku 4.5 and Sonnet 4.6, so this affects you only if you set `BEDROCK_TIER_*=deep`.
+- An account can refuse the use-case form — a previous submission, an organization-level grant, an AWS-internal account — and that is not treated as an error: the deployment carries on and the Marketplace agreements follow.
+
+If your account's Anthropic access is managed elsewhere, you can skip this provisioning entirely:
+
+```bash
+cdk deploy -c skipModelProvisioning=true
+```
+
+That drops the use-case submission, the per-model agreements and the deploy-time role holding `aws-marketplace:Subscribe`. Model access then has to exist already, or Bedrock calls fail with `AccessDeniedException`. The `BedrockModelsEnabled` stack output reports `none (skipModelProvisioning)` so it is clear nothing was provisioned.
 
 ### Retry Logic
 - All API clients implement exponential backoff (5 retries, ~35s max wait)

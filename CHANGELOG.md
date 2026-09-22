@@ -9,7 +9,7 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
-## [2.16.0] - 2026-09-21
+## [2.16.0] - 2026-09-22
 
 A paused keyword used to be invisible and unfixable: nothing in the UI said a
 keyword was paused, nothing could activate it, and a group of paused keywords
@@ -60,6 +60,54 @@ scope will run".
   Content Studio compared against separately.
 - Both lockfiles carried `2.14.2` while their `package.json` had moved on; they
   now read the released version.
+## [2.15.2] - 2026-09-22
+
+### Changed
+
+- The use-case form now tolerates `ValidationException` and
+  `AccessDeniedException` rather than every error. 2.15.1 tolerated all of them
+  to unblock AWS-internal accounts, which also swallowed the two transient
+  errors the operation can return, `ThrottlingException` and
+  `InternalServerException`. The submission runs `onCreate` only under a fixed
+  physical ID, so a tolerated error is never retried on a later deploy: a
+  transient failure would have left a genuinely fresh account permanently
+  unprovisioned and silent, which is the failure this construct exists to
+  prevent. The deterministic refusals — a previous submission, an
+  organization-level grant, an AWS-internal account, an SCP denying
+  `bedrock:PutUseCaseForModelAccess` — are the two that stay tolerated, so
+  internal accounts still deploy. A transient failure now costs a `cdk deploy`
+  retry instead of a silently unprovisioned account.
+
+## [2.15.1] - 2026-09-22
+
+Deploy-time Anthropic provisioning no longer takes the stack down with it when
+an account declines to be provisioned.
+
+### Fixed
+
+- 2.15.0 could not be deployed into an account that already holds Anthropic
+  access. The use-case form submission tolerated `ValidationException` and
+  `ConflictException` only, and an AWS-internal account refuses it with a
+  different error — `Internal Accounts should not submit use case details` —
+  which failed the custom resource and rolled the whole stack back, taking every
+  unrelated resource update with it. An allowlist of error codes was the wrong
+  shape for the call: a previous submission, an organization-level grant, an
+  internal account and an SCP denying `bedrock:PutUseCaseForModelAccess` all mean
+  the same thing, which is that the form is not ours to submit. Every refusal is
+  now tolerated. Nothing is hidden by that: the Marketplace agreements that
+  follow report their own outcome per model, and genuinely missing model access
+  still surfaces as a clear `AccessDeniedException` on the first Bedrock call —
+  the trade the agreement handler already made.
+- `web/package-lock.json` still carried `2.14.2` while its `package.json` had
+  moved on twice.
+
+### Added
+
+- `cdk deploy -c skipModelProvisioning=true` skips account enablement entirely:
+  no use-case submission, no per-model agreements, and no deploy-time role
+  holding `aws-marketplace:Subscribe`. For accounts whose model access is
+  granted by their organization, where the provisioning is at best a no-op. The
+  `BedrockModelsEnabled` output reports `none (skipModelProvisioning)`.
 
 ## [2.15.0] - 2026-09-21
 

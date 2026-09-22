@@ -66,6 +66,30 @@ const MINIMUM_USE_CASE_LENGTH = 10;
 /** us-east-1 is the only endpoint that serves PutUseCaseForModelAccess. */
 const USE_CASE_FORM_REGION = 'us-east-1';
 
+/**
+ * Which error codes to tolerate when submitting the use-case form: the refusals
+ * that mean the form is not ours to submit, and only those.
+ *
+ * `ignoreErrorCodesMatching` is a regex CDK tests against the SDK error's
+ * `name`. Naming only `ValidationException` and `ConflictException` made every
+ * other refusal fatal, which left 2.15.0 unable to deploy into an AWS-internal
+ * account at all ("Internal Accounts should not submit use case details");
+ * `ConflictException` is not even modelled for this operation. The API models
+ * exactly four errors, which split cleanly in two:
+ *
+ *   - `ValidationException`, `AccessDeniedException` — deterministic refusals.
+ *     A previous submission, an org-level grant, an AWS-internal account, an SCP
+ *     denying `bedrock:PutUseCaseForModelAccess`. Re-running the deployment
+ *     would get the same answer, and none is a reason to roll a stack back.
+ *   - `ThrottlingException`, `InternalServerException` — transient. These must
+ *     stay fatal: the submission runs `onCreate` only, under a fixed physical
+ *     ID, so a tolerated error is never retried on a later deploy. Swallowing
+ *     one would leave a genuinely fresh account permanently unprovisioned and
+ *     silent, which is the failure this construct exists to prevent. Failing
+ *     loudly costs a `cdk deploy` retry and keeps that guarantee.
+ */
+const TOLERATED_USE_CASE_REFUSALS = 'ValidationException|AccessDeniedException';
+
 function validate(useCase: AnthropicUseCase, modelIds: string[]): void {
   if (!useCase.companyName.trim()) {
     throw new AnthropicUseCaseError('companyName is required for the Anthropic use-case form');
@@ -205,10 +229,7 @@ export class BedrockModelAccess extends Construct {
         parameters: { formData },
         physicalResourceId: cr.PhysicalResourceId.of('anthropic-use-case-submission'),
         region: USE_CASE_FORM_REGION,
-        // Accounts that already have Anthropic access (a previous submission,
-        // an org-level grant, an AWS-internal account) reject the call. That is
-        // success for our purposes; a real permission problem still fails.
-        ignoreErrorCodesMatching: 'ValidationException|ConflictException',
+        ignoreErrorCodesMatching: TOLERATED_USE_CASE_REFUSALS,
       },
       policy: cr.AwsCustomResourcePolicy.fromStatements([
         new iam.PolicyStatement({
