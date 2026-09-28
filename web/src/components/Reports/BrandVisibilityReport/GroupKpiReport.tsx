@@ -4,6 +4,7 @@ import {
 import type {
   GroupKpiHistoryResponse, GroupRun, KeywordRunHistory
 } from '../../../types/domain/groupKpiHistory';
+import type { ReportScope } from '../../../types';
 import { gateSection } from '../layout';
 import { latestGroupRun } from './groupKpiView';
 import { GroupKpiHeadlineSection } from './sections/GroupKpiHeadlineSection';
@@ -11,11 +12,15 @@ import { GroupKpiTrendSection } from './sections/GroupKpiTrendSection';
 import { GroupKpiDriversSection } from './sections/GroupKpiDriversSection';
 import { KeywordRunsSection } from './sections/KeywordRunsSection';
 import { KpiDefinitionsSection } from './sections/KpiDefinitionsSection';
+import { GroupKpiExportButton } from './GroupKpiExportButton';
 
 /** The periods the report offers, in days. */
 export const GROUP_REPORT_PERIODS = [30, 90, 180, 365] as const;
 
 interface Props {
+  /** The keyword group the report covers, and its name for the export. */
+  readonly scope: ReportScope;
+  readonly scopeLabel: string;
   readonly history: GroupKpiHistoryResponse | null;
   readonly loading: boolean;
   readonly error: string | null;
@@ -41,7 +46,7 @@ function resolveKeyword(keywords: readonly KeywordRunHistory[], keyword: string 
  * drove the latest change, and every keyword's runs, over a chosen period.
  */
 export function GroupKpiReport({
-  history, loading, error, days, onDaysChange
+  scope, scopeLabel, history, loading, error, days, onDaysChange
 }: Props) {
   const periodId = useId();
   const [runTimestamp, setRunTimestamp] = useState<string | null>(null);
@@ -58,7 +63,7 @@ export function GroupKpiReport({
   });
 
   const periodPicker = (
-    <div className="mb-4 print-hidden">
+    <div className="print-hidden">
       <label htmlFor={periodId} className="mr-2 text-xs text-gray-600 dark:text-gray-300">Period</label>
       <select
         id={periodId}
@@ -74,7 +79,7 @@ export function GroupKpiReport({
   if (!gate.ready) {
     return (
       <>
-        {periodPicker}
+        <div className="mb-4">{periodPicker}</div>
         {gate.placeholder}
         <KpiDefinitionsSection />
       </>
@@ -89,7 +94,10 @@ export function GroupKpiReport({
 
   return (
     <>
-      {periodPicker}
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        {periodPicker}
+        <GroupKpiExportButton scope={scope} scopeLabel={scopeLabel} history={gate.value} run={run} />
+      </div>
       {truncated && (
         <p role="note" className="mb-4 text-xs text-amber-700 dark:text-amber-400">
           {`This group has more keywords than one report covers; only the first ${keywords.length} are included.`}

@@ -166,6 +166,18 @@ describe('GroupKpiReport period and states', () => {
 
 
 describe('GroupKpiReport coverage notes', () => {
+  it('offers the whole report as an Excel download', () => {
+    renderGroupKpiReport();
+
+    expect(screen.getByRole('button', { name: 'Export to Excel' })).toBeInTheDocument();
+  });
+
+  it('offers no download before there is a run to export', () => {
+    renderGroupKpiReport({ history: buildHistory({ runs: [] }) });
+
+    expect(screen.queryByRole('button', { name: 'Export to Excel' })).not.toBeInTheDocument();
+  });
+
   it('warns when the group has more keywords than the report covers', () => {
     renderGroupKpiReport({ history: buildHistory({ keywords_truncated: true }) });
 

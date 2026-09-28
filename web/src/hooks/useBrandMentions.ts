@@ -15,7 +15,8 @@ import {
   decodeReportScope, encodeReportScope, reportScopeParams
 } from '../components/ui/reportScope';
 
-function isBrandMentionsResponse(data: unknown): data is BrandMentionsResponse {
+/** The `/brand-mentions` answer: the aggregate and the runs the scope can be read at. */
+export function isBrandMentionsResponse(data: unknown): data is BrandMentionsResponse {
   return typeof data === 'object'
     && data !== null
     && 'aggregated' in data

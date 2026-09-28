@@ -88,6 +88,8 @@ export function BrandVisibilityReport({ keywords }: Props) {
       {scope.kind === 'keyword' && <KeywordSections data={data} />}
       {scope.kind === 'group' && (
         <GroupKpiReport
+          scope={scope}
+          scopeLabel={describeReportScope(scope, groups)}
           history={data.groupHistory}
           loading={data.groupHistoryLoading}
           error={data.groupHistoryError}
