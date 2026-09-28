@@ -3,8 +3,16 @@ import {
   render, screen, within
 } from '@testing-library/react';
 import type { GroupKpiHistoryResponse } from '../../../types/domain/groupKpiHistory';
+import userEvent from '@testing-library/user-event';
 import { GroupKpiReport } from './GroupKpiReport';
+import { GroupKpiExportButton } from './GroupKpiExportButton';
 import { buildHistory } from './groupKpiHistory-fixtures';
+
+/** The keyword group every report fixture covers. */
+export const HOTEL_SOL_SCOPE = {
+  kind: 'group',
+  groupId: 'hotel-sol',
+} as const;
 
 interface Options {
   readonly history?: GroupKpiHistoryResponse | null;
@@ -17,7 +25,17 @@ export function renderGroupKpiReport({
   history = buildHistory(), loading = false, error = null
 }: Options = {}) {
   const onDaysChange = vi.fn<(days: number) => void>();
-  render(<GroupKpiReport history={history} loading={loading} error={error} days={90} onDaysChange={onDaysChange} />);
+  render(
+    <GroupKpiReport
+      scope={HOTEL_SOL_SCOPE}
+      scopeLabel="Hotel Sol"
+      history={history}
+      loading={loading}
+      error={error}
+      days={90}
+      onDaysChange={onDaysChange}
+    />,
+  );
   return { onDaysChange };
 }
 
@@ -68,4 +86,12 @@ export function sectionTable(title: string): string[][] {
 /** The headline figure element of the card explained as `label`. */
 export function statFigure(label: string): HTMLElement {
   return within(statCard(label)).getAllByText(/./, { selector: 'p' })[1];
+}
+
+
+/** Mount the export button on the second run of `buildHistory()` and click it. */
+export async function clickGroupKpiExport(): Promise<void> {
+  const history = buildHistory();
+  render(<GroupKpiExportButton scope={HOTEL_SOL_SCOPE} scopeLabel="Hotel Sol" history={history} run={history.runs[1]} />);
+  await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
 }

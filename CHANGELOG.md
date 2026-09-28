@@ -9,6 +9,28 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.20.0] - 2026-09-28
+
+### Added
+
+- **Export to Excel** on the per-hotel report. One workbook,
+  `hotel-visibility-report-<group>-<date>.xlsx`, with:
+  - **Summary**: the selected run's citation rate, share of voice and
+    prominence with their changes, the period and the group-run threshold.
+  - **Definitions**: how every KPI is measured, the same text as the report
+    tooltips.
+  - **KPI history**: one row per run (partial runs included and marked) with
+    its KPIs, changes and the models that answered.
+  - **Drivers**: every keyword that moved between group runs and its share of
+    the group's move.
+  - **Keyword runs**: every run of every keyword with its values and changes.
+  - **Brand mentions (run)**: one row per brand appearance (keyword, brand,
+    provider, model, rank, mentions, sentiment) of the selected run, read from
+    `/brand-mentions` at that exact run. If they cannot be read, the workbook
+    is still produced without this sheet and the report says so.
+- Unknown values are written as empty cells, never dashes, so the columns stay
+  numeric in a spreadsheet.
+
 ## [2.19.0] - 2026-09-28
 
 ### Added

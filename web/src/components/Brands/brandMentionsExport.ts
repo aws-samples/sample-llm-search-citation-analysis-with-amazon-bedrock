@@ -3,7 +3,8 @@ import {
 } from '../../exporters/excelGenerator';
 import type { BrandMentionsResponse } from '../../types';
 
-const BRAND_MENTION_COLUMNS = [
+/** Column widths of the one-row-per-appearance brand mentions sheet. */
+export const BRAND_MENTION_COLUMNS = [
   { wch: 36 },
   { wch: 28 },
   { wch: 16 },
