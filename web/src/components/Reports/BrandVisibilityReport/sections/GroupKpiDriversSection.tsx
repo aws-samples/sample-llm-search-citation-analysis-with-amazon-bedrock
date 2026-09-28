@@ -2,12 +2,13 @@ import type {
   GroupRun, GroupRunDriver
 } from '../../../../types/domain/groupKpiHistory';
 import { formatDate } from '../../../../formatting/dateFormatter';
+import { formatKpiDelta } from '../../../../formatting/kpiFormatter';
 import {
-  ReportSection, ReportTable, type ReportTableColumn
+  KPI_DEFINITIONS, type KpiId
+} from '../../../../constants/kpiDefinitions';
+import {
+  kpiColumn, ReportSection, ReportTable, type ReportTableColumn
 } from '../../layout';
-import {
-  formatPointsDelta, formatRankDelta
-} from '../groupKpiView';
 
 interface Props {readonly run: GroupRun;}
 
@@ -16,42 +17,49 @@ const MENTION_LABELS = {
   lost: 'No longer mentioned',
 } as const;
 
-const DRIVER_COLUMNS: ReadonlyArray<ReportTableColumn<GroupRunDriver>> = [
-  {
-    header: 'Keyword',
-    // Stryker disable next-line StringLiteral: Tailwind-only cell styling
-    cellClassName: 'font-medium',
-    render: (driver) => driver.keyword,
-  },
-  {
-    header: 'Hotel mention',
-    render: (driver) => (driver.changes.mention === null ? 'Unchanged' : MENTION_LABELS[driver.changes.mention]),
-  },
-  {
-    header: 'Citation rate impact',
-    render: (driver) => formatPointsDelta(driver.impact.coverage_rate),
-  },
-  {
-    header: 'Share of voice',
-    render: (driver) => formatPointsDelta(driver.changes.first_party_sov),
-  },
-  {
-    header: 'SOV impact',
-    render: (driver) => formatPointsDelta(driver.impact.first_party_avg_sov),
-  },
-  {
-    header: 'Rank #1 share',
-    render: (driver) => formatPointsDelta(driver.changes.rank_1_share),
-  },
-  {
-    header: 'Top-3 share',
-    render: (driver) => formatPointsDelta(driver.changes.top_3_share),
-  },
-  {
-    header: 'Mean rank',
-    render: (driver) => formatRankDelta(driver.changes.mean_rank),
-  },
+/** The group changes summarised above the drivers table. */
+const SUMMARY_KPIS: readonly KpiId[] = [
+  'mention_rate', 'share_of_voice', 'visibility_score', 'average_position', 'top_1_share', 'citation_rate',
 ];
+
+const IMPACT_NOTE = 'Share of the group\'s change: the keyword\'s change weighted by its share of the run\'s answers.';
+
+function deltaColumn(id: KpiId): ReportTableColumn<GroupRunDriver> {
+  return kpiColumn(id, (driver) => formatKpiDelta(id, driver.deltas[id]));
+}
+
+/** Built per render (not at import) so every column is exercised by the tests that render the table. */
+function driverColumns(): ReadonlyArray<ReportTableColumn<GroupRunDriver>> {
+  return [
+    {
+      header: 'Keyword',
+      // Stryker disable next-line StringLiteral: Tailwind-only cell styling
+      cellClassName: 'font-medium',
+      render: (driver) => driver.keyword,
+    },
+    {
+      header: 'Brand mention',
+      info: 'Whether the keyword\'s answers started or stopped naming your brand since the previous group run.',
+      render: (driver) => (driver.mention === null ? 'Unchanged' : MENTION_LABELS[driver.mention]),
+    },
+    deltaColumn('mention_rate'),
+    {
+      header: 'Mention rate impact',
+      info: IMPACT_NOTE,
+      render: (driver) => formatKpiDelta('mention_rate', driver.impact.mention_rate),
+    },
+    deltaColumn('visibility_score'),
+    {
+      header: 'Visibility impact',
+      info: IMPACT_NOTE,
+      render: (driver) => formatKpiDelta('visibility_score', driver.impact.visibility_score),
+    },
+    deltaColumn('share_of_voice'),
+    deltaColumn('average_position'),
+    deltaColumn('top_1_share'),
+    deltaColumn('answers'),
+  ];
+}
 
 function noComparisonMessage(run: GroupRun): string {
   return run.is_group_run
@@ -60,10 +68,9 @@ function noComparisonMessage(run: GroupRun): string {
 }
 
 /**
- * What moved the hotel's KPIs between the selected group run and the one
- * before it: the group deltas, then every keyword that changed, largest
- * citation-rate impact first. "Impact" is the keyword's change divided by the
- * keywords with results: its share of the group's move.
+ * What moved the group's KPIs between the selected group run and the one
+ * before it: the group changes, then every keyword that changed, largest
+ * mention-rate impact first.
  */
 export function GroupKpiDriversSection({ run }: Props) {
   const { change } = run;
@@ -78,18 +85,16 @@ export function GroupKpiDriversSection({ run }: Props) {
   return (
     <ReportSection
       title="What changed"
-      subtitle={`Since the group run of ${formatDate(change.previous_timestamp)}. Impact = the keyword's change divided by the keywords with results.`}
+      subtitle={`Since the group run of ${formatDate(change.previous_timestamp)}. ${IMPACT_NOTE}`}
     >
       <p className="mb-3 text-sm text-gray-700 dark:text-gray-300">
-        {`Citation rate ${formatPointsDelta(change.deltas.coverage_rate)} · Share of voice ${formatPointsDelta(change.deltas.first_party_avg_sov)} · `}
-        {`Rank #1 share ${formatPointsDelta(change.deltas.rank_1_share)} · Top-3 share ${formatPointsDelta(change.deltas.top_3_share)} · `}
-        {`Mean rank ${formatRankDelta(change.deltas.mean_rank)}`}
+        {SUMMARY_KPIS.map((id) => `${KPI_DEFINITIONS[id].label} ${formatKpiDelta(id, change.deltas[id])}`).join(' · ')}
       </p>
       {change.drivers.length === 0 ? (
         <p className="text-sm text-gray-500 dark:text-gray-400">No keyword changed between these runs.</p>
       ) : (
         // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
-        <ReportTable columns={DRIVER_COLUMNS} rows={change.drivers} rowKey={(driver) => driver.keyword} />
+        <ReportTable columns={driverColumns()} rows={change.drivers} rowKey={(driver) => driver.keyword} />
       )}
       {change.keywords_entered.length > 0 && (
         <p className="mt-2 text-xs text-gray-600 dark:text-gray-400">{`New in this run: ${change.keywords_entered.join(', ')}`}</p>

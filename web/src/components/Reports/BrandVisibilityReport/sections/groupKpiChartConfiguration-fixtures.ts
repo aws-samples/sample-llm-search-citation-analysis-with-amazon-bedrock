@@ -1,28 +1,33 @@
 import { getChartTheme } from '../../../ui/chartTheme';
 import { buildGroupKpiChartConfiguration } from './groupKpiChartConfiguration';
 import {
-  buildRun, buildSummary, RUN_1, RUN_2
+  buildKpis, buildRun, RUN_1, RUN_2
 } from '../groupKpiHistory-fixtures';
 
-/** A group run at RUN_1 and a partial run at RUN_2, with distinct values for every charted KPI. */
+/**
+ * A group run at RUN_1 and a partial run at RUN_2, with distinct values for
+ * every charted KPI; RUN_2's citation rate is unknown.
+ */
 export const CHART_RUNS = [
   buildRun({
     timestamp: RUN_1,
-    summary: buildSummary({
-      coverage_rate: 80,
-      first_party_avg_sov: 30,
-      rank_1_share: 50,
-      top_3_share: 90,
+    kpis: buildKpis({
+      mention_rate: 70,
+      share_of_voice: 20,
+      visibility_score: 58.1,
+      top_1_share: 35,
+      citation_rate: 29,
     }),
   }),
   buildRun({
     timestamp: RUN_2,
     is_group_run: false,
-    summary: buildSummary({
-      coverage_rate: 60,
-      first_party_avg_sov: 20,
-      rank_1_share: 40,
-      top_3_share: 70,
+    kpis: buildKpis({
+      mention_rate: 60,
+      share_of_voice: 25,
+      visibility_score: 52.4,
+      top_1_share: 40,
+      citation_rate: null,
     }),
   }),
 ];

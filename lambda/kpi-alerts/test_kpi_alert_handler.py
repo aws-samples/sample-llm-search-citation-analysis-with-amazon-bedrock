@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+import pytest
 from botocore.exceptions import ClientError
 
 from shared.kpi_alerts import DEFAULT_ALERT_SETTINGS
+from shared.kpi_engine import Answer, answers_from_rows
 from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.handler_fixtures import handler_fixture
 
@@ -19,7 +22,7 @@ _ENV = {
     'DYNAMODB_TABLE_SEARCH_RESULTS': 'search',
     'DYNAMODB_TABLE_KEYWORDS': 'keywords',
     'DYNAMODB_TABLE_KEYWORD_GROUPS': 'groups',
-    'DYNAMODB_TABLE_PROVIDER_CONFIG': 'providers',
+    'DYNAMODB_TABLE_BRAND_CONFIG': 'brand-config',
     'DYNAMODB_TABLE_KPI_SNAPSHOTS': 'snapshots',
     'DYNAMODB_TABLE_KPI_ALERTS': 'alerts',
     'DYNAMODB_TABLE_ALERT_SETTINGS': 'settings',
@@ -60,50 +63,24 @@ def _event(status: str = 'completed') -> dict:
     }
 
 
-def _visibility() -> dict:
-    first_party = {
-        'name': 'Hotel Mine',
-        'classification': 'first_party',
-        'visibility_score': 60.0,
-        'share_of_voice': 50.0,
-        'provider_count': 2,
-        'providers': ['openai', 'gemini'],
-        'total_mentions': 2,
-        'best_rank': 2,
-    }
-    competitor = {
-        'name': 'Rival',
-        'classification': 'competitor',
-        'visibility_score': 40.0,
-        'share_of_voice': 50.0,
-        'provider_count': 1,
-        'providers': ['openai'],
-        'total_mentions': 2,
-        'best_rank': 1,
-    }
+def _row(provider: str, *brands: tuple[str, str, int]) -> dict:
+    """One engine answer to the shared keyword in the evaluated run."""
     return {
         'keyword': 'shared keyword',
         'timestamp': _RUN_TIMESTAMP,
-        'total_mentions': 4,
-        'brands': [first_party, competitor],
-        'first_party': [first_party],
-        'competitors': [competitor],
-        'others': [],
-        'prominence': {
-            'answers': 2,
-            'mentioned_answers': 1,
-            'rank_1_share': 0.0,
-            'top_3_share': 50.0,
-            'mean_rank': 2.0,
-            'mean_first_position': 12.0,
-        },
-        'summary': {
-            'first_party_avg_score': 60.0,
-            'competitor_avg_score': 40.0,
-            'first_party_total_sov': 50.0,
-            'competitor_total_sov': 50.0,
-        },
+        'provider': provider,
+        'status': 'success',
+        'brands': [{'name': name, 'classification': classification, 'rank': rank} for name, classification, rank in brands],
+        'citations': ['https://hotel-mine.com/rooms'],
     }
+
+
+def _answers() -> list[Answer]:
+    """Two answers: the hotel 2nd behind the rival, then the rival alone."""
+    return answers_from_rows([
+        _row('openai', ('Rival', 'competitor', 1), ('Hotel Mine', 'first_party', 2)),
+        _row('gemini', ('Rival', 'competitor', 3)),
+    ])
 
 
 def _single_group_tables() -> tuple[MagicMock, MagicMock, MagicMock]:
@@ -120,7 +97,7 @@ def _complete_group_patches(
     worker_module,
     resource: MagicMock,
     settings: dict,
-    metrics: dict,
+    answers: list[Answer] | None,
 ):
     return patch.multiple(
         worker_module,
@@ -131,8 +108,8 @@ def _complete_group_patches(
         }]),
         _load_groups=MagicMock(return_value=[{'id': 'group-1', 'name': 'Group One'}]),
         _settings=MagicMock(return_value=settings),
-        get_enabled_provider_count=MagicMock(return_value=4),
-        _load_exact_metrics=MagicMock(return_value={'shared keyword': metrics}),
+        get_brand_config=MagicMock(return_value={'first_party_domains': ['hotel-mine.com']}),
+        _load_run_answers=MagicMock(return_value={'shared keyword': answers}),
         dynamodb=resource,
     )
 
@@ -143,14 +120,20 @@ def _run_complete_group(
     settings: dict,
     previous_snapshot: dict | None,
 ) -> dict:
-    """Run the worker over one complete group whose exact-run metrics are `_visibility()`."""
+    """Run the worker over one complete group whose exact-run answers are `_answers()`."""
     with (
-        _complete_group_patches(worker_module, resource, settings, _visibility()),
+        _complete_group_patches(worker_module, resource, settings, _answers()),
         patch.object(worker_module, '_previous_snapshot', return_value=previous_snapshot),
         patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
     ):
         return worker_module.handler(_event(), None)
 
+
+def _recorded_snapshot(worker_module) -> dict:
+    """The snapshot the worker stores for the complete group, with alerts disabled and no previous snapshot."""
+    snapshots, _alerts, resource = _single_group_tables()
+    _run_complete_group(worker_module, resource, {**DEFAULT_ALERT_SETTINGS, 'enabled': False}, None)
+    return snapshots.put_item.call_args.kwargs['Item']
 
 class TestRunEligibility:
     def test_skips_degraded_report_without_reading_tables(self, worker_module) -> None:
@@ -258,21 +241,21 @@ class TestCompleteSnapshotEvaluation:
             {'id': 'group-1', 'name': 'Group One'},
             {'id': 'group-2', 'name': 'Group Two'},
         ]
-        load_metrics = MagicMock(return_value={'shared keyword': _visibility()})
+        load_answers = MagicMock(return_value={'shared keyword': _answers()})
 
         with (
             patch.object(worker_module, 'query_active_keywords', return_value=active),
             patch.object(worker_module, '_load_groups', return_value=groups),
             patch.object(worker_module, '_settings', return_value={**DEFAULT_ALERT_SETTINGS, 'enabled': False}),
-            patch.object(worker_module, 'get_enabled_provider_count', return_value=4),
-            patch.object(worker_module, '_load_exact_metrics', load_metrics),
+            patch.object(worker_module, 'get_brand_config', return_value={}),
+            patch.object(worker_module, '_load_run_answers', load_answers),
             patch.object(worker_module, '_previous_snapshot', return_value=None),
             patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
             patch.object(worker_module, 'dynamodb', resource),
         ):
             result = worker_module.handler(_event(), None)
 
-        assert load_metrics.call_args.args == (['shared keyword'], _RUN_TIMESTAMP, 4)
+        assert load_answers.call_args.args == (['shared keyword'], _RUN_TIMESTAMP)
         assert snapshots.put_item.call_count == 2
         assert result['snapshots_recorded'] == 2
         assert result['skipped_partial'] == 0
@@ -308,25 +291,44 @@ class TestCompleteSnapshotEvaluation:
         )
 
         stored_snapshot = snapshots.put_item.call_args.kwargs['Item']
-        assert stored_snapshot['summary']['first_party_avg_score'] == Decimal('60.0')
+        assert (stored_snapshot['kpi_version'], stored_snapshot['kpis']['visibility_score']) == (2, Decimal('45.0'))
         assert stored_snapshot['keywords'] == [{
             'keyword': 'shared keyword',
-            'first_party_mentioned': True,
-            'best_rank': 2,
-            'mean_rank': Decimal('2.0'),
+            'mentioned': True,
+            'average_position': Decimal('2.0'),
         }]
+
+    def test_measures_the_citation_kpis_against_the_owned_domains(self, worker_module) -> None:
+        assert _recorded_snapshot(worker_module)['kpis']['citation_rate'] == Decimal('100.0')
+
+    def test_reads_the_owned_domains_from_the_brand_config_table(self, worker_module) -> None:
+        _snapshots, _alerts, resource = _single_group_tables()
+        brand_config = MagicMock(return_value={})
+
+        with (
+            _complete_group_patches(worker_module, resource, {**DEFAULT_ALERT_SETTINGS, 'enabled': False}, _answers()),
+            patch.object(worker_module, 'get_brand_config', brand_config),
+            patch.object(worker_module, '_previous_snapshot', return_value=None),
+            patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
+        ):
+            worker_module.handler(_event(), None)
+
+        brand_config.assert_called_once_with('brand-config')
+
+    def test_records_the_best_position_of_each_competitor(self, worker_module) -> None:
+        assert _recorded_snapshot(worker_module)['competitors'] == [{'name': 'Rival', 'best_position': 1}]
 
     def test_persists_exact_alert_shape_with_compared_run_timestamp(self, worker_module) -> None:
         _snapshots, alerts, resource = _single_group_tables()
         specification = {
-            'type': 'citation_rate_drop',
+            'type': 'mention_rate_drop',
             'severity': 'warning',
             'previous': 64.0,
             'current': 52.0,
             'delta': 12.0,
             'threshold': 10.0,
             'entity': 'group-1',
-            'message': 'Citation coverage fell by 12.0 percentage points.',
+            'message': 'Mention rate fell by 12.0 points.',
         }
 
         with (
@@ -342,7 +344,7 @@ class TestCompleteSnapshotEvaluation:
 
         assert alerts.put_item.call_args.kwargs == {
             'Item': {
-                'id': 'alert-d9c3a09f6c91aeb393b663030c383310',
+                'id': 'alert-80dedc654d7f56f1015ec86c395380bd',
                 'group_id': 'group-1',
                 'group_name': 'Group One',
                 'execution_id': 'exec-1',
@@ -351,33 +353,59 @@ class TestCompleteSnapshotEvaluation:
                 'status': 'open',
                 'acknowledged': False,
                 'ttl': 1822384800,
-                'type': 'citation_rate_drop',
+                'type': 'mention_rate_drop',
                 'severity': 'warning',
                 'previous': Decimal('64.0'),
                 'current': Decimal('52.0'),
                 'delta': Decimal('12.0'),
                 'threshold': Decimal('10.0'),
                 'entity': 'group-1',
-                'message': 'Citation coverage fell by 12.0 percentage points.',
+                'message': 'Mention rate fell by 12.0 points.',
             },
             'ConditionExpression': 'attribute_not_exists(id)',
         }
         assert result['alerts_created'] == 1
 
-    def test_skips_group_when_exact_run_rows_are_missing(self, worker_module) -> None:
+    @pytest.mark.parametrize('answers', [None, []], ids=['read failed', 'no engine answered'])
+    def test_skips_group_when_a_keyword_has_no_exact_run_answers(self, worker_module, answers) -> None:
         resource = fake_dynamodb_resource()
 
         with _complete_group_patches(
             worker_module,
             resource,
             DEFAULT_ALERT_SETTINGS,
-            {'error': 'No data'},
+            answers,
         ):
             result = worker_module.handler(_event(), None)
 
         assert result['groups_evaluated'] == 0
         assert result['snapshots_recorded'] == 0
         assert result['skipped_partial'] == 1
+
+
+class TestLoadRunAnswers:
+    def test_reads_each_keywords_answers_in_the_run(self, worker_module) -> None:
+        search = MagicMock()
+        search.query.return_value = {'Items': [_row('openai', ('Rival', 'competitor', 1)), _row('brave')]}
+        worker_module.dynamodb = fake_dynamodb_resource(by_name={'search': search})
+
+        answers = worker_module._load_run_answers(['shared keyword'], _RUN_TIMESTAMP)
+
+        assert [(answer.provider, answer.timestamp) for answer in answers['shared keyword']] == [('openai', _RUN_TIMESTAMP)]
+
+    def test_marks_a_keyword_that_cannot_be_read(self, worker_module, caplog) -> None:
+        search = MagicMock()
+        search.query.side_effect = ClientError({'Error': {'Code': 'ThrottlingException', 'Message': 'slow down'}}, 'Query')
+        worker_module.dynamodb = fake_dynamodb_resource(by_name={'search': search})
+
+        with caplog.at_level(logging.ERROR):
+            answers = worker_module._load_run_answers(['shared keyword'], _RUN_TIMESTAMP)
+
+        assert answers == {'shared keyword': None}
+        assert [record.getMessage() for record in caplog.records] == ['Exact-run answers query failed for one keyword']
+
+    def test_reads_nothing_for_no_keywords(self, worker_module) -> None:
+        assert worker_module._load_run_answers([], _RUN_TIMESTAMP) == {}
 
 
 class TestIdempotentAlertWrites:
@@ -408,7 +436,7 @@ class TestNotification:
         worker_module.sns = MagicMock()
         alerts = [{
             'severity': 'warning',
-            'message': 'Citation coverage fell.',
+            'message': 'Mention rate fell.',
         }]
         settings = {**DEFAULT_ALERT_SETTINGS, 'notification_emails': ['ops@example.com']}
 
@@ -418,7 +446,7 @@ class TestNotification:
         assert worker_module.sns.publish.call_count == 1
         assert worker_module.sns.publish.call_args.kwargs['Message'] == (
             'Citation Analysis detected 1 new KPI alert(s) for execution exec-1.\n'
-            '- [WARNING] Citation coverage fell.'
+            '- [WARNING] Mention rate fell.'
         )
         assert len(worker_module.sns.publish.call_args.kwargs['Subject']) <= 100
 

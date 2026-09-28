@@ -6,7 +6,8 @@ import { useOpenAlerts } from '../../hooks/useAlerts';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 
 const ALERT_TYPE_LABELS: Record<AlertType, string> = {
-  citation_rate_drop: 'Citation-rate drop',
+  mention_rate_drop: 'Mention-rate drop',
+  citation_rate_drop: 'Keyword-coverage drop (before 2.21)',
   position_loss: 'Position loss',
   new_competitor_top: 'New competitor in top results',
   keyword_lost_mention: 'Keyword lost mention',

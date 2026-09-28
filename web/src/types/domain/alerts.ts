@@ -1,4 +1,6 @@
 export type AlertType =
+  | 'mention_rate_drop'
+  // Raised before 2.21.0 on the former keyword-level "citation rate"; still listed until it expires.
   | 'citation_rate_drop'
   | 'position_loss'
   | 'new_competitor_top'
@@ -55,7 +57,8 @@ export interface AlertAcknowledgement {
 }
 
 export interface AlertThresholds {
-  citation_rate_drop: number;
+  /** Points of mention rate lost between two group runs that raise an alert. */
+  mention_rate_drop: number;
   position_loss: number;
   competitor_top_n: number;
   improvement_after_content_change: number;
@@ -165,7 +168,8 @@ function isOptionalHttpUrl(candidate: unknown): candidate is string | undefined 
 }
 
 function isAlertType(candidate: unknown): candidate is AlertType {
-  return candidate === 'citation_rate_drop'
+  return candidate === 'mention_rate_drop'
+    || candidate === 'citation_rate_drop'
     || candidate === 'position_loss'
     || candidate === 'new_competitor_top'
     || candidate === 'keyword_lost_mention'
@@ -255,7 +259,7 @@ export function isAlertAcknowledgement(candidate: unknown): candidate is AlertAc
 
 function isAlertThresholds(candidate: unknown): candidate is AlertThresholds {
   return isRecord(candidate)
-    && isNumberInRange(candidate.citation_rate_drop, 0.1, 100)
+    && isNumberInRange(candidate.mention_rate_drop, 0.1, 100)
     && isNumberInRange(candidate.position_loss, 0.1, 100)
     && isIntegerInRange(candidate.competitor_top_n, 1, 10)
     && isNumberInRange(candidate.improvement_after_content_change, 0.1, 100);

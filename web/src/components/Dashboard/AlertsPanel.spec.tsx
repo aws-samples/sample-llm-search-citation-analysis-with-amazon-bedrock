@@ -62,7 +62,15 @@ describe('AlertsPanel', () => {
 
     expect(screen.getByText('3 open alerts')).toBeInTheDocument();
     expect(screen.getByText('Group One')).toBeInTheDocument();
-    expect(screen.getByText('Citation coverage fell by 12.0 percentage points.')).toBeInTheDocument();
+    expect(screen.getByText('Mention rate fell by 12.0 points.')).toBeInTheDocument();
+  });
+
+  it('labels an alert raised on the former citation rate as a keyword-coverage drop', () => {
+    mockUseOpenAlerts.mockReturnValue(buildAlertsPanelHookResult({ items: [buildAlertItem({ type: 'citation_rate_drop' })] }));
+
+    render(<AlertsPanel />);
+
+    expect(screen.getByText('Keyword-coverage drop (before 2.21)')).toBeInTheDocument();
   });
 
   it('shows severity, type, metric change, and timestamp details', () => {
@@ -72,7 +80,7 @@ describe('AlertsPanel', () => {
     render(<AlertsPanel />);
 
     expect(screen.getByText('Warning')).toBeInTheDocument();
-    expect(screen.getByText('Citation-rate drop')).toBeInTheDocument();
+    expect(screen.getByText('Mention-rate drop')).toBeInTheDocument();
     expect(screen.getByLabelText('Metric change')).toHaveTextContent(/Previous:\s*64.*Current:\s*52/);
     expect(screen.getByText(formatDate(alertItem.run_timestamp))).toHaveAttribute('datetime', alertItem.run_timestamp);
   });

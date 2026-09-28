@@ -49,7 +49,7 @@ def _settings_request(**overrides: object) -> dict:
         'enabled': settings['enabled'],
         'notification_emails': settings['notification_emails'],
         'thresholds': {
-            'citation_rate_drop': settings['citation_rate_drop'],
+            'mention_rate_drop': settings['mention_rate_drop'],
             'position_loss': settings['position_loss'],
             'competitor_top_n': settings['competitor_top_n'],
             'improvement_after_content_change': settings['improvement_after_content_change'],
@@ -133,14 +133,14 @@ class TestAlertHistory:
             'status': 'open',
             'acknowledged': False,
             'ttl': 1822384800,
-            'type': 'citation_rate_drop',
+            'type': 'mention_rate_drop',
             'severity': 'warning',
             'previous': '64.0',
             'current': '52.0',
             'delta': '12.0',
             'threshold': '10.0',
             'entity': 'group-1',
-            'message': 'Citation coverage fell by 12.0 percentage points.',
+            'message': 'Mention rate fell by 12.0 points.',
         }
         alerts = MagicMock()
         alerts.query.return_value = {'Items': [{
@@ -387,7 +387,7 @@ class TestAlertSettings:
             'enabled': True,
             'notification_emails': [],
             'thresholds': {
-                'citation_rate_drop': 10.0,
+                'mention_rate_drop': 10.0,
                 'position_loss': 1.0,
                 'competitor_top_n': 3,
                 'improvement_after_content_change': 5.0,
@@ -449,7 +449,7 @@ class TestAlertSettings:
             'enabled': True,
             'notification_emails': ['ops@example.com', 'team@example.com'],
             'thresholds': {
-                'citation_rate_drop': 10.0,
+                'mention_rate_drop': 10.0,
                 'position_loss': 1.0,
                 'competitor_top_n': 3,
                 'improvement_after_content_change': 5.0,
@@ -494,7 +494,7 @@ class TestAlertSettings:
         request = _settings_request(
             enabled=False,
             notification_emails=[' Owner@Example.com '],
-            citation_rate_drop=12.5,
+            mention_rate_drop=12.5,
             position_loss=2.25,
             competitor_top_n=10,
             improvement_after_content_change=7.5,
@@ -512,7 +512,7 @@ class TestAlertSettings:
             'enabled': False,
             'notification_emails': ['owner@example.com'],
             'thresholds': {
-                'citation_rate_drop': 12.5,
+                'mention_rate_drop': 12.5,
                 'position_loss': 2.25,
                 'competitor_top_n': 10,
                 'improvement_after_content_change': 7.5,
@@ -527,7 +527,7 @@ class TestAlertSettings:
             'config_id': 'default',
             'enabled': False,
             'notification_emails': ['owner@example.com'],
-            'citation_rate_drop': Decimal('12.5'),
+            'mention_rate_drop': Decimal('12.5'),
             'position_loss': Decimal('2.25'),
             'competitor_top_n': 10,
             'improvement_after_content_change': Decimal('7.5'),

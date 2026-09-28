@@ -8,7 +8,10 @@ import { ReportSection } from '../../layout';
 import {
   groupRuns, modelChanges, type ModelChange
 } from '../groupKpiView';
-import { buildGroupKpiChartConfiguration } from './groupKpiChartConfiguration';
+import {
+  buildGroupKpiChartConfiguration, GROUP_KPI_SERIES 
+} from './groupKpiChartConfiguration';
+import { KPI_DEFINITIONS } from '../../../../constants/kpiDefinitions';
 
 interface Props {
   readonly runs: readonly GroupRun[];
@@ -23,9 +26,9 @@ function describeModelChange(change: ModelChange): string {
 }
 
 /**
- * The group's citation rate, share of voice and prominence over time, one
- * point per run. Model changes are listed under the chart, because a new
- * model can move every KPI on its own.
+ * The group's mention rate, share of voice, visibility score, top-1 share and
+ * citation rate over time, one point per run. Model changes are listed under
+ * the chart, because a new model can move every KPI on its own.
  */
 export function GroupKpiTrendSection({
   runs, minCoverage, includePartial, onIncludePartialChange
@@ -56,7 +59,7 @@ export function GroupKpiTrendSection({
         <figure className="h-72">
           <canvas ref={canvasRef} />
           <figcaption className="sr-only">
-            {`Citation rate, share of voice, rank #1 share and top-3 share over ${shown.length} runs.`}
+            {`${GROUP_KPI_SERIES.map((series) => KPI_DEFINITIONS[series.id].label).join(', ')} over ${shown.length} runs (0–100).`}
           </figcaption>
         </figure>
       )}

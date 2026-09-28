@@ -47,11 +47,11 @@ describe('isGroupKpiHistoryResponse', () => {
         is_group_run: 'yes' 
       }] 
     }],
-    ['a run without a summary', {
+    ['a run without KPIs', {
       ...buildHistory(),
       runs: [{
         ...buildRun(),
-        summary: null 
+        kpis: null 
       }] 
     }],
     ['a run without models', {

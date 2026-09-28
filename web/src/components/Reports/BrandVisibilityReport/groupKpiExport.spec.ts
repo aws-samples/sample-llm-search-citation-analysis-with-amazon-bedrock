@@ -5,12 +5,13 @@ import {
   exportGroupKpiReport, groupKpiReportFileName, groupKpiReportSheets
 } from './groupKpiExport';
 import {
-  buildHistory, buildSummary, RUN_1, RUN_2, RUN_3
+  buildHistory, historyWithoutOwnedDomains, RUN_1, RUN_2, RUN_3
 } from './groupKpiHistory-fixtures';
 import { exportWorkbook } from '../../../exporters/excelGenerator';
-import { VISIBILITY_KPI_DEFINITIONS } from '../../../constants/kpiDefinitions';
+import { GROUP_REPORT_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import {
-  EXPORTED_AT as GENERATED_AT, selectedRunSheets, sheetRows, unknownValueSheets
+  EMPTY_KPI_CELLS, EXPORTED_AT as GENERATED_AT, KPI_CHANGE_HEADERS, KPI_VALUE_HEADERS, kpiChangeCells, kpiValueCells,
+  selectedRunSheets, sheetRows, summaryCells, unknownValueSheets
 } from './groupKpiExport-fixtures';
 
 vi.mock('../../../exporters/excelGenerator', async (importOriginal) => ({
@@ -20,6 +21,12 @@ vi.mock('../../../exporters/excelGenerator', async (importOriginal) => ({
 
 const HISTORY = buildHistory();
 const SELECTED = HISTORY.runs[1];
+
+/** Every KPI value of RUN_2, in report order. */
+const RUN_2_VALUES = [20, 12, 60, 25, 1.8, 40, 55, 52.4, 6, 30, 12.5, 15, 75, 80];
+
+/** Every KPI change from RUN_1 to RUN_2, in report order. */
+const RUN_2_CHANGES = [0, -2, -10, 5, 0.5, 3, 1.5, -8.2, 1, 1.2, -2.5, 10, 0.8, -20];
 
 describe('groupKpiReportSheets', () => {
   it('writes the summary, definitions, history, drivers, keyword runs and brand mentions', () => {
@@ -36,214 +43,11 @@ describe('groupKpiReportSheets', () => {
     expect(selectedRunSheets().every((entry) => entry.data.length === 0 || entry.columns.length === Object.keys(entry.data[0]).length)).toBe(true);
   });
 
-  it('summarises the selected run with its changes', () => {
-    expect(sheetRows(selectedRunSheets(), 'Summary')).toStrictEqual([
-      {
-        Metric: 'Keyword group',
-        Value: 'Hotel Sol' 
-      },
-      {
-        Metric: 'Period (days)',
-        Value: 90 
-      },
-      {
-        Metric: 'Generated at',
-        Value: '2026-09-28T12:00:00.000Z' 
-      },
-      {
-        Metric: 'Run',
-        Value: RUN_2 
-      },
-      {
-        Metric: 'Group run',
-        Value: 'Yes' 
-      },
-      {
-        Metric: 'Keywords with results',
-        Value: '5 of 5' 
-      },
-      {
-        Metric: 'Compared with run',
-        Value: RUN_1 
-      },
-      {
-        Metric: 'Citation rate (%)',
-        Value: 60 
-      },
-      {
-        Metric: 'Citation rate change (pts)',
-        Value: -20 
-      },
-      {
-        Metric: 'Share of voice (%)',
-        Value: 25 
-      },
-      {
-        Metric: 'Share of voice change (pts)',
-        Value: -10 
-      },
-      {
-        Metric: 'Prominence: rank #1 share (%)',
-        Value: 40 
-      },
-      {
-        Metric: 'Rank #1 share change (pts)',
-        Value: 5 
-      },
-      {
-        Metric: 'Prominence: top-3 share (%)',
-        Value: 70 
-      },
-      {
-        Metric: 'Top-3 share change (pts)',
-        Value: 0 
-      },
-      {
-        Metric: 'Prominence: mean rank',
-        Value: 1.8 
-      },
-      {
-        Metric: 'Mean rank change',
-        Value: 0.5 
-      },
-      {
-        Metric: 'Group run threshold (% of keywords)',
-        Value: 50 
-      },
-    ]);
-  });
-
-  it('leaves the changes empty for a run with nothing to compare', () => {
-    const summary = groupKpiReportSheets(HISTORY, 'Hotel Sol', HISTORY.runs[2], null, GENERATED_AT)[0].data;
-
-    expect(summary.filter((row) => String(row.Metric).includes('change') || row.Metric === 'Compared with run').map((row) => row.Value))
-      .toStrictEqual(['', '', '', '', '', '']);
-  });
-
-  it('marks a partial run in the summary', () => {
-    const summary = groupKpiReportSheets(HISTORY, 'Hotel Sol', HISTORY.runs[2], null, GENERATED_AT)[0].data;
-
-    expect(summary[4]).toStrictEqual({
-      Metric: 'Group run',
-      Value: 'No' 
-    });
-  });
-
-  it('writes an unknown mean rank as an empty cell', () => {
-    const run = {
-      ...SELECTED,
-      summary: buildSummary({ mean_rank: null }) 
-    };
-
-    expect(groupKpiReportSheets(HISTORY, 'Hotel Sol', run, null, GENERATED_AT)[0].data[15]).toStrictEqual({
-      Metric: 'Prominence: mean rank',
-      Value: '' 
-    });
-  });
-
-  it('writes out every KPI definition', () => {
-    expect(sheetRows(selectedRunSheets(), 'Definitions')).toStrictEqual(VISIBILITY_KPI_DEFINITIONS.map((entry) => ({
+  it('writes out every KPI, group run and trend definition', () => {
+    expect(sheetRows(selectedRunSheets(), 'Definitions')).toStrictEqual(GROUP_REPORT_DEFINITIONS.map((entry) => ({
       KPI: entry.label,
       'How it is measured': entry.definition,
     })));
-  });
-
-  it('lists every run with its KPIs, changes and models', () => {
-    expect(sheetRows(selectedRunSheets(), 'KPI history')[1]).toStrictEqual({
-      Run: RUN_2,
-      'Group run': 'Yes',
-      'Keywords with results': 5,
-      'Keywords total': 5,
-      'Citation rate (%)': 60,
-      'Share of voice (%)': 25,
-      'Rank #1 share (%)': 40,
-      'Top-3 share (%)': 70,
-      'Mean rank': 1.8,
-      'Compared with run': RUN_1,
-      'Citation rate change (pts)': -20,
-      'Share of voice change (pts)': -10,
-      'Rank #1 share change (pts)': 5,
-      'Mean rank change': 0.5,
-      Models: 'openai: gpt-5.2',
-    });
-  });
-
-  it('lists runs oldest first, partial runs included', () => {
-    expect(sheetRows(selectedRunSheets(), 'KPI history').map((row) => [row.Run, row['Group run']])).toStrictEqual([[RUN_1, 'Yes'], [RUN_2, 'Yes'], [RUN_3, 'No']]);
-  });
-
-  it('leaves the changes of an uncompared run empty', () => {
-    const first = sheetRows(selectedRunSheets(), 'KPI history')[0];
-
-    expect([first['Compared with run'], first['Citation rate change (pts)'], first['Mean rank change']]).toStrictEqual(['', '', '']);
-  });
-
-  it('joins several providers and models in one cell', () => {
-    const run = {
-      ...SELECTED,
-      models: {
-        openai: ['a', 'b'],
-        gemini: ['c'] 
-      } 
-    };
-    const history = {
-      ...HISTORY,
-      runs: [run] 
-    };
-
-    expect(groupKpiReportSheets(history, 'Hotel Sol', run, null, GENERATED_AT)[2].data[0].Models).toBe('openai: a, b; gemini: c');
-  });
-
-  it('lists every driver of every run', () => {
-    expect(sheetRows(selectedRunSheets(), 'Drivers')).toStrictEqual([{
-      Run: RUN_2,
-      'Compared with run': RUN_1,
-      Keyword: 'hotel sol spa',
-      'Hotel mention': 'No longer mentioned',
-      'Citation rate impact (pts)': -20,
-      'Share of voice change (pts)': -50,
-      'SOV impact (pts)': -10,
-      'Rank #1 share change (pts)': -100,
-      'Top-3 share change (pts)': -100,
-      'Mean rank change': '',
-    }]);
-  });
-
-  it('lists every keyword run with its change', () => {
-    expect(sheetRows(selectedRunSheets(), 'Keyword runs')).toStrictEqual([
-      {
-        Keyword: 'hotel sol spa',
-        Run: RUN_1,
-        'Hotel mentioned': 'Yes',
-        'Mention change': '',
-        'Share of voice (%)': 50,
-        'Share of voice change (pts)': '',
-        'Rank #1 share (%)': 100,
-        'Top-3 share (%)': 100,
-        'Mean rank': 1,
-        'Mean rank change': '',
-        'Best rank': 1,
-        Answers: 2,
-        'Answers mentioning': 1,
-        'Hotel score': 60,
-      },
-      {
-        Keyword: 'hotel sol spa',
-        Run: RUN_2,
-        'Hotel mentioned': 'No',
-        'Mention change': 'No longer mentioned',
-        'Share of voice (%)': 0,
-        'Share of voice change (pts)': -50,
-        'Rank #1 share (%)': 100,
-        'Top-3 share (%)': 100,
-        'Mean rank': 1,
-        'Mean rank change': '',
-        'Best rank': 1,
-        Answers: 2,
-        'Answers mentioning': 1,
-        'Hotel score': 60,
-      },
-    ]);
   });
 
   it('attaches one row per brand appearance of the selected run', () => {
@@ -261,46 +65,185 @@ describe('groupKpiReportSheets', () => {
   });
 });
 
+describe('groupKpiReportSheets summary', () => {
+  it('opens the summary with the context of the selected run', () => {
+    expect(summaryCells(1).slice(0, 10)).toStrictEqual([
+      ['Keyword group', 'Hotel Sol', '', ''],
+      ['Period (days)', 90, '', ''],
+      ['Generated at', '2026-09-28T12:00:00.000Z', '', ''],
+      ['Run', RUN_2, '', ''],
+      ['Group run', 'Yes', '', ''],
+      ['Keywords with results', '5 of 5', '', ''],
+      ['AI engines', 4, '', ''],
+      ['Compared with run', RUN_1, '', ''],
+      ['Owned domains configured', 'Yes', '', ''],
+      ['Group run threshold (% of keywords)', 50, '', ''],
+    ]);
+  });
+
+  it('lists every KPI of the selected run with its value, change and trend', () => {
+    expect(summaryCells(1).slice(10)).toStrictEqual([
+      ['Answers', 20, 0, ''],
+      ['Mentions', 12, -2, ''],
+      ['Mention rate (%)', 60, -10, 'declining'],
+      ['Share of voice (%)', 25, 5, 'improving'],
+      ['Average position', 1.8, 0.5, 'declining'],
+      ['Top-1 share (%)', 40, 3, 'improving'],
+      ['Top-3 share (%)', 55, 1.5, 'stable'],
+      ['Visibility score (0-100)', 52.4, -8.2, 'declining'],
+      ['Citations', 6, 1, ''],
+      ['Citation rate (%)', 30, 1.2, 'stable'],
+      ['Citation share (%)', 12.5, -2.5, 'declining'],
+      ['Net sentiment (-100 to +100)', 15, 10, 'improving'],
+      ['Engine coverage (%)', 75, 0.8, 'stable'],
+      ['Keyword coverage (%)', 80, -20, 'declining'],
+    ]);
+  });
+
+  it('leaves the comparison run, changes and trends empty for a run with nothing to compare', () => {
+    const summary = summaryCells(2);
+
+    expect([summary[7][1], ...summary.slice(10).flatMap((row) => row.slice(2))]).toStrictEqual(['', ...EMPTY_KPI_CELLS, ...EMPTY_KPI_CELLS]);
+  });
+
+  it('marks a partial run in the summary', () => {
+    expect(summaryCells(2)[4]).toStrictEqual(['Group run', 'No', '', '']);
+  });
+
+  it('says when owned domains are not configured and leaves the citation KPIs empty', () => {
+    const summary = summaryCells(1, historyWithoutOwnedDomains());
+
+    expect(summary[8]).toStrictEqual(['Owned domains configured', 'No', '', '']);
+    expect(summary.slice(18, 21).map((row) => row.slice(0, 2))).toStrictEqual([
+      ['Citations', ''], ['Citation rate (%)', ''], ['Citation share (%)', ''],
+    ]);
+  });
+});
+
+describe('groupKpiReportSheets KPI history', () => {
+  it('heads the history with the run, its coverage, every KPI value, the comparison, every KPI change and the models', () => {
+    expect(Object.keys(sheetRows(selectedRunSheets(), 'KPI history')[0])).toStrictEqual([
+      'Run', 'Group run', 'Keywords with results', 'Keywords total', ...KPI_VALUE_HEADERS, 'Compared with run', ...KPI_CHANGE_HEADERS, 'Models',
+    ]);
+  });
+
+  it('lists every run oldest first, partial runs included, with its coverage and models', () => {
+    expect(sheetRows(selectedRunSheets(), 'KPI history').map((row) => [row.Run, row['Group run'], row['Keywords with results'], row.Models]))
+      .toStrictEqual([[RUN_1, 'Yes', 5, 'openai: gpt-5-mini'], [RUN_2, 'Yes', 5, 'openai: gpt-5.2'], [RUN_3, 'No', 1, 'openai: gpt-5-mini']]);
+  });
+
+  it('writes every KPI value of a run', () => {
+    expect(kpiValueCells(sheetRows(selectedRunSheets(), 'KPI history')[1])).toStrictEqual(RUN_2_VALUES);
+  });
+
+  it('writes every KPI change of a compared run and the run it is compared with', () => {
+    const row = sheetRows(selectedRunSheets(), 'KPI history')[1];
+
+    expect([row['Compared with run'], ...kpiChangeCells(row)]).toStrictEqual([RUN_1, ...RUN_2_CHANGES]);
+  });
+
+  it('leaves the comparison and every change of an uncompared run empty', () => {
+    const row = sheetRows(selectedRunSheets(), 'KPI history')[0];
+
+    expect([row['Compared with run'], ...kpiChangeCells(row)]).toStrictEqual(['', ...EMPTY_KPI_CELLS]);
+  });
+
+  it('joins several providers and models in one cell', () => {
+    const run = {
+      ...SELECTED,
+      models: {
+        openai: ['a', 'b'],
+        gemini: ['c']
+      }
+    };
+    const history = {
+      ...HISTORY,
+      runs: [run]
+    };
+
+    expect(sheetRows(groupKpiReportSheets(history, 'Hotel Sol', run, null, GENERATED_AT), 'KPI history')[0].Models).toBe('openai: a, b; gemini: c');
+  });
+});
+
+describe('groupKpiReportSheets drivers and keyword runs', () => {
+  it('names each driver with its run, comparison, mention change and impacts', () => {
+    const [driver] = sheetRows(selectedRunSheets(), 'Drivers');
+
+    expect([driver.Run, driver['Compared with run'], driver.Keyword, driver['Brand mention'], driver['Mention rate impact (pts)'],
+      driver['Visibility score impact (pts)']]).toStrictEqual([RUN_2, RUN_1, 'hotel sol spa', 'No longer mentioned', -10, -9]);
+  });
+
+  it('writes every KPI change of a driver, an unknown change as an empty cell', () => {
+    const [driver] = sheetRows(selectedRunSheets(), 'Drivers');
+
+    expect(kpiChangeCells(driver)).toStrictEqual([0, -2, -50, -25, '', -50, -50, -45, '', '', '', '', '', '']);
+  });
+
+  it('lists one driver row per driver of every compared run', () => {
+    expect(sheetRows(selectedRunSheets(), 'Drivers')).toHaveLength(1);
+  });
+
+  it('lists every keyword run with its keyword and mention change', () => {
+    expect(sheetRows(selectedRunSheets(), 'Keyword runs').map((row) => [row.Keyword, row.Run, row['Mention change']])).toStrictEqual([
+      ['hotel sol spa', RUN_1, ''], ['hotel sol spa', RUN_2, 'No longer mentioned'],
+    ]);
+  });
+
+  it('writes every KPI value of a keyword run, an unknown value as an empty cell', () => {
+    const row = sheetRows(selectedRunSheets(), 'Keyword runs')[1];
+
+    expect(kpiValueCells(row)).toStrictEqual([4, 0, 0, 0, '', 0, 0, 0, 1, 25, 12.5, '', 75, 80]);
+  });
+
+  it('writes every KPI change of a keyword run since the keyword\'s previous run', () => {
+    const row = sheetRows(selectedRunSheets(), 'Keyword runs')[1];
+
+    expect(kpiChangeCells(row)).toStrictEqual([0, -2, -50, -25, '', -25, -50, -47.5, 0, 0, '', '', '', '']);
+  });
+
+  it('leaves every change of a keyword\'s first run empty', () => {
+    expect(kpiChangeCells(sheetRows(selectedRunSheets(), 'Keyword runs')[0])).toStrictEqual(EMPTY_KPI_CELLS);
+  });
+});
+
 describe('groupKpiReportSheets with unknown values', () => {
-  it('leaves unknown history values empty', () => {
+  it('leaves unknown history values and changes empty', () => {
     const row = sheetRows(unknownValueSheets(), 'KPI history')[0];
 
-    expect([row['Mean rank'], row['Citation rate change (pts)'], row['Share of voice change (pts)'], row['Rank #1 share change (pts)'], row['Mean rank change']])
-      .toStrictEqual(['', '', '', '', '']);
+    expect([...kpiValueCells(row), ...kpiChangeCells(row)]).toStrictEqual([...EMPTY_KPI_CELLS, ...EMPTY_KPI_CELLS]);
   });
 
-  it('leaves unknown driver changes empty', () => {
+  it('leaves an unchanged driver mention and unknown driver changes empty', () => {
     const row = sheetRows(unknownValueSheets(), 'Drivers')[0];
 
-    expect([row['Hotel mention'], row['Share of voice change (pts)'], row['Rank #1 share change (pts)'], row['Top-3 share change (pts)'], row['Mean rank change']])
-      .toStrictEqual(['', '', '', '', '']);
-  });
-
-  it('leaves unknown keyword ranks empty and names a gained mention', () => {
-    const row = sheetRows(unknownValueSheets(), 'Keyword runs')[0];
-
-    expect([row['Mean rank'], row['Best rank'], row['Mention change']]).toStrictEqual(['', '', 'Now mentioned']);
-  });
-
-  it('leaves unknown summary changes empty even for a compared run', () => {
-    const summary = sheetRows(unknownValueSheets(), 'Summary');
-
-    expect(summary.filter((row) => String(row.Metric).includes('change')).map((row) => row.Value)).toStrictEqual(['', '', '', '', '']);
+    expect([row['Brand mention'], ...kpiChangeCells(row)]).toStrictEqual(['', ...EMPTY_KPI_CELLS]);
   });
 
   it('dates each driver with its comparison run', () => {
     expect(sheetRows(unknownValueSheets(), 'Drivers')[0]['Compared with run']).toBe(RUN_1);
   });
+
+  it('names a gained keyword mention and leaves its unknown values empty', () => {
+    const row = sheetRows(unknownValueSheets(), 'Keyword runs')[0];
+
+    expect([row['Mention change'], ...kpiValueCells(row)]).toStrictEqual(['Now mentioned', ...EMPTY_KPI_CELLS]);
+  });
+
+  it('leaves unknown summary values and changes empty even for a compared run', () => {
+    const summary = sheetRows(unknownValueSheets(), 'Summary').slice(10);
+
+    expect(summary.map((row) => [row.Value, row.Change])).toStrictEqual(EMPTY_KPI_CELLS.map(() => ['', '']));
+  });
 });
 
 describe('exportGroupKpiReport', () => {
   it('names the file after the group and the date', () => {
-    expect(groupKpiReportFileName('Hotel Sol', GENERATED_AT)).toBe('hotel-visibility-report-hotel-sol-2026-09-28.xlsx');
+    expect(groupKpiReportFileName('Hotel Sol', GENERATED_AT)).toBe('group-visibility-report-hotel-sol-2026-09-28.xlsx');
   });
 
   it('writes the workbook under that name', async () => {
     await exportGroupKpiReport(HISTORY, 'Hotel Sol', SELECTED, null, GENERATED_AT);
 
-    expect(exportWorkbook).toHaveBeenCalledWith(selectedRunSheets(null), 'hotel-visibility-report-hotel-sol-2026-09-28.xlsx');
+    expect(exportWorkbook).toHaveBeenCalledWith(selectedRunSheets(null), 'group-visibility-report-hotel-sol-2026-09-28.xlsx');
   });
 });

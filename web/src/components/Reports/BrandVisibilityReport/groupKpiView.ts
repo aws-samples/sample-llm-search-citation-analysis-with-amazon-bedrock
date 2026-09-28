@@ -1,9 +1,12 @@
 /**
- * Pure view helpers for the per-hotel (keyword group) sections of the Brand
- * Visibility report: which runs to show, what changed between them, and how
- * each figure is written.
+ * Pure view helpers for the per-group sections of the Brand Visibility
+ * report: which runs to show, what changed between them, and how each
+ * change is coloured. Values are written by `formatting/kpiFormatter`.
  */
-import type { GroupRun } from '../../../types/domain/groupKpiHistory';
+import type {
+  GroupRun, KpiTrend
+} from '../../../types/domain/groupKpiHistory';
+import type { KpiId } from '../../../constants/kpiDefinitions';
 import type { ReportAccent } from '../layout';
 
 /** The runs covering at least half of the group's keywords — the ones compared with each other. */
@@ -48,39 +51,15 @@ export function modelChanges(runs: readonly GroupRun[]): ModelChange[] {
   });
 }
 
-/** `42.5%`, or an em dash when the value is unknown. */
-export function formatPercent(value: number | null): string {
-  return value === null ? '—' : `${value.toFixed(1)}%`;
-}
-
-/** Mean rank with two decimals, or an em dash when no answer ranks the hotel. */
-export function formatRank(value: number | null): string {
-  return value === null ? '—' : value.toFixed(2);
-}
-
-function signed(value: number, digits: number): string {
-  const fixed = value.toFixed(digits);
-  return value > 0 ? `+${fixed}` : fixed;
-}
-
-/** A change in percentage points: `+2.5 pts`, `-1.0 pts`, or an em dash. */
-export function formatPointsDelta(value: number | null): string {
-  return value === null ? '—' : `${signed(value, 1)} pts`;
-}
-
-/** A change in mean rank: `+0.50` (worse) / `-0.50` (better), or an em dash. */
-export function formatRankDelta(value: number | null): string {
-  return value === null ? '—' : signed(value, 2);
-}
-
-/**
- * The colour a change deserves. For percentages up is good; for ranks down
- * is good (`higherIsBetter: false`). No change, or an unknown one, is neutral.
- */
-export function deltaAccent(value: number | null, higherIsBetter: boolean): ReportAccent {
-  const sign = Math.sign(value ?? 0);
-  const direction = higherIsBetter ? sign : -sign;
-  if (direction > 0) return 'positive';
-  if (direction < 0) return 'negative';
+/** The colour a trend deserves: improving is positive, declining negative, stable or unknown neutral. */
+export function trendAccent(trend: KpiTrend | undefined): ReportAccent {
+  if (trend === 'improving') return 'positive';
+  if (trend === 'declining') return 'negative';
   return 'neutral';
+}
+
+/** The trend of a KPI in a group run's change; `undefined` for counts, or without a change. */
+export function runTrend(run: GroupRun, id: KpiId): KpiTrend | undefined {
+  const trends: Partial<Record<KpiId, KpiTrend>> | undefined = run.change?.trends;
+  return trends?.[id];
 }

@@ -230,7 +230,7 @@ describe('BrandVisibilityReport — keyword group (hotel) variant', () => {
 
   it('shows the hotel KPIs instead of the cross-keyword overview', () => {
     renderAt('/reports/visibility?group=hotel-sol');
-    expect(screen.getByRole('button', { name: 'About Citation rate' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'KPI evolution' })).toBeInTheDocument();
     expect(screen.queryByText(/Cross-keyword visibility overview/i)).not.toBeInTheDocument();
   });
 

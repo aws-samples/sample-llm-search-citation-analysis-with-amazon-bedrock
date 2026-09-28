@@ -200,7 +200,7 @@ def _settings_response(
         'enabled': settings['enabled'],
         'notification_emails': settings['notification_emails'],
         'thresholds': {
-            'citation_rate_drop': settings['citation_rate_drop'],
+            'mention_rate_drop': settings['mention_rate_drop'],
             'position_loss': settings['position_loss'],
             'competitor_top_n': settings['competitor_top_n'],
             'improvement_after_content_change': settings['improvement_after_content_change'],
@@ -372,7 +372,7 @@ def _validate_settings_update(
 
     thresholds = body.get('thresholds')
     threshold_fields = {
-        'citation_rate_drop',
+        'mention_rate_drop',
         'position_loss',
         'competitor_top_n',
         'improvement_after_content_change',

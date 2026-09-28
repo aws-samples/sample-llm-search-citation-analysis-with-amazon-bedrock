@@ -13,7 +13,7 @@ export const MAX_CONTENT_CHANGE_URL_LENGTH = 2048;
 export interface AlertSettingsFormValues {
   enabled: boolean;
   notificationEmailsText: string;
-  citationRateDrop: string;
+  mentionRateDrop: string;
   positionLoss: string;
   competitorTopN: string;
   improvementAfterContentChange: string;
@@ -61,7 +61,7 @@ export function alertSettingsFormValues(settings: AlertSettings): AlertSettingsF
   return {
     enabled: settings.enabled,
     notificationEmailsText: uniqueEmails(settings.notification_emails.join('\n')).join('\n'),
-    citationRateDrop: String(settings.thresholds.citation_rate_drop),
+    mentionRateDrop: String(settings.thresholds.mention_rate_drop),
     positionLoss: String(settings.thresholds.position_loss),
     competitorTopN: String(settings.thresholds.competitor_top_n),
     improvementAfterContentChange: String(settings.thresholds.improvement_after_content_change),
@@ -69,13 +69,13 @@ export function alertSettingsFormValues(settings: AlertSettings): AlertSettingsF
 }
 
 export function validateAlertSettingsForm(values: AlertSettingsFormValues): string | null {
-  const citationProblem = validateThreshold({
-    value: values.citationRateDrop,
-    label: 'Citation-rate drop',
+  const mentionProblem = validateThreshold({
+    value: values.mentionRateDrop,
+    label: 'Mention-rate drop',
     minimum: 0.1,
     maximum: 100,
   });
-  if (citationProblem !== null) return citationProblem;
+  if (mentionProblem !== null) return mentionProblem;
 
   const positionProblem = validateThreshold({
     value: values.positionLoss,
@@ -112,7 +112,7 @@ export function toAlertSettingsUpdate(values: AlertSettingsFormValues): AlertSet
     enabled: values.enabled,
     notification_emails: uniqueEmails(values.notificationEmailsText),
     thresholds: {
-      citation_rate_drop: Number(values.citationRateDrop),
+      mention_rate_drop: Number(values.mentionRateDrop),
       position_loss: Number(values.positionLoss),
       competitor_top_n: Number(values.competitorTopN),
       improvement_after_content_change: Number(values.improvementAfterContentChange),

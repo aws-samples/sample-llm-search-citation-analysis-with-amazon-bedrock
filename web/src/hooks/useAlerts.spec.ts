@@ -222,7 +222,7 @@ describe('useAlertSettings', () => {
       enabled: false,
       notification_emails: ['owner@example.com'],
       thresholds: {
-        citation_rate_drop: 12,
+        mention_rate_drop: 12,
         position_loss: 4,
         competitor_top_n: 3,
         improvement_after_content_change: 9,

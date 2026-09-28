@@ -2,15 +2,15 @@ import {
   describe, expect, it
 } from 'vitest';
 import {
-  deltaAccent, formatPercent, formatPointsDelta, formatRank, formatRankDelta, groupRuns, latestGroupRun, modelChanges
+  groupRuns, latestGroupRun, modelChanges, runTrend, trendAccent
 } from './groupKpiView';
 import {
-  buildRun, RUN_1, RUN_2, RUN_3
+  buildChange, buildRun, buildTrends, RUN_1, RUN_2, RUN_3
 } from './groupKpiHistory-fixtures';
 
 const PARTIAL = buildRun({
   timestamp: RUN_3,
-  is_group_run: false 
+  is_group_run: false
 });
 
 describe('groupRuns', () => {
@@ -36,11 +36,11 @@ describe('modelChanges', () => {
     const runs = [
       buildRun({
         timestamp: RUN_1,
-        models: { openai: ['gpt-5-mini'] } 
+        models: { openai: ['gpt-5-mini'] }
       }),
       buildRun({
         timestamp: RUN_2,
-        models: { openai: ['gpt-5.2'] } 
+        models: { openai: ['gpt-5.2'] }
       }),
     ];
 
@@ -48,7 +48,7 @@ describe('modelChanges', () => {
       timestamp: RUN_2,
       provider: 'openai',
       from: ['gpt-5-mini'],
-      to: ['gpt-5.2'] 
+      to: ['gpt-5.2']
     }]);
   });
 
@@ -56,16 +56,16 @@ describe('modelChanges', () => {
     const runs = [
       buildRun({
         timestamp: RUN_1,
-        models: { openai: ['gpt-5-mini'] } 
+        models: { openai: ['gpt-5-mini'] }
       }),
       buildRun({
         timestamp: RUN_2,
         is_group_run: false,
-        models: { openai: ['gpt-4.1'] } 
+        models: { openai: ['gpt-4.1'] }
       }),
       buildRun({
         timestamp: RUN_3,
-        models: { openai: ['gpt-5-mini'] } 
+        models: { openai: ['gpt-5-mini'] }
       }),
     ];
 
@@ -76,11 +76,11 @@ describe('modelChanges', () => {
     const runs = [
       buildRun({
         timestamp: RUN_1,
-        models: { openai: ['gpt-5-mini'] } 
+        models: { openai: ['gpt-5-mini'] }
       }),
       buildRun({
         timestamp: RUN_2,
-        models: { gemini: ['gemini-2.5-pro'] } 
+        models: { gemini: ['gemini-2.5-pro'] }
       }),
     ];
 
@@ -97,11 +97,11 @@ describe('modelChanges', () => {
     const runs = [
       buildRun({
         timestamp: RUN_1,
-        models: { openai: before } 
+        models: { openai: before }
       }),
       buildRun({
         timestamp: RUN_2,
-        models: { openai: after } 
+        models: { openai: after }
       }),
     ];
 
@@ -109,50 +109,40 @@ describe('modelChanges', () => {
   });
 });
 
-describe('formatting', () => {
+describe('trendAccent', () => {
   it.each([
-    [42.54, '42.5%'],
-    [0, '0.0%'],
-    [null, '—'],
-  ])('writes the percentage %s as %s', (value, expected) => {
-    expect(formatPercent(value)).toBe(expected);
-  });
-
-  it.each([
-    [1.8, '1.80'],
-    [null, '—'],
-  ])('writes the mean rank %s as %s', (value, expected) => {
-    expect(formatRank(value)).toBe(expected);
-  });
-
-  it.each([
-    [2.54, '+2.5 pts'],
-    [-1, '-1.0 pts'],
-    [0, '0.0 pts'],
-    [null, '—'],
-  ])('writes the change %s as %s', (value, expected) => {
-    expect(formatPointsDelta(value)).toBe(expected);
-  });
-
-  it.each([
-    [0.5, '+0.50'],
-    [-0.25, '-0.25'],
-    [null, '—'],
-  ])('writes the rank change %s as %s', (value, expected) => {
-    expect(formatRankDelta(value)).toBe(expected);
+    ['improving', 'positive'],
+    ['declining', 'negative'],
+    ['stable', 'neutral'],
+    [undefined, 'neutral'],
+  ] as const)('colours a %s trend %s', (trend, accent) => {
+    expect(trendAccent(trend)).toBe(accent);
   });
 });
 
-describe('deltaAccent', () => {
+describe('runTrend', () => {
+  const compared = buildRun({
+    change: buildChange({
+      trends: buildTrends({
+        mention_rate: 'declining',
+        average_position: 'improving',
+      }),
+    }),
+  });
+
   it.each([
-    [5, true, 'positive'],
-    [-5, true, 'negative'],
-    [0.5, false, 'negative'],
-    [-0.5, false, 'positive'],
-    [0, true, 'neutral'],
-    [0, false, 'neutral'],
-    [null, true, 'neutral'],
-  ] as const)('colours the change %s (higher is better: %s) %s', (value, higherIsBetter, expected) => {
-    expect(deltaAccent(value, higherIsBetter)).toBe(expected);
+    ['mention_rate', 'declining'],
+    ['average_position', 'improving'],
+    ['visibility_score', 'stable'],
+  ] as const)('returns the %s trend of the run change: %s', (id, trend) => {
+    expect(runTrend(compared, id)).toBe(trend);
+  });
+
+  it('returns no trend for a run without a change', () => {
+    expect(runTrend(buildRun({ change: null }), 'mention_rate')).toBeUndefined();
+  });
+
+  it('returns no trend for a count KPI, which is never trended', () => {
+    expect(runTrend(compared, 'mentions')).toBeUndefined();
   });
 });

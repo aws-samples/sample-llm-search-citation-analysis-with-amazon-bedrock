@@ -1,175 +1,139 @@
 import {
   describe, expect, it, vi
 } from 'vitest';
+import { screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import {
-  screen, within
-} from '@testing-library/react';
-import {
-  renderGroupKpiReport, sectionTable, sectionTitled, statFigure
+  headerTooltips, kpiRowTooltips, renderGroupKpiReport, sectionTable
 } from './GroupKpiReport-fixtures';
 import {
-  buildChange, buildHistory, buildKeywordHistory, buildKeywordRun, buildRun, RUN_1, RUN_2
+  historyWithoutOwnedDomains, RUN_1
 } from './groupKpiHistory-fixtures';
+import {
+  KPI_DEFINITIONS, KPI_SPECS
+} from '../../../constants/kpiDefinitions';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
-describe('GroupKpiReport tables', () => {
-  it('lays out the driver table with every column', () => {
+const IMPACT_NOTE = 'Share of the group\'s change: the keyword\'s change weighted by its share of the run\'s answers.';
+
+describe('GroupKpiReport KPI table', () => {
+  it('heads the KPI table with the KPI, its value, change and trend', () => {
     renderGroupKpiReport();
 
-    expect(sectionTable('What changed')).toStrictEqual([
-      ['Keyword', 'Hotel mention', 'Citation rate impact', 'Share of voice', 'SOV impact', 'Rank #1 share', 'Top-3 share', 'Mean rank'],
-      ['hotel sol spa', 'No longer mentioned', '-20.0 pts', '-50.0 pts', '-10.0 pts', '-100.0 pts', '-100.0 pts', '—'],
+    expect(sectionTable('Headline')[0]).toStrictEqual(['KPI', 'Value', 'Change', 'Trend']);
+  });
+
+  it('lists every KPI of the selected run in report order with its value, change since the previous group run and trend', () => {
+    renderGroupKpiReport();
+
+    expect(sectionTable('Headline').slice(1)).toStrictEqual([
+      ['Answers', '20', '0', '—'],
+      ['Mentions', '12', '-2', '—'],
+      ['Mention rate', '60.0%', '-10.0 pts', 'Declining'],
+      ['Share of voice', '25.0%', '+5.0 pts', 'Improving'],
+      ['Average position', '1.80', '+0.50', 'Declining'],
+      ['Top-1 share', '40.0%', '+3.0 pts', 'Improving'],
+      ['Top-3 share', '55.0%', '+1.5 pts', 'Stable'],
+      ['Visibility score', '52.4', '-8.2 pts', 'Declining'],
+      ['Citations', '6', '+1', '—'],
+      ['Citation rate', '30.0%', '+1.2 pts', 'Stable'],
+      ['Citation share', '12.5%', '-2.5 pts', 'Declining'],
+      ['Net sentiment', '+15.0', '+10.0 pts', 'Improving'],
+      ['Engine coverage', '75.0%', '+0.8 pts', 'Stable'],
+      ['Keyword coverage', '80.0%', '-20.0 pts', 'Declining'],
     ]);
   });
 
-  it('lays out the keyword detail table newest first with every column', () => {
+  it('explains every KPI of the table in a tooltip holding its definition', () => {
     renderGroupKpiReport();
 
-    expect(sectionTable('Keyword detail')).toStrictEqual([
-      ['Run', 'Hotel mentioned', 'Share of voice', 'Rank #1 share', 'Top-3 share', 'Mean rank', 'Best rank', 'Answers mentioning'],
-      [new Date(RUN_2).toLocaleString(), 'No (lost)', '0.0% (-50.0 pts)', '100.0% (-100.0 pts)', '100.0% (-100.0 pts)', '1.00', '#1', '1 of 2'],
-      [new Date(RUN_1).toLocaleString(), 'Yes', '50.0%', '100.0%', '100.0%', '1.00', '#1', '1 of 2'],
+    expect(kpiRowTooltips()).toStrictEqual(KPI_SPECS.map((spec) => [`About ${spec.label}`, spec.definition]));
+  });
+
+  it('shows no change or trend for a run without an earlier group run', async () => {
+    renderGroupKpiReport();
+
+    await userEvent.selectOptions(screen.getByLabelText('Run'), RUN_1);
+
+    expect(sectionTable('Headline').slice(1).map((row) => row.slice(2))).toStrictEqual(KPI_SPECS.map(() => ['—', '—']));
+  });
+
+  it('shows the unmeasured citation KPIs as dashes before owned domains are set', () => {
+    renderGroupKpiReport({ history: historyWithoutOwnedDomains() });
+
+    expect(sectionTable('Headline').slice(9, 12).map((row) => row.slice(0, 2))).toStrictEqual([
+      ['Citations', '—'], ['Citation rate', '—'], ['Citation share', '—'],
+    ]);
+  });
+});
+
+describe('GroupKpiReport drivers table', () => {
+  it('heads the drivers table with the keyword, its mention, every KPI change and both impacts', () => {
+    renderGroupKpiReport();
+
+    expect(sectionTable('What changed')[0]).toStrictEqual([
+      'Keyword', 'Brand mention', 'Mention rate', 'Mention rate impact', 'Visibility score', 'Visibility impact',
+      'Share of voice', 'Average position', 'Top-1 share', 'Answers',
     ]);
   });
 
-  it('names each keyword with its number of runs in the picker', () => {
+  it('explains every KPI column of the drivers table in a header tooltip', () => {
     renderGroupKpiReport();
 
-    expect(within(screen.getByLabelText('Keyword')).getAllByRole('option').map((option) => option.textContent)).toStrictEqual([
-      'hotel sol beach (0 runs)', 'hotel sol spa (2 runs)',
+    expect(headerTooltips('What changed')).toStrictEqual([
+      ['Brand mention', 'Whether the keyword\'s answers started or stopped naming your brand since the previous group run.'],
+      ['Mention rate', KPI_DEFINITIONS.mention_rate.definition],
+      ['Mention rate impact', IMPACT_NOTE],
+      ['Visibility score', KPI_DEFINITIONS.visibility_score.definition],
+      ['Visibility impact', IMPACT_NOTE],
+      ['Share of voice', KPI_DEFINITIONS.share_of_voice.definition],
+      ['Average position', KPI_DEFINITIONS.average_position.definition],
+      ['Top-1 share', KPI_DEFINITIONS.top_1_share.definition],
+      ['Answers', KPI_DEFINITIONS.answers.definition],
+    ]);
+  });
+});
+
+describe('GroupKpiReport keyword detail table', () => {
+  it('heads the keyword detail table with the run, its mention and every KPI', () => {
+    renderGroupKpiReport();
+
+    expect(sectionTable('Keyword detail')[0]).toStrictEqual([
+      'Run', 'Brand mentioned', 'Answers mentioning', 'Mention rate', 'Share of voice', 'Average position', 'Top-1 share',
+      'Visibility score', 'Citation rate', 'Net sentiment',
     ]);
   });
 
-  it('shows a keyword value without a change when that value could not be compared', () => {
-    renderGroupKpiReport({
-      history: buildHistory({
-        keywords: [buildKeywordHistory('k', [buildKeywordRun({
-          change: {
-            previous_timestamp: RUN_1,
-            mention: null,
-            first_party_sov: 5,
-            rank_1_share: null,
-            top_3_share: null,
-            mean_rank: null,
-          },
-        })])],
-      }),
-    });
-
-    expect(sectionTable('Keyword detail')[1].slice(2, 5)).toStrictEqual(['50.0% (+5.0 pts)', '100.0%', '100.0%']);
-  });
-
-  it('shows a mean rank change and a rank the hotel never reached', () => {
-    renderGroupKpiReport({
-      history: buildHistory({
-        runs: [buildRun({
-          change: buildChange({
-            deltas: {
-              coverage_rate: 0,
-              first_party_avg_sov: 0,
-              rank_1_share: 0,
-              top_3_share: 0,
-              mean_rank: 0.5 
-            } 
-          }) 
-        })],
-        keywords: [buildKeywordHistory('k', [buildKeywordRun({
-          mean_rank: null,
-          first_party_best_rank: null 
-        })])],
-      }),
-    });
-
-    expect(sectionTable('Keyword detail')[1].slice(5, 7)).toStrictEqual(['—', '—']);
-    expect(screen.getByText(/Mean rank \+0\.50/)).toBeInTheDocument();
-  });
-});
-
-describe('GroupKpiReport what-changed text', () => {
-  it('summarises every group delta', () => {
+  it('explains every KPI column of the keyword detail table in a header tooltip', () => {
     renderGroupKpiReport();
 
-    expect(within(sectionTitled('What changed')).getByText(/^Citation rate -/).textContent).toBe(
-      'Citation rate -20.0 pts · Share of voice -10.0 pts · Rank #1 share +5.0 pts · Top-3 share 0.0 pts · Mean rank +0.50',
-    );
+    expect(headerTooltips('Keyword detail')).toStrictEqual([
+      ['Brand mentioned', 'Whether any answer of this run names your brand; "new" and "lost" compare with the keyword\'s previous run.'],
+      ['Answers mentioning', KPI_DEFINITIONS.mentions.definition],
+      ['Mention rate', KPI_DEFINITIONS.mention_rate.definition],
+      ['Share of voice', KPI_DEFINITIONS.share_of_voice.definition],
+      ['Average position', KPI_DEFINITIONS.average_position.definition],
+      ['Top-1 share', KPI_DEFINITIONS.top_1_share.definition],
+      ['Visibility score', KPI_DEFINITIONS.visibility_score.definition],
+      ['Citation rate', KPI_DEFINITIONS.citation_rate.definition],
+      ['Net sentiment', KPI_DEFINITIONS.net_sentiment.definition],
+    ]);
   });
 
-  it('dates the comparison and explains impact', () => {
+  it('shows the newest keyword run with each value and its change since the keyword\'s previous run', () => {
     renderGroupKpiReport();
 
-    expect(within(sectionTitled('What changed')).getByText(/^Since the group run of/).textContent).toBe(
-      `Since the group run of ${new Date(RUN_1).toLocaleString()}. Impact = the keyword's change divided by the keywords with results.`,
-    );
+    expect(sectionTable('Keyword detail')[1].slice(1)).toStrictEqual([
+      'No (lost)', '0 of 4', '0.0% (-50.0 pts)', '0.0% (-25.0 pts)', '—', '0.0% (-25.0 pts)', '0.0 (-47.5 pts)', '25.0% (0.0 pts)', '—',
+    ]);
   });
 
-  it('lists several joined and missing keywords separated by commas', () => {
-    renderGroupKpiReport({
-      history: buildHistory({
-        runs: [buildRun({
-          change: buildChange({
-            keywords_entered: ['a', 'b'],
-            keywords_left: ['c', 'd'] 
-          }) 
-        })],
-      }),
-    });
-
-    expect(screen.getByText('New in this run: a, b')).toBeInTheDocument();
-    expect(screen.getByText('Missing from this run: c, d')).toBeInTheDocument();
-  });
-
-  it('adds no joined or missing lines when the same keywords were compared', () => {
+  it('shows the oldest keyword run last, with its values and no change', () => {
     renderGroupKpiReport();
 
-    expect(screen.queryByText(/New in this run|Missing from this run/)).not.toBeInTheDocument();
-  });
-});
-
-describe('GroupKpiReport headline details', () => {
-  it('names the run and its coverage', () => {
-    renderGroupKpiReport();
-
-    expect(screen.getByText(`Run of ${new Date(RUN_2).toLocaleString()} — 5 of 5 keywords with results.`)).toBeInTheDocument();
-  });
-
-  it.each([
-    ['Citation rate', 'text-red-700'],
-    ['Share of voice', 'text-red-700'],
-    ['Prominence (rank #1)', 'text-emerald-700'],
-  ])('colours %s by the direction of its change', (label, colour) => {
-    renderGroupKpiReport();
-
-    expect(statFigure(label)).toHaveClass(colour);
-  });
-
-  it('keeps the heading while the history loads', () => {
-    renderGroupKpiReport({
-      history: null,
-      loading: true 
-    });
-
-    expect(screen.getByRole('heading', { name: 'Headline' })).toBeInTheDocument();
-  });
-});
-
-describe('GroupKpiReport model list', () => {
-  it('lists every model of a provider that answered with several', () => {
-    renderGroupKpiReport({
-      history: buildHistory({
-        runs: [
-          buildRun({
-            timestamp: RUN_1,
-            models: { openai: ['a', 'b'] } 
-          }),
-          buildRun({
-            timestamp: RUN_2,
-            models: { openai: ['c', 'd'] } 
-          }),
-        ],
-      }),
-    });
-
-    expect(screen.getByText(`${new Date(RUN_2).toLocaleDateString()} · openai: a, b → c, d`)).toBeInTheDocument();
+    expect(sectionTable('Keyword detail')[2]).toStrictEqual([
+      new Date(RUN_1).toLocaleString(), 'Yes', '2 of 4', '50.0%', '25.0%', '1.50', '25.0%', '47.5', '25.0%', '+50.0',
+    ]);
   });
 });

@@ -14,6 +14,7 @@ export { ReportStatGrid } from './ReportStatGrid';
 export {
   ReportTable, type ReportTableColumn 
 } from './ReportTable';
+export { kpiColumn } from './kpiColumn';
 export { PriorityBadge } from './PriorityBadge';
 export { MoverColumn } from './MoverColumn';
 export type { ReportAccent } from './reportAccent';
