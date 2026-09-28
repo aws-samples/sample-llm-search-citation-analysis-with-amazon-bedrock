@@ -2,9 +2,10 @@
 Group KPI History API — GET /api/reports/group-kpis
 
 The per-hotel report: every analysis run of a keyword group within the last
-``days`` days with its citation rate, share of voice and prominence, the
-keywords that drove each change, and a per-keyword drill-down of every run.
-Formulas and run semantics live in ``shared.group_kpi_history``.
+``days`` days with its KPIs (``docs/kpi-definitions.md``), the keywords that
+drove each change, and a per-keyword drill-down of every run. Run semantics
+live in ``shared.group_kpi_history``; the citation KPIs use the owned domains
+of the brand configuration.
 
 Query params: exactly one scope (``group_id``, ``keyword_ids``, ``scope=all``
 or ``keyword``) and ``days`` (1-365, default 90).
@@ -17,7 +18,7 @@ from typing import Any
 from shared.api_response import success_response
 from shared.decorators import api_handler, validate
 from shared.group_kpi_history import GROUP_RUN_MIN_COVERAGE, build_group_kpi_history, query_keyword_rows_since
-from shared.providers import get_enabled_provider_count
+from shared.kpi_engine import owned_domains_from
 from shared.scope_params import (
     SCOPE_KEYWORDS_CAP,
     SCOPE_QUERY_PARAMS,
@@ -27,6 +28,7 @@ from shared.scope_params import (
     scoped_dynamodb_resource,
 )
 from shared.search_results import search_results_table_name
+from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -72,14 +74,14 @@ def handler(event, context, *, days, **scope_params):
 
     keywords = list(report_scope.keywords)[:SCOPE_KEYWORDS_CAP]
     since = history_since(days)
-    total_providers = get_enabled_provider_count()
-    history = build_group_kpi_history(keywords, load_rows(keywords, since), total_providers)
+    owned_domains = owned_domains_from(get_brand_config())
+    history = build_group_kpi_history(keywords, load_rows(keywords, since), owned_domains)
     return success_response({
         'scope': report_scope.describe(),
         'days': days,
         'since': since,
-        'total_providers': total_providers,
         'group_run_min_coverage': GROUP_RUN_MIN_COVERAGE,
         'keywords_truncated': len(report_scope.keywords) > len(keywords),
+        'citations_configured': bool(owned_domains),
         **history,
     }, event)

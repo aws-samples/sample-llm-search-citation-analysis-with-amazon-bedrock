@@ -1,19 +1,15 @@
-"""Shared per-keyword visibility loading and aggregation.
+"""Shared per-keyword visibility loading and aggregation behind ``/visibility``.
 
-The HTTP visibility endpoint keeps its historical latest-run semantics while
-post-run KPI evaluation passes an exact execution timestamp. Both consumers use
-the same projected SearchResults fields and the same aggregation implementation.
+The HTTP visibility endpoint reports the latest run of a keyword, or an exact
+run when given its timestamp.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from boto3.dynamodb.conditions import Key
-
 from shared.constants import UNRANKED_SENTINEL
 from shared.dynamo_decimal import to_int
-from shared.dynamodb_batch import collect_all_items
 from shared.visibility_score import (
     calculate_share_of_voice,
     calculate_visibility_score,
@@ -23,19 +19,6 @@ from shared.visibility_score import (
 )
 
 METRICS_PROJECTION = '#ts, provider, brands, query_prompt_id'
-
-
-def query_exact_visibility_rows(table: Any, keyword: str, timestamp: str) -> list[dict[str, Any]]:
-    """Return every projected row for one keyword at one exact run timestamp."""
-    return collect_all_items(
-        table.query,
-        KeyConditionExpression=(
-            Key('keyword').eq(keyword)
-            & Key('timestamp_provider').begins_with(f'{timestamp}#')
-        ),
-        ProjectionExpression=METRICS_PROJECTION,
-        ExpressionAttributeNames={'#ts': 'timestamp'},
-    )
 
 
 def _selected_rows(
@@ -177,19 +160,3 @@ def calculate_keyword_visibility(
             'competitor_total_sov': round(sum(item['share_of_voice'] for item in competitors), 2),
         },
     }
-
-
-def get_exact_keyword_visibility(
-    table: Any,
-    keyword: str,
-    timestamp: str,
-    total_providers: int,
-) -> dict[str, Any]:
-    """Load and calculate one keyword for the exact completed execution."""
-    rows = query_exact_visibility_rows(table, keyword, timestamp)
-    return calculate_keyword_visibility(
-        keyword,
-        rows,
-        total_providers,
-        exact_timestamp=timestamp,
-    )

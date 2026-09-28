@@ -16,7 +16,9 @@ from shared.kpi_engine import (
     brand_table,
     is_owned_domain,
     kpi_changes,
+    kpi_trends,
     normalize_domain,
+    owned_domains_from,
     position_weight,
     trend_direction,
 )
@@ -209,6 +211,16 @@ class TestDomains:
 
     def test_owns_nothing_without_owned_domains(self):
         assert is_owned_domain('hotel-sol.com', ['', '  ']) is False
+
+    @pytest.mark.parametrize(('config', 'expected'), [
+        ({'first_party_domains': ['https://www.Hotel-Sol.com/', 'hotel-sol.com', 'blog.hotel-sol.com', '', 7]}, ['blog.hotel-sol.com', 'hotel-sol.com']),
+        ({'first_party_domains': ('a.com',)}, ['a.com']),
+        ({'first_party_domains': 'hotel-sol.com'}, []),
+        ({'first_party_domains': None}, []),
+        ({}, []),
+    ])
+    def test_reads_the_owned_domains_of_the_brand_configuration(self, config, expected):
+        assert owned_domains_from(config) == expected
 
 
 class TestPositionWeight:
@@ -403,3 +415,12 @@ class TestChanges:
     ])
     def test_calls_the_trend_with_a_noise_band_and_lower_is_better_for_position(self, change, kpi, expected):
         assert trend_direction(change, kpi) == expected
+
+    def test_calls_a_trend_for_every_rate_and_score_but_not_for_counts(self):
+        trends = kpi_trends({'mention_rate': 3.0, 'average_position': 1.0, 'net_sentiment': -2.0, 'answers': 40})
+
+        assert trends == {
+            'mention_rate': 'improving', 'share_of_voice': 'stable', 'average_position': 'declining',
+            'top_1_share': 'stable', 'top_3_share': 'stable', 'visibility_score': 'stable', 'citation_rate': 'stable',
+            'citation_share': 'stable', 'net_sentiment': 'declining', 'engine_coverage': 'stable', 'keyword_coverage': 'stable',
+        }

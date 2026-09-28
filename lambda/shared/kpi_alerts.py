@@ -1,26 +1,40 @@
-"""Pure KPI snapshot, settings, and alert comparison helpers."""
+"""Pure KPI snapshot, settings, and alert comparison helpers.
+
+A snapshot records the KPIs of one complete group run (``shared.kpi_engine``,
+``docs/kpi-definitions.md``). Snapshots carry ``kpi_version``: when the KPI
+definitions change, the version moves on and the first snapshot of the new
+version is a fresh baseline, never compared with one measured differently.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from shared.constants import UNRANKED_SENTINEL
+from shared.kpi_engine import COMPETITOR, Answer, brand_kpis, brand_table
 from shared.visibility_score import finite_number
 
 RETENTION_DAYS = 365
 MAX_NOTIFICATION_EMAILS = 100
 
+#: The KPI definitions snapshots are measured with; 2 = the market-aligned KPIs of 2.21.0.
+KPI_VERSION = 2
+
 DEFAULT_ALERT_SETTINGS: dict[str, Any] = {
     'enabled': True,
     'notification_emails': [],
-    'citation_rate_drop': 10.0,
+    'mention_rate_drop': 10.0,
     'position_loss': 1.0,
     'competitor_top_n': 3,
     'improvement_after_content_change': 5.0,
 }
+
+#: Settings stored under an earlier name: read the old name until the settings are saved again.
+_LEGACY_SETTING_NAMES = {'mention_rate_drop': 'citation_rate_drop'}
 
 _SETTINGS_FIELDS = frozenset(DEFAULT_ALERT_SETTINGS)
 _EMAIL_PATTERN = re.compile(
@@ -31,8 +45,8 @@ _EMAIL_PATTERN = re.compile(
 
 
 def _metric(mapping: dict[str, Any], name: str) -> float | None:
-    summary = mapping.get('summary')
-    return finite_number(summary.get(name)) if isinstance(summary, dict) else None
+    kpis = mapping.get('kpis')
+    return finite_number(kpis.get(name)) if isinstance(kpis, dict) else None
 
 
 def _valid_rank(value: Any) -> float | None:
@@ -110,7 +124,7 @@ def validate_settings(value: Any) -> tuple[dict[str, Any] | None, str | None, st
         'notification_emails': emails,
     }
     for name, minimum, maximum in (
-        ('citation_rate_drop', 0.1, 100.0),
+        ('mention_rate_drop', 0.1, 100.0),
         ('position_loss', 0.1, 100.0),
         ('improvement_after_content_change', 0.1, 100.0),
     ):
@@ -126,11 +140,18 @@ def validate_settings(value: Any) -> tuple[dict[str, Any] | None, str | None, st
     return validated, None, None
 
 
+def _stored_setting(item: Mapping[str, Any], name: str, default: Any) -> Any:
+    if name in item:
+        return item[name]
+    legacy = _LEGACY_SETTING_NAMES.get(name)
+    return item.get(legacy, default) if legacy is not None else default
+
+
 def resolve_settings(item: Any) -> dict[str, Any]:
     """Return safe native defaults overlaid with any valid stored settings."""
     if not isinstance(item, dict):
         return {**DEFAULT_ALERT_SETTINGS, 'notification_emails': []}
-    candidate = {name: item.get(name, default) for name, default in DEFAULT_ALERT_SETTINGS.items()}
+    candidate = {name: _stored_setting(item, name, default) for name, default in DEFAULT_ALERT_SETTINGS.items()}
     stored_top_n = finite_number(candidate['competitor_top_n'])
     if stored_top_n is not None and stored_top_n.is_integer():
         candidate['competitor_top_n'] = int(stored_top_n)
@@ -196,20 +217,20 @@ def _metric_change_alerts(
     settings: dict[str, Any],
 ) -> list[dict[str, Any]]:
     alerts: list[dict[str, Any]] = []
-    previous_coverage = _metric(previous, 'coverage_rate')
-    current_coverage = _metric(current, 'coverage_rate')
-    coverage_threshold = float(settings['citation_rate_drop'])
-    if previous_coverage is not None and current_coverage is not None:
-        drop = previous_coverage - current_coverage
-        if drop >= coverage_threshold:
+    previous_rate = _metric(previous, 'mention_rate')
+    current_rate = _metric(current, 'mention_rate')
+    rate_threshold = float(settings['mention_rate_drop'])
+    if previous_rate is not None and current_rate is not None:
+        drop = previous_rate - current_rate
+        if drop >= rate_threshold:
             alerts.append(_alert(
-                'citation_rate_drop', 'warning', previous_coverage, current_coverage,
-                round(drop, 2), coverage_threshold, str(current.get('group_id', '')),
-                f'Citation coverage fell by {drop:.1f} percentage points.',
+                'mention_rate_drop', 'warning', previous_rate, current_rate,
+                round(drop, 2), rate_threshold, str(current.get('group_id', '')),
+                f'Mention rate fell by {drop:.1f} points.',
             ))
 
-    previous_rank = _valid_rank(_metric(previous, 'mean_rank'))
-    current_rank = _valid_rank(_metric(current, 'mean_rank'))
+    previous_rank = _valid_rank(_metric(previous, 'average_position'))
+    current_rank = _valid_rank(_metric(current, 'average_position'))
     rank_threshold = float(settings['position_loss'])
     if previous_rank is not None and current_rank is not None:
         loss = current_rank - previous_rank
@@ -217,7 +238,7 @@ def _metric_change_alerts(
             alerts.append(_alert(
                 'position_loss', 'warning', previous_rank, current_rank,
                 round(loss, 2), rank_threshold, str(current.get('group_id', '')),
-                f'Average first-party rank worsened by {loss:.1f} positions.',
+                f'Average position worsened by {loss:.1f} positions.',
             ))
     return alerts
 
@@ -228,7 +249,7 @@ def _competitor_alerts(
     top_n: int,
 ) -> list[dict[str, Any]]:
     prior = {
-        str(item.get('name', '')).casefold(): _valid_rank(item.get('best_rank'))
+        str(item.get('name', '')).casefold(): _valid_rank(item.get('best_position'))
         for item in previous.get('competitors', [])
         if isinstance(item, dict) and item.get('name')
     }
@@ -237,7 +258,7 @@ def _competitor_alerts(
         if not isinstance(competitor, dict):
             continue
         name = str(competitor.get('name', '')).strip()
-        rank = _valid_rank(competitor.get('best_rank'))
+        rank = _valid_rank(competitor.get('best_position'))
         previous_rank = prior.get(name.casefold())
         if name and rank is not None and rank <= top_n and (previous_rank is None or previous_rank > top_n):
             alerts.append(_alert(
@@ -253,7 +274,7 @@ def _lost_keyword_alerts(
     current: dict[str, Any],
 ) -> list[dict[str, Any]]:
     prior = {
-        str(item.get('keyword', '')): bool(item.get('first_party_mentioned'))
+        str(item.get('keyword', '')): bool(item.get('mentioned'))
         for item in previous.get('keywords', [])
         if isinstance(item, dict) and item.get('keyword')
     }
@@ -262,10 +283,10 @@ def _lost_keyword_alerts(
         if not isinstance(keyword, dict):
             continue
         name = str(keyword.get('keyword', ''))
-        if name and prior.get(name) is True and not keyword.get('first_party_mentioned'):
+        if name and prior.get(name) is True and not keyword.get('mentioned'):
             alerts.append(_alert(
                 'keyword_lost_mention', 'warning', True, False, -1, 1,
-                name, f'First-party mention was lost for keyword: {name}',
+                name, f'The brand is no longer mentioned for keyword: {name}',
             ))
     return alerts
 
@@ -294,8 +315,8 @@ def _improvement_alert(
         str(current.get('snapshot_at', '')),
     ):
         return []
-    before = _metric(previous, 'first_party_avg_score')
-    after = _metric(current, 'first_party_avg_score')
+    before = _metric(previous, 'visibility_score')
+    after = _metric(current, 'visibility_score')
     threshold = float(settings['improvement_after_content_change'])
     if before is None or after is None or after - before < threshold:
         return []
@@ -314,9 +335,34 @@ def _improvement_alert(
     return [_alert(
         'improvement_after_content_change', 'info', before, after, delta,
         threshold, str(current.get('group_id', '')),
-        f'First-party visibility improved by {delta:.1f} points after a content change.',
+        f'Visibility score improved by {delta:.1f} points after a content change.',
         content_change=change,
     )]
+
+
+def snapshot_metrics(answers_by_keyword: Mapping[str, Iterable[Answer]], owned_domains: Iterable[str] = ()) -> dict[str, Any]:
+    """The measured part of a group snapshot, from the answers of each of the group's keywords in one run.
+
+    ``kpis`` pools every answer (the group report's run value); ``keywords``
+    and ``competitors`` feed the lost-mention and new-competitor rules.
+    """
+    domains = list(owned_domains)
+    per_keyword = {keyword: list(answers) for keyword, answers in answers_by_keyword.items()}
+    keyword_kpis = {keyword: brand_kpis(answers, domains) for keyword, answers in per_keyword.items()}
+    pooled = [answer for answers in per_keyword.values() for answer in answers]
+    return {
+        'kpi_version': KPI_VERSION,
+        'kpis': brand_kpis(pooled, domains),
+        'keywords': [
+            {'keyword': keyword, 'mentioned': kpis['mentions'] > 0, 'average_position': kpis['average_position']}
+            for keyword, kpis in keyword_kpis.items()
+        ],
+        'competitors': [
+            {'name': row['name'], 'best_position': row['best_position']}
+            for row in brand_table(pooled)
+            if row['classification'] == COMPETITOR
+        ],
+    }
 
 
 def compare_snapshots(
@@ -326,8 +372,10 @@ def compare_snapshots(
     *,
     content_change: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    """Evaluate all five rules for two complete snapshots."""
+    """Evaluate all five rules for two complete snapshots measured with the same KPI definitions."""
     if previous is None or not settings.get('enabled'):
+        return []
+    if previous.get('kpi_version') != KPI_VERSION or current.get('kpi_version') != KPI_VERSION:
         return []
     alerts = _metric_change_alerts(previous, current, settings)
     alerts.extend(_competitor_alerts(previous, current, int(settings['competitor_top_n'])))

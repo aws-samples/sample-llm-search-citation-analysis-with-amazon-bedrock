@@ -18,16 +18,17 @@ from botocore.exceptions import ClientError
 
 from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.dynamodb_batch import collect_all_items
+from shared.group_kpi_history import query_keyword_run_rows
 from shared.keyword_groups import keyword_group_ids, query_active_keywords
 from shared.kpi_alerts import (
     build_alert_item,
     compare_snapshots,
     resolve_settings,
+    snapshot_metrics,
     ttl_for_timestamp,
 )
-from shared.providers import get_enabled_provider_count
-from shared.visibility_metrics import get_exact_keyword_visibility
-from shared.visibility_score import summarize_group_visibility
+from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
+from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -37,7 +38,7 @@ _MAX_WORKERS = 10
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 KEYWORDS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORDS']
 KEYWORD_GROUPS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORD_GROUPS']
-PROVIDER_CONFIG_TABLE = os.environ['DYNAMODB_TABLE_PROVIDER_CONFIG']
+BRAND_CONFIG_TABLE = os.environ['DYNAMODB_TABLE_BRAND_CONFIG']
 SNAPSHOTS_TABLE = os.environ['DYNAMODB_TABLE_KPI_SNAPSHOTS']
 ALERTS_TABLE = os.environ['DYNAMODB_TABLE_KPI_ALERTS']
 SETTINGS_TABLE = os.environ['DYNAMODB_TABLE_ALERT_SETTINGS']
@@ -161,24 +162,19 @@ def _complete_groups(
     return complete, skipped
 
 
-def _load_exact_metrics(
+def _load_run_answers(
     keywords: list[str],
     timestamp: str,
-    total_providers: int,
-) -> dict[str, dict[str, Any]]:
+) -> dict[str, list[Answer] | None]:
+    """Each keyword's answers in the run stamped ``timestamp``; ``None`` for a keyword that could not be read."""
     table = dynamodb.Table(SEARCH_RESULTS_TABLE)
 
-    def load(keyword: str) -> tuple[str, dict[str, Any]]:
+    def load(keyword: str) -> tuple[str, list[Answer] | None]:
         try:
-            return keyword, get_exact_keyword_visibility(
-                table,
-                keyword,
-                timestamp,
-                total_providers,
-            )
+            return keyword, answers_from_rows(query_keyword_run_rows(table, keyword, timestamp))
         except Exception:
-            logger.exception('Exact-run visibility query failed for one keyword')
-            return keyword, {'error': 'Visibility query failed'}
+            logger.exception('Exact-run answers query failed for one keyword')
+            return keyword, None
 
     if not keywords:
         return {}
@@ -216,7 +212,7 @@ def _snapshot(
     execution_input: dict[str, Any],
     report: dict[str, Any],
     timestamp: str,
-    group_metrics: dict[str, Any],
+    metrics: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         'group_id': group_id,
@@ -229,20 +225,7 @@ def _snapshot(
             timestamp,
         ),
         'complete_scope': True,
-        'summary': group_metrics['summary'],
-        'keywords': [
-            {
-                'keyword': item['keyword'],
-                'first_party_mentioned': item['first_party_mentioned'],
-                'best_rank': item['first_party_best_rank'],
-                'mean_rank': item['mean_rank'],
-            }
-            for item in group_metrics['keywords']
-        ],
-        'competitors': [
-            {'name': item['name'], 'best_rank': item.get('best_rank')}
-            for item in group_metrics['competitors']
-        ],
+        **metrics,
         'ttl': ttl_for_timestamp(timestamp),
     }
 
@@ -377,31 +360,20 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     }, key=str.casefold)
 
     settings = _settings()
-    total_providers = get_enabled_provider_count(PROVIDER_CONFIG_TABLE)
-    metrics_by_keyword = _load_exact_metrics(
-        unique_keywords,
-        run_timestamp,
-        total_providers,
-    )
+    owned_domains = owned_domains_from(get_brand_config(BRAND_CONFIG_TABLE))
+    answers_by_keyword = _load_run_answers(unique_keywords, run_timestamp)
 
     snapshots_recorded = 0
     groups_evaluated = 0
     new_alerts: list[dict[str, Any]] = []
     for group_id in complete:
         keywords = [str(item['keyword']) for item in members[group_id]]
-        per_keyword = [metrics_by_keyword[keyword] for keyword in keywords]
-        if any(
-            'error' in metrics or metrics.get('timestamp') != run_timestamp
-            for metrics in per_keyword
-        ):
+        group_answers = {keyword: answers for keyword in keywords if (answers := answers_by_keyword[keyword])}
+        # A keyword that could not be read, or that no engine answered, leaves the run incomplete.
+        if len(group_answers) < len(keywords):
             skipped_partial += 1
             continue
 
-        group_metrics = summarize_group_visibility(
-            keywords,
-            per_keyword,
-            total_providers,
-        )
         group = groups_by_id[group_id]
         snapshot = _snapshot(
             group_id,
@@ -410,7 +382,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             execution_input,
             report,
             run_timestamp,
-            group_metrics,
+            snapshot_metrics(group_answers, owned_domains),
         )
         previous = _previous_snapshot(group_id, run_timestamp)
         marker = (

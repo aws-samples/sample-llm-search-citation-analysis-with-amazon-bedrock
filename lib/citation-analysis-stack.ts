@@ -1313,7 +1313,8 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
-        DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
+        // Owned domains (first_party_domains) for the citation KPIs of each snapshot.
+        DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
         DYNAMODB_TABLE_KPI_SNAPSHOTS: kpiSnapshotsTable.tableName,
         DYNAMODB_TABLE_KPI_ALERTS: kpiAlertsTable.tableName,
         DYNAMODB_TABLE_ALERT_SETTINGS: alertSettingsTable.tableName,
@@ -1325,7 +1326,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     searchResultsTable.grantReadData(kpiAlertsFunction);
     keywordsTable.grantReadData(kpiAlertsFunction);
     keywordGroupsTable.grantReadData(kpiAlertsFunction);
-    providerConfigTable.grantReadData(kpiAlertsFunction);
+    brandConfigTable.grantReadData(kpiAlertsFunction);
     kpiSnapshotsTable.grantReadWriteData(kpiAlertsFunction);
     kpiAlertsTable.grantWriteData(kpiAlertsFunction);
     alertSettingsTable.grantReadData(kpiAlertsFunction);

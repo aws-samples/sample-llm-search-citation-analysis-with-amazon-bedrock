@@ -9,14 +9,17 @@ import pytest
 
 from shared.kpi_alerts import (
     DEFAULT_ALERT_SETTINGS,
+    KPI_VERSION,
     compare_snapshots,
     deterministic_alert_id,
     deterministic_content_change_id,
     marker_in_window,
     resolve_settings,
+    snapshot_metrics,
     ttl_for_timestamp,
     validate_settings,
 )
+from shared.kpi_engine import answers_from_rows
 
 PREVIOUS_TIMESTAMP = '2026-09-01T10:00:00Z'
 CURRENT_TIMESTAMP = '2026-09-02T10:00:00Z'
@@ -26,18 +29,19 @@ def _snapshot() -> dict:
     return {
         'group_id': 'group-1',
         'snapshot_at': PREVIOUS_TIMESTAMP,
-        'summary': {
-            'coverage_rate': 80.0,
-            'mean_rank': 2.0,
-            'first_party_avg_score': 50.0,
+        'kpi_version': KPI_VERSION,
+        'kpis': {
+            'mention_rate': 80.0,
+            'average_position': 2.0,
+            'visibility_score': 50.0,
         },
         'keywords': [
-            {'keyword': 'hotel spa', 'first_party_mentioned': True},
-            {'keyword': 'hotel beach', 'first_party_mentioned': False},
+            {'keyword': 'hotel spa', 'mentioned': True},
+            {'keyword': 'hotel beach', 'mentioned': False},
         ],
         'competitors': [
-            {'name': 'Old Rival', 'best_rank': 2},
-            {'name': 'Far Rival', 'best_rank': 7},
+            {'name': 'Old Rival', 'best_position': 2},
+            {'name': 'Far Rival', 'best_position': 7},
         ],
     }
 
@@ -56,49 +60,47 @@ def _of_type(alerts: list[dict], alert_type: str) -> list[dict]:
     return [alert for alert in alerts if alert['type'] == alert_type]
 
 
-class TestCitationRateDrop:
+class TestMentionRateDrop:
     def test_creates_warning_when_drop_equals_threshold(self) -> None:
         current = _current()
-        current['summary']['coverage_rate'] = 70.0
+        current['kpis']['mention_rate'] = 70.0
 
         alerts = compare_snapshots(_snapshot(), current, _settings())
 
-        assert _of_type(alerts, 'citation_rate_drop') == [{
-            'type': 'citation_rate_drop',
+        assert _of_type(alerts, 'mention_rate_drop') == [{
+            'type': 'mention_rate_drop',
             'severity': 'warning',
             'previous': 80.0,
             'current': 70.0,
             'delta': 10.0,
             'threshold': 10.0,
             'entity': 'group-1',
-            'message': 'Citation coverage fell by 10.0 percentage points.',
+            'message': 'Mention rate fell by 10.0 points.',
         }]
 
     def test_creates_no_warning_when_drop_is_below_threshold(self) -> None:
         current = _current()
-        current['summary']['coverage_rate'] = 70.1
+        current['kpis']['mention_rate'] = 70.1
 
         alerts = compare_snapshots(_snapshot(), current, _settings())
 
-        assert _of_type(alerts, 'citation_rate_drop') == []
+        assert _of_type(alerts, 'mention_rate_drop') == []
 
 
 class TestPositionLoss:
-    def test_creates_warning_when_mean_rank_loss_equals_threshold(self) -> None:
+    def test_creates_warning_when_average_position_loss_equals_threshold(self) -> None:
         current = _current()
-        current['summary']['mean_rank'] = 3.0
+        current['kpis']['average_position'] = 3.0
 
         alert = _of_type(compare_snapshots(_snapshot(), current, _settings()), 'position_loss')[0]
 
-        assert alert['previous'] == 2.0
-        assert alert['current'] == 3.0
-        assert alert['delta'] == 1.0
-        assert alert['threshold'] == 1.0
+        assert (alert['previous'], alert['current'], alert['delta'], alert['threshold']) == (2.0, 3.0, 1.0, 1.0)
+        assert alert['message'] == 'Average position worsened by 1.0 positions.'
 
     @pytest.mark.parametrize('invalid_rank', [None, 0, 999, 'not-a-rank'])
     def test_creates_no_warning_when_current_rank_is_invalid(self, invalid_rank: object) -> None:
         current = _current()
-        current['summary']['mean_rank'] = invalid_rank
+        current['kpis']['average_position'] = invalid_rank
 
         alerts = compare_snapshots(_snapshot(), current, _settings())
 
@@ -109,8 +111,8 @@ class TestNewCompetitorTop:
     def test_creates_warning_for_each_competitor_newly_entering_top_n(self) -> None:
         current = _current()
         current['competitors'] = [
-            {'name': 'Far Rival', 'best_rank': 3},
-            {'name': 'New Rival', 'best_rank': 1},
+            {'name': 'Far Rival', 'best_position': 3},
+            {'name': 'New Rival', 'best_position': 1},
         ]
 
         alerts = _of_type(compare_snapshots(_snapshot(), current, _settings()), 'new_competitor_top')
@@ -129,7 +131,7 @@ class TestNewCompetitorTop:
 class TestKeywordLostMention:
     def test_creates_warning_for_each_previously_mentioned_active_keyword_now_missing(self) -> None:
         current = _current()
-        current['keywords'][0]['first_party_mentioned'] = False
+        current['keywords'][0]['mentioned'] = False
 
         alerts = _of_type(compare_snapshots(_snapshot(), current, _settings()), 'keyword_lost_mention')
 
@@ -141,14 +143,14 @@ class TestKeywordLostMention:
             'delta': -1,
             'threshold': 1,
             'entity': 'hotel spa',
-            'message': 'First-party mention was lost for keyword: hotel spa',
+            'message': 'The brand is no longer mentioned for keyword: hotel spa',
         }]
 
 
 class TestImprovementAfterContentChange:
     def test_creates_info_when_improvement_equals_threshold_inside_marker_window(self) -> None:
         current = _current()
-        current['summary']['first_party_avg_score'] = 55.0
+        current['kpis']['visibility_score'] = 55.0
         marker = {
             'id': deterministic_content_change_id('group-1', '2026-09-01T12:00:00Z'),
             'group_id': 'group-1',
@@ -166,11 +168,12 @@ class TestImprovementAfterContentChange:
         assert alert['severity'] == 'info'
         assert alert['delta'] == 5.0
         assert alert['content_change'] == marker
+        assert alert['message'] == 'Visibility score improved by 5.0 points after a content change.'
 
     @pytest.mark.parametrize('changed_at', [PREVIOUS_TIMESTAMP, '2026-09-02T10:00:01Z'])
     def test_creates_no_info_when_marker_is_outside_window(self, changed_at: str) -> None:
         current = _current()
-        current['summary']['first_party_avg_score'] = 60.0
+        current['kpis']['visibility_score'] = 60.0
         marker = {'changed_at': changed_at, 'description': 'Update'}
 
         alerts = compare_snapshots(_snapshot(), current, _settings(), content_change=marker)
@@ -189,9 +192,66 @@ class TestBaselineAndDisabledSettings:
 
     def test_disabled_settings_create_no_alerts(self) -> None:
         current = _current()
-        current['summary']['coverage_rate'] = 0.0
+        current['kpis']['mention_rate'] = 0.0
 
         assert compare_snapshots(_snapshot(), current, _settings(enabled=False)) == []
+
+    @pytest.mark.parametrize('stale', ['previous', 'current'])
+    def test_snapshots_measured_with_other_kpi_definitions_create_no_alerts(self, stale: str) -> None:
+        """The first snapshot after a KPI change is a new baseline."""
+        previous = _snapshot()
+        current = _current()
+        current['kpis']['mention_rate'] = 0.0
+        current['keywords'][0]['mentioned'] = False
+        {'previous': previous, 'current': current}[stale]['kpi_version'] = KPI_VERSION - 1
+
+        assert compare_snapshots(previous, current, _settings()) == []
+
+    def test_a_snapshot_without_a_kpi_version_is_not_compared(self) -> None:
+        previous = _snapshot()
+        del previous['kpi_version']
+        current = _current()
+        current['kpis']['mention_rate'] = 0.0
+
+        assert compare_snapshots(previous, current, _settings()) == []
+
+
+def _row(keyword: str, *brands: tuple[str, str, int], provider: str = 'openai') -> dict:
+    return {
+        'keyword': keyword,
+        'timestamp': CURRENT_TIMESTAMP,
+        'provider': provider,
+        'status': 'success',
+        'brands': [{'name': name, 'classification': classification, 'rank': rank} for name, classification, rank in brands],
+        'citations': ['https://hotel-sol.com/spa'],
+    }
+
+
+class TestSnapshotMetrics:
+    ANSWERS = {
+        'hotel spa': answers_from_rows([
+            _row('hotel spa', ('Hotel Sol', 'first_party', 2), ('Rival', 'competitor', 1)),
+            _row('hotel spa', ('Hotel Sol', 'first_party', 4), ('Rival', 'competitor', 3), provider='gemini'),
+        ]),
+        'hotel beach': answers_from_rows([_row('hotel beach', ('Rival', 'competitor', 2), ('Guide', 'other', 1))]),
+    }
+
+    def test_records_the_kpi_version(self) -> None:
+        assert snapshot_metrics(self.ANSWERS)['kpi_version'] == KPI_VERSION
+
+    def test_pools_the_group_kpis_over_every_answer(self) -> None:
+        kpis = snapshot_metrics(self.ANSWERS, ['hotel-sol.com'])['kpis']
+
+        assert (kpis['answers'], kpis['mention_rate'], kpis['average_position'], kpis['citation_rate']) == (3, 66.7, 3.0, 100.0)
+
+    def test_records_whether_each_keyword_mentions_the_brand(self) -> None:
+        assert snapshot_metrics(self.ANSWERS)['keywords'] == [
+            {'keyword': 'hotel spa', 'mentioned': True, 'average_position': 3.0},
+            {'keyword': 'hotel beach', 'mentioned': False, 'average_position': None},
+        ]
+
+    def test_records_the_best_position_of_each_competitor_only(self) -> None:
+        assert snapshot_metrics(self.ANSWERS)['competitors'] == [{'name': 'Rival', 'best_position': 1}]
 
 
 class TestSettingsValidation:
@@ -208,7 +268,7 @@ class TestSettingsValidation:
     def test_normalizes_dynamodb_numbers_in_stored_settings(self) -> None:
         stored = {
             **_settings(),
-            'citation_rate_drop': Decimal('12.5'),
+            'mention_rate_drop': Decimal('12.5'),
             'position_loss': Decimal('2'),
             'competitor_top_n': Decimal('4'),
             'improvement_after_content_change': Decimal('7.5'),
@@ -216,14 +276,29 @@ class TestSettingsValidation:
 
         resolved = resolve_settings(stored)
 
-        assert resolved['citation_rate_drop'] == 12.5
+        assert resolved['mention_rate_drop'] == 12.5
         assert resolved['position_loss'] == 2.0
         assert resolved['competitor_top_n'] == 4
         assert resolved['improvement_after_content_change'] == 7.5
 
+    def test_reads_the_mention_rate_drop_stored_under_its_former_name(self) -> None:
+        stored = {name: value for name, value in _settings().items() if name != 'mention_rate_drop'}
+
+        assert resolve_settings({**stored, 'citation_rate_drop': Decimal('15')})['mention_rate_drop'] == 15.0
+
+    def test_prefers_the_current_name_over_the_former_one(self) -> None:
+        stored = {**_settings(mention_rate_drop=Decimal('20')), 'citation_rate_drop': Decimal('15')}
+
+        assert resolve_settings(stored)['mention_rate_drop'] == 20.0
+
+    def test_defaults_a_setting_stored_under_neither_name(self) -> None:
+        stored = {name: value for name, value in _settings().items() if name != 'position_loss'}
+
+        assert resolve_settings(stored)['position_loss'] == 1.0
+
     def test_accepts_decimal_thresholds_at_inclusive_bounds(self) -> None:
         candidate = _settings(
-            citation_rate_drop=Decimal('0.1'),
+            mention_rate_drop=Decimal('0.1'),
             position_loss=Decimal('2.5'),
             competitor_top_n=10,
             improvement_after_content_change=Decimal('100.0'),
@@ -232,7 +307,7 @@ class TestSettingsValidation:
         settings, error, field = validate_settings(candidate)
 
         assert settings == _settings(
-            citation_rate_drop=0.1,
+            mention_rate_drop=0.1,
             position_loss=2.5,
             competitor_top_n=10,
             improvement_after_content_change=100.0,
@@ -243,7 +318,7 @@ class TestSettingsValidation:
     @pytest.mark.parametrize(
         'field_name',
         [
-            'citation_rate_drop',
+            'mention_rate_drop',
             'position_loss',
             'improvement_after_content_change',
         ],
@@ -266,9 +341,9 @@ class TestSettingsValidation:
     @pytest.mark.parametrize(
         ('field_name', 'value'),
         [
-            ('citation_rate_drop', 0),
-            ('citation_rate_drop', 100.1),
-            ('citation_rate_drop', float('nan')),
+            ('mention_rate_drop', 0),
+            ('mention_rate_drop', 100.1),
+            ('mention_rate_drop', float('nan')),
             ('position_loss', 0),
             ('position_loss', 100.1),
             ('position_loss', float('inf')),

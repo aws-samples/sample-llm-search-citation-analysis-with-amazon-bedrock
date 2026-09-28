@@ -1471,12 +1471,12 @@ describe('KPI alert backend infrastructure', () => {
 
     expect(Object.keys(environment).sort((left, right) => left.localeCompare(right))).toStrictEqual([
       'DYNAMODB_TABLE_ALERT_SETTINGS',
+      'DYNAMODB_TABLE_BRAND_CONFIG',
       'DYNAMODB_TABLE_CONTENT_CHANGES',
       'DYNAMODB_TABLE_KEYWORD_GROUPS',
       'DYNAMODB_TABLE_KEYWORDS',
       'DYNAMODB_TABLE_KPI_ALERTS',
       'DYNAMODB_TABLE_KPI_SNAPSHOTS',
-      'DYNAMODB_TABLE_PROVIDER_CONFIG',
       'DYNAMODB_TABLE_SEARCH_RESULTS',
       'KPI_ALERTS_TOPIC_ARN',
     ]);
@@ -1499,7 +1499,7 @@ describe('KPI alert backend infrastructure', () => {
       'CitationAnalysis-SearchResults',
       'CitationAnalysis-Keywords',
       'CitationAnalysis-KeywordGroups',
-      'CitationAnalysis-ProviderConfig',
+      'CitationAnalysis-BrandConfig',
       'CitationAnalysis-AlertSettings',
       'CitationAnalysis-ContentChanges',
     ];

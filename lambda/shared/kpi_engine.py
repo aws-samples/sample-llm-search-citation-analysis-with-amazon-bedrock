@@ -51,6 +51,9 @@ PERCENT_KPIS = frozenset({
     'citation_rate', 'citation_share', 'engine_coverage', 'keyword_coverage',
 })
 
+#: The KPIs a trend (improving / declining / stable) is called for: every rate and score, not the counts.
+TRENDED_KPIS: tuple[str, ...] = tuple(kpi for kpi in KPI_IDS if kpi in PERCENT_KPIS | {'average_position', 'net_sentiment'})
+
 #: Visibility score weight of each position: 1st = 1.0, 2nd = 0.9, 3rd = 0.81 ...
 #: (Evertune's published position weighting).
 POSITION_DECAY = 0.9
@@ -69,6 +72,10 @@ FIRST_PARTY = 'first_party'
 COMPETITOR = 'competitor'
 OTHER = 'other'
 _SENTIMENTS = frozenset({'positive', 'neutral', 'negative', 'mixed'})
+
+#: The SearchResults attributes an answer is read from (`#ts` = timestamp, `#st` = status, `#md` = metadata).
+ANSWER_PROJECTION = 'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model'
+ANSWER_ATTRIBUTE_NAMES = {'#ts': 'timestamp', '#st': 'status', '#md': 'metadata'}
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +161,13 @@ def is_owned_domain(domain: str, owned_domains: Iterable[str]) -> bool:
         if normalized and (domain == normalized or domain.endswith(f'.{normalized}')):
             return True
     return False
+
+
+def owned_domains_from(brand_config: Mapping[str, Any]) -> list[str]:
+    """The owned domains of a brand configuration (``first_party_domains``), normalized and without repeats."""
+    configured = brand_config.get('first_party_domains')
+    values = configured if isinstance(configured, (list, tuple, set)) else []
+    return sorted({domain for domain in map(normalize_domain, values) if domain})
 
 
 def _is_answer_row(row: Mapping[str, Any]) -> bool:
@@ -348,9 +362,18 @@ def trend_direction(change: float | None, kpi: str) -> str:
     return 'stable'
 
 
+def kpi_trends(changes: Mapping[str, float | None]) -> dict[str, str]:
+    """The trend of every rate and score KPI, from the output of ``kpi_changes``."""
+    return {kpi: trend_direction(changes.get(kpi), kpi) for kpi in TRENDED_KPIS}
+
+
 __all__ = [
+    'ANSWER_ATTRIBUTE_NAMES',
+    'ANSWER_PROJECTION',
+    'COMPETITOR',
     'KPI_IDS',
     'PERCENT_KPIS',
+    'TRENDED_KPIS',
     'Answer',
     'Sighting',
     'answer_from_row',
@@ -359,7 +382,9 @@ __all__ = [
     'brand_table',
     'is_owned_domain',
     'kpi_changes',
+    'kpi_trends',
     'normalize_domain',
+    'owned_domains_from',
     'position_weight',
     'trend_direction',
 ]

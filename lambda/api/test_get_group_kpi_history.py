@@ -39,6 +39,7 @@ def _answer(keyword: str) -> dict[str, Any]:
         'provider': 'openai',
         'query_prompt_id': 'default',
         'brands': [{'name': 'Hotel Sol', 'classification': 'first_party', 'rank': 1, 'mention_count': 1}],
+        'citations': ['https://www.hotel-sol.com/spa'],
         'metadata': {'model': 'gpt-5.2'},
     }
 
@@ -66,12 +67,16 @@ def _resource(search_rows: dict[str, Any]) -> tuple[MagicMock, MagicMock]:
     return resource, search_table
 
 
-def _call(params: dict[str, str] | None, search_rows: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
+def _call(
+    params: dict[str, str] | None,
+    search_rows: dict[str, Any] | None = None,
+    brand_config: dict[str, Any] | None = None,
+) -> tuple[int, dict[str, Any]]:
     resource, _ = _resource(search_rows or {})
     event = {'httpMethod': 'GET', 'path': '/api/reports/group-kpis', 'queryStringParameters': params, 'headers': {}}
     with (
         patch.object(_mod, 'dynamodb', resource),
-        patch.object(_mod, 'get_enabled_provider_count', return_value=4),
+        patch.object(_mod, 'get_brand_config', return_value=brand_config if brand_config is not None else {}),
         patch.object(_mod, 'history_since', return_value='2026-06-22T06:00:00.000000Z'),
     ):
         response = _mod.handler(event, None)
@@ -103,17 +108,30 @@ class TestGroupKpiHistoryRoute:
         _, body = _call({'group_id': 'sol'}, {'hotel sol spa': [_answer('hotel sol spa')], 'hotel sol beach': [_answer('hotel sol beach')]})
 
         run = body['runs'][0]
-        assert (run['timestamp'], run['summary']['coverage_rate'], run['is_group_run'], run['models']) == (
+        assert (run['timestamp'], run['kpis']['mention_rate'], run['is_group_run'], run['models']) == (
             RUN, 100.0, True, {'openai': ['gpt-5.2']},
         )
+
+    def test_measures_the_citation_kpis_against_the_owned_domains_of_the_brand_configuration(self):
+        _, body = _call(
+            {'group_id': 'sol'},
+            {'hotel sol spa': [_answer('hotel sol spa')]},
+            {'first_party_domains': ['hotel-sol.com']},
+        )
+
+        assert (body['citations_configured'], body['runs'][0]['kpis']['citation_rate']) == (True, 100.0)
+
+    def test_leaves_the_citation_kpis_empty_without_owned_domains(self):
+        _, body = _call({'group_id': 'sol'}, {'hotel sol spa': [_answer('hotel sol spa')]})
+
+        assert (body['citations_configured'], body['runs'][0]['kpis']['citation_rate']) == (False, None)
 
     def test_describes_the_window_and_the_rules(self):
         _, body = _call({'group_id': 'sol', 'days': '30'})
 
-        assert {key: body[key] for key in ('days', 'since', 'total_providers', 'group_run_min_coverage', 'keywords_truncated')} == {
+        assert {key: body[key] for key in ('days', 'since', 'group_run_min_coverage', 'keywords_truncated')} == {
             'days': 30,
             'since': '2026-06-22T06:00:00.000000Z',
-            'total_providers': 4,
             'group_run_min_coverage': 50.0,
             'keywords_truncated': False,
         }
@@ -178,7 +196,7 @@ class TestLoadRows:
 
         with (
             patch.object(_mod, 'dynamodb', resource),
-            patch.object(_mod, 'get_enabled_provider_count', return_value=4),
+            patch.object(_mod, 'get_brand_config', return_value={}),
         ):
             body = json.loads(_mod.handler(event, None)['body'])
 
