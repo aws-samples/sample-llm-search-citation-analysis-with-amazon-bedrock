@@ -35,7 +35,7 @@ describe('alert form model', () => {
       const values = buildAlertSettingsFormValues({
         enabled: false,
         notificationEmailsText: ' alerts@example.com,ALERTS@example.com\nops@example.com ',
-        citationRateDrop: '0.1',
+        mentionRateDrop: '0.1',
         positionLoss: '2.5',
         competitorTopN: '10',
         improvementAfterContentChange: '100',
@@ -45,7 +45,7 @@ describe('alert form model', () => {
         enabled: false,
         notification_emails: ['alerts@example.com', 'ops@example.com'],
         thresholds: {
-          citation_rate_drop: 0.1,
+          mention_rate_drop: 0.1,
           position_loss: 2.5,
           competitor_top_n: 10,
           improvement_after_content_change: 100,
@@ -54,8 +54,8 @@ describe('alert form model', () => {
     });
 
     it.each([
-      ['Citation-rate drop must be a number', { citationRateDrop: '' }],
-      ['Citation-rate drop must be at least 0.1', { citationRateDrop: '0' }],
+      ['Mention-rate drop must be a number', { mentionRateDrop: '' }],
+      ['Mention-rate drop must be at least 0.1', { mentionRateDrop: '0' }],
       ['Position loss must be a number', { positionLoss: 'Infinity' }],
       ['Position loss must be at most 100', { positionLoss: '100.1' }],
       ['Competitor top N must be at most 10', { competitorTopN: '11' }],

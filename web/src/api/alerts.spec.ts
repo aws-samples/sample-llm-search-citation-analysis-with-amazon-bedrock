@@ -180,7 +180,7 @@ describe('alerts API', () => {
         enabled: false,
         notification_emails: ['owner@example.com'],
         thresholds: {
-          citation_rate_drop: 12.5,
+          mention_rate_drop: 12.5,
           position_loss: 2.25,
           competitor_top_n: 10,
           improvement_after_content_change: 9.5,

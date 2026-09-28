@@ -342,6 +342,14 @@ class TestChangeBetweenGroupRuns:
 
         assert [driver['keyword'] for driver in _run(history, RUN_2)['change']['drivers']] == ['b-lost', 'c-bigger', 'a-small']
 
+    def test_gives_no_mention_rate_impact_to_a_keyword_whose_mention_rate_held(self):
+        history = _history({
+            'k1': [_hotel_first(RUN_1), _hotel_at(RUN_2, 4)],
+            'k2': [_hotel_first(RUN_1), _hotel_first(RUN_2)],
+        })
+
+        assert _run(history, RUN_2)['change']['drivers'][0]['impact'] == {'mention_rate': 0.0, 'visibility_score': -13.55}
+
     def test_reports_a_keyword_whose_only_change_is_its_answer_count(self):
         history = _history({
             'k1': [_hotel_first(RUN_1), _hotel_first(RUN_1, provider='gemini'), _hotel_first(RUN_2)],

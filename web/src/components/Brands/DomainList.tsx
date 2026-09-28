@@ -14,9 +14,10 @@ export const DomainList = ({
   onRemoveDomain,
 }: DomainListProps) => (
   <div className="bg-emerald-50/50 rounded-lg p-4 border border-emerald-200">
-    <h3 className="text-sm font-semibold text-emerald-800 mb-2">First Party Domains</h3>
+    <h3 className="text-sm font-semibold text-emerald-800 mb-2">Owned Domains (First Party)</h3>
     <p className="text-xs text-emerald-700 mb-3">
-      Your website domains. URLs from these domains will be excluded from Citation Gaps analysis.
+      Your website domains; subdomains count too. AI answers citing them are what the citation rate and citation share measure,
+      and their URLs are left out of the Citation Gaps analysis.
     </p>
     <div className="flex gap-2 mb-3">
       <input
@@ -53,7 +54,7 @@ export const DomainList = ({
       ))}
       {domains.length === 0 && (
         <span className="text-sm text-emerald-600 italic">
-          No domains added — brand name matching will be used as fallback
+          No domains added — the citation rate and citation share stay empty, and Citation Gaps falls back to brand-name matching
         </span>
       )}
     </div>

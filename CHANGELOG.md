@@ -9,6 +9,67 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.21.0] - 2026-09-28
+
+### Added
+
+- **KPI reference** in `docs/kpi-definitions.md`. It gives one definition per KPI, aligned with how
+  Otterly, Peec, Profound, Scrunch, Semrush, Ahrefs and Evertune measure AI visibility. For each KPI it
+  gives the formula, the denominator and the edge cases, and says which old field it replaces.
+- **KPI engine** (`lambda/shared/kpi_engine.py`). Every KPI is computed once from the same unit, the
+  successful AI answer:
+  - answers and mentions;
+  - mention rate and share of voice;
+  - average position, top-1 share and top-3 share;
+  - visibility score;
+  - citations, citation rate and citation share;
+  - net sentiment;
+  - engine coverage and keyword coverage.
+- **Contract test.** `test_kpi_contract.py` fails when the reference, the engine and the dashboard's
+  `kpiDefinitions` list different KPIs or labels.
+- **Real citation KPIs.** Citation rate and citation share now count AI answers that cite the brand's own
+  website. A URL is owned when its domain is an owned domain or a subdomain of one. Owned domains are
+  set in Settings › Brand Tracking.
+- **Every KPI in the per-group report.** The report now shows:
+  - four headline cards;
+  - a table of every KPI with its change and trend;
+  - tooltips on every card, every KPI row and every KPI column header of the drivers and keyword tables.
+
+  The chart draws mention rate, share of voice, visibility score, top-1 share and citation rate.
+
+### Changed
+
+- **Per-group report, KPI history API and Excel export** now use the market definitions. Group values
+  pool every answer, so each answer weighs the same instead of each keyword.
+  - The former "citation rate" (keywords whose answers name the brand) is now **keyword coverage**.
+  - The headline "how visible are we" KPI is now **mention rate**.
+  - **Share of voice** counts each brand once per answer.
+  - The **visibility score** weights each answer by the brand's position: 100 for 1st, 90 for 2nd,
+    81 for 3rd and so on. Sentiment is not part of it and is reported as **net sentiment**.
+  - The export's Summary, KPI history, Drivers and Keyword runs sheets carry every KPI.
+  - The export file is now `group-visibility-report-<group>-<date>.xlsx`.
+- **Trend rule.** Changes are judged the same way everywhere. A KPI is improving or declining from
+  2 points, or half a place for average position. Anything smaller is stable.
+- **KPI alerts** use the new KPIs.
+  - The **citation-rate drop** setting and alert are now **mention-rate drop**. A threshold saved under
+    the old name keeps working until the settings are saved again.
+  - Position loss follows average position, the content-change rule follows the visibility score, and
+    the competitor rule follows each competitor's best position.
+  - Snapshots now carry a KPI version. The first run after this release sets a fresh baseline and raises
+    no alert, because it is never compared with a run measured the old way.
+  - Open alerts raised before this release are labelled "Keyword-coverage drop (before 2.21)".
+  - The alert worker reads the owned domains, so it needs the brand-config table instead of the
+    provider-config table.
+- **Owned domains** copy in Settings › Brand Tracking now says the domains drive the citation KPIs as well
+  as Citation Gaps.
+
+### Fixed
+
+- Web-search provider rows and failed engine calls no longer count as answers. They used to lower every
+  rate of the per-group report and the alerts.
+- **Engine coverage** now divides by the engines that answered, not by a configured provider count.
+- A brand named several times in one answer counts once, at its best position.
+
 ## [2.20.0] - 2026-09-28
 
 ### Added

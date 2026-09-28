@@ -301,7 +301,7 @@ describe('alert runtime decoders', () => {
     it('accepts decimal scalar thresholds at inclusive bounds', () => {
       expect(isAlertSettings(buildAlertSettings({
         thresholds: {
-          citation_rate_drop: 0.1,
+          mention_rate_drop: 0.1,
           position_loss: 2.5,
           competitor_top_n: 10,
           improvement_after_content_change: 100,
@@ -333,7 +333,7 @@ describe('alert runtime decoders', () => {
     it.each([
       ['config id', { config_id: 'other' }],
       ['enabled flag', { enabled: 'true' }],
-      ['thresholds', { thresholds: { citation_rate_drop: 10 } }],
+      ['thresholds', { thresholds: { mention_rate_drop: 10 } }],
       ['notification email with multiple at signs', { notification_emails: ['a@@b.com'] }],
       ['mixed notification email types', { notification_emails: ['alerts@example.com', 42] }],
       ['subscription record', { subscription_statuses: [null] }],
@@ -363,10 +363,10 @@ describe('alert runtime decoders', () => {
     });
 
     it.each([
-      ['citation_rate_drop', 0],
-      ['citation_rate_drop', 100.1],
-      ['citation_rate_drop', '10'],
-      ['citation_rate_drop', Number.NaN],
+      ['mention_rate_drop', 0],
+      ['mention_rate_drop', 100.1],
+      ['mention_rate_drop', '10'],
+      ['mention_rate_drop', Number.NaN],
       ['position_loss', 0],
       ['position_loss', 100.1],
       ['position_loss', Number.POSITIVE_INFINITY],

@@ -8,7 +8,7 @@ export function buildAlertSettingsFormValues(
   return {
     enabled: true,
     notificationEmailsText: 'alerts@example.com',
-    citationRateDrop: '10',
+    mentionRateDrop: '10',
     positionLoss: '3',
     competitorTopN: '5',
     improvementAfterContentChange: '8',

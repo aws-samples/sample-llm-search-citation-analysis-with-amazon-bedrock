@@ -22,7 +22,7 @@ A row is an answer when its `provider` is an AI engine; the provider decides the
 
 **Position (rank).** The order in which brands first appear in an answer: 1 is the first brand named. For the tracked brand, it is the best position of any first-party brand in that answer. The extractor stores 999 when it could not place a brand; that counts as "position unknown".
 
-**Owned domains.** The website domains of the tracked brand, set in Brand Mentions → owned domains (`first_party_domains`). A cited URL is owned when its host is an owned domain or a subdomain of one: `blog.hotel.com` is owned for `hotel.com`, but `nothotel.com` is not. Owned domains, first-party brands and competitors are global. They apply to every keyword group.
+**Owned domains.** The website domains of the tracked brand, set in Settings → Brand Tracking → Owned Domains (`first_party_domains`). A cited URL is owned when its host is an owned domain or a subdomain of one: `blog.hotel.com` is owned for `hotel.com`, but `nothotel.com` is not. Owned domains, first-party brands and competitors are global. They apply to every keyword group.
 
 **Pooling.** A value for several answers is computed from counts added up over all of them, then divided once. This applies to a keyword group, a period, a run, or all keywords. Every answer weighs the same. Percentages are never averaged. The per-keyword view stays available in the keyword drill-down.
 
@@ -253,7 +253,7 @@ A table is sorted by visibility score, then mentions, then name. Engine lists ar
   - Stable: anything in between, or when there is no change to judge.
 
   The band keeps run-to-run noise from reading as a trend.
-- **Alerts.** Alert rules compare two consecutive complete group runs and use the same KPIs and changes. When a KPI definition changes, the stored baseline is reset. The first run after the change sets a new baseline and does not raise an alert.
+- **Alerts.** Alert rules compare two consecutive complete group runs and use the same KPIs and changes: a mention-rate drop (called "citation-rate drop" before 2.21.0), a loss of average position, a competitor newly reaching the top positions, a keyword whose answers stop naming the brand, and a visibility-score gain after a content change. When a KPI definition changes, the stored baseline is reset. The first run after the change sets a new baseline and does not raise an alert.
 
 ## Sources
 

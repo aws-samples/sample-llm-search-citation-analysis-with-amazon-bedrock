@@ -42,7 +42,7 @@ describe('AlertsConfig', () => {
   it('shows every configured threshold with its server value', () => {
     render(<AlertsConfig isAdmin />);
 
-    expect(screen.getByRole('spinbutton', { name: /Citation-rate drop/ })).toHaveValue(10);
+    expect(screen.getByRole('spinbutton', { name: /Mention-rate drop/ })).toHaveValue(10);
     expect(screen.getByRole('spinbutton', { name: /Position loss/ })).toHaveValue(3);
     expect(screen.getByRole('spinbutton', { name: /Competitor top N/ })).toHaveValue(5);
     expect(screen.getByRole('spinbutton', { name: /Improvement after content change/ })).toHaveValue(8);
@@ -51,7 +51,7 @@ describe('AlertsConfig', () => {
   it('exposes exact threshold constraints to browser validation', () => {
     render(<AlertsConfig isAdmin />);
     const thresholdNames = [
-      /Citation-rate drop/,
+      /Mention-rate drop/,
       /Position loss/,
       /Competitor top N/,
       /Improvement after content change/,
@@ -286,7 +286,7 @@ describe('AlertsConfig', () => {
       enabled: true,
       notification_emails: ['owner@example.com', 'ops@example.com'],
       thresholds: {
-        citation_rate_drop: 10,
+        mention_rate_drop: 10,
         position_loss: 3,
         competitor_top_n: 5,
         improvement_after_content_change: 8,

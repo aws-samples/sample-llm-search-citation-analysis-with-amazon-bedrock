@@ -13,6 +13,7 @@ import { GroupKpiDriversSection } from './sections/GroupKpiDriversSection';
 import { KeywordRunsSection } from './sections/KeywordRunsSection';
 import { KpiDefinitionsSection } from './sections/KpiDefinitionsSection';
 import { GroupKpiExportButton } from './GroupKpiExportButton';
+import { GROUP_REPORT_DEFINITIONS } from '../../../constants/kpiDefinitions';
 
 /** The periods the report offers, in days. */
 export const GROUP_REPORT_PERIODS = [30, 90, 180, 365] as const;
@@ -81,13 +82,14 @@ export function GroupKpiReport({
       <>
         <div className="mb-4">{periodPicker}</div>
         {gate.placeholder}
-        <KpiDefinitionsSection />
+        <KpiDefinitionsSection definitions={GROUP_REPORT_DEFINITIONS} />
       </>
     );
   }
 
   const {
-    runs, keywords, keywords_truncated: truncated, group_run_min_coverage: minCoverage
+    runs, keywords, keywords_truncated: truncated, group_run_min_coverage: minCoverage,
+    citations_configured: citationsConfigured
   } = gate.value;
   const run = resolveRun(runs, runTimestamp);
   const selectedKeyword = resolveKeyword(keywords, keyword);
@@ -103,7 +105,7 @@ export function GroupKpiReport({
           {`This group has more keywords than one report covers; only the first ${keywords.length} are included.`}
         </p>
       )}
-      <GroupKpiHeadlineSection runs={runs} selected={run} onSelect={setRunTimestamp} />
+      <GroupKpiHeadlineSection runs={runs} selected={run} onSelect={setRunTimestamp} citationsConfigured={citationsConfigured} />
       <GroupKpiTrendSection
         runs={runs}
         minCoverage={minCoverage}
@@ -114,7 +116,7 @@ export function GroupKpiReport({
       {selectedKeyword !== null && (
         <KeywordRunsSection keywords={keywords} selected={selectedKeyword} onSelect={setKeyword} />
       )}
-      <KpiDefinitionsSection />
+      <KpiDefinitionsSection definitions={GROUP_REPORT_DEFINITIONS} />
     </>
   );
 }

@@ -136,19 +136,19 @@ export function AlertSettingsForm({
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <ThresholdField
-            id="alert-citation-rate-drop"
-            label="Citation-rate drop"
-            unit="percentage points"
-            value={values.citationRateDrop}
+            id="alert-mention-rate-drop"
+            label="Mention-rate drop"
+            unit="points of mention rate"
+            value={values.mentionRateDrop}
             minimum={0.1}
             maximum={100}
             step={0.1}
-            onChange={(value) => updateValue('citationRateDrop', value)}
+            onChange={(value) => updateValue('mentionRateDrop', value)}
           />
           <ThresholdField
             id="alert-position-loss"
             label="Position loss"
-            unit="rank places"
+            unit="places of average position"
             value={values.positionLoss}
             minimum={0.1}
             maximum={100}
@@ -168,7 +168,7 @@ export function AlertSettingsForm({
           <ThresholdField
             id="alert-improvement-after-change"
             label="Improvement after content change"
-            unit="visibility points"
+            unit="points of visibility score"
             value={values.improvementAfterContentChange}
             minimum={0.1}
             maximum={100}

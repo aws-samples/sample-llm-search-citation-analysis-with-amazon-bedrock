@@ -185,7 +185,7 @@ def build_group_kpi_history(
     }
 
     runs: list[dict[str, Any]] = []
-    previous_group_run: dict[str, Any] | None = None
+    previous_group_run = None
     for timestamp in sorted({timestamp for runs in answers.values() for timestamp in runs}):
         answered = [keyword for keyword in keywords if timestamp in answers[keyword]]
         run_answers = [answer for keyword in answered for answer in answers[keyword][timestamp]]

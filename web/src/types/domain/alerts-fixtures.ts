@@ -12,6 +12,7 @@ import type {
 } from './alerts';
 
 export const VALID_ALERT_TYPES = [
+  'mention_rate_drop',
   'citation_rate_drop',
   'position_loss',
   'new_competitor_top',
@@ -77,14 +78,14 @@ export const BACKEND_ALERT_WIRE_FIXTURE = {
   status: 'open',
   acknowledged: false,
   ttl: '1822384800',
-  type: 'citation_rate_drop',
+  type: 'mention_rate_drop',
   severity: 'warning',
   previous: '64.0',
   current: '52.0',
   delta: '12.0',
   threshold: '10.0',
   entity: 'group-1',
-  message: 'Citation coverage fell by 12.0 percentage points.',
+  message: 'Mention rate fell by 12.0 points.',
 } satisfies AlertItem & {
   acknowledged: boolean;
   ttl: string;
@@ -118,7 +119,7 @@ export const PUBLIC_DEFAULT_ALERT_SETTINGS = {
   enabled: true,
   notification_emails: [],
   thresholds: {
-    citation_rate_drop: 10,
+    mention_rate_drop: 10,
     position_loss: 1,
     competitor_top_n: 3,
     improvement_after_content_change: 5,
@@ -132,7 +133,7 @@ export function buildAlertSettings(overrides: Partial<AlertSettings> = {}): Aler
     enabled: true,
     notification_emails: ['alerts@example.com'],
     thresholds: {
-      citation_rate_drop: 10,
+      mention_rate_drop: 10,
       position_loss: 3,
       competitor_top_n: 5,
       improvement_after_content_change: 8,

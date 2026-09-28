@@ -39,13 +39,13 @@ export function renderAlertSettingsForm(
   };
 }
 
-export async function submitEmptyCitationRate() {
+export async function submitEmptyMentionRate() {
   const user = userEvent.setup();
-  const citationRate = screen.getByRole('spinbutton', { name: /Citation-rate drop/u });
-  await user.clear(citationRate);
+  const mentionRate = screen.getByRole('spinbutton', { name: /Mention-rate drop/u });
+  await user.clear(mentionRate);
   await user.click(screen.getByRole('button', { name: 'Save alert settings' }));
   return {
-    citationRate,
+    mentionRate,
     user,
   };
 }
@@ -65,7 +65,7 @@ export function getAlertSettingsForm(): HTMLFormElement {
 
 export function thresholdValues(): string[] {
   return [
-    'Citation-rate drop',
+    'Mention-rate drop',
     'Position loss',
     'Competitor top N',
     'Improvement after content change',

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -127,6 +128,12 @@ def _run_complete_group(
     ):
         return worker_module.handler(_event(), None)
 
+
+def _recorded_snapshot(worker_module) -> dict:
+    """The snapshot the worker stores for the complete group, with alerts disabled and no previous snapshot."""
+    snapshots, _alerts, resource = _single_group_tables()
+    _run_complete_group(worker_module, resource, {**DEFAULT_ALERT_SETTINGS, 'enabled': False}, None)
+    return snapshots.put_item.call_args.kwargs['Item']
 
 class TestRunEligibility:
     def test_skips_degraded_report_without_reading_tables(self, worker_module) -> None:
@@ -292,18 +299,24 @@ class TestCompleteSnapshotEvaluation:
         }]
 
     def test_measures_the_citation_kpis_against_the_owned_domains(self, worker_module) -> None:
-        snapshots, _alerts, resource = _single_group_tables()
+        assert _recorded_snapshot(worker_module)['kpis']['citation_rate'] == Decimal('100.0')
 
-        _run_complete_group(worker_module, resource, {**DEFAULT_ALERT_SETTINGS, 'enabled': False}, None)
+    def test_reads_the_owned_domains_from_the_brand_config_table(self, worker_module) -> None:
+        _snapshots, _alerts, resource = _single_group_tables()
+        brand_config = MagicMock(return_value={})
 
-        assert snapshots.put_item.call_args.kwargs['Item']['kpis']['citation_rate'] == Decimal('100.0')
+        with (
+            _complete_group_patches(worker_module, resource, {**DEFAULT_ALERT_SETTINGS, 'enabled': False}, _answers()),
+            patch.object(worker_module, 'get_brand_config', brand_config),
+            patch.object(worker_module, '_previous_snapshot', return_value=None),
+            patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
+        ):
+            worker_module.handler(_event(), None)
+
+        brand_config.assert_called_once_with('brand-config')
 
     def test_records_the_best_position_of_each_competitor(self, worker_module) -> None:
-        snapshots, _alerts, resource = _single_group_tables()
-
-        _run_complete_group(worker_module, resource, {**DEFAULT_ALERT_SETTINGS, 'enabled': False}, None)
-
-        assert snapshots.put_item.call_args.kwargs['Item']['competitors'] == [{'name': 'Rival', 'best_position': 1}]
+        assert _recorded_snapshot(worker_module)['competitors'] == [{'name': 'Rival', 'best_position': 1}]
 
     def test_persists_exact_alert_shape_with_compared_run_timestamp(self, worker_module) -> None:
         _snapshots, alerts, resource = _single_group_tables()
@@ -380,12 +393,16 @@ class TestLoadRunAnswers:
 
         assert [(answer.provider, answer.timestamp) for answer in answers['shared keyword']] == [('openai', _RUN_TIMESTAMP)]
 
-    def test_marks_a_keyword_that_cannot_be_read(self, worker_module) -> None:
+    def test_marks_a_keyword_that_cannot_be_read(self, worker_module, caplog) -> None:
         search = MagicMock()
         search.query.side_effect = ClientError({'Error': {'Code': 'ThrottlingException', 'Message': 'slow down'}}, 'Query')
         worker_module.dynamodb = fake_dynamodb_resource(by_name={'search': search})
 
-        assert worker_module._load_run_answers(['shared keyword'], _RUN_TIMESTAMP) == {'shared keyword': None}
+        with caplog.at_level(logging.ERROR):
+            answers = worker_module._load_run_answers(['shared keyword'], _RUN_TIMESTAMP)
+
+        assert answers == {'shared keyword': None}
+        assert [record.getMessage() for record in caplog.records] == ['Exact-run answers query failed for one keyword']
 
     def test_reads_nothing_for_no_keywords(self, worker_module) -> None:
         assert worker_module._load_run_answers([], _RUN_TIMESTAMP) == {}

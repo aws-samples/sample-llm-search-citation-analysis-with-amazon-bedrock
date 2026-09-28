@@ -225,7 +225,7 @@ def _metric_change_alerts(
         if drop >= rate_threshold:
             alerts.append(_alert(
                 'mention_rate_drop', 'warning', previous_rate, current_rate,
-                round(drop, 2), rate_threshold, str(current.get('group_id', '')),
+                round(drop, 2), rate_threshold, str(current['group_id']),
                 f'Mention rate fell by {drop:.1f} points.',
             ))
 
@@ -237,7 +237,7 @@ def _metric_change_alerts(
         if loss >= rank_threshold:
             alerts.append(_alert(
                 'position_loss', 'warning', previous_rank, current_rank,
-                round(loss, 2), rank_threshold, str(current.get('group_id', '')),
+                round(loss, 2), rank_threshold, str(current['group_id']),
                 f'Average position worsened by {loss:.1f} positions.',
             ))
     return alerts
@@ -249,7 +249,7 @@ def _competitor_alerts(
     top_n: int,
 ) -> list[dict[str, Any]]:
     prior = {
-        str(item.get('name', '')).casefold(): _valid_rank(item.get('best_position'))
+        str(item['name']).casefold(): _valid_rank(item.get('best_position'))
         for item in previous.get('competitors', [])
         if isinstance(item, dict) and item.get('name')
     }
@@ -274,7 +274,7 @@ def _lost_keyword_alerts(
     current: dict[str, Any],
 ) -> list[dict[str, Any]]:
     prior = {
-        str(item.get('keyword', '')): bool(item.get('mentioned'))
+        str(item['keyword']): bool(item.get('mentioned'))
         for item in previous.get('keywords', [])
         if isinstance(item, dict) and item.get('keyword')
     }

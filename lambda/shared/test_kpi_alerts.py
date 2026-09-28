@@ -86,6 +86,23 @@ class TestMentionRateDrop:
 
         assert _of_type(alerts, 'mention_rate_drop') == []
 
+    def test_rounds_the_drop_to_hundredths(self) -> None:
+        current = _current()
+        current['kpis']['mention_rate'] = 69.9876
+
+        alert = _of_type(compare_snapshots(_snapshot(), current, _settings()), 'mention_rate_drop')[0]
+
+        assert alert['delta'] == 10.01
+
+    @pytest.mark.parametrize('side', ['previous', 'current'])
+    def test_creates_no_warning_when_either_run_has_no_mention_rate(self, side: str) -> None:
+        previous = _snapshot()
+        current = _current()
+        current['kpis']['mention_rate'] = 0.0
+        {'previous': previous, 'current': current}[side]['kpis']['mention_rate'] = None
+
+        assert _of_type(compare_snapshots(previous, current, _settings()), 'mention_rate_drop') == []
+
 
 class TestPositionLoss:
     def test_creates_warning_when_average_position_loss_equals_threshold(self) -> None:
@@ -96,6 +113,14 @@ class TestPositionLoss:
 
         assert (alert['previous'], alert['current'], alert['delta'], alert['threshold']) == (2.0, 3.0, 1.0, 1.0)
         assert alert['message'] == 'Average position worsened by 1.0 positions.'
+
+    def test_rounds_the_position_loss_to_hundredths(self) -> None:
+        current = _current()
+        current['kpis']['average_position'] = 3.3333
+
+        alert = _of_type(compare_snapshots(_snapshot(), current, _settings()), 'position_loss')[0]
+
+        assert alert['delta'] == 1.33
 
     @pytest.mark.parametrize('invalid_rank', [None, 0, 999, 'not-a-rank'])
     def test_creates_no_warning_when_current_rank_is_invalid(self, invalid_rank: object) -> None:
@@ -145,6 +170,9 @@ class TestKeywordLostMention:
             'entity': 'hotel spa',
             'message': 'The brand is no longer mentioned for keyword: hotel spa',
         }]
+
+    def test_creates_no_warning_while_the_keyword_stays_mentioned(self) -> None:
+        assert _of_type(compare_snapshots(_snapshot(), _current(), _settings()), 'keyword_lost_mention') == []
 
 
 class TestImprovementAfterContentChange:
@@ -231,10 +259,13 @@ class TestSnapshotMetrics:
     ANSWERS = {
         'hotel spa': answers_from_rows([
             _row('hotel spa', ('Hotel Sol', 'first_party', 2), ('Rival', 'competitor', 1)),
-            _row('hotel spa', ('Hotel Sol', 'first_party', 4), ('Rival', 'competitor', 3), provider='gemini'),
+            _row('hotel spa', ('Rival', 'competitor', 3), provider='gemini'),
         ]),
         'hotel beach': answers_from_rows([_row('hotel beach', ('Rival', 'competitor', 2), ('Guide', 'other', 1))]),
     }
+
+    def test_measures_snapshots_with_the_kpi_definitions_of_2_21(self) -> None:
+        assert KPI_VERSION == 2
 
     def test_records_the_kpi_version(self) -> None:
         assert snapshot_metrics(self.ANSWERS)['kpi_version'] == KPI_VERSION
@@ -242,11 +273,11 @@ class TestSnapshotMetrics:
     def test_pools_the_group_kpis_over_every_answer(self) -> None:
         kpis = snapshot_metrics(self.ANSWERS, ['hotel-sol.com'])['kpis']
 
-        assert (kpis['answers'], kpis['mention_rate'], kpis['average_position'], kpis['citation_rate']) == (3, 66.7, 3.0, 100.0)
+        assert (kpis['answers'], kpis['mention_rate'], kpis['average_position'], kpis['citation_rate']) == (3, 33.3, 2.0, 100.0)
 
     def test_records_whether_each_keyword_mentions_the_brand(self) -> None:
         assert snapshot_metrics(self.ANSWERS)['keywords'] == [
-            {'keyword': 'hotel spa', 'mentioned': True, 'average_position': 3.0},
+            {'keyword': 'hotel spa', 'mentioned': True, 'average_position': 2.0},
             {'keyword': 'hotel beach', 'mentioned': False, 'average_position': None},
         ]
 

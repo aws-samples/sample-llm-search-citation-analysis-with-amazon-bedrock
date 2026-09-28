@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { InfoTooltip } from '../../ui/InfoTooltip';
 
 export interface ReportTableColumn<Row> {
   /**
@@ -6,6 +7,8 @@ export interface ReportTableColumn<Row> {
    * must be unique within one table.
    */
   readonly header: string;
+  /** What the column measures, shown in an "i" tooltip next to the heading. */
+  readonly info?: string;
   /** Extra classes appended to every body cell in this column (e.g. `font-medium`). */
   readonly cellClassName?: string;
   readonly render: (row: Row) => ReactNode;
@@ -48,6 +51,7 @@ export function ReportTable<Row>({
                 className="px-3 py-2 text-left text-xs font-medium uppercase tracking-wide text-gray-500 dark:text-gray-400"
               >
                 {column.header}
+                {column.info !== undefined && <InfoTooltip label={column.header} text={column.info} />}
               </th>
             ))}
           </tr>

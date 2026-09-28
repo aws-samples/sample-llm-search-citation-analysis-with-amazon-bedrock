@@ -8,6 +8,8 @@ from typing import Any
 import pytest
 
 from shared.kpi_engine import (
+    ANSWER_ATTRIBUTE_NAMES,
+    ANSWER_PROJECTION,
     KPI_IDS,
     PERCENT_KPIS,
     answer_from_row,
@@ -71,6 +73,12 @@ UNKNOWN_WEIGHT = 0.387420489
 
 
 class TestAnswerFromRow:
+    def test_projects_every_attribute_an_answer_is_built_from(self):
+        fields = [field.strip() for field in ANSWER_PROJECTION.split(',')]
+        resolved = {'.'.join(ANSWER_ATTRIBUTE_NAMES.get(part, part) for part in field.split('.')) for field in fields}
+
+        assert resolved == {'keyword', 'timestamp', 'provider', 'status', 'query_prompt_id', 'brands', 'citations', 'metadata.model'}
+
     def test_keeps_only_successful_llm_answers(self):
         assert [(answer.keyword, answer.provider) for answer in POOL] == [
             ('k1', 'openai'), ('k1', 'gemini'), ('k3', 'claude'), ('k2', 'perplexity'),

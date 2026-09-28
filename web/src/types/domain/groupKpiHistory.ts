@@ -1,56 +1,59 @@
 /**
- * `GET /reports/group-kpis`: every analysis run of a keyword group (one
- * hotel) with its citation rate, share of voice and prominence, the keywords
- * that drove each change, and a per-keyword drill-down of every run.
- * Formulas and run semantics: `lambda/shared/group_kpi_history.py`.
+ * `GET /reports/group-kpis`: every analysis run of a keyword group with its
+ * KPIs, the keywords that drove each change, and a per-keyword drill-down of
+ * every run. KPIs: `docs/kpi-definitions.md`; run semantics:
+ * `lambda/shared/group_kpi_history.py`.
  */
 import type { ReportScopeInfo } from './baseTypes';
+import type { KpiId } from '../../constants/kpiDefinitions';
 import { isRecord } from './keywordDecoders';
 
-/** The group values of one run (the same fields as the `/visibility` group summary). */
-export interface GroupRunSummary {
-  /** Citation rate: % of keywords with data whose answers mention the hotel. */
-  coverage_rate: number;
-  /** Share of voice: mean over keywords of first-party mentions / all brand mentions. */
-  first_party_avg_sov: number;
-  rank_1_share: number;
-  top_3_share: number;
-  mean_rank: number | null;
-  mean_first_position: number | null;
-  first_party_avg_score: number;
-  competitor_avg_score: number;
-  competitor_avg_sov: number;
-  provider_coverage: number;
-  first_party_mean_best_rank: number | null;
+/** The KPIs a trend is called for: every rate and score, not the counts (`TRENDED_KPIS`). */
+export type TrendedKpiId = Exclude<KpiId, 'answers' | 'mentions' | 'citations'>;
+
+export type KpiTrend = 'improving' | 'declining' | 'stable';
+
+export interface SentimentSplit {
+  positive: number;
+  neutral: number;
+  negative: number;
+  mixed: number;
 }
 
-/** The group KPIs compared between consecutive group runs. */
-export type GroupKpiField = 'coverage_rate' | 'first_party_avg_sov' | 'rank_1_share' | 'top_3_share' | 'mean_rank';
+/**
+ * Every KPI of the tracked brand over a set of answers (`brand_kpis`). Rates
+ * are `null` when there is nothing to divide by; the citation KPIs are
+ * `null` until owned domains are configured.
+ */
+export type BrandKpis = Record<KpiId, number | null> & {
+  /** AI engines with at least one answer. */
+  engines: number;
+  /** Keywords with at least one answer. */
+  keywords: number;
+  sentiment_split: SentimentSplit;
+};
+
+/** `current - previous` of every KPI (points, positions or counts); `null` when either side is unknown. */
+export type KpiDeltas = Record<KpiId, number | null>;
 
 export type MentionChange = 'gained' | 'lost' | null;
-
-/** How one keyword moved between two runs (points; `null` when either side is unknown). */
-export interface KeywordChanges {
-  mention: MentionChange;
-  first_party_sov: number | null;
-  rank_1_share: number | null;
-  top_3_share: number | null;
-  mean_rank: number | null;
-}
 
 /** A keyword that moved between two group runs, and its share of the group's move. */
 export interface GroupRunDriver {
   keyword: string;
-  changes: KeywordChanges;
+  mention: MentionChange;
+  deltas: KpiDeltas;
+  /** The keyword's change weighted by its share of the run's answers, in points. */
   impact: {
-    coverage_rate: number;
-    first_party_avg_sov: number;
+    mention_rate: number;
+    visibility_score: number;
   };
 }
 
 export interface GroupRunChange {
   previous_timestamp: string;
-  deltas: Record<GroupKpiField, number | null>;
+  deltas: KpiDeltas;
+  trends: Record<TrendedKpiId, KpiTrend>;
   drivers: GroupRunDriver[];
   keywords_entered: string[];
   keywords_left: string[];
@@ -60,28 +63,24 @@ export interface GroupRun {
   timestamp: string;
   keywords_with_data: number;
   keywords_total: number;
-  /** % of the group's keywords with data in this run. */
+  /** % of the group's keywords answered in this run. */
   coverage: number;
-  /** Covers at least `group_run_min_coverage` % of the keywords; only these are compared. */
+  /** Answers at least `group_run_min_coverage` % of the keywords; only these are compared. */
   is_group_run: boolean;
-  summary: GroupRunSummary;
-  /** Provider -> the models that answered in this run. */
+  kpis: BrandKpis;
+  /** Engine -> the models that answered in this run. */
   models: Record<string, string[]>;
   change: GroupRunChange | null;
 }
 
 export interface KeywordRun {
   timestamp: string;
-  first_party_mentioned: boolean;
-  first_party_sov: number;
-  rank_1_share: number;
-  top_3_share: number;
-  mean_rank: number | null;
-  first_party_best_rank: number | null;
-  answers: number;
-  mentioned_answers: number;
-  first_party_score: number;
-  change: (KeywordChanges & { previous_timestamp: string }) | null;
+  kpis: BrandKpis;
+  change: {
+    previous_timestamp: string;
+    mention: MentionChange;
+    deltas: KpiDeltas;
+  } | null;
 }
 
 export interface KeywordRunHistory {
@@ -94,6 +93,8 @@ export interface GroupKpiHistoryResponse {
   days: number;
   group_run_min_coverage: number;
   keywords_truncated: boolean;
+  /** Whether owned domains are configured, so the citation KPIs are measured. */
+  citations_configured: boolean;
   runs: GroupRun[];
   keywords: KeywordRunHistory[];
 }
@@ -102,7 +103,7 @@ function isGroupRun(value: unknown): value is GroupRun {
   return isRecord(value)
     && typeof value.timestamp === 'string'
     && typeof value.is_group_run === 'boolean'
-    && isRecord(value.summary)
+    && isRecord(value.kpis)
     && isRecord(value.models);
 }
 

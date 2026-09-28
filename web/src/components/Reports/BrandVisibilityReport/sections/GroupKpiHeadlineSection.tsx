@@ -2,13 +2,17 @@ import { useId } from 'react';
 import type { GroupRun } from '../../../../types/domain/groupKpiHistory';
 import { formatDate } from '../../../../formatting/dateFormatter';
 import {
-  CITATION_RATE_DEFINITION, PROMINENCE_DEFINITION, SHARE_OF_VOICE_DEFINITION
-} from '../../../../constants/kpiDefinitions';
+  formatKpi, formatKpiDelta
+} from '../../../../formatting/kpiFormatter';
 import {
-  ReportSection, ReportStatCard, ReportStatGrid
+  KPI_DEFINITIONS, KPI_SPECS, type KpiId, type KpiSpec
+} from '../../../../constants/kpiDefinitions';
+import { InfoTooltip } from '../../../ui/InfoTooltip';
+import {
+  ReportSection, ReportStatCard, ReportStatGrid, ReportTable, type ReportTableColumn
 } from '../../layout';
 import {
-  deltaAccent, formatPercent, formatPointsDelta, formatRank
+  runTrend, trendAccent
 } from '../groupKpiView';
 
 interface Props {
@@ -16,11 +20,24 @@ interface Props {
   readonly runs: readonly GroupRun[];
   readonly selected: GroupRun;
   readonly onSelect: (timestamp: string) => void;
+  /** Whether owned domains are configured, so the citation KPIs are measured. */
+  readonly citationsConfigured: boolean;
 }
 
-function changeFootnote(run: GroupRun, delta: number | null | undefined): string {
+/** The four KPIs on the headline cards; every KPI is in the table below them. */
+const HEADLINE_KPIS: readonly KpiId[] = ['mention_rate', 'share_of_voice', 'visibility_score', 'citation_rate'];
+
+const TREND_LABELS = {
+  improving: 'Improving',
+  declining: 'Declining',
+  stable: 'Stable',
+} as const;
+
+const OWNED_DOMAINS_MISSING = 'Set owned domains in Settings › Brand Tracking to measure citations';
+
+function changeFootnote(run: GroupRun, id: KpiId): string {
   if (run.change === null) return 'No earlier group run to compare with';
-  return `${formatPointsDelta(delta ?? null)} since ${formatDate(run.change.previous_timestamp)}`;
+  return `${formatKpiDelta(id, run.change.deltas[id])} since ${formatDate(run.change.previous_timestamp)}`;
 }
 
 function runOptionLabel(run: GroupRun): string {
@@ -28,22 +45,53 @@ function runOptionLabel(run: GroupRun): string {
   return `${formatDate(run.timestamp)} · ${run.keywords_with_data}/${run.keywords_total} keywords${partial}`;
 }
 
+function kpiTableColumns(run: GroupRun): ReadonlyArray<ReportTableColumn<KpiSpec>> {
+  return [
+    {
+      header: 'KPI',
+      // Stryker disable next-line StringLiteral: Tailwind-only cell styling
+      cellClassName: 'whitespace-nowrap font-medium',
+      render: (spec) => (
+        <>
+          {spec.label}
+          <InfoTooltip label={spec.label} text={spec.definition} />
+        </>
+      ),
+    },
+    {
+      header: 'Value',
+      render: (spec) => formatKpi(spec.id, run.kpis[spec.id]),
+    },
+    {
+      header: 'Change',
+      render: (spec) => (run.change === null ? '—' : formatKpiDelta(spec.id, run.change.deltas[spec.id])),
+    },
+    {
+      header: 'Trend',
+      render: (spec) => {
+        const trend = runTrend(run, spec.id);
+        return trend === undefined ? '—' : TREND_LABELS[trend];
+      },
+    },
+  ];
+}
+
 /**
- * The hotel's three KPIs for one run (the latest group run by default), each
- * with its change since the previous group run and a tooltip saying exactly
- * how it is measured.
+ * The group's KPIs for one run (the latest group run by default): four
+ * headline cards, then every KPI with its change and trend since the
+ * previous group run, each with a tooltip saying how it is measured.
  */
 export function GroupKpiHeadlineSection({
-  runs, selected, onSelect
+  runs, selected, onSelect, citationsConfigured
 }: Props) {
   const pickerId = useId();
-  const { summary } = selected;
-  const deltas = selected.change?.deltas;
+  const { kpis } = selected;
 
   return (
     <ReportSection
       title="Headline"
-      subtitle={`Run of ${formatDate(selected.timestamp)} — ${selected.keywords_with_data} of ${selected.keywords_total} keywords with results.`}
+      subtitle={`Run of ${formatDate(selected.timestamp)} — ${kpis.answers ?? 0} AI answers from ${kpis.engines} engines `
+        + `across ${selected.keywords_with_data} of ${selected.keywords_total} keywords.`}
     >
       <div className="mb-3 print-hidden">
         <label htmlFor={pickerId} className="mr-2 text-xs text-gray-600 dark:text-gray-300">Run</label>
@@ -58,29 +106,24 @@ export function GroupKpiHeadlineSection({
           ))}
         </select>
       </div>
-      <ReportStatGrid columns={3}>
-        <ReportStatCard
-          label={CITATION_RATE_DEFINITION.label}
-          value={formatPercent(summary.coverage_rate)}
-          footnote={changeFootnote(selected, deltas?.coverage_rate)}
-          accent={deltaAccent(deltas?.coverage_rate ?? null, true)}
-          info={CITATION_RATE_DEFINITION.definition}
-        />
-        <ReportStatCard
-          label={SHARE_OF_VOICE_DEFINITION.label}
-          value={formatPercent(summary.first_party_avg_sov)}
-          footnote={changeFootnote(selected, deltas?.first_party_avg_sov)}
-          accent={deltaAccent(deltas?.first_party_avg_sov ?? null, true)}
-          info={SHARE_OF_VOICE_DEFINITION.definition}
-        />
-        <ReportStatCard
-          label={`${PROMINENCE_DEFINITION.label} (rank #1)`}
-          value={formatPercent(summary.rank_1_share)}
-          footnote={`Top 3: ${formatPercent(summary.top_3_share)} · Mean rank: ${formatRank(summary.mean_rank)}`}
-          accent={deltaAccent(deltas?.rank_1_share ?? null, true)}
-          info={PROMINENCE_DEFINITION.definition}
-        />
+      <ReportStatGrid columns={4}>
+        {HEADLINE_KPIS.map((id) => (
+          <ReportStatCard
+            key={id}
+            label={KPI_DEFINITIONS[id].label}
+            value={formatKpi(id, kpis[id])}
+            footnote={id === 'citation_rate' && !citationsConfigured ? OWNED_DOMAINS_MISSING : changeFootnote(selected, id)}
+            accent={trendAccent(runTrend(selected, id))}
+            info={KPI_DEFINITIONS[id].definition}
+          />
+        ))}
       </ReportStatGrid>
+      <div className="mt-4">
+        {
+          // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
+          <ReportTable columns={kpiTableColumns(selected)} rows={KPI_SPECS} rowKey={(spec) => spec.id} />
+        }
+      </div>
     </ReportSection>
   );
 }

@@ -14,7 +14,7 @@ import {
   buildAlertSettingsFormProps,
   getAlertSettingsForm,
   renderAlertSettingsForm,
-  submitEmptyCitationRate,
+  submitEmptyMentionRate,
   thresholdValues,
 } from './AlertSettingsForm-fixtures';
 
@@ -23,7 +23,7 @@ describe('AlertSettingsForm', () => {
     const { props } = renderAlertSettingsForm();
     const user = userEvent.setup();
     const edits = [
-      [/Citation-rate drop/u, '12.5'],
+      [/Mention-rate drop/u, '12.5'],
       [/Position loss/u, '4.5'],
       [/Competitor top N/u, '7'],
       [/Improvement after content change/u, '9.5'],
@@ -43,7 +43,7 @@ describe('AlertSettingsForm', () => {
       enabled: false,
       notification_emails: ['owner@example.com'],
       thresholds: {
-        citation_rate_drop: 12.5,
+        mention_rate_drop: 12.5,
         position_loss: 4.5,
         competitor_top_n: 7,
         improvement_after_content_change: 9.5,
@@ -56,7 +56,7 @@ describe('AlertSettingsForm', () => {
     const nextProps = buildAlertSettingsFormProps({
       settings: buildAlertSettings({
         thresholds: {
-          citation_rate_drop: 0.5,
+          mention_rate_drop: 0.5,
           position_loss: 6,
           competitor_top_n: 10,
           improvement_after_content_change: 100,
@@ -87,16 +87,16 @@ describe('AlertSettingsForm', () => {
   it('shows the exact validation failure without saving invalid settings', async () => {
     const { props } = renderAlertSettingsForm();
 
-    await submitEmptyCitationRate();
+    await submitEmptyMentionRate();
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Citation-rate drop must be a number');
+    expect(screen.getByRole('alert')).toHaveTextContent('Mention-rate drop must be a number');
     expect(props.onSave).not.toHaveBeenCalled();
   });
 
   it('clears a validation failure when persisted settings change', async () => {
     const { rerender } = renderAlertSettingsForm();
-    await submitEmptyCitationRate();
-    expect(screen.getByRole('alert')).toHaveTextContent('Citation-rate drop must be a number');
+    await submitEmptyMentionRate();
+    expect(screen.getByRole('alert')).toHaveTextContent('Mention-rate drop must be a number');
 
     rerender(<AlertSettingsForm {...buildAlertSettingsFormProps()} />);
 
@@ -106,10 +106,10 @@ describe('AlertSettingsForm', () => {
   it('removes the validation failure after valid settings are submitted', async () => {
     const { props } = renderAlertSettingsForm();
     const {
-      citationRate, user
-    } = await submitEmptyCitationRate();
+      mentionRate, user
+    } = await submitEmptyMentionRate();
 
-    await user.type(citationRate, '1');
+    await user.type(mentionRate, '1');
     await user.click(screen.getByRole('button', { name: 'Save alert settings' }));
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();

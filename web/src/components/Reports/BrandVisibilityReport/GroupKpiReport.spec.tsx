@@ -6,56 +6,111 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  renderGroupKpiReport, statCard as card
+  headlineCardLabels, renderGroupKpiReport, sectionTable, sectionTitled, statCard, statFigure, statFootnote
 } from './GroupKpiReport-fixtures';
 import {
-  buildChange, buildHistory, buildRun, historyWithDriverMention, RUN_1, RUN_2, RUN_3
+  buildChange, buildHistory, buildRun, historyWithDriverMention, historyWithoutOwnedDomains, RUN_1, RUN_2, RUN_3
 } from './groupKpiHistory-fixtures';
-import {
-  CITATION_RATE_DEFINITION, PROMINENCE_DEFINITION, SHARE_OF_VOICE_DEFINITION
-} from '../../../constants/kpiDefinitions';
+import { KPI_DEFINITIONS } from '../../../constants/kpiDefinitions';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
-describe('GroupKpiReport headline', () => {
-  it('shows the citation rate of the latest group run, not of a newer partial run', () => {
+/** Each headline card of RUN_2: its KPI, caption, figure, change since RUN_1 and the colour of its trend. */
+const HEADLINE_CARDS = [
+  ['mention_rate', 'Mention rate', '60.0%', '-10.0 pts', 'text-red-700'],
+  ['share_of_voice', 'Share of voice', '25.0%', '+5.0 pts', 'text-emerald-700'],
+  ['visibility_score', 'Visibility score', '52.4', '-8.2 pts', 'text-red-700'],
+  ['citation_rate', 'Citation rate', '30.0%', '+1.2 pts', 'text-gray-900'],
+] as const;
+
+const HEADLINE_LABELS = HEADLINE_CARDS.map(([, label]) => label);
+
+describe('GroupKpiReport headline cards', () => {
+  it('shows four cards: mention rate, share of voice, visibility score and citation rate', () => {
     renderGroupKpiReport();
 
-    expect(within(card('Citation rate')).getByText('60.0%')).toBeInTheDocument();
+    expect(headlineCardLabels()).toStrictEqual(['Mention rate', 'Share of voice', 'Visibility score', 'Citation rate']);
   });
 
-  it('shows the change since the previous group run', () => {
+  it.each(HEADLINE_CARDS)('shows the %s of the latest group run, not of a newer partial run, as %s', (_id, label, value) => {
     renderGroupKpiReport();
 
-    expect(within(card('Citation rate')).getByText(`-20.0 pts since ${new Date(RUN_1).toLocaleString()}`)).toBeInTheDocument();
+    expect(statFigure(label).textContent).toBe(value);
   });
 
-  it('shows share of voice and prominence', () => {
+  it.each(HEADLINE_CARDS)('shows the %s change since the previous group run', (_id, label, _value, change) => {
     renderGroupKpiReport();
 
-    expect(within(card('Share of voice')).getByText('25.0%')).toBeInTheDocument();
-    expect(within(card('Prominence (rank #1)')).getByText('Top 3: 70.0% · Mean rank: 1.80')).toBeInTheDocument();
+    expect(statFootnote(label)).toBe(`${change} since ${new Date(RUN_1).toLocaleString()}`);
   });
 
-  it.each([
-    ['Citation rate', CITATION_RATE_DEFINITION.definition],
-    ['Share of voice', SHARE_OF_VOICE_DEFINITION.definition],
-    ['Prominence (rank #1)', PROMINENCE_DEFINITION.definition],
-  ])('explains how %s is measured in a tooltip', (label, definition) => {
+  it.each(HEADLINE_CARDS)('colours the %s figure by its trend', (_id, label, _value, _change, colour) => {
     renderGroupKpiReport();
 
-    expect(screen.getByRole('button', { name: `About ${label}` })).toHaveAccessibleDescription(definition);
+    expect(statFigure(label)).toHaveClass(colour);
   });
 
-  it('switches every figure to the run the reader picks', async () => {
+  it.each(HEADLINE_CARDS)('explains how %s is measured in the card tooltip', (id, label) => {
+    renderGroupKpiReport();
+
+    expect(within(statCard(label)).getByRole('button')).toHaveAccessibleDescription(KPI_DEFINITIONS[id].definition);
+  });
+
+  it('names the run, its answers, engines and keyword coverage', () => {
+    renderGroupKpiReport();
+
+    expect(screen.getByText(`Run of ${new Date(RUN_2).toLocaleString()} — 20 AI answers from 4 engines across 5 of 5 keywords.`))
+      .toBeInTheDocument();
+  });
+});
+
+describe('GroupKpiReport headline without a comparison', () => {
+  it('switches every card to the run the reader picks', async () => {
     renderGroupKpiReport();
 
     await userEvent.selectOptions(screen.getByLabelText('Run'), RUN_1);
 
-    expect(within(card('Citation rate')).getByText('80.0%')).toBeInTheDocument();
-    expect(within(card('Citation rate')).getByText('No earlier group run to compare with')).toBeInTheDocument();
+    expect(statFigure('Mention rate').textContent).toBe('70.0%');
   });
 
+  it('says on every card that the first group run has nothing to compare with', async () => {
+    renderGroupKpiReport();
+
+    await userEvent.selectOptions(screen.getByLabelText('Run'), RUN_1);
+
+    expect(HEADLINE_LABELS.map(statFootnote)).toStrictEqual(HEADLINE_LABELS.map(() => 'No earlier group run to compare with'));
+  });
+
+  it('colours every card neutral when there is no trend', async () => {
+    renderGroupKpiReport();
+
+    await userEvent.selectOptions(screen.getByLabelText('Run'), RUN_1);
+
+    expect(HEADLINE_LABELS.map((label) => statFigure(label).classList.contains('text-gray-900'))).toStrictEqual([true, true, true, true]);
+  });
+});
+
+describe('GroupKpiReport headline without owned domains', () => {
+  it('asks for owned domains under the citation rate', () => {
+    renderGroupKpiReport({ history: historyWithoutOwnedDomains() });
+
+    expect(statFootnote('Citation rate')).toBe('Set owned domains in Settings › Brand Tracking to measure citations');
+  });
+
+  it('shows the unmeasured citation rate as a dash', () => {
+    renderGroupKpiReport({ history: historyWithoutOwnedDomains() });
+
+    expect(statFigure('Citation rate').textContent).toBe('—');
+  });
+
+  it('keeps the change footnote of the other cards', () => {
+    renderGroupKpiReport({ history: historyWithoutOwnedDomains() });
+
+    expect(statFootnote('Mention rate')).toBe(`-10.0 pts since ${new Date(RUN_1).toLocaleString()}`);
+  });
+});
+
+describe('GroupKpiReport run picker', () => {
   it('lists the runs newest first and marks partial runs', () => {
     renderGroupKpiReport();
 
@@ -67,14 +122,20 @@ describe('GroupKpiReport headline', () => {
     ]);
   });
 
+  it('opens on the latest group run, not the newer partial run', () => {
+    renderGroupKpiReport();
+
+    expect(screen.getByLabelText('Run')).toHaveValue(RUN_2);
+  });
+
   it('falls back to the latest run when the window holds only partial runs', () => {
     renderGroupKpiReport({
       history: buildHistory({
         runs: [buildRun({
           timestamp: RUN_3,
-          is_group_run: false 
-        })] 
-      }) 
+          is_group_run: false
+        })]
+      })
     });
 
     expect(screen.getByLabelText('Run')).toHaveValue(RUN_3);
@@ -82,18 +143,30 @@ describe('GroupKpiReport headline', () => {
 });
 
 describe('GroupKpiReport drivers', () => {
-  it('names the keyword that moved the hotel and how', () => {
+  it('names the keyword that moved the group, how its mention changed, its changes and impacts', () => {
     renderGroupKpiReport();
 
-    const row = screen.getByRole('row', { name: /hotel sol spa/ });
-    expect(within(row).getByText('No longer mentioned')).toBeInTheDocument();
-    expect(within(row).getByText('-20.0 pts')).toBeInTheDocument();
+    expect(sectionTable('What changed')[1]).toStrictEqual([
+      'hotel sol spa', 'No longer mentioned', '-50.0 pts', '-10.0 pts', '-45.0 pts', '-9.0 pts', '-25.0 pts', '—', '-50.0 pts', '0',
+    ]);
   });
 
-  it('summarises the group deltas', () => {
+  it('summarises the group changes', () => {
     renderGroupKpiReport();
 
-    expect(screen.getByText(/Citation rate -20\.0 pts · Share of voice -10\.0 pts/)).toBeInTheDocument();
+    expect(within(sectionTitled('What changed')).getByText(/^Mention rate -/)).toHaveTextContent(
+      'Mention rate -10.0 pts · Share of voice +5.0 pts · Visibility score -8.2 pts · Average position +0.50 · '
+      + 'Top-1 share +3.0 pts · Citation rate +1.2 pts',
+    );
+  });
+
+  it('dates the comparison and explains the impact', () => {
+    renderGroupKpiReport();
+
+    expect(within(sectionTitled('What changed')).getByText(/^Since the group run of/)).toHaveTextContent(
+      `Since the group run of ${new Date(RUN_1).toLocaleString()}. `
+      + 'Share of the group\'s change: the keyword\'s change weighted by its share of the run\'s answers.',
+    );
   });
 
   it('explains that a partial run is not compared', async () => {
@@ -118,28 +191,37 @@ describe('GroupKpiReport drivers', () => {
     expect(screen.getByText('No keyword changed between these runs.')).toBeInTheDocument();
   });
 
-  it('lists keywords that joined or left the comparison', () => {
+  it.each([
+    ['gained', 'Now mentioned'],
+    ['lost', 'No longer mentioned'],
+    [null, 'Unchanged'],
+  ] as const)('labels a keyword whose brand mention is %s as "%s"', (mention, label) => {
+    renderGroupKpiReport({ history: historyWithDriverMention(mention) });
+
+    expect(sectionTable('What changed')[1][1]).toBe(label);
+  });
+});
+
+describe('GroupKpiReport joined and missing keywords', () => {
+  it('lists keywords that joined or left the comparison, separated by commas', () => {
     renderGroupKpiReport({
       history: buildHistory({
         runs: [buildRun({
           change: buildChange({
-            keywords_entered: ['new kw'],
-            keywords_left: ['old kw'] 
-          }) 
+            keywords_entered: ['a', 'b'],
+            keywords_left: ['c', 'd']
+          })
         })],
       }),
     });
 
-    expect(screen.getByText('New in this run: new kw')).toBeInTheDocument();
-    expect(screen.getByText('Missing from this run: old kw')).toBeInTheDocument();
+    expect(screen.getByText('New in this run: a, b')).toBeInTheDocument();
+    expect(screen.getByText('Missing from this run: c, d')).toBeInTheDocument();
   });
 
-  it.each([
-    ['gained', 'Now mentioned'],
-    [null, 'Unchanged'],
-  ] as const)('labels a keyword whose hotel mention is %s as "%s"', (mention, label) => {
-    renderGroupKpiReport({ history: historyWithDriverMention(mention) });
+  it('adds no joined or missing lines when the same keywords were compared', () => {
+    renderGroupKpiReport();
 
-    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText(/New in this run|Missing from this run/)).not.toBeInTheDocument();
   });
 });
