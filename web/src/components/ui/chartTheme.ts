@@ -61,11 +61,22 @@ export const themedTooltip = (theme: ChartTheme) => ({
   bodyColor: theme.tooltipText,
 });
 
-export const themedAxis = (theme: ChartTheme, extra: Record<string, unknown> = {}) => ({
-  ticks: {
-    color: theme.textColor,
-    ...(extra.ticks as object ?? {}) 
-  },
-  grid: { color: theme.gridColor },
-  ...extra,
-});
+/**
+ * A themed axis. `extra.ticks` is merged into the themed ticks rather than
+ * replacing them, so a caller's `stepSize` or `callback` keeps the theme's
+ * tick colour (a plain spread used to drop it, leaving dark-mode ticks grey
+ * on grey).
+ */
+export const themedAxis = (theme: ChartTheme, extra: Record<string, unknown> = {}) => {
+  const {
+    ticks, ...rest
+  } = extra;
+  return {
+    ...rest,
+    ticks: {
+      color: theme.textColor,
+      ...(ticks as object ?? {}),
+    },
+    grid: { color: theme.gridColor },
+  };
+};

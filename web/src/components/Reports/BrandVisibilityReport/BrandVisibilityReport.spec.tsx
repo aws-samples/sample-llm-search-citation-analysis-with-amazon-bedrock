@@ -4,15 +4,18 @@ import {
 import {
   render, screen,
 } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import {
   MemoryRouter, Routes, Route 
 } from 'react-router-dom';
 import { BrandVisibilityReport } from './BrandVisibilityReport';
 import { buildKeywordTrends } from './keywordTrends-fixtures';
+import { buildHistory } from './groupKpiHistory-fixtures';
 import type { Keyword } from '../../../types';
 
 vi.mock('./useBrandVisibilityReport', () => ({useBrandVisibilityReport: vi.fn()}));
 vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPrintMode: false })),}));
+vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
 import { useBrandVisibilityReport } from './useBrandVisibilityReport';
 
@@ -207,5 +210,49 @@ describe('BrandVisibilityReport — all-keywords variant', () => {
     expect(optionTexts).toContain('All keywords');
     expect(optionTexts).toContain('best running shoes');
     expect(optionTexts).toContain('best hiking boots');
+  });
+});
+
+
+const GROUP_DATA = {
+  ...ALL_KEYWORDS_DATA,
+  keyword: null,
+  visibility: null,
+  groupHistory: buildHistory(),
+  groupHistoryLoading: false,
+  groupHistoryError: null,
+};
+
+describe('BrandVisibilityReport — keyword group (hotel) variant', () => {
+  beforeEach(() => {
+    mockUse.mockReturnValue(GROUP_DATA);
+  });
+
+  it('shows the hotel KPIs instead of the cross-keyword overview', () => {
+    renderAt('/reports/visibility?group=hotel-sol');
+    expect(screen.getByRole('button', { name: 'About Citation rate' })).toBeInTheDocument();
+    expect(screen.queryByText(/Cross-keyword visibility overview/i)).not.toBeInTheDocument();
+  });
+
+  it('asks for the last 90 days of the group by default', () => {
+    renderAt('/reports/visibility?group=hotel-sol');
+    expect(mockUse).toHaveBeenLastCalledWith({
+      kind: 'group',
+      groupId: 'hotel-sol' 
+    }, 90);
+  });
+
+  it('asks for the period the reader picks', async () => {
+    renderAt('/reports/visibility?group=hotel-sol');
+    await userEvent.selectOptions(screen.getByLabelText('Period'), '180');
+    expect(mockUse).toHaveBeenLastCalledWith({
+      kind: 'group',
+      groupId: 'hotel-sol' 
+    }, 180);
+  });
+
+  it('describes the report as the hotel KPIs per run', () => {
+    renderAt('/reports/visibility?group=hotel-sol');
+    expect(screen.getByText(/citation rate, share of voice and prominence per run/)).toBeInTheDocument();
   });
 });

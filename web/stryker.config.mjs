@@ -38,7 +38,9 @@ export default {
     reportTests: false 
   },
   tempDirName: '.stryker-tmp',
-  ignorePatterns: ['dist', 'coverage', 'reports'],
+  // Anchored: an unanchored 'reports' also matched src/components/Reports on
+  // a case-insensitive file system, so no report component could be mutated.
+  ignorePatterns: ['/dist', '/coverage', '/reports'],
   // Keep the per-mutant time bound generous: jsdom specs are slow to boot.
   timeoutMS: 20000,
   timeoutFactor: 2,

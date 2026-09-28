@@ -1,6 +1,7 @@
 import {
   accentTextClass, type ReportAccent 
 } from './reportAccent';
+import { InfoTooltip } from '../../ui/InfoTooltip';
 
 interface Props {
   /** Small uppercase caption above the figure (e.g. "Share of voice"). */
@@ -10,6 +11,8 @@ interface Props {
   /** Optional one-line context under the figure (e.g. "Competitor avg: 42.0"). */
   readonly footnote?: string;
   readonly accent?: ReportAccent;
+  /** How the figure is measured, shown in an "i" tooltip next to the caption. */
+  readonly info?: string;
 }
 
 /**
@@ -22,13 +25,16 @@ export function ReportStatCard({
   label,
   value,
   footnote,
+  // Stryker disable next-line StringLiteral: accentTextClass maps every non-directional accent to the neutral colour
   accent = 'neutral',
+  info,
 }: Props) {
   const accentClass = accentTextClass(accent);
   return (
     <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800">
       <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
         {label}
+        {info !== undefined && <InfoTooltip label={label} text={info} />}
       </p>
       <p className={`text-2xl font-semibold mt-1 ${accentClass}`}>{value}</p>
       {footnote !== undefined && (

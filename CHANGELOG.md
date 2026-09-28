@@ -9,6 +9,40 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.19.0] - 2026-09-28
+
+### Added
+
+- Per-hotel report. Reports › Brand Visibility for a keyword group
+  (`/reports/visibility?group=<id>`) is now built from
+  `/reports/group-kpis` and shows, over the last 30, 90, 180 or 365 days:
+  - **Headline**: the group's citation rate, share of voice and prominence
+    (rank #1 share, with top-3 share and mean rank) for the latest group run,
+    or any run the reader picks, each with its change since the previous
+    group run.
+  - **KPI evolution**: a chart of the four percentages per run. Partial runs
+    (less than half of the group's keywords) can be added and are drawn as
+    hollow points. Model changes between runs are listed under the chart.
+  - **What changed**: the group deltas since the previous group run and every
+    keyword that moved, with its share of the group's move, plus keywords
+    that joined or left the comparison.
+  - **Keyword detail**: every run of any keyword with its change since that
+    keyword's previous run.
+- Every KPI card has an "i" tooltip saying exactly how the figure is measured,
+  and the report ends with the same definitions written out so they survive
+  printing. Citation rate is defined as it is computed: the share of the
+  group's keywords whose AI answers mention the hotel. It counts mentions in
+  the answer text and does not check whether the hotel's website is cited.
+
+### Fixed
+
+- Chart axes that set their own tick options (the Keyword detail bar chart)
+  kept the theme's tick colour. `themedAxis` used to replace the themed ticks
+  with the caller's, so those ticks were unreadable in dark mode.
+- Stryker could not mutate any report component. Its `ignorePatterns` entry
+  `reports` also matched `src/components/Reports` on case-insensitive file
+  systems; the patterns are now anchored to the project root.
+
 ## [2.18.0] - 2026-09-28
 
 ### Added
