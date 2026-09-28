@@ -199,15 +199,39 @@ def get_provider_config(provider_id: str) -> dict:
         return {'provider_id': provider_id, 'enabled': True}
 
 
-def save_provider_config(provider_id: str, config: dict) -> bool:
-    """Save provider config to DynamoDB."""
+def _enabled_update(provider_id: str, enabled: bool) -> dict[str, Any]:
+    """``update_item`` arguments that set ``enabled`` and leave every other attribute alone.
+
+    The row is shared: the search Lambda records health on it
+    (``shared/provider_health.py``) and it carries any configured model. A
+    ``put_item`` here used to replace the whole row, so every toggle in
+    Settings silently erased the failure streak, the auto-disable record and
+    the last error.
+
+    Switching a provider *on* is the administrator's "I fixed it" decision
+    that ``record_provider_success`` deliberately leaves to them, so it also
+    clears the auto-disable record and restarts the failure streak — otherwise
+    the very next terminal failure would push the retained count past the
+    threshold and switch the provider straight back off. ``last_error`` stays
+    until a successful call clears it: it is still the truth about the last
+    call that was made.
+    """
+    values: dict[str, Any] = {':enabled': enabled, ':ts': get_timestamp()}
+    expression = 'SET enabled = :enabled, updated_at = :ts'
+    if enabled:
+        values[':zero'] = 0
+        expression += ', consecutive_failures = :zero REMOVE auto_disabled, disabled_reason, disabled_at'
+    return {
+        'Key': {'provider_id': provider_id},
+        'UpdateExpression': expression,
+        'ExpressionAttributeValues': values,
+    }
+
+
+def save_provider_enabled(provider_id: str, enabled: bool) -> bool:
+    """Persist a provider's enabled flag without touching the rest of its row."""
     try:
-        table = dynamodb.Table(PROVIDER_CONFIG_TABLE)
-        table.put_item(Item={
-            'provider_id': provider_id,
-            'enabled': config.get('enabled', True),
-            'updated_at': get_timestamp(),
-        })
+        dynamodb.Table(PROVIDER_CONFIG_TABLE).update_item(**_enabled_update(provider_id, enabled))
     except Exception:
         logger.exception("Error saving provider config")
         return False
@@ -513,11 +537,8 @@ def handle_update_provider(event: dict, context: Any, provider_id: str, body: di
     body = body or {}
 
     # Update enabled status
-    if 'enabled' in body:
-        config = get_provider_config(provider_id)
-        config['enabled'] = bool(body['enabled'])
-        if not save_provider_config(provider_id, config):
-            return api_response(500, {'error': 'Failed to save configuration'}, event)
+    if 'enabled' in body and not save_provider_enabled(provider_id, bool(body['enabled'])):
+        return api_response(500, {'error': 'Failed to save configuration'}, event)
 
     # Update API key
     if body.get('api_key'):
