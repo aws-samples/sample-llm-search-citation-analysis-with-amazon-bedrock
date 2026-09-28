@@ -195,6 +195,91 @@ class TestGetProvidersSurfacesHealth:
         assert _provider(body, 'claude')['last_error_category'] == 'insufficient_credit'
 
 
+def _put_provider(provider_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    """Call PUT /providers/{id} as an administrator; return status and parsed body."""
+    event = {
+        'httpMethod': 'PUT',
+        'path': f'/api/providers/{provider_id}',
+        'pathParameters': {'id': provider_id},
+        'headers': {'origin': 'http://localhost:3000'},
+        'body': json.dumps(body),
+        'requestContext': {
+            'authorizer': {'claims': {
+                'cognito:username': 'admin@example.com',
+                'cognito:groups': 'Admin',
+            }}
+        },
+    }
+    result = _module.handler(event, {})
+    return result['statusCode'], json.loads(result['body'])
+
+
+def _only_update() -> dict[str, Any]:
+    """The keyword arguments of the single `update_item` the toggle issued."""
+    assert mock_table.update_item.call_count == 1
+    return mock_table.update_item.call_args.kwargs
+
+
+class TestToggleKeepsTheRestOfTheRow:
+    """
+    PUT /providers/{id} with `enabled` used to `put_item` a fresh row holding
+    only `enabled`/`updated_at`, silently erasing the health record (and any
+    configured model) on every toggle in Settings.
+    """
+
+    def test_never_replaces_the_provider_row(self):
+        _put_provider('claude', {'enabled': False})
+
+        assert mock_table.put_item.call_args_list == []
+
+    def test_disabling_sets_only_the_flag_and_timestamp(self):
+        _put_provider('claude', {'enabled': False})
+
+        assert _only_update()['UpdateExpression'] == 'SET enabled = :enabled, updated_at = :ts'
+
+    def test_disabling_targets_the_provider_row(self):
+        _put_provider('claude', {'enabled': False})
+
+        update = _only_update()
+        assert update['Key'] == {'provider_id': 'claude'}
+        assert update['ExpressionAttributeValues'][':enabled'] is False
+
+    def test_stamps_the_write_with_the_current_time(self):
+        with patch.object(_module, 'get_timestamp', return_value='2026-09-28T12:00:00Z'):
+            _put_provider('claude', {'enabled': False})
+
+        assert _only_update()['ExpressionAttributeValues'] == {
+            ':enabled': False,
+            ':ts': '2026-09-28T12:00:00Z',
+        }
+
+    def test_enabling_clears_the_auto_disable_record_and_restarts_the_streak(self):
+        """
+        Re-enabling is the administrator's "fixed it" decision. Keeping the
+        retained streak of 3 would let the next terminal failure switch the
+        provider straight back off.
+        """
+        _put_provider('claude', {'enabled': True})
+
+        assert _only_update()['UpdateExpression'] == (
+            'SET enabled = :enabled, updated_at = :ts, consecutive_failures = :zero '
+            'REMOVE auto_disabled, disabled_reason, disabled_at'
+        )
+
+    def test_enabling_keeps_the_last_error_until_a_success_clears_it(self):
+        _put_provider('claude', {'enabled': True})
+
+        update = _only_update()
+        assert 'last_error' not in update['UpdateExpression']
+        assert update['ExpressionAttributeValues'][':zero'] == 0
+
+    def test_answers_500_when_the_write_fails(self):
+        mock_table.update_item.side_effect = ClientError(
+            {'Error': {'Code': 'ProvisionedThroughputExceededException'}}, 'UpdateItem'
+        )
+
+        assert _put_provider('claude', {'enabled': False}) == (500, {'error': 'Failed to save configuration'})
+
 
 class ProbeTimeout(Exception):
     """Stands in for ``requests.Timeout``."""

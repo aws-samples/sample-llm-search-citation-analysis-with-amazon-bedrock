@@ -9,6 +9,21 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.16.2] - 2026-09-28
+
+### Fixed
+
+- Switching a provider on or off in Settings › AI Providers no longer erases
+  the rest of that provider's record. The toggle used `put_item` with only
+  `enabled` and `updated_at`, which replaced the whole row and silently threw
+  away the health record the search Lambda keeps there (last error, failure
+  streak, auto-disable reason) and would have thrown away a configured model.
+  It is now an `update_item` of those two fields. Switching a provider back on
+  also clears the auto-disable record and restarts the failure streak, so the
+  next failure after a fix cannot push the retained count over the threshold
+  and switch it straight off again. The last error stays visible until a
+  successful call clears it.
+
 ## [2.16.1] - 2026-09-22
 
 Two known gaps closed, both cases where a number or a tolerance did not match
