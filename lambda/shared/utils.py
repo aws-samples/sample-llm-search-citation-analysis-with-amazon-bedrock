@@ -45,11 +45,7 @@ _dynamodb = None
 
 
 def get_dynamodb_resource():
-    """Lazy shared DynamoDB resource — import stays side-effect free.
-
-    The single home for the lazy-resource idiom that was previously
-    duplicated in ``shared.providers`` (bugs.md 3.4).
-    """
+    """Lazy shared DynamoDB resource — import stays side-effect free."""
     global _dynamodb
     if _dynamodb is None:
         _dynamodb = boto3.resource('dynamodb')

@@ -26,6 +26,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from shared.config import LLM_PROVIDERS
+from shared.constants import UNRANKED_SENTINEL
 
 #: The KPIs a scope (keyword, group, run, period) reports for the tracked brand.
 KPI_IDS: tuple[str, ...] = (
@@ -60,9 +61,6 @@ POSITION_DECAY = 0.9
 
 #: A mention whose position is unknown (or beyond 10th) earns the 10th-position weight.
 POSITION_WEIGHT_CAP = 10
-
-#: Ranks at or above this are the extractor's "not ranked" sentinel.
-UNRANKED_SENTINEL = 999
 
 #: Noise band of the trend direction: changes smaller than this are "stable".
 TREND_BAND_POINTS = 2.0

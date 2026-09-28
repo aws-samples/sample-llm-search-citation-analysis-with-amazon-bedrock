@@ -16,9 +16,9 @@ from boto3.dynamodb.conditions import Key
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
+from shared.answer_queries import query_keyword_run_rows
 from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.dynamodb_batch import collect_all_items
-from shared.group_kpi_history import query_keyword_run_rows
 from shared.keyword_groups import keyword_group_ids, query_active_keywords
 from shared.kpi_alerts import (
     build_alert_item,

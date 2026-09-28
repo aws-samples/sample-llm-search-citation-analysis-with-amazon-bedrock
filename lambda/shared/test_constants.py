@@ -75,23 +75,6 @@ class TestMentionLogBase:
         )
 
 
-class TestTrendDirectionSlopes:
-    """Thresholds are symmetric — if they drift asymmetric, the dashboard
-    will feel biased toward one direction."""
-
-    def test_improving_and_declining_slopes_are_symmetric(self) -> None:
-        assert (
-            constants.TREND_DIRECTION_IMPROVING_SLOPE
-            == -constants.TREND_DIRECTION_DECLINING_SLOPE
-        )
-
-    def test_improving_slope_is_positive(self) -> None:
-        assert constants.TREND_DIRECTION_IMPROVING_SLOPE > 0
-
-    def test_declining_slope_is_negative(self) -> None:
-        assert constants.TREND_DIRECTION_DECLINING_SLOPE < 0
-
-
 class TestBusinessLimits:
     """Business caps — both are positive integers."""
 

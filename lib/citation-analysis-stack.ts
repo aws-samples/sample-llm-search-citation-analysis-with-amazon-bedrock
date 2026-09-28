@@ -1972,13 +1972,11 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_CRAWLED_CONTENT: crawledContentTable.tableName,
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
-        DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
         // Legacy names (to be removed once rollout is verified):
         SEARCH_RESULTS_TABLE: searchResultsTable.tableName,
         CITATIONS_TABLE: citationsTable.tableName,
         CRAWLED_CONTENT_TABLE: crawledContentTable.tableName,
         KEYWORDS_TABLE: keywordsTable.tableName,
-        PROVIDER_CONFIG_TABLE: providerConfigTable.tableName,
         ...bedrockTierEnv,
         // recommendation status (read for left-join, write for the
         // POST /recommendations/{id}/status route)
@@ -2162,7 +2160,6 @@ export class CitationAnalysisStack extends cdk.Stack {
     crawledContentTable.grantReadData(statsInsightsFunction);
     keywordsTable.grantReadData(statsInsightsFunction);
     brandConfigTable.grantReadData(statsInsightsFunction);
-    providerConfigTable.grantReadData(statsInsightsFunction);
     // The same Lambda serves both GET /recommendations (read-only join)
     // and POST /recommendations/{id}/status (write upsert), so it
     // needs read-write on the status table.

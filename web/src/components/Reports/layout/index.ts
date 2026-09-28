@@ -15,6 +15,12 @@ export {
   ReportTable, type ReportTableColumn 
 } from './ReportTable';
 export { kpiColumn } from './kpiColumn';
+export {
+  HEADLINE_KPIS, KpiHeadline, OWNED_DOMAINS_MISSING, trendAccent, type KpiComparison
+} from './KpiHeadline';
+export {
+  NO_PREVIOUS_PERIOD, periodComparison
+} from './periodComparison';
 export { PriorityBadge } from './PriorityBadge';
 export { MoverColumn } from './MoverColumn';
 export type { ReportAccent } from './reportAccent';

@@ -1,110 +1,55 @@
 import type { BrandClassification } from './brands';
 import type { ReportScopeInfo } from './baseTypes';
+import type {
+  BrandKpis, KpiDeltas, KpiTrend, TrendedKpiId
+} from './groupKpiHistory';
 
-export interface ProminenceMetrics {
-  answers: number;
-  mentioned_answers: number;
-  rank_1_share: number;
-  top_3_share: number;
-  mean_rank: number | null;
-  mean_first_position: number | null;
-}
-
-export interface BrandVisibilityMetric {
-  name: string;
-  visibility_score: number;
-  provider_count: number;
-  providers: string[];
-  total_mentions: number;
-  best_rank: number | null;
-  share_of_voice: number;
-  classification: BrandClassification;
-}
-
-export interface VisibilityMetricsResponse {
-  keyword: string;
-  timestamp: string;
-  total_mentions: number;
-  brands: BrandVisibilityMetric[];
-  first_party: BrandVisibilityMetric[];
-  competitors: BrandVisibilityMetric[];
-  others: BrandVisibilityMetric[];
-  /** Additive for compatibility with responses created before prominence. */
-  prominence?: ProminenceMetrics;
-  summary: {
-    first_party_avg_score: number;
-    competitor_avg_score: number;
-    first_party_total_sov: number;
-    competitor_total_sov: number;
-  };
-}
-
-/** A brand ranked across the keywords of a group (`/visibility?group_id=`). */
-export interface GroupBrandVisibilityMetric {
+/**
+ * One brand named in a scope's answers (`brand_table` in
+ * `lambda/shared/kpi_engine.py`): the tracked-brand formulas applied to
+ * that brand alone. Leaderboards are sorted by visibility score.
+ */
+export interface BrandLeaderboardRow {
   name: string;
   classification: BrandClassification;
-  /** Mean visibility over the keywords the brand appears on. */
+  mentions: number;
+  mention_rate: number | null;
+  share_of_voice: number | null;
+  average_position: number | null;
+  best_position: number | null;
   visibility_score: number;
-  share_of_voice: number;
-  provider_count: number;
-  providers: string[];
-  total_mentions: number;
-  best_rank: number | null;
-  /** How many of the group's keywords mention the brand. */
-  keyword_count: number;
+  /** The AI engines whose answers name the brand, sorted. */
+  engines: string[];
+  /** How many keywords' answers name the brand. */
+  keywords: number;
+  net_sentiment: number | null;
 }
 
-/** One keyword's line in a group visibility summary. */
-export interface KeywordVisibilityRow extends ProminenceMetrics {
+/** One keyword of a visibility view: its latest run, or no data. */
+export interface KeywordVisibilityRow {
   keyword: string;
-  has_data: boolean;
   timestamp: string | null;
-  first_party_score: number;
-  competitor_score: number;
-  first_party_sov: number;
-  first_party_providers: number;
-  total_mentions: number;
-  first_party_mentioned: boolean;
-  first_party_best_rank: number | null;
+  has_data: boolean;
+  kpis: BrandKpis | null;
 }
 
 /**
- * Group summary answered by `/visibility` for `group_id=`, `keyword_ids=` or
- * `scope=all`: per-keyword metrics averaged over the keywords with data.
+ * `GET /visibility` for any scope (one keyword, a group, keyword ids or all):
+ * every KPI over each keyword's latest run, pooled
+ * (`lambda/shared/visibility_views.py`).
  */
-export interface GroupVisibilityResponse {
+export interface VisibilityResponse {
   scope: ReportScopeInfo;
+  /** The newest run among the keywords. */
   timestamp: string | null;
-  /** True when the scope had more keywords than the summary covers (100). */
-  keywords_truncated?: boolean;
+  keywords_truncated: boolean;
+  /** Whether owned domains are configured, so the citation KPIs are measured. */
+  citations_configured: boolean;
   keywords_analyzed: number;
   keywords_with_data: number;
+  kpis: BrandKpis;
+  brands: BrandLeaderboardRow[];
   keywords: KeywordVisibilityRow[];
-  brands: GroupBrandVisibilityMetric[];
-  first_party: GroupBrandVisibilityMetric[];
-  competitors: GroupBrandVisibilityMetric[];
-  others: GroupBrandVisibilityMetric[];
-  summary: {
-    first_party_avg_score: number;
-    competitor_avg_score: number;
-    first_party_avg_sov: number;
-    competitor_avg_sov: number;
-    /** % of keywords (with data) where a first-party brand is mentioned. */
-    coverage_rate: number;
-    /** Mean share of enabled providers mentioning a first-party brand. */
-    provider_coverage: number;
-    first_party_mean_best_rank: number | null;
-    rank_1_share: number;
-    top_3_share: number;
-    mean_rank: number | null;
-    mean_first_position: number | null;
-  };
-}
-
-export type VisibilityResponse = VisibilityMetricsResponse | GroupVisibilityResponse;
-
-export function isGroupVisibilityResponse(data: VisibilityResponse): data is GroupVisibilityResponse {
-  return 'scope' in data && 'keywords' in data;
 }
 
 export interface PromptBrandData {
@@ -228,58 +173,59 @@ export interface RecommendationsResponse {
   };
 }
 
-export type TrendDirection = 'improving' | 'declining' | 'stable';
+export type TrendDirection = KpiTrend;
 
+/** One period of a trend: every answer of the scope in that day, ISO week or month. */
 export interface TrendDataPoint {
   period: string;
-  visibility_score: number;
-  total_mentions: number;
-  provider_count: number;
-  best_rank: number | null;
-  analysis_runs: number;
-  answers?: number;
-  mentioned_answers?: number;
-  rank_1_share?: number;
-  top_3_share?: number;
-  mean_rank?: number | null;
-  mean_first_position?: number | null;
-  keywords_with_data?: number;
+  /** Analysis runs in the period. */
+  runs: number;
+  keywords_with_data: number;
+  kpis: BrandKpis;
 }
 
 export type PeriodType = 'day' | 'week' | 'month';
 
+/** A change between two periods: every KPI's delta and each rate's trend. */
+export interface PeriodChange {
+  deltas: KpiDeltas;
+  trends: Record<TrendedKpiId, KpiTrend>;
+}
+
+/** One keyword's latest period and its change since the keyword's previous period. */
+export interface KeywordTrend {
+  keyword: string;
+  period: string;
+  kpis: BrandKpis;
+  change: (PeriodChange & { previous_period: string }) | null;
+}
+
+/**
+ * `GET /trends` for any scope (`lambda/shared/visibility_views.py`
+ * `trend_view`): the KPIs per period, the latest standing and its change,
+ * and each keyword's move.
+ */
 export interface HistoricalTrendsResponse {
-  keyword?: string;
-  /** Present on group / all answers. */
-  scope?: ReportScopeInfo;
-  keywords_truncated?: boolean;
+  scope: ReportScopeInfo;
   period_type: PeriodType;
   days_analyzed: number;
-  /** Single keyword: its series. Group: per-bucket mean across keywords. */
+  since: string;
+  keywords_analyzed: number;
+  keywords_with_data: number;
+  keywords_truncated: boolean;
+  citations_configured: boolean;
   trend_data: TrendDataPoint[];
-  trend_direction: TrendDirection;
-  summary: {
-    current_score: number;
-    previous_score: number;
-    change: number;
-    change_percent: number;
-    average_score: number;
-    max_score: number;
-    min_score: number;
-  };
-  keywords_analyzed?: number;
-  keyword_trends?: Array<{
-    keyword: string;
-    trend_direction: TrendDirection;
-    current_score: number;
-    change: number;
-    change_percent: number;
-  }>;
-  overall?: {
+  /** Every KPI over each keyword's latest period, pooled. */
+  latest: BrandKpis;
+  /** Latest against previous period over the keywords measured in both; `null` before a second period. */
+  change: (PeriodChange & { keywords_compared: number }) | null;
+  /** Best visibility score first. */
+  keyword_trends: KeywordTrend[];
+  /** Keywords by the trend of their visibility score. */
+  overall: {
     improving_count: number;
     declining_count: number;
     stable_count: number;
-    avg_score: number;
   };
 }
 

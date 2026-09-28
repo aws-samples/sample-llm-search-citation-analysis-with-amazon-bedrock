@@ -36,6 +36,7 @@ import boto3
 
 from shared.api_response import success_response
 from shared.decorators import api_handler, validate
+from shared.kpi_engine import owned_domains_from
 from shared.scope_params import (
     SCOPE_QUERY_PARAMS,
     ReportScope,
@@ -83,7 +84,7 @@ _sibling_cache: dict[str, Callable] = {}
 def _trends_helper() -> Callable:
     if 'trends' not in _sibling_cache:
         _sibling_cache['trends'] = _load_sibling(
-            'get-historical-trends.py', 'get_all_keywords_trends'
+            'get-historical-trends.py', 'trends_for_scope'
         )
     return _sibling_cache['trends']
 
@@ -100,25 +101,22 @@ def _recs_helper() -> Callable:
 # Aggregation
 # ----------------------------------------------------------------------
 
-def _top_movers(
-    keyword_trends: list[dict[str, Any]],
-    direction: str,
-    limit: int,
-) -> list[dict[str, Any]]:
-    """
-    Pick the top N movers in the given direction.
+def _mover(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        'keyword': row['keyword'],
+        'visibility_score': row['kpis']['visibility_score'],
+        'change': row['change']['deltas']['visibility_score'],
+    }
 
-    `direction` is 'up' for biggest improvers (largest positive change) or
-    'down' for biggest decliners (largest negative change, returned with
-    sign preserved so the consumer can format as-is).
-    """
+
+def top_movers(keyword_trends: list[dict[str, Any]], direction: str, limit: int) -> list[dict[str, Any]]:
+    """The ``limit`` keywords whose visibility score rose (``'up'``) or fell (``'down'``) the most since their previous period."""
+    changed = [_mover(row) for row in keyword_trends if row.get('change') and row['change']['deltas']['visibility_score']]
     if direction == 'up':
-        candidates = [k for k in keyword_trends if k.get('change', 0) > 0]
-        candidates.sort(key=lambda k: k['change'], reverse=True)
+        movers = sorted((mover for mover in changed if mover['change'] > 0), key=lambda mover: -mover['change'])
     else:
-        candidates = [k for k in keyword_trends if k.get('change', 0) < 0]
-        candidates.sort(key=lambda k: k['change'])
-    return candidates[:limit]
+        movers = sorted((mover for mover in changed if mover['change'] < 0), key=lambda mover: mover['change'])
+    return movers[:limit]
 
 
 def build_overview(
@@ -129,69 +127,32 @@ def build_overview(
     scope: ReportScope | None = None,
 ) -> dict[str, Any]:
     """
-    Compose the overview payload from existing aggregations.
+    Compose the Executive Summary payload from the trend view and the recommendations.
 
-    Pulls cross-keyword trends + rule-based recommendations and reshapes
-    them into a single payload tailored for the Executive Summary report.
-    ``scope`` (a keyword group or id set) narrows both to its keywords; by
-    default every active keyword is covered. Any error in the trends
-    sub-call propagates up to the api_handler decorator and becomes a 500.
+    ``kpis`` is every KPI over each keyword's latest period; ``change`` compares
+    it with the previous period over the keywords measured in both (``None``
+    before a second period). ``summary`` counts keywords by the trend of their
+    visibility score. ``scope`` narrows everything to its keywords; by default
+    every active keyword is covered.
     """
-    trends = _trends_helper()(config, period=period, days=days, scope=scope)
-    keyword_trends = trends.get('keyword_trends', []) or []
-    overall = trends.get('overall', {}) or {}
-
-    avg_score = float(overall.get('avg_score', 0) or 0)
-
-    # The "previous_score" approximation: subtract the average per-keyword
-    # change from the current average. This matches what the user sees as
-    # the headline movement on the dashboard. If we had a true previous
-    # snapshot we'd use it; today this is the best signal available
-    # without rerunning per-keyword history aggregation.
-    if keyword_trends:
-        avg_change = round(
-            sum(k.get('change', 0) for k in keyword_trends) / len(keyword_trends),
-            1,
-        )
-    else:
-        avg_change = 0.0
-    previous_score = round(avg_score - avg_change, 1)
-    change_percent = round(
-        (avg_change / previous_score * 100) if previous_score > 0 else 0.0,
-        1,
-    )
-
-    # Trend direction is derived from the headline movement. The threshold
-    # mirrors get-historical-trends' `get_trend_direction` (slope > 2).
-    if avg_change > 2:
-        trend_direction = 'improving'
-    elif avg_change < -2:
-        trend_direction = 'declining'
-    else:
-        trend_direction = 'stable'
-
+    trends = _trends_helper()(scope, period, days, owned_domains_from(config))
+    keyword_trends = trends['keyword_trends']
     recommendations = _recs_helper()(config, keywords=list(scope.keywords) if scope is not None else None) or []
-    top_recommendations = recommendations[:top]
 
     return {
         'generated_at': get_timestamp(),
-        'scope': trends.get('scope'),
+        'scope': trends['scope'],
         'period_type': period,
         'days_analyzed': days,
-        'keywords_analyzed': trends.get('keywords_analyzed', 0),
-        'overall_score': round(avg_score, 1),
-        'previous_score': previous_score,
-        'change': avg_change,
-        'change_percent': change_percent,
-        'trend_direction': trend_direction,
-        'summary': {
-            'improving_count': overall.get('improving_count', 0),
-            'declining_count': overall.get('declining_count', 0),
-            'stable_count': overall.get('stable_count', 0),
-        },
-        'top_improving': _top_movers(keyword_trends, 'up', top),
-        'top_declining': _top_movers(keyword_trends, 'down', top),
-        'top_recommendations': top_recommendations,
+        'keywords_analyzed': trends['keywords_analyzed'],
+        'keywords_with_data': trends['keywords_with_data'],
+        'citations_configured': trends['citations_configured'],
+        'kpis': trends['latest'],
+        'change': trends['change'],
+        'summary': trends['overall'],
+        'top_improving': top_movers(keyword_trends, 'up', top),
+        'top_declining': top_movers(keyword_trends, 'down', top),
+        'top_recommendations': recommendations[:top],
     }
 
 

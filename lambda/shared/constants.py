@@ -18,15 +18,12 @@ specific API's throttling behavior), leave it inline with a comment.
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
-# Visibility score (0-100) weights — used by get-visibility-metrics.py AND
-# get-historical-trends.py.
+# Legacy visibility score (0-100) weights — used only by /persona-rankings
+# (shared/visibility_score.py) until it moves to the KPI engine. Every other
+# page reports the visibility score of docs/kpi-definitions.md.
 #
 # The weights sum to 100 intentionally:
 #   40 (provider coverage) + 30 (rank) + 20 (mentions) + 10 (sentiment) = 100.
-#
-# If you change any of these, update ALL four — the formula is a weighted
-# average, not independent factors. See `calculate_visibility_score` in
-# get-visibility-metrics.py for the authoritative implementation.
 # ---------------------------------------------------------------------------
 VISIBILITY_PROVIDER_WEIGHT = 40
 VISIBILITY_RANK_WEIGHT = 30
@@ -50,19 +47,6 @@ VISIBILITY_MENTION_LOG_BASE = VISIBILITY_MENTION_SATURATION_COUNT + 1
 # above VISIBILITY_RANK_CAP gives the same score (zero rank contribution),
 # so 999 is arbitrary but safe.
 UNRANKED_SENTINEL = 999
-
-
-# ---------------------------------------------------------------------------
-# Trend direction classifier thresholds — used by get-historical-trends.py.
-#
-# `get_trend_direction` runs a linear regression over a series of visibility
-# scores. Slope is in score-points per period (day/week/month depending on
-# the caller's selection). The thresholds were tuned for the 0-100 visibility
-# range — a slope of +2 means gaining ~2 score points per period on average,
-# which is a meaningful dashboard change.
-# ---------------------------------------------------------------------------
-TREND_DIRECTION_IMPROVING_SLOPE = 2.0
-TREND_DIRECTION_DECLINING_SLOPE = -2.0
 
 
 # ---------------------------------------------------------------------------
