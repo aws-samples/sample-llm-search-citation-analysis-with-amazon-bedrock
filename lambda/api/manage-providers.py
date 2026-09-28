@@ -10,7 +10,7 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from functools import partial, wraps
-from typing import Any
+from typing import Any, NamedTuple
 
 import boto3
 from botocore.exceptions import ClientError
@@ -18,11 +18,19 @@ from botocore.exceptions import ClientError
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
+from shared.ai_clients import gemini_generate_url, gemini_grounded_payload, openai_web_search_payload
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler
 from shared.dynamo_decimal import to_int
 from shared.env_vars import resolve_table_env
+from shared.provider_models import (
+    CONFIGURABLE_MODEL_PROVIDERS,
+    DEFAULT_PROVIDER_MODELS,
+    default_model,
+    effective_model,
+    is_valid_model_id,
+)
 from shared.utils import get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -46,10 +54,9 @@ PROVIDERS = {
     # LLM Providers (generate AI responses with citations)
     'openai': {
         'name': 'OpenAI',
-        'description': 'GPT-5 mini with native web search',
+        'description': 'Native web search via the Responses API',
         'secret_name': f'{SECRETS_PREFIX}openai-key',
         'docs_url': 'https://platform.openai.com/api-keys',
-        'model': 'gpt-5-mini',
         'type': PROVIDER_TYPE_LLM
     },
     'perplexity': {
@@ -57,15 +64,13 @@ PROVIDERS = {
         'description': 'Sonar model with real-time web search',
         'secret_name': f'{SECRETS_PREFIX}perplexity-key',
         'docs_url': 'https://www.perplexity.ai/settings/api',
-        'model': 'sonar',
         'type': PROVIDER_TYPE_LLM
     },
     'gemini': {
         'name': 'Google Gemini',
-        'description': 'Gemini Flash with Google Search grounding',
+        'description': 'Google Search grounding',
         'secret_name': f'{SECRETS_PREFIX}gemini-key',
         'docs_url': 'https://aistudio.google.com/apikey',
-        'model': 'gemini-3-flash-preview',
         'type': PROVIDER_TYPE_LLM
     },
     'claude': {
@@ -73,7 +78,6 @@ PROVIDERS = {
         'description': 'Claude Sonnet with web search tool',
         'secret_name': f'{SECRETS_PREFIX}claude-key',
         'docs_url': 'https://console.anthropic.com/settings/keys',
-        'model': 'claude-sonnet-4-5',
         'type': PROVIDER_TYPE_LLM
     },
     # Search Providers (return search results directly)
@@ -161,9 +165,14 @@ def _error_code(error: ClientError) -> str | None:
     return error.response.get('Error', {}).get('Code')
 
 
+def _api_key_from(response: Mapping[str, Any]) -> str:
+    """The ``api_key`` field of a ``GetSecretValue`` response ('' when absent)."""
+    return json.loads(response['SecretString']).get('api_key', '') if 'SecretString' in response else ''
+
+
 def _secret_status(response: Mapping[str, Any]) -> dict:
     """Status of a secret that exists: configured with a masked key, or present but empty."""
-    api_key = json.loads(response['SecretString']).get('api_key', '') if 'SecretString' in response else ''
+    api_key = _api_key_from(response)
     if not api_key:
         return {'exists': True, 'has_value': False, 'masked_key': None}
     created = response.get('CreatedDate')
@@ -186,6 +195,21 @@ def get_secret_status(secret_name: str) -> dict:
         logger.exception("Error checking secret")
         return {'exists': False, 'has_value': False}
     return _secret_status(response)
+
+
+def stored_api_key(secret_name: str) -> str:
+    """The key currently stored in ``secret_name`` ('' when there is none).
+
+    Read uncached, unlike ``shared.secrets.get_api_key``: an administrator who
+    has just replaced a key must have the model check use the new one.
+    """
+    try:
+        response = secrets_client.get_secret_value(SecretId=secret_name)
+    except ClientError as e:
+        if _error_code(e) != 'ResourceNotFoundException':
+            logger.exception("Error reading API key")
+        return ''
+    return _api_key_from(response)
 
 
 def get_provider_config(provider_id: str) -> dict:
@@ -234,6 +258,32 @@ def save_provider_enabled(provider_id: str, enabled: bool) -> bool:
         dynamodb.Table(PROVIDER_CONFIG_TABLE).update_item(**_enabled_update(provider_id, enabled))
     except Exception:
         logger.exception("Error saving provider config")
+        return False
+    return True
+
+
+def save_provider_model(provider_id: str, model: str | None) -> bool:
+    """Persist the administrator's model for ``provider_id``; ``None`` returns it to the default.
+
+    Choosing the default removes the override instead of storing the id, so a
+    future release that moves the default moves this provider with it.
+    ``model_updated_at`` records when answers started coming from a new model.
+    """
+    timestamp = get_timestamp()
+    if model:
+        expression = 'SET model = :model, model_updated_at = :ts, updated_at = :ts'
+        values: dict[str, Any] = {':model': model, ':ts': timestamp}
+    else:
+        expression = 'SET model_updated_at = :ts, updated_at = :ts REMOVE model'
+        values = {':ts': timestamp}
+    try:
+        dynamodb.Table(PROVIDER_CONFIG_TABLE).update_item(
+            Key={'provider_id': provider_id},
+            UpdateExpression=expression,
+            ExpressionAttributeValues=values,
+        )
+    except Exception:
+        logger.exception("Error saving provider model")
         return False
     return True
 
@@ -435,7 +485,7 @@ class _KeyProbe:
 
     request: Callable[[str], dict[str, Any]]
     """``api_key`` → ``requests.request`` keyword arguments. Builders return
-    arguments rather than sending, so ``validate_api_key`` owns the single
+    arguments rather than sending, so ``_send`` owns the single
     ``requests`` import and the one timeout/error boundary."""
     interpret: Callable[[Any], dict]
     """HTTP response → ``{'valid': ..., ...}`` result."""
@@ -458,22 +508,196 @@ _KEY_PROBES: dict[str, _KeyProbe] = {
 }
 
 
-def validate_api_key(provider_id: str, api_key: str) -> dict:
-    """Validate API key by making a simple test request."""
+def _send(request: dict[str, Any], timeout: int, interpret: Callable[[Any], dict], label: str) -> dict:
+    """Send one outbound provider request and read the reply; never raises.
+
+    The single ``requests`` import and timeout/error boundary shared by the
+    key probes, the model check and the model listing.
+    """
     import requests
 
-    probe = _KEY_PROBES.get(provider_id)
-    if probe is None:
-        return {'valid': False, 'error': 'Unknown provider'}
-
     try:
-        response = requests.request(timeout=probe.timeout, **probe.request(api_key))
-        return probe.interpret(response)
+        response = requests.request(timeout=timeout, **request)
+        return interpret(response)
     except requests.Timeout:
         return {'valid': False, 'error': 'Validation request timed out'}
     except Exception:
-        logger.exception(f"Error validating API key for {provider_id}")
+        logger.exception(f"Error during {label}")
         return {'valid': False, 'error': 'Validation failed'}
+
+
+def validate_api_key(provider_id: str, api_key: str) -> dict:
+    """Validate API key by making a simple test request."""
+    probe = _KEY_PROBES.get(provider_id)
+    if probe is None:
+        return {'valid': False, 'error': 'Unknown provider'}
+    return _send(probe.request(api_key), probe.timeout, probe.interpret, f'API key validation for {provider_id}')
+
+
+# --- Model selection (OpenAI and Gemini) ------------------------------------
+
+# A real answer from the chosen model with the exact tool configuration runs
+# send: web search for OpenAI, Google Search grounding for Gemini. That is the
+# only reliable way to learn a model accepts it — a model without web-search
+# support answers 400, and three terminal failures in a run would auto-disable
+# the provider. A few seconds and a fraction of a cent.
+_MODEL_CHECK_TIMEOUT = 20
+_MODEL_CHECK_PROMPT = 'Reply with the single word OK.'
+
+
+def _openai_model_check(api_key: str, model: str) -> dict[str, Any]:
+    return _post(
+        'https://api.openai.com/v1/responses',
+        headers=_bearer_json_headers(api_key),
+        json=openai_web_search_payload(_MODEL_CHECK_PROMPT, model),
+    )
+
+
+def _gemini_model_check(api_key: str, model: str) -> dict[str, Any]:
+    return _post(
+        gemini_generate_url(model),
+        headers={'x-goog-api-key': api_key, 'Content-Type': 'application/json'},
+        json=gemini_grounded_payload(_MODEL_CHECK_PROMPT),
+    )
+
+
+def _gemini_listing_request(api_key: str) -> dict[str, Any]:
+    # One page holds every model (the list is well under 1,000 entries).
+    request = _gemini_request(api_key)
+    request['params'] = {'pageSize': 1000}
+    return request
+
+
+def _provider_error_message(response: Any) -> str:
+    """The ``error.message`` OpenAI and Gemini put in a failed response ('' when absent)."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return ''
+    error = payload.get('error') if isinstance(payload, dict) else None
+    message = error.get('message') if isinstance(error, dict) else None
+    return message[:300] if isinstance(message, str) else ''
+
+
+def _model_check_result(response: Any) -> dict:
+    """Interpret the model check: 200 means the model answered with web search enabled."""
+    if response.status_code == 200:
+        return {'valid': True}
+    if response.status_code in (401, 403):
+        return {'valid': False, 'error': 'The stored API key was rejected'}
+    return {'valid': False, 'error': _provider_error_message(response) or f'Unexpected status {response.status_code}'}
+
+
+# Listed ids that cannot answer a web-search prompt: audio, realtime, speech,
+# image and legacy completions models, and the chat-completions-only search
+# variants (embedding and moderation ids never start with `gpt-` / `o<digit>`).
+# A heuristic for the picker only — anything typed is still proven by the
+# model check before it is saved.
+_OPENAI_EXCLUDED_MARKERS = ('audio', 'realtime', 'transcribe', 'tts', 'image', 'search', 'instruct')
+_GEMINI_EXCLUDED_MARKERS = ('embedding', 'tts', 'image', 'live', 'audio')
+
+
+def _is_openai_answer_model(model_id: str) -> bool:
+    family = model_id.startswith('gpt-') or (len(model_id) > 1 and model_id[0] == 'o' and model_id[1].isdigit())
+    return family and not any(marker in model_id for marker in _OPENAI_EXCLUDED_MARKERS)
+
+
+def _created(entry: dict[str, Any]) -> int:
+    """When OpenAI published a listed model (0 when unknown), for newest-first ordering."""
+    created = entry.get('created')
+    return created if isinstance(created, int) else 0
+
+
+def _openai_model_ids(payload: Any) -> list[str]:
+    """Answer-capable ids from ``GET /v1/models``, newest first."""
+    entries = payload.get('data') if isinstance(payload, dict) else None
+    models = [
+        entry for entry in entries or []
+        if isinstance(entry, dict) and is_valid_model_id(entry.get('id')) and _is_openai_answer_model(entry['id'])
+    ]
+    models.sort(key=lambda entry: (-_created(entry), entry['id']))
+    return [entry['id'] for entry in models]
+
+
+def _gemini_model_id(entry: Any) -> str | None:
+    """The bare id of a ``models.list`` entry that can ``generateContent``, else ``None``."""
+    if not isinstance(entry, dict) or 'generateContent' not in (entry.get('supportedGenerationMethods') or []):
+        return None
+    name = entry.get('name')
+    if not isinstance(name, str):
+        return None
+    model_id = name.removeprefix('models/')
+    if not model_id.startswith('gemini-') or any(marker in model_id for marker in _GEMINI_EXCLUDED_MARKERS):
+        return None
+    return model_id if is_valid_model_id(model_id) else None
+
+
+def _gemini_model_ids(payload: Any) -> list[str]:
+    """``generateContent``-capable Gemini ids from ``models.list``, in the API's order."""
+    entries = payload.get('models') if isinstance(payload, dict) else None
+    return [model_id for model_id in map(_gemini_model_id, entries or []) if model_id]
+
+
+def _listing_models(response: Any, read_ids: Callable[[Any], list[str]]) -> dict:
+    """Interpret a model listing: the usable ids, or the provider's reason for refusing."""
+    if response.status_code != 200:
+        return {'valid': False, 'error': _provider_error_message(response) or f'Unexpected status {response.status_code}'}
+    try:
+        payload = response.json()
+    except ValueError:
+        return {'valid': False, 'error': 'Invalid response format'}
+    return {'valid': True, 'models': read_ids(payload)}
+
+
+class _ModelSupport(NamedTuple):
+    """How one configurable provider's models are checked and listed."""
+
+    check: Callable[[str, str], dict[str, Any]]
+    """``(api_key, model)`` → ``requests.request`` arguments for a real answer."""
+    listing: Callable[[str], dict[str, Any]]
+    """``api_key`` → ``requests.request`` arguments for the model listing."""
+    read_ids: Callable[[Any], list[str]]
+    """Listing payload → the ids worth offering in the picker."""
+
+
+_MODEL_SUPPORT: dict[str, _ModelSupport] = {
+    'openai': _ModelSupport(_openai_model_check, _openai_request, _openai_model_ids),
+    'gemini': _ModelSupport(_gemini_model_check, _gemini_listing_request, _gemini_model_ids),
+}
+
+
+def validate_model(provider_id: str, api_key: str, model: str) -> dict:
+    """Prove ``model`` answers a web-search prompt for ``provider_id`` with ``api_key``."""
+    support = _MODEL_SUPPORT[provider_id]
+    return _send(support.check(api_key, model), _MODEL_CHECK_TIMEOUT, _model_check_result, f'model check for {provider_id}')
+
+
+def list_models(provider_id: str, api_key: str) -> dict:
+    """The models ``api_key`` can use for ``provider_id``, filtered to answer-capable ones."""
+    support = _MODEL_SUPPORT[provider_id]
+    return _send(
+        support.listing(api_key), _LISTING_PROBE_TIMEOUT,
+        partial(_listing_models, read_ids=support.read_ids), f'model listing for {provider_id}',
+    )
+
+
+def _model_fields(provider_id: str, config: Mapping[str, Any]) -> dict[str, Any]:
+    """The model a run will use, its default, and whether Settings may change it.
+
+    LLM providers take their default from ``shared.provider_models``; search
+    providers have no model, so their ``model`` is the static label in
+    ``PROVIDERS`` they always carried.
+    """
+    if provider_id not in DEFAULT_PROVIDER_MODELS:
+        return {'model': PROVIDERS[provider_id]['model'], 'model_configurable': False}
+    fields: dict[str, Any] = {
+        'model': effective_model(provider_id, config),
+        'default_model': default_model(provider_id),
+        'model_configurable': provider_id in CONFIGURABLE_MODEL_PROVIDERS,
+    }
+    if config.get('model_updated_at'):
+        fields['model_updated_at'] = config['model_updated_at']
+    return fields
 
 
 def handle_get_providers(event: dict, context: Any) -> dict:
@@ -494,7 +718,7 @@ def handle_get_providers(event: dict, context: Any) -> dict:
             'id': provider_id,
             'name': info['name'],
             'description': info['description'],
-            'model': info['model'],
+            **_model_fields(provider_id, config),
             'docs_url': info['docs_url'],
             'type': info.get('type', PROVIDER_TYPE_LLM),
             'enabled': config.get('enabled', True),
@@ -523,16 +747,81 @@ def _with_known_provider(route: Callable[..., dict]) -> Callable[..., dict]:
     return wrapper
 
 
+def _apply_api_key(provider_id: str, body: dict, event: dict) -> dict | None:
+    """Validate and store ``body['api_key']``; an error response, or ``None`` on success."""
+    api_key = body['api_key'].strip()
+
+    # Input validation - reasonable key length
+    if len(api_key) > 500:
+        return validation_error('API key too long', event)
+
+    # Optionally validate the key first
+    if body.get('validate', True):
+        validation = validate_api_key(provider_id, api_key)
+        if not validation.get('valid'):
+            return api_response(400, {
+                'error': 'Invalid API key',
+                'details': validation['error'],
+            }, event)
+
+    result = update_api_key(PROVIDERS[provider_id]['secret_name'], api_key)
+    if not result.get('success'):
+        return api_response(500, {'error': 'Failed to update API key'}, event)
+    return None
+
+
+def _requested_model(provider_id: str, value: object) -> tuple[bool, str | None]:
+    """``(well_formed, override)`` for a requested ``value``.
+
+    Blank, ``null`` or the provider's default itself mean "use the default"
+    (override ``None``); anything else must be a safe model id.
+    """
+    model = value.strip() if isinstance(value, str) else value
+    if model is None or model in ('', default_model(provider_id)):
+        return True, None
+    if isinstance(model, str) and is_valid_model_id(model):
+        return True, model
+    return False, None
+
+
+def _apply_model(provider_id: str, body: dict, event: dict) -> dict | None:
+    """Check and store ``body['model']``; an error response, or ``None`` on success.
+
+    The model is proven with a real web-search answer using the stored key
+    before it is saved (skippable with ``validate: false``, like the key).
+    Blank, ``null`` or the provider's default returns it to the default.
+    """
+    if provider_id not in CONFIGURABLE_MODEL_PROVIDERS:
+        return validation_error('The model of this provider cannot be changed', event, 'model')
+    well_formed, model = _requested_model(provider_id, body['model'])
+    if not well_formed:
+        return validation_error(
+            'Model ids contain only letters, digits, dots, dashes and underscores (100 characters at most)',
+            event, 'model',
+        )
+    if model is not None and body.get('validate', True):
+        api_key = stored_api_key(PROVIDERS[provider_id]['secret_name'])
+        if not api_key:
+            return validation_error('Configure an API key before choosing a model', event, 'model')
+        check = validate_model(provider_id, api_key, model)
+        if not check.get('valid'):
+            return api_response(400, {'error': 'Model check failed', 'details': check['error']}, event)
+    if not save_provider_model(provider_id, model):
+        return api_response(500, {'error': 'Failed to save model'}, event)
+    return None
+
+
 @require_group(ADMIN_GROUP)
 @parse_json_body
 @_with_known_provider
 def handle_update_provider(event: dict, context: Any, provider_id: str, body: dict | None = None) -> dict:
-    """PUT /providers/{id} - Update provider configuration.
+    """PUT /providers/{id} - Update provider configuration (enabled, API key, model).
 
     Admin-only: this route writes Secrets Manager, and `configMgmtFunction`'s
     role holds prefix-wide read *and* write over every `citation-analysis/*`
     secret. An unprivileged caller could redirect provider billing or capture
-    every prompt the system sends (AUDIT-2026-08-19 §0.3).
+    every prompt the system sends (AUDIT-2026-08-19 §0.3). The key is applied
+    before the model, so one request can set a key and a model checked with it.
     """
     body = body or {}
 
@@ -540,26 +829,11 @@ def handle_update_provider(event: dict, context: Any, provider_id: str, body: di
     if 'enabled' in body and not save_provider_enabled(provider_id, bool(body['enabled'])):
         return api_response(500, {'error': 'Failed to save configuration'}, event)
 
-    # Update API key
-    if body.get('api_key'):
-        api_key = body['api_key'].strip()
-
-        # Input validation - reasonable key length
-        if len(api_key) > 500:
-            return validation_error('API key too long', event)
-
-        # Optionally validate the key first
-        if body.get('validate', True):
-            validation = validate_api_key(provider_id, api_key)
-            if not validation.get('valid'):
-                return api_response(400, {
-                    'error': 'Invalid API key',
-                    'details': validation.get('error', 'Validation failed')
-                }, event)
-
-        result = update_api_key(PROVIDERS[provider_id]['secret_name'], api_key)
-        if not result.get('success'):
-            return api_response(500, {'error': 'Failed to update API key'}, event)
+    error = _apply_api_key(provider_id, body, event) if body.get('api_key') else None
+    if error is None and 'model' in body:
+        error = _apply_model(provider_id, body, event)
+    if error is not None:
+        return error
 
     # Return updated status
     secret_status = get_secret_status(PROVIDERS[provider_id]['secret_name'])
@@ -569,7 +843,32 @@ def handle_update_provider(event: dict, context: Any, provider_id: str, body: di
         'id': provider_id,
         'enabled': config.get('enabled', True),
         'configured': secret_status.get('has_value', False),
-        'masked_key': secret_status.get('masked_key')
+        'masked_key': secret_status.get('masked_key'),
+        **_model_fields(provider_id, config),
+    }, event)
+
+
+@require_group(ADMIN_GROUP)
+@_with_known_provider
+def handle_list_models(event: dict, context: Any, provider_id: str) -> dict:
+    """GET /providers/{id}/models - Models the stored key can use, for the Settings picker.
+
+    Admin-only, like every route that spends the stored key. OpenAI and
+    Gemini only; the list is filtered to models that can answer a prompt, and
+    whatever is chosen is still proven by the model check on save.
+    """
+    if provider_id not in CONFIGURABLE_MODEL_PROVIDERS:
+        return validation_error('The model of this provider cannot be changed', event, 'id')
+    api_key = stored_api_key(PROVIDERS[provider_id]['secret_name'])
+    if not api_key:
+        return validation_error('Configure an API key before choosing a model', event, 'id')
+    listing = list_models(provider_id, api_key)
+    if not listing.get('valid'):
+        return api_response(502, {'error': 'Could not list models', 'details': listing['error']}, event)
+    return success_response({
+        'id': provider_id,
+        'models': listing['models'],
+        **_model_fields(provider_id, get_provider_config(provider_id)),
     }, event)
 
 
@@ -595,6 +894,7 @@ def handle_validate_key(event: dict, context: Any, provider_id: str, body: dict 
 @api_handler
 @cors_preflight
 @route_handler({
+    ('GET', '/models'): handle_list_models,
     ('GET', '/providers'): handle_get_providers,
     ('PUT', None): handle_update_provider,
     ('POST', '/validate'): handle_validate_key,
@@ -605,7 +905,8 @@ def handler(event: dict, context: Any) -> dict:
 
     Endpoints:
     - GET /providers - List all providers with status
-    - PUT /providers/{id} - Update provider config (enable/disable, API key)
+    - GET /providers/{id}/models - Models the stored key can use (OpenAI, Gemini)
+    - PUT /providers/{id} - Update provider config (enable/disable, API key, model)
     - POST /providers/{id}/validate - Validate API key without saving
 
     Routes handle everything; this body is never reached.

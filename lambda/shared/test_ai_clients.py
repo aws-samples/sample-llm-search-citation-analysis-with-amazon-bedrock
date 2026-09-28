@@ -253,3 +253,52 @@ class TestClientBehavior:
         payload = make_request.call_args.args[0]
         assert payload['include'] == ['web_search_call.action.sources']
         assert payload['input'] == 'query text'
+
+
+    def test_openai_client_answers_with_its_own_model_unless_the_call_names_one(self):
+        with patch.object(OpenAIClient, '_make_request', return_value={'output': []}) as make_request:
+            client = OpenAIClient('sk-test', model='gpt-5.2')
+            client.responses_with_web_search('query text')
+            client.responses_with_web_search('query text', model='o4-mini')
+
+        assert [call.args[0]['model'] for call in make_request.call_args_list] == ['gpt-5.2', 'o4-mini']
+
+    def test_gemini_client_posts_to_the_endpoint_of_its_model(self):
+        with patch.object(ai_clients.requests, 'post', return_value=MagicMock(status_code=200)) as post:
+            ai_clients.GeminiClient('gm-test', model='gemini-2.5-pro').generate_content('query text', max_retries=0)
+
+        assert post.call_args.args[0] == (
+            'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent'
+        )
+
+    def test_clients_default_to_the_shared_default_models(self):
+        assert (
+            OpenAIClient('sk-test').model, ai_clients.GeminiClient('gm-test').model, ai_clients.ClaudeClient('ck-test').model,
+        ) == ('gpt-5-mini', 'gemini-3-flash-preview', 'claude-sonnet-4-5')
+
+    def test_openai_web_search_payload_is_the_one_runs_and_the_model_check_send(self):
+        assert ai_clients.openai_web_search_payload('query text', 'gpt-5.2') == {
+            'model': 'gpt-5.2',
+            'tools': [{'type': 'web_search_preview'}],
+            'tool_choice': 'auto',
+            'include': ['web_search_call.action.sources'],
+            'input': 'query text',
+        }
+
+    def test_gemini_grounded_payload_asks_for_google_search(self):
+        assert ai_clients.gemini_grounded_payload('query text') == {
+            'contents': [{'role': 'user', 'parts': [{'text': 'query text'}]}],
+            'tools': [{'googleSearch': {}}],
+        }
+
+    def test_openai_and_perplexity_calls_allow_five_retries_by_default(self):
+        with (
+            patch.object(OpenAIClient, '_make_request', return_value={}) as openai_request,
+            patch.object(ai_clients.PerplexityClient, '_make_request', return_value={}) as perplexity_request,
+        ):
+            OpenAIClient('sk-test').responses_with_web_search('query text')
+            ai_clients.PerplexityClient('pk-test').chat_completion([{'role': 'user', 'content': 'query text'}])
+
+        assert (openai_request.call_args.kwargs, perplexity_request.call_args.kwargs) == (
+            {'max_retries': 5}, {'max_retries': 5},
+        )

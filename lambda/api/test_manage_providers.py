@@ -19,6 +19,7 @@ the JSON.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from collections.abc import Iterator
@@ -149,8 +150,10 @@ class TestGetProvidersSurfacesHealth:
         assert _provider(body, 'gemini') == {
             'id': 'gemini',
             'name': 'Google Gemini',
-            'description': 'Gemini Flash with Google Search grounding',
+            'description': 'Google Search grounding',
             'model': 'gemini-3-flash-preview',
+            'default_model': 'gemini-3-flash-preview',
+            'model_configurable': True,
             'docs_url': 'https://aistudio.google.com/apikey',
             'type': 'llm',
             'enabled': True,
@@ -332,3 +335,543 @@ class TestKeyProbeTimeouts:
             'valid': False,
             'error': 'Validation request timed out',
         }
+
+
+
+# --- Model selection (2.17.0) -------------------------------------------------
+
+def _store_key(api_key: str = 'sk-stored-key-1234') -> None:
+    """Every secret read answers with ``api_key``."""
+    mock_secrets.get_secret_value.side_effect = None
+    mock_secrets.get_secret_value.return_value = {'SecretString': json.dumps({'api_key': api_key})}
+
+
+def _reply(status: int, payload: Any = None) -> MagicMock:
+    """An HTTP response carrying ``status`` and a JSON ``payload``."""
+    response = MagicMock(status_code=status)
+    response.json.return_value = payload
+    return response
+
+
+def _list_models(provider_id: str, groups: str = 'Admin') -> tuple[int, dict[str, Any]]:
+    """Call GET /providers/{id}/models; return status and parsed body."""
+    event = {
+        'httpMethod': 'GET',
+        'path': f'/api/providers/{provider_id}/models',
+        'pathParameters': {'id': provider_id},
+        'headers': {'origin': 'http://localhost:3000'},
+        'requestContext': {
+            'authorizer': {'claims': {'cognito:username': 'admin@example.com', 'cognito:groups': groups}}
+        },
+    }
+    result = _module.handler(event, {})
+    return result['statusCode'], json.loads(result['body'])
+
+
+class TestGetProvidersReportsTheModel:
+    """GET /providers tells Settings which model a run will actually use."""
+
+    def test_reports_the_configured_model_and_when_it_changed(self):
+        _serve_config_rows({'openai': {
+            'provider_id': 'openai', 'model': 'gpt-5.2', 'model_updated_at': '2026-09-28T10:00:00Z',
+        }})
+
+        _, body = _get_providers()
+
+        openai = _provider(body, 'openai')
+        assert {key: openai.get(key) for key in ('model', 'default_model', 'model_configurable', 'model_updated_at')} == {
+            'model': 'gpt-5.2',
+            'default_model': 'gpt-5-mini',
+            'model_configurable': True,
+            'model_updated_at': '2026-09-28T10:00:00Z',
+        }
+
+    def test_ignores_a_stored_model_on_a_provider_settings_cannot_change(self):
+        _serve_config_rows({'claude': {'provider_id': 'claude', 'model': 'claude-opus-9'}})
+
+        _, body = _get_providers()
+
+        assert (_provider(body, 'claude')['model'], _provider(body, 'claude')['model_configurable']) == (
+            'claude-sonnet-4-5', False,
+        )
+
+    def test_keeps_the_static_label_for_a_search_provider(self):
+        _, body = _get_providers()
+
+        brave = _provider(body, 'brave')
+        assert {key: brave.get(key) for key in ('model', 'default_model', 'model_configurable')} == {
+            'model': 'web-search', 'default_model': None, 'model_configurable': False,
+        }
+
+
+class TestUpdateModel:
+    """PUT /providers/{id} with `model`: prove it answers, then store it."""
+
+    def test_stores_a_model_that_answered_the_check(self, requests_stub):
+        _store_key()
+
+        with patch.object(_module, 'get_timestamp', return_value='2026-09-28T12:00:00Z'):
+            status, _ = _put_provider('gemini', {'model': 'gemini-2.5-pro'})
+
+        assert status == 200
+        assert _only_update() == {
+            'Key': {'provider_id': 'gemini'},
+            'UpdateExpression': 'SET model = :model, model_updated_at = :ts, updated_at = :ts',
+            'ExpressionAttributeValues': {':model': 'gemini-2.5-pro', ':ts': '2026-09-28T12:00:00Z'},
+        }
+
+    def test_checks_openai_with_the_exact_web_search_payload_runs_send(self, requests_stub):
+        _store_key('sk-stored-key-1234')
+
+        _put_provider('openai', {'model': 'gpt-5.2'})
+
+        assert requests_stub.call_args.kwargs == {
+            'timeout': 20,
+            'method': 'post',
+            'url': 'https://api.openai.com/v1/responses',
+            'headers': {'Authorization': 'Bearer sk-stored-key-1234', 'Content-Type': 'application/json'},
+            'json': {
+                'model': 'gpt-5.2',
+                'tools': [{'type': 'web_search_preview'}],
+                'tool_choice': 'auto',
+                'include': ['web_search_call.action.sources'],
+                'input': 'Reply with the single word OK.',
+            },
+        }
+
+    def test_checks_gemini_against_the_models_own_grounded_endpoint(self, requests_stub):
+        _store_key('gm-stored-key-1234')
+
+        _put_provider('gemini', {'model': 'gemini-2.5-pro'})
+
+        kwargs = requests_stub.call_args.kwargs
+        assert (kwargs['url'], kwargs['headers']['x-goog-api-key'], kwargs['json']['tools']) == (
+            'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent',
+            'gm-stored-key-1234',
+            [{'googleSearch': {}}],
+        )
+
+    def test_refuses_a_model_the_provider_rejects_and_stores_nothing(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _reply(400, {'error': {'message': "Tool 'web_search_preview' is not supported with gpt-3.5-turbo."}})
+
+        status, body = _put_provider('openai', {'model': 'gpt-3.5-turbo'})
+
+        assert (status, body) == (400, {
+            'error': 'Model check failed',
+            'details': "Tool 'web_search_preview' is not supported with gpt-3.5-turbo.",
+        })
+        assert mock_table.update_item.call_args_list == []
+
+    def test_reports_a_rejected_key_rather_than_a_bad_model(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _reply(401, {'error': {'message': 'Incorrect API key provided'}})
+
+        _, body = _put_provider('openai', {'model': 'gpt-5.2'})
+
+        assert body['details'] == 'The stored API key was rejected'
+
+    def test_reports_the_status_when_the_provider_gives_no_reason(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _reply(500, 'not json')
+
+        _, body = _put_provider('openai', {'model': 'gpt-5.2'})
+
+        assert body['details'] == 'Unexpected status 500'
+
+    @pytest.mark.parametrize('model', ['gemini-2.5-pro:streamGenerateContent', '../../v1/files', 'model id', 'x' * 101, 7])
+    def test_refuses_an_id_that_is_not_a_safe_model_id(self, requests_stub, model):
+        """The id is interpolated into Gemini's URL path; nothing but a plain id may get there."""
+        _store_key()
+
+        status, body = _put_provider('gemini', {'model': model})
+
+        assert (status, body.get('field'), requests_stub.call_args_list) == (400, 'model', [])
+
+    @pytest.mark.parametrize('model', [None, '', '   ', 'gpt-5-mini'])
+    def test_returns_to_the_default_by_removing_the_override(self, requests_stub, model):
+        """Blank, null or the default itself store no id, so a future default moves this provider too."""
+        status, _ = _put_provider('openai', {'model': model})
+
+        assert (status, _only_update()['UpdateExpression'], requests_stub.call_args_list) == (
+            200, 'SET model_updated_at = :ts, updated_at = :ts REMOVE model', [],
+        )
+
+    def test_refuses_to_change_a_provider_whose_model_is_fixed(self, requests_stub):
+        status, body = _put_provider('claude', {'model': 'claude-opus-9'})
+
+        assert (status, body.get('field'), mock_table.update_item.call_args_list) == (400, 'model', [])
+
+    def test_asks_for_a_key_before_a_model_can_be_checked(self, requests_stub):
+        status, body = _put_provider('openai', {'model': 'gpt-5.2'})
+
+        assert (status, body.get('error'), requests_stub.call_args_list) == (
+            400, 'Configure an API key before choosing a model', [],
+        )
+
+    def test_stores_without_the_check_when_validation_is_switched_off(self, requests_stub):
+        status, _ = _put_provider('openai', {'model': 'gpt-5.2', 'validate': False})
+
+        assert (status, _only_update()['ExpressionAttributeValues'][':model'], requests_stub.call_args_list) == (
+            200, 'gpt-5.2', [],
+        )
+
+    def test_answers_500_when_the_model_cannot_be_saved(self, requests_stub):
+        _store_key()
+        mock_table.update_item.side_effect = ClientError({'Error': {'Code': 'InternalServerError'}}, 'UpdateItem')
+
+        assert _put_provider('openai', {'model': 'gpt-5.2'}) == (500, {'error': 'Failed to save model'})
+
+    def test_reports_the_model_now_in_effect(self, requests_stub):
+        _store_key()
+        _serve_config_rows({'openai': {'provider_id': 'openai', 'model': 'gpt-5.2'}})
+
+        _, body = _put_provider('openai', {'model': 'gpt-5.2'})
+
+        assert (body['model'], body['default_model']) == ('gpt-5.2', 'gpt-5-mini')
+
+
+OPENAI_LISTING = {'data': [
+    {'id': 'gpt-4.1', 'created': 1_700_000_000},
+    {'id': 'gpt-5.2', 'created': 1_760_000_000},
+    {'id': 'o4-mini', 'created': 1_740_000_000},
+    {'id': 'gpt-4o-audio-preview', 'created': 1_750_000_000},
+    {'id': 'gpt-4o-search-preview', 'created': 1_750_000_000},
+    {'id': 'gpt-realtime', 'created': 1_750_000_000},
+    {'id': 'text-embedding-3-large', 'created': 1_750_000_000},
+    {'id': 'dall-e-3', 'created': 1_750_000_000},
+    {'id': 'omni-moderation-latest', 'created': 1_750_000_000},
+    {'id': 'gpt-5-mini'},
+]}
+
+GEMINI_LISTING = {'models': [
+    {'name': 'models/gemini-3-flash-preview', 'supportedGenerationMethods': ['generateContent', 'countTokens']},
+    {'name': 'models/gemini-2.5-pro', 'supportedGenerationMethods': ['generateContent']},
+    {'name': 'models/gemini-embedding-001', 'supportedGenerationMethods': ['embedContent']},
+    {'name': 'models/gemini-2.5-flash-preview-tts', 'supportedGenerationMethods': ['generateContent']},
+    {'name': 'models/gemini-2.0-flash-live-001', 'supportedGenerationMethods': ['bidiGenerateContent']},
+    {'name': 'models/gemma-3-27b-it', 'supportedGenerationMethods': ['generateContent']},
+    {'name': 'models/imagen-4.0-generate-001', 'supportedGenerationMethods': ['predict']},
+]}
+
+
+class TestListModels:
+    """GET /providers/{id}/models feeds the Settings picker from the stored key."""
+
+    def test_offers_openai_answer_models_newest_first(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _reply(200, OPENAI_LISTING)
+
+        status, body = _list_models('openai')
+
+        assert (status, body['models']) == (200, ['gpt-5.2', 'o4-mini', 'gpt-4.1', 'gpt-5-mini'])
+
+    def test_offers_gemini_models_that_can_generate_content(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _reply(200, GEMINI_LISTING)
+
+        _, body = _list_models('gemini')
+
+        assert body['models'] == ['gemini-3-flash-preview', 'gemini-2.5-pro']
+
+    def test_asks_gemini_for_the_whole_list_in_one_page(self, requests_stub):
+        _store_key('gm-stored-key-1234')
+        requests_stub.return_value = _reply(200, GEMINI_LISTING)
+
+        _list_models('gemini')
+
+        kwargs = requests_stub.call_args.kwargs
+        assert (kwargs['url'], kwargs['params'], kwargs['headers']) == (
+            'https://generativelanguage.googleapis.com/v1beta/models',
+            {'pageSize': 1000},
+            {'x-goog-api-key': 'gm-stored-key-1234'},
+        )
+
+    def test_reports_the_model_in_effect_alongside_the_list(self, requests_stub):
+        _store_key()
+        _serve_config_rows({'openai': {'provider_id': 'openai', 'model': 'gpt-5.2'}})
+        requests_stub.return_value = _reply(200, OPENAI_LISTING)
+
+        _, body = _list_models('openai')
+
+        assert (body['id'], body['model'], body['default_model']) == ('openai', 'gpt-5.2', 'gpt-5-mini')
+
+    def test_answers_502_with_the_providers_reason_when_listing_fails(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _reply(429, {'error': {'message': 'Rate limit reached'}})
+
+        assert _list_models('openai') == (502, {'error': 'Could not list models', 'details': 'Rate limit reached'})
+
+    def test_answers_502_when_the_listing_is_not_json(self, requests_stub):
+        _store_key()
+        response = _reply(200)
+        response.json.side_effect = ValueError('no json')
+        requests_stub.return_value = response
+
+        assert _list_models('gemini')[1]['details'] == 'Invalid response format'
+
+    def test_offers_nothing_from_a_listing_without_a_model_list(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _reply(200, {'object': 'list'})
+
+        assert _list_models('openai')[1]['models'] == []
+
+    def test_asks_for_a_key_before_listing(self, requests_stub):
+        status, body = _list_models('gemini')
+
+        assert (status, body['error'], requests_stub.call_args_list) == (
+            400, 'Configure an API key before choosing a model', [],
+        )
+
+    def test_refuses_a_provider_whose_model_is_fixed(self, requests_stub):
+        _store_key()
+
+        assert _list_models('perplexity')[0] == 400
+
+    def test_refuses_a_caller_outside_the_admin_group(self, requests_stub):
+        _store_key()
+
+        assert (_list_models('openai', groups='Viewer')[0], requests_stub.call_args_list) == (403, [])
+
+
+
+class TestStoredKeys:
+    """The masked key on the card and the uncached key the model check uses."""
+
+    def test_masks_the_stored_key_on_the_provider_card(self):
+        _store_key('sk-stored-key-1234')
+
+        _, body = _get_providers()
+
+        assert _provider(body, 'openai')['masked_key'] == 'sk-s...1234'
+
+    @pytest.mark.parametrize('response', [{'SecretString': '{}'}, {'SecretBinary': b'binary'}])
+    def test_reads_no_key_from_a_secret_without_one(self, response):
+        mock_secrets.get_secret_value.side_effect = None
+        mock_secrets.get_secret_value.return_value = response
+
+        assert _module.stored_api_key('citation-analysis/openai-key') == ''
+
+    def test_reads_no_key_quietly_when_the_secret_does_not_exist(self, caplog):
+        with caplog.at_level(logging.ERROR):
+            assert _module.stored_api_key('citation-analysis/openai-key') == ''
+
+        assert caplog.records == []
+
+    def test_logs_a_secret_read_that_failed_for_another_reason(self, caplog):
+        mock_secrets.get_secret_value.side_effect = ClientError({'Error': {'Code': 'AccessDeniedException'}}, 'GetSecretValue')
+
+        with caplog.at_level(logging.ERROR):
+            assert _module.stored_api_key('citation-analysis/openai-key') == ''
+
+        assert [record.getMessage() for record in caplog.records] == ['Error reading API key']
+
+
+class TestUpdateApiKey:
+    """PUT /providers/{id} with `api_key` (moved into `_apply_api_key` in 2.17.0)."""
+
+    def test_stores_a_key_the_provider_accepted(self, requests_stub):
+        requests_stub.return_value = _reply(200, {'data': []})
+
+        status, _ = _put_provider('openai', {'api_key': '  sk-new-key-5678  '})
+
+        assert (status, mock_secrets.put_secret_value.call_args.kwargs) == (200, {
+            # The prefix comes from SECRETS_PREFIX at import, which other suites set.
+            'SecretId': _module.PROVIDERS['openai']['secret_name'],
+            'SecretString': json.dumps({'api_key': 'sk-new-key-5678'}),
+        })
+        assert _module.PROVIDERS['openai']['secret_name'].endswith('openai-key')
+
+    def test_checks_the_key_by_default(self, requests_stub):
+        _put_provider('openai', {'api_key': 'sk-new-key-5678'})
+
+        assert requests_stub.call_args.kwargs['url'] == 'https://api.openai.com/v1/models'
+
+    def test_refuses_a_key_the_provider_rejects(self, requests_stub):
+        requests_stub.return_value = _reply(401)
+
+        assert _put_provider('openai', {'api_key': 'sk-bad-key-5678'}) == (400, {
+            'error': 'Invalid API key', 'details': 'Invalid API key',
+        })
+
+    def test_stores_without_the_check_when_validation_is_switched_off(self, requests_stub):
+        _put_provider('openai', {'api_key': 'sk-new-key-5678', 'validate': False})
+
+        assert (requests_stub.call_args_list, mock_secrets.put_secret_value.call_count) == ([], 1)
+
+    @pytest.mark.parametrize(('length', 'status'), [(500, 200), (501, 400)])
+    def test_accepts_keys_up_to_500_characters(self, requests_stub, length, status):
+        assert _put_provider('openai', {'api_key': 'k' * length, 'validate': False})[0] == status
+
+    def test_names_the_reason_a_key_is_too_long(self, requests_stub):
+        assert _put_provider('openai', {'api_key': 'k' * 501})[1] == {'error': 'API key too long'}
+
+    def test_answers_500_when_the_key_cannot_be_stored(self, requests_stub):
+        requests_stub.return_value = _reply(200, {'data': []})
+        mock_secrets.put_secret_value.side_effect = ClientError({'Error': {'Code': 'InternalServiceError'}}, 'PutSecretValue')
+
+        assert _put_provider('openai', {'api_key': 'sk-new-key-5678'}) == (500, {'error': 'Failed to update API key'})
+
+    def test_stops_before_the_model_when_the_key_is_refused(self, requests_stub):
+        status, body = _put_provider('openai', {'api_key': 'k' * 501, 'model': 'gpt-5.2'})
+
+        assert (status, body, mock_table.update_item.call_args_list) == (400, {'error': 'API key too long'}, [])
+
+    def test_reports_the_masked_key_after_an_update(self, requests_stub):
+        _store_key('sk-stored-key-1234')
+
+        assert _put_provider('openai', {'enabled': True})[1]['masked_key'] == 'sk-s...1234'
+
+
+class TestModelChecksAndListingsInDetail:
+    """The verdicts `validate_model` / `list_models` return, beyond what the routes show."""
+
+    def test_accepts_a_model_that_answered(self, requests_stub):
+        assert _module.validate_model('openai', 'sk-test', 'gpt-5.2') == {'valid': True}
+
+    @pytest.mark.parametrize('status', [401, 403])
+    def test_blames_the_key_when_the_provider_refuses_it(self, requests_stub, status):
+        requests_stub.return_value = _reply(status, {'error': {'message': 'nope'}})
+
+        assert _module.validate_model('openai', 'sk-test', 'gpt-5.2') == {
+            'valid': False, 'error': 'The stored API key was rejected',
+        }
+
+    def test_passes_on_the_providers_reason_for_an_unknown_model(self, requests_stub):
+        requests_stub.return_value = _reply(404, {'error': {'message': 'models/gemini-9 is not found'}})
+
+        assert _module.validate_model('gemini', 'gm-test', 'gemini-9') == {
+            'valid': False, 'error': 'models/gemini-9 is not found',
+        }
+
+    def test_truncates_the_providers_reason_to_300_characters(self, requests_stub):
+        requests_stub.return_value = _reply(400, {'error': {'message': 'x' * 400}})
+
+        assert _module.validate_model('openai', 'sk-test', 'gpt-5.2')['error'] == 'x' * 300
+
+    def test_falls_back_to_the_status_when_the_reason_is_not_text(self, requests_stub):
+        requests_stub.return_value = _reply(400, {'error': {'message': 5}})
+
+        assert _module.validate_model('openai', 'sk-test', 'gpt-5.2')['error'] == 'Unexpected status 400'
+
+    def test_sends_gemini_the_json_headers(self, requests_stub):
+        _module.validate_model('gemini', 'gm-test', 'gemini-2.5-pro')
+
+        assert requests_stub.call_args.kwargs['headers'] == {'x-goog-api-key': 'gm-test', 'Content-Type': 'application/json'}
+
+    def test_reports_a_refused_listing_as_invalid(self, requests_stub):
+        requests_stub.return_value = _reply(500, 'not json')
+
+        assert _module.list_models('openai', 'sk-test') == {'valid': False, 'error': 'Unexpected status 500'}
+
+    def test_reports_a_listing_that_is_not_json_as_invalid(self, requests_stub):
+        response = _reply(200)
+        response.json.side_effect = ValueError('no json')
+        requests_stub.return_value = response
+
+        assert _module.list_models('openai', 'sk-test') == {'valid': False, 'error': 'Invalid response format'}
+
+    def test_keeps_one_letter_o_series_ids_and_skips_a_bare_o(self, requests_stub):
+        requests_stub.return_value = _reply(200, {'data': [{'id': 'o'}, {'id': 'o3', 'created': 5}, {'id': 'omni-x'}]})
+
+        assert _module.list_models('openai', 'sk-test') == {'valid': True, 'models': ['o3']}
+
+    def test_orders_models_without_a_date_as_the_oldest(self, requests_stub):
+        requests_stub.return_value = _reply(200, {'data': [{'id': 'gpt-b'}, {'id': 'gpt-a', 'created': 0}]})
+
+        assert _module.list_models('openai', 'sk-test')['models'] == ['gpt-a', 'gpt-b']
+
+    def test_skips_gemini_entries_that_are_not_models(self, requests_stub):
+        requests_stub.return_value = _reply(200, {'models': [
+            'gemini-2.5-pro',
+            {'supportedGenerationMethods': ['generateContent']},
+            {'name': 'models/gemini-2.5-pro', 'supportedGenerationMethods': ['generateContent']},
+        ]})
+
+        assert _module.list_models('gemini', 'gm-test') == {'valid': True, 'models': ['gemini-2.5-pro']}
+
+    @pytest.mark.parametrize('model_id', [
+        'gpt-4o-audio-preview', 'gpt-realtime', 'gpt-4o-transcribe', 'gpt-4o-mini-tts',
+        'gpt-image-1', 'gpt-4o-search-preview', 'gpt-3.5-turbo-instruct',
+    ])
+    def test_leaves_openai_models_that_cannot_answer_out_of_the_picker(self, requests_stub, model_id):
+        requests_stub.return_value = _reply(200, {'data': [{'id': model_id}, {'id': 'gpt-5.2'}]})
+
+        assert _module.list_models('openai', 'sk-test')['models'] == ['gpt-5.2']
+
+    @pytest.mark.parametrize('model_id', [
+        'gemini-embedding-exp', 'gemini-2.5-flash-preview-tts', 'gemini-2.5-flash-image',
+        'gemini-live-2.5-flash', 'gemini-2.5-flash-native-audio',
+    ])
+    def test_leaves_gemini_models_that_cannot_answer_out_of_the_picker(self, requests_stub, model_id):
+        requests_stub.return_value = _reply(200, {'models': [
+            {'name': f'models/{model_id}', 'supportedGenerationMethods': ['generateContent']},
+            {'name': 'models/gemini-2.5-pro', 'supportedGenerationMethods': ['generateContent']},
+        ]})
+
+        assert _module.list_models('gemini', 'gm-test')['models'] == ['gemini-2.5-pro']
+
+    def test_falls_back_to_the_status_when_an_error_body_is_not_json(self, requests_stub):
+        response = _reply(502)
+        response.json.side_effect = ValueError('no json')
+        requests_stub.return_value = response
+
+        assert _module.validate_model('openai', 'sk-test', 'gpt-5.2')['error'] == 'Unexpected status 502'
+
+    @pytest.mark.parametrize(('call', 'label'), [
+        (lambda: _module.validate_api_key('openai', 'sk-test'), 'API key validation for openai'),
+        (lambda: _module.validate_model('gemini', 'gm-test', 'gemini-2.5-pro'), 'model check for gemini'),
+        (lambda: _module.list_models('openai', 'sk-test'), 'model listing for openai'),
+    ])
+    def test_logs_which_outbound_call_failed(self, requests_stub, caplog, call, label):
+        requests_stub.side_effect = ConnectionError('boom')
+
+        with caplog.at_level(logging.ERROR):
+            assert call() == {'valid': False, 'error': 'Validation failed'}
+
+        assert [record.getMessage() for record in caplog.records] == [f'Error during {label}']
+
+    def test_refuses_a_key_check_for_an_unknown_provider(self, requests_stub):
+        assert _module.validate_api_key('acme', 'sk-test') == {'valid': False, 'error': 'Unknown provider'}
+
+
+class TestRefusalDetails:
+    """The field a refusal names, so the Settings form can point at it."""
+
+    def test_names_the_model_field_when_no_key_is_stored(self, requests_stub):
+        assert _put_provider('openai', {'model': 'gpt-5.2'})[1]['field'] == 'model'
+
+    def test_names_the_provider_when_listing_a_fixed_model(self, requests_stub):
+        _store_key()
+
+        assert _list_models('perplexity')[1] == {'error': 'The model of this provider cannot be changed', 'field': 'id'}
+
+    def test_names_the_provider_when_listing_without_a_key(self, requests_stub):
+        assert _list_models('gemini')[1]['field'] == 'id'
+
+    def test_explains_why_a_fixed_model_cannot_be_changed(self, requests_stub):
+        assert _put_provider('claude', {'model': 'claude-opus-9'})[1]['error'] == 'The model of this provider cannot be changed'
+
+    def test_explains_what_a_model_id_may_contain(self, requests_stub):
+        assert _put_provider('gemini', {'model': 'bad id'})[1]['error'] == (
+            'Model ids contain only letters, digits, dots, dashes and underscores (100 characters at most)'
+        )
+
+    def test_logs_a_model_that_could_not_be_saved(self, requests_stub, caplog):
+        mock_table.update_item.side_effect = ClientError({'Error': {'Code': 'InternalServerError'}}, 'UpdateItem')
+
+        with caplog.at_level(logging.ERROR):
+            _put_provider('openai', {'model': None})
+
+        assert 'Error saving provider model' in [record.getMessage() for record in caplog.records]
+
+    def test_stamps_a_return_to_the_default(self, requests_stub):
+        with patch.object(_module, 'get_timestamp', return_value='2026-09-28T12:00:00Z'):
+            _put_provider('openai', {'model': None})
+
+        assert _only_update()['ExpressionAttributeValues'] == {':ts': '2026-09-28T12:00:00Z'}
+
+    def test_describes_openai_by_how_it_searches(self):
+        _, body = _get_providers()
+
+        assert _provider(body, 'openai')['description'] == 'Native web search via the Responses API'

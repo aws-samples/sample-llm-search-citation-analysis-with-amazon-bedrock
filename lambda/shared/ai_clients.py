@@ -28,7 +28,38 @@ from typing import Any
 
 import requests
 
+from shared.provider_models import DEFAULT_PROVIDER_MODELS
 from shared.secrets import get_api_key
+
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+
+
+def openai_web_search_payload(query: str, model: str) -> dict[str, Any]:
+    """The Responses API body every OpenAI web-search call sends.
+
+    Shared with the Settings model check (``manage-providers.py``) so a model
+    is validated against exactly the tool configuration runs will use.
+    """
+    return {
+        "model": model,
+        "tools": [{"type": "web_search_preview"}],
+        "tool_choice": "auto",
+        "include": ["web_search_call.action.sources"],
+        "input": query,
+    }
+
+
+def gemini_generate_url(model: str) -> str:
+    """The ``generateContent`` endpoint for ``model`` (v1beta: preview models live only there)."""
+    return f"{GEMINI_API_BASE}/models/{model}:generateContent"
+
+
+def gemini_grounded_payload(prompt: str) -> dict[str, Any]:
+    """The ``generateContent`` body with Google Search grounding, shared with the Settings model check."""
+    return {
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+        "tools": [{"googleSearch": {}}],
+    }
 
 # Extra attempts a 429 earns on top of the caller's ``max_retries``. Throttling
 # answers in milliseconds, so waiting it out is cheap — unlike the timeouts the
@@ -227,9 +258,10 @@ def retry_with_backoff(
 class OpenAIClient:
     """Lightweight OpenAI API client with native web search via Responses API."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = DEFAULT_PROVIDER_MODELS['openai']):
         self.api_key = api_key
         self.base_url = "https://api.openai.com/v1"
+        self.model = model
 
     @retry_with_backoff(provider_name="OPENAI", timeout=90)
     def _make_request(self, payload: dict, timeout: int = 90) -> requests.Response:
@@ -245,16 +277,9 @@ class OpenAIClient:
             timeout=timeout
         )
 
-    def responses_with_web_search(self, query: str, model: str = "gpt-5-mini", max_retries: int = 5) -> dict[str, Any]:
-        """Call OpenAI Responses API with native web search."""
-        payload = {
-            "model": model,
-            "tools": [{"type": "web_search_preview"}],
-            "tool_choice": "auto",
-            "include": ["web_search_call.action.sources"],
-            "input": query
-        }
-        return self._make_request(payload, max_retries=max_retries)
+    def responses_with_web_search(self, query: str, model: str | None = None, max_retries: int = 5) -> dict[str, Any]:
+        """Call OpenAI Responses API with native web search (``model`` defaults to the client's)."""
+        return self._make_request(openai_web_search_payload(query, model or self.model), max_retries=max_retries)
 
 
 class PerplexityClient:
@@ -278,7 +303,9 @@ class PerplexityClient:
             timeout=timeout
         )
 
-    def chat_completion(self, messages: list[dict], model: str = "sonar", max_retries: int = 5) -> dict[str, Any]:
+    def chat_completion(
+        self, messages: list[dict], model: str = DEFAULT_PROVIDER_MODELS['perplexity'], max_retries: int = 5,
+    ) -> dict[str, Any]:
         """Call Perplexity Chat Completions API."""
         payload = {
             "model": model,
@@ -290,29 +317,20 @@ class PerplexityClient:
 class GeminiClient:
     """Lightweight Google Gemini API client with Google Search."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = DEFAULT_PROVIDER_MODELS['gemini']):
         self.api_key = api_key
-        self.base_url = "https://generativelanguage.googleapis.com/v1beta"
-        # Use gemini-3-flash-preview for better grounding with more citations
-        self.model = "gemini-3-flash-preview"
+        self.model = model
 
     @retry_with_backoff(provider_name="GEMINI", timeout=60)
     def _make_request(self, payload: dict, timeout: int = 60) -> requests.Response:
         """Make HTTP request to Gemini API."""
-        url = f"{self.base_url}/models/{self.model}:generateContent"
+        url = gemini_generate_url(self.model)
         headers = {"x-goog-api-key": self.api_key, "Content-Type": "application/json"}
         return requests.post(url, json=payload, headers=headers, timeout=timeout)
 
     def generate_content(self, prompt: str, max_retries: int = 5) -> dict[str, Any]:
         """Call Gemini Generate Content API with Google Search."""
-        payload = {
-            "contents": [{
-                "role": "user",
-                "parts": [{"text": prompt}]
-            }],
-            "tools": [{"googleSearch": {}}]
-        }
-        return self._make_request(payload, max_retries=max_retries)
+        return self._make_request(gemini_grounded_payload(prompt), max_retries=max_retries)
 
 
 class ClaudeClient:
@@ -321,7 +339,7 @@ class ClaudeClient:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.base_url = "https://api.anthropic.com/v1"
-        self.model = "claude-sonnet-4-5"
+        self.model = DEFAULT_PROVIDER_MODELS['claude']
 
     @retry_with_backoff(provider_name="CLAUDE", timeout=60)
     def _make_request(self, payload: dict, timeout: int = 60) -> requests.Response:

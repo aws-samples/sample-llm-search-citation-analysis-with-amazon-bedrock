@@ -24,9 +24,9 @@ export const PROVIDER_NAMES: Record<ProviderId, string> = {
 
 /** Provider descriptions */
 export const PROVIDER_DESCRIPTIONS: Record<ProviderId, string> = {
-  [PROVIDER.OPENAI]: 'GPT-5.2 with native web search',
+  [PROVIDER.OPENAI]: 'Native web search via the Responses API',
   [PROVIDER.PERPLEXITY]: 'Sonar model with real-time web search',
-  [PROVIDER.GEMINI]: 'Gemini Flash with Google Search grounding',
+  [PROVIDER.GEMINI]: 'Google Search grounding',
   [PROVIDER.CLAUDE]: 'Claude Sonnet with web search tool',
 };
 
