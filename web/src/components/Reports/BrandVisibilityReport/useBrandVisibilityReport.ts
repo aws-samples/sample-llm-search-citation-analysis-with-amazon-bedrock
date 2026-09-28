@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useVisibilityMetrics } from '../../../hooks/useVisibilityMetrics';
 import { useHistoricalTrends } from '../../../hooks/useHistoricalTrends';
+import { useGroupKpiHistory } from '../../../hooks/useGroupKpiHistory';
 import { useReportReady } from '../layout/useReportReady';
 import type { ReportScope } from '../../../types';
 import { isGroupVisibilityResponse } from '../../../types/domain/visibility';
@@ -11,44 +12,40 @@ import {
 /**
  * Brand Visibility data composition.
  *
- * Two modes:
+ * Three modes:
  *   - per-keyword (`scope.kind === 'keyword'`): fetches `/visibility?keyword=...`
  *     and `/trends?keyword=...` for the full per-keyword breakdown + history.
- *   - cross-keyword (`all` or a keyword `group`): fetches `/trends` for that
- *     scope, which returns `keyword_trends[]`, `overall` aggregates and the
- *     group series (`trend_data`) server-side. Skips the per-keyword
- *     visibility call to avoid N+1 fan-out; the cross-keyword view focuses on
- *     rank movement and trend direction rather than per-brand SOV detail.
+ *   - keyword group (`group`, one hotel): fetches `/reports/group-kpis` for the
+ *     last `days` days — every run's citation rate, share of voice and
+ *     prominence, what drove each change, and every keyword's runs.
+ *   - all keywords (`all`): fetches `/trends`, which returns
+ *     `keyword_trends[]`, `overall` aggregates and the series server-side.
  */
-export function useBrandVisibilityReport(scope: ReportScope) {
+export function useBrandVisibilityReport(scope: ReportScope, days: number) {
   const visibility = useVisibilityMetrics();
   const trends = useHistoricalTrends();
+  const groupHistory = useGroupKpiHistory();
 
   const { fetchVisibilityMetrics } = visibility;
   const { fetchHistoricalTrends } = trends;
+  const { fetchGroupKpiHistory } = groupHistory;
   const scopeKey = encodeReportScope(scope);
   const isKeyword = scope.kind === 'keyword';
+  const isGroup = scope.kind === 'group';
 
   useEffect(() => {
     const current = decodeReportScope(scopeKey);
+    if (current.kind === 'group') {
+      fetchGroupKpiHistory(current, days);
+      return;
+    }
     if (current.kind === 'keyword') {
       fetchVisibilityMetrics(current);
     }
     fetchHistoricalTrends(current, 'day', 30);
-  }, [scopeKey, fetchVisibilityMetrics, fetchHistoricalTrends]);
+  }, [scopeKey, days, fetchVisibilityMetrics, fetchHistoricalTrends, fetchGroupKpiHistory]);
 
-  // The visibility slice is "settled" trivially in cross-keyword mode — we
-  // simply don't fetch it. Treating it as already resolved keeps the
-  // ready-aggregation logic uniform across modes.
-  const visibilitySlice = isKeyword
-    ? visibility
-    : {
-      loading: false,
-      data: {},
-      error: null 
-    };
-
-  const ready = useReportReady([visibilitySlice, trends]);
+  const ready = useReportReady(isKeyword ? [visibility, trends] : [isGroup ? groupHistory : trends]);
   const keywordVisibility = visibility.data && !isGroupVisibilityResponse(visibility.data) ? visibility.data : null;
 
   return {
@@ -60,6 +57,9 @@ export function useBrandVisibilityReport(scope: ReportScope) {
     trends: trends.data,
     trendsLoading: trends.loading,
     trendsError: trends.error,
+    groupHistory: groupHistory.data,
+    groupHistoryLoading: groupHistory.loading,
+    groupHistoryError: groupHistory.error,
     ready,
   };
 }
