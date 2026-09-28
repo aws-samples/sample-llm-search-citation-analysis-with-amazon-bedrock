@@ -21,15 +21,19 @@ import pytest
 
 from shared.scope_params import (
     MAX_KEYWORD_IDS,
+    SCOPE_KEYWORDS_CAP,
+    SCOPE_MAX_WORKERS,
     SCOPE_PARAMS,
     SCOPE_QUERY_PARAMS,
     ReportScope,
     all_active_scope,
     keywords_table_name,
     load_sibling_function,
+    map_scope_keywords,
     parse_scope_params,
     query_keyword_rows,
     scope_from_request,
+    scoped_dynamodb_resource,
 )
 
 
@@ -312,3 +316,59 @@ class TestLoadSiblingFunction:
             load_sibling_function(str(sibling_dir / 'report.py'), 'kpi-helper.py', 'missing', '_for_test')
 
         assert str(raised.value) == "kpi-helper.py has no attribute 'missing'"
+
+
+
+class PartitionFailure(Exception):
+    """A keyword partition that cannot be read."""
+
+
+class TestMapScopeKeywords:
+    def test_answers_in_keyword_order(self):
+        assert map_scope_keywords(['b', 'a', 'c'], str.upper, lambda keyword: '') == ['B', 'A', 'C']
+
+    def test_answers_a_failed_keyword_with_its_fallback(self):
+        def compute(keyword: str) -> str:
+            if keyword == 'broken':
+                raise PartitionFailure(keyword)
+            return keyword
+
+        assert map_scope_keywords(['ok', 'broken'], compute, lambda keyword: f'fallback:{keyword}') == ['ok', 'fallback:broken']
+
+    def test_logs_the_keyword_that_failed(self, caplog):
+        def compute(keyword: str) -> str:
+            raise PartitionFailure(keyword)
+
+        with caplog.at_level('ERROR'):
+            map_scope_keywords(['broken'], compute, lambda keyword: '')
+
+        assert [record.getMessage() for record in caplog.records] == ["Scoped report failed for 'broken'"]
+
+    def test_answers_nothing_for_no_keywords(self):
+        assert map_scope_keywords([], str.upper, lambda keyword: '') == []
+
+    def test_reads_at_most_ten_partitions_at_a_time(self):
+        with patch('shared.scope_params.ThreadPoolExecutor') as executor:
+            executor.return_value.__enter__.return_value.map.return_value = iter(['A'] * 12)
+            map_scope_keywords(['k'] * 12, str.upper, lambda keyword: '')
+
+        assert (executor.call_args.kwargs, SCOPE_MAX_WORKERS) == ({'max_workers': 10}, 10)
+
+    def test_starts_no_more_threads_than_keywords(self):
+        with patch('shared.scope_params.ThreadPoolExecutor') as executor:
+            executor.return_value.__enter__.return_value.map.return_value = iter(['A', 'B'])
+            map_scope_keywords(['a', 'b'], str.upper, lambda keyword: '')
+
+        assert executor.call_args.kwargs == {'max_workers': 2}
+
+    def test_caps_a_scoped_report_at_one_hundred_keywords(self):
+        assert SCOPE_KEYWORDS_CAP == 100
+
+
+class TestScopedDynamodbResource:
+    def test_pools_enough_connections_for_the_fan_out(self):
+        with patch('shared.scope_params.boto3.resource') as resource:
+            scoped_dynamodb_resource()
+
+        config = resource.call_args.kwargs['config']
+        assert (resource.call_args.args, config.max_pool_connections) == (('dynamodb',), 50)

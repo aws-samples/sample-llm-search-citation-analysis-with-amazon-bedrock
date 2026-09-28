@@ -824,3 +824,34 @@ class TestOverviewScope:
             response = overview.handler(_event({'group_id': 'coruna', 'keyword_ids': 'k1'}), None)
 
         assert response['statusCode'] == 400
+
+
+
+class PartitionFailure(Exception):
+    """A SearchResults partition that cannot be read."""
+
+
+class TestVisibilityGroupSurvivesAFailedKeyword:
+    def test_reports_a_keyword_that_failed_to_load_as_without_data(self, visibility_env):
+        module, tables = visibility_env
+        succeed = tables['search'].query.side_effect
+
+        def search_query(**kwargs):
+            if kwargs['KeyConditionExpression'].get_expression()['values'][1] == 'best hotels galicia':
+                raise PartitionFailure('throttled')
+            return succeed(**kwargs)
+
+        tables['search'].query.side_effect = search_query
+        body = _body(module.handler(_event({'group_id': 'coruna'}), None))
+
+        assert {row['keyword']: row['has_data'] for row in body['keywords']} == {
+            'best hotels galicia': False,
+            'hotel coruna spa': True,
+        }
+
+    def test_reads_through_the_pooled_scope_resource(self):
+        sentinel = MagicMock(name='pooled-dynamodb')
+        with patch('shared.scope_params.scoped_dynamodb_resource', return_value=sentinel), patch.dict(os.environ, _ENV):
+            module = load_handler_module(_HERE, 'get-visibility-metrics.py', module_name_for('get-visibility-metrics.py', '_pooled'))
+
+        assert module.dynamodb is sentinel
