@@ -1951,6 +1951,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         'get-reports-overview.py',
         'recommendation-status.py',
         'get-reports-competitor.py',
+        'get-group-kpi-history.py',
       ]),
       layers: [sharedLayer],
       // Every route here is read-only bar a millisecond-scale put_item on
@@ -2654,6 +2655,9 @@ export class CitationAnalysisStack extends cdk.Stack {
     reportsOverviewResource.addMethod('GET', new apigateway.LambdaIntegration(statsInsightsFunction, integrationOptions), methodOptions);
     const reportsCompetitorResource = reportsResource.addResource('competitor');
     reportsCompetitorResource.addMethod('GET', new apigateway.LambdaIntegration(statsInsightsFunction, integrationOptions), methodOptions);
+    // Per-run KPI history of a keyword group (the per-hotel report).
+    const reportsGroupKpisResource = reportsResource.addResource('group-kpis');
+    reportsGroupKpisResource.addMethod('GET', new apigateway.LambdaIntegration(statsInsightsFunction, integrationOptions), methodOptions);
 
     // Persona Rankings API Route
     const personaRankingsResource = apiResource.addResource('persona-rankings');

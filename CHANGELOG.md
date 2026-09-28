@@ -9,6 +9,27 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.18.0] - 2026-09-28
+
+### Added
+
+- `GET /api/reports/group-kpis` — the backend of the per-hotel report. For a
+  keyword group (or any report scope) and a window of `days` (1–365, default
+  90) it returns every analysis run with the group's citation rate
+  (`coverage_rate`), share of voice (`first_party_avg_sov`) and prominence
+  (`rank_1_share`, `top_3_share`, `mean_rank`), computed with the same
+  formulas as `/visibility` but on one exact run at a time; the models each
+  provider answered with in that run; and, for each group run, the change since
+  the previous group run with the keywords that drove it (which keyword gained
+  or lost the hotel, its share-of-voice and rank changes, and its share of the
+  group's move). A per-keyword drill-down lists every run of every keyword with
+  its change since that keyword's previous run.
+- Runs are labelled with their coverage. A run covering at least half of the
+  group's keywords is a group run; a one-keyword rerun stays in the keyword
+  drill-down but is never compared as if it were the hotel's visibility.
+- The window is read through the SearchResults sort key, so only the requested
+  days are loaded instead of each keyword's whole history.
+
 ## [2.17.0] - 2026-09-28
 
 ### Added

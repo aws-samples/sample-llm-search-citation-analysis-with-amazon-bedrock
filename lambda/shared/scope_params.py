@@ -39,13 +39,17 @@ through ``load_sibling_function``.
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
+import boto3
 from boto3.dynamodb.conditions import Key
+from botocore.config import Config
 
 from shared.api_response import validation_error
 from shared.constants import MAX_KEYWORD_LENGTH
@@ -53,7 +57,15 @@ from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
 
+logger = logging.getLogger(__name__)
+
 MAX_KEYWORD_IDS = 100
+
+#: The most keywords one scoped report covers, and how many of their
+#: partitions it reads at a time: keeps a group report inside the 29s API budget.
+SCOPE_KEYWORDS_CAP = 100
+SCOPE_MAX_WORKERS = 10
+
 
 SCOPE_QUERY_PARAMS: dict[str, dict[str, Any]] = {
     'keyword': {'type': str, 'max_length': MAX_KEYWORD_LENGTH},
@@ -164,6 +176,34 @@ def scope_from_request(
     if required and scope is None:
         return None, validation_error('Provide keyword, group_id or keyword_ids', event, 'keyword')
     return scope, None
+
+
+def scoped_dynamodb_resource() -> Any:
+    """A DynamoDB resource with enough pooled connections for ``map_scope_keywords``' threads."""
+    return boto3.resource('dynamodb', config=Config(max_pool_connections=50))
+
+
+def map_scope_keywords[ResultT](
+    keywords: Sequence[str],
+    compute: Callable[[str], ResultT],
+    fallback: Callable[[str], ResultT],
+) -> list[ResultT]:
+    """``compute(keyword)`` for every keyword, ``SCOPE_MAX_WORKERS`` at a time, in ``keywords`` order.
+
+    A keyword whose ``compute`` raises is logged and answered with
+    ``fallback(keyword)``: one broken partition must not sink a group report.
+    """
+    def guarded(keyword: str) -> ResultT:
+        try:
+            return compute(keyword)
+        except Exception:
+            logger.exception(f"Scoped report failed for {keyword!r}")
+            return fallback(keyword)
+
+    if not keywords:
+        return []
+    with ThreadPoolExecutor(max_workers=min(SCOPE_MAX_WORKERS, len(keywords))) as pool:
+        return list(pool.map(guarded, keywords))
 
 
 def query_keyword_rows(table: Any, keyword: str, projection: str) -> list[dict[str, Any]]:

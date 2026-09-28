@@ -21,11 +21,7 @@ averaged, with a per-keyword breakdown and a cross-keyword brand ranking.
 import logging
 import os
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
-
-import boto3
-from botocore.config import Config
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
@@ -34,11 +30,14 @@ from shared.api_response import success_response
 from shared.decorators import api_handler, validate
 from shared.providers import get_enabled_provider_count
 from shared.scope_params import (
+    SCOPE_KEYWORDS_CAP,
     SCOPE_QUERY_PARAMS,
     ReportScope,
     keywords_table_name,
+    map_scope_keywords,
     query_keyword_rows,
     scope_from_request,
+    scoped_dynamodb_resource,
 )
 from shared.utils import get_brand_config
 from shared.visibility_metrics import METRICS_PROJECTION, calculate_keyword_visibility
@@ -47,19 +46,12 @@ from shared.visibility_score import summarize_group_visibility
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-# The group summary fans out one Query per keyword; give boto3 enough pooled
-# connections for the thread pool below.
-dynamodb = boto3.resource('dynamodb', config=Config(max_pool_connections=50))
+# The group summary fans out one Query per keyword (map_scope_keywords).
+dynamodb = scoped_dynamodb_resource()
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 KEYWORDS_TABLE = keywords_table_name()
-
-# Parallel per-keyword fan-out for group scopes, and the most keywords one
-# group summary covers (the `keyword_ids` cap; keeps the request inside the
-# 29s API budget with projected queries).
-_SCOPE_MAX_WORKERS = 10
-_SCOPE_KEYWORDS_CAP = 100
 
 # Shared with the exact-run alert worker; the API keeps selecting latest rows.
 _METRICS_PROJECTION = METRICS_PROJECTION
@@ -96,19 +88,14 @@ def get_scope_visibility_metrics(scope: ReportScope, config: dict[str, Any], que
     averages, so a freshly added keyword does not drag a hotel's score to zero.
     """
     total_providers = get_enabled_provider_count()
-    keywords = list(scope.keywords)[:_SCOPE_KEYWORDS_CAP]
+    keywords = list(scope.keywords)[:SCOPE_KEYWORDS_CAP]
 
-    def compute(keyword: str) -> dict[str, Any]:
-        try:
-            return get_visibility_metrics(keyword, config, query_prompt_id=query_prompt_id, total_providers=total_providers)
-        except Exception as exc:  # one broken partition must not sink the group
-            logger.exception(f"Visibility metrics failed for {keyword!r}")
-            return {'error': str(exc)}
-
-    per_keyword: list[dict[str, Any]] = []
-    if keywords:
-        with ThreadPoolExecutor(max_workers=min(_SCOPE_MAX_WORKERS, len(keywords))) as pool:
-            per_keyword = list(pool.map(compute, keywords))
+    per_keyword = map_scope_keywords(
+        keywords,
+        lambda keyword: get_visibility_metrics(keyword, config, query_prompt_id=query_prompt_id, total_providers=total_providers),
+        # A keyword that failed to load counts as "no data" (`{}`) in the summary.
+        lambda _keyword: {},
+    )
 
     summary = summarize_group_visibility(keywords, per_keyword, total_providers)
     return {
