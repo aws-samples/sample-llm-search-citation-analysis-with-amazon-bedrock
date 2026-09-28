@@ -31,6 +31,7 @@ from shared.constants import MAX_KEYWORD_LENGTH
 from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.prompt_safety import sanitize_user_input
 from shared.provider_health import record_provider_failure, record_provider_success
+from shared.provider_models import DEFAULT_PROVIDER_MODELS, ProviderConfigUnavailableError, read_provider_model
 from shared.safe_fetch import fetch_following_validated_redirects, host_matches
 from shared.secrets import get_api_key
 from shared.step_function_response import log_error
@@ -161,53 +162,26 @@ def is_provider_enabled(provider_id: str) -> bool:
     # No config row yet -> treat as enabled (first-run default)
     return True
 
-# Default models per provider (used when no override in ProviderConfig table)
-DEFAULT_PROVIDER_MODELS = {
-    Provider.OPENAI: 'gpt-5-mini',
-    Provider.PERPLEXITY: 'sonar',
-    Provider.GEMINI: 'gemini-3-flash-preview',
-    Provider.CLAUDE: 'claude-sonnet-4-5',
-}
-
-# Cache for provider models (per Lambda invocation)
+# Cache for provider models, cleared at the start of every invocation. It used
+# to live for the whole warm container, so a model changed in Settings reached
+# a warm Lambda only after its next cold start.
 _provider_model_cache: dict[str, str] = {}
-
-class ProviderConfigUnavailableError(RuntimeError):
-    """Raised when provider config cannot be read and no safe default exists."""
 
 
 def get_provider_model(provider_id: str) -> str:
-    """Get configured model for a provider, with sensible defaults.
+    """The model this invocation uses for ``provider_id``.
 
-    Reads the 'model' field from the ProviderConfig table if set,
-    otherwise falls back to DEFAULT_PROVIDER_MODELS.
-
-    Fails closed: raises ProviderConfigUnavailableError on DynamoDB errors
-    so the caller can skip the provider rather than silently using a
+    Reads the administrator's override from the ProviderConfig row
+    (``shared.provider_models``), falling back to the provider's default.
+    Fails closed: raises ``ProviderConfigUnavailableError`` on DynamoDB
+    errors so the caller skips the provider rather than silently running a
     different model than the admin configured.
     """
-    if provider_id in _provider_model_cache:
-        return _provider_model_cache[provider_id]
-
-    default = DEFAULT_PROVIDER_MODELS.get(provider_id, '')
-    try:
-        table = dynamodb.Table(PROVIDER_CONFIG_TABLE)
-        item = table.get_item(Key={'provider_id': provider_id}).get('Item', {})
-    except Exception as e:
-        logger.exception(
-            "provider_model_read_failed provider=%s error=%s action=fail_closed",
-            provider_id,
-            type(e).__name__,
-        )
-        raise ProviderConfigUnavailableError(
-            f"Cannot read model config for provider {provider_id}"
-        ) from e
-
-    configured = item.get('model')
-    model = configured if isinstance(configured, str) and configured else default
-    _provider_model_cache[provider_id] = model
-    logger.info(f"Provider {provider_id} using model: {model}")
-    return model
+    if provider_id not in _provider_model_cache:
+        model = read_provider_model(dynamodb.Table(PROVIDER_CONFIG_TABLE), provider_id)
+        _provider_model_cache[provider_id] = model
+        logger.info(f"Provider {provider_id} using model: {model}")
+    return _provider_model_cache[provider_id]
 
 
 
@@ -343,7 +317,9 @@ def _parse_openai_response(raw_response: dict[str, Any]) -> tuple[str, list[str]
     return response_text or raw_response.get('output_text', ''), list(dict.fromkeys(citations))
 
 
-def query_openai(keyword: str, api_key: str, model: str = "gpt-5-mini", query_template: str | None = None) -> dict[str, Any]:
+def query_openai(
+    keyword: str, api_key: str, model: str = DEFAULT_PROVIDER_MODELS[Provider.OPENAI], query_template: str | None = None,
+) -> dict[str, Any]:
     """Query OpenAI API with native web search via Responses API."""
     def request(query: str) -> dict[str, Any]:
         return OpenAIClient(api_key).responses_with_web_search(query=query, model=model)
@@ -370,7 +346,7 @@ def query_perplexity(keyword: str, api_key: str, query_template: str | None = No
 
     return _query_llm(
         Provider.PERPLEXITY, keyword, query_template, request, _parse_perplexity_response,
-        model="sonar", model_from_response=True,
+        model=DEFAULT_PROVIDER_MODELS[Provider.PERPLEXITY], model_from_response=True,
     )
 
 
@@ -447,14 +423,16 @@ def _parse_gemini_response(raw_response: dict[str, Any]) -> tuple[str, list[str]
     return response_text, _merge_citations(citations, extract_citations_from_response(response_text))
 
 
-def query_gemini(keyword: str, api_key: str, query_template: str | None = None) -> dict[str, Any]:
-    """Query Gemini API with Google Search."""
+def query_gemini(
+    keyword: str, api_key: str, model: str = DEFAULT_PROVIDER_MODELS[Provider.GEMINI], query_template: str | None = None,
+) -> dict[str, Any]:
+    """Query Gemini API with Google Search grounding, using ``model``."""
     def request(query: str) -> dict[str, Any]:
-        return GeminiClient(api_key).generate_content(query)
+        return GeminiClient(api_key, model=model).generate_content(query)
 
     return _query_llm(
         Provider.GEMINI, keyword, query_template, request, _parse_gemini_response,
-        model="gemini-3-flash-preview", usage_key='usageMetadata',
+        model=model, usage_key='usageMetadata',
     )
 
 
@@ -504,12 +482,12 @@ def query_claude(keyword: str, api_key: str, query_template: str | None = None) 
 
     return _query_llm(
         Provider.CLAUDE, keyword, query_template, request, _parse_claude_response,
-        model="claude-sonnet-4-5", model_from_response=True,
+        model=DEFAULT_PROVIDER_MODELS[Provider.CLAUDE], model_from_response=True,
     )
 
 
 def _run_openai_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
-    """OpenAI is the one provider with a configurable model (fail-closed)."""
+    """OpenAI answers with the model configured in Settings (fail-closed)."""
     model = get_provider_model(Provider.OPENAI)
     return query_openai(keyword, api_key, model=model, query_template=query_template)
 
@@ -519,7 +497,9 @@ def _run_perplexity_provider(keyword: str, api_key: str, query_template: str | N
 
 
 def _run_gemini_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
-    return query_gemini(keyword, api_key, query_template=query_template)
+    """Gemini answers with the model configured in Settings (fail-closed)."""
+    model = get_provider_model(Provider.GEMINI)
+    return query_gemini(keyword, api_key, model=model, query_template=query_template)
 
 
 def _run_claude_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
@@ -850,6 +830,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     }
     """
     logger.info(f"Received event: {json.dumps(event)}")
+    # A model changed in Settings must reach the very next invocation, not
+    # wait for this warm container to be recycled.
+    _provider_model_cache.clear()
 
     try:
         return _search_keyword(event)

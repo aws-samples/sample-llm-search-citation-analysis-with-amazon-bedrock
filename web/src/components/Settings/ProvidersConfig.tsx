@@ -7,6 +7,7 @@ import type {
 import { formatRelativeTime } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
 import { RefreshIcon } from '../ui';
+import { ProviderModelEditor } from './ProviderModelEditor';
 
 export interface ProvidersConfigProps {
   readonly providers: ProviderConfig[];
@@ -182,6 +183,7 @@ export const ProvidersConfig = ({
   providers, loading, onUpdate, onRefresh, isAdmin 
 }: ProvidersConfigProps) => {
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
+  const [editingModel, setEditingModel] = useState<string | null>(null);
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [saving, setSaving] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -274,6 +276,11 @@ export const ProvidersConfig = ({
                       saving={saving === provider.id}
                       onToggle={() => handleToggleEnabled(provider.id, provider.enabled)}
                     />
+                    {provider.model_configurable === true && provider.configured && (
+                      <button onClick={() => setEditingModel(provider.id)} className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+                        Change model
+                      </button>
+                    )}
                     <button onClick={() => startEditing(provider.id)} className="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
                       {provider.configured ? 'Update Key' : 'Add Key'}
                     </button>
@@ -299,6 +306,14 @@ export const ProvidersConfig = ({
                 onCancel={cancelEditing}
               />
             )}
+
+            {isAdmin && editingModel === provider.id && (
+              <ProviderModelEditor
+                provider={provider}
+                onSaved={onRefresh}
+                onClose={() => setEditingModel(null)}
+              />
+            )}
           </div>
         ))}
       </div>
@@ -309,6 +324,7 @@ export const ProvidersConfig = ({
           <li>• Only enabled providers with configured API keys will be used during analysis</li>
           <li>• API keys are stored securely in AWS Secrets Manager</li>
           <li>• Disable providers temporarily without removing their API keys</li>
+          <li>• The OpenAI and Gemini models can be changed as new versions appear; each is checked before it is saved</li>
           <li>• Each provider has different capabilities and pricing</li>
           {!isAdmin && (
             <li>• Changing provider settings requires an administrator</li>

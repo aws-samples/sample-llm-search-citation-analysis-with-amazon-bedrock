@@ -9,6 +9,42 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.17.0] - 2026-09-28
+
+### Added
+
+- Settings › AI Providers can change the model OpenAI and Gemini answer with,
+  so the tool can move to new versions as they appear. An administrator opens
+  **Change model**, picks one of the models the stored key can use (the list
+  comes from the provider and is filtered to models that can answer a prompt)
+  or types an id, and saves. Before storing it, the server sends one short
+  prompt with the exact web-search configuration runs use; a model that cannot
+  search is refused with the provider's own reason instead of failing — and,
+  after three failures, switching the provider off — during the next run.
+  **Use the default** removes the override, so a future default moves the
+  provider with it. New endpoint `GET /api/providers/{id}/models` (admin-only);
+  `PUT /api/providers/{id}` accepts `model`.
+- Keyword research now uses the same configured models as analysis runs. The
+  research worker reads the ProviderConfig table (read-only grant) and fails
+  the step rather than researching with a different model when the
+  configuration cannot be read.
+
+### Changed
+
+- The default model ids live in one place, `lambda/shared/provider_models.py`,
+  instead of about six. Model ids are restricted to letters, digits, dots,
+  dashes and underscores because Gemini's id is part of the request URL.
+- Every answer keeps recording the model that produced it (`metadata.model`);
+  Gemini now records the configured model instead of a hardcoded label.
+
+### Fixed
+
+- A model change reaches a warm search Lambda on its next invocation. The
+  model cache used to live for the whole container, so a change only took
+  effect after a cold start.
+- The dashboard's offline fallback and provider descriptions no longer name a
+  model (`gpt-5.2`) the backend never used.
+
 ## [2.16.2] - 2026-09-28
 
 ### Fixed

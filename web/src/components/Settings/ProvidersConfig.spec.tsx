@@ -16,6 +16,43 @@ describe('ProvidersConfig', () => {
     expect(screen.getByText('sk-ant-...xyz')).toBeInTheDocument();
   });
 
+  it('offers an administrator a model change for a configurable provider', () => {
+    renderProvidersConfig([buildProviderConfig({
+      id: 'gemini',
+      model_configurable: true 
+    })]);
+
+    expect(screen.getByRole('button', { name: 'Change model' })).toBeInTheDocument();
+  });
+
+  it('offers no model change for a provider whose model is fixed', () => {
+    renderProvidersConfig([buildProviderConfig({ model_configurable: false })]);
+
+    expect(screen.queryByRole('button', { name: 'Change model' })).not.toBeInTheDocument();
+  });
+
+  it('offers no model change before an API key is stored', () => {
+    renderProvidersConfig([buildProviderConfig({
+      id: 'gemini',
+      model_configurable: true,
+      configured: false 
+    })]);
+
+    expect(screen.queryByRole('button', { name: 'Change model' })).not.toBeInTheDocument();
+  });
+
+  it('offers no model change to a user without the admin group', () => {
+    render(<ProvidersConfig {...buildProvidersConfigProps({
+      isAdmin: false,
+      providers: [buildProviderConfig({
+        id: 'gemini',
+        model_configurable: true 
+      })],
+    })} />);
+
+    expect(screen.queryByRole('button', { name: 'Change model' })).not.toBeInTheDocument();
+  });
+
   it('shows a loading message instead of the cards while providers load', () => {
     render(<ProvidersConfig {...buildProvidersConfigProps({ loading: true })} />);
 

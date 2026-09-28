@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 from decimal import Decimal
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1313,3 +1314,65 @@ class TestFetchPageSeoElements:
         href = 'https://example.com/' + 'a' * 2029
 
         assert _scrape(_page(f'<link rel="canonical" href="{href}">'))['canonical'] == 'https://example.com/' + 'a' * 2028
+
+
+
+def _client_for(provider_id: str, config_table: MagicMock) -> Any:
+    """The client ``_provider_client`` builds for ``provider_id`` when the config table is ``config_table``."""
+    resource = MagicMock()
+    resource.Table.return_value = config_table
+    with (
+        patch.object(_mod, 'dynamodb', resource),
+        patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
+    ):
+        return _mod._provider_client(provider_id)[1]
+
+
+def _config_row(row: dict) -> MagicMock:
+    table = MagicMock()
+    table.get_item.return_value = {'Item': row}
+    return table
+
+
+class TestResearchUsesTheConfiguredModel:
+    """Keyword research answers with the model chosen in Settings, like analysis runs do."""
+
+    @pytest.mark.parametrize(('provider_id', 'model'), [('openai', 'gpt-5.2'), ('gemini', 'gemini-2.5-pro')])
+    def test_builds_the_client_with_the_configured_model(self, provider_id, model):
+        client = _client_for(provider_id, _config_row({'provider_id': provider_id, 'model': model}))
+
+        assert client.model == model
+
+    def test_uses_the_default_when_nothing_is_configured(self):
+        assert _client_for('gemini', _config_row({'provider_id': 'gemini'})).model == 'gemini-3-flash-preview'
+
+    def test_never_reads_the_config_for_a_provider_with_a_fixed_model(self):
+        table = _config_row({})
+
+        _client_for('perplexity', table)
+
+        assert table.get_item.call_args_list == []
+
+    def test_fails_the_step_instead_of_guessing_when_the_config_is_unreadable(self):
+        table = MagicMock()
+        table.get_item.side_effect = RuntimeError('ProvisionedThroughputExceeded')
+
+        with pytest.raises(_mod.StepFailedError, match=r'^Could not read the configured openai model$'):
+            _client_for('openai', table)
+
+    @pytest.mark.parametrize(('environment', 'table_name'), [
+        ({'DYNAMODB_TABLE_PROVIDER_CONFIG': 'Stage-ProviderConfig'}, 'Stage-ProviderConfig'),
+        ({}, 'CitationAnalysis-ProviderConfig'),
+    ])
+    def test_reads_the_table_the_stack_names(self, environment, table_name):
+        resource = MagicMock()
+        resource.Table.return_value = _config_row({})
+
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(_mod, 'dynamodb', resource),
+            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
+        ):
+            _mod._provider_client('openai')
+
+        assert resource.Table.call_args.args == (table_name,)

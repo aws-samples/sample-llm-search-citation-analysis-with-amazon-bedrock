@@ -229,6 +229,84 @@ class TestQueryOpenAIModel:
         assert sig.parameters['model'].default == 'gpt-5-mini'
 
 
+class TestGeminiUsesTheConfiguredModel:
+    """Gemini's model used to be hardcoded in the client; Settings can now change it."""
+
+    def test_builds_the_client_with_the_given_model(self):
+        client = MagicMock()
+        client.generate_content.return_value = {'candidates': []}
+
+        with patch.object(handler, 'GeminiClient', return_value=client) as client_class:
+            result = handler.query_gemini('hotels in malaga', 'fake-key', model='gemini-2.5-pro')
+
+        assert (client_class.call_args.kwargs['model'], result['metadata']['model']) == ('gemini-2.5-pro', 'gemini-2.5-pro')
+
+    def test_run_reads_the_model_configured_for_gemini(self, mock_dynamodb):
+        mock_db, mock_table = mock_dynamodb
+        mock_table.get_item.return_value = {'Item': {'provider_id': 'gemini', 'model': 'gemini-2.5-pro'}}
+
+        with patch.object(handler, 'dynamodb', mock_db), patch.object(handler, 'query_gemini') as query_gemini:
+            handler._provider_model_cache.clear()
+            handler._run_gemini_provider('hotels in malaga', 'fake-key', None)
+
+        assert query_gemini.call_args.kwargs['model'] == 'gemini-2.5-pro'
+
+    def test_records_geminis_usage_metadata(self):
+        client = MagicMock()
+        client.generate_content.return_value = {'candidates': [], 'usageMetadata': {'totalTokenCount': 12}}
+
+        with patch.object(handler, 'GeminiClient', return_value=client):
+            result = handler.query_gemini('hotels in malaga', 'fake-key')
+
+        assert result['metadata']['usage'] == {'totalTokenCount': 12}
+
+    def test_logs_the_model_a_run_uses(self, mock_dynamodb, caplog):
+        import logging
+
+        mock_db, mock_table = mock_dynamodb
+        mock_table.get_item.return_value = {'Item': {'provider_id': 'openai', 'model': 'gpt-5.2'}}
+
+        with patch.object(handler, 'dynamodb', mock_db), caplog.at_level(logging.INFO, logger='search_handler_prompts'):
+            handler._provider_model_cache.clear()
+            handler.get_provider_model('openai')
+
+        assert 'Provider openai using model: gpt-5.2' in [record.getMessage() for record in caplog.records]
+
+
+class TestFixedModelProvidersRecordTheModelThatAnswered:
+    """Perplexity and Claude keep their default, but the answer names the model actually used."""
+
+    def test_perplexity_records_the_model_from_its_answer(self):
+        client = MagicMock()
+        client.chat_completion.return_value = {'choices': [{'message': {'content': 'answer'}}], 'model': 'sonar-2026'}
+
+        with patch.object(handler, 'PerplexityClient', return_value=client):
+            result = handler.query_perplexity('hotels in malaga', 'fake-key')
+
+        assert result['metadata']['model'] == 'sonar-2026'
+
+    def test_claude_records_the_model_from_its_answer(self):
+        client = MagicMock()
+        client.generate_content.return_value = {'content': [], 'model': 'claude-sonnet-4-5-20250929'}
+
+        with patch.object(handler, 'ClaudeClient', return_value=client):
+            result = handler.query_claude('hotels in malaga', 'fake-key')
+
+        assert result['metadata']['model'] == 'claude-sonnet-4-5-20250929'
+
+
+class TestModelChangesReachAWarmLambda:
+    """The model cache used to survive the whole warm container."""
+
+    def test_each_invocation_forgets_the_models_the_previous_one_read(self):
+        handler._provider_model_cache['openai'] = 'gpt-4.1'
+
+        with patch.object(handler, '_search_keyword', return_value={}):
+            handler.handler({'keyword': 'hotels in malaga'}, None)
+
+        assert handler._provider_model_cache == {}
+
+
 class TestQueryTemplateSubstitution:
     """Tests for query template {keyword} substitution across providers."""
 

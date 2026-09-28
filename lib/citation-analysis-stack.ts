@@ -1583,11 +1583,14 @@ export class CitationAnalysisStack extends cdk.Stack {
       logGroup: researchWorkerLogGroup,
       environment: {
         DYNAMODB_TABLE_KEYWORD_RESEARCH: keywordResearchTable.tableName,
+        DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
         SECRETS_PREFIX: 'citation-analysis/',
         ...bedrockTierEnv,
       },
     });
     keywordResearchTable.grantReadWriteData(researchWorkerFunction);
+    // Research uses the OpenAI / Gemini model chosen in Settings › AI Providers.
+    providerConfigTable.grantReadData(researchWorkerFunction);
     perplexitySecret.grantRead(researchWorkerFunction);
     openaiSecret.grantRead(researchWorkerFunction);
     geminiSecret.grantRead(researchWorkerFunction);
@@ -2902,6 +2905,10 @@ export class CitationAnalysisStack extends cdk.Stack {
     
     const providerValidateResource = providerIdResource.addResource('validate');
     providerValidateResource.addMethod('POST', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+
+    // Models the stored key can use, for the Settings model picker (admin-only in the handler).
+    const providerModelsResource = providerIdResource.addResource('models');
+    providerModelsResource.addMethod('GET', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
 
     // KPI alert history, singleton settings, and explicit content markers.
     const alertsResource = apiResource.addResource('alerts');

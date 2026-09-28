@@ -21,7 +21,14 @@ export interface ProviderConfig extends ProviderHealthRecord {
   id: string;
   name: string;
   description: string;
+  /** The model runs use now (the configured one, else the default). */
   model: string;
+  /** LLM providers only: the model used when nothing is configured. */
+  default_model?: string;
+  /** Whether an administrator can change the model (OpenAI and Gemini). */
+  model_configurable?: boolean;
+  /** When the model was last changed or returned to the default. */
+  model_updated_at?: string;
   docs_url: string;
   enabled: boolean;
   configured: boolean;
@@ -85,7 +92,7 @@ function createDefaultProviders(): ProviderConfig[] {
       id: PROVIDER.OPENAI,
       name: PROVIDER_NAMES[PROVIDER.OPENAI],
       description: PROVIDER_DESCRIPTIONS[PROVIDER.OPENAI],
-      model: 'gpt-5.2',
+      model: 'gpt-5-mini',
       docs_url: PROVIDER_DOCS_URLS[PROVIDER.OPENAI],
       enabled: true,
       configured: false,
