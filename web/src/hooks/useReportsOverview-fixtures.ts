@@ -10,3 +10,9 @@ export const mockReportsOverview: ReportsOverviewResponse = buildOverview({
   top_declining: [buildMover('c', -10, 30)],
   top_recommendations: [buildRec('r1', 'high')],
 });
+
+
+/** `mockReportsOverview` without its `field`, as a backend predating that field answers. */
+export function overviewWithout(field: keyof ReportsOverviewResponse): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(mockReportsOverview).filter(([key]) => key !== field));
+}

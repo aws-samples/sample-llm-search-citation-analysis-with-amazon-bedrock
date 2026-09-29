@@ -46,6 +46,8 @@ export interface ReportsOverviewResponse {
   /** Every KPI over each keyword's latest period, pooled. */
   kpis: BrandKpis;
   change: HistoricalTrendsResponse['change'];
+  trend_data: HistoricalTrendsResponse['trend_data'];
+  latest_brands: HistoricalTrendsResponse['latest_brands'];
   summary: ReportsOverviewSummary;
   top_improving: ReportsOverviewMover[];
   top_declining: ReportsOverviewMover[];

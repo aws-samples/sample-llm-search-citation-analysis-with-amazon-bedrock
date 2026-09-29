@@ -13,8 +13,17 @@ import {
   allKeywordsReportData, groupReportData, keywordReportData
 } from './useBrandVisibilityReport-fixtures';
 import {
-  cardFigure, definitionTerms, plainStatCard, sectionTable, sectionTitles, statFigure
+  cardFigure, definitionTerms, plainStatCard, sectionTable, sectionTitled, sectionTitles, statFigure
 } from '../layout/reportQueries-fixtures';
+import {
+  rankedBrandNames, rankingsShareOfVoiceCaption
+} from './sections/brandRankings-fixtures';
+import {
+  BRAND_TRENDS_SOV_CAPTION, LATEST_BRANDS_SOV_CAPTION, TREND_VIEW_KPI_CAPTION, VISIBILITY_BRANDS_SOV_CAPTION, chartCaption, hasChartPanel
+} from './sections/reportChartPanels-fixtures';
+import {
+  KPI_TREND_TITLE, SHARE_OF_VOICE_TITLE, SHARE_OF_VOICE_TREND_TITLE
+} from './sections/ReportChartPanels';
 import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import type { Keyword } from '../../../types';
 
@@ -94,7 +103,25 @@ describe('BrandVisibilityReport — per-keyword variant', () => {
   it('lists the brands of the visibility answer in the rankings', () => {
     renderAt('/reports/visibility/best%20running%20shoes');
 
-    expect(sectionTable('Brand rankings').slice(1).map(([brand]) => brand)).toStrictEqual(['Nike', 'Adidas']);
+    expect(rankedBrandNames()).toStrictEqual(['Nike', 'Adidas']);
+  });
+
+  it('charts the share of voice of the visibility answer next to the rankings', () => {
+    renderAt('/reports/visibility/best%20running%20shoes');
+
+    expect(rankingsShareOfVoiceCaption()).toBe(VISIBILITY_BRANDS_SOV_CAPTION);
+  });
+
+  it('charts the keyword KPIs per period in the trend history', () => {
+    renderAt('/reports/visibility/best%20running%20shoes');
+
+    expect(chartCaption(KPI_TREND_TITLE, sectionTitled('Trend history'))).toBe(TREND_VIEW_KPI_CAPTION);
+  });
+
+  it('charts no share of voice over time for one keyword', () => {
+    renderAt('/reports/visibility/best%20running%20shoes');
+
+    expect(hasChartPanel(SHARE_OF_VOICE_TREND_TITLE)).toBe(false);
   });
 
   it('ends with the definition of every KPI and of the trend rule', () => {
@@ -114,10 +141,27 @@ describe('BrandVisibilityReport — all-keywords variant', () => {
     expect(screen.getByText(/Cross-keyword visibility overview/i)).toBeInTheDocument();
   });
 
-  it('shows the headline, history, movers, leaderboard and definitions, in that order', () => {
+  it('shows the headline, brand rankings, history, movers, leaderboard and definitions, in that order', () => {
     renderAt('/reports/visibility');
 
-    expect(sectionTitles()).toStrictEqual(['Headline', 'Trend history', 'Top movers', 'Per-keyword leaderboard', DEFINITIONS_TITLE]);
+    expect(sectionTitles()).toStrictEqual([
+      'Headline', 'Brand rankings', 'Trend history', 'Top movers', 'Per-keyword leaderboard', DEFINITIONS_TITLE,
+    ]);
+  });
+
+  it('ranks the brands of the latest periods of every keyword', () => {
+    renderAt('/reports/visibility');
+
+    expect(rankedBrandNames()).toStrictEqual(['Nike', 'Adidas', 'Puma']);
+  });
+
+  it.each([
+    [SHARE_OF_VOICE_TITLE, LATEST_BRANDS_SOV_CAPTION],
+    [SHARE_OF_VOICE_TREND_TITLE, BRAND_TRENDS_SOV_CAPTION],
+  ])('charts the %s of every keyword next to the brand rankings', (panel, caption) => {
+    renderAt('/reports/visibility');
+
+    expect(chartCaption(panel, sectionTitled('Brand rankings'))).toBe(caption);
   });
 
   it('counts the improving keywords in the headline', () => {
@@ -179,6 +223,12 @@ describe('BrandVisibilityReport — keyword group (hotel) variant', () => {
   it('describes the report as every KPI of the hotel per run', () => {
     renderAt('/reports/visibility?group=hotel-sol');
     expect(screen.getByText(/mention rate, share of voice, visibility score and every other KPI per run/)).toBeInTheDocument();
+  });
+
+  it('keeps its own KPI evolution chart without a share-of-voice donut, which would need another request', () => {
+    renderAt('/reports/visibility?group=hotel-sol');
+
+    expect(hasChartPanel(SHARE_OF_VOICE_TITLE)).toBe(false);
   });
 
   it('ends with the definitions block', () => {

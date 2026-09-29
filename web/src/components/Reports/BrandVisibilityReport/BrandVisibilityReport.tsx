@@ -26,6 +26,10 @@ import { GroupKpiReport } from './GroupKpiReport';
 /** The per-hotel report opens on the last 90 days (the API's default window). */
 const DEFAULT_GROUP_REPORT_DAYS = 90;
 
+/** What the all-keywords leaderboard covers: the latest period of every keyword. */
+const ALL_KEYWORDS_RANKINGS_SUBTITLE = 'Every brand the AI answers named in each keyword\'s latest period (the leading 10), '
+  + 'by visibility score, and the share of voice of your brand and its leading competitors over time. First-party rows are highlighted.';
+
 interface Props {readonly keywords: ReadonlyArray<Keyword>;}
 
 /**
@@ -130,7 +134,7 @@ function KeywordSections({ data }: SectionsProps) {
         emptyMessage="No visibility data found for this keyword."
       />
       <BrandRankingsSection
-        visibility={data.visibility}
+        brands={data.visibility?.brands ?? null}
         loading={data.visibilityLoading}
         error={data.visibilityError}
       />
@@ -140,12 +144,20 @@ function KeywordSections({ data }: SectionsProps) {
   );
 }
 
-/** Every keyword: KPIs and improving / declining counts, history, movers, per-keyword table. */
+/** Every keyword: KPIs and improving / declining counts, brand rankings, history, movers, per-keyword table. */
 function AllKeywordsSections({ data }: SectionsProps) {
   const slice = trendSlice(data);
   return (
     <>
       <CrossKeywordHeadlineSection {...slice} />
+      <BrandRankingsSection
+        brands={data.trends?.latest_brands ?? null}
+        brandTrends={data.trends?.brand_trends}
+        loading={data.trendsLoading}
+        error={data.trendsError}
+        subtitle={ALL_KEYWORDS_RANKINGS_SUBTITLE}
+        emptyMessage="No brand mentions extracted in the latest periods."
+      />
       <TrendHistorySection {...slice} />
       <MoversSection {...slice} />
       <PerKeywordTableSection {...slice} />

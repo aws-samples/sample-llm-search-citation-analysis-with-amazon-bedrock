@@ -22,8 +22,8 @@ interface Props { readonly keywords: Array<Keyword>; }
 /**
  * Visibility dashboard. The scope selector picks one keyword, a keyword group
  * or every keyword; every scope gets the same overview (KPIs, history,
- * keywords, brand leaderboard), and a single keyword adds how each persona
- * ranks the brands.
+ * keywords, share of voice, brand leaderboard, AI engines, cited domains),
+ * and a single keyword adds how each persona ranks the brands.
  */
 export function VisibilityDashboard({ keywords }: Props) {
   const [scope, setScope] = useState<ReportScope>(ALL_SCOPE);

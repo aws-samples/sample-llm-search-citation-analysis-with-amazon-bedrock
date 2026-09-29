@@ -11,7 +11,7 @@ import {
   buildMover, buildOverview
 } from '../../layout/reportPayload-fixtures';
 import {
-  moverColumn, moverKeywords
+  moverColumn, moverKeywords, sectionTitled
 } from '../../layout/reportQueries-fixtures';
 
 function renderWinsAndGaps(overrides: Partial<ReportsOverviewResponse>): void {
@@ -41,6 +41,12 @@ describe('WinsAndGapsSection — content rendering', () => {
     renderWinsAndGaps({ period_type: 'week' });
 
     expect(screen.getByText(/rose or fell the most since their previous week\./)).toBeInTheDocument();
+  });
+
+  it('starts the second printed page, after the headline and its charts', () => {
+    renderWinsAndGaps({});
+
+    expect(sectionTitled('Top wins and gaps')).toHaveClass('page-break-before');
   });
 });
 

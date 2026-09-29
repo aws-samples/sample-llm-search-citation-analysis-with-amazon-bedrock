@@ -7,6 +7,7 @@ import {
 import { NextActionsSection } from './NextActionsSection';
 import { buildRec } from './reportsOverview-fixtures';
 import { buildOverview } from '../../layout/reportPayload-fixtures';
+import { sectionTitled } from '../../layout/reportQueries-fixtures';
 
 describe('NextActionsSection — content', () => {
   it('renders each recommendation title as an h3', () => {
@@ -66,6 +67,12 @@ describe('NextActionsSection — content', () => {
       />,
     );
     expect(screen.getByText('high')).toBeInTheDocument();
+  });
+
+  it('shares the printed page of the wins and gaps instead of starting a new one', () => {
+    render(<NextActionsSection data={buildOverview({ top_recommendations: [buildRec('Refresh the spa page', 'low')] })} loading={false} error={null} />);
+
+    expect(sectionTitled('Next actions')).not.toHaveClass('page-break-before');
   });
 });
 

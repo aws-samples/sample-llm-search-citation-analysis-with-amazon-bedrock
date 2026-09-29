@@ -821,7 +821,8 @@ class TestOverviewScope:
             seen['owned_domains'] = owned_domains
             return {
                 'scope': report_scope.describe(), 'keywords_analyzed': len(report_scope.keywords), 'keywords_with_data': 0,
-                'citations_configured': bool(owned_domains), 'latest': {}, 'change': None, 'keyword_trends': [],
+                'citations_configured': bool(owned_domains), 'latest': {}, 'latest_brands': [], 'trend_data': [], 'change': None,
+                'keyword_trends': [],
                 'overall': {'improving_count': 0, 'declining_count': 0, 'stable_count': 0},
             }
 

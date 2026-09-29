@@ -12,10 +12,12 @@ import {
 import { useKeywordDeepDive } from './useKeywordDeepDive';
 import { RankHistorySection } from './sections/RankHistorySection';
 import { PersonaImpactSection } from './sections/PersonaImpactSection';
+import { EngineKpisSection } from './sections/EngineKpisSection';
 import { ProviderDeltaSection } from './sections/ProviderDeltaSection';
 import { TopSourcesSection } from './sections/TopSourcesSection';
 import { SentimentExamplesSection } from './sections/SentimentExamplesSection';
 import { RecommendationsSection } from './sections/RecommendationsSection';
+import { BrandRankingsSection } from '../BrandVisibilityReport/sections/BrandRankingsSection';
 import type { Keyword } from '../../../types';
 import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 
@@ -98,7 +100,7 @@ export function KeywordDeepDiveReport({ keywords }: Props) {
   return (
     <ReportLayout
       title={`Keyword Deep Dive: ${selectedKeyword}`}
-      subtitle="KPIs and their history, persona impact, provider differences, top sources, and recommended actions for this keyword."
+      subtitle="KPIs and their history, brand rankings, persona impact, KPIs per AI engine, provider differences, top sources, and recommended actions for this keyword."
       actions={
         <ReportKeywordSelector
           keywords={keywords}
@@ -119,10 +121,20 @@ export function KeywordDeepDiveReport({ keywords }: Props) {
         loading={data.trendsLoading}
         error={data.trendsError}
       />
+      <BrandRankingsSection
+        brands={data.visibility?.brands ?? null}
+        loading={data.visibilityLoading}
+        error={data.visibilityError}
+      />
       <PersonaImpactSection
         personas={data.personas}
         loading={data.personasLoading}
         error={data.personasError}
+      />
+      <EngineKpisSection
+        visibility={data.visibility}
+        loading={data.visibilityLoading}
+        error={data.visibilityError}
       />
       <ProviderDeltaSection
         mentions={data.mentions}

@@ -1,7 +1,7 @@
 import type {
   BrandClassification,
   BrandLeaderboardRow,
-  VisibilityResponse,
+  BrandTrends,
 } from '../../../../types';
 import type { KpiId } from '../../../../constants/kpiDefinitions';
 import { formatKpi } from '../../../../formatting/kpiFormatter';
@@ -13,12 +13,27 @@ import {
   type ReportTableColumn,
   gateSection,
 } from '../../layout';
+import {
+  ShareOfVoicePanel, ShareOfVoiceTrendPanel
+} from './ReportChartPanels';
 
 interface Props {
-  readonly visibility: VisibilityResponse | null;
+  /** The leaderboard, best visibility score first; `null` until it is loaded. */
+  readonly brands: readonly BrandLeaderboardRow[] | null;
   readonly loading: boolean;
   readonly error: string | null;
+  /** What the leaderboard covers, under the title. */
+  readonly subtitle?: string;
+  /** What to say when no answer named a brand. */
+  readonly emptyMessage?: string;
+  /** The share of voice per brand over time, charted next to the donut when given. */
+  readonly brandTrends?: BrandTrends;
 }
+
+/** The subtitle of the leaderboard of one keyword's latest run. */
+export const KEYWORD_RANKINGS_SUBTITLE = 'Every brand the AI answers named for this keyword in its latest run, by visibility score. '
+  + 'First-party rows are highlighted.';
+export const KEYWORD_RANKINGS_EMPTY = 'No brand mentions extracted for this keyword.';
 
 /** The most brands a printed leaderboard lists; the API sorts them by visibility score. */
 export const MAX_BRANDS = 15;
@@ -59,42 +74,44 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>> = [
 ];
 
 /**
- * Per-keyword brand leaderboard: every brand the AI answers named for this
- * keyword, each measured with the same formulas as the tracked brand
- * (`docs/kpi-definitions.md`, per-brand leaderboards). First-party rows are
- * tinted so they stand out from competitors and other brands in print.
+ * Brand leaderboard: every brand the AI answers named in the scope, each
+ * measured with the same formulas as the tracked brand
+ * (`docs/kpi-definitions.md`, per-brand leaderboards), under a share-of-voice
+ * donut (and, when given, the share of voice per brand over time).
+ * First-party rows are tinted so they stand out from competitors and other
+ * brands in print.
  */
 export function BrandRankingsSection({
-  visibility, loading, error 
+  brands, loading, error, subtitle = KEYWORD_RANKINGS_SUBTITLE, emptyMessage = KEYWORD_RANKINGS_EMPTY, brandTrends
 }: Props) {
   const gate = gateSection({
     title: 'Brand rankings',
     loading,
     loadingMessage: 'Loading brand rankings…',
     error,
-    value: visibility,
+    value: brands,
   });
   if (!gate.ready) return gate.placeholder;
 
-  const brands = gate.value.brands.slice(0, MAX_BRANDS);
-  if (brands.length === 0) {
+  if (gate.value.length === 0) {
     return (
       <ReportSectionPlaceholder
         title="Brand rankings"
         variant="empty"
-        message="No brand mentions extracted for this keyword."
+        message={emptyMessage}
       />
     );
   }
 
   return (
-    <ReportSection
-      title="Brand rankings"
-      subtitle="Every brand the AI answers named for this keyword in its latest run, by visibility score. First-party rows are highlighted."
-    >
+    <ReportSection title="Brand rankings" subtitle={subtitle}>
+      <div className={brandTrends ? 'mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2' : 'mb-4'}>
+        <ShareOfVoicePanel brands={gate.value} />
+        {brandTrends && <ShareOfVoiceTrendPanel trends={brandTrends} />}
+      </div>
       <ReportTable
         columns={COLUMNS}
-        rows={brands}
+        rows={gate.value.slice(0, MAX_BRANDS)}
         // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
         rowKey={(brand) => brand.name}
         rowClassName={firstPartyRowClass}

@@ -11,13 +11,18 @@ import {
   buildMover, buildOverview
 } from '../layout/reportPayload-fixtures';
 import {
-  definitionTerms, sectionTitles, statFigure
+  definitionTerms, sectionTitled, sectionTitles, statFigure
 } from '../layout/reportQueries-fixtures';
 import { buildRec } from './sections/reportsOverview-fixtures';
 import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
+import {
+  LATEST_BRANDS_SOV_CAPTION, chartCaption
+} from '../BrandVisibilityReport/sections/reportChartPanels-fixtures';
+import { SHARE_OF_VOICE_TITLE } from '../BrandVisibilityReport/sections/ReportChartPanels';
 
 vi.mock('./useExecutiveSummary', () => ({useExecutiveSummary: vi.fn()}));
 vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPrintMode: false })),}));
+vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
 import { useExecutiveSummary } from './useExecutiveSummary';
 
@@ -52,10 +57,18 @@ describe('ExecutiveSummaryReport', () => {
     expect(getReportHeading(/Executive Summary/i)).toBeInTheDocument();
   });
 
-  it('shows the headline, wins and gaps, next actions and definitions, in that order', () => {
+  it('shows the headline, trend and share of voice, wins and gaps, next actions and definitions, in that order', () => {
     renderReport();
 
-    expect(sectionTitles()).toStrictEqual(['Headline', 'Top wins and gaps', 'Next actions', 'How these KPIs are measured']);
+    expect(sectionTitles()).toStrictEqual([
+      'Headline', 'Trend and share of voice', 'Top wins and gaps', 'Next actions', 'How these KPIs are measured',
+    ]);
+  });
+
+  it('charts the share of voice of the latest leaderboard between the headline and the wins', () => {
+    renderReport();
+
+    expect(chartCaption(SHARE_OF_VOICE_TITLE, sectionTitled('Trend and share of voice'))).toBe(LATEST_BRANDS_SOV_CAPTION);
   });
 
   it('shows the overview KPIs in the headline', () => {

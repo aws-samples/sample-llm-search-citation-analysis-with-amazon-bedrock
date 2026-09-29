@@ -1,0 +1,156 @@
+import type { ReactElement } from 'react';
+import { render } from '@testing-library/react';
+import {
+  MemoryRouter, Route, Routes
+} from 'react-router-dom';
+import type {
+  HistoricalTrendsResponse, Keyword, VisibilityResponse
+} from '../../../types';
+import { buildKeywordGroup } from '../../../hooks/useKeywordGroups-fixtures';
+import {
+  buildTrendView, buildVisibility
+} from '../layout/reportPayload-fixtures';
+import { CompetitorBenchmarkReport } from '../CompetitorBenchmarkReport';
+import { AiEnginesReport } from '../AiEnginesReport';
+import { SourcesReport } from '../SourcesReport';
+import { SentimentReport } from '../SentimentReport';
+import type {
+  ReportSlice, ScopeReportData
+} from './useScopeReportData';
+
+/**
+ * Report data for the specs of the Competitor Benchmark, AI Engines,
+ * Sources and Sentiment reports: the Nike world of `reportPayload-fixtures`
+ * (`buildVisibility()` and `buildTrendView()`) over 30 days, unless
+ * overridden.
+ */
+
+export const NETWORK_ERROR = 'Network down';
+
+/** A fetch that settled with `data`. */
+export function settledSlice<T>(data: T): ReportSlice<T> {
+  return {
+    data,
+    loading: false,
+    error: null,
+  };
+}
+
+const IN_FLIGHT = {
+  data: null,
+  loading: true,
+  error: null,
+} as const;
+
+/** Both fetches settled with the Nike world, over the last 30 days per day, unless overridden. */
+export function buildScopeReport(overrides: Partial<ScopeReportData> = {}): ScopeReportData {
+  return {
+    visibility: settledSlice(buildVisibility()),
+    trends: settledSlice(buildTrendView()),
+    days: 30,
+    period: 'day',
+    ready: true,
+    ...overrides,
+  };
+}
+
+/** The report with `/visibility` answering `buildVisibility(overrides)`. */
+export function reportWithVisibility(overrides: Partial<VisibilityResponse>): ScopeReportData {
+  return buildScopeReport({ visibility: settledSlice(buildVisibility(overrides)) });
+}
+
+/** The report with `/trends` answering `buildTrendView(overrides)`. */
+export function reportWithTrends(overrides: Partial<HistoricalTrendsResponse>): ScopeReportData {
+  return buildScopeReport({ trends: settledSlice(buildTrendView(overrides)) });
+}
+
+/** Both fetches in flight. */
+export function loadingScopeReport(): ScopeReportData {
+  return buildScopeReport({
+    visibility: IN_FLIGHT,
+    trends: IN_FLIGHT,
+    ready: false,
+  });
+}
+
+/** Both fetches failed with NETWORK_ERROR. */
+export function failedScopeReport(): ScopeReportData {
+  const failed = {
+    data: null,
+    loading: false,
+    error: NETWORK_ERROR,
+  };
+  return buildScopeReport({
+    visibility: failed,
+    trends: failed,
+  });
+}
+
+/** A scope whose keywords have no answered run, in the window or ever. */
+export function unansweredScopeReport(): ScopeReportData {
+  return buildScopeReport({
+    visibility: settledSlice(buildVisibility({ keywords_with_data: 0 })),
+    trends: settledSlice(buildTrendView({ trend_data: [] })),
+  });
+}
+
+/** The tracked keywords the reports offer in their scope selector. */
+export const SCOPE_KEYWORDS: Keyword[] = [{
+  id: 'kw-1',
+  keyword: 'best running shoes',
+  created_at: '2026-01-01T00:00:00Z',
+}];
+
+/** The keyword group the reports offer in their scope selector. */
+export const HOTEL_SOL_GROUP = buildKeywordGroup({
+  id: 'hotel-sol',
+  name: 'Hotel Sol',
+});
+
+/** Renders report sections inside a router, for the sections that link elsewhere. */
+export function renderSections(sections: ReactElement) {
+  return render(<MemoryRouter>{sections}</MemoryRouter>);
+}
+
+type ReportElement = (keywords: Keyword[]) => ReactElement;
+
+/** A scope report: its title, its route, the element and its section titles in order. */
+export type ScopeReportCase = readonly [string, string, ReportElement, readonly string[]];
+
+export const SCOPE_REPORTS: readonly ScopeReportCase[] = [
+  [
+    'Competitor Benchmark',
+    '/reports/benchmark',
+    (keywords) => <CompetitorBenchmarkReport keywords={keywords} />,
+    ['Headline', 'Share of voice', 'Brands over time', 'Leaderboard'],
+  ],
+  [
+    'AI Engines',
+    '/reports/engines',
+    (keywords) => <AiEnginesReport keywords={keywords} />,
+    ['Headline', 'KPIs per engine', 'Every KPI per engine', 'Sentiment per engine'],
+  ],
+  [
+    'Sources',
+    '/reports/sources',
+    (keywords) => <SourcesReport keywords={keywords} />,
+    ['Headline', 'Most cited domains', 'Cited domains'],
+  ],
+  [
+    'Sentiment',
+    '/reports/sentiment',
+    (keywords) => <SentimentReport keywords={keywords} />,
+    ['Headline', 'Net sentiment over time', 'Sentiment per engine', 'Net sentiment per brand'],
+  ],
+];
+
+/** Renders `report` routed at `path`, opened at `path` + `search`. */
+export function renderScopeReport(report: ReportElement, path: string, search = '') {
+  return render(
+    <MemoryRouter initialEntries={[`${path}${search}`]}>
+      <Routes>
+        <Route path={path} element={report(SCOPE_KEYWORDS)} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}

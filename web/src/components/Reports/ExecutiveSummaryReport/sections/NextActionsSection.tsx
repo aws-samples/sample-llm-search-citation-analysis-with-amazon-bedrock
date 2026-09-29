@@ -44,7 +44,6 @@ export function NextActionsSection({
     <ReportSection
       title="Next actions"
       subtitle="Top three recommendations from the analysis engine, ordered by priority."
-      startNewPage
     >
       <ol className="space-y-3 list-decimal list-inside">
         {data.top_recommendations.map((rec) => (

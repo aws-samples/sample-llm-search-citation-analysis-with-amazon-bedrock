@@ -10,10 +10,10 @@ interface ReportEntry {
 }
 
 /**
- * The five reports we're building, ordered to match the marketing decision
- * each one supports (top-down strategic to bottom-up operational). Reports
- * we haven't shipped yet are listed but link nowhere; the placeholder makes
- * the planned scope visible to users without surprising them on a 404.
+ * The reports, ordered to match the marketing decision each one supports
+ * (top-down strategic to bottom-up operational). A report marked
+ * `coming-soon` is listed but links nowhere; the placeholder makes the
+ * planned scope visible to users without surprising them on a 404.
  */
 const REPORT_CATALOG: readonly ReportEntry[] = [
   {
@@ -32,6 +32,42 @@ const REPORT_CATALOG: readonly ReportEntry[] = [
       'Mention rate, share of voice, visibility score, citation rate and every other KPI with its change and trend, the brand leaderboard and the KPIs per day, scoped to a keyword, a keyword group or the full keyword set. Highlights regressions in red.',
     audience: 'Marketing lead',
     path: '/reports/visibility',
+    status: 'available',
+  },
+  {
+    id: 'competitor-benchmark',
+    title: 'Competitor Benchmark',
+    description:
+      'Your share of voice and rank against every brand the AI answers name: the share-of-voice donut, the leading brands over time by share of voice, mention rate or visibility score, and the full leaderboard with every KPI per brand.',
+    audience: 'Brand manager, competitive intelligence',
+    path: '/reports/benchmark',
+    status: 'available',
+  },
+  {
+    id: 'ai-engines',
+    title: 'AI Engines',
+    description:
+      'How each AI engine treats your brand: which engines name you, mention rate, visibility score and citation rate per engine side by side, every KPI per engine, and how each engine words its mentions.',
+    audience: 'AI search specialist',
+    path: '/reports/engines',
+    status: 'available',
+  },
+  {
+    id: 'sources',
+    title: 'Sources',
+    description:
+      'Which websites the AI answers cite: your citations, citation rate and citation share, the most cited domains with your own highlighted, and every cited domain with its engines and keywords.',
+    audience: 'SEO and digital PR',
+    path: '/reports/sources',
+    status: 'available',
+  },
+  {
+    id: 'sentiment',
+    title: 'Sentiment',
+    description:
+      'How the AI answers word your brand: net sentiment with its change and split, the net sentiment over time, the split per AI engine, and the net sentiment of every brand named.',
+    audience: 'Brand / communications lead',
+    path: '/reports/sentiment',
     status: 'available',
   },
   {

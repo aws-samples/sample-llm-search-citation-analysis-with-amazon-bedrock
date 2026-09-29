@@ -12,6 +12,8 @@ interface OverviewSheets {
   readonly definitions: ExcelSheet;
   readonly keywords: ExcelSheet;
   readonly brands: ExcelSheet;
+  readonly engines: ExcelSheet;
+  readonly sources: ExcelSheet;
   readonly history: ExcelSheet;
 }
 
@@ -24,12 +26,14 @@ export function buildOverviewSheets(
   visibility: VisibilityResponse = buildVisibility(),
   trends: HistoricalTrendsResponse | null = buildTrendsResponse(),
 ): OverviewSheets {
-  const [summary, definitions, keywords, brands, history] = visibilityOverviewSheets(visibility, trends, 'Hotel Sol');
+  const [summary, definitions, keywords, brands, engines, sources, history] = visibilityOverviewSheets(visibility, trends, 'Hotel Sol');
   return {
     summary,
     definitions,
     keywords,
     brands,
+    engines,
+    sources,
     history,
   };
 }

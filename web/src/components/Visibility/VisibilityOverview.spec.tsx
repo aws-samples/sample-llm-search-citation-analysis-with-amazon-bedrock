@@ -7,9 +7,14 @@ import {
 import userEvent from '@testing-library/user-event';
 import { renderOverview } from './overviewRender-fixtures';
 import {
-  buildKeywordRow, buildTrendsResponse, buildVisibility
+  GROUP_ENGINES_CAPTION, GROUP_SHARE_OF_VOICE_CAPTION, GROUP_SOURCES_CAPTION, GROUP_TREND_CAPTION, buildKeywordRow, buildTrendsResponse,
+  buildVisibility
 } from './visibilityOverview-fixtures';
 import { panelTitled } from './visibilityTables-fixtures';
+import { HISTORY_TITLE } from './VisibilityHistory';
+import {
+  ENGINES_TITLE, SOURCES_TITLE
+} from './VisibilityChartPanels';
 import {
   definitionTerms, headlineCardLabels, statFigure, statFootnote
 } from '../Reports/layout/reportQueries-fixtures';
@@ -20,6 +25,7 @@ import { VISIBILITY_DEFINITIONS } from '../../constants/kpiDefinitions';
 import { formatDate } from '../../formatting/dateFormatter';
 
 vi.mock('./visibilityOverviewExport', () => ({ exportVisibilityOverview: vi.fn() }));
+vi.mock('chart.js', () => import('../Dashboard/chartJs-fixtures'));
 
 import { exportVisibilityOverview } from './visibilityOverviewExport';
 
@@ -105,16 +111,41 @@ describe('VisibilityOverview', () => {
   });
 
   describe('panels', () => {
-    it('shows the headline, history, keywords, leaderboard and definitions in that order', () => {
+    it('shows the headline, history, keywords, share of voice, leaderboard, engines, domains and definitions in that order', () => {
       renderOverview();
 
       expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toStrictEqual([
         'Headline',
-        'Visibility score history',
+        HISTORY_TITLE,
         'Keywords in this scope',
+        'Share of voice',
         'Brand leaderboard',
+        ENGINES_TITLE,
+        SOURCES_TITLE,
         'How these KPIs are measured',
       ]);
+    });
+
+    it.each([
+      ['Share of voice', GROUP_SHARE_OF_VOICE_CAPTION],
+      [ENGINES_TITLE, GROUP_ENGINES_CAPTION],
+      [SOURCES_TITLE, GROUP_SOURCES_CAPTION],
+    ])('charts the %s of the visibility answer', (panel, caption) => {
+      renderOverview();
+
+      expect(within(panelTitled(panel)).getByRole('figure')).toHaveTextContent(caption);
+    });
+
+    it('charts the KPI history of the trends', () => {
+      renderOverview();
+
+      expect(within(panelTitled(HISTORY_TITLE)).getByRole('figure')).toHaveTextContent(GROUP_TREND_CAPTION);
+    });
+
+    it('counts every domain the answers cite under the domains table', () => {
+      renderOverview({ visibility: buildVisibility({ sources_total: 40 }) });
+
+      expect(within(panelTitled(SOURCES_TITLE)).getByText('3 of 40 cited domains, most cited first.')).toBeInTheDocument();
     });
 
     it('lists one keyword row for a single-keyword scope', () => {
@@ -129,7 +160,7 @@ describe('VisibilityOverview', () => {
         trendsError: 'Failed to fetch historical trends',
       });
 
-      expect(within(panelTitled('Visibility score history')).getByText('History unavailable: Failed to fetch historical trends')).toBeInTheDocument();
+      expect(within(panelTitled(HISTORY_TITLE)).getByText('History unavailable: Failed to fetch historical trends')).toBeInTheDocument();
     });
 
     it('shows scope-specific panels before the definitions', () => {

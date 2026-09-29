@@ -16,12 +16,14 @@ from shared.kpi_engine import (
     answers_from_rows,
     brand_kpis,
     brand_table,
+    engine_breakdown,
     is_owned_domain,
     kpi_changes,
     kpi_trends,
     normalize_domain,
     owned_domains_from,
     position_weight,
+    source_table,
     trend_direction,
 )
 
@@ -389,6 +391,54 @@ class TestBrandTable:
 
     def test_is_empty_for_an_empty_pool(self):
         assert brand_table([]) == []
+
+
+class TestEngineBreakdown:
+    def test_lists_every_engine_in_name_order(self):
+        assert [row['engine'] for row in engine_breakdown(POOL, OWNED)] == ['claude', 'gemini', 'openai', 'perplexity']
+
+    @pytest.mark.parametrize(('engine', 'kpi', 'expected'), [
+        ('openai', 'mention_rate', 100.0),
+        ('openai', 'citation_rate', 100.0),
+        ('gemini', 'average_position', 3.0),
+        ('claude', 'mention_rate', 0.0),
+        ('perplexity', 'visibility_score', 38.7),
+    ])
+    def test_computes_every_kpi_over_one_engines_answers(self, engine, kpi, expected):
+        rows = {row['engine']: row['kpis'] for row in engine_breakdown(POOL, OWNED)}
+
+        assert rows[engine][kpi] == expected
+
+    def test_leaves_the_citation_kpis_empty_without_owned_domains(self):
+        assert {row['kpis']['citation_rate'] for row in engine_breakdown(POOL)} == {None}
+
+    def test_is_empty_for_an_empty_pool(self):
+        assert engine_breakdown([], OWNED) == []
+
+
+class TestSourceTable:
+    def test_lists_every_cited_domain_most_cited_first(self):
+        assert [(row['domain'], row['citations']) for row in source_table(POOL, OWNED)] == [
+            ('booking.com', 2), ('blog.hotel-sol.com', 1), ('hotel-sol.com', 1), ('tripadvisor.com', 1),
+        ]
+
+    def test_measures_each_domains_rate_and_share(self):
+        booking = source_table(POOL, OWNED)[0]
+
+        assert (booking['citation_rate'], booking['citation_share'], booking['engines'], booking['keywords']) == (
+            50.0, 40.0, ['gemini', 'openai'], 1,
+        )
+
+    def test_marks_the_owned_domains_and_their_subdomains(self):
+        assert {row['domain']: row['owned'] for row in source_table(POOL, OWNED)} == {
+            'booking.com': False, 'blog.hotel-sol.com': True, 'hotel-sol.com': True, 'tripadvisor.com': False,
+        }
+
+    def test_owns_nothing_without_owned_domains(self):
+        assert {row['owned'] for row in source_table(POOL, ['', ' '])} == {False}
+
+    def test_is_empty_when_nothing_is_cited(self):
+        assert source_table(answers_from_rows([_row('k', 'openai')]), OWNED) == []
 
 
 class TestChanges:

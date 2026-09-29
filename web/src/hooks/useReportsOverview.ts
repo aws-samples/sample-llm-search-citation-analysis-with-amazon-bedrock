@@ -9,6 +9,8 @@ function isReportsOverviewResponse(data: unknown): data is ReportsOverviewRespon
   if ('error' in data) return false;
   return 'kpis' in data
     && 'summary' in data
+    && 'trend_data' in data
+    && 'latest_brands' in data
     && 'top_improving' in data
     && 'top_declining' in data
     && 'top_recommendations' in data;
@@ -41,8 +43,10 @@ const reportsOverviewEndpoint = {
 
 /**
  * Imperative hook for the `/reports/overview` aggregator endpoint: the
- * trend view's latest KPIs and change, keywords by trend, the top movers
- * and the top recommendations. Consumed by the Executive Summary report.
+ * trend view's latest KPIs and change, the KPIs per period and the latest
+ * brand leaderboard (charted by the report), keywords by trend, the top
+ * movers and the top recommendations. Consumed by the Executive Summary
+ * report.
  *
  * Imperative (rather than auto-fetching) so the report component can
  * compose this slice with `useReportReady` exactly the same way as

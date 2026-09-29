@@ -8,9 +8,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { ReportsLandingView } from './ReportsLandingView';
 
 /**
- * The landing view doubles as a roadmap: all five planned reports are listed
- * even before they exist. Tests pin:
- *   - all five titles render so an exec scanning the page sees the full plan
+ * The landing view doubles as a roadmap: every report is listed, including
+ * any not built yet. Tests pin:
+ *   - every title renders so an exec scanning the page sees the full plan
  *   - the available reports link to a real path (regression catch if the
  *     `path` field gets set wrongly during sequencing)
  *   - the not-yet-built reports show "Coming soon" instead of an active link
@@ -71,6 +71,26 @@ describe('ReportsLandingView', () => {
     renderLanding();
     const comingSoonBadges = screen.queryAllByText(/coming soon/i);
     expect(comingSoonBadges).toHaveLength(0);
+  });
+
+  it.each([
+    ['Competitor Benchmark', '/reports/benchmark'],
+    ['AI Engines', '/reports/engines'],
+    ['Sources', '/reports/sources'],
+    ['Sentiment', '/reports/sentiment'],
+  ])('links the %s card to %s', (title, path) => {
+    renderLanding();
+    expect(screen.getByRole('heading', { name: title }).closest('a')).toHaveAttribute('href', path);
+  });
+
+  it.each([
+    ['Competitor Benchmark', 'For: Brand manager, competitive intelligence'],
+    ['AI Engines', 'For: AI search specialist'],
+    ['Sources', 'For: SEO and digital PR'],
+    ['Sentiment', 'For: Brand / communications lead'],
+  ])('names the audience of the %s card', (title, audience) => {
+    renderLanding();
+    expect(screen.getByRole('heading', { name: title }).closest('a')?.lastElementChild?.textContent).toBe(audience);
   });
 
   it('shows the executive and marketing-lead audiences', () => {

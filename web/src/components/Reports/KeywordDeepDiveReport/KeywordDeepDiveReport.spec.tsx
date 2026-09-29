@@ -11,13 +11,18 @@ import {
 import { KeywordDeepDiveReport } from './KeywordDeepDiveReport';
 import { settledData } from './KeywordDeepDiveReport-fixtures';
 import {
-  definitionTerms, sectionTitles, statFigure, statFootnote
+  definitionTerms, sectionTable, sectionTitles, statFigure, statFootnote
 } from '../layout/reportQueries-fixtures';
 import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
+import { VISIBILITY_BRANDS_SOV_CAPTION } from '../BrandVisibilityReport/sections/reportChartPanels-fixtures';
+import {
+  rankedBrandNames, rankingsShareOfVoiceCaption
+} from '../BrandVisibilityReport/sections/brandRankings-fixtures';
 
 
 vi.mock('./useKeywordDeepDive', () => ({useKeywordDeepDive: vi.fn(),}));
 vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPrintMode: false })),}));
+vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
 import { useKeywordDeepDive } from './useKeywordDeepDive';
 
@@ -81,6 +86,30 @@ describe('KeywordDeepDiveReport', () => {
 
     const titles = sectionTitles();
     expect([...titles.slice(0, 2), ...titles.slice(-1)]).toStrictEqual(['Headline', 'KPI history', 'How these KPIs are measured']);
+  });
+
+  it('ranks the brands of the keyword after its KPI history, then compares the AI engines', () => {
+    renderAt('/reports/keyword/best%20running%20shoes');
+
+    expect(sectionTitles().slice(1, 4)).toStrictEqual(['KPI history', 'Brand rankings', 'KPIs per AI engine']);
+  });
+
+  it('lists the brands of the visibility answer in the brand rankings', () => {
+    renderAt('/reports/keyword/best%20running%20shoes');
+
+    expect(rankedBrandNames()).toStrictEqual(['Nike', 'Adidas']);
+  });
+
+  it('charts the share of voice of the visibility answer in the brand rankings', () => {
+    renderAt('/reports/keyword/best%20running%20shoes');
+
+    expect(rankingsShareOfVoiceCaption()).toBe(VISIBILITY_BRANDS_SOV_CAPTION);
+  });
+
+  it('lists every AI engine of the visibility answer in the engine table', () => {
+    renderAt('/reports/keyword/best%20running%20shoes');
+
+    expect(sectionTable('KPIs per AI engine').slice(1).map(([engine]) => engine)).toStrictEqual(['Google Gemini', 'OpenAI']);
   });
 
   it('defines every KPI and the trend rule in the definitions block', () => {

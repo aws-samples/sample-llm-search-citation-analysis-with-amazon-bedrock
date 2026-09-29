@@ -31,6 +31,7 @@ export function WinsAndGapsSection({
     <ReportSection
       title="Top wins and gaps"
       subtitle={`The keywords whose visibility score rose or fell the most since their previous ${gate.value.period_type}. Wins are where investment paid off; gaps are where to focus the next sprint.`}
+      startNewPage
     >
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <MoverColumn

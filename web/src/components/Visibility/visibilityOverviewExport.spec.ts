@@ -14,6 +14,9 @@ import {
   RUN_2, buildKpis
 } from '../Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
 import {
+  buildEngineKpis, buildSourceRow
+} from '../Reports/layout/reportPayload-fixtures';
+import {
   KPI_SPECS, TREND_DEFINITION, VISIBILITY_DEFINITIONS
 } from '../../constants/kpiDefinitions';
 import { exportWorkbook } from '../../exporters/excelGenerator';
@@ -24,13 +27,13 @@ vi.mock('../../exporters/excelGenerator', async (importOriginal) => ({
   exportWorkbook: vi.fn(),
 }));
 
-const CONTEXT_ROW_COUNT = 17;
+const CONTEXT_ROW_COUNT = 18;
 
 describe('visibilityOverviewSheets', () => {
-  it('builds the summary, definitions, keywords, brands and history sheets in that order', () => {
+  it('builds the summary, definitions, keywords, brands, engines, sources and history sheets in that order', () => {
     const sheets = visibilityOverviewSheets(buildVisibility(), buildTrendsResponse(), 'Hotel Sol');
 
-    expect(sheets.map((sheet) => sheet.name)).toStrictEqual(['Summary', 'Definitions', 'Keywords', 'Brands', 'History']);
+    expect(sheets.map((sheet) => sheet.name)).toStrictEqual(['Summary', 'Definitions', 'Keywords', 'Brands', 'Engines', 'Sources', 'History']);
   });
 
   it('opens the summary with the scope, its coverage, sample and history context', () => {
@@ -54,6 +57,7 @@ describe('visibilityOverviewSheets', () => {
       ['History grouped per', 'day'],
       ['Change compared with', 'Each keyword\'s previous run'],
       ['Keywords compared', 1],
+      ['Cited domains', 3],
     ]);
   });
 
@@ -187,6 +191,66 @@ describe('visibilityOverviewSheets', () => {
     ]).toStrictEqual(['', '', '', '']);
   });
 
+  it('exports every KPI of each AI engine, one row per engine in the API order', () => {
+    expect(buildOverviewSheets().engines.data).toStrictEqual([
+      {
+        'AI engine': 'openai',
+        ...BUILT_KPI_CELLS,
+        Mentions: 7,
+        Answers: 10,
+        'Mention rate (%)': 70,
+        'Visibility score (0-100)': 58,
+        'Citation rate (%)': 40,
+      },
+      {
+        'AI engine': 'perplexity',
+        ...BUILT_KPI_CELLS,
+        Mentions: 5,
+        Answers: 10,
+        'Mention rate (%)': 50,
+        'Visibility score (0-100)': 46.8,
+        'Citation rate (%)': 20,
+      },
+    ]);
+  });
+
+  it('exports an unknown engine KPI as an empty cell', () => {
+    const { engines } = buildOverviewSheets(buildVisibility({ engines: [buildEngineKpis('openai', { average_position: null })] }), null);
+
+    expect(engines.data[0]['Average position']).toBe('');
+  });
+
+  it('exports an owned cited domain with every column of the domains table', () => {
+    expect(buildOverviewSheets().sources.data[1]).toStrictEqual({
+      Domain: 'hotelsol.com',
+      Owned: 'Yes',
+      Citations: 6,
+      'Citation rate (%)': 30,
+      'Citation share (%)': 35.3,
+      'AI engines': 'openai, perplexity',
+      Keywords: 2,
+    });
+  });
+
+  it('exports the cited domains most cited first, marking the ones not owned', () => {
+    expect(buildOverviewSheets().sources.data.map((row) => [row.Domain, row.Owned])).toStrictEqual([
+      ['booking.com', 'No'],
+      ['hotelsol.com', 'Yes'],
+      ['tripadvisor.com', 'No'],
+    ]);
+  });
+
+  it('exports unknown domain citation rates and shares as empty cells', () => {
+    const { sources } = buildOverviewSheets(buildVisibility({
+      sources: [buildSourceRow('blog.example', {
+        citation_rate: null,
+        citation_share: null,
+      })],
+    }), null);
+
+    expect([sources.data[0]['Citation rate (%)'], sources.data[0]['Citation share (%)']]).toStrictEqual(['', '']);
+  });
+
   it('exports one history row per period with its runs, keywords and every KPI', () => {
     expect(buildOverviewSheets().history.data[0]).toStrictEqual({
       Period: FIRST_TREND_POINT.period,
@@ -206,7 +270,9 @@ describe('visibilityOverviewSheets', () => {
     ['Definitions', 1, 2],
     ['Keywords', 2, 3 + KPI_SPECS.length],
     ['Brands', 3, 11],
-    ['History', 4, 3 + KPI_SPECS.length],
+    ['Engines', 4, 1 + KPI_SPECS.length],
+    ['Sources', 5, 7],
+    ['History', 6, 3 + KPI_SPECS.length],
   ])('defines one column width per exported field in the %s sheet', (_sheetName, sheetIndex, fieldCount) => {
     const sheet = visibilityOverviewSheets(buildVisibility(), buildTrendsResponse(), 'Hotel Sol')[sheetIndex];
 

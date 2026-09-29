@@ -1,55 +1,20 @@
-import type {
-  HistoricalTrendsResponse, TrendDataPoint
-} from '../../types';
-import { KPI_DEFINITIONS } from '../../constants/kpiDefinitions';
-import { formatKpi } from '../../formatting/kpiFormatter';
+import type { HistoricalTrendsResponse } from '../../types';
 import { formatDateOnly } from '../../formatting/dateFormatter';
+import {
+  KPI_TREND_INFO, TrendPeriodChart
+} from '../Reports/BrandVisibilityReport/sections/ReportChartPanels';
 import { OverviewPanel } from './OverviewPanel';
 
 export type HistoryRangeDays = 7 | 30 | 90;
 export const HISTORY_RANGES: readonly HistoryRangeDays[] = [7, 30, 90];
 
-/** The KPI the history chart plots. */
-const CHARTED = KPI_DEFINITIONS.visibility_score;
-const CHART_HEIGHT_PX = 180;
-/** Every n-th bar carries its period under it. */
-const PERIOD_LABEL_EVERY = 5;
+export const HISTORY_TITLE = 'KPI history';
 
 interface Props {
   readonly trends: HistoricalTrendsResponse | null;
   readonly error: string | null;
   readonly rangeDays: HistoryRangeDays;
   readonly onRangeChange: (days: HistoryRangeDays) => void;
-}
-
-function counted(count: number, noun: string): string {
-  return `${count} ${noun}${count === 1 ? '' : 's'}`;
-}
-
-/** What one bar says: its period, score, and how many runs and keywords it pools. */
-function trendPointDescription(point: TrendDataPoint): string {
-  const score = formatKpi('visibility_score', point.kpis.visibility_score);
-  return `${point.period}: ${score} (${counted(point.runs, 'run')}, ${counted(point.keywords_with_data, 'keyword')})`;
-}
-
-/** One period's bar; a period without a score is a gap, not a zero. */
-function TrendBar({
-  point, showPeriod
-}: {
-  readonly point: TrendDataPoint;
-  readonly showPeriod: boolean
-}) {
-  const score = point.kpis.visibility_score;
-  const description = trendPointDescription(point);
-  return (
-    <li className="flex-1 flex flex-col items-center justify-end h-full">
-      <span className="sr-only">{description}</span>
-      {score === null
-        ? <div aria-hidden="true" title={description} className="w-full border-b border-dashed border-gray-300" />
-        : <div aria-hidden="true" title={description} className="w-full bg-blue-500 rounded-t" style={{ height: `${(score / 100) * CHART_HEIGHT_PX}px` }} />}
-      {showPeriod && <div aria-hidden="true" className="text-xs text-gray-400 mt-1 transform -rotate-45">{point.period.slice(5)}</div>}
-    </li>
-  );
 }
 
 function RangeButton({
@@ -89,14 +54,10 @@ function TrendChart({ trends }: { readonly trends: HistoricalTrendsResponse }) {
   const period = trends.period_type;
   return (
     <>
-      <ol aria-label={`${CHARTED.label} per ${period}`} className="h-48 flex items-end gap-1 list-none p-0 m-0">
-        {trends.trend_data.map((point, index) => (
-          <TrendBar key={point.period} point={point} showPeriod={index % PERIOD_LABEL_EVERY === 0} />
-        ))}
-      </ol>
+      <TrendPeriodChart points={trends.trend_data} />
       <p className="text-xs text-gray-500">
-        {`${CHARTED.label} per ${period} over the last ${trends.days_analyzed} days (since ${formatDateOnly(trends.since)}). `
-          + `A ${period} without answers is a gap.`}
+        {`Mention rate, share of voice, visibility score and citation rate per ${period} over the last ${trends.days_analyzed} days `
+          + `(since ${formatDateOnly(trends.since)}). A ${period} without answers is a gap.`}
       </p>
     </>
   );
@@ -112,14 +73,14 @@ function HistoryBody({
   return <TrendChart trends={trends} />;
 }
 
-/** The visibility score per period over the chosen range, with its definition in a tooltip. */
+/** The headline KPIs per period over the chosen range as lines, with how they are drawn in a tooltip. */
 export function VisibilityHistory({
   trends, error, rangeDays, onRangeChange
 }: Props) {
   return (
     <OverviewPanel
-      title={`${CHARTED.label} history`}
-      info={CHARTED.definition}
+      title={HISTORY_TITLE}
+      info={KPI_TREND_INFO}
       actions={<RangeButtons rangeDays={rangeDays} onRangeChange={onRangeChange} />}
     >
       <HistoryBody trends={trends} error={error} />

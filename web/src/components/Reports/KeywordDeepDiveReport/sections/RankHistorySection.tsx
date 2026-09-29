@@ -5,6 +5,7 @@ import {
   TrendPeriodTable,
   pendingSectionPlaceholder,
 } from '../../layout';
+import { KpiTrendPanel } from '../../BrandVisibilityReport/sections/ReportChartPanels';
 
 interface Props {
   readonly trends: HistoricalTrendsResponse | null;
@@ -21,10 +22,10 @@ function subtitleFor(trends: HistoricalTrendsResponse | null): string {
 }
 
 /**
- * This keyword's KPIs per period of the trend window, as a table rather
- * than a chart: tables print reliably to PDF and are easier to scan on
- * paper. Long windows are sampled to at most 14 rows, keeping the first and
- * last period.
+ * This keyword's KPIs per period of the trend window: a line chart of every
+ * period over a table, since tables print reliably to PDF and are easier to
+ * scan on paper. Long windows are sampled to at most 14 table rows, keeping
+ * the first and last period.
  */
 export function RankHistorySection({
   trends, loading, error 
@@ -51,6 +52,7 @@ export function RankHistorySection({
 
   return (
     <ReportSection title={TITLE} subtitle={subtitleFor(trends)}>
+      <KpiTrendPanel points={points} className="mb-4" />
       <TrendPeriodTable points={points} />
     </ReportSection>
   );

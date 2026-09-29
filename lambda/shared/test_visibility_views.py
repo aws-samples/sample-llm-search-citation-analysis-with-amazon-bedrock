@@ -7,7 +7,15 @@ from typing import Any
 import pytest
 
 from shared.kpi_engine import TRENDED_KPIS, Answer, answers_from_rows
-from shared.visibility_views import PERIODS, period_key, trend_view, visibility_view
+from shared.visibility_views import (
+    BRAND_TREND_COMPETITORS,
+    LATEST_BRANDS_LIMIT,
+    PERIODS,
+    SOURCES_LIMIT,
+    period_key,
+    trend_view,
+    visibility_view,
+)
 
 HOTEL = 'Hotel Sol'
 RIVAL = 'Hotel Mar'
@@ -89,6 +97,30 @@ class TestVisibilityView:
         view = visibility_view([], {})
 
         assert (view['keywords'], view['brands'], view['kpis']['answers'], view['keywords_analyzed']) == ([], [], 0, 0)
+
+    def test_breaks_every_kpi_down_by_engine(self):
+        engines = visibility_view(['spa', 'beach'], self.ANSWERS)['engines']
+
+        assert [(row['engine'], row['kpis']['answers'], row['kpis']['mention_rate']) for row in engines] == [
+            ('gemini', 1, 0.0), ('openai', 2, 50.0),
+        ]
+
+    def test_lists_the_cited_domains_of_the_latest_runs(self):
+        view = visibility_view(['spa', 'beach'], self.ANSWERS, ['hotel-sol.com'])
+
+        assert ([(row['domain'], row['owned'], row['citations']) for row in view['sources']], view['sources_total']) == (
+            [('hotel-sol.com', True, 1)], 1,
+        )
+
+    def test_caps_the_sources_at_the_most_cited(self):
+        answers = {'spa': answers_from_rows([
+            {'keyword': 'spa', 'timestamp': DAY_2, 'provider': 'openai', 'citations': [f'https://site{index:02}.com'], 'brands': []}
+            for index in range(SOURCES_LIMIT + 3)
+        ])}
+
+        view = visibility_view(['spa'], answers)
+
+        assert (len(view['sources']), view['sources_total'], SOURCES_LIMIT) == (25, 28, 25)
 
     def test_compares_like_for_like_the_keywords_answered_in_both_runs(self):
         previous = {'spa': [_rival_only('spa', DAY_1)], 'golf': [_hotel_first('golf', DAY_1)]}
@@ -224,3 +256,53 @@ class TestTrendView:
         view = trend_view(['golf'], {'golf': []}, 'month')
 
         assert (view['trend_data'], view['keyword_trends'], view['change'], view['latest']['answers']) == ([], [], None, 0)
+
+    def test_ranks_the_brands_of_the_latest_periods(self):
+        brands = trend_view(['spa', 'beach'], _two_days(), 'day')['latest_brands']
+
+        assert [(brand['name'], brand['mentions']) for brand in brands] == [(RIVAL, 3), (HOTEL, 2)]
+
+    def test_caps_the_latest_leaderboard(self):
+        answers = {'spa': [_answer('spa', DAY_1, *((f'Brand {index:02}', 'competitor', index + 1) for index in range(12)))]}
+
+        assert (len(trend_view(['spa'], answers, 'day')['latest_brands']), LATEST_BRANDS_LIMIT) == (10, 10)
+
+    def test_follows_the_tracked_brand_per_period(self):
+        tracked = trend_view(['spa', 'beach'], _two_days(), 'day')['brand_trends']['tracked']
+
+        assert tracked == [
+            {'period': '2026-09-01', 'share_of_voice': 0.0, 'mention_rate': 0.0, 'visibility_score': 0.0, 'average_position': None},
+            {'period': '2026-09-08', 'share_of_voice': 40.0, 'mention_rate': 66.7, 'visibility_score': 66.7, 'average_position': 1.0},
+        ]
+
+    def test_follows_the_leading_competitors_per_period(self):
+        competitors = trend_view(['spa', 'beach'], _two_days(), 'day')['brand_trends']['competitors']
+
+        assert competitors == [{
+            'name': RIVAL,
+            'points': [
+                {'period': '2026-09-01', 'share_of_voice': 100.0, 'mention_rate': 100.0, 'visibility_score': 100.0, 'average_position': 1.0},
+                {'period': '2026-09-08', 'share_of_voice': 60.0, 'mention_rate': 100.0, 'visibility_score': 93.3, 'average_position': 1.67},
+            ],
+        }]
+
+    def test_follows_only_the_competitors_with_the_best_visibility(self):
+        brands = [(f'Rival {index}', 'competitor', index + 1) for index in range(7)]
+        answers = {'spa': [_answer('spa', DAY_1, (HOTEL, 'first_party', 8), *brands)]}
+
+        names = [row['name'] for row in trend_view(['spa'], answers, 'day')['brand_trends']['competitors']]
+
+        assert (names, BRAND_TREND_COMPETITORS) == ([f'Rival {index}' for index in range(5)], 5)
+
+    @pytest.mark.parametrize(('day_1', 'share_of_voice'), [
+        ([(HOTEL, 'first_party', 1)], 0.0),
+        ([], None),
+    ])
+    def test_scores_a_competitor_absent_from_a_period_zero(self, day_1, share_of_voice):
+        answers = {'spa': [_answer('spa', DAY_1, *day_1), _rival_only('spa', DAY_2)]}
+
+        rival = trend_view(['spa'], answers, 'day')['brand_trends']['competitors'][0]
+
+        assert rival['points'][0] == {
+            'period': '2026-09-01', 'share_of_voice': share_of_voice, 'mention_rate': 0.0, 'visibility_score': 0.0, 'average_position': None,
+        }

@@ -1,7 +1,8 @@
 /**
  * Excel export of the Visibility tab for any scope: every KPI with its change
- * and trend, how each is measured, every keyword, the brand leaderboard and
- * the KPI history per period.
+ * and trend, how each is measured, every keyword, the brand leaderboard,
+ * every KPI per AI engine, the most cited domains and the KPI history per
+ * period.
  *
  * An unknown value is an empty cell, never `null` or a dash, so a spreadsheet
  * can still compute with the column. KPI headings follow the per-group
@@ -12,7 +13,7 @@ import {
   exportWorkbook, scopedExcelFileName, type ExcelSheet
 } from '../../exporters/excelGenerator';
 import type {
-  BrandLeaderboardRow, HistoricalTrendsResponse, KeywordVisibilityRow, TrendDataPoint, VisibilityResponse
+  BrandLeaderboardRow, EngineKpis, HistoricalTrendsResponse, KeywordVisibilityRow, SourceRow, TrendDataPoint, VisibilityResponse
 } from '../../types';
 import type {
   BrandKpis, KpiTrend
@@ -87,6 +88,7 @@ function scopeContextRows(visibility: VisibilityResponse, trends: HistoricalTren
     contextRow('History grouped per', trends?.period_type ?? ''),
     contextRow('Change compared with', 'Each keyword\'s previous run'),
     contextRow('Keywords compared', visibility.change?.keywords_compared ?? ''),
+    contextRow('Cited domains', visibility.sources_total),
   ];
 }
 
@@ -155,6 +157,25 @@ function historyRow(point: TrendDataPoint): Row {
   };
 }
 
+function engineRow(engine: EngineKpis): Row {
+  return {
+    'AI engine': engine.engine,
+    ...kpiCells(engine.kpis),
+  };
+}
+
+function sourceRow(source: SourceRow): Row {
+  return {
+    Domain: source.domain,
+    Owned: yesNo(source.owned),
+    [kpiValueHeader('citations')]: source.citations,
+    [kpiValueHeader('citation_rate')]: source.citation_rate ?? '',
+    [kpiValueHeader('citation_share')]: source.citation_share ?? '',
+    'AI engines': source.engines.join(', '),
+    Keywords: source.keywords,
+  };
+}
+
 /** Every sheet of the Visibility workbook; History is empty until trends are loaded. */
 export function visibilityOverviewSheets(
   visibility: VisibilityResponse,
@@ -173,6 +194,16 @@ export function visibilityOverviewSheets(
       name: 'Brands',
       columns: columnWidths([30, 14, 18, 12, 18, 18, 18, 14, 22, 30, 10], null),
       data: visibility.brands.map(brandRow),
+    },
+    {
+      name: 'Engines',
+      columns: columnWidths([14], 16),
+      data: visibility.engines.map(engineRow),
+    },
+    {
+      name: 'Sources',
+      columns: columnWidths([36, 8, 12, 18, 18, 30, 10], null),
+      data: visibility.sources.map(sourceRow),
     },
     {
       name: 'History',

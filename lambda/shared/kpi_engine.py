@@ -328,6 +328,50 @@ def brand_table(answers: Iterable[Answer]) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Breakdowns: per AI engine, per cited domain
+# ---------------------------------------------------------------------------
+
+def engine_breakdown(answers: Iterable[Answer], owned_domains: Iterable[str] = ()) -> list[dict[str, Any]]:
+    """Every KPI of the tracked brand per AI engine, engines in name order."""
+    domains = list(owned_domains)
+    by_engine: dict[str, list[Answer]] = defaultdict(list)
+    for answer in answers:
+        by_engine[answer.provider].append(answer)
+    return [{'engine': engine, 'kpis': brand_kpis(by_engine[engine], domains)} for engine in sorted(by_engine)]
+
+
+def source_table(answers: Iterable[Answer], owned_domains: Iterable[str] = ()) -> list[dict[str, Any]]:
+    """One row per domain cited in ``answers``, most cited first.
+
+    ``citations`` counts the answers citing the domain; ``citation_rate`` is
+    their share of all answers and ``citation_share`` the domain's share of
+    every (answer, domain) citation — the tracked-brand citation formulas
+    applied to one domain. ``owned`` marks the brand's own domains.
+    """
+    pool = list(answers)
+    domains = [domain for domain in owned_domains if normalize_domain(domain)]
+    citing: dict[str, list[Answer]] = defaultdict(list)
+    for answer in pool:
+        for domain in answer.cited_domains:
+            citing[domain].append(answer)
+    all_pairs = sum(len(answers_citing) for answers_citing in citing.values())
+    rows = [
+        {
+            'domain': domain,
+            'owned': is_owned_domain(domain, domains),
+            'citations': len(answers_citing),
+            'citation_rate': _percent(len(answers_citing), len(pool)),
+            'citation_share': _percent(len(answers_citing), all_pairs),
+            'engines': sorted({answer.provider for answer in answers_citing}),
+            'keywords': len({answer.keyword for answer in answers_citing}),
+        }
+        for domain, answers_citing in citing.items()
+    ]
+    rows.sort(key=lambda row: (-row['citations'], row['domain']))
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Changes
 # ---------------------------------------------------------------------------
 
@@ -378,11 +422,13 @@ __all__ = [
     'answers_from_rows',
     'brand_kpis',
     'brand_table',
+    'engine_breakdown',
     'is_owned_domain',
     'kpi_changes',
     'kpi_trends',
     'normalize_domain',
     'owned_domains_from',
     'position_weight',
+    'source_table',
     'trend_direction',
 ]

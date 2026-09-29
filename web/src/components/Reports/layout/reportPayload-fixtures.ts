@@ -1,6 +1,8 @@
 import type {
-  BrandLeaderboardRow, HistoricalTrendsResponse, KeywordTrend, TrendDataPoint, TrendDirection, VisibilityResponse
+  BrandLeaderboardRow, BrandTrendPoint, BrandTrends, EngineKpis, HistoricalTrendsResponse, KeywordTrend, SourceRow, TrendDataPoint,
+  TrendDirection, VisibilityResponse
 } from '../../../types';
+import type { BrandKpis } from '../../../types/domain/groupKpiHistory';
 import type {
   ReportsOverviewMover, ReportsOverviewResponse
 } from '../../../api/reports';
@@ -72,6 +74,166 @@ export function movingKeyword(keyword: string, delta: number, trend: TrendDirect
   });
 }
 
+/** One AI engine's answers: every KPI of `buildKpis()` unless `overrides` change some. */
+export function buildEngineKpis(engine: string, overrides: Partial<BrandKpis> = {}): EngineKpis {
+  return {
+    engine,
+    kpis: buildKpis(overrides),
+  };
+}
+
+/**
+ * Gemini and OpenAI, ten answers each, in name order: together they make
+ * the 20 answers, 12 mentions, 6 citations and the rates of `buildKpis()`.
+ */
+export function buildEngines(): EngineKpis[] {
+  return [
+    buildEngineKpis('gemini', {
+      answers: 10,
+      mentions: 7,
+      mention_rate: 70,
+      share_of_voice: 28,
+      visibility_score: 61.5,
+      citations: 4,
+      citation_rate: 40,
+      engines: 1,
+    }),
+    buildEngineKpis('openai', {
+      answers: 10,
+      mentions: 5,
+      mention_rate: 50,
+      share_of_voice: 21.7,
+      visibility_score: 43.3,
+      citations: 2,
+      citation_rate: 20,
+      engines: 1,
+    }),
+  ];
+}
+
+/** A domain the answers cite: not owned, cited by 4 answers of 2 keywords on both engines, unless overridden. */
+export function buildSourceRow(domain: string, overrides: Partial<SourceRow> = {}): SourceRow {
+  return {
+    domain,
+    owned: false,
+    citations: 4,
+    citation_rate: 20,
+    citation_share: 20,
+    engines: ['gemini', 'openai'],
+    keywords: 2,
+    ...overrides,
+  };
+}
+
+/** Every domain the answers cite, most cited first: a review site, the owned nike.com (the 30% citation rate of `buildKpis()`) and a forum. */
+export function buildSources(): SourceRow[] {
+  return [
+    buildSourceRow('runnersworld.com', {
+      citations: 9,
+      citation_rate: 45,
+      citation_share: 45,
+    }),
+    buildSourceRow('nike.com', {
+      owned: true,
+      citations: 6,
+      citation_rate: 30,
+      citation_share: 30,
+    }),
+    buildSourceRow('reddit.com', {
+      citations: 5,
+      citation_rate: 25,
+      citation_share: 25,
+      engines: ['openai'],
+      keywords: 1,
+    }),
+  ];
+}
+
+/** One period of a brand's trend: the share of voice, mention rate, visibility score and position of `buildKpis()` unless overridden. */
+export function buildBrandTrendPoint(period: string, overrides: Partial<BrandTrendPoint> = {}): BrandTrendPoint {
+  return {
+    period,
+    share_of_voice: 25,
+    mention_rate: 60,
+    visibility_score: 52.4,
+    average_position: 1.8,
+    ...overrides,
+  };
+}
+
+/**
+ * The tracked brand (`buildKpis()` in both periods) and the competitors
+ * Adidas and Puma over PREVIOUS_PERIOD and LATEST_PERIOD, their latest
+ * points matching `buildLatestBrands()`, unless overridden.
+ */
+export function buildBrandTrends(overrides: Partial<BrandTrends> = {}): BrandTrends {
+  return {
+    tracked: [buildBrandTrendPoint(PREVIOUS_PERIOD), buildBrandTrendPoint(LATEST_PERIOD)],
+    competitors: [
+      {
+        name: 'Adidas',
+        points: [
+          buildBrandTrendPoint(PREVIOUS_PERIOD, {
+            share_of_voice: 22,
+            mention_rate: 55,
+            visibility_score: 45,
+            average_position: 2,
+          }),
+          buildBrandTrendPoint(LATEST_PERIOD, {
+            share_of_voice: 20.8,
+            mention_rate: 50,
+            visibility_score: 41.3,
+            average_position: 2.1,
+          }),
+        ],
+      },
+      {
+        name: 'Puma',
+        points: [
+          buildBrandTrendPoint(PREVIOUS_PERIOD, {
+            share_of_voice: 10,
+            mention_rate: 25,
+            visibility_score: 18.2,
+            average_position: 3.4,
+          }),
+          buildBrandTrendPoint(LATEST_PERIOD, {
+            share_of_voice: 12.5,
+            mention_rate: 30,
+            visibility_score: 22.7,
+            average_position: 3,
+          }),
+        ],
+      },
+    ],
+    ...overrides,
+  };
+}
+
+/** The latest leaderboard, best visibility score first: the tracked Nike (`buildKpis()`), then Adidas and Puma. */
+export function buildLatestBrands(): BrandLeaderboardRow[] {
+  return [
+    buildBrandRow('Nike', { classification: 'first_party' }),
+    buildBrandRow('Adidas', {
+      mentions: 10,
+      mention_rate: 50,
+      share_of_voice: 20.8,
+      average_position: 2.1,
+      visibility_score: 41.3,
+      net_sentiment: 5,
+    }),
+    buildBrandRow('Puma', {
+      mentions: 6,
+      mention_rate: 30,
+      share_of_voice: 12.5,
+      average_position: 3,
+      best_position: 2,
+      visibility_score: 22.7,
+      engines: ['openai'],
+      net_sentiment: null,
+    }),
+  ];
+}
+
 /** What `/trends` and `/reports/overview` share about the window of every fixture. */
 const WINDOW = {
   period_type: 'day',
@@ -94,6 +256,7 @@ export function buildTrendView(overrides: Partial<HistoricalTrendsResponse> = {}
     keywords_truncated: false,
     trend_data: [buildTrendPoint(PREVIOUS_PERIOD), buildTrendPoint(LATEST_PERIOD)],
     latest: buildKpis(),
+    latest_brands: buildLatestBrands(),
     change: buildPeriodChange(),
     keyword_trends: [],
     overall: {
@@ -101,6 +264,7 @@ export function buildTrendView(overrides: Partial<HistoricalTrendsResponse> = {}
       declining_count: 1,
       stable_count: 1,
     },
+    brand_trends: buildBrandTrends(),
     ...overrides,
   };
 }
@@ -147,6 +311,9 @@ export function buildVisibility(overrides: Partial<VisibilityResponse> = {}): Vi
       buildBrandRow('Nike', { classification: 'first_party' }),
       buildBrandRow('Adidas', { visibility_score: 30 }),
     ],
+    engines: buildEngines(),
+    sources: buildSources(),
+    sources_total: 3,
     keywords: [{
       keyword: 'best running shoes',
       timestamp: RUN_2,
@@ -175,6 +342,8 @@ export function buildOverview(overrides: Partial<ReportsOverviewResponse> = {}):
     scope: trends.scope,
     kpis: trends.latest,
     change: trends.change,
+    trend_data: trends.trend_data,
+    latest_brands: trends.latest_brands,
     summary: trends.overall,
     top_improving: [],
     top_declining: [],
