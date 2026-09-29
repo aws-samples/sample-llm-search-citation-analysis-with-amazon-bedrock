@@ -115,6 +115,9 @@ timestamp, and opens the print dialog once the data is ready. Reports decide rea
 
 - Hide screen-only controls with `print-hidden` (or
   `data-print-hidden="true"`).
+- Reference content that would crowd the screen (the KPI definitions at the
+  end of every report and of the Visibility tab) goes in `ui/Disclosure`:
+  collapsed on screen, always open in print and `?print=1` (`print-reveal`).
 - Keep a card or chart on one page with `avoid-break-inside`; start a
   section on a new page with `page-break-before`.
 - Print output is always light (white background, black text), keeps
@@ -406,7 +409,8 @@ its own file.
 | `Modal.tsx` | `Modal`, `ConfirmModal`, `AlertModal`. |
 | `Spinner.tsx` | Loading indicator (`sm` / `md` / `lg`). |
 | `ThemeToggle.tsx` | Light / dark / system switcher. |
-| `InfoTooltip.tsx` | "i" button with an explanation; used next to headings and KPI columns. |
+| `InfoTooltip.tsx` | "i" button with an explanation; used next to headings and KPI columns. The only tooltip component: it renders into `document.body` with fixed positioning (`tooltipPosition.ts`), so no table or scroll container can clip it or stop its text wrapping. Don't hand-roll another. |
+| `Disclosure.tsx` | A heading that expands the content under it; collapsed on screen, always open in print (§1.4). |
 | `KeywordScopeSelector.tsx`, `KeywordScopePicker.tsx`, `useKeywordScopeOptions.ts`, `reportScope.ts` | Choosing and encoding a keyword scope (all keywords, a keyword group, or selected keywords). |
 | `PrintToPdfButton.tsx` | Opens the page in print mode (§1.4). |
 | `MarkdownProcessor.tsx` | Renders AI markdown, sanitized with DOMPurify. |
@@ -613,7 +617,8 @@ web/src/components/ui/
 ├── Modal.tsx                 # Modal, ConfirmModal, AlertModal
 ├── Spinner.tsx               # loading
 ├── ThemeToggle.tsx           # theme switcher
-├── InfoTooltip.tsx           # "i" explanations
+├── InfoTooltip.tsx           # "i" explanations (+ tooltipPosition)
+├── Disclosure.tsx            # collapsible heading, open in print
 ├── KeywordScopeSelector.tsx  # keyword scope controls (+ KeywordScopePicker, useKeywordScopeOptions, reportScope)
 ├── PrintToPdfButton.tsx      # print mode
 ├── MarkdownProcessor.tsx     # sanitized AI markdown

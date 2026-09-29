@@ -9,6 +9,15 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.26.1] - 2026-09-29
+
+### Changed
+
+- **KPI definitions collapse.** "How these KPIs are measured" at the end of every report and of the Visibility tab
+  is now a heading with a chevron that expands the definitions, collapsed by default, so it no longer takes a
+  screen of space; the "i" tooltips carry the same text. Printed reports and `?print=1` previews always show the
+  definitions in full. The shared `ui/Disclosure` component does this and is documented in `docs/design-system.md`.
+
 ## [2.26.0] - 2026-09-29
 
 ### Added

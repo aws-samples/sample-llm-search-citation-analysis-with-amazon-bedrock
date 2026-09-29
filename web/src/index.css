@@ -529,6 +529,13 @@
   display: none !important;
 }
 
+/* Collapsible reference content (ui/Disclosure) is collapsed on screen with
+   the `hidden` attribute, but a report preview (`?print=1`) and paper always
+   show it. */
+.print-mode .print-reveal[hidden] {
+  display: block !important;
+}
+
 .print-mode {
   /* Preserve background colors of charts, badges, and stat cards in PDF
      output instead of stripping them to white. */
@@ -546,6 +553,10 @@
   .print-hidden,
   [data-print-hidden="true"] {
     display: none !important;
+  }
+
+  .print-reveal[hidden] {
+    display: block !important;
   }
 
   /* Page breaks helpers. Add `.page-break-before` to a section to start it
