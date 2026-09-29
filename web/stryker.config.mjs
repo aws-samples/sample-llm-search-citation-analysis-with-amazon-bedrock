@@ -40,7 +40,10 @@ export default {
   tempDirName: '.stryker-tmp',
   // Anchored: an unanchored 'reports' also matched src/components/Reports on
   // a case-insensitive file system, so no report component could be mutated.
-  ignorePatterns: ['/dist', '/coverage', '/reports'],
+  // '/.stryker-tmp': a run with its own --tempDirName (.stryker-tmp/<name>)
+  // would otherwise copy every other run's sandbox into its own, and fail
+  // with ENOENT when a parallel run changes it mid-copy.
+  ignorePatterns: ['/dist', '/coverage', '/reports', '/.stryker-tmp'],
   // Keep the per-mutant time bound generous: jsdom specs are slow to boot.
   timeoutMS: 20000,
   timeoutFactor: 2,

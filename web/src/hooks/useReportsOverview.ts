@@ -1,13 +1,14 @@
 import { ApiRequestError } from '../infrastructure';
 import type { ReportsOverviewResponse } from '../api/reports';
 import type { ReportScope } from '../types';
+import { isRecord } from '../types/domain/keywordDecoders';
 import { reportScopeParams } from '../components/ui/reportScope';
 import { useAnalysisEndpoint } from './useAnalysisEndpoint';
 
 function isReportsOverviewResponse(data: unknown): data is ReportsOverviewResponse {
-  if (typeof data !== 'object' || data === null) return false;
-  if ('error' in data) return false;
-  return 'kpis' in data
+  return isRecord(data)
+    && !('error' in data)
+    && 'kpis' in data
     && 'summary' in data
     && 'trend_data' in data
     && 'latest_brands' in data

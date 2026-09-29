@@ -84,8 +84,11 @@ export const EMPTY_CHARTS: ReadonlyArray<readonly [string, ChartElement, string]
 ];
 
 
-/** A chart rendered with some props, then with others: its name, both elements and the Chart.js data of the second. */
-export type RedrawnChartCase = readonly [string, ChartElement, ChartElement, unknown];
+/**
+ * A chart rendered with some props, then with others: its name, both elements and a builder of the
+ * Chart.js data of the second (called inside the test, where a mutant is active).
+ */
+export type RedrawnChartCase = readonly [string, ChartElement, ChartElement, () => unknown];
 
 /** Every chart component re-rendered with different data, and the chart data it must redraw. */
 export const REDRAWN_CHARTS: readonly RedrawnChartCase[] = [
@@ -93,36 +96,36 @@ export const REDRAWN_CHARTS: readonly RedrawnChartCase[] = [
     'KpiTrendChart',
     () => <KpiTrendChart points={KPI_POINTS} />,
     () => <KpiTrendChart points={KPI_POINTS.slice(0, 1)} />,
-    kpiTrendChart(KPI_POINTS.slice(0, 1)).data,
+    () => kpiTrendChart(KPI_POINTS.slice(0, 1)).data,
   ],
   [
     'ShareOfVoiceChart',
     () => <ShareOfVoiceChart brands={buildLatestBrands()} limit={6} />,
     () => <ShareOfVoiceChart brands={LEADERBOARD} limit={6} />,
-    shareOfVoiceChart(LEADERBOARD, 6).data,
+    () => shareOfVoiceChart(LEADERBOARD, 6).data,
   ],
   [
     'EngineKpiChart',
     () => <EngineKpiChart engines={ENGINES.slice(0, 1)} />,
     () => <EngineKpiChart engines={ENGINES} />,
-    engineKpiChart(ENGINES).data,
+    () => engineKpiChart(ENGINES).data,
   ],
   [
     'BrandTrendChart',
     () => <BrandTrendChart trends={buildBrandTrends()} metric="share_of_voice" />,
     () => <BrandTrendChart trends={buildBrandTrends()} metric="mention_rate" />,
-    brandTrendChart('mention_rate').data,
+    () => brandTrendChart('mention_rate').data,
   ],
   [
     'SentimentSplitChart',
     () => <SentimentSplitChart rows={SENTIMENT_ROWS} />,
     () => <SentimentSplitChart rows={SENTIMENT_ROWS.slice(0, 1)} />,
-    sentimentChart(SENTIMENT_ROWS.slice(0, 1)).data,
+    () => sentimentChart(SENTIMENT_ROWS.slice(0, 1)).data,
   ],
   [
     'TopSourcesChart',
     () => <TopSourcesChart sources={buildSources()} limit={2} />,
     () => <TopSourcesChart sources={buildSources()} limit={1} />,
-    topSourcesChart(buildSources(), 1).data,
+    () => topSourcesChart(buildSources(), 1).data,
   ],
 ];

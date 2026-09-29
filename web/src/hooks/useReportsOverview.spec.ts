@@ -6,8 +6,11 @@ import {
 } from '@testing-library/react';
 import { useReportsOverview } from './useReportsOverview';
 import {
-  mockReportsOverview, overviewWithout
+  REJECTED_OVERVIEW_BODIES, mockReportsOverview, overviewWithout
 } from './useReportsOverview-fixtures';
+import {
+  INVALID_REQUEST_STATE, renderAnsweredWith
+} from './useVisibilityMetrics-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
@@ -54,7 +57,7 @@ describe('useReportsOverview', () => {
     ],
   });
 
-  it.each(['trend_data', 'latest_brands'] as const)('reports an invalid request when the overview has no %s to chart', async (field) => {
+  it.each(['kpis', 'summary', 'trend_data', 'latest_brands'] as const)('reports an invalid request when the overview has no %s', async (field) => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
     mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(overviewWithout(field)));
     const { result } = renderHook(() => useReportsOverview());
@@ -63,5 +66,11 @@ describe('useReportsOverview', () => {
 
     expect(result.current.error).toBe('Invalid visibility request');
     consoleError.mockRestore();
+  });
+
+  it.each(REJECTED_OVERVIEW_BODIES)('stores no overview and reports an invalid request for %s', async (_description, body) => {
+    const state = await renderAnsweredWith(useReportsOverview, (hook) => hook.fetchReportsOverview(), body);
+
+    expect(state).toStrictEqual(INVALID_REQUEST_STATE);
   });
 });

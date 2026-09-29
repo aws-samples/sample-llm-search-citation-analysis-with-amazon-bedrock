@@ -5,7 +5,7 @@ import {
   buildBrandTrendPoint, buildBrandTrends, LATEST_PERIOD, PREVIOUS_PERIOD
 } from '../layout/reportPayload-fixtures';
 import {
-  brandTrendSeries, describeBrandTrend, TRACKED_SERIES_KEY
+  brandTrendSeries, describeBrandTrend
 } from './brandTrendChartConfiguration';
 import {
   COMPETITOR_LINE_COLOURS, EMERALD
@@ -82,13 +82,13 @@ describe('buildBrandTrendChartConfiguration', () => {
 });
 
 describe('brandTrendSeries', () => {
-  it('names the tracked brand with the given label and keys it apart from the competitors', () => {
+  it('names the tracked brand with the given label and keys it "tracked", apart from the competitors', () => {
     const [tracked] = brandTrendSeries(buildBrandTrends(), {
       metric: 'mention_rate',
       trackedLabel: 'Nike',
     });
 
-    expect([tracked.key, tracked.label, tracked.emphasised]).toStrictEqual([TRACKED_SERIES_KEY, 'Nike', true]);
+    expect([tracked.key, tracked.label, tracked.emphasised]).toStrictEqual(['tracked', 'Nike', true]);
   });
 });
 

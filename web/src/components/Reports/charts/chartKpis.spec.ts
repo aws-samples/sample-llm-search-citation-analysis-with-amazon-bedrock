@@ -25,6 +25,23 @@ describe('KPI_COLOURS', () => {
   it.each(['light', 'dark'] as const)('gives every KPI its own %s colour', (variant) => {
     expect(new Set(CHART_KPI_IDS.map((id) => KPI_COLOURS[id][variant])).size).toBe(CHART_KPI_IDS.length);
   });
+
+  it.each([
+    ['mention_rate', 'rgb(17, 24, 39)', 'rgb(229, 231, 235)'],
+    ['share_of_voice', 'rgb(217, 119, 6)', 'rgb(251, 191, 36)'],
+    ['top_1_share', 'rgb(5, 150, 105)', 'rgb(52, 211, 153)'],
+    ['top_3_share', 'rgb(13, 148, 136)', 'rgb(45, 212, 191)'],
+    ['visibility_score', 'rgb(109, 40, 217)', 'rgb(167, 139, 250)'],
+    ['citation_rate', 'rgb(37, 99, 235)', 'rgb(96, 165, 250)'],
+    ['citation_share', 'rgb(3, 105, 161)', 'rgb(125, 211, 252)'],
+    ['engine_coverage', 'rgb(225, 29, 72)', 'rgb(251, 113, 133)'],
+    ['keyword_coverage', 'rgb(192, 38, 211)', 'rgb(232, 121, 249)'],
+  ] as const)('draws %s in %s on light and %s on dark', (id, light, dark) => {
+    expect(KPI_COLOURS[id]).toStrictEqual({
+      light,
+      dark,
+    });
+  });
 });
 
 describe('kpiSeries', () => {

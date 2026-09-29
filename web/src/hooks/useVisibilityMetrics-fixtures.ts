@@ -50,8 +50,22 @@ export const mockKeywordVisibilityResponse: VisibilityResponse = buildVisibility
 });
 
 
-/** Bodies the `/visibility` guard must reject: the pre-KPI shapes and a new shape missing `kpis`. */
-export const REJECTED_VISIBILITY_BODIES: ReadonlyArray<[description: string, body: Record<string, unknown>]> = [
+/**
+ * Bodies the `/visibility` guard must reject: a body that is not an object,
+ * a full body flagged with a non-string error (a string one is rejected
+ * before the guard), a body without its scope, the pre-KPI shapes and a new
+ * shape whose keyword rows are not a list.
+ */
+export const REJECTED_VISIBILITY_BODIES: ReadonlyArray<[description: string, body: unknown]> = [
+  ['a null body', null],
+  ['a full body flagged with a structured error', {
+    ...mockVisibilityResponse,
+    error: { message: 'No data available' },
+  }],
+  ['a body without its scope', {
+    ...mockVisibilityResponse,
+    scope: null,
+  }],
   ['the old single-keyword shape', {
     keyword: 'hotel sol spa',
     brands: [],
