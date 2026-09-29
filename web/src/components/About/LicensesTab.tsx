@@ -102,7 +102,7 @@ const BACKEND_DEPS = [
 
 const AWS_SERVICES = [
   'Lambda', 'DynamoDB', 'Step Functions', 'API Gateway', 'S3', 
-  'CloudFront', 'Cognito', 'Bedrock', 'Bedrock AgentCore', 'Secrets Manager', 'EventBridge Scheduler', 'WAF'
+  'CloudFront', 'Cognito', 'Bedrock', 'Bedrock AgentCore', 'Secrets Manager', 'EventBridge Scheduler'
 ];
 
 const USE_CASES = [

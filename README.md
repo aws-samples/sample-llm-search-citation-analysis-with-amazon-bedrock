@@ -68,7 +68,7 @@ All functions run Python 3.12.
 | API-StatsInsights, API-CitationsContent, API-KeywordMgmt, API-ConfigMgmt, API-ExecutionMgmt, API-GetBrandMentions, API-ManageBrandConfig, API-GetPersonaRankings, API-SelfReflection, API-ContentStudio, API-ManageUsers, API-Health | `lambda/api/*.py` | REST API handlers; the consolidated functions bundle several handler files each |
 | ContentStudioWorker | `lambda/api/content-studio.py` | Content generation, fed by a DynamoDB stream and a 5-minute reconcile rule |
 
-Two layers: the **shared layer** (`lambda/layer/`: `lambda/shared` modules plus `requests`, `openai`, `httpx`, `bs4` and friends) used by every function except the crawler, and the **crawler layer** (`lambda/crawler-layer/`: Playwright, Bedrock AgentCore and a copy of the shared modules). Synth fails if either layer is not built or its copy of `lambda/shared` is stale. The crawler uses a pre-created AgentCore browser with Web Bot Auth and reuses a crawl for 30 days.
+Two layers: the **shared layer** (`lambda/layer/`: `lambda/shared` modules plus `requests`, `bs4` and `tzdata`) used by every function except the crawler, and the **crawler layer** (`lambda/crawler-layer/`: Playwright, Bedrock AgentCore and a copy of the shared modules). Synth fails if either layer is not built or its copy of `lambda/shared` is stale. The crawler uses a pre-created AgentCore browser with Web Bot Auth and reuses a crawl for 30 days.
 
 ### Data
 
@@ -103,7 +103,7 @@ A REST API (`CitationAnalysis-API`, stage `prod`, all routes under `/api`) with 
 ├── bin/                     # CDK app entry point (stack CitationAnalysisStack)
 ├── lib/
 │   ├── citation-analysis-stack.ts
-│   └── constructs/          # auth.ts (Cognito + WAF), bedrock-model-access.ts
+│   └── constructs/          # auth.ts (Cognito), bedrock-model-access.ts
 ├── lambda/
 │   ├── api/                 # API handlers
 │   ├── search/              # Provider queries, brand extraction, web-search providers
@@ -254,7 +254,7 @@ The stack imports, and never creates, `citation-analysis/{openai,perplexity,gemi
 ## Security
 
 - **Authentication:** Cognito user pool, email sign-in, self sign-up disabled, password policy of 8+ characters with all character classes, 1-hour access and ID tokens and 7-day refresh tokens. MFA is not configured. The API's Cognito authorizer covers every route except `GET /api/health`; user management requires the `Admin` group.
-- **Edge:** CloudFront with HTTPS redirect, security headers (CSP, HSTS, frame DENY) and a WAF web ACL (AWS common and known-bad-inputs rule sets, 1,000 requests per IP rate limit). A regional WAF (rate limit, AWS common, bot control, known bad inputs, Unix and SQLi rule sets, several in count mode) protects the Cognito user pool. API Gateway has no WAF by design; it relies on the authorizer, a 100 rps / 200 burst stage throttle and a 10,000 requests/day usage plan.
+- **Edge:** CloudFront with HTTPS redirect and security headers (CSP, HSTS, frame DENY). There is no WAF, by design, so the sample stays pay-per-use: the API relies on the Cognito authorizer, a 100 rps / 200 burst stage throttle and a 10,000 requests/day usage plan. See [SECURITY.md](SECURITY.md#aws-waf) to add one.
 - **CORS:** API error responses and each Lambda allow only the CloudFront origin (read from SSM `/citation-analysis/cors-origin`).
 - **Data:** S3 buckets block public access and require TLS; DynamoDB and S3 are encrypted at rest; API keys live in Secrets Manager; Lambda logs are kept 30 days.
 
@@ -264,17 +264,16 @@ To allow self sign-up, set `selfSignUpEnabled: true` in `lib/constructs/auth.ts`
 
 ## Cost
 
-> Unit prices below were taken from each vendor's pricing page on 26 May 2026 (AWS WAF on 29 September 2026), at US East (N. Virginia) rates. Prices change; re-check the linked pages before sizing a workload.
+> Unit prices below were taken from each vendor's pricing page on 26 May 2026, at US East (N. Virginia) rates. Prices change; re-check the linked pages before sizing a workload.
 
 You pay AWS for the infrastructure and Bedrock, and each external AI provider on your account with them. AI charges usually dominate. With no batching or prompt caching, AI cost scales with `keywords × providers × personas × runs`.
 
 ### AWS infrastructure
 
-For 100 keywords analysed weekly across four providers and three personas (about 4,800 provider calls a month), AWS typically costs **$38–80 per month**, mostly WAF and the crawler.
+For 100 keywords analysed weekly across four providers and three personas (about 4,800 provider calls a month), AWS typically costs **$12–50 per month**, mostly the crawler and DynamoDB. Every service is pay-per-use; the only fixed charge is Secrets Manager's $0.40 per stored key.
 
 | Service | Monthly | Notes |
 |---|---|---|
-| [WAF](https://aws.amazon.com/waf/pricing/) | $29–31 | Two web ACLs at $5 each, $1 per rule or managed rule group (3 + 6), $10 Bot Control subscription on the user pool ACL, $0.60/M requests |
 | [Bedrock AgentCore Browser](https://aws.amazon.com/bedrock/agentcore/pricing/) | $5–20 | One browser session per newly cited URL; the main variable |
 | [DynamoDB on-demand](https://aws.amazon.com/dynamodb/pricing/on-demand/) | $2–10 | 19 tables; $0.625/M writes, $0.125/M reads, $0.25/GB above 25 GB |
 | [Lambda](https://aws.amazon.com/lambda/pricing/) | $1–3 | Mostly within the free tier |
@@ -316,7 +315,7 @@ The workload above is `100 × 4 × 3 × 4 = 4,800` calls a month, 1,200 per prov
 | Bedrock Haiku brand extraction: 4,800 answers × ~2,000 input and ~300 output tokens | ~$17 |
 | **AI total** (excluding crawler summaries and on-demand Sonnet calls) | **~$61** |
 
-With the infrastructure above, this workload costs roughly $100–140 a month. Anthropic accounts for $27 of the AI total; running only Gemini and Perplexity brings AI cost to about $30.
+With the infrastructure above, this workload costs roughly $75–110 a month. Anthropic accounts for $27 of the AI total; running only Gemini and Perplexity brings AI cost to about $30.
 
 ### Reducing cost
 

@@ -33,7 +33,7 @@ import {
   extractTableProperty,
   extractUserPoolClientProps,
   extractUserPoolGroupNames,
-  extractWebAcls,
+  extractWafFootprint,
   findApiResourceId,
   findFunctionRoleLogicalId,
   findLambdaLogicalId,
@@ -55,7 +55,7 @@ import {
   type LambdaLogGroupSnapshot,
   type StageMethodSettingSnapshot,
   type StateMachineLoggingSnapshot,
-  type WebAclSnapshot,
+  type WafFootprint,
 } from './citation-analysis-stack-fixtures';
 
 const KEYWORD_MGMT_FUNCTION_NAME = 'CitationAnalysis-API-KeywordMgmt';
@@ -76,7 +76,6 @@ const SEARCH_ROLE_NAME = 'CitationAnalysis-SearchLambdaRole';
 const PROVIDER_CONFIG_TABLE_NAME = 'CitationAnalysis-ProviderConfig';
 const RETENTION_DAYS = 30;
 const RETAIN = 'Retain';
-const DELETED_API_WAF_NAME = 'CitationAnalysis-API-WAF';
 const SCREENSHOTS_BUCKET_PREFIX = 'citation-analysis-screenshots';
 const ACCESS_LOGS_BUCKET_PREFIX = 'citation-analysis-access-logs';
 const IA_STORAGE_CLASS = 'STANDARD_IA';
@@ -152,8 +151,7 @@ const synthesized: {
   stateMachineLogging: StateMachineLoggingSnapshot;
   researchStateMachineLogging: StateMachineLoggingSnapshot;
   prodStageMethodSettings: StageMethodSettingSnapshot[];
-  webAcls: WebAclSnapshot[];
-  cloudFrontWafResourceIds: string[];
+  waf: WafFootprint;
   screenshotsLifecycle: BucketLifecycleSnapshot;
   accessLogsLifecycle: BucketLifecycleSnapshot;
   searchRoleProviderConfigActions: string[];
@@ -220,8 +218,10 @@ const synthesized: {
   stateMachineLogging: { level: '', includesExecutionData: false, destinationRetentionDays: Number.NaN },
   researchStateMachineLogging: { level: '', includesExecutionData: false, destinationRetentionDays: Number.NaN },
   prodStageMethodSettings: [],
-  webAcls: [],
-  cloudFrontWafResourceIds: [],
+  waf: {
+    resourceIds: [],
+    distributionWebAclIds: [],
+  },
   screenshotsLifecycle: { transitions: [], expirationDays: [] },
   accessLogsLifecycle: { transitions: [], expirationDays: [] },
   searchRoleProviderConfigActions: [],
@@ -374,10 +374,7 @@ beforeAll(() => {
   synthesized.researchStateMachineLogging = extractStateMachineLogging(template, RESEARCH_STATE_MACHINE);
   synthesized.prodStageMethodSettings = extractProdStageMethodSettings(template);
 
-  synthesized.webAcls = extractWebAcls(template);
-  synthesized.cloudFrontWafResourceIds = Object.keys(
-    template.findResources('AWS::CloudFormation::CustomResource')
-  ).filter((logicalId) => logicalId.startsWith('CloudFrontWaf'));
+  synthesized.waf = extractWafFootprint(template);
 
   synthesized.screenshotsLifecycle = extractBucketLifecycle(template, SCREENSHOTS_BUCKET_PREFIX);
   synthesized.accessLogsLifecycle = extractBucketLifecycle(template, ACCESS_LOGS_BUCKET_PREFIX);
@@ -520,77 +517,23 @@ describe('Content Studio API and worker concurrency separation', () => {
 });
 
 describe('Stack outputs do not claim protection that is not configured', () => {
-  it('does not export the deleted API Gateway Web ACL', () => {
-    /**
-     * The ACL was created and never associated, so an output described as
-     * "WAF Web ACL ARN protecting API Gateway" told anyone auditing the account
-     * that protection existed where it did not (AUDIT-2026-08-19 §2.1). The
-     * output went first; the ACL itself was deleted on 2026-08-19. This asserts
-     * neither comes back.
-     */
-    expect(synthesized.outputKeys).not.toContain('WafWebAclArn');
-  });
-
-  it('still exports the CloudFront Web ACL, which is genuinely attached', () => {
-    /** Guards against deleting the accurate output along with the false one. */
-    expect(synthesized.outputKeys).toContain('CloudFrontWafWebAclArn');
+  it.each(['WafWebAclArn', 'CloudFrontWafWebAclArn'])('exports no %s output', (outputKey) => {
+    expect(synthesized.outputKeys).not.toContain(outputKey);
   });
 });
 
 /**
- * AUDIT-2026-08-19 §2.1 — the WAF that protected nothing.
- *
- * `CitationAnalysis-API-WAF` was a REGIONAL Web ACL with four rules and, per
- * `list-resources-for-web-acl`, zero associated resources. It was deleted on
- * 2026-08-19 rather than attached: its rules target injection and volumetric
- * attacks on a public surface, and every route here except GET /api/health sits
- * behind the Cognito authorizer.
- *
- * The assertions below are framed as "no unassociated ACL survives" rather than
- * "no REGIONAL ACL survives", because a REGIONAL ACL legitimately remains — the
- * Auth construct binds one to the Cognito user pool. Scope is not what made the
- * deleted one waste; being unbound was.
+ * No WAF, by decision: the sample stays pay-per-use, and a web ACL bills every
+ * month whether or not the demo is used. The Cognito authorizer, the stage
+ * throttle and the usage plan protect the API; see the comment in the stack.
  */
-describe('WAF Web ACLs', () => {
-  it('finds at least one Web ACL to reason about', () => {
-    /**
-     * Non-vacuity guard. Every assertion in this block is a claim about the set
-     * of Web ACLs, and all of them hold trivially against an empty set.
-     */
-    expect(synthesized.webAcls.length).toBeGreaterThan(0);
+describe('WAF', () => {
+  it('defines no WAFv2 resource and no CloudFront web ACL custom resource', () => {
+    expect(synthesized.waf.resourceIds).toStrictEqual([]);
   });
 
-  it('no longer defines the API Gateway Web ACL', () => {
-    const names = synthesized.webAcls.map((acl) => acl.name);
-
-    expect(names).not.toContain(DELETED_API_WAF_NAME);
-  });
-
-  it('leaves behind no Web ACL that is billed without being bound to anything', () => {
-    const unbound = synthesized.webAcls
-      .filter((acl) => !acl.associated)
-      .map((acl) => `${acl.logicalId} (${acl.scope})`);
-
-    expect(unbound).toStrictEqual([]);
-  });
-
-  it('keeps the user pool Web ACL, which is REGIONAL and bound', () => {
-    /**
-     * Pins the reason the blanket "no REGIONAL ACL" phrasing was not used, so
-     * nobody deletes this one while tidying up after the API ACL.
-     */
-    const bound = synthesized.webAcls.filter((acl) => acl.associated && acl.scope === 'REGIONAL');
-
-    expect(bound).toHaveLength(1);
-  });
-
-  it('keeps the CloudFront Web ACL, which is created in us-east-1', () => {
-    /**
-     * It is not an AWS::WAFv2::WebACL in this template at all — CloudFront
-     * requires a CLOUDFRONT-scoped ACL in us-east-1, so it is provisioned by a
-     * custom resource. Asserted separately for that reason.
-     */
-    expect(synthesized.cloudFrontWafResourceIds).toStrictEqual(['CloudFrontWaf']);
+  it('attaches no web ACL to the CloudFront distribution', () => {
+    expect(synthesized.waf.distributionWebAclIds).toStrictEqual([]);
   });
 });
 

@@ -28,8 +28,9 @@ mkdir -p $LAYER_DIR
 #   - The pip fallback had no --platform/--python-version/--only-binary at all,
 #     so it built for whatever the host happens to be.
 #
-# This layer carries httpx, openai and beautifulsoup4; nothing downstream
-# checks, so the failure surfaced as an ImportError inside every Lambda. Flags
+# This layer carries compiled wheels (e.g. beautifulsoup4's dependencies);
+# nothing downstream checks the platform, so a wrong one surfaces as an
+# ImportError inside every Lambda. Flags
 # mirror lambda/crawler-layer/build-layer.sh, which already got this right.
 if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
     echo "Using Docker to build for Linux compatibility..."

@@ -13,9 +13,6 @@ import {
 import {
   Effect, PolicyStatement 
 } from "aws-cdk-lib/aws-iam";
-import {
-  CfnWebACL, CfnWebACLAssociation 
-} from "aws-cdk-lib/aws-wafv2";
 import { Construct } from "constructs";
 
 interface AuthProps {
@@ -27,7 +24,6 @@ export class Auth extends Construct {
   public readonly userPool: UserPool;
   public readonly userPoolClient: UserPoolClient;
   public readonly identityPool: IdentityPool;
-  public readonly regionalWebAclArn: string;
 
   constructor(scope: Construct, id: string, props: AuthProps) {
     super(scope, id);
@@ -136,75 +132,13 @@ export class Auth extends Construct {
       })
     );
 
-    // Create Regional WAF for User Pool
-    const regionalWebAcl = new CfnWebACL(this, "regionalWebAcl", {
-      defaultAction: { allow: {} },
-      scope: "REGIONAL",
-      visibilityConfig: {
-        metricName: "regionalWebAcl",
-        sampledRequestsEnabled: true,
-        cloudWatchMetricsEnabled: true,
-      },
-      rules: [
-        {
-          name: "ipRateLimitingRule",
-          priority: 0,
-          statement: {
-            rateBasedStatement: {
-              limit: 3000,
-              aggregateKeyType: "IP",
-            },
-          },
-          action: {block: {},},
-          visibilityConfig: {
-            sampledRequestsEnabled: true,
-            cloudWatchMetricsEnabled: true,
-            metricName: "ipRateLimitingRule",
-          },
-        },
-        ...this.createManagedRules("regional", 1, [
-          {
-            name: "AWSManagedRulesCommonRuleSet",
-            overrideAction: {count: {},},
-          },
-          {
-            name: "AWSManagedRulesBotControlRuleSet",
-            overrideAction: {count: {},},
-          },
-          {name: "AWSManagedRulesKnownBadInputsRuleSet",},
-          {
-            name: "AWSManagedRulesUnixRuleSet",
-            ruleActionOverrides: [
-              {
-                name: "UNIXShellCommandsVariables_BODY",
-                actionToUse: {count: {},},
-              },
-            ],
-          },
-          {
-            name: "AWSManagedRulesSQLiRuleSet",
-            ruleActionOverrides: [
-              {
-                name: "SQLi_BODY",
-                actionToUse: {count: {},},
-              },
-            ],
-          },
-        ]),
-      ],
-    });
-    const regionalWebAclArn = regionalWebAcl.attrArn;
-
-    // Associate WAF with User Pool
-    new CfnWebACLAssociation(this, "userPoolWebAclAssociation", {
-      resourceArn: userPool.userPoolArn,
-      webAclArn: regionalWebAclArn,
-    });
+    // No WAF on the user pool: this sample stays pay-per-use. Cognito's own
+    // throttling and the password policy above protect sign-in; add a
+    // REGIONAL web ACL here (CfnWebACL + CfnWebACLAssociation) if you need one.
 
     this.userPool = userPool;
     this.userPoolClient = userPoolClient;
     this.identityPool = identityPool;
-    this.regionalWebAclArn = regionalWebAclArn;
   }
 
   /**
@@ -325,37 +259,5 @@ export class Auth extends Construct {
   <p style="margin:0;font-size:12px;color:#9ca3af;">If you didn't request this, you can safely ignore this email.</p>`),
       },
     };
-  }
-
-  // Inlined createManagedRules helper from demo-starter-kit
-  private createManagedRules(
-    prefix: string,
-    startingPriority: number,
-    rules: {
-      name: string;
-      overrideAction?: CfnWebACL.OverrideActionProperty;
-      ruleActionOverrides?: CfnWebACL.RuleActionOverrideProperty[];
-    }[]
-  ): CfnWebACL.RuleProperty[] {
-    return rules.map((rule, index) => {
-      const ruleName = `${prefix}-${rule.name}`;
-      return {
-        name: ruleName,
-        priority: startingPriority + index,
-        overrideAction: rule.overrideAction ?? {none: {},},
-        statement: {
-          managedRuleGroupStatement: {
-            vendorName: "AWS",
-            name: rule.name,
-            ruleActionOverrides: rule.ruleActionOverrides,
-          },
-        },
-        visibilityConfig: {
-          metricName: ruleName,
-          sampledRequestsEnabled: true,
-          cloudWatchMetricsEnabled: true,
-        },
-      };
-    });
   }
 }

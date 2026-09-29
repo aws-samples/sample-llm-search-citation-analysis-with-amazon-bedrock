@@ -49,11 +49,11 @@ export interface StageMethodSettingSnapshot {
   dataTraceEnabled: boolean;
 }
 
-export interface WebAclSnapshot {
-  logicalId: string;
-  name: string;
-  scope: string;
-  associated: boolean;
+export interface WafFootprint {
+  /** Logical ids of WAFv2 resources, and of the old CloudFront web ACL custom resource. */
+  resourceIds: string[];
+  /** `WebACLId` of every CloudFront distribution that sets one. */
+  distributionWebAclIds: unknown[];
 }
 
 interface StorageClassTransition {
@@ -570,19 +570,20 @@ export function extractProdStageMethodSettings(template: Template): StageMethodS
   }));
 }
 
-export function extractWebAcls(template: Template): WebAclSnapshot[] {
-  const boundAclIds = new Set(
-    Object.values(template.findResources('AWS::WAFv2::WebACLAssociation'))
-      .flatMap((association) =>
-        collectGetAttTargets(resolvePath(association, ['Properties', 'WebACLArn'])))
-  );
+export function extractWafFootprint(template: Template): WafFootprint {
+  const resources: [string, unknown][] = Object.entries(resolvePath(template.toJSON(), ['Resources']) ?? {});
+  const resourceIds = resources
+    .filter(([logicalId, resource]) =>
+      String(resolvePath(resource, ['Type'])).startsWith('AWS::WAFv2::') || logicalId.startsWith('CloudFrontWaf'))
+    .map(([logicalId]) => logicalId);
+  const distributionWebAclIds = Object.values(template.findResources('AWS::CloudFront::Distribution'))
+    .map((distribution) => resolvePath(distribution, ['Properties', 'DistributionConfig', 'WebACLId']))
+    .filter((webAclId) => webAclId !== undefined);
 
-  return Object.entries(template.findResources('AWS::WAFv2::WebACL')).map(([logicalId, acl]) => ({
-    logicalId,
-    name: resolveString(acl, ['Properties', 'Name']),
-    scope: resolveString(acl, ['Properties', 'Scope']),
-    associated: boundAclIds.has(logicalId),
-  }));
+  return {
+    resourceIds,
+    distributionWebAclIds,
+  };
 }
 
 export function extractBucketLifecycle(template: Template, namePrefix: string): BucketLifecycleSnapshot {

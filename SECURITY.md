@@ -33,14 +33,13 @@ The only inbound endpoints are the CloudFront distribution (dashboard), the API 
 
 ### AWS WAF
 
-The stack declares two web ACLs. API Gateway has no web ACL; it relies on the authorizer, the stage throttle and validation in the handlers.
+There is no web ACL on CloudFront, API Gateway or the Cognito user pool. This is deliberate: the sample stays pay-per-use, and a web ACL bills every month whether or not it is used. The API relies on the Cognito authorizer, the stage throttle, the usage plan quota and validation in the handlers.
 
-| Web ACL | Attached to | Rules |
-|---|---|---|
-| `CitationAnalysis-CloudFront-WAF` (scope `CLOUDFRONT`, us-east-1) | CloudFront distribution | AWS Common rule set, AWS Known Bad Inputs, rate limit 1,000 requests per IP per 5 minutes (block) |
-| Regional web ACL (`lib/constructs/auth.ts`) | Cognito user pool | Rate limit 3,000 requests per IP per 5 minutes (block); AWS Common and Bot Control rule sets in count mode; Known Bad Inputs (block); Unix (`UNIXShellCommandsVariables_BODY` counted) and SQLi (`SQLi_BODY` counted) rule sets |
+Before exposing a production deployment, consider adding:
 
-The CloudFront web ACL is created by a custom resource (`CitationAnalysis-CloudFrontWafHandler`, boto3 `wafv2`) because CloudFront ACLs must live in us-east-1. The handler only recreates the ACL when its name changes, so editing its rules in code does not update an ACL that already exists. Neither ACL has WAF logging; both publish CloudWatch metrics and sampled requests.
+- a `CLOUDFRONT`-scope web ACL (created in us-east-1) with the AWS Common and Known Bad Inputs managed rule groups and an IP rate limit, passed to the distribution as `webAclId` in `lib/citation-analysis-stack.ts`;
+- a `REGIONAL` web ACL associated with the user pool in `lib/constructs/auth.ts`, to rate-limit sign-in attempts;
+- WAF logging for either.
 
 ### Data protection
 
@@ -63,7 +62,6 @@ Each Lambda has its own role, scoped to the tables, buckets, secrets and state m
 - `bedrock:InvokeModel` on `anthropic.claude-*` foundation models and `global.anthropic.claude-*` inference profiles in any region (required for global cross-region inference)
 - `lambda:InvokeFunction` on `CitationAnalysis-*` for the Step Functions role
 - `scheduler:ListSchedules` on `*` (the action supports no resource scoping)
-- `wafv2:CreateWebACL`, `DeleteWebACL`, `GetWebACL` and `UpdateWebACL` on `*`, for the CloudFront WAF custom resource
 - Bedrock model-access and Marketplace actions on `*` (`bedrock:PutUseCaseForModelAccess`, `GetFoundationModelAvailability`, `ListFoundationModelAgreementOffers`, `CreateFoundationModelAgreement`; `aws-marketplace:ViewSubscriptions` and `Subscribe` only when called via Bedrock), held by the deploy-time `BedrockModelAccess` functions only, not by runtime roles
 
 The crawler's AgentCore permissions (`StartBrowserSession`, `StopBrowserSession`, `ConnectBrowserAutomationStream`) are scoped to the stack's own browser.
@@ -85,5 +83,5 @@ The crawler's AgentCore permissions (`StartBrowserSession`, `StopBrowserSession`
 - [ ] Provider API keys are in Secrets Manager (`citation-analysis/*`) and not in source, `.env` files or CDK context
 - [ ] The stack is deployed without `-c dev=true` (dev mode allows localhost and wildcard CORS)
 - [ ] Only the intended users exist in the Cognito user pool, and only administrators are in `Admin`
-- [ ] You have decided whether you need MFA, Cognito threat protection, WAF logging or API Gateway access logs; none is enabled by default
+- [ ] You have decided whether you need a WAF (see [AWS WAF](#aws-waf)), MFA, Cognito threat protection or API Gateway access logs; none is enabled by default
 - [ ] `npm audit` (root and `web/`) shows no unaddressed high or critical findings
