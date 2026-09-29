@@ -21,7 +21,7 @@ from shared.visibility_score import finite_number
 RETENTION_DAYS = 365
 MAX_NOTIFICATION_EMAILS = 100
 
-#: The KPI definitions snapshots are measured with; 2 = the market-aligned KPIs of 2.21.0.
+#: The KPI definitions snapshots are measured with; 2 = the KPIs of 2.21.0 (docs/kpi-definitions.md).
 KPI_VERSION = 2
 
 DEFAULT_ALERT_SETTINGS: dict[str, Any] = {

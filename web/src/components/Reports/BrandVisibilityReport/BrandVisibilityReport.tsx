@@ -43,7 +43,7 @@ interface Props {readonly keywords: ReadonlyArray<Keyword>;}
  * carry the dropdown).
  *
  * The marketing-lead audience reads this for "are we winning, level, or
- * losing": every variant opens on the market-aligned KPIs
+ * losing": every variant opens on the visibility KPIs
  * (`docs/kpi-definitions.md`) with their change and trend as the API judges
  * them, and ends with the definitions of every KPI it shows.
  */

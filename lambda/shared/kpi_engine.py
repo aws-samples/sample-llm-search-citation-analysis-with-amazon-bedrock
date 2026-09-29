@@ -1,10 +1,9 @@
 """
-The market-aligned visibility KPIs, computed one way for every page.
+The visibility KPIs, computed one way for every page.
 
 `docs/kpi-definitions.md` is the specification: every KPI here is defined
-there, with its formula, edge cases and the market definitions it follows
-(Otterly, Peec, Profound, Scrunch, Semrush, Ahrefs, Evertune). Change the
-two together; `test_kpi_contract.py` fails when they drift.
+there, with its formula and edge cases. Change the two together;
+`test_kpi_contract.py` fails when they drift.
 
 The unit of measurement is the **answer**: one successful response from one
 AI engine (LLM provider) to one query (a keyword, optionally rewritten by a
@@ -56,7 +55,6 @@ PERCENT_KPIS = frozenset({
 TRENDED_KPIS: tuple[str, ...] = tuple(kpi for kpi in KPI_IDS if kpi in PERCENT_KPIS | {'average_position', 'net_sentiment'})
 
 #: Visibility score weight of each position: 1st = 1.0, 2nd = 0.9, 3rd = 0.81 ...
-#: (Evertune's published position weighting).
 POSITION_DECAY = 0.9
 
 #: A mention whose position is unknown (or beyond 10th) earns the 10th-position weight.

@@ -1,7 +1,7 @@
 """
 The legacy four-factor visibility score, still behind ``/persona-rankings``.
 
-Every other page reports the market-aligned KPIs of ``shared.kpi_engine``
+New code reports the KPIs of ``shared.kpi_engine``
 (``docs/kpi-definitions.md``). This module goes when the persona view is
 migrated; do not use it for anything new.
 
