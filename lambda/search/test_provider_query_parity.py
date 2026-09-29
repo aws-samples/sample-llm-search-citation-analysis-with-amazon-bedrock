@@ -98,6 +98,7 @@ class TestClaudeParity:
         with (
             patch.object(_mod, 'ClaudeClient', MagicMock(return_value=client)),
             patch.object(_mod, 'store_raw_response_to_s3', MagicMock(return_value=None)),
+            patch.object(_mod, 'get_provider_model', MagicMock(return_value='claude-sonnet-4-5')),
         ):
             _mod._run_claude_provider(KEYWORD, 'test-key', query_template)
 
@@ -145,6 +146,7 @@ class TestClaudeParity:
         with (
             patch.object(_mod, 'PerplexityClient', MagicMock(return_value=perplexity_client)),
             patch.object(_mod, 'store_raw_response_to_s3', MagicMock(return_value=None)),
+            patch.object(_mod, 'get_provider_model', MagicMock(return_value='sonar')),
         ):
             _mod._run_perplexity_provider(KEYWORD, 'test-key', PERSONA)
 

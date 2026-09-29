@@ -291,6 +291,51 @@ class TestClientBehavior:
             'tools': [{'googleSearch': {}}],
         }
 
+    def test_perplexity_client_defaults_to_sonar(self):
+        assert ai_clients.PerplexityClient('pk-test').model == 'sonar'
+
+    def test_perplexity_sends_the_clients_model(self):
+        with patch.object(ai_clients.PerplexityClient, '_make_request', return_value={}) as request:
+            ai_clients.PerplexityClient('pk-test', model='sonar-pro').chat_completion([{'role': 'user', 'content': 'q'}])
+
+        assert request.call_args.args[0] == {'model': 'sonar-pro', 'messages': [{'role': 'user', 'content': 'q'}]}
+
+    def test_perplexity_sends_a_model_given_for_one_call(self):
+        with patch.object(ai_clients.PerplexityClient, '_make_request', return_value={}) as request:
+            ai_clients.PerplexityClient('pk-test').chat_completion([{'role': 'user', 'content': 'q'}], model='sonar-reasoning-pro')
+
+        assert request.call_args.args[0]['model'] == 'sonar-reasoning-pro'
+
+    def test_claude_sends_the_clients_model_with_the_web_search_tool(self):
+        with patch.object(ai_clients.ClaudeClient, '_make_request', return_value={}) as request:
+            ai_clients.ClaudeClient('ck-test', model='claude-opus-4-7').generate_content('q', system_prompt='cite sources')
+
+        assert request.call_args.args[0] == {
+            'model': 'claude-opus-4-7',
+            'max_tokens': 1024,
+            'messages': [{'role': 'user', 'content': 'q'}],
+            'tools': [{'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': 5}],
+            'system': 'cite sources',
+        }
+
+    def test_claude_payload_has_no_system_prompt_unless_given(self):
+        assert 'system' not in ai_clients.claude_web_search_payload('q', 'claude-sonnet-4-6')
+
+    def test_claude_posts_to_the_messages_api_with_the_anthropic_headers(self):
+        with patch.object(ai_clients.requests, 'post', return_value=MagicMock(status_code=200, json=lambda: {})) as post:
+            ai_clients.ClaudeClient('ck-test').generate_content('q', max_retries=0)
+
+        assert (post.call_args.args[0], post.call_args.kwargs['headers']) == (
+            'https://api.anthropic.com/v1/messages',
+            {'x-api-key': 'ck-test', 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
+        )
+
+    def test_perplexity_posts_to_the_sonar_chat_api(self):
+        with patch.object(ai_clients.requests, 'post', return_value=MagicMock(status_code=200, json=lambda: {})) as post:
+            ai_clients.PerplexityClient('pk-test').chat_completion([{'role': 'user', 'content': 'q'}], max_retries=0)
+
+        assert post.call_args.args[0] == 'https://api.perplexity.ai/chat/completions'
+
     def test_openai_and_perplexity_calls_allow_five_retries_by_default(self):
         with (
             patch.object(OpenAIClient, '_make_request', return_value={}) as openai_request,

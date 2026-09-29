@@ -273,8 +273,8 @@ class TestGeminiUsesTheConfiguredModel:
         assert 'Provider openai using model: gpt-5.2' in [record.getMessage() for record in caplog.records]
 
 
-class TestFixedModelProvidersRecordTheModelThatAnswered:
-    """Perplexity and Claude keep their default, but the answer names the model actually used."""
+class TestPerplexityAndClaudeAnswerWithTheConfiguredModel:
+    """Perplexity and Claude send the model chosen in Settings, and record the model that actually answered."""
 
     def test_perplexity_records_the_model_from_its_answer(self):
         client = MagicMock()
@@ -293,6 +293,30 @@ class TestFixedModelProvidersRecordTheModelThatAnswered:
             result = handler.query_claude('hotels in malaga', 'fake-key')
 
         assert result['metadata']['model'] == 'claude-sonnet-4-5-20250929'
+
+    @pytest.mark.parametrize(('provider_id', 'runner', 'query', 'model'), [
+        ('perplexity', '_run_perplexity_provider', 'query_perplexity', 'sonar-pro'),
+        ('claude', '_run_claude_provider', 'query_claude', 'claude-opus-4-7'),
+    ])
+    def test_run_reads_the_configured_model(self, mock_dynamodb, provider_id, runner, query, model):
+        mock_db, mock_table = mock_dynamodb
+        mock_table.get_item.return_value = {'Item': {'provider_id': provider_id, 'model': model}}
+
+        with patch.object(handler, 'dynamodb', mock_db), patch.object(handler, query) as query_provider:
+            handler._provider_model_cache.clear()
+            getattr(handler, runner)('hotels in malaga', 'fake-key', None)
+
+        assert query_provider.call_args.kwargs['model'] == model
+
+    @pytest.mark.parametrize(('client_name', 'query', 'model'), [
+        ('PerplexityClient', 'query_perplexity', 'sonar-pro'),
+        ('ClaudeClient', 'query_claude', 'claude-opus-4-7'),
+    ])
+    def test_query_builds_the_client_with_the_model(self, client_name, query, model):
+        with patch.object(handler, client_name) as client_class:
+            getattr(handler, query)('hotels in malaga', 'fake-key', model=model)
+
+        assert client_class.call_args.kwargs['model'] == model
 
 
 class TestModelChangesReachAWarmLambda:

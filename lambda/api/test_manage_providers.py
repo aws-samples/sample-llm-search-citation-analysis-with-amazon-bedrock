@@ -386,13 +386,20 @@ class TestGetProvidersReportsTheModel:
             'model_updated_at': '2026-09-28T10:00:00Z',
         }
 
-    def test_ignores_a_stored_model_on_a_provider_settings_cannot_change(self):
-        _serve_config_rows({'claude': {'provider_id': 'claude', 'model': 'claude-opus-9'}})
+    def test_reports_a_stored_claude_model_as_configurable(self):
+        _serve_config_rows({'claude': {'provider_id': 'claude', 'model': 'claude-opus-4-7'}})
 
         _, body = _get_providers()
 
         assert (_provider(body, 'claude')['model'], _provider(body, 'claude')['model_configurable']) == (
-            'claude-sonnet-4-5', False,
+            'claude-opus-4-7', True,
+        )
+
+    def test_reports_perplexity_as_configurable_with_its_default(self):
+        _, body = _get_providers()
+
+        assert (_provider(body, 'perplexity')['model'], _provider(body, 'perplexity')['model_configurable']) == (
+            'sonar', True,
         )
 
     def test_keeps_the_static_label_for_a_search_provider(self):
@@ -451,6 +458,52 @@ class TestUpdateModel:
             [{'googleSearch': {}}],
         )
 
+    def test_checks_perplexity_with_the_sonar_chat_body_runs_send(self, requests_stub):
+        _store_key('pplx-stored-key-1234')
+
+        _put_provider('perplexity', {'model': 'sonar-pro'})
+
+        assert requests_stub.call_args.kwargs == {
+            'timeout': 20,
+            'method': 'post',
+            'url': 'https://api.perplexity.ai/chat/completions',
+            'headers': {'Authorization': 'Bearer pplx-stored-key-1234', 'Content-Type': 'application/json'},
+            'json': {
+                'model': 'sonar-pro',
+                'messages': [{'role': 'user', 'content': 'Reply with the single word OK.'}],
+            },
+        }
+
+    def test_checks_claude_with_the_web_search_tool_runs_send(self, requests_stub):
+        _store_key('sk-ant-stored-1234')
+
+        _put_provider('claude', {'model': 'claude-sonnet-4-6'})
+
+        assert requests_stub.call_args.kwargs == {
+            'timeout': 20,
+            'method': 'post',
+            'url': 'https://api.anthropic.com/v1/messages',
+            'headers': {'x-api-key': 'sk-ant-stored-1234', 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
+            'json': {
+                'model': 'claude-sonnet-4-6',
+                'max_tokens': 64,
+                'messages': [{'role': 'user', 'content': 'Reply with the single word OK.'}],
+                'tools': [{'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': 1}],
+            },
+        }
+
+    def test_refuses_a_claude_model_without_web_search_and_stores_nothing(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _reply(400, {
+            'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'web_search is not supported on this model'},
+        })
+
+        status, body = _put_provider('claude', {'model': 'claude-3-haiku-20240307'})
+
+        assert (status, body['details'], mock_table.update_item.call_args_list) == (
+            400, 'web_search is not supported on this model', [],
+        )
+
     def test_refuses_a_model_the_provider_rejects_and_stores_nothing(self, requests_stub):
         _store_key()
         requests_stub.return_value = _reply(400, {'error': {'message': "Tool 'web_search_preview' is not supported with gpt-3.5-turbo."}})
@@ -497,8 +550,8 @@ class TestUpdateModel:
             200, 'SET model_updated_at = :ts, updated_at = :ts REMOVE model', [],
         )
 
-    def test_refuses_to_change_a_provider_whose_model_is_fixed(self, requests_stub):
-        status, body = _put_provider('claude', {'model': 'claude-opus-9'})
+    def test_refuses_to_change_a_provider_without_a_model(self, requests_stub):
+        status, body = _put_provider('brave', {'model': 'claude-opus-9'})
 
         assert (status, body.get('field'), mock_table.update_item.call_args_list) == (400, 'model', [])
 
@@ -553,6 +606,17 @@ GEMINI_LISTING = {'models': [
     {'name': 'models/gemma-3-27b-it', 'supportedGenerationMethods': ['generateContent']},
     {'name': 'models/imagen-4.0-generate-001', 'supportedGenerationMethods': ['predict']},
 ]}
+
+CLAUDE_LISTING = {'data': [
+    {'type': 'model', 'id': 'claude-opus-4-7', 'display_name': 'Claude Opus 4.7'},
+    {'type': 'model', 'id': 'claude-sonnet-4-6', 'display_name': 'Claude Sonnet 4.6'},
+    {'type': 'model', 'id': 'claude-haiku-4-5-20251001', 'display_name': 'Claude Haiku 4.5'},
+    {'type': 'model', 'id': 'claude-3-7-sonnet-20250219', 'display_name': 'Claude Sonnet 3.7'},
+    {'type': 'model', 'id': 'claude-3-haiku-20240307', 'display_name': 'Claude Haiku 3'},
+    {'type': 'model', 'id': 'not-a-claude-model'},
+    {'type': 'model', 'id': 'claude-bad id'},
+    'not an entry',
+], 'has_more': False}
 
 
 class TestListModels:
@@ -616,6 +680,35 @@ class TestListModels:
 
         assert _list_models('openai')[1]['models'] == []
 
+    def test_offers_claude_4_and_later_in_the_apis_order(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _reply(200, CLAUDE_LISTING)
+
+        assert _list_models('claude')[1]['models'] == ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001']
+
+    def test_asks_anthropic_for_the_whole_list_in_one_page(self, requests_stub):
+        _store_key('sk-ant-stored-1234')
+        requests_stub.return_value = _reply(200, CLAUDE_LISTING)
+
+        _list_models('claude')
+
+        kwargs = requests_stub.call_args.kwargs
+        assert (kwargs['method'], kwargs['url'], kwargs['params'], kwargs['headers']) == (
+            'get',
+            'https://api.anthropic.com/v1/models',
+            {'limit': 1000},
+            {'x-api-key': 'sk-ant-stored-1234', 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
+        )
+
+    def test_offers_the_sonar_models_without_calling_perplexity(self, requests_stub):
+        _store_key()
+
+        status, body = _list_models('perplexity')
+
+        assert (status, body['models'], requests_stub.call_args_list) == (
+            200, ['sonar', 'sonar-pro', 'sonar-reasoning-pro'], [],
+        )
+
     def test_asks_for_a_key_before_listing(self, requests_stub):
         status, body = _list_models('gemini')
 
@@ -623,10 +716,10 @@ class TestListModels:
             400, 'Configure an API key before choosing a model', [],
         )
 
-    def test_refuses_a_provider_whose_model_is_fixed(self, requests_stub):
+    def test_refuses_a_provider_without_a_model(self, requests_stub):
         _store_key()
 
-        assert _list_models('perplexity')[0] == 400
+        assert _list_models('brave')[0] == 400
 
     def test_refuses_a_caller_outside_the_admin_group(self, requests_stub):
         _store_key()
@@ -841,16 +934,16 @@ class TestRefusalDetails:
     def test_names_the_model_field_when_no_key_is_stored(self, requests_stub):
         assert _put_provider('openai', {'model': 'gpt-5.2'})[1]['field'] == 'model'
 
-    def test_names_the_provider_when_listing_a_fixed_model(self, requests_stub):
+    def test_names_the_provider_when_listing_a_provider_without_a_model(self, requests_stub):
         _store_key()
 
-        assert _list_models('perplexity')[1] == {'error': 'The model of this provider cannot be changed', 'field': 'id'}
+        assert _list_models('brave')[1] == {'error': 'The model of this provider cannot be changed', 'field': 'id'}
 
     def test_names_the_provider_when_listing_without_a_key(self, requests_stub):
         assert _list_models('gemini')[1]['field'] == 'id'
 
-    def test_explains_why_a_fixed_model_cannot_be_changed(self, requests_stub):
-        assert _put_provider('claude', {'model': 'claude-opus-9'})[1]['error'] == 'The model of this provider cannot be changed'
+    def test_explains_why_a_search_provider_model_cannot_be_changed(self, requests_stub):
+        assert _put_provider('brave', {'model': 'claude-opus-9'})[1]['error'] == 'The model of this provider cannot be changed'
 
     def test_explains_what_a_model_id_may_contain(self, requests_stub):
         assert _put_provider('gemini', {'model': 'bad id'})[1]['error'] == (

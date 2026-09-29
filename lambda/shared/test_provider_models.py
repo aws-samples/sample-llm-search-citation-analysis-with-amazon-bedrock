@@ -35,8 +35,14 @@ class TestConfiguredModel:
     def test_returns_the_override_of_a_configurable_provider(self):
         assert configured_model('gemini', {'model': 'gemini-2.5-pro'}) == 'gemini-2.5-pro'
 
-    def test_ignores_an_override_on_a_provider_with_a_fixed_model(self):
-        assert configured_model('claude', {'model': 'claude-opus-9'}) is None
+    def test_ignores_an_override_on_a_provider_without_a_model(self):
+        assert configured_model('brave', {'model': 'claude-opus-9'}) is None
+
+    def test_reads_an_override_of_perplexity(self):
+        assert configured_model('perplexity', {'model': 'sonar-pro'}) == 'sonar-pro'
+
+    def test_reads_an_override_of_claude(self):
+        assert configured_model('claude', {'model': 'claude-sonnet-4-6'}) == 'claude-sonnet-4-6'
 
     @pytest.mark.parametrize('row', [{}, {'model': ''}, {'model': None}, {'model': 'bad id'}])
     def test_treats_a_missing_or_malformed_value_as_no_override(self, row):
@@ -65,8 +71,8 @@ class TestEffectiveModel:
 
 
 class TestProviderSets:
-    def test_only_openai_and_gemini_models_are_configurable(self):
-        assert CONFIGURABLE_MODEL_PROVIDERS == frozenset({'openai', 'gemini'})
+    def test_every_ai_engine_model_is_configurable(self):
+        assert CONFIGURABLE_MODEL_PROVIDERS == frozenset({'openai', 'perplexity', 'gemini', 'claude'})
 
 
 class TestReadProviderModel:

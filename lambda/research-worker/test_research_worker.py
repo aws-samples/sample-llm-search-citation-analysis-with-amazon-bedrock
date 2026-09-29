@@ -1337,7 +1337,9 @@ def _config_row(row: dict) -> MagicMock:
 class TestResearchUsesTheConfiguredModel:
     """Keyword research answers with the model chosen in Settings, like analysis runs do."""
 
-    @pytest.mark.parametrize(('provider_id', 'model'), [('openai', 'gpt-5.2'), ('gemini', 'gemini-2.5-pro')])
+    @pytest.mark.parametrize(('provider_id', 'model'), [
+        ('openai', 'gpt-5.2'), ('gemini', 'gemini-2.5-pro'), ('perplexity', 'sonar-pro'),
+    ])
     def test_builds_the_client_with_the_configured_model(self, provider_id, model):
         client = _client_for(provider_id, _config_row({'provider_id': provider_id, 'model': model}))
 
@@ -1345,13 +1347,6 @@ class TestResearchUsesTheConfiguredModel:
 
     def test_uses_the_default_when_nothing_is_configured(self):
         assert _client_for('gemini', _config_row({'provider_id': 'gemini'})).model == 'gemini-3-flash-preview'
-
-    def test_never_reads_the_config_for_a_provider_with_a_fixed_model(self):
-        table = _config_row({})
-
-        _client_for('perplexity', table)
-
-        assert table.get_item.call_args_list == []
 
     def test_fails_the_step_instead_of_guessing_when_the_config_is_unreadable(self):
         table = MagicMock()

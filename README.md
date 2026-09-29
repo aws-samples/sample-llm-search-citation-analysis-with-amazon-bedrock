@@ -195,10 +195,12 @@ aws cloudformation describe-stacks --stack-name CitationAnalysisStack \
 
    | Provider | Default model | Web search |
    |---|---|---|
-   | OpenAI | `gpt-5-mini` (changeable in Settings) | Responses API `web_search_preview` tool |
-   | Perplexity | `sonar` | Built in |
-   | Google Gemini | `gemini-3-flash-preview` (changeable in Settings) | Google Search grounding |
+   | OpenAI | `gpt-5-mini` | Responses API `web_search_preview` tool |
+   | Perplexity | `sonar` (or `sonar-pro`, `sonar-reasoning-pro`) | Built in |
+   | Google Gemini | `gemini-3-flash-preview` | Google Search grounding |
    | Anthropic Claude | `claude-sonnet-4-5` | `web_search` tool, 1,024 output tokens |
+
+   **Change model** on each card picks another model: OpenAI, Gemini and Claude list the models your key can use, Perplexity offers its Sonar models, and you can type any id. Before a model is saved it must answer a real web-search request with your key, so a model that cannot search is refused instead of failing the next run.
 
    The same page lists optional web-search providers (Brave, Tavily, Exa, SerpAPI, Firecrawl). They add cited links to a run but write no answer, so they do not count towards the KPIs. A SerpAPI key also enables the research agent's Google signals step.
 
@@ -321,7 +323,7 @@ With the infrastructure above, this workload costs roughly $75–110 a month. An
 
 - Disable providers and personas you do not need: each multiplies the call count.
 - Run weekly rather than daily for about a seventh of the cost.
-- Pick a cheaper OpenAI or Gemini model in **Settings > AI Providers** (the Perplexity and Claude models are fixed).
+- Pick a cheaper model for any engine in **Settings > AI Providers** (for example `sonar` over `sonar-pro`, or Claude Haiku over Sonnet).
 - Lower the crawl concurrency (`CrawlCitations`, `maxConcurrency: 3` in `lib/citation-analysis-stack.ts`) to spread AgentCore usage.
 - `SearchResults`, `Citations` and `CrawledContent` have no TTL; add one if you do not need full history.
 - Track spend in [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) by the `aws:cloudformation:stack-name = CitationAnalysisStack` cost allocation tag once it is activated.
