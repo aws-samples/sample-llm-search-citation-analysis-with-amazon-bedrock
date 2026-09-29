@@ -2,562 +2,379 @@
 
 > **Important:** This is sample code for demonstration and educational purposes. It is not intended for production use without additional security review and testing. You should work with your security and compliance teams to meet your organizational requirements before deploying to production environments.
 
-A serverless citation analysis system that queries multiple AI models with web search capabilities, captures their responses and citations, crawls cited pages using Amazon Bedrock AgentCore, and stores comprehensive results in DynamoDB for analysis.
+A serverless system that tracks how AI engines (OpenAI, Perplexity, Gemini, Claude) mention and cite brands. It sends your keywords to each engine with web search enabled, stores every answer and its citations, extracts the brands named, crawls the cited pages with Amazon Bedrock AgentCore, and reports visibility KPIs, competitor benchmarks and content gaps in a React dashboard. It is deployed with AWS CDK (TypeScript); the backend is Python 3.12 Lambda functions orchestrated by AWS Step Functions.
+
+## Features
+
+The dashboard sidebar has these sections:
+
+| Section | Pages |
+|---|---|
+| Insights | **Dashboard** (totals, citations by provider, brand mentions, KPI alerts), **Visibility** (the KPIs for one keyword, a keyword group or all keywords, with 7/30/90-day KPI history, brand leaderboard, per-engine KPIs and cited domains; persona filter), **Brand Mentions** (every brand named, with sentiment, rank and a per-brand ranking analysis), **Citations** (cited URLs by frequency, with a per-keyword and per-provider breakdown), **Prompt Insights** (which queries and personas rank you in the top 3), **Citation Gaps** (sources that cite competitors but not you), **Action Center** (prioritised recommendations with a status you can track) |
+| Research | **Keyword Research**: Expand, Competitor (analyse a competitor website), Agent (a Bedrock research agent that plans web-search queries over up to three rounds, with saved prompt templates) and History |
+| Content | **Content Studio**: content ideas and briefs from citation gaps and ranking analyses, single or per keyword group, in any output language, exportable as DOCX |
+| Reporting | **Reports**: nine print-ready reports (below) |
+| Data | **Recent Searches** (analysis history with full answers), **Raw Responses** (raw JSON answers and crawl screenshots from S3) |
+| Operations | **Run Analysis**, **Schedule** (EventBridge Scheduler runs) |
+| Configuration | **Settings**: Keywords (with keyword groups), Brand Tracking, Personas, AI Providers, Alerts, Users (admins only) |
+
+Most views export to Excel, the header's PDF button prints the current view (print mode, `?print=1`), and the UI has light, dark and system themes. A first-run guide walks through setup, and a banner flags a provider that is failing.
+
+![Dashboard overview](docs/dashboard.png)
+
+![Brand mentions](docs/brandmentions.png)
+
+![Citation gap analysis](docs/citationgapanalysis.png)
+
+![Content Studio](docs/contentstudio.png)
+
+### Reports
+
+Listed on **Reporting > Reports** (`web/src/components/Reports/ReportsLandingView.tsx`), routed by `ReportsRouter.tsx`:
+
+| Report | Route | For |
+|---|---|---|
+| Executive Summary | `/reports/executive-summary` | CMO, VP Marketing |
+| Brand Visibility Report | `/reports/visibility` (`/reports/visibility/:keyword`) | Marketing lead |
+| Competitor Benchmark | `/reports/benchmark` | Brand manager, competitive intelligence |
+| AI Engines | `/reports/engines` | AI search specialist |
+| Sources | `/reports/sources` | SEO and digital PR |
+| Sentiment | `/reports/sentiment` | Brand / communications lead |
+| Competitor Gap Report | `/reports/competitor` (`/reports/competitor/:competitor`) | Content / PR strategist |
+| Content Action Plan | `/reports/content-action-plan` | Content strategist |
+| Keyword Deep Dive | `/reports/keyword` (`/reports/keyword/:keyword`) | SEO / AI search lead |
+
+### KPIs
+
+The Visibility tab, the per-group report, the Executive Summary, Brand Visibility, Competitor Benchmark, AI Engines, Sources, Sentiment and Keyword Deep Dive reports, their exports and the KPI alerts use one set of KPIs, counted per AI-engine answer and pooled across a scope: answers, mentions, mention rate, share of voice, average position, top-1 and top-3 share, visibility score (position-weighted, 0–100), citations, citation rate, citation share, net sentiment, engine coverage and keyword coverage. Definitions, formulas, edge cases and the market definitions they follow are in [docs/kpi-definitions.md](docs/kpi-definitions.md). The Dashboard, Brand Mentions, Personas, Prompt Insights, Citation Gaps, Action Center and the Competitor Gap and Content Action Plan reports still compute their own figures.
 
 ## Architecture
 
-The system uses AWS Step Functions to orchestrate the workflow and is deployed using AWS CDK in TypeScript.
-
 ![Architecture diagram](architecture-diagram.png)
 
-### Components
+### Workflows (Step Functions)
 
-- **Search Lambda**: Queries OpenAI, Perplexity, Gemini, and Claude with keywords
-- **Deduplication Lambda**: Normalizes URLs and deduplicates citations across providers
-- **Crawler Lambda**: Crawls cited pages using Bedrock AgentCore browser tools
-- **Step Functions**: Orchestrates the workflow
-- **DynamoDB**: Stores search results, citations, and crawled content
-- **Secrets Manager**: Securely stores API keys
+- **`CitationAnalysis-Workflow`** (one execution per analysis run, 2-hour timeout): ParseKeywords → ProcessKeywords Map (per keyword: SearchAllProviders → DeduplicateCitations → CrawlCitations Map) → GenerateSummary → KpiAlerts. Keywords run 3 at a time by default (`-c processKeywordsConcurrency=N`), citations are crawled 3 at a time per keyword, and there is no per-run keyword cap. A failed crawl or alert evaluation does not fail the run.
+- **`CitationAnalysis-KeywordResearch`** (one execution per research job, 30-minute timeout): PlanResearch → ExecuteResearchSteps Map (up to 10 steps in parallel) → EvaluateResearch → continue? → PlanResearch … | FinalizeResearch. Each step checkpoints its result into the job row, so a failed provider keeps the other results and can be retried on its own.
 
-## Project Structure
+### Lambda functions
+
+All functions run Python 3.12.
+
+| Function | Code | Role |
+|---|---|---|
+| ParseKeywords, Search, Deduplication, Crawler, GenerateSummary, KpiAlerts | `lambda/parse-keywords`, `search`, `deduplication`, `crawler`, `generate-summary`, `kpi-alerts` | Analysis workflow steps |
+| ResearchWorker | `lambda/research-worker` | Keyword research steps |
+| API-StatsInsights, API-CitationsContent, API-KeywordMgmt, API-ConfigMgmt, API-ExecutionMgmt, API-GetBrandMentions, API-ManageBrandConfig, API-GetPersonaRankings, API-SelfReflection, API-ContentStudio, API-ManageUsers, API-Health | `lambda/api/*.py` | REST API handlers; the consolidated functions bundle several handler files each |
+| ContentStudioWorker | `lambda/api/content-studio.py` | Content generation, fed by a DynamoDB stream and a 5-minute reconcile rule |
+
+Two layers: the **shared layer** (`lambda/layer/`: `lambda/shared` modules plus `requests`, `openai`, `httpx`, `bs4` and friends) used by every function except the crawler, and the **crawler layer** (`lambda/crawler-layer/`: Playwright, Bedrock AgentCore and a copy of the shared modules). Synth fails if either layer is not built or its copy of `lambda/shared` is stale. The crawler uses a pre-created AgentCore browser with Web Bot Auth and reuses a crawl for 30 days.
+
+### Data
+
+All tables are DynamoDB on-demand with AWS-managed encryption, point-in-time recovery and `RETAIN`:
+
+| Table (`CitationAnalysis-…`) | Key | Holds |
+|---|---|---|
+| SearchResults | keyword / timestamp_provider | Every provider answer, with extracted brands |
+| Citations | keyword / normalized_url | Deduplicated citations |
+| CrawledContent | normalized_url / crawled_at | Crawled page content, summaries and SEO data |
+| Keywords | id | Keywords; `group_ids` holds group membership |
+| KeywordGroups | id | Keyword groups |
+| KeywordResearch | id | Research jobs and their steps (TTL) |
+| ResearchTemplates | id | Saved research agent prompts |
+| BrandConfig | config_id | Industry, first-party and competitor brands, owned domains |
+| ProviderConfig | provider_id | Provider enablement, model override, health |
+| QueryPrompts | id | Personas |
+| ContentStudio, ContentBriefBatches, ContentBriefTemplates | id / batch_id / id | Generated content, batch manifests, saved prompt templates |
+| SelfReflection | keyword_brand / persona_timestamp | Ranking analysis cache (24 h TTL) |
+| RecommendationStatus | recommendation_id | Action Center item status (TTL) |
+| KpiSnapshots, KpiAlerts, AlertSettings, ContentChanges | group_id / snapshot_at, id, config_id, group_id / changed_at | KPI alert baselines, alerts, thresholds, content-change markers |
+
+S3 buckets (`citation-analysis-<name>-<account>`): `keywords` (keyword files and run summaries), `raw-responses`, `screenshots` (moved to Infrequent Access after 90 days), `web` (the dashboard) and `access-logs` (expire after 90 days). KPI alert emails go through the SNS topic `CitationAnalysis-KpiAlerts`.
+
+### API and hosting
+
+A REST API (`CitationAnalysis-API`, stage `prod`, all routes under `/api`) with Lambda proxy integrations and a Cognito user pool authorizer on every route except `GET /api/health`. The dashboard is a static Vite build in a private S3 bucket served by CloudFront through origin access control.
+
+## Project structure
 
 ```
-citation-analysis-system/
-├── bin/                        # CDK app entry point
-├── lib/                        # CDK stack and constructs
+├── bin/                     # CDK app entry point (stack CitationAnalysisStack)
+├── lib/
 │   ├── citation-analysis-stack.ts
-│   └── constructs/auth.ts      # Cognito auth construct
+│   └── constructs/          # auth.ts (Cognito + WAF), bedrock-model-access.ts
 ├── lambda/
-│   ├── api/                    # API endpoint handlers (20+ endpoints)
-│   ├── search/                 # AI provider search + brand extraction
-│   ├── deduplication/          # Citation deduplication
-│   ├── crawler/                # Web crawling with AgentCore
-│   ├── generate-summary/       # Execution summary generation
-│   ├── parse-keywords/         # Keyword file parsing
-│   ├── research-worker/        # Keyword research steps (own state machine)
-│   ├── layer/                  # Shared Lambda layer
-│   └── shared/                 # Common utilities and decorators
-├── web/                        # React frontend (Vite + Tailwind)
-│   └── src/
-│       ├── components/         # UI components by feature
-│       ├── hooks/              # Custom React hooks
-│       └── types/              # TypeScript types
-├── scripts/                    # Deployment and build scripts
+│   ├── api/                 # API handlers
+│   ├── search/              # Provider queries, brand extraction, web-search providers
+│   ├── deduplication/  crawler/  parse-keywords/  generate-summary/  kpi-alerts/
+│   ├── research-worker/     # Keyword research state machine steps
+│   ├── shared/              # Shared modules (KPI engine, clients, decorators, config)
+│   ├── layer/  crawler-layer/   # Layer build scripts and requirements
+│   ├── testing/             # Test support: module loader, DynamoDB stubs, events, env
+│   ├── conftest.py
+│   └── requirements-dev.txt # Python dev toolchain
+├── web/src/
+│   ├── api/  components/  constants/  exporters/  formatting/
+│   ├── hooks/  infrastructure/  types/
+│   └── test/                # Test support
+├── docs/                    # kpi-definitions.md, design-system.md, screenshots
+├── scripts/                 # Deploy, build and quality-gate scripts
 └── cdk.json
 ```
 
 ## Prerequisites
 
 - Node.js 20+ and npm
-- Python 3.12
-- AWS CLI configured with appropriate permissions
+- Python 3.12 and pip
+- AWS CLI with credentials and a default region (`aws configure`, or `AWS_REGION`)
 - AWS CDK CLI (`npm install -g aws-cdk`)
-- At least one API key from: OpenAI (recommended), Perplexity, Google Gemini, or Anthropic Claude
-- Docker recommended for building Lambda layers (falls back to cross-compilation if unavailable)
+- An API key for at least one of OpenAI, Perplexity, Google Gemini or Anthropic. Paid keys are needed: free tiers hit rate limits at analysis volume; $5–10 of credit per provider covers regular use.
+- Docker (optional): the layer builds use the Lambda Python image when Docker is running and fall back to cross-platform pip wheels otherwise.
 
-## Setup
-
-### Quick Start (Automated Deployment)
-
-Use the automated deployment script for a streamlined setup:
+## Deployment
 
 ```bash
-./scripts/deploy.sh
+npm run deploy      # same as ./scripts/deploy.sh
 ```
 
-This script will:
-- Check all prerequisites (Node.js, Python, AWS CLI, CDK)
-- Install Node.js and Python dependencies
-- Build the Lambda Layer
-- Compile TypeScript
-- Check/bootstrap CDK if needed
-- Deploy the CDK stack
-- Verify the deployment
-- Display next steps
-
-### Manual Setup (Advanced)
-
-> **⚠️ Important**: Manual setup requires a two-pass deployment. The web dashboard needs configuration values (API Gateway URL, Cognito IDs) that only exist after the first deployment. If you skip steps or run them out of order, you'll encounter CORS errors. For most use cases, `npm run deploy` handles this automatically.
+`scripts/deploy.sh` checks the tools and AWS credentials, runs `npm install`, builds both Lambda layers and the dashboard, compiles the CDK app, offers to run `cdk bootstrap` if the account/region is not bootstrapped, deploys the stack, rebuilds the dashboard with the new API and Cognito outputs, syncs it to the web bucket, invalidates CloudFront, verifies the core resources and prints the dashboard URL.
 
 <details>
-<summary>Expand manual setup instructions</summary>
+<summary>Manual deployment</summary>
 
-#### 1. Install Dependencies
+The dashboard needs the API URL and Cognito IDs, which exist only after the first deploy, so the frontend is built twice:
 
 ```bash
-# Install CDK dependencies
 npm install
-
-# Install Python dependencies for each Lambda
-cd lambda/search && pip install -r requirements.txt -t .
-cd ../deduplication && pip install -r requirements.txt -t .
-cd ../crawler && pip install -r requirements.txt -t .
-```
-
-#### 2. Bootstrap CDK (First Time Only)
-
-```bash
-cdk bootstrap
-```
-
-#### 3. First Deploy (creates the stack)
-
-```bash
+bash lambda/layer/build-layer.sh           # rebuild after any change to lambda/shared
+bash lambda/crawler-layer/build-layer.sh
+(cd web && npm install && npm run build)   # synth requires web/dist
+npm run build
+cdk bootstrap                              # first time per account/region
 cdk deploy
+./scripts/deploy-web.sh                    # rebuild with the stack outputs, upload, invalidate CloudFront
 ```
-
-#### 4. Build the Web Dashboard
-
-```bash
-./scripts/build-web.sh
-```
-
-This fetches the API Gateway URL and Cognito configuration from CloudFormation and builds the React dashboard with the correct config.
-
-#### 5. Second Deploy (uploads the configured dashboard)
-
-```bash
-cdk deploy
-```
-
-The first deploy creates the infrastructure so the build script can fetch the configuration. The second deploy uploads the correctly configured dashboard to S3.
 
 </details>
 
-### Configure Your First Analysis
+Other commands:
 
-After deployment:
+| Command | Does |
+|---|---|
+| `npm run deploy:cdk` | `cdk deploy --require-approval never` (layers and `web/dist` must already be built) |
+| `npm run deploy:full` | `deploy:cdk`, then clear the CloudFront cache |
+| `./scripts/deploy-web.sh` | Frontend only: build, sync to S3, invalidate CloudFront |
+| `./scripts/build-web.sh` | Build the dashboard with `VITE_*` values from the stack outputs |
+| `npm run clear-cache` | Invalidate the CloudFront distribution |
+| `npm run synth` | `cdk synth` |
+| `./scripts/quick-error-check.sh [minutes]` | Count provider retries and errors in the Search Lambda logs |
+| `python3 scripts/delete-orphaned-log-groups.py [--delete]` | List (or delete) `/aws/lambda/*` log groups whose function no longer exists |
 
-1. Open the dashboard URL (shown in CDK outputs)
-2. Log in with your credentials (admin creates accounts via CLI — see User Registration below)
-3. Go to **Settings > Providers** to enter your API keys for each AI provider you want to use
-4. Go to **Settings > Brand Tracking** to configure brand detection:
-   - Select an industry preset (hotels, airlines, retail, etc.) or choose Custom
-   - Add your brand names under **First Party Brands** - these are tracked as "yours"
-   - Add competitor brands under **Competitors** - these are tracked for comparison
-   - The visibility dashboard calculates your share of voice based on this configuration
-5. Go to **Keywords** to add search queries you want to analyze (e.g., "best hotels in Barcelona")
-6. Click **Run Analysis** to start your first analysis run
-
-## Visualization Dashboard
-
-After deployment, access the real-time visualization dashboard at the CloudFront URL provided in the CDK outputs:
+Get the dashboard URL later with:
 
 ```bash
-# Get the dashboard URL from CDK outputs
-aws cloudformation describe-stacks \
-  --stack-name CitationAnalysisStack \
-  --query 'Stacks[0].Outputs[?OutputKey==`DashboardUrl`].OutputValue' \
-  --output text
+aws cloudformation describe-stacks --stack-name CitationAnalysisStack \
+  --query 'Stacks[0].Outputs[?OutputKey==`DashboardUrl`].OutputValue' --output text
 ```
 
-### Dashboard Features
+## Getting started
 
-![Dashboard overview](docs/dashboard.png)
-*Dashboard overview with real-time statistics, provider comparison, and brand mentions*
+1. **Create the first user.** Self sign-up is off. Create an administrator with the CLI and add it to the `Admin` group; admins can then invite users from **Settings > Users**.
 
-- **Real-time Statistics**: Auto-refreshes every 30 seconds
-- **Provider Comparison**: Bar chart showing citation counts by AI provider
-- **Brand Analysis**: Pie chart of brand mentions across AI providers
-- **Top Citations**: Table of most frequently cited URLs
-- **Recent Searches**: Latest search results with timestamps
-- **Filtering**: Filter by keyword or provider
+   ```bash
+   aws cognito-idp admin-create-user --user-pool-id <UserPoolId> \
+     --username user@example.com \
+     --user-attributes Name=email,Value=user@example.com Name=email_verified,Value=true \
+     --desired-delivery-mediums EMAIL
+   aws cognito-idp admin-add-user-to-group --user-pool-id <UserPoolId> \
+     --username user@example.com --group-name Admin
+   ```
 
-![Brand mentions with sentiment analysis](docs/brandmentions.png)
-*Brand mention tracking with sentiment analysis and ranking context*
+2. **Settings > AI Providers.** Use **Add Key** and enable each provider you want. Keys are stored in Secrets Manager as `citation-analysis/<provider>-key`. Only enabled providers with a key are queried; a provider that fails three times in a row with an invalid key or no credit is disabled automatically and flagged in the dashboard banner.
 
-![Citation gap analysis](docs/citationgapanalysis.png)
-*Citation gap analysis showing sources that cite competitors but not you*
+   | Provider | Default model | Web search |
+   |---|---|---|
+   | OpenAI | `gpt-5-mini` (changeable in Settings) | Responses API `web_search_preview` tool |
+   | Perplexity | `sonar` | Built in |
+   | Google Gemini | `gemini-3-flash-preview` (changeable in Settings) | Google Search grounding |
+   | Anthropic Claude | `claude-sonnet-4-5` | `web_search` tool, 1,024 output tokens |
 
-![Content Studio with AI-generated recommendations](docs/contentstudio.png)
-*Content Studio generating optimised content based on citation gaps*
+   The same page lists optional web-search providers (Brave, Tavily, Exa, SerpAPI, Firecrawl). They add cited links to a run but write no answer, so they do not count towards the KPIs. A SerpAPI key also enables the research agent's Google signals step.
 
-The dashboard is a static React application hosted on S3 and served via CloudFront, with data fetched from API Gateway endpoints backed by Lambda functions.
+3. **Settings > Brand Tracking.** Pick an industry preset or Custom, add your **First Party Brands** and competitors (**Expand Brand** and **Find Competitors** suggest more with Bedrock), and add your **Owned Domains**. Without first-party brands nothing counts as your mention; without owned domains the citation KPIs stay empty.
 
-## Usage Guide
+4. **Settings > Keywords.** Add the queries your customers ask (for example "best hotels in Barcelona"). Keyword groups work like folders, one per property or product line; a keyword can be in several groups. Tick keywords and use **Add to group**, or filter the list by group. Deleting a group keeps its keywords.
 
-### Step 1: Configure AI Providers
+5. **Settings > Personas** (optional). Each persona is a prompt template with a `{keyword}` placeholder, for example "As a parent travelling with 3 young kids, what are the best options for {keyword}?". A run sends every enabled persona × keyword × provider. Filter the Visibility and Brand Mentions pages by persona to compare.
 
-Go to **Settings > AI Providers**. The system supports four providers:
+6. **Operations > Run Analysis.** Pick a keyword group, tick keywords, or leave everything unticked to run all active keywords, then **Start Analysis**.
 
-| Provider | Model | Description |
-|----------|-------|-------------|
-| OpenAI | GPT-5 mini | Native web search via Responses API |
-| Perplexity | Sonar | Real-time web search |
-| Google Gemini | Flash 2.0 | Google Search grounding |
-| Anthropic Claude | Sonnet 4.5 | Web search tool |
+7. **Operations > Schedule.** Named daily, weekly or monthly schedules in any IANA timezone, scoped to all keywords, keyword groups (resolved when the schedule fires) or a fixed selection, with **Run now**.
 
-You need at least one provider configured with a valid API key. OpenAI is recommended as the primary provider. The system skips providers with placeholder or invalid keys and falls through to the next available one.
+8. **Settings > Alerts** (optional). After every run the KpiAlerts step compares each keyword group's KPIs with its previous complete run and raises alerts for a mention-rate drop, a loss of average position, a competitor entering the top positions, a keyword that stops naming you, and a visibility gain after a content change you recorded. Alerts appear on the Dashboard and can be emailed.
 
-> **Paid API keys are required.** This tool analyses the AI providers you want to track, which means it calls their APIs at scale. Free tiers are designed for single API calls and will hit rate limits immediately under any real analysis workload. A small amount of paid credit per provider ($5-10) is more than enough for regular use.
+## Configuration
 
-For each provider you want to use:
-1. Click **Add Key** and enter your API key
-2. Toggle the switch to enable the provider
-3. Only enabled providers with configured keys will be used during analysis
+### Bedrock models
 
-API keys are stored securely in AWS Secrets Manager.
+Internal model calls use Amazon Bedrock (global inference profiles) and need no external key. `lambda/shared/models.py` maps each task to a tier:
 
-### Step 2: Configure Brand Tracking
+| Tier | Model | Used for |
+|---|---|---|
+| fast | Claude Haiku 4.5 | Brand extraction, crawler page summaries, Content Studio, research agent round evaluation |
+| balanced | Claude Sonnet 4.6 (2,000-token thinking budget) | Ranking analysis (self-reflection), Action Center recommendations, brand expansion and competitor discovery, research agent planning |
+| deep | Claude Opus 4.7 | Not used by default |
 
-Go to **Settings > Brand Tracking**. This is essential for visibility scoring.
+A function's tier can be changed with `BEDROCK_TIER_<ROLE>` or a model pinned with `BEDROCK_MODEL_<ROLE>` (roles: `SUMMARIZATION`, `EXTRACTION`, `GENERATION`, `ANALYSIS`, `RESEARCH_PLANNING`, `RESEARCH_EVALUATION`); the stack sets the tiers in `bedrockTierEnv` in `lib/citation-analysis-stack.ts`.
 
-1. **Select an industry preset** (hotels, airlines, retail, technology, etc.) or choose Custom
-2. **Add First Party Brands** – Your brands. These are tracked as "yours" in visibility calculations.
-3. **Add Competitor Brands** – Brands you want to compare against.
-4. Optionally use **Expand Brands** to discover related brands via AI, or **Find Competitors** to discover competitors automatically.
+### Anthropic model access
 
-Without brand tracking configured, the Visibility dashboard will show 0.0 scores even if data exists.
+Anthropic models on Bedrock need three things: `bedrock:InvokeModel` (granted per Lambda role), the one-time Anthropic use-case form (per account) and an AWS Marketplace subscription per model (per account). The `BedrockModelAccess` construct submits the form and subscribes Haiku 4.5, Sonnet 4.6 and Opus 4.7 at deploy time, so a new account needs no console steps; only its deploy-time function holds `aws-marketplace:Subscribe`. The `BedrockModelsEnabled` output lists the subscribed models.
 
-### Step 3: Add Keywords
+- The account needs a verified payment method and a billing country Anthropic supports. A model that cannot be subscribed is reported as unavailable and the deploy continues. A refused form (already submitted, organization-level grant) is not an error.
+- The form and subscriptions are account state and stay when the stack is deleted.
+- Opus 4.7 is not offered on demand to every account; the default tiers do not use it.
 
-Go to **Settings > Keywords**. Add search queries that represent how customers search for your products:
+If model access is managed elsewhere, skip all of this with `cdk deploy -c skipModelProvisioning=true` (`BedrockModelsEnabled` then reads `none (skipModelProvisioning)`); Bedrock calls fail with `AccessDeniedException` until access exists.
 
-- Use natural language queries: "best hotels in Barcelona", "enterprise project management software"
-- Add multiple keywords to track different aspects of your market
-- Keywords are used when running analysis
+### CDK context
 
-**Keyword groups.** Organise keywords into groups (folders), for example one per hotel or property. A keyword can belong to several groups, so shared queries such as "best hotels in Galicia" can sit under every property they matter to. Create groups at the top of the Keywords tab, filter the list by group, tick keywords and use *Add to group*, or open a keyword's *Groups* menu. Keywords added while a group is selected land in that group. Deleting a group keeps its keywords.
+| Key | Default | Effect |
+|---|---|---|
+| `processKeywordsConcurrency` | `3` | Keywords processed in parallel per run |
+| `skipModelProvisioning` | `false` | Skip the Anthropic form and Marketplace subscriptions |
+| `anthropicCompanyName`, `anthropicCompanyWebsite`, `anthropicIndustry`, `anthropicUseCases` | `Citation Analysis`, `https://aws.amazon.com/bedrock/`, `Technology`, "Summarize content and generate new marketing content." | Details submitted on the Anthropic form |
+| `dev` | off | `-c dev=true` lets `http://localhost:5173` call the API (`cd web && npm run dev`) |
 
-### Step 4: Configure Query Prompts (Personas)
+### Secrets
 
-Go to **Settings > Query Prompts**. Define persona-based search templates that shape how AI engines are queried:
+The stack imports, and never creates, `citation-analysis/{openai,perplexity,gemini,claude,brave,tavily,exa,serpapi,firecrawl}-key`. **Settings > AI Providers** creates or updates a secret when you save a key; `aws secretsmanager create-secret --name citation-analysis/<provider>-key --secret-string <key>` works too.
 
-- Each prompt contains a `{keyword}` placeholder that gets substituted during analysis
-- Example: "As a parent travelling with 3 young kids, {keyword}. What are the best family-friendly options?"
-- Create multiple personas to see how different traveler types get different AI recommendations
-- Enable/disable individual prompts to control which run during analysis
-- Each analysis run executes all enabled prompts × all keywords × all providers
-- After analysis, use the persona filter on the Visibility and Brand Mentions pages to compare how your brand ranks under each persona
+## Security
 
-### Step 5: Run Analysis
+- **Authentication:** Cognito user pool, email sign-in, self sign-up disabled, password policy of 8+ characters with all character classes, 1-hour access and ID tokens and 7-day refresh tokens. MFA is not configured. The API's Cognito authorizer covers every route except `GET /api/health`; user management requires the `Admin` group.
+- **Edge:** CloudFront with HTTPS redirect, security headers (CSP, HSTS, frame DENY) and a WAF web ACL (AWS common and known-bad-inputs rule sets, 1,000 requests per IP rate limit). A regional WAF (rate limit, AWS common, bot control, known bad inputs, Unix and SQLi rule sets, several in count mode) protects the Cognito user pool. API Gateway has no WAF by design; it relies on the authorizer, a 100 rps / 200 burst stage throttle and a 10,000 requests/day usage plan.
+- **CORS:** API error responses and each Lambda allow only the CloudFront origin (read from SSM `/citation-analysis/cors-origin`).
+- **Data:** S3 buckets block public access and require TLS; DynamoDB and S3 are encrypted at rest; API keys live in Secrets Manager; Lambda logs are kept 30 days.
 
-Go to **Operations > Run Analysis**:
+To allow self sign-up, set `selfSignUpEnabled: true` in `lib/constructs/auth.ts` and remove `hideSignUp` from the `Authenticator` in `web/src/App.tsx`.
 
-1. Pick what to run: click a keyword group to run the whole group, or tick individual keywords (grouped by keyword group, with search) — or leave everything unticked to run all active keywords
-2. Click **Start Analysis**
-3. Monitor progress in the execution view
-4. Analysis time scales with the number of keywords (3 processed concurrently by default; tune with the CDK context value `processKeywordsConcurrency`). There is no per-run keyword cap.
-
-For recurring analysis, go to **Operations > Schedule** to set up automated runs with EventBridge Scheduler. Give each schedule a name, pick daily/weekly/monthly timing in any IANA timezone, and choose what it runs: all active keywords, one or more keyword groups (resolved when the schedule fires, so newly added keywords are included), or a fixed selection. Click a schedule to edit it in place, toggle it on/off, or use **Run now** to start an analysis with its scope immediately.
-
-### Step 6: Explore Results
-
-After analysis completes, explore your data:
-
-**Insights Section:**
-- **Dashboard** – Overview stats: total searches, citations, pages crawled
-- **Visibility** – Your visibility score vs competitors, with 30-day trends. Shows share of voice by provider. Filter by persona to see how rankings change for different audience segments. The persona comparison chart plots your brand's average rank across personas side by side with competitors.
-- **Brand Mentions** – Every mention of your brand and competitors with sentiment (positive/negative/neutral) and ranking context. Filter by persona to see which brands appear under each audience segment.
-- **Citations** – All URLs cited by AI models, ranked by frequency. Click any URL to see breakdown by keyword and provider.
-- **Prompt Insights** – How AI models frame their responses to your keywords
-- **Citation Gaps** – Sources that cite competitors but not you. This is your PR/content target list.
-- **Action Center** – Prioritized recommendations based on your data
-
-**Research Section:**
-- **Keyword Research** – Expand your keyword list using AI with live web search. Analyze competitor websites to discover keywords they target. Each job runs in its own Step Functions execution that queries every configured provider in parallel and checkpoints each answer as it arrives; the UI shows per-provider progress, keeps partial results when a provider fails, and lets you retry just the failed providers. Results typically appear within a minute.
-
-**Content Section:**
-- **Content Studio** – Generate content briefs and outlines based on citation gap analysis, with output language selection (English, Spanish, French, or any language). Helps you create content that AI models are more likely to cite. Self-reflection recommendations from the ranking analysis also appear here as actionable content ideas, labelled with the originating persona.
-- **Ranking Analysis (Self-Reflection)** – For any brand and persona combination, ask the AI to explain why it ranked the brand where it did. Returns a structured breakdown: what the brand's content contributed, what competitors showed, what data points were missing, and prioritised content recommendations to improve ranking. Results are cached for 24 hours. This is industry-agnostic and works with whatever industry you have configured.
-
-**Data Section:**
-- **Recent Searches** – Your analysis history with full AI responses
-- **Raw Responses** – Browse raw JSON responses and screenshots stored in S3
-
-## Technical Details
-
-### AI Model Configuration
-
-The default OpenAI model is `gpt-5-mini` (cost-effective, supports web search). To use a different model:
-
-1. Go to **Settings > AI Providers**
-2. The model can be overridden per provider via the ProviderConfig DynamoDB table
-3. Set the `model` field for any provider to change the default (e.g., `gpt-5.2` for higher quality)
-
-Content generation (Content Studio) and ranking self-reflection both use Amazon Bedrock Claude Haiku 4.5. This runs on your AWS account and does not require an external API key. Self-reflection results are cached in a dedicated DynamoDB table with a 24-hour TTL to avoid repeated LLM calls for the same keyword, brand, and persona combination.
-
-#### Anthropic model access (handled automatically)
-
-Anthropic models on Bedrock sit behind three gates, and IAM permission is only one of them:
-
-1. `bedrock:InvokeModel` on the model — granted per Lambda role by the stack.
-2. The Anthropic one-time use-case form — once per AWS account, us-east-1 only.
-3. An AWS Marketplace subscription per model — once per AWS account.
-
-The deployment closes gates 2 and 3 itself (the `BedrockModelAccess` construct), so a brand-new AWS account needs no manual console steps. Without that, the first call in a fresh account fails with `AccessDeniedException ... not authorized to perform the required AWS Marketplace actions (aws-marketplace:ViewSubscriptions, aws-marketplace:Subscribe)`, because Bedrock otherwise tries to create the subscription just-in-time using the calling Lambda role's permissions.
-
-Notes for fresh accounts:
-
-- The account needs a verified payment method and a billing country Anthropic supports, or the Marketplace agreement cannot be created. The deployment reports such a model as unavailable and continues rather than failing.
-- Subscriptions and the form submission are account state: they are not removed when the stack is deleted.
-- The company details submitted on the form default to `Citation Analysis` / `Technology` / "Summarize content and generate new marketing content." and can be overridden at deploy time: `cdk deploy -c anthropicCompanyName="Acme" -c anthropicCompanyWebsite="https://acme.example" -c anthropicIndustry="Retail" -c anthropicUseCases="..."`.
-- `global.anthropic.claude-opus-4-7` (the optional `deep` tier) is not offered on demand to every account. The default tiers only use Haiku 4.5 and Sonnet 4.6, so this affects you only if you set `BEDROCK_TIER_*=deep`.
-- An account can refuse the use-case form — a previous submission, an organization-level grant, an AWS-internal account — and that is not treated as an error: the deployment carries on and the Marketplace agreements follow.
-
-If your account's Anthropic access is managed elsewhere, you can skip this provisioning entirely:
-
-```bash
-cdk deploy -c skipModelProvisioning=true
-```
-
-That drops the use-case submission, the per-model agreements and the deploy-time role holding `aws-marketplace:Subscribe`. Model access then has to exist already, or Bedrock calls fail with `AccessDeniedException`. The `BedrockModelsEnabled` stack output reports `none (skipModelProvisioning)` so it is clear nothing was provisioned.
-
-### Retry Logic
-- All API clients implement exponential backoff (5 retries, ~35s max wait)
-- Handles rate limits (429), server errors (5xx), timeouts, and connection errors
-- Step Functions retry on Lambda-level failures only
-
-### Concurrency
-- Keyword processing: 3 concurrent by default (`cdk deploy -c processKeywordsConcurrency=5` to raise it); runs are not capped by keyword count
-- Citation crawling: 3 concurrent per keyword
-
-### Security
-
-#### User Registration
-
-By default, self-registration is **disabled** — only administrators can create user accounts via the Cognito console or AWS CLI. This is the recommended setting for production deployments.
-
-To allow users to sign up themselves, change `selfSignUpEnabled` in `lib/constructs/auth.ts`:
-
-```typescript
-const userPool = new UserPool(this, "userPool", {
-  selfSignUpEnabled: true,  // set to false for admin-only invites
-  ...
-});
-```
-
-Then redeploy with `cdk deploy`. When self-registration is disabled, invite users via:
-
-```bash
-aws cognito-idp admin-create-user \
-  --user-pool-id <your-pool-id> \
-  --username user@example.com \
-  --user-attributes Name=email,Value=user@example.com \
-  --desired-delivery-mediums EMAIL
-```
-
-#### Other Security Features
-
-- API keys encrypted in AWS Secrets Manager
-- DynamoDB encryption at rest
-- IAM least-privilege roles
-- CloudWatch audit trails
-
-#### Federated Identity with Azure AD (Entra ID)
-
-To allow users to sign in with their corporate Azure AD credentials instead of Cognito-managed passwords:
-
-1. **Register an application in Azure AD**: Go to Azure Portal > App registrations > New registration. Set the redirect URI to `https://<your-cognito-domain>.auth.<region>.amazoncognito.com/oauth2/idpresponse`.
-
-2. **Note the Azure AD details**: Application (client) ID, Directory (tenant) ID, and create a client secret under Certificates & secrets.
-
-3. **Add Azure AD as a Cognito identity provider**: In the AWS Console, go to Cognito > User Pools > your pool > Sign-in experience > Add identity provider > OIDC. Configure:
-   - Provider name: `AzureAD`
-   - Client ID: your Azure application client ID
-   - Client secret: your Azure client secret
-   - Issuer URL: `https://login.microsoftonline.com/<tenant-id>/v2.0`
-   - Scopes: `openid email profile`
-   - Map attributes: `email` → `email`, `sub` → `username`
-
-4. **Configure the Cognito hosted UI domain**: Under App integration > Domain, set up a Cognito domain or custom domain.
-
-5. **Update the app client**: Under App integration > App clients, enable the AzureAD identity provider and configure the allowed OAuth flows (Authorization code grant) and scopes (openid, email, profile).
-
-6. **Update the frontend**: In `lib/constructs/auth.ts`, add the identity provider to the user pool client's `supportedIdentityProviders` and update the OAuth callback URLs if needed.
-
-For detailed steps, see the [AWS documentation on adding OIDC identity providers to Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-oidc-idp.html).
+**Federated sign-in (for example Microsoft Entra ID)** is not wired up: the stack defines no Cognito domain or identity provider, and the dashboard signs in with the Amplify `Authenticator` (email and password). Adding it means a user pool domain, an OIDC identity provider (issuer `https://login.microsoftonline.com/<tenant-id>/v2.0`, scopes `openid email profile`) and `supportedIdentityProviders` with the authorization-code flow on the client in `lib/constructs/auth.ts` (do this in CDK rather than the console, or the next deploy overwrites it; keep the client secret out of source control), plus the OAuth settings in `Amplify.configure` in `web/src/App.tsx` and a sign-in-with-redirect button. See [adding OIDC identity providers to a user pool](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-oidc-idp.html).
 
 ## Cost
 
-> Pricing in this section was verified from each vendor's primary source on 26th May 2026. Pricing changes regularly. Re-verify against the linked sources before sizing a workload. All figures use US East (N. Virginia) rates.
+> Unit prices below were taken from each vendor's pricing page on 26 May 2026 (AWS WAF on 29 September 2026), at US East (N. Virginia) rates. Prices change; re-check the linked pages before sizing a workload.
 
-Running this system costs you on two fronts: your AWS bill and your accounts with each external AI provider. Bedrock charges appear on the AWS bill rather than as a separate provider invoice. For most workloads the AI provider charges dominate. Because the system does no batching or prompt caching by default, AI cost scales linearly with `keywords × providers × personas × runs`.
+You pay AWS for the infrastructure and Bedrock, and each external AI provider on your account with them. AI charges usually dominate. With no batching or prompt caching, AI cost scales with `keywords × providers × personas × runs`.
 
 ### AWS infrastructure
 
-A representative workload of 100 keywords analysed weekly across four LLM providers and three personas produces about 4,800 search invocations per month. AWS infrastructure for that workload typically runs between $24 and $65 per month. The crawler is the biggest variable: it uses Bedrock AgentCore browser sessions for every cited URL, and the bill scales with how many distinct citations your keywords return.
+For 100 keywords analysed weekly across four providers and three personas (about 4,800 provider calls a month), AWS typically costs **$38–80 per month**, mostly WAF and the crawler.
 
-| Service | Monthly cost | Notes |
+| Service | Monthly | Notes |
 |---|---|---|
-| [Lambda](https://aws.amazon.com/lambda/pricing/) | $1-3 | $0.20/M requests, $0.0000166667/GB-s; mostly within the 1M request and 400,000 GB-s free tier |
-| [DynamoDB on-demand](https://aws.amazon.com/dynamodb/pricing/on-demand/) | $2-10 | $0.625/M writes, $0.125/M reads, $0.25/GB storage above the 25 GB free tier; 11 tables |
-| [API Gateway REST](https://aws.amazon.com/api-gateway/pricing/) | $1-5 | $3.50/M calls; the dashboard polls every 30 seconds |
-| [Step Functions](https://aws.amazon.com/step-functions/pricing/) | <$1 | $0.000025/state transition, 4,000 free per month |
-| [S3](https://aws.amazon.com/s3/pricing/) | $1-5 | Raw responses, screenshots, access logs; lifecycle expires the latter two at 90 days |
-| [Secrets Manager](https://aws.amazon.com/secrets-manager/pricing/) | $4 | ~9 secrets at $0.40 each plus negligible API call charges |
-| [Cognito](https://aws.amazon.com/cognito/pricing/) | $0 | First 10,000 monthly active users are free on the Essentials tier |
-| [WAF](https://aws.amazon.com/waf/pricing/) | $10-15 | $5/web ACL plus $1/rule plus $0.60/M requests |
-| [CloudFront](https://aws.amazon.com/cloudfront/pricing/) | $0-2 | Pay-as-you-go, dashboard traffic is small |
-| [Bedrock AgentCore Browser](https://aws.amazon.com/bedrock/agentcore/pricing/) | $5-20 | Browser sessions for cited URLs; the variable AWS cost driver |
+| [WAF](https://aws.amazon.com/waf/pricing/) | $29–31 | Two web ACLs at $5 each, $1 per rule or managed rule group (3 + 6), $10 Bot Control subscription on the user pool ACL, $0.60/M requests |
+| [Bedrock AgentCore Browser](https://aws.amazon.com/bedrock/agentcore/pricing/) | $5–20 | One browser session per newly cited URL; the main variable |
+| [DynamoDB on-demand](https://aws.amazon.com/dynamodb/pricing/on-demand/) | $2–10 | 19 tables; $0.625/M writes, $0.125/M reads, $0.25/GB above 25 GB |
+| [Lambda](https://aws.amazon.com/lambda/pricing/) | $1–3 | Mostly within the free tier |
+| [API Gateway REST](https://aws.amazon.com/api-gateway/pricing/) | $1–5 | $3.50/M calls |
+| [S3](https://aws.amazon.com/s3/pricing/) | $1–5 | Raw responses, screenshots, access logs |
+| [Secrets Manager](https://aws.amazon.com/secrets-manager/pricing/) | $2–4 | $0.40 per stored provider key |
+| [CloudFront](https://aws.amazon.com/cloudfront/pricing/) | $0–2 | Small dashboard traffic |
+| [Step Functions](https://aws.amazon.com/step-functions/pricing/) | <$1 | $0.000025 per state transition |
+| [Cognito](https://aws.amazon.com/cognito/pricing/) | $0 | First 10,000 MAUs free on Essentials |
 
 ### AI provider rates
 
-The codebase ships with specific model strings configured. The rates below were verified from each vendor's primary pricing page.
-
-The external providers, billed on your account with each provider, are:
-
-| Provider | Configured model | Input | Output | Source |
+| Provider | Model | Input | Output | Source |
 |---|---|---|---|---|
-| OpenAI | `gpt-5-mini` | $0.25/M | $2.00/M | [platform.openai.com/docs/models/gpt-5-mini](https://platform.openai.com/docs/models/gpt-5-mini) |
-| Anthropic | `claude-sonnet-4-5` | $3.00/M | $15.00/M | [docs.anthropic.com](https://docs.anthropic.com/en/docs/about-claude/pricing) |
-| Google Gemini | `gemini-3-flash-preview` | $0.50/M | $3.00/M | [ai.google.dev pricing](https://ai.google.dev/gemini-api/docs/pricing) |
-| Perplexity | `sonar` | $1.00/M | $1.00/M | [docs.perplexity.ai pricing](https://docs.perplexity.ai/getting-started/pricing) |
+| OpenAI | `gpt-5-mini` | $0.25/M | $2.00/M | [OpenAI](https://platform.openai.com/docs/models/gpt-5-mini) |
+| Anthropic | `claude-sonnet-4-5` | $3.00/M | $15.00/M | [Anthropic](https://docs.anthropic.com/en/docs/about-claude/pricing) |
+| Google Gemini | `gemini-3-flash-preview` | $0.50/M | $3.00/M | [Google](https://ai.google.dev/gemini-api/docs/pricing) |
+| Perplexity | `sonar` | $1.00/M | $1.00/M | [Perplexity](https://docs.perplexity.ai/getting-started/pricing) |
 
-Perplexity also charges a per-request search-context fee on top of token costs. The fee is roughly $0.005 per `web_search` invocation in low-context mode and compounds with the linear scaling above.
+Perplexity also charges about $0.005 per request for search context (low-context mode).
 
-The Bedrock models the system uses internally, billed on your AWS account, are:
+Bedrock, on your AWS bill:
 
-| Use | Model | Input | Output |
+| Model | Input | Output | Volume driver |
 |---|---|---|---|
-| Brand extraction (every analysis run), Content Studio, ranking self-reflection | `claude-haiku-4-5` | $1.00/M | $5.00/M |
-| Persona ranking analysis (on demand) | `claude-sonnet-4-6` | $3.00/M | $15.00/M |
-
-Self-reflection results are cached for 24 hours per `(keyword, brand, persona)` tuple, so repeat queries do not re-bill. Brand extraction runs on every search response, so its cost scales with the total number of LLM responses generated rather than with keywords directly.
+| Claude Haiku 4.5 | $1.00/M | $5.00/M | Brand extraction runs on every answer; crawler summaries on every new page |
+| Claude Sonnet 4.6 | $3.00/M | $15.00/M | On demand: ranking analyses (cached 24 h per keyword, brand and persona), Action Center, brand discovery, research agent |
 
 ### Worked example
 
-Take the same workload again: 100 keywords, four LLM providers enabled, three personas, weekly runs. That comes to `100 × 4 × 3 × 4 = 4,800` provider calls per month. Assume roughly 100 input tokens per call (a persona-templated keyword) and 1,500 output tokens per call. The Claude client caps output at 1,024 tokens; the others usually return similar lengths in practice. Each provider therefore sees 1,200 calls, 120,000 input tokens, and 1.8 million output tokens per month.
+The workload above is `100 × 4 × 3 × 4 = 4,800` calls a month, 1,200 per provider. At about 100 input and 1,500 output tokens per call (Claude is capped at 1,024), each provider sees 120,000 input and 1.8 million output tokens:
 
-| Provider | Monthly cost |
+| Line | Monthly |
 |---|---|
-| OpenAI gpt-5-mini | 120k × $0.25/M + 1.8M × $2.00/M = **$3.63** |
-| Anthropic Sonnet 4.5 | 120k × $3.00/M + 1.8M × $15.00/M = **$27.36** |
-| Gemini 3 Flash Preview | 120k × $0.50/M + 1.8M × $3.00/M = **$5.46** |
-| Perplexity Sonar | 120k × $1.00/M + 1.8M × $1.00/M + 1,200 × $0.005 = **$7.92** |
-| **External providers subtotal** | **~$44** |
+| OpenAI gpt-5-mini: 120k × $0.25/M + 1.8M × $2.00/M | $3.63 |
+| Anthropic Sonnet 4.5: 120k × $3.00/M + 1.8M × $15.00/M | $27.36 |
+| Gemini 3 Flash Preview: 120k × $0.50/M + 1.8M × $3.00/M | $5.46 |
+| Perplexity Sonar: 120k × $1.00/M + 1.8M × $1.00/M + 1,200 × $0.005 | $7.92 |
+| Bedrock Haiku brand extraction: 4,800 answers × ~2,000 input and ~300 output tokens | ~$17 |
+| **AI total** (excluding crawler summaries and on-demand Sonnet calls) | **~$61** |
 
-On top of that, brand extraction runs Bedrock Haiku 4.5 over all 4,800 responses. Each response averages around 2,000 input tokens (the LLM response being analysed) and 300 output tokens (the structured brand list), so Haiku processes roughly 9.6 million input tokens and 1.44 million output tokens per month. At $1 per million input and $5 per million output, that comes to about $17.
-
-Total AI charges for this scenario therefore land at approximately $61 per month. Anthropic Sonnet alone accounts for $27 of that. Disabling Anthropic cuts the total by $27. Replacing Sonnet with Haiku across the board saves about $18. Running with only Gemini and Perplexity, plus the Bedrock Haiku brand-extraction line, drops the AI cost to around $30.
-
-Combined with the AWS infrastructure cost above, the total monthly cost for this workload sits between roughly $85 and $126.
+With the infrastructure above, this workload costs roughly $100–140 a month. Anthropic accounts for $27 of the AI total; running only Gemini and Perplexity brings AI cost to about $30.
 
 ### Reducing cost
 
-The largest lever is picking cheaper models. Sonnet's output is three times more expensive than Haiku's and five times more than Gemini Flash. You can override the default model per provider in the ProviderConfig DynamoDB table.
-
-Disabling providers and personas you do not need has a multiplicative effect, because the system queries every enabled provider for every persona for every keyword. Switching from a daily schedule to a weekly one cuts the bill to roughly a seventh of its previous size for similar insight quality.
-
-The crawler is the largest single AWS line item once cited URLs accumulate. It runs at concurrency 3 per keyword by default. Lowering that in the Step Functions state machine cuts costs at the expense of slower analysis runs.
-
-DynamoDB tables like `SearchResults` and `CrawledContent` retain data forever by default. Adding a TTL attribute drops storage costs if you do not need full history.
-
-To track actual spend, [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) can filter by `aws:cloudformation:stack-name = CitationAnalysisStack` once you activate the cost allocation tag in the Cost Allocation Tags console.
+- Disable providers and personas you do not need: each multiplies the call count.
+- Run weekly rather than daily for about a seventh of the cost.
+- Pick a cheaper OpenAI or Gemini model in **Settings > AI Providers** (the Perplexity and Claude models are fixed).
+- Lower the crawl concurrency (`CrawlCitations`, `maxConcurrency: 3` in `lib/citation-analysis-stack.ts`) to spread AgentCore usage.
+- `SearchResults`, `Citations` and `CrawledContent` have no TTL; add one if you do not need full history.
+- Track spend in [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) by the `aws:cloudformation:stack-name = CitationAnalysisStack` cost allocation tag once it is activated.
 
 ## Development
 
 ```bash
-npm run build          # Build TypeScript
-npm run watch          # Watch mode
-npm run synth          # Synthesize CloudFormation
-npm run deploy         # Full deployment (recommended)
-npm run deploy:full    # Deploy + clear CloudFront cache
-npm run clear-cache    # Clear CloudFront cache only
+npm run build          # tsc (CDK app)
+npm run watch          # tsc -w
+npm run lint:fix       # ESLint --fix
+cd web && npm run dev  # Vite dev server on :5173 (deploy with -c dev=true)
 ```
+
+UI conventions are in [docs/design-system.md](docs/design-system.md); versioning and the changelog in [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog).
 
 ### Validation
 
-`npm run validate` from the repo root runs every quality gate for the CDK app,
-the web dashboard, the Lambda code and their tests, and stops at the first
-failure:
+`npm run validate` runs every quality gate and stops at the first failure:
+
+| Step | Command | Checks |
+|---|---|---|
+| 1 | `npm run lint` | ESLint over the CDK app and `web/src` |
+| 2 | `npm run build` | `tsc` for the CDK app |
+| 3 | `npm run test` | Vitest (CDK stack tests) |
+| 4–5 | `npm run duplication`, `duplication:tests` | jscpd over `bin`, `lib`, `web/src`: production code, then specs and fixtures |
+| 6–7 | `npm run deadcode`, `deadcode:prod` | knip, then `knip --production --strict` |
+| 8 | `npm run contracts` | `scripts/check-contracts.py`: every env var CDK sets is read by a Lambda and vice versa; every member in `web/src/types` is read by dashboard code (allowlist entries need a reason) |
+| 9 | `npm run validate:web` | In `web/`: `tsc --noEmit`, Vitest, knip, `knip --production --strict` |
+| 10 | `npm run validate:python` | `scripts/validate-python.sh`: ruff, pyright, vulture (production, then whole tree), jscpd (code, then tests), pytest |
+
+The Python gate needs the dev toolchain in a repo-local venv and the built shared layer, which the tests import runtime libraries from:
 
 ```bash
-npm run validate           # lint -> build -> tests -> duplication -> dead code -> web -> python
+python3 -m venv .venv && .venv/bin/pip install -r lambda/requirements-dev.txt
+bash lambda/layer/build-layer.sh
 ```
 
-The individual gates:
+Rules the gates enforce:
+
+- **Complexity** is a hard stop: cyclomatic complexity 12 in both languages (ruff `C901`, ESLint `complexity`), and ruff's `PLR0911`/`PLR0912`/`PLR0915` at 11 returns, 16 branches and 53 statements. ESLint also caps files at 400 lines and nesting at depth 3. Split the code; never raise a limit or add `# noqa`.
+- **Python lint** also runs flake8-bandit (`S`), `BLE001`, tryceratops and flake8-pytest-style over `lambda/` and `scripts/`; each per-file exemption in `pyproject.toml` states its reason.
+- **Types:** pyright in `standard` mode over `lambda/` and `scripts/`, with imports resolved from `lambda/` and the built shared layer. Fix findings; never suppress them inline.
+- **Duplication:** jscpd with `minTokens: 40` and threshold `0` in all four configs (`.jscpd.json`, `.jscpd.tests.json`, `.jscpd.python.json`, `.jscpd.python-tests.json`). Share test builders instead: `web/src/test/`, the `*-fixtures.ts` next to the module, and `lambda/testing/` (`lambda/conftest.py` puts `lambda/` and the built layer on `sys.path`).
+- **Dead code:** knip and vulture each run twice, because a symbol only its own tests use counts as dead. The production pass excludes tests (knip's `!` patterns in `knip.json` and `web/knip.json`; vulture without `test_*.py`, `conftest.py` and `lambda/testing/`), the second pass covers the whole tree. Vulture's floor is 60% confidence, the level it assigns unused functions, classes and attributes.
+- **Custom ESLint rules** in `.eslint-rules/`: no generic names (utils, helpers, manager, data …) in files and exports, and no helper functions defined inside test files.
+
+Mutation testing is not part of `validate` (one module takes minutes). Run it on the modules a change touches and resolve every surviving mutant with a test, a deletion, or a `// Stryker disable` comment explaining why it is equivalent:
 
 ```bash
-npm run lint               # ESLint over the CDK app and web/src
-npm run build              # tsc (CDK app)
-npm run test               # Vitest (CDK stack tests)
-npm run duplication        # jscpd over bin, lib and web/src (production code)
-npm run duplication:tests  # jscpd over *.spec.ts(x) and *-fixtures.ts(x)
-npm run deadcode           # knip (CDK app, default mode)
-npm run deadcode:prod      # knip --production (CDK app, spec-only usage does not count)
-npm run contracts          # CDK env vars <-> Lambda reads; web/src/types members <-> dashboard reads
-npm run validate:web       # web/: type-check -> Vitest -> knip -> knip --production
-npm run validate:python    # lambda/: ruff -> pyright -> vulture (production, then whole tree) -> jscpd (code, tests) -> pytest
-
-# Not in validate — targeted, minutes per module, run on what a PR touches:
 npm run mutation:python -- lambda/shared/scope_params.py lambda/shared/test_scope_params.py
 (cd web && npm run mutation -- --mutate src/hooks/useAnalysisEndpoint.ts)
 ```
-
-Duplication is checked by [jscpd](https://github.com/kucherenko/jscpd) with
-`minTokens: 40` and four configs, all at threshold `0`: `.jscpd.json` (`bin/`,
-`lib/`, `web/src/`), `.jscpd.tests.json` (spec and fixture files),
-`.jscpd.python.json` (`lambda/`, `scripts/`) and `.jscpd.python-tests.json`
-(`test_*.py`, `conftest.py`). The codebase carries no clones, and a new 40-token
-duplicate fails the run. Fix the duplication rather than raising the threshold:
-shared test builders live in `web/src/test/` (`infrastructureMock.ts`,
-`fetchResponses.ts`), in the `*-fixtures.ts` file next to the module under
-test, and for Python in `lambda/testing/` (handler module loader, DynamoDB
-stubs, API Gateway events, env fixtures) with `lambda/conftest.py` putting
-`lambda/` and the built layer on `sys.path` for every test.
-
-The Python gate needs the toolchain from `lambda/requirements-dev.txt` — put
-it in a repo-local `.venv` (`python3 -m venv .venv && .venv/bin/pip install -r
-lambda/requirements-dev.txt`) and the scripts pick it up — plus the built
-shared layer (`bash lambda/layer/build-layer.sh`) for the runtime libraries
-the tests import.
-
-Lambda code has complexity ceilings: ruff's `C901`, `PLR0911`, `PLR0912` and
-`PLR0915` fail a function above 12 cyclomatic complexity, 11 returns, 16
-branches or 53 statements; `eslint.config.mjs` holds the dashboard and the CDK
-app to the same cyclomatic 12. They are hard stops — lower them as hotspots
-are broken up, and split a function rather than raise them or add a `# noqa`.
-Beyond style, ruff runs flake8-bandit (`S`), `BLE001`, tryceratops and
-flake8-pytest-style over `lambda/` and `scripts/`; the per-file exemptions in
-`pyproject.toml` each carry the reason (tests may `assert`; four verified
-bandit false positives).
-
-Python types are checked by [pyright](https://microsoft.github.io/pyright)
-(`scripts/lint-python.sh --types`, configured in `pyproject.toml`
-`[tool.pyright]`; `boto3-stubs` types the AWS clients) over the whole `lambda/`
-tree and `scripts/` in `standard` mode. Imports resolve from `lambda/` and the
-built shared layer only; the crawler layer bundles an untyped `boto3` that
-would shadow the stubs, so its client libraries (`playwright`,
-`bedrock-agentcore`) come from the dev venv at the same pins. Fix findings as
-types or annotations, never with inline suppressions.
-
-Code that runs but whose result nothing consumes is a class none of the above
-can see, so two more checks cover it. `npm run contracts`
-(`scripts/check-contracts.py`) compares what one layer produces with what the
-next consumes across the seams: every environment variable the CDK stack sets
-must be read by a Lambda, every variable a Lambda requires must be set by CDK,
-and every member declared in `web/src/types` must be read by non-test
-dashboard code — a field the backend emits and nothing renders is a payload
-nobody looks at. Allowlist entries need a reason. Mutation testing is the
-behavioural backstop: `npm run mutation:python -- <module> <tests>` (mutmut)
-and, in `web/`, `npm run mutation -- --mutate <file>` (Stryker) change one
-statement at a time and report the mutants no test kills; each survivor is
-either a missing test or a statement with no observable effect, and must end
-up as one or the other — a killing test, a deletion, or a `// Stryker disable`
-comment with the reason it is equivalent. It is deliberately not part of
-`validate`: one module against its tests takes minutes, the tree takes hours.
-
-Dead code is checked by [knip](https://knip.dev) for TypeScript and by
-[vulture](https://github.com/jendrikseipp/vulture) for Python, and both tools
-run twice inside `npm run validate` because a test reference otherwise counts
-as a use — a production symbol that only its own tests still call is dead code
-by this project's policy, and a single scan that includes the tests cannot
-see it.
-
-- knip: `npm run deadcode` (default mode: everything, including spec and
-  fixture files) and `npm run deadcode:prod` (`knip --production`: only the
-  `!`-suffixed production patterns in `knip.json` / `web/knip.json`, so a
-  function whose only importer is a spec is reported), each for the CDK app and
-  the dashboard. `ts-node` sits in the root `ignoreDependencies` because its
-  only caller is the `app` command in `cdk.json`, which knip does not read.
-- vulture: `scripts/lint-python.sh --dead-code` scans production code with
-  `test_*.py`, `conftest.py` and `lambda/testing/` excluded, then
-  `--dead-code-tests` scans the whole tree and, given a clean first pass,
-  reports only test-support code nothing exercises. Shared settings live in
-  `pyproject.toml` `[tool.vulture]` at a 60% confidence floor — the tier
-  vulture assigns every unused function, class and attribute; a higher floor
-  can only ever report unused imports and unreachable code.
 
 ## License
 

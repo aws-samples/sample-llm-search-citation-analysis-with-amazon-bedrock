@@ -454,8 +454,8 @@ verify_deployment() {
             fi
             
             # Secrets are NOT CDK-created — the stack imports them with
-            # `fromSecretNameV2` and the operator provisions them via
-            # scripts/setup-secrets.sh. A fresh deployment legitimately has
+            # `fromSecretNameV2` and an admin creates them from the dashboard
+            # (Settings > AI Providers). A fresh deployment legitimately has
             # none, so these stay warnings.
             print_info "Checking provider API key secrets (operator-provisioned)..."
             local secrets=("openai-key" "perplexity-key" "gemini-key" "claude-key")
@@ -486,7 +486,7 @@ verify_deployment() {
     
     if [ "$unprovisioned_secrets" -gt 0 ]; then
         print_warning "$unprovisioned_secrets provider API key secret(s) are not provisioned yet."
-        print_warning "Run scripts/setup-secrets.sh, or add keys via Settings > AI Providers."
+        print_warning "Add the keys in the dashboard under Settings > AI Providers (admin users)."
     fi
     
     print_success "Deployment verification complete!"
@@ -545,7 +545,7 @@ display_next_steps() {
     echo "2. Create a user account via AWS CLI:"
     echo "   aws cognito-idp admin-create-user --user-pool-id <pool-id> --username user@example.com --user-attributes Name=email,Value=user@example.com --desired-delivery-mediums EMAIL"
     echo ""
-    echo "3. Log in and go to Settings > Providers to add your API keys"
+    echo "3. Log in and go to Settings > AI Providers to add your API keys"
     echo "   (OpenAI, Perplexity, Gemini, Claude)"
     echo ""
     echo "4. Add keywords in the Keywords section"

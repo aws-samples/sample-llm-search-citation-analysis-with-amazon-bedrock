@@ -2,136 +2,88 @@
 
 ## Reporting Security Issues
 
-If you discover a potential security issue in this project, please notify AWS Security via our [vulnerability reporting page](http://aws.amazon.com/security/vulnerability-reporting/). 
+If you discover a potential security issue in this project, please notify AWS Security via our [vulnerability reporting page](http://aws.amazon.com/security/vulnerability-reporting/).
 
 **Please do not create a public GitHub issue.**
 
-## Known Dependencies with Advisories
+## Security controls
 
-This project uses the following dependencies with known advisories. We've evaluated these and determined they do not pose a risk in our usage:
+What the deployed stack does, as defined in `lib/citation-analysis-stack.ts`, `lib/constructs/auth.ts` and `lambda/shared/`.
 
-### Development Dependencies (Not in Production)
+### Authentication and authorization (Amazon Cognito)
 
-- **esbuild** (<=0.24.2) - Moderate severity
-  - Advisory: GHSA-67mh-4wv8-2f99
-  - Impact: Development server vulnerability
-  - Mitigation: Only used during local development, not in production builds
-  - Status: Monitoring for updates
+- **Admin-invited users only.** Self sign-up is disabled (`selfSignUpEnabled: false`) and the dashboard's Amplify `Authenticator` hides the sign-up form (`hideSignUp`). Users sign in with their email address, which is verified; new users receive an invitation email with a temporary password.
+- **Password policy:** at least 8 characters with lowercase, uppercase, digits and symbols. Account recovery is by email only.
+- **Tokens:** access and ID tokens last 1 hour, refresh tokens 7 days, so disabling a user takes effect within an hour. The app client has no secret. Amplify keeps the tokens in its default browser storage (`localStorage`) and sends the ID token in the `Authorization` header.
+- **Not configured:** MFA, and Cognito threat protection (the user pool is on the Essentials feature plan).
+- **Identity pool:** unauthenticated identities are disabled, and the unauthenticated role explicitly denies every action.
+- **API authorizer:** a Cognito user pool authorizer protects every API Gateway method except `GET /api/health` and the CORS preflight (`OPTIONS`) methods.
+- **Roles:** two groups, `Admin` and `Users`. Admin-only operations are enforced in the Lambda handlers by `@require_group(ADMIN_GROUP)` (`lambda/shared/auth.py`), which checks the `cognito:groups` claim: user management, starting analysis runs, provider settings and API keys, changes to the brand configuration, personas and schedules, and alert settings, acknowledgements and content-change markers. Every other route (including keyword and keyword-group edits, keyword research and Content Studio) is open to any signed-in user.
 
-- **vite** (0.11.0 - 6.1.6) - Depends on vulnerable esbuild
-  - Impact: Development server vulnerability
-  - Mitigation: Only used during local development, not in production builds
-  - Status: Monitoring for updates
+### Network exposure
 
-### Production Dependencies
+The only inbound endpoints are the CloudFront distribution (dashboard), the API Gateway REST API (`prod` stage) and the Cognito user pool endpoints. There is no VPC, no Lambda function URL and no public S3 bucket. The crawler's Bedrock AgentCore browser uses the public network mode to reach cited pages (outbound only).
 
-All production dependencies have been reviewed and updated to address known vulnerabilities. The project uses `xlsx-js-style` for Excel export functionality, which is actively maintained and does not have the vulnerabilities present in the original `xlsx` package.
+- **CloudFront:** redirects HTTP to HTTPS and reads the web bucket through Origin Access Control. It uses the default `*.cloudfront.net` certificate (no custom domain). The response headers policy sets:
+  - `Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.amazonaws.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none';`
+  - `Strict-Transport-Security` for one year, including subdomains
+  - `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-XSS-Protection: 1; mode=block`
+- **API Gateway:** the stage throttle is 100 requests per second with a burst of 200. A usage plan with the same throttle and a 10,000 requests/day quota is attached to the stage; quotas are counted per API key and no method requires one. Most API Lambdas are capped at the 29-second integration timeout.
+- **CORS:** API Gateway answers preflight requests for any origin, without credentials. Lambda responses allow only the CloudFront origin, read from the SSM parameter `/citation-analysis/cors-origin` (plus `localhost:3000` and `localhost:5173` when deployed with `-c dev=true`). If the parameter cannot be read, the response carries an empty `Access-Control-Allow-Origin`. Gateway error responses (401, 403, 504, 5xx) also name only the CloudFront origin (`*` in dev mode).
 
-## Security Best Practices
+### AWS WAF
 
-This project implements comprehensive security measures:
+The stack declares two web ACLs. API Gateway has no web ACL; it relies on the authorizer, the stage throttle and validation in the handlers.
 
-### Authentication & Authorization
-1. **Amazon Cognito User Pool** - Email-based authentication with email verification
-2. **Strong Password Policy** - 8+ characters, mixed case, digits, symbols required
-3. **Cognito Authorizer** - JWT validation on all API Gateway endpoints
-4. **User Groups** - Admin and Users groups for role-based access control
-5. **Token Security** - 8-hour token validity with secure session management
+| Web ACL | Attached to | Rules |
+|---|---|---|
+| `CitationAnalysis-CloudFront-WAF` (scope `CLOUDFRONT`, us-east-1) | CloudFront distribution | AWS Common rule set, AWS Known Bad Inputs, rate limit 1,000 requests per IP per 5 minutes (block) |
+| Regional web ACL (`lib/constructs/auth.ts`) | Cognito user pool | Rate limit 3,000 requests per IP per 5 minutes (block); AWS Common and Bot Control rule sets in count mode; Known Bad Inputs (block); Unix (`UNIXShellCommandsVariables_BODY` counted) and SQLi (`SQLi_BODY` counted) rule sets |
 
-### Web Application Firewall (WAF)
-6. **API Gateway WAF** - Regional WAF created but not currently associated with API Gateway due to CloudFormation timing constraints. API is still protected by Cognito authorization, input validation, CORS restrictions, and API Gateway throttling. Uncomment the association in `citation-analysis-stack.ts` to enable.
-7. **CloudFront WAF** - CloudFront-scoped WAF (us-east-1) with managed rules
-8. **Cognito User Pool WAF** - Additional WAF protection for authentication endpoints
-9. **Rate Limiting** - 1000-3000 requests per 5 minutes per IP across all WAFs
+The CloudFront web ACL is created by a custom resource (`CitationAnalysis-CloudFrontWafHandler`, boto3 `wafv2`) because CloudFront ACLs must live in us-east-1. The handler only recreates the ACL when its name changes, so editing its rules in code does not update an ACL that already exists. Neither ACL has WAF logging; both publish CloudWatch metrics and sampled requests.
 
-### XSS & Injection Protection
-10. **DOMPurify Sanitization** - All HTML content sanitized before rendering
-11. **Content Security Policy** - Strict CSP headers via CloudFront response policy
-12. **Input Validation** - Comprehensive validation framework with length limits
-13. **Parameterized Queries** - DynamoDB queries use parameterization (no injection risk)
-14. **Sort Field Sanitization** - Only alphanumeric and underscore allowed
+### Data protection
 
-### Security Headers
-15. **X-Frame-Options: DENY** - Clickjacking protection
-16. **X-Content-Type-Options: nosniff** - MIME sniffing protection
-17. **Referrer-Policy** - Strict origin when cross-origin
-18. **Strict-Transport-Security** - HSTS with 1-year max-age
-19. **X-XSS-Protection** - Browser XSS filter enabled
+- **DynamoDB:** every table uses AWS-managed encryption, point-in-time recovery and a `RETAIN` removal policy.
+- **S3:** every bucket (keywords, screenshots, raw responses, web, access logs) uses S3-managed encryption, blocks all public access, rejects non-TLS requests and is retained on stack deletion. Versioning is off. Server access logs go to `citation-analysis-access-logs-<account>` and expire after 90 days. Screenshots move to Infrequent Access after 90 days and are not deleted.
+- **Messaging:** the KPI alerts SNS topic is encrypted with the AWS-managed key `alias/aws/sns`, and the Content Studio SQS queue uses SQS-managed encryption and requires TLS.
+- **Logging:** application Lambda log groups keep 30 days. API Gateway publishes per-method CloudWatch metrics but writes no access or execution logs, and data tracing (full request and response bodies) is deliberately off.
 
-### Network Security
-20. **HTTPS Enforcement** - CloudFront redirects HTTP to HTTPS
-21. **CORS Restrictions** - Origin validation in Lambda functions
-22. **API Gateway Throttling** - 100 req/sec, 200 burst limit
-23. **CloudFront OAC** - Origin Access Control for S3 (not public)
+### Secrets
 
-### Data Protection
-24. **Secrets Manager** - API keys stored securely with 5-minute cache TTL
-25. **DynamoDB Encryption** - AWS-managed encryption at rest on all tables
-26. **S3 Encryption** - S3-managed encryption on all buckets
-27. **S3 Versioning** - Enabled on critical buckets for data recovery
-28. **Point-in-Time Recovery** - Enabled on all DynamoDB tables
-29. **Access Logging** - S3 access logs for audit trail (90-day retention)
+- Provider API keys live in AWS Secrets Manager under `citation-analysis/<name>-key`, where `<name>` is one of `openai`, `perplexity`, `gemini`, `claude`, `brave`, `tavily`, `exa`, `serpapi` or `firecrawl`. The stack imports these secrets and never creates them. Bedrock calls use IAM, not a key.
+- A secret may hold the raw key or JSON with an `api_key` field; an empty value or `placeholder` counts as not configured.
+- Lambdas read keys at invocation time (`lambda/shared/secrets.py`) and cache them for 5 minutes, so a rotated key is picked up without redeploying. Lookup failures log the exception type only, never the value.
+- Admins can create or update keys from **Settings > AI Providers**. The configuration Lambda may create, update and read secrets under `citation-analysis/*`.
 
-### IAM & Permissions
-30. **Least Privilege** - Lambda roles scoped to specific resources
-31. **Resource Scoping** - Permissions limited to `CitationAnalysis-*` patterns
-32. **Bedrock Scoping** - Limited to specific Claude model ARNs
-33. **Minimal Wildcard Permissions** - Wildcards used only where required: `scheduler:ListSchedules` (read-only, requires wildcard), `bedrock-agentcore:*` (service does not yet document granular permissions for browser WebSocket streams), and `bedrock:InvokeAgent`/`bedrock:GetAgent` (AgentCore browser sessions require wildcard resources)
+### IAM
 
-### Logging & Monitoring
-34. **API Gateway Logging** - All requests logged to CloudWatch
-35. **Lambda Logging** - Structured logging with security events
-36. **WAF Logging** - Blocked requests tracked in CloudWatch metrics
-37. **Error Sanitization** - Internal errors logged server-side only
+Each Lambda has its own role, scoped to the tables, buckets, secrets and state machines it uses; most grants name exact resource ARNs. These statements use wider resources:
 
-### Secrets Management
-38. **No Hardcoded Credentials** - All API keys in Secrets Manager
-39. **Runtime Retrieval** - Secrets fetched at Lambda invocation
-40. **Secret Rotation Support** - Keys can be updated without redeployment
-41. **Fail-Secure CORS** - Returns empty string if SSM parameter unavailable
+- `bedrock:InvokeModel` on `anthropic.claude-*` foundation models and `global.anthropic.claude-*` inference profiles in any region (required for global cross-region inference)
+- `lambda:InvokeFunction` on `CitationAnalysis-*` for the Step Functions role
+- `scheduler:ListSchedules` on `*` (the action supports no resource scoping)
+- `wafv2:CreateWebACL`, `DeleteWebACL`, `GetWebACL` and `UpdateWebACL` on `*`, for the CloudFront WAF custom resource
+- Bedrock model-access and Marketplace actions on `*` (`bedrock:PutUseCaseForModelAccess`, `GetFoundationModelAvailability`, `ListFoundationModelAgreementOffers`, `CreateFoundationModelAgreement`; `aws-marketplace:ViewSubscriptions` and `Subscribe` only when called via Bedrock), held by the deploy-time `BedrockModelAccess` functions only, not by runtime roles
 
-## Dependency Updates
+The crawler's AgentCore permissions (`StartBrowserSession`, `StopBrowserSession`, `ConnectBrowserAutomationStream`) are scoped to the stack's own browser.
 
-We regularly monitor dependencies for security updates. To update dependencies:
+### Application
 
-```bash
-# Update Node.js dependencies
-npm update
-cd web && npm update
+- **HTML rendering:** AI answers are formatted by `components/ui/MarkdownProcessor.tsx`, which sanitizes the HTML it builds with DOMPurify before rendering it; it is the only use of `dangerouslySetInnerHTML`. Content Studio output is rendered with `react-markdown`, which does not render raw HTML.
+- **Input validation:** the `@validate` and `@paginate` decorators (`lambda/shared/decorators.py`) enforce types and length limits, clamp page sizes, and reduce sort fields to letters, digits and underscores. User text placed in model prompts is truncated and delimited (`lambda/shared/prompt_safety.py`).
+- **Errors:** handlers log the full exception server-side and return a generic message to the client (`lambda/shared/api_response.py`).
 
-# Update Python dependencies
-pip3 install --upgrade -r lambda/layer/requirements.txt
-```
+## Dependencies
 
-## Cognito Authentication Configuration
+- Run `npm audit` in the repo root and in `web/` before a release. Both `package.json` files pin vulnerable transitive packages through `overrides`.
+- The shared layer (`lambda/layer/requirements.txt`) takes minimum versions, resolved when the layer is built; the crawler layer (`lambda/crawler-layer/requirements.txt`) pins exact versions, including its own boto3. Rebuild the layers to pick up fixes.
+- Third-party licenses are listed in [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
-### User Sign-Up
-- **Self-sign-up enabled**: Users can create accounts without admin approval
-- **Email required**: Email address is the username (not a separate username field)
-- **Email verification**: Users must verify email before accessing the dashboard
-- **Password requirements**: 8+ characters, uppercase, lowercase, digits, symbols
-- **Account recovery**: Email-only recovery (no SMS)
+## Before deploying to production
 
-### Frontend UI
-- **Sign-up UI displayed**: No `hideSignUp` flag - users see "Create Account" option
-- **Email field**: Cognito UI automatically shows email field (not username)
-- **Clear labeling**: UI clearly indicates email address is required
-
-### Token Security
-- **Token validity**: 8 hours for access, ID, and refresh tokens
-- **Secure transmission**: Tokens sent via Authorization header
-- **JWT validation**: API Gateway validates tokens using Cognito authorizer
-- **No localStorage**: Amplify manages tokens securely in session storage
-
-## Security Review Checklist
-
-Before deploying to production:
-
-- [ ] All API keys stored in AWS Secrets Manager
-- [ ] WAF rules configured and tested
-- [ ] CORS origin restricted to your domain
-- [ ] Cognito user pool configured with strong password policy
-- [ ] CloudWatch logs enabled for audit trail
-- [ ] S3 buckets have public access blocked
-- [ ] IAM roles follow least privilege principle
-- [ ] All dependencies reviewed for known vulnerabilities
+- [ ] Provider API keys are in Secrets Manager (`citation-analysis/*`) and not in source, `.env` files or CDK context
+- [ ] The stack is deployed without `-c dev=true` (dev mode allows localhost and wildcard CORS)
+- [ ] Only the intended users exist in the Cognito user pool, and only administrators are in `Admin`
+- [ ] You have decided whether you need MFA, Cognito threat protection, WAF logging or API Gateway access logs; none is enabled by default
+- [ ] `npm audit` (root and `web/`) shows no unaddressed high or critical findings

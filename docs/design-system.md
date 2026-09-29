@@ -1,14 +1,13 @@
 # Design System
 
-Visual language for the Citation Analysis dashboard. This document is the
-source of truth for colours, typography, spacing, components, icons, and
-the dark/light theming strategy. It exists so contributors can build new
-UI without inventing styles, and so reviewers have a checklist for
-catching anomalies.
+Visual language for the Citation Analysis dashboard: colours, typography,
+spacing, components, icons, charts, print output and dark/light theming. Use
+it to build new UI without inventing styles, and as a review checklist.
 
 > **Stack:** Tailwind CSS 3 (`darkMode: 'class'`), React 18, no icon
-> library, no component library beyond AWS Amplify Authenticator. All
-> primitives live under `web/src/components/ui/`.
+> library, no component library beyond the AWS Amplify `Authenticator`.
+> Generic primitives live in `web/src/components/ui/`; report building blocks
+> live in `components/Reports/layout/` and `components/Reports/charts/`.
 
 ---
 
@@ -16,29 +15,27 @@ catching anomalies.
 
 ### 1.1 Strategy
 
-The app is class-based: dark mode is enabled by adding the class `dark`
-to `<html>`. Theme preference is managed by `useTheme` (`light` /
-`dark` / `system`) and toggled via the `ThemeToggle` button.
+Dark mode is class-based: `useTheme` (`hooks/useTheme.ts`) adds `dark` to
+`<html>`. It returns `{ theme, setTheme, toggleTheme, isDark }`; `theme` is
+`light`, `dark` or `system` (the default), persisted in `localStorage`
+under `theme`. `ThemeToggle` in the header cycles light → dark → system.
 
-There are two ways a Tailwind class can become "dark-mode aware":
+A Tailwind class becomes dark-mode aware in one of two ways:
 
-1. **Explicit `dark:` variant** – e.g. `bg-white dark:bg-gray-800`.
-   Used in layout chrome (sidebar, header, fallback error screens) and
-   anywhere we deliberately need a different colour in dark mode.
-2. **Global override** – common Tailwind classes (`bg-white`,
-   `bg-gray-50`, `text-gray-900`, `border-gray-200`, …) are remapped
-   inside `web/src/index.css` under the `.dark` selector. This means
-   most components do not need `dark:` variants at all.
+1. **Global override** – common classes (`bg-white`, `bg-gray-50`,
+   `text-gray-900`, `border-gray-200`, accent tints, …) are remapped in
+   `web/src/index.css` under the `.dark` selector, so most components need
+   no `dark:` variants.
+2. **Explicit `dark:` variant** – e.g. `bg-white dark:bg-gray-800`. Used in
+   app chrome (sidebar, header, login and loading screens, modals, root
+   error fallback) and wherever the override gives the wrong result, such as
+   the sidebar logo mark and other fixed-contrast surfaces.
 
-> **Rule of thumb:** if your class is in the global override list below,
-> do not add a `dark:` variant; trust the override. Only reach for
-> `dark:` when a component sits on a surface where the global override
-> is wrong (e.g. always-dark error fallbacks, gradient backgrounds, the
-> primary action rail in `main.tsx` and `TabContent.tsx`).
+> **Rule of thumb:** if a class is covered by §1.2, do not add a `dark:`
+> variant. If a class you need is not covered, add the override to
+> `index.css` rather than sprinkling `dark:` variants across components.
 
 ### 1.2 Globally overridden classes
-
-Defined in `web/src/index.css`. Two groups: **neutral** and **accent**.
 
 #### 1.2.1 Neutral scale
 
@@ -48,51 +45,53 @@ Defined in `web/src/index.css`. Two groups: **neutral** and **accent**.
 | `bg-gray-50`           | gray-900         |
 | `bg-gray-100`          | gray-700         |
 | `bg-gray-200`          | gray-600         |
-| `border-gray-200`      | gray-700         |
-| `border-gray-100`      | gray-700         |
+| `border-gray-100` / `-200` | gray-700     |
 | `border-gray-300`      | gray-600         |
 | `hover:border-gray-300`| gray-500         |
 | `text-gray-900`        | gray-50          |
-| `text-gray-700`        | gray-300         |
-| `text-gray-600`        | gray-300         |
+| `text-gray-700` / `-600` | gray-300       |
 | `text-gray-500`        | gray-400         |
 | `text-gray-400`        | gray-500         |
 | `text-gray-300`        | gray-400         |
 | `hover:bg-gray-50`     | gray-700         |
-| `hover:bg-gray-100`    | gray-600         |
-| `hover:bg-gray-200`    | gray-600         |
-| `input/textarea/select` background, border, placeholder, focus ring | gray-700/-600/-400/-500 |
+| `hover:bg-gray-100` / `-200` | gray-600   |
+| `input` (except checkbox/radio), `textarea`, `select` | background gray-700, border gray-600, text gray-100, placeholder gray-400, focus ring and border gray-500 |
 
-#### 1.2.2 Accent surfaces, text, and borders
+#### 1.2.2 Accent surfaces, text and borders
 
-The same global-override pattern is applied to every accent palette
-the app uses. The principle is: tinted surfaces become **translucent
-dark tints** and accent text shifts to the **`*-300` / `*-200`** shade
-that is legible on dark.
+Tinted surfaces become translucent dark tints (`bg-{tone}-50` ≈ 25 % and
+`bg-{tone}-100` ≈ 40 % alpha of the tone's `*-900`; slate 50 % / 70 %),
+accent text shifts to the `*-300` shade (`*-200` for `-900` text), and
+accent borders become muted translucent borders. Coverage differs per
+tone; check this table before relying on a class:
 
-| Light class                   | Dark behaviour |
-| ----------------------------- | -------------- |
-| `bg-{tone}-50`                | translucent dark tint (~25% alpha of `*-900`) |
-| `bg-{tone}-100`               | translucent dark tint (~40% alpha of `*-900`) |
-| `text-{tone}-700` / `-800`    | `*-300` (legible accent on dark) |
-| `text-{tone}-900`             | `*-200` (highest emphasis accent) |
-| `border-{tone}-100`           | translucent `*-800/-900` border (~40% alpha) |
-| `border-{tone}-200`           | translucent `*-700/-800` border (~55% alpha) |
-| `border-{tone}-300`           | translucent `*-600/-700` border (~70% alpha) |
-| `hover:bg-{tone}-100/-200`    | denser translucent tint (50–70% alpha) |
+| Tone | `bg-` | `text-` | `border-` | `hover:bg-` |
+| ---- | ----- | ------- | --------- | ----------- |
+| emerald | 50, 100 | 700, 800, 900 | 100, 200, 300 | 100, 200 |
+| green   | 50, 100 | 700, 800, 900 | 100, 200, 300 | 100 |
+| amber   | 50, 100 | 700, 800, 900 | 100, 200, 300 | 100, 200 |
+| yellow  | 50, 100 | 700, 800, 900 | 100, 200 | – |
+| violet  | 50, 100 | 700, 800, 900 | 100, 200, 300 | 100, 200 |
+| purple  | 50, 100 | 700, 800, 900 | 100, 200 | – |
+| fuchsia | 50, 100 | 700, 800 | – | – |
+| blue    | 50, 100 | 700, 800, 900 | 100, 200, 300 | 100, 200 |
+| indigo  | 50, 100 | 700, 800 | 100, 200 | – |
+| sky     | 50, 100 | 700, 800 | 100, 200 | – |
+| cyan    | 50, 100 | – | – | – |
+| teal    | 50, 100 | 700, 800 | 100, 200 | – |
+| red     | 50, 100 | 700, 800, 900 | 100, 200, 300 | 100, 200 |
+| rose    | 50, 100 | 700, 800 | 100, 200 | 100 |
+| orange  | 50, 100 | 700, 800 | 100, 200, 300 | – |
+| slate   | 50, 100 | 700, 800 | 100, 200 | – |
 
-Tones covered: `emerald`, `green`, `amber`, `yellow`, `violet`,
-`purple`, `fuchsia`, `blue`, `indigo`, `sky`, `cyan`, `teal`, `red`,
-`rose`, `orange`, `slate`. Alpha-modifier classes used in row
-backgrounds (`bg-green-50/30`, `bg-emerald-50/50`, `bg-red-50/30`,
-`bg-orange-50/30`) have their own matching dark-mode overrides.
+Four alpha-modifier row backgrounds have their own overrides:
+`bg-emerald-50/50`, `bg-green-50/30`, `bg-red-50/30`, `bg-orange-50/30`.
 
-> **What is NOT overridden:** saturated solid surfaces
-> (`bg-{tone}-500/600/700`) and their `text-white` pairings. Those are
-> primary-action buttons that work in both themes as-is.
+> **Not overridden:** saturated solid surfaces (`bg-{tone}-500/600/700`)
+> and their `text-white` pairings. They work in both themes as-is.
 
-Markdown prose styles (`.prose-markdown`) and AWS Amplify
-Authenticator have their own dark overrides in the same file.
+Markdown prose (`.prose-markdown`) and the Amplify `Authenticator` have
+their own dark overrides in the same file.
 
 ### 1.3 CSS variables
 
@@ -103,9 +102,24 @@ The body uses two semantic tokens that switch with the theme:
 .dark        { --color-bg-primary: 17 24 39;     --color-text-primary: 249 250 251; }
 ```
 
-These are exposed as `bg-skin-primary` / `text-skin-primary` utilities
-for the body element only. Component-level styling uses Tailwind colour
-utilities directly, not these variables.
+`index.css` exposes them as `bg-skin-primary` / `text-skin-primary`, applied
+to `body` only. Components use Tailwind colour utilities directly.
+
+### 1.4 Print
+
+Every page can be printed to PDF. `PrintToPdfButton` (header) opens the
+current URL with `?print=1` in a new tab; `usePrintMode` then adds
+`print-mode` to the app root, hides the sidebar, the provider banner and
+the onboarding modal, reduces the header to the page title and a
+timestamp, and opens the print dialog once the data is ready. Reports decide readiness themselves (`Reports/layout/useReportReady.ts`).
+
+- Hide screen-only controls with `print-hidden` (or
+  `data-print-hidden="true"`).
+- Keep a card or chart on one page with `avoid-break-inside`; start a
+  section on a new page with `page-break-before`.
+- Print output is always light (white background, black text), keeps
+  background colours (`print-color-adjust: exact`) and makes `sticky`
+  elements static.
 
 ---
 
@@ -122,38 +136,37 @@ utilities directly, not these variables.
 | Text primary    | `gray-900` | `gray-50`  |
 | Text secondary  | `gray-600` | `gray-300` |
 | Text muted      | `gray-400` | `gray-500` |
-| Action primary  | `gray-900` | (kept dark; see Buttons) |
+| Action primary  | `gray-900` | (see Buttons) |
 
 ### 2.2 Accent palette
 
 Accents are used sparingly: navigation icon tints, stat card badges,
-status pills, and feedback states. Each tone has a defined behaviour in
-both themes.
+status pills and feedback states. Each sidebar item has its own `-500`
+icon tint; reuse the tone of the feature when you add accents to it.
 
-| Tone    | Usage                            | Light surface        | Light text            | Dark surface (auto) | Dark text (auto) |
-| ------- | -------------------------------- | -------------------- | --------------------- | ------------------- | ---------------- |
-| Blue    | Searches, info, neutral metrics  | `bg-blue-50/100`     | `text-blue-700/800`   | translucent blue-900 | `blue-300`      |
-| Indigo  | Visibility metrics               | `bg-indigo-50/100`   | `text-indigo-700/800` | translucent indigo-900 | `indigo-300`  |
-| Violet  | Brand mentions                   | `bg-violet-50/100`   | `text-violet-700/800` | translucent violet-900 | `violet-300`  |
-| Purple  | Citations                        | `bg-purple-50/100`   | `text-purple-700/800` | translucent purple-900 | `purple-300`  |
-| Fuchsia | Prompt insights                  | `bg-fuchsia-50/100`  | `text-fuchsia-700/800` | translucent fuchsia-900 | `fuchsia-300` |
-| Rose    | Citation gaps                    | `bg-rose-50/100`     | `text-rose-700/800`   | translucent rose-900 | `rose-300`     |
-| Emerald | "Yours", success, crawled        | `bg-emerald-50/100`  | `text-emerald-700/800` | translucent emerald-900 | `emerald-300` |
-| Green   | Success, positive                | `bg-green-50/100`    | `text-green-700/800`  | translucent green-900 | `green-300`    |
-| Amber   | Warnings, competitors            | `bg-amber-50/100`    | `text-amber-700/800`  | translucent amber-900 | `amber-300`    |
-| Yellow  | Medium priority                  | `bg-yellow-50/100`   | `text-yellow-700/800` | translucent yellow-900 | `yellow-300`  |
-| Red     | Errors, destructive              | `bg-red-50/100`      | `text-red-700/800`    | translucent red-900 | `red-300`       |
-| Sky     | Recent searches                  | `bg-sky-50/100`      | `text-sky-700/800`    | translucent sky-900 | `sky-300`       |
-| Slate   | Raw responses, low emphasis      | `bg-slate-50/100`    | `text-slate-700/800`  | translucent slate-900 | `slate-300`   |
-| Teal    | Content studio                   | `bg-teal-50/100`     | `text-teal-700/800`   | translucent teal-900 | `teal-300`     |
-| Orange  | Schedule                         | `bg-orange-50/100`   | `text-orange-700/800` | translucent orange-900 | `orange-300` |
+| Tone    | Meaning                          | Sidebar item |
+| ------- | -------------------------------- | ------------ |
+| Blue    | Info, neutral metrics            | Dashboard |
+| Indigo  | Visibility; domains that are not yours (charts) | Visibility |
+| Violet  | Brand mentions                   | Brand Mentions |
+| Purple  | Citations                        | Citations |
+| Fuchsia | Prompt insights                  | Prompt Insights |
+| Rose    | Citation gaps                    | Citation Gaps |
+| Emerald | Your brand, success, positive    | Action Center |
+| Amber   | Competitors, warnings            | Keyword Research |
+| Teal    | Content                          | Content Studio |
+| Cyan    | Reports                          | Reports |
+| Sky     | Recent searches                  | Recent Searches |
+| Slate   | Raw data, low emphasis           | Raw Responses |
+| Green   | Success, running                 | Run Analysis |
+| Orange  | Schedule                         | Schedule |
+| Yellow  | Medium priority                  | – |
+| Red     | Errors, destructive, negative    | – |
 
 Pattern for badges and pills: `bg-{tone}-50 text-{tone}-700`
-(`bg-{tone}-100` for stronger emphasis). Avoid mixing two accents in
-the same component.
-
-> Solid action buttons keep `bg-{tone}-600 text-white hover:bg-{tone}-700`
-> in both themes. Those classes are intentionally NOT overridden.
+(`bg-{tone}-100` for stronger emphasis). Avoid mixing two accents in the
+same component. Solid action buttons keep
+`bg-{tone}-600 text-white hover:bg-{tone}-700` in both themes.
 
 ### 2.3 Semantic state colours
 
@@ -172,7 +185,8 @@ The app uses the system font stack inherited from Tailwind defaults.
 
 | Role            | Class                                  |
 | --------------- | -------------------------------------- |
-| Page title (h2) | `text-2xl font-semibold text-gray-900` |
+| Header title (h1, `App` header) | `text-lg sm:text-xl font-semibold text-gray-900` |
+| In-page title (h2) | `text-2xl font-semibold text-gray-900` |
 | Section title (h3) | `text-lg font-semibold text-gray-900` |
 | Card label      | `text-sm font-medium text-gray-700`    |
 | Body            | `text-sm text-gray-600`                |
@@ -180,57 +194,59 @@ The app uses the system font stack inherited from Tailwind defaults.
 | Numeric stat    | `text-3xl font-semibold text-gray-900` |
 | Section label   | `text-xs font-semibold uppercase tracking-wider text-gray-400` |
 
-> Markdown prose (AI responses, content studio output) uses the
-> `.prose-markdown` class which has its own typographic scale defined
-> in `index.css`. Do not re-style markdown output; extend
-> `.prose-markdown` instead.
+> Markdown prose (AI responses, Content Studio output) uses the
+> `.prose-markdown` class, which has its own typographic scale in
+> `index.css`. Extend `.prose-markdown` instead of re-styling markdown
+> output.
 
 ---
 
 ## 4. Spacing and layout
 
 - The grid uses Tailwind's default 4 px base.
-- Standard card padding: `p-6` (24 px) on desktop, `p-4` on dense lists.
+- Standard card padding: `p-6` (24 px), `p-4` on dense lists.
 - Standard gap between cards: `gap-4` to `gap-6`.
 - Section margin between blocks: `mb-6 sm:mb-8`.
-- Sidebar width: `w-64` (256 px), top bar height: `h-16` (64 px).
-- Page content max width is unconstrained – it fills the viewport
-  minus the sidebar, so internal widgets must remain readable up to
-  ultra-wide displays.
+- Sidebar width: `w-64` (256 px); header height: `h-16` (64 px).
+- Page content sits in `max-w-7xl mx-auto` with `p-4 sm:p-6 lg:p-8`
+  around it.
 
 Border radius: `rounded-lg` (8 px) is the default for cards, inputs,
-and buttons. Larger surfaces (icon badges, modals) use `rounded-xl`.
-Pills use `rounded-full`.
-
-Borders are 1 px (`border`) and use the neutral border tokens above.
+buttons and modals. Icon badges use `rounded-xl`; pills use
+`rounded-full`. Borders are 1 px (`border`) with the neutral border tokens.
 
 ---
 
 ## 5. Buttons
 
-Use the `<Button>` component from `web/src/components/ui/Button.tsx`.
-Do not hand-roll button class strings.
+Use the `<Button>` component from `web/src/components/ui/Button.tsx` for new
+buttons instead of hand-rolled class strings. Many existing views still
+hand-roll their buttons; move them to `<Button>` when you work on them.
 
 ### 5.1 Variants
 
 | Variant      | When to use | Visual |
 | ------------ | ----------- | ------ |
-| `primary`    | The main action of a page or form. Only **one** primary per visible group. | `bg-gray-900 text-white hover:bg-gray-800` |
+| `primary` (default) | The main action of a page or form. Only **one** primary per visible group. | `bg-gray-900 text-white hover:bg-gray-800 disabled:bg-gray-300` |
 | `secondary`  | Alternate actions of equal weight. | `bg-white text-gray-900 border border-gray-200 hover:bg-gray-50` |
 | `ghost`      | Tertiary actions, cancel buttons, links inside dense rows. | `text-gray-600 hover:text-gray-900 hover:bg-gray-100` |
-| `danger`     | Destructive primary actions inside confirmation dialogs. | `bg-red-600 text-white hover:bg-red-700` |
-| `iconOnly`   | Square button hosting only an icon (toolbar / list-row actions). Always provide `aria-label`. | `text-gray-400 hover:text-gray-600 hover:bg-gray-100` |
+| `danger`     | Destructive primary actions inside confirmation dialogs. | `bg-red-600 text-white hover:bg-red-700 disabled:bg-red-300` |
+| `iconOnly`   | Square button hosting only an icon (toolbar / list-row actions). Always provide `aria-label`. | `text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-md` |
+
+Every variant gets `rounded-lg`, `transition-colors`, a
+`focus-visible` ring and `disabled:opacity-50 disabled:cursor-not-allowed`.
+`type` defaults to `"button"`.
 
 ### 5.2 Sizes
 
-| Size | Height | When to use |
-| ---- | ------ | ----------- |
-| `sm` | ~32 px (`px-3 py-1.5`) | Inside dense rows, table cells, list-row actions. |
-| `md` | ~36-40 px (`px-4 py-2`, default) | Standard page-level actions. |
+| Size | Padding | When to use |
+| ---- | ------- | ----------- |
+| `sm` | `px-3 py-1.5 text-sm` (`p-1.5` for `iconOnly`) | Dense rows, table cells, list-row actions. |
+| `md` (default) | `px-4 py-2 text-sm` (`p-2` for `iconOnly`) | Standard page-level actions. |
 
 ### 5.3 Composition
 
-Use `leadingIcon` / `trailingIcon` props instead of hand-placing icons:
+Use `leadingIcon` / `trailingIcon` instead of hand-placing icons:
 
 ```tsx
 <Button
@@ -241,27 +257,19 @@ Use `leadingIcon` / `trailingIcon` props instead of hand-placing icons:
 </Button>
 ```
 
-Disabled state: pass `disabled`. The component applies `opacity-50` and
-`cursor-not-allowed` automatically. For loading, swap children for a
-loading label (`'Saving…'`) – do not introduce custom spinners on
-primary buttons.
+For loading, swap the children for a loading label (`'Saving…'`) and pass
+`disabled`; do not add custom spinners to primary buttons.
 
 ### 5.4 Dark-mode inversion
 
-`primary` buttons rely on the global override system, so
-`bg-gray-900 / hover:bg-gray-800` works in both themes. For buttons
-that sit on always-dark surfaces in light mode (the app rail,
-fallback error screens), set `invertOnDark` so the dark theme inverts
-them to a light pill (`dark:bg-gray-100 dark:text-gray-900`).
-
-```tsx
-<Button invertOnDark onClick={reload}>Reload Page</Button>
-```
+`primary` relies on the global override, so `bg-gray-900` works in both
+themes. On a surface that must stay high-contrast in dark mode, set
+`invertOnDark`: the button becomes a light pill
+(`dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200`).
 
 ### 5.5 Anti-patterns
 
 - Inline `className="px-4 py-2 bg-gray-900 text-white …"` strings.
-  Use `<Button>` so the design system stays consistent.
 - Mixing sizes in the same row.
 - More than one primary button visible at once.
 - `iconOnly` button without `aria-label` / `title`.
@@ -272,33 +280,37 @@ them to a light pill (`dark:bg-gray-100 dark:text-gray-900`).
 
 ### 6.1 Source and style
 
-We ship our own icon set instead of pulling a library. Icons live in
-`web/src/components/ui/Icons.tsx` and follow a single Heroicons-style
-convention:
+The app ships its own outline icon set in `web/src/components/ui/Icons.tsx`,
+Heroicons-style:
 
-- 24 × 24 viewBox.
-- Stroke only, `fill="none"`, `stroke="currentColor"`.
-- `strokeLinecap="round"`, `strokeLinejoin="round"`,
-  `strokeWidth={1.5}`.
-- Default size `w-5 h-5` (20 px), sized via the `className` prop.
-- Colour is inherited from `currentColor`, so place the icon inside an
-  element whose `text-*` colour you want.
+- 24 × 24 viewBox, `fill="none"`, `stroke="currentColor"`.
+- `strokeLinecap="round"`, `strokeLinejoin="round"`, `strokeWidth={1.5}`.
+- Default size `w-5 h-5`, set through the `className` prop.
+- Colour comes from `currentColor`: set `text-*` on the parent.
 
-Available icons: `PauseIcon`, `PlayIcon`, `PencilIcon`, `TrashIcon`,
-`PlusIcon`, `CloseIcon`, `ChevronRightIcon`, `ChevronDownIcon`,
-`SearchIcon`, `LinkIcon`, `GlobeIcon`, `KeyIcon`, `WarningIcon`,
-`CheckIcon`, `ArrowRightIcon`.
+Available icons (re-exported from `components/ui/index.ts`): `PauseIcon`,
+`PlayIcon`, `PencilIcon`, `TrashIcon`, `PlusIcon`, `CloseIcon`,
+`ChevronDownIcon`, `SearchIcon`, `LinkIcon`, `GlobeIcon`, `KeyIcon`,
+`WarningIcon`, `CheckIcon`, `ArrowRightIcon`, `EyeIcon`, `CogIcon`,
+`RefreshIcon`, `ClockIcon`, `CollectionIcon`. `ClipboardIcon` is a separate
+file (`ui/ClipboardIcon.tsx`) used by copy buttons.
 
-The sidebar (`Layout/Sidebar.tsx`) has a separate set of inline icons
-(`DashboardIcon`, `BrandIcon`, `CitationsIcon`, …). They follow the
-same convention; consolidating them into `Icons.tsx` is a future
-refactor.
+There is no right chevron: rotate `ChevronDownIcon` (`-rotate-90` for a
+collapsed row, `rotate-180` for a "show less" toggle).
+
+The sidebar (`Layout/Sidebar.tsx`) defines its own navigation icons
+(`DashboardIcon`, `BrandIcon`, `CitationsIcon`, `SearchesIcon`,
+`RawResponsesIcon`, `KeywordResearchIcon`, `PromptIcon`, `GapsIcon`,
+`RecommendationsIcon`, `ContentStudioIcon`, `ReportsIcon`) with the same
+convention, and uses `EyeIcon`, `PlayIcon`, `ClockIcon`, `CogIcon` and
+`CloseIcon` from the shared set.
 
 ### 6.2 Adding a new icon
 
 1. Pick or trace a Heroicons outline path.
-2. Add a function component to `Icons.tsx` matching the existing
-   pattern (props: `className`, `title`).
+2. Add its path constant and an exported component to `Icons.tsx`
+   (every icon renders through the shared `OutlineIcon` wrapper; props
+   `className` and `title`).
 3. Re-export it from `components/ui/index.ts`.
 4. Use it via `<MyIcon className="w-4 h-4" />`.
 
@@ -314,159 +326,153 @@ refactor.
 
 ### 6.4 Accessibility
 
-- Decorative icons need no label; the wrapping `<svg>` defaults to
-  `aria-hidden`.
-- When the icon is the only visible content (icon-only buttons,
-  sidebar collapse, expand chevrons that double as the click
-  target), the host element must carry `aria-label` and the icon's
-  `title` prop should be set or the host element should have a
-  `title` attribute.
-- Use `aria-expanded` on disclosure buttons that toggle a chevron.
+- Without a `title`, an icon renders `aria-hidden`. With a `title`, it
+  renders `role="img"` and a `<title>` element.
+- When the icon is the only visible content (icon-only buttons, sidebar
+  close, disclosure chevrons), the host element carries `aria-label` or
+  `title`.
+- Disclosure buttons that toggle a chevron set `aria-expanded`.
 
 ### 6.5 No emoji as UI
 
-Emoji are not used as UI affordances anywhere. Reasons:
+Emoji are not used as UI affordances: they render inconsistently across
+operating systems, cannot be recoloured for dark mode or hover states, and
+screen readers announce their unicode name instead of the action.
 
-1. Inconsistent rendering across operating systems.
-2. No way to recolour for dark mode or hover states.
-3. Screen readers announce the unicode name, not the action.
-
-The only places emoji appear are decorative content **inside** the
-About section (`components/About/ArchitectureTab.tsx`,
-`components/About/LicensesTab.tsx`) where they label conceptual
-sections, not interactive controls. There is also a single
-`✓` text suffix in `components/Brands/PromptEditor.tsx` inside a
-native `<select>` `<option>` – browsers will not render React
-components inside `<option>`, so a unicode glyph is the only viable
-choice there. Treat that as the ceiling for emoji / unicode-glyph
-usage.
+The exceptions are decorative section labels inside the About dialog
+(`About/ArchitectureTab.tsx`, `About/LicensesTab.tsx`) and the `✓` suffix
+inside a native `<option>` in `Brands/PromptEditor.tsx` (browsers do not
+render components inside `<option>`). Treat these as the ceiling.
 
 ---
 
 ## 7. Components inventory
 
-### 7.1 Pages and theme support
+### 7.1 Pages
 
-Every route in `App.tsx` is listed below with its primary components
-and the light / dark mode coverage status. "✓ auto" means the page
-relies entirely on the global overrides described in §1.2 — no
-component-level `dark:` variants are needed and the page renders
-correctly in both themes.
+`App.tsx` maps each tab to a path (`TAB_TO_PATH`) and a header title
+(`PAGE_TITLES`); `Layout/TabContent.tsx` renders the tab's view, and every
+path under `/reports` goes to `Reports/ReportsRouter.tsx`. Pages rely on the
+global overrides of §1.2 for dark mode.
 
-| # | Route | Page label | Primary components | Theme support |
-| - | ----- | ---------- | ------------------ | ------------- |
-| 1 | `/` | Dashboard | `Layout/TabContent`, `Dashboard/StatCard`, `Dashboard/ProviderChart`, `Dashboard/BrandChart`, `Tables/TopCitationsTable`, `Tables/RecentSearchesTable` | ✓ auto |
-| 2 | `/visibility` | Visibility | `Visibility/VisibilityDashboard`, `GroupOverview`, `VisibilityComponents`, `PersonaComparisonChart`, `ui/KeywordScopeSelector`, `shared/PersonaSelector` | ✓ auto |
-| 3 | `/brands` | Brand Mentions | `Brands/BrandsView`, `BrandConfigContent`, `BrandConfigPanel`, `BrandTagList`, `DomainList`, `IndustrySelector`, `ExtractionOptions`, `BrandExpansionPanel`, `CompetitorDiscoveryPanel`, `FirstPartyBrandsSection`, `CompetitorBrandsSection`, `BrandMentionsTable`, `BrandOverviewTab`, `BrandDetailModal`, `ProviderResponseCard`, `PromptEditor` | ✓ auto (was the green-everywhere bug) |
-| 4 | `/citations` | Citations | `Citations/CitationsView`, `CitationFilters`, `CitationRow`, `CitationTableHeader`, `CitationDetailModal`, `CrawlHistory`, `PaginationControls` | ✓ auto |
-| 5 | `/prompt-insights` | Prompt Insights | `Insights/PromptInsights`, `PromptCard` | ✓ auto |
-| 6 | `/citation-gaps` | Citation Gaps | `Insights/CitationGaps`, `GapCard` | ✓ auto |
-| 7 | `/recommendations` | Action Center | `Insights/Recommendations` | ✓ auto |
-| 8 | `/keyword-research` | Keyword Research | `KeywordResearch/KeywordResearchView`, `KeywordExpansion`, `CompetitorAnalysis`, `CompetitorAnalysisComponents`, `ResearchProgress`, `ResearchHistory`, `KeywordResultsTable` (Excel export) | ✓ auto |
-| 9 | `/content-studio` | Content Studio | `ContentStudio/ContentStudioView`, `ContentGenerator`, `ContentHistory`, `ContentDetailModal`, `ContentIdeaCard`, `HistoryListItem`, `SelfReflection/SelfReflectionPanel` | ✓ auto |
-| 10 | `/searches` | Recent Searches | `Searches/SearchesView`, `SearchesViewComponents` | ✓ auto |
-| 11 | `/raw-responses` | Raw Responses | `RawResponses/RawResponsesExplorer`, `Breadcrumb`, `FileViewer`, `ImageViewer` | ✓ auto |
-| 12 | `/execution` | Run Analysis | `Execution/ExecutionMonitor`, `ExecutionStatus`, `ExecutionMonitorComponents`, `TriggerSection` | ✓ auto |
-| 13 | `/schedule` | Schedule | `Schedule/ScheduleManager`, `ScheduleForm`, `ScheduleManagerComponents` | ✓ auto |
-| 14 | `/settings` | Settings | `Settings/SettingsView`, `UsersConfig`, `UserModals`, `QueryPromptsManager` | ✓ auto |
+| Route | Sidebar label | View |
+| ----- | ------------- | ---- |
+| `/` | Dashboard | `Layout/TabContent` (dashboard content: `Dashboard/StatCard`, `ProviderChart`, `BrandChart`, `AlertsPanel`, quick actions) |
+| `/visibility` | Visibility | `Visibility/VisibilityDashboard` |
+| `/brands` | Brand Mentions | `Brands/BrandsView` |
+| `/citations` | Citations | `Citations/CitationsView` |
+| `/prompt-insights` | Prompt Insights | `Insights/PromptInsights` |
+| `/citation-gaps` | Citation Gaps | `Insights/CitationGaps` |
+| `/recommendations` | Action Center | `Insights/Recommendations` |
+| `/keyword-research` | Keyword Research | `KeywordResearch/KeywordResearchView` (research agent in `KeywordResearch/agent/`) |
+| `/content-studio` | Content Studio | `ContentStudio/ContentStudioView` |
+| `/reports/*` | Reports | `Reports/ReportsRouter`, landing page `Reports/ReportsLandingView` |
+| `/searches` | Recent Searches | `Searches/SearchesView` |
+| `/raw-responses` | Raw Responses | `RawResponses/RawResponsesExplorer` |
+| `/execution` | Run Analysis | `Execution/ExecutionMonitor` |
+| `/schedule` | Schedule | `Schedule/ScheduleManager` |
+| `/settings` | Settings | `Settings/SettingsView`, tabs Keywords, Brand Tracking, Personas, AI Providers, Alerts, Users |
 
-Modals and chrome:
+Reports (`ReportsRouter`): Executive Summary (`/reports/executive-summary`),
+Brand Visibility Report (`/reports/visibility[/:keyword]`), Competitor
+Benchmark (`/reports/benchmark`), AI Engines (`/reports/engines`), Sources
+(`/reports/sources`), Sentiment (`/reports/sentiment`), Competitor Gap
+Report (`/reports/competitor[/:competitor]`), Content Action Plan
+(`/reports/content-action-plan`) and Keyword Deep Dive
+(`/reports/keyword[/:keyword]`).
 
-| Component | Coverage |
-| --------- | -------- |
-| `Layout/Sidebar` | explicit `dark:` variants (always-dark navigation rail) |
-| `App` header (sign out, about, theme toggle) | explicit `dark:` variants |
-| `ui/Modal` / `ConfirmModal` / `AlertModal` | explicit `dark:` variants on overlay + content |
-| `ui/Spinner` | `currentColor` – inherits theme |
-| `ui/ThemeToggle` | explicit `dark:` variants |
-| `ui/Button` | global override; `invertOnDark` flag for always-dark surfaces |
-| `About/AboutModal` and tabs | explicit `dark:` variants |
-| `ErrorBoundary` / `ErrorDisplay` | explicit `dark:` variants on always-dark fallback |
+Chrome and overlays:
+
+| Component | Theming |
+| --------- | ------- |
+| `Layout/Sidebar` (`bg-white dark:bg-gray-800`) | explicit `dark:` variants |
+| `App` header (print, theme toggle, about, sign out) | explicit `dark:` variants |
+| `ui/Modal`, `ConfirmModal`, `AlertModal` (close on Escape) | explicit `dark:` variants on overlay and panel |
+| `About/AboutModal` | explicit `dark:` variants |
 | `main.tsx` `RootErrorFallback` | explicit `dark:` variants |
-
-> "✓ auto" pages do not need `dark:` variants on accent classes because
-> the global overrides handle them. If a page in the table changes its
-> mind and starts using a class that is **not** in §1.2, add the
-> override to `index.css` rather than sprinkling `dark:` variants
-> across components.
+| `ErrorBoundary/ErrorBoundary` | global override |
+| `ui/Spinner` | `currentColor` |
+| `Onboarding/OnboardingModal`, `ProviderHealth/ProviderHealthBanner` | app-wide, hidden in print mode |
 
 ### 7.2 Primitives (`components/ui/`)
 
-| Component       | Purpose |
-| --------------- | ------- |
-| `Button`        | Canonical button. Variants + sizes. Use everywhere. |
-| `Modal`, `ConfirmModal`, `AlertModal` | Overlays with focus trap and escape handling. |
-| `Spinner`       | Loading indicator (`sm`/`md`/`lg`). |
-| `ThemeToggle`   | Light / dark / system theme switcher. |
-| `Icons.tsx`     | Shared SVG icon set. |
-| `chartTheme.ts` | `getChartTheme(isDark)` returns axis tick / grid / tooltip colours for Chart.js so canvases adapt to the theme. |
-| `MarkdownProcessor` | Helpers for rendering AI markdown safely. |
+`ui/index.ts` re-exports `Button` and the icons; import everything else from
+its own file.
+
+| File | Purpose |
+| ---- | ------- |
+| `Button.tsx` | Canonical button: variants and sizes (§5). |
+| `Icons.tsx`, `ClipboardIcon.tsx` | Shared SVG icons (§6). |
+| `Modal.tsx` | `Modal`, `ConfirmModal`, `AlertModal`. |
+| `Spinner.tsx` | Loading indicator (`sm` / `md` / `lg`). |
+| `ThemeToggle.tsx` | Light / dark / system switcher. |
+| `InfoTooltip.tsx` | "i" button with an explanation; used next to headings and KPI columns. |
+| `KeywordScopeSelector.tsx`, `KeywordScopePicker.tsx`, `useKeywordScopeOptions.ts`, `reportScope.ts` | Choosing and encoding a keyword scope (all keywords, a keyword group, or selected keywords). |
+| `PrintToPdfButton.tsx` | Opens the page in print mode (§1.4). |
+| `MarkdownProcessor.tsx` | Renders AI markdown, sanitized with DOMPurify. |
+| `chartTheme.ts` | `getChartTheme(isDark)` plus `themedLegend`, `themedTooltip`, `themedAxis` (§7.5). |
+| `pagination.ts` | Client-side `paginate()` helper. |
 
 ### 7.3 Layout
 
-`components/Layout/Sidebar.tsx` is the only navigation chrome. It owns
-nav sections, badges, and the "running" pulse indicator. New top-level
-features should be added there as a new entry, not as a new chrome
-component.
+`Layout/Sidebar.tsx` is the only navigation chrome: sections, items, count
+badges and the "running" pulse on Run Analysis. A new top-level feature gets
+a sidebar entry, a `TAB_TO_PATH` / `PAGE_TITLES` entry in `App.tsx` and a
+case in `Layout/TabContent.tsx`, not a new chrome component.
 
 ### 7.4 Feature components
 
-Organised by feature folder under `components/<Feature>`. Each feature
-folder has an `index.ts` that re-exports its public surface. Internal
-components keep `*.spec.tsx` next to the file. See
+Feature code lives in `components/<Feature>/`; import through the folder's
+`index.ts` where it has one. Specs (`*.spec.tsx`) and fixtures
+(`*-fixtures.ts(x)`) sit next to the file. ESLint caps files at 400 lines
+(specs at 730), cyclomatic complexity at 12 and nesting depth at 3; split a
+component into sub-components before it reaches them. See
 `.kiro/steering/structure.md` for the layout map.
+
+Reports compose their pages from `components/Reports/layout/`:
+`ReportLayout`, `ReportSection` and `ReportSectionPlaceholder` (page and
+section frames, loading / error / empty states via `sectionGate`),
+`ReportStatCard` / `ReportStatGrid`, `ReportTable` (print-friendly typed
+columns, with `kpiColumn` for KPI columns whose tooltip holds the
+definition), `KpiHeadline`, `TrendPeriodTable`, `KpiDefinitionsSection`
+(the definitions every report ends with), `PriorityBadge` and
+`ReportKeywordSelector`. Use them instead of building report layout from
+scratch.
 
 ### 7.5 Charts
 
-The app uses Chart.js (via `react-chartjs-2` for declarative usage and
-the imperative `Chart` constructor for the dashboard charts). Canvases
-do **not** participate in the global CSS override system, so chart
-chrome (axis ticks, grid, legend, tooltip) needs explicit theme-aware
-colours.
+Chart.js canvases do **not** participate in the CSS override system, so
+axis ticks, grid, legend and tooltip need explicit theme-aware colours.
 
-Use the shared `getChartTheme(isDark)` helper from
-`components/ui/chartTheme.ts` together with the `useTheme` hook:
+- **Imperative charts** (the dashboard charts and every report chart) use
+  `Dashboard/useThemedChart.ts`: it creates the `Chart`, passes the
+  current `getChartTheme(isDark)` to a module-level configuration builder,
+  rebuilds when the data or the theme changes and destroys the chart on
+  unmount.
+- **Declarative charts** (`react-chartjs-2`, in
+  `Visibility/PersonaComparisonChart.tsx` and `Keywords/KeywordDetail.tsx`)
+  read `isDark` from `useTheme()` and build their options with the
+  `chartTheme.ts` helpers:
 
 ```tsx
 import { useTheme } from '../../hooks/useTheme';
-import { getChartTheme } from '../ui/chartTheme';
+import { getChartTheme, themedAxis, themedLegend, themedTooltip } from '../ui/chartTheme';
 
 export function MyChart() {
   const { isDark } = useTheme();
   const theme = getChartTheme(isDark);
 
   const options = {
-    plugins: {
-      legend: { labels: { color: theme.textColor } },
-      tooltip: {
-        backgroundColor: theme.tooltipBackground,
-        borderColor: theme.tooltipBorder,
-        titleColor: theme.tooltipText,
-        bodyColor: theme.tooltipText,
-      },
-    },
-    scales: {
-      x: { ticks: { color: theme.textColor }, grid: { color: theme.gridColor } },
-      y: { ticks: { color: theme.textColor }, grid: { color: theme.gridColor } },
-    },
+    plugins: { legend: themedLegend(theme), tooltip: themedTooltip(theme) },
+    scales: { x: themedAxis(theme), y: themedAxis(theme, { beginAtZero: true }) },
   };
   // ...
 }
 ```
 
-For imperative `new Chart(ctx, …)` usage, include `isDark` in the
-`useEffect` dependency array so the chart re-renders when the user
-toggles the theme.
-
-Dataset colours (the actual bars / slices / lines) follow these
-conventions:
-
-- **Saturated branded palettes** (e.g. `rgba(168, 85, 247, 0.5)` for
-  Claude) stay fixed across themes – they are saturated enough to read
-  on both backgrounds.
-- **Neutral data series** (e.g. the brand mentions doughnut whose
-  first slices are `gray-900` / `gray-700`) need a light- and
-  dark-mode palette. See `Dashboard/BrandChart.tsx` for the pattern.
+Dataset colours: saturated colours stay fixed across themes; neutral
+(gray) series need a light and a dark variant, as in
+`Dashboard/BrandChart.tsx` and `Reports/charts/chartPalette.ts`.
 
 #### Report charts
 
@@ -485,21 +491,19 @@ grouped engine bars, brand trend lines, sentiment split, top sources):
   sentiment and "Other brands" (with a light and a dark variant).
   Competitor lines take amber, orange, rose, violet and sky in turn.
 - **Scales.** Charts draw the percentages and the visibility score on a
-  shared 0–100 axis (`chartKpis.ts`); net sentiment has its own −100…+100
-  chart. Counts and average position stay in tables.
+  shared 0–100 axis (`chartKpis.ts`, `chartOptions.ts`); net sentiment has
+  its own −100…+100 chart in the Sentiment report. Counts and average
+  position stay in tables.
 - **Build the Chart.js configuration in a pure `*ChartConfiguration.ts`
   module** and keep the component to the canvas lifecycle, so the
-  configuration is unit-tested without a canvas.
+  configuration is unit-tested without a canvas. Shared pieces:
+  `lineChartConfiguration.ts` (line charts on the 0–100 axis, gaps for
+  unknown values) and `chartSeries.ts` (series and their captions in words).
 
 ### 7.6 Images
 
-User-content images (website screenshots from the crawler, raw S3
-images) usually carry their own bright white-themed backgrounds.
-Without treatment they appear as harsh white slabs on the dark
-surface, even when the surrounding panel is correctly tinted.
-
-Apply the standard dim filter to `<img>` tags that render arbitrary
-captured content:
+User-content images (crawler screenshots, raw S3 images) usually carry
+bright white backgrounds. Dim them in dark mode:
 
 ```tsx
 <img
@@ -509,128 +513,93 @@ captured content:
 />
 ```
 
-`dark:brightness-90 dark:contrast-95` takes the edge off harsh whites
-without distorting brand colours in the screenshot. Apply it to:
-
-- `Citations/CitationDetailModal.tsx` – cited-page screenshots.
-- `Citations/CrawlHistory.tsx` – historical crawl screenshots.
-- `RawResponses/ImageViewer.tsx` – raw image objects in S3.
+Applied in `Citations/CitationDetailModal.tsx`, `Citations/CrawlHistory.tsx`
+and `RawResponses/ImageViewer.tsx`.
 
 Do NOT apply the filter to:
 
-- **Profile photos** of real people (e.g. the AboutTab portraits).
-  They are photos, not UI surfaces, and dimming looks unnatural.
-- **Logos / favicons** (`web/public/assets/favicon.ico`,
-  `Layout/Sidebar` brand mark). These already invert via Tailwind
-  classes (`bg-gray-900 dark:bg-white`).
-- **Decorative icons** – use the SVG icon set in
-  `components/ui/Icons.tsx` instead.
+- **Profile photos** of real people (the About tab portraits).
+- **Logos and favicons**; the sidebar mark inverts through Tailwind
+  classes instead (`bg-gray-900 dark:bg-white`).
+- **Decorative icons** – use the SVG icon set.
 
 ---
 
 ## 8. Forms
 
 - Wrap form fields in `<form>` and submit via a `primary` button.
-- Labels: `block text-sm font-medium text-gray-700 mb-1` paired via
+- Labels: `block text-sm font-medium text-gray-700 mb-1`, paired via
   `htmlFor` / `id`.
 - Inputs / textareas / selects: `w-full p-2 border border-gray-200
-  rounded-lg text-sm focus:ring-2 focus:ring-gray-900`. Dark-mode
-  styling is applied globally.
+  rounded-lg text-sm focus:ring-2 focus:ring-gray-900`. Dark-mode styling
+  is applied globally.
 - Helper text under inputs: `text-xs text-gray-400 mt-1`.
 - Validation errors: `text-xs text-red-600 mt-1`.
-- Cancel buttons live to the right of the submit button and use the
-  `ghost` variant.
+- Cancel buttons sit to the right of the submit button and use the `ghost`
+  variant.
 
 ---
 
 ## 9. Tables
 
-- Header row: `bg-gray-50` background, `text-xs font-medium uppercase
-  tracking-wider text-gray-500`.
-- Cell padding: `px-6 py-4`.
-- Row separators: `divide-y divide-gray-200`.
-- Sortable columns use a chevron icon next to the label and toggle
-  `aria-sort`.
-- Expandable rows use `ChevronRightIcon` (collapsed) and
-  `ChevronDownIcon` (expanded), wrapped in a button with
-  `aria-expanded`.
+- Header row: `bg-gray-50`; header cells `px-6 py-3 text-xs font-medium
+  uppercase tracking-wider text-gray-500`.
+- Body cells: `px-6 py-4`; row separators `divide-y divide-gray-200`.
+- Sortable columns set `aria-sort` on the header cell.
+- Expandable rows use `ChevronDownIcon` (rotated `-rotate-90` while
+  collapsed) inside a button with `aria-expanded`.
+- In reports, use `Reports/layout/ReportTable`.
 
 ---
 
 ## 10. Favicon and identity
 
-- App favicon: `web/public/assets/favicon.ico` (32×32 ICO).
-- App name: "Citation Analysis Dashboard" (`web/index.html` `<title>`).
-- Logo mark in sidebar: an inline bar-chart SVG inside an
-  `bg-gray-900 dark:bg-white` rounded square (32×32). The fill colour
-  inverts so the mark stays high-contrast in both themes.
-- Profile portraits in the About tab (`web/public/assets/*.jpg`) are
-  photos and intentionally render unchanged in both themes – the
-  surrounding panel adapts via the global override.
+- App favicon: `web/public/assets/favicon.ico` (16×16 ICO), linked from
+  `web/index.html`.
+- App name: "Citation Analysis Dashboard" (`web/index.html` `<title>`); the
+  sidebar and the sign-in screen read "Citation Analysis".
+- Logo mark in the sidebar: an inline bar-chart SVG (`strokeWidth={2}`,
+  `text-white dark:text-gray-900`) inside a `w-8 h-8 rounded-lg
+  bg-gray-900 dark:bg-white` square, so it stays high-contrast in both
+  themes.
+- About tab portraits (`web/public/assets/*.jpg`) render unchanged in both
+  themes.
 
-If a new favicon is needed, replace `favicon.ico` and add modern
-formats (`favicon.svg`, `apple-touch-icon.png`) referenced from
-`web/index.html`. Keep the silhouette legible at 16×16.
-
-For user-content images (screenshots, captured assets) see
-§7.6 Images for the dimming pattern.
+When replacing the favicon, add modern formats (`favicon.svg`,
+`apple-touch-icon.png`) and reference them from `web/index.html`. Keep the
+silhouette legible at 16×16.
 
 ---
 
-## 11. Anomaly checklist
+## 11. Review checklist
 
-Use this list during code review of any UI change. Every item is a
-real anomaly that has been fixed in the codebase – don't reintroduce
-them.
+None of these is enforced by lint; check them in review.
 
 - [ ] No emoji as a button label or interactive icon. Use icons from
       `components/ui/Icons.tsx`.
-- [ ] No unicode arrows (`▲▼◀▶`) for expand/collapse. Use
-      `ChevronDownIcon` / `ChevronRightIcon`, with `aria-expanded` on
-      the button.
+- [ ] No unicode arrows (`▲▼◀▶`) for expand/collapse. Use a rotated
+      `ChevronDownIcon`, with `aria-expanded` on the button.
 - [ ] No hand-rolled `className="px-4 py-2 bg-gray-900 …"` button
-      strings. Use `<Button>`.
-- [ ] No icon-only button missing `aria-label` / `title`.
-- [ ] No hard-coded hex colours. Use Tailwind tokens.
+      strings in new code. Use `<Button>`.
+- [ ] No icon-only button without `aria-label` / `title`.
+- [ ] No hard-coded hex colours. Use Tailwind tokens (chart palettes use
+      the `rgb()` values of Tailwind tokens).
 - [ ] No mixed sizes in the same button group / list row.
-- [ ] No new `dark:` variants for classes already covered by the
-      global override – this includes neutrals (`bg-white`,
-      `text-gray-900`, …) **and accent tones** (`bg-emerald-50`,
-      `text-amber-800`, `border-blue-200`, …). If you find yourself
-      writing `dark:bg-emerald-900/20` or similar, add the override to
-      `index.css` instead so every accent surface gets it.
-- [ ] No accent surface inside an always-dark area without checking
-      that the global override matches the intent (e.g. status pills
-      inside the dark sidebar – those already have explicit `dark:`
-      treatment).
-- [ ] No `dark:` variants forgotten on always-dark surfaces (app rail,
-      fallback error screens, header chrome, modals).
-- [ ] No emoji-as-key prop signatures (e.g. `icon: '🔍'` mapping into
-      a switch). Take a `ReactNode` icon component instead.
-- [ ] All new icons follow the stroke convention: 24 × 24 viewBox,
+- [ ] No new `dark:` variants for classes covered by the global override
+      (§1.2), neutrals and accents alike. If a class is missing there, add
+      the override to `index.css`.
+- [ ] No accent surface in an explicitly themed area (sidebar, header,
+      modals) without checking that the global override matches the intent.
+- [ ] No `dark:` variants forgotten on explicitly themed chrome.
+- [ ] No emoji-as-key props (e.g. `icon: '🔍'` mapped in a switch) outside
+      the About dialog. Take a `ReactNode` icon instead.
+- [ ] New icons follow the stroke convention: 24 × 24 viewBox,
       `currentColor`, `strokeWidth={1.5}`.
-- [ ] No primary button without `transition-colors` (provided by
-      `<Button>` automatically).
 - [ ] No two primary buttons in the same visible group.
-
-### 11.1 Recently fixed anomalies (May 2026)
-
-For reference – these were the anomalies discovered during the
-design-system pass:
-
-| Component | Issue | Fix |
-| --------- | ----- | --- |
-| `Settings/QueryPromptsManager.tsx` | Emoji icons (`⏸▶✏️🗑`) on action buttons; non-canonical button styling for "+ New Persona". | Replaced with `PauseIcon`/`PlayIcon`/`PencilIcon`/`TrashIcon`. Buttons migrated to `<Button>` primary/ghost/iconOnly variants. |
-| `Dashboard/StatCard.tsx` | `icon` prop typed as a `string` (emoji) and used as a key into an SVG lookup map – unrelated emoji silently fell back to a literal emoji render. | Refactored to take a `ReactNode` icon directly plus a `tone` prop (blue/violet/emerald/amber/gray). Call site `Layout/TabContent.tsx` updated to pass `SearchIcon`/`LinkIcon`/`GlobeIcon`/`KeyIcon`. |
-| `Tables/TopCitationsTable.tsx`, `Keywords/KeywordDetailComponents.tsx`, `Brands/ProviderResponseCard.tsx` | Unicode `▲▼▶` for expand/collapse. | Replaced with `ChevronDownIcon` / `ChevronRightIcon`, plus `aria-expanded` and `aria-label` on the controls. |
-| `Brands/BrandExpansionPanel.tsx` | `⚠️` emoji on duplicate-warning text. | Replaced with `WarningIcon`. |
-| `Brands/BrandMentionsTable.tsx` | `→` text arrow inside "View Details" button. | Replaced with `ArrowRightIcon` trailing the label. |
-| `Brands/CompetitorDiscoveryPanel.tsx` | `✓` text suffix on already-added competitor pills. | Replaced with `CheckIcon` rendered conditionally with `title="Already added"`. |
-| `Brands/ProviderResponseCard.tsx` | `🌍 Geographic Analysis` emoji prefix on a section header. | Removed; section title now reads "Geographic Analysis". |
-| `Keywords/KeywordDetailComponents.tsx` | `✕ Close` unicode multiplication-sign in the close button. | Replaced with `CloseIcon` leading the label. |
-| **All accent-tinted surfaces (48 files, ~349 occurrences)** | Pages using `bg-{tone}-50/100`, `text-{tone}-700/800`, `border-{tone}-100/200/300` rendered as bright pale-tinted panels in dark mode. Most visible on `Settings > Brand Tracking`, where the stacked emerald + amber + violet panels turned the whole page green/yellow on a dark background. | Extended the `index.css` global override system to cover every accent tone: tinted surfaces become translucent dark tints, accent text shifts to `*-300/-200`, accent borders become muted translucent equivalents. Zero call-site changes – fixes all 48 files at once and any future accent surface gets the right behaviour automatically. |
-| **Chart.js canvases** (`Dashboard/ProviderChart`, `Dashboard/BrandChart`, `Visibility/PersonaComparisonChart`, `Keywords/KeywordDetail*`) | Canvases sit outside Tailwind's CSS so the global overrides do not reach them. Axis tick text, grid lines, legend, tooltip, and the neutral doughnut palette stayed in light-mode colours on dark, leaving labels invisible and the BrandChart's `gray-900` slice merging into the dark page. Charts also did not re-render when the user toggled the theme. | Added shared `components/ui/chartTheme.ts` (`getChartTheme(isDark)`) that returns axis tick / grid / tooltip colours per theme, wired all 4 chart components to call it via `useTheme()`, added `isDark` to the imperative chart `useEffect` deps so they re-render on theme toggle, and split out a per-mode dataset palette in `BrandChart`. Extracted `KeywordDetail` chart options into a sibling `KeywordDetailChartOptions.ts` to keep the components file under the 400-line cap. Test setup gained a `window.matchMedia` polyfill so components consuming `useTheme()` render in jsdom. |
-| **User-content images** (`Citations/CitationDetailModal`, `Citations/CrawlHistory`, `RawResponses/ImageViewer`) | Cited-page screenshots and raw S3 image objects carry their own bright white-themed backgrounds, so even with the surrounding panel correctly tinted dark they still appeared as harsh white slabs. | Added `dark:brightness-90 dark:contrast-95` to `<img>` tags rendering arbitrary captured content. Profile photos (About tab) and the inverting brand mark (sidebar) intentionally do **not** receive the filter – the rule only applies to user-supplied screenshots. Documented in design-system §7.6 Images. |
+- [ ] Screen-only controls carry `print-hidden`; cards and charts that must
+      not split carry `avoid-break-inside`.
+- [ ] New charts theme their chrome (§7.5); report charts go through
+      `ChartPanel` / `ChartFigure` with a pure configuration module.
 
 ---
 
@@ -638,15 +607,24 @@ design-system pass:
 
 ```
 web/src/components/ui/
-├── Button.tsx          # button variants + sizes
-├── Icons.tsx           # shared icon set
-├── Modal.tsx           # overlays
-├── Spinner.tsx         # loading
-├── ThemeToggle.tsx     # theme switcher
-├── MarkdownProcessor.tsx
-└── index.ts            # public re-exports
+├── Button.tsx                # button variants + sizes
+├── Icons.tsx                 # shared icon set
+├── ClipboardIcon.tsx         # copy-button glyph
+├── Modal.tsx                 # Modal, ConfirmModal, AlertModal
+├── Spinner.tsx               # loading
+├── ThemeToggle.tsx           # theme switcher
+├── InfoTooltip.tsx           # "i" explanations
+├── KeywordScopeSelector.tsx  # keyword scope controls (+ KeywordScopePicker, useKeywordScopeOptions, reportScope)
+├── PrintToPdfButton.tsx      # print mode
+├── MarkdownProcessor.tsx     # sanitized AI markdown
+├── chartTheme.ts             # Chart.js theme helpers
+├── pagination.ts
+└── index.ts                  # re-exports Button and the icons
+web/src/components/Reports/layout/   # report page building blocks
+web/src/components/Reports/charts/   # report chart library
 ```
 
-When in doubt, add the primitive here and re-export it from
-`index.ts`. Feature folders should consume primitives, not redefine
-them.
+A generic primitive goes in `components/ui/` (re-export it from
+`index.ts` only if it belongs with `Button` and the icons); a report
+building block goes in `Reports/layout/` or `Reports/charts/`. Feature
+folders consume primitives, they do not redefine them.

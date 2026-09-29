@@ -9,6 +9,26 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.23.2] - 2026-09-29
+
+Documentation brought up to date with the code; out-of-date content removed.
+
+### Changed
+
+- **README.md** rewritten against the code: the dashboard tabs and Settings tabs, the nine reports, the KPIs (linked to
+  `docs/kpi-definitions.md`), the full architecture (Lambdas, layers, tables, state machines, buckets), the build and
+  deploy steps, configuration and secrets, security, cost and the validation gates.
+- **SECURITY.md**, **CONTRIBUTING.md**, **THIRD_PARTY_LICENSES.md**, the PR and bug-report templates,
+  `docs/design-system.md` and `docs/kpi-definitions.md` corrected to match the code, with their history tables and
+  "replaces" notes dropped (the history stays in this changelog).
+- `scripts/deploy.sh` and the stack's `DeploymentInstructions` output point to Settings > AI Providers for the API keys instead of a
+  `setup-secrets.sh` script that does not exist.
+
+### Removed
+
+- Out-of-date docs: the May 2026 design-system audit and its audit prompt, the keyword-groups delivery plan, and the
+  2.23.0 report benchmark.
+
 ## [2.23.1] - 2026-09-29
 
 Mutation sweep over every line changed in 2.21.0–2.23.0 (Python with mutmut, the dashboard with Stryker): each
