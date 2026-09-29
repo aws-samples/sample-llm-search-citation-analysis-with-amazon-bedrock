@@ -475,7 +475,7 @@ class TestUpdateModel:
         }
 
     def test_checks_claude_with_the_web_search_tool_runs_send(self, requests_stub):
-        _store_key('sk-ant-stored-1234')
+        _store_key('claude-stored-key-1234')
 
         _put_provider('claude', {'model': 'claude-sonnet-4-6'})
 
@@ -483,7 +483,7 @@ class TestUpdateModel:
             'timeout': 20,
             'method': 'post',
             'url': 'https://api.anthropic.com/v1/messages',
-            'headers': {'x-api-key': 'sk-ant-stored-1234', 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
+            'headers': {'x-api-key': 'claude-stored-key-1234', 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
             'json': {
                 'model': 'claude-sonnet-4-6',
                 'max_tokens': 64,
@@ -687,7 +687,7 @@ class TestListModels:
         assert _list_models('claude')[1]['models'] == ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001']
 
     def test_asks_anthropic_for_the_whole_list_in_one_page(self, requests_stub):
-        _store_key('sk-ant-stored-1234')
+        _store_key('claude-stored-key-1234')
         requests_stub.return_value = _reply(200, CLAUDE_LISTING)
 
         _list_models('claude')
@@ -697,7 +697,7 @@ class TestListModels:
             'get',
             'https://api.anthropic.com/v1/models',
             {'limit': 1000},
-            {'x-api-key': 'sk-ant-stored-1234', 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
+            {'x-api-key': 'claude-stored-key-1234', 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
         )
 
     def test_offers_the_sonar_models_without_calling_perplexity(self, requests_stub):
