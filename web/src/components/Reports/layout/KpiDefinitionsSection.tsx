@@ -1,4 +1,5 @@
 import type { KpiDefinition } from '../../../constants/kpiDefinitions';
+import { Disclosure } from '../../ui/Disclosure';
 import { ReportSection } from './ReportSection';
 
 interface Props {
@@ -8,19 +9,27 @@ interface Props {
 
 /**
  * How every KPI in the report is measured — the tooltip text, written out
- * so it survives printing and sharing. Every report ends with one.
+ * so it survives printing and sharing. Every report ends with one. It is
+ * collapsed on screen (the tooltips carry the same text) and always open in
+ * print.
  */
 export function KpiDefinitionsSection({ definitions }: Props) {
   return (
-    <ReportSection title="How these KPIs are measured">
-      <dl className="grid gap-3 text-xs text-gray-700 dark:text-gray-300 sm:grid-cols-2">
-        {definitions.map((entry) => (
-          <div key={entry.label}>
-            <dt className="font-semibold text-gray-900 dark:text-white">{entry.label}</dt>
-            <dd className="mt-1">{entry.definition}</dd>
-          </div>
-        ))}
-      </dl>
+    <ReportSection>
+      <Disclosure
+        title="How these KPIs are measured"
+        headingLevel={2}
+        headingClassName="text-base font-semibold text-gray-900 dark:text-white"
+      >
+        <dl className="grid gap-3 text-xs text-gray-700 dark:text-gray-300 sm:grid-cols-2">
+          {definitions.map((entry) => (
+            <div key={entry.label}>
+              <dt className="font-semibold text-gray-900 dark:text-white">{entry.label}</dt>
+              <dd className="mt-1">{entry.definition}</dd>
+            </div>
+          ))}
+        </dl>
+      </Disclosure>
     </ReportSection>
   );
 }

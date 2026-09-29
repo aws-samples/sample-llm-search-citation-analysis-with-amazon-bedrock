@@ -126,14 +126,14 @@ export function sectionTitles(): string[] {
   return [...document.querySelectorAll('section h2')].map((heading) => heading.textContent ?? '');
 }
 
-/** Every term of the definitions block, in order. */
+/** Every term of the definitions block, in order (the block is collapsed on screen, so hidden terms count). */
 export function definitionTerms(): string[] {
-  return within(sectionTitled('How these KPIs are measured')).getAllByRole('term').map((term) => term.textContent ?? '');
+  return within(sectionTitled('How these KPIs are measured')).getAllByRole('term', { hidden: true }).map((term) => term.textContent ?? '');
 }
 
-/** Every definition of the definitions block, in order. */
+/** Every definition of the definitions block, in order (collapsed ones included). */
 export function definitionTexts(): string[] {
-  return within(sectionTitled('How these KPIs are measured')).getAllByRole('definition').map((entry) => entry.textContent ?? '');
+  return within(sectionTitled('How these KPIs are measured')).getAllByRole('definition', { hidden: true }).map((entry) => entry.textContent ?? '');
 }
 
 
