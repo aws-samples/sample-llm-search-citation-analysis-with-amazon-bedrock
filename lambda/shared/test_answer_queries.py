@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
 from shared.answer_queries import (
+    history_since,
     latest_run_timestamp,
+    previous_run_timestamp,
     query_keyword_rows_since,
     query_keyword_run_rows,
-    query_latest_run_rows,
+    query_last_two_runs_rows,
 )
 
 RUN_1 = '2026-09-01T06:00:00.000000Z'
@@ -120,18 +123,75 @@ class TestLatestRun:
 
         assert latest_run_timestamp(table, 'hotel malaga') is None
 
-    def test_reads_every_row_of_the_latest_run(self):
+    def test_reads_every_row_of_the_latest_and_the_previous_run(self):
         table = MagicMock()
-        table.query.side_effect = [{'Items': [{'timestamp': RUN_2}]}, {'Items': [{'timestamp': RUN_2, 'provider': 'openai'}]}]
+        table.query.side_effect = [
+            {'Items': [{'timestamp': RUN_2}]},
+            {'Items': [{'timestamp': RUN_1}]},
+            {'Items': [{'timestamp': RUN_1, 'provider': 'gemini'}]},
+            {'Items': [{'timestamp': RUN_2, 'provider': 'openai'}]},
+        ]
 
-        rows = query_latest_run_rows(table, 'hotel malaga')
+        latest, previous = query_last_two_runs_rows(table, 'hotel malaga')
 
-        assert (rows, _sort_condition(table.query.call_args)) == (
-            [{'timestamp': RUN_2, 'provider': 'openai'}], ('begins_with', 'timestamp_provider', f'{RUN_2}#'),
+        prefixes = [_sort_condition(call)[2] for call in table.query.call_args_list[2:]]
+        assert (latest, previous, prefixes) == (
+            [{'timestamp': RUN_2, 'provider': 'openai'}], [{'timestamp': RUN_1, 'provider': 'gemini'}], [f'{RUN_1}#', f'{RUN_2}#'],
         )
+
+    def test_reads_the_latest_run_alone_when_there_is_no_previous_one(self):
+        table = MagicMock()
+        table.query.side_effect = [{'Items': [{'timestamp': RUN_2}]}, {'Items': []}, {'Items': [{'timestamp': RUN_2}]}]
+
+        assert query_last_two_runs_rows(table, 'hotel malaga') == ([{'timestamp': RUN_2}], [])
 
     def test_reads_nothing_more_for_a_keyword_never_analysed(self):
         table = MagicMock()
         table.query.return_value = {'Items': []}
 
-        assert (query_latest_run_rows(table, 'hotel malaga'), table.query.call_count) == ([], 1)
+        assert (query_last_two_runs_rows(table, 'hotel malaga'), table.query.call_count) == (([], []), 1)
+
+
+class TestPreviousRun:
+    def test_reads_the_newest_row_strictly_before_the_run(self):
+        table = MagicMock()
+        table.query.return_value = {'Items': [{'timestamp': RUN_1}]}
+
+        timestamp = previous_run_timestamp(table, 'hotel malaga', RUN_2)
+
+        kwargs = table.query.call_args.kwargs
+        assert (timestamp, _sort_condition(table.query.call_args), kwargs['ScanIndexForward'], kwargs['Limit']) == (
+            RUN_1, ('<', 'timestamp_provider', RUN_2), False, 1,
+        )
+
+    def test_projects_only_the_timestamp(self):
+        table = MagicMock()
+        table.query.return_value = {'Items': []}
+
+        previous_run_timestamp(table, 'hotel malaga', RUN_2)
+
+        kwargs = table.query.call_args.kwargs
+        assert (kwargs['ProjectionExpression'], kwargs['ExpressionAttributeNames']) == ('#ts', {'#ts': 'timestamp'})
+
+    @pytest.mark.parametrize(('response', 'expected'), [
+        ({'Items': [{'timestamp': RUN_1}]}, RUN_1),
+        ({'Items': []}, None),
+        ({'Items': [{'timestamp': ''}]}, None),
+        ({}, None),
+    ])
+    def test_answers_the_previous_run_timestamp_or_none(self, response, expected):
+        table = MagicMock()
+        table.query.return_value = response
+
+        assert previous_run_timestamp(table, 'hotel malaga', RUN_2) == expected
+
+
+
+class TestHistorySince:
+    def test_formats_the_window_start_like_run_timestamps(self):
+        now = datetime(2026, 9, 28, 12, 30, 15, 123456, tzinfo=UTC)
+
+        assert history_since(90, now) == '2026-06-30T12:30:15.123456Z'
+
+    def test_defaults_to_the_current_time(self):
+        assert history_since(0) <= datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%S.%fZ')

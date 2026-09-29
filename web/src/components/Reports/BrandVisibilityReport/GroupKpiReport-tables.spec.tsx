@@ -3,15 +3,17 @@ import {
 } from 'vitest';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderGroupKpiReport } from './GroupKpiReport-fixtures';
 import {
-  headerTooltips, kpiRowTooltips, renderGroupKpiReport, sectionTable
-} from './GroupKpiReport-fixtures';
+  headerTooltips, kpiRowTooltips, sectionTable
+} from '../layout/reportQueries-fixtures';
 import {
   historyWithoutOwnedDomains, RUN_1
 } from './groupKpiHistory-fixtures';
 import {
   KPI_DEFINITIONS, KPI_SPECS
 } from '../../../constants/kpiDefinitions';
+import { KPI_TABLE_ROWS } from '../layout/kpiHeadline-fixtures';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
@@ -27,22 +29,7 @@ describe('GroupKpiReport KPI table', () => {
   it('lists every KPI of the selected run in report order with its value, change since the previous group run and trend', () => {
     renderGroupKpiReport();
 
-    expect(sectionTable('Headline').slice(1)).toStrictEqual([
-      ['Answers', '20', '0', '—'],
-      ['Mentions', '12', '-2', '—'],
-      ['Mention rate', '60.0%', '-10.0 pts', 'Declining'],
-      ['Share of voice', '25.0%', '+5.0 pts', 'Improving'],
-      ['Average position', '1.80', '+0.50', 'Declining'],
-      ['Top-1 share', '40.0%', '+3.0 pts', 'Improving'],
-      ['Top-3 share', '55.0%', '+1.5 pts', 'Stable'],
-      ['Visibility score', '52.4', '-8.2 pts', 'Declining'],
-      ['Citations', '6', '+1', '—'],
-      ['Citation rate', '30.0%', '+1.2 pts', 'Stable'],
-      ['Citation share', '12.5%', '-2.5 pts', 'Declining'],
-      ['Net sentiment', '+15.0', '+10.0 pts', 'Improving'],
-      ['Engine coverage', '75.0%', '+0.8 pts', 'Stable'],
-      ['Keyword coverage', '80.0%', '-20.0 pts', 'Declining'],
-    ]);
+    expect(sectionTable('Headline').slice(1)).toStrictEqual(KPI_TABLE_ROWS);
   });
 
   it('explains every KPI of the table in a tooltip holding its definition', () => {

@@ -3,8 +3,8 @@ The Visibility tab's two views of a scope (one keyword, a keyword group or
 every keyword), built from answers with ``shared.kpi_engine``:
 
 - ``visibility_view``: where the brand stands now — every KPI over each
-  keyword's latest run, pooled, with the brand leaderboard and a row per
-  keyword.
+  keyword's latest run, pooled, its change since each keyword's previous
+  run, the brand leaderboard and a row per keyword.
 - ``trend_view``: how it moved — every KPI per day, week or month, the
   latest period against the previous one, and each keyword's own move.
 
@@ -30,35 +30,55 @@ def _latest_timestamp(answers: Iterable[Answer]) -> str | None:
     return max((answer.timestamp for answer in answers), default=None)
 
 
+def _of_persona(answers: Iterable[Answer], persona: str | None) -> list[Answer]:
+    return [answer for answer in answers if persona is None or answer.persona == persona]
+
+
+def _run_change(
+    latest_by_keyword: Mapping[str, list[Answer]],
+    previous_by_keyword: Mapping[str, list[Answer]],
+    domains: list[str],
+) -> dict[str, Any] | None:
+    """Latest against previous run, like for like: only the keywords with answers in both runs are compared."""
+    compared = [keyword for keyword, answers in latest_by_keyword.items() if answers and previous_by_keyword.get(keyword)]
+    if not compared:
+        return None
+    latest = brand_kpis((answer for keyword in compared for answer in latest_by_keyword[keyword]), domains)
+    previous = brand_kpis((answer for keyword in compared for answer in previous_by_keyword[keyword]), domains)
+    return {'keywords_compared': len(compared), **_change(latest, previous)}
+
+
 def visibility_view(
     keywords: list[str],
     answers_by_keyword: Mapping[str, Iterable[Answer]],
     owned_domains: Iterable[str] = (),
     *,
+    previous_by_keyword: Mapping[str, Iterable[Answer]] | None = None,
     persona: str | None = None,
     brand: str | None = None,
 ) -> dict[str, Any]:
     """Every KPI over the given latest-run answers of each keyword, pooled.
 
-    ``persona`` keeps the answers of one persona; ``brand`` narrows the
-    leaderboard to brands whose name contains it (the KPIs are unchanged).
-    A keyword whose latest run has no answer is reported without KPIs.
+    ``previous_by_keyword`` holds each keyword's run before its latest one;
+    ``change`` then compares the two runs over the keywords answered in both
+    (``None`` without such a keyword). ``persona`` keeps the answers of one
+    persona; ``brand`` narrows the leaderboard to brands whose name contains
+    it (the KPIs are unchanged). A keyword whose latest run has no answer is
+    reported without KPIs.
     """
     domains = list(owned_domains)
-    pooled: list[Answer] = []
-    rows = []
-    for keyword in keywords:
-        answers = [
-            answer for answer in answers_by_keyword.get(keyword, ())
-            if persona is None or answer.persona == persona
-        ]
-        pooled.extend(answers)
-        rows.append({
+    latest = {keyword: _of_persona(answers_by_keyword.get(keyword, ()), persona) for keyword in keywords}
+    previous = {keyword: _of_persona((previous_by_keyword or {}).get(keyword, ()), persona) for keyword in keywords}
+    pooled = [answer for answers in latest.values() for answer in answers]
+    rows = [
+        {
             'keyword': keyword,
             'timestamp': _latest_timestamp(answers),
             'has_data': bool(answers),
             'kpis': brand_kpis(answers, domains) if answers else None,
-        })
+        }
+        for keyword, answers in latest.items()
+    ]
     brands = brand_table(pooled)
     if brand:
         brands = [row for row in brands if brand.lower() in row['name'].lower()]
@@ -67,6 +87,7 @@ def visibility_view(
         'keywords_analyzed': len(keywords),
         'keywords_with_data': sum(row['has_data'] for row in rows),
         'kpis': brand_kpis(pooled, domains),
+        'change': _run_change(latest, previous, domains),
         'brands': brands,
         'keywords': rows,
     }

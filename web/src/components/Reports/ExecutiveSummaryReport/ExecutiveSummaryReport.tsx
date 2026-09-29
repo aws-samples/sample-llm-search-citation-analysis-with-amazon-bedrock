@@ -3,8 +3,11 @@ import {
 } from 'react-router-dom';
 import { usePrintMode } from '../../../hooks/usePrintMode';
 import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
-import { ReportLayout } from '../layout';
+import {
+  KpiDefinitionsSection, ReportLayout
+} from '../layout';
 import type { ReportScope } from '../../../types';
+import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import { KeywordScopeSelector } from '../../ui/KeywordScopeSelector';
 import {
   ALL_SCOPE, describeReportScope 
@@ -21,10 +24,11 @@ import { NextActionsSection } from './sections/NextActionsSection';
  * doesn't replicate cross-keyword aggregation logic on the client.
  * `?group=<id>` narrows it to one keyword group (a hotel).
  *
- * Three sections, in this order:
- *   1. Headline — overall score, 30-day movement, breadth.
+ * Sections, in this order:
+ *   1. Headline — every KPI with its change, and the keywords by trend.
  *   2. Top wins and gaps — three improvers, three decliners.
  *   3. Next actions — top three recommendations.
+ *   4. How these KPIs are measured — the definitions, for print.
  *
  * Designed to fit on two printed pages: sections 1+2 on the first,
  * section 3 on the second (via `startNewPage` on NextActionsSection).
@@ -42,8 +46,10 @@ export function ExecutiveSummaryReport() {
 
   usePrintMode({ ready: data.ready });
 
+  // The API names the scope it summarised; before it answers, the group list does.
+  const scopeLabel = data.data?.scope.label ?? describeReportScope(scope, groups);
   const subtitle = scope.kind === 'group'
-    ? `The one-page state of brand visibility for "${describeReportScope(scope, groups)}" across AI search engines.`
+    ? `The one-page state of brand visibility for "${scopeLabel}" across AI search engines.`
     : 'The one-page state of brand visibility across AI search engines. For quarterly reviews and exec stand-ups.';
 
   return (
@@ -76,6 +82,7 @@ export function ExecutiveSummaryReport() {
         loading={data.loading}
         error={data.error}
       />
+      <KpiDefinitionsSection definitions={VISIBILITY_DEFINITIONS} />
     </ReportLayout>
   );
 }

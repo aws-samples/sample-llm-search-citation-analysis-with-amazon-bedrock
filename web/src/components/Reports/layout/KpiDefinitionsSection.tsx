@@ -1,5 +1,5 @@
-import type { KpiDefinition } from '../../../../constants/kpiDefinitions';
-import { ReportSection } from '../../layout';
+import type { KpiDefinition } from '../../../constants/kpiDefinitions';
+import { ReportSection } from './ReportSection';
 
 interface Props {
   /** The definitions of every figure the report shows, in the order it shows them. */
@@ -8,7 +8,7 @@ interface Props {
 
 /**
  * How every KPI in the report is measured — the tooltip text, written out
- * so it survives printing and sharing.
+ * so it survives printing and sharing. Every report ends with one.
  */
 export function KpiDefinitionsSection({ definitions }: Props) {
   return (

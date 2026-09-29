@@ -1,8 +1,6 @@
 import type { HistoricalTrendsResponse } from '../../../../types';
 import {
-  ReportSection,
-  ReportStatCard,
-  ReportStatGrid,
+  TrendHeadlineSection,
   gateSection,
 } from '../../layout';
 
@@ -13,9 +11,9 @@ interface Props {
 }
 
 /**
- * All-keywords overview header — improving / declining / stable counts plus
- * the average score. Reads from `/trends` (no keyword) which already
- * computes these aggregates server-side.
+ * All-keywords headline: every KPI over each keyword's latest period, its
+ * change since the previous period, and how many keywords improve, decline
+ * or hold — all computed by `/trends`.
  */
 export function CrossKeywordHeadlineSection({
   trends, loading, error 
@@ -25,20 +23,10 @@ export function CrossKeywordHeadlineSection({
     loading,
     loadingMessage: 'Loading aggregate trends…',
     error,
-    value: trends?.overall,
+    value: trends !== null && trends.keywords_with_data > 0 ? trends : null,
     emptyMessage: 'No aggregate trend data yet. Run an analysis to populate.',
   });
   if (!gate.ready) return gate.placeholder;
-  const overall = gate.value;
 
-  return (
-    <ReportSection title="Headline">
-      <ReportStatGrid columns={4}>
-        <ReportStatCard label="Average score" value={overall.avg_score.toFixed(1)} />
-        <ReportStatCard label="Improving" value={overall.improving_count.toString()} accent="positive" />
-        <ReportStatCard label="Declining" value={overall.declining_count.toString()} accent="negative" />
-        <ReportStatCard label="Stable" value={overall.stable_count.toString()} />
-      </ReportStatGrid>
-    </ReportSection>
-  );
+  return <TrendHeadlineSection kpis={gate.value.latest} standing={gate.value} counts={gate.value.overall} />;
 }

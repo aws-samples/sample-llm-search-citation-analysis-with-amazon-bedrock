@@ -3,6 +3,7 @@ import {
   MoverColumn, ReportSection 
 } from '../../layout';
 import { gateKeywordTrendRows } from './keywordTrendRows';
+import { keywordMovers } from './keywordMovers';
 
 interface Props {
   readonly trends: HistoricalTrendsResponse | null;
@@ -10,15 +11,13 @@ interface Props {
   readonly error: string | null;
 }
 
-const TOP_N = 5;
-const NO_MOVERS_MESSAGE = 'No keywords moved in this direction.';
+const NO_MOVERS_MESSAGE = 'No keyword\'s visibility score moved this way.';
 
 /**
- * Top improvers and top decliners side by side. The aggregator endpoint
- * (PR D) will eventually provide these directly; until then we sort the
- * `keyword_trends` array client-side by `change`. Five rows on each side
- * is the print-friendly default — enough to spot a campaign-level pattern
- * without bleeding onto a second page.
+ * Top improvers and top decliners side by side: the keywords whose
+ * visibility score improves or declines since their previous period (from
+ * 2 points, as the API judges trends), largest move first, five a side —
+ * enough to spot a campaign-level pattern without a second page.
  */
 export function MoversSection({
   trends, loading, error 
@@ -26,27 +25,20 @@ export function MoversSection({
   const gate = gateKeywordTrendRows({
     title: 'Top movers',
     loading,
-    loadingMessage: 'Computing movers…',
+    loadingMessage: 'Loading movers…',
     error,
     trends,
   });
   if (!gate.ready) return gate.placeholder;
 
-  const improvers = [...gate.rows]
-    .filter((r) => r.change > 0)
-    .sort((a, b) => b.change - a.change)
-    .slice(0, TOP_N);
-  const decliners = [...gate.rows]
-    .filter((r) => r.change < 0)
-    .sort((a, b) => a.change - b.change)
-    .slice(0, TOP_N);
-
+  const improvers = keywordMovers(gate.rows, 'improving');
+  const decliners = keywordMovers(gate.rows, 'declining');
   if (improvers.length === 0 && decliners.length === 0) return null;
 
   return (
     <ReportSection
       title="Top movers"
-      subtitle="Keywords that shifted the most in the period. The improvers list is where momentum is paying off; the decliners list is where to investigate."
+      subtitle="Keywords whose visibility score improved or declined by 2 points or more since their previous period. Improvers show where momentum pays off; decliners where to investigate."
     >
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <MoverColumn

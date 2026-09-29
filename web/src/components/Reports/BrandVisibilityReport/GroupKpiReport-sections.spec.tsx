@@ -6,8 +6,11 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  keywordDetailMentions, renderGroupKpiReport, sectionTable, sectionTitled
+  keywordDetailMentions, renderGroupKpiReport
 } from './GroupKpiReport-fixtures';
+import {
+  definitionTerms, definitionTexts, sectionTable
+} from '../layout/reportQueries-fixtures';
 import {
   buildHistory, buildKeywordChange, buildKeywordRun, buildRun, historyWithKeywordRun, KEYWORD_KPIS, RUN_1, RUN_2
 } from './groupKpiHistory-fixtures';
@@ -154,15 +157,13 @@ describe('GroupKpiReport definitions', () => {
   it('names every KPI, the group run and the trend rule in the definitions block, in order', () => {
     renderGroupKpiReport();
 
-    expect(within(sectionTitled('How these KPIs are measured')).getAllByRole('term').map((term) => term.textContent))
-      .toStrictEqual(GROUP_REPORT_DEFINITIONS.map((entry) => entry.label));
+    expect(definitionTerms()).toStrictEqual(GROUP_REPORT_DEFINITIONS.map((entry) => entry.label));
   });
 
   it('writes out every definition for print', () => {
     renderGroupKpiReport();
 
-    expect(within(sectionTitled('How these KPIs are measured')).getAllByRole('definition').map((entry) => entry.textContent))
-      .toStrictEqual(GROUP_REPORT_DEFINITIONS.map((entry) => entry.definition));
+    expect(definitionTexts()).toStrictEqual(GROUP_REPORT_DEFINITIONS.map((entry) => entry.definition));
   });
 
   it('keeps the definitions while the history loads', () => {
@@ -171,7 +172,7 @@ describe('GroupKpiReport definitions', () => {
       loading: true
     });
 
-    expect(within(sectionTitled('How these KPIs are measured')).getAllByRole('term')).toHaveLength(GROUP_REPORT_DEFINITIONS.length);
+    expect(definitionTerms()).toHaveLength(GROUP_REPORT_DEFINITIONS.length);
   });
 });
 

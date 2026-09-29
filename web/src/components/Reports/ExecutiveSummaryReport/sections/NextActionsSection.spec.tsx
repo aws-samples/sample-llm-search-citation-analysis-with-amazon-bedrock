@@ -5,16 +5,15 @@ import {
   render, screen 
 } from '@testing-library/react';
 import { NextActionsSection } from './NextActionsSection';
-import {
-  buildOverview, buildRec
-} from './reportsOverview-fixtures';
+import { buildRec } from './reportsOverview-fixtures';
+import { buildOverview } from '../../layout/reportPayload-fixtures';
 
 describe('NextActionsSection — content', () => {
   it('renders each recommendation title as an h3', () => {
     render(
       <NextActionsSection
         data={buildOverview({
-          recommendations: [
+          top_recommendations: [
             buildRec('First action', 'high'),
             buildRec('Second action', 'medium'),
           ],
@@ -39,7 +38,7 @@ describe('NextActionsSection — content', () => {
     render(
       <NextActionsSection
         data={buildOverview({
-          recommendations: [
+          top_recommendations: [
             buildRec('Pitch publishers', 'high', {
               description: 'Outdoor outlets cite competitors only.',
               action: 'Reach out to Outside, Backpacker, REI Co-op Journal',
@@ -61,7 +60,7 @@ describe('NextActionsSection — content', () => {
   it('renders the priority label as a badge', () => {
     render(
       <NextActionsSection
-        data={buildOverview({ recommendations: [buildRec('Action A', 'high')] })}
+        data={buildOverview({ top_recommendations: [buildRec('Action A', 'high')] })}
         loading={false}
         error={null}
       />,

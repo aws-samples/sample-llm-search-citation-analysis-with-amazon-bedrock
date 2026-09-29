@@ -4,107 +4,84 @@ import {
 import {
   render, screen 
 } from '@testing-library/react';
+import type { ReportsOverviewResponse } from '../../../../api/reports';
 import { HeadlineSection } from './HeadlineSection';
-import { buildData } from './HeadlineSection-fixtures';
+import { NO_PREVIOUS_PERIOD } from '../../layout';
+import { OWNED_DOMAINS_MISSING } from '../../layout/KpiHeadline';
+import {
+  buildOverview, buildPeriodChange
+} from '../../layout/reportPayload-fixtures';
+import {
+  cardFigure, cardFootnote, plainStatCard, statFigure, statFootnote
+} from '../../layout/reportQueries-fixtures';
+import { buildKpis } from '../../BrandVisibilityReport/groupKpiHistory-fixtures';
 
-describe('HeadlineSection — value rendering', () => {
-  it('renders the overall visibility score as the first hero metric', () => {
-    render(
-      <HeadlineSection
-        data={buildData({ overall_score: 65.4 })}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(screen.getByText('65.4')).toBeInTheDocument();
+function renderHeadline(overrides: Partial<ReportsOverviewResponse> = {}): void {
+  render(<HeadlineSection data={buildOverview(overrides)} loading={false} error={null} />);
+}
+
+describe('HeadlineSection — KPIs', () => {
+  it('shows the overview KPIs on the headline cards', () => {
+    renderHeadline({ kpis: buildKpis({ visibility_score: 65.44 }) });
+
+    expect(statFigure('Visibility score').textContent).toBe('65.4');
   });
 
-  it('formats positive movement with a plus sign and percent', () => {
-    render(
-      <HeadlineSection
-        data={buildData({
-          change: 4.9,
-          change_percent: 8.1 
-        })}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(screen.getByText(/\+4\.9 \(\+8\.1%\)/)).toBeInTheDocument();
+  it('writes each change against the previous period over the keywords compared', () => {
+    renderHeadline({ change: buildPeriodChange({ keywords_compared: 7 }) });
+
+    expect(statFootnote('Visibility score')).toBe('-8.2 pts vs previous day (7 keywords)');
   });
 
-  it('formats negative movement without a plus sign', () => {
-    render(
-      <HeadlineSection
-        data={buildData({
-          change: -3.2,
-          change_percent: -5.0 
-        })}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(screen.getByText(/-3\.2 \(-5\.0%\)/)).toBeInTheDocument();
+  it('says there is no earlier period before a second one', () => {
+    renderHeadline({ change: null });
+
+    expect(statFootnote('Visibility score')).toBe(NO_PREVIOUS_PERIOD);
   });
 
-  it('renders "No change" when change is exactly zero', () => {
-    render(
-      <HeadlineSection
-        data={buildData({
-          change: 0,
-          change_percent: 0 
-        })}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(screen.getByText('No change')).toBeInTheDocument();
+  it.each([
+    [false, OWNED_DOMAINS_MISSING],
+    [true, '+1.2 pts vs previous day (3 keywords)'],
+  ])('writes under the citation rate, with owned domains configured %s, "%s"', (configured, footnote) => {
+    renderHeadline({ citations_configured: configured });
+
+    expect(statFootnote('Citation rate')).toBe(footnote);
+  });
+
+  it('says how many answers and keywords the KPIs cover', () => {
+    renderHeadline({
+      keywords_analyzed: 10,
+      keywords_with_data: 8,
+    });
+
+    expect(screen.getByText('Each keyword\'s latest day in the last 30 days — 20 AI answers across 8 of 10 keywords.')).toBeInTheDocument();
   });
 });
 
 describe('HeadlineSection — keyword breadth', () => {
-  it('renders the improving fraction as "improving / total"', () => {
-    render(
-      <HeadlineSection
-        data={buildData({
-          summary: {
-            improving_count: 3,
-            declining_count: 2,
-            stable_count: 5 
-          },
-        })}
-        loading={false}
-        error={null}
-      />,
-    );
-    // 3 improving / (3+2+5) = 3/10
-    expect(screen.getByText('3/10')).toBeInTheDocument();
+  it('counts the improving, declining and stable keywords from the summary', () => {
+    renderHeadline({
+      summary: {
+        improving_count: 3,
+        declining_count: 2,
+        stable_count: 5,
+      },
+    });
+
+    expect(['Improving', 'Declining', 'Stable'].map((label) => cardFigure(plainStatCard(label)).textContent)).toStrictEqual(['3', '2', '5']);
   });
 
-  it('shows the declining and stable counts in the breadth footnote', () => {
-    render(
-      <HeadlineSection
-        data={buildData({
-          summary: {
-            improving_count: 1,
-            declining_count: 4,
-            stable_count: 5 
-          },
-        })}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(screen.getByText(/4 declining, 5 stable/)).toBeInTheDocument();
+  it('says the counts cover the keywords with data', () => {
+    renderHeadline({ keywords_with_data: 10 });
+
+    expect(cardFootnote(plainStatCard('Improving'))).toBe('of 10 keywords with data');
   });
 });
 
 describe('HeadlineSection — placeholder states', () => {
   it('renders the loading placeholder when loading is true', () => {
     render(<HeadlineSection data={null} loading error={null} />);
-    expect(
-      screen.getByText(/Loading executive summary/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Loading executive summary…')).toBeInTheDocument();
   });
 
   it('renders the error message when error is set', () => {
@@ -112,8 +89,11 @@ describe('HeadlineSection — placeholder states', () => {
     expect(screen.getByText('boom')).toBeInTheDocument();
   });
 
-  it('renders the empty placeholder when data is null and not loading', () => {
-    render(<HeadlineSection data={null} loading={false} error={null} />);
-    expect(screen.getByText(/Run an analysis/i)).toBeInTheDocument();
+  it.each([
+    ['there is no overview yet', null],
+    ['no keyword has data', buildOverview({ keywords_with_data: 0 })],
+  ])('asks for an analysis when %s', (_label, data) => {
+    render(<HeadlineSection data={data} loading={false} error={null} />);
+    expect(screen.getByText('No analysis data yet. Run an analysis to populate the executive summary.')).toBeInTheDocument();
   });
 });

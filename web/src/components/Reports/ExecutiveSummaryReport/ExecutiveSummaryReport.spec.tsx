@@ -7,67 +7,36 @@ import {
 import { MemoryRouter } from 'react-router-dom';
 import { ExecutiveSummaryReport } from './ExecutiveSummaryReport';
 import { getReportHeading } from '../../../test/reportHeading';
+import {
+  buildMover, buildOverview
+} from '../layout/reportPayload-fixtures';
+import {
+  definitionTerms, sectionTitles, statFigure
+} from '../layout/reportQueries-fixtures';
+import { buildRec } from './sections/reportsOverview-fixtures';
+import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 
 vi.mock('./useExecutiveSummary', () => ({useExecutiveSummary: vi.fn()}));
 vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPrintMode: false })),}));
 
 import { useExecutiveSummary } from './useExecutiveSummary';
 
-const mockUse = useExecutiveSummary as ReturnType<typeof vi.fn>;
+const mockUse = vi.mocked(useExecutiveSummary);
 
 const POPULATED = {
-  data: {
-    generated_at: '2026-05-14T12:00:00Z',
-    period_type: 'day',
-    days_analyzed: 30,
-    keywords_analyzed: 4,
-    overall_score: 65.4,
-    previous_score: 60.5,
-    change: 4.9,
-    change_percent: 8.1,
-    trend_direction: 'improving',
-    summary: {
-      improving_count: 2,
-      declining_count: 1,
-      stable_count: 1 
-    },
-    top_improving: [
-      {
-        keyword: 'best running shoes',
-        current_score: 80,
-        change: 8,
-        change_percent: 11.1,
-        trend_direction: 'improving' 
-      },
-    ],
-    top_declining: [
-      {
-        keyword: 'best hiking boots',
-        current_score: 30,
-        change: -10,
-        change_percent: -25,
-        trend_direction: 'declining' 
-      },
-    ],
-    top_recommendations: [
-      {
-        type: 'gap',
-        priority: 'high',
-        title: 'Pitch hiking-gear-focused publishers',
-        description: 'Target the citation gaps on outdoor outlets.',
-        action: 'Reach out to Outside, Backpacker, REI Co-op Journal',
-        impact: '5-10% visibility lift on `best hiking boots`',
-      },
-    ],
-  },
+  data: buildOverview({
+    top_improving: [buildMover('best running shoes', 8, 80)],
+    top_declining: [buildMover('best hiking boots', -10, 30)],
+    top_recommendations: [buildRec('Pitch hiking-gear-focused publishers', 'high')],
+  }),
   loading: false,
   error: null,
   ready: true,
 };
 
-function renderReport() {
+function renderReport(path = '/reports/executive-summary') {
   return render(
-    <MemoryRouter initialEntries={['/reports/executive-summary']}>
+    <MemoryRouter initialEntries={[path]}>
       <ExecutiveSummaryReport />
     </MemoryRouter>,
   );
@@ -83,9 +52,16 @@ describe('ExecutiveSummaryReport', () => {
     expect(getReportHeading(/Executive Summary/i)).toBeInTheDocument();
   });
 
-  it('renders the overall visibility headline value', () => {
+  it('shows the headline, wins and gaps, next actions and definitions, in that order', () => {
     renderReport();
-    expect(screen.getByText('65.4')).toBeInTheDocument();
+
+    expect(sectionTitles()).toStrictEqual(['Headline', 'Top wins and gaps', 'Next actions', 'How these KPIs are measured']);
+  });
+
+  it('shows the overview KPIs in the headline', () => {
+    renderReport();
+
+    expect(statFigure('Visibility score').textContent).toBe('52.4');
   });
 
   it('renders a top-improving keyword in the wins panel', () => {
@@ -98,5 +74,28 @@ describe('ExecutiveSummaryReport', () => {
     expect(
       screen.getByText('Pitch hiking-gear-focused publishers'),
     ).toBeInTheDocument();
+  });
+
+  it('ends with the definition of every KPI and of the trend rule', () => {
+    renderReport();
+
+    expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITIONS.map((entry) => entry.label));
+  });
+
+  it('names a keyword group as the API describes the scope', () => {
+    mockUse.mockReturnValue({
+      ...POPULATED,
+      data: buildOverview({
+        scope: {
+          kind: 'group',
+          label: 'Hotel Sol',
+          keyword_count: 4,
+        },
+      }),
+    });
+
+    renderReport('/reports/executive-summary?group=hotel-sol');
+
+    expect(screen.getByText('The one-page state of brand visibility for "Hotel Sol" across AI search engines.')).toBeInTheDocument();
   });
 });

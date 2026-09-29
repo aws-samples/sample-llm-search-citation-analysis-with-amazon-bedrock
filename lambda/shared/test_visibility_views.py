@@ -90,6 +90,24 @@ class TestVisibilityView:
 
         assert (view['keywords'], view['brands'], view['kpis']['answers'], view['keywords_analyzed']) == ([], [], 0, 0)
 
+    def test_compares_like_for_like_the_keywords_answered_in_both_runs(self):
+        previous = {'spa': [_rival_only('spa', DAY_1)], 'golf': [_hotel_first('golf', DAY_1)]}
+
+        change = visibility_view(['spa', 'beach', 'golf'], self.ANSWERS, previous_by_keyword=previous)['change']
+
+        assert (change['keywords_compared'], change['deltas']['mention_rate'], change['trends']['mention_rate']) == (1, 50.0, 'improving')
+
+    def test_has_no_change_without_a_previous_run(self):
+        assert visibility_view(['spa', 'beach'], self.ANSWERS)['change'] is None
+
+    def test_compares_the_previous_run_of_the_same_persona(self):
+        latest = {'spa': [_hotel_first('spa', DAY_2, persona='family')]}
+        previous = {'spa': [_rival_only('spa', DAY_1, persona='family'), _hotel_first('spa', DAY_1)]}
+
+        change = visibility_view(['spa'], latest, previous_by_keyword=previous, persona='family')['change']
+
+        assert change['deltas']['mention_rate'] == 100.0
+
 
 class TestPeriodKey:
     @pytest.mark.parametrize(('period', 'expected'), [

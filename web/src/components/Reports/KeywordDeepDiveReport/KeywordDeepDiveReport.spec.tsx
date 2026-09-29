@@ -10,6 +10,10 @@ import {
 } from 'react-router-dom';
 import { KeywordDeepDiveReport } from './KeywordDeepDiveReport';
 import { settledData } from './KeywordDeepDiveReport-fixtures';
+import {
+  definitionTerms, sectionTitles, statFigure, statFootnote
+} from '../layout/reportQueries-fixtures';
+import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 
 
 vi.mock('./useKeywordDeepDive', () => ({useKeywordDeepDive: vi.fn(),}));
@@ -60,21 +64,29 @@ describe('KeywordDeepDiveReport', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders the headline visibility score from the visibility data', () => {
+  it('shows the keyword KPIs of the visibility answer in the headline', () => {
     renderAt('/reports/keyword/best%20running%20shoes');
-    expect(screen.getByText('42.0')).toBeInTheDocument();
+
+    expect(statFigure('Visibility score').textContent).toBe('52.4');
   });
 
-  it('renders the headline first-party share-of-voice from the visibility data', () => {
+  it('writes the headline change against the previous run', () => {
     renderAt('/reports/keyword/best%20running%20shoes');
-    // first_party_total_sov = 12 in fixture -> rendered as "12.0%".
-    expect(screen.getByText('12.0%')).toBeInTheDocument();
+
+    expect(statFootnote('Share of voice')).toBe('+5.0 pts vs previous run (3 keywords)');
   });
 
-  it('renders the competitor average score in the headline footnote', () => {
+  it('shows the KPI history after the headline and ends with the definitions', () => {
     renderAt('/reports/keyword/best%20running%20shoes');
-    // competitor_avg_score = 38 in fixture -> footnote "Competitor avg: 38.0".
-    expect(screen.getByText(/Competitor avg: 38\.0/)).toBeInTheDocument();
+
+    const titles = sectionTitles();
+    expect([...titles.slice(0, 2), ...titles.slice(-1)]).toStrictEqual(['Headline', 'KPI history', 'How these KPIs are measured']);
+  });
+
+  it('defines every KPI and the trend rule in the definitions block', () => {
+    renderAt('/reports/keyword/best%20running%20shoes');
+
+    expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITIONS.map((entry) => entry.label));
   });
 
   it('renders the keyword selector populated with every configured keyword', () => {

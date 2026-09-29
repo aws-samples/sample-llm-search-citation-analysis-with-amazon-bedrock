@@ -44,7 +44,7 @@ describe('useReportsOverview', () => {
     failures: [
       ['Failed to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
       ['Failed to load visibility metrics', 'response is a backend {error} body', { errorResponse: { error: 'No data' } }],
-      ['Invalid visibility request', 'payload is missing the overall_score field', { invalidResponse: true }],
+      ['Invalid visibility request', 'payload is missing the kpis field', { invalidResponse: true }],
     ],
   });
 });

@@ -1,15 +1,17 @@
 import {
-  describe, it, expect, vi 
+  describe, it, expect, vi
 } from 'vitest';
 import {
-  renderHook, act 
+  renderHook, act
 } from '@testing-library/react';
 import { useVisibilityMetrics } from './useVisibilityMetrics';
-import { mockVisibilityResponse } from './useVisibilityMetrics-fixtures';
+import {
+  INVALID_REQUEST_STATE, REJECTED_VISIBILITY_BODIES, mockKeywordVisibilityResponse, mockVisibilityResponse, renderAnsweredWith
+} from './useVisibilityMetrics-fixtures';
 import { renderDeferredEndpoint } from './useAnalysisEndpoint-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
 import {
-  ALL_SCOPE, groupScope, keywordScope 
+  ALL_SCOPE, groupScope, keywordScope
 } from '../components/ui/reportScope-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -43,7 +45,8 @@ describe('useVisibilityMetrics', () => {
       ['https://api.test.com/visibility?scope=all', 'the all-keywords scope is given', [ALL_SCOPE]],
     ],
     successes: [
-      ['visibility metrics', mockVisibilityResponse, [keywordScope('best hotels')]],
+      ['group visibility', mockVisibilityResponse, [groupScope('grp-sol')]],
+      ['single-keyword visibility in the same shape', mockKeywordVisibilityResponse, [keywordScope('hotel sol spa')]],
     ],
     failures: [
       ['Unable to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
@@ -52,33 +55,36 @@ describe('useVisibilityMetrics', () => {
     ],
   });
 
+  it.each(REJECTED_VISIBILITY_BODIES)('stores no visibility and reports an invalid request for %s', async (_description, body) => {
+    const state = await renderAnsweredWith(useVisibilityMetrics, (hook) => hook.fetchVisibilityMetrics(ALL_SCOPE), body);
+
+    expect(state).toStrictEqual(INVALID_REQUEST_STATE);
+  });
+
   describe('rapid refetch', () => {
-    it('aborts the previous request when a newer keyword fetch starts', () => {
+    it('aborts the previous request when a newer scope fetch starts', () => {
       const {
-        deferred, startRequest 
+        deferred, startRequest
       } = renderDeferredEndpoint(useVisibilityMetrics);
 
       startRequest((hook) => hook.fetchVisibilityMetrics(keywordScope('old keyword')));
-      startRequest((hook) => hook.fetchVisibilityMetrics(keywordScope('new keyword')));
+      startRequest((hook) => hook.fetchVisibilityMetrics(groupScope('grp-sol')));
 
       expect(deferred.requests.map((request) => request.signal?.aborted)).toStrictEqual([true, false]);
     });
 
-    it('keeps the newer keyword data when a stale response resolves late', async () => {
+    it('keeps the newer scope data when a stale response resolves late', async () => {
       const {
-        deferred, result, startRequest 
+        deferred, result, startRequest
       } = renderDeferredEndpoint(useVisibilityMetrics);
 
-      startRequest((hook) => hook.fetchVisibilityMetrics(keywordScope('old keyword')));
-      startRequest((hook) => hook.fetchVisibilityMetrics(keywordScope('best hotels')));
+      startRequest((hook) => hook.fetchVisibilityMetrics(keywordScope('hotel sol spa')));
+      startRequest((hook) => hook.fetchVisibilityMetrics(groupScope('grp-sol')));
       await act(async () => {
         deferred.requests[1].respond(mockVisibilityResponse);
       });
       await act(async () => {
-        deferred.requests[0].respond({
-          ...mockVisibilityResponse,
-          keyword: 'old keyword',
-        });
+        deferred.requests[0].respond(mockKeywordVisibilityResponse);
       });
 
       expect(result.current.data).toStrictEqual(mockVisibilityResponse);

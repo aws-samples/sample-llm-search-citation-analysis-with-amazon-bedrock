@@ -1,14 +1,17 @@
 import type {
-  HistoricalTrendsResponse, TrendDirection 
+  HistoricalTrendsResponse, KeywordTrend, TrendDirection
 } from '../../../../types';
+import { TREND_DEFINITION } from '../../../../constants/kpiDefinitions';
 import {
+  formatKpi, formatKpiDelta
+} from '../../../../formatting/kpiFormatter';
+import {
+  kpiColumn,
   ReportSection,
   ReportTable,
   type ReportTableColumn,
 } from '../../layout';
-import {
-  gateKeywordTrendRows, type KeywordTrendRow
-} from './keywordTrendRows';
+import { gateKeywordTrendRows } from './keywordTrendRows';
 
 interface Props {
   readonly trends: HistoricalTrendsResponse | null;
@@ -16,40 +19,52 @@ interface Props {
   readonly error: string | null;
 }
 
-/**
- * Per-keyword leaderboard for the all-keywords variant. Sorted by current
- * score descending so the strongest performers anchor the top of the page.
- *
- * Movers (`change` rows where the magnitude is >= 5 points) are highlighted
- * with a positive/negative tint so a reader can spot the keywords that
- * actually shifted in the period without computing the deltas themselves.
- */
-const MOVE_THRESHOLD = 5;
+export const PERIODS_INFO = 'The keyword\'s latest period with data, and the previous one its change is measured against.';
 
-const COLUMNS: ReadonlyArray<ReportTableColumn<KeywordTrendRow>> = [
+/** A keyword's visibility-score trend since its previous period; `undefined` before it has one. */
+function visibilityTrend(row: KeywordTrend): TrendDirection | undefined {
+  return row.change?.trends.visibility_score;
+}
+
+function periodsText(row: KeywordTrend): string {
+  return row.change === null ? row.period : `${row.change.previous_period} → ${row.period}`;
+}
+
+const COLUMNS: ReadonlyArray<ReportTableColumn<KeywordTrend>> = [
   {
     header: 'Keyword',
+    // Stryker disable next-line StringLiteral: Tailwind-only cell styling
     cellClassName: 'font-medium',
     render: (row) => row.keyword,
   },
+  kpiColumn<KeywordTrend>('visibility_score', (row) => formatKpi('visibility_score', row.kpis.visibility_score)),
   {
-    header: 'Score',
-    render: (row) => row.current_score.toFixed(1),
+    header: 'Visibility change',
+    info: TREND_DEFINITION.definition,
+    render: (row) => formatKpiDelta('visibility_score', row.change?.deltas.visibility_score),
   },
   {
-    header: 'Change',
-    render: (row) => `${row.change > 0 ? '+' : ''}${row.change.toFixed(1)}`,
+    header: 'Trend',
+    info: TREND_DEFINITION.definition,
+    render: (row) => <TrendBadge trend={visibilityTrend(row)} />,
   },
   {
-    header: '%',
-    render: (row) => `${row.change_percent > 0 ? '+' : ''}${row.change_percent.toFixed(1)}%`,
+    header: 'Periods',
+    info: PERIODS_INFO,
+    // Stryker disable next-line StringLiteral: Tailwind-only cell styling
+    cellClassName: 'font-mono text-xs whitespace-nowrap',
+    render: periodsText,
   },
-  {
-    header: 'Direction',
-    render: (row) => <DirectionBadge direction={row.trend_direction} />,
-  },
+  kpiColumn<KeywordTrend>('mention_rate', (row) => formatKpi('mention_rate', row.kpis.mention_rate)),
+  kpiColumn<KeywordTrend>('share_of_voice', (row) => formatKpi('share_of_voice', row.kpis.share_of_voice)),
 ];
 
+/**
+ * Per-keyword leaderboard for the all-keywords variant, in the API's order
+ * (best visibility score first): each keyword's latest period and its
+ * change since the keyword's previous one. Keywords whose visibility score
+ * improves or declines (2 points or more) are tinted.
+ */
 export function PerKeywordTableSection({
   trends, loading, error 
 }: Props) {
@@ -62,45 +77,44 @@ export function PerKeywordTableSection({
   });
   if (!gate.ready) return gate.placeholder;
 
-  const sorted = [...gate.rows].sort((a, b) => b.current_score - a.current_score);
-
   return (
     <ReportSection
       title="Per-keyword leaderboard"
-      subtitle="Current score and 30-day change for every tracked keyword. Sorted strongest to weakest. Movers (≥5 points) are highlighted."
+      subtitle="Every keyword's latest period, strongest visibility score first. Keywords whose visibility score improved or declined by 2 points or more are highlighted."
     >
       <ReportTable
         columns={COLUMNS}
-        rows={sorted}
+        rows={gate.rows}
+        // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
         rowKey={(row) => row.keyword}
-        rowClassName={(row) => moverRowClass(row.change)}
+        rowClassName={(row) => trendRowClass(visibilityTrend(row))}
       />
     </ReportSection>
   );
 }
 
-function moverRowClass(change: number): string {
-  if (Math.abs(change) < MOVE_THRESHOLD) return '';
-  if (change > 0) return 'bg-emerald-50 dark:bg-emerald-950/20';
-  return 'bg-red-50 dark:bg-red-950/20';
+function trendRowClass(trend: TrendDirection | undefined): string {
+  if (trend === 'improving') return 'bg-emerald-50 dark:bg-emerald-950/20';
+  if (trend === 'declining') return 'bg-red-50 dark:bg-red-950/20';
+  return '';
 }
 
-function DirectionBadge({ direction }: { readonly direction: TrendDirection }) {
-  const styles = directionStyles(direction);
+function TrendBadge({ trend }: { readonly trend: TrendDirection | undefined }) {
+  if (trend === undefined) return <>—</>;
   return (
     <span
-      className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium uppercase tracking-wide ${styles}`}
+      className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium uppercase tracking-wide ${trendBadgeStyles(trend)}`}
     >
-      {direction}
+      {trend}
     </span>
   );
 }
 
-function directionStyles(d: TrendDirection): string {
-  if (d === 'improving') {
+function trendBadgeStyles(trend: TrendDirection): string {
+  if (trend === 'improving') {
     return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300';
   }
-  if (d === 'declining') {
+  if (trend === 'declining') {
     return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300';
   }
   return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300';

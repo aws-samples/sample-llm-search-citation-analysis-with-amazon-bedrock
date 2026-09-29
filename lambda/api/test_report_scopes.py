@@ -85,6 +85,8 @@ def _sort_key_matches(row, sort) -> bool:
     value = sort.get_expression()['values'][1]
     if sort.expression_operator == 'begins_with':
         return row['timestamp_provider'].startswith(value)
+    if sort.expression_operator == '<':
+        return row['timestamp_provider'] < value
     assert sort.expression_operator == '>='
     return row['timestamp_provider'] >= value
 
@@ -278,6 +280,20 @@ class TestVisibilityScope:
         body = _body(module.handler(_event({'keyword': 'hotel coruna spa', 'brand': 'rival'}), None))
 
         assert ([brand['name'] for brand in body['brands']], body['kpis']['mention_rate']) == (['Rival Inn'], 100.0)
+
+    def test_compares_the_latest_run_with_the_previous_one(self, visibility_env):
+        module, _ = visibility_env
+
+        change = _body(module.handler(_event({'keyword': 'hotel coruna spa'}), None))['change']
+
+        assert (change['keywords_compared'], change['deltas']['mention_rate'], change['trends']['visibility_score']) == (
+            1, 100.0, 'improving',
+        )
+
+    def test_has_no_change_for_keywords_analysed_once(self, visibility_env):
+        module, _ = visibility_env
+
+        assert _body(module.handler(_event({'keyword': 'best hotels galicia'}), None))['change'] is None
 
 
 # ---------------------------------------------------------------------------

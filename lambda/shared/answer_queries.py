@@ -58,16 +58,36 @@ def latest_run_timestamp(table: Any, keyword: str) -> str | None:
     return timestamp if isinstance(timestamp, str) and timestamp else None
 
 
-def query_latest_run_rows(table: Any, keyword: str) -> list[dict[str, Any]]:
-    """Every projected row of ``keyword``'s latest run; empty when it was never analysed."""
-    timestamp = latest_run_timestamp(table, keyword)
-    return [] if timestamp is None else query_keyword_run_rows(table, keyword, timestamp)
+def previous_run_timestamp(table: Any, keyword: str, before: str) -> str | None:
+    """The timestamp of ``keyword``'s last run before the run stamped ``before``, or ``None``."""
+    response = table.query(
+        # Every sort key of the run `before` starts with `before#`, so `< before` is strictly earlier runs.
+        KeyConditionExpression=Key('keyword').eq(keyword) & Key('timestamp_provider').lt(before),
+        ScanIndexForward=False,
+        Limit=1,
+        ProjectionExpression='#ts',
+        ExpressionAttributeNames={'#ts': 'timestamp'},
+    )
+    items = response.get('Items') or []
+    timestamp = items[0].get('timestamp') if items else None
+    return timestamp if isinstance(timestamp, str) and timestamp else None
+
+
+def query_last_two_runs_rows(table: Any, keyword: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The projected rows of ``keyword``'s latest run and of the run before it (either may be empty)."""
+    latest = latest_run_timestamp(table, keyword)
+    if latest is None:
+        return [], []
+    previous = previous_run_timestamp(table, keyword, latest)
+    previous_rows = [] if previous is None else query_keyword_run_rows(table, keyword, previous)
+    return query_keyword_run_rows(table, keyword, latest), previous_rows
 
 
 __all__ = [
     'history_since',
     'latest_run_timestamp',
+    'previous_run_timestamp',
     'query_keyword_rows_since',
     'query_keyword_run_rows',
-    'query_latest_run_rows',
+    'query_last_two_runs_rows',
 ]

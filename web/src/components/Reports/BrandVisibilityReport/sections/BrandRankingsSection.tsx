@@ -1,9 +1,12 @@
 import type {
   BrandClassification,
-  BrandVisibilityMetric,
-  VisibilityMetricsResponse,
+  BrandLeaderboardRow,
+  VisibilityResponse,
 } from '../../../../types';
+import type { KpiId } from '../../../../constants/kpiDefinitions';
+import { formatKpi } from '../../../../formatting/kpiFormatter';
 import {
+  kpiColumn,
   ReportSection,
   ReportSectionPlaceholder,
   ReportTable,
@@ -12,38 +15,42 @@ import {
 } from '../../layout';
 
 interface Props {
-  readonly visibility: VisibilityMetricsResponse | null;
+  readonly visibility: VisibilityResponse | null;
   readonly loading: boolean;
   readonly error: string | null;
 }
 
-const MAX_BRANDS = 15;
+/** The most brands a printed leaderboard lists; the API sorts them by visibility score. */
+export const MAX_BRANDS = 15;
 
-const COLUMNS: ReadonlyArray<ReportTableColumn<BrandVisibilityMetric>> = [
+/** The KPIs of each brand, in column order. */
+const BRAND_KPIS = ['visibility_score', 'mention_rate', 'share_of_voice', 'average_position'] as const satisfies readonly KpiId[];
+
+export const BEST_POSITION_INFO = 'The best place the brand reached in any answer (1 = named first). '
+  + 'Answers where its place is unknown are left out.';
+
+const COLUMNS: ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>> = [
   {
     header: 'Brand',
+    // Stryker disable next-line StringLiteral: Tailwind-only cell styling
     cellClassName: 'font-medium',
     render: (brand) => brand.name,
   },
+  ...BRAND_KPIS.map((id) => kpiColumn<BrandLeaderboardRow>(id, (brand) => formatKpi(id, brand[id]))),
   {
-    header: 'Score',
-    render: (brand) => brand.visibility_score.toFixed(1),
+    header: 'Best position',
+    info: BEST_POSITION_INFO,
+    render: (brand) => brand.best_position ?? '—',
   },
   {
-    header: 'Share of voice',
-    render: (brand) => `${brand.share_of_voice.toFixed(1)}%`,
+    header: 'Engines',
+    info: 'The AI engines whose answers name the brand.',
+    render: (brand) => brand.engines.join(', '),
   },
   {
-    header: 'Best rank',
-    render: (brand) => brand.best_rank ?? '—',
-  },
-  {
-    header: 'Mentions',
-    render: (brand) => brand.total_mentions,
-  },
-  {
-    header: 'Providers',
-    render: (brand) => brand.provider_count,
+    header: 'Keywords',
+    info: 'How many keywords\' answers name the brand.',
+    render: (brand) => brand.keywords,
   },
   {
     header: 'Type',
@@ -52,10 +59,10 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<BrandVisibilityMetric>> = [
 ];
 
 /**
- * Per-keyword brand rankings: every brand the AI engines mentioned for this
- * keyword, with score, share of voice, best rank, mentions, providers, and
- * classification. First-party rows are tinted to make them visually
- * distinguishable from competitor and other-third-party rows in print.
+ * Per-keyword brand leaderboard: every brand the AI answers named for this
+ * keyword, each measured with the same formulas as the tracked brand
+ * (`docs/kpi-definitions.md`, per-brand leaderboards). First-party rows are
+ * tinted so they stand out from competitors and other brands in print.
  */
 export function BrandRankingsSection({
   visibility, loading, error 
@@ -83,11 +90,12 @@ export function BrandRankingsSection({
   return (
     <ReportSection
       title="Brand rankings"
-      subtitle="All brands the AI engines mentioned for this keyword. First-party rows are highlighted."
+      subtitle="Every brand the AI answers named for this keyword in its latest run, by visibility score. First-party rows are highlighted."
     >
       <ReportTable
         columns={COLUMNS}
         rows={brands}
+        // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
         rowKey={(brand) => brand.name}
         rowClassName={firstPartyRowClass}
       />
@@ -95,20 +103,22 @@ export function BrandRankingsSection({
   );
 }
 
-function firstPartyRowClass(brand: BrandVisibilityMetric): string {
+function firstPartyRowClass(brand: BrandLeaderboardRow): string {
   return brand.classification === 'first_party' ? 'bg-emerald-50 dark:bg-emerald-950/20' : '';
 }
 
+const CLASSIFICATION_LABELS: Record<BrandClassification, string> = {
+  first_party: 'first-party',
+  competitor: 'competitor',
+  other: 'other',
+};
+
 function ClassificationBadge({ classification }: { readonly classification: BrandClassification }) {
-  const styles = badgeStyles(classification);
-  const label = classification === 'first_party'
-    ? 'first-party'
-    : classification;
   return (
     <span
-      className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${styles}`}
+      className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${badgeStyles(classification)}`}
     >
-      {label}
+      {CLASSIFICATION_LABELS[classification]}
     </span>
   );
 }

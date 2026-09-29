@@ -48,6 +48,8 @@ export interface VisibilityResponse {
   keywords_analyzed: number;
   keywords_with_data: number;
   kpis: BrandKpis;
+  /** Latest against previous run over the keywords answered in both; `null` without such a keyword. */
+  change: ScopeChange | null;
   brands: BrandLeaderboardRow[];
   keywords: KeywordVisibilityRow[];
 }
@@ -192,6 +194,11 @@ export interface PeriodChange {
   trends: Record<TrendedKpiId, KpiTrend>;
 }
 
+/** A scope's change, like for like: computed over the keywords measured on both sides. */
+export interface ScopeChange extends PeriodChange {
+  keywords_compared: number;
+}
+
 /** One keyword's latest period and its change since the keyword's previous period. */
 export interface KeywordTrend {
   keyword: string;
@@ -218,7 +225,7 @@ export interface HistoricalTrendsResponse {
   /** Every KPI over each keyword's latest period, pooled. */
   latest: BrandKpis;
   /** Latest against previous period over the keywords measured in both; `null` before a second period. */
-  change: (PeriodChange & { keywords_compared: number }) | null;
+  change: ScopeChange | null;
   /** Best visibility score first. */
   keyword_trends: KeywordTrend[];
   /** Keywords by the trend of their visibility score. */

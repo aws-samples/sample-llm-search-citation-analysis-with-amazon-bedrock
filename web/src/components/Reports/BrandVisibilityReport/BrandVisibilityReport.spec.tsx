@@ -9,8 +9,13 @@ import {
   MemoryRouter, Routes, Route 
 } from 'react-router-dom';
 import { BrandVisibilityReport } from './BrandVisibilityReport';
-import { buildKeywordTrends } from './keywordTrends-fixtures';
-import { buildHistory } from './groupKpiHistory-fixtures';
+import {
+  allKeywordsReportData, groupReportData, keywordReportData
+} from './useBrandVisibilityReport-fixtures';
+import {
+  cardFigure, definitionTerms, plainStatCard, sectionTable, sectionTitles, statFigure
+} from '../layout/reportQueries-fixtures';
+import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import type { Keyword } from '../../../types';
 
 vi.mock('./useBrandVisibilityReport', () => ({useBrandVisibilityReport: vi.fn()}));
@@ -19,7 +24,7 @@ vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
 import { useBrandVisibilityReport } from './useBrandVisibilityReport';
 
-const mockUse = useBrandVisibilityReport as ReturnType<typeof vi.fn>;
+const mockUse = vi.mocked(useBrandVisibilityReport);
 
 const KEYWORDS: Keyword[] = [
   {
@@ -34,78 +39,7 @@ const KEYWORDS: Keyword[] = [
   },
 ];
 
-const PER_KEYWORD_DATA = {
-  keyword: 'best running shoes',
-  visibility: {
-    keyword: 'best running shoes',
-    timestamp: '2026-05-10T00:00:00Z',
-    total_mentions: 20,
-    brands: [
-      {
-        name: 'Nike',
-        visibility_score: 80,
-        provider_count: 4,
-        providers: ['openai', 'perplexity', 'gemini', 'claude'],
-        total_mentions: 12,
-        best_rank: 1,
-        share_of_voice: 60,
-        classification: 'first_party' as const,
-      },
-    ],
-    first_party: [],
-    competitors: [],
-    others: [],
-    summary: {
-      first_party_avg_score: 80,
-      competitor_avg_score: 50,
-      first_party_total_sov: 60,
-      competitor_total_sov: 40,
-    },
-  },
-  visibilityLoading: false,
-  visibilityError: null,
-  trends: {
-    period_type: 'day',
-    days_analyzed: 30,
-    data_points: 30,
-    trend_data: [],
-    trend_direction: 'stable',
-    summary: {
-      current_score: 80,
-      previous_score: 78,
-      change: 2,
-      change_percent: 2.5,
-      average_score: 79,
-      max_score: 82,
-      min_score: 76,
-    },
-  },
-  trendsLoading: false,
-  trendsError: null,
-  ready: true,
-};
-
-const ALL_KEYWORDS_DATA = {
-  keyword: null,
-  visibility: null,
-  visibilityLoading: false,
-  visibilityError: null,
-  trends: buildKeywordTrends([
-    {
-      keyword: 'best running shoes',
-      current_score: 80,
-      change: 8,
-    },
-    {
-      keyword: 'best hiking boots',
-      current_score: 30,
-      change: -10,
-    },
-  ]),
-  trendsLoading: false,
-  trendsError: null,
-  ready: true,
-};
+const DEFINITIONS_TITLE = 'How these KPIs are measured';
 
 function renderAt(path: string) {
   return render(
@@ -126,7 +60,7 @@ function renderAt(path: string) {
 
 describe('BrandVisibilityReport — per-keyword variant', () => {
   beforeEach(() => {
-    mockUse.mockReturnValue(PER_KEYWORD_DATA);
+    mockUse.mockReturnValue(keywordReportData());
   });
 
   it('renders the report H1', () => {
@@ -139,26 +73,40 @@ describe('BrandVisibilityReport — per-keyword variant', () => {
     ).toBeInTheDocument();
   });
 
-  it('renders the per-keyword subtitle with the selected keyword', () => {
+  it('names the keyword in the subtitle', () => {
     renderAt('/reports/visibility/best%20running%20shoes');
-    const matches = screen.getAllByText(/best running shoes/i);
-    expect(matches.length).toBeGreaterThan(0);
+
+    expect(screen.getByText('Per-keyword visibility for "best running shoes"')).toBeInTheDocument();
   });
 
-  it('renders a brand row from visibility data', () => {
+  it('shows the headline, the brand rankings, the trend history and the definitions, in that order', () => {
     renderAt('/reports/visibility/best%20running%20shoes');
-    expect(screen.getByText('Nike')).toBeInTheDocument();
+
+    expect(sectionTitles()).toStrictEqual(['Headline', 'Brand rankings', 'Trend history', DEFINITIONS_TITLE]);
   });
 
-  it('renders the gap-to-competitor headline metric', () => {
+  it('shows the keyword KPIs of the visibility answer in the headline', () => {
     renderAt('/reports/visibility/best%20running%20shoes');
-    expect(screen.getByText('+30.0')).toBeInTheDocument();
+
+    expect(statFigure('Mention rate').textContent).toBe('60.0%');
+  });
+
+  it('lists the brands of the visibility answer in the rankings', () => {
+    renderAt('/reports/visibility/best%20running%20shoes');
+
+    expect(sectionTable('Brand rankings').slice(1).map(([brand]) => brand)).toStrictEqual(['Nike', 'Adidas']);
+  });
+
+  it('ends with the definition of every KPI and of the trend rule', () => {
+    renderAt('/reports/visibility/best%20running%20shoes');
+
+    expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITIONS.map((entry) => entry.label));
   });
 });
 
 describe('BrandVisibilityReport — all-keywords variant', () => {
   beforeEach(() => {
-    mockUse.mockReturnValue(ALL_KEYWORDS_DATA);
+    mockUse.mockReturnValue(allKeywordsReportData());
   });
 
   it('renders the cross-keyword subtitle', () => {
@@ -166,46 +114,33 @@ describe('BrandVisibilityReport — all-keywords variant', () => {
     expect(screen.getByText(/Cross-keyword visibility overview/i)).toBeInTheDocument();
   });
 
-  it('renders the improving / declining / stable counts from overall aggregates', () => {
+  it('shows the headline, history, movers, leaderboard and definitions, in that order', () => {
     renderAt('/reports/visibility');
-    // Fixture: improving=1, declining=1. The labels "Improving" and
-    // "Declining" appear twice — once as paragraph metric labels in the
-    // headline, once as h3 column titles in MoversSection. Disambiguate
-    // by tag: the metric panel uses a <p>, the column uses an <h3>.
-    const labels = screen.getAllByText('Improving');
-    const metricLabel = labels.find((el) => el.tagName === 'P');
-    expect(metricLabel?.parentElement).toHaveTextContent('1');
+
+    expect(sectionTitles()).toStrictEqual(['Headline', 'Trend history', 'Top movers', 'Per-keyword leaderboard', DEFINITIONS_TITLE]);
   });
 
-  it('renders the average score from overall aggregates', () => {
+  it('counts the improving keywords in the headline', () => {
     renderAt('/reports/visibility');
-    // Fixture: avg_score=55 -> "55.0" formatted.
-    expect(screen.getByText('55.0')).toBeInTheDocument();
+
+    expect(cardFigure(plainStatCard('Improving')).textContent).toBe('1');
   });
 
-  it('renders the per-keyword leaderboard rows for every tracked keyword', () => {
+  it('lists every keyword in the API order in the leaderboard', () => {
     renderAt('/reports/visibility');
-    const shoesMatches = screen.getAllByText('best running shoes');
-    const bootsMatches = screen.getAllByText('best hiking boots');
-    expect(shoesMatches.length).toBeGreaterThan(0);
-    expect(bootsMatches.length).toBeGreaterThan(0);
+
+    expect(sectionTable('Per-keyword leaderboard').slice(1).map(([keyword]) => keyword)).toStrictEqual(['best running shoes', 'best hiking boots']);
   });
 
-  it('orders the leaderboard by current_score descending', () => {
+  it('ends with the definition of every KPI and of the trend rule', () => {
     renderAt('/reports/visibility');
-    // Fixture: shoes=80, boots=30 — shoes should appear above boots in the table.
-    // Filter to rows that contain a keyword cell.
-    const tables = screen.getAllByRole('table');
-    const leaderboard = tables[tables.length - 1];
-    const text = leaderboard.textContent ?? '';
-    expect(text.indexOf('best running shoes')).toBeLessThan(
-      text.indexOf('best hiking boots'),
-    );
+
+    expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITIONS.map((entry) => entry.label));
   });
 
   it('renders the keyword scope selector populated with All + every tracked keyword', () => {
     renderAt('/reports/visibility');
-    const select = screen.getByLabelText(/scope/i) as HTMLSelectElement;
+    const select = screen.getByLabelText<HTMLSelectElement>(/scope/i);
     const optionTexts = Array.from(select.options).map((o) => o.textContent);
     expect(optionTexts).toContain('All keywords');
     expect(optionTexts).toContain('best running shoes');
@@ -213,19 +148,9 @@ describe('BrandVisibilityReport — all-keywords variant', () => {
   });
 });
 
-
-const GROUP_DATA = {
-  ...ALL_KEYWORDS_DATA,
-  keyword: null,
-  visibility: null,
-  groupHistory: buildHistory(),
-  groupHistoryLoading: false,
-  groupHistoryError: null,
-};
-
 describe('BrandVisibilityReport — keyword group (hotel) variant', () => {
   beforeEach(() => {
-    mockUse.mockReturnValue(GROUP_DATA);
+    mockUse.mockReturnValue(groupReportData());
   });
 
   it('shows the hotel KPIs instead of the cross-keyword overview', () => {
@@ -251,8 +176,14 @@ describe('BrandVisibilityReport — keyword group (hotel) variant', () => {
     }, 180);
   });
 
-  it('describes the report as the hotel KPIs per run', () => {
+  it('describes the report as every KPI of the hotel per run', () => {
     renderAt('/reports/visibility?group=hotel-sol');
-    expect(screen.getByText(/citation rate, share of voice and prominence per run/)).toBeInTheDocument();
+    expect(screen.getByText(/mention rate, share of voice, visibility score and every other KPI per run/)).toBeInTheDocument();
+  });
+
+  it('ends with the definitions block', () => {
+    renderAt('/reports/visibility?group=hotel-sol');
+
+    expect(sectionTitles().slice(-1)).toStrictEqual([DEFINITIONS_TITLE]);
   });
 });
