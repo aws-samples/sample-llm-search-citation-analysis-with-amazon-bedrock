@@ -6,7 +6,7 @@ import {
 } from '@testing-library/react';
 import type { ReportsOverviewResponse } from '../../../../api/reports';
 import { HeadlineSection } from './HeadlineSection';
-import { NO_PREVIOUS_PERIOD } from '../../layout';
+import { NO_PREVIOUS_PERIOD } from '../../layout/periodComparison';
 import { OWNED_DOMAINS_MISSING } from '../../layout/KpiHeadline';
 import {
   buildOverview, buildPeriodChange

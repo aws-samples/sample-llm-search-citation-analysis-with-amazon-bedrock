@@ -93,6 +93,7 @@ function BodyRows({ rows }: { readonly rows: readonly KeywordVisibilityRow[] }) 
   return (
     <>
       {rows.map((row) => (
+        // Stryker disable next-line StringLiteral: Tailwind-only dimming; the "No analysis data yet" hint and dashes carry the state
         <tr key={row.keyword} className={row.has_data ? '' : 'bg-gray-50 text-gray-400'}>
           {COLUMNS.map((column) => <td key={column.key} className="px-3 py-2 text-sm">{column.render(row)}</td>)}
         </tr>

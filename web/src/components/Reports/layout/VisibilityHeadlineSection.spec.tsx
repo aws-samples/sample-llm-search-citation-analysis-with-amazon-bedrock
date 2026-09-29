@@ -34,10 +34,13 @@ function renderHeadline(overrides: Partial<VisibilityHeadlineProps> = {}): void 
 }
 
 describe('VisibilityHeadlineSection', () => {
-  it('names the latest run and the answers and engines its KPIs come from', () => {
-    renderHeadline();
+  it.each([
+    ['its date', RUN_2, `Latest run of ${new Date(RUN_2).toLocaleString()}`],
+    ['no date when the run has no timestamp', null, 'Latest run'],
+  ])('names the latest run with %s and the answers and engines its KPIs come from', (_run, timestamp, run) => {
+    renderHeadline({ visibility: buildVisibility({ timestamp }) });
 
-    expect(screen.getByText(`Latest run of ${new Date(RUN_2).toLocaleString()} — 20 AI answers from 4 engines.`)).toBeInTheDocument();
+    expect(screen.getByText(`${run} — 20 AI answers from 4 engines.`)).toBeInTheDocument();
   });
 
   it('shows the KPIs of the latest run', () => {
@@ -56,7 +59,10 @@ describe('VisibilityHeadlineSection', () => {
     ['the trend has a change', buildTrendView({ change: buildPeriodChange() })],
     ['the trend request failed', null],
   ])('says there is no earlier run when the keyword was analysed once, even if %s', (_label, trends) => {
-    renderHeadline({ visibility: buildVisibility({ change: null }), trends });
+    renderHeadline({
+      visibility: buildVisibility({ change: null }),
+      trends 
+    });
 
     expect(statFootnote('Mention rate')).toBe(NO_PREVIOUS_RUN);
   });

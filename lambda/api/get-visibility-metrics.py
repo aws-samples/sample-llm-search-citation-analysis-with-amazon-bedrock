@@ -59,8 +59,8 @@ def load_last_two_runs(keywords: list[str]) -> tuple[dict[str, list[Answer]], di
         lambda keyword: tuple(answers_from_rows(rows) for rows in query_last_two_runs_rows(table, keyword)),
         lambda _keyword: ([], []),
     )
-    latest = {keyword: list(pair[0]) for keyword, pair in zip(keywords, runs, strict=True)}
-    previous = {keyword: list(pair[1]) for keyword, pair in zip(keywords, runs, strict=True)}
+    latest = {keyword: runs[index][0] for index, keyword in enumerate(keywords)}
+    previous = {keyword: runs[index][1] for index, keyword in enumerate(keywords)}
     return latest, previous
 
 

@@ -109,14 +109,12 @@ def _mover(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def top_movers(keyword_trends: list[dict[str, Any]], direction: str, limit: int) -> list[dict[str, Any]]:
-    """The ``limit`` keywords whose visibility score rose (``'up'``) or fell (``'down'``) the most since their previous period."""
-    changed = [_mover(row) for row in keyword_trends if row.get('change') and row['change']['deltas']['visibility_score']]
-    if direction == 'up':
-        movers = sorted((mover for mover in changed if mover['change'] > 0), key=lambda mover: -mover['change'])
-    else:
-        movers = sorted((mover for mover in changed if mover['change'] < 0), key=lambda mover: mover['change'])
-    return movers[:limit]
+def top_movers(keyword_trends: list[dict[str, Any]], limit: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """The ``limit`` keywords whose visibility score rose the most, and those whose score fell the most, since their previous period."""
+    changed = [_mover(row) for row in keyword_trends if row.get('change') and row['change']['deltas']['visibility_score'] is not None]
+    improvers = sorted((mover for mover in changed if mover['change'] > 0), key=lambda mover: -mover['change'])
+    decliners = sorted((mover for mover in changed if mover['change'] < 0), key=lambda mover: mover['change'])
+    return improvers[:limit], decliners[:limit]
 
 
 def build_overview(
@@ -136,7 +134,7 @@ def build_overview(
     every active keyword is covered.
     """
     trends = _trends_helper()(scope, period, days, owned_domains_from(config))
-    keyword_trends = trends['keyword_trends']
+    top_improving, top_declining = top_movers(trends['keyword_trends'], top)
     recommendations = _recs_helper()(config, keywords=list(scope.keywords) if scope is not None else None) or []
 
     return {
@@ -150,8 +148,8 @@ def build_overview(
         'kpis': trends['latest'],
         'change': trends['change'],
         'summary': trends['overall'],
-        'top_improving': top_movers(keyword_trends, 'up', top),
-        'top_declining': top_movers(keyword_trends, 'down', top),
+        'top_improving': top_improving,
+        'top_declining': top_declining,
         'top_recommendations': recommendations[:top],
     }
 

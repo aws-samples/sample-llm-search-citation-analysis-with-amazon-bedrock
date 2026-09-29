@@ -59,7 +59,7 @@ def load_window_answers(keywords: list[str], since: str) -> dict[str, list[Answe
         lambda keyword: answers_from_rows(query_keyword_rows_since(table, keyword, since)),
         lambda _keyword: [],
     )
-    return dict(zip(keywords, answers, strict=True))
+    return {keyword: answers[index] for index, keyword in enumerate(keywords)}
 
 
 def _resolve_scope(scope: ReportScope | None) -> tuple[ReportScope, int]:

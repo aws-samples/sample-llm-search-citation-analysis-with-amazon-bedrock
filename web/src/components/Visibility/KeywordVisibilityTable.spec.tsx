@@ -98,13 +98,43 @@ describe('KeywordVisibilityTable', () => {
     expect(firstColumnCells(screen.getByRole('table', { name: TABLE_NAME }))).toStrictEqual(['many answers', 'few answers']);
   });
 
-  it('announces the active sort column and direction', async () => {
+  it.each([
+    ['falling visibility score by default', [], 'Visibility score ↓'],
+    ['rising average position once it is picked', ['Average position'], 'Average position ↑'],
+    ['falling average position after a second click', ['Average position', 'Average position'], 'Average position ↓'],
+  ])('arrows only the sort column, showing the %s', async (_sort, clicks, label) => {
     render(<KeywordVisibilityTable rows={SORTABLE_KEYWORD_ROWS} />);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Average position' }));
+    await clickButtonsInTurn(clicks);
 
-    expect(ariaSortValues(screen.getByRole('table', { name: TABLE_NAME }))).toStrictEqual([
-      'none', 'none', 'none', 'none', 'ascending', 'none', 'none',
-    ]);
+    expect(sortButtonLabels(screen.getByRole('table', { name: TABLE_NAME })).filter((text) => /[↑↓]$/u.test(text))).toStrictEqual([label]);
+  });
+
+  it('gives the keyword column no definition tooltip', () => {
+    render(<KeywordVisibilityTable rows={[buildKeywordRow()]} />);
+
+    expect(screen.queryByRole('button', { name: 'About Keyword' })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['hotel', 'Hotel'],
+    ['Hotel', 'hotel'],
+  ])('keeps "%s" before "%s" when sorting by keyword, since case is ignored', async (first, second) => {
+    render(<KeywordVisibilityTable rows={[buildKeywordRow({ keyword: first }), buildKeywordRow({ keyword: second })]} />);
+
+    await userEvent.click(screen.getByRole('button', { name: 'Keyword' }));
+
+    expect(firstColumnCells(screen.getByRole('table', { name: TABLE_NAME }))).toStrictEqual([first, second]);
+  });
+
+  it.each([
+    ['visibility score falling by default', [], ['none', 'none', 'none', 'descending', 'none', 'none', 'none']],
+    ['average position rising once it is picked', ['Average position'], ['none', 'none', 'none', 'none', 'ascending', 'none', 'none']],
+  ])('announces the %s as the only sorted column', async (_sort, clicks, expected) => {
+    render(<KeywordVisibilityTable rows={SORTABLE_KEYWORD_ROWS} />);
+
+    await clickButtonsInTurn(clicks);
+
+    expect(ariaSortValues(screen.getByRole('table', { name: TABLE_NAME }))).toStrictEqual(expected);
   });
 });

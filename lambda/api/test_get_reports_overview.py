@@ -88,7 +88,9 @@ def _empty_event():
 
 
 def test_top_movers_ranks_improvers_by_largest_gain(overview_mod):
-    assert overview_mod.top_movers(DEFAULT_FAKE_TRENDS['keyword_trends'], 'up', 3) == [
+    improvers, _decliners = overview_mod.top_movers(DEFAULT_FAKE_TRENDS['keyword_trends'], 3)
+
+    assert improvers == [
         {'keyword': 'e', 'visibility_score': 65, 'change': 12},
         {'keyword': 'a', 'visibility_score': 80, 'change': 8},
         {'keyword': 'b', 'visibility_score': 70, 'change': 4},
@@ -98,18 +100,29 @@ def test_top_movers_ranks_improvers_by_largest_gain(overview_mod):
 def test_top_movers_ranks_decliners_by_largest_loss(overview_mod):
     trends = [*DEFAULT_FAKE_TRENDS['keyword_trends'], _keyword_trend('g', 20, -3)]
 
-    assert [mover['keyword'] for mover in overview_mod.top_movers(trends, 'down', 3)] == ['c', 'g']
+    _improvers, decliners = overview_mod.top_movers(trends, 3)
+
+    assert [mover['keyword'] for mover in decliners] == ['c', 'g']
 
 
-def test_top_movers_caps_the_list(overview_mod):
-    assert [mover['keyword'] for mover in overview_mod.top_movers(DEFAULT_FAKE_TRENDS['keyword_trends'], 'up', 2)] == ['e', 'a']
+def test_top_movers_caps_both_lists(overview_mod):
+    trends = [*DEFAULT_FAKE_TRENDS['keyword_trends'], _keyword_trend('g', 20, -3)]
+
+    improvers, decliners = overview_mod.top_movers(trends, 1)
+
+    assert ([mover['keyword'] for mover in improvers], [mover['keyword'] for mover in decliners]) == (['e'], ['c'])
 
 
-@pytest.mark.parametrize('direction', ['up', 'down'])
-def test_top_movers_leaves_out_unchanged_keywords_and_keywords_with_one_period(overview_mod, direction):
-    movers = overview_mod.top_movers([_keyword_trend('d', 50, 0), _keyword_trend('f', 40, None)], direction, 3)
+def test_top_movers_counts_a_change_under_one_point(overview_mod):
+    improvers, decliners = overview_mod.top_movers([_keyword_trend('up', 50, 0.5), _keyword_trend('down', 50, -0.5)], 3)
 
-    assert movers == []
+    assert ([mover['keyword'] for mover in improvers], [mover['keyword'] for mover in decliners]) == (['up'], ['down'])
+
+
+def test_top_movers_leaves_out_unchanged_keywords_and_keywords_with_one_period(overview_mod):
+    movers = overview_mod.top_movers([_keyword_trend('d', 50, 0), _keyword_trend('f', 40, None)], 3)
+
+    assert movers == ([], [])
 
 
 # --- build_overview ---------------------------------------------------------

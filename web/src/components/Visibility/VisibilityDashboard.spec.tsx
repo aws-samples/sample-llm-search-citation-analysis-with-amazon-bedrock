@@ -31,6 +31,9 @@ import {
   buildTrendsResponse, buildVisibility
 } from './visibilityOverview-fixtures';
 import { panelTitled } from './visibilityTables-fixtures';
+import type {
+  Keyword, KeywordGroup
+} from '../../types';
 
 const mockUseVisibilityMetrics = vi.mocked(useVisibilityMetrics);
 const mockUseHistoricalTrends = vi.mocked(useHistoricalTrends);
@@ -40,6 +43,10 @@ const mockExportVisibilityOverview = vi.mocked(exportVisibilityOverview);
 
 const visibility = buildVisibility();
 const trends = buildTrendsResponse();
+const OTHER_GROUP = buildKeywordGroup({
+  id: 'group-madrid',
+  name: 'Hotel Madrid',
+});
 const HOTELS_SCOPE = {
   kind: 'keyword',
   keyword: 'hotels',
@@ -107,6 +114,12 @@ describe('VisibilityDashboard', () => {
       render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
       expect(screen.getByText('Loading visibility data...')).toBeInTheDocument();
+    });
+
+    it('hides the loading message once both requests are done', () => {
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+
+      expect(screen.queryByText('Loading visibility data...')).not.toBeInTheDocument();
     });
 
     it('shows the visibility error once loading is over', () => {
@@ -219,6 +232,30 @@ describe('VisibilityDashboard', () => {
       await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Analyze' }), 'keyword:hotels');
 
       expect(screen.getByText(TOO_FEW_PERSONAS)).toBeInTheDocument();
+    });
+
+    it('fetches no persona rankings for all keywords', () => {
+      const personaHook = buildPersonaRankingsHookResult(null);
+      mockUsePersonaRankings.mockReturnValue(personaHook);
+
+      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+
+      expect(personaHook.fetchPersonaRankings).not.toHaveBeenCalled();
+    });
+
+    it.each<[string, string, Keyword[], KeywordGroup[], string]>([
+      ['falls back to all keywords when the selected keyword is deleted', 'keyword:hotels', [SCOPE_KEYWORDS[1]], [], 'All keywords'],
+      ['falls back to all keywords when the selected group is deleted', 'group:group-coruna', [], [OTHER_GROUP], 'All keywords'],
+      ['keeps the selected keyword while keywords and groups are still loading', 'keyword:hotels', [], [], 'hotels'],
+    ])('%s', async (_outcome, option, keywordsAfter, groupsAfter, scopeLabel) => {
+      mockUseVisibilityMetrics.mockReturnValue(buildVisibilityHookResult(visibility));
+
+      const { rerender } = render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Analyze' }), option);
+      mockUseKeywordGroups.mockReturnValue(buildKeywordGroupsHookResult(groupsAfter));
+      rerender(<VisibilityDashboard keywords={keywordsAfter} />);
+
+      expect(screen.getByText(/keywords have analysis data/).textContent?.split(' · ')[0]).toBe(scopeLabel);
     });
   });
 });

@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from shared.kpi_engine import TRENDED_KPIS, Answer, answers_from_rows
-from shared.visibility_views import period_key, trend_view, visibility_view
+from shared.visibility_views import PERIODS, period_key, trend_view, visibility_view
 
 HOTEL = 'Hotel Sol'
 RIVAL = 'Hotel Mar'
@@ -167,6 +167,16 @@ class TestTrendView:
         answers = {'spa': [_hotel_first('spa', DAY_2)]}
 
         assert trend_view(['spa'], answers, 'day')['change'] is None
+
+    def test_compares_the_last_two_of_three_periods(self):
+        answers = {'spa': [_rival_only('spa', DAY_1), _rival_only('spa', DAY_2), _hotel_first('spa', '2026-09-15T06:00:00Z')]}
+
+        change = trend_view(['spa'], answers, 'day')['change']
+
+        assert (change['deltas']['mention_rate'], change['deltas']['answers']) == (100.0, 0)
+
+    def test_offers_a_day_an_iso_week_and_a_month(self):
+        assert PERIODS == ('day', 'week', 'month')
 
     def test_reports_each_keywords_latest_period_best_first(self):
         trends = trend_view(['spa', 'beach', 'golf'], _two_days(), 'day')['keyword_trends']

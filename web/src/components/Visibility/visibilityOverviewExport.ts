@@ -43,6 +43,7 @@ function kpiValueHeader(id: KpiId): string {
 
 /** Column widths in characters: `fixed` first, then `perKpi` for each KPI. */
 function columnWidths(fixed: readonly number[], perKpi: number | null): ExcelSheet['columns'] {
+  // Stryker disable next-line ArrowFunction: the per-KPI width is presentation only; the column count is pinned by the specs
   const kpiWidths = perKpi === null ? [] : KPI_SPECS.map(() => perKpi);
   // Stryker disable next-line ObjectLiteral,ArrowFunction: column widths are presentation only
   return [...fixed, ...kpiWidths].map((wch) => ({ wch }));

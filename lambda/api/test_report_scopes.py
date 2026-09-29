@@ -140,6 +140,18 @@ def _fake_dynamodb(search_rows=SEARCH_ROWS, citation_rows=None, active=ACTIVE_KE
     return resource, {'keywords': keywords_table, 'search': search_table, 'citations': citations_table}
 
 
+def _fail_reads_of(search_table, keyword: str) -> None:
+    """Make every read of ``keyword``'s SearchResults partition raise, keeping the others answering."""
+    succeed = search_table.query.side_effect
+
+    def search_query(**kwargs):
+        if _key_parts(kwargs['KeyConditionExpression'])[0] == keyword:
+            raise PartitionFailure('throttled')
+        return succeed(**kwargs)
+
+    search_table.query.side_effect = search_query
+
+
 def _event(params: dict | None) -> dict:
     return {'httpMethod': 'GET', 'path': '/api/x', 'queryStringParameters': params, 'headers': {}}
 
@@ -617,6 +629,50 @@ class TestTrendsScopeRouting:
 
         assert module.handler(_event({'keyword': 'a', 'keyword_ids': 'k1'}), None)['statusCode'] == 400
 
+    def test_defaults_to_thirty_days_per_day(self, trends_env):
+        module, _ = trends_env
+
+        body = _body(module.handler(_event({'keyword': 'hotel coruna spa'}), None))
+
+        assert (body['days_analyzed'], body['period_type']) == (30, 'day')
+
+    @pytest.mark.parametrize('params', [{'days': '1'}, {'days': '365'}, {'period': 'month'}, {'period': 'week'}])
+    def test_accepts_every_window_and_period_in_range(self, trends_env, params):
+        module, _ = trends_env
+
+        assert module.handler(_event({'keyword': 'hotel coruna spa', **params}), None)['statusCode'] == 200
+
+    @pytest.mark.parametrize('params', [{'days': '0'}, {'days': '366'}, {'period': 'fortnight'}])
+    def test_rejects_a_window_or_period_out_of_range(self, trends_env, params):
+        module, _ = trends_env
+
+        assert module.handler(_event({'keyword': 'hotel coruna spa', **params}), None)['statusCode'] == 400
+
+    def test_says_whether_owned_domains_are_configured(self, trends):
+        resource, _ = _fake_dynamodb()
+        with (
+            patch.object(trends, 'dynamodb', resource),
+            patch.object(trends, 'get_brand_config', return_value={'first_party_domains': ['hotel-coruna.com']}),
+        ):
+            body = _body(trends.handler(_event({'keyword': 'hotel coruna spa'}), None))
+
+        assert body['citations_configured'] is True
+
+    def test_counts_a_keyword_that_failed_to_load_as_without_data(self, trends_env):
+        module, tables = trends_env
+
+        _fail_reads_of(tables['search'], 'best hotels galicia')
+        body = _body(module.handler(_event({'group_id': 'coruna'}), None))
+
+        assert ([row['keyword'] for row in body['keyword_trends']], body['keywords_with_data']) == (['hotel coruna spa'], 1)
+
+    def test_reads_through_the_pooled_scope_resource(self):
+        sentinel = MagicMock(name='pooled-dynamodb')
+        with patch('shared.scope_params.scoped_dynamodb_resource', return_value=sentinel), patch.dict(os.environ, _ENV):
+            module = load_handler_module(_HERE, 'get-historical-trends.py', module_name_for('get-historical-trends.py', '_pooled'))
+
+        assert module.dynamodb is sentinel
+
     def test_caps_an_unscoped_request_at_twenty_keywords(self, trends):
         many = [{'id': f'k{i}', 'keyword': f'kw {i:02}', 'status': 'active'} for i in range(25)]
         resource, _ = _fake_dynamodb(active=many)
@@ -802,14 +858,8 @@ class PartitionFailure(Exception):
 class TestVisibilityGroupSurvivesAFailedKeyword:
     def test_reports_a_keyword_that_failed_to_load_as_without_data(self, visibility_env):
         module, tables = visibility_env
-        succeed = tables['search'].query.side_effect
 
-        def search_query(**kwargs):
-            if _key_parts(kwargs['KeyConditionExpression'])[0] == 'best hotels galicia':
-                raise PartitionFailure('throttled')
-            return succeed(**kwargs)
-
-        tables['search'].query.side_effect = search_query
+        _fail_reads_of(tables['search'], 'best hotels galicia')
         body = _body(module.handler(_event({'group_id': 'coruna'}), None))
 
         assert {row['keyword']: row['has_data'] for row in body['keywords']} == {

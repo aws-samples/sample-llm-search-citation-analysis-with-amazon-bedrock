@@ -44,10 +44,10 @@ def query_keyword_run_rows(table: Any, keyword: str, timestamp: str) -> list[dic
     )
 
 
-def latest_run_timestamp(table: Any, keyword: str) -> str | None:
-    """The timestamp of ``keyword``'s latest run, or ``None`` when it was never analysed."""
+def _newest_timestamp(table: Any, key_condition: Any) -> str | None:
+    """The run timestamp of the newest row matching ``key_condition``, or ``None``."""
     response = table.query(
-        KeyConditionExpression=Key('keyword').eq(keyword),
+        KeyConditionExpression=key_condition,
         ScanIndexForward=False,
         Limit=1,
         ProjectionExpression='#ts',
@@ -56,21 +56,17 @@ def latest_run_timestamp(table: Any, keyword: str) -> str | None:
     items = response.get('Items') or []
     timestamp = items[0].get('timestamp') if items else None
     return timestamp if isinstance(timestamp, str) and timestamp else None
+
+
+def latest_run_timestamp(table: Any, keyword: str) -> str | None:
+    """The timestamp of ``keyword``'s latest run, or ``None`` when it was never analysed."""
+    return _newest_timestamp(table, Key('keyword').eq(keyword))
 
 
 def previous_run_timestamp(table: Any, keyword: str, before: str) -> str | None:
     """The timestamp of ``keyword``'s last run before the run stamped ``before``, or ``None``."""
-    response = table.query(
-        # Every sort key of the run `before` starts with `before#`, so `< before` is strictly earlier runs.
-        KeyConditionExpression=Key('keyword').eq(keyword) & Key('timestamp_provider').lt(before),
-        ScanIndexForward=False,
-        Limit=1,
-        ProjectionExpression='#ts',
-        ExpressionAttributeNames={'#ts': 'timestamp'},
-    )
-    items = response.get('Items') or []
-    timestamp = items[0].get('timestamp') if items else None
-    return timestamp if isinstance(timestamp, str) and timestamp else None
+    # Every sort key of the run `before` starts with `before#`, so `< before` is strictly earlier runs.
+    return _newest_timestamp(table, Key('keyword').eq(keyword) & Key('timestamp_provider').lt(before))
 
 
 def query_last_two_runs_rows(table: Any, keyword: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

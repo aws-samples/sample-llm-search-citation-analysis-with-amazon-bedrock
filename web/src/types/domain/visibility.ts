@@ -195,9 +195,7 @@ export interface PeriodChange {
 }
 
 /** A scope's change, like for like: computed over the keywords measured on both sides. */
-export interface ScopeChange extends PeriodChange {
-  keywords_compared: number;
-}
+export interface ScopeChange extends PeriodChange {keywords_compared: number;}
 
 /** One keyword's latest period and its change since the keyword's previous period. */
 export interface KeywordTrend {

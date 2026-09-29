@@ -18,7 +18,7 @@ export {
   KpiHeadline, type KpiComparison
 } from './KpiHeadline';
 export {
-  NO_PREVIOUS_PERIOD, NO_PREVIOUS_RUN, periodComparison, runComparison
+  NO_PREVIOUS_RUN, runComparison
 } from './periodComparison';
 export { KpiDefinitionsSection } from './KpiDefinitionsSection';
 export { TrendPeriodTable } from './TrendPeriodTable';

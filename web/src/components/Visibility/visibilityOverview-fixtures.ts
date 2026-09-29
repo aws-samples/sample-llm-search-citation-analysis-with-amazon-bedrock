@@ -109,6 +109,11 @@ export function buildTrendPoint(overrides: Partial<TrendDataPoint> = {}): TrendD
   };
 }
 
+/** `count` consecutive September days from the 1st, each with the RUN_2 KPIs. */
+export function buildDailyTrendPoints(count: number): TrendDataPoint[] {
+  return Array.from({ length: count }, (_unused, index) => buildTrendPoint({ period: `2026-09-${String(index + 1).padStart(2, '0')}` }));
+}
+
 /** RUN_1's day: a visibility score 8.2 points above RUN_2's (`GROUP_DELTAS`). */
 export const FIRST_TREND_POINT: TrendDataPoint = buildTrendPoint({
   period: '2026-09-01',

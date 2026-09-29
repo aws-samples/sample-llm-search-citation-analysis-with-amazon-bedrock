@@ -89,7 +89,10 @@ describe('VisibilityOverview', () => {
       ['trends are not loaded', null],
       ['the trend has a change', buildTrendsResponse()],
     ])('says there is no earlier run when the keywords were analysed once, even if %s', (_condition, trends) => {
-      renderOverview({ visibility: buildVisibility({ change: null }), trends });
+      renderOverview({
+        visibility: buildVisibility({ change: null }),
+        trends 
+      });
 
       expect(statFootnote('Visibility score')).toBe(NO_PREVIOUS_RUN);
     });

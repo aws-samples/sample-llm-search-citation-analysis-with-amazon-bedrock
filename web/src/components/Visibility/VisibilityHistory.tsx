@@ -52,6 +52,26 @@ function TrendBar({
   );
 }
 
+function RangeButton({
+  days, pressed, onSelect
+}: {
+  readonly days: HistoryRangeDays;
+  readonly pressed: boolean;
+  readonly onSelect: (days: HistoryRangeDays) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(days)}
+      aria-pressed={pressed}
+      // Stryker disable next-line StringLiteral,ConditionalExpression: Tailwind-only styling; aria-pressed carries the selected range
+      className={`px-3 py-1 text-xs font-medium rounded-lg border transition-colors ${pressed ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'}`}
+    >
+      {days} days
+    </button>
+  );
+}
+
 function RangeButtons({
   rangeDays, onRangeChange
 }: Pick<Props, 'rangeDays' | 'onRangeChange'>) {
@@ -59,17 +79,7 @@ function RangeButtons({
     <fieldset className="flex gap-1 border-0 p-0 m-0">
       <legend className="sr-only">History range</legend>
       {HISTORY_RANGES.map((days) => (
-        <button
-          key={days}
-          type="button"
-          onClick={() => onRangeChange(days)}
-          aria-pressed={rangeDays === days}
-          className={`px-3 py-1 text-xs font-medium rounded-lg border transition-colors ${
-            rangeDays === days ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-100'
-          }`}
-        >
-          {days} days
-        </button>
+        <RangeButton key={days} days={days} pressed={rangeDays === days} onSelect={onRangeChange} />
       ))}
     </fieldset>
   );

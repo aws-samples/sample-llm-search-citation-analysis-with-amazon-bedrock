@@ -91,7 +91,7 @@ describe('BrandLeaderboard', () => {
     const [, tracked, competitor] = within(panelTitled(LEADERBOARD)).getAllByRole('row');
 
     expect(tracked).toHaveClass('bg-green-50');
-    expect(competitor).not.toHaveClass('bg-green-50');
+    expect(competitor.className).toBe('');
   });
 
   it('says there is no brand data when no answer names a brand', () => {

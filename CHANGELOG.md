@@ -9,6 +9,45 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.22.0] - 2026-09-29
+
+### Changed
+
+- **The Visibility tab, `/visibility`, `/trends` and `/reports/overview` now use the market-aligned KPIs**
+  (`docs/kpi-definitions.md`), computed by the KPI engine from successful AI answers only.
+  - **`/visibility`** returns one response shape for every scope (one keyword, a group, selected keywords, all):
+    - every KPI over each keyword's latest run, pooled;
+    - its change since each keyword's previous run, over the keywords answered in both;
+    - the brand leaderboard and a row per keyword.
+    - It reads each keyword's last two runs through the sort key instead of the whole partition.
+  - **`/trends`** returns every KPI per day, ISO week or month; the latest standing and its change against
+    the previous period (like for like); and each keyword's own move. The window is a key condition, and it
+    no longer falls back to the whole history when the window is empty.
+  - **`/reports/overview`** reports the latest KPIs and their change, the keywords by trend, and the top movers
+    by visibility-score change. The "change percent" of a score is gone; changes are in points.
+- **The Visibility tab** shows one overview for every scope:
+  - the headline cards and every KPI with change and trend;
+  - the visibility-score history;
+  - a sortable keyword table and a brand leaderboard;
+  - a definitions block, with a tooltip on every KPI.
+
+  The mislabelled "Citation rate" (it was keyword coverage), "Provider coverage" and "Prominence" cards are
+  gone. The Excel export carries every KPI.
+- **Reports.** The Brand Visibility report (keyword and all-keywords modes), the Executive Summary and the
+  Keyword Deep Dive now use the shared KPI headline, the per-period KPI tables and the brand leaderboard.
+  - Every report ends with a definitions block.
+  - Movers follow the trend rule (2 points), not a 5-point threshold.
+  - No KPI is computed in the browser any more.
+- **Trend direction** everywhere follows the 2-point rule between two comparable periods. The linear-regression
+  slope is gone.
+
+### Removed
+
+- `shared/visibility_metrics.py`, the equal-keyword group summary and the three-factor score of
+  `shared/visibility_score.py`, and `shared/providers.py`. What remains of `visibility_score.py` serves
+  `/persona-rankings` until it moves to the KPI engine.
+- The provider-config read and grant of the stats Lambda, which no longer needs them.
+
 ## [2.21.0] - 2026-09-28
 
 ### Added

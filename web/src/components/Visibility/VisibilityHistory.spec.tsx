@@ -7,7 +7,7 @@ import {
 import userEvent from '@testing-library/user-event';
 import { VisibilityHistory } from './VisibilityHistory';
 import {
-  TRENDS_WITH_GAP, buildTrendsResponse
+  TRENDS_WITH_GAP, buildDailyTrendPoints, buildTrendsResponse
 } from './visibilityOverview-fixtures';
 import { panelTitled } from './visibilityTables-fixtures';
 import { KPI_DEFINITIONS } from '../../constants/kpiDefinitions';
@@ -50,12 +50,11 @@ describe('VisibilityHistory', () => {
   });
 
   it('labels the first of every five periods under its bar', () => {
-    render(<VisibilityHistory trends={buildTrendsResponse()} error={null} rangeDays={30} onRangeChange={vi.fn()} />);
+    render(<VisibilityHistory trends={buildTrendsResponse({ trend_data: buildDailyTrendPoints(7) })} error={null} rangeDays={30} onRangeChange={vi.fn()} />);
 
-    const [first, second] = within(screen.getByRole('list', { name: 'Visibility score per day' })).getAllByRole('listitem');
+    const labels = within(screen.getByRole('list', { name: 'Visibility score per day' })).getAllByText(/^\d{2}-\d{2}$/u);
 
-    expect(within(first).getByText('09-01')).toBeInTheDocument();
-    expect(within(second).queryByText('09-08')).not.toBeInTheDocument();
+    expect(labels.map((label) => label.textContent)).toStrictEqual(['09-01', '09-06']);
   });
 
   it('names the period, range and start date under the chart', () => {

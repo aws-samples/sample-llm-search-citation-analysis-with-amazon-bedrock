@@ -1,31 +1,41 @@
 import {
-  describe, it, expect
+  afterEach, describe, it, expect, vi
 } from 'vitest';
 import {
-  visibilityOverviewFileName, visibilityOverviewSheets
+  exportVisibilityOverview, visibilityOverviewFileName, visibilityOverviewSheets
 } from './visibilityOverviewExport';
 import {
   BUILT_KPI_CELLS, COMPETITOR_ROW, EMPTY_KPI_CELLS, FIRST_TREND_POINT, KEYWORD_WITHOUT_DATA, buildTrendsResponse, buildVisibility
 } from './visibilityOverview-fixtures';
+import {
+  buildOverviewSheets, summaryRow
+} from './visibilityOverviewExport-fixtures';
 import {
   RUN_2, buildKpis
 } from '../Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
 import {
   KPI_SPECS, TREND_DEFINITION, VISIBILITY_DEFINITIONS
 } from '../../constants/kpiDefinitions';
+import { exportWorkbook } from '../../exporters/excelGenerator';
+import type { VisibilityResponse } from '../../types';
+
+vi.mock('../../exporters/excelGenerator', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../exporters/excelGenerator')>(),
+  exportWorkbook: vi.fn(),
+}));
 
 const CONTEXT_ROW_COUNT = 17;
 
-const sheets = visibilityOverviewSheets(buildVisibility(), buildTrendsResponse(), 'Hotel Sol');
-const [summary, definitions, keywords, brands, history] = sheets;
-const sheetsWithoutTrends = visibilityOverviewSheets(buildVisibility(), null, 'Hotel Sol');
-
 describe('visibilityOverviewSheets', () => {
   it('builds the summary, definitions, keywords, brands and history sheets in that order', () => {
+    const sheets = visibilityOverviewSheets(buildVisibility(), buildTrendsResponse(), 'Hotel Sol');
+
     expect(sheets.map((sheet) => sheet.name)).toStrictEqual(['Summary', 'Definitions', 'Keywords', 'Brands', 'History']);
   });
 
   it('opens the summary with the scope, its coverage, sample and history context', () => {
+    const { summary } = buildOverviewSheets();
+
     expect(summary.data.slice(0, CONTEXT_ROW_COUNT).map((row) => [row.Metric, row.Value])).toStrictEqual([
       ['Scope', 'Hotel Sol'],
       ['Latest run', RUN_2],
@@ -47,14 +57,18 @@ describe('visibilityOverviewSheets', () => {
     ]);
   });
 
-  it.each([
-    ['context rows', summary.data.slice(0, CONTEXT_ROW_COUNT)],
-    ['KPI rows when no keyword has an earlier run', visibilityOverviewSheets(buildVisibility({ change: null }), buildTrendsResponse(), 'x')[0].data.slice(CONTEXT_ROW_COUNT)],
-  ])('leaves change and trend empty on the %s', (_rows, rows) => {
-    expect(new Set(rows.flatMap((row) => [row.Change, row.Trend]))).toStrictEqual(new Set(['']));
+  it.each<[string, Partial<VisibilityResponse>, number, number]>([
+    ['context rows', {}, 0, CONTEXT_ROW_COUNT],
+    ['KPI rows when no keyword has an earlier run', { change: null }, CONTEXT_ROW_COUNT, CONTEXT_ROW_COUNT + KPI_SPECS.length],
+  ])('leaves change and trend empty on the %s', (_rows, overrides, start, end) => {
+    const { summary } = buildOverviewSheets(buildVisibility(overrides));
+
+    expect(new Set(summary.data.slice(start, end).flatMap((row) => [row.Change, row.Trend]))).toStrictEqual(new Set(['']));
   });
 
   it('lists one summary row per KPI in report order after the context rows', () => {
+    const { summary } = buildOverviewSheets();
+
     expect(summary.data.slice(CONTEXT_ROW_COUNT).map((row) => row.Metric)).toStrictEqual(Object.keys(BUILT_KPI_CELLS));
   });
 
@@ -67,9 +81,7 @@ describe('visibilityOverviewSheets', () => {
     ['Net sentiment (-100 to +100)', 15, 10, 'improving'],
     ['Answers', 20, 0, ''],
   ])('exports %s with value %s, change %s and trend "%s"', (metric, value, change, trend) => {
-    const row = summary.data.find((candidate) => candidate.Metric === metric);
-
-    expect(row).toStrictEqual({
+    expect(summaryRow(buildOverviewSheets(), metric)).toStrictEqual({
       Metric: metric,
       Value: value,
       Change: change,
@@ -78,29 +90,40 @@ describe('visibilityOverviewSheets', () => {
   });
 
   it('exports an unknown KPI as an empty value cell', () => {
-    const [unknownSummary] = visibilityOverviewSheets(buildVisibility({ kpis: buildKpis({ average_position: null }) }), null, 'x');
+    const sheets = buildOverviewSheets(buildVisibility({ kpis: buildKpis({ average_position: null }) }), null);
 
-    expect(unknownSummary.data.find((row) => row.Metric === 'Average position')?.Value).toBe('');
+    expect(summaryRow(sheets, 'Average position')?.Value).toBe('');
   });
 
   it('takes the changes from the runs, not from the trend periods', () => {
-    const [summaryWithoutPeriods] = visibilityOverviewSheets(buildVisibility(), buildTrendsResponse({ change: null }), 'x');
+    const sheets = buildOverviewSheets(buildVisibility(), buildTrendsResponse({ change: null }));
 
-    expect(summaryWithoutPeriods.data.find((row) => row.Metric === 'Mention rate (%)')?.Change).toBe(-10);
+    expect(summaryRow(sheets, 'Mention rate (%)')?.Change).toBe(-10);
+  });
+
+  it.each<[string, string, Partial<VisibilityResponse>]>([
+    ['Latest run', 'no keyword of the scope has a run', { timestamp: null }],
+    ['Keywords compared', 'no keyword has an earlier run', { change: null }],
+  ])('exports an empty %s cell when %s', (metric, _condition, overrides) => {
+    expect(summaryRow(buildOverviewSheets(buildVisibility(overrides)), metric)?.Value).toBe('');
   });
 
   it('exports empty history context when trends are not loaded', () => {
-    expect(sheetsWithoutTrends[0].data.slice(12, 15).map((row) => row.Value)).toStrictEqual(['', '', '']);
+    const { summary } = buildOverviewSheets(buildVisibility(), null);
+
+    expect(summary.data.slice(12, 15).map((row) => row.Value)).toStrictEqual(['', '', '']);
   });
 
   it('exports every visibility definition with how it is measured', () => {
-    expect(definitions.data).toStrictEqual(VISIBILITY_DEFINITIONS.map((entry) => ({
+    expect(buildOverviewSheets().definitions.data).toStrictEqual(VISIBILITY_DEFINITIONS.map((entry) => ({
       KPI: entry.label,
       'How it is measured': entry.definition,
     })));
   });
 
   it('ends the definitions with how a change and trend are judged', () => {
+    const { definitions } = buildOverviewSheets();
+
     expect(definitions.data[definitions.data.length - 1]).toStrictEqual({
       KPI: TREND_DEFINITION.label,
       'How it is measured': TREND_DEFINITION.definition,
@@ -108,7 +131,7 @@ describe('visibilityOverviewSheets', () => {
   });
 
   it('exports an analysed keyword with its latest run and every KPI', () => {
-    expect(keywords.data[0]).toStrictEqual({
+    expect(buildOverviewSheets().keywords.data[0]).toStrictEqual({
       Keyword: 'hotel sol spa',
       'Has data': 'Yes',
       'Latest run': RUN_2,
@@ -117,7 +140,7 @@ describe('visibilityOverviewSheets', () => {
   });
 
   it('exports a keyword without data with empty run and KPI cells', () => {
-    expect(keywords.data[1]).toStrictEqual({
+    expect(buildOverviewSheets().keywords.data[1]).toStrictEqual({
       Keyword: KEYWORD_WITHOUT_DATA.keyword,
       'Has data': 'No',
       'Latest run': '',
@@ -126,7 +149,7 @@ describe('visibilityOverviewSheets', () => {
   });
 
   it('exports the tracked brand of the leaderboard with its engines as one value', () => {
-    expect(brands.data[0]).toStrictEqual({
+    expect(buildOverviewSheets().brands.data[0]).toStrictEqual({
       Brand: 'Hotel Sol',
       Type: 'first_party',
       'Visibility score (0-100)': 52.4,
@@ -142,11 +165,11 @@ describe('visibilityOverviewSheets', () => {
   });
 
   it('exports an unknown competitor sentiment as an empty cell', () => {
-    expect(brands.data[1]['Net sentiment (-100 to +100)']).toBe('');
+    expect(buildOverviewSheets().brands.data[1]['Net sentiment (-100 to +100)']).toBe('');
   });
 
   it('exports unknown brand rates and positions as empty cells', () => {
-    const [, , , unknownBrands] = visibilityOverviewSheets(buildVisibility({
+    const { brands } = buildOverviewSheets(buildVisibility({
       brands: [{
         ...COMPETITOR_ROW,
         mention_rate: null,
@@ -154,18 +177,18 @@ describe('visibilityOverviewSheets', () => {
         average_position: null,
         best_position: null,
       }],
-    }), null, 'x');
+    }), null);
 
     expect([
-      unknownBrands.data[0]['Mention rate (%)'],
-      unknownBrands.data[0]['Share of voice (%)'],
-      unknownBrands.data[0]['Average position'],
-      unknownBrands.data[0]['Best position'],
+      brands.data[0]['Mention rate (%)'],
+      brands.data[0]['Share of voice (%)'],
+      brands.data[0]['Average position'],
+      brands.data[0]['Best position'],
     ]).toStrictEqual(['', '', '', '']);
   });
 
   it('exports one history row per period with its runs, keywords and every KPI', () => {
-    expect(history.data[0]).toStrictEqual({
+    expect(buildOverviewSheets().history.data[0]).toStrictEqual({
       Period: FIRST_TREND_POINT.period,
       'Analysis runs': 2,
       'Keywords with data': 2,
@@ -175,7 +198,7 @@ describe('visibilityOverviewSheets', () => {
   });
 
   it('exports an empty history sheet when trends are not loaded', () => {
-    expect(sheetsWithoutTrends[4].data).toStrictEqual([]);
+    expect(buildOverviewSheets(buildVisibility(), null).history.data).toStrictEqual([]);
   });
 
   it.each([
@@ -185,7 +208,7 @@ describe('visibilityOverviewSheets', () => {
     ['Brands', 3, 11],
     ['History', 4, 3 + KPI_SPECS.length],
   ])('defines one column width per exported field in the %s sheet', (_sheetName, sheetIndex, fieldCount) => {
-    const sheet = sheets[sheetIndex];
+    const sheet = visibilityOverviewSheets(buildVisibility(), buildTrendsResponse(), 'Hotel Sol')[sheetIndex];
 
     expect(Object.keys(sheet.data[0])).toHaveLength(fieldCount);
     expect(sheet.columns).toHaveLength(fieldCount);
@@ -199,5 +222,20 @@ describe('visibilityOverviewFileName', () => {
 
   it('falls back to keywords when scope label has no slug characters', () => {
     expect(visibilityOverviewFileName('', new Date('2026-09-18T12:00:00Z'))).toBe('visibility-keywords-2026-09-18.xlsx');
+  });
+});
+
+describe('exportVisibilityOverview', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('writes every sheet to a file named after the scope and dated today', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-18T12:00:00Z'));
+
+    await exportVisibilityOverview(buildVisibility(), null, 'Hotel Sol');
+
+    expect(exportWorkbook).toHaveBeenCalledWith(visibilityOverviewSheets(buildVisibility(), null, 'Hotel Sol'), 'visibility-hotel-sol-2026-09-18.xlsx');
   });
 });

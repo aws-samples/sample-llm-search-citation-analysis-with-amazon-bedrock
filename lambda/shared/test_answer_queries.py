@@ -93,9 +93,10 @@ class TestLatestRun:
 
         kwargs = table.query.call_args.kwargs
         partition = kwargs['KeyConditionExpression'].get_expression()
-        assert (partition['values'][1], kwargs['ScanIndexForward'], kwargs['Limit'], kwargs['ProjectionExpression']) == (
-            'hotel malaga', False, 1, '#ts',
+        assert (partition['values'][0].name, partition['values'][1], kwargs['ScanIndexForward'], kwargs['Limit']) == (
+            'keyword', 'hotel malaga', False, 1,
         )
+        assert kwargs['ProjectionExpression'] == '#ts'
 
     def test_names_the_timestamp_attribute(self):
         table = MagicMock()
@@ -160,9 +161,11 @@ class TestPreviousRun:
         timestamp = previous_run_timestamp(table, 'hotel malaga', RUN_2)
 
         kwargs = table.query.call_args.kwargs
-        assert (timestamp, _sort_condition(table.query.call_args), kwargs['ScanIndexForward'], kwargs['Limit']) == (
-            RUN_1, ('<', 'timestamp_provider', RUN_2), False, 1,
+        partition, _sort = _key_condition(table.query.call_args)
+        assert (timestamp, _sort_condition(table.query.call_args), partition['values'][0].name, kwargs['ScanIndexForward']) == (
+            RUN_1, ('<', 'timestamp_provider', RUN_2), 'keyword', False,
         )
+        assert kwargs['Limit'] == 1
 
     def test_projects_only_the_timestamp(self):
         table = MagicMock()

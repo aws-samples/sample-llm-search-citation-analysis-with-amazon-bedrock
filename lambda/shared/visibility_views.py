@@ -20,10 +20,11 @@ from typing import Any
 
 from shared.kpi_engine import Answer, brand_kpis, brand_table, kpi_changes, kpi_trends
 
-#: The trend periods: a calendar day, an ISO week (Monday to Sunday) or a calendar month.
-PERIODS = ('day', 'week', 'month')
-
+#: The format of each trend period: a calendar day, an ISO week (Monday to Sunday) or a calendar month.
 _PERIOD_FORMATS = {'day': '%Y-%m-%d', 'week': '%G-W%V', 'month': '%Y-%m'}
+
+#: The trend periods.
+PERIODS = tuple(_PERIOD_FORMATS)
 
 
 def _latest_timestamp(answers: Iterable[Answer]) -> str | None:
@@ -96,7 +97,7 @@ def visibility_view(
 def period_key(timestamp: str, period: str) -> str | None:
     """The day (``2026-09-28``), ISO week (``2026-W40``) or month (``2026-09``) of a run timestamp."""
     try:
-        parsed = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+        parsed = datetime.fromisoformat(timestamp)
     except ValueError:
         return None
     return parsed.strftime(_PERIOD_FORMATS[period])
@@ -157,7 +158,7 @@ def trend_view(
     }
     series = _by_period((answer for periods in per_keyword.values() for bucket in periods.values() for answer in bucket), period)
     keyword_trends = [_keyword_trend(keyword, periods, domains) for keyword, periods in per_keyword.items()]
-    keyword_trends.sort(key=lambda row: (-(row['kpis']['visibility_score'] or 0), row['keyword'].lower()))
+    keyword_trends.sort(key=lambda row: (-row['kpis']['visibility_score'], row['keyword'].lower()))
     directions = [row['change']['trends']['visibility_score'] if row['change'] else 'stable' for row in keyword_trends]
     latest = [answer for periods in per_keyword.values() for answer in list(periods.values())[-1]]
     return {
