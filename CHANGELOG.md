@@ -9,6 +9,16 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.24.1] - 2026-09-29
+
+### Fixed
+
+- **KPI tooltips** wrap their text and stay on screen. The "i" tooltip inherited `whitespace-nowrap` from table
+  cells, so a definition ran on one line out of its box, and a scrolling table clipped the box at its edge. The
+  tooltip now opens above the page (rendered into `document.body` with fixed positioning), wraps and aligns its
+  text left, keeps a margin from the window edges, opens above its button when there is no room below, and follows
+  the button while the page or a table scrolls.
+
 ## [2.24.0] - 2026-09-29
 
 ### Removed
