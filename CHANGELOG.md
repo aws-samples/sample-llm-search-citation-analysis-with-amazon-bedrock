@@ -9,6 +9,23 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.26.0] - 2026-09-29
+
+### Added
+
+- **Choose the Perplexity and Claude models** in Settings > AI Providers (**Change model**), like OpenAI and
+  Gemini. Perplexity offers its Sonar models (`sonar`, `sonar-pro`, `sonar-reasoning-pro`; `sonar-deep-research`
+  is left out because one answer takes minutes). Claude lists the Claude 4 and later models your key can use. Any
+  id can be typed. As for OpenAI and Gemini, a model is saved only after it answers a real web-search request
+  with the stored key: Sonar Chat Completions for Perplexity, the Messages API with the web search tool for
+  Claude. Analysis runs and keyword research use the chosen model; every answer still records the model that
+  actually answered.
+
+### Changed
+
+- Settings model checks and the analysis clients build their Perplexity and Claude requests from the same helpers
+  (`shared/ai_clients.py`), so a model is checked against exactly what runs send.
+
 ## [2.25.0] - 2026-09-29
 
 ### Added

@@ -61,6 +61,51 @@ def gemini_grounded_payload(prompt: str) -> dict[str, Any]:
         "tools": [{"googleSearch": {}}],
     }
 
+
+PERPLEXITY_CHAT_URL = "https://api.perplexity.ai/chat/completions"
+ANTHROPIC_API_BASE = "https://api.anthropic.com/v1"
+ANTHROPIC_VERSION = "2023-06-01"
+
+
+def perplexity_chat_payload(messages: list[dict], model: str) -> dict[str, Any]:
+    """The Sonar Chat Completions body (Sonar models always search), shared with the Settings model check."""
+    return {
+        "model": model,
+        "messages": messages,
+    }
+
+
+def anthropic_headers(api_key: str) -> dict[str, str]:
+    """The headers every Anthropic API call sends."""
+    return {
+        "x-api-key": api_key,
+        "anthropic-version": ANTHROPIC_VERSION,
+        "content-type": "application/json",
+    }
+
+
+def claude_web_search_payload(
+    prompt: str, model: str, *, system_prompt: str | None = None, max_tokens: int = 1024, max_uses: int = 5,
+) -> dict[str, Any]:
+    """The Messages API body with the web search tool, shared with the Settings model check.
+
+    A model without web-search support answers 400 to exactly this body, so
+    the check proves the tool configuration analysis runs use.
+    """
+    payload: dict[str, Any] = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+        "tools": [{
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": max_uses,
+        }],
+    }
+    if system_prompt:
+        payload["system"] = system_prompt
+    return payload
+
 # Extra attempts a 429 earns on top of the caller's ``max_retries``. Throttling
 # answers in milliseconds, so waiting it out is cheap — unlike the timeouts the
 # caller's budget is sized for (the research worker allows two attempts because
@@ -285,9 +330,9 @@ class OpenAIClient:
 class PerplexityClient:
     """Lightweight Perplexity API client."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = DEFAULT_PROVIDER_MODELS['perplexity']):
         self.api_key = api_key
-        self.base_url = "https://api.perplexity.ai"
+        self.model = model
 
     @retry_with_backoff(provider_name="PERPLEXITY", timeout=60)
     def _make_request(self, payload: dict, timeout: int = 60) -> requests.Response:
@@ -297,21 +342,17 @@ class PerplexityClient:
             "Content-Type": "application/json"
         }
         return requests.post(
-            f"{self.base_url}/chat/completions",
+            PERPLEXITY_CHAT_URL,
             headers=headers,
             json=payload,
             timeout=timeout
         )
 
     def chat_completion(
-        self, messages: list[dict], model: str = DEFAULT_PROVIDER_MODELS['perplexity'], max_retries: int = 5,
+        self, messages: list[dict], model: str | None = None, max_retries: int = 5,
     ) -> dict[str, Any]:
-        """Call Perplexity Chat Completions API."""
-        payload = {
-            "model": model,
-            "messages": messages
-        }
-        return self._make_request(payload, max_retries=max_retries)
+        """Call Perplexity Chat Completions API (``model`` defaults to the client's)."""
+        return self._make_request(perplexity_chat_payload(messages, model or self.model), max_retries=max_retries)
 
 
 class GeminiClient:
@@ -336,42 +377,23 @@ class GeminiClient:
 class ClaudeClient:
     """Lightweight Anthropic Claude API client with web search."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = DEFAULT_PROVIDER_MODELS['claude']):
         self.api_key = api_key
-        self.base_url = "https://api.anthropic.com/v1"
-        self.model = DEFAULT_PROVIDER_MODELS['claude']
+        self.model = model
 
     @retry_with_backoff(provider_name="CLAUDE", timeout=60)
     def _make_request(self, payload: dict, timeout: int = 60) -> requests.Response:
         """Make HTTP request to Claude API."""
-        headers = {
-            "x-api-key": self.api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json"
-        }
         return requests.post(
-            f"{self.base_url}/messages",
-            headers=headers,
+            f"{ANTHROPIC_API_BASE}/messages",
+            headers=anthropic_headers(self.api_key),
             json=payload,
             timeout=timeout
         )
 
     def generate_content(self, prompt: str, system_prompt: str | None = None, max_retries: int = 5) -> dict[str, Any]:
         """Call Claude API with web search tool."""
-        payload = {
-            "model": self.model,
-            "max_tokens": 1024,
-            "messages": [{"role": "user", "content": prompt}],
-            "tools": [{
-                "type": "web_search_20250305",
-                "name": "web_search",
-                "max_uses": 5
-            }]
-        }
-
-        if system_prompt:
-            payload["system"] = system_prompt
-
+        payload = claude_web_search_payload(prompt, self.model, system_prompt=system_prompt)
         return self._make_request(payload, max_retries=max_retries)
 
 

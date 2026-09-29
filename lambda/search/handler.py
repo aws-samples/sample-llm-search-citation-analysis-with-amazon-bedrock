@@ -339,14 +339,16 @@ def _parse_perplexity_response(raw_response: dict[str, Any]) -> tuple[str, list[
     return response_text, citations
 
 
-def query_perplexity(keyword: str, api_key: str, query_template: str | None = None) -> dict[str, Any]:
+def query_perplexity(
+    keyword: str, api_key: str, model: str = DEFAULT_PROVIDER_MODELS[Provider.PERPLEXITY], query_template: str | None = None,
+) -> dict[str, Any]:
     """Query Perplexity API."""
     def request(query: str) -> dict[str, Any]:
-        return PerplexityClient(api_key).chat_completion([{"role": "user", "content": query}])
+        return PerplexityClient(api_key, model=model).chat_completion([{"role": "user", "content": query}])
 
     return _query_llm(
         Provider.PERPLEXITY, keyword, query_template, request, _parse_perplexity_response,
-        model=DEFAULT_PROVIDER_MODELS[Provider.PERPLEXITY], model_from_response=True,
+        model=model, model_from_response=True,
     )
 
 
@@ -475,14 +477,16 @@ def _parse_claude_response(raw_response: dict[str, Any]) -> tuple[str, list[str]
     return response_text, _merge_citations(citations, extract_citations_from_response(response_text))
 
 
-def query_claude(keyword: str, api_key: str, query_template: str | None = None) -> dict[str, Any]:
+def query_claude(
+    keyword: str, api_key: str, model: str = DEFAULT_PROVIDER_MODELS[Provider.CLAUDE], query_template: str | None = None,
+) -> dict[str, Any]:
     """Query Claude API with web search."""
     def request(query: str) -> dict[str, Any]:
-        return ClaudeClient(api_key).generate_content(query, system_prompt=CLAUDE_CITATION_SYSTEM_PROMPT)
+        return ClaudeClient(api_key, model=model).generate_content(query, system_prompt=CLAUDE_CITATION_SYSTEM_PROMPT)
 
     return _query_llm(
         Provider.CLAUDE, keyword, query_template, request, _parse_claude_response,
-        model=DEFAULT_PROVIDER_MODELS[Provider.CLAUDE], model_from_response=True,
+        model=model, model_from_response=True,
     )
 
 
@@ -493,7 +497,9 @@ def _run_openai_provider(keyword: str, api_key: str, query_template: str | None)
 
 
 def _run_perplexity_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
-    return query_perplexity(keyword, api_key, query_template=query_template)
+    """Perplexity answers with the model configured in Settings (fail-closed)."""
+    model = get_provider_model(Provider.PERPLEXITY)
+    return query_perplexity(keyword, api_key, model=model, query_template=query_template)
 
 
 def _run_gemini_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
@@ -503,7 +509,7 @@ def _run_gemini_provider(keyword: str, api_key: str, query_template: str | None)
 
 
 def _run_claude_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
-    """Claude gets the same query as everyone else.
+    """Claude answers with the model configured in Settings (fail-closed), to the same query as everyone else.
 
     The "include source URLs" instruction moved into Claude's system prompt
     (`CLAUDE_CITATION_SYSTEM_PROMPT`); it used to be concatenated onto the
@@ -511,7 +517,8 @@ def _run_claude_provider(keyword: str, api_key: str, query_template: str | None)
     and corrupted persona templates by injecting the instruction at the
     `{keyword}` position.
     """
-    return query_claude(keyword, api_key, query_template=query_template)
+    model = get_provider_model(Provider.CLAUDE)
+    return query_claude(keyword, api_key, model=model, query_template=query_template)
 
 
 def _search_provider_runner(client_class: type) -> Callable[[str, str, str | None], dict[str, Any]]:

@@ -7,9 +7,8 @@ worker (keyword research) and the providers API (Settings > AI Providers).
 Before 2.17.0 the same ids were hardcoded in about six places and only the
 search Lambda's OpenAI call honoured an override that nothing could write.
 
-Only OpenAI and Gemini are configurable. Perplexity and Claude keep their
-default: their answers already record the model the provider actually used,
-and nobody has asked to move them.
+Every AI engine's model is configurable (Perplexity and Claude since 2.26.0);
+an unset or invalid override falls back to the default below.
 """
 
 from __future__ import annotations
@@ -31,13 +30,13 @@ DEFAULT_PROVIDER_MODELS: dict[str, str] = {
 }
 
 #: Providers whose model an administrator may change in Settings.
-CONFIGURABLE_MODEL_PROVIDERS = frozenset({Provider.OPENAI, Provider.GEMINI})
+CONFIGURABLE_MODEL_PROVIDERS = frozenset({Provider.OPENAI, Provider.PERPLEXITY, Provider.GEMINI, Provider.CLAUDE})
 
 # Model ids are interpolated into the Gemini URL path
 # (`/models/{model}:generateContent`), so anything beyond letters, digits,
 # dots, dashes and underscores is refused rather than escaped. Every published
-# OpenAI and Gemini id (`gpt-5.2`, `o4-mini`, `gemini-2.5-flash-lite`,
-# `gpt-5-2025-08-07`) fits.
+# OpenAI, Perplexity Sonar, Gemini and Claude id (`gpt-5.2`, `o4-mini`,
+# `sonar-reasoning-pro`, `gemini-2.5-flash-lite`, `claude-sonnet-4-6`) fits.
 _MODEL_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}')
 
 

@@ -18,7 +18,16 @@ from botocore.exceptions import ClientError
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.ai_clients import gemini_generate_url, gemini_grounded_payload, openai_web_search_payload
+from shared.ai_clients import (
+    ANTHROPIC_API_BASE,
+    PERPLEXITY_CHAT_URL,
+    anthropic_headers,
+    claude_web_search_payload,
+    gemini_generate_url,
+    gemini_grounded_payload,
+    openai_web_search_payload,
+    perplexity_chat_payload,
+)
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler
@@ -404,7 +413,7 @@ def _perplexity_request(api_key: str) -> dict[str, Any]:
     # Cost: 1 input token + 1 output token if the key IS valid, so
     # ≤ $0.001 per validation.
     return _post(
-        'https://api.perplexity.ai/chat/completions',
+        PERPLEXITY_CHAT_URL,
         headers=_bearer_json_headers(api_key),
         json={
             'model': 'sonar',
@@ -425,12 +434,8 @@ def _claude_request(api_key: str) -> dict[str, Any]:
     # Anthropic /v1/messages returns 401 immediately on a bad key
     # without consuming meaningful quota for a 1-token request.
     return _post(
-        'https://api.anthropic.com/v1/messages',
-        headers={
-            'x-api-key': api_key,
-            'anthropic-version': '2023-06-01',
-            'content-type': 'application/json',
-        },
+        f'{ANTHROPIC_API_BASE}/messages',
+        headers=anthropic_headers(api_key),
         json={
             'model': 'claude-haiku-4-5',
             'max_tokens': 1,
@@ -534,13 +539,14 @@ def validate_api_key(provider_id: str, api_key: str) -> dict:
     return _send(probe.request(api_key), probe.timeout, probe.interpret, f'API key validation for {provider_id}')
 
 
-# --- Model selection (OpenAI and Gemini) ------------------------------------
+# --- Model selection ---------------------------------------------------------
 
 # A real answer from the chosen model with the exact tool configuration runs
-# send: web search for OpenAI, Google Search grounding for Gemini. That is the
-# only reliable way to learn a model accepts it — a model without web-search
-# support answers 400, and three terminal failures in a run would auto-disable
-# the provider. A few seconds and a fraction of a cent.
+# send: web search for OpenAI and Claude, Google Search grounding for Gemini,
+# a Sonar model (which always searches) for Perplexity. That is the only
+# reliable way to learn a model accepts it — a model without web-search
+# support answers 400, and three terminal failures in a run would
+# auto-disable the provider. A few seconds and a fraction of a cent.
 _MODEL_CHECK_TIMEOUT = 20
 _MODEL_CHECK_PROMPT = 'Reply with the single word OK.'
 
@@ -553,12 +559,34 @@ def _openai_model_check(api_key: str, model: str) -> dict[str, Any]:
     )
 
 
+def _perplexity_model_check(api_key: str, model: str) -> dict[str, Any]:
+    return _post(
+        PERPLEXITY_CHAT_URL,
+        headers=_bearer_json_headers(api_key),
+        json=perplexity_chat_payload([{'role': 'user', 'content': _MODEL_CHECK_PROMPT}], model),
+    )
+
+
 def _gemini_model_check(api_key: str, model: str) -> dict[str, Any]:
     return _post(
         gemini_generate_url(model),
         headers={'x-goog-api-key': api_key, 'Content-Type': 'application/json'},
         json=gemini_grounded_payload(_MODEL_CHECK_PROMPT),
     )
+
+
+def _claude_model_check(api_key: str, model: str) -> dict[str, Any]:
+    # One search at most and a short reply keep the check to a cent or so.
+    return _post(
+        f'{ANTHROPIC_API_BASE}/messages',
+        headers=anthropic_headers(api_key),
+        json=claude_web_search_payload(_MODEL_CHECK_PROMPT, model, max_tokens=64, max_uses=1),
+    )
+
+
+def _claude_listing_request(api_key: str) -> dict[str, Any]:
+    # One page holds every model (the list is well under 1,000 entries), newest first.
+    return _get(f'{ANTHROPIC_API_BASE}/models', headers=anthropic_headers(api_key), params={'limit': 1000})
 
 
 def _gemini_listing_request(api_key: str) -> dict[str, Any]:
@@ -569,7 +597,7 @@ def _gemini_listing_request(api_key: str) -> dict[str, Any]:
 
 
 def _provider_error_message(response: Any) -> str:
-    """The ``error.message`` OpenAI and Gemini put in a failed response ('' when absent)."""
+    """The ``error.message`` OpenAI, Perplexity, Gemini and Anthropic put in a failed response ('' when absent)."""
     try:
         payload = response.json()
     except ValueError:
@@ -638,6 +666,30 @@ def _gemini_model_ids(payload: Any) -> list[str]:
     return [model_id for model_id in map(_gemini_model_id, entries or []) if model_id]
 
 
+# Claude 3 models predate the current web search tool generation (the 3.x
+# ids that support it are deprecated), so the picker offers Claude 4 and later.
+# Older families (Claude 2, Instant) are retired and no longer listed.
+_CLAUDE_EXCLUDED_PREFIX = 'claude-3'
+
+
+def _claude_model_ids(payload: Any) -> list[str]:
+    """Claude ids from ``GET /v1/models``, in the API's order (newest first)."""
+    entries = payload.get('data') if isinstance(payload, dict) else None
+    return [
+        entry['id'] for entry in entries or []
+        if isinstance(entry, dict) and is_valid_model_id(entry.get('id'))
+        and entry['id'].startswith('claude-') and not entry['id'].startswith(_CLAUDE_EXCLUDED_PREFIX)
+    ]
+
+
+# The Sonar Chat Completions API has no listing: Perplexity's `GET /v1/models`
+# lists Agent API models (third-party ids such as `openai/gpt-5.5`), which
+# the Sonar endpoint this system calls does not serve. `sonar-deep-research`
+# is left out on purpose: one answer takes minutes, beyond the 60 s a query
+# may take in a run.
+PERPLEXITY_SONAR_MODELS = ('sonar', 'sonar-pro', 'sonar-reasoning-pro')
+
+
 def _listing_models(response: Any, read_ids: Callable[[Any], list[str]]) -> dict:
     """Interpret a model listing: the usable ids, or the provider's reason for refusing."""
     if response.status_code != 200:
@@ -654,15 +706,22 @@ class _ModelSupport(NamedTuple):
 
     check: Callable[[str, str], dict[str, Any]]
     """``(api_key, model)`` → ``requests.request`` arguments for a real answer."""
-    listing: Callable[[str], dict[str, Any]]
-    """``api_key`` → ``requests.request`` arguments for the model listing."""
+    listing: Callable[[str], dict[str, Any]] | None
+    """``api_key`` → ``requests.request`` arguments for the model listing; ``None`` when the provider has none."""
     read_ids: Callable[[Any], list[str]]
-    """Listing payload → the ids worth offering in the picker."""
+    """Listing payload → the ids worth offering in the picker (with no listing: ``None`` → the fixed ids)."""
+
+
+def _fixed_ids(models: tuple[str, ...]) -> Callable[[Any], list[str]]:
+    """``read_ids`` for a provider without a listing: always ``models``."""
+    return lambda _payload: list(models)
 
 
 _MODEL_SUPPORT: dict[str, _ModelSupport] = {
     'openai': _ModelSupport(_openai_model_check, _openai_request, _openai_model_ids),
+    'perplexity': _ModelSupport(_perplexity_model_check, None, _fixed_ids(PERPLEXITY_SONAR_MODELS)),
     'gemini': _ModelSupport(_gemini_model_check, _gemini_listing_request, _gemini_model_ids),
+    'claude': _ModelSupport(_claude_model_check, _claude_listing_request, _claude_model_ids),
 }
 
 
@@ -675,6 +734,8 @@ def validate_model(provider_id: str, api_key: str, model: str) -> dict:
 def list_models(provider_id: str, api_key: str) -> dict:
     """The models ``api_key`` can use for ``provider_id``, filtered to answer-capable ones."""
     support = _MODEL_SUPPORT[provider_id]
+    if support.listing is None:
+        return {'valid': True, 'models': support.read_ids(None)}
     return _send(
         support.listing(api_key), _LISTING_PROBE_TIMEOUT,
         partial(_listing_models, read_ids=support.read_ids), f'model listing for {provider_id}',
@@ -853,9 +914,10 @@ def handle_update_provider(event: dict, context: Any, provider_id: str, body: di
 def handle_list_models(event: dict, context: Any, provider_id: str) -> dict:
     """GET /providers/{id}/models - Models the stored key can use, for the Settings picker.
 
-    Admin-only, like every route that spends the stored key. OpenAI and
-    Gemini only; the list is filtered to models that can answer a prompt, and
-    whatever is chosen is still proven by the model check on save.
+    Admin-only, like every route that spends the stored key. AI engines only
+    (Perplexity's list is fixed: the Sonar API has no listing); the list is
+    filtered to models that can answer a prompt, and whatever is chosen is
+    still proven by the model check on save.
     """
     if provider_id not in CONFIGURABLE_MODEL_PROVIDERS:
         return validation_error('The model of this provider cannot be changed', event, 'id')
@@ -905,7 +967,7 @@ def handler(event: dict, context: Any) -> dict:
 
     Endpoints:
     - GET /providers - List all providers with status
-    - GET /providers/{id}/models - Models the stored key can use (OpenAI, Gemini)
+    - GET /providers/{id}/models - Models the stored key can use (the AI engines)
     - PUT /providers/{id} - Update provider config (enable/disable, API key, model)
     - POST /providers/{id}/validate - Validate API key without saving
 

@@ -29,7 +29,7 @@ from shared.keyword_signals import fetch_google_signals
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
 from shared.prompt_safety import wrap_user_input
-from shared.provider_models import CONFIGURABLE_MODEL_PROVIDERS, ProviderConfigUnavailableError, read_provider_model
+from shared.provider_models import ProviderConfigUnavailableError, read_provider_model
 from shared.research_agent import (
     AGENT_DEFAULT_ROUNDS,
     AGENT_MAX_ROUNDS,
@@ -832,11 +832,11 @@ def _provider_config_table() -> Any:
 def _provider_client(provider_id: str) -> tuple[WebSearchProvider, Any]:
     """The web-search provider behind ``provider_id`` and a client authenticated with its key.
 
-    OpenAI and Gemini clients answer with the model configured in Settings,
-    the same one analysis runs use. Raises ``StepFailedError`` (the message
-    the user sees on the step) for an unknown provider, one without an API
-    key, or one whose configured model cannot be read — failing the step
-    rather than silently researching with a different model.
+    The client answers with the model configured in Settings, the same one
+    analysis runs use. Raises ``StepFailedError`` (the message the user sees
+    on the step) for an unknown provider, one without an API key, or one
+    whose configured model cannot be read — failing the step rather than
+    silently researching with a different model.
     """
     provider = get_web_search_provider(provider_id)
     if provider is None:
@@ -844,8 +844,6 @@ def _provider_client(provider_id: str) -> tuple[WebSearchProvider, Any]:
     api_key = get_api_key(provider.secret_name)
     if not api_key:
         raise StepFailedError(f'{provider_id} is not configured')
-    if provider_id not in CONFIGURABLE_MODEL_PROVIDERS:
-        return provider, provider.client_class(api_key)
     try:
         model = read_provider_model(_provider_config_table(), provider_id)
     except ProviderConfigUnavailableError as error:
