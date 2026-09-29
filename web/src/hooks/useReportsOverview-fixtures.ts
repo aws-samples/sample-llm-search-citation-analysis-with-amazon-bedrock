@@ -16,3 +16,17 @@ export const mockReportsOverview: ReportsOverviewResponse = buildOverview({
 export function overviewWithout(field: keyof ReportsOverviewResponse): Record<string, unknown> {
   return Object.fromEntries(Object.entries(mockReportsOverview).filter(([key]) => key !== field));
 }
+
+
+/**
+ * Bodies the `/reports/overview` guard must reject besides a missing field:
+ * a body that is not an object and a full body flagged with a non-string
+ * error (a string one is rejected before the guard).
+ */
+export const REJECTED_OVERVIEW_BODIES: ReadonlyArray<[description: string, body: unknown]> = [
+  ['a null body', null],
+  ['a full body flagged with a structured error', {
+    ...mockReportsOverview,
+    error: { message: 'No overview' },
+  }],
+];

@@ -187,19 +187,23 @@ interface ConfigurationShape {
   };
 }
 
-/** Every chart's light configuration of the fixture data, by builder name. */
-export const LIGHT_CONFIGURATIONS: ReadonlyArray<readonly [string, ConfigurationShape]> = [
-  ['buildKpiTrendChartConfiguration', kpiTrendChart()],
-  ['buildEngineKpiChartConfiguration', engineKpiChart()],
-  ['buildBrandTrendChartConfiguration', brandTrendChart()],
-  ['buildShareOfVoiceChartConfiguration', shareOfVoiceChart()],
-  ['buildSentimentSplitChartConfiguration', sentimentChart()],
-  ['buildTopSourcesChartConfiguration', topSourcesChart()],
+/**
+ * Every chart's light configuration of the fixture data, by builder name. Each row
+ * carries the builder, so a spec builds the configuration inside its test, where a
+ * mutant is active, not when this module loads.
+ */
+export const LIGHT_CONFIGURATIONS: ReadonlyArray<readonly [string, () => ConfigurationShape]> = [
+  ['buildKpiTrendChartConfiguration', () => kpiTrendChart()],
+  ['buildEngineKpiChartConfiguration', () => engineKpiChart()],
+  ['buildBrandTrendChartConfiguration', () => brandTrendChart()],
+  ['buildShareOfVoiceChartConfiguration', () => shareOfVoiceChart()],
+  ['buildSentimentSplitChartConfiguration', () => sentimentChart()],
+  ['buildTopSourcesChartConfiguration', () => topSourcesChart()],
 ];
 
-/** The 0–100 value axis of every percentage chart, by builder name. */
-export const PERCENT_AXES: ReadonlyArray<readonly [string, unknown]> = [
-  ['buildKpiTrendChartConfiguration', kpiTrendChart().options?.scales?.y],
-  ['buildEngineKpiChartConfiguration', engineKpiChart().options?.scales?.y],
-  ['buildBrandTrendChartConfiguration', brandTrendChart().options?.scales?.y],
+/** The 0–100 value axis of every percentage chart, by builder name; built when a test calls it. */
+export const PERCENT_AXES: ReadonlyArray<readonly [string, () => unknown]> = [
+  ['buildKpiTrendChartConfiguration', () => kpiTrendChart().options?.scales?.y],
+  ['buildEngineKpiChartConfiguration', () => engineKpiChart().options?.scales?.y],
+  ['buildBrandTrendChartConfiguration', () => brandTrendChart().options?.scales?.y],
 ];

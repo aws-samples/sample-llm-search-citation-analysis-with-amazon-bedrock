@@ -7,7 +7,7 @@ import {
 import type { BrandLeaderboardRow } from '../../../../types';
 import { expectRendersNothing } from '../../../../test/renderNothing';
 import {
-  BEST_POSITION_INFO, BrandRankingsSection, MAX_BRANDS
+  BrandRankingsSection, MAX_BRANDS
 } from './BrandRankingsSection';
 import {
   buildBrandRow, buildBrandTrends, buildVisibility
@@ -68,10 +68,14 @@ describe('BrandRankingsSection columns', () => {
     );
   });
 
-  it('explains the best position in its own words', () => {
+  it('explains the best position, engines and keywords columns in their own words', () => {
     renderRankings();
 
-    expect(headerTooltips(TITLE)[4]).toStrictEqual(['Best position', BEST_POSITION_INFO]);
+    expect(headerTooltips(TITLE).slice(4)).toStrictEqual([
+      ['Best position', 'The best place the brand reached in any answer (1 = named first). Answers where its place is unknown are left out.'],
+      ['Engines', 'The AI engines whose answers name the brand.'],
+      ['Keywords', 'How many keywords\' answers name the brand.'],
+    ]);
   });
 });
 

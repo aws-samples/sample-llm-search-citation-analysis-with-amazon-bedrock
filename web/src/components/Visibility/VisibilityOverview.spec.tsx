@@ -43,7 +43,7 @@ describe('VisibilityOverview', () => {
     it('names the scope, its keywords with data and the latest run', () => {
       renderOverview();
 
-      expect(screen.getByText(/keywords have analysis data/)).toHaveTextContent(
+      expect(screen.getByText(/keywords have analysis data/).textContent).toBe(
         `Hotel Sol · 1 of 2 keywords have analysis data · latest run ${formatDate(RUN_2)}`
       );
     });
@@ -56,7 +56,7 @@ describe('VisibilityOverview', () => {
         }),
       });
 
-      expect(screen.getByText(/keywords have analysis data/)).toHaveTextContent('Hotel Sol · 0 of 2 keywords have analysis data · no analysis run yet');
+      expect(screen.getByText(/keywords have analysis data/).textContent).toBe('Hotel Sol · 0 of 2 keywords have analysis data · no analysis run yet');
     });
 
     it('says how many keywords are included when the scope is truncated', () => {

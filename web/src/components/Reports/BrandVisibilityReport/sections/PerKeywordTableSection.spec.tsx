@@ -2,18 +2,16 @@ import {
   describe, it, expect,
 } from 'vitest';
 import {
-  render, screen 
+  render, within
 } from '@testing-library/react';
 import type { KeywordTrend } from '../../../../types';
 import { expectRendersNothing } from '../../../../test/renderNothing';
-import {
-  PerKeywordTableSection, PERIODS_INFO
-} from './PerKeywordTableSection';
+import { PerKeywordTableSection } from './PerKeywordTableSection';
 import {
   buildKeywordTrend, movingKeyword, trendViewOf
 } from '../../layout/reportPayload-fixtures';
 import {
-  headerTooltips, sectionTable, tableRow
+  headerTooltips, sectionTable, sectionTitled, tableRow
 } from '../../layout/reportQueries-fixtures';
 import {
   KPI_DEFINITIONS, TREND_DEFINITION
@@ -66,7 +64,9 @@ describe('PerKeywordTableSection tooltips', () => {
   it('explains which periods are compared', () => {
     renderTable([buildKeywordTrend('shoes')]);
 
-    expect(headerTooltips(TITLE)[3]).toStrictEqual(['Periods', PERIODS_INFO]);
+    expect(headerTooltips(TITLE)[3]).toStrictEqual([
+      'Periods', 'The keyword\'s latest period with data, and the previous one its change is measured against.',
+    ]);
   });
 
   it('explains each KPI column with its definition', () => {
@@ -96,15 +96,15 @@ describe('PerKeywordTableSection states', () => {
     expectRendersNothing(<PerKeywordTableSection trends={trendViewOf([])} loading={false} error={null} />);
   });
 
-  it('shows the loading state', () => {
+  it('shows the loading state under the section title', () => {
     render(<PerKeywordTableSection trends={null} loading error={null} />);
 
-    expect(screen.getByText('Loading per-keyword rankings…')).toBeInTheDocument();
+    expect(within(sectionTitled(TITLE)).getByText('Loading per-keyword rankings…')).toBeInTheDocument();
   });
 
-  it('shows the error', () => {
+  it('shows the error under the section title', () => {
     render(<PerKeywordTableSection trends={null} loading={false} error="Network down" />);
 
-    expect(screen.getByText('Network down')).toBeInTheDocument();
+    expect(within(sectionTitled(TITLE)).getByText('Network down')).toBeInTheDocument();
   });
 });

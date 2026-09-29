@@ -12,6 +12,9 @@ import {
   LEADERBOARD, shareOfVoiceChart
 } from './charts-fixtures';
 
+/** Nike with a 40% share of voice, then Puma with none. */
+const ONE_ZERO_SHARE = [buildBrandRow('Nike', { share_of_voice: 40 }), buildBrandRow('Puma', { share_of_voice: 0 })];
+
 describe('buildShareOfVoiceChartConfiguration', () => {
   it('gives six brands their own slice by default', () => {
     expect(DEFAULT_SHARE_OF_VOICE_LIMIT).toBe(6);
@@ -51,6 +54,14 @@ describe('buildShareOfVoiceChartConfiguration', () => {
     expect(shareOfVoiceChart().options?.plugins?.tooltip?.callbacks?.label).toBe(sliceTooltipLabel);
   });
 
+  it('names its dataset "Share of voice"', () => {
+    expect(shareOfVoiceChart().data.datasets[0].label).toBe('Share of voice');
+  });
+
+  it('cuts a 60% hole in the doughnut', () => {
+    expect(shareOfVoiceChart().options?.cutout).toBe('60%');
+  });
+
   it('draws nothing without a brand', () => {
     expect(shareOfVoiceChart([]).data.labels).toStrictEqual([]);
   });
@@ -72,9 +83,11 @@ describe('shareOfVoiceSlices', () => {
   });
 
   it('adds no other-brands slice when the rest have no share', () => {
-    const brands = [buildBrandRow('Nike', { share_of_voice: 40 }), buildBrandRow('Puma', { share_of_voice: 0 })];
+    expect(shareOfVoiceSlices(ONE_ZERO_SHARE, 1).map((slice) => slice.name)).toStrictEqual(['Nike']);
+  });
 
-    expect(shareOfVoiceSlices(brands, 1).map((slice) => slice.name)).toStrictEqual(['Nike']);
+  it('keeps a shown brand with a zero share when another brand has a share', () => {
+    expect(shareOfVoiceSlices(ONE_ZERO_SHARE, 6).map((slice) => [slice.name, slice.share])).toStrictEqual([['Nike', 40], ['Puma', 0]]);
   });
 
   it('rounds the other brands\' share to one decimal', () => {

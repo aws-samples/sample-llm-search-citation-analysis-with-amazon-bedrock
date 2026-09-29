@@ -62,11 +62,11 @@ describe('report chart components', () => {
     expect(Chart).not.toHaveBeenCalledWith(CANVAS_CONTEXT, expect.anything());
   });
 
-  it.each(REDRAWN_CHARTS)('%s redraws the chart of its new props when they change', (_name, first, second, data) => {
+  it.each(REDRAWN_CHARTS)('%s redraws the chart of its new props when they change', (_name, first, second, buildData) => {
     stubCanvasContext();
     const { rerender } = render(first());
     rerender(second());
 
-    expect(Chart).toHaveBeenLastCalledWith(CANVAS_CONTEXT, expect.objectContaining({ data }));
+    expect(Chart).toHaveBeenLastCalledWith(CANVAS_CONTEXT, expect.objectContaining({ data: buildData() }));
   });
 });

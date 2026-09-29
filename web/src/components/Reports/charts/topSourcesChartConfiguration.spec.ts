@@ -46,6 +46,10 @@ describe('buildTopSourcesChartConfiguration', () => {
     }));
   });
 
+  it('stacks a domain\'s owned and other citations in one bar', () => {
+    expect(topSourcesChart().options?.scales?.y).toStrictEqual(themedAxis(LIGHT_THEME, { stacked: true }));
+  });
+
   it('adds the citation rate and share under the tooltip\'s citation count', () => {
     expect(topSourcesChart().options?.plugins?.tooltip?.callbacks).toStrictEqual({ afterLabel: expect.any(Function) });
   });

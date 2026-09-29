@@ -6,7 +6,7 @@ import {
 } from '@testing-library/react';
 import type { TrendDataPoint } from '../../../types';
 import {
-  MAX_TREND_ROWS, TREND_PERIOD_KPIS, TrendPeriodTable
+  MAX_TREND_ROWS, TrendPeriodTable
 } from './TrendPeriodTable';
 import { ReportSection } from './ReportSection';
 import {
@@ -51,15 +51,25 @@ describe('TrendPeriodTable', () => {
     renderTable([buildTrendPoint('2026-09-08')]);
 
     expect(headerTooltips('History').map(([header]) => header)).toStrictEqual([
-      'Runs', ...TREND_PERIOD_KPIS.map((id) => KPI_DEFINITIONS[id].label),
+      'Runs', 'Answers', 'Mention rate', 'Share of voice', 'Visibility score', 'Average position', 'Citation rate',
+    ]);
+  });
+
+  it('explains that the runs of a period are pooled into its KPIs', () => {
+    renderTable([buildTrendPoint('2026-09-08')]);
+
+    expect(headerTooltips('History')[0]).toStrictEqual([
+      'Runs', 'Analysis runs in the period. Every answer of every run in the period is pooled into its KPIs.',
     ]);
   });
 
   it('gives each KPI column the KPI definition as its tooltip', () => {
     renderTable([buildTrendPoint('2026-09-08')]);
 
-    expect(headerTooltips('History').slice(1).map(([, text]) => text))
-      .toStrictEqual(TREND_PERIOD_KPIS.map((id) => KPI_DEFINITIONS[id].definition));
+    expect(headerTooltips('History').slice(1).map(([, text]) => text)).toStrictEqual(
+      (['answers', 'mention_rate', 'share_of_voice', 'visibility_score', 'average_position', 'citation_rate'] as const)
+        .map((id) => KPI_DEFINITIONS[id].definition),
+    );
   });
 
   it('lists every period of a short series', () => {

@@ -41,37 +41,38 @@ export const MAX_BRANDS = 15;
 /** The KPIs of each brand, in column order. */
 const BRAND_KPIS = ['visibility_score', 'mention_rate', 'share_of_voice', 'average_position'] as const satisfies readonly KpiId[];
 
-export const BEST_POSITION_INFO = 'The best place the brand reached in any answer (1 = named first). '
-  + 'Answers where its place is unknown are left out.';
-
-const COLUMNS: ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>> = [
-  {
-    header: 'Brand',
-    // Stryker disable next-line StringLiteral: Tailwind-only cell styling
-    cellClassName: 'font-medium',
-    render: (brand) => brand.name,
-  },
-  ...BRAND_KPIS.map((id) => kpiColumn<BrandLeaderboardRow>(id, (brand) => formatKpi(id, brand[id]))),
-  {
-    header: 'Best position',
-    info: BEST_POSITION_INFO,
-    render: (brand) => brand.best_position ?? '—',
-  },
-  {
-    header: 'Engines',
-    info: 'The AI engines whose answers name the brand.',
-    render: (brand) => brand.engines.join(', '),
-  },
-  {
-    header: 'Keywords',
-    info: 'How many keywords\' answers name the brand.',
-    render: (brand) => brand.keywords,
-  },
-  {
-    header: 'Type',
-    render: (brand) => <ClassificationBadge classification={brand.classification} />,
-  },
-];
+/** Built per render (not at import) so every column is exercised by the tests that render the table. */
+function rankingColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>> {
+  return [
+    {
+      header: 'Brand',
+      // Stryker disable next-line StringLiteral: Tailwind-only cell styling
+      cellClassName: 'font-medium',
+      render: (brand) => brand.name,
+    },
+    ...BRAND_KPIS.map((id) => kpiColumn<BrandLeaderboardRow>(id, (brand) => formatKpi(id, brand[id]))),
+    {
+      header: 'Best position',
+      info: 'The best place the brand reached in any answer (1 = named first). '
+        + 'Answers where its place is unknown are left out.',
+      render: (brand) => brand.best_position ?? '—',
+    },
+    {
+      header: 'Engines',
+      info: 'The AI engines whose answers name the brand.',
+      render: (brand) => brand.engines.join(', '),
+    },
+    {
+      header: 'Keywords',
+      info: 'How many keywords\' answers name the brand.',
+      render: (brand) => brand.keywords,
+    },
+    {
+      header: 'Type',
+      render: (brand) => <ClassificationBadge classification={brand.classification} />,
+    },
+  ];
+}
 
 /**
  * Brand leaderboard: every brand the AI answers named in the scope, each
@@ -112,7 +113,7 @@ export function BrandRankingsSection({
         {brandTrends && <ShareOfVoiceTrendPanel trends={brandTrends} />}
       </div>
       <ReportTable
-        columns={COLUMNS}
+        columns={rankingColumns()}
         rows={gate.value.slice(0, MAX_BRANDS)}
         // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
         rowKey={(brand) => brand.name}
@@ -135,6 +136,7 @@ const CLASSIFICATION_LABELS: Record<BrandClassification, string> = {
 function ClassificationBadge({ classification }: { readonly classification: BrandClassification }) {
   return (
     <span
+      // Stryker disable next-line StringLiteral: Tailwind-only badge styling; the text below names the classification
       className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${badgeStyles(classification)}`}
     >
       {CLASSIFICATION_LABELS[classification]}

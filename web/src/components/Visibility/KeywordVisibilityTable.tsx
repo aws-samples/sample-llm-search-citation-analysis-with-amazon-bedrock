@@ -18,7 +18,15 @@ const KEYWORD_KPIS = [
   'answers',
 ] as const satisfies readonly KpiId[];
 
-type KeywordSortKey = 'keyword' | (typeof KEYWORD_KPIS)[number];
+type KpiSortKey = (typeof KEYWORD_KPIS)[number];
+
+type KeywordSortKey = 'keyword' | KpiSortKey;
+
+/** A keyword row with its known value of the sort KPI. */
+interface RowValue {
+  readonly row: KeywordVisibilityRow;
+  readonly value: number;
+}
 
 /** Sorted ascending the first time they are picked: names A→Z, positions best (lowest) first. */
 const ASCENDING_FIRST: ReadonlySet<KeywordSortKey> = new Set<KeywordSortKey>(['keyword', 'average_position']);
@@ -44,19 +52,28 @@ const COLUMNS: readonly SortableColumn[] = [
   })),
 ];
 
-/** `left` before `right`: unknown values last whatever the direction. */
-function compareKnownFirst(left: number | null, right: number | null, descending: boolean): number {
-  if (left === null) return right === null ? 0 : 1;
-  if (right === null) return -1;
-  return descending ? right - left : left - right;
-}
-
-function compareRows(left: KeywordVisibilityRow, right: KeywordVisibilityRow, key: KeywordSortKey, descending: boolean): number {
-  if (key === 'keyword') {
+/** `rows` by keyword name, ignoring case. */
+function sortByKeyword(rows: readonly KeywordVisibilityRow[], descending: boolean): KeywordVisibilityRow[] {
+  return [...rows].sort((left, right) => {
     const comparison = left.keyword.localeCompare(right.keyword, undefined, { sensitivity: 'base' });
     return descending ? -comparison : comparison;
+  });
+}
+
+/** `rows` by the KPI `key`; rows without that KPI stay last, in their original order, whatever the direction. */
+function sortByKpi(rows: readonly KeywordVisibilityRow[], key: KpiSortKey, descending: boolean): KeywordVisibilityRow[] {
+  const known: RowValue[] = [];
+  const unknown: KeywordVisibilityRow[] = [];
+  for (const row of rows) {
+    const value = row.kpis?.[key] ?? null;
+    if (value === null) unknown.push(row);
+    else known.push({
+      row,
+      value
+    });
   }
-  return compareKnownFirst(left.kpis?.[key] ?? null, right.kpis?.[key] ?? null, descending);
+  known.sort((left, right) => (descending ? right.value - left.value : left.value - right.value));
+  return [...known.map(({ row }) => row), ...unknown];
 }
 
 function ariaSort(active: boolean, descending: boolean): 'ascending' | 'descending' | 'none' {
@@ -119,7 +136,7 @@ export function KeywordVisibilityTable({ rows }: { readonly rows: readonly Keywo
     setDescending(!ASCENDING_FIRST.has(key));
   };
 
-  const sorted = [...rows].sort((left, right) => compareRows(left, right, sortKey, descending));
+  const sorted = sortKey === 'keyword' ? sortByKeyword(rows, descending) : sortByKpi(rows, sortKey, descending);
 
   return (
     <OverviewPanel title={TITLE}>

@@ -8,12 +8,10 @@ import { MemoryRouter } from 'react-router-dom';
 import { ReportsLandingView } from './ReportsLandingView';
 
 /**
- * The landing view doubles as a roadmap: every report is listed, including
- * any not built yet. Tests pin:
- *   - every title renders so an exec scanning the page sees the full plan
- *   - the available reports link to a real path (regression catch if the
- *     `path` field gets set wrongly during sequencing)
- *   - the not-yet-built reports show "Coming soon" instead of an active link
+ * The landing view lists every report as a card linking to it. Tests pin:
+ *   - every title renders so an exec scanning the page sees the full set
+ *   - each card links to a real path (regression catch if the `path` field
+ *     gets set wrongly)
  */
 describe('ReportsLandingView', () => {
   function renderLanding() {
@@ -67,10 +65,9 @@ describe('ReportsLandingView', () => {
     expect(link).toHaveAttribute('href', '/reports/competitor');
   });
 
-  it('lists every report as available with a working link', () => {
+  it('makes each of the nine report cards a link', () => {
     renderLanding();
-    const comingSoonBadges = screen.queryAllByText(/coming soon/i);
-    expect(comingSoonBadges).toHaveLength(0);
+    expect(screen.getAllByRole('link')).toHaveLength(9);
   });
 
   it.each([

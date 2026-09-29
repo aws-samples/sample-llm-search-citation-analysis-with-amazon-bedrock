@@ -9,6 +9,26 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.23.1] - 2026-09-29
+
+Mutation sweep over every line changed in 2.21.0–2.23.0 (Python with mutmut, the dashboard with Stryker): each
+surviving mutant is now caught by a test, removed as dead code, or annotated as presentation-only.
+
+### Removed
+
+- The unused "Coming soon" state of the Reports landing cards: every report is built, so each card is a link.
+
+### Changed
+
+- The `/reports/overview` hook checks its response with the same guard as the `/visibility` and `/trends` hooks.
+- The keyword table sorts rows with a value on their own and appends the rows without one in their original order
+  (same order as before, without relying on the comparator's tie handling).
+- Column lists of the report tables are built at render time, so a wrong KPI id fails a test instead of the module import.
+- Tests pin the chart palette and KPI colours, the tooltip and title texts, the malformed responses each hook rejects,
+  a padded `period` query value on `/trends`, and chart redraws when their props change.
+- `web/stryker.config.mjs` ignores `.stryker-tmp`, so parallel runs with their own temp directory no longer copy each
+  other's sandboxes.
+
 ## [2.23.0] - 2026-09-29
 
 Reports benchmarked against AI-visibility vendors (`docs/report-benchmark.md`): the reports that are

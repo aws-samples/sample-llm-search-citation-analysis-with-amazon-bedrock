@@ -23,8 +23,13 @@ import { SHARE_OF_VOICE_TITLE } from '../BrandVisibilityReport/sections/ReportCh
 vi.mock('./useExecutiveSummary', () => ({useExecutiveSummary: vi.fn()}));
 vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPrintMode: false })),}));
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
+vi.mock('../../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
 
 import { useExecutiveSummary } from './useExecutiveSummary';
+import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
+import {
+  buildKeywordGroup, buildKeywordGroupsHookResult
+} from '../../../hooks/useKeywordGroups-fixtures';
 
 const mockUse = vi.mocked(useExecutiveSummary);
 
@@ -50,6 +55,10 @@ function renderReport(path = '/reports/executive-summary') {
 describe('ExecutiveSummaryReport', () => {
   beforeEach(() => {
     mockUse.mockReturnValue(POPULATED);
+    vi.mocked(useKeywordGroups).mockReturnValue(buildKeywordGroupsHookResult([buildKeywordGroup({
+      id: 'hotel-sol',
+      name: 'Hotel Sol (list)',
+    })]));
   });
 
   it('renders the report H1', () => {
@@ -110,5 +119,18 @@ describe('ExecutiveSummaryReport', () => {
     renderReport('/reports/executive-summary?group=hotel-sol');
 
     expect(screen.getByText('The one-page state of brand visibility for "Hotel Sol" across AI search engines.')).toBeInTheDocument();
+  });
+
+  it('names a keyword group from the group list before the API answers', () => {
+    mockUse.mockReturnValue({
+      data: null,
+      loading: true,
+      error: null,
+      ready: false,
+    });
+
+    renderReport('/reports/executive-summary?group=hotel-sol');
+
+    expect(screen.getByText('The one-page state of brand visibility for "Hotel Sol (list)" across AI search engines.')).toBeInTheDocument();
   });
 });

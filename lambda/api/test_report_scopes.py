@@ -648,6 +648,13 @@ class TestTrendsScopeRouting:
 
         assert module.handler(_event({'keyword': 'hotel coruna spa', **params}), None)['statusCode'] == 400
 
+    def test_reads_a_period_padded_with_spaces_as_that_period(self, trends_env):
+        module, _ = trends_env
+
+        body = _body(module.handler(_event({'keyword': 'hotel coruna spa', 'period': ' week '}), None))
+
+        assert body['period_type'] == 'week'
+
     def test_says_whether_owned_domains_are_configured(self, trends):
         resource, _ = _fake_dynamodb()
         with (

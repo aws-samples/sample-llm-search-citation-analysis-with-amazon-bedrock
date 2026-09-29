@@ -20,7 +20,7 @@ export type BrandTrendMetric = 'share_of_voice' | 'mention_rate' | 'visibility_s
 export const DEFAULT_TRACKED_LABEL = 'Your brand';
 
 /** The key of the tracked brand's series (competitors are keyed by name). */
-export const TRACKED_SERIES_KEY = 'tracked';
+const TRACKED_SERIES_KEY = 'tracked';
 
 export interface BrandTrendOptions {
   readonly metric: BrandTrendMetric;
