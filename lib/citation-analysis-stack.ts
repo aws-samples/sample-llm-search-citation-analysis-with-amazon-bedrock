@@ -776,7 +776,8 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Secrets Manager - API Keys
     // ========================================
 
-    // Import existing secrets (created via setup-secrets.sh script)
+    // Import the provider API key secrets; an admin creates them from the
+    // dashboard (Settings > AI Providers), so they may not exist yet.
     // OpenAI API Key Secret
     const openaiSecret = secretsmanager.Secret.fromSecretNameV2(
       this,
@@ -3442,7 +3443,7 @@ def delete_waf(waf, arn):
 
     // Deployment instructions
     new cdk.CfnOutput(this, 'DeploymentInstructions', {
-      value: 'Open the dashboard, go to Settings > Providers to configure API keys, then add keywords and run analysis',
+      value: 'Open the dashboard, go to Settings > AI Providers to configure API keys, then add keywords and run analysis',
       description: 'Next steps after deployment',
     });
   }

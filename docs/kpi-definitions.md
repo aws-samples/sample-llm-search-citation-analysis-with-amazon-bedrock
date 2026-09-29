@@ -1,9 +1,9 @@
 # KPI definitions
 
-This is the reference for every visibility KPI the system reports: what each one means, how it is calculated, and which market definition it follows. Every page, export and alert uses these definitions. Nothing else may define them.
+This is the reference for every visibility KPI the system reports: what each one means, how it is calculated, and which market definition it follows. The Visibility tab, the reports and their exports, and the KPI alerts all use these definitions. Prompt Insights and Citation Gaps show figures of their own (see [engine coverage](#engine_coverage--engine-coverage)); those are not these KPIs.
 
 - Code source of truth: `lambda/shared/kpi_engine.py` (the calculations) and `web/src/constants/kpiDefinitions.ts` (the customer-facing wording in tooltips and exports).
-- Contract: `lambda/shared/test_kpi_contract.py` fails when the KPI sections below, `KPI_IDS` in the engine and the web definitions list different KPIs. Change all three together.
+- Contract: `lambda/shared/test_kpi_contract.py` fails unless the KPI sections below, `KPI_IDS` in the engine and the web definitions list the same KPIs in the same order, with the same labels. Change all three together.
 
 ## Conventions
 
@@ -14,15 +14,15 @@ These are not answers and are excluded from every KPI:
 - rows from the optional web-search providers (Brave, Tavily, Exa, SerpAPI, Firecrawl), because they return links and never write an answer that could name a brand;
 - failed engine calls (`status` other than `success`).
 
-A row is an answer when its `provider` is an AI engine; the provider decides the type. A row without `status` counts as successful; such rows were written before failures were stored.
+A row is an answer when its `provider` is an AI engine; the provider decides the type. A row without `status` counts as successful.
 
-**Tracked brand.** All brands classified as first-party in the brand configuration, taken together. For a hotel chain that means every name the hotel is known by. "Mentions the brand" means the answer names at least one of them.
+**Tracked brand.** All brands classified as first-party in the brand configuration, taken together. For a hotel chain that means every name the hotel is known by. "Mentions the brand" means the answer names at least one of them. Brand names are compared case-insensitively.
 
-**Sighting.** One brand named in one answer. A brand named several times in the same answer is still one sighting, at its best position. Otherwise a long answer that repeats a name would outweigh a short one.
+**Sighting.** One brand named in one answer. A brand named several times in the same answer is still one sighting, at its best position (and with the sentiment of that sighting). Otherwise a long answer that repeats a name would outweigh a short one.
 
 **Position (rank).** The order in which brands first appear in an answer: 1 is the first brand named. For the tracked brand, it is the best position of any first-party brand in that answer. The extractor stores 999 when it could not place a brand; that counts as "position unknown".
 
-**Owned domains.** The website domains of the tracked brand, set in Settings → Brand Tracking → Owned Domains (`first_party_domains`). A cited URL is owned when its host is an owned domain or a subdomain of one: `blog.hotel.com` is owned for `hotel.com`, but `nothotel.com` is not. Owned domains, first-party brands and competitors are global. They apply to every keyword group.
+**Owned domains.** The website domains of the tracked brand, set in Settings › Brand Tracking under Owned Domains (`first_party_domains`). Hosts are compared lower-case, without `www.` or a port. A cited URL is owned when its host is an owned domain or a subdomain of one: `blog.hotel.com` is owned for `hotel.com`, but `nothotel.com` is not. Owned domains, first-party brands and competitors are global. They apply to every keyword group.
 
 **Pooling.** A value for several answers is computed from counts added up over all of them, then divided once. This applies to a keyword group, a period, a run, or all keywords. Every answer weighs the same. Percentages are never averaged. The per-keyword view stays available in the keyword drill-down.
 
@@ -31,6 +31,8 @@ A row is an answer when its `provider` is an AI engine; the provider decides the
 **Sample size.** Every KPI is shown next to the number of answers it was computed from. AI answers vary between runs, so small samples are noisy. With 20 answers, one extra mention moves the mention rate by 5 points.
 
 **Empty values.** When there is nothing to divide by (no answers, no ranked mention, no owned domain configured), the KPI is empty ("—"), not 0. A KPI that is 0 means it was measured and was zero.
+
+**Rounding.** Rates, the visibility score and net sentiment are rounded to one decimal; average position, changes and driver impacts to two.
 
 ## Summary
 
@@ -46,7 +48,7 @@ A row is an answer when its `provider` is an AI engine; the provider decides the
 | Visibility score | mean of the position weight 0.9^(position − 1) over answers × 100 | 0–100 | higher |
 | Citations | answers citing an owned domain | count | higher |
 | Citation rate | citations ÷ answers | 0–100 % | higher |
-| Citation share | owned cited domains ÷ all cited domains | 0–100 % | higher |
+| Citation share | owned (answer, domain) pairs ÷ all (answer, domain) pairs | 0–100 % | higher |
 | Net sentiment | (positive − negative) ÷ labelled sightings × 100 | −100 to +100 | higher |
 | Engine coverage | engines naming the brand ÷ engines that answered | 0–100 % | higher |
 | Keyword coverage | keywords with a mention ÷ keywords that were answered | 0–100 % | higher |
@@ -77,8 +79,6 @@ This is the share of AI answers that mention the brand. It is the headline "how 
 
 Otterly counts once per prompt, whereas we count once per answer. That matches Peec, Profound and Scrunch, and it also rewards being named by more engines.
 
-**Replaces:** the old "citation rate" of the group report (`coverage_rate`), which counted keywords, not answers. That value survives as [keyword coverage](#keyword_coverage--keyword-coverage).
-
 ### `share_of_voice` — Share of voice
 
 **Formula:** sightings of first-party brands ÷ sightings of all brands (first-party, competitors, others) × 100.
@@ -95,11 +95,6 @@ A sighting is one brand in one answer, so a brand named five times in one answer
 
 We count each brand once per answer, which is how Peec and Scrunch count mentions.
 
-**Replaces:**
-
-- the group report's share of voice, which summed raw `mention_count` values (repetitions included) and then averaged the keywords;
-- the Visibility tab's share of voice, which divided by the number of brands.
-
 ### `average_position` — Average position
 
 **Formula:** the mean of the brand's best position, over the answers that name the brand and place it. Lower is better, and 1 is the best possible value.
@@ -112,8 +107,6 @@ We count each brand once per answer, which is how Peec and Scrunch count mention
 - Profound and Semrush: average position counts only responses where the brand appears.
 - Otterly: "average position" in the ranking list.
 
-**Replaces:** "mean rank" in the prominence block; the formula is the same, but it is now pooled.
-
 ### `top_1_share` — Top-1 share
 
 **Formula:** answers naming the tracked brand first ÷ answers × 100.
@@ -123,8 +116,6 @@ Unlike the average position, the denominator is every answer, including answers 
 **Edge cases:** empty when there are no answers.
 
 **Market:** there is no vendor standard. Evertune and Profound report the distribution of positions; this is our summary of it.
-
-**Replaces:** "rank #1 share".
 
 ### `top_3_share` — Top-3 share
 
@@ -138,6 +129,8 @@ Unlike the average position, the denominator is every answer, including answers 
 |---|---|---|---|---|---|---|---|
 | Weight | 1.00 | 0.90 | 0.81 | 0.73 | 0.66 | 0.39 | 0 |
 
+The decay (0.9, `POSITION_DECAY`) and the cap at the 10th position (`POSITION_WEIGHT_CAP`) are constants in the engine.
+
 The score combines how often and how early the brand is named in a single 0–100 number. Mentioned first in every answer is 100; never mentioned is 0. Sentiment is not part of the score. It is reported separately as [net sentiment](#net_sentiment--net-sentiment).
 
 **Edge cases:** empty when there are no answers. A mention whose position is unknown gets the 10th-position weight: it still counts as a mention, but not as a prominent one.
@@ -147,13 +140,6 @@ The score combines how often and how early the brand is named in a single 0–10
 - Evertune: the visibility score weights each mention by position, and each position is worth 90 % of the one above it.
 - Profound and Semrush: visibility scores combine mention frequency with position.
 - Otterly: "brand visibility index".
-
-**Replaces:**
-
-- the 4-factor score (mentions, rank, sentiment, provider breadth) used on the Visibility tab;
-- the 3-factor, sentiment-agnostic score used on the group report.
-
-Old and new scores are not comparable. The first period after the change has no trend.
 
 ### `citations` — Citations
 
@@ -176,8 +162,6 @@ This is the share of AI answers that link to the brand's own website. It is inde
 - Semrush and Ahrefs: cited pages and citation counts.
 - Profound: "citation rate".
 
-**Replaces:** nothing. Before this change, the report called its mention coverage "citation rate".
-
 ### `citation_share` — Citation share
 
 **Formula:** owned (answer, domain) pairs ÷ all (answer, domain) pairs × 100.
@@ -196,7 +180,7 @@ Each cited domain counts once per answer, however many of its URLs the answer li
 
 **Formula:** (positive − negative) ÷ labelled first-party sightings × 100. The range is −100 (all negative) to +100 (all positive).
 
-The labels are positive, neutral, negative and mixed. Neutral and mixed sightings count in the denominator but pull toward 0. Sightings without a label are left out. The split (positive, neutral, negative, mixed) is reported next to the net value.
+The labels are positive, neutral, negative and mixed. Neutral and mixed sightings count in the denominator but pull toward 0. Sightings without a label are left out. The split (positive, neutral, negative, mixed) is reported next to the net value as `sentiment_split`.
 
 **Edge cases:** empty when no mention of the brand has a sentiment label.
 
@@ -217,7 +201,7 @@ The labels are positive, neutral, negative and mixed. Neutral and mixed sighting
 - Otterly and Peec: platform and model breakdown of visibility.
 - Scrunch: "platform coverage".
 
-**Replaces:** `provider_coverage`. On Prompt Insights it wrongly divided by answer rows instead of engines.
+Not the same as the "provider coverage" on Prompt Insights, which divides the engines naming the brand by every result row of the latest run (web-search, failed and persona rows included).
 
 ### `keyword_coverage` — Keyword coverage
 
@@ -229,41 +213,50 @@ It shows how much of the keyword set the brand appears for at all, however many 
 
 **Market:** Otterly's "brand coverage" counts prompts; this is the same idea one level up, where a keyword is a topic.
 
-**Replaces:** the group report's old "citation rate" (`coverage_rate`).
-
 ## Per-brand leaderboards
 
-Tables that list every brand named in the answers apply the same formulas to each brand on its own: mentions, mention rate, share of voice, average position, best position, visibility score, engines, keywords and net sentiment.
+Tables that list every brand named in the answers apply the same formulas to each brand on its own. Each row has the brand's `name` and `classification`, and its mentions, mention rate, share of voice, average position, best position, visibility score, net sentiment and `sentiment_split`, plus `engines` (the engines naming it) and `keywords` (how many keywords it is named for).
 
-A table is sorted by visibility score, then mentions, then name. Engine lists are per brand. A brand's classification is taken from the first answer that names it.
+A table is sorted by visibility score, then mentions, then name. A brand's name and classification are taken from the first answer read that names it.
 
 ## Breakdowns
 
-These apply the same formulas to a slice of the scope's answers (since 2.23.0):
+These apply the same formulas to a slice of the scope's answers:
 
-- **Per AI engine** (`engines` in `/visibility`). Every KPI of your brand, computed from one engine's answers. Within one engine, engine coverage can only be 0% or 100%.
-- **Per cited domain** (`sources` in `/visibility`, the 25 most cited of `sources_total`). For each domain: citations (answers citing it), citation rate (those answers ÷ all answers), citation share (its citations ÷ every answer-and-domain citation), whether it is one of your domains, the engines citing it, and the keywords whose answers cite it. Sorted by citations, then domain. Other domains are not classified as competitor-owned.
-- **Brand trends** (`brand_trends` in `/trends`). Share of voice, mention rate, visibility score and average position per period for your brand (your first-party brands pooled) and the 5 competitors with the best visibility score over the whole window. A competitor not named in a period scores 0, with no position; its share of voice is empty if the period's answers name no brand at all.
-- **Latest leaderboard** (`latest_brands` in `/trends` and `/reports/overview`). The per-brand leaderboard of each keyword's latest period, top 10.
+- **Per AI engine** (`engines` in `/api/visibility`). Every KPI of your brand, computed from one engine's answers, engines in name order. Within one engine, engine coverage can only be 0% or 100%.
+- **Per cited domain** (`sources` in `/api/visibility`: the `SOURCES_LIMIT` = 25 most cited, of `sources_total`). For each domain: citations (answers citing it), citation rate (those answers ÷ all answers), citation share (its citations ÷ every answer-and-domain citation), whether it is one of your domains (`owned`), the engines citing it, and the number of keywords whose answers cite it. Sorted by citations, then domain. Other domains are not classified as competitor-owned.
+- **Brand trends** (`brand_trends` in `/api/trends`). Share of voice, mention rate, visibility score and average position per period for your brand (your first-party brands pooled) and the `BRAND_TREND_COMPETITORS` = 5 competitors with the best visibility score over the whole window. A competitor not named in a period scores 0, with no position; its share of voice is empty if the period's answers name no brand at all.
+- **Latest leaderboard** (`latest_brands` in `/api/trends` and `/api/reports/overview`). The per-brand leaderboard of each keyword's latest period, top `LATEST_BRANDS_LIMIT` = 10.
 
 ## Scopes and aggregation
 
 - **Keyword group.** All answers of the group's keywords, pooled.
-- **Group run.** A run that answered at least half of the group's keywords (`GROUP_RUN_MIN_COVERAGE`). Only group runs are compared with each other. A run of a single keyword stays in the keyword drill-down.
-- **Latest (Visibility tab, keyword and deep-dive reports).** Each keyword's latest run, pooled. Its change compares each keyword's latest run with its previous run, over the keywords answered in both (like for like), so a keyword analysed once does not distort the change.
-- **Period (trend charts and tables).** All answers whose run timestamp falls within the day, ISO week or month, pooled. The latest standing of a scope pools each keyword's latest period; its change compares the latest period with the previous one over the keywords measured in both.
+- **Group run** (`/api/reports/group-kpis`). A run whose `coverage` (the group's keywords with at least one successful answer at that run timestamp ÷ all of the group's keywords) is at least `GROUP_RUN_MIN_COVERAGE` = 50 %; the response flags it with `is_group_run` and returns the threshold as `group_run_min_coverage`. Only group runs are compared with each other. A run of a single keyword stays in the keyword drill-down.
+- **Latest (Visibility tab, keyword and deep-dive reports, and the Competitor Benchmark, AI Engines, Sources and Sentiment reports).** Each keyword's latest run, pooled (`/api/visibility`). Its change compares each keyword's latest run with its previous run, over the keywords answered in both (like for like, `keywords_compared`), so a keyword analysed once does not distort the change.
+- **Period (trend charts and tables, `/api/trends`).** All answers whose run timestamp falls within the day, ISO week or month, pooled. The latest standing of a scope pools each keyword's latest period with data. Its change pools, over the keywords with at least two periods, each keyword's latest period against that keyword's previous period with data.
 - **Keyword drill-down.** The same KPIs, computed from one keyword's answers.
 
 ## Changes and trends
 
-- **Change.** The current value minus the value of the previous comparable scope: the previous group run, or the previous period of the same length. It is in points for percentages and scores, in positions for average position, and in units for counts. It is empty when either side is empty.
-- **Trend.**
-  - Improving: the change is ≥ +2 points. For average position, the position falls by ≥ 0.5.
+- **Change.** The current value minus the value of the previous comparable scope: the previous group run, the keyword's previous run, or its previous period with data. It is in points for percentages and scores, in positions for average position, and in units for counts. It is empty when either side is empty.
+- **Trend.** Called for the rates, the visibility score, average position and net sentiment; counts have no trend.
+  - Improving: the change is ≥ +2 points (`TREND_BAND_POINTS`). For average position, the position falls by ≥ 0.5 (`TREND_BAND_POSITIONS`).
   - Declining: the same thresholds in the other direction.
   - Stable: anything in between, or when there is no change to judge.
 
   The band keeps run-to-run noise from reading as a trend.
-- **Alerts.** Alert rules compare two consecutive complete group runs and use the same KPIs and changes: a mention-rate drop (called "citation-rate drop" before 2.21.0), a loss of average position, a competitor newly reaching the top positions, a keyword whose answers stop naming the brand, and a visibility-score gain after a content change. When a KPI definition changes, the stored baseline is reset. The first run after the change sets a new baseline and does not raise an alert.
+- **Drivers.** Between two group runs, each keyword answered in both runs that moved is listed with its changes and its `impact` on the group's mention rate and visibility score: the keyword's change × its share of the later run's answers.
+- **Alerts.** After each analysis run, the alert worker snapshots every keyword group the run covered completely: every keyword of the group processed in the run and answered at least once. It compares that snapshot with the group's previous one using the same KPIs, but with its own thresholds (Settings › Alerts), not the trend band:
+
+  | Rule | Fires when | Default |
+  |---|---|---|
+  | Mention-rate drop | mention rate fell by at least the threshold | 10 points |
+  | Position loss | average position worsened by at least the threshold | 1 position |
+  | New competitor in the top N | a competitor's best position is N or better and was not before | N = 3 |
+  | Lost keyword mention | a keyword was mentioned in the previous snapshot and is not now | — |
+  | Improvement after a content change | the visibility score rose by at least the threshold after a content change recorded between the two snapshots | 5 points |
+
+  Point and position thresholds accept 0.1–100 and N accepts 1–10. Each snapshot records the KPI definition version (`KPI_VERSION`); snapshots of different versions are never compared, so the first run after a definition change sets a new baseline and raises no alert.
 
 ## Sources
 
@@ -276,5 +269,4 @@ The market definitions above are paraphrased from these public pages, read in Se
 - [Semrush — AI SEO metrics](https://www.semrush.com/kb/1594-ai-seo-metrics)
 - [Ahrefs — AI visibility metrics](https://help.ahrefs.com/en/articles/15501968-ai-visibility-metrics)
 - [Evertune — essential AI search optimization metrics](https://www.evertune.ai/resources/insights-on-ai/15-essential-metrics-every-ai-search-optimization-platform-should-track)
-- [Conductor — AI search academy](https://www.conductor.com/academy/ai-search/)
 - [Promptwatch — citation share](https://promptwatch.com/glossary/citation-share)
