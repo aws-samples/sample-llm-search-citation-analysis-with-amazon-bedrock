@@ -7,7 +7,8 @@ import { useAnalysisEndpoint } from './useAnalysisEndpoint';
 function isReportsOverviewResponse(data: unknown): data is ReportsOverviewResponse {
   if (typeof data !== 'object' || data === null) return false;
   if ('error' in data) return false;
-  return 'overall_score' in data
+  return 'kpis' in data
+    && 'summary' in data
     && 'top_improving' in data
     && 'top_declining' in data
     && 'top_recommendations' in data;
@@ -39,10 +40,9 @@ const reportsOverviewEndpoint = {
 };
 
 /**
- * Imperative hook for the cross-keyword reports-overview rollup. Pairs
- * with the `/reports/overview` aggregator endpoint and is consumed by
- * the Executive Summary report and (optionally) the Brand Visibility
- * all-keywords variant.
+ * Imperative hook for the `/reports/overview` aggregator endpoint: the
+ * trend view's latest KPIs and change, keywords by trend, the top movers
+ * and the top recommendations. Consumed by the Executive Summary report.
  *
  * Imperative (rather than auto-fetching) so the report component can
  * compose this slice with `useReportReady` exactly the same way as

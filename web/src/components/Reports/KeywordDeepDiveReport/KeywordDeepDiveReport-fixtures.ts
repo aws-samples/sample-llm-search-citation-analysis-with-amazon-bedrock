@@ -1,23 +1,15 @@
-export function settledData() {
+import type { useKeywordDeepDive } from './useKeywordDeepDive';
+import {
+  buildPeriodChange, buildTrendView, buildVisibility
+} from '../layout/reportPayload-fixtures';
+
+/** Every slice of the Deep Dive settled: `buildVisibility()` with a run change and `buildTrendView()`, the other slices empty. */
+export function settledData(): ReturnType<typeof useKeywordDeepDive> {
   return {
-    visibility: {
-      keyword: 'best running shoes',
-      timestamp: '2026-05-14T10:00:00Z',
-      total_mentions: 0,
-      brands: [],
-      first_party: [],
-      competitors: [],
-      others: [],
-      summary: {
-        first_party_avg_score: 42,
-        competitor_avg_score: 38,
-        first_party_total_sov: 12,
-        competitor_total_sov: 50,
-      },
-    },
+    visibility: buildVisibility({ change: buildPeriodChange() }),
     visibilityError: null,
     visibilityLoading: false,
-    trends: null,
+    trends: buildTrendView(),
     trendsError: null,
     trendsLoading: false,
     personas: null,

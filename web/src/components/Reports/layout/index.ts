@@ -6,16 +6,23 @@ export { ReportSectionPlaceholder } from './ReportSectionPlaceholder';
 export {
   gateSection, pendingSectionPlaceholder 
 } from './sectionGate';
-export {
-  gateVisibilityHeadline, type VisibilityHeadlineProps 
-} from './visibilityHeadline';
+export { VisibilityHeadlineSection } from './VisibilityHeadlineSection';
+export { TrendHeadlineSection } from './TrendHeadlineSection';
 export { ReportStatCard } from './ReportStatCard';
 export { ReportStatGrid } from './ReportStatGrid';
 export {
   ReportTable, type ReportTableColumn 
 } from './ReportTable';
 export { kpiColumn } from './kpiColumn';
+export {
+  KpiHeadline, type KpiComparison
+} from './KpiHeadline';
+export {
+  NO_PREVIOUS_RUN, runComparison
+} from './periodComparison';
+export { KpiDefinitionsSection } from './KpiDefinitionsSection';
+export { TrendPeriodTable } from './TrendPeriodTable';
 export { PriorityBadge } from './PriorityBadge';
-export { MoverColumn } from './MoverColumn';
-export type { ReportAccent } from './reportAccent';
-export { sampleEvenly } from './sampleEvenly';
+export {
+  MoverColumn, type KeywordMover
+} from './MoverColumn';

@@ -23,12 +23,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from boto3.dynamodb.conditions import Key
-
-from shared.dynamodb_batch import collect_all_items
 from shared.kpi_engine import (
-    ANSWER_ATTRIBUTE_NAMES,
-    ANSWER_PROJECTION,
     KPI_IDS,
     Answer,
     answers_from_rows,
@@ -43,31 +38,6 @@ GROUP_RUN_MIN_COVERAGE = 50.0
 
 #: The group KPIs each driver's share of the move is reported for.
 DRIVER_IMPACT_KPIS = ('mention_rate', 'visibility_score')
-
-
-def query_keyword_rows_since(table: Any, keyword: str, since: str) -> list[dict[str, Any]]:
-    """Every projected SearchResults row of ``keyword`` from ``since`` (an ISO timestamp) on.
-
-    The sort key starts with the run timestamp (``<ts>#<provider>#<persona>``),
-    so the window is a key condition: only the requested days are read, not
-    the keyword's whole history.
-    """
-    return collect_all_items(
-        table.query,
-        KeyConditionExpression=Key('keyword').eq(keyword) & Key('timestamp_provider').gte(since),
-        ProjectionExpression=ANSWER_PROJECTION,
-        ExpressionAttributeNames=ANSWER_ATTRIBUTE_NAMES,
-    )
-
-
-def query_keyword_run_rows(table: Any, keyword: str, timestamp: str) -> list[dict[str, Any]]:
-    """Every projected SearchResults row of ``keyword`` in the run stamped ``timestamp``."""
-    return collect_all_items(
-        table.query,
-        KeyConditionExpression=Key('keyword').eq(keyword) & Key('timestamp_provider').begins_with(f'{timestamp}#'),
-        ProjectionExpression=ANSWER_PROJECTION,
-        ExpressionAttributeNames=ANSWER_ATTRIBUTE_NAMES,
-    )
 
 
 def answers_by_run(answers: Iterable[Answer]) -> dict[str, list[Answer]]:
@@ -221,7 +191,5 @@ __all__ = [
     'compare_group_runs',
     'keyword_history',
     'mention_change',
-    'query_keyword_rows_since',
-    'query_keyword_run_rows',
     'run_models',
 ]

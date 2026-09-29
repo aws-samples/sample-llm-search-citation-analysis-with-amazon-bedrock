@@ -5,13 +5,14 @@ import type {
   GroupKpiHistoryResponse, GroupRun, KeywordRunHistory
 } from '../../../types/domain/groupKpiHistory';
 import type { ReportScope } from '../../../types';
-import { gateSection } from '../layout';
+import {
+  gateSection, KpiDefinitionsSection
+} from '../layout';
 import { latestGroupRun } from './groupKpiView';
 import { GroupKpiHeadlineSection } from './sections/GroupKpiHeadlineSection';
 import { GroupKpiTrendSection } from './sections/GroupKpiTrendSection';
 import { GroupKpiDriversSection } from './sections/GroupKpiDriversSection';
 import { KeywordRunsSection } from './sections/KeywordRunsSection';
-import { KpiDefinitionsSection } from './sections/KpiDefinitionsSection';
 import { GroupKpiExportButton } from './GroupKpiExportButton';
 import { GROUP_REPORT_DEFINITIONS } from '../../../constants/kpiDefinitions';
 

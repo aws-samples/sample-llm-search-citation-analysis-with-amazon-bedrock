@@ -1,74 +1,33 @@
 import type { HistoricalTrendsResponse } from '../types';
+import {
+  KEYWORD_SCOPE_INFO, buildTrendPoint, buildTrendsResponse
+} from '../components/Visibility/visibilityOverview-fixtures';
 
-export const mockSingleKeywordResponse: HistoricalTrendsResponse = {
-  keyword: 'best hotels',
-  period_type: 'day',
-  days_analyzed: 30,
-  trend_data: [
-    {
-      period: '2024-01-01',
-      visibility_score: 75,
-      total_mentions: 10,
-      provider_count: 3,
-      best_rank: 1,
-      analysis_runs: 1
-    },
-    {
-      period: '2024-01-02',
-      visibility_score: 78,
-      total_mentions: 12,
-      provider_count: 3,
-      best_rank: 1,
-      analysis_runs: 1
-    },
-  ],
-  trend_direction: 'improving',
-  summary: {
-    current_score: 78,
-    previous_score: 75,
-    change: 3,
-    change_percent: 4,
-    average_score: 76.5,
-    max_score: 78,
-    min_score: 75
-  }
-};
+/** `/trends` of the "Hotel Sol" group: two days, compared over one keyword. */
+export const mockGroupTrendsResponse: HistoricalTrendsResponse = buildTrendsResponse();
 
-export const mockAllKeywordsResponse: HistoricalTrendsResponse = {
-  period_type: 'day',
-  days_analyzed: 30,
-  trend_data: [],
-  trend_direction: 'improving',
-  summary: {
-    current_score: 0,
-    previous_score: 0,
-    change: 0,
-    change_percent: 0,
-    average_score: 0,
-    max_score: 0,
-    min_score: 0
-  },
-  keywords_analyzed: 2,
-  keyword_trends: [
-    {
-      keyword: 'best hotels',
-      trend_direction: 'improving',
-      current_score: 75,
-      change: 3,
-      change_percent: 5 
-    },
-    {
-      keyword: 'luxury resorts',
-      trend_direction: 'stable',
-      current_score: 70,
-      change: 0,
-      change_percent: 0 
-    },
-  ],
-  overall: {
-    improving_count: 1,
-    declining_count: 0,
-    stable_count: 1,
-    avg_score: 72.5,
-  },
-};
+/** `/trends` of one keyword before a second period: no change to report yet. */
+export const mockFirstPeriodTrendsResponse: HistoricalTrendsResponse = buildTrendsResponse({
+  scope: KEYWORD_SCOPE_INFO,
+  keywords_analyzed: 1,
+  trend_data: [buildTrendPoint()],
+  change: null,
+});
+
+
+/** Bodies the `/trends` guard must reject: the pre-KPI shapes and a new shape missing `latest`. */
+export const REJECTED_TRENDS_BODIES: ReadonlyArray<[description: string, body: Record<string, unknown>]> = [
+  ['the old single-keyword shape', {
+    keyword: 'hotel sol spa',
+    trend_data: [],
+    trend_direction: 'stable',
+  }],
+  ['the old all-keywords shape', {
+    keyword_trends: [],
+    overall: { improving_count: 0 },
+  }],
+  ['a body without the latest KPIs', {
+    ...mockGroupTrendsResponse,
+    latest: null,
+  }],
+];

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -12,8 +11,6 @@ from shared.group_kpi_history import (
     GROUP_RUN_MIN_COVERAGE,
     answers_by_run,
     build_group_kpi_history,
-    query_keyword_rows_since,
-    query_keyword_run_rows,
     run_models,
 )
 from shared.kpi_engine import KPI_IDS, TRENDED_KPIS, answers_from_rows
@@ -77,70 +74,6 @@ def _keyword(history: dict[str, Any], keyword: str) -> dict[str, Any]:
     matches = [entry for entry in history['keywords'] if entry['keyword'] == keyword]
     assert len(matches) == 1
     return matches[0]
-
-
-def _key_condition(table: MagicMock) -> tuple[Any, Any]:
-    """The partition and sort-key parts of the key condition of the table's last query."""
-    condition = table.query.call_args.kwargs['KeyConditionExpression'].get_expression()
-    assert condition['operator'] == 'AND'
-    return condition['values'][0].get_expression(), condition['values'][1]
-
-
-class TestQueries:
-    @pytest.mark.parametrize(('query', 'value'), [(query_keyword_rows_since, RUN_1), (query_keyword_run_rows, RUN_1)])
-    def test_reads_one_keyword_partition(self, query, value):
-        table = MagicMock()
-        table.query.return_value = {'Items': [{'timestamp': RUN_1}]}
-
-        rows = query(table, 'hotel malaga', value)
-
-        partition, _sort = _key_condition(table)
-        assert (rows, partition['values'][0].name, partition['values'][1]) == ([{'timestamp': RUN_1}], 'keyword', 'hotel malaga')
-
-    def test_reads_the_window_from_its_start_through_the_sort_key(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
-
-        query_keyword_rows_since(table, 'hotel malaga', RUN_1)
-
-        _partition, window = _key_condition(table)
-        assert (window.expression_operator, window.get_expression()['values'][0].name, window.get_expression()['values'][1]) == (
-            '>=', 'timestamp_provider', RUN_1,
-        )
-
-    def test_reads_one_run_through_the_sort_key_prefix(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
-
-        query_keyword_run_rows(table, 'hotel malaga', RUN_2)
-
-        _partition, run = _key_condition(table)
-        assert (run.expression_operator, run.get_expression()['values'][0].name, run.get_expression()['values'][1]) == (
-            'begins_with', 'timestamp_provider', f'{RUN_2}#',
-        )
-
-    @pytest.mark.parametrize('query', [query_keyword_rows_since, query_keyword_run_rows])
-    def test_projects_the_answer_fields(self, query):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
-
-        query(table, 'hotel malaga', RUN_1)
-
-        kwargs = table.query.call_args.kwargs
-        assert (kwargs['ProjectionExpression'], kwargs['ExpressionAttributeNames']) == (
-            'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model',
-            {'#ts': 'timestamp', '#st': 'status', '#md': 'metadata'},
-        )
-
-    @pytest.mark.parametrize('query', [query_keyword_rows_since, query_keyword_run_rows])
-    def test_follows_pagination(self, query):
-        table = MagicMock()
-        table.query.side_effect = [
-            {'Items': [{'timestamp': RUN_1}], 'LastEvaluatedKey': {'keyword': 'k'}},
-            {'Items': [{'timestamp': RUN_2}]},
-        ]
-
-        assert query(table, 'hotel malaga', RUN_1) == [{'timestamp': RUN_1}, {'timestamp': RUN_2}]
 
 
 class TestAnswersByRun:

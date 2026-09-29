@@ -5,25 +5,19 @@ import {
   screen, within
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { renderGroupKpiReport } from './GroupKpiReport-fixtures';
 import {
-  headlineCardLabels, renderGroupKpiReport, sectionTable, sectionTitled, statCard, statFigure, statFootnote
-} from './GroupKpiReport-fixtures';
+  headlineCardLabels, sectionTable, sectionTitled, statCard, statFigure, statFootnote
+} from '../layout/reportQueries-fixtures';
 import {
   buildChange, buildHistory, buildRun, historyWithDriverMention, historyWithoutOwnedDomains, RUN_1, RUN_2, RUN_3
 } from './groupKpiHistory-fixtures';
 import { KPI_DEFINITIONS } from '../../../constants/kpiDefinitions';
+import {
+  HEADLINE_CARDS, HEADLINE_LABELS
+} from '../layout/kpiHeadline-fixtures';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
-
-/** Each headline card of RUN_2: its KPI, caption, figure, change since RUN_1 and the colour of its trend. */
-const HEADLINE_CARDS = [
-  ['mention_rate', 'Mention rate', '60.0%', '-10.0 pts', 'text-red-700'],
-  ['share_of_voice', 'Share of voice', '25.0%', '+5.0 pts', 'text-emerald-700'],
-  ['visibility_score', 'Visibility score', '52.4', '-8.2 pts', 'text-red-700'],
-  ['citation_rate', 'Citation rate', '30.0%', '+1.2 pts', 'text-gray-900'],
-] as const;
-
-const HEADLINE_LABELS = HEADLINE_CARDS.map(([, label]) => label);
 
 describe('GroupKpiReport headline cards', () => {
   it('shows four cards: mention rate, share of voice, visibility score and citation rate', () => {

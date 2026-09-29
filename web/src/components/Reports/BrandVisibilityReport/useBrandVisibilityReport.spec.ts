@@ -16,6 +16,12 @@ import { keywordScope as kw } from '../../ui/reportScope-fixtures';
 import {
   failedSlice, LOADING_SLICE
 } from './useBrandVisibilityReport-fixtures';
+import {
+  buildTrendView, buildVisibility
+} from '../layout/reportPayload-fixtures';
+
+const VISIBILITY = buildVisibility();
+const TRENDS = buildTrendView();
 
 const mockVisibility = useVisibilityMetrics as ReturnType<typeof vi.fn>;
 const mockTrends = useHistoricalTrends as ReturnType<typeof vi.fn>;
@@ -33,22 +39,13 @@ describe('useBrandVisibilityReport', () => {
 
   beforeEach(() => {
     mockVisibility.mockReturnValue({
-      data: {
-        keyword: 'shoes',
-        summary: { first_party_avg_score: 50 } 
-      },
+      data: VISIBILITY,
       loading: false,
       error: null,
       fetchVisibilityMetrics,
     });
     mockTrends.mockReturnValue({
-      data: {
-        trend_data: [],
-        summary: {
-          current_score: 50,
-          change: 0 
-        } 
-      },
+      data: TRENDS,
       loading: false,
       error: null,
       fetchHistoricalTrends,
@@ -134,13 +131,12 @@ describe('useBrandVisibilityReport', () => {
 
   it('hands the keyword and its visibility to a per-keyword report', () => {
     const { result } = renderHook(() => useBrandVisibilityReport(kw('shoes'), 90));
-    expect([result.current.keyword, result.current.visibility]).toStrictEqual([
-      'shoes',
-      {
-        keyword: 'shoes',
-        summary: { first_party_avg_score: 50 } 
-      },
-    ]);
+    expect([result.current.keyword, result.current.visibility]).toStrictEqual(['shoes', VISIBILITY]);
+  });
+
+  it('hands the trend to a per-keyword report', () => {
+    const { result } = renderHook(() => useBrandVisibilityReport(kw('shoes'), 90));
+    expect(result.current.trends).toStrictEqual(TRENDS);
   });
 
   it('hands no keyword visibility to a group report', () => {
@@ -171,19 +167,9 @@ describe('useBrandVisibilityReport', () => {
     expect(result.current.ready).toBe(ready);
   });
 
-  it.each([
-    ['a group-shaped answer', {
-      data: {
-        keywords: [],
-        scope: {} 
-      },
-      loading: false,
-      error: null 
-    }],
-    ['a failed request', failedSlice('boom')],
-  ])('hands no keyword visibility on %s', (_label, slice) => {
+  it('hands no keyword visibility on a failed request', () => {
     mockVisibility.mockReturnValue({
-      ...slice,
+      ...failedSlice('boom'),
       fetchVisibilityMetrics 
     });
     const { result } = renderHook(() => useBrandVisibilityReport(kw('shoes'), 90));

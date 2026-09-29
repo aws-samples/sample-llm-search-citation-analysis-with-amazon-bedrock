@@ -6,14 +6,16 @@ import {
 } from 'react-router-dom';
 import { usePrintMode } from '../../../hooks/usePrintMode';
 import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
-import { ReportLayout } from '../layout';
+import {
+  KpiDefinitionsSection, ReportLayout, VisibilityHeadlineSection
+} from '../layout';
 import type {
   Keyword, ReportScope 
 } from '../../../types';
+import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import { KeywordScopeSelector } from '../../ui/KeywordScopeSelector';
 import { describeReportScope } from '../../ui/reportScope';
 import { useBrandVisibilityReport } from './useBrandVisibilityReport';
-import { PerKeywordHeadlineSection } from './sections/PerKeywordHeadlineSection';
 import { BrandRankingsSection } from './sections/BrandRankingsSection';
 import { TrendHistorySection } from './sections/TrendHistorySection';
 import { CrossKeywordHeadlineSection } from './sections/CrossKeywordHeadlineSection';
@@ -37,9 +39,9 @@ interface Props {readonly keywords: ReadonlyArray<Keyword>;}
  * carry the dropdown).
  *
  * The marketing-lead audience reads this for "are we winning, level, or
- * losing", so the per-keyword variant is anchored on the gap to
- * competitor average and the cross-keyword variants on improving vs
- * declining counts plus the group's history.
+ * losing": every variant opens on the market-aligned KPIs
+ * (`docs/kpi-definitions.md`) with their change and trend as the API judges
+ * them, and ends with the definitions of every KPI it shows.
  */
 export function BrandVisibilityReport({ keywords }: Props) {
   const params = useParams<{ keyword?: string }>();
@@ -106,55 +108,48 @@ type ReportData = ReturnType<typeof useBrandVisibilityReport>;
 
 interface SectionsProps {readonly data: ReportData;}
 
-/** One keyword: headline against competitors, brand rankings, score history. */
+/** The `/trends` slice every trend section of the report reads. */
+function trendSlice(data: ReportData) {
+  return {
+    trends: data.trends,
+    loading: data.trendsLoading,
+    error: data.trendsError,
+  };
+}
+
+/** One keyword: its KPIs and their change, the brand leaderboard, the KPIs per period. */
 function KeywordSections({ data }: SectionsProps) {
   const headlineLoading = data.visibilityLoading || data.trendsLoading;
   return (
     <>
-      <PerKeywordHeadlineSection
+      <VisibilityHeadlineSection
         trends={data.trends}
         visibility={data.visibility}
         error={data.visibilityError ?? data.trendsError}
         loading={headlineLoading}
+        emptyMessage="No visibility data found for this keyword."
       />
       <BrandRankingsSection
         visibility={data.visibility}
         loading={data.visibilityLoading}
         error={data.visibilityError}
       />
-      <TrendHistorySection
-        trends={data.trends}
-        loading={data.trendsLoading}
-        error={data.trendsError}
-      />
+      <TrendHistorySection {...trendSlice(data)} />
+      <KpiDefinitionsSection definitions={VISIBILITY_DEFINITIONS} />
     </>
   );
 }
 
-/** Every keyword: improving / declining counts, history, movers, per-keyword table. */
+/** Every keyword: KPIs and improving / declining counts, history, movers, per-keyword table. */
 function AllKeywordsSections({ data }: SectionsProps) {
+  const slice = trendSlice(data);
   return (
     <>
-      <CrossKeywordHeadlineSection
-        trends={data.trends}
-        loading={data.trendsLoading}
-        error={data.trendsError}
-      />
-      <TrendHistorySection
-        trends={data.trends}
-        loading={data.trendsLoading}
-        error={data.trendsError}
-      />
-      <MoversSection
-        trends={data.trends}
-        loading={data.trendsLoading}
-        error={data.trendsError}
-      />
-      <PerKeywordTableSection
-        trends={data.trends}
-        loading={data.trendsLoading}
-        error={data.trendsError}
-      />
+      <CrossKeywordHeadlineSection {...slice} />
+      <TrendHistorySection {...slice} />
+      <MoversSection {...slice} />
+      <PerKeywordTableSection {...slice} />
+      <KpiDefinitionsSection definitions={VISIBILITY_DEFINITIONS} />
     </>
   );
 }
@@ -179,6 +174,6 @@ function pathFor(scope: ReportScope): string {
 
 function subtitleFor(scope: ReportScope, label: string): string {
   if (scope.kind === 'keyword') return `Per-keyword visibility for "${label}"`;
-  if (scope.kind === 'group') return `Keyword group "${label}" — citation rate, share of voice and prominence per run`;
+  if (scope.kind === 'group') return `Keyword group "${label}" — mention rate, share of voice, visibility score and every other KPI per run`;
   return 'Cross-keyword visibility overview';
 }

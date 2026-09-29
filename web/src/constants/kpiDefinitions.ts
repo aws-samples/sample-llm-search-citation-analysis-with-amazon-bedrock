@@ -166,3 +166,6 @@ export const TREND_DEFINITION: KpiDefinition = {
 
 /** Everything the per-group report measures, in the order its definitions block lists them. */
 export const GROUP_REPORT_DEFINITIONS: readonly KpiDefinition[] = [...KPI_SPECS, GROUP_RUN_DEFINITION, TREND_DEFINITION];
+
+/** Everything the Visibility tab and the other reports measure, in the order their definitions blocks list them. */
+export const VISIBILITY_DEFINITIONS: readonly KpiDefinition[] = [...KPI_SPECS, TREND_DEFINITION];

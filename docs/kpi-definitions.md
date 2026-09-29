@@ -241,7 +241,8 @@ A table is sorted by visibility score, then mentions, then name. Engine lists ar
 
 - **Keyword group.** All answers of the group's keywords, pooled.
 - **Group run.** A run that answered at least half of the group's keywords (`GROUP_RUN_MIN_COVERAGE`). Only group runs are compared with each other. A run of a single keyword stays in the keyword drill-down.
-- **Period.** All answers whose run timestamp falls within the period, pooled.
+- **Latest (Visibility tab, keyword and deep-dive reports).** Each keyword's latest run, pooled. Its change compares each keyword's latest run with its previous run, over the keywords answered in both (like for like), so a keyword analysed once does not distort the change.
+- **Period (trend charts and tables).** All answers whose run timestamp falls within the day, ISO week or month, pooled. The latest standing of a scope pools each keyword's latest period; its change compares the latest period with the previous one over the keywords measured in both.
 - **Keyword drill-down.** The same KPIs, computed from one keyword's answers.
 
 ## Changes and trends

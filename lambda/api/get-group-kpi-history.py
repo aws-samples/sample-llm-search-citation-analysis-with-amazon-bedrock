@@ -12,12 +12,12 @@ or ``keyword``) and ``days`` (1-365, default 90).
 """
 
 import logging
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from shared.answer_queries import history_since, query_keyword_rows_since
 from shared.api_response import success_response
 from shared.decorators import api_handler, validate
-from shared.group_kpi_history import GROUP_RUN_MIN_COVERAGE, build_group_kpi_history, query_keyword_rows_since
+from shared.group_kpi_history import GROUP_RUN_MIN_COVERAGE, build_group_kpi_history
 from shared.kpi_engine import owned_domains_from
 from shared.scope_params import (
     SCOPE_KEYWORDS_CAP,
@@ -38,12 +38,6 @@ logger.setLevel(logging.INFO)
 dynamodb = scoped_dynamodb_resource()
 SEARCH_RESULTS_TABLE = search_results_table_name()
 KEYWORDS_TABLE = keywords_table_name()
-
-
-def history_since(days: int, now: datetime | None = None) -> str:
-    """The ISO timestamp ``days`` days before ``now``, in the run timestamps' format."""
-    moment = (now or datetime.now(UTC)) - timedelta(days=days)
-    return moment.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
 
 def load_rows(keywords: list[str], since: str) -> dict[str, list[dict[str, Any]]]:

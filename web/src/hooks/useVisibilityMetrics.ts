@@ -1,6 +1,7 @@
 import type {
   ReportScope, VisibilityResponse
 } from '../types';
+import { isRecord } from '../types/domain/keywordDecoders';
 import { reportScopeParams } from '../components/ui/reportScope';
 import { useAnalysisEndpoint } from './useAnalysisEndpoint';
 
@@ -11,15 +12,14 @@ class VisibilityFetchError extends Error {
   }
 }
 
-function isVisibilityResponse(data: unknown): data is VisibilityResponse {
-  if (typeof data !== 'object' || data === null) return false;
-
-  // Check for error response from backend
-  if ('error' in data) return false;
-
-  // Single keyword answers carry `keyword`; group / all answers carry `scope`
-  // plus the per-keyword rows. Both carry the brand ranking.
-  return 'brands' in data && ('keyword' in data || ('scope' in data && 'keywords' in data));
+/** The one `/visibility` shape of every scope: its scope, pooled KPIs, brand leaderboard and keyword rows. */
+function isVisibilityResponse(value: unknown): value is VisibilityResponse {
+  return isRecord(value)
+    && !('error' in value)
+    && isRecord(value.scope)
+    && isRecord(value.kpis)
+    && Array.isArray(value.brands)
+    && Array.isArray(value.keywords);
 }
 
 const visibilityMetricsEndpoint = {
@@ -40,18 +40,19 @@ const visibilityMetricsEndpoint = {
 };
 
 /**
- * Visibility metrics for a report scope: one keyword (the classic payload) or
- * a keyword group / every keyword (a group summary with per-keyword rows).
+ * Visibility of a report scope (one keyword, a keyword group or every
+ * keyword): every KPI over each keyword's latest run, the brand leaderboard
+ * and one row per keyword — the same shape for every scope.
  */
 export function useVisibilityMetrics() {
   const {
-    data, loading, error, fetchData: fetchVisibilityMetrics 
+    data, loading, error, fetchData: fetchVisibilityMetrics
   } = useAnalysisEndpoint(visibilityMetricsEndpoint);
 
   return {
     data,
     loading,
     error,
-    fetchVisibilityMetrics 
+    fetchVisibilityMetrics
   };
 }

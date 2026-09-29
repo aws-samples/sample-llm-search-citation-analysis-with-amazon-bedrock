@@ -5,13 +5,11 @@ import { useVisibilityMetrics } from '../../hooks/useVisibilityMetrics';
 import { useHistoricalTrends } from '../../hooks/useHistoricalTrends';
 import { usePersonaRankings } from '../../hooks/usePersonaRankings';
 import type {
-  GroupVisibilityResponse, Keyword, ReportScope, VisibilityMetricsResponse, VisibilityResponse
+  Keyword, ReportScope
 } from '../../types';
-import { isGroupVisibilityResponse } from '../../types/domain/visibility';
-import {
-  GroupOverview, type HistoryRangeDays
-} from './GroupOverview';
-import { KeywordVisibilityPanel } from './KeywordVisibilityPanel';
+import { VisibilityOverview } from './VisibilityOverview';
+import type { HistoryRangeDays } from './VisibilityHistory';
+import { PersonaComparisonChart } from './PersonaComparisonChart';
 import { PersonaSelector } from '../Personas/PersonaSelector';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
 import {
@@ -21,36 +19,11 @@ import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
 
 interface Props { readonly keywords: Array<Keyword>; }
 
-interface SplitVisibility {
-  readonly groupVisibility: GroupVisibilityResponse | null;
-  readonly keywordVisibility: VisibilityMetricsResponse | null;
-}
-
-/** A response is a group overview or one keyword's metrics; the other view gets null. */
-function splitVisibility(visibility: VisibilityResponse | null): SplitVisibility {
-  if (visibility === null) {
-    return {
-      groupVisibility: null,
-      keywordVisibility: null
-    };
-  }
-  if (isGroupVisibilityResponse(visibility)) {
-    return {
-      groupVisibility: visibility,
-      keywordVisibility: null
-    };
-  }
-  return {
-    groupVisibility: null,
-    keywordVisibility: visibility
-  };
-}
-
 /**
- * Visibility dashboard. The scope selector picks a keyword (the classic
- * per-keyword view with brand rankings and personas) or a keyword group /
- * every keyword (the group overview: one score for the group, its history,
- * the per-keyword table and the brand ranking across keywords).
+ * Visibility dashboard. The scope selector picks one keyword, a keyword group
+ * or every keyword; every scope gets the same overview (KPIs, history,
+ * keywords, brand leaderboard), and a single keyword adds how each persona
+ * ranks the brands.
  */
 export function VisibilityDashboard({ keywords }: Props) {
   const [scope, setScope] = useState<ReportScope>(ALL_SCOPE);
@@ -63,7 +36,7 @@ export function VisibilityDashboard({ keywords }: Props) {
     data: visibility, loading: visLoading, error: visError, fetchVisibilityMetrics
   } = useVisibilityMetrics();
   const {
-    data: trends, loading: trendsLoading, fetchHistoricalTrends
+    data: trends, loading: trendsLoading, error: trendsError, fetchHistoricalTrends
   } = useHistoricalTrends();
   const {
     data: personaRankings, fetchPersonaRankings
@@ -77,24 +50,18 @@ export function VisibilityDashboard({ keywords }: Props) {
   }, [scope, activeKeywords, groups]);
 
   const scopeKey = encodeReportScope(scope);
-  const isKeywordScope = scope.kind === 'keyword';
-  const historyDays = isKeywordScope ? 30 : rangeDays;
 
   useEffect(() => {
     if (activeKeywords.length === 0) return;
     const current = decodeReportScope(scopeKey);
     fetchVisibilityMetrics(current, selectedPersonaId ?? undefined);
-    fetchHistoricalTrends(current, 'day', historyDays);
-  }, [scopeKey, selectedPersonaId, historyDays, activeKeywords.length, fetchVisibilityMetrics, fetchHistoricalTrends]);
+    fetchHistoricalTrends(current, 'day', rangeDays);
+  }, [scopeKey, selectedPersonaId, rangeDays, activeKeywords.length, fetchVisibilityMetrics, fetchHistoricalTrends]);
 
   useEffect(() => {
     const current = decodeReportScope(scopeKey);
     if (current.kind === 'keyword') fetchPersonaRankings(current.keyword);
   }, [scopeKey, fetchPersonaRankings]);
-
-  const {
-    groupVisibility, keywordVisibility
-  } = splitVisibility(visibility);
 
   return (
     <div className="space-y-6">
@@ -126,18 +93,17 @@ export function VisibilityDashboard({ keywords }: Props) {
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">{visError}</div>
       )}
 
-      {groupVisibility && (
-        <GroupOverview
-          visibility={groupVisibility}
+      {visibility && (
+        <VisibilityOverview
+          visibility={visibility}
           trends={trends}
+          trendsError={trendsError}
           scopeLabel={describeReportScope(scope, groups)}
           rangeDays={rangeDays}
           onRangeChange={setRangeDays}
-        />
-      )}
-
-      {keywordVisibility && (
-        <KeywordVisibilityPanel visibility={keywordVisibility} trends={trends} personaRankings={personaRankings} />
+        >
+          {scope.kind === 'keyword' && <PersonaComparisonChart data={personaRankings} />}
+        </VisibilityOverview>
       )}
     </div>
   );

@@ -2,7 +2,7 @@ import {
   describe, expect, it
 } from 'vitest';
 import {
-  groupRuns, latestGroupRun, modelChanges, runTrend, trendAccent
+  groupRuns, latestGroupRun, modelChanges, runTrend
 } from './groupKpiView';
 import {
   buildChange, buildRun, buildTrends, RUN_1, RUN_2, RUN_3
@@ -106,17 +106,6 @@ describe('modelChanges', () => {
     ];
 
     expect(modelChanges(runs)).toHaveLength(1);
-  });
-});
-
-describe('trendAccent', () => {
-  it.each([
-    ['improving', 'positive'],
-    ['declining', 'negative'],
-    ['stable', 'neutral'],
-    [undefined, 'neutral'],
-  ] as const)('colours a %s trend %s', (trend, accent) => {
-    expect(trendAccent(trend)).toBe(accent);
   });
 });
 

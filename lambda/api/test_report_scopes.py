@@ -6,10 +6,10 @@ Covers, per endpoint, the routing between the single-keyword path and the
 scoped path, the 400s for a missing / contradictory scope, and the shape of
 the group answer built from per-keyword DynamoDB partitions:
 
-- /visibility: group summary + per-keyword breakdown + cross-keyword brands
+- /visibility: every KPI over each keyword's latest run, pooled, with the brand leaderboard and a row per keyword
 - /brand-mentions: brands aggregated over every keyword's latest run
 - /citations: one Query per keyword instead of a table Scan
-- /trends: group series (per-bucket mean) next to the per-keyword trends
+- /trends: the KPIs per period, pooled over the scope, next to each keyword's move
 - /citation-gaps: fan-out over the scope's keywords
 - /reports/overview: scope threaded into trends and recommendations
 """
@@ -58,41 +58,37 @@ def _brand(name, classification, mentions=1, rank=1, sentiment='positive'):
 
 def _result(keyword, provider, brands, timestamp=RUN_TS, citations=None, model=None, query_prompt_id='default'):
     return {
-        'keyword': keyword, 'timestamp': timestamp, 'timestamp_provider': f'{timestamp}_{provider}', 'provider': provider,
-        'brands': brands, 'response': 'long llm text ' * 50, 'citations': citations or [],
+        'keyword': keyword, 'timestamp': timestamp, 'timestamp_provider': f'{timestamp}#{provider}#{query_prompt_id}',
+        'provider': provider, 'brands': brands, 'response': 'long llm text ' * 50, 'citations': citations or [],
         'metadata': {'model': model or f'{provider}-model'}, 'query_prompt_id': query_prompt_id,
     }
 
 
-def _trend_point(
-    *,
-    period,
-    visibility_score,
-    total_mentions,
-    provider_count,
-    best_rank,
-    analysis_runs,
-    answers,
-    mentioned_answers,
-    rank_1_share,
-    top_3_share,
-    mean_rank,
-    mean_first_position,
-):
-    return dict(
-        period=period,
-        visibility_score=visibility_score,
-        total_mentions=total_mentions,
-        provider_count=provider_count,
-        best_rank=best_rank,
-        analysis_runs=analysis_runs,
-        answers=answers,
-        mentioned_answers=mentioned_answers,
-        rank_1_share=rank_1_share,
-        top_3_share=top_3_share,
-        mean_rank=mean_rank,
-        mean_first_position=mean_first_position,
-    )
+def _key_parts(condition):
+    """The partition value and the sort-key condition (or ``None``) of a key condition."""
+    expression = condition.get_expression()
+    if expression['operator'] == 'AND':
+        partition, sort = expression['values']
+        return partition.get_expression()['values'][1], sort
+    return expression['values'][1], None
+
+
+def _sort_condition(query_kwargs) -> tuple[str, str]:
+    """The operator and value of a query's sort-key condition."""
+    sort = present(_key_parts(query_kwargs['KeyConditionExpression'])[1])
+    return sort.expression_operator, sort.get_expression()['values'][1]
+
+
+def _sort_key_matches(row, sort) -> bool:
+    if sort is None:
+        return True
+    value = sort.get_expression()['values'][1]
+    if sort.expression_operator == 'begins_with':
+        return row['timestamp_provider'].startswith(value)
+    if sort.expression_operator == '<':
+        return row['timestamp_provider'] < value
+    assert sort.expression_operator == '>='
+    return row['timestamp_provider'] >= value
 
 
 SEARCH_ROWS = {
@@ -114,8 +110,11 @@ def _fake_dynamodb(search_rows=SEARCH_ROWS, citation_rows=None, active=ACTIVE_KE
     keywords_table.query.return_value = {'Items': active}
 
     def search_query(**kwargs):
-        keyword = kwargs['KeyConditionExpression'].get_expression()['values'][1]
-        return {'Items': list(search_rows.get(keyword, []))}
+        keyword, sort = _key_parts(kwargs['KeyConditionExpression'])
+        rows = [row for row in search_rows.get(keyword, []) if _sort_key_matches(row, sort)]
+        if kwargs.get('ScanIndexForward') is False:
+            rows.sort(key=lambda row: row['timestamp_provider'], reverse=True)
+        return {'Items': rows[:kwargs['Limit']] if 'Limit' in kwargs else rows}
 
     search_table = MagicMock(name='search')
     search_table.query.side_effect = search_query
@@ -141,6 +140,18 @@ def _fake_dynamodb(search_rows=SEARCH_ROWS, citation_rows=None, active=ACTIVE_KE
     return resource, {'keywords': keywords_table, 'search': search_table, 'citations': citations_table}
 
 
+def _fail_reads_of(search_table, keyword: str) -> None:
+    """Make every read of ``keyword``'s SearchResults partition raise, keeping the others answering."""
+    succeed = search_table.query.side_effect
+
+    def search_query(**kwargs):
+        if _key_parts(kwargs['KeyConditionExpression'])[0] == keyword:
+            raise PartitionFailure('throttled')
+        return succeed(**kwargs)
+
+    search_table.query.side_effect = search_query
+
+
 def _event(params: dict | None) -> dict:
     return {'httpMethod': 'GET', 'path': '/api/x', 'queryStringParameters': params, 'headers': {}}
 
@@ -163,8 +174,7 @@ def visibility_env(visibility):
     resource, tables = _fake_dynamodb()
     with (
         patch.object(visibility, 'dynamodb', resource),
-        patch.object(visibility, 'get_brand_config', return_value={}),
-        patch.object(visibility, 'get_enabled_provider_count', return_value=4),
+        patch.object(visibility, 'get_brand_config', return_value={'first_party_domains': ['hotel-coruna.com']}),
     ):
         yield visibility, tables
 
@@ -186,37 +196,46 @@ class TestVisibilityScope:
         assert response['statusCode'] == 400
         assert 'only one of' in _body(response)['error']
 
-    def test_single_keyword_keeps_the_original_payload(self, visibility_env):
+    def test_single_keyword_measures_its_latest_run(self, visibility_env):
         module, _ = visibility_env
 
         body = _body(module.handler(_event({'keyword': 'hotel coruna spa'}), None))
 
-        assert body['keyword'] == 'hotel coruna spa'
-        assert body['timestamp'] == RUN_TS
-        assert [brand['name'] for brand in body['first_party']] == ['Hotel Coruna']
-        assert body['summary']['first_party_total_sov'] == 75.0
+        kpis = body['kpis']
+        assert (body['timestamp'], kpis['answers'], kpis['mention_rate'], kpis['share_of_voice']) == (RUN_TS, 2, 100.0, 66.7)
 
-    def test_single_keyword_reads_a_projection_without_the_llm_text(self, visibility_env):
+    def test_single_keyword_answers_one_keyword_row(self, visibility_env):
+        module, _ = visibility_env
+
+        body = _body(module.handler(_event({'keyword': 'hotel coruna spa'}), None))
+
+        assert [(row['keyword'], row['timestamp'], row['has_data']) for row in body['keywords']] == [('hotel coruna spa', RUN_TS, True)]
+
+    def test_reads_only_the_latest_run_without_the_llm_text(self, visibility_env):
         module, tables = visibility_env
 
         module.handler(_event({'keyword': 'hotel coruna spa'}), None)
 
-        kwargs = tables['search'].query.call_args.kwargs
-        assert 'response' not in kwargs['ProjectionExpression']
-        assert kwargs['ExpressionAttributeNames'] == {'#ts': 'timestamp'}
+        run_query = tables['search'].query.call_args.kwargs
+        assert (*_sort_condition(run_query), 'response' in run_query['ProjectionExpression']) == (
+            'begins_with', f'{RUN_TS}#', False,
+        )
 
-    def test_group_scope_averages_the_keywords_that_have_data(self, visibility_env):
+    def test_group_scope_pools_the_answers_of_every_keyword(self, visibility_env):
         module, _ = visibility_env
 
         body = _body(module.handler(_event({'group_id': 'coruna'}), None))
 
-        assert body['scope']['kind'] == 'group'
-        assert (body['keywords_analyzed'], body['keywords_with_data']) == (2, 2)
+        kpis = body['kpis']
+        assert (body['scope']['kind'], kpis['answers'], kpis['mention_rate'], kpis['keyword_coverage']) == ('group', 3, 66.7, 50.0)
+
+    def test_group_scope_reports_each_keywords_kpis(self, visibility_env):
+        module, _ = visibility_env
+
+        body = _body(module.handler(_event({'group_id': 'coruna'}), None))
+
         rows = {row['keyword']: row for row in body['keywords']}
-        assert rows['hotel coruna spa']['first_party_mentioned'] is True
-        assert rows['best hotels galicia']['first_party_mentioned'] is False
-        assert body['summary']['coverage_rate'] == 50.0
-        assert body['summary']['first_party_avg_sov'] == 37.5
+        assert (rows['hotel coruna spa']['kpis']['mentions'], rows['best hotels galicia']['kpis']['mentions']) == (2, 0)
 
     def test_group_scope_ranks_brands_across_keywords(self, visibility_env):
         module, _ = visibility_env
@@ -224,9 +243,7 @@ class TestVisibilityScope:
         body = _body(module.handler(_event({'group_id': 'coruna'}), None))
 
         rival = next(brand for brand in body['brands'] if brand['name'] == 'Rival Inn')
-        assert rival['keyword_count'] == 2
-        assert rival['classification'] == 'competitor'
-        assert [brand['name'] for brand in body['first_party']] == ['Hotel Coruna']
+        assert (rival['keywords'], rival['classification'], rival['mentions']) == (2, 'competitor', 2)
 
     def test_group_scope_reports_keywords_without_data(self, visibility_env):
         module, _ = visibility_env
@@ -234,7 +251,7 @@ class TestVisibilityScope:
         body = _body(module.handler(_event({'group_id': 'marino'}), None))
 
         rows = {row['keyword']: row for row in body['keywords']}
-        assert rows['hotel marino beach']['has_data'] is False
+        assert (rows['hotel marino beach']['has_data'], rows['hotel marino beach']['kpis']) == (False, None)
         assert (body['keywords_analyzed'], body['keywords_with_data']) == (2, 1)
 
     def test_keyword_ids_scope_resolves_to_the_selected_keywords(self, visibility_env):
@@ -252,6 +269,43 @@ class TestVisibilityScope:
 
         assert body['scope']['kind'] == 'all'
         assert body['keywords_analyzed'] == 3
+
+    def test_says_whether_owned_domains_are_configured(self, visibility_env):
+        module, _ = visibility_env
+
+        assert _body(module.handler(_event({'keyword': 'hotel coruna spa'}), None))['citations_configured'] is True
+
+    def test_keeps_one_personas_answers(self, visibility):
+        rows = {'hotel coruna spa': [
+            _result('hotel coruna spa', 'openai', [_brand('Hotel Coruna', 'first_party')], query_prompt_id='family'),
+            _result('hotel coruna spa', 'gemini', [_brand('Rival Inn', 'competitor')]),
+        ]}
+        resource, _ = _fake_dynamodb(search_rows=rows)
+        with patch.object(visibility, 'dynamodb', resource), patch.object(visibility, 'get_brand_config', return_value={}):
+            body = _body(visibility.handler(_event({'keyword': 'hotel coruna spa', 'query_prompt_id': 'family'}), None))
+
+        assert (body['kpis']['answers'], body['kpis']['mention_rate']) == (1, 100.0)
+
+    def test_narrows_the_leaderboard_to_the_requested_brand(self, visibility_env):
+        module, _ = visibility_env
+
+        body = _body(module.handler(_event({'keyword': 'hotel coruna spa', 'brand': 'rival'}), None))
+
+        assert ([brand['name'] for brand in body['brands']], body['kpis']['mention_rate']) == (['Rival Inn'], 100.0)
+
+    def test_compares_the_latest_run_with_the_previous_one(self, visibility_env):
+        module, _ = visibility_env
+
+        change = _body(module.handler(_event({'keyword': 'hotel coruna spa'}), None))['change']
+
+        assert (change['keywords_compared'], change['deltas']['mention_rate'], change['trends']['visibility_score']) == (
+            1, 100.0, 'improving',
+        )
+
+    def test_has_no_change_for_keywords_analysed_once(self, visibility_env):
+        module, _ = visibility_env
+
+        assert _body(module.handler(_event({'keyword': 'best hotels galicia'}), None))['change'] is None
 
 
 # ---------------------------------------------------------------------------
@@ -502,165 +556,130 @@ def trends():
     return _load('get-historical-trends.py')
 
 
-class TestTrendsGroupSeries:
-    def test_returns_complete_bucket_aggregates_when_keyword_periods_overlap(self, trends):
-        series = trends.build_group_series([
-            {'trend_data': [
-                _trend_point(
-                    period='2026-09-17',
-                    visibility_score=80.0,
-                    total_mentions=2,
-                    provider_count=2,
-                    best_rank=1,
-                    analysis_runs=1,
-                    answers=2,
-                    mentioned_answers=1,
-                    rank_1_share=50.0,
-                    top_3_share=50.0,
-                    mean_rank=2.0,
-                    mean_first_position=10.0,
-                ),
-                _trend_point(
-                    period='2026-09-18',
-                    visibility_score=60.0,
-                    total_mentions=1,
-                    provider_count=1,
-                    best_rank=2,
-                    analysis_runs=1,
-                    answers=2,
-                    mentioned_answers=2,
-                    rank_1_share=50.0,
-                    top_3_share=100.0,
-                    mean_rank=1.5,
-                    mean_first_position=4.0,
-                ),
-            ]},
-            {'trend_data': [
-                _trend_point(
-                    period='2026-09-18',
-                    visibility_score=20.0,
-                    total_mentions=3,
-                    provider_count=3,
-                    best_rank=None,
-                    analysis_runs=2,
-                    answers=4,
-                    mentioned_answers=3,
-                    rank_1_share=25.0,
-                    top_3_share=75.0,
-                    mean_rank=3.5,
-                    mean_first_position=8.0,
-                ),
-            ]},
-        ])
-
-        assert series == [
-            {
-                'period': '2026-09-17',
-                'visibility_score': 80.0,
-                'total_mentions': 2,
-                'provider_count': 2,
-                'best_rank': 1,
-                'analysis_runs': 1,
-                'answers': 2,
-                'mentioned_answers': 1,
-                'rank_1_share': 50.0,
-                'top_3_share': 50.0,
-                'mean_rank': 2.0,
-                'mean_first_position': 10.0,
-                'keywords_with_data': 1,
-            },
-            {
-                'period': '2026-09-18',
-                'visibility_score': 40.0,
-                'total_mentions': 4,
-                'provider_count': 3,
-                'best_rank': 2,
-                'analysis_runs': 3,
-                'answers': 6,
-                'mentioned_answers': 5,
-                'rank_1_share': 37.5,
-                'top_3_share': 87.5,
-                'mean_rank': 2.5,
-                'mean_first_position': 6.0,
-                'keywords_with_data': 2,
-            },
-        ]
-
-    def test_series_summary_matches_the_single_keyword_shape(self, trends):
-        summary = trends.summarize_series([
-            {'period': '2026-09-17', 'visibility_score': 40.0},
-            {'period': '2026-09-18', 'visibility_score': 50.0},
-        ])
-
-        assert summary == {
-            'trend_data': [
-                {'period': '2026-09-17', 'visibility_score': 40.0},
-                {'period': '2026-09-18', 'visibility_score': 50.0},
-            ],
-            'trend_direction': 'improving',
-            'summary': {
-                'current_score': 50.0, 'previous_score': 40.0, 'change': 10.0, 'change_percent': 25.0,
-                'average_score': 45.0, 'max_score': 50.0, 'min_score': 40.0,
-            },
-        }
-
-    def test_empty_series_summary_is_all_zero(self, trends):
-        summary = trends.summarize_series([])
-
-        assert summary == {
-            'trend_data': [],
-            'trend_direction': 'stable',
-            'summary': {
-                'current_score': 0, 'previous_score': 0, 'change': 0, 'change_percent': 0,
-                'average_score': 0.0, 'max_score': 0, 'min_score': 0,
-            },
-        }
-
-
 class TestTrendsScopeRouting:
     @pytest.fixture
     def trends_env(self, trends):
         resource, tables = _fake_dynamodb()
         with (
             patch.object(trends, 'dynamodb', resource),
-            patch.object(trends, 'get_brand_config', return_value={'tracked_brands': {'first_party': ['Hotel Coruna']}}),
-            patch.object(trends, 'get_enabled_provider_count', return_value=4),
+            patch.object(trends, 'get_brand_config', return_value={}),
+            patch.object(trends, 'history_since', return_value='2026-01-01T00:00:00.000000Z'),
         ):
             yield trends, tables
 
-    def test_group_scope_returns_group_series_and_per_keyword_trends(self, trends_env):
+    def test_group_scope_returns_the_series_of_the_pooled_answers(self, trends_env):
         module, _ = trends_env
 
-        body = _body(module.handler(_event({'group_id': 'coruna', 'days': '365'}), None))
+        body = _body(module.handler(_event({'group_id': 'coruna'}), None))
 
-        assert body['scope']['kind'] == 'group'
-        assert body['keywords_analyzed'] == 2
-        assert body['keywords_truncated'] is False
-        assert sorted(entry['keyword'] for entry in body['keyword_trends']) == ['best hotels galicia', 'hotel coruna spa']
-        assert body['trend_data'][-1]['keywords_with_data'] == 2
-        assert 'trend_direction' in body
-        assert 'summary' in body
+        assert [(point['period'], point['keywords_with_data'], point['kpis']['answers']) for point in body['trend_data']] == [
+            ('2026-09-10', 1, 1), ('2026-09-18', 2, 3),
+        ]
 
-    def test_single_keyword_is_unchanged(self, trends_env):
+    def test_group_scope_reports_each_keywords_move(self, trends_env):
         module, _ = trends_env
 
-        body = _body(module.handler(_event({'keyword': 'hotel coruna spa', 'days': '365'}), None))
+        body = _body(module.handler(_event({'group_id': 'coruna'}), None))
 
-        assert body['keyword'] == 'hotel coruna spa'
-        assert 'keyword_trends' not in body
+        assert [(row['keyword'], row['kpis']['visibility_score']) for row in body['keyword_trends']] == [
+            ('hotel coruna spa', 100.0), ('best hotels galicia', 0.0),
+        ]
+
+    def test_group_scope_compares_the_keywords_measured_in_both_periods(self, trends_env):
+        module, _ = trends_env
+
+        body = _body(module.handler(_event({'group_id': 'coruna'}), None))
+
+        change = body['change']
+        assert (change['keywords_compared'], change['deltas']['visibility_score'], body['overall']['improving_count']) == (1, 100.0, 1)
+
+    def test_describes_the_scope_and_window(self, trends_env):
+        module, _ = trends_env
+
+        body = _body(module.handler(_event({'group_id': 'coruna', 'days': '90', 'period': 'week'}), None))
+
+        assert {key: body[key] for key in ('period_type', 'days_analyzed', 'since', 'keywords_analyzed', 'keywords_truncated')} == {
+            'period_type': 'week', 'days_analyzed': 90, 'since': '2026-01-01T00:00:00.000000Z',
+            'keywords_analyzed': 2, 'keywords_truncated': False,
+        }
+
+    def test_reads_each_keyword_from_the_window_start(self, trends_env):
+        module, tables = trends_env
+
+        module.handler(_event({'keyword': 'hotel coruna spa'}), None)
+
+        assert _sort_condition(tables['search'].query.call_args.kwargs) == ('>=', '2026-01-01T00:00:00.000000Z')
+
+    def test_single_keyword_has_the_same_shape(self, trends_env):
+        module, _ = trends_env
+
+        body = _body(module.handler(_event({'keyword': 'hotel coruna spa'}), None))
+
+        assert (body['scope']['kind'], [row['keyword'] for row in body['keyword_trends']]) == ('keyword', ['hotel coruna spa'])
 
     def test_unscoped_request_covers_the_active_keywords(self, trends_env):
         module, _ = trends_env
 
-        body = _body(module.handler(_event({'days': '365'}), None))
+        body = _body(module.handler(_event(None), None))
 
-        assert body['scope']['kind'] == 'all'
-        assert body['scope']['keyword_count'] == 3
+        assert (body['scope']['kind'], body['scope']['keyword_count']) == ('all', 3)
 
     def test_rejects_two_scopes(self, trends_env):
         module, _ = trends_env
 
         assert module.handler(_event({'keyword': 'a', 'keyword_ids': 'k1'}), None)['statusCode'] == 400
+
+    def test_defaults_to_thirty_days_per_day(self, trends_env):
+        module, _ = trends_env
+
+        body = _body(module.handler(_event({'keyword': 'hotel coruna spa'}), None))
+
+        assert (body['days_analyzed'], body['period_type']) == (30, 'day')
+
+    @pytest.mark.parametrize('params', [{'days': '1'}, {'days': '365'}, {'period': 'month'}, {'period': 'week'}])
+    def test_accepts_every_window_and_period_in_range(self, trends_env, params):
+        module, _ = trends_env
+
+        assert module.handler(_event({'keyword': 'hotel coruna spa', **params}), None)['statusCode'] == 200
+
+    @pytest.mark.parametrize('params', [{'days': '0'}, {'days': '366'}, {'period': 'fortnight'}])
+    def test_rejects_a_window_or_period_out_of_range(self, trends_env, params):
+        module, _ = trends_env
+
+        assert module.handler(_event({'keyword': 'hotel coruna spa', **params}), None)['statusCode'] == 400
+
+    def test_says_whether_owned_domains_are_configured(self, trends):
+        resource, _ = _fake_dynamodb()
+        with (
+            patch.object(trends, 'dynamodb', resource),
+            patch.object(trends, 'get_brand_config', return_value={'first_party_domains': ['hotel-coruna.com']}),
+        ):
+            body = _body(trends.handler(_event({'keyword': 'hotel coruna spa'}), None))
+
+        assert body['citations_configured'] is True
+
+    def test_counts_a_keyword_that_failed_to_load_as_without_data(self, trends_env):
+        module, tables = trends_env
+
+        _fail_reads_of(tables['search'], 'best hotels galicia')
+        body = _body(module.handler(_event({'group_id': 'coruna'}), None))
+
+        assert ([row['keyword'] for row in body['keyword_trends']], body['keywords_with_data']) == (['hotel coruna spa'], 1)
+
+    def test_reads_through_the_pooled_scope_resource(self):
+        sentinel = MagicMock(name='pooled-dynamodb')
+        with patch('shared.scope_params.scoped_dynamodb_resource', return_value=sentinel), patch.dict(os.environ, _ENV):
+            module = load_handler_module(_HERE, 'get-historical-trends.py', module_name_for('get-historical-trends.py', '_pooled'))
+
+        assert module.dynamodb is sentinel
+
+    def test_caps_an_unscoped_request_at_twenty_keywords(self, trends):
+        many = [{'id': f'k{i}', 'keyword': f'kw {i:02}', 'status': 'active'} for i in range(25)]
+        resource, _ = _fake_dynamodb(active=many)
+        with patch.object(trends, 'dynamodb', resource), patch.object(trends, 'get_brand_config', return_value={}):
+            body = _body(trends.handler(_event(None), None))
+
+        assert (body['keywords_analyzed'], body['keywords_truncated']) == (20, True)
 
 
 # ---------------------------------------------------------------------------
@@ -796,12 +815,14 @@ class TestOverviewScope:
         resource, _ = _fake_dynamodb()
         seen: dict = {}
 
-        def fake_trends(config, period='day', days=30, scope: ReportScope | None = None):
+        def fake_trends(scope: ReportScope | None, period, days, owned_domains):
             report_scope = present(scope)
             seen['scope'] = report_scope
+            seen['owned_domains'] = owned_domains
             return {
-                'scope': report_scope.describe(), 'keywords_analyzed': len(report_scope.keywords),
-                'keyword_trends': [], 'overall': {},
+                'scope': report_scope.describe(), 'keywords_analyzed': len(report_scope.keywords), 'keywords_with_data': 0,
+                'citations_configured': bool(owned_domains), 'latest': {}, 'change': None, 'keyword_trends': [],
+                'overall': {'improving_count': 0, 'declining_count': 0, 'stable_count': 0},
             }
 
         def fake_recs(config, keywords=None):
@@ -810,13 +831,16 @@ class TestOverviewScope:
 
         overview._sibling_cache['trends'] = fake_trends
         overview._sibling_cache['recs'] = fake_recs
-        with patch.object(overview, 'dynamodb', resource), patch.object(overview, 'get_brand_config', return_value={}):
+        with (
+            patch.object(overview, 'dynamodb', resource),
+            patch.object(overview, 'get_brand_config', return_value={'first_party_domains': ['hotel-coruna.com']}),
+        ):
             body = _body(overview.handler(_event({'group_id': 'coruna'}), None))
 
-        assert seen['scope'].kind == 'group'
-        assert seen['keywords'] == ['best hotels galicia', 'hotel coruna spa']
-        assert body['scope']['kind'] == 'group'
-        assert body['keywords_analyzed'] == 2
+        assert (seen['scope'].kind, seen['keywords'], seen['owned_domains']) == (
+            'group', ['best hotels galicia', 'hotel coruna spa'], ['hotel-coruna.com'],
+        )
+        assert (body['scope']['kind'], body['keywords_analyzed'], body['citations_configured']) == ('group', 2, True)
 
     def test_rejects_two_scopes(self, overview):
         resource, _ = _fake_dynamodb()
@@ -834,14 +858,8 @@ class PartitionFailure(Exception):
 class TestVisibilityGroupSurvivesAFailedKeyword:
     def test_reports_a_keyword_that_failed_to_load_as_without_data(self, visibility_env):
         module, tables = visibility_env
-        succeed = tables['search'].query.side_effect
 
-        def search_query(**kwargs):
-            if kwargs['KeyConditionExpression'].get_expression()['values'][1] == 'best hotels galicia':
-                raise PartitionFailure('throttled')
-            return succeed(**kwargs)
-
-        tables['search'].query.side_effect = search_query
+        _fail_reads_of(tables['search'], 'best hotels galicia')
         body = _body(module.handler(_event({'group_id': 'coruna'}), None))
 
         assert {row['keyword']: row['has_data'] for row in body['keywords']} == {

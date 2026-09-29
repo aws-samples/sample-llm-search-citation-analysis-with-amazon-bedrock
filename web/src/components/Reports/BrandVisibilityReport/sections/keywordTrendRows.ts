@@ -1,8 +1,8 @@
 import type { ReactElement } from 'react';
-import type { HistoricalTrendsResponse } from '../../../../types';
+import type {
+  HistoricalTrendsResponse, KeywordTrend
+} from '../../../../types';
 import { gateSection } from '../../layout';
-
-export type KeywordTrendRow = NonNullable<HistoricalTrendsResponse['keyword_trends']>[number];
 
 interface KeywordTrendRowsOptions {
   readonly title: string;
@@ -15,7 +15,7 @@ interface KeywordTrendRowsOptions {
 export type KeywordTrendRowsGate =
   | {
     readonly ready: true;
-    readonly rows: readonly KeywordTrendRow[];
+    readonly rows: readonly KeywordTrend[];
   }
   | {
     readonly ready: false;
@@ -24,8 +24,9 @@ export type KeywordTrendRowsGate =
 
 /**
  * Gates a section on the all-keywords `/trends` payload and lifts out its
- * per-keyword rows. A payload with no rows hides the section (a `null`
- * placeholder), so callers only ever see a non-empty list.
+ * per-keyword rows (best visibility score first). A payload with no rows
+ * hides the section (a `null` placeholder), so callers only ever see a
+ * non-empty list.
  */
 export function gateKeywordTrendRows({
   trends, ...pending
@@ -36,7 +37,7 @@ export function gateKeywordTrendRows({
   });
   if (!gate.ready) return gate;
 
-  const rows = gate.value.keyword_trends ?? [];
+  const rows = gate.value.keyword_trends;
   if (rows.length === 0) {
     return {
       ready: false,

@@ -4,11 +4,12 @@ import {
 } from 'react-router-dom';
 import { usePrintMode } from '../../../hooks/usePrintMode';
 import {
+  KpiDefinitionsSection,
   ReportLayout,
   ReportKeywordSelector,
+  VisibilityHeadlineSection,
 } from '../layout';
 import { useKeywordDeepDive } from './useKeywordDeepDive';
-import { HeadlineSection } from './sections/HeadlineSection';
 import { RankHistorySection } from './sections/RankHistorySection';
 import { PersonaImpactSection } from './sections/PersonaImpactSection';
 import { ProviderDeltaSection } from './sections/ProviderDeltaSection';
@@ -16,6 +17,7 @@ import { TopSourcesSection } from './sections/TopSourcesSection';
 import { SentimentExamplesSection } from './sections/SentimentExamplesSection';
 import { RecommendationsSection } from './sections/RecommendationsSection';
 import type { Keyword } from '../../../types';
+import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 
 interface Props {readonly keywords: ReadonlyArray<Keyword>;}
 
@@ -96,7 +98,7 @@ export function KeywordDeepDiveReport({ keywords }: Props) {
   return (
     <ReportLayout
       title={`Keyword Deep Dive: ${selectedKeyword}`}
-      subtitle="Ranking, persona impact, provider differences, top sources, and recommended actions for this keyword."
+      subtitle="KPIs and their history, persona impact, provider differences, top sources, and recommended actions for this keyword."
       actions={
         <ReportKeywordSelector
           keywords={keywords}
@@ -105,11 +107,12 @@ export function KeywordDeepDiveReport({ keywords }: Props) {
         />
       }
     >
-      <HeadlineSection
+      <VisibilityHeadlineSection
         visibility={data.visibility}
         trends={data.trends}
         loading={data.visibilityLoading || data.trendsLoading}
         error={data.visibilityError ?? data.trendsError}
+        emptyMessage="No visibility data found for this keyword. Run an analysis to populate the report."
       />
       <RankHistorySection
         trends={data.trends}
@@ -143,6 +146,7 @@ export function KeywordDeepDiveReport({ keywords }: Props) {
         loading={data.recommendationsLoading}
         error={data.recommendationsError}
       />
+      <KpiDefinitionsSection definitions={VISIBILITY_DEFINITIONS} />
     </ReportLayout>
   );
 }

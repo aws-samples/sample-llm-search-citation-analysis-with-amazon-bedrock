@@ -1,7 +1,12 @@
+import {
+  formatKpi, formatKpiDelta
+} from '../../../formatting/kpiFormatter';
 import { accentTextClass } from './reportAccent';
 
-interface KeywordMover {
+/** A keyword whose visibility score moved: its latest score and the change since its previous period, in points. */
+export interface KeywordMover {
   readonly keyword: string;
+  readonly visibility_score: number | null;
   readonly change: number;
 }
 
@@ -15,8 +20,8 @@ interface Props {
 
 /**
  * One side of an "improvers vs decliners" pair: a titled card listing
- * keywords with their signed score change. Used by the Brand Visibility
- * movers panel and the Executive Summary wins/gaps panel.
+ * keywords with their visibility score and its change. Used by the Brand
+ * Visibility movers panel and the Executive Summary wins/gaps panel.
  */
 export function MoverColumn({
   title,
@@ -51,9 +56,11 @@ export function MoverColumn({
             <span className="text-gray-700 dark:text-gray-300 truncate">
               {row.keyword}
             </span>
+            <span className="flex-shrink-0 text-xs text-gray-500 dark:text-gray-400">
+              {`Score ${formatKpi('visibility_score', row.visibility_score)}`}
+            </span>
             <span className={`font-mono font-semibold flex-shrink-0 ${accentClass}`}>
-              {row.change > 0 ? '+' : ''}
-              {row.change.toFixed(1)}
+              {formatKpiDelta('visibility_score', row.change)}
             </span>
           </li>
         ))}

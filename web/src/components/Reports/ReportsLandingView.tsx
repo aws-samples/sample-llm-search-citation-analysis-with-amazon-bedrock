@@ -29,7 +29,7 @@ const REPORT_CATALOG: readonly ReportEntry[] = [
     id: 'brand-visibility',
     title: 'Brand Visibility Report',
     description:
-      'Visibility score, rank distribution, share of voice vs. configured competitors, sentiment, and trend, scoped to a keyword or to the full keyword set. Highlights regressions in red.',
+      'Mention rate, share of voice, visibility score, citation rate and every other KPI with its change and trend, the brand leaderboard and the KPIs per day, scoped to a keyword, a keyword group or the full keyword set. Highlights regressions in red.',
     audience: 'Marketing lead',
     path: '/reports/visibility',
     status: 'available',
@@ -56,7 +56,7 @@ const REPORT_CATALOG: readonly ReportEntry[] = [
     id: 'keyword-deep-dive',
     title: 'Keyword Deep Dive',
     description:
-      'Single-keyword drill-down: rank history, persona impact, provider differences, top sources, sentiment examples, recommended actions, and an LLM-generated narrative explaining the current ranking.',
+      'Single-keyword drill-down: every KPI with its change, KPI history, persona impact, provider differences, top sources, sentiment examples, recommended actions, and an LLM-generated narrative explaining the current ranking.',
     audience: 'SEO / AI search lead',
     path: '/reports/keyword',
     status: 'available',

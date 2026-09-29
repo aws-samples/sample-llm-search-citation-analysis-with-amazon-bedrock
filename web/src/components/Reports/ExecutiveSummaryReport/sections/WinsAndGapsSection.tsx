@@ -10,9 +10,10 @@ interface Props {
 }
 
 /**
- * The "what worked / what didn't" pair. Surfaces the top three improvers
- * and decliners side-by-side so the reader can match a campaign decision
- * to a measurable outcome (or its absence) on a single page.
+ * The "what worked / what didn't" pair: the keywords whose visibility score
+ * rose and fell the most since their previous period, side by side, so the
+ * reader can match a campaign decision to a measurable outcome (or its
+ * absence) on a single page.
  */
 export function WinsAndGapsSection({
   data, loading, error 
@@ -29,7 +30,7 @@ export function WinsAndGapsSection({
   return (
     <ReportSection
       title="Top wins and gaps"
-      subtitle="Top three movers in each direction. Wins are where investment paid off; gaps are where to focus the next sprint."
+      subtitle={`The keywords whose visibility score rose or fell the most since their previous ${gate.value.period_type}. Wins are where investment paid off; gaps are where to focus the next sprint.`}
     >
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <MoverColumn

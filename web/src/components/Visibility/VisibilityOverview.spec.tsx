@@ -1,0 +1,180 @@
+import {
+  describe, it, expect, vi
+} from 'vitest';
+import {
+  screen, within
+} from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { renderOverview } from './overviewRender-fixtures';
+import {
+  buildKeywordRow, buildTrendsResponse, buildVisibility
+} from './visibilityOverview-fixtures';
+import { panelTitled } from './visibilityTables-fixtures';
+import {
+  definitionTerms, headlineCardLabels, statFigure, statFootnote
+} from '../Reports/layout/reportQueries-fixtures';
+import { NO_PREVIOUS_RUN } from '../Reports/layout';
+import { OWNED_DOMAINS_MISSING } from '../Reports/layout/KpiHeadline';
+import { RUN_2 } from '../Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
+import { VISIBILITY_DEFINITIONS } from '../../constants/kpiDefinitions';
+import { formatDate } from '../../formatting/dateFormatter';
+
+vi.mock('./visibilityOverviewExport', () => ({ exportVisibilityOverview: vi.fn() }));
+
+import { exportVisibilityOverview } from './visibilityOverviewExport';
+
+const mockExportVisibilityOverview = vi.mocked(exportVisibilityOverview);
+
+class ExportFailure extends Error {
+  constructor() {
+    super('workbook could not be written');
+    this.name = 'ExportFailure';
+  }
+}
+
+describe('VisibilityOverview', () => {
+  describe('scope line', () => {
+    it('names the scope, its keywords with data and the latest run', () => {
+      renderOverview();
+
+      expect(screen.getByText(/keywords have analysis data/)).toHaveTextContent(
+        `Hotel Sol · 1 of 2 keywords have analysis data · latest run ${formatDate(RUN_2)}`
+      );
+    });
+
+    it('says there is no run yet when no keyword was analysed', () => {
+      renderOverview({
+        visibility: buildVisibility({
+          timestamp: null,
+          keywords_with_data: 0,
+        }),
+      });
+
+      expect(screen.getByText(/keywords have analysis data/)).toHaveTextContent('Hotel Sol · 0 of 2 keywords have analysis data · no analysis run yet');
+    });
+
+    it('says how many keywords are included when the scope is truncated', () => {
+      renderOverview({ visibility: buildVisibility({ keywords_truncated: true }) });
+
+      expect(screen.getByText(/keywords have analysis data/)).toHaveTextContent('only the first 2 keywords are included');
+    });
+  });
+
+  describe('headline', () => {
+    it('shows the four headline KPIs as cards', () => {
+      renderOverview();
+
+      expect(headlineCardLabels()).toStrictEqual(['Mention rate', 'Share of voice', 'Visibility score', 'Citation rate']);
+    });
+
+    it('shows the citation rate, not the keyword coverage, on the citation rate card', () => {
+      renderOverview();
+
+      expect(statFigure('Citation rate')).toHaveTextContent('30.0%');
+    });
+
+    it('drops the old provider coverage and prominence cards', () => {
+      renderOverview();
+
+      expect(screen.queryByText(/Provider coverage|Prominence/)).not.toBeInTheDocument();
+    });
+
+    it('shows each change against the previous run over the keywords compared', () => {
+      renderOverview();
+
+      expect(statFootnote('Mention rate')).toBe('-10.0 pts vs previous run (1 keyword)');
+    });
+
+    it.each([
+      ['trends are not loaded', null],
+      ['the trend has a change', buildTrendsResponse()],
+    ])('says there is no earlier run when the keywords were analysed once, even if %s', (_condition, trends) => {
+      renderOverview({
+        visibility: buildVisibility({ change: null }),
+        trends 
+      });
+
+      expect(statFootnote('Visibility score')).toBe(NO_PREVIOUS_RUN);
+    });
+
+    it('asks for owned domains on the citation rate card until they are configured', () => {
+      renderOverview({ visibility: buildVisibility({ citations_configured: false }) });
+
+      expect(statFootnote('Citation rate')).toBe(OWNED_DOMAINS_MISSING);
+    });
+  });
+
+  describe('panels', () => {
+    it('shows the headline, history, keywords, leaderboard and definitions in that order', () => {
+      renderOverview();
+
+      expect(screen.getAllByRole('heading', { level: 3 }).map((heading) => heading.textContent)).toStrictEqual([
+        'Headline',
+        'Visibility score history',
+        'Keywords in this scope',
+        'Brand leaderboard',
+        'How these KPIs are measured',
+      ]);
+    });
+
+    it('lists one keyword row for a single-keyword scope', () => {
+      renderOverview({ visibility: buildVisibility({ keywords: [buildKeywordRow()] }) });
+
+      expect(within(screen.getByRole('table', { name: 'Keywords in this scope' })).getAllByRole('row')).toHaveLength(2);
+    });
+
+    it('passes a trends error on to the history panel', () => {
+      renderOverview({
+        trends: null,
+        trendsError: 'Failed to fetch historical trends',
+      });
+
+      expect(within(panelTitled('Visibility score history')).getByText('History unavailable: Failed to fetch historical trends')).toBeInTheDocument();
+    });
+
+    it('shows scope-specific panels before the definitions', () => {
+      renderOverview({ children: <p>Persona comparison</p> });
+
+      expect(screen.getByText('Persona comparison').nextElementSibling).toBe(panelTitled('How these KPIs are measured'));
+    });
+
+    it('defines every KPI and the change rule in the definitions block', () => {
+      renderOverview();
+
+      expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITIONS.map((entry) => entry.label));
+    });
+  });
+
+  describe('export', () => {
+    it('exports exactly the rendered visibility, trends and scope label', async () => {
+      mockExportVisibilityOverview.mockResolvedValue();
+      const { props } = renderOverview();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
+
+      expect(mockExportVisibilityOverview).toHaveBeenCalledWith(props.visibility, props.trends, 'Hotel Sol');
+    });
+
+    it('disables the button while the workbook is written', async () => {
+      mockExportVisibilityOverview.mockReturnValue(new Promise(vi.fn()));
+      renderOverview();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
+
+      expect(screen.getByRole('button', { name: 'Exporting…' })).toBeDisabled();
+    });
+
+    it('logs a failed export and offers the export again', async () => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+      const failure = new ExportFailure();
+      mockExportVisibilityOverview.mockRejectedValue(failure);
+      renderOverview();
+
+      await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
+
+      expect(consoleError).toHaveBeenCalledWith('[visibility] Excel export failed:', failure);
+      expect(screen.getByRole('button', { name: 'Export to Excel' })).toBeEnabled();
+      consoleError.mockRestore();
+    });
+  });
+});

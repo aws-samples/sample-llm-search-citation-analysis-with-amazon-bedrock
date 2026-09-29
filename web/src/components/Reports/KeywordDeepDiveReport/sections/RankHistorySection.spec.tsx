@@ -6,65 +6,61 @@ import {
 } from '@testing-library/react';
 import { RankHistorySection } from './RankHistorySection';
 import {
-  buildTrendHistory, buildTrendPoints 
-} from './rankHistory-fixtures';
+  buildTrendPoints, buildTrendView
+} from '../../layout/reportPayload-fixtures';
+import { sectionTable } from '../../layout/reportQueries-fixtures';
 
-describe('RankHistorySection — sampling', () => {
-  it('renders every row when point count is below the cap', () => {
-    render(
-      <RankHistorySection trends={buildTrendHistory(buildTrendPoints(5))} loading={false} error={null} />,
-    );
-    // 5 data rows + 1 header row.
-    expect(screen.getAllByRole('row')).toHaveLength(6);
+const EMPTY = 'No history yet — run an analysis of this keyword to start one.';
+
+describe('RankHistorySection — table', () => {
+  it('lists every period of the keyword with its runs and KPIs', () => {
+    render(<RankHistorySection trends={buildTrendView({ trend_data: buildTrendPoints(2) })} loading={false} error={null} />);
+
+    expect(sectionTable('KPI history').slice(1)).toStrictEqual([
+      ['d-00', '2', '20', '60.0%', '25.0%', '40.0', '1.80', '30.0%'],
+      ['d-01', '2', '20', '60.0%', '25.0%', '41.0', '1.80', '30.0%'],
+    ]);
   });
 
-  it('caps the table at 14 rows when point count exceeds the cap', () => {
-    render(
-      <RankHistorySection trends={buildTrendHistory(buildTrendPoints(30))} loading={false} error={null} />,
-    );
-    // 14 sampled data rows + 1 header row.
-    expect(screen.getAllByRole('row')).toHaveLength(15);
+  it('says over which periods and days the KPIs moved', () => {
+    render(<RankHistorySection trends={buildTrendView({ period_type: 'week' })} loading={false} error={null} />);
+
+    expect(screen.getByText('How this keyword\'s KPIs moved per week over the last 30 days.')).toBeInTheDocument();
   });
 
-  it('keeps the first and last data points when sampling', () => {
-    render(
-      <RankHistorySection trends={buildTrendHistory(buildTrendPoints(30))} loading={false} error={null} />,
-    );
-    expect(screen.getByText('d-00')).toBeInTheDocument();
-    expect(screen.getByText('d-29')).toBeInTheDocument();
+  it('samples a long history to the printable number of rows, keeping the first and last period', () => {
+    render(<RankHistorySection trends={buildTrendView({ trend_data: buildTrendPoints(30) })} loading={false} error={null} />);
+
+    const periods = sectionTable('KPI history').slice(1).map(([period]) => period);
+    expect([periods.length, periods[0], periods[periods.length - 1]]).toStrictEqual([14, 'd-00', 'd-29']);
   });
 });
 
 describe('RankHistorySection — placeholder states', () => {
-  it('renders empty state when trend_data is empty', () => {
-    render(
-      <RankHistorySection
-        trends={buildTrendHistory([])}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(screen.getByText(/at least two analysis runs/i)).toBeInTheDocument();
-  });
+  it.each([
+    ['the trend holds no period', buildTrendView({ trend_data: [] })],
+    ['there is no trend answer', null],
+  ])('says there is no history yet when %s', (_label, trends) => {
+    render(<RankHistorySection trends={trends} loading={false} error={null} />);
 
-  it('renders empty state when trends is null', () => {
-    render(
-      <RankHistorySection trends={null} loading={false} error={null} />,
-    );
-    expect(screen.getByText(/at least two analysis runs/i)).toBeInTheDocument();
+    expect(screen.getByText(EMPTY)).toBeInTheDocument();
   });
 
   it('renders loading state when loading is true', () => {
-    render(
-      <RankHistorySection trends={null} loading error={null} />,
-    );
-    expect(screen.getByText(/Loading trend data/i)).toBeInTheDocument();
+    render(<RankHistorySection trends={null} loading error={null} />);
+
+    expect(screen.getByText('Loading trend data…')).toBeInTheDocument();
+  });
+
+  it('describes the default 30-day window while loading', () => {
+    render(<RankHistorySection trends={null} loading error={null} />);
+
+    expect(screen.getByText('How this keyword\'s KPIs moved per day over the last 30 days.')).toBeInTheDocument();
   });
 
   it('renders error message when error is set', () => {
-    render(
-      <RankHistorySection trends={null} loading={false} error="Network blew up" />,
-    );
-    expect(screen.getByText(/Network blew up/i)).toBeInTheDocument();
+    render(<RankHistorySection trends={null} loading={false} error="Network blew up" />);
+
+    expect(screen.getByText('Network blew up')).toBeInTheDocument();
   });
 });

@@ -12,15 +12,16 @@
  * and `hooks/useCompetitorRollup.ts`).
  */
 import type {
-  Recommendation, TrendDirection 
+  HistoricalTrendsResponse, Recommendation, ReportScopeInfo
 } from '../types';
+import type { BrandKpis } from '../types/domain/groupKpiHistory';
 
+/** A keyword whose visibility score moved most since its previous period. */
 export interface ReportsOverviewMover {
   keyword: string;
-  trend_direction: TrendDirection;
-  current_score: number;
+  visibility_score: number;
+  /** Points of visibility score since the keyword's previous period. */
   change: number;
-  change_percent: number;
 }
 
 export interface ReportsOverviewSummary {
@@ -29,16 +30,22 @@ export interface ReportsOverviewSummary {
   stable_count: number;
 }
 
+/**
+ * `GET /reports/overview`: the trend view's latest KPIs and change
+ * (`lambda/api/get-reports-overview.py`), the top movers and the top
+ * recommendations.
+ */
 export interface ReportsOverviewResponse {
   generated_at: string;
+  scope: ReportScopeInfo;
   period_type: 'day' | 'week' | 'month';
   days_analyzed: number;
   keywords_analyzed: number;
-  overall_score: number;
-  previous_score: number;
-  change: number;
-  change_percent: number;
-  trend_direction: TrendDirection;
+  keywords_with_data: number;
+  citations_configured: boolean;
+  /** Every KPI over each keyword's latest period, pooled. */
+  kpis: BrandKpis;
+  change: HistoricalTrendsResponse['change'];
   summary: ReportsOverviewSummary;
   top_improving: ReportsOverviewMover[];
   top_declining: ReportsOverviewMover[];

@@ -7,6 +7,7 @@ import { useExecutiveSummary } from './useExecutiveSummary';
 vi.mock('../../../hooks/useReportsOverview', () => ({useReportsOverview: vi.fn()}));
 
 import { useReportsOverview } from '../../../hooks/useReportsOverview';
+import { buildOverview } from '../layout/reportPayload-fixtures';
 
 const mockOverview = useReportsOverview as ReturnType<typeof vi.fn>;
 
@@ -15,7 +16,7 @@ describe('useExecutiveSummary', () => {
 
   beforeEach(() => {
     mockOverview.mockReturnValue({
-      data: { overall_score: 60 },
+      data: buildOverview(),
       loading: false,
       error: null,
       fetchReportsOverview,
@@ -46,6 +47,11 @@ describe('useExecutiveSummary', () => {
   it('reports ready=true once the slice has data', () => {
     const { result } = renderHook(() => useExecutiveSummary());
     expect(result.current.ready).toBe(true);
+  });
+
+  it('hands the overview to the report', () => {
+    const { result } = renderHook(() => useExecutiveSummary());
+    expect(result.current.data).toStrictEqual(buildOverview());
   });
 
   it('reports ready=false while the overview slice is loading', () => {

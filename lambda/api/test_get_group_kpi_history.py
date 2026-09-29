@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -81,16 +80,6 @@ def _call(
     ):
         response = _mod.handler(event, None)
     return response['statusCode'], json.loads(response['body'])
-
-
-class TestHistorySince:
-    def test_formats_the_window_start_like_run_timestamps(self):
-        now = datetime(2026, 9, 28, 12, 30, 15, 123456, tzinfo=UTC)
-
-        assert _mod.history_since(90, now) == '2026-06-30T12:30:15.123456Z'
-
-    def test_defaults_to_the_current_time(self):
-        assert _mod.history_since(0) <= datetime.now(UTC).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
 
 
 class TestGroupKpiHistoryRoute:

@@ -4,71 +4,57 @@ import {
 import {
   render, screen, within 
 } from '@testing-library/react';
+import type { ReportsOverviewResponse } from '../../../../api/reports';
 import { expectRendersNothing } from '../../../../test/renderNothing';
 import { WinsAndGapsSection } from './WinsAndGapsSection';
 import {
   buildMover, buildOverview
-} from './reportsOverview-fixtures';
+} from '../../layout/reportPayload-fixtures';
+import {
+  moverColumn, moverKeywords
+} from '../../layout/reportQueries-fixtures';
+
+function renderWinsAndGaps(overrides: Partial<ReportsOverviewResponse>): void {
+  render(<WinsAndGapsSection data={buildOverview(overrides)} loading={false} error={null} />);
+}
 
 describe('WinsAndGapsSection — content rendering', () => {
-  it('renders improvers in the Wins column with their change values', () => {
-    render(
-      <WinsAndGapsSection
-        data={buildOverview({ improving: [buildMover('best running shoes', 8, 'improving')] })}
-        loading={false}
-        error={null}
-      />,
-    );
-    const winsHeading = screen.getByRole('heading', { name: 'Wins' });
-    const winsColumn = winsHeading.closest('div');
-    expect(within(winsColumn as HTMLElement).getByText('best running shoes'))
-      .toBeInTheDocument();
-    expect(within(winsColumn as HTMLElement).getByText('+8.0'))
-      .toBeInTheDocument();
+  it('lists an improver in the Wins column with its visibility score and change in points', () => {
+    renderWinsAndGaps({ top_improving: [buildMover('best running shoes', 8, 80)] });
+
+    expect(within(moverColumn('Wins')).getByRole('listitem')).toHaveTextContent('best running shoesScore 80.0+8.0 pts');
   });
 
-  it('renders decliners in the Gaps column without a plus sign', () => {
-    render(
-      <WinsAndGapsSection
-        data={buildOverview({ declining: [buildMover('best hiking boots', -10, 'declining')] })}
-        loading={false}
-        error={null}
-      />,
-    );
-    const gapsHeading = screen.getByRole('heading', { name: 'Gaps' });
-    const gapsColumn = gapsHeading.closest('div');
-    expect(within(gapsColumn as HTMLElement).getByText('best hiking boots'))
-      .toBeInTheDocument();
-    expect(within(gapsColumn as HTMLElement).getByText('-10.0'))
-      .toBeInTheDocument();
+  it('lists a decliner in the Gaps column with its fall in points', () => {
+    renderWinsAndGaps({ top_declining: [buildMover('best hiking boots', -10, 30)] });
+
+    expect(within(moverColumn('Gaps')).getByRole('listitem')).toHaveTextContent('best hiking bootsScore 30.0-10.0 pts');
+  });
+
+  it('keeps the order of the API, largest move first', () => {
+    renderWinsAndGaps({ top_improving: [buildMover('big', 9), buildMover('small', 2)] });
+
+    expect(moverKeywords('Wins')).toStrictEqual(['big', 'small']);
+  });
+
+  it('names the period the movers are measured over', () => {
+    renderWinsAndGaps({ period_type: 'week' });
+
+    expect(screen.getByText(/rose or fell the most since their previous week\./)).toBeInTheDocument();
   });
 });
 
 describe('WinsAndGapsSection — empty-side messaging', () => {
   it('shows the no-improvers copy when there are no top-improving entries', () => {
-    render(
-      <WinsAndGapsSection
-        data={buildOverview({ declining: [buildMover('declining-kw', -5, 'declining')] })}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(
-      screen.getByText(/should focus on the gaps panel/i),
-    ).toBeInTheDocument();
+    renderWinsAndGaps({ top_declining: [buildMover('declining-kw', -5)] });
+
+    expect(screen.getByText(/should focus on the gaps panel/i)).toBeInTheDocument();
   });
 
   it('shows the no-decliners copy when there are no top-declining entries', () => {
-    render(
-      <WinsAndGapsSection
-        data={buildOverview({ improving: [buildMover('improving-kw', 5, 'improving')] })}
-        loading={false}
-        error={null}
-      />,
-    );
-    expect(
-      screen.getByText(/Maintain current investment/i),
-    ).toBeInTheDocument();
+    renderWinsAndGaps({ top_improving: [buildMover('improving-kw', 5)] });
+
+    expect(screen.getByText(/Maintain current investment/i)).toBeInTheDocument();
   });
 });
 

@@ -1,12 +1,9 @@
-import type {
-  HistoricalTrendsResponse, TrendDataPoint 
-} from '../../../../types';
+import type { HistoricalTrendsResponse } from '../../../../types';
+import { formatDateOnly } from '../../../../formatting/dateFormatter';
 import {
   ReportSection,
-  ReportTable,
-  type ReportTableColumn,
+  TrendPeriodTable,
   gateSection,
-  sampleEvenly,
 } from '../../layout';
 
 interface Props {
@@ -15,37 +12,10 @@ interface Props {
   readonly error: string | null;
 }
 
-const MAX_ROWS = 14;
-
-const COLUMNS: ReadonlyArray<ReportTableColumn<TrendDataPoint>> = [
-  {
-    header: 'Period',
-    cellClassName: 'font-mono text-xs',
-    render: (point) => point.period,
-  },
-  {
-    header: 'Score',
-    render: (point) => point.visibility_score.toFixed(1),
-  },
-  {
-    header: 'Best rank',
-    render: (point) => point.best_rank ?? '—',
-  },
-  {
-    header: 'Mentions',
-    render: (point) => point.total_mentions,
-  },
-  {
-    header: 'Providers',
-    render: (point) => point.provider_count,
-  },
-];
-
 /**
- * Sampled trend history for the per-keyword report. The raw `trend_data`
- * can hold up to 30 rows for a 30-day window; printing all 30 wastes a
- * full page on a near-flat curve. Sampling evenly to ≤14 rows keeps the
- * shape readable in print without losing inflection points.
+ * The scope's KPIs per day, week or month of the trend window: each row
+ * pools every answer of the period. Long windows are sampled to at most 14
+ * rows so the table fits one printed page, keeping the first and last period.
  */
 export function TrendHistorySection({
   trends, loading, error 
@@ -59,22 +29,18 @@ export function TrendHistorySection({
   });
   if (!gate.ready) return gate.placeholder;
 
-  const points = gate.value.trend_data;
+  const {
+    trend_data: points, period_type: period, since
+  } = gate.value;
   if (points.length === 0) return null;
-
-  const sampled = sampleEvenly(points, MAX_ROWS);
 
   return (
     <ReportSection
       title="Trend history"
-      subtitle={`Visibility score across the last ${gate.value.days_analyzed} days. Sampled to ${sampled.length} rows for print.`}
+      subtitle={`Every KPI per ${period} since ${formatDateOnly(since)}, over every answer in the ${period}.`}
       startNewPage
     >
-      <ReportTable
-        columns={COLUMNS}
-        rows={sampled}
-        rowKey={(point) => point.period}
-      />
+      <TrendPeriodTable points={points} />
     </ReportSection>
   );
 }

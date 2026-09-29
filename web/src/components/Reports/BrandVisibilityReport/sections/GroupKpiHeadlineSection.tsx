@@ -2,18 +2,8 @@ import { useId } from 'react';
 import type { GroupRun } from '../../../../types/domain/groupKpiHistory';
 import { formatDate } from '../../../../formatting/dateFormatter';
 import {
-  formatKpi, formatKpiDelta
-} from '../../../../formatting/kpiFormatter';
-import {
-  KPI_DEFINITIONS, KPI_SPECS, type KpiId, type KpiSpec
-} from '../../../../constants/kpiDefinitions';
-import { InfoTooltip } from '../../../ui/InfoTooltip';
-import {
-  ReportSection, ReportStatCard, ReportStatGrid, ReportTable, type ReportTableColumn
+  KpiHeadline, ReportSection, type KpiComparison
 } from '../../layout';
-import {
-  runTrend, trendAccent
-} from '../groupKpiView';
 
 interface Props {
   /** Every run in the window, oldest first. */
@@ -24,62 +14,23 @@ interface Props {
   readonly citationsConfigured: boolean;
 }
 
-/** The four KPIs on the headline cards; every KPI is in the table below them. */
-const HEADLINE_KPIS: readonly KpiId[] = ['mention_rate', 'share_of_voice', 'visibility_score', 'citation_rate'];
-
-const TREND_LABELS = {
-  improving: 'Improving',
-  declining: 'Declining',
-  stable: 'Stable',
-} as const;
-
-const OWNED_DOMAINS_MISSING = 'Set owned domains in Settings › Brand Tracking to measure citations';
-
-function changeFootnote(run: GroupRun, id: KpiId): string {
-  if (run.change === null) return 'No earlier group run to compare with';
-  return `${formatKpiDelta(id, run.change.deltas[id])} since ${formatDate(run.change.previous_timestamp)}`;
-}
-
 function runOptionLabel(run: GroupRun): string {
   const partial = run.is_group_run ? '' : ' (partial)';
   return `${formatDate(run.timestamp)} · ${run.keywords_with_data}/${run.keywords_total} keywords${partial}`;
 }
 
-function kpiTableColumns(run: GroupRun): ReadonlyArray<ReportTableColumn<KpiSpec>> {
-  return [
-    {
-      header: 'KPI',
-      // Stryker disable next-line StringLiteral: Tailwind-only cell styling
-      cellClassName: 'whitespace-nowrap font-medium',
-      render: (spec) => (
-        <>
-          {spec.label}
-          <InfoTooltip label={spec.label} text={spec.definition} />
-        </>
-      ),
-    },
-    {
-      header: 'Value',
-      render: (spec) => formatKpi(spec.id, run.kpis[spec.id]),
-    },
-    {
-      header: 'Change',
-      render: (spec) => (run.change === null ? '—' : formatKpiDelta(spec.id, run.change.deltas[spec.id])),
-    },
-    {
-      header: 'Trend',
-      render: (spec) => {
-        const trend = runTrend(run, spec.id);
-        return trend === undefined ? '—' : TREND_LABELS[trend];
-      },
-    },
-  ];
+function runComparison(run: GroupRun): KpiComparison | null {
+  const { change } = run;
+  return change === null ? null : {
+    deltas: change.deltas,
+    trends: change.trends,
+    label: `since ${formatDate(change.previous_timestamp)}`,
+  };
 }
 
 /**
- * The group's KPIs for one run (the latest group run by default): four
- * headline cards, then every KPI with its change and trend since the
- * previous group run, each with a tooltip saying how it is measured.
+ * The group's KPIs for one run (the latest group run by default), with each
+ * change and trend since the previous group run.
  */
 export function GroupKpiHeadlineSection({
   runs, selected, onSelect, citationsConfigured
@@ -106,24 +57,12 @@ export function GroupKpiHeadlineSection({
           ))}
         </select>
       </div>
-      <ReportStatGrid columns={4}>
-        {HEADLINE_KPIS.map((id) => (
-          <ReportStatCard
-            key={id}
-            label={KPI_DEFINITIONS[id].label}
-            value={formatKpi(id, kpis[id])}
-            footnote={id === 'citation_rate' && !citationsConfigured ? OWNED_DOMAINS_MISSING : changeFootnote(selected, id)}
-            accent={trendAccent(runTrend(selected, id))}
-            info={KPI_DEFINITIONS[id].definition}
-          />
-        ))}
-      </ReportStatGrid>
-      <div className="mt-4">
-        {
-          // Stryker disable next-line ArrowFunction: React row key only; the rendered rows are identical
-          <ReportTable columns={kpiTableColumns(selected)} rows={KPI_SPECS} rowKey={(spec) => spec.id} />
-        }
-      </div>
+      <KpiHeadline
+        kpis={kpis}
+        comparison={runComparison(selected)}
+        noComparisonNote="No earlier group run to compare with"
+        citationsConfigured={citationsConfigured}
+      />
     </ReportSection>
   );
 }

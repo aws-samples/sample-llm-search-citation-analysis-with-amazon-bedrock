@@ -1,13 +1,12 @@
 /**
  * Pure view helpers for the per-group sections of the Brand Visibility
- * report: which runs to show, what changed between them, and how each
- * change is coloured. Values are written by `formatting/kpiFormatter`.
+ * report: which runs to show and what changed between them. Values are
+ * written by `formatting/kpiFormatter`.
  */
 import type {
   GroupRun, KpiTrend
 } from '../../../types/domain/groupKpiHistory';
 import type { KpiId } from '../../../constants/kpiDefinitions';
-import type { ReportAccent } from '../layout';
 
 /** The runs covering at least half of the group's keywords — the ones compared with each other. */
 export function groupRuns(runs: readonly GroupRun[]): GroupRun[] {
@@ -49,13 +48,6 @@ export function modelChanges(runs: readonly GroupRun[]): ModelChange[] {
         to: models,
       }));
   });
-}
-
-/** The colour a trend deserves: improving is positive, declining negative, stable or unknown neutral. */
-export function trendAccent(trend: KpiTrend | undefined): ReportAccent {
-  if (trend === 'improving') return 'positive';
-  if (trend === 'declining') return 'negative';
-  return 'neutral';
 }
 
 /** The trend of a KPI in a group run's change; `undefined` for counts, or without a change. */
