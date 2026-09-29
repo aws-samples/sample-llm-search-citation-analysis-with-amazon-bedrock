@@ -40,6 +40,8 @@ DEFAULT_FAKE_TRENDS = {
     'keywords_with_data': 5,
     'citations_configured': False,
     'latest': LATEST,
+    'latest_brands': [{'name': 'Hotel Sol', 'classification': 'first_party', 'share_of_voice': 40.0}],
+    'trend_data': [{'period': '2026-09-18', 'runs': 1, 'keywords_with_data': 5, 'kpis': LATEST}],
     'change': CHANGE,
     'keyword_trends': [
         _keyword_trend('a', 80, 8),
@@ -132,6 +134,12 @@ def test_build_overview_reports_the_latest_kpis_and_their_change(overview_mod):
     result = overview_mod.build_overview({}, period='day', days=30, top=3)
 
     assert (result['kpis'], result['change']) == (LATEST, CHANGE)
+
+
+def test_build_overview_carries_the_trend_series_and_the_latest_leaderboard(overview_mod):
+    result = overview_mod.build_overview({}, period='day', days=30, top=3)
+
+    assert (result['trend_data'], result['latest_brands']) == (DEFAULT_FAKE_TRENDS['trend_data'], DEFAULT_FAKE_TRENDS['latest_brands'])
 
 
 def test_build_overview_reports_the_keyword_counts(overview_mod):

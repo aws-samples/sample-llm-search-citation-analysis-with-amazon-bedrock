@@ -34,6 +34,22 @@ const CompetitorGapReport = lazy(() =>
   import('./CompetitorGapReport').then((m) => ({default: m.CompetitorGapReport,})),
 );
 
+const CompetitorBenchmarkReport = lazy(() =>
+  import('./CompetitorBenchmarkReport').then((m) => ({default: m.CompetitorBenchmarkReport,})),
+);
+
+const AiEnginesReport = lazy(() =>
+  import('./AiEnginesReport').then((m) => ({default: m.AiEnginesReport,})),
+);
+
+const SourcesReport = lazy(() =>
+  import('./SourcesReport').then((m) => ({default: m.SourcesReport,})),
+);
+
+const SentimentReport = lazy(() =>
+  import('./SentimentReport').then((m) => ({default: m.SentimentReport,})),
+);
+
 interface Props {readonly keywords: ReadonlyArray<Keyword>;}
 
 function ReportFallback() {
@@ -92,6 +108,22 @@ export function ReportsRouter({ keywords }: Props) {
           <Route
             path="/reports/competitor/:competitor"
             element={<CompetitorGapReport />}
+          />
+          <Route
+            path="/reports/benchmark"
+            element={<CompetitorBenchmarkReport keywords={keywords} />}
+          />
+          <Route
+            path="/reports/engines"
+            element={<AiEnginesReport keywords={keywords} />}
+          />
+          <Route
+            path="/reports/sources"
+            element={<SourcesReport keywords={keywords} />}
+          />
+          <Route
+            path="/reports/sentiment"
+            element={<SentimentReport keywords={keywords} />}
           />
           <Route path="*" element={<Navigate to="/reports" replace />} />
         </Routes>

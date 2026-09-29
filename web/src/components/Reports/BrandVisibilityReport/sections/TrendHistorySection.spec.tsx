@@ -1,5 +1,5 @@
 import {
-  describe, expect, it
+  describe, expect, it, vi
 } from 'vitest';
 import {
   render, screen
@@ -9,10 +9,30 @@ import { TrendHistorySection } from './TrendHistorySection';
 import {
   buildTrendView, LATEST_PERIOD, PREVIOUS_PERIOD
 } from '../../layout/reportPayload-fixtures';
-import { sectionTable } from '../../layout/reportQueries-fixtures';
+import {
+  sectionTable, sectionTitled
+} from '../../layout/reportQueries-fixtures';
 import { RUN_1 } from '../groupKpiHistory-fixtures';
+import {
+  TREND_VIEW_KPI_CAPTION, chartCaption
+} from './reportChartPanels-fixtures';
+import { KPI_TREND_TITLE } from './ReportChartPanels';
+
+vi.mock('chart.js', () => import('../../../Dashboard/chartJs-fixtures'));
 
 describe('TrendHistorySection', () => {
+  it('charts the KPIs of every period above the table', () => {
+    render(<TrendHistorySection trends={buildTrendView()} loading={false} error={null} />);
+
+    expect(chartCaption(KPI_TREND_TITLE, sectionTitled('Trend history'))).toBe(TREND_VIEW_KPI_CAPTION);
+  });
+
+  it('starts the history on a new printed page', () => {
+    render(<TrendHistorySection trends={buildTrendView()} loading={false} error={null} />);
+
+    expect(sectionTitled('Trend history')).toHaveClass('page-break-before');
+  });
+
   it('lists every period of the trend, oldest first', () => {
     render(<TrendHistorySection trends={buildTrendView()} loading={false} error={null} />);
 

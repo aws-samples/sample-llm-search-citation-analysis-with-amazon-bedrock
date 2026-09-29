@@ -1,5 +1,5 @@
 import {
-  describe, it, expect,
+  describe, it, expect, vi,
 } from 'vitest';
 import {
   render, screen 
@@ -8,9 +8,25 @@ import { RankHistorySection } from './RankHistorySection';
 import {
   buildTrendPoints, buildTrendView
 } from '../../layout/reportPayload-fixtures';
-import { sectionTable } from '../../layout/reportQueries-fixtures';
+import {
+  sectionTable, sectionTitled
+} from '../../layout/reportQueries-fixtures';
+import {
+  TREND_VIEW_KPI_CAPTION, chartCaption
+} from '../../BrandVisibilityReport/sections/reportChartPanels-fixtures';
+import { KPI_TREND_TITLE } from '../../BrandVisibilityReport/sections/ReportChartPanels';
+
+vi.mock('chart.js', () => import('../../../Dashboard/chartJs-fixtures'));
 
 const EMPTY = 'No history yet — run an analysis of this keyword to start one.';
+
+describe('RankHistorySection — chart', () => {
+  it('charts the keyword KPIs of every period above the table', () => {
+    render(<RankHistorySection trends={buildTrendView()} loading={false} error={null} />);
+
+    expect(chartCaption(KPI_TREND_TITLE, sectionTitled('KPI history'))).toBe(TREND_VIEW_KPI_CAPTION);
+  });
+});
 
 describe('RankHistorySection — table', () => {
   it('lists every period of the keyword with its runs and KPIs', () => {

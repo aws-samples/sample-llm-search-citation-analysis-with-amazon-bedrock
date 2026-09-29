@@ -147,6 +147,8 @@ def build_overview(
         'citations_configured': trends['citations_configured'],
         'kpis': trends['latest'],
         'change': trends['change'],
+        'trend_data': trends['trend_data'],
+        'latest_brands': trends['latest_brands'],
         'summary': trends['overall'],
         'top_improving': top_improving,
         'top_declining': top_declining,

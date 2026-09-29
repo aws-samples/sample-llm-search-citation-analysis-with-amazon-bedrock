@@ -1,7 +1,6 @@
 import { Link } from 'react-router-dom';
 
 interface ReportEntry {
-  readonly id: string;
   readonly title: string;
   readonly description: string;
   readonly audience: string;
@@ -10,14 +9,13 @@ interface ReportEntry {
 }
 
 /**
- * The five reports we're building, ordered to match the marketing decision
- * each one supports (top-down strategic to bottom-up operational). Reports
- * we haven't shipped yet are listed but link nowhere; the placeholder makes
- * the planned scope visible to users without surprising them on a 404.
+ * The reports, ordered to match the marketing decision each one supports
+ * (top-down strategic to bottom-up operational). A report marked
+ * `coming-soon` is listed but links nowhere; the placeholder makes the
+ * planned scope visible to users without surprising them on a 404.
  */
 const REPORT_CATALOG: readonly ReportEntry[] = [
   {
-    id: 'executive-summary',
     title: 'Executive Summary',
     description:
       'One-page rollup of overall visibility, the trend over time, top wins, top gaps, and the next three actions to take. The report a marketing lead would print before a quarterly business review.',
@@ -26,7 +24,6 @@ const REPORT_CATALOG: readonly ReportEntry[] = [
     status: 'available',
   },
   {
-    id: 'brand-visibility',
     title: 'Brand Visibility Report',
     description:
       'Mention rate, share of voice, visibility score, citation rate and every other KPI with its change and trend, the brand leaderboard and the KPIs per day, scoped to a keyword, a keyword group or the full keyword set. Highlights regressions in red.',
@@ -35,7 +32,38 @@ const REPORT_CATALOG: readonly ReportEntry[] = [
     status: 'available',
   },
   {
-    id: 'competitor-gap',
+    title: 'Competitor Benchmark',
+    description:
+      'Your share of voice and rank against every brand the AI answers name: the share-of-voice donut, the leading brands over time by share of voice, mention rate or visibility score, and the full leaderboard with every KPI per brand.',
+    audience: 'Brand manager, competitive intelligence',
+    path: '/reports/benchmark',
+    status: 'available',
+  },
+  {
+    title: 'AI Engines',
+    description:
+      'How each AI engine treats your brand: which engines name you, mention rate, visibility score and citation rate per engine side by side, every KPI per engine, and how each engine words its mentions.',
+    audience: 'AI search specialist',
+    path: '/reports/engines',
+    status: 'available',
+  },
+  {
+    title: 'Sources',
+    description:
+      'Which websites the AI answers cite: your citations, citation rate and citation share, the most cited domains with your own highlighted, and every cited domain with its engines and keywords.',
+    audience: 'SEO and digital PR',
+    path: '/reports/sources',
+    status: 'available',
+  },
+  {
+    title: 'Sentiment',
+    description:
+      'How the AI answers word your brand: net sentiment with its change and split, the net sentiment over time, the split per AI engine, and the net sentiment of every brand named.',
+    audience: 'Brand / communications lead',
+    path: '/reports/sentiment',
+    status: 'available',
+  },
+  {
     title: 'Competitor Gap Report',
     description:
       'For each tracked competitor: keywords where they outrank you, citation sources unique to them, and a prioritized outreach list ranked by potential visibility lift.',
@@ -44,7 +72,6 @@ const REPORT_CATALOG: readonly ReportEntry[] = [
     status: 'available',
   },
   {
-    id: 'content-action-plan',
     title: 'Content Action Plan',
     description:
       'Prioritized citation gaps paired with AI-generated content briefs from Content Studio. Closes the loop from "we have a gap" to "here is the asset to fill it".',
@@ -53,7 +80,6 @@ const REPORT_CATALOG: readonly ReportEntry[] = [
     status: 'available',
   },
   {
-    id: 'keyword-deep-dive',
     title: 'Keyword Deep Dive',
     description:
       'Single-keyword drill-down: every KPI with its change, KPI history, persona impact, provider differences, top sources, sentiment examples, recommended actions, and an LLM-generated narrative explaining the current ranking.',
@@ -79,7 +105,7 @@ export function ReportsLandingView() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {REPORT_CATALOG.map((report) => (
-          <ReportCard key={report.id} report={report} />
+          <ReportCard key={report.title} report={report} />
         ))}
       </div>
     </div>

@@ -31,6 +31,7 @@ import {
   buildTrendsResponse, buildVisibility
 } from './visibilityOverview-fixtures';
 import { panelTitled } from './visibilityTables-fixtures';
+import { HISTORY_TITLE } from './VisibilityHistory';
 import type {
   Keyword, KeywordGroup
 } from '../../types';
@@ -147,7 +148,7 @@ describe('VisibilityDashboard', () => {
 
       render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
 
-      expect(within(panelTitled('Visibility score history')).getByText('History unavailable: Failed to fetch historical trends')).toBeInTheDocument();
+      expect(within(panelTitled(HISTORY_TITLE)).getByText('History unavailable: Failed to fetch historical trends')).toBeInTheDocument();
     });
   });
 

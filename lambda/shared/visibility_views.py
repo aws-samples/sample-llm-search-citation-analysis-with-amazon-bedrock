@@ -4,9 +4,11 @@ every keyword), built from answers with ``shared.kpi_engine``:
 
 - ``visibility_view``: where the brand stands now — every KPI over each
   keyword's latest run, pooled, its change since each keyword's previous
-  run, the brand leaderboard and a row per keyword.
+  run, the brand leaderboard, every KPI per AI engine, the most cited
+  domains and a row per keyword.
 - ``trend_view``: how it moved — every KPI per day, week or month, the
-  latest period against the previous one, and each keyword's own move.
+  latest period against the previous one, each keyword's own move, and the
+  tracked brand against its leading competitors over time.
 
 Definitions: ``docs/kpi-definitions.md``.
 """
@@ -18,13 +20,34 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
-from shared.kpi_engine import Answer, brand_kpis, brand_table, kpi_changes, kpi_trends
+from shared.kpi_engine import (
+    COMPETITOR,
+    Answer,
+    brand_kpis,
+    brand_table,
+    engine_breakdown,
+    kpi_changes,
+    kpi_trends,
+    source_table,
+)
 
 #: The format of each trend period: a calendar day, an ISO week (Monday to Sunday) or a calendar month.
 _PERIOD_FORMATS = {'day': '%Y-%m-%d', 'week': '%G-W%V', 'month': '%Y-%m'}
 
 #: The trend periods.
 PERIODS = tuple(_PERIOD_FORMATS)
+
+#: The most cited domains a visibility view lists.
+SOURCES_LIMIT = 25
+
+#: The competitors whose share of voice is followed over time, next to the tracked brand.
+BRAND_TREND_COMPETITORS = 5
+
+#: The brands of the latest leaderboard of a trend view.
+LATEST_BRANDS_LIMIT = 10
+
+#: The per-brand KPIs followed over time.
+_BRAND_TREND_KPIS = ('share_of_voice', 'mention_rate', 'visibility_score', 'average_position')
 
 
 def _latest_timestamp(answers: Iterable[Answer]) -> str | None:
@@ -65,7 +88,9 @@ def visibility_view(
     (``None`` without such a keyword). ``persona`` keeps the answers of one
     persona; ``brand`` narrows the leaderboard to brands whose name contains
     it (the KPIs are unchanged). A keyword whose latest run has no answer is
-    reported without KPIs.
+    reported without KPIs. ``engines`` breaks every KPI down by AI engine;
+    ``sources`` lists the ``SOURCES_LIMIT`` most cited domains (of
+    ``sources_total``).
     """
     domains = list(owned_domains)
     latest = {keyword: _of_persona(answers_by_keyword.get(keyword, ()), persona) for keyword in keywords}
@@ -83,6 +108,7 @@ def visibility_view(
     brands = brand_table(pooled)
     if brand:
         brands = [row for row in brands if brand.lower() in row['name'].lower()]
+    sources = source_table(pooled, domains)
     return {
         'timestamp': _latest_timestamp(pooled),
         'keywords_analyzed': len(keywords),
@@ -90,6 +116,9 @@ def visibility_view(
         'kpis': brand_kpis(pooled, domains),
         'change': _run_change(latest, previous, domains),
         'brands': brands,
+        'engines': engine_breakdown(pooled, domains),
+        'sources': sources[:SOURCES_LIMIT],
+        'sources_total': len(sources),
         'keywords': rows,
     }
 
@@ -137,6 +166,38 @@ def _group_change(per_keyword: Mapping[str, dict[str, list[Answer]]], domains: l
     return {'keywords_compared': len(compared), **_change(brand_kpis(latest, domains), brand_kpis(previous, domains))}
 
 
+def _brand_point(period: str, kpis: Mapping[str, Any]) -> dict[str, Any]:
+    return {'period': period, **{kpi: kpis[kpi] for kpi in _BRAND_TREND_KPIS}}
+
+
+def _absent_brand(answers: list[Answer]) -> dict[str, Any]:
+    """The KPIs of a brand no answer of the period names."""
+    named = any(answer.sightings for answer in answers)
+    return {'share_of_voice': 0.0 if named else None, 'mention_rate': 0.0, 'visibility_score': 0.0, 'average_position': None}
+
+
+def _brand_trends(series: Mapping[str, list[Answer]], tracked_kpis: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """Share of voice, mention rate, visibility score and position per period: the tracked brand and its leading competitors.
+
+    The competitors are the ``BRAND_TREND_COMPETITORS`` with the best
+    visibility score over the whole window; a period whose answers do not
+    name one scores it 0 (no position).
+    """
+    pooled = [answer for answers in series.values() for answer in answers]
+    leaders = [row['name'] for row in brand_table(pooled) if row['classification'] == COMPETITOR][:BRAND_TREND_COMPETITORS]
+    tables = {key: {row['name'].lower(): row for row in brand_table(answers)} for key, answers in series.items()}
+    return {
+        'tracked': [_brand_point(key, tracked_kpis[key]) for key in series],
+        'competitors': [
+            {
+                'name': name,
+                'points': [_brand_point(key, tables[key].get(name.lower()) or _absent_brand(series[key])) for key in series],
+            }
+            for name in leaders
+        ],
+    }
+
+
 def trend_view(
     keywords: list[str],
     answers_by_keyword: Mapping[str, Iterable[Answer]],
@@ -146,10 +207,11 @@ def trend_view(
     """Every KPI per period, the scope's latest standing and move, and each keyword's move.
 
     - ``trend_data``: one point per period holding every answer of the scope in it.
-    - ``latest``: every KPI over each keyword's latest period, pooled.
+    - ``latest``: every KPI over each keyword's latest period, pooled; ``latest_brands``: its leaderboard.
     - ``change``: the latest period against the previous one, over the keywords measured in both.
     - ``keyword_trends``: each keyword's latest period and change, best visibility score first.
     - ``overall``: how many keywords improve, decline or hold on the visibility score.
+    - ``brand_trends``: the tracked brand and its leading competitors per period.
     """
     domains = list(owned_domains)
     per_keyword = {
@@ -157,6 +219,7 @@ def trend_view(
         if (periods := _by_period(answers_by_keyword.get(keyword, ()), period))
     }
     series = _by_period((answer for periods in per_keyword.values() for bucket in periods.values() for answer in bucket), period)
+    series_kpis = {key: brand_kpis(answers, domains) for key, answers in series.items()}
     keyword_trends = [_keyword_trend(keyword, periods, domains) for keyword, periods in per_keyword.items()]
     keyword_trends.sort(key=lambda row: (-row['kpis']['visibility_score'], row['keyword'].lower()))
     directions = [row['change']['trends']['visibility_score'] if row['change'] else 'stable' for row in keyword_trends]
@@ -168,11 +231,12 @@ def trend_view(
                 'period': key,
                 'runs': len({answer.timestamp for answer in answers}),
                 'keywords_with_data': len({answer.keyword for answer in answers}),
-                'kpis': brand_kpis(answers, domains),
+                'kpis': series_kpis[key],
             }
             for key, answers in series.items()
         ],
         'latest': brand_kpis(latest, domains),
+        'latest_brands': brand_table(latest)[:LATEST_BRANDS_LIMIT],
         'change': _group_change(per_keyword, domains),
         'keyword_trends': keyword_trends,
         'overall': {
@@ -180,7 +244,16 @@ def trend_view(
             'declining_count': directions.count('declining'),
             'stable_count': directions.count('stable'),
         },
+        'brand_trends': _brand_trends(series, series_kpis),
     }
 
 
-__all__ = ['PERIODS', 'period_key', 'trend_view', 'visibility_view']
+__all__ = [
+    'BRAND_TREND_COMPETITORS',
+    'LATEST_BRANDS_LIMIT',
+    'PERIODS',
+    'SOURCES_LIMIT',
+    'period_key',
+    'trend_view',
+    'visibility_view',
+]

@@ -11,6 +11,9 @@ import {
 import { BrandLeaderboard } from './BrandLeaderboard';
 import { KeywordVisibilityTable } from './KeywordVisibilityTable';
 import { OverviewPanel } from './OverviewPanel';
+import {
+  BrandShareOfVoicePanel, EnginesPanel, SourcesPanel
+} from './VisibilityChartPanels';
 import { VisibilityDefinitions } from './VisibilityDefinitions';
 import {
   VisibilityHistory, type HistoryRangeDays
@@ -67,7 +70,8 @@ function ExportButton({
 /**
  * The Visibility tab for any scope (one keyword, a group, every keyword):
  * the KPIs of the latest runs with their change since the previous runs,
- * their history, every keyword and the brand leaderboard
+ * their history, every keyword, each brand's share of voice and the brand
+ * leaderboard, the KPIs per AI engine and the most cited domains
  * (`docs/kpi-definitions.md`).
  */
 export function VisibilityOverview({
@@ -94,7 +98,10 @@ export function VisibilityOverview({
 
       <VisibilityHistory trends={trends} error={trendsError} rangeDays={rangeDays} onRangeChange={onRangeChange} />
       <KeywordVisibilityTable rows={visibility.keywords} />
+      <BrandShareOfVoicePanel brands={visibility.brands} />
       <BrandLeaderboard brands={visibility.brands} />
+      <EnginesPanel engines={visibility.engines} />
+      <SourcesPanel sources={visibility.sources} total={visibility.sources_total} />
       {children}
       <VisibilityDefinitions />
     </div>

@@ -51,7 +51,50 @@ export interface VisibilityResponse {
   /** Latest against previous run over the keywords answered in both; `null` without such a keyword. */
   change: ScopeChange | null;
   brands: BrandLeaderboardRow[];
+  /** Every KPI per AI engine, engines in name order. */
+  engines: EngineKpis[];
+  /** The most cited domains (at most 25), most cited first. */
+  sources: SourceRow[];
+  /** How many distinct domains the answers cite. */
+  sources_total: number;
   keywords: KeywordVisibilityRow[];
+}
+
+/** Every KPI of the tracked brand over one AI engine's answers. */
+export interface EngineKpis {
+  engine: string;
+  kpis: BrandKpis;
+}
+
+/** One domain cited in a scope's answers (`source_table`). */
+export interface SourceRow {
+  domain: string;
+  /** One of the brand's owned domains, or a subdomain of one. */
+  owned: boolean;
+  /** Answers citing the domain. */
+  citations: number;
+  citation_rate: number | null;
+  citation_share: number | null;
+  engines: string[];
+  keywords: number;
+}
+
+/** One period of a brand's trend. */
+export interface BrandTrendPoint {
+  period: string;
+  share_of_voice: number | null;
+  mention_rate: number | null;
+  visibility_score: number | null;
+  average_position: number | null;
+}
+
+/** The tracked brand and its leading competitors over time (`/trends`). */
+export interface BrandTrends {
+  tracked: BrandTrendPoint[];
+  competitors: Array<{
+    name: string;
+    points: BrandTrendPoint[];
+  }>;
 }
 
 export interface PromptBrandData {
@@ -222,6 +265,8 @@ export interface HistoricalTrendsResponse {
   trend_data: TrendDataPoint[];
   /** Every KPI over each keyword's latest period, pooled. */
   latest: BrandKpis;
+  /** The brand leaderboard of those latest periods (at most 10). */
+  latest_brands: BrandLeaderboardRow[];
   /** Latest against previous period over the keywords measured in both; `null` before a second period. */
   change: ScopeChange | null;
   /** Best visibility score first. */
@@ -232,6 +277,7 @@ export interface HistoricalTrendsResponse {
     declining_count: number;
     stable_count: number;
   };
+  brand_trends: BrandTrends;
 }
 
 export interface PersonaBrandRanking {

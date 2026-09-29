@@ -14,6 +14,7 @@ import {
 } from '../../ui/reportScope';
 import { useExecutiveSummary } from './useExecutiveSummary';
 import { HeadlineSection } from './sections/HeadlineSection';
+import { TrendSnapshotSection } from './sections/TrendSnapshotSection';
 import { WinsAndGapsSection } from './sections/WinsAndGapsSection';
 import { NextActionsSection } from './sections/NextActionsSection';
 
@@ -26,12 +27,14 @@ import { NextActionsSection } from './sections/NextActionsSection';
  *
  * Sections, in this order:
  *   1. Headline — every KPI with its change, and the keywords by trend.
- *   2. Top wins and gaps — three improvers, three decliners.
- *   3. Next actions — top three recommendations.
- *   4. How these KPIs are measured — the definitions, for print.
+ *   2. Trend and share of voice — the KPI lines and the share-of-voice donut.
+ *   3. Top wins and gaps — three improvers, three decliners.
+ *   4. Next actions — top three recommendations.
+ *   5. How these KPIs are measured — the definitions, for print.
  *
- * Designed to fit on two printed pages: sections 1+2 on the first,
- * section 3 on the second (via `startNewPage` on NextActionsSection).
+ * Designed to print the state on the first page (sections 1+2) and what
+ * to do about it on the second (sections 3+4, via `startNewPage` on
+ * WinsAndGapsSection).
  */
 export function ExecutiveSummaryReport() {
   const [searchParams] = useSearchParams();
@@ -68,6 +71,11 @@ export function ExecutiveSummaryReport() {
       )}
     >
       <HeadlineSection
+        data={data.data}
+        loading={data.loading}
+        error={data.error}
+      />
+      <TrendSnapshotSection
         data={data.data}
         loading={data.loading}
         error={data.error}

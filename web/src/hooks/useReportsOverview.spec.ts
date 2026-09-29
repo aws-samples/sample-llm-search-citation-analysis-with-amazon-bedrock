@@ -1,10 +1,16 @@
 import {
   describe, it, expect, vi 
 } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import {
+  act, renderHook
+} from '@testing-library/react';
 import { useReportsOverview } from './useReportsOverview';
-import { mockReportsOverview } from './useReportsOverview-fixtures';
+import {
+  mockReportsOverview, overviewWithout
+} from './useReportsOverview-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
+import { createMockJsonResponse } from '../test/fetchResponses';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import {
   groupScope, keywordScope 
 } from '../components/ui/reportScope-fixtures';
@@ -46,5 +52,16 @@ describe('useReportsOverview', () => {
       ['Failed to load visibility metrics', 'response is a backend {error} body', { errorResponse: { error: 'No data' } }],
       ['Invalid visibility request', 'payload is missing the kpis field', { invalidResponse: true }],
     ],
+  });
+
+  it.each(['trend_data', 'latest_brands'] as const)('reports an invalid request when the overview has no %s to chart', async (field) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(overviewWithout(field)));
+    const { result } = renderHook(() => useReportsOverview());
+
+    await act(() => result.current.fetchReportsOverview());
+
+    expect(result.current.error).toBe('Invalid visibility request');
+    consoleError.mockRestore();
   });
 });

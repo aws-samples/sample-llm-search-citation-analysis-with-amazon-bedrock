@@ -5,6 +5,7 @@ import {
   TrendPeriodTable,
   gateSection,
 } from '../../layout';
+import { KpiTrendPanel } from './ReportChartPanels';
 
 interface Props {
   readonly trends: HistoricalTrendsResponse | null;
@@ -13,9 +14,10 @@ interface Props {
 }
 
 /**
- * The scope's KPIs per day, week or month of the trend window: each row
- * pools every answer of the period. Long windows are sampled to at most 14
- * rows so the table fits one printed page, keeping the first and last period.
+ * The scope's KPIs per day, week or month of the trend window: a line chart
+ * of every period over the table, whose rows pool every answer of the period.
+ * Long windows are sampled to at most 14 rows so the table fits one printed
+ * page, keeping the first and last period; the chart draws every period.
  */
 export function TrendHistorySection({
   trends, loading, error 
@@ -40,6 +42,7 @@ export function TrendHistorySection({
       subtitle={`Every KPI per ${period} since ${formatDateOnly(since)}, over every answer in the ${period}.`}
       startNewPage
     >
+      <KpiTrendPanel points={points} className="mb-4" />
       <TrendPeriodTable points={points} />
     </ReportSection>
   );
