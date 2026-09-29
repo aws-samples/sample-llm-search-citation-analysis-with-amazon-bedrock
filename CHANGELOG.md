@@ -9,6 +9,13 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.23.3] - 2026-09-29
+
+### Changed
+
+- `docs/kpi-definitions.md` is now a guide to our own KPIs only: the comparisons with third-party products and their
+  source links are removed, and the code comments and this changelog no longer name other products.
+
 ## [2.23.2] - 2026-09-29
 
 Documentation brought up to date with the code; out-of-date content removed.
@@ -51,8 +58,7 @@ surviving mutant is now caught by a test, removed as dead code, or annotated as 
 
 ## [2.23.0] - 2026-09-29
 
-Reports benchmarked against AI-visibility vendors (`docs/report-benchmark.md`): the reports that are
-table stakes elsewhere are added, every KPI is shown per engine, and the reports gain charts.
+Four new reports, every KPI shown per engine, and charts across the reports.
 
 ### Added
 
@@ -74,11 +80,12 @@ table stakes elsewhere are added, every KPI is shown per engine, and the reports
   and a trend snapshot in the Executive Summary. Every chart has its figures in words for screen readers.
 - **The Visibility tab's Excel export** gains Engines and Sources sheets.
 - **Every KPI per engine** in the Keyword Deep Dive and on the Visibility tab, in the same table as the AI Engines report.
+
 ## [2.22.0] - 2026-09-29
 
 ### Changed
 
-- **The Visibility tab, `/visibility`, `/trends` and `/reports/overview` now use the market-aligned KPIs**
+- **The Visibility tab, `/visibility`, `/trends` and `/reports/overview` now use the shared KPIs**
   (`docs/kpi-definitions.md`), computed by the KPI engine from successful AI answers only.
   - **`/visibility`** returns one response shape for every scope (one keyword, a group, selected keywords, all):
     - every KPI over each keyword's latest run, pooled;
@@ -117,9 +124,8 @@ table stakes elsewhere are added, every KPI is shown per engine, and the reports
 
 ### Added
 
-- **KPI reference** in `docs/kpi-definitions.md`. It gives one definition per KPI, aligned with how
-  Otterly, Peec, Profound, Scrunch, Semrush, Ahrefs and Evertune measure AI visibility. For each KPI it
-  gives the formula, the denominator and the edge cases, and says which old field it replaces.
+- **KPI reference** in `docs/kpi-definitions.md`. It gives one definition per KPI: the formula, the
+  denominator and the edge cases.
 - **KPI engine** (`lambda/shared/kpi_engine.py`). Every KPI is computed once from the same unit, the
   successful AI answer:
   - answers and mentions;
@@ -143,7 +149,7 @@ table stakes elsewhere are added, every KPI is shown per engine, and the reports
 
 ### Changed
 
-- **Per-group report, KPI history API and Excel export** now use the market definitions. Group values
+- **Per-group report, KPI history API and Excel export** now use these definitions. Group values
   pool every answer, so each answer weighs the same instead of each keyword.
   - The former "citation rate" (keywords whose answers name the brand) is now **keyword coverage**.
   - The headline "how visible are we" KPI is now **mention rate**.

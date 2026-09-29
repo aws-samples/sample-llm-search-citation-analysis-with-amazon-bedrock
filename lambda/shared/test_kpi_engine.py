@@ -1,4 +1,4 @@
-"""Tests for shared/kpi_engine.py — the market-aligned KPIs every page reports."""
+"""Tests for shared/kpi_engine.py — the visibility KPIs every page reports."""
 
 from __future__ import annotations
 

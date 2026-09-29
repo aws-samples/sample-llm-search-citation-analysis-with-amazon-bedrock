@@ -1,6 +1,6 @@
 # KPI definitions
 
-This is the reference for every visibility KPI the system reports: what each one means, how it is calculated, and which market definition it follows. The Visibility tab, the reports and their exports, and the KPI alerts all use these definitions. Prompt Insights and Citation Gaps show figures of their own (see [engine coverage](#engine_coverage--engine-coverage)); those are not these KPIs.
+This is the reference for every visibility KPI the system reports: what each one means and how it is calculated. The Visibility tab, the reports and their exports, and the KPI alerts all use these definitions. Prompt Insights and Citation Gaps show figures of their own (see [engine coverage](#engine_coverage--engine-coverage)); those are not these KPIs.
 
 - Code source of truth: `lambda/shared/kpi_engine.py` (the calculations) and `web/src/constants/kpiDefinitions.ts` (the customer-facing wording in tooltips and exports).
 - Contract: `lambda/shared/test_kpi_contract.py` fails unless the KPI sections below, `KPI_IDS` in the engine and the web definitions list the same KPIs in the same order, with the same labels. Change all three together.
@@ -71,13 +71,7 @@ This is the share of AI answers that mention the brand. It is the headline "how 
 
 **Edge cases:** empty when there are no answers.
 
-**Market:**
-
-- Otterly: "Brand coverage" is the share of prompts where the brand appears.
-- Peec: "Visibility" is the share of chats that mention the brand.
-- Profound, Scrunch and Semrush: "visibility" or "mention rate" is the share of responses mentioning the brand.
-
-Otterly counts once per prompt, whereas we count once per answer. That matches Peec, Profound and Scrunch, and it also rewards being named by more engines.
+It counts once per answer, not once per keyword, so a brand named by more engines for the same keyword scores higher.
 
 ### `share_of_voice` — Share of voice
 
@@ -87,25 +81,11 @@ A sighting is one brand in one answer, so a brand named five times in one answer
 
 **Edge cases:** empty when the answers name no brand at all. The result is 0 when brands are named but the tracked brand is not.
 
-**Market:**
-
-- Peec: share of voice is the brand's mentions divided by the mentions of all tracked brands.
-- Otterly and Semrush: share of voice is the brand's share of all brand mentions.
-- Scrunch and Evertune: similar definitions based on mention counts.
-
-We count each brand once per answer, which is how Peec and Scrunch count mentions.
-
 ### `average_position` — Average position
 
 **Formula:** the mean of the brand's best position, over the answers that name the brand and place it. Lower is better, and 1 is the best possible value.
 
 **Edge cases:** answers that do not mention the brand are not in this average. A brand named once, first, has an average position of 1 however rarely it is mentioned, so always read it with the mention rate. Mentions with an unknown position (999) are left out. The KPI is empty when no mention has a known position.
-
-**Market:**
-
-- Peec: position is the brand's average rank in the chats that mention it.
-- Profound and Semrush: average position counts only responses where the brand appears.
-- Otterly: "average position" in the ranking list.
 
 ### `top_1_share` — Top-1 share
 
@@ -114,8 +94,6 @@ We count each brand once per answer, which is how Peec and Scrunch count mention
 Unlike the average position, the denominator is every answer, including answers that do not mention the brand. This makes it a rate of being the first recommendation.
 
 **Edge cases:** empty when there are no answers.
-
-**Market:** there is no vendor standard. Evertune and Profound report the distribution of positions; this is our summary of it.
 
 ### `top_3_share` — Top-3 share
 
@@ -135,12 +113,6 @@ The score combines how often and how early the brand is named in a single 0–10
 
 **Edge cases:** empty when there are no answers. A mention whose position is unknown gets the 10th-position weight: it still counts as a mention, but not as a prominent one.
 
-**Market:**
-
-- Evertune: the visibility score weights each mention by position, and each position is worth 90 % of the one above it.
-- Profound and Semrush: visibility scores combine mention frequency with position.
-- Otterly: "brand visibility index".
-
 ### `citations` — Citations
 
 The number of answers that cite at least one owned domain as a source.
@@ -155,13 +127,6 @@ This is the share of AI answers that link to the brand's own website. It is inde
 
 **Edge cases:** empty until owned domains are configured, or when there are no answers.
 
-**Market:**
-
-- Otterly: "domain coverage" is the share of prompts citing the domain.
-- Peec: the share of chats that cite the domain.
-- Semrush and Ahrefs: cited pages and citation counts.
-- Profound: "citation rate".
-
 ### `citation_share` — Citation share
 
 **Formula:** owned (answer, domain) pairs ÷ all (answer, domain) pairs × 100.
@@ -169,12 +134,6 @@ This is the share of AI answers that link to the brand's own website. It is inde
 Each cited domain counts once per answer, however many of its URLs the answer lists. This is the brand's share of all the sources the AI engines cite.
 
 **Edge cases:** empty until owned domains are configured. It is also empty when the answers cite nothing.
-
-**Market:**
-
-- Promptwatch: citation share is the brand's share of all citations.
-- Otterly and Peec: domain share of citations.
-- Scrunch: source share.
 
 ### `net_sentiment` — Net sentiment
 
@@ -184,22 +143,11 @@ The labels are positive, neutral, negative and mixed. Neutral and mixed sighting
 
 **Edge cases:** empty when no mention of the brand has a sentiment label.
 
-**Market:**
-
-- Otterly: the "net sentiment score" is on a −100 to +100 scale.
-- Peec and Profound: sentiment is the share of positive, neutral and negative mentions.
-- Scrunch: sentiment split.
-
 ### `engine_coverage` — Engine coverage
 
 **Formula:** AI engines with at least one answer naming the brand ÷ AI engines with at least one answer in scope × 100.
 
 **Edge cases:** empty when there are no answers. Engines that were disabled, or failed for the whole scope, are not in the denominator.
-
-**Market:**
-
-- Otterly and Peec: platform and model breakdown of visibility.
-- Scrunch: "platform coverage".
 
 Not the same as the "provider coverage" on Prompt Insights, which divides the engines naming the brand by every result row of the latest run (web-search, failed and persona rows included).
 
@@ -210,8 +158,6 @@ Not the same as the "provider coverage" on Prompt Insights, which divides the en
 It shows how much of the keyword set the brand appears for at all, however many engines name it for each keyword.
 
 **Edge cases:** empty when there are no answers.
-
-**Market:** Otterly's "brand coverage" counts prompts; this is the same idea one level up, where a keyword is a topic.
 
 ## Per-brand leaderboards
 
@@ -257,16 +203,3 @@ These apply the same formulas to a slice of the scope's answers:
   | Improvement after a content change | the visibility score rose by at least the threshold after a content change recorded between the two snapshots | 5 points |
 
   Point and position thresholds accept 0.1–100 and N accepts 1–10. Each snapshot records the KPI definition version (`KPI_VERSION`); snapshots of different versions are never compared, so the first run after a definition change sets a new baseline and raises no alert.
-
-## Sources
-
-The market definitions above are paraphrased from these public pages, read in September 2026:
-
-- [Otterly — brand report KPI definitions](https://help.otterly.ai/brand-report-kpi-definition)
-- [Peec AI — metrics overview](https://docs.peec.ai/metrics-overview)
-- [Profound — how to track your visibility in AI search](https://www.tryprofound.com/blog/how-to-track-your-visibility-in-ai-search)
-- [Scrunch — metrics guide](https://helpcenter.scrunchai.com/en/articles/13566677-scrunch-metrics-guide)
-- [Semrush — AI SEO metrics](https://www.semrush.com/kb/1594-ai-seo-metrics)
-- [Ahrefs — AI visibility metrics](https://help.ahrefs.com/en/articles/15501968-ai-visibility-metrics)
-- [Evertune — essential AI search optimization metrics](https://www.evertune.ai/resources/insights-on-ai/15-essential-metrics-every-ai-search-optimization-platform-should-track)
-- [Promptwatch — citation share](https://promptwatch.com/glossary/citation-share)
