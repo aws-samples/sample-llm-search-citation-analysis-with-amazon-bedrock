@@ -9,6 +9,7 @@ what comes out of the parse.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -30,6 +31,11 @@ def extractor_with(**overrides: Any) -> LLMBrandExtractor:
 def tracking(first_party: list[str], competitors: list[str]) -> dict[str, list[str]]:
     """The ``tracked_brands`` block of an extraction config."""
     return {'first_party': first_party, 'competitors': competitors}
+
+
+def format_example(prompt: str) -> list[dict[str, Any]]:
+    """The JSON array the prompt shows the model as its output format."""
+    return json.loads(prompt.split('Format:\n', 1)[1].split('\n\nIf no brands', 1)[0])
 
 
 class TestExtractorConfig:
@@ -149,14 +155,110 @@ class TestExtractionPrompt:
         prompt = LLMBrandExtractor()._build_extraction_prompt(TEXT)
 
         assert (
-            '- sentiment: Overall sentiment about this brand (positive/neutral/negative/mixed)\n'
-            '- sentiment_reason: Brief reason for the sentiment (1 sentence)'
+            "- sentiment: How THIS answer portrays THIS brand (not the tone of the whole answer, "
+            "not the brand's general reputation). Exactly one of:\n"
         ) in prompt
+
+    @pytest.mark.parametrize('definition', [
+        '  - "positive": the answer recommends or praises the brand, or credits it with a favourable attribute\n',
+        '  - "negative": the answer criticises the brand, warns against it, or its drawbacks dominate what is said about it\n',
+        '  - "mixed": the answer clearly praises and clearly criticises the brand\n',
+        '  - "neutral": the brand is named or listed without praise or criticism (a plain list entry, a factual mention).'
+        ' Being ranked or listed is not by itself positive.\n',
+    ])
+    def test_defines_each_sentiment_label_by_how_the_answer_portrays_the_brand(self, definition: str) -> None:
+        assert definition in LLMBrandExtractor()._build_extraction_prompt(TEXT)
+
+    def test_asks_for_a_verbatim_sentiment_quote(self) -> None:
+        prompt = LLMBrandExtractor()._build_extraction_prompt(TEXT)
+
+        assert (
+            '- sentiment_quote: A short excerpt (at most 200 characters) copied verbatim from the text that carries the '
+            'sentiment toward this brand; an empty string when the mention is neutral and nothing evaluative is said\n'
+        ) in prompt
+
+    def test_asks_for_a_one_sentence_reason_in_english(self) -> None:
+        prompt = LLMBrandExtractor()._build_extraction_prompt(TEXT)
+
+        assert '- sentiment_reason: One sentence in English explaining the label, in your own words (not a quote)\n' in prompt
+
+    def test_shows_a_format_example_with_positive_negative_and_neutral_brands(self) -> None:
+        prompt = LLMBrandExtractor()._build_extraction_prompt(TEXT)
+
+        example = format_example(prompt)
+        assert [(brand['name'], brand['sentiment']) for brand in example] == [
+            ('Brand A', 'positive'), ('Brand B', 'negative'), ('Brand C', 'neutral'),
+        ]
+
+    def test_quotes_the_negative_passage_in_the_format_example(self) -> None:
+        prompt = LLMBrandExtractor()._build_extraction_prompt(TEXT)
+
+        assert '"sentiment_quote": "Brand B is cheaper, but guests often complain about noise and dated rooms."' in prompt
+
+    def test_shows_the_format_example_as_json_indented_by_two_spaces(self) -> None:
+        prompt = LLMBrandExtractor()._build_extraction_prompt(TEXT)
+
+        assert 'Format:\n[\n  {\n    "name": "Brand A",\n    "parent_company": "Parent Company or null",\n' in prompt
+
+    def test_shows_every_field_of_every_brand_in_the_format_example(self) -> None:
+        prompt = LLMBrandExtractor()._build_extraction_prompt(TEXT)
+
+        assert format_example(prompt) == [
+            {
+                'name': 'Brand A', 'parent_company': 'Parent Company or null', 'classification': 'first_party',
+                'mention_count': 2, 'first_position': 150, 'rank': 1, 'sentiment': 'positive',
+                'sentiment_quote': 'Brand A is the best choice for families, with spacious rooms and a great pool.',
+                'sentiment_reason': 'The answer recommends Brand A for families and praises its rooms.',
+                'ranking_context': 'Recommended as top choice',
+            },
+            {
+                'name': 'Brand B', 'parent_company': None, 'classification': 'competitor',
+                'mention_count': 1, 'first_position': 420, 'rank': 2, 'sentiment': 'negative',
+                'sentiment_quote': 'Brand B is cheaper, but guests often complain about noise and dated rooms.',
+                'sentiment_reason': 'The answer warns about noise and dated rooms at Brand B.',
+                'ranking_context': 'Mentioned as a cheaper but noisy option',
+            },
+            {
+                'name': 'Brand C', 'parent_company': None, 'classification': 'other',
+                'mention_count': 1, 'first_position': 610, 'rank': 3, 'sentiment': 'neutral',
+                'sentiment_quote': '',
+                'sentiment_reason': 'The answer only lists Brand C without evaluating it.',
+                'ranking_context': 'Listed as another option',
+            },
+        ]
+
+    def test_asks_for_sentiment_when_the_config_does_not_mention_it(self) -> None:
+        prompt = LLMBrandExtractor(config={'industry': 'hotels'})._build_extraction_prompt(TEXT)
+
+        assert '- sentiment_reason: One sentence in English' in prompt
+
+    def test_goes_from_rank_to_ranking_context_when_sentiment_is_disabled(self) -> None:
+        prompt = extractor_with(include_sentiment=False)._build_extraction_prompt(TEXT)
+
+        assert '- rank: Order of first appearance (1 = first mentioned)\n- ranking_context: How this brand' in prompt
 
     def test_omits_the_sentiment_fields_when_sentiment_is_disabled(self) -> None:
         prompt = extractor_with(include_sentiment=False)._build_extraction_prompt(TEXT)
 
         assert '- sentiment' not in prompt
+
+    def test_omits_the_sentiment_fields_from_the_format_example_when_sentiment_is_disabled(self) -> None:
+        prompt = extractor_with(include_sentiment=False)._build_extraction_prompt(TEXT)
+
+        assert '"sentiment' not in prompt
+
+    def test_keeps_the_rest_of_the_format_example_when_sentiment_is_disabled(self) -> None:
+        prompt = extractor_with(include_sentiment=False)._build_extraction_prompt(TEXT)
+
+        assert format_example(prompt)[1] == {
+            'name': 'Brand B',
+            'parent_company': None,
+            'classification': 'competitor',
+            'mention_count': 1,
+            'first_position': 420,
+            'rank': 2,
+            'ranking_context': 'Mentioned as a cheaper but noisy option',
+        }
 
     def test_omits_the_ranking_context_field_when_disabled(self) -> None:
         prompt = extractor_with(include_ranking_context=False)._build_extraction_prompt(TEXT)
@@ -263,7 +365,7 @@ class TestExtractMentions:
         prompt, role = bedrock.call_args.args
         assert f'<response_text>{TEXT}</response_text>' in prompt
         assert role is ModelRole.EXTRACTION
-        assert bedrock.call_args.kwargs == {'max_tokens': 4000, 'temperature': 0}
+        assert bedrock.call_args.kwargs == {'max_tokens': 8000, 'temperature': 0}
 
     def test_returns_the_classified_brands_the_model_found(self, bedrock) -> None:
         bedrock.return_value = '[{"name": "Marriott", "classification": "first_party"}, {"name": "Unknown Inn"}]'
@@ -289,6 +391,79 @@ class TestExtractMentions:
         bedrock.side_effect = RuntimeError('ThrottlingException')
 
         assert LLMBrandExtractor().extract_mentions(TEXT) == []
+
+
+def model_brand(**fields: Any) -> str:
+    """The model's answer naming one first-party brand with ``fields`` on top."""
+    return json.dumps([{'name': 'Marriott', 'classification': 'first_party', **fields}])
+
+
+class TestSentimentNormalisation:
+    @pytest.mark.parametrize(('label', 'kept'), [
+        ('positive', 'positive'),
+        ('Negative', 'negative'),
+        (' MIXED ', 'mixed'),
+        ('neutral', 'neutral'),
+    ])
+    def test_keeps_a_known_label_lower_cased(self, bedrock, label: str, kept: str) -> None:
+        bedrock.return_value = model_brand(sentiment=label)
+
+        assert LLMBrandExtractor().extract_mentions(TEXT)[0]['sentiment'] == kept
+
+    @pytest.mark.parametrize('label', ['very positive', '', None, 1, ['positive']])
+    def test_drops_a_label_that_is_not_one_of_the_four(self, bedrock, label: object) -> None:
+        bedrock.return_value = model_brand(sentiment=label)
+
+        assert LLMBrandExtractor().extract_mentions(TEXT) == [{'name': 'Marriott', 'classification': 'first_party'}]
+
+    def test_strips_the_quote_and_the_reason(self, bedrock) -> None:
+        bedrock.return_value = model_brand(
+            sentiment='positive', sentiment_quote='  Marriott is superb.\n', sentiment_reason=' The answer praises it. ',
+        )
+
+        brand = LLMBrandExtractor().extract_mentions(TEXT)[0]
+
+        assert (brand['sentiment_quote'], brand['sentiment_reason']) == ('Marriott is superb.', 'The answer praises it.')
+
+    def test_keeps_an_empty_quote_of_a_neutral_mention(self, bedrock) -> None:
+        bedrock.return_value = model_brand(sentiment='neutral', sentiment_quote='')
+
+        assert LLMBrandExtractor().extract_mentions(TEXT)[0]['sentiment_quote'] == ''
+
+    def test_caps_a_long_quote_at_three_hundred_characters(self, bedrock) -> None:
+        bedrock.return_value = model_brand(sentiment_quote='q' * 301)
+
+        assert LLMBrandExtractor().extract_mentions(TEXT)[0]['sentiment_quote'] == 'q' * 300
+
+    def test_keeps_a_quote_of_exactly_three_hundred_characters(self, bedrock) -> None:
+        bedrock.return_value = model_brand(sentiment_quote=' ' + 'q' * 300 + ' ')
+
+        assert LLMBrandExtractor().extract_mentions(TEXT)[0]['sentiment_quote'] == 'q' * 300
+
+    def test_drops_a_quote_and_a_reason_that_are_not_strings(self, bedrock) -> None:
+        bedrock.return_value = model_brand(sentiment_quote=['Marriott is superb.'], sentiment_reason=3)
+
+        assert LLMBrandExtractor().extract_mentions(TEXT) == [{'name': 'Marriott', 'classification': 'first_party'}]
+
+    def test_keeps_the_other_fields_of_the_brand(self, bedrock) -> None:
+        bedrock.return_value = model_brand(rank=2, ranking_context='Budget option', sentiment='positive')
+
+        assert LLMBrandExtractor().extract_mentions(TEXT) == [{
+            'name': 'Marriott', 'classification': 'first_party', 'rank': 2, 'ranking_context': 'Budget option',
+            'sentiment': 'positive',
+        }]
+
+    def test_removes_every_sentiment_field_when_sentiment_is_disabled(self, bedrock) -> None:
+        bedrock.return_value = model_brand(sentiment='positive', sentiment_quote='Superb.', sentiment_reason='Praised.')
+
+        mentions = extractor_with(include_sentiment=False).extract_mentions(TEXT)
+
+        assert mentions == [{'name': 'Marriott', 'classification': 'first_party'}]
+
+    def test_keeps_the_sentiment_when_the_config_does_not_mention_it(self, bedrock) -> None:
+        bedrock.return_value = model_brand(sentiment='positive')
+
+        assert LLMBrandExtractor(config={'industry': 'hotels'}).extract_mentions(TEXT)[0]['sentiment'] == 'positive'
 
 
 MODEL_ANSWER = (

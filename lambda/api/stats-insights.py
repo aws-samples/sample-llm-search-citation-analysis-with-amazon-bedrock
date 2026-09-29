@@ -4,6 +4,7 @@ Stats & Insights Consolidated API Lambda
 Routes requests to the appropriate handler based on API Gateway resource path.
 Consolidates 6 separate Lambdas into one to reduce CloudFormation resource count:
 - GET /api/stats -> get-stats handler
+- GET /api/visibility/sentiment-examples -> get-sentiment-examples handler
 - GET /api/visibility -> get-visibility-metrics handler
 - GET /api/prompt-insights -> get-prompt-insights handler
 - GET /api/citation-gaps -> get-citation-gaps handler
@@ -22,6 +23,8 @@ from shared.consolidated_router import route_map_handler
 # Map resource paths to handler module filenames
 ROUTE_MAP = {
     '/api/stats': 'get-stats.py',
+    # Before its parent: the matcher takes the first prefix that matches.
+    '/api/visibility/sentiment-examples': 'get-sentiment-examples.py',
     '/api/visibility': 'get-visibility-metrics.py',
     '/api/prompt-insights': 'get-prompt-insights.py',
     '/api/citation-gaps': 'get-citation-gaps.py',

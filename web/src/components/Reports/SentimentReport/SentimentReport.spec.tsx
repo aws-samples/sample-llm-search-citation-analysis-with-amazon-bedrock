@@ -137,6 +137,12 @@ describe('Sentiment per engine', () => {
 
     expect(within(sectionTitled('Sentiment per engine')).getByText(/^Sentiment of the labelled mentions/).textContent).toMatch(/Google Gemini: .* OpenAI: /);
   });
+
+  it('offers the answers behind each count of the split', () => {
+    renderSections(<SentimentSections report={buildScopeReport()} />);
+
+    expect(within(sectionTitled('Sentiment per engine')).getByRole('button', { name: 'Show the 5 positive answers from all engines' })).toBeInTheDocument();
+  });
 });
 
 describe('Sentiment per brand', () => {

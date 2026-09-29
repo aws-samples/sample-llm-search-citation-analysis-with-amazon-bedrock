@@ -58,6 +58,12 @@ describe('useScopeReportData', () => {
     expect([result.current.days, result.current.period]).toStrictEqual([90, 'week']);
   });
 
+  it('reports the scope it covers, for sections that fetch more of it', () => {
+    const { result } = renderHook(() => useScopeReportData(groupScope('hotel-sol'), 30));
+
+    expect(result.current.scope).toStrictEqual(groupScope('hotel-sol'));
+  });
+
   it('refetches only the trend when the period changes', () => {
     const { rerender } = renderHook(({ days }) => useScopeReportData(ALL_SCOPE, days), { initialProps: { days: 30 } });
     rerender({ days: 180 });

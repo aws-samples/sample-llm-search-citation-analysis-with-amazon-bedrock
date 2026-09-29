@@ -459,6 +459,21 @@ class TestBrandMentionsScope:
     def test_group_scope_counts_distinct_providers_across_keywords(self, latest_coruna_hotel_brand):
         assert latest_coruna_hotel_brand['provider_count'] == 2
 
+    def test_appearances_carry_the_sentiment_quote_next_to_the_reason(self, brand_mentions):
+        brand = {**_brand('Hotel Coruna', 'first_party', sentiment='negative'),
+                 'sentiment_quote': 'Rooms feel dated.', 'sentiment_reason': 'The answer warns about dated rooms.'}
+        resource, _ = _fake_dynamodb(search_rows={'hotel coruna spa': [_result('hotel coruna spa', 'openai', [brand])]})
+        with (
+            patch.object(brand_mentions, 'dynamodb', resource),
+            patch.object(brand_mentions, 'get_brand_config', return_value={'tracked_brands': {}}),
+        ):
+            body = _body(brand_mentions.handler(_event({'group_id': 'coruna'}), None))
+
+        appearance = body['aggregated']['brands'][0]['appearances'][0]
+        assert (appearance['sentiment_quote'], appearance['sentiment_reason']) == (
+            'Rooms feel dated.', 'The answer warns about dated rooms.',
+        )
+
     def test_group_scope_reads_projections_without_the_llm_text(self, brand_mentions_env):
         module, tables = brand_mentions_env
 

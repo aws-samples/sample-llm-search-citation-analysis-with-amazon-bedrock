@@ -109,6 +109,7 @@ def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, An
                 'first_position': brand.get('first_position'),
                 'sentiment': brand.get('sentiment'),
                 'sentiment_reason': brand.get('sentiment_reason'),
+                'sentiment_quote': brand.get('sentiment_quote'),
                 'ranking_context': brand.get('ranking_context')
             })
 

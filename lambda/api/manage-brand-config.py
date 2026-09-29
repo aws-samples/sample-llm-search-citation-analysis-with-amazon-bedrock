@@ -91,7 +91,8 @@ _EXAMPLE_MENTION = {
     "first_position": 150,
     "rank": 1,
     "sentiment": "positive",
-    "sentiment_reason": "Praised for quality and value",
+    "sentiment_quote": "Brand Name is the best choice for families, with spacious rooms.",
+    "sentiment_reason": "The answer recommends the brand for families and praises its rooms.",
     "ranking_context": "Recommended as top choice",
 }
 

@@ -47,6 +47,8 @@ export interface BrandAppearance {
   first_position: number;
   sentiment?: string;
   sentiment_reason?: string;
+  /** The verbatim passage carrying the sentiment (rows extracted since 2.25.0). */
+  sentiment_quote?: string;
   ranking_context?: string;
 }
 

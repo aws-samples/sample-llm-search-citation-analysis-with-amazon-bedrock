@@ -9,6 +9,32 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.25.0] - 2026-09-29
+
+### Added
+
+- **The answers behind every sentiment count.** The Sentiment report's AI-engine section gains a table of the
+  positive, neutral, mixed and negative counts for all engines and for each engine. Each count opens a window that
+  lists the answers behind it: the brand, the passage that carries the sentiment (verbatim), why it was labelled that
+  way, the ranking context, the keyword, engine, persona and run date, and the full answer on demand. The counts and
+  the list come from the same answers and sightings as the report's KPIs (each keyword's latest run).
+- `GET /api/visibility/sentiment-examples` (scope, `sentiment`, optional `provider`, `limit` up to 50): those
+  answers, with `total` (see "Net sentiment" in `docs/kpi-definitions.md`).
+
+### Changed
+
+- **Sentiment labelling is defined.** The extraction prompt now labels how each answer portrays each brand, not the
+  tone of the whole answer: positive (recommended, praised or credited with a favourable attribute), negative
+  (criticised, warned against, or its drawbacks dominate), mixed (clearly both), neutral (named or listed without
+  praise or criticism; being listed is not by itself positive). Before, the labels were undefined and the only format
+  example was positive. It also asks for the verbatim passage (`sentiment_quote`) and a one-sentence English reason,
+  drops any label outside the four, and allows a longer reply so long brand lists are not cut off. The new definition
+  applies to answers analysed from this release on.
+- The Keyword Deep Dive's sentiment examples show the verbatim passage as the quotation and the reason as "Why: …";
+  before, the model's paraphrase appeared in quotation marks as if the engine had said it. `/api/brand-mentions`
+  appearances carry `sentiment_quote`.
+- The brand-configuration prompt preview shows the same fields as the real prompt.
+
 ## [2.24.1] - 2026-09-29
 
 ### Fixed
