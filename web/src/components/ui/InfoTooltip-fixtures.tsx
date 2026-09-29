@@ -10,3 +10,9 @@ export function renderCitationRateTooltip(): HTMLElement {
   render(<InfoTooltip label="Citation rate" text={TOOLTIP_TEXT} />);
   return screen.getByRole('button', { name: 'About Citation rate' });
 }
+
+
+/** The id of the tooltip that describes `button`. */
+export function tooltipIdOf(button: HTMLElement): string {
+  return button.getAttribute('aria-describedby') ?? '';
+}
