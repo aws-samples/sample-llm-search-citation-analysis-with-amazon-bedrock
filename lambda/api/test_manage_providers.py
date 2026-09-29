@@ -328,6 +328,15 @@ class TestKeyProbeTimeouts:
     def test_covers_every_listed_provider(self):
         assert set(_module._KEY_PROBES) == set(_module.PROVIDERS)
 
+    @pytest.mark.parametrize(('provider_id', 'url'), [
+        ('claude', 'https://api.anthropic.com/v1/messages'),
+        ('perplexity', 'https://api.perplexity.ai/chat/completions'),
+    ])
+    def test_sends_the_probe_to_the_providers_answer_endpoint(self, requests_stub, provider_id, url):
+        _module.validate_api_key(provider_id, 'test-key-1234')
+
+        assert (requests_stub.call_args.kwargs['method'], requests_stub.call_args.kwargs['url']) == ('post', url)
+
     def test_reports_a_timed_out_probe_as_invalid_without_raising(self, requests_stub):
         requests_stub.side_effect = ProbeTimeout()
 

@@ -668,7 +668,8 @@ def _gemini_model_ids(payload: Any) -> list[str]:
 
 # Claude 3 models predate the current web search tool generation (the 3.x
 # ids that support it are deprecated), so the picker offers Claude 4 and later.
-_CLAUDE_EXCLUDED_PREFIXES = ('claude-2', 'claude-3', 'claude-instant')
+# Older families (Claude 2, Instant) are retired and no longer listed.
+_CLAUDE_EXCLUDED_PREFIX = 'claude-3'
 
 
 def _claude_model_ids(payload: Any) -> list[str]:
@@ -677,7 +678,7 @@ def _claude_model_ids(payload: Any) -> list[str]:
     return [
         entry['id'] for entry in entries or []
         if isinstance(entry, dict) and is_valid_model_id(entry.get('id'))
-        and entry['id'].startswith('claude-') and not entry['id'].startswith(_CLAUDE_EXCLUDED_PREFIXES)
+        and entry['id'].startswith('claude-') and not entry['id'].startswith(_CLAUDE_EXCLUDED_PREFIX)
     ]
 
 

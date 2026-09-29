@@ -318,6 +318,15 @@ class TestPerplexityAndClaudeAnswerWithTheConfiguredModel:
 
         assert client_class.call_args.kwargs['model'] == model
 
+    def test_perplexity_is_sent_the_query_as_one_user_message(self):
+        client = MagicMock()
+        client.chat_completion.return_value = {'choices': [{'message': {'content': 'answer'}}]}
+
+        with patch.object(handler, 'PerplexityClient', return_value=client):
+            handler.query_perplexity('hotels in malaga', 'fake-key', model='sonar-pro')
+
+        assert client.chat_completion.call_args.args[0] == [{'role': 'user', 'content': 'hotels in malaga'}]
+
 
 class TestModelChangesReachAWarmLambda:
     """The model cache used to survive the whole warm container."""
