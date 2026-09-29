@@ -141,6 +141,19 @@ Each cited domain counts once per answer, however many of its URLs the answer li
 
 The labels are positive, neutral, negative and mixed. Neutral and mixed sightings count in the denominator but pull toward 0. Sightings without a label are left out. The split (positive, neutral, negative, mixed) is reported next to the net value as `sentiment_split`.
 
+**Labels.** The brand extractor (`lambda/search/brand_extractor.py`) labels each sighting by how that answer portrays that brand, not by the tone of the whole answer or the brand's general reputation:
+
+| Label | When |
+|---|---|
+| positive | the answer recommends or praises the brand, or credits it with a favourable attribute |
+| negative | the answer criticises the brand, warns against it, or its drawbacks dominate what is said about it |
+| mixed | the answer clearly praises and clearly criticises the brand |
+| neutral | the brand is named or listed without praise or criticism; being ranked or listed is not by itself positive |
+
+With each label the extractor stores `sentiment_quote`, the passage of the answer that carries it (verbatim, empty for a plain neutral mention), and `sentiment_reason`, one sentence explaining it. Any other label is dropped, so that sighting counts as unlabelled. Answers analysed before 2.25.0 have no quote and were labelled without these definitions.
+
+**Examples** (`/api/visibility/sentiment-examples`). The sightings behind one count of the split: the same answers (each keyword's latest run in the scope) and the same first-party sightings, filtered by `sentiment` and optionally by one AI engine (`provider`). The response gives `total` and the first `limit` (at most 50, default 20), newest run first, each with its quote, reason, ranking context, keyword, engine, persona and the answer (up to 20,000 characters).
+
 **Edge cases:** empty when no mention of the brand has a sentiment label.
 
 ### `engine_coverage` — Engine coverage

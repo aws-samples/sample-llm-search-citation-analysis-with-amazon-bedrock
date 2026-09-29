@@ -156,6 +156,18 @@ const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
     config: 'Visibility tracking not configured',
     unknown: 'Failed to load visibility metrics',
   },
+  sentimentExamples: {
+    network: 'Unable to load the answers',
+    auth: 'Authentication required to view the answers',
+    permission: 'You do not have permission to view these answers',
+    not_found: 'No answers found',
+    validation: 'Invalid answers request',
+    rate_limit: 'Answer requests limited. Please wait',
+    server: 'Failed to load the answers',
+    timeout: 'Loading the answers timed out',
+    config: 'Answers are not available',
+    unknown: 'Failed to load the answers',
+  },
   citationGaps: {
     network: 'Unable to load citation gaps',
     auth: 'Authentication required to view citation gaps',

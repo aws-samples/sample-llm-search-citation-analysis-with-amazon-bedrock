@@ -15,7 +15,9 @@ from shared.answer_queries import (
     query_keyword_rows_since,
     query_keyword_run_rows,
     query_last_two_runs_rows,
+    query_latest_run_rows,
 )
+from shared.kpi_engine import ANSWER_ATTRIBUTE_NAMES, ANSWER_PROJECTION
 
 RUN_1 = '2026-09-01T06:00:00.000000Z'
 RUN_2 = '2026-09-08T06:00:00.000000Z'
@@ -82,6 +84,44 @@ class TestWindowAndRunQueries:
         ]
 
         assert query(table, 'hotel malaga', RUN_1) == [{'timestamp': RUN_1}, {'timestamp': RUN_2}]
+
+    def test_reads_one_run_with_a_wider_projection_when_asked(self):
+        table = MagicMock()
+        table.query.return_value = {'Items': []}
+
+        query_keyword_run_rows(table, 'hotel malaga', RUN_2, projection='keyword, #rsp', attribute_names={'#rsp': 'response'})
+
+        kwargs = table.query.call_args.kwargs
+        assert (kwargs['ProjectionExpression'], kwargs['ExpressionAttributeNames']) == ('keyword, #rsp', {'#rsp': 'response'})
+
+
+class TestLatestRunRows:
+    def test_reads_the_rows_of_the_latest_run_with_the_given_projection(self):
+        table = MagicMock()
+        table.query.side_effect = [{'Items': [{'timestamp': RUN_2}]}, {'Items': [{'timestamp': RUN_2, 'response': 'text'}]}]
+
+        rows = query_latest_run_rows(table, 'hotel malaga', projection='#ts, #rsp', attribute_names={'#ts': 'timestamp', '#rsp': 'response'})
+
+        run_query = table.query.call_args_list[1]
+        assert (rows, _sort_condition(run_query), run_query.kwargs['ProjectionExpression']) == (
+            [{'timestamp': RUN_2, 'response': 'text'}], ('begins_with', 'timestamp_provider', f'{RUN_2}#'), '#ts, #rsp',
+        )
+
+    def test_projects_the_answer_fields_by_default(self):
+        table = MagicMock()
+        table.query.side_effect = [{'Items': [{'timestamp': RUN_2}]}, {'Items': []}]
+
+        query_latest_run_rows(table, 'hotel malaga')
+
+        assert (table.query.call_args.kwargs['ProjectionExpression'], table.query.call_args.kwargs['ExpressionAttributeNames']) == (
+            ANSWER_PROJECTION, ANSWER_ATTRIBUTE_NAMES,
+        )
+
+    def test_reads_no_run_rows_for_a_keyword_never_analysed(self):
+        table = MagicMock()
+        table.query.return_value = {'Items': []}
+
+        assert (query_latest_run_rows(table, 'hotel malaga'), table.query.call_count) == ([], 1)
 
 
 class TestLatestRun:

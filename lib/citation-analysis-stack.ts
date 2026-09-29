@@ -1943,6 +1943,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         'stats-insights.py',
         'get-stats.py',
         'get-visibility-metrics.py',
+        'get-sentiment-examples.py',
         'get-prompt-insights.py',
         'get-citation-gaps.py',
         'get-recommendations.py',
@@ -2591,6 +2592,9 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     const visibilityResource = apiResource.addResource('visibility');
     visibilityResource.addMethod('GET', new apigateway.LambdaIntegration(statsInsightsFunction, integrationOptions), methodOptions);
+    // The answers behind one sentiment count of the Sentiment report.
+    const sentimentExamplesResource = visibilityResource.addResource('sentiment-examples');
+    sentimentExamplesResource.addMethod('GET', new apigateway.LambdaIntegration(statsInsightsFunction, integrationOptions), methodOptions);
 
     const promptInsightsResource = apiResource.addResource('prompt-insights');
     promptInsightsResource.addMethod('GET', new apigateway.LambdaIntegration(statsInsightsFunction, integrationOptions), methodOptions);

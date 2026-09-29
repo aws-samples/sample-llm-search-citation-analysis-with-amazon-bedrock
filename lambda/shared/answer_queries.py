@@ -9,6 +9,7 @@ walks a keyword's whole history.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -34,13 +35,24 @@ def query_keyword_rows_since(table: Any, keyword: str, since: str) -> list[dict[
     )
 
 
-def query_keyword_run_rows(table: Any, keyword: str, timestamp: str) -> list[dict[str, Any]]:
-    """Every projected row of ``keyword`` in the run stamped ``timestamp``."""
+def query_keyword_run_rows(
+    table: Any,
+    keyword: str,
+    timestamp: str,
+    *,
+    projection: str = ANSWER_PROJECTION,
+    attribute_names: Mapping[str, str] = ANSWER_ATTRIBUTE_NAMES,
+) -> list[dict[str, Any]]:
+    """Every row of ``keyword`` in the run stamped ``timestamp``, projected to an answer's attributes by default.
+
+    ``projection`` / ``attribute_names`` widen the read for a caller that
+    needs more than ``answer_from_row`` does (e.g. the answer text).
+    """
     return collect_all_items(
         table.query,
         KeyConditionExpression=Key('keyword').eq(keyword) & Key('timestamp_provider').begins_with(f'{timestamp}#'),
-        ProjectionExpression=ANSWER_PROJECTION,
-        ExpressionAttributeNames=ANSWER_ATTRIBUTE_NAMES,
+        ProjectionExpression=projection,
+        ExpressionAttributeNames=dict(attribute_names),
     )
 
 
@@ -79,6 +91,20 @@ def query_last_two_runs_rows(table: Any, keyword: str) -> tuple[list[dict[str, A
     return query_keyword_run_rows(table, keyword, latest), previous_rows
 
 
+def query_latest_run_rows(
+    table: Any,
+    keyword: str,
+    *,
+    projection: str = ANSWER_PROJECTION,
+    attribute_names: Mapping[str, str] = ANSWER_ATTRIBUTE_NAMES,
+) -> list[dict[str, Any]]:
+    """Every row of ``keyword``'s latest run (projected as ``query_keyword_run_rows``); none when it was never analysed."""
+    latest = latest_run_timestamp(table, keyword)
+    if latest is None:
+        return []
+    return query_keyword_run_rows(table, keyword, latest, projection=projection, attribute_names=attribute_names)
+
+
 __all__ = [
     'history_since',
     'latest_run_timestamp',
@@ -86,4 +112,5 @@ __all__ = [
     'query_keyword_rows_since',
     'query_keyword_run_rows',
     'query_last_two_runs_rows',
+    'query_latest_run_rows',
 ]

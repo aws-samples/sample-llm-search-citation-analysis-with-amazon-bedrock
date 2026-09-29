@@ -19,6 +19,8 @@ export interface ReportSlice<T> {
 
 /** What every scope report renders from. */
 export interface ScopeReportData {
+  /** The scope the report covers, for sections that fetch more of it on demand. */
+  readonly scope: ReportScope;
   /** `/visibility`: every KPI, brand, engine and source over each keyword's latest run. */
   readonly visibility: ReportSlice<VisibilityResponse>;
   /** `/trends` over the last `days` days, per `period`. */
@@ -64,6 +66,7 @@ export function useScopeReportData(scope: ReportScope, days: number): ScopeRepor
   const ready = useReportReady([visibility, trends]);
 
   return {
+    scope,
     visibility: sliceOf(visibility),
     trends: sliceOf(trends),
     days,

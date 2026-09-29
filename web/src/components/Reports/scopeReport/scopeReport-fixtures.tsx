@@ -14,6 +14,7 @@ import { CompetitorBenchmarkReport } from '../CompetitorBenchmarkReport';
 import { AiEnginesReport } from '../AiEnginesReport';
 import { SourcesReport } from '../SourcesReport';
 import { SentimentReport } from '../SentimentReport';
+import { ALL_SCOPE } from '../../ui/reportScope';
 import type {
   ReportSlice, ScopeReportData
 } from './useScopeReportData';
@@ -42,9 +43,10 @@ const IN_FLIGHT = {
   error: null,
 } as const;
 
-/** Both fetches settled with the Nike world, over the last 30 days per day, unless overridden. */
+/** Both fetches settled with the Nike world for every keyword, over the last 30 days per day, unless overridden. */
 export function buildScopeReport(overrides: Partial<ScopeReportData> = {}): ScopeReportData {
   return {
+    scope: ALL_SCOPE,
     visibility: settledSlice(buildVisibility()),
     trends: settledSlice(buildTrendView()),
     days: 30,

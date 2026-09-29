@@ -9,6 +9,7 @@ not exact string matching. This allows the LLM to understand brand hierarchies
 (e.g., sub-brands belonging to parent companies).
 """
 
+import json
 import logging
 from typing import Any
 
@@ -43,6 +44,102 @@ DEFAULT_EXTRACTION_CONFIG = {
     "custom_prompt_additions": ""
 }
 
+# Enough output for a long brand list with a quote and a reason per brand.
+EXTRACTION_MAX_TOKENS = 8000
+
+# The labels the KPI engine counts (shared.kpi_engine); anything else is left unlabelled.
+SENTIMENT_LABELS = ('positive', 'neutral', 'mixed', 'negative')
+
+# The prompt asks for ~200 characters; a longer quote is cut here.
+SENTIMENT_QUOTE_MAX_LENGTH = 300
+
+# Every field a brand carries only when sentiment is enabled.
+_SENTIMENT_FIELDS = ('sentiment', 'sentiment_quote', 'sentiment_reason')
+
+_SENTIMENT_INSTRUCTION = """
+- sentiment: How THIS answer portrays THIS brand (not the tone of the whole answer, not the brand's general reputation). Exactly one of:
+  - "positive": the answer recommends or praises the brand, or credits it with a favourable attribute
+  - "negative": the answer criticises the brand, warns against it, or its drawbacks dominate what is said about it
+  - "mixed": the answer clearly praises and clearly criticises the brand
+  - "neutral": the brand is named or listed without praise or criticism (a plain list entry, a factual mention). Being ranked or listed is not by itself positive.
+- sentiment_quote: A short excerpt (at most 200 characters) copied verbatim from the text that carries the sentiment toward this brand; an empty string when the mention is neutral and nothing evaluative is said
+- sentiment_reason: One sentence in English explaining the label, in your own words (not a quote)"""
+
+# The format example: brands with different labels, so the example does not bias toward "positive".
+_FORMAT_EXAMPLE: list[dict[str, Any]] = [
+    {
+        "name": "Brand A",
+        "parent_company": "Parent Company or null",
+        "classification": "first_party",
+        "mention_count": 2,
+        "first_position": 150,
+        "rank": 1,
+        "sentiment": "positive",
+        "sentiment_quote": "Brand A is the best choice for families, with spacious rooms and a great pool.",
+        "sentiment_reason": "The answer recommends Brand A for families and praises its rooms.",
+        "ranking_context": "Recommended as top choice",
+    },
+    {
+        "name": "Brand B",
+        "parent_company": None,
+        "classification": "competitor",
+        "mention_count": 1,
+        "first_position": 420,
+        "rank": 2,
+        "sentiment": "negative",
+        "sentiment_quote": "Brand B is cheaper, but guests often complain about noise and dated rooms.",
+        "sentiment_reason": "The answer warns about noise and dated rooms at Brand B.",
+        "ranking_context": "Mentioned as a cheaper but noisy option",
+    },
+    {
+        "name": "Brand C",
+        "parent_company": None,
+        "classification": "other",
+        "mention_count": 1,
+        "first_position": 610,
+        "rank": 3,
+        "sentiment": "neutral",
+        "sentiment_quote": "",
+        "sentiment_reason": "The answer only lists Brand C without evaluating it.",
+        "ranking_context": "Listed as another option",
+    },
+]
+
+
+def _format_example(include_sentiment: bool) -> str:
+    """The JSON array the model is shown, without the sentiment fields when sentiment is disabled."""
+    brands = [
+        {field: value for field, value in brand.items() if include_sentiment or field not in _SENTIMENT_FIELDS}
+        for brand in _FORMAT_EXAMPLE
+    ]
+    return json.dumps(brands, indent=2)
+
+
+def _stripped_text(value: object) -> str | None:
+    return value.strip() if isinstance(value, str) else None
+
+
+def _normalize_sentiment_fields(brand: dict[str, Any], include_sentiment: bool) -> None:
+    """Keep only well-formed sentiment fields on ``brand`` (in place).
+
+    ``sentiment`` stays only as one of ``SENTIMENT_LABELS`` (lower-cased), so
+    anything else counts as unlabelled; ``sentiment_quote`` and
+    ``sentiment_reason`` stay only as stripped strings, the quote cut at
+    ``SENTIMENT_QUOTE_MAX_LENGTH``. With sentiment disabled every sentiment
+    field is removed.
+    """
+    label = _stripped_text(brand.pop('sentiment', None))
+    quote = _stripped_text(brand.pop('sentiment_quote', None))
+    reason = _stripped_text(brand.pop('sentiment_reason', None))
+    if not include_sentiment:
+        return
+    if label is not None and label.lower() in SENTIMENT_LABELS:
+        brand['sentiment'] = label.lower()
+    if quote is not None:
+        brand['sentiment_quote'] = quote[:SENTIMENT_QUOTE_MAX_LENGTH]
+    if reason is not None:
+        brand['sentiment_reason'] = reason
+
 
 class LLMBrandExtractor:
     """Extract brand mentions using LLM for intelligent parsing and classification."""
@@ -75,7 +172,7 @@ class LLMBrandExtractor:
 
         try:
             # Call shared Bedrock client with EXTRACTION role
-            response_text = invoke_bedrock(prompt, ModelRole.EXTRACTION, max_tokens=4000, temperature=0)
+            response_text = invoke_bedrock(prompt, ModelRole.EXTRACTION, max_tokens=EXTRACTION_MAX_TOKENS, temperature=0)
         except Exception:
             logger.exception("Error calling Bedrock for brand extraction")
             return []
@@ -86,6 +183,9 @@ class LLMBrandExtractor:
 
         # Classify brands as first_party, competitor, or other
         brands = self._classify_brands(self._parse_llm_response(response_text))
+        include_sentiment = bool(self.config.get("include_sentiment", True))
+        for brand in brands:
+            _normalize_sentiment_fields(brand, include_sentiment)
         logger.info(f"LLM extracted {len(brands)} brand mentions")
         return brands
 
@@ -158,11 +258,8 @@ Classify all brands as "other" until the user configures their brand tracking.
 """
 
         # Sentiment instruction
-        sentiment_instruction = ""
-        if self.config.get("include_sentiment", True):
-            sentiment_instruction = """
-- sentiment: Overall sentiment about this brand (positive/neutral/negative/mixed)
-- sentiment_reason: Brief reason for the sentiment (1 sentence)"""
+        include_sentiment = bool(self.config.get("include_sentiment", True))
+        sentiment_instruction = _SENTIMENT_INSTRUCTION if include_sentiment else ""
 
         # Ranking context instruction
         ranking_instruction = ""
@@ -210,19 +307,7 @@ For each brand found, provide:
 - rank: Order of first appearance (1 = first mentioned){sentiment_instruction}{ranking_instruction}
 {custom_additions}
 Return ONLY a valid JSON array with no additional text. Format:
-[
-  {{
-    "name": "Brand Name",
-    "parent_company": "Parent Company or null",
-    "classification": "first_party|competitor|other",
-    "mention_count": 2,
-    "first_position": 150,
-    "rank": 1,
-    "sentiment": "positive",
-    "sentiment_reason": "Praised for quality and value",
-    "ranking_context": "Recommended as top choice"
-  }}
-]
+{_format_example(include_sentiment)}
 
 If no brands are found, return an empty array: []
 

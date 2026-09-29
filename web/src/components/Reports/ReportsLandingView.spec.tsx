@@ -113,7 +113,7 @@ describe('ReportsLandingView', () => {
     ],
     [
       'Sentiment',
-      'How the AI answers word your brand: net sentiment with its change and split, the net sentiment over time, the split per AI engine, and the net sentiment of every brand named.',
+      'How the AI answers word your brand: net sentiment with its change and split, the net sentiment over time, the split per AI engine with the answers behind every count, and the net sentiment of every brand named.',
     ],
     [
       'Competitor Gap Report',

@@ -12,7 +12,10 @@ interface SentimentExample {
   brand: string;
   provider: string;
   sentiment: string;
-  reason: string;
+  /** The engine's own words about the brand, when extracted. */
+  quote?: string;
+  /** Why the extraction labelled it so; not a quote. */
+  reason?: string;
   rankingContext?: string;
 }
 
@@ -27,8 +30,10 @@ const MAX_EXAMPLES_PER_POLARITY = 2;
  *
  * We pull from the per-provider `appearances` array on each first-party
  * brand so the quotes stay tied to a specific provider/rank. Examples
- * without a `sentiment_reason` are skipped — a sentiment label without a
- * reason is not useful in a printed report.
+ * with neither a `sentiment_quote` nor a `sentiment_reason` are skipped — a
+ * sentiment label with nothing to back it is not useful in a printed report.
+ * The quote is the engine's own words; the reason is the extraction's
+ * explanation, so it is shown as "Why: …", never as a quotation.
  */
 export function SentimentExamplesSection({
   mentions, loading, error 
@@ -77,7 +82,8 @@ export function SentimentExamplesSection({
       <div className="space-y-3">
         {examples.map((example) => (
           <ExampleCard
-            key={`${example.brand}::${example.provider}::${example.sentiment}::${example.reason}`}
+            // Stryker disable next-line StringLiteral,LogicalOperator: React list key only; the rendered cards are identical
+            key={`${example.brand}::${example.provider}::${example.sentiment}::${example.quote ?? ''}::${example.reason ?? ''}`}
             example={example}
           />
         ))}
@@ -93,13 +99,14 @@ function collectExamples(brands: BrandMentionsResponse['aggregated']['first_part
   for (const brand of brands) {
     for (const appearance of brand.appearances) {
       const polarity = (appearance.sentiment ?? 'neutral').toLowerCase();
-      if (!appearance.sentiment_reason) continue;
+      if (!appearance.sentiment_quote && !appearance.sentiment_reason) continue;
       const bucket = grouped[polarity];
       if (!bucket || bucket.length >= MAX_EXAMPLES_PER_POLARITY) continue;
       bucket.push({
         brand: brand.name,
         provider: appearance.provider,
         sentiment: polarity,
+        quote: appearance.sentiment_quote,
         reason: appearance.sentiment_reason,
         rankingContext: appearance.ranking_context,
       });
@@ -107,7 +114,7 @@ function collectExamples(brands: BrandMentionsResponse['aggregated']['first_part
   }
 
   // Negative first, then positive, then mixed, then neutral.
-  return SENTIMENT_ORDER.flatMap((polarity) => grouped[polarity] ?? []);
+  return SENTIMENT_ORDER.flatMap((polarity) => grouped[polarity]);
 }
 
 function ExampleCard({ example }: { readonly example: SentimentExample }) {
@@ -126,9 +133,16 @@ function ExampleCard({ example }: { readonly example: SentimentExample }) {
           {example.sentiment}
         </span>
       </div>
-      <p className="text-sm text-gray-800 dark:text-gray-200 italic">
-        “{example.reason}”
-      </p>
+      {example.quote && (
+        <blockquote className="text-sm text-gray-800 dark:text-gray-200 italic">
+          “{example.quote}”
+        </blockquote>
+      )}
+      {example.reason && (
+        <p className="text-sm text-gray-700 dark:text-gray-300 mt-1">
+          Why: {example.reason}
+        </p>
+      )}
       {example.rankingContext && (
         <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
           Ranking context: {example.rankingContext}

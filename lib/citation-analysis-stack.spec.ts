@@ -155,6 +155,8 @@ const synthesized: {
   screenshotsLifecycle: BucketLifecycleSnapshot;
   accessLogsLifecycle: BucketLifecycleSnapshot;
   searchRoleProviderConfigActions: string[];
+  sentimentExamplesMethods: ApiGatewayMethodSnapshot[];
+  statsInsightsFunctionId: string;
 } = {
   definitionRaw: '',
   researchDefinitionRaw: '',
@@ -225,6 +227,8 @@ const synthesized: {
   screenshotsLifecycle: { transitions: [], expirationDays: [] },
   accessLogsLifecycle: { transitions: [], expirationDays: [] },
   searchRoleProviderConfigActions: [],
+  sentimentExamplesMethods: [],
+  statsInsightsFunctionId: '',
 };
 
 /**
@@ -381,6 +385,12 @@ beforeAll(() => {
 
   synthesized.searchRoleProviderConfigActions =
     extractRoleTableActions(template, SEARCH_ROLE_NAME, PROVIDER_CONFIG_TABLE_NAME);
+
+  const visibilityId = findApiResourceId(template, 'visibility');
+  synthesized.sentimentExamplesMethods = extractApiMethods(
+    template, findApiResourceId(template, 'sentiment-examples', visibilityId)
+  );
+  synthesized.statsInsightsFunctionId = findLambdaLogicalId(template, 'CitationAnalysis-API-StatsInsights');
 }, 180_000);
 
 describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
@@ -897,6 +907,19 @@ describe('Schedule routes (Schedules v2)', () => {
   it('lets ConfigMgmt start workflow executions for run-now and read the groups table for scope checks', () => {
     expect(synthesized.configMgmtStateMachineActions).toContain('states:StartExecution');
     expect(synthesized.configMgmtEnvVars).toHaveProperty('DYNAMODB_TABLE_KEYWORD_GROUPS');
+  });
+});
+
+describe('Sentiment examples route', () => {
+  it('exposes GET only on /api/visibility/sentiment-examples', () => {
+    expect(synthesized.sentimentExamplesMethods.map((method) => method.httpMethod)).toStrictEqual(['GET']);
+  });
+
+  it('puts the route behind the Cognito authorizer on the stats and insights function', () => {
+    expect(unguardedVerbs(synthesized.sentimentExamplesMethods, synthesized.statsInsightsFunctionId)).toStrictEqual({
+      withoutCognitoAuthorizer: [],
+      notIntegratedWithFunction: [],
+    });
   });
 });
 

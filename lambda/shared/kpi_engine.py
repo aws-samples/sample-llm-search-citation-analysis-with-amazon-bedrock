@@ -122,7 +122,8 @@ def _rank(value: object) -> int | None:
     return rank if 1 <= rank < UNRANKED_SENTINEL else None
 
 
-def _sighting(brand: object) -> Sighting | None:
+def sighting_from_brand(brand: object) -> Sighting | None:
+    """The sighting one stored brand dict makes, or ``None`` for a brand without a name."""
     if not isinstance(brand, Mapping):
         return None
     name = str(brand.get('name') or '').strip()
@@ -181,7 +182,7 @@ def answer_from_row(row: Mapping[str, Any]) -> Answer | None:
     if not _is_answer_row(row):
         return None
     by_key: dict[str, Sighting] = {}
-    for sighting in filter(None, (_sighting(brand) for brand in row.get('brands') or [])):
+    for sighting in filter(None, (sighting_from_brand(brand) for brand in row.get('brands') or [])):
         kept = by_key.get(sighting.key)
         if kept is None or (sighting.rank is not None and (kept.rank is None or sighting.rank < kept.rank)):
             by_key[sighting.key] = sighting
@@ -427,6 +428,7 @@ __all__ = [
     'normalize_domain',
     'owned_domains_from',
     'position_weight',
+    'sighting_from_brand',
     'source_table',
     'trend_direction',
 ]

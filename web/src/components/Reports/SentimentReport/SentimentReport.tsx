@@ -14,7 +14,7 @@ export function SentimentSections({ report }: ScopeSectionProps) {
     <>
       <SentimentHeadlineSection report={report} />
       <NetSentimentTrendSection report={report} />
-      <EngineSentimentSection report={report} />
+      <EngineSentimentSection report={report} explore />
       <BrandSentimentSection report={report} />
     </>
   );
@@ -28,8 +28,8 @@ interface Props {readonly keywords: ReadonlyArray<Keyword>;}
 
 /**
  * Sentiment (`/reports/sentiment`): the net sentiment with its change and
- * split, its trend, the split per AI engine and the net sentiment of every
- * brand named.
+ * split, its trend, the split per AI engine (each count opening the answers
+ * behind it) and the net sentiment of every brand named.
  */
 export function SentimentReport({ keywords }: Props) {
   return (
