@@ -10,14 +10,11 @@ import {
   buildScopeReport, renderSections, reportWithVisibility
 } from '../scopeReport/scopeReport-fixtures';
 import {
-  headerTooltips, sectionTable, sectionTitled, statFigure, statFootnote
+  headerTooltips, sectionTable, sectionTitled, statCardInfo, statFigure, statFootnote
 } from '../layout/reportQueries-fixtures';
 import {
   buildPeriodChange, buildSourceRow
 } from '../layout/reportPayload-fixtures';
-import {
-  DOMAIN_CITATIONS_INFO, DOMAIN_RATE_INFO, DOMAIN_SHARE_INFO
-} from './sections/DomainsTableSection';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
@@ -56,6 +53,12 @@ describe('Sources headline', () => {
 
     expect(statFigure('Domains cited').textContent).toBe('42');
   });
+
+  it('explains the domains cited in the card tooltip', () => {
+    renderSections(<SourcesSections report={buildScopeReport()} />);
+
+    expect(statCardInfo('Domains cited')).toBe('How many distinct domains the answers cite as sources, yours and everyone else\'s.');
+  });
 });
 
 describe('Sources most cited domains', () => {
@@ -74,13 +77,15 @@ describe('Sources domains table', () => {
     expect(sectionTable('Cited domains')[0]).toStrictEqual(['Domain', 'Citations', 'Citation rate', 'Citation share', 'Engines', 'Keywords']);
   });
 
-  it('explains the per-domain citation figures', () => {
+  it('explains every per-domain figure in its column tooltip', () => {
     renderSections(<SourcesSections report={buildScopeReport()} />);
 
-    expect(headerTooltips('Cited domains').slice(0, 3)).toStrictEqual([
-      ['Citations', DOMAIN_CITATIONS_INFO],
-      ['Citation rate', DOMAIN_RATE_INFO],
-      ['Citation share', DOMAIN_SHARE_INFO],
+    expect(headerTooltips('Cited domains')).toStrictEqual([
+      ['Citations', 'Answers that cite the domain at least once.'],
+      ['Citation rate', 'Share of the AI answers that cite the domain as a source.'],
+      ['Citation share', 'The domain\'s share of all the sources the answers cite; each domain counts once per answer.'],
+      ['Engines', 'The AI engines whose answers cite the domain.'],
+      ['Keywords', 'How many keywords have an answer citing the domain.'],
     ]);
   });
 
@@ -108,10 +113,13 @@ describe('Sources domains table', () => {
     expect(screen.getByText('Listing the 3 most cited of 40 domains.')).toBeInTheDocument();
   });
 
-  it('adds no listing note when every domain is listed', () => {
+  it('puts only the Citation Gaps pointer under the table when every domain is listed', () => {
     renderSections(<SourcesSections report={buildScopeReport()} />);
 
-    expect(screen.queryByText(/^Listing the/)).not.toBeInTheDocument();
+    expect([...sectionTitled('Cited domains').querySelectorAll('p')].map((paragraph) => paragraph.textContent)).toStrictEqual([
+      'The domains the latest runs cite, most cited first. Your owned domains carry a badge.',
+      'Which sources cite your competitors but not you? See the Citation Gaps analysis.',
+    ]);
   });
 
   it('points to the Citation Gaps analysis', () => {
@@ -129,9 +137,12 @@ describe('Sources domains table', () => {
     expect(within(sectionTitled('Cited domains')).getByText('No answer cites a source yet.')).toBeInTheDocument();
   });
 
-  it('keeps a domain cited by no known engine readable', () => {
-    renderSections(<SourcesSections report={reportWithVisibility({ sources: [buildSourceRow('example.org', { engines: [] })] })} />);
+  it.each([
+    [['gemini', 'openai'], 'Google Gemini, OpenAI'],
+    [[], ''],
+  ])('writes the engines %j citing a domain as "%s"', (engines, names) => {
+    renderSections(<SourcesSections report={reportWithVisibility({ sources: [buildSourceRow('example.org', { engines })] })} />);
 
-    expect(sectionTable('Cited domains')[1]).toStrictEqual(['example.org', '4', '20.0%', '20.0%', '', '2']);
+    expect(sectionTable('Cited domains')[1]).toStrictEqual(['example.org', '4', '20.0%', '20.0%', names, '2']);
   });
 });

@@ -33,6 +33,10 @@ describe('benchmarkStanding', () => {
     expect(benchmarkStanding(brands).leader?.name).toBe('Adidas');
   });
 
+  it('takes a brand with a zero share as the leader when no brand has more', () => {
+    expect(benchmarkStanding([buildBrandRow('Nike', { share_of_voice: 0 })]).leader?.name).toBe('Nike');
+  });
+
   it('has no leader before any brand has a share', () => {
     expect(benchmarkStanding([buildBrandRow('Nike', { share_of_voice: null })]).leader).toBeNull();
   });

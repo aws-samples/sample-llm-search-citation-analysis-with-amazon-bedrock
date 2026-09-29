@@ -1,10 +1,12 @@
 import {
   describe, it, expect, vi
 } from 'vitest';
-import { within } from '@testing-library/react';
+import {
+  render, within
+} from '@testing-library/react';
 import { SentimentSections } from './SentimentReport';
 import {
-  sectionTable, sectionTitled, statFigure, statFootnote
+  sectionTable, sectionTitled, statCardInfo, statFigure, statFootnote
 } from '../layout/reportQueries-fixtures';
 import {
   buildScopeReport, renderSections, reportWithTrends, reportWithVisibility
@@ -22,6 +24,13 @@ const NO_SENTIMENT = buildKpis({
     neutral: 0,
     negative: 0,
     mixed: 0,
+  },
+});
+
+const ONE_POSITIVE = buildKpis({
+  sentiment_split: {
+    ...NO_SENTIMENT.sentiment_split,
+    positive: 1,
   },
 });
 
@@ -52,6 +61,16 @@ describe('Sentiment headline', () => {
     renderSections(<SentimentSections report={reportWithVisibility({ kpis: NO_SENTIMENT })} />);
 
     expect(statFootnote('Positive mentions')).toBe('No mention with a sentiment yet');
+  });
+
+  it.each([
+    ['Positive mentions', 'Mentions of your brand that the AI answers word favourably.'],
+    ['Negative mentions', 'Mentions of your brand that the AI answers word unfavourably.'],
+    ['Neutral or mixed', 'Mentions worded neither way, or both ways at once; they pull the net sentiment towards 0.'],
+  ])('explains the %s in the card tooltip', (label, info) => {
+    renderSections(<SentimentSections report={buildScopeReport()} />);
+
+    expect(statCardInfo(label)).toBe(info);
   });
 
   it('states the split of every engine together in the chart caption', () => {
@@ -87,6 +106,28 @@ describe('Sentiment over time', () => {
     renderSections(<SentimentSections report={reportWithTrends({ trend_data: [buildTrendPoint('2026-09-08', { kpis: buildKpis({ net_sentiment: null }) })] })} />);
 
     expect(within(sectionTitled('Net sentiment over time')).getByText(/^Net sentiment over 1 period/).textContent).toMatch(/Latest \(2026-09-08\): —\.$/);
+  });
+});
+
+describe('Sentiment charts on new data', () => {
+  it.each([
+    [
+      'Headline',
+      reportWithVisibility({ kpis: ONE_POSITIVE }),
+      /^Sentiment of the labelled mentions/,
+      'Sentiment of the labelled mentions per row, stacked to 100%. All engines: 100.0% positive, 0.0% neutral, 0.0% mixed, 0.0% negative of 1 labelled mention.',
+    ],
+    [
+      'Net sentiment over time',
+      reportWithTrends({ trend_data: [buildTrendPoint('2026-09-15', { kpis: buildKpis({ net_sentiment: -5 }) })] }),
+      /^Net sentiment over \d/,
+      'Net sentiment over 1 period (2026-09-15), from −100 (all negative) to +100 (all positive). Latest (2026-09-15): -5.0.',
+    ],
+  ])('restates the %s chart caption when the report data changes', (title, next, caption, text) => {
+    const { rerender } = render(<SentimentSections report={buildScopeReport()} />);
+    rerender(<SentimentSections report={next} />);
+
+    expect(within(sectionTitled(title)).getByText(caption).textContent).toBe(text);
   });
 });
 

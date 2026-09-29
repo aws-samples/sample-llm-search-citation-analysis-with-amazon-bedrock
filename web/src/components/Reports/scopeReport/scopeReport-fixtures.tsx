@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { render } from '@testing-library/react';
 import {
-  MemoryRouter, Route, Routes
+  MemoryRouter, Route, Routes, useLocation
 } from 'react-router-dom';
 import type {
   HistoricalTrendsResponse, Keyword, VisibilityResponse
@@ -144,12 +144,24 @@ export const SCOPE_REPORTS: readonly ScopeReportCase[] = [
   ],
 ];
 
-/** Renders `report` routed at `path`, opened at `path` + `search`. */
-export function renderScopeReport(report: ReportElement, path: string, search = '') {
+/** The router's current path and query, read by its label "Current location". */
+function CurrentLocation() {
+  const {
+    pathname, search
+  } = useLocation();
+  return <output aria-label="Current location">{`${pathname}${search}`}</output>;
+}
+
+/**
+ * Renders `report` routed at `route` (`path` unless given, e.g. `*` to mount
+ * it away from its own route), opened at `path` + `search`, with the current
+ * location beside it.
+ */
+export function renderScopeReport(report: ReportElement, path: string, search = '', route = path) {
   return render(
     <MemoryRouter initialEntries={[`${path}${search}`]}>
       <Routes>
-        <Route path={path} element={report(SCOPE_KEYWORDS)} />
+        <Route path={route} element={<>{report(SCOPE_KEYWORDS)}<CurrentLocation /></>} />
       </Routes>
     </MemoryRouter>,
   );

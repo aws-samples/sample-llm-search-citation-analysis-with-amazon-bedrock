@@ -15,11 +15,22 @@ const TYPE_LABELS: Readonly<Record<BrandClassification, string>> = {
   other: 'Other',
 };
 
+// Stryker disable next-line ObjectLiteral: the badge palette is Tailwind-only; the classification label carries the meaning
 const TYPE_STYLES: Readonly<Record<BrandClassification, string>> = {
+  // Stryker disable next-line StringLiteral: first-party badge colors are presentation-only
   first_party: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+  // Stryker disable next-line StringLiteral: competitor badge colors are presentation-only
   competitor: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
+  // Stryker disable next-line StringLiteral: other-brand badge colors are presentation-only
   other: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
 };
+
+/** The look of the badge saying whose a brand is. */
+// Stryker disable next-line BlockStatement: Tailwind-only badge styling
+function badgeClassName(classification: BrandClassification): string {
+  // Stryker disable next-line StringLiteral: Tailwind-only badge styling
+  return `ml-2 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${TYPE_STYLES[classification]}`;
+}
 
 /** The brand's name, with a badge saying whose it is. */
 export const BRAND_COLUMN: ReportTableColumn<BrandLeaderboardRow> = {
@@ -29,7 +40,7 @@ export const BRAND_COLUMN: ReportTableColumn<BrandLeaderboardRow> = {
   render: (brand) => (
     <>
       {brand.name}
-      <span className={`ml-2 inline-block rounded-full px-2 py-0.5 text-xs font-medium ${TYPE_STYLES[brand.classification]}`}>
+      <span className={badgeClassName(brand.classification)}>
         {TYPE_LABELS[brand.classification]}
       </span>
     </>
@@ -47,6 +58,7 @@ export function firstPartyRowClass(brand: BrandLeaderboardRow): string {
 }
 
 /** The key of a leaderboard row. */
+// Stryker disable next-line BlockStatement: React row key only; the rendered rows are identical
 export function brandRowKey(brand: BrandLeaderboardRow): string {
   return brand.name;
 }

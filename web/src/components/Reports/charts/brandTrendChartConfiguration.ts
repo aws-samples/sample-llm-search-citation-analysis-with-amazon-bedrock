@@ -74,7 +74,7 @@ export function describeBrandTrend(series: readonly ChartSeries[], metric: Brand
   if (periods.length === 0) return '';
   const latest = periods.length - 1;
   const names = series.map((line) => line.label);
-  const values = series.map((line) => `${line.label} ${formatKpi(metric, line.points[latest]?.value)}`);
+  const values = series.map((line) => `${line.label} ${formatKpi(metric, line.points[latest].value)}`);
   return `${KPI_DEFINITIONS[metric].label} of ${listInWords(names)} over ${periodsInWords(periods)}, on a 0–100 scale. `
     + `Latest (${periods[latest]}): ${values.join(', ')}.`;
 }

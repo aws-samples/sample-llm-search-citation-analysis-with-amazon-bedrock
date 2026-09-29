@@ -48,13 +48,23 @@ function SplitCards({ split }: { readonly split: SentimentSplit }) {
   );
 }
 
-/** Your net sentiment with its change, and how the mentions behind it split. */
-export function SentimentHeadlineSection({ report }: ScopeSectionProps) {
-  const split = report.visibility.data?.kpis.sentiment_split;
-  const rows = useMemo<SentimentRow[]>(() => (split === undefined ? [] : [{
+/** The split of every engine together as one stacked bar. */
+function HeadlineSplitChart({ split }: { readonly split: SentimentSplit }) {
+  const rows = useMemo<SentimentRow[]>(() => [{
     label: SPLIT_ROW_LABEL,
     split,
-  }]), [split]);
+  }], [split]);
+
+  return (
+    <div className="mt-4">
+      <SentimentSplitChart rows={rows} />
+    </div>
+  );
+}
+
+/** Your net sentiment with its change, and how the mentions behind it split. */
+export function SentimentHeadlineSection({ report }: ScopeSectionProps) {
+  const visibility = report.visibility.data;
 
   return (
     <LatestRunHeadline
@@ -66,9 +76,7 @@ export function SentimentHeadlineSection({ report }: ScopeSectionProps) {
         </>
       )}
     >
-      <div className="mt-4">
-        <SentimentSplitChart rows={rows} />
-      </div>
+      {visibility !== null && <HeadlineSplitChart split={visibility.kpis.sentiment_split} />}
     </LatestRunHeadline>
   );
 }

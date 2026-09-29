@@ -237,6 +237,15 @@ Tables that list every brand named in the answers apply the same formulas to eac
 
 A table is sorted by visibility score, then mentions, then name. Engine lists are per brand. A brand's classification is taken from the first answer that names it.
 
+## Breakdowns
+
+These apply the same formulas to a slice of the scope's answers (since 2.23.0):
+
+- **Per AI engine** (`engines` in `/visibility`). Every KPI of your brand, computed from one engine's answers. Within one engine, engine coverage can only be 0% or 100%.
+- **Per cited domain** (`sources` in `/visibility`, the 25 most cited of `sources_total`). For each domain: citations (answers citing it), citation rate (those answers ÷ all answers), citation share (its citations ÷ every answer-and-domain citation), whether it is one of your domains, the engines citing it, and the keywords whose answers cite it. Sorted by citations, then domain. Other domains are not classified as competitor-owned.
+- **Brand trends** (`brand_trends` in `/trends`). Share of voice, mention rate, visibility score and average position per period for your brand (your first-party brands pooled) and the 5 competitors with the best visibility score over the whole window. A competitor not named in a period scores 0, with no position; its share of voice is empty if the period's answers name no brand at all.
+- **Latest leaderboard** (`latest_brands` in `/trends` and `/reports/overview`). The per-brand leaderboard of each keyword's latest period, top 10.
+
 ## Scopes and aggregation
 
 - **Keyword group.** All answers of the group's keywords, pooled.

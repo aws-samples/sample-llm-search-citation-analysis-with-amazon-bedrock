@@ -38,22 +38,27 @@ Differentiators a few vendors have: AI crawler and referral traffic (Peec, Profo
 
 Out of scope for now, because the system does not collect the data: countries and languages, AI crawler and referral traffic, prompt volumes, shopping.
 
-## How 2.23.0 closes the gaps
+## What 2.23.0 adds
 
-Data (`lambda/shared/kpi_engine.py`, `lambda/shared/visibility_views.py`), all from the same answers and KPI definitions:
+Status: built in 2.23.0. The Where we stand table above is the 2.22.0 baseline.
+
+Data (`lambda/shared/kpi_engine.py`, `lambda/shared/visibility_views.py`), all from the same answers and KPI definitions (see "Breakdowns" in `docs/kpi-definitions.md`):
 
 - **Per-engine KPIs** (`engines`): every KPI for each AI engine, in `/visibility`.
 - **Sources** (`sources`): per cited domain, the answers citing it, its citation rate and citation share, whether it is owned, and the engines and keywords citing it, in `/visibility`.
 - **Brand trends** (`brand_trends`): share of voice, mention rate, visibility score and average position per period for the tracked brand and its leading competitors, in `/trends`.
 - **Latest leaderboard** (`latest_brands`): the brand leaderboard of the latest periods, in `/trends` and `/reports/overview`.
 
-Reports (all with the scope selector: one keyword, a keyword group or all keywords; print to PDF; KPI tooltips and definitions):
+Reports (all with the scope selector: one keyword, a keyword group or all keywords, over 30, 90 or 180 days; print to PDF; KPI tooltips and definitions):
 
-- **Competitor Benchmark** (new): share-of-voice donut, share of voice over time per brand, leaderboard with every KPI.
-- **AI Engines** (new): KPIs per engine as grouped bars and a table, sentiment split per engine.
-- **Sources** (new): citation KPIs, top domains chart (owned highlighted), domains table.
-- **Sentiment** (new): net sentiment over time, split donut, sentiment per engine and per brand.
-- **Charts in the existing reports and the Visibility tab**: a KPI trend line wherever a per-period table was the only history, the SOV donut next to every leaderboard, the engine chart in the Keyword Deep Dive.
+- **Competitor Benchmark** (new): your standing, share-of-voice donut, the leading brands over time (share of voice, mention rate or visibility score), leaderboard with every KPI.
+- **AI Engines** (new): which engines name you, mention rate, visibility score and citation rate per engine as grouped bars, every KPI per engine in a table, sentiment split per engine.
+- **Sources** (new): citation KPIs, top domains chart (yours highlighted), domains table with engines and keywords.
+- **Sentiment** (new): net sentiment with change and split, net sentiment over time, split per engine, net sentiment per brand.
+- **Charts in the existing reports and the Visibility tab**: a KPI trend line wherever a per-period table was the only history, the share-of-voice donut next to the leaderboards, the engine chart and a table of every KPI per engine in the Keyword Deep Dive and the Visibility tab, top domains on the Visibility tab, and a trend snapshot in the Executive Summary.
+- **Export**: the Visibility tab's Excel file gains Engines and Sources sheets.
+
+Still open: countries and languages, AI crawler and referral traffic, prompt volumes, shopping (no data collected), scheduled email, and source-type or competitor-owned classification of cited domains.
 
 ## Sources
 

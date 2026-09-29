@@ -6,7 +6,7 @@ import {
 } from 'vitest';
 import { Chart } from 'chart.js';
 import {
-  DRAWN_CHARTS, EMPTY_CHARTS
+  DRAWN_CHARTS, EMPTY_CHARTS, REDRAWN_CHARTS
 } from './chartComponents-fixtures';
 import {
   CANVAS_CONTEXT, stubCanvasContext
@@ -60,5 +60,13 @@ describe('report chart components', () => {
     render(chart());
 
     expect(Chart).not.toHaveBeenCalledWith(CANVAS_CONTEXT, expect.anything());
+  });
+
+  it.each(REDRAWN_CHARTS)('%s redraws the chart of its new props when they change', (_name, first, second, data) => {
+    stubCanvasContext();
+    const { rerender } = render(first());
+    rerender(second());
+
+    expect(Chart).toHaveBeenLastCalledWith(CANVAS_CONTEXT, expect.objectContaining({ data }));
   });
 });

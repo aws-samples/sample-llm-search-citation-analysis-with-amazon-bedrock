@@ -9,6 +9,7 @@ import {
 } from '../layout/reportPayload-fixtures';
 import { buildKpis } from '../BrandVisibilityReport/groupKpiHistory-fixtures';
 import { LIGHT_THEME } from '../charts/charts-fixtures';
+import { EMERALD } from '../charts/chartPalette';
 
 const POINTS = [
   buildTrendPoint(PREVIOUS_PERIOD, { kpis: buildKpis({ net_sentiment: -20 }) }),
@@ -20,17 +21,23 @@ describe('netSentimentSeries', () => {
     expect(netSentimentSeries([])).toStrictEqual([]);
   });
 
-  it('takes the net sentiment of each period, unknown ones as gaps', () => {
-    expect(netSentimentSeries(POINTS)[0].points).toStrictEqual([
-      {
-        label: PREVIOUS_PERIOD,
-        value: -20,
-      },
-      {
-        label: LATEST_PERIOD,
-        value: null,
-      },
-    ]);
+  it('draws the net sentiment as one emphasised emerald line, unknown periods as gaps', () => {
+    expect(netSentimentSeries(POINTS)).toStrictEqual([{
+      key: 'net_sentiment',
+      label: 'Net sentiment',
+      colour: EMERALD,
+      emphasised: true,
+      points: [
+        {
+          label: PREVIOUS_PERIOD,
+          value: -20,
+        },
+        {
+          label: LATEST_PERIOD,
+          value: null,
+        },
+      ],
+    }]);
   });
 });
 

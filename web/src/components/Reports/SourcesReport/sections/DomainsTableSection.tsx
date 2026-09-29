@@ -73,6 +73,7 @@ function noSourceCited({ sources }: VisibilityResponse): string | null {
   return sources.length === 0 ? 'No answer cites a source yet.' : null;
 }
 
+// Stryker disable next-line BlockStatement: React row key only; the rendered rows are identical
 function domainKey(source: SourceRow): string {
   return source.domain;
 }

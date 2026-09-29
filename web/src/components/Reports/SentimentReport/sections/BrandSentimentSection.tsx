@@ -6,12 +6,18 @@ import {
   BRAND_COLUMN, brandKpiColumn, brandRowKey, firstPartyRowClass, LatestRunSection, noBrandNamed, type ScopeSectionProps
 } from '../../scopeReport';
 
-const SENTIMENT_COLUMNS: ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>> = [
-  BRAND_COLUMN,
-  brandKpiColumn('net_sentiment'),
-  brandKpiColumn('mentions'),
-  brandKpiColumn('mention_rate'),
-];
+/**
+ * The brand and the KPIs its sentiment is read with. Built at render, not at
+ * import, so a column that cannot be built fails the section it heads.
+ */
+function sentimentColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>> {
+  return [
+    BRAND_COLUMN,
+    brandKpiColumn('net_sentiment'),
+    brandKpiColumn('mentions'),
+    brandKpiColumn('mention_rate'),
+  ];
+}
 
 /** How the answers word each brand they name, in leaderboard order; your brand highlighted. */
 export function BrandSentimentSection({ report }: ScopeSectionProps) {
@@ -25,7 +31,7 @@ export function BrandSentimentSection({ report }: ScopeSectionProps) {
       {({ brands }) => (
         <ReportTable
           rows={brands}
-          columns={SENTIMENT_COLUMNS}
+          columns={sentimentColumns()}
           rowClassName={firstPartyRowClass}
           rowKey={brandRowKey}
         />

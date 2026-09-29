@@ -57,5 +57,5 @@ export function describeNetSentimentTrend(series: readonly ChartSeries[]): strin
   if (labels.length === 0) return '';
   const latest = labels.length - 1;
   return `Net sentiment over ${periodsInWords(labels)}, from −100 (all negative) to +100 (all positive). `
-    + `Latest (${labels[latest]}): ${formatKpi('net_sentiment', series[0].points[latest]?.value)}.`;
+    + `Latest (${labels[latest]}): ${formatKpi('net_sentiment', series[0].points[latest].value)}.`;
 }

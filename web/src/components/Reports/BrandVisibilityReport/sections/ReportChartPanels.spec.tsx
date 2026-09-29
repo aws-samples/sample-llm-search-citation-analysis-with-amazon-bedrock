@@ -5,8 +5,9 @@ import {
   render, screen, within
 } from '@testing-library/react';
 import { TrendPeriodChart } from './ReportChartPanels';
+import { buildTrendView } from '../../layout/reportPayload-fixtures';
 import {
-  REPORT_CHART_PANELS, chartCaption
+  LATEST_PERIOD_KPI_CAPTION, REPORT_CHART_PANELS, chartCaption
 } from './reportChartPanels-fixtures';
 
 vi.mock('chart.js', () => import('../../../Dashboard/chartJs-fixtures'));
@@ -30,5 +31,13 @@ describe('TrendPeriodChart', () => {
     render(<TrendPeriodChart points={[]} />);
 
     expect(screen.getByText('No KPI history to chart yet.')).toBeInTheDocument();
+  });
+
+  it('describes the new periods when the series changes', () => {
+    const points = buildTrendView().trend_data;
+    const { rerender } = render(<TrendPeriodChart points={points} />);
+    rerender(<TrendPeriodChart points={points.slice(1)} />);
+
+    expect(screen.getByRole('figure').textContent).toBe(LATEST_PERIOD_KPI_CAPTION);
   });
 });

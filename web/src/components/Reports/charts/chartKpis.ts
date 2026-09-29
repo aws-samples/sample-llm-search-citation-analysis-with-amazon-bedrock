@@ -96,7 +96,10 @@ export function kpiLabelsInWords(ids: readonly ChartKpiId[]): string {
   return listInWords(ids.map((id) => KPI_DEFINITIONS[id].label));
 }
 
-/** Each series' value at point `index`, formatted as its KPI: "Mention rate 60.0%, Visibility score 52.4". */
+/**
+ * Each series' value at point `index`, formatted as its KPI: "Mention rate 60.0%, Visibility score 52.4".
+ * Every `kpiSeries` line has a point per category, so `index` is in range for each.
+ */
 export function kpiValuesInWords(series: ReadonlyArray<ChartSeries<ChartKpiId>>, index: number): string {
-  return series.map((line) => `${line.label} ${formatKpi(line.key, line.points[index]?.value)}`).join(', ');
+  return series.map((line) => `${line.label} ${formatKpi(line.key, line.points[index].value)}`).join(', ');
 }

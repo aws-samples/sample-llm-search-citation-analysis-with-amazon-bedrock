@@ -9,6 +9,31 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.23.0] - 2026-09-29
+
+Reports benchmarked against AI-visibility vendors (`docs/report-benchmark.md`): the reports that are
+table stakes elsewhere are added, every KPI is shown per engine, and the reports gain charts.
+
+### Added
+
+- **Four reports**, each for one keyword, a keyword group or all keywords, over 30, 90 or 180 days, printable:
+  - **Competitor Benchmark** (`/reports/benchmark`): your standing, the share-of-voice donut, the leading
+    brands over time by share of voice, mention rate or visibility score, and the leaderboard with every KPI.
+  - **AI Engines** (`/reports/engines`): which engines name you, the headline KPIs per engine as grouped bars,
+    every KPI per engine, and the sentiment split per engine.
+  - **Sources** (`/reports/sources`): your citation KPIs, the most cited domains with yours highlighted, and every
+    cited domain with its citation rate, citation share, engines and keywords.
+  - **Sentiment** (`/reports/sentiment`): net sentiment with its change and split, net sentiment over time, the
+    split per engine and the net sentiment of every brand.
+- **Data for them**, from the same answers and KPI definitions (`docs/kpi-definitions.md`, "Breakdowns"):
+  - `/visibility`: `engines` (every KPI per AI engine), `sources` (the 25 most cited domains, of `sources_total`).
+  - `/trends`: `brand_trends` (your brand and the 5 leading competitors per period) and `latest_brands`.
+  - `/reports/overview`: `trend_data` and `latest_brands`.
+- **Charts** (`web/src/components/Reports/charts/`, `docs/design-system.md` §7.5) in the existing reports and the
+  Visibility tab: KPI trend lines, share-of-voice donuts next to the leaderboards, the engine chart, top domains,
+  and a trend snapshot in the Executive Summary. Every chart has its figures in words for screen readers.
+- **The Visibility tab's Excel export** gains Engines and Sources sheets.
+- **Every KPI per engine** in the Keyword Deep Dive and on the Visibility tab, in the same table as the AI Engines report.
 ## [2.22.0] - 2026-09-29
 
 ### Changed

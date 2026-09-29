@@ -7,7 +7,7 @@ import {
 import userEvent from '@testing-library/user-event';
 import { BenchmarkSections } from './CompetitorBenchmarkReport';
 import {
-  buildScopeReport, renderSections, reportWithVisibility
+  buildScopeReport, renderSections, reportWithTrends, reportWithVisibility
 } from '../scopeReport/scopeReport-fixtures';
 import {
   headerTooltips, sectionTable, sectionTitled, statFigure, statFootnote
@@ -20,6 +20,7 @@ import { NO_PREVIOUS_RUN } from '../layout/periodComparison';
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
 const NIKE = buildBrandRow('Nike', { classification: 'first_party' });
+const ADIDAS = buildBrandRow('Adidas');
 
 describe('Competitor Benchmark headline', () => {
   it('shows your share of voice', () => {
@@ -50,20 +51,38 @@ describe('Competitor Benchmark headline', () => {
     expect(statFigure('Your rank').textContent).toBe(rank);
   });
 
-  it('says when no answer names your brand', () => {
-    renderSections(<BenchmarkSections report={reportWithVisibility({ brands: [buildBrandRow('Adidas')] })} />);
-
-    expect(statFootnote('Your rank')).toBe('No answer names your brand');
-  });
-
-  it('names the brand with the largest share of voice, with its share', () => {
-    const brands = [buildBrandRow('Nike', {
-      classification: 'first_party',
-      share_of_voice: 20,
-    }), buildBrandRow('Adidas', { share_of_voice: 31.5 })];
+  it.each([
+    ['By visibility score', [NIKE, ADIDAS]],
+    ['No answer names your brand', [ADIDAS]],
+  ])('footnotes your rank with "%s"', (footnote, brands) => {
     renderSections(<BenchmarkSections report={reportWithVisibility({ brands })} />);
 
-    expect([statFigure('Leading brand').textContent, statFootnote('Leading brand')]).toStrictEqual(['Adidas', '31.5% share of voice']);
+    expect(statFootnote('Your rank')).toBe(footnote);
+  });
+
+  it.each([
+    ['Adidas', '31.5% share of voice', [buildBrandRow('Nike', {
+      classification: 'first_party',
+      share_of_voice: 20,
+    }), buildBrandRow('Adidas', { share_of_voice: 31.5 })]],
+    ['—', 'No brand has a share of voice yet', [buildBrandRow('Nike', {
+      classification: 'first_party',
+      share_of_voice: null,
+    })]],
+  ])('names %s as the brand leading the share of voice, footnoted "%s"', (leader, footnote, brands) => {
+    renderSections(<BenchmarkSections report={reportWithVisibility({ brands })} />);
+
+    expect([statFigure('Leading brand').textContent, statFootnote('Leading brand')]).toStrictEqual([leader, footnote]);
+  });
+
+  it.each([
+    ['Your rank', 'Your brand\'s place among every brand the answers name, by visibility score (1 = the most visible).'],
+    ['Leading brand', 'The brand with the largest share of voice: the largest share of all brand mentions in the answers.'],
+    ['Brands named', 'How many distinct brands the answers name: yours, competitors\' and others\'.'],
+  ])('explains the %s card in its tooltip', (label, text) => {
+    renderSections(<BenchmarkSections report={buildScopeReport()} />);
+
+    expect(within(sectionTitled('Headline')).getByRole('button', { name: `About ${label}` })).toHaveAccessibleDescription(text);
   });
 
   it('counts the brands named', () => {
@@ -110,16 +129,20 @@ describe('Competitor Benchmark brands over time', () => {
     expect(screen.getByText(`${label} of your brand and its leading competitors, per day over the last 30 days.`)).toBeInTheDocument();
   });
 
-  it('marks the share of voice as the chosen metric before any choice', () => {
+  it('marks the share of voice as the only chosen metric before any choice', () => {
     renderSections(<BenchmarkSections report={buildScopeReport()} />);
 
-    expect(screen.getByRole('button', { name: 'Share of voice' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(screen.getByRole('group', { name: 'Metric' })).getAllByRole('button').map((button) => button.getAttribute('aria-pressed')))
+      .toStrictEqual(['true', 'false', 'false']);
   });
 
-  it('names your brand in the chart after the latest leaderboard', () => {
-    renderSections(<BenchmarkSections report={buildScopeReport()} />);
+  it.each([
+    ['Nike', [ADIDAS, NIKE]],
+    ['Your brand', [ADIDAS]],
+  ])('labels your brand\'s line %s after the latest leaderboard', (name, brands) => {
+    renderSections(<BenchmarkSections report={reportWithTrends({ latest_brands: brands })} />);
 
-    expect(within(sectionTitled('Brands over time')).getByText(/^Share of voice of Nike, /)).toBeInTheDocument();
+    expect(within(sectionTitled('Brands over time')).getByText(new RegExp(`^Share of voice of ${name}, `))).toBeInTheDocument();
   });
 });
 
@@ -150,18 +173,42 @@ describe('Competitor Benchmark leaderboard', () => {
     expect(headerTooltips('Leaderboard').map(([header]) => header)).toStrictEqual(sectionTable('Leaderboard')[0].slice(1));
   });
 
+  it.each([
+    ['Best position', 'The earliest place the brand reached in any answer (1 = named first); answers without a known place are left out.'],
+    ['Engines', 'The AI engines whose answers name the brand.'],
+    ['Keywords', 'How many keywords have an answer naming the brand.'],
+  ])('explains the %s column in its tooltip', (column, text) => {
+    renderSections(<BenchmarkSections report={buildScopeReport()} />);
+
+    expect(headerTooltips('Leaderboard').find(([header]) => header === column)).toStrictEqual([column, text]);
+  });
+
+  it('shows a dash for a brand without a known best position', () => {
+    renderSections(<BenchmarkSections report={reportWithVisibility({ brands: [buildBrandRow('Asics', { best_position: null })] })} />);
+
+    expect(sectionTable('Leaderboard')[1][5]).toBe('—');
+  });
+
+  it('lists every engine naming a brand, comma separated', () => {
+    renderSections(<BenchmarkSections report={buildScopeReport()} />);
+
+    expect(sectionTable('Leaderboard')[1][7]).toBe('Google Gemini, OpenAI');
+  });
+
   it('highlights your brand\'s row only', () => {
     renderSections(<BenchmarkSections report={buildScopeReport()} />);
     const [nike, adidas] = within(sectionTitled('Leaderboard')).getAllByRole('row').slice(1);
 
     expect(nike).toHaveClass('bg-emerald-50');
-    expect(adidas).not.toHaveClass('bg-emerald-50');
+    expect(adidas.getAttribute('class')).toBe('');
   });
 
   it('badges each brand with whose it is', () => {
-    renderSections(<BenchmarkSections report={buildScopeReport()} />);
+    const brands = [NIKE, ADIDAS, buildBrandRow('Asics', { classification: 'other' })];
+    renderSections(<BenchmarkSections report={reportWithVisibility({ brands })} />);
 
-    expect(within(sectionTitled('Leaderboard')).getAllByText(/^(Your brand|Competitor)$/).map((badge) => badge.textContent)).toStrictEqual(['Your brand', 'Competitor']);
+    expect(within(sectionTitled('Leaderboard')).getAllByText(/^(Your brand|Competitor|Other)$/).map((badge) => badge.textContent))
+      .toStrictEqual(['Your brand', 'Competitor', 'Other']);
   });
 
   it('says so when the answers name no brand', () => {

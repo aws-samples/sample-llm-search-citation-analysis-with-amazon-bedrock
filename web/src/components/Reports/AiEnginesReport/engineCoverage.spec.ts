@@ -27,6 +27,16 @@ describe('engineCoverage', () => {
     expect(engineCoverage(engines).strongest?.engine).toBe('gemini');
   });
 
+  it('picks a later engine as the strongest when its score is higher', () => {
+    const engines = [buildEngineKpis('openai', { visibility_score: 3 }), buildEngineKpis('gemini', { visibility_score: 5 })];
+
+    expect(engineCoverage(engines).strongest?.engine).toBe('gemini');
+  });
+
+  it('picks an engine scoring 0 as the strongest when no other engine is scored', () => {
+    expect(engineCoverage([buildEngineKpis('gemini', { visibility_score: 0 })]).strongest?.engine).toBe('gemini');
+  });
+
   it('skips engines without a visibility score', () => {
     const engines = [buildEngineKpis('gemini', { visibility_score: null }), buildEngineKpis('openai', { visibility_score: 3 })];
 

@@ -7,7 +7,7 @@ import {
   buildEngineKpis, buildEngines, buildPeriodChange
 } from '../layout/reportPayload-fixtures';
 import {
-  headerTooltips, sectionTable, sectionTitled, statFigure, statFootnote
+  headerTooltips, sectionTable, sectionTitled, statCardInfo, statFigure, statFootnote
 } from '../layout/reportQueries-fixtures';
 import {
   buildScopeReport, renderSections, reportWithVisibility
@@ -55,6 +55,16 @@ describe('AI Engines headline', () => {
     renderSections(<EngineSections report={reportWithVisibility({ engines: [] })} />);
 
     expect([statFigure('Strongest engine').textContent, statFootnote('Strongest engine')]).toStrictEqual(['—', 'No visibility score yet']);
+  });
+
+  it.each([
+    ['Engines answering', 'The AI engines with at least one answer in the latest runs.'],
+    ['Engines naming you', 'The AI engines with at least one answer that names your brand.'],
+    ['Strongest engine', 'The AI engine whose answers give your brand the highest visibility score.'],
+  ])('explains %s in the card tooltip', (label, info) => {
+    renderSections(<EngineSections report={buildScopeReport()} />);
+
+    expect(statCardInfo(label)).toBe(info);
   });
 });
 

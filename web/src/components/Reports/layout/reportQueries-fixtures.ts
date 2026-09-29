@@ -155,3 +155,9 @@ export function moverColumn(title: string): HTMLElement {
 export function moverKeywords(title: string): (string | null)[] {
   return within(moverColumn(title)).queryAllByRole('listitem').map((item) => item.firstChild?.textContent ?? null);
 }
+
+
+/** The tooltip text of the headline card explained as `label`. */
+export function statCardInfo(label: string): string | null {
+  return tooltipText(within(statCard(label)).getByRole('button'));
+}

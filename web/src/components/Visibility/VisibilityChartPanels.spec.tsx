@@ -5,7 +5,7 @@ import {
   render, screen, within
 } from '@testing-library/react';
 import {
-  BrandShareOfVoicePanel, ENGINES_INFO, ENGINES_TITLE, EnginesPanel, SOURCES_INFO, SOURCES_TITLE, SourcesPanel
+  BrandShareOfVoicePanel, ENGINES_TITLE, EnginesPanel, SOURCES_TITLE, SourcesPanel
 } from './VisibilityChartPanels';
 import { DOMAIN_COLUMN_INFO } from './TopDomainsTable';
 import {
@@ -51,7 +51,10 @@ describe('EnginesPanel', () => {
   it('explains what the chart and the table show in the tooltip', () => {
     render(<EnginesPanel engines={buildGroupEngines()} />);
 
-    expect(screen.getByRole('button', { name: `About ${ENGINES_TITLE}` })).toHaveAccessibleDescription(ENGINES_INFO);
+    expect(screen.getByRole('button', { name: `About ${ENGINES_TITLE}` })).toHaveAccessibleDescription(
+      'The KPIs over each AI engine\'s answers alone. The chart compares the mention rate, '
+        + 'visibility score and citation rate on a 0–100 scale; the table adds the other KPIs, and the Excel export every one.',
+    );
   });
 
   it('lists each engine by name with its KPIs formatted by unit, in the API order', () => {
@@ -81,7 +84,9 @@ describe('SourcesPanel', () => {
   it('explains the domain chart in the tooltip', () => {
     render(<SourcesPanel sources={buildGroupSources()} total={3} />);
 
-    expect(screen.getByRole('button', { name: `About ${SOURCES_TITLE}` })).toHaveAccessibleDescription(SOURCES_INFO);
+    expect(screen.getByRole('button', { name: `About ${SOURCES_TITLE}` })).toHaveAccessibleDescription(
+      'The domains the answers cite most, by the answers citing each. Your own domains are marked owned.',
+    );
   });
 
   it('heads the domain, citations, citation rate, citation share, engines and keywords columns', () => {

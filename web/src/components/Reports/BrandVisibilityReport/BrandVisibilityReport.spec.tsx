@@ -155,6 +155,13 @@ describe('BrandVisibilityReport — all-keywords variant', () => {
     expect(rankedBrandNames()).toStrictEqual(['Nike', 'Adidas', 'Puma']);
   });
 
+  it('describes the brand rankings as the latest period of every keyword, with its share of voice over time', () => {
+    renderAt('/reports/visibility');
+
+    expect(screen.getByText('Every brand the AI answers named in each keyword\'s latest period (the leading 10), by visibility score, '
+      + 'and the share of voice of your brand and its leading competitors over time. First-party rows are highlighted.')).toBeInTheDocument();
+  });
+
   it.each([
     [SHARE_OF_VOICE_TITLE, LATEST_BRANDS_SOV_CAPTION],
     [SHARE_OF_VOICE_TREND_TITLE, BRAND_TRENDS_SOV_CAPTION],
@@ -235,5 +242,34 @@ describe('BrandVisibilityReport — keyword group (hotel) variant', () => {
     renderAt('/reports/visibility?group=hotel-sol');
 
     expect(sectionTitles().slice(-1)).toStrictEqual([DEFINITIONS_TITLE]);
+  });
+});
+
+
+describe('BrandVisibilityReport — requests in flight', () => {
+  it.each([
+    [
+      'one keyword while its visibility answer loads',
+      '/reports/visibility/best%20running%20shoes',
+      {
+        ...keywordReportData(),
+        visibility: null,
+        visibilityLoading: true,
+      },
+    ],
+    [
+      'every keyword while the trends load',
+      '/reports/visibility',
+      {
+        ...allKeywordsReportData(),
+        trends: null,
+        trendsLoading: true,
+      },
+    ],
+  ])('shows the brand rankings loading for %s', (_case, path, data) => {
+    mockUse.mockReturnValue(data);
+    renderAt(path);
+
+    expect(screen.getByText('Loading brand rankings…')).toBeInTheDocument();
   });
 });

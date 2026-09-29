@@ -6,7 +6,7 @@ import {
 } from '@testing-library/react';
 import { expectRendersNothing } from '../../../../test/renderNothing';
 import {
-  ENGINE_CHART_SUBTITLE, ENGINE_CHART_TITLE, EngineKpisSection
+  ENGINE_CHART_SUBTITLE, EngineKpisSection
 } from './EngineKpisSection';
 import { KPI_SPECS } from '../../../../constants/kpiDefinitions';
 import {
@@ -29,7 +29,7 @@ describe('EngineKpisSection', () => {
   it('charts the mention rate, visibility score and citation rate of each engine', () => {
     renderEngines();
 
-    expect(chartCaption(ENGINE_CHART_TITLE, sectionTitled(TITLE))).toBe(
+    expect(chartCaption('AI engines compared', sectionTitled(TITLE))).toBe(
       'Mention rate, Visibility score and Citation rate per AI engine, on a 0–100 scale. '
         + 'Google Gemini: Mention rate 70.0%, Visibility score 61.5, Citation rate 40.0%. '
         + 'OpenAI: Mention rate 50.0%, Visibility score 43.3, Citation rate 20.0%.',
@@ -39,7 +39,7 @@ describe('EngineKpisSection', () => {
   it('says what the engine chart compares under its title, for print', () => {
     renderEngines();
 
-    expect(within(screen.getByRole('region', { name: ENGINE_CHART_TITLE })).getByText(ENGINE_CHART_SUBTITLE)).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'AI engines compared' })).getByText(ENGINE_CHART_SUBTITLE)).toBeInTheDocument();
   });
 
   it('heads the table with the engine and its KPIs', () => {

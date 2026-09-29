@@ -40,10 +40,10 @@ describe('TrendSnapshotSection', () => {
     expectRendersNothing(<TrendSnapshotSection data={buildOverview({ keywords_with_data: 0 })} loading={false} error={null} />);
   });
 
-  it('shows the loading state', () => {
+  it('shows the loading state under the section title', () => {
     render(<TrendSnapshotSection data={null} loading error={null} />);
 
-    expect(screen.getByText('Loading the KPI trend…')).toBeInTheDocument();
+    expect(sectionTitled(TITLE)).toHaveTextContent('Loading the KPI trend…');
   });
 
   it('shows the error', () => {

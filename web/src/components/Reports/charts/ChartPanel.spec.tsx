@@ -25,10 +25,16 @@ describe('ChartPanel', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('shows the subtitle under the title', () => {
+  it('shows the subtitle in its own paragraph under the title', () => {
     render(<ChartPanel title="Top sources" subtitle="Most cited domains first."><p>chart</p></ChartPanel>);
 
-    expect(screen.getByText('Most cited domains first.')).toBeInTheDocument();
+    expect(screen.getByText('Most cited domains first.')).toBeInstanceOf(HTMLParagraphElement);
+  });
+
+  it('writes no stray space into the panel classes when the caller adds none', () => {
+    render(<ChartPanel title="Top sources"><p>chart</p></ChartPanel>);
+
+    expect(screen.getByRole('region').getAttribute('class')).not.toMatch(/\s$/);
   });
 
   it('keeps the panel on one printed page and adds the caller\'s classes', () => {

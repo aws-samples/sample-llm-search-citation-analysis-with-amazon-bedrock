@@ -119,6 +119,12 @@ describe('BrandRankingsSection charts', () => {
 });
 
 describe('BrandRankingsSection states', () => {
+  it('describes the leaderboard as the latest run of the keyword when given no subtitle', () => {
+    renderRankings();
+
+    expect(screen.getByText('Every brand the AI answers named for this keyword in its latest run, by visibility score. '
+      + 'First-party rows are highlighted.')).toBeInTheDocument();
+  });
   it('says when no brand was named for the keyword', () => {
     renderRankings([]);
 

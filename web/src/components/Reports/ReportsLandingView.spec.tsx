@@ -93,6 +93,48 @@ describe('ReportsLandingView', () => {
     expect(screen.getByRole('heading', { name: title }).closest('a')?.lastElementChild?.textContent).toBe(audience);
   });
 
+  it.each([
+    [
+      'Executive Summary',
+      'One-page rollup of overall visibility, the trend over time, top wins, top gaps, and the next three actions to take. The report a marketing lead would print before a quarterly business review.',
+    ],
+    [
+      'Brand Visibility Report',
+      'Mention rate, share of voice, visibility score, citation rate and every other KPI with its change and trend, the brand leaderboard and the KPIs per day, scoped to a keyword, a keyword group or the full keyword set. Highlights regressions in red.',
+    ],
+    [
+      'Competitor Benchmark',
+      'Your share of voice and rank against every brand the AI answers name: the share-of-voice donut, the leading brands over time by share of voice, mention rate or visibility score, and the full leaderboard with every KPI per brand.',
+    ],
+    [
+      'AI Engines',
+      'How each AI engine treats your brand: which engines name you, mention rate, visibility score and citation rate per engine side by side, every KPI per engine, and how each engine words its mentions.',
+    ],
+    [
+      'Sources',
+      'Which websites the AI answers cite: your citations, citation rate and citation share, the most cited domains with your own highlighted, and every cited domain with its engines and keywords.',
+    ],
+    [
+      'Sentiment',
+      'How the AI answers word your brand: net sentiment with its change and split, the net sentiment over time, the split per AI engine, and the net sentiment of every brand named.',
+    ],
+    [
+      'Competitor Gap Report',
+      'For each tracked competitor: keywords where they outrank you, citation sources unique to them, and a prioritized outreach list ranked by potential visibility lift.',
+    ],
+    [
+      'Content Action Plan',
+      'Prioritized citation gaps paired with AI-generated content briefs from Content Studio. Closes the loop from "we have a gap" to "here is the asset to fill it".',
+    ],
+    [
+      'Keyword Deep Dive',
+      'Single-keyword drill-down: every KPI with its change, KPI history, persona impact, provider differences, top sources, sentiment examples, recommended actions, and an LLM-generated narrative explaining the current ranking.',
+    ],
+  ])('describes what the %s card covers', (title, description) => {
+    renderLanding();
+    expect(screen.getByRole('heading', { name: title }).closest('a')?.querySelector('p')?.textContent).toBe(description);
+  });
+
   it('shows the executive and marketing-lead audiences', () => {
     renderLanding();
     expect(screen.getByText(/CMO, VP Marketing/)).toBeInTheDocument();

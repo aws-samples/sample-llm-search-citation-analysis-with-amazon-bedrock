@@ -21,6 +21,10 @@ interface MetricToggleProps {
   readonly onChange: (metric: BrandTrendMetric) => void;
 }
 
+/** A metric button; `aria-pressed` marks the chosen one and drives its look. */
+// Stryker disable next-line StringLiteral: Tailwind-only styling; aria-pressed carries the chosen metric
+const TOGGLE_CLASS = 'rounded-full border px-3 py-1 text-xs font-medium border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300 aria-pressed:border-gray-900 aria-pressed:bg-gray-900 aria-pressed:text-white dark:aria-pressed:border-white dark:aria-pressed:bg-white dark:aria-pressed:text-gray-900';
+
 function MetricToggle({
   metric, onChange
 }: MetricToggleProps) {
@@ -33,9 +37,7 @@ function MetricToggle({
           type="button"
           aria-pressed={id === metric}
           onClick={() => onChange(id)}
-          className={`rounded-full border px-3 py-1 text-xs font-medium ${id === metric
-            ? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-900'
-            : 'border-gray-200 text-gray-600 dark:border-gray-700 dark:text-gray-300'}`}
+          className={TOGGLE_CLASS}
         >
           {KPI_DEFINITIONS[id].label}
         </button>

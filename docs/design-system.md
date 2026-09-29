@@ -468,6 +468,29 @@ conventions:
   first slices are `gray-900` / `gray-700`) need a light- and
   dark-mode palette. See `Dashboard/BrandChart.tsx` for the pattern.
 
+#### Report charts
+
+The reports and the Visibility tab draw their charts from one library,
+`components/Reports/charts/` (KPI trend line, share-of-voice donut,
+grouped engine bars, brand trend lines, sentiment split, top sources):
+
+- **Layout.** Wrap each chart in `ChartPanel` (a titled card with an
+  optional "i" tooltip beside the heading and a printed subtitle) and
+  draw it with `ChartFigure` (a fixed-height canvas, kept on one printed
+  page, with the figures in words as a screen-reader `figcaption`, and a
+  plain sentence instead of an empty chart).
+- **Colours** (`chartPalette.ts`): emerald for your brand, your domains
+  and positive sentiment; amber for competitors and mixed sentiment; red
+  for negative; indigo for domains that are not yours; gray for neutral
+  sentiment and "Other brands" (with a light and a dark variant).
+  Competitor lines take amber, orange, rose, violet and sky in turn.
+- **Scales.** Charts draw the percentages and the visibility score on a
+  shared 0–100 axis (`chartKpis.ts`); net sentiment has its own −100…+100
+  chart. Counts and average position stay in tables.
+- **Build the Chart.js configuration in a pure `*ChartConfiguration.ts`
+  module** and keep the component to the canvas lifecycle, so the
+  configuration is unit-tested without a canvas.
+
 ### 7.6 Images
 
 User-content images (website screenshots from the crawler, raw S3

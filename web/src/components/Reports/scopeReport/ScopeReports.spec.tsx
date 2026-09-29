@@ -1,7 +1,9 @@
 import {
   describe, it, expect, vi, beforeEach
 } from 'vitest';
-import { screen } from '@testing-library/react';
+import {
+  screen, within
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   buildScopeReport, failedScopeReport, HOTEL_SOL_GROUP, loadingScopeReport, NETWORK_ERROR, renderScopeReport, SCOPE_REPORTS,
@@ -86,6 +88,27 @@ describe.each(SCOPE_REPORTS)('%s report', (title, path, report, sections) => {
     await userEvent.selectOptions(screen.getByLabelText('Trend period'), '180');
 
     expect(mockReportData).toHaveBeenLastCalledWith(keywordScope('best running shoes'), 180);
+  });
+
+  it('opens its own route when a scope is picked while mounted elsewhere', async () => {
+    renderScopeReport(report, '/elsewhere', '', '*');
+
+    await userEvent.selectOptions(screen.getByLabelText('Scope'), 'group:hotel-sol');
+
+    expect(screen.getByLabelText('Current location').textContent).toBe(`${path}?group=hotel-sol`);
+  });
+
+  it('offers the last 30, 90 and 180 days as trend periods', () => {
+    renderScopeReport(report, path);
+
+    expect(within(screen.getByLabelText('Trend period')).getAllByRole('option').map((option) => option.textContent))
+      .toStrictEqual(['Last 30 days', 'Last 90 days', 'Last 180 days']);
+  });
+
+  it('offers every tracked keyword in the scope selector', () => {
+    renderScopeReport(report, path);
+
+    expect(within(screen.getByLabelText('Scope')).getByRole('option', { name: 'best running shoes' })).toHaveValue('keyword:best running shoes');
   });
 
   it('names the group from the group list while the latest runs load', () => {

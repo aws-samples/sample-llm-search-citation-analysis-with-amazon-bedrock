@@ -34,7 +34,7 @@ export function valuesAt(line: ChartSeries, labels: readonly string[]): Array<nu
 
 /** "A", "A and B", "A, B and C". */
 export function listInWords(items: readonly string[]): string {
-  if (items.length < 2) return items.join('');
+  if (items.length < 2) return items[0] ?? '';
   return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
 }
 

@@ -103,9 +103,11 @@ export function BrandRankingsSection({
     );
   }
 
+  // Stryker disable next-line StringLiteral: Tailwind-only layout; the same charts render either way
+  const chartsClass = brandTrends ? 'mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2' : 'mb-4';
   return (
     <ReportSection title="Brand rankings" subtitle={subtitle}>
-      <div className={brandTrends ? 'mb-4 grid grid-cols-1 gap-4 lg:grid-cols-2' : 'mb-4'}>
+      <div className={chartsClass}>
         <ShareOfVoicePanel brands={gate.value} />
         {brandTrends && <ShareOfVoiceTrendPanel trends={brandTrends} />}
       </div>

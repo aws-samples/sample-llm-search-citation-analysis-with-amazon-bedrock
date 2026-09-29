@@ -106,6 +106,17 @@ describe('KeywordDeepDiveReport', () => {
     expect(rankingsShareOfVoiceCaption()).toBe(VISIBILITY_BRANDS_SOV_CAPTION);
   });
 
+  it('shows the brand rankings loading while the visibility answer is in flight', () => {
+    mockUseKeywordDeepDive.mockReturnValue({
+      ...settledData(),
+      visibility: null,
+      visibilityLoading: true,
+    });
+    renderAt('/reports/keyword/best%20running%20shoes');
+
+    expect(screen.getByText('Loading brand rankings…')).toBeInTheDocument();
+  });
+
   it('lists every AI engine of the visibility answer in the engine table', () => {
     renderAt('/reports/keyword/best%20running%20shoes');
 
