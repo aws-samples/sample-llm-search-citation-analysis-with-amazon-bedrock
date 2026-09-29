@@ -9,6 +9,25 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.24.0] - 2026-09-29
+
+### Removed
+
+- **AWS WAF.** The stack no longer declares a web ACL: the CloudFront web ACL (its us-east-1 custom resource,
+  handler and `CloudFrontWafWebAclArn` output) and the regional web ACL on the Cognito user pool are gone, so the
+  sample stays pay-per-use. Both ACLs had already been deleted from the deployed account, and CloudFormation
+  was still tracking them, so the next change to the distribution or the user pool would have failed. `SECURITY.md`
+  describes what protects the app without them and how to add one.
+- `openai`, `httpx` and `anyio` from the shared Lambda layer: every AI provider is called over REST with
+  `requests`, so nothing imported them. The layer shrinks to about 8 MB.
+
+### Changed
+
+- The `version-check` workflow also requires a version bump when `web/vite.config.ts` changes, when either
+  `package.json` changes its dependencies or `overrides`, and when either lock file resolves a different
+  package. Dependabot pull requests now need a maintainer to add the bump and changelog entry.
+- Estimated AWS cost for the example workload drops to $12–50 a month (README, Cost).
+
 ## [2.23.3] - 2026-09-29
 
 ### Changed

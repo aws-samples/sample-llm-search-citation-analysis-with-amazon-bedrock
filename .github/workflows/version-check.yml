@@ -1,7 +1,9 @@
 # Enforces the release policy in CONTRIBUTING.md ("Versioning and changelog"):
-# any PR that changes application behavior must bump the version in BOTH
-# package.json and web/package.json (same value) and add a CHANGELOG.md entry
-# for it. Docs-only and CI-only PRs are exempt.
+# any PR that changes what ships must bump the version in BOTH package.json
+# and web/package.json (same value) and add a CHANGELOG.md entry for it.
+# What ships: application code, the web build config, and the npm
+# dependencies (declared in either package.json, or resolved in either
+# lockfile). Docs-only and CI-only PRs are exempt.
 #
 # Deliberately a check rather than an auto-bump: the bump level (major/minor/
 # patch) is a judgment call about breaking behavior that the PR author is best
@@ -32,12 +34,43 @@ jobs:
           base="origin/${BASE_REF}"
 
           # Paths whose changes constitute an application change.
-          app_paths=(lambda lib bin web/src web/index.html scripts cdk.json)
+          app_paths=(lambda lib bin web/src web/index.html web/vite.config.ts scripts cdk.json)
 
-          if git diff --quiet "${base}...HEAD" -- "${app_paths[@]}"; then
-            echo "No application code changed — version bump not required."
+          # The npm dependencies that ship: the declared ranges and overrides of
+          # each manifest, and every resolved package of each lockfile (the
+          # lockfile's root entry is left out, since it only repeats the
+          # manifest's name and version).
+          manifest_filter='{dependencies, devDependencies, optionalDependencies, peerDependencies, overrides}'
+          lock_filter='.packages // {} | del(.[""])'
+
+          # True when `filter` selects something different in `file` at the base and here.
+          changed_json() {
+            local file="$1" filter="$2" before after
+            before="$(git show "${base}:${file}" 2>/dev/null | jq -S "${filter}" 2>/dev/null || echo missing)"
+            after="$(jq -S "${filter}" "${file}" 2>/dev/null || echo missing)"
+            [ "${before}" != "${after}" ]
+          }
+
+          reasons=()
+          if ! git diff --quiet "${base}...HEAD" -- "${app_paths[@]}"; then
+            reasons+=("application code or web build config")
+          fi
+          for manifest in package.json web/package.json; do
+            if changed_json "${manifest}" "${manifest_filter}"; then
+              reasons+=("dependencies in ${manifest}")
+            fi
+          done
+          for lockfile in package-lock.json web/package-lock.json; do
+            if changed_json "${lockfile}" "${lock_filter}"; then
+              reasons+=("resolved packages in ${lockfile}")
+            fi
+          done
+
+          if [ "${#reasons[@]}" -eq 0 ]; then
+            echo "No application code or dependency changed — version bump not required."
             exit 0
           fi
+          printf 'Version bump required, changed: %s\n' "${reasons[@]}"
 
           head_version="$(jq -r .version package.json)"
           web_version="$(jq -r .version web/package.json)"
@@ -49,7 +82,7 @@ jobs:
           fi
 
           if [ "${head_version}" = "${base_version}" ]; then
-            echo "::error::Application code changed but the version is still ${base_version}. Bump package.json and web/package.json and add a CHANGELOG.md entry (see CONTRIBUTING.md, 'Versioning and changelog')."
+            echo "::error::A change that ships (see above) needs a new version, but it is still ${base_version}. Bump package.json and web/package.json and add a CHANGELOG.md entry (see CONTRIBUTING.md, 'Versioning and changelog')."
             exit 1
           fi
 

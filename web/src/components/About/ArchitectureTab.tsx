@@ -101,7 +101,7 @@ export function ArchitectureTab() {
           <div className="bg-white border border-gray-300 rounded-lg px-6 py-3 text-sm font-medium text-gray-700 shadow-sm mb-2">
             <div className="text-center">
               <div className="font-semibold">API Gateway</div>
-              <div className="text-xs text-gray-500">REST API + Cognito Auth + WAF</div>
+              <div className="text-xs text-gray-500">REST API + Cognito Auth</div>
             </div>
           </div>
           <div className="w-px h-6 bg-gray-300"></div>

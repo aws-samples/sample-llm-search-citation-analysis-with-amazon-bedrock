@@ -58,9 +58,6 @@ tooling that is not bundled into the dashboard or the Lambda layers is not liste
 |---------|---------|---------|---------|
 | [requests](https://requests.readthedocs.io/) | ≥2.31.0 | Apache-2.0 | HTTP calls to the AI engines, search providers and crawled pages |
 | [beautifulsoup4](https://www.crummy.com/software/BeautifulSoup/) | ≥4.12.0 | MIT | HTML parsing |
-| [httpx](https://www.python-httpx.org/) | ≥0.28.0 | BSD-3-Clause | Installed in the layer; no Lambda code imports it |
-| [anyio](https://anyio.readthedocs.io/) | ≥4.0.0 | MIT | Installed in the layer; no Lambda code imports it |
-| [openai](https://github.com/openai/openai-python) | ≥1.10.0 | Apache-2.0 | Installed in the layer; no Lambda code imports it |
 | [tzdata](https://github.com/python/tzdata) | ≥2024.1 | Apache-2.0 | IANA time zone database for schedule validation |
 
 OpenAI, Perplexity, Gemini and Claude (Anthropic API) and the web-search providers are called over their REST APIs with

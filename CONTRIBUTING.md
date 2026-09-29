@@ -32,7 +32,7 @@ To send us a pull request, please:
 1. Fork the repository.
 2. Modify the source; please focus on the specific change you are contributing. If you also reformat all the code, it will be hard for us to focus on your change.
 3. Run the local gates below and make sure they are clean.
-4. Bump the version and add a changelog entry if the change touches application code (see [Versioning and changelog](#versioning-and-changelog)).
+4. Bump the version and add a changelog entry if the change touches anything that ships (see [Versioning and changelog](#versioning-and-changelog)).
 5. Commit to your fork using clear commit messages.
 6. Send us a pull request, answering any default questions in the pull request interface.
 7. Pay attention to any automated CI failures reported in the pull request, and stay involved in the conversation.
@@ -93,7 +93,7 @@ The version lives in **two** files that must always carry the same value —
 `web/package.json`'s version into the dashboard (Settings page and About
 modal) via `vite.config.ts`.
 
-Every pull request that changes application code must, in the same PR:
+Every pull request that changes what ships (listed below) must, in the same PR:
 
 1. **Bump the version** in both files:
 
@@ -115,13 +115,21 @@ Choosing the bump:
   users or API clients.
 
 The `version-check` workflow (`.github/workflows/version-check.yml`) enforces
-this on every pull request to `main`. It treats a change under `lambda/`,
-`lib/`, `bin/`, `web/src/`, `scripts/`, or to `web/index.html` or `cdk.json`
-as an application change; everything else (docs, Markdown files, `.github/`,
-`.kiro/`, `package.json` and lock files, build and lint configuration) is
-exempt. When application code changed, it fails if the two `package.json`
-versions differ, if the version equals the one on `main`, or if
-`CHANGELOG.md` has no `## [<version>]` heading for it.
+this on every pull request to `main`. It requires a bump when anything that
+ships changed:
+
+- a file under `lambda/`, `lib/`, `bin/`, `web/src/` or `scripts/`, or
+  `web/index.html`, `web/vite.config.ts` or `cdk.json`;
+- the declared dependencies or `overrides` of either `package.json`;
+- any resolved package in either lock file (a transitive update counts).
+
+Everything else is exempt: docs and Markdown files, `.github/`, `.kiro/`, the
+`scripts` and version fields of `package.json`, and lint and test
+configuration. When a bump is required, the check fails if the two
+`package.json` versions differ, if the version equals the one on `main`, or if
+`CHANGELOG.md` has no `## [<version>]` heading for it. Dependabot cannot bump
+the version itself, so a maintainer adds the bump and the changelog entry to a
+Dependabot branch before merging it.
 
 Commit messages on `main` largely follow
 [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`,

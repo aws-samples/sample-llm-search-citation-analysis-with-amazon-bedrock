@@ -30,7 +30,7 @@ Please describe the tests that you ran to verify your changes. Provide instructi
 
 ## Checklist:
 
-- [ ] The version is bumped in `package.json` **and** `web/package.json` and `CHANGELOG.md` has a `## [<version>]` entry (required when `lambda/`, `lib/`, `bin/`, `web/src/`, `scripts/`, `web/index.html` or `cdk.json` changed — see [CONTRIBUTING.md](../CONTRIBUTING.md#versioning-and-changelog))
+- [ ] The version is bumped in `package.json` **and** `web/package.json` and `CHANGELOG.md` has a `## [<version>]` entry (required when `lambda/`, `lib/`, `bin/`, `web/src/`, `scripts/`, `web/index.html`, `web/vite.config.ts`, `cdk.json`, the npm dependencies or a lock file changed — see [CONTRIBUTING.md](../CONTRIBUTING.md#versioning-and-changelog))
 - [ ] Both Lambda layers rebuilt if `lambda/shared/` or a layer's `requirements.txt` changed (`bash lambda/layer/build-layer.sh`, `bash lambda/crawler-layer/build-layer.sh`)
 - [ ] No lint limit raised and no inline suppression (`# noqa`, `eslint-disable`) added
 - [ ] KPI changes are reflected in `docs/kpi-definitions.md`, `lambda/shared/kpi_engine.py` and `web/src/constants/kpiDefinitions.ts` together

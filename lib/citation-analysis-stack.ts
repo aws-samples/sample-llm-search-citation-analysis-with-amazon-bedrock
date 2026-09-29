@@ -18,9 +18,6 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
-// No aws-wafv2 import: the only L1 WAF construct in this stack was the
-// unassociated REGIONAL ACL deleted on 2026-08-19. The CloudFront Web ACL is
-// built through a us-east-1 custom resource (boto3 wafv2), not this module.
 import * as bedrockagentcore from 'aws-cdk-lib/aws-bedrockagentcore';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -2348,31 +2345,6 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Grant scheduler role permission to start executions
     stateMachine.grantStartExecution(schedulerRole);
 
-    // ========================================
-    // WAF Web ACL for API Gateway — REMOVED 2026-08-19
-    // ========================================
-    //
-    // `CitationAnalysis-API-WAF` (REGIONAL, logical id `ApiWaf`) used to be
-    // created here with four rules — the two AWS managed sets, SQLi, and a
-    // 1000-per-5-min rate limit — and was never associated with anything. The
-    // association below it had been commented out since it was written, and
-    // `list-resources-for-web-acl` confirmed the empty set: it inspected zero
-    // requests while billing for the ACL plus every rule group, every month
-    // (AUDIT-2026-08-19 §2.1).
-    //
-    // Attaching it was the other option and was rejected: the rules it carried
-    // target injection and volumetric attacks against a public surface, and
-    // this API has no anonymous surface to speak of.
-    //
-    // What protects the API now:
-    //   - the Cognito authorizer, on every route except GET /api/health
-    //   - the stage throttle, 100 rps sustained / 200 burst
-    //   - per-request origin validation and input validation in the handlers
-    //
-    // The CloudFront Web ACL is a DIFFERENT resource, further down, created in
-    // us-east-1 via custom resource. It IS attached to the distribution and
-    // must stay.
-
     // Create REST API Gateway
     // Note: Auth construct created early, callback URLs updated after CloudFront distribution
     const auth = new Auth(this, 'Auth', {urls: ['http://localhost:5173'], // Temporary - updated below after CloudFront creation
@@ -3027,146 +2999,19 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     // ========================================
-    // CloudFront WAF (us-east-1) - Cross-Region Custom Resource
+    // No WAF (pay-per-use by design)
     // ========================================
-    
-    // CloudFront WAF must be in us-east-1. We use a custom resource to create it.
-    const cloudFrontWafProvider = new cdk.custom_resources.Provider(this, 'CloudFrontWafProvider', {
-      onEventHandler: new lambda.Function(this, 'CloudFrontWafHandler', {
-        functionName: 'CitationAnalysis-CloudFrontWafHandler',
-        runtime: lambda.Runtime.PYTHON_3_12,
-        handler: 'index.handler',
-        timeout: cdk.Duration.minutes(5),
-        code: lambda.Code.fromInline(`
-import boto3
-import json
-import logging
+    //
+    // Neither CloudFront nor API Gateway nor the user pool has a web ACL: a
+    // web ACL bills per month whether or not the demo is used. What protects
+    // the app instead:
+    //   - CloudFront: HTTPS only, origin access control, the security headers below
+    //   - API Gateway: the Cognito authorizer on every route except GET
+    //     /api/health, the stage throttle (100 rps / 200 burst) and the usage
+    //     plan quota, and input validation in the handlers
+    // To add one, create a CLOUDFRONT-scope web ACL in us-east-1 and pass its
+    // ARN as the distribution's `webAclId`.
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
-
-def handler(event, context):
-    logger.info(f"Event: {json.dumps(event)}")
-    request_type = event['RequestType']
-    props = event['ResourceProperties']
-    waf_name = props['WafName']
-    
-    # WAFv2 client in us-east-1 for CloudFront scope
-    waf = boto3.client('wafv2', region_name='us-east-1')
-    
-    if request_type == 'Create':
-        return create_waf(waf, waf_name)
-    elif request_type == 'Update':
-        old_props = event.get('OldResourceProperties', {})
-        physical_id = event['PhysicalResourceId']
-        # If name changed, delete old and create new
-        if old_props.get('WafName') != waf_name:
-            delete_waf(waf, physical_id)
-            return create_waf(waf, waf_name)
-        return {'PhysicalResourceId': physical_id, 'Data': {'WebAclArn': physical_id}}
-    elif request_type == 'Delete':
-        physical_id = event['PhysicalResourceId']
-        delete_waf(waf, physical_id)
-        return {'PhysicalResourceId': physical_id}
-
-def create_waf(waf, waf_name):
-    response = waf.create_web_acl(
-        Name=waf_name,
-        Scope='CLOUDFRONT',
-        DefaultAction={'Allow': {}},
-        VisibilityConfig={
-            'SampledRequestsEnabled': True,
-            'CloudWatchMetricsEnabled': True,
-            'MetricName': 'CitationAnalysisCloudFrontWaf'
-        },
-        Rules=[
-            {
-                'Name': 'AWSManagedRulesCommonRuleSet',
-                'Priority': 1,
-                'OverrideAction': {'None': {}},
-                'Statement': {
-                    'ManagedRuleGroupStatement': {
-                        'VendorName': 'AWS',
-                        'Name': 'AWSManagedRulesCommonRuleSet'
-                    }
-                },
-                'VisibilityConfig': {
-                    'SampledRequestsEnabled': True,
-                    'CloudWatchMetricsEnabled': True,
-                    'MetricName': 'AWSManagedRulesCommonRuleSet'
-                }
-            },
-            {
-                'Name': 'AWSManagedRulesKnownBadInputsRuleSet',
-                'Priority': 2,
-                'OverrideAction': {'None': {}},
-                'Statement': {
-                    'ManagedRuleGroupStatement': {
-                        'VendorName': 'AWS',
-                        'Name': 'AWSManagedRulesKnownBadInputsRuleSet'
-                    }
-                },
-                'VisibilityConfig': {
-                    'SampledRequestsEnabled': True,
-                    'CloudWatchMetricsEnabled': True,
-                    'MetricName': 'AWSManagedRulesKnownBadInputsRuleSet'
-                }
-            },
-            {
-                'Name': 'RateLimitRule',
-                'Priority': 3,
-                'Action': {'Block': {}},
-                'Statement': {
-                    'RateBasedStatement': {
-                        'Limit': 1000,
-                        'AggregateKeyType': 'IP'
-                    }
-                },
-                'VisibilityConfig': {
-                    'SampledRequestsEnabled': True,
-                    'CloudWatchMetricsEnabled': True,
-                    'MetricName': 'RateLimitRule'
-                }
-            }
-        ]
-    )
-    arn = response['Summary']['ARN']
-    logger.info(f"Created WAF: {arn}")
-    return {'PhysicalResourceId': arn, 'Data': {'WebAclArn': arn}}
-
-def delete_waf(waf, arn):
-    try:
-        # Get the lock token
-        name = arn.split('/')[-2]
-        id = arn.split('/')[-1]
-        response = waf.get_web_acl(Name=name, Scope='CLOUDFRONT', Id=id)
-        lock_token = response['LockToken']
-        waf.delete_web_acl(Name=name, Scope='CLOUDFRONT', Id=id, LockToken=lock_token)
-        logger.info(f"Deleted WAF: {arn}")
-    except Exception as e:
-        logger.warning(f"Failed to delete WAF {arn}: {e}")
-`),
-      }),
-    });
-
-    // Grant the handler permission to manage WAF in us-east-1
-    cloudFrontWafProvider.onEventHandler.addToRolePolicy(new iam.PolicyStatement({
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'wafv2:CreateWebACL',
-        'wafv2:DeleteWebACL',
-        'wafv2:GetWebACL',
-        'wafv2:UpdateWebACL',
-      ],
-      resources: ['*'], // WAF ARNs are dynamic
-    }));
-
-    // Create the CloudFront WAF via custom resource
-    const cloudFrontWaf = new cdk.CustomResource(this, 'CloudFrontWaf', {
-      serviceToken: cloudFrontWafProvider.serviceToken,
-      properties: {WafName: 'CitationAnalysis-CloudFront-WAF',},
-    });
-    // CloudFront Distribution with WAF protection
     // Create response headers policy for security headers
     const securityHeadersPolicy = new cloudfront.ResponseHeadersPolicy(this, 'SecurityHeadersPolicy', {
       responseHeadersPolicyName: 'CitationAnalysis-SecurityHeaders-v3',
@@ -3199,7 +3044,6 @@ def delete_waf(waf, arn):
     });
 
     const distribution = new cloudfront.Distribution(this, 'WebDistribution', {
-      webAclId: cloudFrontWaf.getAttString('WebAclArn'),
       defaultBehavior: {
         origin: origins.S3BucketOrigin.withOriginAccessControl(webBucket),
         viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
@@ -3220,15 +3064,6 @@ def delete_waf(waf, arn):
         },
       ],
     });
-
-    // ========================================
-    // Associate WAF with API Gateway — NOT DONE, BY DECISION 2026-08-19
-    // ========================================
-    //
-    // The commented-out `CfnWebACLAssociation` that lived here is gone along
-    // with the ACL it referenced; see "WAF Web ACL for API Gateway — REMOVED"
-    // above for the reasoning and for what protects the API instead. Kept as a
-    // marker so the absence reads as a decision rather than an oversight.
 
     // ========================================
     // Configure CORS with CloudFront Domain
@@ -3386,21 +3221,6 @@ def delete_waf(waf, arn):
       value: distribution.distributionId,
       description: 'CloudFront Distribution ID (for cache invalidation)',
       exportName: 'CitationAnalysis-CloudFrontDistributionId',
-    });
-
-    // There is no API Gateway Web ACL output because there is no longer an API
-    // Gateway Web ACL — it was deleted on 2026-08-19 (AUDIT-2026-08-19 §2.1).
-    // The output had already been dropped before that, because describing an
-    // unassociated ACL as "protecting API Gateway" told anyone auditing this
-    // account that protection existed where it did not.
-    //
-    // The CloudFront Web ACL below IS attached, so its export is accurate.
-
-    // WAF Web ACL ARN (CloudFront - us-east-1)
-    new cdk.CfnOutput(this, 'CloudFrontWafWebAclArn', {
-      value: cloudFrontWaf.getAttString('WebAclArn'),
-      description: 'WAF Web ACL ARN protecting CloudFront (us-east-1)',
-      exportName: 'CitationAnalysis-CloudFrontWafWebAclArn',
     });
 
     // Web S3 Bucket Name
