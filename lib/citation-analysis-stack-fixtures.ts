@@ -1277,3 +1277,81 @@ export function extractWorkflowScaleSnapshot(template: Template): WorkflowScaleS
     generateSummaryTimeoutSeconds: extractFunctionTimeout(template, 'CitationAnalysis-GenerateSummary'),
   };
 }
+
+/** The providers that get their own `CitationAnalysis-Search-<id>` function (2.28.0). */
+export const SEARCH_PROVIDER_IDS = [
+  'openai', 'perplexity', 'gemini', 'claude', 'brave', 'tavily', 'exa', 'serpapi', 'firecrawl',
+];
+
+export function searchFunctionName(providerId: string): string {
+  return `CitationAnalysis-Search-${providerId}`;
+}
+
+/** The per-provider search functions as synthesized, keyed by provider id. */
+export interface ProviderSearchSnapshot {
+  reservedConcurrency: Record<string, number | undefined>;
+  timeoutSeconds: Record<string, number>;
+  roleLogicalIds: Record<string, string>;
+  searchRoleLogicalId: string;
+  /** `PROVIDER_THROTTLE_EXTRA_ATTEMPTS` of every function in the stack that sets it, by function name. */
+  throttleExtraAttemptsByFunction: Record<string, unknown>;
+  /** Logical ids of the single pre-2.28.0 search function and its log group ('' when gone). */
+  legacyFunctionLogicalId: string;
+  legacyLogGroupLogicalId: string;
+}
+
+export const EMPTY_PROVIDER_SEARCH_SNAPSHOT: ProviderSearchSnapshot = {
+  reservedConcurrency: {},
+  timeoutSeconds: {},
+  roleLogicalIds: {},
+  searchRoleLogicalId: '',
+  throttleExtraAttemptsByFunction: {},
+  legacyFunctionLogicalId: '',
+  legacyLogGroupLogicalId: '',
+};
+
+function byProvider<T>(read: (functionName: string) => T): Record<string, T> {
+  return Object.fromEntries(SEARCH_PROVIDER_IDS.map((id) => [id, read(searchFunctionName(id))]));
+}
+
+export function extractProviderSearchSnapshot(template: Template): ProviderSearchSnapshot {
+  const throttleExtraAttemptsByFunction: Record<string, unknown> = {};
+  for (const resource of Object.values(template.findResources('AWS::Lambda::Function'))) {
+    const value = resolvePath(resource, ['Properties', 'Environment', 'Variables', 'PROVIDER_THROTTLE_EXTRA_ATTEMPTS']);
+    if (value !== undefined) {
+      throttleExtraAttemptsByFunction[resolveString(resource, ['Properties', 'FunctionName'])] = value;
+    }
+  }
+  return {
+    reservedConcurrency: byProvider((name) => extractReservedConcurrency(template, name)),
+    timeoutSeconds: byProvider((name) => extractFunctionTimeout(template, name)),
+    roleLogicalIds: byProvider((name) => findFunctionRoleLogicalId(template, name)),
+    searchRoleLogicalId: findLogicalIdByName(template, 'AWS::IAM::Role', 'RoleName', 'CitationAnalysis-SearchLambdaRole'),
+    throttleExtraAttemptsByFunction,
+    legacyFunctionLogicalId: findLambdaLogicalId(template, 'CitationAnalysis-Search'),
+    legacyLogGroupLogicalId: findLogicalIdByName(
+      template, 'AWS::Logs::LogGroup', 'LogGroupName', '/aws/lambda/CitationAnalysis-Search'
+    ),
+  };
+}
+
+/** The keyword child workflow's states inside ProcessKeywords. */
+export function keywordChildStates(definition: unknown): unknown {
+  return resolvePath(definition, ['States', 'ProcessKeywords', 'ItemProcessor', 'States']);
+}
+
+/**
+ * The SearchAllProviders branch that calls one provider, found by its start
+ * state `Search-<id>` so the assertions do not depend on branch order.
+ */
+export function providerSearchBranch(definition: unknown, providerId: string): unknown {
+  const branches = resolvePath(keywordChildStates(definition), ['SearchAllProviders', 'Branches']);
+  return (Array.isArray(branches) ? branches : [])
+    .find((branch) => resolvePath(branch, ['StartAt']) === `Search-${providerId}`);
+}
+
+/** Every SearchAllProviders branch's start state, in definition order. */
+export function providerSearchBranchStarts(definition: unknown): unknown[] {
+  const branches = resolvePath(keywordChildStates(definition), ['SearchAllProviders', 'Branches']);
+  return (Array.isArray(branches) ? branches : []).map((branch) => resolvePath(branch, ['StartAt']));
+}

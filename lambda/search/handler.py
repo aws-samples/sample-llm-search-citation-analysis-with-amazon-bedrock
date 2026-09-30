@@ -607,25 +607,26 @@ def execute_all_providers(keyword: str, provider_types: list[str] | None = None,
         return True
 
     for provider_id, secret_name, label, provider_type, run_query in PROVIDER_RUNNERS:
-        if provider_type not in run_types:
+        # Selection first: a Lambda asked for one provider reads one secret
+        # and one enablement row, not all nine.
+        if provider_type not in run_types or not should_run_provider(provider_id):
+            continue
+        api_key = get_api_key(secret_name)
+        if not api_key:
+            logger.info(f"{label} API key not configured, skipping")
+            continue
+        if not is_provider_enabled(provider_id):
+            logger.info(f"{label} is disabled, skipping")
             continue
 
-        # Same decision ladder every provider block used to carry:
-        # key + enabled + selected -> run; key + selected -> disabled;
-        # selected -> no key configured.
-        api_key = get_api_key(secret_name)
-        if api_key and is_provider_enabled(provider_id) and should_run_provider(provider_id):
-            logger.info(f"Querying {label}...")
-            try:
-                result = run_query(keyword, api_key, query_template)
-                _record_provider_outcome(provider_id, result)
-                results.append(result)
-            except ProviderConfigUnavailableError:
-                logger.exception(f"{label} provider config unavailable, skipping this run")
-        elif api_key and should_run_provider(provider_id):
-            logger.info(f"{label} is disabled, skipping")
-        elif should_run_provider(provider_id):
-            logger.info(f"{label} API key not configured, skipping")
+        logger.info(f"Querying {label}...")
+        try:
+            result = run_query(keyword, api_key, query_template)
+        except ProviderConfigUnavailableError:
+            logger.exception(f"{label} provider config unavailable, skipping this run")
+            continue
+        _record_provider_outcome(provider_id, result)
+        results.append(result)
 
     return results
 
@@ -826,14 +827,15 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         "timestamp": "2025-01-15T10:30:00Z",
         "query_prompts": [{"id": "...", "name": "Family", "template": "As a family traveler, find me {keyword}"}],
         "provider_types": ["search"],  // Optional: "llm", "search", or both
-        "providers": ["brave", "tavily"]  // Optional: specific provider IDs
+        "providers": ["brave", "tavily"]  // Optional: specific provider IDs; the analysis
+                                          // workflow sends one id per invocation
     }
 
     Output:
     {
         "keyword": "best hotels in malaga",
         "timestamp": "2025-01-15T10:30:00Z",
-        "results": [...]
+        "results": [...]  // slim results; [] when the one provider is disabled or has no key
     }
     """
     logger.info(f"Received event: {json.dumps(event)}")

@@ -109,6 +109,7 @@ ignore = [
 #   S104 — 0.0.0.0 appears in the SSRF *blocklist*, not as a bind address.
 "lambda/shared/ai_clients.py"     = ["S311"]
 "lambda/shared/models.py"         = ["S311"]
+"lambda/shared/serpapi.py"        = ["S311"]
 "lambda/shared/research_agent.py" = ["S105", "S608"]
 "lambda/shared/url_validator.py"  = ["S104"]
 

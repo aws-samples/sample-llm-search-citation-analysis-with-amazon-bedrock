@@ -1,7 +1,8 @@
 """
 Tests for shared.keyword_signals: Google expansion signals through SerpAPI
 (related searches, People Also Ask, autocomplete) shaped as research
-candidates.
+candidates. SerpAPI itself is stubbed at ``serpapi_search`` (async submit +
+Search Archive, tested in ``test_serpapi.py``).
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared import keyword_signals
+from shared.serpapi import SerpApiError
 
 _SEARCH_PAGE = {
     'related_searches': [{'query': 'Hotel Coruña Playa Riazor'}, {'query': 'hoteles baratos coruña'}],
@@ -20,12 +22,14 @@ _AUTOCOMPLETE = {'suggestions': [{'value': 'hotel coruña centro'}, {'value': 'h
 
 
 def _serpapi(search=_SEARCH_PAGE, autocomplete=_AUTOCOMPLETE) -> MagicMock:
-    return MagicMock(side_effect=lambda params: search if params['engine'] == 'google' else autocomplete)
+    return MagicMock(
+        side_effect=lambda api_key, params, **_options: search if params['engine'] == 'google' else autocomplete,
+    )
 
 
 class TestFetchGoogleSignals:
     def test_collects_related_searches_questions_and_autocomplete_in_order(self):
-        with patch.object(keyword_signals, '_serpapi_get', _serpapi()):
+        with patch.object(keyword_signals, 'serpapi_search', _serpapi()):
             candidates = keyword_signals.fetch_google_signals('key', 'hotel coruña', country='es', language='es')
 
         assert [(entry['keyword'], entry['source']) for entry in candidates] == [
@@ -36,38 +40,64 @@ class TestFetchGoogleSignals:
         ]
 
     def test_candidates_carry_a_neutral_relevance_and_no_judged_intent(self):
-        with patch.object(keyword_signals, '_serpapi_get', _serpapi()):
+        with patch.object(keyword_signals, 'serpapi_search', _serpapi()):
             first = keyword_signals.fetch_google_signals('key', 'hotel coruña')[0]
 
         assert (first['relevance'], first['intent'], first['competition']) == (5, '', '')
 
     def test_sends_the_market_and_language_to_both_engines(self):
-        get = _serpapi()
+        search = _serpapi()
 
-        with patch.object(keyword_signals, '_serpapi_get', get):
+        with patch.object(keyword_signals, 'serpapi_search', search):
             keyword_signals.fetch_google_signals('key', 'hotel coruña', country='es', language='gl')
 
-        engines = [(call.args[0]['engine'], call.args[0]['gl'], call.args[0]['hl'], call.args[0]['q']) for call in get.call_args_list]
+        engines = [(call.args[1]['engine'], call.args[1]['gl'], call.args[1]['hl'], call.args[1]['q']) for call in search.call_args_list]
         assert engines == [('google', 'es', 'gl', 'hotel coruña'), ('google_autocomplete', 'es', 'gl', 'hotel coruña')]
 
+    def test_passes_the_api_key_separately_from_the_search_parameters(self):
+        search = _serpapi()
+
+        with patch.object(keyword_signals, 'serpapi_search', search):
+            keyword_signals.fetch_google_signals('serp-key', 'hotel coruña')
+
+        assert [(call.args[0], 'api_key' in call.args[1]) for call in search.call_args_list] == [
+            ('serp-key', False), ('serp-key', False),
+        ]
+
+    def test_waits_for_each_search_at_most_the_signals_deadline(self):
+        search = _serpapi()
+
+        with patch.object(keyword_signals, 'serpapi_search', search):
+            keyword_signals.fetch_google_signals('key', 'hotel coruña')
+
+        assert [call.kwargs for call in search.call_args_list] == [
+            {'deadline_seconds': keyword_signals.SIGNALS_DEADLINE_SECONDS},
+            {'deadline_seconds': keyword_signals.SIGNALS_DEADLINE_SECONDS},
+        ]
+
+    def test_asks_google_for_ten_results(self):
+        search = _serpapi()
+
+        with patch.object(keyword_signals, 'serpapi_search', search):
+            keyword_signals.fetch_google_signals('key', 'hotel coruña')
+
+        assert search.call_args_list[0].args[1]['num'] == 10
+
     def test_tolerates_pages_without_the_signal_blocks(self):
-        with patch.object(keyword_signals, '_serpapi_get', _serpapi(search={'organic_results': []}, autocomplete={})):
+        with patch.object(keyword_signals, 'serpapi_search', _serpapi(search={'organic_results': []}, autocomplete={})):
             assert keyword_signals.fetch_google_signals('key', 'hotel coruña') == []
 
     def test_caps_the_number_of_candidates_per_query(self):
         many = {'suggestions': [{'value': f'suggestion {index}'} for index in range(50)]}
 
-        with patch.object(keyword_signals, '_serpapi_get', _serpapi(search={}, autocomplete=many)):
+        with patch.object(keyword_signals, 'serpapi_search', _serpapi(search={}, autocomplete=many)):
             candidates = keyword_signals.fetch_google_signals('key', 'q')
 
         assert len(candidates) == keyword_signals.MAX_SIGNALS_PER_QUERY
 
     def test_propagates_api_errors_to_the_caller(self):
-        class SerpApiError(Exception):
-            pass
-
         with (
-            patch.object(keyword_signals, '_serpapi_get', MagicMock(side_effect=SerpApiError('401'))),
-            pytest.raises(SerpApiError),
+            patch.object(keyword_signals, 'serpapi_search', MagicMock(side_effect=SerpApiError('SerpAPI HTTP 401: bad key'))),
+            pytest.raises(SerpApiError, match='HTTP 401'),
         ):
             keyword_signals.fetch_google_signals('key', 'q')

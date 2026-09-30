@@ -155,6 +155,12 @@ class TestCreditExhaustionAcrossProviders:
         """Payment Required is unambiguous, so the status fallback can be trusted here."""
         assert classify_provider_error('', 402) == INSUFFICIENT_CREDIT
 
+    def test_classifies_serpapis_out_of_searches_429_as_insufficient_credit(self):
+        """SerpAPI answers 429 for both a spent month and hourly throttling; only the text tells them apart."""
+        message = 'SerpAPI account has run out of searches: {"error": "Your account has run out of searches."}'
+
+        assert classify_provider_error(message, 429) == INSUFFICIENT_CREDIT
+
 
 class TestTransientFailuresAreNotTerminal:
     """Throttling and timeouts resolve themselves; misreading them disables healthy providers."""
@@ -171,6 +177,9 @@ class TestTransientFailuresAreNotTerminal:
 
     def test_classifies_a_read_timeout_message_as_timeout(self):
         assert classify_provider_error('HTTPSConnectionPool: Read timed out. (read timeout=60)') == TIMEOUT
+
+    def test_classifies_a_serpapi_search_still_pending_at_its_deadline_as_timeout(self):
+        assert classify_provider_error('SerpAPI search 6523ab timed out: still pending after 300s') == TIMEOUT
 
     def test_classifies_a_504_as_timeout(self):
         assert classify_provider_error('Gateway Timeout', 504) == TIMEOUT

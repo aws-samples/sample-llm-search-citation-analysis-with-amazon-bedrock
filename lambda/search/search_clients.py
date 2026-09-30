@@ -12,6 +12,7 @@ from typing import Any
 import requests
 
 from api_clients import clean_url, retry_with_backoff
+from shared.serpapi import serpapi_search
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -43,7 +44,9 @@ class BaseSearchClient(ABC):
     ) -> tuple[list[str], list[dict[str, Any]]]:
         """Normalize raw provider hits into ``(citations, search_results)``.
 
-        Hits without a usable URL (after ``clean_url``) are dropped. Each kept
+        Hits without a URL are dropped before cleaning (``clean_url('')``
+        is ``'://'``, which is truthy), and so are hits whose URL cleans to
+        nothing. Each kept
         hit becomes ``{"url", "title", "snippet", *extra_fields, "source"}``,
         where ``extra_fields`` adds the provider-specific attributes and
         ``source`` is this client's ``provider_id``.
@@ -51,7 +54,8 @@ class BaseSearchClient(ABC):
         citations: list[str] = []
         results: list[dict[str, Any]] = []
         for item in items:
-            url = clean_url(item.get(url_key, ""))
+            raw_url = item.get(url_key)
+            url = clean_url(raw_url) if isinstance(raw_url, str) and raw_url.strip() else ""
             if not url:
                 continue
             citations.append(url)
@@ -285,36 +289,25 @@ class ExaSearchClient(BaseSearchClient):
 
 
 class SerpAPIClient(BaseSearchClient):
-    """SerpAPI Google Search client."""
+    """SerpAPI Google Search client (async submit + Search Archive, see ``shared.serpapi``)."""
 
     provider_id = "serpapi"
 
     def __init__(self, api_key: str):
         self.api_key = api_key
-        self.base_url = "https://serpapi.com/search"
-
-    @retry_with_backoff(provider_name="SERPAPI", timeout=30)
-    def _make_request(self, params: dict, timeout: int = 30) -> requests.Response:
-        """Make HTTP request to SerpAPI."""
-        return requests.get(
-            self.base_url,
-            params=params,
-            timeout=timeout
-        )
 
     def search(self, query: str, num_results: int = 10) -> dict[str, Any]:
         """Execute Google search via SerpAPI."""
         start_time = time.time()
         try:
             params = {
-                "api_key": self.api_key,
                 "q": query,
                 "engine": "google",
                 "num": num_results,
                 "hl": "en",
                 "gl": "us"
             }
-            raw_response = self._make_request(params)
+            raw_response = serpapi_search(self.api_key, params)
             latency_ms = _elapsed_ms(start_time)
 
             # Extract organic results

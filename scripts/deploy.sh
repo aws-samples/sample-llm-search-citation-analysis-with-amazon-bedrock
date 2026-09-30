@@ -432,7 +432,12 @@ verify_deployment() {
             
             # Verify Lambda functions
             print_info "Verifying Lambda functions..."
-            local functions=("Search" "Deduplication" "Crawler" "ParseKeywords" "GenerateSummary")
+            local functions=("Deduplication" "Crawler" "ParseKeywords" "GenerateSummary")
+            # One search Lambda per provider since 2.28.0 (lib/constructs/provider-search.ts).
+            local provider
+            for provider in openai perplexity gemini claude brave tavily exa serpapi firecrawl; do
+                functions+=("Search-$provider")
+            done
             for func in "${functions[@]}"; do
                 if aws lambda get-function --function-name "CitationAnalysis-$func" --region "$region" &> /dev/null; then
                     print_success "  ✓ Lambda exists: CitationAnalysis-$func"

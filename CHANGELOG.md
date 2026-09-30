@@ -9,6 +9,51 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.28.0] - 2026-09-30
+
+### Fixed
+
+- **SerpAPI no longer times out.** On the free plan a Google search through SerpAPI usually takes a few seconds
+  but sometimes over a minute (78 s measured). The client gave up after 30 s and sent the same search again, up to
+  five times, so on the 2.27.0 proof run 5 of 44 keywords got no SerpAPI results and the run was reported
+  degraded. Searches are now submitted with `async=true` and read back from SerpAPI's Search Archive (free) until
+  they are done, so a slow search is waited for instead of re-sent. An account that has run out of searches is
+  reported as out of credit straight away instead of being retried. The keyword-research Google signals use the
+  same client. The API key is masked in every SerpAPI error and log line (`requests` put it in connection errors).
+- **Rate limits are waited out, not failed.** Clients honour `x-ratelimit-reset` (Perplexity) as well as
+  `Retry-After`, and the analysis search Lambdas allow 12 more throttled attempts than the default, so a
+  per-minute limit cannot fail a call.
+
+### Changed
+
+- **Providers run at the same time, and 20 keywords at a time.** Each keyword used to call its nine providers one
+  after another inside one Lambda (about 2.3 minutes per keyword on the last run) and three keywords ran at a time.
+  `SearchAllProviders` is now a Parallel state with one `CitationAnalysis-Search-<provider>` Lambda per provider,
+  merged before deduplication. Each provider's Lambda has reserved concurrency, which caps its calls in flight
+  across the whole run: a keyword whose provider is at its cap waits for a slot (Step Functions retries the
+  throttled invoke with jittered backoff), and a provider Lambda that still fails is recorded as that provider's
+  failed call instead of failing the keyword. Defaults were measured locally against the real APIs with our keys
+  (Perplexity allows about one request a second, Firecrawl about six searches a minute on our plan) and can be
+  raised per deployment with `-c providerConcurrency` (see the README). Keywords run 20 at a time
+  (`processKeywordsConcurrency`, was 3) and cited pages are crawled 10 at a time (`crawlConcurrency`, was 3).
+- **Measured on the same 44 keywords** (all active keywords, no personas, eight enabled providers):
+
+  | | 2.27.0 | 2.28.0 |
+  |---|---|---|
+  | Run time | 79 min | 5.6 min |
+  | Successful provider calls | 347 of 352 (SerpAPI 39 of 44) | 352 of 352, every provider 44 of 44 |
+  | Run status / KPI alerts | `completed_degraded`, alerts skipped | `completed`, 5 group snapshots recorded |
+  | Per keyword, median | ~5 min | 99 s (search 60 s, crawl 37 s) |
+
+  Firecrawl is now the slowest provider on our plan (about six searches a minute; p90 134 s including waiting for
+  a slot); a paid plan and a higher `providerConcurrency.firecrawl` remove that wait. Rate limits still happen and
+  are waited out (38 Firecrawl and 8 Perplexity 429s on that run, none of them failed a call).
+- The single `CitationAnalysis-Search` Lambda and the `CitationAnalysis-SearchFunctionArn` export are removed (no
+  stack imports the export); its log group is kept (Retain) so earlier runs stay readable until retention expires
+  them. `scripts/quick-error-check.sh` reads the nine provider log groups and `scripts/deploy.sh` verifies the nine
+  provider Lambdas.
+- Deduplication sanitizes the keyword the way the search step does, so Citations and SearchResults keep one key.
+
 ## [2.27.0] - 2026-09-30
 
 Reported and first fixed by [@bastiandelrioblanco](https://github.com/bastiandelrioblanco), who found that keyword
