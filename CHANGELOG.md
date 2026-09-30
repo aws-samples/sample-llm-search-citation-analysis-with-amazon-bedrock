@@ -9,6 +9,25 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.28.1] - 2026-09-30
+
+### Security
+
+- **Dependencies patched for every open Dependabot alert:**
+  - `dompurify` 3.4.13 → 3.4.16 in the dashboard. It sanitizes rendered answers; low severity, IN_PLACE hook XSS,
+    GHSA-p98j-92pf-mc4p.
+  - `axios` 1.19.0 → 1.20.0. Development-only, pulled in by Nx; ten advisories including GHSA-m8m8-qj5v-23w3 and
+    GHSA-r4gj-5m52-g5wh.
+  - `brace-expansion` 5.0.9 → 5.0.12, root and dashboard. Development-only; DoS advisories GHSA-6j4f-fj2g-mc7p,
+    GHSA-qhr7-859c-m2p7 and GHSA-q2hr-2g5m-vwhr.
+- The override floors for `axios` and `brace-expansion` in `package.json` are raised to the patched versions, so a
+  later lockfile refresh can't resolve a vulnerable one again. This supersedes Dependabot's #158, which bumped only
+  the root `brace-expansion` and left the override floor at `^5.0.5`.
+- One copy is still flagged: `aws-cdk-lib` bundles `brace-expansion@5.0.9` inside its own package, up to and
+  including 2.272.0. npm overrides cannot reach a bundled dependency, and no `aws-cdk-lib` release ships a fixed
+  copy yet. It runs only at synth time on the glob patterns in this repository's own CDK code, never on outside
+  input, so the DoS is not reachable. Revisit when `aws-cdk-lib` updates its bundled `minimatch`/`brace-expansion`.
+
 ## [2.28.0] - 2026-09-30
 
 ### Fixed
