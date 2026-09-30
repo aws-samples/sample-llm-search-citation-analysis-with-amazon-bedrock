@@ -18,6 +18,7 @@ from typing import Any
 
 from boto3.dynamodb.conditions import Key
 
+from shared.keyword_groups import ACTIVE_KEYWORD_STATUS
 from shared.utils import brand_names_match
 
 logger = logging.getLogger(__name__)
@@ -27,8 +28,29 @@ logger.setLevel(logging.INFO)
 RESULTS_PER_KEYWORD = 20
 # Bound on the fallback scan used when no keyword is known.
 FALLBACK_SCAN_LIMIT = 500
-# Bound on the Keywords-table scan that discovers the active keywords.
-ACTIVE_KEYWORDS_SCAN_LIMIT = 100
+# The Keywords-table GSI keyed by status, sorted by keyword text.
+_STATUS_INDEX = 'StatusIndex'
+
+
+def _first_active_keywords(keywords_table: Any, max_keywords: int) -> list[str]:
+    """The first ``max_keywords`` active keyword texts in keyword order.
+
+    One StatusIndex query page: the key condition selects exactly the active
+    rows (no filter runs after ``Limit``), so the page holds ``max_keywords``
+    of them whenever that many exist, and the index's ``keyword`` sort key
+    makes the choice the same on every call. A scan with a status filter
+    applied ``Limit`` before the filter and returned an arbitrary handful, or
+    none, once the table held thousands of keywords.
+    """
+    if max_keywords < 1:
+        return []
+    response = keywords_table.query(
+        IndexName=_STATUS_INDEX,
+        KeyConditionExpression=Key('status').eq(ACTIVE_KEYWORD_STATUS),
+        ProjectionExpression='keyword',
+        Limit=max_keywords,
+    )
+    return [item['keyword'] for item in response.get('Items', []) if item.get('keyword')]
 
 
 def tracked_brand_names(config: dict[str, Any]) -> tuple[list[str], list[str]]:
@@ -77,7 +99,8 @@ def load_recent_search_results(
 ) -> list[dict[str, Any]]:
     """Return recent SearchResults rows for the keywords under analysis.
 
-    Keyword discovery: ``keywords`` when given, otherwise the ``active`` rows
+    Keyword discovery: ``keywords`` when given, otherwise the first
+    ``max_keywords`` active keywords, in keyword order, from the StatusIndex
     of the Keywords table named by ``DYNAMODB_TABLE_KEYWORDS`` (read per call
     so a caller-scoped environment applies). With no keyword at all the
     function falls back to a bounded scan of the search table.
@@ -99,15 +122,7 @@ def load_recent_search_results(
     keywords = list(keywords) if keywords is not None else []
     keywords_table_name = os.environ.get('DYNAMODB_TABLE_KEYWORDS')
     if not keywords and keywords_table_name:
-        keywords_table = dynamodb.Table(keywords_table_name)
-        kw_response = keywords_table.scan(
-            ProjectionExpression='keyword',
-            FilterExpression='#status = :status',
-            ExpressionAttributeNames={'#status': 'status'},
-            ExpressionAttributeValues={':status': 'active'},
-            Limit=ACTIVE_KEYWORDS_SCAN_LIMIT,
-        )
-        keywords = [item.get('keyword', '') for item in kw_response.get('Items', []) if item.get('keyword')]
+        keywords = _first_active_keywords(dynamodb.Table(keywords_table_name), max_keywords)
 
     if not keywords:
         response = search_table.scan(Limit=FALLBACK_SCAN_LIMIT)

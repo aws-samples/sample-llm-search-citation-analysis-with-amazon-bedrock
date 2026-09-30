@@ -14,13 +14,13 @@ import {
   mockCitations,
   mockSearches,
   mockKeywords,
-  createMockAuthoritativeKeywordsResponse,
   createMockDelayedJsonResponse,
   createMockFetch,
   createMockKeywords,
   renderLoadedDashboard,
   startPendingKeywordReconciliation,
 } from './useDashboardData-fixtures';
+import { buildKeywordsPage } from '../api/keywordPages-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
@@ -102,15 +102,20 @@ describe('useDashboardData', () => {
     expect(result.current.keywords).toStrictEqual(newKeywords);
   });
 
-  it('keeps the dashboard usable when API payloads have invalid shapes', async () => {
+  it('keeps the dashboard usable when panel payloads have invalid shapes', async () => {
     const { result } = await renderLoadedDashboard({
       stats: { invalid: 'data' },
       citations: { invalid: 'data' },
       searches: { invalid: 'data' },
-      keywords: { invalid: 'data' },
     });
 
     expect(result.current.error).toBeNull();
+  });
+
+  it('reports the dashboard error when a keyword page has an invalid shape', async () => {
+    const { result } = await renderLoadedDashboard({ keywordsPage: { invalid: 'data' } });
+
+    expect(result.current.error).toBe('Invalid dashboard request');
   });
 
   it('aborts the active dashboard request when the owner unmounts', () => {
@@ -155,29 +160,28 @@ describe('useDashboardData', () => {
       {
         outcome: 'replaces keywords immediately',
         condition: 'reconciliation receives a complete response',
-        authoritativeResponse: createMockAuthoritativeKeywordsResponse(reconciledKeywords),
+        authoritativeResponse: buildKeywordsPage(reconciledKeywords),
         expectedKeywords: reconciledKeywords,
       },
       {
         outcome: 'accepts the complete replacement',
         condition: 'the authoritative response contains 501 keywords',
-        authoritativeResponse: createMockAuthoritativeKeywordsResponse(largeReplacement),
+        authoritativeResponse: buildKeywordsPage(largeReplacement),
         expectedKeywords: largeReplacement,
       },
       {
         outcome: 'preserves keywords',
         condition: 'the authoritative count differs from the array length',
-        authoritativeResponse: createMockAuthoritativeKeywordsResponse(mismatchedKeywords, 1),
+        authoritativeResponse: buildKeywordsPage(mismatchedKeywords, null, 1),
         expectedKeywords: mockKeywords,
       },
       {
         outcome: 'preserves keywords',
-        condition: 'the authoritative response is incomplete',
-        authoritativeResponse: createMockAuthoritativeKeywordsResponse(
-          incompleteKeywords,
-          incompleteKeywords.length,
-          false
-        ),
+        condition: 'the authoritative page has no continuation token field',
+        authoritativeResponse: {
+          keywords: incompleteKeywords,
+          count: incompleteKeywords.length,
+        },
         expectedKeywords: mockKeywords,
       },
       {
@@ -191,7 +195,7 @@ describe('useDashboardData', () => {
             status: 'archived',
           }],
           count: 1,
-          complete: true,
+          next_token: null,
         },
         expectedKeywords: mockKeywords,
       },
@@ -242,10 +246,10 @@ describe('useDashboardData', () => {
     vi.useFakeTimers();
     const olderKeywords = createMockKeywords(1, 'older-full');
     const reconciledKeywords = createMockKeywords(1, 'newer-reconciliation');
-    const defaultFetch = createMockFetch({ authoritativeResponse: createMockAuthoritativeKeywordsResponse(reconciledKeywords) });
+    const defaultFetch = createMockFetch({ authoritativeResponse: buildKeywordsPage(reconciledKeywords) });
     mockAuthenticatedFetch.mockImplementation((url) => {
       if (url === MOCK_KEYWORDS_URL) {
-        return createMockDelayedJsonResponse({ keywords: olderKeywords }, 100);
+        return createMockDelayedJsonResponse(buildKeywordsPage(olderKeywords), 100);
       }
       return defaultFetch(url);
     });
@@ -271,7 +275,7 @@ describe('useDashboardData', () => {
     mockAuthenticatedFetch.mockImplementation((url) => {
       if (url === MOCK_AUTHORITATIVE_KEYWORDS_URL) {
         return createMockDelayedJsonResponse(
-          createMockAuthoritativeKeywordsResponse(staleReconciliationKeywords),
+          buildKeywordsPage(staleReconciliationKeywords),
           100
         );
       }
@@ -305,7 +309,7 @@ describe('useDashboardData', () => {
       const responseKeywords = isFirstRequest ? staleKeywords : newestKeywords;
       const responseDelay = isFirstRequest ? 100 : 10;
       return createMockDelayedJsonResponse(
-        createMockAuthoritativeKeywordsResponse(responseKeywords),
+        buildKeywordsPage(responseKeywords),
         responseDelay
       );
     });

@@ -1,5 +1,21 @@
 /** Pure id-selection arithmetic for `KeywordScopePicker`; kept apart from the component so the picker stays under the file-length cap. */
 
+/**
+ * Most keyword ids a run or schedule scope may name; mirrors `MAX_SCOPE_IDS`
+ * in `lambda/shared/keyword_groups.py`, which rejects larger scopes with a 400.
+ * Group scopes have no such cap.
+ */
+export const MAX_SCOPE_KEYWORD_IDS = 1000;
+
+export function hasSelectionCap(maxSelected: number | undefined): maxSelected is number {
+  return Number.isFinite(maxSelected);
+}
+
+export function effectiveSelectionLimit(maxSelected: number | undefined, itemCount: number): number {
+  if (!hasSelectionCap(maxSelected)) return itemCount;
+  return Math.min(itemCount, Math.max(0, Math.floor(maxSelected)));
+}
+
 export function knownIdsInInputOrder(allIds: readonly string[], selectedIds: readonly string[]): string[] {
   const selected = new Set(selectedIds);
   return [...new Set(allIds)].filter((id) => selected.has(id));

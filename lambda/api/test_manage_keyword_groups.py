@@ -7,9 +7,12 @@ DynamoDB tables.
 """
 
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource, reset_tables
 from testing.events import api_gateway_event, parse_response
@@ -212,7 +215,7 @@ class TestDeleteGroup:
         assert status == 200
         assert body == {'message': 'Keyword group deleted', 'detached_keywords': 2}
         detach_calls = mock_keywords_table.update_item.call_args_list
-        assert [call.kwargs['Key'] for call in detach_calls] == [{'id': 'k1'}, {'id': 'k2'}]
+        assert sorted(call.kwargs['Key']['id'] for call in detach_calls) == ['k1', 'k2']
         assert all(call.kwargs['UpdateExpression'] == 'DELETE group_ids :gids' for call in detach_calls)
         assert all(call.kwargs['ExpressionAttributeValues'] == {':gids': {'g1'}} for call in detach_calls)
         mock_groups_table.delete_item.assert_called_once_with(Key={'id': 'g1'})
@@ -223,6 +226,31 @@ class TestDeleteGroup:
         ))
 
         assert status == 404
+        mock_groups_table.delete_item.assert_not_called()
+
+    @pytest.mark.parametrize(('member_count', 'expected_workers'), [(25, 10), (3, 3)])
+    def test_detaches_members_with_bounded_parallel_writes_when_group_is_deleted(self, member_count, expected_workers):
+        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1', 'name': 'Coruna'}}
+        mock_keywords_table.scan.return_value = {'Items': [{'id': f'k{index}'} for index in range(member_count)]}
+
+        with patch.object(_mod, 'ThreadPoolExecutor', wraps=ThreadPoolExecutor) as executor:
+            _mod.handler(make_event('DELETE', None, {'id': 'g1'}, path='/api/keyword-groups/g1'), None)
+
+        assert executor.call_args.kwargs == {'max_workers': expected_workers}
+        assert mock_keywords_table.update_item.call_count == member_count
+
+    def test_keeps_the_group_when_detaching_a_member_fails(self):
+        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1', 'name': 'Coruna'}}
+        mock_keywords_table.scan.return_value = {'Items': [{'id': 'k1'}]}
+        mock_keywords_table.update_item.side_effect = ClientError(
+            {'Error': {'Code': 'ThrottlingException', 'Message': 'Rate exceeded'}}, 'UpdateItem'
+        )
+
+        status, _ = parse_response(_mod.handler(
+            make_event('DELETE', None, {'id': 'g1'}, path='/api/keyword-groups/g1'), None
+        ))
+
+        assert status == 500
         mock_groups_table.delete_item.assert_not_called()
 
 
@@ -312,6 +340,38 @@ class TestUpdateMemberships:
         status, _ = parse_response(_mod.handler(self._event({'add': ['k1']}), None))
 
         assert status == 404
+        mock_keywords_table.update_item.assert_not_called()
+
+    def test_reports_added_ids_in_request_order_when_parallel_writes_finish_out_of_order(self):
+        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
+        keyword_ids = [f'k{index}' for index in range(12)]
+
+        def finish_earlier_ids_last(**kwargs):
+            index = int(kwargs['Key']['id'][1:])
+            time.sleep((len(keyword_ids) - index) * 0.002)
+            return {'Attributes': {'id': kwargs['Key']['id'], 'keyword': 'a'}}
+
+        mock_keywords_table.update_item.side_effect = finish_earlier_ids_last
+
+        _status, body = parse_response(_mod.handler(self._event({'add': keyword_ids}), None))
+
+        assert body['added'] == keyword_ids
+
+    def test_writes_memberships_with_at_most_ten_threads_when_a_request_changes_many_keywords(self):
+        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
+        mock_keywords_table.update_item.return_value = {'Attributes': {'id': 'k', 'keyword': 'a'}}
+
+        with patch.object(_mod, 'ThreadPoolExecutor', wraps=ThreadPoolExecutor) as executor:
+            _mod.handler(self._event({'add': [f'k{index}' for index in range(_mod.MAX_MEMBERSHIP_CHANGES)]}), None)
+
+        assert executor.call_args.kwargs == {'max_workers': 10}
+
+    def test_rejects_more_than_500_additions_in_one_request(self):
+        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
+
+        status, body = parse_response(_mod.handler(self._event({'add': [f'k{index}' for index in range(501)]}), None))
+
+        assert (status, body) == (400, {'error': 'add accepts at most 500 entries', 'field': 'add'})
         mock_keywords_table.update_item.assert_not_called()
 
 

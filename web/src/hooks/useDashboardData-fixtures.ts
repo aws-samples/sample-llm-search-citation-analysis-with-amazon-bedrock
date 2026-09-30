@@ -7,11 +7,14 @@ import {
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import type { Keyword } from '../types';
+import { buildKeywordsPage } from '../api/keywordPages-fixtures';
 import { useDashboardData } from './useDashboardData';
 
 export const MOCK_API_BASE_URL = 'https://api.test.com';
 export const MOCK_KEYWORDS_URL = `${MOCK_API_BASE_URL}/keywords`;
 export const MOCK_AUTHORITATIVE_KEYWORDS_URL = `${MOCK_KEYWORDS_URL}?authoritative=true`;
+export const MOCK_KEYWORDS_SECOND_PAGE_URL = `${MOCK_KEYWORDS_URL}?next_token=page-2`;
+export const MOCK_AUTHORITATIVE_SECOND_PAGE_URL = `${MOCK_AUTHORITATIVE_KEYWORDS_URL}&next_token=page-2`;
 
 export const mockStats = {
   total_searches: 100,
@@ -62,20 +65,7 @@ export function createMockKeywords(count: number, namePrefix = 'keyword'): Keywo
   }));
 }
 
-export function createMockAuthoritativeKeywordsResponse(
-  keywords: Keyword[],
-  count = keywords.length,
-  complete = true
-) {
-  return {
-    keywords,
-    count,
-    complete,
-  };
-}
-
-export const mockAuthoritativeKeywordsResponse =
-  createMockAuthoritativeKeywordsResponse(mockKeywords);
+export const mockAuthoritativeKeywordsResponse = buildKeywordsPage(mockKeywords);
 
 export function createMockDelayedJsonResponse(
   responsePayload: unknown,
@@ -90,8 +80,14 @@ interface MockFetchOverrides {
   stats?: unknown;
   citations?: unknown;
   searches?: unknown;
-  keywords?: unknown;
+  keywords?: Keyword[];
+  /** Raw payload of the first ordinary keyword page; wins over `keywords`. */
+  keywordsPage?: unknown;
   authoritativeResponse?: unknown;
+  /** Further URL -> payload entries, e.g. later keyword pages. */
+  extraPayloads?: Readonly<Record<string, unknown>>;
+  /** URLs answered with HTTP 500. */
+  failingUrls?: readonly string[];
   shouldFail?: boolean;
   failStatus?: number;
 }
@@ -102,11 +98,13 @@ export function createMockFetch(overrides: MockFetchOverrides = {}) {
     [`${MOCK_API_BASE_URL}/citations`, overrides.citations ?? mockCitations],
     [`${MOCK_API_BASE_URL}/searches`, { searches: overrides.searches ?? mockSearches }],
     [MOCK_AUTHORITATIVE_KEYWORDS_URL, overrides.authoritativeResponse ?? mockAuthoritativeKeywordsResponse],
-    [MOCK_KEYWORDS_URL, { keywords: overrides.keywords ?? mockKeywords }],
+    [MOCK_KEYWORDS_URL, overrides.keywordsPage ?? buildKeywordsPage(overrides.keywords ?? mockKeywords)],
+    ...Object.entries(overrides.extraPayloads ?? {}),
   ]);
+  const failingUrls = new Set(overrides.failingUrls);
 
   return vi.fn((url: string): Promise<Response> => {
-    if (overrides.shouldFail) {
+    if (overrides.shouldFail === true || failingUrls.has(url)) {
       return Promise.resolve(createMockJsonResponse({}, overrides.failStatus ?? 500));
     }
     return Promise.resolve(createMockJsonResponse(payloadsByUrl.has(url) ? payloadsByUrl.get(url) : {}));
