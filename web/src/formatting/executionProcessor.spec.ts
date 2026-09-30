@@ -3,8 +3,10 @@ import {
 } from 'vitest';
 import { processExecutionData } from './executionProcessor';
 import {
-  buildExecution, buildEvent, buildCompletedExecution 
+  buildExecution, buildEvent, buildCompletedExecution, buildDistributedMapExecution, buildKeywordProgress,
+  buildLegacyExecution,
 } from './executionProcessorFixtures';
+import type { DistributedMapEvent } from './executionProcessorFixtures';
 
 describe('processExecutionData', () => {
   describe('when execution is null', () => {
@@ -20,10 +22,10 @@ describe('processExecutionData', () => {
       expect(result.startDate).toBe('');
     });
 
-    it('returns 5 pending steps', () => {
+    it('returns 3 pending steps', () => {
       const result = processExecutionData(null);
 
-      expect(result.steps).toHaveLength(5);
+      expect(result.steps).toHaveLength(3);
       expect(result.steps.every(s => s.status === 'pending')).toBe(true);
     });
 
@@ -33,15 +35,23 @@ describe('processExecutionData', () => {
       expect(result.progress).toBe(0);
     });
 
-    it('returns correct step names in order', () => {
+    it('returns the parse, keyword and summary steps in order', () => {
       const result = processExecutionData(null);
 
       expect(result.steps.map(s => s.name)).toStrictEqual([
         'ParseKeywords',
-        'SearchAllProviders',
-        'Deduplication',
-        'Crawl',
+        'ProcessKeywords',
         'GenerateSummary',
+      ]);
+    });
+
+    it('describes the ProcessKeywords step as the per-keyword search, dedupe and crawl', () => {
+      const result = processExecutionData(null);
+
+      expect(result.steps.map(s => s.description)).toStrictEqual([
+        undefined,
+        'Search, dedupe and crawl per keyword',
+        undefined,
       ]);
     });
   });
@@ -116,7 +126,7 @@ describe('processExecutionData', () => {
       expect(result.steps[0].error).toBe('Parse error');
     });
 
-    it('returns currentStep as the running step name', () => {
+    it('returns ProcessKeywords as currentStep while a legacy per-keyword search runs', () => {
       const execution = buildExecution({
         events: [
           buildEvent({
@@ -132,7 +142,7 @@ describe('processExecutionData', () => {
 
       const result = processExecutionData(execution);
 
-      expect(result.currentStep).toBe('SearchAllProviders');
+      expect(result.currentStep).toBe('ProcessKeywords');
     });
 
     it('returns undefined currentStep when no step is running', () => {
@@ -153,22 +163,15 @@ describe('processExecutionData', () => {
       expect(result.progress).toBe(0);
     });
 
-    it('returns 20 when 1 of 5 steps completed', () => {
-      const execution = buildExecution({
-        events: [
-          buildEvent({
-            type: 'TaskSucceeded',
-            state_name: 'ParseKeywords' 
-          }),
-        ],
-      });
+    it('returns 10 when only ParseKeywords completed', () => {
+      const execution = buildDistributedMapExecution(['parseStarted', 'parseSucceeded']);
 
       const result = processExecutionData(execution);
 
-      expect(result.progress).toBe(20);
+      expect(result.progress).toBe(10);
     });
 
-    it('returns 100 when all 5 steps completed', () => {
+    it('returns 100 when a legacy run completed every step', () => {
       const execution = buildCompletedExecution();
 
       const result = processExecutionData(execution);
@@ -176,27 +179,149 @@ describe('processExecutionData', () => {
       expect(result.progress).toBe(100);
     });
 
-    it('returns 60 when 3 of 5 steps completed', () => {
-      const execution = buildExecution({
-        events: [
-          buildEvent({
-            type: 'TaskSucceeded',
-            state_name: 'ParseKeywords' 
-          }),
-          buildEvent({
-            type: 'TaskSucceeded',
-            state_name: 'SearchAllProviders' 
-          }),
-          buildEvent({
-            type: 'TaskSucceeded',
-            state_name: 'Deduplication' 
-          }),
-        ],
+    it.each([
+      ['half the keywords finished (9 succeeded + 1 failed of 20)', buildKeywordProgress(), 50],
+      ['no keywords finished yet', buildKeywordProgress({
+        keywords_succeeded: 0,
+        keywords_failed: 0 
+      }), 10],
+      ['the map run reports a total of 0', buildKeywordProgress({
+        keywords_total: 0,
+        keywords_succeeded: 0,
+        keywords_failed: 0 
+      }), 10],
+      ['the counts overshoot the total', buildKeywordProgress({
+        keywords_total: 2,
+        keywords_succeeded: 3 
+      }), 90],
+      ['there are no keyword counts', null, 10],
+    ])('returns %s -> %i while ProcessKeywords runs', (_label, progress, expected) => {
+      const execution = buildDistributedMapExecution(['parseSucceeded', 'mapRunStarted'], { progress });
+
+      const result = processExecutionData(execution);
+
+      expect(result.progress).toBe(expected);
+    });
+
+    it('returns 90 once ProcessKeywords exits, whatever the keyword counts say', () => {
+      const execution = buildDistributedMapExecution(['parseSucceeded', 'mapRunStarted', 'mapStateExited'], {
+        progress: buildKeywordProgress({
+          keywords_succeeded: 0,
+          keywords_failed: 0 
+        }) 
       });
 
       const result = processExecutionData(execution);
 
-      expect(result.progress).toBe(60);
+      expect(result.progress).toBe(90);
+    });
+
+    it('keeps the finished keyword share when the map run fails', () => {
+      const execution = buildDistributedMapExecution(['parseSucceeded', 'mapRunStarted', 'mapRunFailed'], {progress: buildKeywordProgress({ keywords_failed: 11 }),});
+
+      const result = processExecutionData(execution);
+
+      expect(result.progress).toBe(90);
+    });
+
+    it('returns 100 when the summary of a Distributed Map run succeeds', () => {
+      const execution = buildDistributedMapExecution(['parseSucceeded', 'mapStateExited', 'summarySucceeded']);
+
+      const result = processExecutionData(execution);
+
+      expect(result.progress).toBe(100);
+    });
+  });
+
+  describe('Distributed Map workflow', () => {
+    it.each<[DistributedMapEvent[], string[]]>([
+      [['parseStarted'], ['running', 'pending', 'pending']],
+      [['parseStarted', 'parseSucceeded', 'mapStateStarted'], ['completed', 'running', 'pending']],
+      [['parseStarted', 'mapRunStarted'], ['completed', 'running', 'pending']],
+      [['parseSucceeded', 'mapStateStarted', 'mapRunStarted', 'mapRunSucceeded'], ['completed', 'completed', 'pending']],
+      [['parseSucceeded', 'mapRunStarted', 'mapStateExited'], ['completed', 'completed', 'pending']],
+      [['parseSucceeded', 'mapRunStarted', 'mapRunFailed'], ['completed', 'failed', 'pending']],
+      [['parseSucceeded', 'mapRunStarted', 'mapRunSucceeded', 'mapStateExited', 'summaryStarted'], ['completed', 'completed', 'running']],
+    ])('derives the step states from %j', (names, expected) => {
+      const result = processExecutionData(buildDistributedMapExecution(names));
+
+      expect(result.steps.map(s => s.status)).toStrictEqual(expected);
+    });
+
+    it('records the map run error on the ProcessKeywords step when the map run fails', () => {
+      const result = processExecutionData(buildDistributedMapExecution(['mapRunStarted', 'mapRunFailed']));
+
+      expect(result.steps[1].error).toBe('States.ExceedToleratedFailureThreshold');
+    });
+
+    it('attaches the keyword counts to the ProcessKeywords step', () => {
+      const progress = buildKeywordProgress();
+
+      const result = processExecutionData(buildDistributedMapExecution(['mapRunStarted'], { progress }));
+
+      expect(result.steps.map(s => s.keywords)).toStrictEqual([undefined, progress, undefined]);
+    });
+
+    it('leaves the ProcessKeywords step without counts when the status carries none', () => {
+      const result = processExecutionData(buildDistributedMapExecution(['mapRunStarted'], { progress: null }));
+
+      expect(result.steps[1].keywords).toBeUndefined();
+    });
+  });
+
+  describe('legacy inline-Map histories', () => {
+    it.each([
+      ['TaskSucceeded', 'SearchAllProviders'],
+      ['TaskSucceeded', 'DeduplicateCitations'],
+      ['TaskSucceeded', 'CrawlSingleCitation'],
+      ['MapStateExited', 'CrawlCitations'],
+    ])('keeps ProcessKeywords running when one keyword reports %s for %s', (type, stateName) => {
+      const execution = buildLegacyExecution([{
+        type: 'TaskStarted',
+        state_name: 'SearchAllProviders' 
+      }, {
+        type,
+        state_name: stateName 
+      }]);
+
+      const result = processExecutionData(execution);
+
+      expect(result.steps.map(s => s.status)).toStrictEqual(['completed', 'running', 'pending']);
+    });
+
+    it('marks ProcessKeywords failed when a per-keyword task fails', () => {
+      const execution = buildLegacyExecution([{
+        type: 'TaskFailed',
+        state_name: 'CrawlSingleCitation',
+        error: 'States.Timeout' 
+      }]);
+
+      const result = processExecutionData(execution);
+
+      expect(result.steps[1]).toMatchObject({
+        status: 'failed',
+        error: 'States.Timeout' 
+      });
+    });
+
+    it('completes ProcessKeywords when the legacy keyword map exits', () => {
+      const execution = buildLegacyExecution([{
+        type: 'TaskStarted',
+        state_name: 'SearchAllProviders' 
+      }, {
+        type: 'MapStateExited',
+        state_name: 'ProcessKeywords' 
+      }]);
+
+      const result = processExecutionData(execution);
+
+      expect(result.steps.map(s => s.status)).toStrictEqual(['completed', 'completed', 'pending']);
+    });
+
+    it('marks every step completed for a finished legacy run', () => {
+      const result = processExecutionData(buildCompletedExecution());
+
+      expect(result.steps.map(s => s.status)).toStrictEqual(['completed', 'completed', 'completed']);
     });
   });
 

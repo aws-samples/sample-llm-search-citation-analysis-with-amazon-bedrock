@@ -11,6 +11,8 @@ import {
   createMockStatusResponse,
   createMockFetch,
   renderExecutionPolling,
+  mockKeywordProgress,
+  triggerWithProgress,
 } from './useExecutionPolling-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -108,6 +110,50 @@ describe('useExecutionPolling', () => {
     expect(result.current.execution?.arn).toBe(mockExecutionArn);
     expect(result.current.execution?.name).toBe(mockExecutionName);
     expect(result.current.isRunning).toBe(true);
+  });
+});
+
+describe('useExecutionPolling keyword progress', () => {
+  it('carries the keyword progress of the status response into the execution', async () => {
+    const execution = await triggerWithProgress(mockKeywordProgress);
+
+    expect(execution?.progress).toStrictEqual(mockKeywordProgress);
+  });
+
+  it('decodes keyword counts sent as digit strings into numbers', async () => {
+    const execution = await triggerWithProgress({
+      ...mockKeywordProgress,
+      keywords_total: '40',
+      keywords_failed: '2' 
+    });
+
+    expect(execution?.progress).toStrictEqual(mockKeywordProgress);
+  });
+
+  it.each([
+    ['absent', undefined],
+    ['null (no map run yet)', null],
+    ['missing a count', {
+      ...mockKeywordProgress,
+      keywords_pending: undefined 
+    }],
+    ['carrying a negative count', {
+      ...mockKeywordProgress,
+      keywords_running: -1 
+    }],
+    ['carrying a fractional count', {
+      ...mockKeywordProgress,
+      keywords_total: 40.5 
+    }],
+    ['carrying a non-numeric string', {
+      ...mockKeywordProgress,
+      keywords_succeeded: 'twelve' 
+    }],
+    ['not an object', 'forty'],
+  ])('sets progress to null when the status progress is %s', async (_label, progress) => {
+    const execution = await triggerWithProgress(progress);
+
+    expect(execution?.progress).toBeNull();
   });
 });
 
