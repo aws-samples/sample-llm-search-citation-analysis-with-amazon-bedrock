@@ -822,7 +822,7 @@ describe('Keyword-scale workflow permissions', () => {
  */
 const DEFAULT_PROVIDER_CAPS: Record<string, number | undefined> = {
   openai: 10,
-  perplexity: 1,
+  perplexity: 3,
   gemini: 10,
   claude: 5,
   brave: 10,

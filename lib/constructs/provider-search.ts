@@ -37,9 +37,12 @@ const SEARCH_PROVIDERS: readonly SearchProvider[] = [
   // 20 in flight: 20/20 (p50 32 s, p90 57 s). Half the proven level leaves
   // tokens-per-minute headroom when query prompts get longer.
   { id: 'openai', type: 'llm', defaultConcurrency: 10 },
-  // Sends `x-ratelimit-limit: 1`. 20 in flight: 11/20 (429s); 5 and 2 only
-  // reached 100% through 38 and 23 throttle retries; 1 needed 8 for 15 calls.
-  { id: 'perplexity', type: 'llm', defaultConcurrency: 1 },
+  // Sends `x-ratelimit-limit: 1` (about one request a second). 20 in flight:
+  // 11/20 (429s). With the reset-aware 429 waits and 12 extra attempts, 3 and
+  // 4 in flight were 20/20 (15 waited-out 429s each) at ~29-32 calls a minute,
+  // against ~14 at 1; the 2.28.0 live run at 1 queued keywords ~2 minutes for
+  // a slot. 3 keeps most of the gain with the fewest 429s.
+  { id: 'perplexity', type: 'llm', defaultConcurrency: 3 },
   // 20 in flight: 20/20 (p50 22 s), same headroom as OpenAI.
   { id: 'gemini', type: 'llm', defaultConcurrency: 10 },
   // Not benchmarked (disabled in our deployment). Anthropic's entry tier has the
@@ -71,15 +74,16 @@ const PROVIDER_CONCURRENCY_CONTEXT = 'providerConcurrency';
 const PROVIDER_THROTTLE_EXTRA_ATTEMPTS = 12;
 
 /**
- * Attempts to get a slot while a provider is at its cap. Sized for the worst
- * default queue: 20 keywords in flight on Perplexity's cap of 1, where one
- * invocation runs every query prompt (~30 s with a few prompts and their 429
- * waits), so the last keyword waits ~19 x 30 s ≈ 10 min. Retries are not a
- * FIFO queue (each waiting keyword re-polls at a random point), so the budget
- * is 3x the drain, ~30 min: the 2 s x 1.5 backoff reaches the 30 s ceiling
- * after ~8 attempts (~50 s mean with FULL jitter), after which each attempt
- * averages 15 s, so 30 min ≈ 120 attempts. Worst case that is ~360 history
- * events per branch, far inside the child execution's 25,000.
+ * Attempts to get a slot while a provider is at its cap. Sized for a slow
+ * queue: 20 keywords in flight on a cap of 1, where one invocation runs every
+ * query prompt (~30 s with a few prompts and their 429 waits), so the last
+ * keyword waits ~19 x 30 s ≈ 10 min (the 2.28.0 live run with Perplexity at
+ * 1 waited up to 7 min). Retries are not a FIFO queue (each waiting keyword
+ * re-polls at a random point), so the budget is 3x the drain, ~30 min: the
+ * 2 s x 1.5 backoff reaches the 30 s ceiling after ~8 attempts (~50 s mean
+ * with FULL jitter), after which each attempt averages 15 s, so 30 min ≈ 120
+ * attempts. Worst case that is ~360 history events per branch, far inside the
+ * child execution's 25,000.
  */
 const PROVIDER_SLOT_RETRY_ATTEMPTS = 120;
 
