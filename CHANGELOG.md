@@ -36,8 +36,22 @@ process.
   (Perplexity allows about one request a second, Firecrawl about six searches a minute on our plan) and can be
   raised per deployment with `-c providerConcurrency` (see the README). Keywords run 20 at a time
   (`processKeywordsConcurrency`, was 3) and cited pages are crawled 10 at a time (`crawlConcurrency`, was 3).
-- The single `CitationAnalysis-Search` Lambda, its log group and the `CitationAnalysis-SearchFunctionArn` export are
-  removed (no stack imports the export). `scripts/quick-error-check.sh` reads the nine provider log groups.
+- **Measured on the same 44 keywords** (all active keywords, no personas, eight enabled providers):
+
+  | | 2.27.0 | 2.28.0 |
+  |---|---|---|
+  | Run time | 79 min | 5.6 min |
+  | Successful provider calls | 347 of 352 (SerpAPI 39 of 44) | 352 of 352, every provider 44 of 44 |
+  | Run status / KPI alerts | `completed_degraded`, alerts skipped | `completed`, 5 group snapshots recorded |
+  | Per keyword, median | ~5 min | 99 s (search 60 s, crawl 37 s) |
+
+  Firecrawl is now the slowest provider on our plan (about six searches a minute; p90 134 s including waiting for
+  a slot); a paid plan and a higher `providerConcurrency.firecrawl` remove that wait. Rate limits still happen and
+  are waited out (38 Firecrawl and 8 Perplexity 429s on that run, none of them failed a call).
+- The single `CitationAnalysis-Search` Lambda and the `CitationAnalysis-SearchFunctionArn` export are removed (no
+  stack imports the export); its log group is kept (Retain) so earlier runs stay readable until retention expires
+  them. `scripts/quick-error-check.sh` reads the nine provider log groups and `scripts/deploy.sh` verifies the nine
+  provider Lambdas.
 - Deduplication sanitizes the keyword the way the search step does, so Citations and SearchResults keep one key.
 
 ## [2.27.0] - 2026-09-30
