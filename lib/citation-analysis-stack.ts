@@ -19,6 +19,7 @@ import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as stepfunctions from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as bedrockagentcore from 'aws-cdk-lib/aws-bedrockagentcore';
+import * as cxapi from 'aws-cdk-lib/cx-api';
 import * as path from 'path';
 import * as fs from 'fs';
 import { Auth } from './constructs/auth';
@@ -101,6 +102,36 @@ const RESEARCH_STATE_MACHINE_TIMEOUT_MINUTES = 30;
  * multi-round research agent rather than a limit anyone hits.
  */
 const RESEARCH_STEP_CONCURRENCY = 10;
+
+/** Name of the analysis state machine; its role policies format ARNs from it to avoid a self-reference. */
+const WORKFLOW_STATE_MACHINE_NAME = 'CitationAnalysis-Workflow';
+
+/**
+ * Keywords-bucket prefix for per-run scratch objects: ParseKeywords' keyword
+ * manifest and the ProcessKeywords ResultWriter output. Expired after
+ * `WORKFLOW_RUNS_RETENTION_DAYS`.
+ */
+const WORKFLOW_RUNS_PREFIX = 'runs/';
+const WORKFLOW_RUNS_RETENTION_DAYS = 30;
+
+/**
+ * Analysis workflow budget. Measured: ~1.9 minutes per keyword at the default
+ * ProcessKeywords concurrency of 3 (32 keywords took 62 minutes), so the old
+ * 2-hour timeout ended runs at ~60 keywords and 1,000 keywords need ~32 hours.
+ * Seven days is headroom rather than a target: every task is already bounded
+ * by its Lambda timeout and retries, so this only stops a run that is truly stuck.
+ */
+const WORKFLOW_TIMEOUT_DAYS = 7;
+
+/**
+ * Share of ProcessKeywords child executions (one per keyword) that may fail
+ * before the Distributed Map fails the run. Isolated failures — one keyword
+ * whose search exhausted its retries — must not discard a 1,000-keyword run;
+ * GenerateSummary reports them as failed keywords. Above 10% the cause is
+ * systemic (a dead provider key, throttling, a bad deploy), so the run stops
+ * instead of spending on every remaining keyword.
+ */
+const PROCESS_KEYWORDS_TOLERATED_FAILURE_PERCENTAGE = 10;
 
 /**
  * Thrown at synth time when a Lambda layer's local build output is missing.
@@ -499,6 +530,12 @@ export class CitationAnalysisStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
+    // ProcessKeywords writes its per-keyword results to S3 only through
+    // `resultWriterV2`, which CDK renders only with this flag on; without it
+    // the Map would silently fall back to returning every result in the
+    // 256 KiB state. cdk.json enables it too; pinning it here keeps every app
+    // that synthesizes this stack (tests included) on the same definition.
+    this.node.setContext(cxapi.STEPFUNCTIONS_USE_DISTRIBUTED_MAP_RESULT_WRITER_V2, true);
     // Dev mode: `cdk deploy --context dev=true` adds http://localhost:5173 as allowed CORS origin
     const devMode = this.node.tryGetContext('dev') === 'true';
 
@@ -864,9 +901,28 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     // Keywords Bucket
+    //
+    // `runs/` holds per-run scratch: the keyword manifest ParseKeywords writes
+    // (`runs/<execution>/keywords.json`) and the ProcessKeywords Distributed
+    // Map's ResultWriter output (`runs/map-results/`). GenerateSummary reads
+    // both back within the run and keeps the full report under
+    // `execution-summaries/`, so 30 days is only a window for debugging a run.
+    // The bucket is unversioned, so there are no noncurrent versions to expire;
+    // ResultWriter uploads in parts, so abandoned multipart uploads under the
+    // prefix are cleaned up too. `execution-summaries/` is deliberately NOT
+    // covered by any rule.
     const keywordsBucket = citationAnalysisBucket(this, 'KeywordsBucket', {
       name: 'keywords',
       accessLogsBucket,
+      lifecycleRules: [
+        {
+          id: 'ExpireRunScratch',
+          enabled: true,
+          prefix: WORKFLOW_RUNS_PREFIX,
+          expiration: cdk.Duration.days(WORKFLOW_RUNS_RETENTION_DAYS),
+          abortIncompleteMultipartUploadAfter: cdk.Duration.days(1),
+        },
+      ],
     });
 
     // Screenshots Bucket
@@ -1088,11 +1144,16 @@ export class CitationAnalysisStack extends cdk.Stack {
         // does not carry them (EventBridge schedules).
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
         QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
+        // Every run's keyword list is written here as the ProcessKeywords
+        // item source (`runs/<execution>/keywords.json`).
+        KEYWORDS_BUCKET: keywordsBucket.bucketName,
       },
     });
 
-    // Grant ParseKeywords Lambda read access to keywords bucket and tables
+    // Grant ParseKeywords Lambda read access to keywords bucket and tables,
+    // and write access to the run-scratch prefix only (its keyword manifests).
     keywordsBucket.grantRead(parseKeywordsFunction);
+    keywordsBucket.grantPut(parseKeywordsFunction, `${WORKFLOW_RUNS_PREFIX}*`);
     keywordGroupsTable.grantReadData(parseKeywordsFunction);
     keywordsTable.grantReadData(parseKeywordsFunction);
     queryPromptsTable.grantReadData(parseKeywordsFunction);
@@ -1282,14 +1343,20 @@ export class CitationAnalysisStack extends cdk.Stack {
       handler: 'handler.handler',
       code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/generate-summary'), { exclude: PYTHON_ASSET_EXCLUDES }),
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(60),
-      memorySize: 256,
+      // Reads one ResultWriter record per keyword (compact child output plus
+      // its input, ~1–3 KB each) and builds the full report in memory: a
+      // few-thousand-keyword run is tens of MB of JSON to parse and re-serialize.
+      // 256 MB / 60 s was sized for the old inline list of ~30 results.
+      timeout: cdk.Duration.seconds(300),
+      memorySize: 1024,
       description: 'Generate execution summary and statistics',
       logGroup: generateSummaryLogGroup,
     });
 
-    // Grant GenerateSummary Lambda write access to keywords bucket (for storing summaries)
+    // Grant GenerateSummary Lambda write access to keywords bucket (for storing
+    // summaries) and read access to the ProcessKeywords ResultWriter output.
     keywordsBucket.grantWrite(generateSummaryFunction);
+    keywordsBucket.grantRead(generateSummaryFunction, `${WORKFLOW_RUNS_PREFIX}*`);
 
     const kpiAlertsLogGroup = new logs.LogGroup(this, 'KpiAlertsLogGroup', {
       logGroupName: '/aws/lambda/CitationAnalysis-KpiAlerts',
@@ -1331,6 +1398,9 @@ export class CitationAnalysisStack extends cdk.Stack {
     contentChangesTable.grantReadData(kpiAlertsFunction);
     kpiAlertsTopic.grantPublish(kpiAlertsFunction);
     kpiAlertsKey.grantEncryptDecrypt(kpiAlertsFunction);
+    // The payload's report is GenerateSummary's compact copy; the per-keyword
+    // run identity is read back from the full report it stored.
+    keywordsBucket.grantRead(kpiAlertsFunction, 'execution-summaries/*');
 
     // ========================================
     // Step Functions State Machine
@@ -1338,9 +1408,14 @@ export class CitationAnalysisStack extends cdk.Stack {
 
     // Define the workflow states
 
-    // 1. ParseKeywords Task
+    // 1. ParseKeywords Task. It files the run's keyword manifest under the
+    // execution name, so the payload carries that next to the input.
     const parseKeywordsTask = new tasks.LambdaInvoke(this, 'ParseKeywords', {
       lambdaFunction: parseKeywordsFunction,
+      payload: stepfunctions.TaskInput.fromObject({
+        'execution_input.$': '$',
+        'execution_name.$': '$$.Execution.Name',
+      }),
       outputPath: '$.Payload',
       retryOnServiceExceptions: true,
     });
@@ -1408,19 +1483,59 @@ export class CitationAnalysisStack extends cdk.Stack {
       },
     }).itemProcessor(crawlTask);
 
-    // 6. Chain Search -> Deduplication -> Crawl
+    // 6. SummarizeKeywordResult: each ProcessKeywords child ends with a
+    // compact record. The citation and crawl arrays (~8.5 KB per keyword) are
+    // what made the old inline Map output overflow the 256 KiB state at ~31
+    // keywords; GenerateSummary only needs their counts. `total_citations_found`
+    // comes from the deduplication Lambda because no intrinsic function sums;
+    // the filter-in-ArrayLength form was proven with `aws stepfunctions test-state`.
+    const summarizeKeywordResult = new stepfunctions.Pass(this, 'SummarizeKeywordResult', {
+      parameters: {
+        'keyword.$': '$.keyword',
+        'timestamp.$': '$.timestamp',
+        'status.$': '$.status',
+        'provider_summary.$': '$.provider_summary',
+        'unique_citations.$': 'States.ArrayLength($.deduplicated_citations)',
+        'total_citations_found.$': '$.total_citations_found',
+        'pages_crawled.$': "States.ArrayLength($.crawled_results[?(@.status == 'success')])",
+      },
+    });
+
+    // 7. Chain Search -> Deduplication -> Crawl -> compact result
     const processKeywordChain = searchTask
       .next(deduplicationTask)
-      .next(crawlCitationsMap);
+      .next(crawlCitationsMap)
+      .next(summarizeKeywordResult);
 
-    // 7. ProcessKeywords Map State (parallel keyword processing)
-    // Executions are no longer capped at 100 keywords; this concurrency is the
-    // throughput knob. Override per deployment with `-c processKeywordsConcurrency=5`
-    // once provider rate limits are known to tolerate it.
-    const processKeywordsMap = new stepfunctions.Map(this, 'ProcessKeywords', {
+    // 8. ProcessKeywords Distributed Map (parallel keyword processing).
+    //
+    // Distributed rather than inline because an inline Map keeps every
+    // iteration in the parent execution: its results in the 256 KiB state
+    // (~31 keywords) and ~160 history events per keyword against the 25,000
+    // cap (~155 keywords). Here each keyword is its own child execution, the
+    // items come from the manifest ParseKeywords wrote to S3, and the results
+    // go back to S3 through the ResultWriter, so the parent's state and
+    // history stay constant in the keyword count. STANDARD children because a
+    // search task can run 15 minutes (Express children are capped at 5).
+    //
+    // maxConcurrency is the throughput knob; override per deployment with
+    // `-c processKeywordsConcurrency=5` once provider rate limits are known to
+    // tolerate it.
+    const processKeywordsMap = new stepfunctions.DistributedMap(this, 'ProcessKeywords', {
       maxConcurrency: readPositiveIntegerContext(this, 'processKeywordsConcurrency', 3),
-      itemsPath: '$.keywords',
-      resultPath: '$.keyword_results',
+      mapExecutionType: stepfunctions.StateMachineType.STANDARD,
+      itemReader: new stepfunctions.S3JsonItemReader({
+        bucket: keywordsBucket,
+        key: stepfunctions.JsonPath.stringAt('$.keywords_manifest.key'),
+      }),
+      resultWriterV2: new stepfunctions.ResultWriterV2({
+        bucket: keywordsBucket,
+        prefix: `${WORKFLOW_RUNS_PREFIX}map-results`,
+      }),
+      toleratedFailurePercentage: PROCESS_KEYWORDS_TOLERATED_FAILURE_PERCENTAGE,
+      // Keeps the ParseKeywords fields (keyword_count, timestamp, ...) and adds
+      // {MapRunArn, ResultWriterDetails: {Bucket, Key}}.
+      resultPath: '$.map_run',
       itemSelector: {
         'keyword.$': '$$.Map.Item.Value.keyword',
         'timestamp.$': '$$.Map.Item.Value.timestamp',
@@ -1433,19 +1548,22 @@ export class CitationAnalysisStack extends cdk.Stack {
       },
     }).itemProcessor(processKeywordChain);
 
-    // 8. GenerateSummary Task
+    // 9. GenerateSummary Task: reads the per-keyword results from S3 and
+    // returns a compact report (the full one is stored in S3).
     const generateSummaryTask = new tasks.LambdaInvoke(this, 'GenerateSummary', {
       lambdaFunction: generateSummaryFunction,
       payload: stepfunctions.TaskInput.fromObject({
         'execution_id.$': '$$.Execution.Name',
-        'keyword_results.$': '$.keyword_results',
+        'map_run.$': '$.map_run',
+        'keyword_count.$': '$.keyword_count',
+        'timestamp.$': '$.timestamp',
         'summary_bucket': keywordsBucket.bucketName,
       }),
       outputPath: '$.Payload',
       retryOnServiceExceptions: true,
     });
 
-    // 9. Evaluate exact-run KPI alerts without replacing the generated report.
+    // 10. Evaluate exact-run KPI alerts without replacing the generated report.
     const kpiAlertsTask = new tasks.LambdaInvoke(this, 'KpiAlerts', {
       lambdaFunction: kpiAlertsFunction,
       payload: stepfunctions.TaskInput.fromObject({
@@ -1471,14 +1589,14 @@ export class CitationAnalysisStack extends cdk.Stack {
       resultPath: stepfunctions.JsonPath.DISCARD,
     });
 
-    // 10. Define the complete workflow. Both alert branches retain every
+    // 11. Define the complete workflow. Both alert branches retain every
     // GenerateSummary field and add only the top-level alerts block.
     const definition = parseKeywordsTask
       .next(processKeywordsMap)
       .next(generateSummaryTask)
       .next(kpiAlertsTask);
 
-    // 11. Create the State Machine
+    // 12. Create the State Machine
 
     // Execution history log group for the workflow.
     //
@@ -1500,10 +1618,10 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     const stateMachine = new stepfunctions.StateMachine(this, 'CitationAnalysisStateMachine', {
-      stateMachineName: 'CitationAnalysis-Workflow',
+      stateMachineName: WORKFLOW_STATE_MACHINE_NAME,
       definitionBody: stepfunctions.DefinitionBody.fromChainable(definition),
       role: stepFunctionsRole,
-      timeout: cdk.Duration.hours(2),
+      timeout: cdk.Duration.days(WORKFLOW_TIMEOUT_DAYS),
       tracingEnabled: true,
       // Logging was `level: OFF` with `includeExecutionData: false`, so a
       // failed execution left nothing behind to debug: X-Ray tracing shows
@@ -1533,6 +1651,21 @@ export class CitationAnalysisStack extends cdk.Stack {
         includeExecutionData: true,
       },
     });
+
+    // ProcessKeywords runs each keyword as a child execution of this same
+    // state machine. CDK grants the ItemReader's s3:GetObject, the
+    // ResultWriter's s3:PutObject/GetObject/ListMultipartUploadParts/
+    // AbortMultipartUpload, and (in its DistributedMapPolicy) StartExecution
+    // plus Describe/StopExecution on `execution:<name>:*` — which matches the
+    // parent only. Child executions are named `execution:<name>/<map run
+    // label>:<id>`, so describing and stopping them needs the `/*` form. The
+    // ARN is formatted from the name: `stateMachine.stateMachineArn` in the
+    // role's own default policy would be a circular dependency.
+    stepFunctionsRole.addToPolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['states:DescribeExecution', 'states:StopExecution'],
+      resources: [`arn:aws:states:${this.region}:${this.account}:execution:${WORKFLOW_STATE_MACHINE_NAME}/*`],
+    }));
 
     // ========================================
     // Keyword Research State Machine
@@ -2258,6 +2391,19 @@ export class CitationAnalysisStack extends cdk.Stack {
       effect: iam.Effect.ALLOW,
       actions: ['states:ListExecutions'],
       resources: [stateMachine.stateMachineArn],
+    }));
+    // Keyword progress of a running execution comes from its ProcessKeywords
+    // map run (item counts). DescribeMapRun is authorized on the map run ARN,
+    // ListMapRuns on the parent execution ARN.
+    executionMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['states:DescribeMapRun'],
+      resources: [`arn:aws:states:${this.region}:${this.account}:mapRun:${WORKFLOW_STATE_MACHINE_NAME}/*`],
+    }));
+    executionMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
+      effect: iam.Effect.ALLOW,
+      actions: ['states:ListMapRuns'],
+      resources: [`arn:aws:states:${this.region}:${this.account}:execution:${WORKFLOW_STATE_MACHINE_NAME}:*`],
     }));
 
     searchResultsTable.grantReadData(getBrandMentionsFunction);

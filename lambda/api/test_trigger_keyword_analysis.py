@@ -1,6 +1,10 @@
 """
 Tests for trigger-keyword-analysis.py (scope-aware subset runs) and the
 cap-free active-keyword read in trigger-analysis.py.
+
+Scope runs start with the scope as their execution input, never the keyword
+texts; only a legacy explicit list travels inline, and it is refused when it
+would not fit the execution input.
 """
 
 import json
@@ -88,9 +92,13 @@ class TestSubsetTriggerWithScope:
         assert body['keywords'] == ['hotel coruna spa']
         assert body['keywords_count'] == 1
         assert body['scope'] == {'mode': 'groups', 'group_ids': ['coruna']}
-        started = _started_input()
-        assert [kw['keyword'] for kw in started['keywords']] == ['hotel coruna spa']
-        assert started['requested_scope'] == {'mode': 'groups', 'group_ids': ['coruna']}
+
+    def test_starts_the_run_with_the_scope_instead_of_the_keyword_texts(self):
+        _stage_active_keywords(_keyword_row('k1', 'hotel coruna spa', 'coruna'))
+
+        _subset.handler(make_event({'scope': {'mode': 'groups', 'group_ids': ['coruna']}}), None)
+
+        assert _started_input() == {'scope': {'mode': 'groups', 'group_ids': ['coruna']}, 'query_prompts': []}
 
     def test_runs_only_the_requested_keyword_ids(self):
         _stage_active_keywords(_keyword_row('k1', 'alpha'), _keyword_row('k2', 'beta'))
@@ -132,6 +140,15 @@ class TestSubsetTriggerLegacyKeywords:
         timestamps = {kw['timestamp'] for kw in _started_input()['keywords']}
         assert len(timestamps) == 1
 
+    def test_refuses_an_explicit_list_too_large_for_the_execution_input(self):
+        keywords = [f'{index:03d} ' + 'k' * 490 for index in range(400)]
+
+        status, body = parse_response(_subset.handler(make_event({'keywords': keywords}), None))
+
+        assert status == 400
+        assert 'Run a keyword group or all keywords with a "scope" instead.' in body['error']
+        mock_stepfunctions.start_execution.assert_not_called()
+
     def test_rejects_a_body_with_neither_keywords_nor_scope(self):
         status, body = parse_response(_subset.handler(make_event({}), None))
 
@@ -161,7 +178,13 @@ class TestFullTriggerReadsEveryPage:
 
         assert status == 200
         assert body['keywords_count'] == 130
-        assert len(_started_input()['keywords']) == 130
+
+    def test_starts_the_run_with_the_all_keywords_scope(self):
+        _stage_active_keywords(_keyword_row('k1', 'alpha'), _keyword_row('k2', 'beta'))
+
+        _all.handler(make_event(), None)
+
+        assert _started_input() == {'scope': {'mode': 'all'}, 'query_prompts': []}
 
     def test_rejects_when_no_keyword_is_active(self):
         status, body = parse_response(_all.handler(make_event(), None))

@@ -56,6 +56,19 @@ def nine_credit_failures_summary(dedup) -> dict[str, Any]:
     ])
 
 
+@pytest.fixture
+def overlapping_citations_event() -> dict[str, Any]:
+    """A dedup event where OpenAI cites two URLs and Perplexity cites one of them again."""
+    return {
+        'keyword': 'best hotels malaga',
+        'timestamp': '2026-08-19T10:00:00Z',
+        'results': [
+            provider_row('openai', ['https://a.example', 'https://b.example']),
+            provider_row('perplexity', ['https://a.example']),
+        ],
+    }
+
+
 class TestSummarizeProviders:
     """The rollup function in isolation."""
 
@@ -266,17 +279,8 @@ class TestHandlerEchoesTheRollup:
     entire downstream state.
     """
 
-    def test_includes_the_rollup_alongside_deduplicated_citations(self, dedup) -> None:
-        event = {
-            'keyword': 'best hotels malaga',
-            'timestamp': '2026-08-19T10:00:00Z',
-            'results': [
-                provider_row('openai', ['https://a.example', 'https://b.example']),
-                provider_row('perplexity', ['https://a.example']),
-            ],
-        }
-
-        result = dedup.handler(event, None)
+    def test_includes_the_rollup_alongside_deduplicated_citations(self, dedup, overlapping_citations_event) -> None:
+        result = dedup.handler(overlapping_citations_event, None)
 
         assert result['provider_summary']['result_count'] == 2
         assert result['provider_summary']['by_provider']['openai']['citations'] == 2
@@ -315,3 +319,19 @@ class TestHandlerEchoesTheRollup:
             'result_count': 0,
             'by_provider': {},
         }
+
+
+class TestHandlerReportsTheCitationTotal:
+    """
+    The workflow's SummarizeKeywordResult drops the citation list and keeps
+    `total_citations_found`, which no intrinsic function can sum, so dedup
+    reports it.
+    """
+
+    def test_counts_a_url_once_per_provider_that_cited_it(self, dedup, overlapping_citations_event) -> None:
+        assert dedup.handler(overlapping_citations_event, None)['total_citations_found'] == 3
+
+    def test_reports_zero_when_no_results_are_provided(self, dedup) -> None:
+        event = {'keyword': 'best hotels malaga', 'timestamp': '2026-08-19T10:00:00Z', 'results': []}
+
+        assert dedup.handler(event, None)['total_citations_found'] == 0

@@ -3,11 +3,14 @@ Tests for the ParseKeywords Lambda handler.
 
 Covers:
 - Keyword parsing from direct input and DynamoDB
+- The keyword manifest written to S3 for the ProcessKeywords Distributed Map
 - query_prompts pass-through from the execution input
 - query_prompts resolution from DynamoDB for scheduled runs
 """
 
+import json
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -20,6 +23,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 mock_keywords_table = MagicMock()
 mock_prompts_table = MagicMock()
 mock_dynamodb = MagicMock()
+mock_s3 = MagicMock()
 
 
 def _table_for_name(name):
@@ -36,12 +40,14 @@ def _mock_boto3_resource(*args, **kwargs):
 
 
 def _mock_boto3_client(*args, **kwargs):
-    return MagicMock()
+    return mock_s3
 
 
+_KEYWORDS_BUCKET = 'test-keywords-bucket'
 _test_env = {
     'KEYWORDS_TABLE': 'test-keywords-table',
     'QUERY_PROMPTS_TABLE': 'test-prompts-table',
+    'KEYWORDS_BUCKET': _KEYWORDS_BUCKET,
 }
 
 # Import the handler module. boto3.resource is stubbed while the file executes,
@@ -68,9 +74,19 @@ GROUPED_KEYWORD_ITEMS = [
 ]
 
 
+def _manifest() -> list[dict]:
+    """The keyword manifest the last invocation wrote to S3."""
+    return json.loads(mock_s3.put_object.call_args.kwargs['Body'])
+
+
+def _parsed_keywords() -> list[str]:
+    return [item['keyword'] for item in _manifest()]
+
+
 @pytest.fixture(autouse=True)
 def _reset_mocks():
     """Reset table mocks before each test."""
+    mock_s3.reset_mock()
     mock_keywords_table.reset_mock()
     mock_prompts_table.reset_mock()
     mock_prompts_table.query.side_effect = None
@@ -89,18 +105,16 @@ class TestKeywordParsing:
 
     def test_parses_direct_keyword_array(self, handler_module):
         """A direct keywords array is normalized into keyword/timestamp pairs."""
-        result = handler_module.handler({'keywords': ['best hotels', 'top resorts'], 'query_prompts': []}, {})
-        parsed = [item['keyword'] for item in result['keywords']]
-        assert parsed == ['best hotels', 'top resorts']
+        handler_module.handler({'keywords': ['best hotels', 'top resorts'], 'query_prompts': []}, {})
+        assert _parsed_keywords() == ['best hotels', 'top resorts']
 
     def test_reads_active_keywords_from_dynamodb_for_scheduled_runs(self, handler_module):
         """source=dynamodb loads the active keywords from the Keywords table."""
         mock_keywords_table.query.return_value = {
             'Items': [{'keyword': 'best hotels malaga'}, {'keyword': 'boutique madrid'}]
         }
-        result = handler_module.handler({'source': 'dynamodb'}, {})
-        parsed = [item['keyword'] for item in result['keywords']]
-        assert parsed == ['best hotels malaga', 'boutique madrid']
+        handler_module.handler({'source': 'dynamodb'}, {})
+        assert _parsed_keywords() == ['best hotels malaga', 'boutique madrid']
 
     def test_raises_when_no_valid_keywords_found(self, handler_module):
         """Empty keyword input raises instead of starting an empty run."""
@@ -224,9 +238,9 @@ class TestScopeResolution:
     def test_resolves_a_group_scope_to_the_active_members_of_that_group(self, handler_module):
         mock_keywords_table.query.return_value = {'Items': GROUPED_KEYWORD_ITEMS}
 
-        result = handler_module.handler({'scope': {'mode': 'groups', 'group_ids': ['coruna']}, 'query_prompts': []}, {})
+        handler_module.handler({'scope': {'mode': 'groups', 'group_ids': ['coruna']}, 'query_prompts': []}, {})
 
-        assert [item['keyword'] for item in result['keywords']] == ['best hotels galicia', 'hotel coruna spa']
+        assert _parsed_keywords() == ['best hotels galicia', 'hotel coruna spa']
 
     def test_resolves_a_keyword_id_scope(self, handler_module):
         mock_keywords_table.query.return_value = {'Items': [
@@ -234,9 +248,9 @@ class TestScopeResolution:
             {'id': 'k2', 'keyword': 'beta'},
         ]}
 
-        result = handler_module.handler({'scope': {'mode': 'keywords', 'keyword_ids': ['k2']}, 'query_prompts': []}, {})
+        handler_module.handler({'scope': {'mode': 'keywords', 'keyword_ids': ['k2']}, 'query_prompts': []}, {})
 
-        assert [item['keyword'] for item in result['keywords']] == ['beta']
+        assert _parsed_keywords() == ['beta']
 
     def test_raises_a_clear_error_for_an_invalid_scope(self, handler_module):
         with pytest.raises(ValueError, match=r'Invalid scope: scope\.mode must be one of'):
@@ -259,9 +273,9 @@ class TestScopeResolution:
             'query_prompts': [],
         }
 
-        result = handler_module.handler(descriptor, {})
+        handler_module.handler(descriptor, {})
 
-        assert [item['keyword'] for item in result['keywords']] == ['best hotels galicia', 'hotel marino beach']
+        assert _parsed_keywords() == ['best hotels galicia', 'hotel marino beach']
 
 
 class TestNoKeywordCap:
@@ -272,8 +286,8 @@ class TestNoKeywordCap:
 
         result = handler_module.handler({'keywords': keywords, 'query_prompts': []}, {})
 
-        assert len(result['keywords']) == 180
-        assert result['keywords'][-1]['keyword'] == 'keyword 179'
+        assert result['keyword_count'] == 180
+        assert _parsed_keywords()[-1] == 'keyword 179'
 
     def test_reads_every_page_of_the_status_index_for_scheduled_runs(self, handler_module):
         first_page = {'Items': [{'id': f'k{i}', 'keyword': f'kw {i:03d}'} for i in range(100)], 'LastEvaluatedKey': {'id': 'k99'}}
@@ -282,5 +296,57 @@ class TestNoKeywordCap:
 
         result = handler_module.handler({'source': 'dynamodb', 'query_prompts': []}, {})
 
-        assert len(result['keywords']) == 150
+        assert result['keyword_count'] == 150
         mock_keywords_table.query.side_effect = None
+
+
+class TestKeywordManifest:
+    """The keyword list goes to S3; the state carries only a pointer to it."""
+
+    _STATE_MACHINE_EVENT = {
+        'execution_input': {'keywords': ['best hotels', 'top resorts'], 'query_prompts': []},
+        'execution_name': 'analysis-20261001100000',
+    }
+
+    def test_writes_the_manifest_under_the_execution_name_in_the_keywords_bucket(self, handler_module):
+        handler_module.handler(self._STATE_MACHINE_EVENT, {})
+
+        call = mock_s3.put_object.call_args.kwargs
+        assert (call['Bucket'], call['Key']) == (_KEYWORDS_BUCKET, 'runs/analysis-20261001100000/keywords.json')
+
+    def test_returns_a_manifest_pointer_instead_of_the_keyword_list(self, handler_module):
+        result = handler_module.handler(self._STATE_MACHINE_EVENT, {})
+
+        assert result == {
+            'keywords_manifest': {'bucket': _KEYWORDS_BUCKET, 'key': 'runs/analysis-20261001100000/keywords.json'},
+            'keyword_count': 2,
+            'timestamp': result['timestamp'],
+            'query_prompts': [],
+        }
+
+    def test_stamps_every_manifest_entry_with_the_returned_run_timestamp(self, handler_module):
+        result = handler_module.handler(self._STATE_MACHINE_EVENT, {})
+
+        assert {entry['timestamp'] for entry in _manifest()} == {result['timestamp']}
+
+    def test_resolves_a_scope_carried_inside_the_state_machine_payload(self, handler_module):
+        mock_keywords_table.query.return_value = {'Items': GROUPED_KEYWORD_ITEMS}
+        event = {
+            'execution_input': {'scope': {'mode': 'groups', 'group_ids': ['marino']}, 'query_prompts': []},
+            'execution_name': 'keyword-analysis-20261001100000',
+        }
+
+        handler_module.handler(event, {})
+
+        assert _parsed_keywords() == ['best hotels galicia', 'hotel marino beach']
+
+    def test_files_a_direct_invocation_manifest_under_its_request_id(self, handler_module):
+        handler_module.handler({'keywords': ['best hotels'], 'query_prompts': []}, SimpleNamespace(aws_request_id='req-42'))
+
+        assert mock_s3.put_object.call_args.kwargs['Key'] == 'runs/req-42/keywords.json'
+
+    def test_writes_no_manifest_when_no_valid_keywords_are_found(self, handler_module):
+        with pytest.raises(ValueError, match='No valid keywords'):
+            handler_module.handler({'execution_input': {'keywords': ['  ']}, 'execution_name': 'analysis-1'}, {})
+
+        mock_s3.put_object.assert_not_called()
