@@ -1166,7 +1166,15 @@ export class CitationAnalysisStack extends cdk.Stack {
     // Search Lambda Functions: one `CitationAnalysis-Search-<id>` per provider,
     // same code, role and environment, each capped by its reserved concurrency
     // (lib/constructs/provider-search.ts). They replace the single
-    // CitationAnalysis-Search that called every provider in sequence.
+    // CitationAnalysis-Search that called every provider in sequence. That
+    // function's log group is kept, not deleted with it, so earlier runs' logs
+    // stay readable until the 30-day retention expires them; nothing writes to
+    // it any more.
+    new logs.LogGroup(this, 'SearchLogGroup', {
+      logGroupName: '/aws/lambda/CitationAnalysis-Search',
+      retention: logs.RetentionDays.ONE_MONTH,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
     const providerSearch = new ProviderSearch(this, 'ProviderSearch', {
       code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/search'), { exclude: PYTHON_ASSET_EXCLUDES }),
       role: searchLambdaRole,

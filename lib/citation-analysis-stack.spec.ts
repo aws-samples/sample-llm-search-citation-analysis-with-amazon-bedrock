@@ -859,9 +859,12 @@ describe('Per-provider search functions', () => {
       .toStrictEqual(Object.fromEntries(SEARCH_PROVIDER_IDS.map((id) => [searchFunctionName(id), '12'])));
   });
 
-  it('removes the single CitationAnalysis-Search function and its log group', () => {
+  it('removes the single CitationAnalysis-Search function', () => {
     expect(synthesized.providerSearch.legacyFunctionLogicalId).toBe('');
-    expect(synthesized.providerSearch.legacyLogGroupLogicalId).toBe('');
+  });
+
+  it('keeps the single search function log group so earlier runs stay readable', () => {
+    expect(synthesized.providerSearch.legacyLogGroupLogicalId).toBe('SearchLogGroup64E61B0B');
   });
 
   it('drops the SearchFunctionArn output with the function it named', () => {
