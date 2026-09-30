@@ -31,8 +31,18 @@ from shared.ai_clients import (
     get_web_search_provider,
     run_web_search,
 )
+from testing.env import cleared_env
 
 _PERPLEXITY, _OPENAI, _GEMINI = WEB_SEARCH_PROVIDERS
+# A fixed ``time.time()`` for ``x-ratelimit-reset`` epoch arithmetic.
+_NOW = 1_800_000_000.0
+
+
+@pytest.fixture(autouse=True)
+def _default_throttle_budget():
+    """Every test starts from the default budget, whatever the developer's shell exports."""
+    with cleared_env(ai_clients.THROTTLE_EXTRA_ATTEMPTS_ENV):
+        yield
 
 
 class TestRegistry:
@@ -143,13 +153,18 @@ class TestRunWebSearch:
 
 
 class TestClientBehavior:
-    def test_perplexity_client_retries_a_rate_limited_request(self):
-        rate_limited = MagicMock(status_code=429, text='slow down', headers={})
+    @pytest.mark.parametrize(('headers', 'expected_wait'), [
+        ({}, 1.25),
+        ({'x-ratelimit-reset': str(_NOW + 4)}, 4.25),
+    ], ids=['backoff-without-headers', 'waits-for-x-ratelimit-reset'])
+    def test_perplexity_client_retries_a_rate_limited_request_after_the_throttle_wait(self, headers, expected_wait):
+        rate_limited = MagicMock(status_code=429, text='slow down', headers=headers)
         ok = MagicMock(status_code=200)
         ok.json.return_value = {'choices': []}
 
         with (
             patch.object(ai_clients.requests, 'post', side_effect=[rate_limited, ok]) as post,
+            patch.object(ai_clients.time, 'time', return_value=_NOW),
             patch.object(ai_clients.time, 'sleep') as sleep,
             patch.object(ai_clients.random, 'uniform', return_value=0.25),
         ):
@@ -159,7 +174,7 @@ class TestClientBehavior:
 
         assert result == {'choices': []}
         assert post.call_count == 2
-        sleep.assert_called_once_with(1.25)
+        sleep.assert_called_once_with(expected_wait)
 
     def test_throttling_earns_extra_attempts_beyond_the_callers_retry_budget(self):
         """The research worker allows two attempts (sized for OpenAI's 90s timeout).
@@ -186,13 +201,20 @@ class TestClientBehavior:
         assert post.call_count == 5
         assert [call.args[0] for call in sleep.call_args_list] == [1.0, 2.5, 5.0, 9.5]
 
-    def test_throttling_gives_up_after_the_extra_attempts(self):
+    @pytest.mark.parametrize(('env', 'expected_attempts'), [
+        ({}, 5),
+        ({'PROVIDER_THROTTLE_EXTRA_ATTEMPTS': '0'}, 2),
+        ({'PROVIDER_THROTTLE_EXTRA_ATTEMPTS': '12'}, 14),
+        ({'PROVIDER_THROTTLE_EXTRA_ATTEMPTS': 'lots'}, 5),
+    ], ids=['default-3', 'env-0', 'env-12', 'invalid-env-falls-back-to-3'])
+    def test_throttling_gives_up_after_the_extra_attempts(self, env, expected_attempts):
         rate_limited = MagicMock(status_code=429, text='slow down', headers={})
         rate_limited.raise_for_status.side_effect = ai_clients.requests.exceptions.HTTPError(
             '429 Client Error', response=rate_limited
         )
 
         with (
+            patch.dict(ai_clients.os.environ, env),
             patch.object(ai_clients.requests, 'post', return_value=rate_limited) as post,
             patch.object(ai_clients.time, 'sleep'),
             patch.object(ai_clients.random, 'uniform', return_value=0.0),
@@ -200,7 +222,7 @@ class TestClientBehavior:
         ):
             PerplexityClient('sk-test').chat_completion([{'role': 'user', 'content': 'q'}], max_retries=2)
 
-        assert post.call_count == 5
+        assert post.call_count == expected_attempts
 
     def test_server_errors_keep_the_callers_retry_budget(self):
         """5xx and timeouts are the slow failures the caller's budget is sized for."""
@@ -244,6 +266,72 @@ class TestClientBehavior:
 
         assert wait == ai_clients.THROTTLE_MAX_WAIT_SECONDS
 
+    @pytest.mark.parametrize(('headers', 'attempt', 'expected'), [
+        ({'x-ratelimit-reset': str(_NOW + 6)}, 0, 6.0),
+        ({'x-ratelimit-reset': '3'}, 0, 3.0),
+        ({'x-ratelimit-reset': str(_NOW - 10)}, 2, 5.0),
+        ({'x-ratelimit-reset': 'soon'}, 1, 2.5),
+        ({'x-ratelimit-reset': '2'}, 3, 9.5),
+        ({'Retry-After': '7', 'x-ratelimit-reset': str(_NOW + 2)}, 0, 7.0),
+    ], ids=[
+        'epoch-reset-in-6s', 'reset-as-seconds', 'reset-in-the-past-uses-backoff',
+        'unparseable-reset-uses-backoff', 'backoff-longer-than-reset-wins', 'retry-after-wins-over-reset',
+    ])
+    def test_throttle_wait_is_the_longer_of_the_providers_wait_and_the_backoff(self, headers, attempt, expected):
+        with (
+            patch.object(ai_clients.time, 'time', return_value=_NOW),
+            patch.object(ai_clients.random, 'uniform', return_value=0.0),
+        ):
+            wait = ai_clients._throttle_wait_seconds(MagicMock(headers=headers), attempt=attempt)
+
+        assert wait == expected
+
+    def test_throttle_wait_adds_jitter_up_to_the_ratelimit_reset(self):
+        response = MagicMock(headers={'x-ratelimit-reset': str(_NOW + 6)})
+
+        with (
+            patch.object(ai_clients.time, 'time', return_value=_NOW),
+            patch.object(ai_clients.random, 'uniform', return_value=2.0) as uniform,
+        ):
+            wait = ai_clients._throttle_wait_seconds(response, attempt=0)
+
+        assert (wait, uniform.call_args.args) == (8.0, (0, 6.0))
+
+
+class TestThrottleExtraAttempts:
+    """``PROVIDER_THROTTLE_EXTRA_ATTEMPTS``: the analysis provider Lambdas set 12, everything else keeps 3."""
+
+    @pytest.mark.parametrize(('raw', 'expected'), [
+        (None, 3), ('12', 12), ('0', 0), (' 7 ', 7), ('', 3), ('-1', 3), ('2.5', 3), ('twelve', 3),
+    ])
+    def test_reads_a_non_negative_integer_or_falls_back_to_three(self, raw, expected):
+        env = {} if raw is None else {ai_clients.THROTTLE_EXTRA_ATTEMPTS_ENV: raw}
+
+        with patch.dict(ai_clients.os.environ, env):
+            assert ai_clients.throttle_extra_attempts() == expected
+
+    def test_warns_when_the_value_is_invalid(self, caplog):
+        with (
+            patch.dict(ai_clients.os.environ, {ai_clients.THROTTLE_EXTRA_ATTEMPTS_ENV: 'twelve'}),
+            caplog.at_level('WARNING', logger='shared.ai_clients'),
+        ):
+            ai_clients.throttle_extra_attempts()
+
+        assert [record.getMessage() for record in caplog.records] == [
+            "[THROTTLE_CONFIG] PROVIDER_THROTTLE_EXTRA_ATTEMPTS='twelve' is not an integer >= 0; using 3",
+        ]
+
+    def test_does_not_warn_when_the_value_is_valid(self, caplog):
+        with (
+            patch.dict(ai_clients.os.environ, {ai_clients.THROTTLE_EXTRA_ATTEMPTS_ENV: '12'}),
+            caplog.at_level('WARNING', logger='shared.ai_clients'),
+        ):
+            ai_clients.throttle_extra_attempts()
+
+        assert caplog.records == []
+
+
+class TestClientPayloads:
     def test_openai_payload_requests_web_search_call_sources(self):
         with patch.object(
             OpenAIClient, '_make_request', return_value={'output': []}

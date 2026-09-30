@@ -5,7 +5,9 @@ import {
 } from 'vitest';
 import { CitationAnalysisStack } from './citation-analysis-stack';
 import {
+  EMPTY_PROVIDER_SEARCH_SNAPSHOT,
   EMPTY_WORKFLOW_SCALE_SNAPSHOT,
+  SEARCH_PROVIDER_IDS,
   STATUS_CREATED_INDEX_SCHEMA,
   allowStatementsOfRole,
   allowStatementsOfTemplate,
@@ -26,6 +28,7 @@ import {
   extractLambdaLogGroups,
   extractMemorySizesByLogicalIdPrefix,
   extractProdStageMethodSettings,
+  extractProviderSearchSnapshot,
   extractReservedConcurrency,
   extractRoleTableActions,
   extractStateMachineDefinition,
@@ -43,10 +46,14 @@ import {
   findModelAgreements,
   findStateMachineLogicalId,
   findUseCaseSubmission,
+  keywordChildStates,
+  providerSearchBranch,
+  providerSearchBranchStarts,
   pythonTierFoundationModelIds,
   resolvePath,
   resolveString,
   retentionForLogGroupName,
+  searchFunctionName,
   statementActions,
   tokenValidityMinutes,
   unguardedVerbs,
@@ -55,6 +62,7 @@ import {
   type BucketLifecycleSnapshot,
   type IamPolicyStatementSnapshot,
   type LambdaLogGroupSnapshot,
+  type ProviderSearchSnapshot,
   type StageMethodSettingSnapshot,
   type StateMachineLoggingSnapshot,
   type WafFootprint,
@@ -161,6 +169,7 @@ const synthesized: {
   sentimentExamplesMethods: ApiGatewayMethodSnapshot[];
   statsInsightsFunctionId: string;
   workflowScale: WorkflowScaleSnapshot;
+  providerSearch: ProviderSearchSnapshot;
 } = {
   definitionRaw: '',
   researchDefinitionRaw: '',
@@ -234,6 +243,7 @@ const synthesized: {
   sentimentExamplesMethods: [],
   statsInsightsFunctionId: '',
   workflowScale: EMPTY_WORKFLOW_SCALE_SNAPSHOT,
+  providerSearch: EMPTY_PROVIDER_SEARCH_SNAPSHOT,
 };
 
 /**
@@ -242,7 +252,7 @@ const synthesized: {
  */
 const WORKER_LOG_GROUP_NAMES = [
   '/aws/lambda/CitationAnalysis-ParseKeywords',
-  '/aws/lambda/CitationAnalysis-Search',
+  ...SEARCH_PROVIDER_IDS.map((id) => `/aws/lambda/${searchFunctionName(id)}`),
   '/aws/lambda/CitationAnalysis-Deduplication',
   '/aws/lambda/CitationAnalysis-Crawler',
   '/aws/lambda/CitationAnalysis-GenerateSummary',
@@ -397,6 +407,7 @@ beforeAll(() => {
   );
   synthesized.statsInsightsFunctionId = findLambdaLogicalId(template, 'CitationAnalysis-API-StatsInsights');
   synthesized.workflowScale = extractWorkflowScaleSnapshot(template);
+  synthesized.providerSearch = extractProviderSearchSnapshot(template);
 }, 180_000);
 
 describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
@@ -719,8 +730,8 @@ describe('Keyword-scale analysis workflow', () => {
     expect(resolvePath(synthesized.workflowScale.definition, [...PROCESS_KEYWORDS, 'ToleratedFailurePercentage'])).toBe(10);
   });
 
-  it('keeps the default keyword concurrency of 3', () => {
-    expect(resolvePath(synthesized.workflowScale.definition, [...PROCESS_KEYWORDS, 'MaxConcurrency'])).toBe(3);
+  it('runs 20 keywords at a time by default', () => {
+    expect(resolvePath(synthesized.workflowScale.definition, [...PROCESS_KEYWORDS, 'MaxConcurrency'])).toBe(20);
   });
 
   it('ends each keyword child with a compact result that keeps counts instead of the citation and crawl arrays', () => {
@@ -800,6 +811,207 @@ describe('Keyword-scale workflow permissions', () => {
 
   it('lets KpiAlerts read the stored execution summaries', () => {
     expect(synthesized.workflowScale.kpiAlertsReadResources).toContain('"/execution-summaries/*"');
+  });
+});
+
+/**
+ * Parallel providers (2.28.0). Every provider used to be called one after
+ * another inside one search Lambda (~139 s per keyword), with nothing bounding
+ * how many keywords hit a provider at once. Each provider now has its own
+ * function whose reserved concurrency caps its calls in flight across the run.
+ */
+const DEFAULT_PROVIDER_CAPS: Record<string, number | undefined> = {
+  openai: 10,
+  perplexity: 1,
+  gemini: 10,
+  claude: 5,
+  brave: 10,
+  tavily: 10,
+  exa: 5,
+  serpapi: 5,
+  firecrawl: 2,
+};
+const LAMBDA_SERVICE_ERRORS = [
+  'Lambda.ClientExecutionTimeoutException',
+  'Lambda.ServiceException',
+  'Lambda.AWSLambdaException',
+  'Lambda.SdkClientException',
+];
+
+describe('Per-provider search functions', () => {
+  it('caps each provider with its default reserved concurrency', () => {
+    expect(synthesized.providerSearch.reservedConcurrency).toStrictEqual(DEFAULT_PROVIDER_CAPS);
+  });
+
+  it('gives every provider function the 15-minute search timeout', () => {
+    expect(synthesized.providerSearch.timeoutSeconds)
+      .toStrictEqual(Object.fromEntries(SEARCH_PROVIDER_IDS.map((id) => [id, 900])));
+  });
+
+  it('runs every provider function as the shared search role', () => {
+    expect(synthesized.providerSearch.searchRoleLogicalId).not.toBe('');
+    expect(new Set(Object.values(synthesized.providerSearch.roleLogicalIds)))
+      .toStrictEqual(new Set([synthesized.providerSearch.searchRoleLogicalId]));
+  });
+
+  it('sets 12 extra throttle attempts on the provider functions and no other function', () => {
+    expect(synthesized.providerSearch.throttleExtraAttemptsByFunction)
+      .toStrictEqual(Object.fromEntries(SEARCH_PROVIDER_IDS.map((id) => [searchFunctionName(id), '12'])));
+  });
+
+  it('removes the single CitationAnalysis-Search function and its log group', () => {
+    expect(synthesized.providerSearch.legacyFunctionLogicalId).toBe('');
+    expect(synthesized.providerSearch.legacyLogGroupLogicalId).toBe('');
+  });
+
+  it('drops the SearchFunctionArn output with the function it named', () => {
+    expect(synthesized.outputKeys).not.toContain('SearchFunctionArn');
+  });
+});
+
+describe('SearchAllProviders parallel search', () => {
+  const childStates = (): unknown => keywordChildStates(synthesized.workflowScale.definition);
+  const branchState = (providerId: string, stateName: string): unknown =>
+    resolvePath(providerSearchBranch(synthesized.workflowScale.definition, providerId), ['States', stateName]);
+  const searchTask = (providerId: string): unknown => branchState(providerId, `Search-${providerId}`);
+
+  it('fans out to one branch per provider', () => {
+    expect(providerSearchBranchStarts(synthesized.workflowScale.definition))
+      .toStrictEqual(SEARCH_PROVIDER_IDS.map((id) => `Search-${id}`));
+  });
+
+  it('keeps the branch outputs at provider_results and goes on to MergeProviderResults', () => {
+    const parallel = resolvePath(childStates(), ['SearchAllProviders']);
+
+    expect([resolvePath(parallel, ['Type']), resolvePath(parallel, ['ResultPath']), resolvePath(parallel, ['Next'])])
+      .toStrictEqual(['Parallel', '$.provider_results', 'MergeProviderResults']);
+  });
+
+  it('sends each branch the keyword, timestamp, query prompts and only its own provider', () => {
+    expect(SEARCH_PROVIDER_IDS.map((id) => resolvePath(searchTask(id), ['Parameters', 'Payload'])))
+      .toStrictEqual(SEARCH_PROVIDER_IDS.map((id) => ({
+        'keyword.$': '$.keyword',
+        'timestamp.$': '$.timestamp',
+        'query_prompts.$': '$.query_prompts',
+        providers: [id],
+      })));
+  });
+
+  it('keeps only the slim results of each provider Lambda', () => {
+    expect(new Set(SEARCH_PROVIDER_IDS.map((id) => JSON.stringify(resolvePath(searchTask(id), ['ResultSelector'])))))
+      .toStrictEqual(new Set([JSON.stringify({ 'results.$': '$.Payload.results' })]));
+  });
+
+  it('checks the slot retrier before States.TaskFailed, which also matches a throttled invoke', () => {
+    const retriers = resolvePath(searchTask('perplexity'), ['Retry']);
+
+    expect((Array.isArray(retriers) ? retriers : []).map((retrier) => resolvePath(retrier, ['ErrorEquals'])))
+      .toStrictEqual([LAMBDA_SERVICE_ERRORS, ['Lambda.TooManyRequestsException'], ['States.TaskFailed', 'States.Timeout']]);
+  });
+
+  it('waits for a free slot with jittered backoff while a provider is at its cap', () => {
+    expect(resolvePath(searchTask('perplexity'), ['Retry', '1'])).toStrictEqual({
+      ErrorEquals: ['Lambda.TooManyRequestsException'],
+      IntervalSeconds: 2,
+      MaxAttempts: 120,
+      BackoffRate: 1.5,
+      MaxDelaySeconds: 30,
+      JitterStrategy: 'FULL',
+    });
+  });
+
+  it('retries a failed provider Lambda twice with backoff', () => {
+    expect(resolvePath(searchTask('openai'), ['Retry', '2'])).toStrictEqual({
+      ErrorEquals: ['States.TaskFailed', 'States.Timeout'],
+      IntervalSeconds: 10,
+      MaxAttempts: 2,
+      BackoffRate: 2,
+    });
+  });
+
+  it('catches every provider failure into that provider\'s failed state', () => {
+    expect(SEARCH_PROVIDER_IDS.map((id) => resolvePath(searchTask(id), ['Catch'])))
+      .toStrictEqual(SEARCH_PROVIDER_IDS.map((id) => [{ ErrorEquals: ['States.ALL'], Next: `SearchFailed-${id}` }]));
+  });
+
+  it('records a failed search provider as one error row of type search', () => {
+    expect(branchState('serpapi', 'SearchFailed-serpapi')).toStrictEqual({
+      Type: 'Pass',
+      Result: {
+        results: [{
+          provider: 'serpapi',
+          provider_type: 'search',
+          status: 'error',
+          error: 'provider Lambda failed',
+          citations: [],
+          citation_count: 0,
+          query_prompt_id: 'default',
+        }],
+      },
+      End: true,
+    });
+  });
+
+  it('records a failed answer engine as an error row of type llm', () => {
+    expect(resolvePath(branchState('claude', 'SearchFailed-claude'), ['Result', 'results', '0', 'provider_type']))
+      .toBe('llm');
+  });
+
+  it('flattens the branch results into the input DeduplicateCitations reads', () => {
+    expect(resolvePath(childStates(), ['MergeProviderResults'])).toStrictEqual({
+      Type: 'Pass',
+      Parameters: {
+        'keyword.$': '$.keyword',
+        'timestamp.$': '$.timestamp',
+        'results.$': '$.provider_results[*].results[*]',
+      },
+      Next: 'DeduplicateCitations',
+    });
+  });
+
+  it('crawls 10 citations at a time per keyword by default', () => {
+    expect(resolvePath(childStates(), ['CrawlCitations', 'MaxConcurrency'])).toBe(10);
+  });
+});
+
+describe('Search and crawl concurrency overrides', () => {
+  const app = new cdk.App({
+    context: {
+      providerConcurrency: '{"perplexity":5,"firecrawl":0}',
+      crawlConcurrency: '4',
+      processKeywordsConcurrency: '7',
+    },
+  });
+  const template = Template.fromStack(new CitationAnalysisStack(app, 'ConcurrencyOverrideStack'));
+  const providerSearch = extractProviderSearchSnapshot(template);
+  const definition = extractWorkflowScaleSnapshot(template).definition;
+
+  it('applies -c providerConcurrency caps and keeps the defaults of providers it does not name', () => {
+    expect(providerSearch.reservedConcurrency).toStrictEqual({ ...DEFAULT_PROVIDER_CAPS, perplexity: 5, firecrawl: undefined });
+  });
+
+  it('runs -c crawlConcurrency citations at a time per keyword', () => {
+    expect(resolvePath(keywordChildStates(definition), ['CrawlCitations', 'MaxConcurrency'])).toBe(4);
+  });
+
+  it('runs -c processKeywordsConcurrency keywords at a time', () => {
+    expect(resolvePath(definition, ['States', 'ProcessKeywords', 'MaxConcurrency'])).toBe(7);
+  });
+});
+
+describe('Invalid -c providerConcurrency', () => {
+  it.each([
+    ['names an unknown provider', '{"bing":2}', "unknown provider 'bing' (known: openai, perplexity, gemini, claude, brave, tavily, exa, serpapi, firecrawl)"],
+    ['sets a negative cap', { perplexity: -1 }, "'perplexity' must be a positive integer, or 0 for no cap, got -1"],
+    ['sets a fractional cap', '{"openai":2.5}', "'openai' must be a positive integer, or 0 for no cap, got 2.5"],
+    ['sets a cap as a string', { exa: '5' }, "'exa' must be a positive integer, or 0 for no cap, got \"5\""],
+    ['is not JSON', 'perplexity=5', 'must be a JSON object, got perplexity=5'],
+    ['is a JSON array', '[5]', 'must be a JSON object, got "[5]"'],
+  ])('fails synth when the value %s', (_case, providerConcurrency, message) => {
+    const app = new cdk.App({ context: { providerConcurrency } });
+
+    expect(() => new CitationAnalysisStack(app, 'InvalidProviderConcurrencyStack'))
+      .toThrow(`CDK context 'providerConcurrency': ${message}`);
   });
 });
 
@@ -2145,7 +2357,7 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
     const runtimeFunctions = [
       'CitationAnalysis-API-ContentStudio',
       'CitationAnalysis-ResearchWorker',
-      'CitationAnalysis-Search',
+      ...SEARCH_PROVIDER_IDS.map(searchFunctionName),
     ];
 
     const marketplaceGrants = runtimeFunctions.filter((functionName) =>

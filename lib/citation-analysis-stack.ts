@@ -24,6 +24,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { Auth } from './constructs/auth';
 import { BedrockModelAccess } from './constructs/bedrock-model-access';
+import { ProviderSearch, readProviderConcurrency } from './constructs/provider-search';
 
 /**
  * Bedrock model tier defaults per task role.
@@ -115,9 +116,10 @@ const WORKFLOW_RUNS_PREFIX = 'runs/';
 const WORKFLOW_RUNS_RETENTION_DAYS = 30;
 
 /**
- * Analysis workflow budget. Measured: ~1.9 minutes per keyword at the default
- * ProcessKeywords concurrency of 3 (32 keywords took 62 minutes), so the old
- * 2-hour timeout ended runs at ~60 keywords and 1,000 keywords need ~32 hours.
+ * Analysis workflow budget. Measured: ~1.9 minutes per keyword at the old
+ * ProcessKeywords concurrency of 3 with providers called in sequence (32
+ * keywords took 62 minutes), so the old 2-hour timeout ended runs at ~60
+ * keywords and 1,000 keywords needed ~32 hours at that rate.
  * Seven days is headroom rather than a target: every task is already bounded
  * by its Lambda timeout and retries, so this only stops a run that is truly stuck.
  */
@@ -538,6 +540,9 @@ export class CitationAnalysisStack extends cdk.Stack {
     this.node.setContext(cxapi.STEPFUNCTIONS_USE_DISTRIBUTED_MAP_RESULT_WRITER_V2, true);
     // Dev mode: `cdk deploy --context dev=true` adds http://localhost:5173 as allowed CORS origin
     const devMode = this.node.tryGetContext('dev') === 'true';
+    // Read first so a bad `-c providerConcurrency=...` fails synth before any
+    // asset is staged.
+    const providerConcurrency = readProviderConcurrency(this);
 
     provisionBedrockModelAccess(this);
 
@@ -1158,24 +1163,15 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordsTable.grantReadData(parseKeywordsFunction);
     queryPromptsTable.grantReadData(parseKeywordsFunction);
 
-    // Search Lambda Function
-    const searchLogGroup = new logs.LogGroup(this, 'SearchLogGroup', {
-      logGroupName: '/aws/lambda/CitationAnalysis-Search',
-      retention: logs.RetentionDays.ONE_MONTH,
-      removalPolicy: cdk.RemovalPolicy.DESTROY,
-    });
-
-    const searchFunction = new lambda.Function(this, 'SearchFunction', {
-      functionName: 'CitationAnalysis-Search',
-      runtime: lambda.Runtime.PYTHON_3_12,
-      handler: 'handler.handler',
+    // Search Lambda Functions: one `CitationAnalysis-Search-<id>` per provider,
+    // same code, role and environment, each capped by its reserved concurrency
+    // (lib/constructs/provider-search.ts). They replace the single
+    // CitationAnalysis-Search that called every provider in sequence.
+    const providerSearch = new ProviderSearch(this, 'ProviderSearch', {
       code: lambda.Code.fromAsset(path.join(__dirname, '../lambda/search'), { exclude: PYTHON_ASSET_EXCLUDES }),
       role: searchLambdaRole,
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(900), // 15 min max — invoked by Step Functions, not API Gateway
-      memorySize: 512,
-      description: 'Query all AI providers with web search',
-      logGroup: searchLogGroup,
+      concurrency: providerConcurrency,
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
@@ -1420,27 +1416,10 @@ export class CitationAnalysisStack extends cdk.Stack {
       retryOnServiceExceptions: true,
     });
 
-    // 2. SearchAllProviders Task
-    const searchTask = new tasks.LambdaInvoke(this, 'SearchAllProviders', {
-      lambdaFunction: searchFunction,
-      payload: stepfunctions.TaskInput.fromObject({
-        'keyword.$': '$.keyword',
-        'timestamp.$': '$.timestamp',
-        'query_prompts.$': '$.query_prompts',
-      }),
-      outputPath: '$.Payload',
-      retryOnServiceExceptions: true,
-    });
-
-    // Add retry logic for Search Lambda
-    // Note: API clients now have their own exponential backoff (5 retries each)
-    // Step Functions retry is for Lambda-level failures only
-    searchTask.addRetry({
-      errors: ['States.TaskFailed', 'States.Timeout'],
-      interval: cdk.Duration.seconds(10),
-      maxAttempts: 2,
-      backoffRate: 2.0,
-    });
+    // 2. SearchAllProviders: one Parallel branch per provider Lambda, each
+    // queued behind its provider's cap, then MergeProviderResults flattens the
+    // branches into the {keyword, timestamp, results} DeduplicateCitations reads.
+    const searchAllProviders = providerSearch.searchAllProviders();
 
     // 3. DeduplicateCitations Task
     const deduplicationTask = new tasks.LambdaInvoke(this, 'DeduplicateCitations', {
@@ -1472,9 +1451,14 @@ export class CitationAnalysisStack extends cdk.Stack {
       resultPath: '$.error',
     });
 
-    // 5. CrawlCitations Map State (parallel crawling with concurrency limit)
+    // 5. CrawlCitations Map State (parallel crawling with concurrency limit).
+    // A page takes ~24 s, so 20 pages at 3 at a time was ~163 s per keyword.
+    // 10 per keyword x 20 keywords is 200 browser sessions at most, against
+    // AgentCore's 1,000 concurrent sessions and 30 StartBrowserSession/s; the
+    // crawler has no reserved concurrency, so it shares the account's
+    // unreserved Lambda pool. Override with `-c crawlConcurrency=N`.
     const crawlCitationsMap = new stepfunctions.Map(this, 'CrawlCitations', {
-      maxConcurrency: 3,
+      maxConcurrency: readPositiveIntegerContext(this, 'crawlConcurrency', 10),
       itemsPath: '$.deduplicated_citations',
       resultPath: '$.crawled_results',
       itemSelector: {
@@ -1502,7 +1486,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     });
 
     // 7. Chain Search -> Deduplication -> Crawl -> compact result
-    const processKeywordChain = searchTask
+    const processKeywordChain = searchAllProviders
       .next(deduplicationTask)
       .next(crawlCitationsMap)
       .next(summarizeKeywordResult);
@@ -1519,10 +1503,13 @@ export class CitationAnalysisStack extends cdk.Stack {
     // search task can run 15 minutes (Express children are capped at 5).
     //
     // maxConcurrency is the throughput knob; override per deployment with
-    // `-c processKeywordsConcurrency=5` once provider rate limits are known to
-    // tolerate it.
+    // `-c processKeywordsConcurrency=N`. 20 (was 3) is safe because provider
+    // calls no longer scale with it: each provider's reserved concurrency caps
+    // its calls in flight however many keywords run, and a keyword over a cap
+    // waits for a slot. What does scale with it is the crawl (x crawlConcurrency
+    // browser sessions) and Lambda concurrency from the unreserved pool.
     const processKeywordsMap = new stepfunctions.DistributedMap(this, 'ProcessKeywords', {
-      maxConcurrency: readPositiveIntegerContext(this, 'processKeywordsConcurrency', 3),
+      maxConcurrency: readPositiveIntegerContext(this, 'processKeywordsConcurrency', 20),
       mapExecutionType: stepfunctions.StateMachineType.STANDARD,
       itemReader: new stepfunctions.S3JsonItemReader({
         bucket: keywordsBucket,
@@ -2006,12 +1993,6 @@ export class CitationAnalysisStack extends cdk.Stack {
       value: parseKeywordsFunction.functionArn,
       description: 'ARN of ParseKeywords Lambda function',
       exportName: 'CitationAnalysis-ParseKeywordsFunctionArn',
-    });
-
-    new cdk.CfnOutput(this, 'SearchFunctionArn', {
-      value: searchFunction.functionArn,
-      description: 'ARN of Search Lambda function',
-      exportName: 'CitationAnalysis-SearchFunctionArn',
     });
 
     new cdk.CfnOutput(this, 'DeduplicationFunctionArn', {

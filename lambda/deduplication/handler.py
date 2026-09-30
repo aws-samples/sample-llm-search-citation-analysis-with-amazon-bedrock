@@ -11,8 +11,9 @@ from typing import Any
 
 import boto3
 
-from shared.constants import MAX_CITATIONS_PER_KEYWORD_DEFAULT
+from shared.constants import MAX_CITATIONS_PER_KEYWORD_DEFAULT, MAX_KEYWORD_LENGTH
 from shared.env_vars import resolve_table_env
+from shared.prompt_safety import sanitize_user_input
 from shared.step_function_response import log_error, step_function_success
 
 # Import shared utilities
@@ -266,7 +267,12 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     logger.info(f"Received event: {json.dumps(event, default=str)}")
 
-    keyword = event.get('keyword')
+    # The search step used to hand back its sanitized keyword; the workflow now
+    # merges nine per-provider outputs and passes the Map item's keyword, so
+    # sanitize it the same way the search Lambda does before storing under it.
+    # SearchResults and Citations must share one keyword key.
+    raw_keyword = event.get('keyword')
+    keyword = sanitize_user_input(raw_keyword, max_length=MAX_KEYWORD_LENGTH) if isinstance(raw_keyword, str) else raw_keyword
     results = event.get('results', [])
     timestamp = event.get('timestamp')
 

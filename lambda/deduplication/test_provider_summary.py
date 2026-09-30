@@ -335,3 +335,24 @@ class TestHandlerReportsTheCitationTotal:
         event = {'keyword': 'best hotels malaga', 'timestamp': '2026-08-19T10:00:00Z', 'results': []}
 
         assert dedup.handler(event, None)['total_citations_found'] == 0
+
+
+class TestKeywordSanitization:
+    """The merged per-provider input carries the raw Map keyword; dedup must key rows like the search step did."""
+
+    def test_returns_the_search_steps_sanitized_keyword_when_the_raw_keyword_has_markup_and_newlines(
+        self, dedup, overlapping_citations_event
+    ) -> None:
+        event = {**overlapping_citations_event, 'keyword': 'best <b>hotels</b>\nmalaga'}
+
+        assert dedup.handler(event, None)['keyword'] == 'best bhotels/b malaga'
+
+    def test_stores_citations_under_the_sanitized_keyword_when_the_raw_keyword_has_markup(
+        self, dedup, overlapping_citations_event
+    ) -> None:
+        event = {**overlapping_citations_event, 'keyword': 'best <hotels> malaga'}
+
+        with patch.object(dedup, 'store_citations') as store:
+            dedup.handler(event, None)
+
+        assert store.call_args.args[0] == 'best hotels malaga'

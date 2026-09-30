@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import os
 import random
 import time
 from collections.abc import Callable
@@ -30,6 +31,9 @@ import requests
 
 from shared.provider_models import DEFAULT_PROVIDER_MODELS
 from shared.secrets import get_api_key
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
@@ -109,10 +113,42 @@ def claude_web_search_payload(
 # Extra attempts a 429 earns on top of the caller's ``max_retries``. Throttling
 # answers in milliseconds, so waiting it out is cheap — unlike the timeouts the
 # caller's budget is sized for (the research worker allows two attempts because
-# OpenAI's 90s timeout must fit a 300s Lambda). Three throttled waits cost at
-# most ~14s plus jitter.
+# OpenAI's 90s timeout must fit a 300s Lambda). The default three throttled
+# waits cost at most ~14s plus jitter; the analysis provider Lambdas, which run
+# one provider each with a longer timeout, raise it through
+# ``PROVIDER_THROTTLE_EXTRA_ATTEMPTS`` so a per-minute limit is always waited
+# out (5 + 12 attempts: at most ~6.6 minutes of waiting, each wait capped at 30s).
 THROTTLE_EXTRA_ATTEMPTS = 3
+THROTTLE_EXTRA_ATTEMPTS_ENV = 'PROVIDER_THROTTLE_EXTRA_ATTEMPTS'
 THROTTLE_MAX_WAIT_SECONDS = 30.0
+# ``x-ratelimit-reset`` values above this are epoch seconds (Perplexity sends
+# those); smaller positive values are seconds from now.
+_EPOCH_THRESHOLD = 1e9
+
+
+def throttle_extra_attempts() -> int:
+    """The extra 429 attempts, from ``PROVIDER_THROTTLE_EXTRA_ATTEMPTS`` (an int >= 0) or the default.
+
+    Read on every call, not at import, so a test (or a Lambda whose
+    environment changed) sees the current value. An invalid value falls back
+    to ``THROTTLE_EXTRA_ATTEMPTS`` with a warning rather than failing the call.
+    """
+    # Literal name (not THROTTLE_EXTRA_ATTEMPTS_ENV) so scripts/check-contracts.py
+    # can match it to the CDK stack that sets it.
+    raw = os.environ.get('PROVIDER_THROTTLE_EXTRA_ATTEMPTS')
+    if raw is None or raw.strip() == '':
+        return THROTTLE_EXTRA_ATTEMPTS
+    try:
+        value = int(raw)
+    except ValueError:
+        value = -1
+    if value < 0:
+        logger.warning(
+            f"[THROTTLE_CONFIG] {THROTTLE_EXTRA_ATTEMPTS_ENV}={raw!r} is not an integer >= 0; "
+            f"using {THROTTLE_EXTRA_ATTEMPTS}"
+        )
+        return THROTTLE_EXTRA_ATTEMPTS
+    return value
 
 
 def _backoff_seconds(attempt: int) -> float:
@@ -120,26 +156,44 @@ def _backoff_seconds(attempt: int) -> float:
     return (2 ** attempt) + (attempt * 0.5)
 
 
+def _positive_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _provider_wait_seconds(headers: Any) -> float | None:
+    """Seconds the provider asked for: ``Retry-After``, else ``x-ratelimit-reset``; ``None`` if neither is usable.
+
+    ``x-ratelimit-reset`` is an epoch timestamp when it is above
+    ``_EPOCH_THRESHOLD`` (a reset already in the past means "now", so no
+    provider wait), and seconds from now otherwise.
+    """
+    retry_after = _positive_float(headers.get('Retry-After', ''))
+    if retry_after is not None:
+        return retry_after
+    reset = _positive_float(headers.get('x-ratelimit-reset', ''))
+    if reset is None or reset <= _EPOCH_THRESHOLD:
+        return reset
+    return _positive_float(reset - time.time())
+
+
 def _throttle_wait_seconds(response: Any, attempt: int) -> float:
     """How long to wait after a 429 before attempt ``attempt + 1``.
 
-    Honours a numeric ``Retry-After`` header when the provider sends one,
-    otherwise exponential backoff; either way full jitter is added so parallel
-    steps that were throttled together do not retry in lockstep and collide
-    again — three Perplexity steps fired within 100ms of each other did exactly
-    that, one 1.0s sleep each, and one of them lost.
+    Never earlier than the provider asked (``Retry-After`` or
+    ``x-ratelimit-reset``) and never less patient than exponential backoff:
+    the longer of the two. Full jitter is added so parallel calls that were
+    throttled together do not retry in lockstep and collide again — three
+    Perplexity steps fired within 100ms of each other did exactly that, one
+    1.0s sleep each, and one of them lost. Capped at
+    ``THROTTLE_MAX_WAIT_SECONDS``.
     """
-    retry_after = None
     headers = getattr(response, 'headers', None) or {}
-    try:
-        retry_after = float(headers.get('Retry-After', ''))
-    except (TypeError, ValueError):
-        retry_after = None
-    base = retry_after if retry_after is not None and retry_after > 0 else _backoff_seconds(attempt)
+    base = max(_provider_wait_seconds(headers) or 0.0, _backoff_seconds(attempt))
     return min(base + random.uniform(0, base), THROTTLE_MAX_WAIT_SECONDS)
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
 def _status_retry_wait(
@@ -243,8 +297,9 @@ def retry_with_backoff(
     Args:
         provider_name: Name of the provider for logging (e.g., "OPENAI", "PERPLEXITY")
         max_retries: Maximum number of retry attempts for timeouts and 5xx
-            answers. A 429 gets ``THROTTLE_EXTRA_ATTEMPTS`` more, with jittered,
-            ``Retry-After``-aware waits — throttling is fast to fail and cheap
+            answers. A 429 gets ``throttle_extra_attempts()`` more (env
+            ``PROVIDER_THROTTLE_EXTRA_ATTEMPTS``, default 3), with jittered,
+            ``Retry-After`` / ``x-ratelimit-reset``-aware waits — throttling is fast to fail and cheap
             to wait out, so it should not spend the budget sized for slow failures.
         retryable_codes: HTTP status codes that should trigger a retry
         timeout: Request timeout in seconds
@@ -257,7 +312,7 @@ def retry_with_backoff(
         def wrapper(*args, **kwargs) -> dict[str, Any]:
             # Allow override of max_retries via kwargs
             actual_max_retries = kwargs.pop('max_retries', max_retries)
-            throttle_attempts = actual_max_retries + THROTTLE_EXTRA_ATTEMPTS
+            throttle_attempts = actual_max_retries + throttle_extra_attempts()
 
             attempt = 0
             while attempt < throttle_attempts:

@@ -82,6 +82,7 @@ _CREDIT_MARKERS = (
     'insufficient funds',
     'insufficient credit',
     'out of credits',
+    'run out of searches',            # SerpAPI (429 once the monthly searches are spent)
     # Deliberately NOT 'quota exceeded'. Google returns
     # `429 RESOURCE_EXHAUSTED — "Quota exceeded for quota metric 'Generate
     # Content API requests per minute'"` for ordinary per-minute throttling.
