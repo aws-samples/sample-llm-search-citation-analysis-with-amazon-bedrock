@@ -5,6 +5,7 @@ import {
 } from 'vitest';
 import { CitationAnalysisStack } from './citation-analysis-stack';
 import {
+  EMPTY_WORKFLOW_SCALE_SNAPSHOT,
   STATUS_CREATED_INDEX_SCHEMA,
   allowStatementsOfRole,
   allowStatementsOfTemplate,
@@ -34,6 +35,7 @@ import {
   extractUserPoolClientProps,
   extractUserPoolGroupNames,
   extractWafFootprint,
+  extractWorkflowScaleSnapshot,
   findApiResourceId,
   findFunctionRoleLogicalId,
   findLambdaLogicalId,
@@ -56,6 +58,7 @@ import {
   type StageMethodSettingSnapshot,
   type StateMachineLoggingSnapshot,
   type WafFootprint,
+  type WorkflowScaleSnapshot,
 } from './citation-analysis-stack-fixtures';
 
 const KEYWORD_MGMT_FUNCTION_NAME = 'CitationAnalysis-API-KeywordMgmt';
@@ -157,6 +160,7 @@ const synthesized: {
   searchRoleProviderConfigActions: string[];
   sentimentExamplesMethods: ApiGatewayMethodSnapshot[];
   statsInsightsFunctionId: string;
+  workflowScale: WorkflowScaleSnapshot;
 } = {
   definitionRaw: '',
   researchDefinitionRaw: '',
@@ -229,6 +233,7 @@ const synthesized: {
   searchRoleProviderConfigActions: [],
   sentimentExamplesMethods: [],
   statsInsightsFunctionId: '',
+  workflowScale: EMPTY_WORKFLOW_SCALE_SNAPSHOT,
 };
 
 /**
@@ -391,6 +396,7 @@ beforeAll(() => {
     template, findApiResourceId(template, 'sentiment-examples', visibilityId)
   );
   synthesized.statsInsightsFunctionId = findLambdaLogicalId(template, 'CitationAnalysis-API-StatsInsights');
+  synthesized.workflowScale = extractWorkflowScaleSnapshot(template);
 }, 180_000);
 
 describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
@@ -675,6 +681,128 @@ describe('Step Functions workflow', () => {
   });
 });
 
+/**
+ * Keyword scale (2.27.0). ProcessKeywords was an inline Map: every keyword's
+ * ~8.5 KB result landed in the 256 KiB state (runs over ~31 keywords failed
+ * with States.DataLimitExceeded after all the spend) and ~160 history events
+ * per keyword counted against the 25,000-event cap. It is now a Distributed
+ * Map whose items and results live in S3, so the parent's state and history
+ * stay flat in the keyword count.
+ */
+describe('Keyword-scale analysis workflow', () => {
+  const PROCESS_KEYWORDS = ['States', 'ProcessKeywords'];
+  const CHILD_STATES = [...PROCESS_KEYWORDS, 'ItemProcessor', 'States'];
+
+  it('runs ProcessKeywords as a distributed map of standard child executions', () => {
+    expect(resolvePath(synthesized.workflowScale.definition, [...PROCESS_KEYWORDS, 'ItemProcessor', 'ProcessorConfig']))
+      .toStrictEqual({ Mode: 'DISTRIBUTED', ExecutionType: 'STANDARD' });
+  });
+
+  it('reads the ProcessKeywords items from the manifest ParseKeywords names', () => {
+    expect(resolvePath(synthesized.workflowScale.definition, [...PROCESS_KEYWORDS, 'ItemReader'])).toStrictEqual({
+      Resource: 'arn:__TOKEN__:states:::s3:getObject',
+      ReaderConfig: { InputType: 'JSON' },
+      Parameters: { Bucket: '__TOKEN__', 'Key.$': '$.keywords_manifest.key' },
+    });
+  });
+
+  it('writes the ProcessKeywords results under the run-scratch prefix', () => {
+    expect(resolvePath(synthesized.workflowScale.definition, [...PROCESS_KEYWORDS, 'ResultWriter', 'Parameters']))
+      .toStrictEqual({ Bucket: '__TOKEN__', Prefix: 'runs/map-results' });
+  });
+
+  it('keeps the ParseKeywords output and adds the map run pointer as map_run', () => {
+    expect(resolvePath(synthesized.workflowScale.definition, [...PROCESS_KEYWORDS, 'ResultPath'])).toBe('$.map_run');
+  });
+
+  it('tolerates up to 10 percent failed keywords before failing the run', () => {
+    expect(resolvePath(synthesized.workflowScale.definition, [...PROCESS_KEYWORDS, 'ToleratedFailurePercentage'])).toBe(10);
+  });
+
+  it('keeps the default keyword concurrency of 3', () => {
+    expect(resolvePath(synthesized.workflowScale.definition, [...PROCESS_KEYWORDS, 'MaxConcurrency'])).toBe(3);
+  });
+
+  it('ends each keyword child with a compact result that keeps counts instead of the citation and crawl arrays', () => {
+    expect(resolvePath(synthesized.workflowScale.definition, [...CHILD_STATES, 'SummarizeKeywordResult'])).toStrictEqual({
+      Type: 'Pass',
+      Parameters: {
+        'keyword.$': '$.keyword',
+        'timestamp.$': '$.timestamp',
+        'status.$': '$.status',
+        'provider_summary.$': '$.provider_summary',
+        'unique_citations.$': 'States.ArrayLength($.deduplicated_citations)',
+        'total_citations_found.$': '$.total_citations_found',
+        'pages_crawled.$': "States.ArrayLength($.crawled_results[?(@.status == 'success')])",
+      },
+      End: true,
+    });
+  });
+
+  it('hands ParseKeywords the execution input and the execution name', () => {
+    expect(resolvePath(synthesized.workflowScale.definition, ['States', 'ParseKeywords', 'Parameters', 'Payload']))
+      .toStrictEqual({ 'execution_input.$': '$', 'execution_name.$': '$$.Execution.Name' });
+  });
+
+  it('hands GenerateSummary the map run pointer instead of the keyword results', () => {
+    expect(resolvePath(synthesized.workflowScale.definition, ['States', 'GenerateSummary', 'Parameters', 'Payload'])).toStrictEqual({
+      'execution_id.$': '$$.Execution.Name',
+      'map_run.$': '$.map_run',
+      'keyword_count.$': '$.keyword_count',
+      'timestamp.$': '$.timestamp',
+      summary_bucket: '__TOKEN__',
+    });
+  });
+
+  it('allows the workflow seven days', () => {
+    expect(extractDefinitionTimeoutSeconds(synthesized.definitionRaw)).toBe(SEVEN_DAYS_IN_MINUTES * 60);
+  });
+
+  it('sizes GenerateSummary for thousands of keyword results', () => {
+    expect([synthesized.workflowScale.generateSummaryMemorySize, synthesized.workflowScale.generateSummaryTimeoutSeconds])
+      .toStrictEqual([1024, 300]);
+  });
+});
+
+describe('Keywords bucket run-scratch lifecycle', () => {
+  it('expires runs/ objects and abandoned uploads under runs/ only', () => {
+    expect(synthesized.workflowScale.keywordsBucketRules).toStrictEqual([{
+      Id: 'ExpireRunScratch',
+      Status: 'Enabled',
+      Prefix: 'runs/',
+      ExpirationInDays: 30,
+      AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 },
+    }]);
+  });
+});
+
+describe('Keyword-scale workflow permissions', () => {
+  it('lets the workflow role describe and stop its distributed map child executions', () => {
+    expect(synthesized.workflowScale.childExecutionDescribeResources)
+      .toContain(':execution:CitationAnalysis-Workflow/*');
+  });
+
+  it('lets the execution status endpoint describe the workflow map runs', () => {
+    expect(synthesized.workflowScale.describeMapRunResources).toContain(':mapRun:CitationAnalysis-Workflow/*');
+  });
+
+  it('lets the execution status endpoint list the map runs of workflow executions', () => {
+    expect(synthesized.workflowScale.listMapRunsResources).toContain(':execution:CitationAnalysis-Workflow:*');
+  });
+
+  it('lets ParseKeywords write only under runs/', () => {
+    expect(synthesized.workflowScale.parseKeywordsPutResources).toMatch(/^\[\{"Fn::Join":\["",\[\{"Fn::GetAtt":\["KeywordsBucket\w+","Arn"\]\},"\/runs\/\*"\]\]\}\]$/);
+  });
+
+  it('lets GenerateSummary read the map run results under runs/', () => {
+    expect(synthesized.workflowScale.generateSummaryReadResources).toContain('"/runs/*"');
+  });
+
+  it('lets KpiAlerts read the stored execution summaries', () => {
+    expect(synthesized.workflowScale.kpiAlertsReadResources).toContain('"/execution-summaries/*"');
+  });
+});
+
 describe('Keyword research state machine', () => {
   /**
    * 2.2.0: keyword research left the API Lambda's self-invoke path for a
@@ -937,6 +1065,10 @@ describe('ParseKeywords Lambda environment', () => {
   it('includes the query prompts table for execution-time prompt resolution', () => {
     expect(synthesized.parseKeywordsEnvVars).toHaveProperty('DYNAMODB_TABLE_QUERY_PROMPTS');
     expect(synthesized.parseKeywordsEnvVars).toHaveProperty('QUERY_PROMPTS_TABLE');
+  });
+
+  it('names the keywords bucket the run manifest is written to', () => {
+    expect(collectRefTargets(synthesized.parseKeywordsEnvVars.KEYWORDS_BUCKET)[0]).toMatch(/^KeywordsBucket/);
   });
 });
 

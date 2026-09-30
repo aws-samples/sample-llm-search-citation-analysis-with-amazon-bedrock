@@ -12,6 +12,7 @@ import {
   deleteKeywordGroup,
   fetchKeywordGroups,
   mergeUpdatedKeywords,
+  PartialMembershipUpdateError,
   updateGroupMemberships,
   updateKeywordGroup,
 } from '../api/keywordGroups';
@@ -20,6 +21,11 @@ import type { MembershipChanges } from '../api/keywordGroups';
 export interface MutationOutcome {
   success: boolean;
   message: string;
+}
+
+function partialMembershipMessage(error: PartialMembershipUpdateError): string {
+  const reason = getErrorMessage(error.failure, 'keywords');
+  return `Updated ${error.appliedChanges} of ${error.totalChanges} keyword memberships, then stopped: ${reason}`;
 }
 
 interface UseKeywordGroupsOptions {
@@ -98,6 +104,14 @@ export const useKeywordGroups = (options: UseKeywordGroupsOptions = {}): UseKeyw
       };
     } catch (mutationError) {
       console.error(`[keyword-groups] ${context} failed:`, mutationError);
+      // Earlier chunks are stored, so the counts changed: refresh them too.
+      if (mutationError instanceof PartialMembershipUpdateError) {
+        await refresh();
+        return {
+          success: false,
+          message: partialMembershipMessage(mutationError),
+        };
+      }
       return {
         success: false,
         message: getErrorMessage(mutationError, 'keywords')
@@ -135,7 +149,12 @@ export const useKeywordGroups = (options: UseKeywordGroupsOptions = {}): UseKeyw
   const changeMemberships = useCallback(
     (id: string, changes: MembershipChanges) => runMutation(
       async () => {
-        const result = await updateGroupMemberships(id, changes);
+        const result = await updateGroupMemberships(id, changes).catch((membershipError: unknown) => {
+          if (membershipError instanceof PartialMembershipUpdateError) {
+            onKeywordsUpdated?.(membershipError.applied.keywords);
+          }
+          throw membershipError;
+        });
         onKeywordsUpdated?.(result.keywords);
       },
       'Group membership updated',

@@ -84,32 +84,27 @@ export function isGroupMembershipResponse(value: unknown): value is GroupMembers
   );
 }
 
-/** Response from the ordinary keywords API. */
-export interface KeywordsResponse { keywords: Keyword[] }
-
-/** Complete response from the authoritative keywords API. */
-export interface AuthoritativeKeywordsResponse {
+/**
+ * One page of GET /keywords. `next_token` is the opaque continuation token
+ * of the next page; `null` means this page is the last one.
+ */
+export interface KeywordsPage {
   keywords: Keyword[];
   count: number;
-  complete: true;
+  next_token: string | null;
 }
 
-export function isKeywordsResponse(value: unknown): value is KeywordsResponse {
+function isContinuationToken(value: unknown): value is KeywordsPage['next_token'] {
+  return value === null || (typeof value === 'string' && value.length > 0);
+}
+
+export function isKeywordsPage(value: unknown): value is KeywordsPage {
   return (
     isRecord(value)
     && Array.isArray(value.keywords)
     && value.keywords.every(isKeyword)
-  );
-}
-
-export function isAuthoritativeKeywordsResponse(value: unknown): value is AuthoritativeKeywordsResponse {
-  return (
-    isKeywordsResponse(value)
-    && 'count' in value
-    && typeof value.count === 'number'
-    && Number.isInteger(value.count)
+    // `count` is len(page), not a stored number, so it arrives as a JSON number.
     && value.count === value.keywords.length
-    && 'complete' in value
-    && value.complete === true
+    && isContinuationToken(value.next_token)
   );
 }

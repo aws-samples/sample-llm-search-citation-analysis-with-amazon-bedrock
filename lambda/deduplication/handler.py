@@ -194,6 +194,11 @@ def prioritize_citations(
     return prioritized
 
 
+def total_citations_found(citations: list[dict[str, Any]]) -> int:
+    """Citations before deduplication: each kept URL counts once per provider that cited it."""
+    return sum(citation.get('citation_count', 1) for citation in citations)
+
+
 def store_citations(keyword: str, citations: list[dict[str, Any]]) -> None:
     """
     Store deduplicated citations in DynamoDB.
@@ -252,7 +257,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         context: Lambda context object
 
     Returns:
-        Dictionary containing deduplicated and prioritized citations, plus a
+        Dictionary containing deduplicated and prioritized citations, their
+        ``total_citations_found``, plus a
         ``provider_summary`` rollup. The rollup exists because this payload
         replaces the whole Step Functions state, so the search step's
         ``results`` array cannot reach ``generate-summary`` on its own — see
@@ -275,6 +281,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             'keyword': keyword,
             'timestamp': timestamp,
             'deduplicated_citations': [],
+            'total_citations_found': 0,
             'provider_summary': summarize_providers([]),
         }, f"No results for keyword: {keyword}")
 
@@ -291,11 +298,14 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         logger.info(f"Successfully processed {len(prioritized)} citations for keyword: {keyword}")
 
         # Return prioritized citations for Crawler Lambda, plus the provider
-        # rollup that would otherwise be dropped with the search output.
+        # rollup that would otherwise be dropped with the search output, and
+        # the citation total the workflow's SummarizeKeywordResult keeps once
+        # the citation list itself is dropped (no intrinsic function can sum it).
         return step_function_success({
             'keyword': keyword,
             'timestamp': timestamp,
             'deduplicated_citations': prioritized,
+            'total_citations_found': total_citations_found(prioritized),
             'provider_summary': summarize_providers(results),
         }, f"Processed {len(prioritized)} citations for {keyword}")
 

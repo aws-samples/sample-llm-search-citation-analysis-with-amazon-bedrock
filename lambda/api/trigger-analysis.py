@@ -1,8 +1,9 @@
 """
 Trigger Analysis API Lambda
 
-Starts a Step Functions execution with keywords from DynamoDB.
-Uses efficient query with StatusIndex GSI instead of scan with filter.
+Starts a Step Functions execution over every active keyword, passed as the
+scope ``{"mode": "all"}``. Uses efficient query with StatusIndex GSI instead
+of scan with filter to count them.
 """
 
 import logging
@@ -16,7 +17,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.analysis_runs import fetch_enabled_query_prompts, start_analysis_run
+from shared.analysis_runs import fetch_enabled_query_prompts, scope_run_input, start_analysis_run
 from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler
@@ -85,20 +86,24 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     loop is unbounded spend (AUDIT-2026-08-19 §2.3). The gate is the authz half
     of that finding; throttling and idempotency are tracked separately.
 
-    There is no per-execution keyword cap: every active keyword is included
-    (StatusIndex is read to the last page) and the ProcessKeywords Map bounds
-    concurrency.
+    There is no per-execution keyword cap. The active keywords are read here
+    only to refuse an empty run and to report the count: the execution input is
+    the scope ``{"mode": "all"}``, which ParseKeywords resolves when the run
+    starts and writes to S3 for the ProcessKeywords Distributed Map, so the
+    input's size does not grow with the keyword count.
     """
     keywords = _active_keywords()
-    if not keywords:
+    keyword_count = sum(1 for kw in keywords if kw.get('keyword'))
+    if not keyword_count:
         return validation_error('No active keywords found. Please add keywords first.', event)
 
-    keyword_texts = [kw['keyword'] for kw in keywords if kw.get('keyword')]
     query_prompts = fetch_enabled_query_prompts(query_prompts_table)
-    started = start_analysis_run(stepfunctions, STATE_MACHINE_ARN, 'analysis', keyword_texts, query_prompts)
+    started = start_analysis_run(
+        stepfunctions, STATE_MACHINE_ARN, 'analysis', scope_run_input({'mode': 'all'}, query_prompts), keyword_count
+    )
 
     result = {
         **started,
-        'message': f'Analysis started with {len(keyword_texts)} keywords and {len(query_prompts)} query prompts',
+        'message': f'Analysis started with {keyword_count} keywords and {len(query_prompts)} query prompts',
     }
     return success_response(result, event)

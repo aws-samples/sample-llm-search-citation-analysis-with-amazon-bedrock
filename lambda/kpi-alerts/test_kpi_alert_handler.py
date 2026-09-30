@@ -14,6 +14,7 @@ from shared.kpi_alerts import DEFAULT_ALERT_SETTINGS
 from shared.kpi_engine import Answer, answers_from_rows
 from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.handler_fixtures import handler_fixture
+from testing.map_run_fixtures import RESULTS_BUCKET, fake_s3_objects
 
 _HANDLER_DIR = os.path.dirname(os.path.abspath(__file__))
 _SUMMARY_HANDLER_DIR = os.path.join(os.path.dirname(_HANDLER_DIR), 'generate-summary')
@@ -470,3 +471,55 @@ class TestNotification:
 
         assert result == {'status': 'not_sent', 'reason': 'no_configured_emails'}
         assert worker_module.sns.publish.call_count == 0
+
+
+_FULL_REPORT_KEY = 'execution-summaries/20261001100500-exec-1.json'
+
+
+def _compact_event(status: str = 'completed', s3_location: str | None = f's3://{RESULTS_BUCKET}/{_FULL_REPORT_KEY}') -> dict:
+    """What the workflow sends since GenerateSummary returns the compact report."""
+    event = _event(status)
+    report = event['report']
+    report['run_metadata'] = {'timestamp': _RUN_TIMESTAMP, 'timestamps': [_RUN_TIMESTAMP], 'keyword_count': 1}
+    if s3_location is not None:
+        report['s3_location'] = s3_location
+    return event
+
+
+class TestFullReportFromS3:
+    """The compact report has no per-keyword identity; the full one is read back from S3."""
+
+    def test_evaluates_the_run_from_the_full_report_stored_at_its_s3_location(self, worker_module) -> None:
+        s3 = fake_s3_objects({(RESULTS_BUCKET, _FULL_REPORT_KEY): _event()['report']})
+        _snapshots, _alerts, resource = _single_group_tables()
+
+        with (
+            _complete_group_patches(worker_module, resource, {**DEFAULT_ALERT_SETTINGS, 'enabled': False}, _answers()),
+            patch.object(worker_module, 's3', s3),
+            patch.object(worker_module, '_previous_snapshot', return_value=None),
+            patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
+        ):
+            result = worker_module.handler(_compact_event(), None)
+
+        assert (result['status'], result['snapshots_recorded']) == ('completed', 1)
+
+    def test_skips_with_a_reason_when_the_full_report_cannot_be_read(self, worker_module) -> None:
+        with patch.object(worker_module, 's3', fake_s3_objects({})):
+            result = worker_module.handler(_compact_event(), None)
+
+        assert (result['status'], result['reason']) == ('skipped', 'full_report_unreadable')
+
+    def test_skips_with_a_reason_when_the_compact_report_names_no_s3_location(self, worker_module) -> None:
+        with patch.object(worker_module, 's3', fake_s3_objects({})):
+            result = worker_module.handler(_compact_event(s3_location=None), None)
+
+        assert (result['status'], result['reason']) == ('skipped', 'full_report_location_missing')
+
+    def test_does_not_read_s3_for_a_report_that_is_not_comparable(self, worker_module) -> None:
+        s3 = fake_s3_objects({})
+
+        with patch.object(worker_module, 's3', s3):
+            result = worker_module.handler(_compact_event('completed_with_errors'), None)
+
+        assert result['reason'] == 'report_not_comparable'
+        s3.get_object.assert_not_called()

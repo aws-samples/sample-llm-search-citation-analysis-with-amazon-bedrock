@@ -19,8 +19,9 @@ user: organising keywords is content-team work, not an admin action.
 import logging
 import sys
 import uuid
-from collections.abc import Callable
-from functools import wraps
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial, wraps
 from typing import Any
 
 import boto3
@@ -57,10 +58,27 @@ GROUPS_TABLE = resolve_table_env(KEYWORD_GROUPS_TABLE_ENV)
 keywords_table = dynamodb.Table(KEYWORDS_TABLE)
 groups_table = dynamodb.Table(GROUPS_TABLE)
 
-# Bulk membership edits are bounded so one request stays inside the API budget.
+# Bulk membership edits are bounded so one request stays inside the API budget;
+# the dashboard sends larger edits in chunks of this size
+# (MAX_MEMBERSHIP_CHANGES_PER_REQUEST in web/src/api/keywordGroups.ts).
 MAX_MEMBERSHIP_CHANGES = 500
+# One update_item per keyword membership, this many at a time: a serial loop over
+# a group of thousands of keywords outlasts API Gateway's 29 s integration limit.
+# Ten also matches botocore's default connection pool, so no thread waits for one.
+MEMBERSHIP_WRITE_WORKERS = 10
 
 _Route = Callable[..., dict[str, Any]]
+
+
+def _map_membership_writes[ResultT](write: Callable[[str], ResultT], keyword_ids: Sequence[str]) -> list[ResultT]:
+    """``write(keyword_id)`` for every id, ``MEMBERSHIP_WRITE_WORKERS`` at a time, in ``keyword_ids`` order.
+
+    The first write that raises propagates once the in-flight writes finish.
+    """
+    if not keyword_ids:
+        return []
+    with ThreadPoolExecutor(max_workers=min(MEMBERSHIP_WRITE_WORKERS, len(keyword_ids))) as pool:
+        return list(pool.map(write, keyword_ids))
 
 
 class _InvalidGroupName(ValueError):
@@ -224,14 +242,17 @@ def delete_group(event: dict[str, Any], context: Any, id: str, **_: Any) -> dict
         FilterExpression='contains(group_ids, :gid)',
         ExpressionAttributeValues={':gid': id},
     )
-    for member in members:
-        keywords_table.update_item(
-            Key={'id': member['id']},
-            UpdateExpression='DELETE group_ids :gids',
-            ExpressionAttributeValues={':gids': {id}},
-        )
+    _map_membership_writes(partial(_detach_keyword, group_id=id), [member['id'] for member in members])
     groups_table.delete_item(Key={'id': id})
     return success_response({'message': 'Keyword group deleted', 'detached_keywords': len(members)}, event)
+
+
+def _detach_keyword(keyword_id: str, *, group_id: str) -> None:
+    keywords_table.update_item(
+        Key={'id': keyword_id},
+        UpdateExpression='DELETE group_ids :gids',
+        ExpressionAttributeValues={':gids': {group_id}},
+    )
 
 
 def _apply_membership(keyword_id: str, group_id: str, *, add: bool) -> dict[str, Any] | None:
@@ -273,16 +294,12 @@ def update_memberships(event: dict[str, Any], context: Any, body: dict, id: str,
     removed: list[str] = []
     missing: list[str] = []
     updated: dict[str, dict[str, Any]] = {}
-    for keyword_id in add_ids:
-        item = _apply_membership(keyword_id, id, add=True)
-        (added if item else missing).append(keyword_id)
-        if item:
-            updated[keyword_id] = item
-    for keyword_id in remove_ids:
-        item = _apply_membership(keyword_id, id, add=False)
-        (removed if item else missing).append(keyword_id)
-        if item:
-            updated[keyword_id] = item
+    for applied_ids, keyword_ids, add in ((added, add_ids, True), (removed, remove_ids, False)):
+        items = _map_membership_writes(partial(_apply_membership, group_id=id, add=add), keyword_ids)
+        for keyword_id, item in zip(keyword_ids, items, strict=True):
+            (applied_ids if item else missing).append(keyword_id)
+            if item:
+                updated[keyword_id] = item
 
     return success_response({
         'group_id': id,

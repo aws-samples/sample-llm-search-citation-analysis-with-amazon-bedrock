@@ -123,6 +123,18 @@ export interface Execution {
   start_date: string;
   stop_date?: string;
   events: ExecutionEvent[];
+  /**
+   * Keyword counts of the run's ProcessKeywords Distributed Map, from the
+   * status API's `progress`. `null` before the map run starts and for runs
+   * started before the Distributed Map; absent until the first status poll.
+   */
+  progress?: {
+    keywords_total: number;
+    keywords_succeeded: number;
+    keywords_failed: number;
+    keywords_running: number;
+    keywords_pending: number;
+  } | null;
 }
 
 export type ScheduleState = 'ENABLED' | 'DISABLED';

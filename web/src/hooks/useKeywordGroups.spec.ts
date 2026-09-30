@@ -27,6 +27,7 @@ import {
   createKeywordGroup,
   deleteKeywordGroup,
   fetchKeywordGroups,
+  PartialMembershipUpdateError,
   updateGroupMemberships,
   updateKeywordGroup,
 } from '../api/keywordGroups';
@@ -129,5 +130,51 @@ describe('useKeywordGroups', () => {
 
     expect(mockMemberships).toHaveBeenCalledWith('a', { add: ['kw-1'] });
     expect(onKeywordsUpdated).toHaveBeenCalledWith(updated);
+  });
+
+  describe('when a later membership chunk fails', () => {
+    const appliedKeywords = [buildKeyword({ group_ids: ['a'] })];
+    const partialFailure = new PartialMembershipUpdateError({
+      applied: {
+        group_id: 'a',
+        added: ['kw-1'],
+        removed: [],
+        missing: [],
+        keywords: appliedKeywords,
+      },
+      appliedChanges: 500,
+      totalChanges: 600,
+    }, new ApiRequestError('HTTP 500', 500));
+
+    it('hands the keywords of the applied chunks to onKeywordsUpdated', async () => {
+      mockMemberships.mockRejectedValue(partialFailure);
+      const onKeywordsUpdated = vi.fn();
+      const { result } = await renderLoadedKeywordGroups({ onKeywordsUpdated });
+
+      await act(() => result.current.changeMemberships('a', { add: ['kw-1'] }));
+
+      expect(onKeywordsUpdated).toHaveBeenCalledWith(appliedKeywords);
+    });
+
+    it('reports how many memberships were applied before the failure', async () => {
+      mockMemberships.mockRejectedValue(partialFailure);
+      const { result } = await renderLoadedKeywordGroups();
+
+      const outcome = await act(() => result.current.changeMemberships('a', { add: ['kw-1'] }));
+
+      expect(outcome).toStrictEqual({
+        success: false,
+        message: 'Updated 500 of 600 keyword memberships, then stopped: Failed to process keyword request',
+      });
+    });
+
+    it('refreshes the group counts because the applied chunks are stored', async () => {
+      mockMemberships.mockRejectedValue(partialFailure);
+      const { result } = await renderLoadedKeywordGroups();
+
+      await act(() => result.current.changeMemberships('a', { add: ['kw-1'] }));
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
   });
 });

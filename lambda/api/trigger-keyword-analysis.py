@@ -2,9 +2,10 @@
 Trigger Keyword Analysis API Lambda
 
 Starts a Step Functions execution for a subset of keywords: either an explicit
-list of keyword texts (legacy clients) or a *scope* — one or more keyword
-groups, or a list of keyword ids — that is resolved against the Keywords table
-so only real, active keywords are run.
+list of keyword texts (legacy clients, sent inline and size-capped) or a
+*scope* — one or more keyword groups, or a list of keyword ids — that is
+checked against the Keywords table so only real, active keywords are run, and
+then passed to the execution for ParseKeywords to resolve at run time.
 """
 
 import logging
@@ -17,7 +18,13 @@ import boto3
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.analysis_runs import fetch_enabled_query_prompts, start_analysis_run
+from shared.analysis_runs import (
+    RunInputTooLargeError,
+    fetch_enabled_query_prompts,
+    keyword_list_run_input,
+    scope_run_input,
+    start_analysis_run,
+)
 from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.constants import MAX_KEYWORD_LENGTH
@@ -53,6 +60,20 @@ def _keywords_from_texts(keywords_input: Any) -> list[str] | None:
     return texts
 
 
+def _resolve_scope_request(scope_body: Any, event: dict[str, Any]) -> tuple[dict[str, Any], list[str]] | dict[str, Any]:
+    """Validate and resolve a ``scope`` body to ``(scope, keyword texts)``, or return the 400 response."""
+    scope, scope_error = validate_scope(scope_body)
+    if scope is None:
+        # validate_scope returns exactly one of (descriptor, None) / (None, error).
+        return validation_error(str(scope_error), event, 'scope')
+    keyword_texts = [item['keyword'] for item in resolve_scope(scope, keywords_table)]
+    if not keyword_texts:
+        return validation_error(
+            f'No active keywords match the selected scope ({describe_scope(scope)}).', event, 'scope'
+        )
+    return scope, keyword_texts
+
+
 @api_handler
 @require_group(ADMIN_GROUP)
 @parse_json_body
@@ -70,24 +91,21 @@ def handler(event: dict[str, Any], context: Any, body: dict) -> dict[str, Any]:
         {"scope": {"mode": "keywords", "keyword_ids": ["..."]}}    // these keywords, if active
         {"scope": {"mode": "all"}}                                  // every active keyword
 
-    There is no per-execution keyword cap: the ProcessKeywords Map bounds
-    concurrency and the state-machine timeout bounds duration.
+    A scope is resolved here to refuse an empty run and to report the
+    keywords, then passed to the execution as-is: ParseKeywords resolves it
+    again when the run starts, so the input does not grow with the group. An
+    explicit list travels inline and is refused with a 400 when it would not
+    fit the execution input (`shared.analysis_runs.MAX_RUN_INPUT_BYTES`).
     """
     if not isinstance(body, dict):
         return validation_error('Request body must be a JSON object', event, 'body')
 
     scope = None
     if 'scope' in body:
-        scope, scope_error = validate_scope(body.get('scope'))
-        if scope is None:
-            # validate_scope returns exactly one of (descriptor, None) / (None, error).
-            return validation_error(str(scope_error), event, 'scope')
-        resolved = resolve_scope(scope, keywords_table)
-        keyword_texts = [item['keyword'] for item in resolved]
-        if not keyword_texts:
-            return validation_error(
-                f'No active keywords match the selected scope ({describe_scope(scope)}).', event, 'scope'
-            )
+        resolved = _resolve_scope_request(body.get('scope'), event)
+        if not isinstance(resolved, tuple):
+            return resolved
+        scope, keyword_texts = resolved
     else:
         keyword_texts = _keywords_from_texts(body.get('keywords'))
         if keyword_texts is None:
@@ -98,11 +116,14 @@ def handler(event: dict[str, Any], context: Any, body: dict) -> dict[str, Any]:
             return validation_error('No valid keywords provided.', event, 'keywords')
 
     query_prompts = fetch_enabled_query_prompts(query_prompts_table)
-    # `requested_scope` is recorded for traceability; ParseKeywords uses the explicit list.
-    extra_input = {'requested_scope': scope} if scope is not None else None
-    started = start_analysis_run(
-        stepfunctions, STATE_MACHINE_ARN, 'keyword-analysis', keyword_texts, query_prompts, extra_input
+    run_input = (
+        scope_run_input(scope, query_prompts) if scope is not None
+        else keyword_list_run_input(keyword_texts, query_prompts)
     )
+    try:
+        started = start_analysis_run(stepfunctions, STATE_MACHINE_ARN, 'keyword-analysis', run_input, len(keyword_texts))
+    except RunInputTooLargeError as error:
+        return validation_error(str(error), event, 'scope' if scope is not None else 'keywords')
 
     return success_response({
         **started,

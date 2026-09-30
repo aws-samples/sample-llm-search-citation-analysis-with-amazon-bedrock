@@ -2,10 +2,16 @@
 
 The state machine catches every failure from this Lambda, so analysis reports
 remain successful even when alert evaluation is unavailable.
+
+The report in the payload is GenerateSummary's compact one; the per-keyword
+run identity is read back from the full report at its ``s3_location``.
+Executions started before scope-only trigger inputs carry ``requested_scope``
+next to (or instead of) ``scope``; both are honoured.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -14,7 +20,7 @@ from typing import Any
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from shared.answer_queries import query_keyword_run_rows
 from shared.dynamo_decimal import convert_floats_to_decimal
@@ -47,6 +53,52 @@ ALERTS_TOPIC_ARN = os.environ['KPI_ALERTS_TOPIC_ARN']
 
 dynamodb = boto3.resource('dynamodb', config=Config(max_pool_connections=50))
 sns = boto3.client('sns')
+s3 = boto3.client('s3')
+
+
+def _skipped(reason: str | None) -> dict[str, Any]:
+    return {
+        'status': 'skipped',
+        'reason': reason,
+        'groups_evaluated': 0,
+        'snapshots_recorded': 0,
+        'alerts_created': 0,
+        'skipped_partial': 0,
+    }
+
+
+def _parse_s3_uri(value: Any) -> tuple[str, str] | None:
+    if not isinstance(value, str) or not value.startswith('s3://'):
+        return None
+    bucket, _, key = value.removeprefix('s3://').partition('/')
+    return (bucket, key) if bucket and key else None
+
+
+def _full_report(report: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    """The report with its per-keyword lists: ``(report, None)`` or ``(None, skip reason)``.
+
+    GenerateSummary returns a compact report (the keyword lists would outgrow
+    the state for large runs) and stores the full one at ``s3_location``. A
+    report that already carries ``run_metadata.processed_keywords`` (older
+    executions, direct invocations) or that is not comparable anyway is used
+    as-is. A missing or unreadable S3 report skips the evaluation; it never
+    fails the run.
+    """
+    metadata = report.get('run_metadata')
+    if report.get('status') != 'completed' or (isinstance(metadata, dict) and 'processed_keywords' in metadata):
+        return report, None
+    location = _parse_s3_uri(report.get('s3_location'))
+    if location is None:
+        return None, 'full_report_location_missing'
+    bucket, key = location
+    try:
+        full = json.loads(s3.get_object(Bucket=bucket, Key=key)['Body'].read())
+    except (BotoCoreError, ClientError, ValueError):
+        logger.exception('Full execution report could not be read from S3')
+        return None, 'full_report_unreadable'
+    if not isinstance(full, dict):
+        return None, 'full_report_unreadable'
+    return full, None
 
 
 def _load_groups() -> list[dict[str, Any]]:
@@ -322,16 +374,13 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if not isinstance(report, dict) or not isinstance(execution_input, dict) or not isinstance(execution_id, str):
         raise ValueError('KPI alert event is missing required fields')
 
+    report, report_error = _full_report(report)
+    if report is None:
+        return _skipped(report_error)
+
     run_timestamp, processed_names, reason = _run_identity(report)
     if reason is not None or run_timestamp is None:
-        return {
-            'status': 'skipped',
-            'reason': reason,
-            'groups_evaluated': 0,
-            'snapshots_recorded': 0,
-            'alerts_created': 0,
-            'skipped_partial': 0,
-        }
+        return _skipped(reason)
 
     active_keywords = query_active_keywords(dynamodb.Table(KEYWORDS_TABLE))
     groups = _load_groups()

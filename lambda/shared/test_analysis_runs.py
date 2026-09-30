@@ -3,7 +3,9 @@ Tests for shared.analysis_runs — how the trigger endpoints start an analysis r
 
 - the enabled personas are read from EnabledIndex and shaped for the state machine
 - a DynamoDB failure reading them is logged and the run proceeds without prompts
-- one execution is started with every keyword stamped by the same run timestamp
+- a scope run input names the scope, never the keyword texts
+- an explicit keyword list is stamped with one run timestamp
+- one execution is started with the run input as given, and refused when it is too large
 - the response fields every trigger endpoint reports come back from the start call
 """
 
@@ -18,7 +20,15 @@ import pytest
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError, EndpointConnectionError
 
-from shared.analysis_runs import MAX_QUERY_PROMPTS_PER_RUN, fetch_enabled_query_prompts, start_analysis_run
+from shared.analysis_runs import (
+    MAX_QUERY_PROMPTS_PER_RUN,
+    MAX_RUN_INPUT_BYTES,
+    RunInputTooLargeError,
+    fetch_enabled_query_prompts,
+    keyword_list_run_input,
+    scope_run_input,
+    start_analysis_run,
+)
 from testing.dynamodb_stubs import fake_table
 
 _STATE_MACHINE_ARN = 'arn:aws:states:us-east-1:123456789012:stateMachine:analysis'
@@ -77,47 +87,51 @@ class TestFetchEnabledQueryPrompts:
         assert 'Could not fetch query prompts, proceeding without them' in caplog.text
 
 
-class TestStartAnalysisRun:
-    def test_stamps_every_keyword_with_the_same_run_timestamp(self):
-        client = _stepfunctions()
+class TestRunInputs:
+    def test_scope_input_carries_the_scope_and_prompts_only(self):
+        scope = {'mode': 'groups', 'group_ids': ['coruna']}
 
-        start_analysis_run(client, _STATE_MACHINE_ARN, 'analysis', ['alpha', 'beta'], [])
+        assert scope_run_input(scope, _PROMPTS) == {'scope': scope, 'query_prompts': _PROMPTS}
 
-        keywords = _execution_input(client)['keywords']
+    def test_keyword_list_input_stamps_every_keyword_with_the_same_run_timestamp(self):
+        keywords = keyword_list_run_input(['alpha', 'beta'], [])['keywords']
+
         assert [entry['keyword'] for entry in keywords] == ['alpha', 'beta']
         assert len({entry['timestamp'] for entry in keywords}) == 1
+
+
+class TestStartAnalysisRun:
+    def test_sends_the_run_input_unchanged(self):
+        client = _stepfunctions()
+        run_input = scope_run_input({'mode': 'all'}, _PROMPTS)
+
+        start_analysis_run(client, _STATE_MACHINE_ARN, 'analysis', run_input, 3)
+
+        assert _execution_input(client) == {'scope': {'mode': 'all'}, 'query_prompts': _PROMPTS}
 
     def test_starts_the_state_machine_under_a_prefixed_execution_name(self):
         client = _stepfunctions()
 
-        started = start_analysis_run(client, _STATE_MACHINE_ARN, 'keyword-analysis', ['alpha'], [])
+        started = start_analysis_run(client, _STATE_MACHINE_ARN, 'keyword-analysis', scope_run_input({'mode': 'all'}, []), 1)
 
         call = client.start_execution.call_args.kwargs
         assert call['stateMachineArn'] == _STATE_MACHINE_ARN
         assert call['name'].startswith('keyword-analysis-')
         assert call['name'] == started['execution_name']
 
-    def test_passes_the_prompts_and_extra_input_to_the_execution(self):
+    def test_refuses_an_input_over_the_budget_without_starting_a_run(self):
         client = _stepfunctions()
-        scope = {'mode': 'groups', 'group_ids': ['coruna']}
+        run_input = keyword_list_run_input(['k' * 500] * 400, [])
 
-        start_analysis_run(client, _STATE_MACHINE_ARN, 'keyword-analysis', ['alpha'], _PROMPTS, {'requested_scope': scope})
+        with pytest.raises(RunInputTooLargeError, match=f'the limit is {MAX_RUN_INPUT_BYTES}'):
+            start_analysis_run(client, _STATE_MACHINE_ARN, 'keyword-analysis', run_input, 400)
 
-        execution_input = _execution_input(client)
-        assert execution_input['query_prompts'] == _PROMPTS
-        assert execution_input['requested_scope'] == scope
-
-    def test_leaves_the_execution_input_to_keywords_and_prompts_without_extra_input(self):
-        client = _stepfunctions()
-
-        start_analysis_run(client, _STATE_MACHINE_ARN, 'analysis', ['alpha'], [])
-
-        assert sorted(_execution_input(client)) == ['keywords', 'query_prompts']
+        client.start_execution.assert_not_called()
 
     def test_describes_the_execution_for_the_api_response(self):
         client = _stepfunctions()
 
-        started = start_analysis_run(client, _STATE_MACHINE_ARN, 'analysis', ['alpha', 'beta', 'gamma'], _PROMPTS)
+        started = start_analysis_run(client, _STATE_MACHINE_ARN, 'analysis', scope_run_input({'mode': 'all'}, _PROMPTS), 3)
 
         assert started == {
             'execution_arn': f'{_STATE_MACHINE_ARN}:run-1',

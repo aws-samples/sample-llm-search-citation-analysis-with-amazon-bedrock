@@ -360,18 +360,25 @@ function extractFunctionRoleActionsMatching(
   );
 }
 
-function extractFunctionStatementsForAction(
+function roleStatementsForAction(
   template: Template,
-  functionName: string,
+  roleLogicalId: string,
   action: string
 ): IamPolicyStatementSnapshot[] {
-  const roleId = findFunctionRoleLogicalId(template, functionName);
-  return allowStatementsOfRole(template, roleId)
+  return allowStatementsOfRole(template, roleLogicalId)
     .filter((statement) => statementActions(statement).includes(action))
     .map((statement) => ({
       actions: sortedUnique(statementActions(statement)),
       resources: statementResources(statement),
     }));
+}
+
+function extractFunctionStatementsForAction(
+  template: Template,
+  functionName: string,
+  action: string
+): IamPolicyStatementSnapshot[] {
+  return roleStatementsForAction(template, findFunctionRoleLogicalId(template, functionName), action);
 }
 
 export function extractFunctionRoleActions(template: Template, functionName: string): string[] {
@@ -586,12 +593,16 @@ export function extractWafFootprint(template: Template): WafFootprint {
   };
 }
 
-export function extractBucketLifecycle(template: Template, namePrefix: string): BucketLifecycleSnapshot {
+function bucketLifecycleRules(template: Template, namePrefix: string): unknown[] {
   const [bucket] = Object.values(template.findResources('AWS::S3::Bucket'))
     .filter((candidate) =>
       JSON.stringify(resolvePath(candidate, ['Properties', 'BucketName'])).includes(namePrefix));
   const rules = resolvePath(bucket, ['Properties', 'LifecycleConfiguration', 'Rules']);
-  const ruleList = Array.isArray(rules) ? rules : [];
+  return Array.isArray(rules) ? rules : [];
+}
+
+export function extractBucketLifecycle(template: Template, namePrefix: string): BucketLifecycleSnapshot {
+  const ruleList = bucketLifecycleRules(template, namePrefix);
 
   const transitions = ruleList.flatMap((rule) => {
     const entries = resolvePath(rule, ['Transitions']);
@@ -1200,3 +1211,69 @@ export function findModelAgreements(template: Template): [string, unknown][] {
 }
 
 
+
+/** What the keyword-scale workflow (Distributed Map, S3 hand-offs) synthesizes to. */
+export interface WorkflowScaleSnapshot {
+  /** The analysis workflow definition, CloudFormation tokens replaced by `__TOKEN__`. */
+  definition: unknown;
+  keywordsBucketRules: unknown[];
+  /** Serialized resources of the grants below, so ARN patterns can be matched. */
+  childExecutionDescribeResources: string;
+  describeMapRunResources: string;
+  listMapRunsResources: string;
+  parseKeywordsPutResources: string;
+  generateSummaryReadResources: string;
+  kpiAlertsReadResources: string;
+  generateSummaryMemorySize: number;
+  generateSummaryTimeoutSeconds: number;
+}
+
+export const EMPTY_WORKFLOW_SCALE_SNAPSHOT: WorkflowScaleSnapshot = {
+  definition: undefined,
+  keywordsBucketRules: [],
+  childExecutionDescribeResources: '',
+  describeMapRunResources: '',
+  listMapRunsResources: '',
+  parseKeywordsPutResources: '',
+  generateSummaryReadResources: '',
+  kpiAlertsReadResources: '',
+  generateSummaryMemorySize: Number.NaN,
+  generateSummaryTimeoutSeconds: Number.NaN,
+};
+
+/**
+ * A state machine definition parsed as JSON. Token parts sit inside string
+ * literals (`"arn:" + Ref + ":states:::..."`), so they are replaced by bare
+ * text to keep the result valid JSON.
+ */
+function parseStateMachineDefinition(template: Template, stateMachineName: string): unknown {
+  const joinArgs = resolvePath(findStateMachine(template, stateMachineName), ['Properties', 'DefinitionString', 'Fn::Join']);
+  const parts = Array.isArray(joinArgs) && Array.isArray(joinArgs[1]) ? joinArgs[1] : [];
+  const parsed: unknown = JSON.parse(parts.map((part) => (typeof part === 'string' ? part : '__TOKEN__')).join(''));
+  return parsed;
+}
+
+function serializedResources(statements: IamPolicyStatementSnapshot[]): string {
+  return JSON.stringify(statements.flatMap((statement) => statement.resources));
+}
+
+export function extractWorkflowScaleSnapshot(template: Template): WorkflowScaleSnapshot {
+  const functionGrant = (functionName: string, action: string): string =>
+    serializedResources(extractFunctionStatementsForAction(template, functionName, action));
+  const stepFunctionsRoleId = findLogicalIdByName(template, 'AWS::IAM::Role', 'RoleName', 'CitationAnalysis-StepFunctionsRole');
+
+  return {
+    definition: parseStateMachineDefinition(template, 'CitationAnalysis-Workflow'),
+    keywordsBucketRules: bucketLifecycleRules(template, 'citation-analysis-keywords'),
+    childExecutionDescribeResources: serializedResources(
+      roleStatementsForAction(template, stepFunctionsRoleId, 'states:DescribeExecution')
+    ),
+    describeMapRunResources: functionGrant('CitationAnalysis-API-ExecutionMgmt', 'states:DescribeMapRun'),
+    listMapRunsResources: functionGrant('CitationAnalysis-API-ExecutionMgmt', 'states:ListMapRuns'),
+    parseKeywordsPutResources: functionGrant('CitationAnalysis-ParseKeywords', 's3:PutObject'),
+    generateSummaryReadResources: functionGrant('CitationAnalysis-GenerateSummary', 's3:GetObject*'),
+    kpiAlertsReadResources: functionGrant('CitationAnalysis-KpiAlerts', 's3:GetObject*'),
+    generateSummaryMemorySize: extractFunctionMemorySize(template, 'CitationAnalysis-GenerateSummary'),
+    generateSummaryTimeoutSeconds: extractFunctionTimeout(template, 'CitationAnalysis-GenerateSummary'),
+  };
+}

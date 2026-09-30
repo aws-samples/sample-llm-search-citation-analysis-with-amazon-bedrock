@@ -10,6 +10,8 @@ import {
 import type {
   AnalysisScope, Execution, ExecutionEvent, ExecutionStatus 
 } from '../types';
+import { isRecord } from '../types/domain/keywordDecoders';
+import type { KeywordProgress } from '../formatting/executionProcessor';
 
 /** @internal Response from the execution status API */
 interface ExecutionStatusResponse {
@@ -19,6 +21,8 @@ interface ExecutionStatusResponse {
     stop_date?: string;
   };
   events?: ExecutionEvent[];
+  /** ProcessKeywords map-run counts; decoded by `decodeKeywordProgress`. */
+  progress?: unknown;
 }
 
 /** @internal Response from the trigger analysis API */
@@ -45,6 +49,33 @@ function isTriggerAnalysisResponse(data: unknown): data is TriggerAnalysisRespon
 
 function isTriggerErrorResponse(data: unknown): data is { error?: string } {
   return typeof data === 'object' && data !== null;
+}
+
+/** A non-negative integer count, sent as a number or a digit string; anything else is `null`. */
+function toCount(value: unknown): number | null {
+  const parsed = typeof value === 'string' && /^\d+$/u.test(value) ? Number(value) : value;
+  return typeof parsed === 'number' && Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function hasEveryCount(counts: Record<keyof KeywordProgress, number | null>): counts is KeywordProgress {
+  return Object.values(counts).every(count => count !== null);
+}
+
+/**
+ * The status response's keyword progress, or `null` when it is absent
+ * (no map run yet, runs started before the Distributed Map) or malformed.
+ * Progress is decoration: a bad block hides the counts, never the status.
+ */
+function decodeKeywordProgress(value: unknown): KeywordProgress | null {
+  if (!isRecord(value)) return null;
+  const counts = {
+    keywords_total: toCount(value.keywords_total),
+    keywords_succeeded: toCount(value.keywords_succeeded),
+    keywords_failed: toCount(value.keywords_failed),
+    keywords_running: toCount(value.keywords_running),
+    keywords_pending: toCount(value.keywords_pending),
+  };
+  return hasEveryCount(counts) ? counts : null;
 }
 
 /**
@@ -113,6 +144,7 @@ export const useExecutionPolling = (onComplete?: () => void) => {
           events: json.events ?? [],
           start_date: json.execution?.start_date ?? new Date().toISOString(),
           stop_date: json.execution?.stop_date,
+          progress: decodeKeywordProgress(json.progress),
         }));
 
         // Stop polling if execution is complete

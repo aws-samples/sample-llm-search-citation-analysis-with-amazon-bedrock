@@ -2,6 +2,7 @@ import {
   useCallback, useEffect, useLayoutEffect, useRef, useState
 } from 'react';
 import { validateApiConfig } from '../api/client';
+import { fetchAllKeywords } from '../api/keywordPages';
 import {
   API_BASE_URL,
   authenticatedFetch,
@@ -12,9 +13,6 @@ import {
 import type {
   Stats, Citations, Search, Keyword
 } from '../types';
-import {
-  isAuthoritativeKeywordsResponse, isKeywordsResponse
-} from '../types/domain/keywordDecoders';
 
 // The KeywordMgmt Lambda has a 120-second timeout. This second refresh runs
 // after that ceiling so an abandoned browser request cannot remain stale if
@@ -67,10 +65,49 @@ function validateResponses(responses: Response[]): void {
   }
 }
 
+/** Stats, citations and searches payloads, in that order. */
+async function fetchPanelPayloads(signal: AbortSignal): Promise<unknown[]> {
+  const responses = await Promise.all([
+    authenticatedFetch(`${API_BASE_URL}/stats`, { signal }),
+    authenticatedFetch(`${API_BASE_URL}/citations`, { signal }),
+    authenticatedFetch(`${API_BASE_URL}/searches`, { signal }),
+  ]);
+
+  validateResponses(responses);
+
+  return Promise.all(
+    responses.map(async (response): Promise<unknown> => response.json())
+  );
+}
+
+interface DashboardPayloads {
+  panelPayloads: unknown[];
+  keywordList: Keyword[];
+}
+
+/**
+ * Panels and every keyword page, fetched in parallel. A panel failure takes
+ * precedence over a keyword failure so the dashboard message stays the
+ * panels' one when both fail.
+ */
+async function fetchDashboardPayloads(signal: AbortSignal): Promise<DashboardPayloads> {
+  const [panelOutcome, keywordOutcome] = await Promise.allSettled([
+    fetchPanelPayloads(signal),
+    fetchAllKeywords({ signal }),
+  ]);
+  if (panelOutcome.status === 'rejected') throw panelOutcome.reason;
+  if (keywordOutcome.status === 'rejected') throw keywordOutcome.reason;
+  return {
+    panelPayloads: panelOutcome.value,
+    keywordList: keywordOutcome.value,
+  };
+}
+
 /**
  * Fetches dashboard data and owns authoritative keyword reconciliation.
- * Ordinary dashboard loads retain the `/keywords` endpoint, while promotion
- * reconciliation uses the complete authoritative keyword snapshot.
+ * Both the ordinary load and promotion reconciliation read every
+ * `/keywords` page (`fetchAllKeywords`); reconciliation reads them with
+ * `authoritative=true`. A failed or malformed page applies no keywords.
  */
 export const useDashboardData = () => {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -88,19 +125,17 @@ export const useDashboardData = () => {
   const ownerMountedRef = useRef(true);
 
   const applyDashboardResults = useCallback((
-    jsonResults: unknown[],
+    panelPayloads: unknown[],
+    keywordList: Keyword[],
     requestKeywordGeneration: number
   ): void => {
-    const [statsJson, citationsJson, searchesJson, keywordsJson] = jsonResults;
+    const [statsJson, citationsJson, searchesJson] = panelPayloads;
 
     if (isStats(statsJson)) setStats(statsJson);
     if (isCitations(citationsJson)) setCitations(citationsJson);
     if (isSearchesResponse(searchesJson)) setSearches(searchesJson.searches);
-    if (
-      keywordGenerationRef.current === requestKeywordGeneration
-      && isKeywordsResponse(keywordsJson)
-    ) {
-      setKeywords(keywordsJson.keywords);
+    if (keywordGenerationRef.current === requestKeywordGeneration) {
+      setKeywords(keywordList);
     }
 
     setLastUpdate(new Date());
@@ -138,21 +173,12 @@ export const useDashboardData = () => {
       setLoading(true);
       validateApiConfig();
 
-      const responses = await Promise.all([
-        authenticatedFetch(`${API_BASE_URL}/stats`, { signal }),
-        authenticatedFetch(`${API_BASE_URL}/citations`, { signal }),
-        authenticatedFetch(`${API_BASE_URL}/searches`, { signal }),
-        authenticatedFetch(`${API_BASE_URL}/keywords`, { signal }),
-      ]);
-
-      validateResponses(responses);
-
-      const jsonResults = await Promise.all(
-        responses.map(async (response): Promise<unknown> => response.json())
-      );
+      const {
+        panelPayloads, keywordList
+      } = await fetchDashboardPayloads(signal);
       if (!isCurrent()) return;
 
-      applyDashboardResults(jsonResults, keywordGeneration);
+      applyDashboardResults(panelPayloads, keywordList, keywordGeneration);
     } catch (fetchError) {
       if (isAbortError(fetchError)) return;
       if (!isCurrent()) return;
@@ -183,27 +209,13 @@ export const useDashboardData = () => {
       && keywordGenerationRef.current === keywordGeneration;
 
     try {
-      const response = await authenticatedFetch(
-        `${API_BASE_URL}/keywords?authoritative=true`,
-        { signal: keywordController.signal }
-      );
+      const reconciledKeywords = await fetchAllKeywords({
+        signal: keywordController.signal,
+        authoritative: true,
+      });
       if (!isCurrent()) return;
 
-      if (!response.ok) {
-        throw new ApiRequestError(
-          `HTTP ${response.status}: ${response.statusText}`,
-          response.status
-        );
-      }
-
-      const payload: unknown = await response.json();
-      if (!isCurrent()) return;
-
-      if (!isAuthoritativeKeywordsResponse(payload)) {
-        throw new TypeError('Authoritative keywords API returned an invalid response');
-      }
-
-      setKeywords(payload.keywords);
+      setKeywords(reconciledKeywords);
     } catch (reconciliationError) {
       if (!isAbortError(reconciliationError) && isCurrent()) {
         console.error('[keywords] Error reconciling active keywords:', reconciliationError);

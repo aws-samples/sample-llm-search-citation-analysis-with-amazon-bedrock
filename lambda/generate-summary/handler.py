@@ -1,8 +1,10 @@
 """
 GenerateSummary Lambda Function
 
-Aggregates results from all keyword processing, counts successes/failures,
-and generates an execution report.
+Reads every keyword's result from the ProcessKeywords Distributed Map's
+ResultWriter output in S3, counts successes/failures, aggregates statistics,
+writes the full execution report to S3 and returns a compact copy for the
+state.
 
 Requirements: 9.6
 """
@@ -13,6 +15,7 @@ import os
 from typing import Any
 
 import boto3
+from map_run_results import load_keyword_results
 
 from shared.step_function_response import log_error
 from shared.utils import get_timestamp, get_timestamp_compact
@@ -148,6 +151,35 @@ def merge_raw_provider_results(stats: dict[str, Any], results: list[dict[str, An
         bucket['citations'] += len(provider_result.get('citations', []))
 
 
+def _count(value: Any) -> int:
+    """A non-negative integer count from a compact child result; anything else counts as zero."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+def merge_citation_counts(stats: dict[str, Any], result: dict[str, Any]) -> None:
+    """Fold one keyword's citation and crawl counts into the running statistics.
+
+    The workflow delivers the compact ``SummarizeKeywordResult`` shape, whose
+    ``unique_citations`` / ``total_citations_found`` / ``pages_crawled`` counts
+    replace the citation and crawl arrays (those arrays are what used to push
+    the Map output past the state limit). Direct invocations may still send
+    the full ``deduplicated_citations`` / ``crawled_results`` arrays.
+    """
+    if 'deduplicated_citations' in result:
+        citations = result['deduplicated_citations']
+        stats['total_unique_citations'] += len(citations)
+        # Total citations before deduplication.
+        stats['total_citations_found'] += sum(citation.get('citation_count', 1) for citation in citations)
+    else:
+        stats['total_unique_citations'] += _count(result.get('unique_citations'))
+        stats['total_citations_found'] += _count(result.get('total_citations_found'))
+
+    if 'crawled_results' in result:
+        stats['total_pages_crawled'] += sum(1 for crawled in result['crawled_results'] if crawled.get('status') == 'success')
+    else:
+        stats['total_pages_crawled'] += _count(result.get('pages_crawled'))
+
+
 def aggregate_statistics(keyword_results: list[dict[str, Any]]) -> dict[str, Any]:
     """Aggregate statistics from all keyword processing."""
     stats = {
@@ -178,20 +210,7 @@ def aggregate_statistics(keyword_results: list[dict[str, Any]]) -> dict[str, Any
         elif 'results' in result:
             merge_raw_provider_results(stats, result['results'])
 
-        # Count deduplicated citations
-        if 'deduplicated_citations' in result:
-            unique_citations = len(result['deduplicated_citations'])
-            stats['total_unique_citations'] += unique_citations
-
-            # Count total citations before deduplication
-            for citation in result['deduplicated_citations']:
-                citation_count = citation.get('citation_count', 1)
-                stats['total_citations_found'] += citation_count
-
-        # Count crawled pages
-        if 'crawled_results' in result:
-            crawled = [r for r in result['crawled_results'] if r.get('status') == 'success']
-            stats['total_pages_crawled'] += len(crawled)
+        merge_citation_counts(stats, result)
 
     return stats
 
@@ -273,8 +292,20 @@ def generate_report(execution_id: str, counts: dict[str, Any], stats: dict[str, 
     }
 
 
-def store_summary_in_s3(report: dict[str, Any], bucket: str) -> str | None:
-    """Store execution summary in S3; returns the S3 URI, or ``None`` when the write failed."""
+class SummaryStorageError(Exception):
+    """Raised when the full report cannot be written to S3."""
+
+
+def store_summary_in_s3(report: dict[str, Any], bucket: str) -> str:
+    """Store the full execution report in S3 and return its S3 URI.
+
+    Required, not best-effort: the state carries only the compact report, so
+    the S3 object is the one copy of the O(N) keyword lists (and KpiAlerts
+    reads them back from it).
+
+    Raises:
+        SummaryStorageError: When the write fails.
+    """
     execution_id = report['execution_id']
     timestamp = get_timestamp_compact()
     key = f"execution-summaries/{timestamp}-{execution_id}.json"
@@ -286,13 +317,78 @@ def store_summary_in_s3(report: dict[str, Any], bucket: str) -> str | None:
             Body=json.dumps(report, indent=2),
             ContentType='application/json'
         )
-    except Exception:
-        logger.exception("Failed to store summary in S3")
-        return None
+    except Exception as error:
+        raise SummaryStorageError(f"Failed to store the summary in s3://{bucket}/{key}") from error
 
     s3_uri = f"s3://{bucket}/{key}"
     logger.info(f"Summary stored in S3: {s3_uri}")
     return s3_uri
+
+
+def compact_report(report: dict[str, Any]) -> dict[str, Any]:
+    """The report without its O(N) lists, for the state (256 KiB cap) and KpiAlerts' payload.
+
+    Drops ``summary.statistics.keywords_processed`` and
+    ``run_metadata.processed_keywords`` and adds ``run_metadata.keyword_count``;
+    every other field is kept. The full report is at ``s3_location``.
+    """
+    summary = report['summary']
+    statistics = {key: value for key, value in summary['statistics'].items() if key != 'keywords_processed'}
+    run_metadata = report['run_metadata']
+    return {
+        **report,
+        'summary': {**summary, 'statistics': statistics},
+        'run_metadata': {
+            **{key: value for key, value in run_metadata.items() if key != 'processed_keywords'},
+            'keyword_count': len(run_metadata['processed_keywords']),
+        },
+    }
+
+
+def _event_keyword_results(event: dict[str, Any] | list[Any], context: Any) -> tuple[str, list[Any], str | None, bool]:
+    """``(execution_id, keyword_results, requested summary bucket, from_map_run)`` for any supported event shape.
+
+    The workflow sends ``map_run`` (the ProcessKeywords ResultWriter pointer);
+    direct invocations may send a raw result list or ``keyword_results``.
+    """
+    default_id = context.aws_request_id if context else 'unknown'
+    if isinstance(event, list):
+        return default_id, event, None, False
+    execution_id = event.get('execution_id', default_id)
+    requested_bucket = event.get('summary_bucket')
+    if 'map_run' in event:
+        keyword_results = load_keyword_results(
+            s3_client, event['map_run'], _count(event.get('keyword_count')), event.get('timestamp')
+        )
+        return execution_id, keyword_results, requested_bucket, True
+    return execution_id, event.get('keyword_results', []), requested_bucket, False
+
+
+def _build_report(execution_id: str, keyword_results: list[Any]) -> dict[str, Any]:
+    counts = count_results(keyword_results)
+    logger.info(f"Counts: {json.dumps(counts)}")
+
+    stats = aggregate_statistics(keyword_results)
+    logger.info(f"Statistics: {json.dumps({k: v for k, v in stats.items() if k != 'keywords_processed'}, default=str)}")
+
+    report = generate_report(execution_id, counts, stats)
+    # Add the exact Map-state run identity without changing any existing
+    # summary fields or the S3 object location contract.
+    report['run_metadata'] = build_run_metadata(keyword_results)
+    return report
+
+
+def _summary_bucket(requested_bucket: str | None, from_map_run: bool) -> str | None:
+    """Where the full report goes: the env var, else the event's bucket.
+
+    ``None`` only for a direct invocation without one, which then gets the full
+    report back. A workflow run must store it: its state carries only the
+    compact report.
+    """
+    bucket = SUMMARY_BUCKET or requested_bucket
+    if not bucket and from_map_run:
+        raise SummaryStorageError('No summary bucket configured for a workflow run')
+    return bucket or None
 
 
 def handler(event: dict[str, Any] | list[Any], context: Any) -> dict[str, Any]:
@@ -302,26 +398,31 @@ def handler(event: dict[str, Any] | list[Any], context: Any) -> dict[str, Any]:
     Input (as the state machine actually delivers it):
     {
         "execution_id": "abc-123",
-        "keyword_results": [
-            {
-                "keyword": "best hotels in malaga",
-                "provider_summary": {
-                    "result_count": 4,
-                    "by_provider": {"openai": {"queries": 1, "citations": 7}}
-                },
-                "deduplicated_citations": [...],
-                "crawled_results": [...]
-            },
-            ...
-        ]
+        "map_run": {
+            "MapRunArn": "arn:aws:states:...:mapRun:CitationAnalysis-Workflow/ProcessKeywords:...",
+            "ResultWriterDetails": {"Bucket": "citation-analysis-keywords-123", "Key": "runs/map-results/.../manifest.json"}
+        },
+        "keyword_count": 10,
+        "timestamp": "2025-01-15T10:30:00Z",
+        "summary_bucket": "citation-analysis-keywords-123"
     }
 
-    Note there is no `results` key: the dedup task replaces the whole state, so
-    the search step's raw provider rows never arrive here. `provider_summary` is
-    the bounded rollup dedup echoes in their place (AUDIT-2026-08-19 §1.3). A
-    raw `results` array is still accepted for direct invocations.
+    The per-keyword results are read from S3 (`map_run_results`); each
+    succeeded one is the compact ``SummarizeKeywordResult`` shape:
+        {"keyword": "best hotels in malaga", "timestamp": "...", "status": "success",
+         "provider_summary": {"result_count": 4, "by_provider": {"openai": {"queries": 1, "citations": 7}}},
+         "unique_citations": 5, "total_citations_found": 9, "pages_crawled": 4}
 
-    Output:
+    `provider_summary` is the bounded rollup dedup echoes in place of the
+    search step's raw provider rows (AUDIT-2026-08-19 §1.3). Direct
+    invocations may still send ``keyword_results`` (or a raw list) in the
+    older full shape, including a raw `results` array.
+
+    Output: the report below without ``summary.statistics.keywords_processed``
+    and ``run_metadata.processed_keywords``, plus ``run_metadata.keyword_count``
+    and ``s3_location`` (see `compact_report`). The full report is written to
+    S3 and the write is required; only a direct invocation with no bucket gets
+    the full report back instead.
     {
         "execution_id": "abc-123",
         "timestamp": "2025-01-15T10:45:00Z",
@@ -341,52 +442,26 @@ def handler(event: dict[str, Any] | list[Any], context: Any) -> dict[str, Any]:
                 "providers_breakdown": {...}
             }
         },
+        "run_metadata": {"timestamp": "...", "timestamps": ["..."], "keyword_count": 9},
         "status": "completed_with_errors",
         "s3_location": "s3://bucket/execution-summaries/..."
     }
     """
-    logger.info(f"Received event: {json.dumps(event, default=str)}")
+    logger.info(f"Received event: {json.dumps(event, default=str)[:2000]}")
 
     try:
-        # Raw Map output is accepted for direct invocations; the workflow sends
-        # an object carrying execution metadata and the Map result.
-        if isinstance(event, list):
-            execution_id = context.aws_request_id if context else 'unknown'
-            keyword_results = event
-            requested_summary_bucket = None
-        else:
-            execution_id = event.get('execution_id', context.aws_request_id if context else 'unknown')
-            keyword_results = event.get('keyword_results', [])
-            requested_summary_bucket = event.get('summary_bucket')
-
+        execution_id, keyword_results, requested_summary_bucket, from_map_run = _event_keyword_results(event, context)
         logger.info(f"Processing summary for {len(keyword_results)} keyword results")
 
-        # Count successes and failures
-        counts = count_results(keyword_results)
-        logger.info(f"Counts: {json.dumps(counts)}")
-
-        # Aggregate statistics
-        stats = aggregate_statistics(keyword_results)
-        logger.info(f"Statistics: {json.dumps(stats, default=str)}")
-
-        # Generate report
-        report = generate_report(execution_id, counts, stats)
-
-        # Add the exact Map-state run identity without changing any existing
-        # summary fields or the S3 object location contract.
-        report['run_metadata'] = build_run_metadata(keyword_results)
-
-        # Store in S3 if bucket is configured (env var takes precedence over event)
-        s3_bucket = SUMMARY_BUCKET or requested_summary_bucket
-        if s3_bucket:
-            s3_location = store_summary_in_s3(report, s3_bucket)
-            if s3_location:
-                report['s3_location'] = s3_location
-
+        report = _build_report(execution_id, keyword_results)
+        s3_bucket = _summary_bucket(requested_summary_bucket, from_map_run)
+        s3_location = store_summary_in_s3(report, s3_bucket) if s3_bucket else None
         logger.info(f"Execution summary generated: {report['status']}")
     except Exception as e:
         # `log_error` sanitises a dict event; a raw Map list carries nothing to redact.
         log_error(e, "generate summary handler", event if isinstance(event, dict) else None)
         raise
 
-    return report
+    if s3_location is None:
+        return report
+    return {**compact_report(report), 's3_location': s3_location}

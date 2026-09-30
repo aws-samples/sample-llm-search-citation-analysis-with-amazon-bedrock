@@ -5,7 +5,8 @@ The handler turns a Step Functions execution and its event history into the
 timeline the dashboard polls (``useExecutionPolling``). These tests pin that
 contract branch by branch — execution lookup (``latest`` vs. an ARN), the
 summary block, how each history event type is rendered, how a task event is
-attributed to the state that entered it, timeline filtering, and the error
+attributed to the state that entered it, timeline filtering, the keyword
+``progress`` read from the ProcessKeywords map run, and the error
 mapping the decorators apply — so the handler can be restructured without
 moving any of it.
 
@@ -34,6 +35,7 @@ _mod = load_handler_module_offline(os.path.dirname(__file__), 'get-execution-sta
 
 _STATE_MACHINE_ARN = 'arn:aws:states:us-east-1:123456789012:stateMachine:CitationAnalysis-Workflow'
 _EXECUTION_ARN = 'arn:aws:states:us-east-1:123456789012:execution:CitationAnalysis-Workflow:run-1'
+_MAP_RUN_ARN = 'arn:aws:states:us-east-1:123456789012:mapRun:CitationAnalysis-Workflow/ProcessKeywords:run-1'
 _STARTED_AT = datetime(2026, 9, 18, 10, 0, tzinfo=UTC)
 
 
@@ -98,6 +100,23 @@ def _timeline(stepfunctions: MagicMock, *events: dict) -> list[dict]:
     stepfunctions.get_execution_history.return_value = {'events': list(events)}
     _, body = parse_response(_mod.handler(_execution_event(), None))
     return body['events']
+
+
+def _map_run_started(event_id: int = 4, map_run_arn: str = _MAP_RUN_ARN) -> dict:
+    """The ``MapRunStarted`` event the ProcessKeywords Distributed Map writes to the parent history."""
+    return _history_event(event_id, 'MapRunStarted', mapRunStartedEventDetails={'mapRunArn': map_run_arn})
+
+
+def _serve_map_run(stepfunctions: MagicMock, *events: dict, **item_counts: object) -> None:
+    """Serve ``events`` as a complete history and ``item_counts`` as the map run's DescribeMapRun counts."""
+    stepfunctions.get_execution_history.return_value = {'events': list(events)}
+    stepfunctions.describe_map_run.return_value = {'mapRunArn': _MAP_RUN_ARN, 'itemCounts': item_counts}
+
+
+def _progress(stepfunctions: MagicMock) -> dict | None:
+    """The ``progress`` block of the status response for whatever ``stepfunctions`` serves."""
+    _, body = parse_response(_mod.handler(_execution_event(), None))
+    return body['progress']
 
 
 @pytest.fixture
@@ -281,10 +300,17 @@ class TestTaskSucceeded:
         ({'results': [1, 'gemini', {'citation_count': 2}]}, '3 providers, 2 citations'),
         ({'results': [{'citation_count': 'many'}, {'citation_count': 4}]}, '2 providers, 4 citations'),
         ({'keywords': 5, 'results': [{'citation_count': 1}]}, '1 providers, 1 citations'),
+        ({'keyword_count': 1200, 'keywords_manifest': {'bucket': 'b', 'key': 'k'}}, '1200 keywords'),
+        ({'keyword_count': '37'}, '37 keywords'),
+        ({'keyword_count': 0}, '0 keywords'),
+        ({'keywords': ['a', 'b'], 'keyword_count': 9}, '2 keywords'),
+        ({'keyword_count': 'many', 'results': [{'citation_count': 1}]}, '1 providers, 1 citations'),
     ], ids=[
         'keywords', 'deduplicated-citations', 'search-results', 'keywords-win-over-other-collections',
         'non-object-result-entries-count-as-providers', 'non-numeric-citation-count-is-skipped',
         'uncountable-keywords-fall-through-to-results',
+        'manifest-keyword-count', 'numeric-string-keyword-count', 'zero-keyword-count',
+        'legacy-keyword-list-wins-over-keyword-count', 'non-numeric-keyword-count-falls-through-to-results',
     ])
     def test_summarises_the_countable_collection_in_the_task_output(self, stepfunctions, output, details):
         succeeded = _task_outcome('ParseKeywords', 'TaskSucceeded', taskSucceededEventDetails={'output': json.dumps(output)})
@@ -304,9 +330,14 @@ class TestTaskSucceeded:
         {'taskSucceededEventDetails': {'output': '{"keywords": "abc"}'}},
         {'taskSucceededEventDetails': {'output': '{"results": "oops"}'}},
         {'taskSucceededEventDetails': {'output': '{"deduplicated_citations": {"a": 1}}'}},
+        {'taskSucceededEventDetails': {'output': '{"keyword_count": -3}'}},
+        {'taskSucceededEventDetails': {'output': '{"keyword_count": true}'}},
+        {'taskSucceededEventDetails': {'output': '{"keyword_count": "12a"}'}},
+        {'taskSucceededEventDetails': {'output': '{"keyword_count": 2.5}'}},
     ], ids=[
         'no-details', 'no-output', 'malformed-json', 'nothing-countable', 'scalar-output', 'string-output',
         'uncountable-keywords', 'string-keywords', 'string-results', 'object-citations',
+        'negative-keyword-count', 'boolean-keyword-count', 'alphanumeric-keyword-count', 'fractional-keyword-count',
     ])
     def test_omits_details_when_the_output_carries_nothing_countable(self, stepfunctions, details_block):
         events = _timeline(stepfunctions, *_task_outcome('ParseKeywords', 'TaskSucceeded', **details_block))
@@ -400,6 +431,103 @@ class TestStateTransitions:
         events = _timeline(stepfunctions, _history_event(1, 'ExecutionSucceeded'))
 
         assert events == [_shown(1, 'ExecutionSucceeded', message='Execution completed successfully')]
+
+    @pytest.mark.parametrize(('event_type', 'details', 'message'), [
+        ('MapRunStarted', {'mapRunStartedEventDetails': {'mapRunArn': _MAP_RUN_ARN}}, 'Keyword processing started'),
+        ('MapRunSucceeded', {}, 'Keyword processing completed'),
+    ])
+    def test_attributes_a_map_run_event_to_process_keywords(self, stepfunctions, event_type, details, message):
+        events = _timeline(stepfunctions, _history_event(1, event_type, **details))
+
+        assert events == [_shown(1, event_type, state_name='ProcessKeywords', message=message)]
+
+    def test_reports_the_error_and_cause_when_the_map_run_fails(self, stepfunctions):
+        failure = {'error': 'States.ExceedToleratedFailureThreshold', 'cause': 'x' * 201}
+
+        events = _timeline(stepfunctions, _history_event(1, 'MapRunFailed', mapRunFailedEventDetails=failure))
+
+        assert events == [_shown(
+            1, 'MapRunFailed', state_name='ProcessKeywords', message='Keyword processing failed',
+            error='States.ExceedToleratedFailureThreshold', cause='x' * 200 + '...',
+        )]
+
+    def test_reports_unknown_error_when_the_map_run_failure_has_no_details(self, stepfunctions):
+        events = _timeline(stepfunctions, _history_event(1, 'MapRunFailed'))
+
+        assert events == [_shown(1, 'MapRunFailed', state_name='ProcessKeywords', message='Keyword processing failed', error='Unknown error')]
+
+
+class TestKeywordProgress:
+    """The top-level ``progress`` block: ProcessKeywords map-run item counts, or ``None``."""
+
+    def test_returns_null_progress_without_asking_for_map_runs_when_a_complete_history_has_no_map_run(self, stepfunctions):
+        stepfunctions.get_execution_history.return_value = {'events': _started_task('ParseKeywords')}
+
+        assert _progress(stepfunctions) is None
+        stepfunctions.list_map_runs.assert_not_called()
+        stepfunctions.describe_map_run.assert_not_called()
+
+    def test_reports_the_item_counts_of_the_map_run_started_in_the_history(self, stepfunctions):
+        _serve_map_run(stepfunctions, _map_run_started(), succeeded=5, failed=1, timedOut=2, aborted=1, running=3, pending=8, total=20)
+
+        assert _progress(stepfunctions) == {
+            'keywords_total': 20,
+            'keywords_succeeded': 5,
+            'keywords_failed': 4,
+            'keywords_running': 3,
+            'keywords_pending': 8,
+        }
+
+    def test_describes_the_newest_map_run_when_the_history_holds_two(self, stepfunctions):
+        _serve_map_run(stepfunctions, _map_run_started(9, f'{_MAP_RUN_ARN}-retry'), _map_run_started(4))
+
+        _progress(stepfunctions)
+
+        stepfunctions.describe_map_run.assert_called_once_with(mapRunArn=f'{_MAP_RUN_ARN}-retry')
+
+    def test_reports_zero_for_item_counts_that_are_missing_or_not_integers(self, stepfunctions):
+        _serve_map_run(stepfunctions, _map_run_started(), total=3, succeeded='2', failed=True)
+
+        assert _progress(stepfunctions) == {
+            'keywords_total': 3,
+            'keywords_succeeded': 0,
+            'keywords_failed': 0,
+            'keywords_running': 0,
+            'keywords_pending': 0,
+        }
+
+    def test_describes_the_newest_listed_map_run_when_the_history_page_stops_before_map_run_started(self, stepfunctions):
+        _serve_map_run(stepfunctions, _history_event(1, 'TaskStateEntered'), total=1)
+        stepfunctions.get_execution_history.return_value['nextToken'] = 'older-events'
+        stepfunctions.list_map_runs.return_value = {'mapRuns': [
+            {'mapRunArn': _MAP_RUN_ARN, 'startDate': _timestamp(4)},
+            {'mapRunArn': f'{_MAP_RUN_ARN}-retry', 'startDate': _timestamp(9)},
+        ]}
+
+        _progress(stepfunctions)
+
+        stepfunctions.list_map_runs.assert_called_once_with(executionArn=_EXECUTION_ARN)
+        stepfunctions.describe_map_run.assert_called_once_with(mapRunArn=f'{_MAP_RUN_ARN}-retry')
+
+    def test_returns_null_progress_when_a_truncated_history_belongs_to_an_inline_map_execution(self, stepfunctions):
+        stepfunctions.get_execution_history.return_value = {'events': _started_task('SearchAllProviders'), 'nextToken': 'older-events'}
+        stepfunctions.list_map_runs.return_value = {'mapRuns': []}
+
+        assert _progress(stepfunctions) is None
+        stepfunctions.describe_map_run.assert_not_called()
+
+    @pytest.mark.parametrize('failing_call', ['describe_map_run', 'list_map_runs'])
+    def test_returns_the_status_with_null_progress_when_step_functions_refuses_the_map_run_lookup(self, stepfunctions, failing_call):
+        _serve_map_run(stepfunctions, _history_event(1, 'MapStateStarted'), total=1)
+        stepfunctions.get_execution_history.return_value['nextToken'] = 'older-events'
+        stepfunctions.list_map_runs.return_value = {'mapRuns': [{'mapRunArn': _MAP_RUN_ARN, 'startDate': _timestamp(1)}]}
+        getattr(stepfunctions, failing_call).side_effect = ClientError(
+            {'Error': {'Code': 'AccessDeniedException', 'Message': 'not authorized'}}, 'DescribeMapRun'
+        )
+
+        status, body = parse_response(_mod.handler(_execution_event(), None))
+
+        assert (status, body['progress'], body['execution']['status']) == (200, None, 'SUCCEEDED')
 
 
 class TestTimelineFiltering:

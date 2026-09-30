@@ -9,6 +9,49 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.27.0] - 2026-09-30
+
+Reported and first fixed by [@bastiandelrioblanco](https://github.com/bastiandelrioblanco), who found that keyword
+groups past 500 keywords lost members in the Run Analysis picker and traced it to the default limit in
+`get-keywords.py`. His change (500 → 1,000) is the first commit of this release and is now the page size.
+
+### Fixed
+
+- **Every keyword appears, however many there are.** `GET /api/keywords` returned a single table-scan page (500
+  keywords, and fewer when filtered, because DynamoDB applies the limit before the filter) with no way to ask for
+  the rest, and every dashboard keyword list was built from that page. A group could show "(612)" while its picker
+  listed a few hundred. The endpoint is now cursor-paginated (`next_token` in the response and the query; up to
+  1,000 keywords per page) and the dashboard follows it to the last page, for the normal load and for the
+  consistent read after promoting researched keywords. `complete` is gone from the response, and
+  `authoritative=true` now means a strongly consistent read of one page.
+- **Analysis runs no longer fail as they grow.** The ProcessKeywords step kept every keyword's result in the run's
+  state and history. Measured on real runs: about 8.5 KB and 160 history events per keyword against a 256 KB state
+  limit and a 25,000-event history, so runs over about 31 keywords failed with `States.DataLimitExceeded` after
+  all their searching and crawling, and the 2-hour timeout ended a run at about 60 keywords. ProcessKeywords is
+  now a Distributed Map: ParseKeywords writes the keyword list to S3 (`runs/<execution>/keywords.json`), each
+  keyword runs as its own child execution that ends with a compact result, the results go to S3, and
+  GenerateSummary reads them from there and returns a compact report (the full one, with every keyword, is stored
+  under `execution-summaries/` as before; KpiAlerts reads it from there). The trigger endpoints start runs with the
+  scope instead of the keyword list, and an explicit legacy keyword list too large to fit the execution input is
+  refused with a 400 that names the fix. The run timeout is 7 days: at the default concurrency a keyword takes
+  about 2 minutes, so 1,000 keywords take about a day. `runs/` objects expire after 30 days.
+- **One failing keyword no longer throws away the run.** Up to 10% of a run's keywords may fail; they are
+  reported as failed keywords (`completed_with_errors`, which KPI alerts skip as before). Above 10% the cause is
+  systemic and the run stops.
+- **Group membership changes over 500 keywords** are sent in requests of 500 instead of being refused, and a
+  partial failure reports how many were applied. Deleting a group, and changing many memberships at once, update
+  the keywords in parallel so large groups finish inside the API time limit.
+- **Picking more than 1,000 keywords** one by one in Run Analysis or Schedule stops at 1,000 (the API's limit for
+  keyword-id scopes) with a hint to run whole groups, which have no limit, instead of failing on submit.
+- **Brand visibility's default keywords** (Content Studio ideas, recommendations) read the active keywords from the
+  status index instead of a 100-row scan that could return none of them in a large table.
+
+### Changed
+
+- **Run progress counts keywords.** Run Analysis shows three steps (parse keywords, process keywords, summary) and
+  "N of M keywords" (plus failures) while the keywords run, from the Distributed Map's item counts. Each step spells
+  out its status in text.
+
 ## [2.26.1] - 2026-09-29
 
 ### Changed

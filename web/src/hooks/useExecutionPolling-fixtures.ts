@@ -1,5 +1,7 @@
 import { vi } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import {
+  act, renderHook 
+} from '@testing-library/react';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import { useExecutionPolling } from './useExecutionPolling';
 
@@ -29,7 +31,7 @@ export function createMockTriggerResponse(overrides: Partial<{
   };
 }
 
-export function createMockStatusResponse(status: string, events: unknown[] = []) {
+export function createMockStatusResponse(status: string, events: unknown[] = [], progress?: unknown) {
   return {
     execution: {
       status,
@@ -37,7 +39,24 @@ export function createMockStatusResponse(status: string, events: unknown[] = [])
       stop_date: status === 'RUNNING' ? undefined : '2024-01-01T00:05:00Z',
     },
     events,
+    ...(progress === undefined ? {} : { progress }),
   };
+}
+
+/** The status API's keyword `progress` block for a 40-keyword run. */
+export const mockKeywordProgress = {
+  keywords_total: 40,
+  keywords_succeeded: 12,
+  keywords_failed: 2,
+  keywords_running: 10,
+  keywords_pending: 16,
+};
+
+/** Triggers a run whose first status poll carries `progress`, and returns the resulting execution. */
+export async function triggerWithProgress(progress: unknown) {
+  const { result } = renderExecutionPolling(createMockFetch({ statusResponse: createMockStatusResponse('RUNNING', [], progress) }));
+  await act(() => result.current.triggerAnalysis());
+  return result.current.execution;
 }
 
 export function createMockFetch(options: {

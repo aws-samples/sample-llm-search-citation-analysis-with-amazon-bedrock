@@ -1,8 +1,10 @@
 """
 ParseKeywords Lambda Function
 
-Reads keywords from S3 or direct input, validates them, and returns
-an array of keywords with timestamps for processing.
+Reads keywords from a scope, S3 or direct input, validates them, writes the
+run's keyword list (with one run timestamp) to S3 and returns a pointer to it
+for the ProcessKeywords Distributed Map. There is no per-execution cap: the
+former silent truncation to 100 dropped keywords for multi-group installations.
 
 Requirements: 2.1, 2.2, 2.3, 2.4
 """
@@ -21,13 +23,19 @@ from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
 from shared.step_function_response import log_error
 
 # Configure logging
-from shared.utils import get_timestamp
+from shared.utils import get_timestamp, get_timestamp_compact
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 s3_client = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
+
+# Fail-fast: every run writes its keyword manifest here (see write_keywords_manifest).
+KEYWORDS_BUCKET = os.environ['KEYWORDS_BUCKET']
+# Per-run scratch prefix, shared with the ProcessKeywords ResultWriter output
+# and expired by the keywords bucket's lifecycle rule.
+RUNS_PREFIX = 'runs/'
 
 KEYWORDS_TABLE = (
     os.environ.get('DYNAMODB_TABLE_KEYWORDS')
@@ -241,12 +249,49 @@ def _valid_keywords_from_event(event: dict[str, Any]) -> list[str]:
     return valid_keywords
 
 
+def _unwrap_event(event: dict[str, Any], context: Any) -> tuple[dict[str, Any], str]:
+    """Split the task payload into ``(execution input, execution name)``.
+
+    The state machine sends ``{"execution_input": $, "execution_name": $$.Execution.Name}``.
+    A direct invocation (console, tests) sends the bare execution input, and
+    its manifest is filed under the invocation's request id instead.
+    """
+    execution_input = event.get('execution_input')
+    if isinstance(execution_input, dict):
+        return execution_input, str(event.get('execution_name') or _direct_invocation_name(context))
+    return event, _direct_invocation_name(context)
+
+
+def _direct_invocation_name(context: Any) -> str:
+    request_id = getattr(context, 'aws_request_id', None)
+    return str(request_id) if request_id else f"direct-{get_timestamp_compact()}"
+
+
+def write_keywords_manifest(execution_name: str, keywords: list[str], timestamp: str) -> dict[str, str]:
+    """Write the run's keyword list to S3 for the ProcessKeywords Distributed Map to read.
+
+    The list lives in S3 rather than in the state because state is capped at
+    256 KiB: at ~100 bytes a keyword (560 at the 500-character maximum) the
+    inline list alone put a ceiling of a few thousand keywords on a run.
+    ``runs/`` objects are scratch and expire through the bucket's lifecycle rule.
+    """
+    key = f"{RUNS_PREFIX}{execution_name}/keywords.json"
+    body = json.dumps([{'keyword': keyword, 'timestamp': timestamp} for keyword in keywords])
+    s3_client.put_object(Bucket=KEYWORDS_BUCKET, Key=key, Body=body, ContentType='application/json')
+    logger.info(f"Wrote {len(keywords)} keywords to s3://{KEYWORDS_BUCKET}/{key}")
+    return {'bucket': KEYWORDS_BUCKET, 'key': key}
+
+
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     Lambda handler for parsing keywords.
 
-    Input formats:
-    1. Scope descriptor (schedules, run-time resolution):
+    Payload from the state machine:
+        {"execution_input": <the execution input>, "execution_name": "<execution name>"}
+    A direct invocation may send the execution input itself.
+
+    Execution input formats:
+    1. Scope descriptor (trigger APIs, schedules; run-time resolution):
        {"scope": {"mode": "all" | "groups" | "keywords", ...}}
     2. Legacy scheduled runs: {"source": "dynamodb"} (all active keywords)
     3. S3 URI: {"keywords_file": "s3://bucket/path/keywords.txt"}
@@ -257,47 +302,42 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     output. When absent (scheduled runs), enabled prompts are loaded from
     DynamoDB instead.
 
+    The keywords are written to ``runs/<execution name>/keywords.json`` in the
+    keywords bucket as ``[{"keyword", "timestamp"}, ...]``; the output names
+    that object instead of carrying the list, so the state stays the same size
+    however many keywords the run covers.
+
     Output:
     {
-        "keywords": [
-            {"keyword": "best hotels in malaga", "timestamp": "2025-01-15T10:30:00Z"},
-            {"keyword": "top restaurants paris", "timestamp": "2025-01-15T10:30:00Z"}
-        ],
+        "keywords_manifest": {"bucket": "citation-analysis-keywords-123", "key": "runs/analysis-20250115103000/keywords.json"},
+        "keyword_count": 2,
+        "timestamp": "2025-01-15T10:30:00Z",
         "query_prompts": [
             {"id": "prompt-1", "name": "Family Traveler", "template": "As a family traveler, find {keyword}"}
         ]
     }
     """
     logger.info(f"Received event: {json.dumps(event)}")
+    execution_input, execution_name = _unwrap_event(event, context)
 
     try:
         timestamp = get_timestamp()
-        valid_keywords = _valid_keywords_from_event(event)
+        valid_keywords = _valid_keywords_from_event(execution_input)
 
-        # No per-execution cap: the ProcessKeywords Map state bounds concurrency
-        # and the state-machine timeout bounds duration. The former silent
-        # truncation to 100 dropped keywords for multi-group installations.
-        if len(valid_keywords) > 100:
-            logger.info(f"{len(valid_keywords)} keywords in this execution")
-
-        # Format output with timestamps. query_prompts is always emitted so the
-        # ProcessKeywords Map state can select it from this state's output,
-        # regardless of whether the execution input carried prompts (API
-        # triggers do, EventBridge schedules do not).
+        # query_prompts is always emitted so the ProcessKeywords Map state can
+        # select it from this state's output, regardless of whether the
+        # execution input carried prompts (API triggers do, EventBridge
+        # schedules do not).
         result = {
-            "keywords": [
-                {
-                    "keyword": keyword,
-                    "timestamp": timestamp
-                }
-                for keyword in valid_keywords
-            ],
-            "query_prompts": resolve_query_prompts(event)
+            "keywords_manifest": write_keywords_manifest(execution_name, valid_keywords, timestamp),
+            "keyword_count": len(valid_keywords),
+            "timestamp": timestamp,
+            "query_prompts": resolve_query_prompts(execution_input),
         }
 
         logger.info(f"Successfully parsed {len(valid_keywords)} keywords")
     except Exception as e:
-        log_error(e, "parse keywords handler", event)
+        log_error(e, "parse keywords handler", execution_input)
         raise
 
     return result

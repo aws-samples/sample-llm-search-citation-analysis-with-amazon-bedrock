@@ -1,6 +1,7 @@
 import type {
   Keyword, KeywordGroup
 } from '../types';
+import type { GroupMembershipResponse } from '../types/domain/keywordDecoders';
 
 export function buildGroup(overrides: Partial<KeywordGroup> = {}): KeywordGroup {
   return {
@@ -43,3 +44,22 @@ export const membershipResponseFixture = {
   missing: ['ghost'],
   keywords: [buildKeyword({ group_ids: ['group-coruna'] })],
 };
+
+/** `count` distinct keyword ids, `${prefix}-1` onwards. */
+export function buildKeywordIds(count: number, prefix = 'kw'): string[] {
+  return Array.from({ length: count }, (_unused, index) => `${prefix}-${index + 1}`);
+}
+
+/** A PUT /keyword-groups/{id}/keywords response; every field can be overridden. */
+export function buildMembershipResponse(
+  overrides: Partial<GroupMembershipResponse> = {}
+): GroupMembershipResponse {
+  return {
+    group_id: 'group-coruna',
+    added: [],
+    removed: [],
+    missing: [],
+    keywords: [],
+    ...overrides,
+  };
+}

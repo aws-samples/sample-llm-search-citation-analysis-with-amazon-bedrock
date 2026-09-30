@@ -92,7 +92,7 @@
     "@aws-cdk/aws-s3:setUniqueReplicationRoleName": false,
     "@aws-cdk/aws-signer:signingProfileNamePassedToCfn": false,
     "@aws-cdk/aws-stepfunctions-tasks:fixRunEcsTaskPolicy": false,
-    "@aws-cdk/aws-stepfunctions:useDistributedMapResultWriterV2": false,
+    "@aws-cdk/aws-stepfunctions:useDistributedMapResultWriterV2": true,
     "@aws-cdk/core:annotationsInValidationReport": false,
     "@aws-cdk/core:aspectPrioritiesMutating": false,
     "@aws-cdk/core:cfnIncludeRejectComplexResourceUpdateCreatePolicyIntrinsics": false,

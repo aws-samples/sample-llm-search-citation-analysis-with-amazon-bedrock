@@ -7,9 +7,8 @@ import {
 import { Spinner } from '../ui/Spinner';
 import { KeywordScopePicker } from '../ui/KeywordScopePicker';
 import { PlayIcon } from '../ui';
-import type {
-  StepState, ProcessedExecution
-} from '../../formatting/executionProcessor';
+import type { ProcessedExecution } from '../../formatting/executionProcessor';
+import { WorkflowSteps } from './WorkflowSteps';
 
 const getStatusStyle = (status: string): string => {
   const styles: Record<string, string> = {
@@ -18,22 +17,6 @@ const getStatusStyle = (status: string): string => {
     FAILED: 'bg-red-100 text-red-700',
   };
   return styles[status] ?? 'bg-gray-100 text-gray-600';
-};
-
-const getStepStyle = (status: string): string => {
-  const styles: Record<string, string> = {
-    running: 'border-gray-400 bg-gray-50',
-    completed: 'border-emerald-400 bg-emerald-50',
-    failed: 'border-red-400 bg-red-50',
-  };
-  return styles[status] ?? 'border-gray-200 bg-gray-50';
-};
-
-const getStepIndicator = (status: string): JSX.Element => {
-  if (status === 'running') return <div className="w-2.5 h-2.5 bg-gray-500 rounded-full animate-pulse" />;
-  if (status === 'completed') return <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full" />;
-  if (status === 'failed') return <div className="w-2.5 h-2.5 bg-red-500 rounded-full" />;
-  return <div className="w-2.5 h-2.5 bg-gray-300 rounded-full" />;
 };
 
 const getExecutionTitle = (status: string): string => {
@@ -278,50 +261,6 @@ const ExecutionHeader = ({
         </div>
       )}
     </div>
-  </div>
-);
-
-interface WorkflowStepsProps { steps: StepState[]; }
-
-const WorkflowSteps = ({ steps }: WorkflowStepsProps) => (
-  <div className="p-4 sm:p-6 border-b border-gray-200 bg-gray-50">
-    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 mb-4">
-      <h3 className="text-sm font-medium text-gray-900">Workflow</h3>
-      <StepLegend />
-    </div>
-    <div className="flex items-center gap-2 overflow-x-auto pb-2">
-      {steps.map((step, idx) => (
-        <StepItem key={step.name} step={step} isLast={idx === steps.length - 1} />
-      ))}
-    </div>
-  </div>
-);
-
-const StepLegend = () => (
-  <div className="flex items-center gap-3 sm:gap-4 text-xs text-gray-500">
-    <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-gray-300 rounded-full"></div><span>Pending</span></div>
-    <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-gray-500 rounded-full animate-pulse"></div><span>Running</span></div>
-    <div className="flex items-center gap-1.5"><div className="w-2 h-2 bg-emerald-500 rounded-full"></div><span>Done</span></div>
-  </div>
-);
-
-interface StepItemProps {
-  step: StepState;
-  isLast: boolean;
-}
-
-const StepItem = ({
-  step, isLast
-}: StepItemProps) => (
-  <div className="flex items-center">
-    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border min-w-[140px] ${getStepStyle(step.status)}`}>
-      {getStepIndicator(step.status)}
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-gray-900 truncate">{step.name}</p>
-        {step.status === 'running' && <p className="text-xs text-gray-500">In progress</p>}
-      </div>
-    </div>
-    {!isLast && <div className="w-6 h-px bg-gray-300 mx-1" />}
   </div>
 );
 

@@ -3,10 +3,9 @@ import {
 } from 'vitest';
 
 import {
-  isAuthoritativeKeywordsResponse,
   isKeyword,
   isKeywordStatus,
-  isKeywordsResponse,
+  isKeywordsPage,
   isRecord,
 } from './keywordDecoders';
 
@@ -71,44 +70,74 @@ describe('isKeyword', () => {
   });
 });
 
-describe('isKeywordsResponse', () => {
-  it('accepts a response whose keywords are all valid', () => {
-    expect(isKeywordsResponse({ keywords: [validKeyword] })).toBe(true);
-  });
-
-  it('rejects a response whose keywords field is null instead of an array', () => {
-    // Regression shape from AUDIT-2026-08-19 2.17: a key-only check would
-    // let `null` flow into array-typed state.
-    expect(isKeywordsResponse({ keywords: null })).toBe(false);
-  });
-
-  it('rejects a response containing a malformed keyword', () => {
-    expect(isKeywordsResponse({ keywords: [validKeyword, { id: 42 }] })).toBe(false);
-  });
-});
-
-describe('isAuthoritativeKeywordsResponse', () => {
-  it('accepts a complete response whose count matches the keyword list', () => {
-    expect(isAuthoritativeKeywordsResponse({
+describe('isKeywordsPage', () => {
+  it('accepts a last page whose count matches the keyword list', () => {
+    expect(isKeywordsPage({
       keywords: [validKeyword],
       count: 1,
-      complete: true,
+      next_token: null,
     })).toBe(true);
   });
 
-  it('rejects a response whose count disagrees with the keyword list', () => {
-    expect(isAuthoritativeKeywordsResponse({
-      keywords: [validKeyword],
-      count: 2,
-      complete: true,
+  it('accepts a page that carries a continuation token', () => {
+    expect(isKeywordsPage({
+      keywords: [],
+      count: 0,
+      next_token: 'eyJpZCI6Imt3LTEifQ',
+    })).toBe(true);
+  });
+
+  it('rejects a page whose keywords field is null instead of an array', () => {
+    // Regression shape from AUDIT-2026-08-19 2.17: a key-only check would
+    // let `null` flow into array-typed state.
+    expect(isKeywordsPage({
+      keywords: null,
+      count: 0,
+      next_token: null,
     })).toBe(false);
   });
 
-  it('rejects a response that is not marked complete', () => {
-    expect(isAuthoritativeKeywordsResponse({
-      keywords: [validKeyword],
-      count: 1,
-      complete: false,
+  it('rejects a page containing a malformed keyword', () => {
+    expect(isKeywordsPage({
+      keywords: [validKeyword, { id: 42 }],
+      count: 2,
+      next_token: null,
     })).toBe(false);
+  });
+
+  it('rejects a page whose count disagrees with the keyword list', () => {
+    expect(isKeywordsPage({
+      keywords: [validKeyword],
+      count: 2,
+      next_token: null,
+    })).toBe(false);
+  });
+
+  it.each([
+    {
+      condition: 'the token is missing',
+      page: {
+        keywords: [validKeyword],
+        count: 1,
+      },
+    },
+    {
+      condition: 'the token is an empty string',
+      page: {
+        keywords: [validKeyword],
+        count: 1,
+        next_token: '',
+      },
+    },
+    {
+      condition: 'the token is not a string',
+      page: {
+        keywords: [validKeyword],
+        count: 1,
+        next_token: { id: 'kw-1' },
+      },
+    },
+  ])('rejects a page when $condition', ({ page }) => {
+    expect(isKeywordsPage(page)).toBe(false);
   });
 });

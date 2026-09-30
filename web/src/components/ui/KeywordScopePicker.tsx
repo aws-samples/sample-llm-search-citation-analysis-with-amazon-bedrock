@@ -5,8 +5,10 @@ import type {
   AnalysisScope, Keyword, KeywordGroup
 } from '../../types';
 import {
-  cappedSectionSelection, knownIdsInInputOrder
+  MAX_SCOPE_KEYWORD_IDS, cappedSectionSelection, effectiveSelectionLimit, hasSelectionCap, knownIdsInInputOrder
 } from './KeywordScopePicker-selection';
+
+const SCOPE_CAP_HINT = `Runs take at most ${MAX_SCOPE_KEYWORD_IDS.toLocaleString('en-US')} selected keywords. Run whole groups to include more; group runs have no cap.`;
 
 function ungroupedSectionId(): string {
   return '__ungrouped__';
@@ -55,6 +57,8 @@ type KeywordIdPickerProps = SharedKeywordScopePickerProps & {
   readonly selectedIds: readonly string[];
   readonly onChange: (selectedIds: string[]) => void;
   readonly maxSelected?: number;
+  /** Shown once the cap is reached while more keywords exist. */
+  readonly capHint?: string;
 };
 
 type GroupIdPickerProps = {
@@ -102,21 +106,6 @@ function sectionState(section: Section, selected: Set<string>): SectionState {
   const count = section.keywords.filter((keyword) => selected.has(keyword.id)).length;
   if (count === 0) return 'none';
   return count === section.keywords.length ? 'all' : 'some';
-}
-
-function hasSelectionCap(maxSelected: number | undefined): maxSelected is number {
-  return Number.isFinite(maxSelected);
-}
-
-function selectionLimit(maxSelected: number, itemCount: number): number {
-  return Math.min(itemCount, Math.max(0, Math.floor(maxSelected)));
-}
-
-function effectiveSelectionLimit(
-  maxSelected: number | undefined,
-  itemCount: number
-): number {
-  return hasSelectionCap(maxSelected) ? selectionLimit(maxSelected, itemCount) : itemCount;
 }
 
 function globalSelectionLabel(selectionComplete: boolean, capped: boolean, targetCount: number): string {
@@ -202,9 +191,21 @@ function GroupIdPicker({
   );
 }
 
+/** Explains the disabled checkboxes once the selection cap is reached while more keywords exist. */
+function ScopeCapHint({
+  hint, atLimit, moreKeywordsExist,
+}: {
+  readonly hint?: string;
+  readonly atLimit: boolean;
+  readonly moreKeywordsExist: boolean 
+}) {
+  if (hint === undefined || !atLimit || !moreKeywordsExist) return null;
+  return <output className="block px-3 py-2 border-b border-gray-200 text-xs text-gray-500">{hint}</output>;
+}
+
 /** Grouped, searchable ID picker shared by legacy and scoped keyword selection. */
 function KeywordIdPicker({
-  idPrefix, name, keywords, groups, selectedIds, onChange, disabled = false, maxSelected,
+  idPrefix, name, keywords, groups, selectedIds, onChange, disabled = false, maxSelected, capHint,
 }: KeywordIdPickerProps) {
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -273,6 +274,7 @@ function KeywordIdPicker({
           </button>
         </div>
       </div>
+      <ScopeCapHint hint={capHint} atLimit={selectionAtLimit} moreKeywordsExist={maxSelectionCount < allIds.length} />
       <div className="max-h-80 overflow-y-auto divide-y divide-gray-200">
         {visibleSections.length === 0 && <p className="p-4 text-sm text-gray-400">No keywords match your search.</p>}
         {visibleSections.map((section) => {
@@ -375,7 +377,8 @@ function ScopedIdPicker({
           mode: 'keywords',
           keyword_ids: nextKeywordIds,
         })}
-        maxSelected={maxKeywords}
+        maxSelected={maxKeywords ?? MAX_SCOPE_KEYWORD_IDS}
+        capHint={maxKeywords === undefined ? SCOPE_CAP_HINT : undefined}
         disabled={disabled}
       />
     );
@@ -425,6 +428,7 @@ export function KeywordScopePicker(props: KeywordScopePickerProps): React.ReactE
   if (isScopedKeywordScopePickerProps(props)) return <ScopedKeywordScopePicker {...props} />;
   return (
     <KeywordIdPicker idPrefix={props.idPrefix} name={props.name} keywords={props.keywords} groups={props.groups}
-      selectedIds={props.selectedIds} onChange={props.onChange} disabled={props.disabled} />
+      selectedIds={props.selectedIds} onChange={props.onChange} disabled={props.disabled}
+      maxSelected={MAX_SCOPE_KEYWORD_IDS} capHint={SCOPE_CAP_HINT} />
   );
 }
