@@ -72,6 +72,17 @@ describe('ResearchProgress', () => {
     expect(screen.getByText('Google Gemini')).toBeInTheDocument();
   });
 
+  it('names the SerpAPI step "Google signals"', () => {
+    render(<ResearchProgress job={buildJob({
+      status: 'running',
+      steps_total: 1,
+      steps_done: 0,
+      steps: [buildStep('serpapi', { status: 'running' })],
+    })} />);
+
+    expect(screen.getByText('Google signals')).toBeInTheDocument();
+  });
+
   it('says it is planning while no step exists yet', () => {
     render(<ResearchProgress job={buildJob({ status: 'pending' })} />);
 

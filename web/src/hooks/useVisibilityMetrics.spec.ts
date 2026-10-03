@@ -50,6 +50,11 @@ describe('useVisibilityMetrics', () => {
       failedToLoadOnBackendError('No data available'),
       INVALID_REQUEST_ON_TYPE_GUARD_FAILURE,
     ],
+    loggedHttpError: {
+      logMessage: '[visibility] Error fetching metrics:',
+      name: 'VisibilityFetchError',
+      message: 'Failed to fetch visibility metrics',
+    },
   });
 
   it.each(REJECTED_VISIBILITY_BODIES)('stores no visibility and reports an invalid request for %s', async (_description, body) => {

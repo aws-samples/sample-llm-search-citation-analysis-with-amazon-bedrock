@@ -72,12 +72,15 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
   }, []);
 
   /** Shows a failed request's error and logs it, unless the tab has been left. */
+  // Stryker disable ArrayDeclaration: React dependency list; the callback reads only a ref and state setters, so any list keeps it correct
   const reportFailure = useCallback((err: unknown, action: string): void => {
     if (!mountedRef.current) return;
     setError(getErrorMessage(err, 'research'));
     console.error(`[research-agent] Error ${action}:`, err);
   }, []);
+  // Stryker restore ArrayDeclaration
 
+  // Stryker disable ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
   const refresh = useCallback(async (): Promise<void> => {
     setLoadingJobs(true);
     try {
@@ -90,6 +93,7 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
       if (mountedRef.current) setLoadingJobs(false);
     }
   }, [reportFailure]);
+  // Stryker restore ArrayDeclaration
 
   useEffect(() => {
     void refresh();
@@ -143,6 +147,7 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
   }, [activeKey, reload]);
 
   /** Start a run; it appears at the top of the list (the user opens it from there). */
+  // Stryker disable ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
   const start = useCallback(async (request: StartAgentRequest): Promise<KeywordResearchItem | null> => {
     setStarting(true);
     setError(null);
@@ -158,11 +163,13 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
       if (mountedRef.current) setStarting(false);
     }
   }, [reportFailure]);
+  // Stryker restore ArrayDeclaration
 
   const select = useCallback((id: string | null) => {
     setSelectedId(id);
   }, []);
 
+  // Stryker disable ArrayDeclaration: React dependency list; reload and reportFailure have a stable identity, so omitting them cannot stale this callback
   const retry = useCallback(async (job: KeywordResearchItem): Promise<void> => {
     setError(null);
     try {
@@ -180,7 +187,9 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
       reportFailure(err, 'retrying run');
     }
   }, [reload, reportFailure]);
+  // Stryker restore ArrayDeclaration
 
+  // Stryker disable ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
   const remove = useCallback(async (id: string): Promise<void> => {
     try {
       await deleteKeywordResearch(id);
@@ -191,6 +200,7 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
       reportFailure(err, 'deleting run');
     }
   }, [reportFailure]);
+  // Stryker restore ArrayDeclaration
 
   return {
     jobs,

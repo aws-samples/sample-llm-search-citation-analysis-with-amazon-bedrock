@@ -54,7 +54,10 @@ export function createMockApi(options: {
   shouldFailUpdate?: boolean;
   shouldFailDelete?: boolean;
   shouldFailReset?: boolean;
+  /** Makes every request reject with this non-Error value. */
+  nonErrorRejection?: unknown;
 } = {}) {
+  if (options.nonErrorRejection !== undefined) return createRejectingApi(options.nonErrorRejection);
   return {
     listUsers: vi.fn().mockImplementation(() => {
       if (options.shouldFailList) {
@@ -99,6 +102,18 @@ export function createMockApi(options: {
   };
 }
 
+/** The user API with every request rejecting with `rejection`. */
+function createRejectingApi(rejection: unknown) {
+  const rejecting = () => vi.fn().mockImplementation(() => Promise.reject(rejection));
+  return {
+    listUsers: rejecting(),
+    listGroups: rejecting(),
+    inviteUser: rejecting(),
+    updateUser: rejecting(),
+    deleteUser: rejecting(),
+    resetUserPassword: rejecting(),
+  };
+}
 
 /** Renders the hook and waits for the initial users + groups load to settle. */
 export async function renderLoadedUserManagement() {

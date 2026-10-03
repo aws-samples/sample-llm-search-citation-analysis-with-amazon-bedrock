@@ -6,7 +6,10 @@ import { AGENT_POLL_INTERVAL_MS } from './useResearchAgent';
 import { buildAgentJob } from '../components/KeywordResearch/agent/agent-fixtures';
 import type { StartAgentRequest } from '../api/keywordResearch';
 import {
-  advanceBy, openRun, renderAgentRuns, requests
+  advanceBy, openRun, renderAgentRuns, renderAgentRunsUnmountedEarly, requests
+} from './useResearchAgent-fixtures';
+import type {
+  AgentHookResult, AgentOperation
 } from './useResearchAgent-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -138,6 +141,41 @@ describe('useResearchAgent', () => {
 
     expect(result.current.jobs).toStrictEqual([]);
     expect(result.current.selectedId).toBeNull();
+  });
+
+  it.each<[action: string, operation: AgentOperation, run: (result: AgentHookResult) => Promise<unknown>]>([
+    ['loading runs', 'history', () => Promise.resolve()],
+    ['starting run', 'start', (result) => result.current.start(START_REQUEST)],
+    ['retrying run', 'retry', (result) => result.current.retry(buildAgentJob())],
+    ['deleting run', 'delete', (result) => result.current.remove('job-a')],
+  ])('shows the research server error and logs "%s" when its request fails', async (action, operation, run) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+    const result = await renderAgentRuns({
+      history: [buildAgentJob()],
+      serverErrors: [operation],
+    });
+
+    await act(() => run(result));
+
+    expect(result.current.error).toBe('Keyword research failed');
+    expect(consoleError).toHaveBeenCalledWith(`[research-agent] Error ${action}:`, expect.objectContaining({ statusCode: 500 }));
+  });
+
+  it('shows no error and logs nothing when the history load is aborted', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+
+    const result = await renderAgentRuns({ abortHistory: true });
+
+    expect(result.current.error).toBeNull();
+    expect(consoleError).not.toHaveBeenCalledWith('[research-agent] Error loading runs:', expect.anything());
+  });
+
+  it('logs nothing when the history load fails after the tab was left', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+
+    await renderAgentRunsUnmountedEarly({ serverErrors: ['history'] });
+
+    expect(consoleError).not.toHaveBeenCalledWith('[research-agent] Error loading runs:', expect.anything());
   });
 
   it('surfaces a start failure as an error and keeps the list', async () => {

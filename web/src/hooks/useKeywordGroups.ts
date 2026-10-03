@@ -61,6 +61,7 @@ export const useKeywordGroups = (options: UseKeywordGroupsOptions = {}): UseKeyw
   const [error, setError] = useState<string | null>(null);
   const { beginRequest } = useLatestRequest();
 
+  // Stryker disable ArrayDeclaration: React dependency list; beginRequest has a stable identity, so omitting it cannot stale this callback
   const refresh = useCallback(async (): Promise<void> => {
     const request = beginRequest();
     try {
@@ -74,9 +75,11 @@ export const useKeywordGroups = (options: UseKeywordGroupsOptions = {}): UseKeyw
       setError(getErrorMessage(fetchError, 'keywords'));
     } finally {
       if (request.isCurrent()) setLoading(false);
+      // Stryker disable next-line CallExpression: equivalent, finish only stops a later cancel from aborting this settled request's signal, which nothing reads after it settles
       request.finish();
     }
   }, [beginRequest]);
+  // Stryker restore ArrayDeclaration
 
   useEffect(() => {
     void refresh();

@@ -60,6 +60,7 @@ describe('FileViewer', () => {
       ['perplexity', 'bg-orange-100'],
       ['gemini', 'bg-blue-100'],
       ['claude', 'bg-purple-100'],
+      ['mistral', 'bg-gray-100'],
     ])('tints the %s provider badge %s, the colour the provider has across the dashboard', (provider, tint) => {
       renderFileViewer({ content: buildDocumentContent(provider) });
 

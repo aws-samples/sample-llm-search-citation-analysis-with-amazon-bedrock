@@ -266,6 +266,13 @@ describe('useContentStudio status polling', () => {
     unmount();
   });
 
+  it('leaves no polling timer behind once the only generating item reaches three consecutive failures', async () => {
+    const { unmount } = await renderContentStudioAfterStatusFailureLimit('network');
+
+    expect(vi.getTimerCount()).toBe(0);
+    unmount();
+  });
+
   it('keeps one status request in flight when multiple polling intervals elapse', async () => {
     const {
       deferredStatusFetch, unmount

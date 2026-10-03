@@ -1,13 +1,18 @@
 import {
   beforeEach, describe, expect, it, vi 
 } from 'vitest';
-import { act } from '@testing-library/react';
-import type { useKeywordGroups } from './useKeywordGroups';
+import {
+  act, renderHook
+} from '@testing-library/react';
+import { useKeywordGroups } from './useKeywordGroups';
 import { ApiRequestError } from '../infrastructure';
 import {
   buildGroup, buildKeyword
 } from '../api/keywordGroups-fixtures';
 import { renderLoadedKeywordGroups } from './useKeywordGroups-fixtures';
+import { deferNextTwoCalls } from '../test/fetchResponses';
+import { TestAbortError } from '../test/abortError';
+import type { KeywordGroup } from '../types';
 
 vi.mock('../api/keywordGroups', async () => {
   const actual = await vi.importActual<typeof import('../api/keywordGroups')>('../api/keywordGroups');
@@ -70,6 +75,51 @@ describe('useKeywordGroups', () => {
     const { result } = await renderLoadedKeywordGroups();
 
     expect(result.current.error).toBe('Failed to process keyword request');
+  });
+
+  it('keeps the newer list when an older refresh resolves after it', async () => {
+    const { result } = await renderLoadedKeywordGroups();
+    const [older, newer] = deferNextTwoCalls<KeywordGroup[]>(mockFetch);
+    const refreshes = act(async () => {
+      await Promise.all([result.current.refresh(), result.current.refresh()]);
+    });
+
+    newer.resolve([buildGroup({
+      id: 'n',
+      name: 'Newer',
+    })]);
+    older.resolve([buildGroup({
+      id: 'o',
+      name: 'Older',
+    })]);
+    await refreshes;
+
+    expect(result.current.groups.map((group) => group.name)).toStrictEqual(['Newer']);
+  });
+
+  it('stays loading while a newer refresh is in flight after the superseded mount load settles', async () => {
+    const [mountLoad, newer] = deferNextTwoCalls<KeywordGroup[]>(mockFetch);
+    const { result } = renderHook(() => useKeywordGroups());
+    act(() => {
+      void result.current.refresh();
+    });
+
+    await act(async () => {
+      mountLoad.resolve([]);
+    });
+
+    expect(result.current.loading).toBe(true);
+    await act(async () => {
+      newer.resolve([]);
+    });
+  });
+
+  it('shows no error when the current request rejects with an abort', async () => {
+    mockFetch.mockRejectedValue(new TestAbortError());
+
+    const { result } = await renderLoadedKeywordGroups();
+
+    expect(result.current.error).toBeNull();
   });
 
   it('creates a group and refreshes the list', async () => {

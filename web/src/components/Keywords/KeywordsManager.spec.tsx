@@ -186,6 +186,48 @@ describe('KeywordsManager', () => {
     });
   });
 
+  describe('entry checks', () => {
+    it('sends the keyword trimmed', async () => {
+      mockApiPost.mockResolvedValue(createdKeywordFixture);
+      renderManager();
+
+      await submitCreate('  resorts  ');
+
+      expect(mockApiPost).toHaveBeenCalledWith('/keywords', { keyword: 'resorts' }, { allowStructured4xx: true });
+    });
+
+    it('sends nothing for a blank entry submitted with Enter', async () => {
+      renderManager();
+
+      await userEvent.setup().type(screen.getByPlaceholderText('Enter new keyword...'), '   {Enter}');
+
+      expect(mockApiPost).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything());
+    });
+
+    it('refuses a duplicate keyword without a request and says it already exists', async () => {
+      renderManager();
+
+      await submitCreate(' Hotels ');
+
+      expect(await screen.findByText('"Hotels" already exists')).toBeInTheDocument();
+      expect(mockApiPost).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything());
+    });
+
+    it('refuses a rename onto another keyword without a request', async () => {
+      renderManager([existingKeywordFixture, createdKeywordFixture]);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: `Edit ${existingKeywordFixture.keyword}` }));
+      const input = screen.getByDisplayValue(existingKeywordFixture.keyword);
+      await user.clear(input);
+      await user.type(input, createdKeywordFixture.keyword);
+
+      await user.click(screen.getByRole('button', { name: 'Save' }));
+
+      expect(await screen.findByText('"resorts" already exists')).toBeInTheDocument();
+      expect(mockApiPut).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything());
+    });
+  });
+
   describe('update mutation', () => {
     function renderUpdateConflict() {
       mockApiPut.mockRejectedValue(createApiRequestError(UPDATE_CONFLICT_MESSAGE));

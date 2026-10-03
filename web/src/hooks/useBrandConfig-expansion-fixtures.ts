@@ -96,24 +96,30 @@ interface ExpansionFailure {
   run: (hook: BrandConfigHook) => Promise<ExpansionOutcome>;
 }
 
+type ExpansionRun = (hook: BrandConfigHook) => Promise<ExpansionOutcome>;
+
+export const expandTestBrand: ExpansionRun = (hook) => hook.expandBrand('TestBrand');
+export const expandBrand1: ExpansionRun = (hook) => hook.expandAllBrands(['Brand1']);
+export const findMyBrandCompetitors: ExpansionRun = (hook) => hook.findCompetitors(['MyBrand']);
+
 /** Each expansion action against a failing endpoint, and the list it must return empty. */
 export const EXPANSION_FAILURES: ExpansionFailure[] = [
   {
     action: 'expandBrand',
     emptyField: 'suggestions',
     failure: { shouldFailExpand: true },
-    run: (hook) => hook.expandBrand('TestBrand'),
+    run: expandTestBrand,
   },
   {
     action: 'expandAllBrands',
     emptyField: 'suggestions',
     failure: { shouldFailExpandAll: true },
-    run: (hook) => hook.expandAllBrands(['Brand1']),
+    run: expandBrand1,
   },
   {
     action: 'findCompetitors',
     emptyField: 'competitors',
     failure: { shouldFailFindCompetitors: true },
-    run: (hook) => hook.findCompetitors(['MyBrand']),
+    run: findMyBrandCompetitors,
   },
 ];

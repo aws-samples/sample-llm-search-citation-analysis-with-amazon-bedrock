@@ -1,5 +1,5 @@
 import {
-  render, screen, fireEvent
+  render, screen, fireEvent, act
 } from '@testing-library/react';
 import {
   describe, it, expect, vi
@@ -36,5 +36,25 @@ describe('BrandConfigContent owned domains', () => {
     renderAndAddDomain('https://');
 
     expect(screen.getByText(/No domains added/)).toBeInTheDocument();
+  });
+});
+
+describe('BrandConfigContent states', () => {
+  it('shows only the loading message while the configuration loads', () => {
+    render(<BrandConfigContent config={mockBrandConfig} presets={null} loading onSave={vi.fn()} />);
+
+    expect(screen.getByText('Loading configuration...')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save Configuration' })).not.toBeInTheDocument();
+  });
+
+  it('confirms a save only once it has completed', async () => {
+    render(<BrandConfigContent config={mockBrandConfig} presets={null} loading={false} onSave={vi.fn(() => Promise.resolve())} />);
+    expect(screen.queryByText('Saved!')).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save Configuration' }));
+    });
+
+    expect(screen.getByText('Saved!')).toBeInTheDocument();
   });
 });

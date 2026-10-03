@@ -138,6 +138,14 @@ describe('keyword research client', () => {
     respondWith(200, { count: 0 });
 
     await expect(fetchKeywordResearchHistory()).rejects.toThrow(InvalidKeywordResearchResponseError);
+    await expect(fetchKeywordResearchHistory()).rejects.toThrow('Keyword research API returned an invalid history');
+  });
+
+  it('throws InvalidKeywordResearchResponseError naming the template list when it has no items list', async () => {
+    respondWith(200, { count: 0 });
+
+    await expect(fetchResearchTemplates()).rejects.toThrow(InvalidKeywordResearchResponseError);
+    await expect(fetchResearchTemplates()).rejects.toThrow('Keyword research API returned an invalid template list');
   });
 
   it('deletes a job by id', async () => {

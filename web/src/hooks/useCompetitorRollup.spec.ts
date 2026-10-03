@@ -45,6 +45,12 @@ describe('useCompetitorRollup', () => {
       }],
       failedToLoadOnBackendError('Unknown competitor'),
       ['Invalid visibility request', 'payload has neither rollup nor rollups', { invalidResponse: true }],
+      ['Invalid visibility request', 'payload is null', { nullResponse: true }],
     ],
+    loggedHttpError: {
+      logMessage: '[competitorRollup] Error:',
+      name: 'ApiRequestError',
+      message: 'Failed to fetch competitor rollup',
+    },
   });
 });

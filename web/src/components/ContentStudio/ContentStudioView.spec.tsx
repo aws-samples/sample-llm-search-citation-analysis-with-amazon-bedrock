@@ -18,6 +18,7 @@ import {
   buildGroupBriefIdea,
   buildMissingActiveBatch,
   buildPendingGenerateContentResponse,
+  confirmIdeaGeneration,
   startMockContentBriefBatch,
 } from './ContentStudioView-fixtures';
 
@@ -77,6 +78,23 @@ function renderContentStudioView(
 ) {
   mockUseContentStudio.mockReturnValue(buildContentStudioHookResult(overrides));
   return render(<ContentStudioView keywords={keywords} />);
+}
+
+/** Renders one ordinary idea (built with `overrides`) and opens its confirmation; returns the idea and the generateContent spy. */
+async function renderIdeaConfirmation(overrides: Partial<ContentIdea> = {}) {
+  const idea = buildActionableIdea(overrides);
+  const generateContent = vi.fn().mockResolvedValue(
+    buildPendingGenerateContentResponse('product comparisons')
+  );
+  renderContentStudioView({
+    ideas: [idea],
+    generateContent,
+  });
+  await userEvent.click(screen.getByText('Create content for product comparisons'));
+  return {
+    idea,
+    generateContent,
+  };
 }
 
 async function renderGeneratedContentTab(
@@ -230,26 +248,47 @@ describe('ContentStudioView', () => {
   });
 
   it('keeps ordinary ideas behind their existing confirmation flow', async () => {
-    const idea = buildActionableIdea();
-    const generateContent = vi.fn().mockResolvedValue(
-      buildPendingGenerateContentResponse('product comparisons')
-    );
-    renderContentStudioView({
-      ideas: [idea],
-      generateContent,
-    });
-
-    await userEvent.click(screen.getByText('Create content for product comparisons'));
+    const { generateContent } = await renderIdeaConfirmation();
 
     expect(screen.getByText('Create Content')).toBeInTheDocument();
     expect(generateContent).not.toHaveBeenCalledWith(expect.anything());
-    await userEvent.click(screen.getByRole('button', { name: 'Generate Content' }));
+  });
+
+  it.each([
+    ['English', 'by default', undefined],
+    ['Spanish', 'when Spanish is picked', 'Spanish'],
+  ])('generates the confirmed idea in %s %s', async (outputLanguage, _condition, picked) => {
+    const {
+      idea, generateContent
+    } = await renderIdeaConfirmation();
+
+    await confirmIdeaGeneration(picked);
+
     await waitFor(() => {
       expect(generateContent).toHaveBeenCalledWith({
         ...idea,
-        output_language: 'English',
+        output_language: outputLanguage,
       });
     });
+  });
+
+  it.each([
+    ['says how many competitor sources will be analyzed', ['https://a.example/', 'https://b.example/'], ['2 competitor sources will be analyzed']],
+    ['mentions no competitor sources when the idea has none', [], []],
+  ])('%s', async (_condition, competitorUrls, mentions) => {
+    await renderIdeaConfirmation({ competitor_urls: competitorUrls });
+
+    expect(screen.queryAllByText(/competitor sources will be analyzed/u).map((line) => line.textContent)).toStrictEqual(mentions);
+  });
+
+  it('loads neither ideas nor history when the Content Brief tab opens', async () => {
+    const hookResult = buildContentStudioHookResult();
+    mockUseContentStudio.mockReturnValue(hookResult);
+    render(<ContentStudioView keywords={[]} />);
+
+    await userEvent.click(screen.getByText('Content Brief'));
+
+    expect(hookResult.fetchHistory).not.toHaveBeenCalledWith();
   });
 
   it('shows the unviewed count when generated content exists', () => {

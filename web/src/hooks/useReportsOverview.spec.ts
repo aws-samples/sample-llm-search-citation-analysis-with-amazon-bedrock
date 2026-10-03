@@ -54,6 +54,11 @@ describe('useReportsOverview', () => {
       failedToLoadOnBackendError('No data'),
       ['Invalid visibility request', 'payload is missing the kpis field', { invalidResponse: true }],
     ],
+    loggedHttpError: {
+      logMessage: '[reportsOverview] Error fetching overview:',
+      name: 'ApiRequestError',
+      message: 'Failed to fetch reports overview',
+    },
   });
 
   it.each(['kpis', 'summary', 'trend_data', 'latest_brands'] as const)('reports an invalid request when the overview has no %s', async (field) => {

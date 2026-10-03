@@ -150,6 +150,7 @@ const HistoryItem = ({
   const panelId = `research-history-keywords-${item.id}`;
 
   // A new identity whenever the row expands, collapses or gets new keywords.
+  // Stryker disable next-line ObjectLiteral: equivalent, useRunPromotion reads only the identity of shown, which the memo dependencies renew either way
   const shown = useMemo(() => ({
     isExpanded,
     keywords,

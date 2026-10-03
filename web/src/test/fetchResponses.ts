@@ -82,12 +82,14 @@ export interface EndpointMockFetchOptions<TResponse> {
   errorResponse?: { error: string };
   /** Resolve OK with a body that does not match the hook's type guard. */
   invalidResponse?: boolean;
+  /** Resolve OK with a JSON `null` body, which no analysis type guard may accept. */
+  nullResponse?: boolean;
 }
 
 /**
  * Mock `authenticatedFetch` for hooks that call a single endpoint: success,
- * HTTP failure, backend `{ error }` body, or a payload that fails the type
- * guard.
+ * HTTP failure, backend `{ error }` body, or a payload (an object or `null`)
+ * that fails the type guard.
  */
 export function createEndpointMockFetch<TResponse>(
   defaultResponse: TResponse,
@@ -102,6 +104,9 @@ export function createEndpointMockFetch<TResponse>(
     }
     if (options.invalidResponse) {
       return Promise.resolve(createMockJsonResponse({ invalid: 'data' }));
+    }
+    if (options.nullResponse) {
+      return Promise.resolve(createMockJsonResponse(null));
     }
     return Promise.resolve(createMockJsonResponse(options.response ?? defaultResponse));
   });

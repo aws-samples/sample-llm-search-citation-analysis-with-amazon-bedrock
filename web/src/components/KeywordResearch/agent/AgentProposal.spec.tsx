@@ -232,6 +232,17 @@ describe('AgentProposal', () => {
     expect(screen.getByLabelText('0 selected active tracked keywords, 3 unselected inactive library keywords')).toBeInTheDocument();
   });
 
+  it('logs a failed export under the research-agent prefix', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+    const failure = new TypeError('Workbook failed');
+    vi.mocked(exportAgentRun).mockRejectedValueOnce(failure);
+    renderProposal();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
+
+    expect(consoleError).toHaveBeenCalledWith('[research-agent] Error exporting run:', failure);
+  });
+
   it('exports the run with its proposal', async () => {
     const job = renderProposal();
 

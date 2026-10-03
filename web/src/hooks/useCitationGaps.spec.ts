@@ -64,6 +64,12 @@ describe('useCitationGaps', () => {
         { errorResponse: { error: 'No brand config found' } },
       ],
       ['Invalid citation gap request', 'payload fails the type guard', { invalidResponse: true }],
+      ['Invalid citation gap request', 'payload is null', { nullResponse: true }],
     ],
+    loggedHttpError: {
+      logMessage: '[citationGaps] Error fetching citation gaps:',
+      name: 'ApiRequestError',
+      message: 'Failed to fetch citation gaps',
+    },
   });
 });

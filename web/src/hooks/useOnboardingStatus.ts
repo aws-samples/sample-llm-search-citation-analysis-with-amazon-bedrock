@@ -57,6 +57,7 @@ async function readPayload(request: () => Promise<Response>): Promise<Record<str
 
 async function readProvidersConfigured(api: OnboardingStatusApi): Promise<boolean> {
   const data = await readPayload(() => api.fetchProviders());
+  // Stryker disable next-line ConditionalExpression: equivalent, reading the null payload throws and safeCheck maps that to the same false
   if (data === null) return false;
   const payload: ProvidersPayload = data;
   return (payload.providers ?? []).some((provider) => provider.configured === true);
@@ -64,6 +65,7 @@ async function readProvidersConfigured(api: OnboardingStatusApi): Promise<boolea
 
 async function readBrandConfigured(api: OnboardingStatusApi): Promise<boolean> {
   const data = await readPayload(() => api.fetchBrandConfig());
+  // Stryker disable next-line ConditionalExpression: equivalent, reading the null payload throws and safeCheck maps that to the same false
   if (data === null) return false;
   // GET /brand-config never 404s: it synthesizes a default config with empty
   // tracked_brands when nothing is stored, so presence of first-party brands
@@ -74,6 +76,7 @@ async function readBrandConfigured(api: OnboardingStatusApi): Promise<boolean> {
 
 async function readScheduleConfigured(api: OnboardingStatusApi): Promise<boolean> {
   const data = await readPayload(() => api.fetchSchedules());
+  // Stryker disable next-line ConditionalExpression: equivalent, reading the null payload throws and safeCheck maps that to the same false
   if (data === null) return false;
   const payload: SchedulesPayload = data;
   return (payload.schedules ?? []).length > 0;

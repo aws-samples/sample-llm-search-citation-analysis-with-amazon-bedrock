@@ -27,6 +27,15 @@ async function renderAndClick(buttonName: string) {
   return props;
 }
 
+/** Renders the panel and renames Hotel Coruña to "Hotel Coruña Centro" with Enter; returns its props. */
+async function renderRenamedCoruna(overrides: Partial<ComponentProps<typeof KeywordGroupsPanel>> = {}) {
+  const props = renderKeywordGroupsPanel(overrides);
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: 'Rename group Hotel Coruña' }));
+  await user.type(screen.getByRole('textbox', { name: 'Rename group Hotel Coruña' }), ' Centro{Enter}');
+  return props;
+}
+
 describe('KeywordGroupsPanel', () => {
   it('describes reusable groups with generic examples', () => {
     renderKeywordGroupsPanel();
@@ -102,6 +111,23 @@ describe('KeywordGroupsPanel', () => {
     await user.type(input, 'Hotel A Coruña{Enter}');
 
     expect(props.onRename).toHaveBeenCalledWith('coruna', 'Hotel A Coruña');
+  });
+
+  it('closes the inline rename once the rename succeeds', async () => {
+    await renderRenamedCoruna();
+
+    expect(screen.queryByRole('textbox', { name: 'Rename group Hotel Coruña' })).not.toBeInTheDocument();
+  });
+
+  it('reports a refused rename under "Could not rename group"', async () => {
+    const props = await renderRenamedCoruna({
+      onRename: vi.fn().mockResolvedValue({
+        success: false,
+        message: 'A group with that name already exists',
+      }),
+    });
+
+    expect(props.onNotify).toHaveBeenCalledWith('Could not rename group', 'A group with that name already exists', 'error');
   });
 
   it('asks the parent to delete the group with the full group record', async () => {

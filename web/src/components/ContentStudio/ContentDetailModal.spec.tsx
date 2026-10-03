@@ -49,6 +49,17 @@ describe('ContentDetailModal', () => {
     });
   });
 
+  it('logs a failed Word export', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+    const failure = new TypeError('Document failed');
+    mockExportToDocx.mockRejectedValue(failure);
+    renderContentDetailModal(whitespaceGeneratedTitleOverrides);
+
+    await userEvent.click(screen.getByTitle('Download as Word document'));
+
+    expect(consoleError).toHaveBeenCalledWith('Error exporting to DOCX:', failure);
+  });
+
   it('uses keyword in copied draft when generated and idea titles are blank', async () => {
     const onCopy = vi.fn();
     renderContentDetailModal({
