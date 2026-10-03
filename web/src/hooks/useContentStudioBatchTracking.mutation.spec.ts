@@ -1,9 +1,7 @@
 import {
   afterEach, beforeEach, describe, expect, it, vi
 } from 'vitest';
-import {
-  act, waitFor
-} from '@testing-library/react';
+import { act } from '@testing-library/react';
 import {
   advanceContentStudioPoll,
   dispatchBatchStorageEvent,
@@ -22,7 +20,6 @@ import {
   createMockFetch,
   mockBatchRequest,
   renderContentStudio,
-  renderRunningBatchContentStudio,
   storedActiveContentStudioBatchIds,
   storeActiveContentStudioBatchIds,
 } from './useContentStudio-fixtures';
@@ -30,6 +27,13 @@ import {
   prepareContentStudioHookTest, restoreContentStudioHookTest
 } from './useContentStudio-test-fixtures';
 import { deferNextTwoAuthenticatedFetches } from '../test/infrastructureMock';
+import { requestUrlsContaining } from './useContentStudio-request-fixtures';
+import {
+  activeBatchIds,
+  renderTwoVisibleRunningBatches,
+  spyOnAggregatePollIntervals,
+  startRunningBatch,
+} from './useContentStudio-scenario-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
@@ -38,31 +42,23 @@ afterEach(restoreContentStudioHookTest);
 
 describe('useContentStudioBatchTracking mutation boundaries', () => {
   it('creates no polling interval when no batch IDs are stored', () => {
-    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const aggregatePollIntervals = spyOnAggregatePollIntervals();
     const fetch = createMockFetch();
 
     renderContentStudio(fetch);
 
-    const batchRequests = fetch.mock.calls.filter(([url]) => (
-      String(url).includes('/batches/')
-    ));
-    const aggregateIntervals = setIntervalSpy.mock.calls.filter(([, milliseconds]) => (
-      milliseconds === 10_000
-    ));
-    expect(batchRequests).toStrictEqual([]);
-    expect(aggregateIntervals).toStrictEqual([]);
+    expect(requestUrlsContaining(fetch, '/batches/')).toStrictEqual([]);
+    expect(aggregatePollIntervals()).toStrictEqual([]);
   });
 
   it('replaces one batch card instead of duplicating a repeated batch start', async () => {
     const {
       result, unmount
-    } = renderRunningBatchContentStudio();
+    } = await startRunningBatch();
 
     await act(() => result.current.generateContentBatch(mockBatchRequest));
-    await act(() => result.current.generateContentBatch(mockBatchRequest));
 
-    expect(result.current.activeBatches.map((batch) => batch.batch_id))
-      .toStrictEqual(['batch-1']);
+    expect(activeBatchIds(result.current)).toStrictEqual(['batch-1']);
     expect(storedActiveContentStudioBatchIds()).toStrictEqual(['batch-1']);
     unmount();
   });
@@ -70,9 +66,8 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
   it('continues polling an accepted running batch after ten seconds', async () => {
     vi.useFakeTimers();
     const {
-      fetch, result, unmount
-    } = renderRunningBatchContentStudio();
-    await act(() => result.current.generateContentBatch(mockBatchRequest));
+      fetch, unmount
+    } = await startRunningBatch();
     await flushContentStudioPromises();
 
     await advanceContentStudioPoll();
@@ -88,8 +83,7 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
 
     await startContentStudioBatches(result.current, batchIds);
 
-    expect(result.current.activeBatches.map((batch) => batch.batch_id))
-      .toStrictEqual(newestTrackedBatchIdsAfterElevenStarts);
+    expect(activeBatchIds(result.current)).toStrictEqual(newestTrackedBatchIdsAfterElevenStarts);
     expect(storedActiveContentStudioBatchIds())
       .toStrictEqual(newestTrackedBatchIdsAfterElevenStarts);
   });
@@ -112,8 +106,7 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
     await startContentStudioBatches(result.current, laterBatchIds);
     await resolveRunningBatchStatus(batchTwoStatus, 'batch-2');
 
-    expect(result.current.activeBatches.map((batch) => batch.batch_id))
-      .toStrictEqual(newestTrackedBatchIdsAfterElevenStarts);
+    expect(activeBatchIds(result.current)).toStrictEqual(newestTrackedBatchIdsAfterElevenStarts);
     expect(storedActiveContentStudioBatchIds())
       .toStrictEqual(newestTrackedBatchIdsAfterElevenStarts);
     unmount();
@@ -130,8 +123,7 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
     dispatchBatchStorageEvent(['batch-2']);
     await resolveRunningBatchStatus(batchTwoStatus, 'batch-2');
 
-    expect(result.current.activeBatches.map((batch) => batch.batch_id))
-      .toStrictEqual(['batch-2']);
+    expect(activeBatchIds(result.current)).toStrictEqual(['batch-2']);
     expect(storedActiveContentStudioBatchIds()).toStrictEqual(['batch-2']);
     unmount();
   });
@@ -150,12 +142,7 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
 
   it('keeps the aggregate interval when a storage event repeats the same IDs', async () => {
     const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
-    const {
-      result, unmount
-    } = renderTwoRunningBatches();
-    await waitFor(() => {
-      expect(result.current.activeBatches).toHaveLength(2);
-    });
+    const { unmount } = await renderTwoVisibleRunningBatches();
     const callsBeforeEvent = clearIntervalSpy.mock.calls.length;
 
     dispatchBatchStorageEvent(['batch-1', 'batch-2']);

@@ -8,7 +8,6 @@ import { buildBatchCandidate } from '../api/contentStudioBatchStorage-fixtures';
 import {
   createDeferredResponse, createMockJsonResponse
 } from '../test/fetchResponses';
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
@@ -17,21 +16,23 @@ import {
   buildTerminalBatchStatusFor,
   dispatchBatchCandidateStorageEvent,
   flushContentStudioPromises,
+  renderRecoveredBatches,
 } from './useContentStudioBatchTracking-fixtures';
 import {
-  batchStatusRequestUrls,
   buildContentHistoryPayload,
   buildRunningBatchStatusResponse,
   buildTerminalBatchStartResponse,
-  createMockFetch,
   mockBatchRequest,
-  renderContentStudio,
   storeActiveContentStudioBatchCandidates,
-  storeActiveContentStudioBatchIds,
   storedActiveContentStudioBatchIds,
 } from './useContentStudio-fixtures';
+import { batchStatusRequestCounts } from './useContentStudio-scenario-fixtures';
 import {
-  prepareContentStudioHookTest, restoreContentStudioHookTest
+  contentStudioRequestUrls,
+  prepareContentStudioHookTest,
+  queueContentStudioPayloads,
+  restoreContentStudioHookTest,
+  settleDeferredJson,
 } from './useContentStudio-test-fixtures';
 import { useContentStudio } from './useContentStudio';
 
@@ -44,18 +45,13 @@ describe('useContentStudioBatchTracking finalization ownership', () => {
     vi.setSystemTime(100);
     const terminalStart = buildTerminalBatchStartResponse('batch-1');
     const historyRequest = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockResolvedValueOnce(createMockJsonResponse(terminalStart))
-      .mockReturnValueOnce(historyRequest.promise)
-      .mockResolvedValueOnce(createMockJsonResponse(terminalStart));
+    queueContentStudioPayloads(terminalStart, historyRequest.promise, terminalStart);
     const { result } = renderHook(() => useContentStudio());
 
     await act(() => result.current.generateContentBatch(mockBatchRequest));
     await act(() => result.current.generateContentBatch(mockBatchRequest));
 
-    expect(mockAuthenticatedFetch.mock.calls.filter(([url]) => (
-      String(url).includes('/history')
-    ))).toHaveLength(1);
+    expect(contentStudioRequestUrls('/history')).toHaveLength(1);
     expect(storedActiveContentStudioBatchIds()).toStrictEqual(['batch-1']);
     historyRequest.resolve(createMockJsonResponse(buildContentHistoryPayload([])));
     await flushContentStudioPromises();
@@ -64,12 +60,11 @@ describe('useContentStudioBatchTracking finalization ownership', () => {
   it('polls a candidate again when the same identity is registered after cleanup', async () => {
     const candidate = buildBatchCandidate('batch-1', 100);
     storeActiveContentStudioBatchCandidates([candidate]);
-    mockAuthenticatedFetch
-      .mockResolvedValueOnce(createMockJsonResponse(
-        buildTerminalBatchStatusFor('batch-1')
-      ))
-      .mockResolvedValueOnce(createMockJsonResponse(buildContentHistoryPayload([])))
-      .mockResolvedValueOnce(createMockJsonResponse(buildRunningBatchStatusResponse()));
+    queueContentStudioPayloads(
+      buildTerminalBatchStatusFor('batch-1'),
+      buildContentHistoryPayload([]),
+      buildRunningBatchStatusResponse()
+    );
     const { result } = renderHook(() => useContentStudio());
     await waitFor(() => {
       expect(storedActiveContentStudioBatchIds()).toStrictEqual([]);
@@ -82,9 +77,7 @@ describe('useContentStudioBatchTracking finalization ownership', () => {
       ]);
     });
 
-    expect(mockAuthenticatedFetch.mock.calls.filter(([url]) => (
-      String(url).includes('/batches/batch-1')
-    ))).toHaveLength(2);
+    expect(contentStudioRequestUrls('/batches/batch-1')).toHaveLength(2);
   });
 
   it('keeps newer finalization locked when stale history settles', async () => {
@@ -95,15 +88,12 @@ describe('useContentStudioBatchTracking finalization ownership', () => {
     storeActiveContentStudioBatchCandidates([initialCandidate]);
     const staleHistory = createDeferredResponse();
     const currentHistory = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockResolvedValueOnce(createMockJsonResponse(
-        buildTerminalBatchStatusFor('batch-1')
-      ))
-      .mockReturnValueOnce(staleHistory.promise)
-      .mockResolvedValueOnce(createMockJsonResponse(
-        buildTerminalBatchStatusFor('batch-1')
-      ))
-      .mockReturnValueOnce(currentHistory.promise);
+    queueContentStudioPayloads(
+      buildTerminalBatchStatusFor('batch-1'),
+      staleHistory.promise,
+      buildTerminalBatchStatusFor('batch-1'),
+      currentHistory.promise
+    );
     const rendered = renderHook(() => useContentStudio());
     await flushContentStudioPromises();
     await flushContentStudioPromises();
@@ -114,12 +104,9 @@ describe('useContentStudioBatchTracking finalization ownership', () => {
     await flushContentStudioPromises();
     await advanceContentStudioPoll();
 
-    expect(mockAuthenticatedFetch.mock.calls.filter(([url]) => (
-      String(url).includes('/batches/batch-1')
-    ))).toHaveLength(2);
+    expect(contentStudioRequestUrls('/batches/batch-1')).toHaveLength(2);
     rendered.unmount();
-    currentHistory.resolve(createMockJsonResponse(buildContentHistoryPayload([])));
-    await currentHistory.promise;
+    await settleDeferredJson(currentHistory, buildContentHistoryPayload([]));
   });
 
   it('keeps the aggregate interval stable when stale cleanup changes no candidate', async () => {
@@ -130,12 +117,11 @@ describe('useContentStudioBatchTracking finalization ownership', () => {
     storeActiveContentStudioBatchCandidates([
       buildBatchCandidate('batch-1', 100)
     ]);
-    mockAuthenticatedFetch
-      .mockResolvedValueOnce(createMockJsonResponse(
-        buildTerminalBatchStatusFor('batch-1')
-      ))
-      .mockReturnValueOnce(staleHistory.promise)
-      .mockResolvedValueOnce(createMockJsonResponse(buildRunningBatchStatusResponse()));
+    queueContentStudioPayloads(
+      buildTerminalBatchStatusFor('batch-1'),
+      staleHistory.promise,
+      buildRunningBatchStatusResponse()
+    );
     const rendered = renderHook(() => useContentStudio());
     await flushContentStudioPromises();
 
@@ -153,21 +139,18 @@ describe('useContentStudioBatchTracking finalization ownership', () => {
 
   it('stops polling after two candidates finalize together', async () => {
     vi.useFakeTimers();
-    storeActiveContentStudioBatchIds(['terminal-1', 'terminal-2']);
-    const fetch = createMockFetch({
-      batchStatusResponses: {
-        'terminal-1': buildTerminalBatchStatusFor('terminal-1'),
-        'terminal-2': buildTerminalBatchStatusFor('terminal-2'),
-      },
-      historyResponse: buildContentHistoryPayload([]),
-    });
-    renderContentStudio(fetch);
+    const { fetch } = renderRecoveredBatches({
+      'terminal-1': buildTerminalBatchStatusFor('terminal-1'),
+      'terminal-2': buildTerminalBatchStatusFor('terminal-2'),
+    }, { historyResponse: buildContentHistoryPayload([]) });
     await flushContentStudioPromises();
     await flushContentStudioPromises();
 
     await advanceContentStudioPoll();
 
-    expect(batchStatusRequestUrls(fetch, 'terminal-1')).toHaveLength(1);
-    expect(batchStatusRequestUrls(fetch, 'terminal-2')).toHaveLength(1);
+    expect(batchStatusRequestCounts(fetch, ['terminal-1', 'terminal-2'])).toStrictEqual({
+      'terminal-1': 1,
+      'terminal-2': 1,
+    });
   });
 });

@@ -21,7 +21,16 @@ import {
   buildApiHistoryItem,
   buildApiMissingBatchStatusResponse,
   buildApiTemplate,
+  buildJsonRequestInit,
 } from './contentStudio-fixtures';
+import {
+  buildDecodedLegacyHistoryItem,
+  buildGenerationDecoderPayload,
+  buildHistoryDecoderPayload,
+  buildHistoryItemDecoderRecord,
+  buildIdeasDecoderPayload,
+  buildTemplateListDecoderPayload,
+} from './contentStudioDecoders-fixtures';
 import { createMockJsonResponse } from '../test/fetchResponses';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -31,6 +40,10 @@ import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 beforeEach(() => {
   vi.clearAllMocks();
 });
+
+function mockAcceptedBatchStart(): void {
+  mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(apiBatchStartResponse, 202));
+}
 
 describe('Content Studio read decoders', () => {
   it('returns every idea when the ideas response is valid', async () => {
@@ -42,11 +55,12 @@ describe('Content Studio read decoders', () => {
         content_angle: 'seasonal',
       }),
     ];
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      ideas,
-      total_count: 2,
-      generated_at: '2026-01-01T00:00:00Z',
-    }));
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
+      buildIdeasDecoderPayload(ideas[0], {
+        ideas,
+        total_count: 2,
+      })
+    ));
 
     const received = await fetchContentIdeas();
 
@@ -54,11 +68,12 @@ describe('Content Studio read decoders', () => {
   });
 
   it('rejects the complete ideas response when one nested idea is malformed', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      ideas: [buildApiContentIdea(), { id: 'broken' }],
-      total_count: 2,
-      generated_at: '2026-01-01T00:00:00Z',
-    }));
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
+      buildIdeasDecoderPayload(buildApiContentIdea(), {
+        ideas: [buildApiContentIdea(), { id: 'broken' }],
+        total_count: 2,
+      })
+    ));
 
     await expect(fetchContentIdeas()).rejects.toMatchObject({
       name: 'InvalidContentStudioResponseError',
@@ -67,17 +82,13 @@ describe('Content Studio read decoders', () => {
   });
 
   it('normalizes stored numeric strings and empty pending content in history', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      history: [{
-        ...buildApiHistoryItem(),
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
+      buildHistoryDecoderPayload(buildHistoryItemDecoderRecord({
         competitor_sources_used: '0',
-        generated_content: {},
         batch_size: '2',
         batch_position: '1',
-      }],
-      total_count: 1,
-      unviewed_count: 0,
-    }));
+      }))
+    ));
 
     const received = await fetchContentHistory();
 
@@ -94,70 +105,40 @@ describe('Content Studio read decoders', () => {
   });
 
   it('supplies stable presentation defaults when a legacy history row omits them', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      history: [{
-        id: 'legacy',
-        idea_id: 'idea-legacy',
-        keyword: 'Legacy keyword',
-        status: 'generated',
-        created_at: '2026-01-01T00:00:00Z',
-        updated_at: '2026-01-01T00:00:00Z',
-        generated_content: {},
-      }],
-      total_count: 1,
-      unviewed_count: 0,
-    }));
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(buildHistoryDecoderPayload({
+      id: 'legacy',
+      idea_id: 'idea-legacy',
+      keyword: 'Legacy keyword',
+      status: 'generated',
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+      generated_content: {},
+    })));
 
     const received = await fetchContentHistory();
 
-    expect(received.history).toStrictEqual([{
-      id: 'legacy',
-      keyword: 'Legacy keyword',
-      idea_title: 'Legacy keyword',
-      content_angle: '',
-      competitor_sources_used: 0,
-      status: 'generated',
-      viewed: false,
-      created_at: '2026-01-01T00:00:00Z',
-      updated_at: '2026-01-01T00:00:00Z',
-      generated_content: undefined,
-      content_warning: undefined,
-      error_message: undefined,
-      batch_id: undefined,
-      batch_size: undefined,
-      batch_position: undefined,
-      keyword_id: undefined,
-    }]);
+    expect(received.history).toStrictEqual([
+      buildDecodedLegacyHistoryItem('2026-01-01T00:00:00Z')
+    ]);
   });
 });
 
 describe('Content Studio generation transport', () => {
   it('posts the exact combined Content Brief payload to the single endpoint', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      success: true,
-      id: 'content-1',
-      status: 'pending',
-      keyword: 'Alpha keyword',
-    }));
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
+      buildGenerationDecoderPayload()
+    ));
 
     await startContentGeneration(apiGroupBriefIdea);
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
       'https://api.test.com/content-studio/generate',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ idea: apiGroupBriefIdea }),
-        signal: undefined,
-      }
+      buildJsonRequestInit('POST', { idea: apiGroupBriefIdea })
     );
   });
 
   it('posts one exact durable batch payload to the batch endpoint', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
-      apiBatchStartResponse,
-      202
-    ));
+    mockAcceptedBatchStart();
 
     const received = await startContentBriefBatch(apiBatchRequest);
 
@@ -165,20 +146,12 @@ describe('Content Studio generation transport', () => {
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
     expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
       'https://api.test.com/content-studio/generate-batch',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(apiBatchRequest),
-        signal: undefined,
-      }
+      buildJsonRequestInit('POST', apiBatchRequest)
     );
   });
 
   it('returns every persisted child when a batch is accepted', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
-      apiBatchStartResponse,
-      202
-    ));
+    mockAcceptedBatchStart();
 
     const received = await startContentBriefBatch(apiBatchRequest);
 
@@ -262,10 +235,9 @@ describe('Content Brief template transport', () => {
         updated_at: '2026-01-01T00:00:00Z',
       }),
     ];
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      items: templates,
-      count: 2,
-    }));
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
+      buildTemplateListDecoderPayload(templates)
+    ));
 
     const received = await fetchContentBriefTemplates();
 
@@ -302,17 +274,12 @@ describe('Content Brief template transport', () => {
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
       'https://api.test.com/content-studio/templates',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'Campaign',
-          description: 'Reusable campaign brief',
-          content_angle: 'create_new_landing_page',
-          prompt_template: 'Create for {scope}.',
-        }),
-        signal: undefined,
-      }
+      buildJsonRequestInit('POST', {
+        name: 'Campaign',
+        description: 'Reusable campaign brief',
+        content_angle: 'create_new_landing_page',
+        prompt_template: 'Create for {scope}.',
+      })
     );
   });
 
@@ -328,12 +295,7 @@ describe('Content Brief template transport', () => {
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
       'https://api.test.com/content-studio/templates/saved%2Fid',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Renamed' }),
-        signal: undefined,
-      }
+      buildJsonRequestInit('PUT', { name: 'Renamed' })
     );
   });
 

@@ -2,6 +2,7 @@ import {
   describe, expect, it
 } from 'vitest';
 import { decodeBatchStatusResponse } from './contentStudioDecoders';
+import { apiBatchStatusResponse } from './contentStudio-fixtures';
 import {
   buildAllStatusBatchDecoderPayload,
   buildBatchStatusChildDecoderRecord,
@@ -149,16 +150,7 @@ describe('Content Studio batch status decoder', () => {
 
   it('normalizes every batch status Decimal string', () => {
     const firstChild = buildBatchStatusChildDecoderRecord({ batch_position: '01' });
-    const secondChild = buildBatchStatusChildDecoderRecord({
-      id: 'content-2',
-      idea_id: 'idea-2',
-      keyword_id: 'keyword-2',
-      keyword: 'Beta keyword',
-      status: 'failed',
-      batch_position: '02',
-      has_content: false,
-      error_message: 'Generation failed',
-    });
+    const secondChild = buildBatchStatusChildDecoderRecord({ batch_position: '02' }, 1);
     const decoded = decodeBatchStatusResponse(buildBatchStatusDecoderPayload({
       batch_size: '02',
       children: [firstChild, secondChild],
@@ -174,14 +166,7 @@ describe('Content Studio batch status decoder', () => {
 
     expect(decoded.batch_size).toBe(2);
     expect(decoded.children.map((child) => child.batch_position)).toStrictEqual([1, 2]);
-    expect(decoded.counts).toStrictEqual({
-      pending: 0,
-      generating: 0,
-      generated: 1,
-      failed: 1,
-      missing: 0,
-      total: 2,
-    });
+    expect(decoded.counts).toStrictEqual(apiBatchStatusResponse.counts);
   });
 
   it('returns exact counts when every batch child status is present', () => {

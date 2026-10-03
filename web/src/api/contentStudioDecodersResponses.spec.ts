@@ -111,27 +111,19 @@ describe('Content Studio generation response decoder', () => {
   );
 
   it('returns every optional generation field when each value is valid', () => {
-    expect(decodeGenerateContentResponse(buildGenerationDecoderPayload({
+    const optionalFields = {
       message: 'Generation queued',
       error: '',
       idempotent_hit: false,
-    }))).toStrictEqual({
-      success: true,
-      id: 'content-1',
-      status: 'pending',
-      keyword: 'Alpha keyword',
-      message: 'Generation queued',
-      error: '',
-      idempotent_hit: false,
-    });
+    };
+
+    expect(decodeGenerateContentResponse(buildGenerationDecoderPayload(optionalFields)))
+      .toStrictEqual(buildGenerationDecoderPayload(optionalFields));
   });
 
   it('omits optional generation fields when the server omits them', () => {
     expect(decodeGenerateContentResponse(buildGenerationDecoderPayload())).toStrictEqual({
-      success: true,
-      id: 'content-1',
-      status: 'pending',
-      keyword: 'Alpha keyword',
+      ...buildGenerationDecoderPayload(),
       message: undefined,
       error: undefined,
       idempotent_hit: undefined,

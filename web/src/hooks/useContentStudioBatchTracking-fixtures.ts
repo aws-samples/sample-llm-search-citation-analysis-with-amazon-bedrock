@@ -38,18 +38,37 @@ export function buildTerminalBatchStatusFor(
   };
 }
 
-export function renderTwoRunningBatches() {
-  storeActiveContentStudioBatchIds(['batch-1', 'batch-2']);
+export function buildRunningBatchStatusesFor(
+  batchIds: readonly string[]
+): Record<string, ContentBriefBatchStatusResponse> {
+  return Object.fromEntries(batchIds.map((batchId) => [
+    batchId, buildRunningBatchStatusFor(batchId)
+  ]));
+}
+
+type RecoveryFetchOptions = NonNullable<Parameters<typeof createMockFetch>[0]>;
+
+/**
+ * Stores every key of `batchStatusResponses` as an active batch and renders a
+ * hook that answers each status poll from that (live, mutable) map.
+ */
+export function renderRecoveredBatches(
+  batchStatusResponses: Readonly<Record<string, unknown>>,
+  options: RecoveryFetchOptions = {}
+) {
+  storeActiveContentStudioBatchIds(Object.keys(batchStatusResponses));
   const fetch = createMockFetch({
-    batchStatusResponses: {
-      'batch-1': buildRunningBatchStatusFor('batch-1'),
-      'batch-2': buildRunningBatchStatusFor('batch-2'),
-    },
+    ...options,
+    batchStatusResponses,
   });
   return {
     ...renderContentStudio(fetch),
     fetch,
   };
+}
+
+export function renderTwoRunningBatches() {
+  return renderRecoveredBatches(buildRunningBatchStatusesFor(['batch-1', 'batch-2']));
 }
 
 export function queueRunningBatchStarts(batchIds: readonly string[]): void {

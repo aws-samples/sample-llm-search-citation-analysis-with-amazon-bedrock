@@ -10,7 +10,6 @@ import {
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import type {
   ContentBriefBatchStartResponse,
-  ContentStudioHistory,
   GenerateContentResponse,
 } from '../types';
 import {
@@ -33,9 +32,18 @@ import {
 } from './useContentStudio-strict-fixtures';
 import {
   prepareContentStudioHookTest,
+  queueContentStudioPayloads,
   queueTwoDeferredContentStudioRequests,
   restoreContentStudioHookTest,
+  settleDeferredJson,
 } from './useContentStudio-test-fixtures';
+import { startTwoOverlappingCalls } from './useContentStudio-request-fixtures';
+import {
+  buildStartedGenerationResponse,
+  generationState,
+  renderPendingBatchStart,
+  startOverlappingHistoryLoads,
+} from './useContentStudio-scenario-fixtures';
 import { useContentStudio } from './useContentStudio';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -76,8 +84,7 @@ describe('useContentStudio StrictMode replay lifecycle', () => {
       id: 'content-newer',
     }];
 
-    secondRequest.resolve(createMockJsonResponse(buildContentHistoryPayload(newerHistory)));
-    await act(() => secondRequest.promise);
+    await act(() => settleDeferredJson(secondRequest, buildContentHistoryPayload(newerHistory)));
 
     expect({
       historyIds: rendered.result.current.history.map((item) => item.id),
@@ -86,8 +93,7 @@ describe('useContentStudio StrictMode replay lifecycle', () => {
       historyIds: ['content-newer'],
       loading: false,
     });
-    firstRequest.resolve(createMockJsonResponse(buildContentHistoryPayload(mockContentHistory)));
-    await act(() => firstRequest.promise);
+    await act(() => settleDeferredJson(firstRequest, buildContentHistoryPayload(mockContentHistory)));
     expect(rendered.result.current.history.map((item) => item.id))
       .toStrictEqual(['content-newer']);
     expect(fetch).toHaveBeenCalledTimes(2);
@@ -101,22 +107,16 @@ describe('useContentStudio StrictMode replay lifecycle', () => {
       rendered,
     } = renderReplayedGenerationStart();
 
-    secondRequest.resolve(createMockJsonResponse({
-      success: true,
-      id: 'content-newer',
-      status: 'pending',
-      keyword: 'best hotels',
-    }));
-    await act(() => secondRequest.promise);
+    await act(() => settleDeferredJson(
+      secondRequest,
+      buildStartedGenerationResponse('content-newer')
+    ));
 
     expect(rendered.result.current.generating).toBe(false);
-    firstRequest.resolve(createMockJsonResponse({
-      success: true,
-      id: 'content-discarded',
-      status: 'pending',
-      keyword: 'best hotels',
-    }));
-    await act(() => firstRequest.promise);
+    await act(() => settleDeferredJson(
+      firstRequest,
+      buildStartedGenerationResponse('content-discarded')
+    ));
     expect(rendered.result.current.generating).toBe(false);
     expect(fetch).toHaveBeenCalledTimes(2);
   });
@@ -130,10 +130,7 @@ describe('useContentStudio StrictMode replay lifecycle', () => {
       fetch,
       rendered,
     } = renderReplayedBatchStart();
-    firstRequest.resolve(createMockJsonResponse(
-      buildTerminalBatchStartResponse('batch-1')
-    ));
-    await act(() => firstRequest.promise);
+    await act(() => settleDeferredJson(firstRequest, buildTerminalBatchStartResponse('batch-1')));
 
     expect({
       activeBatches: rendered.result.current.activeBatches,
@@ -142,10 +139,7 @@ describe('useContentStudio StrictMode replay lifecycle', () => {
       activeBatches: [],
       generating: true,
     });
-    secondRequest.resolve(createMockJsonResponse(
-      buildTerminalBatchStartResponse('batch-1')
-    ));
-    await act(() => secondRequest.promise);
+    await act(() => settleDeferredJson(secondRequest, buildTerminalBatchStartResponse('batch-1')));
     expect(storedActiveContentStudioBatchIds()).toStrictEqual([]);
     expect(fetch).toHaveBeenCalledTimes(4);
   });
@@ -154,38 +148,21 @@ describe('useContentStudio StrictMode replay lifecycle', () => {
 describe('useContentStudio history read lifecycle', () => {
   it('keeps loading true until every overlapping history request settles', async () => {
     const {
-      newerRequest, olderRequest
-    } = queueTwoDeferredContentStudioRequests();
-    const { result } = renderHook(() => useContentStudio());
-    const received: {
-      first: Promise<ContentStudioHistory[]>;
-      second: Promise<ContentStudioHistory[]>;
-    } = {
-      first: Promise.resolve([]),
-      second: Promise.resolve([]),
-    };
-    act(() => {
-      received.first = result.current.fetchHistory();
-      received.second = result.current.fetchHistory();
-    });
-    newerRequest.resolve(createMockJsonResponse(buildContentHistoryPayload([
-      mockContentHistory[0]
-    ])));
+      loads, olderRequest, result
+    } = startOverlappingHistoryLoads();
 
-    await act(() => received.second);
+    await act(() => loads.second);
 
     expect(result.current.loading).toBe(true);
     olderRequest.resolve(createMockJsonResponse(buildContentHistoryPayload(mockContentHistory)));
-    const staleResult = await act(() => received.first);
+    const staleResult = await act(() => loads.first);
     expect(staleResult).toStrictEqual([]);
     expect(result.current.loading).toBe(false);
   });
 
   it('clears an earlier history error while a retry is pending', async () => {
     const retryRequest = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockResolvedValueOnce(createMockJsonResponse({}, 500))
-      .mockReturnValueOnce(retryRequest.promise);
+    queueContentStudioPayloads(createMockJsonResponse({}, 500), retryRequest.promise);
     vi.spyOn(console, 'error').mockImplementation(vi.fn());
     const {
       result, unmount
@@ -202,8 +179,7 @@ describe('useContentStudio history read lifecycle', () => {
       loading: true,
     });
     unmount();
-    retryRequest.resolve(createMockJsonResponse(buildContentHistoryPayload([])));
-    await retryRequest.promise;
+    await settleDeferredJson(retryRequest, buildContentHistoryPayload([]));
   });
 
   it('returns an empty result with the exact current history error', async () => {
@@ -224,27 +200,12 @@ describe('useContentStudio history read lifecycle', () => {
   it('ignores an older history failure after a newer request succeeds', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
     const {
-      newerRequest, olderRequest
-    } = queueTwoDeferredContentStudioRequests();
-    const { result } = renderHook(() => useContentStudio());
-    const requests: {
-      older: Promise<ContentStudioHistory[]>;
-      newer: Promise<ContentStudioHistory[]>;
-    } = {
-      older: Promise.resolve([]),
-      newer: Promise.resolve([]),
-    };
-    act(() => {
-      requests.older = result.current.fetchHistory();
-      requests.newer = result.current.fetchHistory();
-    });
-    newerRequest.resolve(createMockJsonResponse(buildContentHistoryPayload([
-      mockContentHistory[0]
-    ])));
-    await act(() => requests.newer);
+      loads, olderRequest, result
+    } = startOverlappingHistoryLoads();
+    await act(() => loads.second);
 
     olderRequest.reject(new TypeError('Older request lost connection'));
-    const staleResult = await act(() => requests.older);
+    const staleResult = await act(() => loads.first);
 
     expect(staleResult).toStrictEqual([]);
     expect(result.current.history.map((item) => item.id)).toStrictEqual(['content-1']);
@@ -280,34 +241,21 @@ describe('useContentStudio generation request lifecycle', () => {
     vi.spyOn(console, 'error').mockImplementation(vi.fn());
     const deferredStarts = queueTwoDeferredContentStudioRequests();
     const { result } = renderHook(() => useContentStudio());
-    const pendingStarts: {
-      first: Promise<GenerateContentResponse | null>;
-      second: Promise<GenerateContentResponse | null>;
-    } = {
-      first: Promise.resolve(null),
-      second: Promise.resolve(null),
-    };
-    act(() => {
-      pendingStarts.first = result.current.generateContent(mockContentIdea);
-      pendingStarts.second = result.current.generateContent(mockContentIdea);
-    });
+    const pendingStarts = startTwoOverlappingCalls<GenerateContentResponse | null>(
+      () => result.current.generateContent(mockContentIdea),
+      null
+    );
 
     deferredStarts.olderRequest.resolve(createMockJsonResponse({}, 500));
     await act(() => pendingStarts.first);
 
-    expect({
-      error: result.current.error,
-      generating: result.current.generating,
-    }).toStrictEqual({
+    expect(generationState(result.current)).toStrictEqual({
       error: null,
       generating: true,
     });
-    deferredStarts.newerRequest.resolve(createMockJsonResponse({
-      success: true,
-      id: 'content-newer',
-      status: 'pending',
-      keyword: 'best hotels',
-    }));
+    deferredStarts.newerRequest.resolve(createMockJsonResponse(
+      buildStartedGenerationResponse('content-newer')
+    ));
     await act(() => pendingStarts.second);
   });
 
@@ -325,15 +273,13 @@ describe('useContentStudio generation request lifecycle', () => {
 
   it('retains the pre-POST candidate when an accepted response settles after unmount', async () => {
     const request = createDeferredResponse();
-    mockAuthenticatedFetch.mockReturnValueOnce(request.promise);
+    queueContentStudioPayloads(request.promise);
     const {
       result, unmount
-    } = renderHook(() => useContentStudio());
-    act(() => { void result.current.generateContentBatch(mockBatchRequest); });
+    } = renderPendingBatchStart();
 
     unmount();
-    request.resolve(createMockJsonResponse(mockBatchStartResponse));
-    await request.promise;
+    await settleDeferredJson(request, mockBatchStartResponse);
 
     expect(storedActiveContentStudioBatchIds()).toStrictEqual(['batch-1']);
     expect(result.current.activeBatches).toStrictEqual([]);
@@ -396,14 +342,10 @@ describe('useContentStudio generation request lifecycle', () => {
     mockAuthenticatedFetch.mockResolvedValueOnce(
       createMockJsonResponse('Bad request', 400, 'Bad Request')
     );
-    const { result } = renderHook(() => useContentStudio());
     vi.spyOn(console, 'error').mockImplementation(vi.fn());
-    const starts: ReturnType<typeof result.current.generateContentBatch>[] = [];
-    act(() => {
-      starts.push(result.current.generateContentBatch(mockBatchRequest));
-    });
+    const { pendingStart } = renderPendingBatchStart();
 
-    await act(() => starts[0]);
+    await act(() => pendingStart);
 
     expect(storedActiveContentStudioBatchIds()).toStrictEqual(['batch-1']);
   });
@@ -416,10 +358,7 @@ describe('useContentStudio generation request lifecycle', () => {
 
     await act(() => result.current.generateContentBatch(mockBatchRequest));
 
-    expect({
-      error: result.current.error,
-      generating: result.current.generating,
-    }).toStrictEqual({
+    expect(generationState(result.current)).toStrictEqual({
       error: 'Content generation failed',
       generating: false,
     });
