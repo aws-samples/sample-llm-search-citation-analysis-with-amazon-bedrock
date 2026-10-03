@@ -64,19 +64,28 @@ export function apiRequestErrors(httpMessage: string): ContractErrors {
   };
 }
 
-/** A failed analysis request, named after the hook that made it (`VisibilityFetchError`). */
-class AnalysisFetchError extends Error {
-  constructor(name: string, message: string) {
-    super(message);
-    this.name = name;
-  }
+/**
+ * A failed-request error class named `name` (`VisibilityFetchError`): the
+ * class is defined under that key, so its constructor name and `name` agree
+ * as the hand-written per-hook classes did.
+ */
+function namedFetchError(name: string) {
+  return {
+    [name]: class extends Error {
+      constructor(message: string) {
+        super(message);
+        this.name = name;
+      }
+    },
+  }[name];
 }
 
 /** Failures named `name`: `defaultMessage` for a non-OK status, the body's message otherwise. */
 export function fetchErrors(name: string, defaultMessage: string): ContractErrors {
+  const errorClass = namedFetchError(name);
   return {
-    createHttpError: () => new AnalysisFetchError(name, defaultMessage),
-    createResponseError: (message: string) => new AnalysisFetchError(name, message),
+    createHttpError: () => new errorClass(defaultMessage),
+    createResponseError: (message: string) => new errorClass(message),
   };
 }
 
