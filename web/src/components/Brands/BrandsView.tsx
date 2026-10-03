@@ -13,6 +13,7 @@ import { Spinner } from '../ui/Spinner';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
 import { describeReportScope } from '../ui/reportScope';
 import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
+import { useExportAction } from '../ui/useExportAction';
 import type {
   Keyword, KeywordGroup, AggregatedBrand, BrandMentionsResponse, BrandConfig, ReportScope
 } from '../../types';
@@ -142,18 +143,12 @@ const BrandReportControls = ({
   selectedTimestamp: string | null;
   onTimestampChange: (timestamp: string | null) => void;
 }) => {
-  const [exporting, setExporting] = useState(false);
-
-  const handleExport = async () => {
-    setExporting(true);
-    try {
-      await exportBrandMentions(data, scopeLabel);
-    } catch (error) {
-      console.error('[brands] Excel export failed:', error);
-    } finally {
-      setExporting(false);
-    }
-  };
+  const {
+    exporting, handleExport 
+  } = useExportAction(
+    () => exportBrandMentions(data, scopeLabel),
+    '[brands] Excel export failed:',
+  );
 
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">

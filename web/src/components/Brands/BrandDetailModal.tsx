@@ -9,6 +9,8 @@ import { ProviderResponsesTab } from './ProviderResponsesTab';
 import { BrandOverviewTab } from './BrandOverviewTab';
 import { SelfReflectionPanel } from '../SelfReflection/SelfReflectionPanel';
 import { CloseIcon } from '../ui';
+import { classificationLabel } from './brandPresentation';
+import { ModalCloseFooter } from '../ui/ModalCloseFooter';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   CHART_BAR_PATHS, LIGHTBULB_PATHS 
@@ -50,17 +52,6 @@ export const BrandDetailModal = ({
     }
   };
 
-  const getClassificationLabel = (classification: string) => {
-    switch (classification) {
-      case 'first_party':
-        return 'First Party';
-      case 'competitor':
-        return 'Competitor';
-      default:
-        return 'Other';
-    }
-  };
-
   const modalContent = (
     <div className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg border border-gray-200 max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
@@ -74,7 +65,7 @@ export const BrandDetailModal = ({
                   brand.classification
                 )}`}
               >
-                {getClassificationLabel(brand.classification)}
+                {classificationLabel(brand.classification)}
               </span>
             </div>
             <p className="text-xs sm:text-sm text-gray-500 mt-1">
@@ -150,14 +141,7 @@ export const BrandDetailModal = ({
         </div>
 
         {/* Footer */}
-        <div className="px-4 sm:px-6 py-4 border-t border-gray-200 flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            Close
-          </button>
-        </div>
+        <ModalCloseFooter onClose={onClose} paddingClassName="px-4 sm:px-6" />
       </div>
     </div>
   );

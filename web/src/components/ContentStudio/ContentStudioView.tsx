@@ -1,6 +1,7 @@
 import {
-  useState, useEffect
+  useState, useEffect, useCallback
 } from 'react';
+import type { ReactNode } from 'react';
 import { useContentStudio } from '../../hooks/useContentStudio';
 import { ContentIdeaCard } from './ContentIdeaCard';
 import { ContentHistory } from './ContentHistory';
@@ -14,6 +15,7 @@ import type {
   Keyword,
 } from '../../types';
 import { ContentBriefBatchProgress } from './ContentBriefBatchProgress';
+import { OverlayDialog } from './OverlayDialog';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   BOLT_PATHS, DOCUMENT_TEXT_PATHS, LIGHTBULB_PATHS, REFRESH_PATHS, WARNING_PATHS 
@@ -101,66 +103,60 @@ function ConfirmGenerateModal({
   const [outputLanguage, setOutputLanguage] = useState('English');
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex min-h-full items-center justify-center p-4">
-        <div className="fixed inset-0 bg-gray-900/50 transition-opacity" onClick={onCancel} />
-
-        <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-          <div className="flex items-start gap-4">
-            <div className="p-3 bg-orange-100 rounded-full">
-              <StrokeIcon className="w-6 h-6 text-orange-600" paths={LIGHTBULB_PATHS} />
-            </div>
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold text-gray-900">Create Content</h3>
-              <p className="text-sm text-gray-600 mt-2">
-                AI will analyze competitor content and generate optimized content for:
-              </p>
-              <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-                <p className="font-medium text-gray-900">{idea.title}</p>
-                <p className="text-sm text-gray-500 mt-1">Keyword: {idea.keyword}</p>
-                {idea.competitor_urls && idea.competitor_urls.length > 0 && (
-                  <p className="text-sm text-gray-500">{idea.competitor_urls.length} competitor sources will be analyzed</p>
-                )}
-              </div>
-              <div className="mt-3">
-                <label htmlFor="output-language" className="block text-sm font-medium text-gray-700 mb-1">
-                  Output Language
-                </label>
-                <select
-                  id="output-language"
-                  value={outputLanguage}
-                  onChange={e => setOutputLanguage(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
-                >
-                  {GROUP_BRIEF_LANGUAGES.map(lang => (
-                    <option key={lang} value={lang}>{lang}</option>
-                  ))}
-                </select>
-              </div>
-              <p className="text-xs text-gray-500 mt-3">
-                This may take up to a minute. You&apos;ll be notified when it&apos;s ready.
-              </p>
-            </div>
+    <OverlayDialog onDismiss={onCancel} panelClassName="max-w-md w-full p-6">
+      <div className="flex items-start gap-4">
+        <div className="p-3 bg-orange-100 rounded-full">
+          <StrokeIcon className="w-6 h-6 text-orange-600" paths={LIGHTBULB_PATHS} />
+        </div>
+        <div className="flex-1">
+          <h3 className="text-lg font-semibold text-gray-900">Create Content</h3>
+          <p className="text-sm text-gray-600 mt-2">
+            AI will analyze competitor content and generate optimized content for:
+          </p>
+          <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+            <p className="font-medium text-gray-900">{idea.title}</p>
+            <p className="text-sm text-gray-500 mt-1">Keyword: {idea.keyword}</p>
+            {idea.competitor_urls && idea.competitor_urls.length > 0 && (
+              <p className="text-sm text-gray-500">{idea.competitor_urls.length} competitor sources will be analyzed</p>
+            )}
           </div>
-
-          <div className="flex gap-3 mt-6">
-            <button
-              onClick={onCancel}
-              className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+          <div className="mt-3">
+            <label htmlFor="output-language" className="block text-sm font-medium text-gray-700 mb-1">
+              Output Language
+            </label>
+            <select
+              id="output-language"
+              value={outputLanguage}
+              onChange={e => setOutputLanguage(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
             >
-              Cancel
-            </button>
-            <button
-              onClick={() => onConfirm(outputLanguage)}
-              className="flex-1 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
-            >
-              <StrokeIcon className="w-4 h-4" paths={BOLT_PATHS} />
-              Generate Content
-            </button>
+              {GROUP_BRIEF_LANGUAGES.map(lang => (
+                <option key={lang} value={lang}>{lang}</option>
+              ))}
+            </select>
           </div>
+          <p className="text-xs text-gray-500 mt-3">
+            This may take up to a minute. You&apos;ll be notified when it&apos;s ready.
+          </p>
         </div>
       </div>
-    </div>
+
+      <div className="flex gap-3 mt-6">
+        <button
+          onClick={onCancel}
+          className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => onConfirm(outputLanguage)}
+          className="flex-1 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
+        >
+          <StrokeIcon className="w-4 h-4" paths={BOLT_PATHS} />
+          Generate Content
+        </button>
+      </div>
+    </OverlayDialog>
   );
 }
 
@@ -193,6 +189,30 @@ const Header = ({
   </div>
 );
 
+interface TabButtonProps {
+  tab: TabType;
+  activeTab: TabType;
+  setActiveTab: (tab: TabType) => void;
+  /** Appended to the base classes, before the active-state classes. */
+  positionClassName?: string;
+  children: ReactNode;
+}
+
+const TabButton = ({
+  tab, activeTab, setActiveTab, positionClassName = '', children
+}: TabButtonProps) => (
+  <button
+    onClick={() => setActiveTab(tab)}
+    className={`pb-3 text-sm font-medium border-b-2 transition-colors${positionClassName} ${
+      activeTab === tab
+        ? 'border-gray-900 text-gray-900'
+        : 'border-transparent text-gray-500 hover:text-gray-700'
+    }`}
+  >
+    {children}
+  </button>
+);
+
 interface TabsProps {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
@@ -206,39 +226,18 @@ const Tabs = ({
 }: TabsProps) => (
   <div className="border-b border-gray-200">
     <nav className="flex gap-8 overflow-x-auto">
-      <button
-        onClick={() => setActiveTab('ideas')}
-        className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-          activeTab === 'ideas'
-            ? 'border-gray-900 text-gray-900'
-            : 'border-transparent text-gray-500 hover:text-gray-700'
-        }`}
-      >
+      <TabButton tab="ideas" activeTab={activeTab} setActiveTab={setActiveTab}>
         Content Ideas
         {highPriorityCount > 0 && (
           <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">
             {highPriorityCount} high priority
           </span>
         )}
-      </button>
-      <button
-        onClick={() => setActiveTab('brief')}
-        className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-          activeTab === 'brief'
-            ? 'border-gray-900 text-gray-900'
-            : 'border-transparent text-gray-500 hover:text-gray-700'
-        }`}
-      >
+      </TabButton>
+      <TabButton tab="brief" activeTab={activeTab} setActiveTab={setActiveTab}>
         Content Brief
-      </button>
-      <button
-        onClick={() => setActiveTab('history')}
-        className={`pb-3 text-sm font-medium border-b-2 transition-colors relative ${
-          activeTab === 'history'
-            ? 'border-gray-900 text-gray-900'
-            : 'border-transparent text-gray-500 hover:text-gray-700'
-        }`}
-      >
+      </TabButton>
+      <TabButton tab="history" activeTab={activeTab} setActiveTab={setActiveTab} positionClassName=" relative">
         Generated Content
         {unviewedCount > 0 && (
           <span className="ml-2 px-2 py-0.5 text-xs bg-orange-500 text-white rounded-full font-semibold animate-pulse">
@@ -250,7 +249,7 @@ const Tabs = ({
             {historyLength}
           </span>
         )}
-      </button>
+      </TabButton>
     </nav>
   </div>
 );
@@ -289,15 +288,19 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
     deleteContent
   } = useContentStudio();
 
-  useEffect(() => {
-    if (activeTab === 'ideas') {
+  const loadTab = useCallback((tab: TabType) => {
+    if (tab === 'ideas') {
       fetchIdeas();
       return;
     }
-    if (activeTab === 'history') {
+    if (tab === 'history') {
       fetchHistory();
     }
-  }, [activeTab, fetchIdeas, fetchHistory]);
+  }, [fetchIdeas, fetchHistory]);
+
+  useEffect(() => {
+    loadTab(activeTab);
+  }, [activeTab, loadTab]);
 
   const handleCreateContent = (idea: ContentIdea) => {
     setPendingIdea(idea);
@@ -345,15 +348,7 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
     setPendingIdea(null);
   };
 
-  const handleRefresh = () => {
-    if (activeTab === 'ideas') {
-      fetchIdeas();
-      return;
-    }
-    if (activeTab === 'history') {
-      fetchHistory();
-    }
-  };
+  const handleRefresh = () => loadTab(activeTab);
 
   const actionableIdeas = ideas.filter(idea => idea.actionable);
   const highPriorityCount = actionableIdeas.filter(i => i.priority === 'high').length;

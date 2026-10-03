@@ -5,6 +5,8 @@ import type { ContentStudioHistory } from '../../types';
 import { Spinner } from '../ui/Spinner';
 import { exportToDocx } from '../../exporters/documentGenerator';
 import { CopyButtonLabel } from './CopyButtonLabel';
+import { useExportAction } from '../ui/useExportAction';
+import { OverlayDialog } from './OverlayDialog';
 import {
   formatContentWarning, getContentTitle
 } from './contentPresentation';
@@ -24,56 +26,45 @@ export const ContentDetailModal = ({
   item, onClose, onCopy, copied
 }: ContentDetailModalProps) => {
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
-  const [exporting, setExporting] = useState(false);
 
   const content = item.generated_content;
   const displayTitle = getContentTitle(item);
   const fullContent = `# ${displayTitle}\n\n${content?.meta_description ?? ''}\n\n${content?.body ?? ''}`;
 
-  const handleExportDocx = async () => {
-    if (!content) return;
-    setExporting(true);
-
-    try {
-      await exportToDocx({
+  const {
+    exporting, handleExport: handleExportDocx 
+  } = useExportAction(
+    content
+      ? () => exportToDocx({
         content: {
           ...content,
           title: displayTitle,
         },
         keyword: item.keyword
-      });
-    } catch (error) {
-      console.error('Error exporting to DOCX:', error);
-    } finally {
-      setExporting(false);
-    }
-  };
+      })
+      : null,
+    'Error exporting to DOCX:',
+  );
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex min-h-full items-center justify-center p-4">
-        <div className="fixed inset-0 bg-gray-900/50 transition-opacity" onClick={onClose} />
-
-        <div className="relative bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
-          <ContentDetailHeader
-            item={item}
-            title={displayTitle}
-            viewMode={viewMode}
-            setViewMode={setViewMode}
-            exporting={exporting}
-            onExportDocx={handleExportDocx}
-            onCopy={() => onCopy(fullContent)}
-            copied={copied}
-            onClose={onClose}
-          />
-          <ContentDetailBody
-            content={content}
-            contentWarning={item.content_warning}
-            viewMode={viewMode}
-          />
-        </div>
-      </div>
-    </div>
+    <OverlayDialog onDismiss={onClose} panelClassName="max-w-4xl w-full max-h-[90vh] overflow-hidden">
+      <ContentDetailHeader
+        item={item}
+        title={displayTitle}
+        viewMode={viewMode}
+        setViewMode={setViewMode}
+        exporting={exporting}
+        onExportDocx={handleExportDocx}
+        onCopy={() => onCopy(fullContent)}
+        copied={copied}
+        onClose={onClose}
+      />
+      <ContentDetailBody
+        content={content}
+        contentWarning={item.content_warning}
+        viewMode={viewMode}
+      />
+    </OverlayDialog>
   );
 };
 

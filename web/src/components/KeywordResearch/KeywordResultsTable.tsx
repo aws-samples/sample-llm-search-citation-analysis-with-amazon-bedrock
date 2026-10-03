@@ -5,6 +5,7 @@ import {
 } from '../../hooks/keywordIdentity';
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { exportResearchKeywords } from './researchExport';
+import { useExportAction } from '../ui/useExportAction';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import { DUPLICATE_PATHS } from '../ui/iconPaths';
 
@@ -23,19 +24,7 @@ export const KeywordResultsTable = ({
 }: KeywordResultsTableProps) => {
   const [sortBy, setSortBy] = useState<'relevance' | 'competition'>('relevance');
   const [filterIntent, setFilterIntent] = useState<string>('all');
-  const [exporting, setExporting] = useState(false);
   const { copy } = useClipboardCopy();
-
-  const handleExport = async () => {
-    setExporting(true);
-    try {
-      await exportResearchKeywords(sortedKeywords, title);
-    } catch (error) {
-      console.error('[research] Excel export failed:', error);
-    } finally {
-      setExporting(false);
-    }
-  };
 
   const getIntentColor = (intent: string) => {
     switch (intent?.toLowerCase()) {
@@ -72,6 +61,12 @@ export const KeywordResultsTable = ({
     const rightCompetition = right.competition?.toLowerCase() ?? '';
     return (competitionOrder[leftCompetition] ?? 2) - (competitionOrder[rightCompetition] ?? 2);
   });
+  const {
+    exporting, handleExport 
+  } = useExportAction(
+    () => exportResearchKeywords(sortedKeywords, title),
+    '[research] Excel export failed:',
+  );
 
   if (uniqueKeywords.length === 0) return null;
 
