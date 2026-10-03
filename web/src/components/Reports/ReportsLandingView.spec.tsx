@@ -1,11 +1,15 @@
 import {
-  describe, it, expect 
+  describe, it, expect, vi
 } from 'vitest';
 import {
   render, screen 
 } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ReportsLandingView } from './ReportsLandingView';
+import { mockApiGet } from '../../api/clientMock-fixtures';
+import { reportsListPayload } from './customReport/customReportPages-fixtures';
+
+vi.mock('../../api/client', () => import('../../api/clientMock-fixtures'));
 
 /**
  * The landing view lists every report as a card linking to it. Tests pin:
@@ -15,12 +19,18 @@ import { ReportsLandingView } from './ReportsLandingView';
  */
 describe('ReportsLandingView', () => {
   function renderLanding() {
+    mockApiGet.mockResolvedValue(reportsListPayload());
     return render(
       <MemoryRouter>
         <ReportsLandingView />
       </MemoryRouter>,
     );
   }
+
+  it('offers to create a custom report above the report cards', async () => {
+    renderLanding();
+    expect(await screen.findByRole('button', { name: 'Create custom report' })).toBeInTheDocument();
+  });
 
   it('lists the four strategic reports by title', () => {
     renderLanding();

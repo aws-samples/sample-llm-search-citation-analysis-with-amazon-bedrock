@@ -45,7 +45,8 @@ interface PeriodSelectorProps {
 
 const PERIOD_OPTIONS = SCOPE_REPORT_PERIODS.map((period) => <option key={period} value={period}>{`Last ${period} days`}</option>);
 
-function PeriodSelector({
+/** The trend period picker of the scope reports, and of custom reports. */
+export function PeriodSelector({
   days, onChange
 }: PeriodSelectorProps) {
   const id = useId();

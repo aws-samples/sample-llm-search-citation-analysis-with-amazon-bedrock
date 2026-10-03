@@ -507,6 +507,11 @@ export function unguardedVerbs(methods: ApiGatewayMethodSnapshot[], functionLogi
   };
 }
 
+/** The HTTP verbs of `methods`, alphabetically. */
+export function sortedHttpMethods(methods: ApiGatewayMethodSnapshot[]): string[] {
+  return methods.map((method) => method.httpMethod).sort((left, right) => left.localeCompare(right));
+}
+
 function retentionDaysOf(logGroups: Record<string, unknown>, logicalId: string): number {
   const days = resolvePath(logGroups[logicalId], ['Properties', 'RetentionInDays']);
   return typeof days === 'number' ? days : Number.NaN;
@@ -1354,4 +1359,77 @@ export function providerSearchBranch(definition: unknown, providerId: string): u
 export function providerSearchBranchStarts(definition: unknown): unknown[] {
   const branches = resolvePath(keywordChildStates(definition), ['SearchAllProviders', 'Branches']);
   return (Array.isArray(branches) ? branches : []).map((branch) => resolvePath(branch, ['StartAt']));
+}
+
+export interface CustomReportsSnapshot {
+  tableLogicalId: string;
+  table: {
+    keySchema: unknown;
+    billingMode: unknown;
+    pointInTimeRecovery: unknown;
+    encryption: unknown;
+    deletionPolicy: string;
+  };
+  configMgmtFunctionLogicalId: string;
+  configMgmtTableEnv: unknown;
+  configMgmtTableActions: string[];
+  collectionMethods: ApiGatewayMethodSnapshot[];
+  itemMethods: ApiGatewayMethodSnapshot[];
+}
+
+export const EMPTY_CUSTOM_REPORTS_SNAPSHOT: CustomReportsSnapshot = {
+  tableLogicalId: '',
+  table: {
+    keySchema: undefined,
+    billingMode: undefined,
+    pointInTimeRecovery: undefined,
+    encryption: undefined,
+    deletionPolicy: '',
+  },
+  configMgmtFunctionLogicalId: '',
+  configMgmtTableEnv: undefined,
+  configMgmtTableActions: [],
+  collectionMethods: [],
+  itemMethods: [],
+};
+
+/** The saved custom reports table, its ConfigMgmt wiring and its four API verbs, as synthesized. */
+export function extractCustomReportsSnapshot(template: Template): CustomReportsSnapshot {
+  const tableName = 'CitationAnalysis-CustomReports';
+  const configMgmt = 'CitationAnalysis-API-ConfigMgmt';
+  const tableLogicalId = findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', tableName);
+  const table: unknown = template.findResources('AWS::DynamoDB::Table')[tableLogicalId];
+  const collectionId = findApiResourceId(template, 'custom-reports');
+  return {
+    tableLogicalId,
+    table: {
+      keySchema: resolvePath(table, ['Properties', 'KeySchema']),
+      billingMode: resolvePath(table, ['Properties', 'BillingMode']),
+      pointInTimeRecovery: resolvePath(
+        table, ['Properties', 'PointInTimeRecoverySpecification', 'PointInTimeRecoveryEnabled']
+      ),
+      encryption: resolvePath(table, ['Properties', 'SSESpecification']),
+      deletionPolicy: resolveString(table, ['DeletionPolicy']),
+    },
+    configMgmtFunctionLogicalId: findLambdaLogicalId(template, configMgmt),
+    configMgmtTableEnv: extractLambdaEnvVars(template, configMgmt).DYNAMODB_TABLE_CUSTOM_REPORTS,
+    configMgmtTableActions: extractFunctionRoleActionsOn(template, configMgmt, tableLogicalId),
+    collectionMethods: extractApiMethods(template, collectionId),
+    itemMethods: extractApiMethods(template, findApiResourceId(template, '{id}', collectionId)),
+  };
+}
+
+/** The dashboard CSP from the CloudFront security-headers policy, as `{directive: sources}`. */
+export function extractContentSecurityPolicy(template: Template): Record<string, string[]> {
+  const [policy] = Object.values(template.findResources('AWS::CloudFront::ResponseHeadersPolicy'));
+  const header = resolveString(policy, [
+    'Properties', 'ResponseHeadersPolicyConfig', 'SecurityHeadersConfig', 'ContentSecurityPolicy', 'ContentSecurityPolicy',
+  ]);
+  return Object.fromEntries(
+    header
+      .split(';')
+      .map((directive) => directive.trim().split(/\s+/))
+      .filter(([name]) => name !== '')
+      .map(([name, ...sources]) => [name, sources])
+  );
 }

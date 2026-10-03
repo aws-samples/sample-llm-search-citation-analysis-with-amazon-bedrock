@@ -1,4 +1,4 @@
-"""ConfigMgmt dispatch coverage for the alerts API."""
+"""ConfigMgmt dispatch coverage for the alerts and custom-reports APIs."""
 
 from __future__ import annotations
 
@@ -14,16 +14,22 @@ _API_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 @pytest.mark.parametrize(
-    ('method', 'path'),
+    ('method', 'resource', 'path', 'handler_file'),
     [
-        ('GET', '/api/alerts/settings'),
-        ('POST', '/api/alerts/test-notification'),
+        ('GET', '/api/alerts/settings', '/api/alerts/settings', 'manage-alerts.py'),
+        ('POST', '/api/alerts/test-notification', '/api/alerts/test-notification', 'manage-alerts.py'),
+        ('GET', '/api/custom-reports', '/api/custom-reports', 'manage-custom-reports.py'),
+        ('POST', '/api/custom-reports', '/api/custom-reports', 'manage-custom-reports.py'),
+        ('PUT', '/api/custom-reports/{id}', '/api/custom-reports/report-1', 'manage-custom-reports.py'),
+        ('DELETE', '/api/custom-reports/{id}', '/api/custom-reports/report-1', 'manage-custom-reports.py'),
     ],
 )
-def test_dispatches_alert_paths_to_manage_alerts_handler(
+def test_dispatches_each_config_path_to_its_handler_file(
     monkeypatch: pytest.MonkeyPatch,
     method: str,
+    resource: str,
     path: str,
+    handler_file: str,
 ) -> None:
     router = load_handler_module(
         _API_DIR,
@@ -35,12 +41,12 @@ def test_dispatches_alert_paths_to_manage_alerts_handler(
     monkeypatch.setattr(HandlerLoader, 'get', loader_get)
     event = {
         'httpMethod': method,
-        'resource': path,
+        'resource': resource,
         'path': path,
     }
 
     response = router.handler(event, None)
 
     assert response == {'statusCode': 200, 'body': '{}'}
-    assert loader_get.call_args.args[-1] == 'manage-alerts.py'
+    assert loader_get.call_args.args[-1] == handler_file
     child.assert_called_once_with(event, None)

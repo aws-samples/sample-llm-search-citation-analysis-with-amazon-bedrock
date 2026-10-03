@@ -6,7 +6,7 @@ import { TopCitationTargetsSection } from './sections/TopCitationTargetsSection'
 import { CoverageMapSection } from './sections/CoverageMapSection';
 import { BriefsReadySection } from './sections/BriefsReadySection';
 import { SuggestedBriefsSection } from './sections/SuggestedBriefsSection';
-import type { ContentPlanSectionProps } from './sections/ContentPlanSectionProps';
+import { joinedContentPlan } from './sections/ContentPlanSectionProps';
 
 /**
  * Content Action Plan — the printable version of "what to build, what to
@@ -26,15 +26,7 @@ export function ContentActionPlanReport() {
 
   usePrintMode({ ready: data.ready });
 
-  // The sections that join all three sources wait for both fetches and
-  // surface whichever failed first.
-  const contentPlanProps: ContentPlanSectionProps = {
-    gaps: data.gaps,
-    ideas: data.ideas,
-    history: data.history,
-    loading: data.gapsLoading || data.studioLoading,
-    error: data.gapsError ?? data.studioError,
-  };
+  const contentPlanProps = joinedContentPlan(data);
 
   return (
     <ReportLayout

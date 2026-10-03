@@ -13,7 +13,7 @@ The dashboard sidebar has these sections:
 | Insights | **Dashboard** (totals, citations by provider, brand mentions, KPI alerts), **Visibility** (the KPIs for one keyword, a keyword group or all keywords, with 7/30/90-day KPI history, brand leaderboard, per-engine KPIs and cited domains; persona filter), **Brand Mentions** (every brand named, with sentiment, rank and a per-brand ranking analysis), **Citations** (cited URLs by frequency, with a per-keyword and per-provider breakdown), **Prompt Insights** (which queries and personas rank you in the top 3), **Citation Gaps** (sources that cite competitors but not you), **Action Center** (prioritised recommendations with a status you can track) |
 | Research | **Keyword Research**: Expand, Competitor (analyse a competitor website), Agent (a Bedrock research agent that plans web-search queries over up to three rounds, with saved prompt templates) and History |
 | Content | **Content Studio**: content ideas and briefs from citation gaps and ranking analyses, single or per keyword group, in any output language, exportable as DOCX |
-| Reporting | **Reports**: nine print-ready reports (below) |
+| Reporting | **Reports**: nine print-ready reports (below), plus custom reports you build from their sections |
 | Data | **Recent Searches** (analysis history with full answers), **Raw Responses** (raw JSON answers and crawl screenshots from S3) |
 | Operations | **Run Analysis**, **Schedule** (EventBridge Scheduler runs) |
 | Configuration | **Settings**: Keywords (with keyword groups), Brand Tracking, Personas, AI Providers, Alerts, Users (admins only) |
@@ -43,6 +43,8 @@ Listed on **Reporting > Reports** (`web/src/components/Reports/ReportsLandingVie
 | Competitor Gap Report | `/reports/competitor` (`/reports/competitor/:competitor`) | Content / PR strategist |
 | Content Action Plan | `/reports/content-action-plan` | Content strategist |
 | Keyword Deep Dive | `/reports/keyword` (`/reports/keyword/:keyword`) | SEO / AI search lead |
+
+**Custom reports** (`/reports/custom/new`, `/reports/custom/:id`, `/reports/custom/:id/edit`; `web/src/components/Reports/customReport/`): any signed-in user can name a report, pick blocks from a list sorted into categories (one per report above, plus their own headings, Markdown text, https images and YouTube or Vimeo videos), drag or add them into one ordered list and save it. Every user sees every saved report (at most 50). A saved report opens on every keyword and its saved period (30, 90 or 180 days); the reader can narrow it to a keyword group or one keyword and change the period in the URL, like the scope reports. Each data source is fetched once however many blocks read it. A block that needs a particular scope (a single keyword for the Keyword Deep Dive blocks, a keyword group for the group KPI blocks) says so instead of showing the wrong data. The catalogue and the stored block types live in `customReport/blockCatalog.ts`.
 
 ### KPIs
 
@@ -87,6 +89,7 @@ All tables are DynamoDB on-demand with AWS-managed encryption, point-in-time rec
 | ProviderConfig | provider_id | Provider enablement, model override, health |
 | QueryPrompts | id | Personas |
 | ContentStudio, ContentBriefBatches, ContentBriefTemplates | id / batch_id / id | Generated content, batch manifests, saved prompt templates |
+| CustomReports | id | Saved custom reports (title, ordered blocks, period; at most 50) |
 | SelfReflection | keyword_brand / persona_timestamp | Ranking analysis cache (24 h TTL) |
 | RecommendationStatus | recommendation_id | Action Center item status (TTL) |
 | KpiSnapshots, KpiAlerts, AlertSettings, ContentChanges | group_id / snapshot_at, id, config_id, group_id / changed_at | KPI alert baselines, alerts, thresholds, content-change markers |
@@ -95,7 +98,7 @@ S3 buckets (`citation-analysis-<name>-<account>`): `keywords` (keyword files and
 
 ### API and hosting
 
-A REST API (`CitationAnalysis-API`, stage `prod`, all routes under `/api`) with Lambda proxy integrations and a Cognito user pool authorizer on every route except `GET /api/health`. The dashboard is a static Vite build in a private S3 bucket served by CloudFront through origin access control.
+A REST API (`CitationAnalysis-API`, stage `prod`, all routes under `/api`) with Lambda proxy integrations and a Cognito user pool authorizer on every route except `GET /api/health`. Saved custom reports are `GET`/`POST /api/custom-reports` and `PUT`/`DELETE /api/custom-reports/{id}` on API-ConfigMgmt, open to any signed-in user. The dashboard is a static Vite build in a private S3 bucket served by CloudFront through origin access control; its content security policy allows embedded players from `www.youtube-nocookie.com` and `player.vimeo.com` only (custom report video blocks).
 
 ## Project structure
 

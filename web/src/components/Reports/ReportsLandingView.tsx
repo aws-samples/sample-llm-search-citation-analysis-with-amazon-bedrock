@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { CustomReportsPanel } from './customReport/CustomReportsPanel';
 
 interface ReportEntry {
   readonly title: string;
@@ -90,6 +91,8 @@ export function ReportsLandingView() {
           as PDF button on any report to export it for sharing.
         </p>
       </div>
+
+      <CustomReportsPanel />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {REPORT_CATALOG.map((report) => (

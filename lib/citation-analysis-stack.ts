@@ -721,6 +721,13 @@ export class CitationAnalysisStack extends cdk.Stack {
       partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
     });
 
+    // Saved custom report layouts (Reports > Custom report builder), shared
+    // by every signed-in user and capped at 50 rows by the handler.
+    const customReportsTable = citationAnalysisTable(this, 'CustomReportsTable', {
+      tableName: 'CitationAnalysis-CustomReports',
+      partitionKey: { name: 'id', type: dynamodb.AttributeType.STRING },
+    });
+
     // DynamoDB Table: ProviderConfig
     // Stores AI provider enable/disable configuration
     const providerConfigTable = citationAnalysisTable(this, 'ProviderConfigTable', {
@@ -2211,7 +2218,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       },
     });
 
-    // Consolidated Config Management Lambda (query-prompts, schedules, providers, and KPI alerts)
+    // Consolidated Config Management Lambda (query-prompts, schedules, providers, KPI alerts and custom reports)
     const configMgmtFunction = new lambda.Function(this, 'ConfigMgmtFunction', {
       functionName: 'CitationAnalysis-API-ConfigMgmt',
       runtime: lambda.Runtime.PYTHON_3_12,
@@ -2222,11 +2229,12 @@ export class CitationAnalysisStack extends cdk.Stack {
         'manage-schedule.py',
         'manage-providers.py',
         'manage-alerts.py',
+        'manage-custom-reports.py',
       ]),
       layers: [sharedLayer],
       timeout: cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
       memorySize: 256,
-      description: 'API: Consolidated query prompts, schedules, providers, and KPI alerts',
+      description: 'API: Consolidated query prompts, schedules, providers, KPI alerts and custom reports',
       logGroup: apiLambdaLogGroup(this, 'ConfigMgmtLogGroup', 'CitationAnalysis-API-ConfigMgmt'),
       environment: {
         // Audit #12 canonical names.
@@ -2235,6 +2243,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_KPI_ALERTS: kpiAlertsTable.tableName,
         DYNAMODB_TABLE_ALERT_SETTINGS: alertSettingsTable.tableName,
         DYNAMODB_TABLE_CONTENT_CHANGES: contentChangesTable.tableName,
+        DYNAMODB_TABLE_CUSTOM_REPORTS: customReportsTable.tableName,
         KPI_ALERTS_TOPIC_ARN: kpiAlertsTopic.topicArn,
         // Schedules and content-change markers validate group ids.
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
@@ -2315,6 +2324,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     kpiAlertsTable.grantReadWriteData(configMgmtFunction);
     alertSettingsTable.grantReadWriteData(configMgmtFunction);
     contentChangesTable.grantReadWriteData(configMgmtFunction);
+    customReportsTable.grantReadWriteData(configMgmtFunction);
     configMgmtFunction.addToRolePolicy(new iam.PolicyStatement({
       effect: iam.Effect.ALLOW,
       actions: ['sns:ListSubscriptionsByTopic', 'sns:Publish', 'sns:Subscribe'],
@@ -3043,6 +3053,15 @@ export class CitationAnalysisStack extends cdk.Stack {
     contentChangesResource.addMethod('GET', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
     contentChangesResource.addMethod('POST', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
 
+    // Saved custom reports, open to every signed-in user (no admin gate in
+    // the handler); `manage-custom-reports.py` owns the routes.
+    const customReportsResource = apiResource.addResource('custom-reports');
+    customReportsResource.addMethod('GET', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+    customReportsResource.addMethod('POST', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+    const customReportIdResource = customReportsResource.addResource('{id}');
+    customReportIdResource.addMethod('PUT', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+    customReportIdResource.addMethod('DELETE', new apigateway.LambdaIntegration(configMgmtFunction, integrationOptions), methodOptions);
+
     // ========================================
     // User Management API
     // ========================================
@@ -3157,7 +3176,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       comment: 'Security headers for Citation Analysis Dashboard',
       securityHeadersBehavior: {
         contentSecurityPolicy: {
-          contentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.amazonaws.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none';",
+          contentSecurityPolicy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.amazonaws.com; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none';",
           override: true,
         },
         contentTypeOptions: {override: true,},

@@ -35,4 +35,14 @@ describe('ReportsRouter', () => {
       name: title,
     })).toBeInTheDocument();
   });
+
+  it('opens the custom report builder at /reports/custom/new', async () => {
+    render(
+      <MemoryRouter initialEntries={['/reports/custom/new']}>
+        <ReportsRouter keywords={SCOPE_KEYWORDS} />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'Create a custom report' })).toBeInTheDocument();
+  });
 });

@@ -50,6 +50,14 @@ const SentimentReport = lazy(() =>
   import('./SentimentReport').then((m) => ({default: m.SentimentReport,})),
 );
 
+const CustomReportBuilder = lazy(() =>
+  import('./customReport/CustomReportBuilder').then((m) => ({default: m.CustomReportBuilder,})),
+);
+
+const CustomReportView = lazy(() =>
+  import('./customReport/CustomReportView').then((m) => ({default: m.CustomReportView,})),
+);
+
 interface Props {readonly keywords: ReadonlyArray<Keyword>;}
 
 function ReportFallback() {
@@ -124,6 +132,12 @@ export function ReportsRouter({ keywords }: Props) {
           <Route
             path="/reports/sentiment"
             element={<SentimentReport keywords={keywords} />}
+          />
+          <Route path="/reports/custom/new" element={<CustomReportBuilder />} />
+          <Route path="/reports/custom/:id/edit" element={<CustomReportBuilder />} />
+          <Route
+            path="/reports/custom/:id"
+            element={<CustomReportView keywords={keywords} />}
           />
           <Route path="*" element={<Navigate to="/reports" replace />} />
         </Routes>

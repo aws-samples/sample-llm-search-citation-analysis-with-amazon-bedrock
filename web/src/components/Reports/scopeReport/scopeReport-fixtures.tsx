@@ -147,7 +147,7 @@ export const SCOPE_REPORTS: readonly ScopeReportCase[] = [
 ];
 
 /** The router's current path and query, read by its label "Current location". */
-function CurrentLocation() {
+export function CurrentLocation() {
   const {
     pathname, search
   } = useLocation();
