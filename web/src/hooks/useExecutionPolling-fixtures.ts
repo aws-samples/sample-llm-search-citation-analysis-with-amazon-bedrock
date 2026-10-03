@@ -3,6 +3,7 @@ import {
   act, renderHook 
 } from '@testing-library/react';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { createMockJsonResponse } from '../test/fetchResponses';
 import type { AnalysisScope } from '../types';
 import { useExecutionPolling } from './useExecutionPolling';
 
@@ -83,16 +84,9 @@ export function createMockFetch(options: {
   return vi.fn().mockImplementation((url: string) => {
     if (url.includes('/trigger')) {
       if (options.triggerSuccess === false) {
-        return Promise.resolve({
-          ok: false,
-          status: 500,
-          json: () => Promise.resolve({ error: 'Trigger failed' }),
-        });
+        return Promise.resolve(createMockJsonResponse({ error: 'Trigger failed' }, 500));
       }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.triggerResponse ?? createMockTriggerResponse()),
-      });
+      return Promise.resolve(createMockJsonResponse(options.triggerResponse ?? createMockTriggerResponse()));
     }
 
     if (url.includes('/executions/')) {
@@ -100,10 +94,7 @@ export function createMockFetch(options: {
         ? options.statusSequence[statusCallCount.current++] ?? options.statusSequence[options.statusSequence.length - 1]
         : options.statusResponse ?? createMockStatusResponse('RUNNING');
 
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(response),
-      });
+      return Promise.resolve(createMockJsonResponse(response));
     }
 
     return Promise.resolve({

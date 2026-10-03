@@ -28,6 +28,7 @@ import { advanceFakeTime } from '../test/fakeTime';
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { spyOnAbortAfterPendingUnmount } from '../test/abortOnUnmount';
 
 
 describe('useDashboardData', () => {
@@ -122,14 +123,9 @@ describe('useDashboardData', () => {
   });
 
   it('aborts the active dashboard request when the owner unmounts', () => {
-    const abortSpy = vi.spyOn(AbortController.prototype, 'abort');
-    mockAuthenticatedFetch.mockImplementation(() => new Promise<Response>(vi.fn()));
-    const { unmount } = renderHook(() => useDashboardData());
-
-    unmount();
+    const abortSpy = spyOnAbortAfterPendingUnmount(() => renderHook(() => useDashboardData()));
 
     expect(abortSpy).toHaveBeenCalledWith();
-    abortSpy.mockRestore();
   });
 
   it('returns the same reconciliation callback after rerender', async () => {

@@ -6,6 +6,7 @@ import type {
   S3BrowseResponse, RawResponseContent 
 } from '../types';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { createMockJsonResponse } from '../test/fetchResponses';
 import { useRawResponses } from './useRawResponses';
 
 /**
@@ -86,43 +87,25 @@ export function createMockFetch(options: {
 } = {}) {
   return vi.fn().mockImplementation((url: string) => {
     if (options.shouldFail) {
-      return Promise.resolve({
-        ok: false,
-        status: 500 
-      });
+      return Promise.resolve(createMockJsonResponse({}, 500));
     }
 
     if (url.includes('/browse')) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.browseResponse ?? mockBrowseResponse),
-      });
+      return Promise.resolve(createMockJsonResponse(options.browseResponse ?? mockBrowseResponse));
     }
 
     if (url.includes('/file')) {
       if (options.shouldFailFile) {
-        return Promise.resolve({
-          ok: false,
-          status: 404 
-        });
+        return Promise.resolve(createMockJsonResponse({}, 404));
       }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.fileResponse ?? mockFileContent),
-      });
+      return Promise.resolve(createMockJsonResponse(options.fileResponse ?? mockFileContent));
     }
 
     if (url.includes('/download')) {
       if (options.shouldFailDownload) {
-        return Promise.resolve({
-          ok: false,
-          status: 500 
-        });
+        return Promise.resolve(createMockJsonResponse({}, 500));
       }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ download_url: options.downloadUrl ?? 'https://s3.example.com/presigned-url' }),
-      });
+      return Promise.resolve(createMockJsonResponse({ download_url: options.downloadUrl ?? 'https://s3.example.com/presigned-url' }));
     }
 
     return Promise.resolve({

@@ -19,6 +19,7 @@ vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 import {
   deferAuthenticatedFetch, mockAuthenticatedFetch
 } from '../test/infrastructureMock';
+import { spyOnAbortAfterPendingUnmount } from '../test/abortOnUnmount';
 
 interface BrandMentionsProps {
   keyword: string;
@@ -129,15 +130,9 @@ describe('useBrandMentions', () => {
   });
 
   it('aborts the pending request when the hook unmounts', () => {
-    const abortSpy = vi.spyOn(AbortController.prototype, 'abort');
-    mockAuthenticatedFetch.mockImplementation(() => new Promise(vi.fn()));
-
-    const { unmount } = renderHook(() => useBrandMentions(kw('test')));
-
-    unmount();
+    const abortSpy = spyOnAbortAfterPendingUnmount(() => renderHook(() => useBrandMentions(kw('test'))));
 
     expect(abortSpy).toHaveBeenCalledWith();
-    abortSpy.mockRestore();
   });
 
   it('clears response data when the scope becomes null', async () => {
