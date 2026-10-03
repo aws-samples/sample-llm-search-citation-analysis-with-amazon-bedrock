@@ -19,12 +19,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
+from shared.brand_visibility import load_recent_search_results, tracked_brand_names
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.search_results import latest_run, scan_keyword_texts, search_results_table_name
@@ -41,6 +41,8 @@ KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')
 
 # Rank sentinel for a brand side that was never mentioned; reported as `best_rank: None`.
 _UNRANKED = 999
+# Keywords whose recent results the insights read (one partition query each).
+_MAX_KEYWORDS = 50
 
 
 def get_all_keywords() -> list[str]:
@@ -58,30 +60,6 @@ def get_all_keywords() -> list[str]:
     except Exception:
         logger.exception("Error getting keywords")
         return []
-
-
-def _fetch_recent_results(keywords: list[str]) -> list[dict[str, Any]]:
-    """Query the 20 most recent SearchResults rows for each of the first 50 keywords.
-
-    Querying by partition key is much more efficient than a scan. A keyword
-    whose query fails is logged (with its traceback) and skipped so one bad
-    partition cannot empty the whole view.
-    """
-    table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    items: list[dict[str, Any]] = []
-    for keyword in keywords[:50]:  # Limit to 50 keywords for performance
-        try:
-            response = table.query(
-                KeyConditionExpression=Key('keyword').eq(keyword),
-                ScanIndexForward=False,  # Most recent first
-                Limit=20  # Get recent results per keyword
-            )
-            items.extend(response.get('Items', []))
-        except Exception:
-            logger.exception(f"Error querying keyword {keyword!r}")
-
-    logger.info(f"Queried {len(items)} total items across {len(keywords)} keywords")
-    return items
 
 
 def _group_by_keyword(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -225,13 +203,9 @@ def analyze_prompt_brand_correlation(config: dict[str, Any]) -> dict[str, Any]:
     - Which prompts favor competitors
     - Opportunities where competitors appear but first-party doesn't
     """
-    # Get tracked brands — only first_party is needed to gate execution below.
-    # Classification is taken from brand.get('classification') per-mention in
-    # _tally_brand_presence, so the lowercase lists that used to drive substring
-    # matching are no longer needed here.
-    tracked_brands = config.get("tracked_brands", {})
-    first_party = [b.lower() for b in tracked_brands.get("first_party", [])]
-
+    # Only the first-party list gates execution: classification is taken from
+    # brand.get('classification') per-mention in _tally_brand_presence.
+    first_party, _competitors = tracked_brand_names(config)
     if not first_party:
         return {"error": "No first-party brands configured"}
 
@@ -241,7 +215,10 @@ def analyze_prompt_brand_correlation(config: dict[str, Any]) -> dict[str, Any]:
     if not keywords:
         return {"error": "No keywords configured"}
 
-    keyword_results = _group_by_keyword(_fetch_recent_results(keywords))
+    # The 20 most recent rows of each of the first 50 keywords, one partition query each.
+    items = load_recent_search_results(dynamodb, SEARCH_RESULTS_TABLE, max_keywords=_MAX_KEYWORDS, keywords=keywords)
+    logger.info(f"Queried {len(items)} total items across {len(keywords)} keywords")
+    keyword_results = _group_by_keyword(items)
     prompts = [_analyze_keyword(keyword, results) for keyword, results in keyword_results.items()]
     return _rank_prompts(prompts)
 

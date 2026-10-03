@@ -33,6 +33,9 @@ _MODULE_NAME = 'browse_raw_responses_under_test'
 RESPONSES_BUCKET = 'test-raw-responses'
 SCREENSHOTS_BUCKET = 'test-screenshots'
 
+# A key already confined to the raw-responses root prefix.
+_SCOPED_KEY = 'raw-responses/2026/08/openai.json'
+
 _TEST_ENV = {
     'RAW_RESPONSES_BUCKET': RESPONSES_BUCKET,
     'SCREENSHOTS_BUCKET': SCREENSHOTS_BUCKET,
@@ -83,6 +86,11 @@ def browse():
 def make_event(route: str, key: str, bucket: str = 'responses') -> dict[str, Any]:
     """Build an API Gateway event for /file or /download."""
     return api_gateway_event('GET', f'/api/raw-responses{route}', query={'key': key, 'bucket': bucket})
+
+
+def _request(module: Any, route: str, key: str, bucket: str = 'responses') -> tuple[int, Any]:
+    """``(status, decoded body)`` of ``GET <route>`` for ``key`` in ``bucket``."""
+    return parse_response(module.handler(make_event(route, key, bucket), None))
 
 
 def signed_key(s3: MagicMock) -> str:
@@ -151,20 +159,19 @@ class TestFileRouteContainment:
 
     def test_reads_an_already_scoped_key_verbatim(self, browse) -> None:
         module, s3 = browse
-        key = 'raw-responses/2026/08/openai.json'
 
-        status, _ = parse_response(module.handler(make_event('/file', key), None))
+        status, _ = _request(module, '/file', _SCOPED_KEY)
 
         assert status == 200
         assert s3.get_object.call_args.kwargs == {
             'Bucket': RESPONSES_BUCKET,
-            'Key': key,
+            'Key': _SCOPED_KEY,
         }
 
     def test_scopes_a_relative_key_before_reading(self, browse) -> None:
         module, s3 = browse
 
-        module.handler(make_event('/file', '2026/08/openai.json'), None)
+        _request(module, '/file', '2026/08/openai.json')
 
         assert s3.get_object.call_args.kwargs['Key'] == 'raw-responses/2026/08/openai.json'
 
@@ -175,7 +182,7 @@ class TestFileRouteContainment:
         """
         module, s3 = browse
 
-        module.handler(make_event('/file', 'citation-exports/secrets.json'), None)
+        _request(module, '/file', 'citation-exports/secrets.json')
 
         assert s3.get_object.call_args.kwargs['Key'] == (
             'raw-responses/citation-exports/secrets.json'
@@ -184,9 +191,7 @@ class TestFileRouteContainment:
     def test_rejects_a_traversing_key(self, browse) -> None:
         module, s3 = browse
 
-        status, body = parse_response(
-            module.handler(make_event('/file', '../other/secrets.json'), None)
-        )
+        status, body = _request(module, '/file', '../other/secrets.json')
 
         assert status == 400
         assert body['field'] == 'key'
@@ -196,9 +201,7 @@ class TestFileRouteContainment:
         """Unquote runs before validation, so the encoded form is caught too."""
         module, s3 = browse
 
-        status, _ = parse_response(
-            module.handler(make_event('/file', '%2e%2e%2fsecrets.json'), None)
-        )
+        status, _ = _request(module, '/file', '%2e%2e%2fsecrets.json')
 
         assert status == 400
         assert s3.get_object.call_count == 0
@@ -206,7 +209,7 @@ class TestFileRouteContainment:
     def test_uses_the_screenshots_root_when_that_bucket_is_requested(self, browse) -> None:
         module, s3 = browse
 
-        module.handler(make_event('/file', '2026/08/shot.png', bucket='screenshots'), None)
+        _request(module, '/file', '2026/08/shot.png', bucket='screenshots')
 
         assert s3.get_object.call_args.kwargs == {
             'Bucket': SCREENSHOTS_BUCKET,
@@ -222,17 +225,16 @@ class TestDownloadRouteContainment:
 
     def test_signs_an_already_scoped_key_verbatim(self, browse) -> None:
         module, s3 = browse
-        key = 'raw-responses/2026/08/openai.json'
 
-        status, _ = parse_response(module.handler(make_event('/download', key), None))
+        status, _ = _request(module, '/download', _SCOPED_KEY)
 
         assert status == 200
-        assert signed_key(s3) == key
+        assert signed_key(s3) == _SCOPED_KEY
 
     def test_scopes_a_relative_key_before_signing(self, browse) -> None:
         module, s3 = browse
 
-        module.handler(make_event('/download', '2026/08/openai.json'), None)
+        _request(module, '/download', '2026/08/openai.json')
 
         assert signed_key(s3) == 'raw-responses/2026/08/openai.json'
 
@@ -240,16 +242,14 @@ class TestDownloadRouteContainment:
         """REGRESSION: the headline of §2.7."""
         module, s3 = browse
 
-        module.handler(make_event('/download', 'citation-exports/secrets.json'), None)
+        _request(module, '/download', 'citation-exports/secrets.json')
 
         assert signed_key(s3).startswith('raw-responses/')
 
     def test_rejects_a_traversing_key_without_signing_anything(self, browse) -> None:
         module, s3 = browse
 
-        status, _ = parse_response(
-            module.handler(make_event('/download', '../secrets.json'), None)
-        )
+        status, _ = _request(module, '/download', '../secrets.json')
 
         assert status == 400
         assert s3.generate_presigned_url.call_count == 0
@@ -258,16 +258,14 @@ class TestDownloadRouteContainment:
         """Returning the raw input would misreport what the URL grants."""
         module, _ = browse
 
-        _, body = parse_response(
-            module.handler(make_event('/download', '2026/08/openai.json'), None)
-        )
+        _, body = _request(module, '/download', '2026/08/openai.json')
 
         assert body['key'] == 'raw-responses/2026/08/openai.json'
 
     def test_signs_screenshots_against_the_screenshots_bucket(self, browse) -> None:
         module, s3 = browse
 
-        module.handler(make_event('/download', 'shot.png', bucket='screenshots'), None)
+        _request(module, '/download', 'shot.png', bucket='screenshots')
 
         assert s3.generate_presigned_url.call_args.kwargs['Params'] == {
             'Bucket': SCREENSHOTS_BUCKET,

@@ -11,15 +11,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from testing.module_loader import load_handler_module
+from testing.report_scope_fixtures import REPORT_TABLES_ENV
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_ENV = {
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
-    'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
-    'CORS_ORIGIN_PARAM': '',
-}
 
-with patch('boto3.resource', MagicMock()), patch.dict(os.environ, _ENV):
+with patch('boto3.resource', MagicMock()), patch.dict(os.environ, REPORT_TABLES_ENV):
     _mod = load_handler_module(_HERE, 'get-group-kpi-history.py', 'get_group_kpi_history_under_test')
 
 ACTIVE_KEYWORDS = [
@@ -43,14 +39,18 @@ def _answer(keyword: str) -> dict[str, Any]:
     }
 
 
+# One answered keyword of the 'sol' group; its sibling 'hotel sol beach' has no rows.
+SPA_ROWS = {'hotel sol spa': [_answer('hotel sol spa')]}
+
+
 class ReadFailure(Exception):
     """A SearchResults partition that cannot be read."""
 
 
-def _resource(search_rows: dict[str, Any]) -> tuple[MagicMock, MagicMock]:
-    """A boto3 resource: the keywords table lists ACTIVE_KEYWORDS, search answers per keyword."""
+def _resource(search_rows: dict[str, Any], active: list[dict[str, Any]] = ACTIVE_KEYWORDS) -> tuple[MagicMock, MagicMock]:
+    """A boto3 resource: the keywords table lists ``active``, search answers per keyword."""
     keywords_table = MagicMock(name='keywords')
-    keywords_table.query.return_value = {'Items': ACTIVE_KEYWORDS}
+    keywords_table.query.return_value = {'Items': active}
 
     def search_query(**kwargs: Any) -> dict[str, Any]:
         keyword = kwargs['KeyConditionExpression'].get_expression()['values'][0].get_expression()['values'][1]
@@ -70,8 +70,9 @@ def _call(
     params: dict[str, str] | None,
     search_rows: dict[str, Any] | None = None,
     brand_config: dict[str, Any] | None = None,
+    active: list[dict[str, Any]] = ACTIVE_KEYWORDS,
 ) -> tuple[int, dict[str, Any]]:
-    resource, _ = _resource(search_rows or {})
+    resource, _ = _resource(search_rows or {}, active)
     event = {'httpMethod': 'GET', 'path': '/api/reports/group-kpis', 'queryStringParameters': params, 'headers': {}}
     with (
         patch.object(_mod, 'dynamodb', resource),
@@ -83,18 +84,20 @@ def _call(
 
 
 class TestGroupKpiHistoryRoute:
+    @pytest.fixture
+    def spa_only_body(self) -> dict[str, Any]:
+        return _call({'group_id': 'sol'}, SPA_ROWS)[1]
+
     def test_requires_a_scope(self):
         status, body = _call(None)
 
         assert (status, body['field']) == (400, 'keyword')
 
-    def test_covers_the_active_keywords_of_the_group(self):
-        _, body = _call({'group_id': 'sol'}, {'hotel sol spa': [_answer('hotel sol spa')]})
-
-        assert [entry['keyword'] for entry in body['keywords']] == ['hotel sol beach', 'hotel sol spa']
+    def test_covers_the_active_keywords_of_the_group(self, spa_only_body):
+        assert [entry['keyword'] for entry in spa_only_body['keywords']] == ['hotel sol beach', 'hotel sol spa']
 
     def test_answers_each_run_with_its_kpis(self):
-        _, body = _call({'group_id': 'sol'}, {'hotel sol spa': [_answer('hotel sol spa')], 'hotel sol beach': [_answer('hotel sol beach')]})
+        _, body = _call({'group_id': 'sol'}, {**SPA_ROWS, 'hotel sol beach': [_answer('hotel sol beach')]})
 
         run = body['runs'][0]
         assert (run['timestamp'], run['kpis']['mention_rate'], run['is_group_run'], run['models']) == (
@@ -104,16 +107,14 @@ class TestGroupKpiHistoryRoute:
     def test_measures_the_citation_kpis_against_the_owned_domains_of_the_brand_configuration(self):
         _, body = _call(
             {'group_id': 'sol'},
-            {'hotel sol spa': [_answer('hotel sol spa')]},
+            SPA_ROWS,
             {'first_party_domains': ['hotel-sol.com']},
         )
 
         assert (body['citations_configured'], body['runs'][0]['kpis']['citation_rate']) == (True, 100.0)
 
-    def test_leaves_the_citation_kpis_empty_without_owned_domains(self):
-        _, body = _call({'group_id': 'sol'}, {'hotel sol spa': [_answer('hotel sol spa')]})
-
-        assert (body['citations_configured'], body['runs'][0]['kpis']['citation_rate']) == (False, None)
+    def test_leaves_the_citation_kpis_empty_without_owned_domains(self, spa_only_body):
+        assert (spa_only_body['citations_configured'], spa_only_body['runs'][0]['kpis']['citation_rate']) == (False, None)
 
     def test_describes_the_window_and_the_rules(self):
         _, body = _call({'group_id': 'sol', 'days': '30'})
@@ -152,7 +153,7 @@ class TestGroupKpiHistoryRoute:
     def test_keeps_a_group_report_when_one_keyword_cannot_be_read(self, caplog):
         with caplog.at_level(logging.ERROR):
             status, body = _call({'group_id': 'sol'}, {
-                'hotel sol spa': [_answer('hotel sol spa')],
+                **SPA_ROWS,
                 'hotel sol beach': ReadFailure('throttled'),
             })
 
@@ -175,18 +176,7 @@ class TestLoadRows:
 
     def test_caps_the_report_at_one_hundred_keywords(self):
         many = [{'id': f'k{i}', 'keyword': f'kw {i:03}', 'status': 'active', 'group_ids': {'big'}} for i in range(101)]
-        keywords_table = MagicMock()
-        keywords_table.query.return_value = {'Items': many}
-        search_table = MagicMock()
-        search_table.query.return_value = {'Items': []}
-        resource = MagicMock()
-        resource.Table.side_effect = lambda name: keywords_table if name == 'test-keywords' else search_table
-        event = {'httpMethod': 'GET', 'path': '/api/reports/group-kpis', 'queryStringParameters': {'group_id': 'big'}, 'headers': {}}
 
-        with (
-            patch.object(_mod, 'dynamodb', resource),
-            patch.object(_mod, 'get_brand_config', return_value={}),
-        ):
-            body = json.loads(_mod.handler(event, None)['body'])
+        _, body = _call({'group_id': 'big'}, active=many)
 
         assert (len(body['keywords']), body['keywords_truncated']) == (100, True)

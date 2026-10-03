@@ -24,8 +24,8 @@ from unittest.mock import MagicMock, call, patch
 
 import pytest
 from boto3.dynamodb.conditions import Key
-from botocore.exceptions import ClientError
 
+from testing.client_errors import throttled
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
@@ -74,6 +74,16 @@ def _run(keyword: str, *brands: dict[str, Any], provider: str = 'openai') -> dic
     return {keyword: [_result(keyword, provider, list(brands))]}
 
 
+def _answers(keyword: str, **brands_by_provider: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """The latest run of `keyword` with one row per provider, keyed the way `_analyze` stages rows."""
+    return {keyword: [_result(keyword, provider, brands) for provider, brands in brands_by_provider.items()]}
+
+
+def _first_party_wins(keywords: list[str]) -> dict[str, list[dict[str, Any]]]:
+    """Every keyword answered by openai with the first-party brand at rank 1."""
+    return {keyword: [_result(keyword, 'openai', [_FIRST_PARTY_TOP])] for keyword in keywords}
+
+
 def _mixed_results() -> dict[str, list[dict[str, Any]]]:
     """One keyword per bucket: a win, a loss and an opportunity."""
     return {
@@ -98,10 +108,6 @@ def _two_per_bucket_results() -> dict[str, list[dict[str, Any]]]:
 # --- Stubs and invocation ----------------------------------------------------
 
 
-def _throttled(operation: str) -> ClientError:
-    return ClientError({'Error': {'Code': 'ProvisionedThroughputExceededException', 'Message': 'throttled'}}, operation)
-
-
 def _queried_keyword(**kwargs: Any) -> str:
     """The partition key a `query(KeyConditionExpression=Key('keyword').eq(...))` call asks for."""
     _, keyword = kwargs['KeyConditionExpression'].get_expression()['values']
@@ -113,7 +119,7 @@ def _search_table(results_by_keyword: dict[str, list[dict[str, Any]]], failing: 
     def query(**kwargs: Any) -> dict[str, Any]:
         keyword = _queried_keyword(**kwargs)
         if keyword in failing:
-            raise _throttled('Query')
+            raise throttled('Query')
         return {'Items': results_by_keyword.get(keyword, [])}
 
     table = MagicMock()
@@ -164,6 +170,19 @@ def _get_insights(
         return parse_response(module.handler(event, None))
 
 
+def _search_queries(module: ModuleType, keywords: list[str]) -> list[Any]:
+    """The SearchResults queries an analysis over a Keywords table listing `keywords` (and no rows) sends."""
+    resource = _dynamodb(module, keywords, {})
+    with patch.object(module, 'dynamodb', resource):
+        module.analyze_prompt_brand_correlation(_CONFIG)
+    return resource.Table(module.SEARCH_RESULTS_TABLE).query.call_args_list
+
+
+def _winning_first_party(module: ModuleType, results_by_keyword: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """The first-party tally of the top winning prompt of an analysis over the staged rows."""
+    return _analyze(module, results_by_keyword)['winning_prompts'][0]['first_party']
+
+
 def _statuses(result: dict[str, Any]) -> dict[str, list[str]]:
     """The `status` of every prompt, per bucket."""
     return {bucket: [prompt['status'] for prompt in result[bucket]] for bucket in _BUCKETS}
@@ -199,7 +218,7 @@ class TestConfigurationGuards:
 
     def test_returns_a_keywords_error_when_the_keywords_scan_fails(self, insights_module):
         keywords_table = MagicMock()
-        keywords_table.scan.side_effect = _throttled('Scan')
+        keywords_table.scan.side_effect = throttled('Scan')
         resource = fake_dynamodb_resource(by_name={insights_module.KEYWORDS_TABLE: keywords_table})
 
         with patch.object(insights_module, 'dynamodb', resource):
@@ -211,24 +230,17 @@ class TestConfigurationGuards:
 class TestFetchingSearchResults:
     def test_queries_each_keyword_for_its_twenty_most_recent_rows(self, insights_module):
         keywords = ['best running shoes', 'trail running shoes']
-        resource = _dynamodb(insights_module, keywords, {})
 
-        with patch.object(insights_module, 'dynamodb', resource):
-            insights_module.analyze_prompt_brand_correlation(_CONFIG)
-
-        assert resource.Table(insights_module.SEARCH_RESULTS_TABLE).query.call_args_list == [
+        assert _search_queries(insights_module, keywords) == [
             call(KeyConditionExpression=Key('keyword').eq(keyword), ScanIndexForward=False, Limit=20)
             for keyword in keywords
         ]
 
     def test_queries_only_the_first_fifty_keywords(self, insights_module):
         keywords = [f'keyword {index:02d}' for index in range(60)]
-        resource = _dynamodb(insights_module, keywords, {})
 
-        with patch.object(insights_module, 'dynamodb', resource):
-            insights_module.analyze_prompt_brand_correlation(_CONFIG)
+        queries = _search_queries(insights_module, keywords)
 
-        queries = resource.Table(insights_module.SEARCH_RESULTS_TABLE).query.call_args_list
         assert [_queried_keyword(**query.kwargs) for query in queries] == keywords[:50]
 
     def test_skips_a_keyword_whose_query_fails_and_analyzes_the_rest(self, insights_module):
@@ -303,43 +315,34 @@ class TestBrandTallies:
         }]
 
     def test_sums_mentions_and_keeps_the_best_rank_across_providers(self, insights_module):
-        rows = [
-            _result('best running shoes', 'openai', [_brand('first_party', 3, mentions=2)]),
-            _result('best running shoes', 'gemini', [_FIRST_PARTY_TOP]),
-            _result('best running shoes', 'perplexity', [_COMPETITOR_TOP]),
-        ]
+        rows = _answers(
+            'best running shoes',
+            openai=[_brand('first_party', 3, mentions=2)], gemini=[_FIRST_PARTY_TOP], perplexity=[_COMPETITOR_TOP],
+        )
 
-        result = _analyze(insights_module, {'best running shoes': rows})
-
-        first_party = result['winning_prompts'][0]['first_party']
+        first_party = _winning_first_party(insights_module, rows)
         assert (first_party['mentions'], first_party['best_rank']) == (3, 1)
         assert sorted(first_party['providers']) == ['gemini', 'openai']
 
     def test_reports_coverage_as_the_percentage_of_providers_mentioning_each_side(self, insights_module):
-        rows = [
-            _result('best running shoes', 'openai', [_FIRST_PARTY_TOP]),
-            _result('best running shoes', 'gemini', [_FIRST_PARTY_TOP]),
-            _result('best running shoes', 'perplexity', [_COMPETITOR_TOP]),
-        ]
+        rows = _answers('best running shoes', openai=[_FIRST_PARTY_TOP], gemini=[_FIRST_PARTY_TOP], perplexity=[_COMPETITOR_TOP])
 
-        result = _analyze(insights_module, {'best running shoes': rows})
-
-        prompt = result['winning_prompts'][0]
+        prompt = _analyze(insights_module, rows)['winning_prompts'][0]
         coverage = (prompt['first_party']['provider_coverage'], prompt['competitors']['provider_coverage'])
         assert (coverage, prompt['total_providers']) == ((66.7, 33.3), 3)
 
     def test_sums_several_first_party_brands_named_by_one_provider(self, insights_module):
         brands = (_brand('first_party', 2, mentions=2), _brand('first_party', 5, mentions=1))
 
-        result = _analyze(insights_module, _run('best running shoes', *brands))
+        first_party = _winning_first_party(insights_module, _run('best running shoes', *brands))
 
-        first_party = result['winning_prompts'][0]['first_party']
         assert (first_party['mentions'], first_party['best_rank'], first_party['providers']) == (3, 2, ['openai'])
 
     def test_reads_decimal_ranks_and_mention_counts_as_integers(self, insights_module):
-        result = _analyze(insights_module, _run('best running shoes', _brand('first_party', Decimal('2'), Decimal('3'))))
+        rows = _run('best running shoes', _brand('first_party', Decimal('2'), Decimal('3')))
 
-        first_party = result['winning_prompts'][0]['first_party']
+        first_party = _winning_first_party(insights_module, rows)
+
         assert (first_party['mentions'], first_party['best_rank']) == (3, 2)
         assert {type(first_party['mentions']), type(first_party['best_rank'])} == {int}
 
@@ -364,40 +367,18 @@ class TestBrandTallies:
 
 
 class TestPromptClassification:
-    @pytest.mark.parametrize('rank', [1, 2, 3])
-    def test_classifies_a_prompt_as_winning_when_first_party_ranks_in_the_top_three(self, insights_module, rank):
-        result = _analyze(insights_module, _run('best running shoes', _brand('first_party', rank)))
+    @pytest.mark.parametrize(('brands', 'statuses'), [
+        *[pytest.param((_brand('first_party', rank),), (['winning'], [], []), id=f'winning-at-rank-{rank}') for rank in (1, 2, 3)],
+        *[pytest.param((_brand('first_party', rank),), (['neutral'], [], []), id=f'neutral-at-rank-{rank}') for rank in (4, 5)],
+        *[pytest.param((_brand('first_party', rank),), ([], ['losing'], []), id=f'losing-at-rank-{rank}') for rank in (6, 10, 999)],
+        pytest.param((_brand('first_party', 8), _COMPETITOR_TOP), ([], ['losing'], []), id='losing-below-fifth-beside-competitors'),
+        pytest.param((), ([], ['losing'], []), id='losing-without-a-tracked-brand'),
+        pytest.param((_COMPETITOR_TOP, _brand('competitor', 4)), ([], [], ['opportunity']), id='opportunity-competitors-only'),
+    ])
+    def test_files_the_prompt_in_the_bucket_its_first_party_rank_earns(self, insights_module, brands, statuses):
+        result = _analyze(insights_module, _run('best running shoes', *brands))
 
-        assert _statuses(result) == {'winning_prompts': ['winning'], 'losing_prompts': [], 'opportunity_prompts': []}
-
-    @pytest.mark.parametrize('rank', [4, 5])
-    def test_classifies_a_prompt_as_neutral_in_the_winning_bucket_when_first_party_ranks_fourth_or_fifth(
-        self, insights_module, rank
-    ):
-        result = _analyze(insights_module, _run('best running shoes', _brand('first_party', rank)))
-
-        assert _statuses(result) == {'winning_prompts': ['neutral'], 'losing_prompts': [], 'opportunity_prompts': []}
-
-    @pytest.mark.parametrize('rank', [6, 10, 999])
-    def test_classifies_a_prompt_as_losing_when_first_party_ranks_below_fifth(self, insights_module, rank):
-        result = _analyze(insights_module, _run('best running shoes', _brand('first_party', rank)))
-
-        assert _statuses(result) == {'winning_prompts': [], 'losing_prompts': ['losing'], 'opportunity_prompts': []}
-
-    def test_classifies_a_prompt_as_losing_when_first_party_ranks_below_fifth_beside_competitors(self, insights_module):
-        result = _analyze(insights_module, _run('best running shoes', _brand('first_party', 8), _COMPETITOR_TOP))
-
-        assert _statuses(result) == {'winning_prompts': [], 'losing_prompts': ['losing'], 'opportunity_prompts': []}
-
-    def test_classifies_a_prompt_as_losing_when_no_tracked_brand_is_mentioned(self, insights_module):
-        result = _analyze(insights_module, _run('best running shoes'))
-
-        assert _statuses(result) == {'winning_prompts': [], 'losing_prompts': ['losing'], 'opportunity_prompts': []}
-
-    def test_classifies_a_prompt_as_an_opportunity_when_competitors_appear_without_first_party(self, insights_module):
-        result = _analyze(insights_module, _run('best running shoes', _COMPETITOR_TOP, _brand('competitor', 4)))
-
-        assert _statuses(result) == {'winning_prompts': [], 'losing_prompts': [], 'opportunity_prompts': ['opportunity']}
+        assert _statuses(result) == dict(zip(_BUCKETS, statuses, strict=True))
 
     def test_leaves_a_neutral_prompt_without_a_score(self, insights_module):
         result = _analyze(insights_module, _run('best running shoes', _brand('first_party', 4)))
@@ -407,12 +388,9 @@ class TestPromptClassification:
         assert 'score' not in prompt
 
     def test_scores_a_win_from_coverage_rank_and_mentions(self, insights_module):
-        rows = [
-            _result('best running shoes', 'openai', [_brand('first_party', 2, mentions=3)]),
-            _result('best running shoes', 'gemini', [_COMPETITOR_TOP]),
-        ]
+        rows = _answers('best running shoes', openai=[_brand('first_party', 2, mentions=3)], gemini=[_COMPETITOR_TOP])
 
-        result = _analyze(insights_module, {'best running shoes': rows})
+        result = _analyze(insights_module, rows)
 
         # 50% coverage -> 25, rank 2 -> 20, 3 mentions -> 6
         assert result['winning_prompts'][0]['score'] == 51.0
@@ -423,12 +401,9 @@ class TestPromptClassification:
         assert result['winning_prompts'][0]['score'] == 100.0
 
     def test_scores_an_opportunity_from_competitor_coverage_and_mentions(self, insights_module):
-        rows = [
-            _result('best running shoes', 'openai', [_brand('competitor', 1, mentions=4)]),
-            _result('best running shoes', 'gemini', []),
-        ]
+        rows = _answers('best running shoes', openai=[_brand('competitor', 1, mentions=4)], gemini=[])
 
-        result = _analyze(insights_module, {'best running shoes': rows})
+        result = _analyze(insights_module, rows)
 
         # 50% coverage -> 25, 4 mentions -> 20
         assert result['opportunity_prompts'][0]['opportunity_score'] == 45.0
@@ -513,17 +488,13 @@ class TestRankingAndSummary:
 
     def test_keeps_keyword_order_for_prompts_with_equal_scores(self, insights_module):
         keywords = ['seo audit checklist', 'best running shoes', 'marathon training plan']
-        results = {keyword: [_result(keyword, 'openai', [_FIRST_PARTY_TOP])] for keyword in keywords}
 
-        result = _analyze(insights_module, results)
+        result = _analyze(insights_module, _first_party_wins(keywords))
 
         assert [prompt['keyword'] for prompt in result['winning_prompts']] == keywords
 
     def test_returns_at_most_twenty_prompts_per_bucket_while_counting_every_prompt(self, insights_module):
-        keywords = [f'keyword {index:02d}' for index in range(25)]
-        results = {keyword: [_result(keyword, 'openai', [_FIRST_PARTY_TOP])] for keyword in keywords}
-
-        result = _analyze(insights_module, results)
+        result = _analyze(insights_module, _first_party_wins([f'keyword {index:02d}' for index in range(25)]))
 
         counts = (len(result['winning_prompts']), result['summary']['winning_count'], result['total_prompts_analyzed'])
         assert counts == (20, 25, 25)
@@ -562,19 +533,20 @@ class TestHandler:
         assert sorted(body) == sorted([bucket, 'summary'])
         assert [prompt['keyword'] for prompt in body[bucket]] == [keyword]
 
-    def test_truncates_every_bucket_to_the_requested_limit(self, insights_module):
-        _, body = _get_insights(insights_module, _two_per_bucket_results(), query={'limit': '1'})
+    @pytest.fixture
+    def limited_body(self, insights_module) -> dict[str, Any]:
+        """The body of a `limit=1` request over two prompts per bucket."""
+        return _get_insights(insights_module, _two_per_bucket_results(), query={'limit': '1'})[1]
 
-        assert {bucket: [prompt['keyword'] for prompt in body[bucket]] for bucket in _BUCKETS} == {
+    def test_truncates_every_bucket_to_the_requested_limit(self, limited_body):
+        assert {bucket: [prompt['keyword'] for prompt in limited_body[bucket]] for bucket in _BUCKETS} == {
             'winning_prompts': ['best running shoes'],
             'losing_prompts': ['marathon training plan'],
             'opportunity_prompts': ['running shoe reviews'],
         }
 
-    def test_keeps_full_counts_in_the_summary_when_a_limit_truncates_the_buckets(self, insights_module):
-        _, body = _get_insights(insights_module, _two_per_bucket_results(), query={'limit': '1'})
-
-        assert body['summary'] == {'winning_count': 2, 'losing_count': 2, 'opportunity_count': 2, 'win_rate': 33.3}
+    def test_keeps_full_counts_in_the_summary_when_a_limit_truncates_the_buckets(self, limited_body):
+        assert limited_body['summary'] == {'winning_count': 2, 'losing_count': 2, 'opportunity_count': 2, 'win_rate': 33.3}
 
     def test_truncates_the_requested_bucket_when_type_and_limit_are_combined(self, insights_module):
         _, body = _get_insights(insights_module, _two_per_bucket_results(), query={'type': 'losing', 'limit': '1'})

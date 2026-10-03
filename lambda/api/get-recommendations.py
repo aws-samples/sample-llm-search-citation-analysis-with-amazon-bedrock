@@ -33,6 +33,7 @@ from shared.dynamo_decimal import to_int
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
 from shared.scope_params import load_sibling_function
+from shared.search_results import latest_run
 from shared.utils import get_brand_config, get_timestamp, recommendation_id
 
 logger = logging.getLogger(__name__)
@@ -81,8 +82,7 @@ class _KeywordFindings:
 
 def _latest_run_snapshot(results: list[dict[str, Any]], first_party: list[str], competitors: list[str]) -> _KeywordSnapshot:
     """Reduce one keyword's SearchResults rows to what its latest run says about the tracked brands."""
-    latest_ts = max(r.get('timestamp', '') for r in results)
-    latest = [r for r in results if r.get('timestamp') == latest_ts]
+    _latest_ts, latest = latest_run(results)
 
     providers: set[str] = set()
     fp_providers: set[str] = set()

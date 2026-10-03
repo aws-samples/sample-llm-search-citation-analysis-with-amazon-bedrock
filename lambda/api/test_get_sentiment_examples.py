@@ -14,6 +14,7 @@ from shared.scope_params import SCOPE_KEYWORDS_CAP
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.module_loader import load_handler_module
+from testing.report_scope_fixtures import REPORT_TABLES_ENV
 from testing.sentiment_examples_fixtures import (
     OLDER_RUN,
     RUN,
@@ -25,13 +26,8 @@ from testing.sentiment_examples_fixtures import (
 )
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
-_ENV = {
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
-    'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
-    'CORS_ORIGIN_PARAM': '',
-}
 
-sentiment_handler = handler_fixture(_API_DIR, 'get-sentiment-examples.py', 'get_sentiment_examples_under_test', env=_ENV)
+sentiment_handler = handler_fixture(_API_DIR, 'get-sentiment-examples.py', 'get_sentiment_examples_under_test', env=REPORT_TABLES_ENV)
 
 
 class KeywordsReadFailure(Exception):
@@ -72,12 +68,14 @@ def call(module: Any, query: dict[str, str] | None) -> tuple[int, Any]:
 
 
 class TestSelection:
-    def test_lists_the_sightings_of_each_keywords_latest_run(self, endpoint) -> None:
-        _status, body = call(endpoint, {'group_id': 'sol', 'sentiment': 'negative'})
+    @pytest.fixture
+    def sol_negative_body(self, endpoint) -> Any:
+        """The answer to the negative sightings of the 'sol' group."""
+        return call(endpoint, {'group_id': 'sol', 'sentiment': 'negative'})[1]
 
-        assert (body['total'], [(example['keyword'], example['provider']) for example in body['examples']]) == (
-            2, [('hotel sol beach', 'claude'), ('hotel sol spa', 'openai')],
-        )
+    def test_lists_the_sightings_of_each_keywords_latest_run(self, sol_negative_body) -> None:
+        sightings = [(example['keyword'], example['provider']) for example in sol_negative_body['examples']]
+        assert (sol_negative_body['total'], sightings) == (2, [('hotel sol beach', 'claude'), ('hotel sol spa', 'openai')])
 
     def test_keeps_one_engine_when_a_provider_is_given(self, endpoint) -> None:
         _status, body = call(endpoint, {'group_id': 'sol', 'sentiment': 'negative', 'provider': 'openai'})
@@ -106,10 +104,9 @@ class TestSelection:
 
         assert (body['total'], len(body['examples'])) == (25, 20)
 
-    def test_describes_the_scope_like_the_visibility_endpoint(self, endpoint) -> None:
-        _status, body = call(endpoint, {'group_id': 'sol', 'sentiment': 'negative'})
-
-        assert (body['scope']['kind'], body['scope']['keyword_count'], body['keywords_truncated']) == ('group', 2, False)
+    def test_describes_the_scope_like_the_visibility_endpoint(self, sol_negative_body) -> None:
+        scope = sol_negative_body['scope']
+        assert (scope['kind'], scope['keyword_count'], sol_negative_body['keywords_truncated']) == ('group', 2, False)
 
     def test_answers_no_examples_for_a_keyword_whose_read_fails(self, sentiment_handler) -> None:
         rows = {**SEARCH_ROWS, 'hotel sol spa': PartitionReadFailure('throttled')}
@@ -144,7 +141,7 @@ class TestReads:
 
     def test_builds_its_dynamodb_resource_with_the_pooled_scope_helper(self) -> None:
         pooled = MagicMock(name='pooled-scope-resource')
-        with patch.dict(os.environ, _ENV), patch.object(scope_params, 'scoped_dynamodb_resource', return_value=pooled):
+        with patch.dict(os.environ, REPORT_TABLES_ENV), patch.object(scope_params, 'scoped_dynamodb_resource', return_value=pooled):
             loaded = load_handler_module(_API_DIR, 'get-sentiment-examples.py', 'get_sentiment_examples_pooled_under_test')
         sys.modules.pop('get_sentiment_examples_pooled_under_test', None)
 

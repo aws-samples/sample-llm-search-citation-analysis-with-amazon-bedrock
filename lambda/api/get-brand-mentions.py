@@ -16,17 +16,12 @@ from boto3.dynamodb.conditions import Key
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
-from shared.api_response import not_found_response, success_response, validation_error
+from shared.api_response import not_found_response, success_response
 from shared.decorators import api_handler, optional_provider, validate
 from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import collect_all_items
-from shared.scope_params import (
-    SCOPE_QUERY_PARAMS,
-    ReportScope,
-    keywords_table_name,
-    query_keyword_rows,
-    scope_from_request,
-)
+from shared.scope_params import SCOPE_QUERY_PARAMS, ReportScope, keywords_table_name, query_keyword_rows
+from shared.scoped_reports import required_report_scope
 from shared.search_results import latest_run, search_results_table_name
 from shared.utils import get_brand_config
 
@@ -152,6 +147,25 @@ def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, An
     }
 
 
+def _aggregate_classified(
+    items: list[dict[str, Any]], brand_config: dict[str, Any], classification: str | None,
+) -> dict[str, Any]:
+    """``aggregate_brand_mentions`` with ``brands`` narrowed to ``classification`` when one is given."""
+    aggregated = aggregate_brand_mentions(items, brand_config)
+    if classification:
+        aggregated['brands'] = [b for b in aggregated['brands'] if b.get('classification') == classification]
+    return aggregated
+
+
+def _filter_rows(items: list[dict[str, Any]], query_prompt_id: str | None, provider: str | None) -> list[dict[str, Any]]:
+    """The rows of one persona (rows without one are ``default``) and one provider, when given."""
+    if query_prompt_id:
+        items = [item for item in items if item.get('query_prompt_id', 'default') == query_prompt_id]
+    if provider:
+        items = [item for item in items if item.get('provider') == provider]
+    return items
+
+
 def _available_runs(items: list[dict[str, Any]]) -> list[str]:
     """Newest distinct analysis timestamps represented by loaded rows."""
     timestamps = {
@@ -173,11 +187,7 @@ def _scope_run_items(
     available_runs = _available_runs(items)
     selected_timestamp = timestamp or (available_runs[0] if available_runs else None)
     selected_items = [item for item in items if item.get('timestamp') == selected_timestamp]
-    if query_prompt_id:
-        selected_items = [item for item in selected_items if item.get('query_prompt_id', 'default') == query_prompt_id]
-    if provider:
-        selected_items = [item for item in selected_items if item.get('provider') == provider]
-    return selected_items, available_runs
+    return _filter_rows(selected_items, query_prompt_id, provider), available_runs
 
 
 def get_scope_brand_mentions(
@@ -210,9 +220,7 @@ def get_scope_brand_mentions(
         {run for _rows, runs in loaded for run in runs},
         reverse=True,
     )[:_AVAILABLE_RUN_LIMIT]
-    aggregated = aggregate_brand_mentions(items, brand_config)
-    if classification:
-        aggregated['brands'] = [b for b in aggregated['brands'] if b.get('classification') == classification]
+    aggregated = _aggregate_classified(items, brand_config, classification)
 
     return {
         'scope': scope.describe(),
@@ -243,8 +251,9 @@ def _query_full_keyword_rows(table: Any, keyword: str) -> list[dict[str, Any]]:
     'classification': {'type': str, 'choices': ['first_party', 'competitor', 'other']},
     'query_prompt_id': {'type': str, 'max_length': 100},
 })
-def handler(event: dict[str, Any], context: Any, timestamp: str | None = None, provider: str | None = None,
-            classification: str | None = None, query_prompt_id: str | None = None, **scope_params: str | None) -> dict[str, Any]:
+@required_report_scope(lambda: dynamodb.Table(KEYWORDS_TABLE))
+def handler(event: dict[str, Any], context: Any, report_scope: ReportScope, timestamp: str | None = None, provider: str | None = None,
+            classification: str | None = None, query_prompt_id: str | None = None) -> dict[str, Any]:
     """
     API handler to get brand mentions for a keyword or a keyword group.
 
@@ -260,11 +269,6 @@ def handler(event: dict[str, Any], context: Any, timestamp: str | None = None, p
         Brand mention aggregates, available run timestamps, and per-provider
         response details for single-keyword requests.
     """
-    report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE), required=True)
-    if report_scope is None:
-        # required=True answers a missing scope with a rejection; the fallback only satisfies the type checker.
-        return rejected or validation_error('Provide keyword, group_id or keyword_ids', event, 'keyword')
-
     # Get brand tracking configuration
     brand_config = get_brand_config()
 
@@ -297,13 +301,7 @@ def handler(event: dict[str, Any], context: Any, timestamp: str | None = None, p
     else:
         result_timestamp, items = latest_run(items)
 
-    # Filter by persona if specified
-    if query_prompt_id:
-        items = [item for item in items if item.get('query_prompt_id', 'default') == query_prompt_id]
-
-    # Filter by provider if specified
-    if provider:
-        items = [item for item in items if item.get('provider') == provider]
+    items = _filter_rows(items, query_prompt_id, provider)
 
     # Format response by provider
     by_provider = []
@@ -321,11 +319,7 @@ def handler(event: dict[str, Any], context: Any, timestamp: str | None = None, p
         })
 
     # Aggregate across providers
-    aggregated = aggregate_brand_mentions(items, brand_config)
-
-    # Apply classification filter if specified
-    if classification:
-        aggregated['brands'] = [b for b in aggregated['brands'] if b.get('classification') == classification]
+    aggregated = _aggregate_classified(items, brand_config, classification)
 
     result = {
         'keyword': keyword,

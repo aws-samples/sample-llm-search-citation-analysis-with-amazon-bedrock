@@ -37,6 +37,14 @@ _STATE_MACHINE_ARN = 'arn:aws:states:us-east-1:123456789012:stateMachine:Citatio
 _EXECUTION_ARN = 'arn:aws:states:us-east-1:123456789012:execution:CitationAnalysis-Workflow:run-1'
 _MAP_RUN_ARN = 'arn:aws:states:us-east-1:123456789012:mapRun:CitationAnalysis-Workflow/ProcessKeywords:run-1'
 _STARTED_AT = datetime(2026, 9, 18, 10, 0, tzinfo=UTC)
+# The completion message both a succeeded task and its state's exit show, per step
+# (ParseKeywords differs between the two and is listed by each test).
+_STEP_COMPLETION_MESSAGES = [
+    ('SearchAllProviders', 'Search completed'),
+    ('DeduplicateCitations', 'Deduplication completed'),
+    ('CrawlSingleCitation', 'Citation crawled'),
+    ('GenerateSummary', 'Summary generated'),
+]
 
 
 def _execution_event(execution_id: str | None = _EXECUTION_ARN, **query: str) -> dict:
@@ -111,6 +119,13 @@ def _serve_map_run(stepfunctions: MagicMock, *events: dict, **item_counts: objec
     """Serve ``events`` as a complete history and ``item_counts`` as the map run's DescribeMapRun counts."""
     stepfunctions.get_execution_history.return_value = {'events': list(events)}
     stepfunctions.describe_map_run.return_value = {'mapRunArn': _MAP_RUN_ARN, 'itemCounts': item_counts}
+
+
+def _serve_truncated_map_run(stepfunctions: MagicMock, first_event: dict, *map_runs: dict) -> None:
+    """Serve a one-item map run behind a history page that stops at ``first_event``, listing ``map_runs``."""
+    _serve_map_run(stepfunctions, first_event, total=1)
+    stepfunctions.get_execution_history.return_value['nextToken'] = 'older-events'
+    stepfunctions.list_map_runs.return_value = {'mapRuns': list(map_runs)}
 
 
 def _progress(stepfunctions: MagicMock) -> dict | None:
@@ -276,10 +291,7 @@ class TestTaskSucceeded:
 
     @pytest.mark.parametrize(('state_name', 'message'), [
         ('ParseKeywords', 'Keywords parsed'),
-        ('SearchAllProviders', 'Search completed'),
-        ('DeduplicateCitations', 'Deduplication completed'),
-        ('CrawlSingleCitation', 'Citation crawled'),
-        ('GenerateSummary', 'Summary generated'),
+        *_STEP_COMPLETION_MESSAGES,
         ('CustomStep', 'Completed CustomStep'),
     ])
     def test_describes_a_succeeded_task_by_its_state(self, stepfunctions, state_name, message):
@@ -385,10 +397,7 @@ class TestStateTransitions:
 
     @pytest.mark.parametrize(('state_name', 'message'), [
         ('ParseKeywords', 'Keywords parsed successfully'),
-        ('SearchAllProviders', 'Search completed'),
-        ('DeduplicateCitations', 'Deduplication completed'),
-        ('CrawlSingleCitation', 'Citation crawled'),
-        ('GenerateSummary', 'Summary generated'),
+        *_STEP_COMPLETION_MESSAGES,
     ])
     def test_describes_a_known_state_exit_by_its_completion_message(self, stepfunctions, state_name, message):
         events = _timeline(stepfunctions, _history_event(1, 'TaskStateExited', stateExitedEventDetails={'name': state_name}))
@@ -497,12 +506,12 @@ class TestKeywordProgress:
         }
 
     def test_describes_the_newest_listed_map_run_when_the_history_page_stops_before_map_run_started(self, stepfunctions):
-        _serve_map_run(stepfunctions, _history_event(1, 'TaskStateEntered'), total=1)
-        stepfunctions.get_execution_history.return_value['nextToken'] = 'older-events'
-        stepfunctions.list_map_runs.return_value = {'mapRuns': [
+        _serve_truncated_map_run(
+            stepfunctions,
+            _history_event(1, 'TaskStateEntered'),
             {'mapRunArn': _MAP_RUN_ARN, 'startDate': _timestamp(4)},
             {'mapRunArn': f'{_MAP_RUN_ARN}-retry', 'startDate': _timestamp(9)},
-        ]}
+        )
 
         _progress(stepfunctions)
 
@@ -518,9 +527,9 @@ class TestKeywordProgress:
 
     @pytest.mark.parametrize('failing_call', ['describe_map_run', 'list_map_runs'])
     def test_returns_the_status_with_null_progress_when_step_functions_refuses_the_map_run_lookup(self, stepfunctions, failing_call):
-        _serve_map_run(stepfunctions, _history_event(1, 'MapStateStarted'), total=1)
-        stepfunctions.get_execution_history.return_value['nextToken'] = 'older-events'
-        stepfunctions.list_map_runs.return_value = {'mapRuns': [{'mapRunArn': _MAP_RUN_ARN, 'startDate': _timestamp(1)}]}
+        _serve_truncated_map_run(
+            stepfunctions, _history_event(1, 'MapStateStarted'), {'mapRunArn': _MAP_RUN_ARN, 'startDate': _timestamp(1)},
+        )
         getattr(stepfunctions, failing_call).side_effect = ClientError(
             {'Error': {'Code': 'AccessDeniedException', 'Message': 'not authorized'}}, 'DescribeMapRun'
         )
@@ -551,7 +560,7 @@ class TestTimelineFiltering:
     def test_keeps_identical_messages_that_belong_to_different_states(self, stepfunctions):
         events = _timeline(
             stepfunctions,
-            _entered(1, 'ParseKeywords'), _history_event(2, 'TaskFailed', 1),
+            *_task_outcome('ParseKeywords', 'TaskFailed'),
             _entered(3, 'GenerateSummary'), _history_event(4, 'TaskFailed', 3),
         )
 
@@ -561,7 +570,7 @@ class TestTimelineFiltering:
         ]
 
     def test_keeps_an_identical_message_when_only_one_occurrence_names_a_state(self, stepfunctions):
-        events = _timeline(stepfunctions, _entered(1, 'ParseKeywords'), _history_event(2, 'TaskFailed', 1), _history_event(3, 'TaskFailed', None))
+        events = _timeline(stepfunctions, *_task_outcome('ParseKeywords', 'TaskFailed'), _history_event(3, 'TaskFailed', None))
 
         assert [(e['id'], e.get('state_name')) for e in events] == [(2, 'ParseKeywords'), (3, None)]
 

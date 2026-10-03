@@ -157,75 +157,59 @@ def test_outreach_lift_handles_zero_citations_without_blowing_up(mod):
 # --- _build_competitor_rollup --------------------------------------------
 
 
-def test_rollup_picks_keywords_where_competitor_outranks_first_party(mod):
-    keywords = ['best running shoes', 'best hiking boots']
-    rollup = mod._build_competitor_rollup('Adidas', keywords, CONFIG)
-    keywords_outranked = [r['keyword'] for r in rollup['outranked_keywords']]
+@pytest.fixture
+def running_shoes_rollup(mod):
+    """Adidas's rollup over the one keyword where it outranks the first party."""
+    return mod._build_competitor_rollup('Adidas', ['best running shoes'], CONFIG)
+
+
+@pytest.fixture
+def two_keyword_rollup(mod):
+    """Adidas's rollup over a keyword it outranks us on and one where we already win."""
+    return mod._build_competitor_rollup('Adidas', ['best running shoes', 'best hiking boots'], CONFIG)
+
+
+def test_rollup_picks_keywords_where_competitor_outranks_first_party(two_keyword_rollup):
+    keywords_outranked = [r['keyword'] for r in two_keyword_rollup['outranked_keywords']]
     assert 'best running shoes' in keywords_outranked
 
 
-def test_rollup_excludes_keywords_where_first_party_already_wins(mod):
-    keywords = ['best running shoes', 'best hiking boots']
-    rollup = mod._build_competitor_rollup('Adidas', keywords, CONFIG)
-    keywords_outranked = [r['keyword'] for r in rollup['outranked_keywords']]
+def test_rollup_excludes_keywords_where_first_party_already_wins(two_keyword_rollup):
+    keywords_outranked = [r['keyword'] for r in two_keyword_rollup['outranked_keywords']]
     # Adidas is rank 8 on hiking boots, Nike is rank 6 — Adidas does NOT outrank
     assert 'best hiking boots' not in keywords_outranked
 
 
-def test_rollup_records_their_best_rank_and_our_best_rank(mod):
-    rollup = mod._build_competitor_rollup(
-        'Adidas', ['best running shoes'], CONFIG,
-    )
-    row = rollup['outranked_keywords'][0]
+def test_rollup_records_their_best_rank_and_our_best_rank(running_shoes_rollup):
+    row = running_shoes_rollup['outranked_keywords'][0]
     # Fixture: Adidas best=1, Nike best=2.
     assert row['their_best_rank'] == 1
     assert row['our_best_rank'] == 2
 
 
-def test_rollup_records_rank_delta_as_their_minus_our(mod):
-    rollup = mod._build_competitor_rollup(
-        'Adidas', ['best running shoes'], CONFIG,
-    )
-    row = rollup['outranked_keywords'][0]
+def test_rollup_records_rank_delta_as_their_minus_our(running_shoes_rollup):
     # delta = our(2) - their(1) = 1
-    assert row['rank_delta'] == 1
+    assert running_shoes_rollup['outranked_keywords'][0]['rank_delta'] == 1
 
 
-def test_rollup_records_providers_for_outranked_row(mod):
-    rollup = mod._build_competitor_rollup(
-        'Adidas', ['best running shoes'], CONFIG,
-    )
-    row = rollup['outranked_keywords'][0]
-    assert row['providers'] == ['openai', 'perplexity']
+def test_rollup_records_providers_for_outranked_row(running_shoes_rollup):
+    assert running_shoes_rollup['outranked_keywords'][0]['providers'] == ['openai', 'perplexity']
 
 
-def test_rollup_finds_exclusive_sources_for_named_competitor(mod):
-    rollup = mod._build_competitor_rollup(
-        'Adidas',
-        ['best running shoes', 'best hiking boots'],
-        CONFIG,
-    )
-    urls = [s['url'] for s in rollup['exclusive_sources']]
+def test_rollup_finds_exclusive_sources_for_named_competitor(two_keyword_rollup):
+    urls = [s['url'] for s in two_keyword_rollup['exclusive_sources']]
     assert 'https://example.com/shoes-review' in urls
 
 
-def test_rollup_propagates_priority_and_lift_for_exclusive_source(mod):
-    rollup = mod._build_competitor_rollup(
-        'Adidas', ['best running shoes'], CONFIG,
-    )
-    source = rollup['exclusive_sources'][0]
+def test_rollup_propagates_priority_and_lift_for_exclusive_source(running_shoes_rollup):
+    source = running_shoes_rollup['exclusive_sources'][0]
     assert source['priority'] == 'high'
     # provider_count=3, citation_count=9, lift = 3 * log(10) ~= 6.91
     assert source['lift_score'] > 0
 
 
-def test_rollup_skips_sources_naming_other_competitors(mod):
-    rollup = mod._build_competitor_rollup(
-        'Adidas',
-        ['best running shoes', 'best hiking boots'],
-        CONFIG,
-    )
-    urls = [s['url'] for s in rollup['exclusive_sources']]
+def test_rollup_skips_sources_naming_other_competitors(two_keyword_rollup):
+    urls = [s['url'] for s in two_keyword_rollup['exclusive_sources']]
     # Asics-only and Merrell-only sources should not be in Adidas's rollup
     assert 'https://other.com/asics' not in urls
     assert 'https://outside.com/merrell' not in urls
@@ -319,60 +303,52 @@ def test_build_records_keywords_analyzed_count(mod):
 # --- handler -------------------------------------------------------------
 
 
-def test_handler_returns_200_for_valid_competitor(mod):
+def _get_competitor_report(mod, **params):
+    """The handler's response to ``params`` with the brand configuration of ``CONFIG``."""
     with patch.object(mod, 'get_brand_config', return_value=CONFIG):
-        result = mod.handler(_event(competitor='Adidas'), None)
-    assert result['statusCode'] == 200
+        return mod.handler(_event(**params), None)
 
 
-def test_handler_returns_single_rollup_payload_for_named_competitor(mod):
-    with patch.object(mod, 'get_brand_config', return_value=CONFIG):
-        result = mod.handler(_event(competitor='Adidas'), None)
-    body = json.loads(result['body'])
+@pytest.fixture
+def adidas_response(mod):
+    return _get_competitor_report(mod, competitor='Adidas')
+
+
+def test_handler_returns_200_for_valid_competitor(adidas_response):
+    assert adidas_response['statusCode'] == 200
+
+
+def test_handler_returns_single_rollup_payload_for_named_competitor(adidas_response):
+    body = json.loads(adidas_response['body'])
     assert body['competitor'] == 'Adidas'
     assert body['rollup']['competitor'] == 'Adidas'
 
 
-def test_handler_includes_outranked_keywords_in_payload(mod):
-    with patch.object(mod, 'get_brand_config', return_value=CONFIG):
-        result = mod.handler(_event(competitor='Adidas'), None)
-    body = json.loads(result['body'])
+def test_handler_includes_outranked_keywords_in_payload(adidas_response):
+    body = json.loads(adidas_response['body'])
     keywords_outranked = [
         r['keyword'] for r in body['rollup']['outranked_keywords']
     ]
     assert 'best running shoes' in keywords_outranked
 
 
-def test_handler_returns_400_for_unconfigured_competitor(mod):
-    with patch.object(mod, 'get_brand_config', return_value=CONFIG):
-        result = mod.handler(_event(competitor='Unknown'), None)
-    assert result['statusCode'] == 400
-
-
-def test_handler_rejects_keyword_limit_above_max(mod):
-    with patch.object(mod, 'get_brand_config', return_value=CONFIG):
-        result = mod.handler(_event(keyword_limit=999), None)
-    assert result['statusCode'] == 400
-
-
-def test_handler_rejects_keyword_limit_below_min(mod):
-    with patch.object(mod, 'get_brand_config', return_value=CONFIG):
-        result = mod.handler(_event(keyword_limit=0), None)
-    assert result['statusCode'] == 400
+@pytest.mark.parametrize('params', [
+    pytest.param({'competitor': 'Unknown'}, id='unconfigured-competitor'),
+    pytest.param({'keyword_limit': 999}, id='keyword-limit-above-max'),
+    pytest.param({'keyword_limit': 0}, id='keyword-limit-below-min'),
+])
+def test_handler_returns_400_for_an_invalid_request(mod, params):
+    assert _get_competitor_report(mod, **params)['statusCode'] == 400
 
 
 def test_handler_returns_all_rollups_payload_when_competitor_omitted(mod):
-    with patch.object(mod, 'get_brand_config', return_value=CONFIG):
-        result = mod.handler(_event(), None)
-    body = json.loads(result['body'])
+    body = json.loads(_get_competitor_report(mod)['body'])
     assert 'rollups' in body
     assert len(body['rollups']) == 4
 
 
-def test_handler_returns_iso_generated_at_with_zulu(mod):
-    with patch.object(mod, 'get_brand_config', return_value=CONFIG):
-        result = mod.handler(_event(competitor='Adidas'), None)
-    body = json.loads(result['body'])
+def test_handler_returns_iso_generated_at_with_zulu(adidas_response):
+    body = json.loads(adidas_response['body'])
     assert body['generated_at'].endswith('Z')
 
 
@@ -447,18 +423,17 @@ def _scanning_dynamodb(items):
     return fake_dynamodb_resource(fake_table(scan={'Items': items}))
 
 
+def _keywords_table_listing(raw_mod, items, limit):
+    """``_list_tracked_keywords(limit)`` over a Keywords table whose scan answers ``items``."""
+    with patch.object(raw_mod, 'KEYWORDS_TABLE', 'test-keywords'), patch.object(raw_mod, 'dynamodb', _scanning_dynamodb(items)):
+        return raw_mod._list_tracked_keywords(limit)
+
+
 def test_list_tracked_keywords_reads_from_keywords_table_when_configured(raw_mod):
-    fake_dynamodb = _scanning_dynamodb([
-        {'keyword': 'shoes'},
-        {'keyword': 'boots'},
-        {'keyword': 'shoes'},  # duplicate to verify de-dup
-    ])
+    # 'shoes' twice to verify de-dup
+    items = [{'keyword': 'shoes'}, {'keyword': 'boots'}, {'keyword': 'shoes'}]
 
-    with patch.object(raw_mod, 'KEYWORDS_TABLE', 'test-keywords'):
-        with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
-            result = raw_mod._list_tracked_keywords(50)
-
-    assert result == ['shoes', 'boots']
+    assert _keywords_table_listing(raw_mod, items, 50) == ['shoes', 'boots']
 
 
 def test_list_tracked_keywords_falls_back_to_search_results_when_no_keywords_table(raw_mod):
@@ -480,13 +455,7 @@ def test_list_tracked_keywords_returns_empty_when_no_tables_configured(raw_mod):
 
 
 def test_list_tracked_keywords_caps_result_at_limit(raw_mod):
-    fake_dynamodb = _scanning_dynamodb([{'keyword': f'kw-{i}'} for i in range(20)])
-
-    with patch.object(raw_mod, 'KEYWORDS_TABLE', 'test-keywords'):
-        with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
-            result = raw_mod._list_tracked_keywords(5)
-
-    assert len(result) == 5
+    assert len(_keywords_table_listing(raw_mod, [{'keyword': f'kw-{i}'} for i in range(20)], 5)) == 5
 
 
 # --- _latest_brand_ranks --------------------------------------------------
