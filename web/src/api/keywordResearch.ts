@@ -14,6 +14,7 @@ import {
 import type {
   AgentDimensionOption, KeywordResearchItem, ResearchTemplate
 } from '../types';
+import { isRecord } from '../types/domain/keywordDecoders';
 
 export class InvalidKeywordResearchResponseError extends TypeError {
   constructor(message: string) {
@@ -25,10 +26,6 @@ export class InvalidKeywordResearchResponseError extends TypeError {
 export type ResearchType = KeywordResearchItem['type'];
 
 const RESEARCH_TYPES: readonly string[] = ['expansion', 'competitor', 'agent'];
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
 
 export function isKeywordResearchItem(value: unknown): value is KeywordResearchItem {
   return isRecord(value)

@@ -1,3 +1,5 @@
+import { isRecord } from './keywordDecoders';
+
 export type AlertType =
   | 'mention_rate_drop'
   // Raised before 2.21.0 on the former keyword-level "citation rate"; still listed until it expires.
@@ -99,10 +101,6 @@ export interface CreateContentChangeRequest {
   group_id: string;
   description: string;
   url?: string;
-}
-
-function isRecord(candidate: unknown): candidate is Record<string, unknown> {
-  return candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate);
 }
 
 function isNonEmptyString(candidate: unknown): candidate is string {

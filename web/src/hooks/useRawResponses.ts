@@ -63,47 +63,45 @@ export const useRawResponses = () => {
   const [browseData, setBrowseData] = useState<S3BrowseResponse | null>(null);
   const [fileContent, setFileContent] = useState<RawResponseContent | null>(null);
 
-  const browse = useCallback(async (prefix = '', bucket: BucketType = 'responses') => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await requestRawResponses({
-        endpoint: 'browse',
-        param: 'prefix',
-        value: prefix,
-        bucket,
-      }, isS3BrowseResponse);
-      if (data) setBrowseData(data);
-      return data;
-    } catch (err) {
-      setError(getErrorMessage(err, 'rawResponses'));
-      console.error('[rawResponses] Error browsing:', err);
-      return null;
-    } finally {
-      setLoading(false);
-    }
+  const reportFailure = useCallback((err: unknown, action: string): null => {
+    setError(getErrorMessage(err, 'rawResponses'));
+    console.error(`[rawResponses] Error ${action}:`, err);
+    return null;
   }, []);
 
-  const getFile = useCallback(async (key: string, bucket: BucketType = 'responses') => {
+  /** A browse or file read: shows the spinner, clears the last error and stores the payload it gets. */
+  const load = useCallback(async <TPayload,>(
+    request: RawResponsesRequest,
+    isPayload: (data: unknown) => data is TPayload,
+    store: (payload: TPayload) => void,
+    action: string
+  ): Promise<TPayload | null> => {
     setLoading(true);
     setError(null);
     try {
-      const data = await requestRawResponses({
-        endpoint: 'file',
-        param: 'key',
-        value: key,
-        bucket,
-      }, isRawResponseContent);
-      if (data) setFileContent(data);
+      const data = await requestRawResponses(request, isPayload);
+      if (data) store(data);
       return data;
     } catch (err) {
-      setError(getErrorMessage(err, 'rawResponses'));
-      console.error('[rawResponses] Error getting file:', err);
-      return null;
+      return reportFailure(err, action);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [reportFailure]);
+
+  const browse = useCallback(async (prefix = '', bucket: BucketType = 'responses') => load({
+    endpoint: 'browse',
+    param: 'prefix',
+    value: prefix,
+    bucket,
+  }, isS3BrowseResponse, setBrowseData, 'browsing'), [load]);
+
+  const getFile = useCallback(async (key: string, bucket: BucketType = 'responses') => load({
+    endpoint: 'file',
+    param: 'key',
+    value: key,
+    bucket,
+  }, isRawResponseContent, setFileContent, 'getting file'), [load]);
 
   const getDownloadUrl = useCallback(async (key: string, bucket: BucketType = 'responses'): Promise<string | null> => {
     try {
@@ -115,11 +113,9 @@ export const useRawResponses = () => {
       }, isDownloadResponse);
       return data?.download_url ?? null;
     } catch (err) {
-      setError(getErrorMessage(err, 'rawResponses'));
-      console.error('[rawResponses] Error getting download URL:', err);
-      return null;
+      return reportFailure(err, 'getting download URL');
     }
-  }, []);
+  }, [reportFailure]);
 
   const clearFile = useCallback(() => {
     setFileContent(null);

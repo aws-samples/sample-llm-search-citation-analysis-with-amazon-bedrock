@@ -47,20 +47,24 @@ function isPayload(data: unknown): data is Record<string, unknown> {
   return typeof data === 'object' && data !== null;
 }
 
-async function readProvidersConfigured(api: OnboardingStatusApi): Promise<boolean> {
-  const response = await api.fetchProviders();
-  if (!response.ok) return false;
+/** The JSON object an OK response carries; `null` for a failed status or a non-object body. */
+async function readPayload(request: () => Promise<Response>): Promise<Record<string, unknown> | null> {
+  const response = await request();
+  if (!response.ok) return null;
   const data: unknown = await response.json();
-  if (!isPayload(data)) return false;
+  return isPayload(data) ? data : null;
+}
+
+async function readProvidersConfigured(api: OnboardingStatusApi): Promise<boolean> {
+  const data = await readPayload(() => api.fetchProviders());
+  if (data === null) return false;
   const payload: ProvidersPayload = data;
   return (payload.providers ?? []).some((provider) => provider.configured === true);
 }
 
 async function readBrandConfigured(api: OnboardingStatusApi): Promise<boolean> {
-  const response = await api.fetchBrandConfig();
-  if (!response.ok) return false;
-  const data: unknown = await response.json();
-  if (!isPayload(data)) return false;
+  const data = await readPayload(() => api.fetchBrandConfig());
+  if (data === null) return false;
   // GET /brand-config never 404s: it synthesizes a default config with empty
   // tracked_brands when nothing is stored, so presence of first-party brands
   // is the only reliable "configured" signal.
@@ -69,10 +73,8 @@ async function readBrandConfigured(api: OnboardingStatusApi): Promise<boolean> {
 }
 
 async function readScheduleConfigured(api: OnboardingStatusApi): Promise<boolean> {
-  const response = await api.fetchSchedules();
-  if (!response.ok) return false;
-  const data: unknown = await response.json();
-  if (!isPayload(data)) return false;
+  const data = await readPayload(() => api.fetchSchedules());
+  if (data === null) return false;
   const payload: SchedulesPayload = data;
   return (payload.schedules ?? []).length > 0;
 }

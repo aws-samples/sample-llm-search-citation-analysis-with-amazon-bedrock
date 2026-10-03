@@ -1,3 +1,5 @@
+import { isRecord } from '../types/domain/keywordDecoders';
+
 export const ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY =
   'contentStudio.activeBatchCandidates.v2';
 export const LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY =
@@ -19,12 +21,6 @@ interface DecodedCandidateStorageState {
   readonly raw: string | null;
   readonly candidates: ContentStudioBatchCandidate[];
 }
-
-// Stryker disable ConditionalExpression,LogicalOperator: The following predicates are a single runtime record guard; weakening an individual predicate has the same safe-rejection result at each guarded decoder.
-function isRecord(candidate: unknown): candidate is Record<string, unknown> {
-  return typeof candidate === 'object' && candidate !== null && !Array.isArray(candidate);
-}
-// Stryker restore ConditionalExpression,LogicalOperator
 
 function currentTimestamp(): number {
   return Math.max(0, Math.trunc(Date.now()));
@@ -146,50 +142,30 @@ function parseStoredState(
   }
 }
 
-function readCurrentCandidateState(
+/**
+ * Reads one stored candidate list; an unreadable value is removed so it is not
+ * parsed again, and reads as never stored.
+ */
+function readCandidateState(
   storage: Storage,
-  now: number
+  key: string,
+  decoder: (storedState: unknown) => ContentStudioBatchCandidate[] | null
 ): DecodedCandidateStorageState {
-  const raw = storage.getItem(ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY);
+  const raw = storage.getItem(key);
   if (raw === null) {
     return {
       raw,
       candidates: [],
     };
   }
-  const candidates = parseStoredState(
-    raw,
-    (storedState) => decodeStoredCandidates(storedState, now)
-  );
+  const candidates = parseStoredState(raw, decoder);
   if (candidates !== null) {
     return {
       raw,
       candidates,
     };
   }
-  removeStorageKey(storage, ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY);
-  return {
-    raw: null,
-    candidates: [],
-  };
-}
-
-function readLegacyCandidateState(storage: Storage): DecodedCandidateStorageState {
-  const raw = storage.getItem(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY);
-  if (raw === null) {
-    return {
-      raw,
-      candidates: [],
-    };
-  }
-  const candidates = parseStoredState(raw, decodeLegacyBatchIds);
-  if (candidates !== null) {
-    return {
-      raw,
-      candidates,
-    };
-  }
-  removeStorageKey(storage, LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY);
+  removeStorageKey(storage, key);
   return {
     raw: null,
     candidates: [],
@@ -220,8 +196,12 @@ function candidateStorageNeedsWrite(
 
 function readCandidatesFromStorage(storage: Storage): ContentStudioBatchCandidate[] {
   const now = currentTimestamp();
-  const current = readCurrentCandidateState(storage, now);
-  const legacy = readLegacyCandidateState(storage);
+  const current = readCandidateState(
+    storage,
+    ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY,
+    (storedState) => decodeStoredCandidates(storedState, now)
+  );
+  const legacy = readCandidateState(storage, LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY, decodeLegacyBatchIds);
   const candidates = boundedContentStudioBatchCandidates([
     ...current.candidates,
     ...legacy.candidates,
@@ -247,19 +227,23 @@ export function readStoredContentStudioBatchCandidates(): ContentStudioBatchCand
   }
 }
 
-export function addStoredContentStudioBatchCandidate(
-  candidate: ContentStudioBatchCandidate
-): ContentStudioBatchCandidate[] {
-  const candidates = boundedContentStudioBatchCandidates([
-    candidate,
-    ...readStoredContentStudioBatchCandidates(),
-  ]);
+/** Persists the list when storage is reachable and returns it either way. */
+function persistBestEffort(candidates: ContentStudioBatchCandidate[]): ContentStudioBatchCandidate[] {
   try {
     persistCandidates(globalThis.localStorage, candidates);
   } catch {
     // In-memory tracking continues when the localStorage getter is unavailable.
   }
   return candidates;
+}
+
+export function addStoredContentStudioBatchCandidate(
+  candidate: ContentStudioBatchCandidate
+): ContentStudioBatchCandidate[] {
+  return persistBestEffort(boundedContentStudioBatchCandidates([
+    candidate,
+    ...readStoredContentStudioBatchCandidates(),
+  ]));
 }
 
 function candidateIdentity(candidate: ContentStudioBatchCandidate): string {
@@ -270,12 +254,6 @@ export function removeStoredContentStudioBatchCandidates(
   removedCandidates: readonly ContentStudioBatchCandidate[]
 ): ContentStudioBatchCandidate[] {
   const removed = new Set(removedCandidates.map(candidateIdentity));
-  const candidates = readStoredContentStudioBatchCandidates()
-    .filter((candidate) => !removed.has(candidateIdentity(candidate)));
-  try {
-    persistCandidates(globalThis.localStorage, candidates);
-  } catch {
-    // In-memory tracking continues when the localStorage getter is unavailable.
-  }
-  return candidates;
+  return persistBestEffort(readStoredContentStudioBatchCandidates()
+    .filter((candidate) => !removed.has(candidateIdentity(candidate))));
 }

@@ -4,6 +4,7 @@
 import {
   API_BASE_URL, authenticatedFetch, ApiConfigError, ApiRequestError 
 } from '../infrastructure';
+import { isRecord } from '../types/domain/keywordDecoders';
 
 interface ApiErrorResponse {
   error: string;
@@ -24,12 +25,8 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
   return data as T;
 }
 
-function isJsonObject(data: unknown): data is Record<string, unknown> {
-  return typeof data === 'object' && data !== null && !Array.isArray(data);
-}
-
 function decodeApiErrorResponse(data: unknown): ApiErrorResponse | null {
-  if (!isJsonObject(data)) return null;
+  if (!isRecord(data)) return null;
 
   const {
     error, field

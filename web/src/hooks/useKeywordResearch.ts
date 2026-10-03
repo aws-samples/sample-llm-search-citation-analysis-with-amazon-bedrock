@@ -14,6 +14,7 @@ import { pollResearchJob } from './researchPolling';
 import type {
   CompetitorAnalysis, CompetitorAnalysisResult, KeywordExpansionResult, KeywordResearchItem
 } from '../types';
+import { isRecord } from '../types/domain/keywordDecoders';
 
 /**
  * The job the user is waiting on, remembered across a refresh, a tab switch
@@ -30,10 +31,6 @@ type TrackedResearchType = Exclude<ResearchType, 'agent'>;
 interface StoredActiveJob {
   id: string;
   type: TrackedResearchType;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
 }
 
 function isStoredActiveJob(value: unknown): value is StoredActiveJob {
