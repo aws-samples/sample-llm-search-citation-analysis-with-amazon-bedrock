@@ -222,21 +222,24 @@ export const useKeywordResearch = () => {
     }
   }, [beginRun, claimGeneration, trackJob]);
 
+  // Stryker disable ArrayDeclaration: React dependency list; launchRun has a stable identity, so omitting it cannot stale this callback
   const expandKeywords = useCallback(async (seedKeyword: string, industry: string, count: number) => launchRun(
     'expansion',
     () => startKeywordExpansion(seedKeyword, industry, count),
     'expanding keywords'
-  // Stryker disable next-line ArrayDeclaration: React dependency list; launchRun has a stable identity, so omitting it cannot stale this callback
   ), [launchRun]);
+  // Stryker restore ArrayDeclaration
 
+  // Stryker disable ArrayDeclaration: React dependency list; launchRun has a stable identity, so omitting it cannot stale this callback
   const analyzeCompetitor = useCallback(async (url: string) => launchRun(
     'competitor',
     () => startCompetitorAnalysis(url),
     'analyzing competitor'
-  // Stryker disable next-line ArrayDeclaration: React dependency list; launchRun has a stable identity, so omitting it cannot stale this callback
   ), [launchRun]);
+  // Stryker restore ArrayDeclaration
 
   /** Re-run the failed steps of a partial or failed job and follow it again. */
+  // Stryker disable ArrayDeclaration: React dependency list; launchRun has a stable identity, so omitting it cannot stale this callback
   const retryResearch = useCallback(async (job: KeywordResearchItem) => {
     // Agent runs are followed by the Research Agent tab (`useResearchAgent`).
     if (job.type === 'agent') return;
@@ -244,8 +247,8 @@ export const useKeywordResearch = () => {
       await retryKeywordResearch(job.id);
       return job;
     }, 'retrying research', job);
-  // Stryker disable next-line ArrayDeclaration: React dependency list; launchRun has a stable identity, so omitting it cannot stale this callback
   }, [launchRun]);
+  // Stryker restore ArrayDeclaration
 
   // Re-attach to a job the user was waiting on before a refresh or tab switch.
   useEffect(() => {

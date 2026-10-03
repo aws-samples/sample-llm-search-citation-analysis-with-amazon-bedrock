@@ -87,12 +87,13 @@ export function useUserManagement(): UseUserManagementReturn {
     fetchData();
   }, [fetchData]);
 
+  // Stryker disable ArrayDeclaration: React dependency list; fetchData has a stable identity, so omitting it cannot stale this callback
   const invite = useCallback(async (request: InviteUserRequest) => messageOutcome(async () => {
     const response = await inviteUser(request);
     await fetchData();
     return response;
-  // Stryker disable next-line ArrayDeclaration: React dependency list; fetchData has a stable identity, so omitting it cannot stale this callback
   }, 'Failed to invite user'), [fetchData]);
+  // Stryker restore ArrayDeclaration
 
   const mutateAndRefresh = useCallback(async (mutation: () => Promise<unknown>, failure: string) => {
     try {

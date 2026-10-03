@@ -70,6 +70,7 @@ export const useRawResponses = () => {
   }, []);
 
   /** A browse or file read: shows the spinner, clears the last error and stores the payload it gets. */
+  // Stryker disable ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
   const load = useCallback(async <TPayload,>(
     request: RawResponsesRequest,
     isPayload: (data: unknown) => data is TPayload,
@@ -87,25 +88,28 @@ export const useRawResponses = () => {
     } finally {
       setLoading(false);
     }
-  // Stryker disable next-line ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
   }, [reportFailure]);
+  // Stryker restore ArrayDeclaration
 
+  // Stryker disable ArrayDeclaration: React dependency list; load has a stable identity, so omitting it cannot stale this callback
   const browse = useCallback(async (prefix = '', bucket: BucketType = 'responses') => load({
     endpoint: 'browse',
     param: 'prefix',
     value: prefix,
     bucket,
-  // Stryker disable next-line ArrayDeclaration: React dependency list; load has a stable identity, so omitting it cannot stale this callback
   }, isS3BrowseResponse, setBrowseData, 'browsing'), [load]);
+  // Stryker restore ArrayDeclaration
 
+  // Stryker disable ArrayDeclaration: React dependency list; load has a stable identity, so omitting it cannot stale this callback
   const getFile = useCallback(async (key: string, bucket: BucketType = 'responses') => load({
     endpoint: 'file',
     param: 'key',
     value: key,
     bucket,
-  // Stryker disable next-line ArrayDeclaration: React dependency list; load has a stable identity, so omitting it cannot stale this callback
   }, isRawResponseContent, setFileContent, 'getting file'), [load]);
+  // Stryker restore ArrayDeclaration
 
+  // Stryker disable ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
   const getDownloadUrl = useCallback(async (key: string, bucket: BucketType = 'responses'): Promise<string | null> => {
     try {
       const data = await requestRawResponses({
@@ -118,8 +122,8 @@ export const useRawResponses = () => {
     } catch (err) {
       return reportFailure(err, 'getting download URL');
     }
-  // Stryker disable next-line ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
   }, [reportFailure]);
+  // Stryker restore ArrayDeclaration
 
   const clearFile = useCallback(() => {
     setFileContent(null);

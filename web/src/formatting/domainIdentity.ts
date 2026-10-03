@@ -31,6 +31,7 @@ function dropTrailingDots(host: string): string {
 
 export function normalizeDomain(value: string): string | null {
   const url = asParsableUrl(value.trim().toLowerCase());
+  // Stryker disable next-line ConditionalExpression: equivalent, hostOf(null) parses 'null', which has no scheme, so it yields the same null
   const host = (url === null ? null : hostOf(url)) ?? '';
   const withoutLeadingDots = host.replace(/^\.+/, '');
   const withoutWww = withoutLeadingDots.startsWith('www.') ? withoutLeadingDots.slice(4) : withoutLeadingDots;
