@@ -7,6 +7,10 @@ import { KeywordExpansion } from './KeywordExpansion';
 import { CompetitorAnalysis } from './CompetitorAnalysis';
 import { ResearchHistory } from './ResearchHistory';
 import { ResearchAgent } from './agent/ResearchAgent';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  BOLT_PATHS, CLOCK_PATHS, GLOBE_PATHS 
+} from '../ui/iconPaths';
 
 type ResearchTab = 'expand' | 'competitor' | 'history' | 'agent';
 
@@ -48,36 +52,28 @@ export const KeywordResearchView = ({ onKeywordsAdded }: KeywordResearchViewProp
       id: 'expand',
       label: 'Related Keywords',
       icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
+        <StrokeIcon className="w-4 h-4" paths={BOLT_PATHS} />
       ),
     },
     {
       id: 'competitor',
       label: 'Competitor Analysis',
       icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9" />
-        </svg>
+        <StrokeIcon className="w-4 h-4" paths={GLOBE_PATHS} />
       ),
     },
     {
       id: 'history',
       label: 'History',
       icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
+        <StrokeIcon className="w-4 h-4" paths={CLOCK_PATHS} />
       ),
     },
     {
       id: 'agent',
       label: 'Research Agent',
       icon: (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zm11 2l2 4.5 4.5 2-4.5 2-2 4.5-2-4.5L9.5 11.5 14 9.5 16 5zM8 16l1 2.5 2.5 1-2.5 1L8 23l-1-2.5-2.5-1 2.5-1L8 16z" />
-        </svg>
+        <StrokeIcon className="w-4 h-4" paths={['M5 3l1.5 3.5L10 8l-3.5 1.5L5 13l-1.5-3.5L0 8l3.5-1.5L5 3zm11 2l2 4.5 4.5 2-4.5 2-2 4.5-2-4.5L9.5 11.5 14 9.5 16 5zM8 16l1 2.5 2.5 1-2.5 1L8 23l-1-2.5-2.5-1 2.5-1L8 16z']} />
       ),
     },
   ];

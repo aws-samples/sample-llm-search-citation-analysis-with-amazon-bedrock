@@ -1,4 +1,6 @@
 import { ClipboardIcon } from '../ui/ClipboardIcon';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import { CHECK_PATHS } from '../ui/iconPaths';
 
 interface CopyButtonLabelProps {
   copied: boolean;
@@ -17,9 +19,7 @@ export const CopyButtonLabel = ({
 }: CopyButtonLabelProps) => (
   copied ? (
     <>
-      <svg className={`${iconClassName} text-green-500`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-      </svg>
+      <StrokeIcon className={`${iconClassName} text-green-500`} paths={CHECK_PATHS} strokeWidth={2} />
       {copiedLabel}
     </>
   ) : (

@@ -4,6 +4,7 @@ import { themedTooltip } from '../ui/chartTheme';
 import type { ChartTheme } from '../ui/chartTheme';
 import { useThemedChart } from './useThemedChart';
 import { DashboardChartCard } from './DashboardChartCard';
+import { CHART_BAR_PATHS } from '../ui/iconPaths';
 
 interface ProviderChartProps {data: ProviderStat[];}
 
@@ -12,10 +13,6 @@ const PROVIDER_PALETTE = [
   'rgba(100, 149, 237, 0.85)',
   'rgba(134, 239, 172, 0.85)',
   'rgba(251, 146, 60, 0.85)',
-];
-
-const PROVIDER_CITATIONS_EMPTY_ICON_PATHS = [
-  'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z',
 ];
 
 const buildProviderChartConfiguration = (
@@ -66,7 +63,7 @@ export const ProviderChart = ({ data }: ProviderChartProps) => {
       canvasRef={canvasRef}
       hasData={hasData}
       emptyHint="Run an analysis to see provider stats"
-      emptyIconPaths={PROVIDER_CITATIONS_EMPTY_ICON_PATHS}
+      emptyIconPaths={CHART_BAR_PATHS}
     />
   );
 };

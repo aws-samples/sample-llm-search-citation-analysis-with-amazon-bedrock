@@ -7,6 +7,10 @@ import {
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { safeHref } from '../../infrastructure';
 import { Spinner } from '../ui/Spinner';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  CHEVRON_RIGHT_PATHS, DUPLICATE_PATHS, GLOBE_PATHS 
+} from '../ui/iconPaths';
 
 type SectionId = 'primary' | 'secondary' | 'longtail' | 'gaps';
 
@@ -115,14 +119,7 @@ export const InputForm = ({
           </>
         ) : (
           <>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
-              />
-            </svg>
+            <StrokeIcon className="w-4 h-4" paths={GLOBE_PATHS} />
             Analyze
           </>
         )}
@@ -210,9 +207,7 @@ export const SeoElementsDisplay = ({ seoElements }: SeoElementsDisplayProps) => 
   return (
     <div className="mt-4 pt-4 border-t border-gray-100">
       <div className="flex items-center gap-2 text-xs font-medium text-gray-700 mb-3">
-        <svg className="w-4 h-4 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
+        <StrokeIcon className="w-4 h-4 rotate-90" paths={CHEVRON_RIGHT_PATHS} strokeWidth={2} />
         <span>Extracted SEO Elements</span>
         <span className="text-gray-400 font-normal">(actual page data)</span>
       </div>
@@ -341,9 +336,7 @@ const KeywordRow = ({
           className="text-gray-400 hover:text-gray-600 transition-colors"
           title="Copy keyword"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
+          <StrokeIcon className="w-4 h-4" paths={DUPLICATE_PATHS} />
         </button>
       </td>
     </tr>

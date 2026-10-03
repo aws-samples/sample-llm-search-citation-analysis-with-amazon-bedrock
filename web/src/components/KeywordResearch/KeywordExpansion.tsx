@@ -9,6 +9,8 @@ import { ResearchProgress } from './ResearchProgress';
 import type { ResearchRunViewProps } from './researchRunView';
 import { DEFAULT_BRAND_INDUSTRY } from '../../constants/brandConfigDefaults';
 import { Spinner } from '../ui/Spinner';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import { SEARCH_PATHS } from '../ui/iconPaths';
 
 interface KeywordExpansionProps extends ResearchRunViewProps {
   onExpand: (seedKeyword: string, industry: string, count: number) => Promise<void>;
@@ -146,9 +148,7 @@ export const KeywordExpansion = ({
                 </>
               ) : (
                 <>
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
+                  <StrokeIcon className="w-4 h-4" paths={SEARCH_PATHS} />
                   Find Keywords
                 </>
               )}

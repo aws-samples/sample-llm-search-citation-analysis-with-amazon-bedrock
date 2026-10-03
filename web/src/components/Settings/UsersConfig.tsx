@@ -8,6 +8,8 @@ import {
   getStatusBadgeClass,
   getStatusLabel,
 } from './UserModals';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import { REFRESH_PATHS } from '../ui/iconPaths';
 
 class InviteError extends Error {
   constructor(message: string) {
@@ -87,18 +89,14 @@ export function UsersConfig() {
             onClick={refresh}
             className="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
+            <StrokeIcon className="w-4 h-4" paths={REFRESH_PATHS} />
             Refresh
           </button>
           <button
             onClick={() => setShowInviteModal(true)}
             className="px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-2"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
+            <StrokeIcon className="w-4 h-4" paths={['M12 4.5v15m7.5-7.5h-15']} />
             Invite User
           </button>
         </div>
@@ -166,9 +164,7 @@ export function UsersConfig() {
                       className="text-gray-400 hover:text-gray-600 transition-colors"
                       title="View details"
                     >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
-                      </svg>
+                      <StrokeIcon className="w-5 h-5" paths={['M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z']} />
                     </button>
                   </td>
                 </tr>

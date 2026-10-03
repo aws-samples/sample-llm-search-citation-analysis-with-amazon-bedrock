@@ -3,6 +3,8 @@ import { safeHref } from '../../infrastructure';
 import {
   ChevronDownIcon, CloseIcon 
 } from '../ui';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import { EXTERNAL_LINK_PATHS } from '../ui/iconPaths';
 
 const providerColors: Record<string, {
   border: string;
@@ -370,14 +372,7 @@ const RawResponseLink = ({
       }}
       className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
     >
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.5}
-          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-        />
-      </svg>
+      <StrokeIcon className="w-4 h-4" paths={EXTERNAL_LINK_PATHS} />
       View Raw Response
     </button>
   </div>

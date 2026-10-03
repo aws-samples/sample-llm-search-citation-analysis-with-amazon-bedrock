@@ -8,6 +8,10 @@ import { formatRelativeTime } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
 import { RefreshIcon } from '../ui';
 import { ProviderModelEditor } from './ProviderModelEditor';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  EXCLAMATION_TRIANGLE_PATHS, EXTERNAL_LINK_PATHS 
+} from '../ui/iconPaths';
 
 export interface ProvidersConfigProps {
   readonly providers: ProviderConfig[];
@@ -87,9 +91,7 @@ const ProviderAutoDisabledNote = ({ provider }: ProviderHealthProps) => {
 
   return (
     <div className="mt-3 flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3">
-      <svg className="w-4 h-4 mt-0.5 shrink-0 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
-      </svg>
+      <StrokeIcon className="w-4 h-4 mt-0.5 shrink-0 text-red-600" paths={EXCLAMATION_TRIANGLE_PATHS} />
       <p className="text-xs text-red-800">
         <span className="font-semibold">The system switched this provider off. </span>
         {health.autoDisabledNote}
@@ -287,9 +289,7 @@ export const ProvidersConfig = ({
                   </>
                 )}
                 <a href={provider.docs_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-gray-600 transition-colors" title="Get API Key">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                  </svg>
+                  <StrokeIcon className="w-4 h-4" paths={EXTERNAL_LINK_PATHS} />
                 </a>
               </div>
             </div>

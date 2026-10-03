@@ -17,6 +17,10 @@ import {
   resolveResearchStatus
 } from '../../formatting/researchStatus';
 import { Spinner } from '../ui/Spinner';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  CHEVRON_RIGHT_PATHS, CLOCK_PATHS, REFRESH_PATHS, TRASH_PATHS 
+} from '../ui/iconPaths';
 
 interface ResearchHistoryProps {
   history: KeywordResearchItem[];
@@ -108,19 +112,7 @@ const Header = ({
       disabled={loading}
       className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-2"
     >
-      <svg
-        className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.5}
-          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-        />
-      </svg>
+      <StrokeIcon className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} paths={REFRESH_PATHS} />
       Refresh
     </button>
   </div>
@@ -135,19 +127,7 @@ const LoadingState = () => (
 
 const EmptyState = () => (
   <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-    <svg
-      className="w-12 h-12 mx-auto text-gray-300"
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-      />
-    </svg>
+    <StrokeIcon className="w-12 h-12 mx-auto text-gray-300" paths={CLOCK_PATHS} />
     <p className="mt-4 text-sm text-gray-500">No research history yet</p>
     <p className="text-xs text-gray-400 mt-1">
       Start by expanding a keyword or analyzing a competitor
@@ -266,14 +246,7 @@ const ExpandButton = ({
       onToggle();
     }}
   >
-    <svg
-      className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" />
-    </svg>
+    <StrokeIcon className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`} paths={CHEVRON_RIGHT_PATHS} />
   </button>
 );
 
@@ -369,14 +342,7 @@ const RetryButton = ({ onClick }: RetryButtonProps) => (
     title="Retry failed providers"
     aria-label="Retry failed providers"
   >
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-      />
-    </svg>
+    <StrokeIcon className="w-4 h-4" paths={REFRESH_PATHS} />
   </button>
 );
 
@@ -391,13 +357,6 @@ const DeleteButton = ({ onClick }: DeleteButtonProps) => (
     className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
     title="Delete"
   >
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-      />
-    </svg>
+    <StrokeIcon className="w-4 h-4" paths={TRASH_PATHS} />
   </button>
 );

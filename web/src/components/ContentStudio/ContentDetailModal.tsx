@@ -8,6 +8,10 @@ import { CopyButtonLabel } from './CopyButtonLabel';
 import {
   formatContentWarning, getContentTitle
 } from './contentPresentation';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  CHECK_PATHS, CLOSE_PATHS, DOWNLOAD_PATHS, HASHTAG_PATHS 
+} from '../ui/iconPaths';
 
 interface ContentDetailModalProps {
   item: ContentStudioHistory;
@@ -95,9 +99,7 @@ const ContentDetailHeader = ({
       </h2>
       <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
         <span className="flex items-center gap-1">
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
-          </svg>
+          <StrokeIcon className="w-3.5 h-3.5" paths={HASHTAG_PATHS} />
           {item.keyword}
         </span>
         <span>•</span>
@@ -168,9 +170,7 @@ const ExportButton = ({
     {exporting ? (
       <Spinner size="sm" />
     ) : (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-      </svg>
+      <StrokeIcon className="w-4 h-4" paths={DOWNLOAD_PATHS} />
     )}
     .docx
   </button>
@@ -200,9 +200,7 @@ const CloseButton = ({ onClose }: CloseButtonProps) => (
     className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
     aria-label="Close content details"
   >
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
-    </svg>
+    <StrokeIcon className="w-5 h-5" paths={CLOSE_PATHS} />
   </button>
 );
 
@@ -272,9 +270,7 @@ const ContentDetailBody = ({
         <ul className="mt-2 space-y-2">
           {content.key_points.map((point) => (
             <li key={point} className="text-sm text-gray-700 flex items-start gap-2">
-              <svg className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
+              <StrokeIcon className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" paths={CHECK_PATHS} strokeWidth={2} />
               {point}
             </li>
           ))}

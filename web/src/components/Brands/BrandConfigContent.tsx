@@ -11,6 +11,8 @@ import { DomainList } from './DomainList';
 import { PromptEditor } from './PromptEditor';
 import { FirstPartyBrandsSection } from './FirstPartyBrandsSection';
 import { CompetitorBrandsSection } from './CompetitorBrandsSection';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import { CHECK_PATHS } from '../ui/iconPaths';
 
 interface BrandConfigContentProps {
   readonly config: BrandConfig | null;
@@ -163,7 +165,7 @@ export const BrandConfigContent = ({
       </fieldset>
 
       <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
-        {ui.saved && <span className="text-green-600 text-sm flex items-center gap-1"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>Saved!</span>}
+        {ui.saved && <span className="text-green-600 text-sm flex items-center gap-1"><StrokeIcon className="w-4 h-4" paths={CHECK_PATHS} strokeWidth={2} />Saved!</span>}
         {canEdit ? (
           <button onClick={handleSave} disabled={ui.saving} className="px-6 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 text-sm font-medium">{ui.saving ? 'Saving...' : 'Save Configuration'}</button>
         ) : (

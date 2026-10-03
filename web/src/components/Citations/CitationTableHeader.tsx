@@ -1,6 +1,8 @@
 import type {
   SortColumn, SortConfig 
 } from '../../exporters/citationParser';
+import { CHEVRON_DOWN_PATHS } from '../ui/iconPaths';
+import { StrokeIcon } from '../ui/StrokeIcon';
 
 interface CitationTableHeaderProps {
   sort: SortConfig;
@@ -14,12 +16,8 @@ function SortIcon({
   readonly direction: 'asc' | 'desc' 
 }) {
   if (!active) return null;
-  const d = direction === 'desc' ? 'M19 9l-7 7-7-7' : 'M5 15l7-7 7 7';
-  return (
-    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={d} />
-    </svg>
-  );
+  const paths = direction === 'desc' ? CHEVRON_DOWN_PATHS : ['M5 15l7-7 7 7'];
+  return <StrokeIcon className="w-3 h-3" paths={paths} strokeWidth={2} />;
 }
 
 function sortableClass(isActive: boolean): string {

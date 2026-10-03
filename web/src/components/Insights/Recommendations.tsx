@@ -7,6 +7,10 @@ import { Spinner } from '../ui/Spinner';
 import {
   EyeIcon, CogIcon, RefreshIcon 
 } from '../ui';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  BOLT_PATHS, CHART_BAR_PATHS, CHEVRON_DOWN_PATHS, INFO_CIRCLE_PATHS, LIGHTBULB_PATHS, LINK_PATHS, SORT_ASCENDING_PATHS, SPARKLES_PATHS 
+} from '../ui/iconPaths';
 
 const getPriorityColor = (priority: string): string => {
   const colors: Record<string, string> = {
@@ -31,39 +35,27 @@ const getTypeBorderColor = (type: string): string => {
 };
 
 const RankingIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
-  </svg>
+  <StrokeIcon className="w-5 h-5" paths={SORT_ASCENDING_PATHS} />
 );
 
 const ProviderGapIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-  </svg>
+  <StrokeIcon className="w-5 h-5" paths={LINK_PATHS} />
 );
 
 const CompetitiveIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-  </svg>
+  <StrokeIcon className="w-5 h-5" paths={BOLT_PATHS} />
 );
 
 const DataIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-  </svg>
+  <StrokeIcon className="w-5 h-5" paths={CHART_BAR_PATHS} />
 );
 
 const BestPracticeIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-  </svg>
+  <StrokeIcon className="w-5 h-5" paths={SPARKLES_PATHS} />
 );
 
 const DefaultIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-  </svg>
+  <StrokeIcon className="w-5 h-5" paths={LIGHTBULB_PATHS} />
 );
 
 const getTypeIcon = (type: string): JSX.Element => {
@@ -100,14 +92,7 @@ const RecommendationCard = ({
             <h4 className="font-semibold text-gray-900">{rec.title}</h4>
             <div className="flex items-center gap-2">
               <span className={`w-2.5 h-2.5 rounded-full ${getPriorityColor(rec.priority)}`} />
-              <svg 
-                className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} 
-                fill="none" 
-                stroke="currentColor" 
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 9l-7 7-7-7" />
-              </svg>
+              <StrokeIcon className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} paths={CHEVRON_DOWN_PATHS} />
             </div>
           </div>
           
@@ -191,9 +176,7 @@ const Header = ({
         </p>
         <div className="mt-3 flex items-center gap-2 text-sm">
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-700 rounded-full text-xs sm:text-sm">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
+            <StrokeIcon className="w-3.5 h-3.5" paths={BOLT_PATHS} strokeWidth={2} />
             <span className="hidden sm:inline">Start with high-priority items for biggest impact</span>
             <span className="sm:hidden">Start with high-priority items</span>
           </span>
@@ -232,9 +215,7 @@ const LlmEnhancedSection = ({
 }) => (
   <div className="mt-8">
     <h3 className="text-lg font-medium mb-4 flex items-center gap-2 text-gray-900">
-      <svg className="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-      </svg>
+      <StrokeIcon className="w-5 h-5 text-indigo-500" paths={SPARKLES_PATHS} />
       AI-Enhanced Recommendations
     </h3>
     <div className="space-y-4">
@@ -256,9 +237,7 @@ const LlmEnhancedSection = ({
 const LlmHint = () => (
   <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 text-sm text-indigo-700">
     <div className="flex items-center gap-2">
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
+      <StrokeIcon className="w-4 h-4" paths={INFO_CIRCLE_PATHS} />
       AI enhancement is enabled but no additional recommendations were generated.
     </div>
   </div>

@@ -6,6 +6,10 @@ import type {
   BrandExpansionAllResult, CompetitorDiscoveryResult 
 } from '../../types';
 import type { BrandListSectionProps } from './brandListSection';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  BOLT_PATHS, SEARCH_PATHS 
+} from '../ui/iconPaths';
 
 interface CompetitorBrandsSectionProps extends BrandListSectionProps {
   readonly discoveryResult: CompetitorDiscoveryResult | null;
@@ -41,7 +45,7 @@ function CompetitorActions({
           className="px-3 py-1.5 bg-amber-100 text-amber-700 text-xs font-medium rounded-lg hover:bg-amber-200 transition-colors disabled:opacity-50 flex items-center gap-1.5"
         >
           {finding ? <><Spinner size="sm" />Finding...</> : (
-            <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>Find Competitors</>
+            <><StrokeIcon className="w-3 h-3" paths={SEARCH_PATHS} strokeWidth={2} />Find Competitors</>
           )}
         </button>
       )}
@@ -52,7 +56,7 @@ function CompetitorActions({
           className="px-3 py-1.5 bg-amber-600 text-white text-xs font-medium rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
         >
           {expandingAll ? <><Spinner size="sm" />Expanding...</> : (
-            <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Expand Brand</>
+            <><StrokeIcon className="w-3 h-3" paths={BOLT_PATHS} strokeWidth={2} />Expand Brand</>
           )}
         </button>
       )}

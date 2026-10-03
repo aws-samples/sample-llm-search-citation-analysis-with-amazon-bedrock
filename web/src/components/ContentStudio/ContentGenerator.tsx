@@ -5,6 +5,10 @@ import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { Spinner } from '../ui/Spinner';
 import { CloseIcon } from '../ui';
 import { CopyButtonLabel } from './CopyButtonLabel';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  CHECK_PATHS, DUPLICATE_PATHS 
+} from '../ui/iconPaths';
 
 interface ContentGeneratorProps {
   idea: ContentIdea;
@@ -122,9 +126,7 @@ const GeneratedContentDisplay = ({
           <ul className="space-y-1">
             {content.key_points.map((point) => (
               <li key={point} className="text-sm text-gray-700 flex items-start gap-2">
-                <svg className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                </svg>
+                <StrokeIcon className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" paths={CHECK_PATHS} strokeWidth={2} />
                 {point}
               </li>
             ))}
@@ -196,16 +198,12 @@ export const ContentGenerator = ({
               >
                 {copied === 'all' ? (
                   <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
+                    <StrokeIcon className="w-4 h-4" paths={CHECK_PATHS} strokeWidth={2} />
                     Copied All!
                   </>
                 ) : (
                   <>
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
+                    <StrokeIcon className="w-4 h-4" paths={DUPLICATE_PATHS} />
                     Copy All Content
                   </>
                 )}
