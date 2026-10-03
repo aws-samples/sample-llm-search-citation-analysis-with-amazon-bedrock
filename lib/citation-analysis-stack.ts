@@ -757,12 +757,6 @@ export class CitationAnalysisStack extends cdk.Stack {
       partitionKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'normalized_url', type: dynamodb.AttributeType.STRING },
       globalSecondaryIndexes: [
-        // GSI: CitationCountIndex - Query citations by popularity
-        {
-          indexName: 'CitationCountIndex',
-          partitionKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
-          sortKey: { name: 'citation_count', type: dynamodb.AttributeType.NUMBER },
-        },
         // GSI: UrlIndex - Inverse index for "which keywords cite this URL?"
         //
         // The base table is keyed by (keyword, normalized_url) which makes the
