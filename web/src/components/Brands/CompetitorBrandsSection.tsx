@@ -7,9 +7,8 @@ import type {
 } from '../../types';
 import type { BrandListSectionProps } from './brandListSection';
 import { StrokeIcon } from '../ui/StrokeIcon';
-import {
-  BOLT_PATHS, SEARCH_PATHS 
-} from '../ui/iconPaths';
+import { SEARCH_PATHS } from '../ui/iconPaths';
+import { ExpandBrandLabel } from './ExpandBrandLabel';
 
 interface CompetitorBrandsSectionProps extends BrandListSectionProps {
   readonly discoveryResult: CompetitorDiscoveryResult | null;
@@ -55,9 +54,7 @@ function CompetitorActions({
           disabled={expanding}
           className="px-3 py-1.5 bg-amber-600 text-white text-xs font-medium rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
         >
-          {expandingAll ? <><Spinner size="sm" />Expanding...</> : (
-            <><StrokeIcon className="w-3 h-3" paths={BOLT_PATHS} strokeWidth={2} />Expand Brand</>
-          )}
+          <ExpandBrandLabel expanding={expandingAll} />
         </button>
       )}
     </div>

@@ -14,6 +14,7 @@ import {
 } from '../ui/iconPaths';
 import { CenteredMessage } from '../ui/CenteredState';
 import { SettingsErrorNotice } from './SettingsErrorNotice';
+import { SettingsSectionHeader } from './SettingsSectionHeader';
 
 export interface ProvidersConfigProps {
   readonly providers: ProviderConfig[];
@@ -237,16 +238,12 @@ export const ProvidersConfig = ({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900">AI Provider Configuration</h3>
-          <p className="text-xs text-gray-500 mt-1">Configure API keys and enable/disable providers for analysis</p>
-        </div>
+      <SettingsSectionHeader title="AI Provider Configuration" description="Configure API keys and enable/disable providers for analysis">
         <button onClick={onRefresh} className="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2">
           <RefreshIcon className="w-4 h-4" />
           Refresh
         </button>
-      </div>
+      </SettingsSectionHeader>
 
       <SettingsErrorNotice error={error} />
 

@@ -105,13 +105,15 @@ function DashboardCharts({ citations }: { readonly citations: Citations | null }
   );
 }
 
-function QuickActions({
-  citations, keywords, setActiveTab
-}: {
+interface QuickActionsProps {
   readonly citations: Citations | null;
   readonly keywords: Keyword[];
   readonly setActiveTab: (tab: TabType) => void;
-}) {
+}
+
+function QuickActions({
+  citations, keywords, setActiveTab
+}: QuickActionsProps) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
       <h3 className="text-sm font-medium text-gray-900 mb-4">Quick Actions</h3>
@@ -156,12 +158,7 @@ function QuickActions({
 
 function DashboardContent({
   stats, citations, keywords, setActiveTab
-}: {
-  readonly stats: Stats | null;
-  readonly citations: Citations | null;
-  readonly keywords: Keyword[];
-  readonly setActiveTab: (tab: TabType) => void;
-}) {
+}: QuickActionsProps & { readonly stats: Stats | null }) {
   return (
     <ErrorBoundary>
       <DashboardStats stats={stats} />

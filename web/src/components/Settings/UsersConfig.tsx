@@ -12,6 +12,7 @@ import { StrokeIcon } from '../ui/StrokeIcon';
 import { REFRESH_PATHS } from '../ui/iconPaths';
 import { CenteredMessage } from '../ui/CenteredState';
 import { SettingsErrorNotice } from './SettingsErrorNotice';
+import { SettingsSectionHeader } from './SettingsSectionHeader';
 
 class InviteError extends Error {
   constructor(message: string) {
@@ -79,13 +80,7 @@ export function UsersConfig() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900">User Management</h3>
-          <p className="text-xs text-gray-500 mt-1">
-            Manage Cognito users: invite, enable/disable, and assign groups
-          </p>
-        </div>
+      <SettingsSectionHeader title="User Management" description="Manage Cognito users: invite, enable/disable, and assign groups">
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
@@ -102,7 +97,7 @@ export function UsersConfig() {
             Invite User
           </button>
         </div>
-      </div>
+      </SettingsSectionHeader>
 
       <SettingsErrorNotice error={error} />
 
