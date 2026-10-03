@@ -1,9 +1,7 @@
 import {
   beforeEach, describe, expect, it, vi
 } from 'vitest';
-import {
-  act, renderHook, waitFor
-} from '@testing-library/react';
+import { act } from '@testing-library/react';
 import { useResearchTemplates } from './useResearchTemplates';
 import {
   buildCafeTemplate, buildSavedTemplate, buildTemplate
@@ -11,22 +9,41 @@ import {
 import {
   createEndpointMockFetch, createMockJsonResponse
 } from '../test/fetchResponses';
+import { renderLoadedHook } from '../test/loadedHook';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 const SAVED = buildSavedTemplate();
+const BEACH_RESORTS = buildSavedTemplate({
+  id: 't2',
+  name: 'Beach resorts',
+});
+const BEACH_RESORTS_DRAFT = {
+  name: 'Beach resorts',
+  systemPrompt: 'You research beach resorts for families.',
+};
 
 interface TemplatesHookResult { current: ReturnType<typeof useResearchTemplates> }
 
 /** Renders the hook and waits for the initial template list to arrive. */
 async function renderLoadedTemplates(): Promise<TemplatesHookResult> {
-  const { result } = renderHook(() => useResearchTemplates());
-  await waitFor(() => {
-    expect(result.current.loading).toBe(false);
-  });
+  const { result } = await renderLoadedHook(() => useResearchTemplates());
   return result;
+}
+
+/** Renders the loaded hook and saves the Beach resorts template from `draft`. */
+async function renderAfterCreatingBeachResorts(
+  draft: Parameters<TemplatesHookResult['current']['create']>[0] = BEACH_RESORTS_DRAFT
+) {
+  const result = await renderLoadedTemplates();
+  mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse(BEACH_RESORTS, 201));
+  const outcome = await act(() => result.current.create(draft));
+  return {
+    result,
+    outcome,
+  };
 }
 
 describe('useResearchTemplates', () => {
@@ -41,17 +58,12 @@ describe('useResearchTemplates', () => {
   });
 
   it('adds a saved template among the saved ones sorted by name', async () => {
-    const result = await renderLoadedTemplates();
-    mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse(buildSavedTemplate({
-      id: 't2',
-      name: 'Beach resorts',
-    }), 201));
-
-    const outcome = await act(() => result.current.create({
-      name: 'Beach resorts',
-      systemPrompt: 'You research beach resorts for families.',
+    const {
+      result, outcome
+    } = await renderAfterCreatingBeachResorts({
+      ...BEACH_RESORTS_DRAFT,
       baseTemplateId: 'builtin-default',
-    }));
+    });
 
     expect(outcome.success).toBe(true);
     expect(result.current.templates.map((template) => template.name)).toStrictEqual(['Hotels', 'Cafés', 'Beach resorts', 'Urban hotels']);
@@ -70,15 +82,7 @@ describe('useResearchTemplates', () => {
   });
 
   it('re-sorts the saved templates when one is renamed', async () => {
-    const result = await renderLoadedTemplates();
-    mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse(buildSavedTemplate({
-      id: 't2',
-      name: 'Beach resorts',
-    }), 201));
-    await act(() => result.current.create({
-      name: 'Beach resorts',
-      systemPrompt: 'You research beach resorts for families.',
-    }));
+    const { result } = await renderAfterCreatingBeachResorts();
     mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse({
       ...SAVED,
       name: 'Airport hotels',

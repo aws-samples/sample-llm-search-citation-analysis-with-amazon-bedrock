@@ -3,6 +3,8 @@ import {
   act, renderHook 
 } from '@testing-library/react';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { createMockJsonResponse } from '../test/fetchResponses';
+import type { AnalysisScope } from '../types';
 import { useExecutionPolling } from './useExecutionPolling';
 
 export const mockExecutionArn = 'arn:aws:states:us-east-1:123456789:execution:test';
@@ -52,10 +54,22 @@ export const mockKeywordProgress = {
   keywords_pending: 16,
 };
 
+/** `renderExecutionPolling(fetch)`, then one `triggerAnalysis(scope)`; `triggerResult` is what it resolved with. */
+export async function renderTriggeredExecutionPolling(
+  fetch: ReturnType<typeof createMockFetch> = createMockFetch(),
+  scope?: AnalysisScope
+) {
+  const rendered = renderExecutionPolling(fetch);
+  const triggerResult = await act(() => rendered.result.current.triggerAnalysis(scope));
+  return {
+    triggerResult,
+    ...rendered,
+  };
+}
+
 /** Triggers a run whose first status poll carries `progress`, and returns the resulting execution. */
 export async function triggerWithProgress(progress: unknown) {
-  const { result } = renderExecutionPolling(createMockFetch({ statusResponse: createMockStatusResponse('RUNNING', [], progress) }));
-  await act(() => result.current.triggerAnalysis());
+  const { result } = await renderTriggeredExecutionPolling(createMockFetch({ statusResponse: createMockStatusResponse('RUNNING', [], progress) }));
   return result.current.execution;
 }
 
@@ -70,16 +84,9 @@ export function createMockFetch(options: {
   return vi.fn().mockImplementation((url: string) => {
     if (url.includes('/trigger')) {
       if (options.triggerSuccess === false) {
-        return Promise.resolve({
-          ok: false,
-          status: 500,
-          json: () => Promise.resolve({ error: 'Trigger failed' }),
-        });
+        return Promise.resolve(createMockJsonResponse({ error: 'Trigger failed' }, 500));
       }
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(options.triggerResponse ?? createMockTriggerResponse()),
-      });
+      return Promise.resolve(createMockJsonResponse(options.triggerResponse ?? createMockTriggerResponse()));
     }
 
     if (url.includes('/executions/')) {
@@ -87,10 +94,7 @@ export function createMockFetch(options: {
         ? options.statusSequence[statusCallCount.current++] ?? options.statusSequence[options.statusSequence.length - 1]
         : options.statusResponse ?? createMockStatusResponse('RUNNING');
 
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve(response),
-      });
+      return Promise.resolve(createMockJsonResponse(response));
     }
 
     return Promise.resolve({

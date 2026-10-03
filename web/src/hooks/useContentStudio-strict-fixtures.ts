@@ -1,18 +1,16 @@
 import {
   useEffect, useRef
 } from 'react';
-import { renderHook } from '@testing-library/react';
 import { vi } from 'vitest';
 import {
   createDeferredResponse, createMockJsonResponse
 } from '../test/fetchResponses';
 import type { authenticatedFetch } from '../infrastructure/auth';
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import {
   buildContentHistoryPayload,
-  contentStudioStrictModeBoundary,
   mockBatchRequest,
   mockContentIdea,
+  renderContentStudioScenario,
 } from './useContentStudio-fixtures';
 import { useContentStudio } from './useContentStudio';
 
@@ -60,8 +58,7 @@ function renderReplayedRequests(
   fetch
     .mockReturnValueOnce(firstRequest.promise)
     .mockReturnValueOnce(secondRequest.promise);
-  mockAuthenticatedFetch.mockImplementation(fetch);
-  const rendered = renderHook(useScenario, {wrapper: contentStudioStrictModeBoundary,});
+  const rendered = renderContentStudioScenario(useScenario, fetch, 'strict');
   return {
     firstRequest,
     secondRequest,
@@ -92,11 +89,7 @@ export function renderReplayedBatchStart() {
     }
     return Promise.resolve(createMockJsonResponse(buildContentHistoryPayload([])));
   });
-  mockAuthenticatedFetch.mockImplementation(fetch);
-  const rendered = renderHook(
-    useBatchStartOnMount,
-    {wrapper: contentStudioStrictModeBoundary,}
-  );
+  const rendered = renderContentStudioScenario(useBatchStartOnMount, fetch, 'strict');
   return {
     firstRequest,
     secondRequest,

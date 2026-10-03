@@ -1,10 +1,8 @@
 import {
   beforeEach, describe, expect, it, vi 
 } from 'vitest';
-import {
-  act, renderHook, waitFor
-} from '@testing-library/react';
-import { useKeywordGroups } from './useKeywordGroups';
+import { act } from '@testing-library/react';
+import type { useKeywordGroups } from './useKeywordGroups';
 import { ApiRequestError } from '../infrastructure';
 import {
   buildGroup, buildKeyword
@@ -38,6 +36,12 @@ const mockUpdate = vi.mocked(updateKeywordGroup);
 const mockDelete = vi.mocked(deleteKeywordGroup);
 const mockMemberships = vi.mocked(updateGroupMemberships);
 
+/** Renders the loaded hook and adds kw-1 to group a, settling the membership change. */
+async function renderAfterAddingKw1(options?: Parameters<typeof useKeywordGroups>[0]) {
+  const { result } = await renderLoadedKeywordGroups(options);
+  return act(() => result.current.changeMemberships('a', { add: ['kw-1'] }));
+}
+
 describe('useKeywordGroups', () => {
   beforeEach(() => {
     vi.spyOn(console, 'error').mockImplementation(vi.fn());
@@ -54,9 +58,7 @@ describe('useKeywordGroups', () => {
   });
 
   it('loads groups on mount sorted by name ignoring case', async () => {
-    const { result } = renderHook(() => useKeywordGroups());
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedKeywordGroups();
 
     expect(result.current.groups.map((group) => group.name)).toStrictEqual(['coruña', 'Marino']);
     expect(result.current.error).toBeNull();
@@ -65,9 +67,8 @@ describe('useKeywordGroups', () => {
   it('exposes the safe keyword message when loading fails with a server error', async () => {
     mockFetch.mockRejectedValue(new ApiRequestError('HTTP 500', 500));
 
-    const { result } = renderHook(() => useKeywordGroups());
+    const { result } = await renderLoadedKeywordGroups();
 
-    await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toBe('Failed to process keyword request');
   });
 
@@ -122,11 +123,8 @@ describe('useKeywordGroups', () => {
       keywords: updated,
     });
     const onKeywordsUpdated = vi.fn();
-    const { result } = await renderLoadedKeywordGroups({ onKeywordsUpdated });
 
-    await act(async () => {
-      await result.current.changeMemberships('a', { add: ['kw-1'] });
-    });
+    await renderAfterAddingKw1({ onKeywordsUpdated });
 
     expect(mockMemberships).toHaveBeenCalledWith('a', { add: ['kw-1'] });
     expect(onKeywordsUpdated).toHaveBeenCalledWith(updated);
@@ -146,21 +144,20 @@ describe('useKeywordGroups', () => {
       totalChanges: 600,
     }, new ApiRequestError('HTTP 500', 500));
 
-    it('hands the keywords of the applied chunks to onKeywordsUpdated', async () => {
+    beforeEach(() => {
       mockMemberships.mockRejectedValue(partialFailure);
-      const onKeywordsUpdated = vi.fn();
-      const { result } = await renderLoadedKeywordGroups({ onKeywordsUpdated });
+    });
 
-      await act(() => result.current.changeMemberships('a', { add: ['kw-1'] }));
+    it('hands the keywords of the applied chunks to onKeywordsUpdated', async () => {
+      const onKeywordsUpdated = vi.fn();
+
+      await renderAfterAddingKw1({ onKeywordsUpdated });
 
       expect(onKeywordsUpdated).toHaveBeenCalledWith(appliedKeywords);
     });
 
     it('reports how many memberships were applied before the failure', async () => {
-      mockMemberships.mockRejectedValue(partialFailure);
-      const { result } = await renderLoadedKeywordGroups();
-
-      const outcome = await act(() => result.current.changeMemberships('a', { add: ['kw-1'] }));
+      const outcome = await renderAfterAddingKw1();
 
       expect(outcome).toStrictEqual({
         success: false,
@@ -169,10 +166,7 @@ describe('useKeywordGroups', () => {
     });
 
     it('refreshes the group counts because the applied chunks are stored', async () => {
-      mockMemberships.mockRejectedValue(partialFailure);
-      const { result } = await renderLoadedKeywordGroups();
-
-      await act(() => result.current.changeMemberships('a', { add: ['kw-1'] }));
+      await renderAfterAddingKw1();
 
       expect(mockFetch).toHaveBeenCalledTimes(2);
     });

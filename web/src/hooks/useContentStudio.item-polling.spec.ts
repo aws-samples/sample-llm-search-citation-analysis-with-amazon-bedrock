@@ -18,16 +18,16 @@ import {
 import {
   contentStatusPayload,
   contentStudioRequestUrls,
+  generatingHistoryPayload,
   historyItemWithStatus,
   prepareContentStudioHookTest,
-  queueContentStudioPayloads,
-  queueContentStudioResponses,
-  renderFetchedContentStudio,
   renderPendingItemStatus,
+  renderQueuedContentStudio,
   restoreContentStudioHookTest,
   settleDeferredJson,
   waitForContentStudioRequests,
 } from './useContentStudio-test-fixtures';
+import { advanceContentStudioPoll } from './useContentStudioBatchTracking-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
@@ -42,16 +42,14 @@ describe('useContentStudio single-item polling', () => {
   it.each(terminalStatuses)(
     'refreshes history when one non-batch item becomes %s',
     async (status) => {
-      queueContentStudioPayloads(
-        buildContentHistoryPayload([mockContentHistory[1]]),
+      const { result } = await renderQueuedContentStudio(
+        3,
+        generatingHistoryPayload,
         contentStatusPayload('content-2', status),
         buildContentHistoryPayload([
           historyItemWithStatus(mockContentHistory[1], status)
         ])
       );
-
-      const { result } = await renderFetchedContentStudio();
-      await waitForContentStudioRequests(3);
 
       expect(result.current.history[0]?.status).toBe(status);
       expect(contentStudioRequestUrls('/history')).toHaveLength(2);
@@ -70,15 +68,13 @@ describe('useContentStudio single-item polling', () => {
     const completedHistory = generatingHistory.map((item) => (
       historyItemWithStatus(item, 'generated')
     ));
-    queueContentStudioPayloads(
+    const { result } = await renderQueuedContentStudio(
+      4,
       buildContentHistoryPayload(generatingHistory),
       contentStatusPayload('content-1', 'generated'),
       contentStatusPayload('content-2', 'generating'),
       buildContentHistoryPayload(completedHistory)
     );
-
-    const { result } = await renderFetchedContentStudio();
-    await waitForContentStudioRequests(4);
 
     expect(result.current.history.map((item) => item.status)).toStrictEqual([
       'generated', 'generated'
@@ -87,13 +83,11 @@ describe('useContentStudio single-item polling', () => {
   });
 
   it('keeps history unchanged when a status request fails', async () => {
-    queueContentStudioResponses(
-      createMockJsonResponse(buildContentHistoryPayload([mockContentHistory[1]])),
+    const { result } = await renderQueuedContentStudio(
+      2,
+      generatingHistoryPayload,
       createMockJsonResponse({}, 500)
     );
-
-    const { result } = await renderFetchedContentStudio();
-    await waitForContentStudioRequests(2);
 
     expect(result.current.history[0]?.status).toBe('generating');
     expect(contentStudioRequestUrls('/history')).toHaveLength(1);
@@ -101,13 +95,11 @@ describe('useContentStudio single-item polling', () => {
 
   it('does not refresh history for a pending-to-generating transition', async () => {
     const pendingItem = historyItemWithStatus(mockContentHistory[1], 'pending');
-    queueContentStudioPayloads(
+    await renderQueuedContentStudio(
+      2,
       buildContentHistoryPayload([pendingItem]),
       contentStatusPayload('content-2', 'generating')
     );
-
-    await renderFetchedContentStudio();
-    await waitForContentStudioRequests(2);
 
     expect(contentStudioRequestUrls('/history')).toHaveLength(1);
   });
@@ -118,13 +110,11 @@ describe('useContentStudio single-item polling', () => {
       id: 'content-pending',
       status: 'pending',
     };
-    queueContentStudioPayloads(
+    await renderQueuedContentStudio(
+      2,
       buildContentHistoryPayload([pendingItem]),
       contentStatusPayload('content-pending', 'pending')
     );
-
-    await renderFetchedContentStudio();
-    await waitForContentStudioRequests(2);
 
     expect(contentStudioRequestUrls('/status/content-pending')).toHaveLength(1);
   });
@@ -145,7 +135,8 @@ describe('useContentStudio single-item polling', () => {
       id: 'content-batch',
       batch_id: 'batch-1',
     };
-    queueContentStudioPayloads(
+    await renderQueuedContentStudio(
+      2,
       buildContentHistoryPayload([
         mockContentHistory[1],
         batchItem,
@@ -153,9 +144,6 @@ describe('useContentStudio single-item polling', () => {
       ]),
       contentStatusPayload('content-2', 'generating')
     );
-
-    await renderFetchedContentStudio();
-    await waitForContentStudioRequests(2);
 
     expect(contentStudioRequestUrls('/status/')).toStrictEqual([
       'https://api.test.com/content-studio/status/content-2'
@@ -218,17 +206,13 @@ describe('useContentStudio single-item polling', () => {
   it('ignores a stale item status that settles after polling was restarted', async () => {
     const staleStatus = createDeferredResponse();
     const currentStatus = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockResolvedValueOnce(createMockJsonResponse(
-        buildContentHistoryPayload([mockContentHistory[1]])
-      ))
-      .mockReturnValueOnce(staleStatus.promise)
-      .mockResolvedValueOnce(createMockJsonResponse(
-        buildContentHistoryPayload([mockContentHistory[1]])
-      ))
-      .mockReturnValueOnce(currentStatus.promise);
-    const rendered = await renderFetchedContentStudio();
-    await waitForContentStudioRequests(2);
+    const rendered = await renderQueuedContentStudio(
+      2,
+      generatingHistoryPayload,
+      staleStatus.promise,
+      generatingHistoryPayload,
+      currentStatus.promise
+    );
     await act(() => rendered.result.current.fetchHistory());
     await waitForContentStudioRequests(4);
 
@@ -248,7 +232,7 @@ describe('useContentStudio single-item polling', () => {
   it('requests another item status when the ten-second interval elapses', async () => {
     vi.useFakeTimers();
     const fetch = createMockFetch({
-      historyResponse: buildContentHistoryPayload([mockContentHistory[1]]),
+      historyResponse: generatingHistoryPayload,
       statusResponse: contentStatusPayload('content-2', 'generating'),
     });
     const {
@@ -259,10 +243,7 @@ describe('useContentStudio single-item polling', () => {
       await Promise.resolve();
     });
 
-    await act(async () => {
-      vi.advanceTimersByTime(10_000);
-      await Promise.resolve();
-    });
+    await advanceContentStudioPoll();
 
     expect(contentStudioRequestUrls('/status/')).toHaveLength(2);
     unmount();

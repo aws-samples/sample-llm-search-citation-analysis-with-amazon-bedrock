@@ -12,6 +12,10 @@ import {
 } from './useRecommendations-fixtures';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
+import { idleEndpointState } from '../test/idleEndpointState';
+import {
+  INVALID_REQUEST_ON_TYPE_GUARD_FAILURE, UNABLE_TO_LOAD_ON_NON_OK_STATUS
+} from './useAnalysisEndpoint-failure-fixtures';
 import type { RecommendationStatus } from '../types';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -24,13 +28,7 @@ describe('useRecommendations', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useRecommendations());
 
-    expect(result.current).toStrictEqual({
-      data: null,
-      loading: false,
-      error: null,
-      fetchRecommendations: expect.any(Function),
-      updateRecommendationStatus: expect.any(Function),
-    });
+    expect(result.current).toStrictEqual(idleEndpointState('fetchRecommendations', 'updateRecommendationStatus'));
   });
 
   describeEndpointHookContract({
@@ -51,8 +49,8 @@ describe('useRecommendations', () => {
       ['recommendations', mockRecommendationsResponse, []],
     ],
     failures: [
-      ['Unable to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
-      ['Invalid visibility request', 'payload fails the type guard', { invalidResponse: true }],
+      UNABLE_TO_LOAD_ON_NON_OK_STATUS,
+      INVALID_REQUEST_ON_TYPE_GUARD_FAILURE,
     ],
   });
 

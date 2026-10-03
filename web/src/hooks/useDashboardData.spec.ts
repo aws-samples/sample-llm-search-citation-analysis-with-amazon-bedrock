@@ -18,13 +18,17 @@ import {
   createMockFetch,
   createMockKeywords,
   renderLoadedDashboard,
+  renderReconciledDashboard,
   startPendingKeywordReconciliation,
 } from './useDashboardData-fixtures';
 import { buildKeywordsPage } from '../api/keywordPages-fixtures';
 
+import { advanceFakeTime } from '../test/fakeTime';
+
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { spyOnAbortAfterPendingUnmount } from '../test/abortOnUnmount';
 
 
 describe('useDashboardData', () => {
@@ -119,14 +123,9 @@ describe('useDashboardData', () => {
   });
 
   it('aborts the active dashboard request when the owner unmounts', () => {
-    const abortSpy = vi.spyOn(AbortController.prototype, 'abort');
-    mockAuthenticatedFetch.mockImplementation(() => new Promise<Response>(vi.fn()));
-    const { unmount } = renderHook(() => useDashboardData());
-
-    unmount();
+    const abortSpy = spyOnAbortAfterPendingUnmount(() => renderHook(() => useDashboardData()));
 
     expect(abortSpy).toHaveBeenCalledWith();
-    abortSpy.mockRestore();
   });
 
   it('returns the same reconciliation callback after rerender', async () => {
@@ -141,9 +140,7 @@ describe('useDashboardData', () => {
   });
 
   it('fetches the exact authoritative URL with an abort signal during reconciliation', async () => {
-    const { result } = await renderLoadedDashboard();
-
-    await act(() => result.current.reconcileKeywords());
+    await renderReconciledDashboard();
 
     expect(mockAuthenticatedFetch).toHaveBeenLastCalledWith(
       MOCK_AUTHORITATIVE_KEYWORDS_URL,
@@ -204,9 +201,7 @@ describe('useDashboardData', () => {
     it.each(replacementCases)('$outcome when $condition', async ({
       authoritativeResponse, expectedKeywords
     }) => {
-      const { result } = await renderLoadedDashboard({ authoritativeResponse });
-
-      await act(() => result.current.reconcileKeywords());
+      const { result } = await renderReconciledDashboard({ authoritativeResponse });
 
       expect(result.current.keywords).toStrictEqual(expectedKeywords);
     });
@@ -219,13 +214,9 @@ describe('useDashboardData', () => {
     await act(() => result.current.reconcileKeywords());
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(5);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(LATE_KEYWORD_RECONCILIATION_MS - 1);
-    });
+    await advanceFakeTime(LATE_KEYWORD_RECONCILIATION_MS - 1);
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(5);
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
+    await advanceFakeTime(1);
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(6);
   });
 
@@ -258,9 +249,7 @@ describe('useDashboardData', () => {
     await act(() => result.current.reconcileKeywords());
     expect(result.current.keywords).toStrictEqual(reconciledKeywords);
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(100);
-    });
+    await advanceFakeTime(100);
 
     expect(result.current.keywords).toStrictEqual(reconciledKeywords);
     expect(result.current.loading).toBe(false);
@@ -319,9 +308,7 @@ describe('useDashboardData', () => {
       reconciliationCompletions.push(result.current.reconcileKeywords());
       reconciliationCompletions.push(result.current.reconcileKeywords());
     });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(10);
-    });
+    await advanceFakeTime(10);
     expect(result.current.keywords).toStrictEqual(newestKeywords);
 
     await act(async () => {

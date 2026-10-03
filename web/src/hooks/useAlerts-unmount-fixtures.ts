@@ -1,41 +1,87 @@
-import type {
-  AlertAcknowledgement, AlertSettings
-} from '../types';
-import { buildAlertSettings } from '../types/domain/alerts-fixtures';
-import { AlertHookFailure } from './alertHookErrors-fixtures';
-import type { DeferredValue } from './useAlerts-fixtures';
 import {
-  ALERT_SETTINGS_UPDATE, buildAlertAcknowledgement
+  buildAlertItem, buildAlertSettings
+} from '../types/domain/alerts-fixtures';
+import {
+  acknowledgeAlert, updateAlertSettings
+} from './alertsApiMock-fixtures';
+import { AlertHookFailure } from './alertHookErrors-fixtures';
+import {
+  ALERT_SETTINGS_UPDATE,
+  beginHookRequest,
+  buildAlertAcknowledgement,
+  deferNextCall,
+  renderLoadedAlertSettings,
+  renderLoadedOpenAlerts,
 } from './useAlerts-fixtures';
 
-interface AcknowledgementSettlement {
-  condition: string;
-  settle: (response: DeferredValue<AlertAcknowledgement>, alertId: string) => void;
+/** An alert action left pending in a mounted hook, with hand-settled responses. */
+interface StartedAlertAction {
+  pending: Promise<unknown>;
+  unmount: () => void;
+  succeed: () => void;
+  fail: () => void;
 }
 
-interface SettingsSettlement {
-  condition: string;
-  settle: (response: DeferredValue<AlertSettings>) => void;
+async function startAcknowledgement(): Promise<StartedAlertAction> {
+  const response = deferNextCall(acknowledgeAlert);
+  const {
+    result, unmount
+  } = await renderLoadedOpenAlerts();
+  const alertId = buildAlertItem().id;
+  return {
+    pending: beginHookRequest(() => result.current.acknowledge(alertId)),
+    unmount,
+    succeed: () => response.resolve(buildAlertAcknowledgement(alertId)),
+    fail: () => response.reject(new AlertHookFailure()),
+  };
 }
 
-export const ACKNOWLEDGEMENT_SETTLEMENTS = [
+async function startSettingsSave(): Promise<StartedAlertAction> {
+  const response = deferNextCall(updateAlertSettings);
+  const {
+    result, unmount
+  } = await renderLoadedAlertSettings();
+  return {
+    pending: beginHookRequest(() => result.current.saveSettings(ALERT_SETTINGS_UPDATE)),
+    unmount,
+    succeed: () => response.resolve(buildAlertSettings(ALERT_SETTINGS_UPDATE)),
+    fail: () => response.reject(new AlertHookFailure()),
+  };
+}
+
+const UNMOUNT_ACTIONS = [
+  {
+    action: 'acknowledgement',
+    start: startAcknowledgement,
+    cancellation: {
+      success: false,
+      message: 'Alert acknowledgement cancelled.',
+    },
+  },
+  {
+    action: 'save',
+    start: startSettingsSave,
+    cancellation: {
+      success: false,
+      message: 'Alert settings save cancelled.',
+      warnings: [],
+    },
+  },
+];
+
+const SETTLEMENTS = [
   {
     condition: 'success',
-    settle: (response, alertId) => response.resolve(buildAlertAcknowledgement(alertId)),
+    settle: (started: StartedAlertAction) => started.succeed(),
   },
   {
     condition: 'failure',
-    settle: (response) => response.reject(new AlertHookFailure()),
+    settle: (started: StartedAlertAction) => started.fail(),
   },
-] satisfies AcknowledgementSettlement[];
+];
 
-export const SETTINGS_SETTLEMENTS = [
-  {
-    condition: 'success',
-    settle: (response) => response.resolve(buildAlertSettings(ALERT_SETTINGS_UPDATE)),
-  },
-  {
-    condition: 'failure',
-    settle: (response) => response.reject(new AlertHookFailure()),
-  },
-] satisfies SettingsSettlement[];
+/** Every alert action crossed with every way its response can settle after unmount. */
+export const UNMOUNT_SETTLEMENT_CASES = UNMOUNT_ACTIONS.flatMap((action) => SETTLEMENTS.map((settlement) => ({
+  ...action,
+  ...settlement,
+})));

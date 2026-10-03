@@ -2,14 +2,14 @@ import {
   afterEach, beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
-  act, renderHook
-} from '@testing-library/react';
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
-import {
   buildRunningBatchStatusResponse,
   createMockFetch,
+  renderContentStudioScenario,
   storeActiveContentStudioBatchIds,
 } from './useContentStudio-fixtures';
+import {
+  advanceContentStudioPoll, flushContentStudioPromises
+} from './useContentStudioBatchTracking-fixtures';
 import {
   prepareContentStudioHookTest, restoreContentStudioHookTest
 } from './useContentStudio-test-fixtures';
@@ -29,25 +29,17 @@ describe('useContentStudioBatchTracking no-op poll outcome', () => {
       batchStatusResponse: buildRunningBatchStatusResponse(),
       shouldFailBatchStatus: false,
     };
-    const fetch = createMockFetch(requestBehavior);
-    mockAuthenticatedFetch.mockImplementation(fetch);
     const renderCount = { value: 0 };
-    const { result } = renderHook(() => {
+    const { result } = renderContentStudioScenario(() => {
       renderCount.value += 1;
       return useContentStudio();
-    });
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+    }, createMockFetch(requestBehavior));
+    await flushContentStudioPromises();
     expect(result.current.activeBatches).toHaveLength(1);
     requestBehavior.shouldFailBatchStatus = true;
     const rendersBeforeError = renderCount.value;
 
-    await act(async () => {
-      vi.advanceTimersByTime(10_000);
-      await Promise.resolve();
-    });
+    await advanceContentStudioPoll();
 
     expect(renderCount.value).toBe(rendersBeforeError);
   });

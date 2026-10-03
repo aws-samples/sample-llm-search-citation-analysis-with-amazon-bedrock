@@ -12,6 +12,10 @@ import {
   INVALID_REQUEST_STATE, renderAnsweredWith
 } from './useVisibilityMetrics-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
+import { idleEndpointState } from '../test/idleEndpointState';
+import {
+  FAILED_TO_LOAD_ON_NON_OK_STATUS, failedToLoadOnBackendError
+} from './useAnalysisEndpoint-failure-fixtures';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import {
@@ -26,12 +30,7 @@ describe('useReportsOverview', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useReportsOverview());
 
-    expect(result.current).toStrictEqual({
-      data: null,
-      loading: false,
-      error: null,
-      fetchReportsOverview: expect.any(Function),
-    });
+    expect(result.current).toStrictEqual(idleEndpointState('fetchReportsOverview'));
   });
 
   describeEndpointHookContract({
@@ -51,8 +50,8 @@ describe('useReportsOverview', () => {
       ['overview', mockReportsOverview, []],
     ],
     failures: [
-      ['Failed to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
-      ['Failed to load visibility metrics', 'response is a backend {error} body', { errorResponse: { error: 'No data' } }],
+      FAILED_TO_LOAD_ON_NON_OK_STATUS,
+      failedToLoadOnBackendError('No data'),
       ['Invalid visibility request', 'payload is missing the kpis field', { invalidResponse: true }],
     ],
   });

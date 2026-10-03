@@ -1,7 +1,6 @@
 import {
   describe, expect, it
 } from 'vitest';
-import { act } from '@testing-library/react';
 import {
   EMPTY_INDUSTRY_BRAND_CONFIG,
   GENERAL_AND_CUSTOM_PRESETS,
@@ -9,59 +8,75 @@ import {
   UNKNOWN_INDUSTRY_CONFIG,
   UNKNOWN_INDUSTRY_OVERRIDE_CONFIG,
   renderBrandConfigForm,
+  resetPrompt,
 } from './useBrandConfigForm-defaults-fixtures';
+import type { useBrandConfigForm } from './useBrandConfigForm';
+
+type BrandConfigFormState = ReturnType<typeof useBrandConfigForm>;
 
 describe('useBrandConfigForm General defaults', () => {
-  it('uses General when stored industry is empty', () => {
-    const { result } = renderBrandConfigForm(EMPTY_INDUSTRY_BRAND_CONFIG, GENERAL_AND_CUSTOM_PRESETS);
+  it.each([
+    {
+      name: 'uses General when stored industry is empty',
+      config: EMPTY_INDUSTRY_BRAND_CONFIG,
+      presets: GENERAL_AND_CUSTOM_PRESETS,
+      read: (state: BrandConfigFormState) => state.form.industry,
+      expected: 'general',
+    },
+    {
+      name: 'preserves an unknown stored industry key',
+      config: UNKNOWN_INDUSTRY_CONFIG,
+      presets: GENERAL_AND_CUSTOM_PRESETS,
+      read: (state: BrandConfigFormState) => state.form.industry,
+      expected: 'legacy-industry',
+    },
+    {
+      name: 'returns Custom preset when stored industry is unknown',
+      config: UNKNOWN_INDUSTRY_CONFIG,
+      presets: GENERAL_AND_CUSTOM_PRESETS,
+      read: (state: BrandConfigFormState) => state.currentPreset,
+      expected: GENERAL_AND_CUSTOM_PRESETS.custom,
+    },
+    {
+      name: 'uses Custom default prompt when stored industry is unknown',
+      config: UNKNOWN_INDUSTRY_CONFIG,
+      presets: GENERAL_AND_CUSTOM_PRESETS,
+      read: (state: BrandConfigFormState) => state.form.currentPrompt,
+      expected: 'Extract custom brand and company mentions.',
+    },
+    {
+      name: 'uses stored override before Custom fallback for unknown industry',
+      config: UNKNOWN_INDUSTRY_OVERRIDE_CONFIG,
+      presets: GENERAL_AND_CUSTOM_PRESETS,
+      read: (state: BrandConfigFormState) => state.form.currentPrompt,
+      expected: 'Stored legacy prompt',
+    },
+    {
+      name: 'returns no preset when unknown industry has no Custom fallback',
+      config: UNKNOWN_INDUSTRY_CONFIG,
+      presets: HOTEL_PRESETS,
+      read: (state: BrandConfigFormState) => state.currentPreset,
+      expected: undefined,
+    },
+    {
+      name: 'uses an empty prompt when unknown industry has no Custom fallback',
+      config: UNKNOWN_INDUSTRY_CONFIG,
+      presets: HOTEL_PRESETS,
+      read: (state: BrandConfigFormState) => state.form.currentPrompt,
+      expected: '',
+    },
+  ])('$name', ({
+    config, presets, read, expected
+  }) => {
+    const { result } = renderBrandConfigForm(config, presets);
 
-    expect(result.current.form.industry).toBe('general');
-  });
-
-  it('preserves an unknown stored industry key', () => {
-    const { result } = renderBrandConfigForm(UNKNOWN_INDUSTRY_CONFIG, GENERAL_AND_CUSTOM_PRESETS);
-
-    expect(result.current.form.industry).toBe('legacy-industry');
-  });
-
-  it('returns Custom preset when stored industry is unknown', () => {
-    const { result } = renderBrandConfigForm(UNKNOWN_INDUSTRY_CONFIG, GENERAL_AND_CUSTOM_PRESETS);
-
-    expect(result.current.currentPreset).toStrictEqual(GENERAL_AND_CUSTOM_PRESETS.custom);
-  });
-
-  it('uses Custom default prompt when stored industry is unknown', () => {
-    const { result } = renderBrandConfigForm(UNKNOWN_INDUSTRY_CONFIG, GENERAL_AND_CUSTOM_PRESETS);
-
-    expect(result.current.form.currentPrompt).toBe(
-      'Extract custom brand and company mentions.'
-    );
-  });
-
-  it('uses stored override before Custom fallback for unknown industry', () => {
-    const { result } = renderBrandConfigForm(UNKNOWN_INDUSTRY_OVERRIDE_CONFIG, GENERAL_AND_CUSTOM_PRESETS);
-
-    expect(result.current.form.currentPrompt).toBe('Stored legacy prompt');
-  });
-
-  it('returns no preset when unknown industry has no Custom fallback', () => {
-    const { result } = renderBrandConfigForm(UNKNOWN_INDUSTRY_CONFIG, HOTEL_PRESETS);
-
-    expect(result.current.currentPreset).toBeUndefined();
-  });
-
-  it('uses an empty prompt when unknown industry has no Custom fallback', () => {
-    const { result } = renderBrandConfigForm(UNKNOWN_INDUSTRY_CONFIG, HOTEL_PRESETS);
-
-    expect(result.current.form.currentPrompt).toBe('');
+    expect(read(result.current)).toStrictEqual(expected);
   });
 
   it('removes only the unknown-industry override when reset to Custom default', () => {
     const { result } = renderBrandConfigForm(UNKNOWN_INDUSTRY_OVERRIDE_CONFIG, GENERAL_AND_CUSTOM_PRESETS);
 
-    act(() => {
-      result.current.resetPromptToDefault();
-    });
+    resetPrompt(result);
 
     const industryPrompts = result.current.buildConfig().industry_prompts;
     expect(industryPrompts).toStrictEqual({ general: 'Retained general prompt' });

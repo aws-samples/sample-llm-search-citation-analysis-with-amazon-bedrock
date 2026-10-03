@@ -22,6 +22,7 @@ import {
   validContentAngles,
   validContentIdeaTypes,
   validContentPriorities,
+  buildDecodedLegacyHistoryItem,
 } from './contentStudioDecoders-fixtures';
 
 const oneIdea = buildContentIdeaDecoderRecord();
@@ -131,24 +132,7 @@ describe('Content Studio history decoder', () => {
     };
 
     expect(decodeContentHistoryResponse(buildHistoryDecoderPayload(historyItem)).history[0])
-      .toStrictEqual({
-        id: 'legacy',
-        keyword: 'Legacy keyword',
-        idea_title: 'Legacy keyword',
-        content_angle: '',
-        competitor_sources_used: 0,
-        status: 'generated',
-        viewed: false,
-        created_at: '2026-01-01T00:00:00Z',
-        updated_at: '2026-01-01T00:01:00Z',
-        generated_content: undefined,
-        content_warning: undefined,
-        error_message: undefined,
-        batch_id: undefined,
-        batch_size: undefined,
-        batch_position: undefined,
-        keyword_id: undefined,
-      });
+      .toStrictEqual(buildDecodedLegacyHistoryItem('2026-01-01T00:01:00Z'));
   });
 
   it('returns every optional history field when each value is valid', () => {

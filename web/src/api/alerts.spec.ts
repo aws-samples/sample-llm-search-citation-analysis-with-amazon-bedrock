@@ -28,6 +28,11 @@ import {
 
 vi.mock('./client', () => import('./clientMock-fixtures'));
 
+const INCOMPLETE_ITEM_LIST = {
+  items: [{ id: 'incomplete' }],
+  count: 1,
+};
+
 describe('alerts API', () => {
   describe('error identity', () => {
     it('names malformed server payload failures as InvalidAlertResponseError', () => {
@@ -44,71 +49,62 @@ describe('alerts API', () => {
   });
 
   describe('fetchAlerts', () => {
-    it('returns decoded alerts and sends the status, limit, and signal', async () => {
-      const response = buildAlertsResponse();
-      const controller = new AbortController();
-      mockApiGet.mockResolvedValue(response);
-
-      const received = await fetchAlerts({
-        status: 'open',
+    it.each([
+      {
+        name: 'returns decoded alerts and sends the status, limit, and signal',
+        status: 'open' as const,
         limit: 20,
-        signal: controller.signal,
-      });
-
-      expect(received).toStrictEqual(response);
-      expect(mockApiGet).toHaveBeenCalledWith('/alerts', {
-        params: {
-          status: 'open',
-          limit: '20',
-        },
-        signal: controller.signal,
-      });
-    });
-
-    it('accepts one as the minimum alert request limit', async () => {
+        signal: new AbortController().signal,
+      },
+      {
+        name: 'accepts one as the minimum alert request limit',
+        status: 'all' as const,
+        limit: 1,
+        signal: undefined,
+      },
+    ])('$name', async ({
+      status, limit, signal
+    }) => {
       const response = buildAlertsResponse();
       mockApiGet.mockResolvedValue(response);
 
       const received = await fetchAlerts({
-        status: 'all',
-        limit: 1
+        status,
+        limit,
+        signal,
       });
 
       expect(received).toStrictEqual(response);
       expect(mockApiGet).toHaveBeenCalledWith('/alerts', {
         params: {
-          status: 'all',
-          limit: '1',
+          status,
+          limit: String(limit),
         },
-        signal: undefined,
+        signal,
       });
     });
 
-    it('throws InvalidAlertResponseError when the alert list is malformed', async () => {
-      mockApiGet.mockResolvedValue({
-        items: [{ id: 'incomplete' }],
-        count: 1,
-      });
+  });
 
-      await expect(fetchAlerts({
-        status: 'all',
-        limit: 10,
-      })).rejects.toThrow(InvalidAlertResponseError);
-      await expect(fetchAlerts({
-        status: 'all',
-        limit: 10,
-      })).rejects.toThrow('Alerts API returned an invalid list');
-    });
-
-    it('throws InvalidAlertRequestError when the limit is not positive', async () => {
-      await expect(fetchAlerts({
-        status: 'open',
-        limit: 0,
-      })).rejects.toThrow(InvalidAlertRequestError);
-      await expect(fetchAlerts({
-        status: 'open',
-        limit: 0,
-      })).rejects.toThrow('Alert request limit must be a positive integer');
+  describe('request limits', () => {
+    it.each([
+      {
+        condition: 'the alert limit is not positive',
+        call: () => fetchAlerts({
+          status: 'open',
+          limit: 0,
+        }),
+      },
+      {
+        condition: 'the marker limit is zero',
+        call: () => fetchContentChanges({
+          groupId: 'group-north',
+          limit: 0,
+        }),
+      },
+    ])('throws InvalidAlertRequestError when $condition', async ({ call }) => {
+      await expect(call()).rejects.toThrow(InvalidAlertRequestError);
+      await expect(call()).rejects.toThrow('Alert request limit must be a positive integer');
     });
   });
 
@@ -128,19 +124,6 @@ describe('alerts API', () => {
         '/alerts/alert%2Fwith%20space/acknowledge',
         {},
         { allowStructured4xx: true }
-      );
-    });
-
-    it('throws the acknowledgement decoder failure when the payload is malformed', async () => {
-      mockApiPost.mockResolvedValue({
-        success: true,
-        id: 'alert-1',
-        status: 'open'
-      });
-
-      await expect(acknowledgeAlert('alert-1')).rejects.toThrow(InvalidAlertResponseError);
-      await expect(acknowledgeAlert('alert-1')).rejects.toThrow(
-        'Alerts API returned an invalid acknowledgement'
       );
     });
 
@@ -165,15 +148,6 @@ describe('alerts API', () => {
 
       expect(received).toStrictEqual(response);
       expect(mockApiGet).toHaveBeenCalledWith('/alerts/settings', { signal: controller.signal });
-    });
-
-    it('throws the settings decoder failure when the GET payload is malformed', async () => {
-      mockApiGet.mockResolvedValue({ config_id: 'default' });
-
-      await expect(fetchAlertSettings()).rejects.toThrow(InvalidAlertResponseError);
-      await expect(fetchAlertSettings()).rejects.toThrow(
-        'Alerts API returned invalid settings'
-      );
     });
 
     it('puts the complete editable settings object and returns server state', async () => {
@@ -203,14 +177,6 @@ describe('alerts API', () => {
       );
     });
 
-    it('throws the settings decoder failure when the PUT payload is malformed', async () => {
-      const settings = buildAlertSettings();
-      mockApiPut.mockResolvedValue({ config_id: 'default' });
-
-      await expect(updateAlertSettings(settingsUpdateFrom(settings))).rejects.toThrow(InvalidAlertResponseError);
-      await expect(updateAlertSettings(settingsUpdateFrom(settings))).rejects.toThrow('Alerts API returned invalid settings');
-    });
-
     it('posts an empty object when requesting a test notification', async () => {
       const response = buildAlertTestNotificationResponse();
       const controller = new AbortController();
@@ -226,18 +192,6 @@ describe('alerts API', () => {
           allowStructured4xx: true,
           signal: controller.signal,
         }
-      );
-    });
-
-    it('throws InvalidAlertResponseError when the test response is malformed', async () => {
-      mockApiPost.mockResolvedValue({
-        success: true,
-        message: 'Unexpected response',
-      });
-
-      await expect(sendTestNotification()).rejects.toThrow(InvalidAlertResponseError);
-      await expect(sendTestNotification()).rejects.toThrow(
-        'Alerts API returned an invalid test-notification response'
       );
     });
   });
@@ -264,33 +218,6 @@ describe('alerts API', () => {
       });
     });
 
-    it('throws InvalidAlertRequestError when the marker limit is zero', async () => {
-      await expect(fetchContentChanges({
-        groupId: 'group-north',
-        limit: 0,
-      })).rejects.toThrow(InvalidAlertRequestError);
-      await expect(fetchContentChanges({
-        groupId: 'group-north',
-        limit: 0,
-      })).rejects.toThrow('Alert request limit must be a positive integer');
-    });
-
-    it('throws the content-change list decoder failure when the payload is malformed', async () => {
-      mockApiGet.mockResolvedValue({
-        items: [{ id: 'incomplete' }],
-        count: 1
-      });
-
-      await expect(fetchContentChanges({
-        groupId: 'group-north',
-        limit: 1,
-      })).rejects.toThrow(InvalidAlertResponseError);
-      await expect(fetchContentChanges({
-        groupId: 'group-north',
-        limit: 1,
-      })).rejects.toThrow('Alerts API returned an invalid content-change list');
-    });
-
     it('posts a marker request and returns the decoded marker', async () => {
       const request = {
         group_id: 'group-north',
@@ -313,18 +240,75 @@ describe('alerts API', () => {
         { allowStructured4xx: true }
       );
     });
+  });
 
-    it('throws the content-change marker decoder failure when the payload is malformed', async () => {
-      mockApiPost.mockResolvedValue({ id: 'incomplete' });
+  describe('malformed payloads', () => {
+    it.each([
+      {
+        name: 'throws InvalidAlertResponseError when the alert list is malformed',
+        respond: () => mockApiGet.mockResolvedValue(INCOMPLETE_ITEM_LIST),
+        call: () => fetchAlerts({
+          status: 'all',
+          limit: 10,
+        }),
+        message: 'Alerts API returned an invalid list',
+      },
+      {
+        name: 'throws the acknowledgement decoder failure when the payload is malformed',
+        respond: () => mockApiPost.mockResolvedValue({
+          success: true,
+          id: 'alert-1',
+          status: 'open',
+        }),
+        call: () => acknowledgeAlert('alert-1'),
+        message: 'Alerts API returned an invalid acknowledgement',
+      },
+      {
+        name: 'throws the settings decoder failure when the GET payload is malformed',
+        respond: () => mockApiGet.mockResolvedValue({ config_id: 'default' }),
+        call: () => fetchAlertSettings(),
+        message: 'Alerts API returned invalid settings',
+      },
+      {
+        name: 'throws the settings decoder failure when the PUT payload is malformed',
+        respond: () => mockApiPut.mockResolvedValue({ config_id: 'default' }),
+        call: () => updateAlertSettings(settingsUpdateFrom(buildAlertSettings())),
+        message: 'Alerts API returned invalid settings',
+      },
+      {
+        name: 'throws InvalidAlertResponseError when the test response is malformed',
+        respond: () => mockApiPost.mockResolvedValue({
+          success: true,
+          message: 'Unexpected response',
+        }),
+        call: () => sendTestNotification(),
+        message: 'Alerts API returned an invalid test-notification response',
+      },
+      {
+        name: 'throws the content-change list decoder failure when the payload is malformed',
+        respond: () => mockApiGet.mockResolvedValue(INCOMPLETE_ITEM_LIST),
+        call: () => fetchContentChanges({
+          groupId: 'group-north',
+          limit: 1,
+        }),
+        message: 'Alerts API returned an invalid content-change list',
+      },
+      {
+        name: 'throws the content-change marker decoder failure when the payload is malformed',
+        respond: () => mockApiPost.mockResolvedValue({ id: 'incomplete' }),
+        call: () => createContentChange({
+          group_id: 'group-north',
+          description: 'Published a revised comparison',
+        }),
+        message: 'Alerts API returned an invalid content-change marker',
+      },
+    ])('$name', async ({
+      respond, call, message
+    }) => {
+      respond();
 
-      await expect(createContentChange({
-        group_id: 'group-north',
-        description: 'Published a revised comparison',
-      })).rejects.toThrow(InvalidAlertResponseError);
-      await expect(createContentChange({
-        group_id: 'group-north',
-        description: 'Published a revised comparison',
-      })).rejects.toThrow('Alerts API returned an invalid content-change marker');
+      await expect(call()).rejects.toThrow(InvalidAlertResponseError);
+      await expect(call()).rejects.toThrow(message);
     });
   });
 });

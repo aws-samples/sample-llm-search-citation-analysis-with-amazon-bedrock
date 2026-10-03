@@ -21,7 +21,7 @@ import {
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import {
-  lastRequest, respondWith
+  lastRequest, lastRequestBody, lastRequestTarget, respondWith
 } from './keywordResearch-fixtures';
 
 const PENDING_JOB = {
@@ -32,6 +32,11 @@ const PENDING_JOB = {
   keyword_count: 0,
   created_at: '2026-09-18T10:00:00Z',
 };
+const PENDING_AGENT_JOB = {
+  ...PENDING_JOB,
+  type: 'agent',
+};
+const TEMPLATE_T1_URL = 'https://api.test.com/keyword-research/templates/t1';
 
 describe('isKeywordResearchItem', () => {
   it('accepts an object with a string id and a known type', () => {
@@ -39,10 +44,7 @@ describe('isKeywordResearchItem', () => {
   });
 
   it('accepts the research-agent type', () => {
-    expect(isKeywordResearchItem({
-      ...PENDING_JOB,
-      type: 'agent' 
-    })).toBe(true);
+    expect(isKeywordResearchItem(PENDING_AGENT_JOB)).toBe(true);
   });
 
   it('rejects an unknown type', () => {
@@ -63,11 +65,8 @@ describe('keyword research client', () => {
 
     const job = await startKeywordExpansion('hotel malaga', 'hotels', 30);
 
-    const {
-      url, init 
-    } = lastRequest();
-    expect(url).toBe('https://api.test.com/keyword-research/expand');
-    expect(JSON.parse(String(init?.body))).toStrictEqual({
+    expect(lastRequest().url).toBe('https://api.test.com/keyword-research/expand');
+    expect(lastRequestBody()).toStrictEqual({
       seed_keyword: 'hotel malaga',
       industry: 'hotels',
       count: 30 
@@ -108,11 +107,10 @@ describe('keyword research client', () => {
 
     await retryKeywordResearch('job 1');
 
-    const {
-      url, init 
-    } = lastRequest();
-    expect(url).toBe('https://api.test.com/keyword-research/job%201/retry');
-    expect(init?.method).toBe('POST');
+    expect(lastRequestTarget()).toStrictEqual({
+      url: 'https://api.test.com/keyword-research/job%201/retry',
+      method: 'POST',
+    });
   });
 
   it('reads a job by id', async () => {
@@ -147,11 +145,10 @@ describe('keyword research client', () => {
 
     await deleteKeywordResearch('job-1');
 
-    const {
-      url, init 
-    } = lastRequest();
-    expect(url).toBe('https://api.test.com/keyword-research/job-1');
-    expect(init?.method).toBe('DELETE');
+    expect(lastRequestTarget()).toStrictEqual({
+      url: 'https://api.test.com/keyword-research/job-1',
+      method: 'DELETE',
+    });
   });
 });
 
@@ -167,6 +164,11 @@ const AGENT_REQUEST = {
   templateId: 'builtin-default',
   systemPrompt: null,
   groupId: 'g1',
+};
+
+const AGENT_START_REQUEST = {
+  ...AGENT_REQUEST,
+  dimensions: [...AGENT_REQUEST.dimensions],
 };
 
 const TEMPLATE = {
@@ -187,21 +189,12 @@ const TEMPLATE = {
 
 describe('research agent client', () => {
   it('starts an agent run with the brief in the API field names', async () => {
-    respondWith(202, {
-      ...PENDING_JOB,
-      type: 'agent' 
-    });
+    respondWith(202, PENDING_AGENT_JOB);
 
-    await startResearchAgent({
-      ...AGENT_REQUEST,
-      dimensions: [...AGENT_REQUEST.dimensions],
-    });
+    await startResearchAgent(AGENT_START_REQUEST);
 
-    const {
-      url, init 
-    } = lastRequest();
-    expect(url).toBe('https://api.test.com/keyword-research/agent');
-    expect(JSON.parse(String(init?.body))).toStrictEqual({
+    expect(lastRequest().url).toBe('https://api.test.com/keyword-research/agent');
+    expect(lastRequestBody()).toStrictEqual({
       seed: 'Hotel Gran Marino',
       country: 'es',
       language: 'es',
@@ -216,19 +209,15 @@ describe('research agent client', () => {
   });
 
   it('sends the edited prompt only when the form changed it', async () => {
-    respondWith(202, {
-      ...PENDING_JOB,
-      type: 'agent' 
-    });
+    respondWith(202, PENDING_AGENT_JOB);
 
     await startResearchAgent({
-      ...AGENT_REQUEST,
-      dimensions: [...AGENT_REQUEST.dimensions],
+      ...AGENT_START_REQUEST,
       systemPrompt: 'edited prompt text here',
       groupId: null,
     });
 
-    const body: Record<string, unknown> = JSON.parse(String(lastRequest().init?.body));
+    const body = lastRequestBody();
     expect(body.system_prompt).toBe('edited prompt text here');
     expect(body).not.toHaveProperty('group_id');
   });
@@ -256,7 +245,7 @@ describe('research agent client', () => {
     });
 
     expect(created).toStrictEqual(TEMPLATE);
-    expect(JSON.parse(String(lastRequest().init?.body))).toStrictEqual({
+    expect(lastRequestBody()).toStrictEqual({
       name: 'Beach resorts',
       system_prompt: 'You research beach resorts for families.',
     });
@@ -275,7 +264,7 @@ describe('research agent client', () => {
       dimensions: TEMPLATE.dimensions,
     });
 
-    expect(JSON.parse(String(lastRequest().init?.body))).toStrictEqual({
+    expect(lastRequestBody()).toStrictEqual({
       name: 'Beach resorts',
       system_prompt: 'You research beach resorts for families.',
       description: 'Family beach hotels',
@@ -294,12 +283,11 @@ describe('research agent client', () => {
 
     await updateResearchTemplate('t1', { name: 'Renamed' });
 
-    const {
-      url, init 
-    } = lastRequest();
-    expect(url).toBe('https://api.test.com/keyword-research/templates/t1');
-    expect(init?.method).toBe('PUT');
-    expect(JSON.parse(String(init?.body))).toStrictEqual({ name: 'Renamed' });
+    expect(lastRequestTarget()).toStrictEqual({
+      url: TEMPLATE_T1_URL,
+      method: 'PUT',
+    });
+    expect(lastRequestBody()).toStrictEqual({ name: 'Renamed' });
   });
 
   it('updates the profile fields in the API field names', async () => {
@@ -312,7 +300,7 @@ describe('research agent client', () => {
       systemPrompt: 'You research beach resorts for families.',
     });
 
-    expect(JSON.parse(String(lastRequest().init?.body))).toStrictEqual({
+    expect(lastRequestBody()).toStrictEqual({
       subject: 'resort',
       audience: 'families',
       dimensions: TEMPLATE.dimensions,
@@ -325,11 +313,10 @@ describe('research agent client', () => {
 
     await deleteResearchTemplate('t1');
 
-    const {
-      url, init 
-    } = lastRequest();
-    expect(url).toBe('https://api.test.com/keyword-research/templates/t1');
-    expect(init?.method).toBe('DELETE');
+    expect(lastRequestTarget()).toStrictEqual({
+      url: TEMPLATE_T1_URL,
+      method: 'DELETE',
+    });
   });
 
   it('recognises a template payload', () => {

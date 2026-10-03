@@ -2,15 +2,20 @@ import {
   StrictMode, createElement, type ReactNode
 } from 'react';
 import {
-  renderHook, waitFor
+  act, renderHook
 } from '@testing-library/react';
-import {
-  expect, vi
-} from 'vitest';
+import { vi } from 'vitest';
 import { buildApiTemplate } from '../api/contentStudio-fixtures';
-import { createMockJsonResponse } from '../test/fetchResponses';
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
-import type { ContentBriefTemplate } from '../types';
+import {
+  createMockJsonResponse, type DeferredResponse
+} from '../test/fetchResponses';
+import {
+  deferAuthenticatedFetch, mockAuthenticatedFetch
+} from '../test/infrastructureMock';
+import { renderLoadedHook } from '../test/loadedHook';
+import type {
+  ContentBriefTemplate, ContentBriefTemplateDraft
+} from '../types';
 import { useContentBriefTemplates } from './useContentBriefTemplates';
 
 export const builtinCreateTemplate = buildApiTemplate();
@@ -40,10 +45,33 @@ export const expectedOrderedTemplateIds = [
   'saved-urban',
 ];
 
-export function templateListResponse(templates: ContentBriefTemplate[]) {
+function templateListResponse(templates: ContentBriefTemplate[]) {
   return {
     items: templates,
     count: templates.length,
+  };
+}
+
+/** The GET /content-studio/templates response listing `templates`. */
+export function templateListJsonResponse(templates: ContentBriefTemplate[]): Response {
+  return createMockJsonResponse(templateListResponse(templates));
+}
+
+/** Answers every request with the list of `templates`. */
+export function serveTemplateList(templates: ContentBriefTemplate[]): void {
+  mockAuthenticatedFetch.mockResolvedValue(templateListJsonResponse(templates));
+}
+
+/** A create-template draft for the landing-page angle; every field can be overridden. */
+export function buildTemplateDraft(
+  overrides: Partial<ContentBriefTemplateDraft> = {}
+): ContentBriefTemplateDraft {
+  return {
+    name: 'Campaign',
+    description: '',
+    contentAngle: 'create_new_landing_page',
+    promptTemplate: 'Create for {scope}.',
+    ...overrides,
   };
 }
 
@@ -53,23 +81,37 @@ function templateHookStrictMode({ children }: TemplateHookStrictModeProps) {
   return createElement(StrictMode, null, children);
 }
 
-export async function renderLoadedContentBriefTemplates() {
-  const rendered = renderHook(() => useContentBriefTemplates());
-  await waitFor(() => {
-    expect(rendered.result.current.loading).toBe(false);
-  });
-  return rendered;
+export function renderLoadedContentBriefTemplates() {
+  return renderLoadedHook(() => useContentBriefTemplates());
 }
 
-export async function renderLoadedContentBriefTemplatesInStrictMode() {
-  const rendered = renderHook(
-    () => useContentBriefTemplates(),
-    {wrapper: templateHookStrictMode,}
-  );
-  await waitFor(() => {
-    expect(rendered.result.current.loading).toBe(false);
+export function renderLoadedContentBriefTemplatesInStrictMode() {
+  return renderLoadedHook(() => useContentBriefTemplates(), { wrapper: templateHookStrictMode });
+}
+
+/** Renders the hook while its initial list request stays in flight until `deferred` settles. */
+export function renderPendingContentBriefTemplates() {
+  const deferred = deferAuthenticatedFetch();
+  return {
+    deferred,
+    ...renderHook(() => useContentBriefTemplates()),
+  };
+}
+
+/** Answers `deferred` with the list of `templates` and flushes the resulting updates. */
+export async function settleTemplateList(
+  deferred: DeferredResponse,
+  templates: ContentBriefTemplate[]
+): Promise<void> {
+  deferred.resolve(templateListJsonResponse(templates));
+  await act(async () => {
+    await deferred.promise;
   });
-  return rendered;
+}
+
+/** The ids of `templates`, in list order. */
+export function templateIds(templates: readonly ContentBriefTemplate[]): string[] {
+  return templates.map((template) => template.id);
 }
 
 export function respondTemplateNotFound(): void {

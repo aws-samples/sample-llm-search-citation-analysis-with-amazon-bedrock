@@ -1,23 +1,25 @@
 import {
   afterEach, beforeEach, describe, expect, it, vi
 } from 'vitest';
-import {
-  act, renderHook, waitFor
-} from '@testing-library/react';
+import { act } from '@testing-library/react';
 import { createMockJsonResponse } from '../test/fetchResponses';
-import { useContentBriefTemplates } from './useContentBriefTemplates';
+import { waitForLoaded } from '../test/loadedHook';
+import type { useContentBriefTemplates } from './useContentBriefTemplates';
 import {
+  buildTemplateDraft,
   builtinCreateTemplate,
   prepareTemplateHookResponses,
   renderLoadedContentBriefTemplates,
+  renderPendingContentBriefTemplates,
   savedUrbanTemplate,
-  templateListResponse,
+  settleTemplateList,
+  templateListJsonResponse,
 } from './useContentBriefTemplates-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import {
-  deferAuthenticatedFetch, deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
+  deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
 } from '../test/infrastructureMock';
 
 type ContentBriefTemplatesHook = ReturnType<typeof useContentBriefTemplates>;
@@ -25,12 +27,7 @@ type ContentBriefTemplatesHook = ReturnType<typeof useContentBriefTemplates>;
 const mutationErrorCases = [
   {
     testName: 'logs the exact saving context when template creation fails',
-    invokeMutation: (hook: ContentBriefTemplatesHook) => hook.create({
-      name: 'Campaign',
-      description: '',
-      contentAngle: 'create_new_landing_page',
-      promptTemplate: 'Create for {scope}.',
-    }),
+    invokeMutation: (hook: ContentBriefTemplatesHook) => hook.create(buildTemplateDraft()),
     logContext: '[content] Error saving Content Brief template:',
   },
   {
@@ -59,10 +56,7 @@ describe('useContentBriefTemplates operational errors', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
     mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({}, 500));
 
-    const { result } = renderHook(() => useContentBriefTemplates());
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
+    await renderLoadedContentBriefTemplates();
 
     expect(consoleError).toHaveBeenCalledWith(
       '[content] Error loading Content Brief templates:',
@@ -111,24 +105,17 @@ describe('useContentBriefTemplates overlapping operation state', () => {
     await act(() => pendingMutation.promise);
 
     expect(result.current.loading).toBe(true);
-    refreshResponse.resolve(createMockJsonResponse(templateListResponse([
-      builtinCreateTemplate,
-      savedUrbanTemplate,
-    ])));
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
+    refreshResponse.resolve(templateListJsonResponse([builtinCreateTemplate, savedUrbanTemplate]));
+    await waitForLoaded(result);
   });
 
   it('ignores a refresh result that settles after the hook unmounts', async () => {
-    const deferred = deferAuthenticatedFetch();
     const {
-      result, unmount
-    } = renderHook(() => useContentBriefTemplates());
+      deferred, result, unmount
+    } = renderPendingContentBriefTemplates();
 
     unmount();
-    deferred.resolve(createMockJsonResponse(templateListResponse([builtinCreateTemplate])));
-    await deferred.promise;
+    await settleTemplateList(deferred, [builtinCreateTemplate]);
 
     expect(result.current.templates).toStrictEqual([]);
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);

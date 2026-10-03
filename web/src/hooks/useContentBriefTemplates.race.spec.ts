@@ -1,19 +1,20 @@
 import {
   describe, expect, it, vi
 } from 'vitest';
-import {
-  act, waitFor
-} from '@testing-library/react';
+import { act } from '@testing-library/react';
 import { buildApiTemplate } from '../api/contentStudio-fixtures';
 import {
   createDeferredResponse, createMockJsonResponse
 } from '../test/fetchResponses';
+import { waitForLoaded } from '../test/loadedHook';
 import {
+  buildTemplateDraft,
   builtinCreateTemplate,
   prepareTemplateHookResponses,
   renderLoadedContentBriefTemplates,
   savedUrbanTemplate,
-  templateListResponse,
+  serveTemplateList,
+  templateListJsonResponse,
 } from './useContentBriefTemplates-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -35,9 +36,7 @@ describe('useContentBriefTemplates request ordering', () => {
       name: 'Zebra',
       builtin: false,
     });
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
-      templateListResponse([builtinCreateTemplate, zebra, alpha])
-    ));
+    serveTemplateList([builtinCreateTemplate, zebra, alpha]);
 
     const { result } = await renderLoadedContentBriefTemplates();
 
@@ -50,12 +49,7 @@ describe('useContentBriefTemplates request ordering', () => {
     const { result } = await renderLoadedContentBriefTemplates();
     mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse({}, 500));
 
-    const outcome = await act(() => result.current.create({
-      name: 'Campaign',
-      description: '',
-      contentAngle: 'create_new_landing_page',
-      promptTemplate: 'Create for {scope}.',
-    }));
+    const outcome = await act(() => result.current.create(buildTemplateDraft()));
 
     expect(outcome).toStrictEqual({
       success: false,
@@ -69,9 +63,7 @@ describe('useContentBriefTemplates request ordering', () => {
     const older = createDeferredResponse();
     mockAuthenticatedFetch
       .mockReturnValueOnce(older.promise)
-      .mockResolvedValueOnce(createMockJsonResponse(
-        templateListResponse([builtinCreateTemplate])
-      ));
+      .mockResolvedValueOnce(templateListJsonResponse([builtinCreateTemplate]));
     const olderRequest = { promise: Promise.resolve() };
     act(() => {
       olderRequest.promise = result.current.refresh();
@@ -97,15 +89,13 @@ describe('useContentBriefTemplates request ordering', () => {
       requests.older = result.current.refresh();
       requests.newer = result.current.refresh();
     });
-    older.resolve(createMockJsonResponse(templateListResponse([savedUrbanTemplate])));
+    older.resolve(templateListJsonResponse([savedUrbanTemplate]));
     await act(() => requests.older);
 
     expect(result.current.loading).toBe(true);
-    newer.resolve(createMockJsonResponse(templateListResponse([builtinCreateTemplate])));
+    newer.resolve(templateListJsonResponse([builtinCreateTemplate]));
     await act(() => requests.newer);
 
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
+    await waitForLoaded(result);
   });
 });

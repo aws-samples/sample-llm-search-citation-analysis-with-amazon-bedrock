@@ -16,6 +16,7 @@ import {
   mockContentHistory,
   renderContentStudio,
 } from './useContentStudio-fixtures';
+import { requestedPathId } from './useContentStudio-request-fixtures';
 
 export type StatusFailure = 'http' | 'network' | 'invalid';
 
@@ -61,15 +62,11 @@ export function buildPollingHistoryItem(
   };
 }
 
-function requestedContentId(url: string): string {
-  return decodeURIComponent(url.slice(url.lastIndexOf('/') + 1));
-}
-
 function contentStatusResponse(
   url: string,
   options: PollingMockFetchOptions
 ): Promise<Response> | undefined {
-  const contentId = requestedContentId(url);
+  const contentId = requestedPathId(url);
   const statusFailure = options.statusFailures?.[contentId] ?? options.statusFailure;
   if (statusFailure === 'network') {
     return Promise.reject(new TypeError('Network unavailable'));
@@ -132,7 +129,7 @@ function createDeferredStatusFetch(
     if (url.includes('/status/')) {
       const response = createDeferredResponse();
       statusRequests.push({
-        contentId: requestedContentId(url),
+        contentId: requestedPathId(url),
         signal: init?.signal ?? null,
         response,
       });
@@ -148,7 +145,8 @@ function createDeferredStatusFetch(
 
 export async function settleDeferredStatusBatch(
   statusRequests: readonly DeferredStatusRequest[],
-  outcomes: readonly (ContentStatus | 'network-failure')[]
+  outcomes: readonly (ContentStatus | 'network-failure')[],
+  advanceMs = 0
 ): Promise<void> {
   await act(async () => {
     outcomes.forEach((outcome, index) => {
@@ -162,19 +160,43 @@ export async function settleDeferredStatusBatch(
         status: outcome,
       }));
     });
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(advanceMs);
   });
+}
+
+export async function advanceContentStudioTimersAsync(milliseconds: number): Promise<void> {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(milliseconds);
+  });
+}
+
+export function contentHistoryStatuses(
+  contentStudio: { readonly history: readonly ContentStudioHistory[] }
+): [string, ContentStatus][] {
+  return contentStudio.history.map((item) => [item.id, item.status]);
+}
+
+async function renderContentStudioWithFetchedHistory(
+  fetch: ReturnType<typeof createMockFetch>
+) {
+  vi.useFakeTimers();
+  const renderedHook = renderContentStudio(fetch);
+  await act(async () => {
+    await renderedHook.result.current.fetchHistory();
+  });
+  return renderedHook;
+}
+
+/** Renders with fake timers and `createPollingMockFetch(options)`, then loads history once. */
+export function renderPollingContentStudio(options: PollingMockFetchOptions) {
+  return renderContentStudioWithFetchedHistory(createPollingMockFetch(options));
 }
 
 export async function renderContentStudioWithDeferredPolling(
   historyResponses: readonly (readonly ContentStudioHistory[])[]
 ) {
-  vi.useFakeTimers();
   const deferredStatusFetch = createDeferredStatusFetch(historyResponses);
-  const renderedHook = renderContentStudio(deferredStatusFetch.fetch);
-  await act(async () => {
-    await renderedHook.result.current.fetchHistory();
-  });
+  const renderedHook = await renderContentStudioWithFetchedHistory(deferredStatusFetch.fetch);
   return {
     ...renderedHook,
     deferredStatusFetch
@@ -196,19 +218,11 @@ export async function unmountContentStudioWithActiveStatusRequest() {
 export async function renderContentStudioAfterStatusFailureLimit(
   statusFailure: StatusFailure
 ) {
-  vi.useFakeTimers();
-  const generatingHistory = mockContentHistory.slice(1);
-  const renderedHook = renderContentStudio(createPollingMockFetch({
+  const renderedHook = await renderPollingContentStudio({
     statusFailure,
-    historyResponse: buildContentHistoryPayload(generatingHistory),
-  }));
-
-  await act(async () => {
-    await renderedHook.result.current.fetchHistory();
+    historyResponse: buildContentHistoryPayload(mockContentHistory.slice(1)),
   });
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(20_000);
-  });
+  await advanceContentStudioTimersAsync(20_000);
   return renderedHook;
 }
 
@@ -216,7 +230,7 @@ export function countContentStatusRequests(contentId?: string): number {
   return mockAuthenticatedFetch.mock.calls.filter(([input]) => {
     const url = String(input);
     return url.includes('/status/')
-      && (contentId === undefined || requestedContentId(url) === contentId);
+      && (contentId === undefined || requestedPathId(url) === contentId);
   }).length;
 }
 

@@ -1,13 +1,12 @@
 import {
   beforeEach, describe, expect, it, vi
 } from 'vitest';
-import { createMockJsonResponse } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import {
   builtinCreateTemplate,
   renderLoadedContentBriefTemplatesInStrictMode,
   savedUrbanTemplate,
-  templateListResponse,
+  templateListJsonResponse,
 } from './useContentBriefTemplates-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
@@ -15,10 +14,7 @@ vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 beforeEach(() => {
   vi.clearAllMocks();
   mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(
-    createMockJsonResponse(templateListResponse([
-      builtinCreateTemplate,
-      savedUrbanTemplate,
-    ]))
+    templateListJsonResponse([builtinCreateTemplate, savedUrbanTemplate])
   ));
 });
 

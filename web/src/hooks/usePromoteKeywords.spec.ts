@@ -16,13 +16,14 @@ import {
 import {
   abortedPromotionRequest,
   availableKeywordFixtures,
-  createMockPromotionRequest,
   createdKeywordItemFixture,
   fullProposalKeywordFixtures,
+  renderCancelledPromotion,
   renderPendingPromotion,
   renderSelectedPromotion,
   replacementAvailableKeywordFixtures,
   selectFixtureKeyword,
+  setupNeverSettlingPromotion,
   startPromotion,
   successfulFullProposalResponseFixture,
   type PromotionHookReader,
@@ -152,9 +153,7 @@ interface EnablementFixture {
 }
 
 describe('Property 13: Promotion trigger is enabled exactly when a non-empty selection exists', () => {
-  beforeEach(() => {
-    mockApiPost.mockReturnValue(new Promise(vi.fn()));
-  });
+  beforeEach(setupNeverSettlingPromotion);
 
   const enablementFixtures: EnablementFixture[] = [
     {
@@ -458,9 +457,7 @@ describe('full proposal promotion', () => {
 });
 
 describe('promotion request safety', () => {
-  beforeEach(() => {
-    mockApiPost.mockReturnValue(new Promise(vi.fn()));
-  });
+  beforeEach(setupNeverSettlingPromotion);
 
   it('sends one request when promotion is triggered twice before rendering updates', () => {
     const { result } = renderSelectedPromotion();
@@ -527,18 +524,12 @@ describe('promotion request safety', () => {
   });
 
   it('ignores the result when a cancelled promotion settles', async () => {
-    const promotionRequest = createMockPromotionRequest();
     const onKeywordsAdded = vi.fn();
-    mockApiPost.mockReturnValue(promotionRequest.promise);
     const {
-      result, rerender
-    } = renderPendingPromotion({ onKeywordsAdded });
+      result, settle
+    } = renderCancelledPromotion({ onKeywordsAdded });
 
-    rerender({ availableKeywords: replacementAvailableKeywordFixtures });
-    await act(async () => {
-      promotionRequest.resolve();
-      await promotionRequest.promise;
-    });
+    await settle();
 
     expect(result.current.outcome).toBeNull();
     expect(result.current.error).toBeNull();
@@ -547,17 +538,11 @@ describe('promotion request safety', () => {
   });
 
   it('does not clear the request timeout again when a cancelled promotion settles', async () => {
-    const promotionRequest = createMockPromotionRequest();
     const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
-    mockApiPost.mockReturnValue(promotionRequest.promise);
-    const { rerender } = renderPendingPromotion();
+    const { settle } = renderCancelledPromotion();
 
-    rerender({ availableKeywords: replacementAvailableKeywordFixtures });
     const callsAfterCancellation = clearTimeoutSpy.mock.calls.length;
-    await act(async () => {
-      promotionRequest.resolve();
-      await promotionRequest.promise;
-    });
+    await settle();
 
     expect(clearTimeoutSpy).toHaveBeenCalledTimes(callsAfterCancellation);
     clearTimeoutSpy.mockRestore();

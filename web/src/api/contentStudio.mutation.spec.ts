@@ -21,99 +21,159 @@ import {
   apiGroupBriefIdea,
   buildApiContentIdea,
   buildApiTemplate,
+  buildJsonRequestInit,
 } from './contentStudio-fixtures';
+import {
+  buildIdeasDecoderPayload, buildTemplateListDecoderPayload
+} from './contentStudioDecoders-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+
+const readIdea = buildApiContentIdea();
+const readTemplate = buildApiTemplate();
+
+const signalledReadCases: {
+  name: string;
+  payload: unknown;
+  read: (signal: AbortSignal) => Promise<unknown>;
+  expected: unknown;
+  url: string;
+}[] = [
+  {
+    name: 'gets ideas from the exact endpoint with the caller abort signal',
+    payload: buildIdeasDecoderPayload(readIdea),
+    read: (signal) => fetchContentIdeas(signal),
+    expected: [readIdea],
+    url: 'https://api.test.com/content-studio/ideas',
+  },
+  {
+    name: 'gets history with the exact limit and caller abort signal',
+    payload: {
+      history: [],
+      total_count: 0,
+      unviewed_count: 0,
+    },
+    read: (signal) => fetchContentHistory(7, signal),
+    expected: {
+      history: [],
+      unviewedCount: 0,
+    },
+    url: 'https://api.test.com/content-studio/history?limit=7',
+  },
+  {
+    name: 'gets encoded content status with the caller abort signal',
+    payload: {
+      id: 'content/id',
+      status: 'generated',
+    },
+    read: (signal) => fetchContentStatus('content/id', signal),
+    expected: 'generated',
+    url: 'https://api.test.com/content-studio/status/content%2Fid',
+  },
+  {
+    name: 'gets encoded batch status with the caller abort signal',
+    payload: apiBatchStatusResponse,
+    read: (signal) => fetchContentBriefBatch('batch/id', signal),
+    expected: apiBatchStatusResponse,
+    url: 'https://api.test.com/content-studio/batches/batch%2Fid',
+  },
+  {
+    name: 'gets templates from the exact endpoint with the caller abort signal',
+    payload: buildTemplateListDecoderPayload([readTemplate]),
+    read: (signal) => fetchContentBriefTemplates(signal),
+    expected: [readTemplate],
+    url: 'https://api.test.com/content-studio/templates',
+  },
+];
+
+const structuredWriteErrorCases: {
+  name: string;
+  error: string;
+  field: string;
+  send: () => Promise<unknown>;
+}[] = [
+  {
+    name: 'preserves a structured generation error from a client response',
+    error: 'Generation conflict',
+    field: 'idea.id',
+    send: () => startContentGeneration(apiGroupBriefIdea),
+  },
+  {
+    name: 'preserves a structured batch error from a client response',
+    error: 'Batch conflict',
+    field: 'batch_id',
+    send: () => startContentBriefBatch(apiBatchRequest),
+  },
+  {
+    name: 'preserves a structured generated-content deletion error',
+    error: 'Content is locked',
+    field: 'id',
+    send: () => deleteGeneratedContent('content-1'),
+  },
+  {
+    name: 'preserves a structured template update error',
+    error: 'Template is immutable',
+    field: 'id',
+    send: () => updateContentBriefTemplate('template-1', { name: 'Changed' }),
+  },
+  {
+    name: 'preserves a structured template deletion error',
+    error: 'Template is immutable',
+    field: 'id',
+    send: () => deleteContentBriefTemplate('template-1'),
+  },
+];
+
+const templateUpdatePayloadCases: {
+  name: string;
+  templateId: string;
+  changes: Parameters<typeof updateContentBriefTemplate>[1];
+  url: string;
+  wireBody: Record<string, string>;
+}[] = [
+  {
+    name: 'puts every changed template field with exact wire names and empty strings',
+    templateId: 'saved/id',
+    changes: {
+      name: 'Campaign',
+      description: '',
+      contentAngle: 'rewrite_pasted_copy',
+      promptTemplate: '',
+    },
+    url: 'https://api.test.com/content-studio/templates/saved%2Fid',
+    wireBody: {
+      name: 'Campaign',
+      description: '',
+      content_angle: 'rewrite_pasted_copy',
+      prompt_template: '',
+    },
+  },
+  {
+    name: 'puts an empty object when no template fields changed',
+    templateId: 'saved-1',
+    changes: {},
+    url: 'https://api.test.com/content-studio/templates/saved-1',
+    wireBody: {},
+  },
+];
 
 beforeEach(() => {
   mockAuthenticatedFetch.mockReset();
 });
 
 describe('Content Studio read transport', () => {
-  it('gets ideas from the exact endpoint with the caller abort signal', async () => {
-    const idea = buildApiContentIdea();
+  it.each(signalledReadCases)('$name', async ({
+    payload, read, expected, url
+  }) => {
     const signal = new AbortController().signal;
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      ideas: [idea],
-      total_count: 1,
-      generated_at: '2026-01-01T00:00:00Z',
-    }));
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(payload));
 
-    const received = await fetchContentIdeas(signal);
+    const received = await read(signal);
 
-    expect(received).toStrictEqual([idea]);
-    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-      'https://api.test.com/content-studio/ideas',
-      { signal }
-    );
-  });
-
-  it('gets history with the exact limit and caller abort signal', async () => {
-    const signal = new AbortController().signal;
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      history: [],
-      total_count: 0,
-      unviewed_count: 0,
-    }));
-
-    const received = await fetchContentHistory(7, signal);
-
-    expect(received).toStrictEqual({
-      history: [],
-      unviewedCount: 0
-    });
-    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-      'https://api.test.com/content-studio/history?limit=7',
-      { signal }
-    );
-  });
-
-  it('gets encoded content status with the caller abort signal', async () => {
-    const signal = new AbortController().signal;
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      id: 'content/id',
-      status: 'generated',
-    }));
-
-    const received = await fetchContentStatus('content/id', signal);
-
-    expect(received).toBe('generated');
-    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-      'https://api.test.com/content-studio/status/content%2Fid',
-      { signal }
-    );
-  });
-
-  it('gets encoded batch status with the caller abort signal', async () => {
-    const signal = new AbortController().signal;
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(apiBatchStatusResponse));
-
-    const received = await fetchContentBriefBatch('batch/id', signal);
-
-    expect(received).toStrictEqual(apiBatchStatusResponse);
-    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-      'https://api.test.com/content-studio/batches/batch%2Fid',
-      { signal }
-    );
-  });
-
-  it('gets templates from the exact endpoint with the caller abort signal', async () => {
-    const signal = new AbortController().signal;
-    const template = buildApiTemplate();
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      items: [template],
-      count: 1,
-    }));
-
-    const received = await fetchContentBriefTemplates(signal);
-
-    expect(received).toStrictEqual([template]);
-    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-      'https://api.test.com/content-studio/templates',
-      { signal }
-    );
+    expect(received).toStrictEqual(expected);
+    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(url, { signal });
   });
 });
 
@@ -128,12 +188,7 @@ describe('Content Studio history mutation transport', () => {
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
       'https://api.test.com/content-studio/viewed',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: 'content-1' }),
-        signal: undefined,
-      }
+      buildJsonRequestInit('POST', { id: 'content-1' })
     );
   });
 
@@ -156,124 +211,34 @@ describe('Content Studio history mutation transport', () => {
 });
 
 describe('Content Brief template update payloads', () => {
-  it('puts every changed template field with exact wire names and empty strings', async () => {
-    const template = buildApiTemplate({ builtin: false });
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(template));
+  it.each(templateUpdatePayloadCases)('$name', async ({
+    templateId, changes, url, wireBody
+  }) => {
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
+      buildApiTemplate({ builtin: false })
+    ));
 
-    await updateContentBriefTemplate('saved/id', {
-      name: 'Campaign',
-      description: '',
-      contentAngle: 'rewrite_pasted_copy',
-      promptTemplate: '',
-    });
+    await updateContentBriefTemplate(templateId, changes);
 
-    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-      'https://api.test.com/content-studio/templates/saved%2Fid',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: 'Campaign',
-          description: '',
-          content_angle: 'rewrite_pasted_copy',
-          prompt_template: '',
-        }),
-        signal: undefined,
-      }
-    );
-  });
-
-  it('puts an empty object when no template fields changed', async () => {
-    const template = buildApiTemplate({ builtin: false });
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(template));
-
-    await updateContentBriefTemplate('saved-1', {});
-
-    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-      'https://api.test.com/content-studio/templates/saved-1',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: '{}',
-        signal: undefined,
-      }
-    );
+    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(url, buildJsonRequestInit('PUT', wireBody));
   });
 });
 
 describe('Content Studio structured write errors', () => {
-  it('preserves a structured generation error from a client response', async () => {
+  it.each(structuredWriteErrorCases)('$name', async ({
+    error, field, send
+  }) => {
     mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      error: 'Generation conflict',
-      field: 'idea.id',
+      error,
+      field,
     }, 409));
 
-    const request = startContentGeneration(apiGroupBriefIdea);
+    const request = send();
 
     await expect(request).rejects.toMatchObject({
       name: 'ApiRequestError',
-      message: 'Generation conflict',
-      field: 'idea.id',
-    });
-  });
-
-  it('preserves a structured batch error from a client response', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      error: 'Batch conflict',
-      field: 'batch_id',
-    }, 409));
-
-    const request = startContentBriefBatch(apiBatchRequest);
-
-    await expect(request).rejects.toMatchObject({
-      name: 'ApiRequestError',
-      message: 'Batch conflict',
-      field: 'batch_id',
-    });
-  });
-
-  it('preserves a structured generated-content deletion error', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      error: 'Content is locked',
-      field: 'id',
-    }, 409));
-
-    const request = deleteGeneratedContent('content-1');
-
-    await expect(request).rejects.toMatchObject({
-      name: 'ApiRequestError',
-      message: 'Content is locked',
-      field: 'id',
-    });
-  });
-
-  it('preserves a structured template update error', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      error: 'Template is immutable',
-      field: 'id',
-    }, 409));
-
-    const request = updateContentBriefTemplate('template-1', { name: 'Changed' });
-
-    await expect(request).rejects.toMatchObject({
-      name: 'ApiRequestError',
-      message: 'Template is immutable',
-      field: 'id',
-    });
-  });
-
-  it('preserves a structured template deletion error', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      error: 'Template is immutable',
-      field: 'id',
-    }, 409));
-
-    const request = deleteContentBriefTemplate('template-1');
-
-    await expect(request).rejects.toMatchObject({
-      name: 'ApiRequestError',
-      message: 'Template is immutable',
-      field: 'id',
+      message: error,
+      field,
     });
   });
 });

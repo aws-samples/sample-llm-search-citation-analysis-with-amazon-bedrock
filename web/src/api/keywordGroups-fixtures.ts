@@ -2,6 +2,7 @@ import type {
   Keyword, KeywordGroup
 } from '../types';
 import type { GroupMembershipResponse } from '../types/domain/keywordDecoders';
+import { mockApiPut } from './clientMock-fixtures';
 
 export function buildGroup(overrides: Partial<KeywordGroup> = {}): KeywordGroup {
   return {
@@ -23,6 +24,11 @@ export function buildKeyword(overrides: Partial<Keyword> = {}): Keyword {
     status: 'active',
     ...overrides,
   };
+}
+
+/** The request bodies of every mocked `apiPut` call, in call order. */
+export function sentPutBodies(): unknown[] {
+  return mockApiPut.mock.calls.map(([, body]) => body);
 }
 
 export const groupsResponseFixture = {

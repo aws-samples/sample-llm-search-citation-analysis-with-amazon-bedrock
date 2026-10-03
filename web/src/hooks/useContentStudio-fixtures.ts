@@ -1,19 +1,16 @@
 import {
   StrictMode, createElement, useEffect, type ReactNode
 } from 'react';
-import {
-  act, renderHook
-} from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { vi } from 'vitest';
 import {
-  apiBatchStartResponse, apiBatchStatusResponse
+  apiBatchRequest, apiBatchStartResponse, apiBatchStatusResponse, buildApiBatchRequest
 } from '../api/contentStudio-fixtures';
 import {
-  ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY,
-  CONTENT_STUDIO_BATCH_STORAGE_VERSION,
   readStoredContentStudioBatchCandidates,
   type ContentStudioBatchCandidate,
 } from '../api/contentStudioBatchStorage';
+import { storeBatchCandidateEntries } from '../api/contentStudioBatchStorage-fixtures';
 import type { authenticatedFetch } from '../infrastructure/auth';
 import type {
   ContentBriefBatchRequest,
@@ -27,6 +24,9 @@ import {
   createDeferredResponse, createMockJsonResponse
 } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import {
+  requestedPathId, requestUrlsContaining, startTwoOverlappingCalls
+} from './useContentStudio-request-fixtures';
 import { useContentStudio } from './useContentStudio';
 
 export const mockContentIdea: ContentIdea = {
@@ -90,21 +90,13 @@ export const mockBatchStatusResponse: ContentBriefBatchStatusResponse = {
   batch_id: 'batch-1',
 };
 
-export const mockBatchRequest = {
+export const mockBatchRequest = buildApiBatchRequest({
   batch_id: 'batch-1',
-  scope: {
-    mode: 'keywords',
-    keyword_ids: ['keyword-1', 'keyword-2'],
-  },
   brief: {
-    content_angle: 'create_new_landing_page',
-    landing_url: '',
-    current_copy: '',
-    template_id: 'builtin-create-new-landing-page',
+    ...apiBatchRequest.brief,
     prompt_template: 'Create a brief for {scope}.',
-    output_language: 'English',
   },
-} satisfies ContentBriefBatchRequest;
+});
 
 interface MockFetchOptions {
   ideasResponse?: unknown;
@@ -138,12 +130,8 @@ export function buildContentHistoryPayload(
   };
 }
 
-function requestedBatchId(url: string): string {
-  return decodeURIComponent(url.slice(url.lastIndexOf('/') + 1));
-}
-
 function batchStatusResponse(url: string, options: MockFetchOptions): Response {
-  const batchId = requestedBatchId(url);
+  const batchId = requestedPathId(url);
   if (options.missingBatchIds?.includes(batchId) === true) {
     return createMockJsonResponse({ error: 'Batch not found' }, 404, 'Not Found');
   }
@@ -240,21 +228,29 @@ export function contentStudioStrictModeBoundary({ children }: StrictModeBoundary
   return createElement(StrictMode, null, children);
 }
 
+/** Routes `authenticatedFetch` to `fetch`, then renders `useScenario` (in StrictMode when asked). */
+export function renderContentStudioScenario<TResult>(
+  useScenario: () => TResult,
+  fetch: typeof mockAuthenticatedFetch,
+  mode: 'default' | 'strict' = 'default'
+) {
+  mockAuthenticatedFetch.mockImplementation(fetch);
+  return renderHook(
+    useScenario,
+    mode === 'strict' ? { wrapper: contentStudioStrictModeBoundary } : {}
+  );
+}
+
 export function renderContentStudio(
   fetch: ReturnType<typeof createMockFetch> = createMockFetch()
 ) {
-  mockAuthenticatedFetch.mockImplementation(fetch);
-  return renderHook(() => useContentStudio());
+  return renderContentStudioScenario(() => useContentStudio(), fetch);
 }
 
 export function renderContentStudioInStrictMode(
   fetch: ReturnType<typeof createMockFetch> = createMockFetch()
 ) {
-  mockAuthenticatedFetch.mockImplementation(fetch);
-  return renderHook(
-    () => useContentStudio(),
-    {wrapper: contentStudioStrictModeBoundary,}
-  );
+  return renderContentStudioScenario(() => useContentStudio(), fetch, 'strict');
 }
 
 function useContentStudioWithInitialHistory() {
@@ -268,23 +264,13 @@ function useContentStudioWithInitialHistory() {
 export function renderInitialHistoryInStrictMode(
   fetch: ReturnType<typeof createMockFetch> = createMockFetch()
 ) {
-  mockAuthenticatedFetch.mockImplementation(fetch);
-  return renderHook(
-    () => useContentStudioWithInitialHistory(),
-    {wrapper: contentStudioStrictModeBoundary,}
-  );
+  return renderContentStudioScenario(useContentStudioWithInitialHistory, fetch, 'strict');
 }
 
 export function storeActiveContentStudioBatchCandidates(
   candidates: readonly ContentStudioBatchCandidate[]
 ): void {
-  localStorage.setItem(
-    ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY,
-    JSON.stringify({
-      version: CONTENT_STUDIO_BATCH_STORAGE_VERSION,
-      entries: candidates,
-    })
-  );
+  storeBatchCandidateEntries(candidates);
 }
 
 export function storeActiveContentStudioBatchIds(
@@ -384,9 +370,7 @@ export function batchStatusRequestUrls(
   fetch: ReturnType<typeof createMockFetch>,
   batchId = 'batch-1'
 ): string[] {
-  return fetch.mock.calls
-    .map(([url]) => String(url))
-    .filter((url) => url.includes(`/batches/${batchId}`));
+  return requestUrlsContaining(fetch, `/batches/${batchId}`);
 }
 
 export function renderConcurrentBatchStarts() {
@@ -399,21 +383,12 @@ export function renderConcurrentBatchStarts() {
     .mockReturnValueOnce(firstStart.promise)
     .mockReturnValueOnce(secondStart.promise);
   const rendered = renderHook(() => useContentStudio());
-  const pendingBatches: {
-    first: Promise<ContentBriefBatchStartResponse | null>;
-    second: Promise<ContentBriefBatchStartResponse | null>;
-  } = {
-    first: Promise.resolve(null),
-    second: Promise.resolve(null),
-  };
-  act(() => {
-    pendingBatches.first = rendered.result.current.generateContentBatch(
-      buildMockBatchRequest('batch-1')
-    );
-    pendingBatches.second = rendered.result.current.generateContentBatch(
-      buildMockBatchRequest('batch-2')
-    );
-  });
+  const pendingBatches = startTwoOverlappingCalls<ContentBriefBatchStartResponse | null>(
+    (callIndex) => rendered.result.current.generateContentBatch(
+      buildMockBatchRequest(`batch-${callIndex + 1}`)
+    ),
+    null
+  );
   return {
     ...rendered,
     firstStart,

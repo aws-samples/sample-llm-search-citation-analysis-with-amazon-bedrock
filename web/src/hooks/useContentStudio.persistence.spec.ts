@@ -4,19 +4,39 @@ import {
 import {
   act, renderHook, waitFor
 } from '@testing-library/react';
-import { ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY } from '../api/contentStudioBatchStorage';
-import { buildBatchCandidate } from '../api/contentStudioBatchStorage-fixtures';
+import {
+  buildBatchCandidate, storeBatchCandidateValue, storedBatchCandidateValue
+} from '../api/contentStudioBatchStorage-fixtures';
 import {
   createDeferredResponse, createMockJsonResponse
 } from '../test/fetchResponses';
 import {
   advanceContentStudioPoll,
+  buildRunningBatchStatusesFor,
   buildTerminalBatchStatusFor,
   dispatchBatchCandidateStorageEvent,
   dispatchBatchStorageEvent,
   flushContentStudioPromises,
+  renderRecoveredBatches,
   renderTwoRunningBatches,
 } from './useContentStudioBatchTracking-fixtures';
+import {
+  contentStudioRequestUrls,
+  prepareContentStudioHookTest,
+  queueContentStudioPayloads,
+  restoreContentStudioHookTest,
+  settleDeferredJson,
+  waitForContentStudioRequests,
+} from './useContentStudio-test-fixtures';
+import { requestUrlsContaining } from './useContentStudio-request-fixtures';
+import {
+  activeBatchIds,
+  batchStatusRequestCounts,
+  renderTwoRunningBatchesWithFakeTimers,
+  spyOnAggregatePollIntervals,
+  renderTwoVisibleRunningBatches,
+  startTerminalBatch,
+} from './useContentStudio-scenario-fixtures';
 import { CONTENT_STUDIO_BATCH_NOT_FOUND_GRACE_MS } from './useContentStudioBatchTracking';
 import {
   batchStatusRequestUrls,
@@ -42,15 +62,8 @@ import {
   deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
 } from '../test/infrastructureMock';
 
-beforeEach(() => {
-  localStorage.clear();
-});
-
-afterEach(() => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  localStorage.clear();
-});
+beforeEach(prepareContentStudioHookTest);
+afterEach(restoreContentStudioHookTest);
 
 describe('useContentStudio recovered batch persistence', () => {
   it('recovers and requests every stored nonterminal batch', async () => {
@@ -59,17 +72,17 @@ describe('useContentStudio recovered batch persistence', () => {
     } = renderTwoRunningBatches();
 
     await waitFor(() => {
-      expect(result.current.activeBatches.map((batch) => batch.batch_id)).toStrictEqual([
-        'batch-1', 'batch-2'
-      ]);
+      expect(activeBatchIds(result.current)).toStrictEqual(['batch-1', 'batch-2']);
     });
 
-    expect(batchStatusRequestUrls(fetch, 'batch-1')).toHaveLength(1);
-    expect(batchStatusRequestUrls(fetch, 'batch-2')).toHaveLength(1);
+    expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
+      'batch-1': 1,
+      'batch-2': 1,
+    });
   });
 
   it('uses one ten-second interval for every recovered batch', async () => {
-    const setIntervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const aggregatePollIntervals = spyOnAggregatePollIntervals();
     const {
       fetch, unmount
     } = renderTwoRunningBatches();
@@ -77,22 +90,18 @@ describe('useContentStudio recovered batch persistence', () => {
       expect(batchStatusRequestUrls(fetch, 'batch-2')).toHaveLength(1);
     });
 
-    expect(setIntervalSpy.mock.calls.filter(([, milliseconds]) => (
-      milliseconds === 10_000
-    ))).toHaveLength(1);
+    expect(aggregatePollIntervals()).toHaveLength(1);
     unmount();
   });
 
   it('ignores malformed persisted candidate state without making requests', () => {
-    localStorage.setItem(ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY, '{broken');
+    storeBatchCandidateValue('{broken');
     const fetch = createMockFetch();
 
     renderContentStudio(fetch);
 
-    expect(fetch.mock.calls.filter(([url]) => String(url).includes('/batches/')))
-      .toStrictEqual([]);
-    expect(localStorage.getItem(ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY))
-      .toBeNull();
+    expect(requestUrlsContaining(fetch, '/batches/')).toStrictEqual([]);
+    expect(storedBatchCandidateValue()).toBeNull();
   });
 
   it('retains a young not-found candidate for a later recovery poll', async () => {
@@ -107,8 +116,7 @@ describe('useContentStudio recovered batch persistence', () => {
 
     expect(storedActiveContentStudioBatchIds()).toStrictEqual(['candidate-batch']);
     expect(result.current.activeBatches).toStrictEqual([]);
-    expect(fetch.mock.calls.filter(([url]) => String(url).includes('/history')))
-      .toStrictEqual([]);
+    expect(requestUrlsContaining(fetch, '/history')).toStrictEqual([]);
   });
 
   it('removes a not-found candidate when its five-minute grace has elapsed', async () => {
@@ -123,7 +131,7 @@ describe('useContentStudio recovered batch persistence', () => {
     });
 
     expect(result.current.activeBatches).toStrictEqual([]);
-    expect(fetch.mock.calls.map(([url]) => String(url))).toContain(
+    expect(requestUrlsContaining(fetch, '/history')).toContain(
       'https://api.test.com/content-studio/history?limit=20'
     );
   });
@@ -131,13 +139,9 @@ describe('useContentStudio recovered batch persistence', () => {
   it('removes a terminal candidate only after history refresh settles', async () => {
     storeActiveContentStudioBatchIds(['batch-1']);
     const historyRequest = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockResolvedValueOnce(createMockJsonResponse(mockBatchStatusResponse))
-      .mockReturnValueOnce(historyRequest.promise);
+    queueContentStudioPayloads(mockBatchStatusResponse, historyRequest.promise);
     const { result } = renderHook(() => useContentStudio());
-    await waitFor(() => {
-      expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(2);
-    });
+    await waitForContentStudioRequests(2);
 
     expect(storedActiveContentStudioBatchIds()).toStrictEqual(['batch-1']);
     expect(result.current.activeBatches).toStrictEqual([mockBatchStatusResponse]);
@@ -149,35 +153,34 @@ describe('useContentStudio recovered batch persistence', () => {
 
   it('polls only the running batch after mixed recovered outcomes', async () => {
     vi.useFakeTimers();
-    storeActiveContentStudioBatchIds(['batch-terminal', 'batch-running']);
-    const batchStatusResponses = {
+    const { fetch } = renderRecoveredBatches({
       'batch-terminal': buildTerminalBatchStatusFor('batch-terminal'),
       'batch-running': buildRunningBatchStatusFor('batch-running'),
-    };
-    const fetch = createMockFetch({ batchStatusResponses });
-    renderContentStudio(fetch);
+    });
     await flushContentStudioPromises();
 
     await advanceContentStudioPoll();
 
-    expect(batchStatusRequestUrls(fetch, 'batch-terminal')).toHaveLength(1);
-    expect(batchStatusRequestUrls(fetch, 'batch-running')).toHaveLength(2);
+    expect(batchStatusRequestCounts(fetch, ['batch-terminal', 'batch-running'])).toStrictEqual({
+      'batch-terminal': 1,
+      'batch-running': 2,
+    });
     expect(storedActiveContentStudioBatchIds()).toStrictEqual(['batch-running']);
   });
 });
 
 describe('useContentStudio aggregate batch timer', () => {
   it('requests another status for every tracked batch after ten seconds', async () => {
-    vi.useFakeTimers();
     const {
       fetch, unmount
-    } = renderTwoRunningBatches();
-    await flushContentStudioPromises();
+    } = await renderTwoRunningBatchesWithFakeTimers();
 
     await advanceContentStudioPoll();
 
-    expect(batchStatusRequestUrls(fetch, 'batch-1')).toHaveLength(2);
-    expect(batchStatusRequestUrls(fetch, 'batch-2')).toHaveLength(2);
+    expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
+      'batch-1': 2,
+      'batch-2': 2,
+    });
     unmount();
   });
 
@@ -247,27 +250,23 @@ describe('useContentStudio aggregate batch timer', () => {
 
 describe('useContentStudio cross-instance batch synchronization', () => {
   it('stops polling a removed ID while retaining the other running card', async () => {
-    vi.useFakeTimers();
     const {
       fetch, result, unmount
-    } = renderTwoRunningBatches();
-    await flushContentStudioPromises();
+    } = await renderTwoRunningBatchesWithFakeTimers();
 
     dispatchBatchStorageEvent(['batch-2']);
     await advanceContentStudioPoll();
 
-    expect(result.current.activeBatches.map((batch) => batch.batch_id))
-      .toStrictEqual(['batch-2']);
-    expect(batchStatusRequestUrls(fetch, 'batch-1')).toHaveLength(1);
-    expect(batchStatusRequestUrls(fetch, 'batch-2')).toHaveLength(2);
+    expect(activeBatchIds(result.current)).toStrictEqual(['batch-2']);
+    expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
+      'batch-1': 1,
+      'batch-2': 2,
+    });
     unmount();
   });
 
   it('clears running cards when another instance clears storage', async () => {
-    const { result } = renderTwoRunningBatches();
-    await waitFor(() => {
-      expect(result.current.activeBatches).toHaveLength(2);
-    });
+    const { result } = await renderTwoVisibleRunningBatches();
 
     dispatchBatchStorageEvent([], null);
 
@@ -275,9 +274,7 @@ describe('useContentStudio cross-instance batch synchronization', () => {
   });
 
   it('recovers a batch added by another instance with one request', async () => {
-    const batchStatusResponses = Object.fromEntries([[
-      'batch-added', buildRunningBatchStatusFor('batch-added')
-    ]]);
+    const batchStatusResponses = buildRunningBatchStatusesFor(['batch-added']);
     const fetch = createMockFetch({ batchStatusResponses });
     const { result } = renderContentStudio(fetch);
 
@@ -290,17 +287,14 @@ describe('useContentStudio cross-instance batch synchronization', () => {
   });
 
   it('does not request unchanged candidates again after a repeated storage event', async () => {
-    const {
-      fetch, result
-    } = renderTwoRunningBatches();
-    await waitFor(() => {
-      expect(result.current.activeBatches).toHaveLength(2);
-    });
+    const { fetch } = await renderTwoVisibleRunningBatches();
 
     dispatchBatchStorageEvent(['batch-1', 'batch-2']);
 
-    expect(batchStatusRequestUrls(fetch, 'batch-1')).toHaveLength(1);
-    expect(batchStatusRequestUrls(fetch, 'batch-2')).toHaveLength(1);
+    expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
+      'batch-1': 1,
+      'batch-2': 1,
+    });
   });
 
   it('invalidates a stale poll when another tab replaces the candidate timestamp', async () => {
@@ -311,9 +305,7 @@ describe('useContentStudio cross-instance batch synchronization', () => {
     const {
       result, unmount
     } = renderHook(() => useContentStudio());
-    await waitFor(() => {
-      expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
-    });
+    await waitForContentStudioRequests(1);
 
     dispatchBatchCandidateStorageEvent([replacementCandidate]);
     staleStatus.resolve(createMockJsonResponse(mockBatchStatusResponse));
@@ -328,18 +320,14 @@ describe('useContentStudio cross-instance batch synchronization', () => {
     expect(storedActiveContentStudioBatchCandidates()).toStrictEqual([
       replacementCandidate
     ]);
-    expect(mockAuthenticatedFetch.mock.calls.filter(([url]) => (
-      String(url).includes('/history')
-    ))).toStrictEqual([]);
+    expect(contentStudioRequestUrls('/history')).toStrictEqual([]);
     unmount();
   });
 
   it('ignores storage events for a different key', async () => {
-    vi.useFakeTimers();
     const {
       fetch, result, unmount
-    } = renderTwoRunningBatches();
-    await flushContentStudioPromises();
+    } = await renderTwoRunningBatchesWithFakeTimers();
 
     dispatchBatchStorageEvent([], 'other.key');
     await advanceContentStudioPoll();
@@ -384,7 +372,7 @@ describe('useContentStudio batch request races', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
     storeActiveContentStudioBatchIds(['batch-1']);
     const statusRequest = createDeferredResponse();
-    mockAuthenticatedFetch.mockReturnValueOnce(statusRequest.promise);
+    queueContentStudioPayloads(statusRequest.promise);
     renderHook(() => useContentStudio());
 
     dispatchBatchStorageEvent([]);
@@ -396,13 +384,8 @@ describe('useContentStudio batch request races', () => {
 
   it('retains in-memory running candidates when storage cleanup is unavailable', async () => {
     vi.useFakeTimers();
-    storeActiveContentStudioBatchIds(['batch-terminal', 'batch-running']);
-    const batchStatusResponses = {
-      'batch-terminal': buildRunningBatchStatusFor('batch-terminal'),
-      'batch-running': buildRunningBatchStatusFor('batch-running'),
-    };
-    const fetch = createMockFetch({ batchStatusResponses });
-    renderContentStudio(fetch);
+    const batchStatusResponses = buildRunningBatchStatusesFor(['batch-terminal', 'batch-running']);
+    const { fetch } = renderRecoveredBatches(batchStatusResponses);
     await flushContentStudioPromises();
     batchStatusResponses['batch-terminal'] = buildTerminalBatchStatusFor('batch-terminal');
     const getItemSpy = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
@@ -412,8 +395,10 @@ describe('useContentStudio batch request races', () => {
     await advanceContentStudioPoll();
     await advanceContentStudioPoll();
 
-    expect(batchStatusRequestUrls(fetch, 'batch-terminal')).toHaveLength(2);
-    expect(batchStatusRequestUrls(fetch, 'batch-running')).toHaveLength(3);
+    expect(batchStatusRequestCounts(fetch, ['batch-terminal', 'batch-running'])).toStrictEqual({
+      'batch-terminal': 2,
+      'batch-running': 3,
+    });
     getItemSpy.mockRestore();
   });
 
@@ -438,28 +423,21 @@ describe('useContentStudio batch request races', () => {
 
     await advanceContentStudioPoll();
 
-    expect(result.current.activeBatches.map((batch) => batch.batch_id))
-      .toStrictEqual(['batch-terminal']);
+    expect(activeBatchIds(result.current)).toStrictEqual(['batch-terminal']);
   });
 
   it('does not replace terminal outcomes while an added status is pending', async () => {
-    const terminalStart = buildTerminalBatchStartResponse('batch-terminal');
-    const fetch = createMockFetch({ batchStartResponse: terminalStart });
     const {
       result, unmount
-    } = renderContentStudio(fetch);
-    await act(() => result.current.generateContentBatch(
-      buildMockBatchRequest('batch-terminal')
-    ));
+    } = await startTerminalBatch('batch-terminal');
     const terminalOutcomes = result.current.activeBatches;
     const addedStatus = createDeferredResponse();
-    mockAuthenticatedFetch.mockReturnValueOnce(addedStatus.promise);
+    queueContentStudioPayloads(addedStatus.promise);
 
     dispatchBatchStorageEvent(['batch-added']);
 
     expect(result.current.activeBatches).toBe(terminalOutcomes);
     unmount();
-    addedStatus.resolve(createMockJsonResponse(buildRunningBatchStatusFor('batch-added')));
-    await addedStatus.promise;
+    await settleDeferredJson(addedStatus, buildRunningBatchStatusFor('batch-added'));
   });
 });

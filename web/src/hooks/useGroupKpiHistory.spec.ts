@@ -6,6 +6,10 @@ import {
   buildHttpError, useGroupKpiHistory
 } from './useGroupKpiHistory';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
+import { idleEndpointState } from '../test/idleEndpointState';
+import {
+  FAILED_TO_LOAD_ON_NON_OK_STATUS, failedToLoadOnBackendError
+} from './useAnalysisEndpoint-failure-fixtures';
 import {
   ALL_SCOPE, groupScope
 } from '../components/ui/reportScope-fixtures';
@@ -25,12 +29,7 @@ describe('useGroupKpiHistory', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useGroupKpiHistory());
 
-    expect(result.current).toStrictEqual({
-      data: null,
-      loading: false,
-      error: null,
-      fetchGroupKpiHistory: expect.any(Function),
-    });
+    expect(result.current).toStrictEqual(idleEndpointState('fetchGroupKpiHistory'));
   });
 
   describeEndpointHookContract({
@@ -48,8 +47,8 @@ describe('useGroupKpiHistory', () => {
       ['group KPI history', buildHistory(), [groupScope('hotel-sol'), 90]],
     ],
     failures: [
-      ['Failed to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
-      ['Failed to load visibility metrics', 'response is a backend {error} body', { errorResponse: { error: 'Unknown keyword group' } }],
+      FAILED_TO_LOAD_ON_NON_OK_STATUS,
+      failedToLoadOnBackendError('Unknown keyword group'),
       ['Invalid visibility request', 'payload is not a group KPI history', { invalidResponse: true }],
     ],
   });

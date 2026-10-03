@@ -10,8 +10,15 @@ import {
 } from './contentStudioBatchStorage';
 import {
   buildBatchCandidate,
+  buildBatchCandidateState,
+  mockRejectedStorageWrites,
+  spyOnStorageMutations,
   storeBatchCandidateEntries,
+  storeBatchCandidateValue,
+  storeLegacyBatchIdsValue,
   storedBatchCandidateState,
+  storedBatchCandidateValue,
+  storedLegacyBatchIdsValue,
 } from './contentStudioBatchStorage-fixtures';
 
 class RejectedStorageWriteError extends Error {
@@ -50,10 +57,7 @@ describe('Content Studio batch candidate storage edge behavior', () => {
       entries: { id: 'not-an-array' },
     }),
   ])('clears the v2 key when its envelope is malformed as %s', (storedState) => {
-    localStorage.setItem(
-      ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY,
-      storedState
-    );
+    storeBatchCandidateValue(storedState);
 
     const candidates = readStoredContentStudioBatchCandidates();
     const currentState = localStorage.getItem(
@@ -69,34 +73,29 @@ describe('Content Studio batch candidate storage edge behavior', () => {
   });
 
   it('drops malformed entries while preserving an exact valid candidate', () => {
-    localStorage.setItem(
-      ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY,
-      JSON.stringify({
-        version: CONTENT_STUDIO_BATCH_STORAGE_VERSION,
-        entries: [
-          null,
-          [],
-          {},
-          {
-            id: 2,
-            registeredAt: 200,
-          },
-          {
-            id: '',
-            registeredAt: 300,
-          },
-          buildBatchCandidate('valid-batch', 400),
-        ],
-      })
+    storeBatchCandidateValue(JSON.stringify({
+      version: CONTENT_STUDIO_BATCH_STORAGE_VERSION,
+      entries: [
+        null,
+        [],
+        {},
+        {
+          id: 2,
+          registeredAt: 200,
+        },
+        {
+          id: '',
+          registeredAt: 300,
+        },
+        buildBatchCandidate('valid-batch', 400),
+      ],
+    })
     );
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([
       buildBatchCandidate('valid-batch', 400)
     ]);
-    expect(storedBatchCandidateState()).toStrictEqual({
-      version: CONTENT_STUDIO_BATCH_STORAGE_VERSION,
-      entries: [buildBatchCandidate('valid-batch', 400)],
-    });
+    expect(storedBatchCandidateState()).toStrictEqual(buildBatchCandidateState([buildBatchCandidate('valid-batch', 400)]));
   });
 
   it.each([
@@ -104,64 +103,54 @@ describe('Content Studio batch candidate storage edge behavior', () => {
     JSON.stringify(['batch-1', 2]),
     JSON.stringify(42),
   ])('clears malformed legacy IDs when value is %s', (legacyState) => {
-    localStorage.setItem(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY, legacyState);
+    storeLegacyBatchIdsValue(legacyState);
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([]);
-    expect(localStorage.getItem(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY)).toBeNull();
-    expect(localStorage.getItem(ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY))
-      .toBeNull();
+    expect(storedLegacyBatchIdsValue()).toBeNull();
+    expect(storedBatchCandidateValue()).toBeNull();
   });
 
   it('migrates valid legacy IDs after discarding malformed v2 state', () => {
-    localStorage.setItem(ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY, '{broken');
-    localStorage.setItem(
-      LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY,
-      JSON.stringify(['batch-1'])
-    );
+    storeBatchCandidateValue('{broken');
+    storeLegacyBatchIdsValue(JSON.stringify(['batch-1']));
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([
       buildBatchCandidate('batch-1', 0)
     ]);
-    expect(storedBatchCandidateState()).toStrictEqual({
-      version: CONTENT_STUDIO_BATCH_STORAGE_VERSION,
-      entries: [buildBatchCandidate('batch-1', 0)],
-    });
-    expect(localStorage.getItem(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY)).toBeNull();
+    expect(storedBatchCandidateState()).toStrictEqual(buildBatchCandidateState([buildBatchCandidate('batch-1', 0)]));
+    expect(storedLegacyBatchIdsValue()).toBeNull();
   });
 
   it('preserves valid v2 candidates after discarding malformed legacy state', () => {
     storeBatchCandidateEntries([buildBatchCandidate('batch-1', 100)]);
-    localStorage.setItem(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY, '{broken');
+    storeLegacyBatchIdsValue('{broken');
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([
       buildBatchCandidate('batch-1', 100)
     ]);
-    expect(storedBatchCandidateState()).toStrictEqual({
-      version: CONTENT_STUDIO_BATCH_STORAGE_VERSION,
-      entries: [buildBatchCandidate('batch-1', 100)],
-    });
-    expect(localStorage.getItem(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY)).toBeNull();
+    expect(storedBatchCandidateState()).toStrictEqual(buildBatchCandidateState([buildBatchCandidate('batch-1', 100)]));
+    expect(storedLegacyBatchIdsValue()).toBeNull();
   });
 
   it('removes the v2 key when its normalized candidate list is empty', () => {
     storeBatchCandidateEntries([]);
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([]);
-    expect(localStorage.getItem(ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY))
-      .toBeNull();
+    expect(storedBatchCandidateValue()).toBeNull();
   });
 
   it('removes the legacy key when its normalized ID list is empty', () => {
-    localStorage.setItem(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY, '[]');
+    storeLegacyBatchIdsValue('[]');
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([]);
-    expect(localStorage.getItem(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY)).toBeNull();
+    expect(storedLegacyBatchIdsValue()).toBeNull();
   });
 
   it('does not rewrite candidate state when it is already normalized', () => {
     storeBatchCandidateEntries([buildBatchCandidate('batch-1', 100)]);
-    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
-    const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem');
+    const {
+      removeItemSpy, setItemSpy
+    } = spyOnStorageMutations();
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([
       buildBatchCandidate('batch-1', 100)
@@ -180,38 +169,29 @@ describe('Content Studio batch candidate storage edge behavior', () => {
       buildBatchCandidate('future-batch', 1_000)
     ]);
     expect(removeItemSpy).toHaveBeenCalledTimes(0);
-    expect(storedBatchCandidateState()).toStrictEqual({
-      version: CONTENT_STUDIO_BATCH_STORAGE_VERSION,
-      entries: [buildBatchCandidate('future-batch', 1_000)],
-    });
+    expect(storedBatchCandidateState()).toStrictEqual(buildBatchCandidateState([buildBatchCandidate('future-batch', 1_000)]));
   });
 
   it('removes an empty legacy key after preserving normalized v2 candidates', () => {
     storeBatchCandidateEntries([buildBatchCandidate('batch-1', 100)]);
-    localStorage.setItem(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY, '[]');
+    storeLegacyBatchIdsValue('[]');
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([
       buildBatchCandidate('batch-1', 100)
     ]);
-    expect(localStorage.getItem(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY)).toBeNull();
+    expect(storedLegacyBatchIdsValue()).toBeNull();
   });
 
   it('preserves legacy IDs when writing their migration is rejected', () => {
-    localStorage.setItem(
-      LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY,
-      JSON.stringify(['batch-1'])
-    );
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new RejectedStorageWriteError();
-    });
+    storeLegacyBatchIdsValue(JSON.stringify(['batch-1']));
+    mockRejectedStorageWrites(new RejectedStorageWriteError());
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([
       buildBatchCandidate('batch-1', 0)
     ]);
-    expect(localStorage.getItem(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY))
+    expect(storedLegacyBatchIdsValue())
       .toBe('["batch-1"]');
-    expect(localStorage.getItem(ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY))
-      .toBeNull();
+    expect(storedBatchCandidateValue()).toBeNull();
   });
 
   it('bounds non-finite in-memory timestamps to the expired-safe lower bound', () => {
