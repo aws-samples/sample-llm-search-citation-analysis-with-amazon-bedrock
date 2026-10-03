@@ -26,7 +26,7 @@ import { Construct } from 'constructs';
  */
 
 /** Thrown at synth time when the Anthropic use-case form is not usable. */
-export class AnthropicUseCaseError extends Error {
+class AnthropicUseCaseError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'AnthropicUseCaseError';
@@ -37,9 +37,9 @@ export class AnthropicUseCaseError extends Error {
  * `intendedUsers` is an index the form API expects as a string:
  * 0 = internal employees, 1 = external customers, 2 = both.
  */
-export type IntendedUsers = '0' | '1' | '2';
+type IntendedUsers = '0' | '1' | '2';
 
-export interface AnthropicUseCase {
+interface AnthropicUseCase {
   companyName: string;
   companyWebsite: string;
   intendedUsers: IntendedUsers;
