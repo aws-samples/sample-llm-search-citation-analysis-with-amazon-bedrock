@@ -18,6 +18,7 @@ from boto3.dynamodb.conditions import Key
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
+from shared.bounded_reads import collect_capped_items
 from shared.decorators import api_handler, validate
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scope_from_request
 from shared.utils import get_brand_config
@@ -74,18 +75,7 @@ _MAX_SCAN_PAGES = 25
 
 def _query_keyword_citations(keyword: str) -> tuple[list[dict[str, Any]], bool]:
     """Query the Citations partition of one keyword, bounded by ``_MAX_SCAN_PAGES``."""
-    items: list[dict[str, Any]] = []
-    params: dict[str, Any] = {'KeyConditionExpression': Key('keyword').eq(keyword)}
-    response = citations_table.query(**params)
-    items.extend(response.get('Items', []))
-    pages = 1
-    last_evaluated_key = response.get('LastEvaluatedKey')
-    while last_evaluated_key and pages < _MAX_SCAN_PAGES:
-        response = citations_table.query(**params, ExclusiveStartKey=last_evaluated_key)
-        items.extend(response.get('Items', []))
-        pages += 1
-        last_evaluated_key = response.get('LastEvaluatedKey')
-    return items, bool(last_evaluated_key)
+    return collect_capped_items(citations_table.query, _MAX_SCAN_PAGES, KeyConditionExpression=Key('keyword').eq(keyword))
 
 
 def _scan_all_citations(keyword=None, keywords=None) -> list[dict[str, Any]]:
@@ -111,16 +101,7 @@ def _scan_all_citations(keyword=None, keywords=None) -> list[dict[str, Any]]:
             truncated = truncated or partition_truncated
     else:
         # Full scan for all keywords
-        response = citations_table.scan()
-        items.extend(response.get('Items', []))
-        pages_scanned = 1
-        last_evaluated_key = response.get('LastEvaluatedKey')
-        while last_evaluated_key and pages_scanned < _MAX_SCAN_PAGES:
-            response = citations_table.scan(ExclusiveStartKey=last_evaluated_key)
-            items.extend(response.get('Items', []))
-            pages_scanned += 1
-            last_evaluated_key = response.get('LastEvaluatedKey')
-        truncated = bool(last_evaluated_key)
+        items, truncated = collect_capped_items(citations_table.scan, _MAX_SCAN_PAGES)
 
     if truncated:
         logger.warning(

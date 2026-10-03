@@ -21,6 +21,7 @@ from boto3.dynamodb.conditions import Key
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
+from shared.bounded_reads import collect_capped_items
 from shared.decorators import api_handler, validate
 from shared.env_vars import resolve_table_env
 from shared.utils import normalize_url
@@ -51,27 +52,13 @@ def _query_url_index(target_normalized: str) -> list[dict[str, Any]]:
     matches the target. Returns the raw items so the caller can shape the
     response.
     """
-    items: list[dict[str, Any]] = []
-    pages = 0
-    last_evaluated_key: dict[str, Any] | None = None
-
-    while pages < _MAX_QUERY_PAGES:
-        query_kwargs: dict[str, Any] = {
-            'IndexName': URL_INDEX_NAME,
-            'KeyConditionExpression': Key('normalized_url').eq(target_normalized),
-        }
-        if last_evaluated_key:
-            query_kwargs['ExclusiveStartKey'] = last_evaluated_key
-
-        response = citations_table.query(**query_kwargs)
-        items.extend(response.get('Items', []))
-        pages += 1
-
-        last_evaluated_key = response.get('LastEvaluatedKey')
-        if not last_evaluated_key:
-            break
-
-    if last_evaluated_key:
+    items, truncated = collect_capped_items(
+        citations_table.query,
+        _MAX_QUERY_PAGES,
+        IndexName=URL_INDEX_NAME,
+        KeyConditionExpression=Key('normalized_url').eq(target_normalized),
+    )
+    if truncated:
         logger.warning(
             "UrlIndex query hit the %d-page cap (url=%s, items=%d). "
             "Results are truncated.",
