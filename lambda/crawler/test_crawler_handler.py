@@ -9,9 +9,9 @@ from types import ModuleType, SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
 
 from shared.crawl_cache import success_cache_scope
+from testing.crawl_cache_fixtures import missing_cache_index_error
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.module_loader import load_handler_module
 
@@ -29,6 +29,39 @@ _ENV = {
     'DYNAMODB_TABLE_CRAWLED_CONTENT': 'CrawledContent',
     'SCREENSHOTS_BUCKET': 'screenshots-bucket',
 }
+
+
+_RESTRICTED = 'URL points to a restricted address'
+# Navigation reports a captcha page in the same shape the crawl returns it.
+_CAPTCHA_BLOCK = {'url': _URL, 'status': 'blocked', 'block_reason': 'captcha'}
+
+
+def _error_outcome(message: str) -> dict[str, str]:
+    """The compact result ``crawl_citation`` returns for a failed crawl."""
+    return {'url': _URL, 'status': 'error', 'error': message}
+
+
+def _cached_outcome(status: str, crawled_at: str, **extra: str) -> dict[str, object]:
+    """The compact result ``crawl_citation`` returns when a fresh cache row answers."""
+    return {'url': _URL, 'status': status, 'cached': True, 'crawled_at': crawled_at, **extra}
+
+
+def _stored_fields(runtime: SimpleNamespace, *names: str) -> tuple[object, ...]:
+    """The named fields of the CrawledContent row the crawl persisted."""
+    stored = runtime.table.put_item.call_args.kwargs['Item']
+    return tuple(stored[name] for name in names)
+
+
+def _crawl_with_cache_rows(
+    runtime: SimpleNamespace,
+    citation: dict[str, object],
+    *,
+    same_keyword: list[dict[str, str]] | None = None,
+    cross_keyword: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    """Crawl with the same-keyword then cross-keyword cache lookups answering these rows."""
+    runtime.table.query.side_effect = [{'Items': same_keyword or []}, {'Items': cross_keyword or []}]
+    return runtime.module.crawl_citation(citation)
 
 
 class BrowserInitializationError(Exception):
@@ -109,23 +142,13 @@ def test_returns_cached_success_without_starting_browser_when_same_keyword_row_i
     citation,
 ):
     crawled_at = datetime.now(UTC).isoformat()
-    crawler_runtime.table.query.side_effect = [
-        {'Items': [{
-            'cache_status': 'success',
-            'analysis_status': 'complete',
-            'crawled_at': crawled_at,
-        }]},
-        {'Items': []},
-    ]
+    result = _crawl_with_cache_rows(
+        crawler_runtime,
+        citation,
+        same_keyword=[{'cache_status': 'success', 'analysis_status': 'complete', 'crawled_at': crawled_at}],
+    )
 
-    result = crawler_runtime.module.crawl_citation(citation)
-
-    assert result == {
-        'url': _URL,
-        'status': 'success',
-        'cached': True,
-        'crawled_at': crawled_at,
-    }
+    assert result == _cached_outcome('success', crawled_at)
     crawler_runtime.browser_factory.assert_not_called()
     crawler_runtime.table.update_item.assert_called_once_with(
         Key={'normalized_url': _URL, 'crawled_at': crawled_at},
@@ -143,24 +166,13 @@ def test_returns_cached_block_without_starting_browser_when_cross_keyword_row_is
     citation,
 ):
     crawled_at = datetime.now(UTC).isoformat()
-    crawler_runtime.table.query.side_effect = [
-        {'Items': []},
-        {'Items': [{
-            'cache_status': 'blocked',
-            'crawled_at': crawled_at,
-            'block_reason': 'captcha',
-        }]},
-    ]
+    result = _crawl_with_cache_rows(
+        crawler_runtime,
+        citation,
+        cross_keyword=[{'cache_status': 'blocked', 'crawled_at': crawled_at, 'block_reason': 'captcha'}],
+    )
 
-    result = crawler_runtime.module.crawl_citation(citation)
-
-    assert result == {
-        'url': _URL,
-        'status': 'blocked',
-        'cached': True,
-        'crawled_at': crawled_at,
-        'block_reason': 'captcha',
-    }
+    assert result == _cached_outcome('blocked', crawled_at, block_reason='captcha')
     crawler_runtime.browser_factory.assert_not_called()
     crawler_runtime.table.put_item.assert_not_called()
 
@@ -169,24 +181,13 @@ def test_returns_safety_error_without_starting_browser_when_url_is_restricted(
     crawler_runtime,
     citation,
 ):
-    crawler_runtime.module.validate_url_safe.return_value = (
-        False,
-        'URL points to a restricted address',
-    )
+    crawler_runtime.module.validate_url_safe.return_value = (False, _RESTRICTED)
 
     result = crawler_runtime.module.crawl_citation(citation)
 
-    assert result == {
-        'url': _URL,
-        'status': 'error',
-        'error': 'URL points to a restricted address',
-    }
+    assert result == _error_outcome(_RESTRICTED)
     crawler_runtime.browser_factory.assert_not_called()
-    stored = crawler_runtime.table.put_item.call_args.kwargs['Item']
-    assert (stored['status'], stored['error_message']) == (
-        'error',
-        'URL points to a restricted address',
-    )
+    assert _stored_fields(crawler_runtime, 'status', 'error_message') == ('error', _RESTRICTED)
 
 
 def test_persists_blocked_outcome_when_navigation_finds_captcha(
@@ -194,11 +195,7 @@ def test_persists_blocked_outcome_when_navigation_finds_captcha(
     citation,
     monkeypatch,
 ):
-    crawler_runtime.browser.navigate_to_url.return_value = {
-        'status': 'blocked',
-        'url': _URL,
-        'block_reason': 'captcha',
-    }
+    crawler_runtime.browser.navigate_to_url.return_value = dict(_CAPTCHA_BLOCK)
     monkeypatch.setattr(
         crawler_runtime.module.time,
         'monotonic',
@@ -207,11 +204,7 @@ def test_persists_blocked_outcome_when_navigation_finds_captcha(
 
     result = crawler_runtime.module.crawl_citation(citation)
 
-    assert result == {
-        'url': _URL,
-        'status': 'blocked',
-        'block_reason': 'captcha',
-    }
+    assert result == _CAPTCHA_BLOCK
     stored = crawler_runtime.table.put_item.call_args.kwargs['Item']
     assert (
         stored['status'],
@@ -227,11 +220,7 @@ def test_stops_agentcore_session_before_persisting_navigation_block(
     citation,
 ):
     events: list[str] = []
-    crawler_runtime.browser.navigate_to_url.return_value = {
-        'status': 'blocked',
-        'url': _URL,
-        'block_reason': 'captcha',
-    }
+    crawler_runtime.browser.navigate_to_url.return_value = dict(_CAPTCHA_BLOCK)
     crawler_runtime.browser.cleanup.side_effect = lambda: events.append('cleanup')
     crawler_runtime.table.put_item.side_effect = lambda **_kwargs: events.append('persist')
 
@@ -247,25 +236,17 @@ def test_returns_safety_error_when_document_redirect_occurs_during_extraction(
     extracted = uncached_runtime.browser.extract_page_content.return_value
 
     def extract_after_redirect():
-        uncached_runtime.browser.navigation_guard_error = 'URL points to a restricted address'
+        uncached_runtime.browser.navigation_guard_error = _RESTRICTED
         return extracted
 
     uncached_runtime.browser.extract_page_content.side_effect = extract_after_redirect
 
     result = uncached_runtime.module.crawl_citation(citation)
 
-    assert result == {
-        'url': _URL,
-        'status': 'error',
-        'error': 'URL points to a restricted address',
-    }
+    assert result == _error_outcome(_RESTRICTED)
     uncached_runtime.module.analyze_content_combined.assert_not_called()
     uncached_runtime.browser.cleanup.assert_called_once_with()
-    stored = uncached_runtime.table.put_item.call_args.kwargs['Item']
-    assert (stored['status'], stored['error_message']) == (
-        'error',
-        'URL points to a restricted address',
-    )
+    assert _stored_fields(uncached_runtime, 'status', 'error_message') == ('error', _RESTRICTED)
 
 
 def test_skips_screenshot_upload_when_redirect_is_aborted_during_capture(
@@ -273,7 +254,7 @@ def test_skips_screenshot_upload_when_redirect_is_aborted_during_capture(
     citation,
 ):
     def screenshot_after_redirect():
-        uncached_runtime.browser.navigation_guard_error = 'URL points to a restricted address'
+        uncached_runtime.browser.navigation_guard_error = _RESTRICTED
         return {
             'status': 'success',
             'screenshot_base64': 'captured-but-unsafe',
@@ -285,11 +266,7 @@ def test_skips_screenshot_upload_when_redirect_is_aborted_during_capture(
 
     result = uncached_runtime.module.crawl_citation(citation)
 
-    assert result == {
-        'url': _URL,
-        'status': 'error',
-        'error': 'URL points to a restricted address',
-    }
+    assert result == _error_outcome(_RESTRICTED)
     uploader.assert_not_called()
     uncached_runtime.browser.cleanup.assert_called_once_with()
 
@@ -328,13 +305,7 @@ def test_marks_success_cache_complete_when_analysis_succeeds(
 ):
     uncached_runtime.module.crawl_citation(citation)
 
-    stored = uncached_runtime.table.put_item.call_args.kwargs['Item']
-    assert (
-        stored['status'],
-        stored['cache_status'],
-        stored['analysis_status'],
-        stored['cache_scope'],
-    ) == (
+    assert _stored_fields(uncached_runtime, 'status', 'cache_status', 'analysis_status', 'cache_scope') == (
         'success',
         'success',
         'complete',
@@ -350,12 +321,9 @@ def test_marks_success_cache_incomplete_when_optional_analysis_fails(
 
     uncached_runtime.module.crawl_citation(citation)
 
-    stored = uncached_runtime.table.put_item.call_args.kwargs['Item']
-    assert (
-        stored['status'],
-        stored['cache_status'],
-        stored['analysis_status'],
-    ) == ('success', 'success', 'failed')
+    assert _stored_fields(uncached_runtime, 'status', 'cache_status', 'analysis_status') == (
+        'success', 'success', 'failed'
+    )
 
 
 def test_cleans_up_started_browser_when_session_initialization_fails(
@@ -368,11 +336,7 @@ def test_cleans_up_started_browser_when_session_initialization_fails(
 
     result = crawler_runtime.module.crawl_citation(citation)
 
-    assert result == {
-        'url': _URL,
-        'status': 'error',
-        'error': 'CDP unavailable',
-    }
+    assert result == _error_outcome('CDP unavailable')
     crawler_runtime.browser.cleanup.assert_called_once_with()
 
 
@@ -380,18 +344,11 @@ def test_returns_configuration_error_without_starting_browser_when_cache_index_i
     crawler_runtime,
     citation,
 ):
-    crawler_runtime.table.query.side_effect = ClientError(
-        {'Error': {'Code': 'ValidationException', 'Message': 'missing index'}},
-        'Query',
-    )
+    crawler_runtime.table.query.side_effect = missing_cache_index_error()
 
     result = crawler_runtime.module.crawl_citation(citation)
 
-    assert result == {
-        'url': _URL,
-        'status': 'error',
-        'error': 'Crawl cache configuration error (ValidationException)',
-    }
+    assert result == _error_outcome('Crawl cache configuration error (ValidationException)')
     crawler_runtime.browser_factory.assert_not_called()
 
 

@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+import pytest
+
 from shared.research_agent import AGENT_MAX_QUERIES_PER_ROUND, AGENT_MAX_ROUNDS, LEGACY_DIMENSION_CATALOG
 from shared.research_jobs import (
     FINAL_PROPOSAL_MAX_BYTES,
@@ -52,6 +54,14 @@ MAX_COMPOSED_RESEARCH_JOB_BYTES = (
 
 def _step(provider: str, status: str = 'completed', **fields) -> dict:
     return {'provider': provider, 'status': status, **fields}
+
+
+def _wide_planned_queries(wide: str, dimension: str) -> list[dict]:
+    """A full round of maximally wide planned queries for ``dimension``."""
+    return [
+        {'query': wide * 200, 'dimension': dimension, 'rationale': wide * 300}
+        for _index in range(8)
+    ]
 
 
 class TestBuildJobItem:
@@ -360,25 +370,15 @@ class TestBoundStepResult:
             (int, int),
         ]
 
-    def test_omits_step_metadata_when_values_are_not_integral_ints_or_decimals(self):
-        invalid_values = (
-            True,
-            1.0,
-            Decimal('1.5'),
-            Decimal('NaN'),
-            Decimal('Infinity'),
-            Decimal('-Infinity'),
-        )
-        results = [bound_step_result({'round': value, 'attempt': value}) for value in invalid_values]
+    @pytest.mark.parametrize(
+        'value',
+        [True, 1.0, Decimal('1.5'), Decimal('NaN'), Decimal('Infinity'), Decimal('-Infinity')],
+        ids=['bool', 'float', 'fractional-decimal', 'nan', 'infinity', 'negative-infinity'],
+    )
+    def test_omits_step_metadata_when_values_are_not_integral_ints_or_decimals(self, value):
+        result = bound_step_result({'round': value, 'attempt': value})
 
-        assert [('round' in result, 'attempt' in result) for result in results] == [
-            (False, False),
-            (False, False),
-            (False, False),
-            (False, False),
-            (False, False),
-            (False, False),
-        ]
+        assert ('round' in result, 'attempt' in result) == (False, False)
 
 
 class TestPersistenceBudgets:
@@ -429,14 +429,8 @@ class TestPersistenceBudgets:
         steps = {}
         rounds = []
         next_query_sets = [
-            [
-                {'query': wide * 200, 'dimension': 'destination', 'rationale': wide * 300}
-                for _index in range(8)
-            ],
-            [
-                {'query': wide * 200, 'dimension': 'audience', 'rationale': wide * 300}
-                for _index in range(8)
-            ],
+            _wide_planned_queries(wide, 'destination'),
+            _wide_planned_queries(wide, 'audience'),
             [],
         ]
         decisions = ['continue', 'continue', 'stop']
@@ -463,10 +457,7 @@ class TestPersistenceBudgets:
                 'planned_at': '2026-09-18T10:00:00Z',
                 'planned_attempt': 1,
                 'strategy': wide * 600,
-                'queries': [
-                    {'query': wide * 200, 'dimension': 'destination', 'rationale': wide * 300}
-                    for _index in range(8)
-                ],
+                'queries': _wide_planned_queries(wide, 'destination'),
                 'step_ids': [*step_ids, signal_id],
             })
             plan['evaluation'] = bound_round_evaluation(plan, {

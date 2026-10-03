@@ -35,6 +35,12 @@ def passages_of(example: dict[str, Any]) -> tuple[Any, ...]:
     return example['quote'], example['reason'], example['ranking_context'], example['persona_name']
 
 
+def first_negative_example(brands: list[dict[str, Any]], **answer_fields: Any) -> dict[str, Any]:
+    """The first negative example of one OpenAI answer to `hotel sol spa` naming `brands`."""
+    rows = [stored_answer('hotel sol spa', 'openai', brands, **answer_fields)]
+    return sentiment_examples(rows, 'negative')[1][0]
+
+
 class TestCounts:
     @given(STORED_ROWS)
     def test_totals_match_the_kpi_sentiment_split_of_every_engine_together(self, rows: list[dict[str, Any]]) -> None:
@@ -93,30 +99,29 @@ class TestRepeatedBrand:
         assert sentiment_examples(rows, 'negative')[0] == 1
 
     def test_describes_the_brand_at_its_best_rank(self) -> None:
-        rows = [stored_answer('hotel sol spa', 'openai', [
+        example = first_negative_example([
             SOL_NEGATIVE,
             stored_brand('hotel sol', rank=1, sentiment_quote='Hotel Sol is loud.'),
-        ])]
-
-        example = sentiment_examples(rows, 'negative')[1][0]
+        ])
 
         assert (example['brand'], example['rank'], example['quote']) == ('hotel sol', 1, 'Hotel Sol is loud.')
 
-    def test_describes_the_first_brand_dict_when_two_share_the_best_rank(self) -> None:
-        rows = [stored_answer('hotel sol spa', 'openai', [
-            stored_brand('Hotel Sol', rank=2, sentiment_quote='First quote.'),
-            stored_brand('Hotel Sol', rank=2, sentiment_quote='Second quote.'),
-        ])]
+    @pytest.mark.parametrize(
+        ('first_rank', 'second_rank'),
+        [
+            pytest.param(2, 2, id='two_share_the_best_rank'),
+            pytest.param(None, 'first', id='no_rank_is_known'),
+        ],
+    )
+    def test_describes_the_first_brand_dict_when_ranks_do_not_separate_them(
+        self, first_rank: object, second_rank: object
+    ) -> None:
+        example = first_negative_example([
+            stored_brand('Hotel Sol', rank=first_rank, sentiment_quote='First quote.'),
+            stored_brand('Hotel Sol', rank=second_rank, sentiment_quote='Second quote.'),
+        ])
 
-        assert sentiment_examples(rows, 'negative')[1][0]['quote'] == 'First quote.'
-
-    def test_describes_the_first_brand_dict_when_no_rank_is_known(self) -> None:
-        rows = [stored_answer('hotel sol spa', 'openai', [
-            stored_brand('Hotel Sol', rank=None, sentiment_quote='First quote.'),
-            stored_brand('Hotel Sol', rank='first', sentiment_quote='Second quote.'),
-        ])]
-
-        assert sentiment_examples(rows, 'negative')[1][0]['quote'] == 'First quote.'
+        assert example['quote'] == 'First quote.'
 
     def test_counts_the_kept_label_not_the_label_of_a_worse_rank(self) -> None:
         rows = [stored_answer('hotel sol spa', 'openai', [
@@ -150,9 +155,7 @@ class TestExample:
         }]
 
     def test_describes_an_older_row_without_quote_reason_context_or_persona_name(self) -> None:
-        rows = [stored_answer('hotel sol spa', 'openai', [stored_brand('Hotel Sol')])]
-
-        assert passages_of(sentiment_examples(rows, 'negative')[1][0]) == (None, None, None, None)
+        assert passages_of(first_negative_example([stored_brand('Hotel Sol')])) == (None, None, None, None)
 
     def test_reads_the_default_persona_when_the_row_names_none(self) -> None:
         row = stored_answer('hotel sol spa', 'openai', [SOL_NEGATIVE])
@@ -162,42 +165,36 @@ class TestExample:
 
     @pytest.mark.parametrize('value', ['', '   ', 7, ['text']])
     def test_reads_blank_or_non_text_passages_as_none(self, value: object) -> None:
-        rows = [stored_answer('hotel sol spa', 'openai', [
-            stored_brand('Hotel Sol', sentiment_quote=value, sentiment_reason=value, ranking_context=value),
-        ], query_prompt_name=value)]
+        example = first_negative_example(
+            [stored_brand('Hotel Sol', sentiment_quote=value, sentiment_reason=value, ranking_context=value)],
+            query_prompt_name=value,
+        )
 
-        assert passages_of(sentiment_examples(rows, 'negative')[1][0]) == (None, None, None, None)
+        assert passages_of(example) == (None, None, None, None)
 
     def test_strips_the_stored_passages(self) -> None:
-        rows = [stored_answer('hotel sol spa', 'openai', [
-            stored_brand('Hotel Sol', sentiment_quote=' Dated rooms. ', sentiment_reason='\nWarns.\n', ranking_context=' cheap '),
-        ], query_prompt_name=' Family ')]
+        example = first_negative_example(
+            [stored_brand('Hotel Sol', sentiment_quote=' Dated rooms. ', sentiment_reason='\nWarns.\n', ranking_context=' cheap ')],
+            query_prompt_name=' Family ',
+        )
 
-        assert passages_of(sentiment_examples(rows, 'negative')[1][0]) == ('Dated rooms.', 'Warns.', 'cheap', 'Family')
+        assert passages_of(example) == ('Dated rooms.', 'Warns.', 'cheap', 'Family')
 
 
 class TestAnswerText:
-    def test_cuts_a_long_answer_at_the_cap(self) -> None:
-        rows = [stored_answer('hotel sol spa', 'openai', [SOL_NEGATIVE], response='a' * (ANSWER_TEXT_CAP + 1))]
+    @pytest.mark.parametrize(
+        ('response', 'expected'),
+        [
+            pytest.param('a' * (ANSWER_TEXT_CAP + 1), ('a' * 20_000, True), id='long_answer_cut_at_the_cap'),
+            pytest.param('a' * 20_000, ('a' * 20_000, False), id='answer_of_exactly_the_cap_kept'),
+            pytest.param(None, ('', False), id='no_text_answers_empty'),
+            pytest.param(42, ('', False), id='non_text_answers_empty'),
+        ],
+    )
+    def test_carries_the_answer_text_capped_with_a_truncation_flag(self, response: object, expected: tuple) -> None:
+        example = first_negative_example([SOL_NEGATIVE], response=response)
 
-        example = sentiment_examples(rows, 'negative')[1][0]
-
-        assert (example['answer'], example['answer_truncated']) == ('a' * 20_000, True)
-
-    def test_keeps_an_answer_of_exactly_the_cap(self) -> None:
-        rows = [stored_answer('hotel sol spa', 'openai', [SOL_NEGATIVE], response='a' * 20_000)]
-
-        example = sentiment_examples(rows, 'negative')[1][0]
-
-        assert (len(example['answer']), example['answer_truncated']) == (20_000, False)
-
-    @pytest.mark.parametrize('response', [None, 42])
-    def test_answers_an_empty_text_when_the_row_has_none(self, response: object) -> None:
-        rows = [stored_answer('hotel sol spa', 'openai', [SOL_NEGATIVE], response=response)]
-
-        example = sentiment_examples(rows, 'negative')[1][0]
-
-        assert (example['answer'], example['answer_truncated']) == ('', False)
+        assert (example['answer'], example['answer_truncated']) == expected
 
 
 class TestOrder:
@@ -209,14 +206,20 @@ class TestOrder:
 
         assert brands_of(sentiment_examples(rows, 'negative')[1]) == ['Newer', 'Older']
 
-    def test_orders_a_run_by_keyword_ignoring_case(self) -> None:
-        rows = [stored_answer('B hotel', 'openai', [stored_brand('Second')]), stored_answer('a hotel', 'openai', [stored_brand('First')])]
-
-        assert brands_of(sentiment_examples(rows, 'negative')[1]) == ['First', 'Second']
-
-    def test_orders_a_keyword_by_provider(self) -> None:
-        rows = [stored_answer('a hotel', 'openai', [stored_brand('Second')]), stored_answer('a hotel', 'gemini', [stored_brand('First')])]
-
+    @pytest.mark.parametrize(
+        'rows',
+        [
+            pytest.param(
+                [stored_answer('B hotel', 'openai', [stored_brand('Second')]), stored_answer('a hotel', 'openai', [stored_brand('First')])],
+                id='run_by_keyword_ignoring_case',
+            ),
+            pytest.param(
+                [stored_answer('a hotel', 'openai', [stored_brand('Second')]), stored_answer('a hotel', 'gemini', [stored_brand('First')])],
+                id='keyword_by_provider',
+            ),
+        ],
+    )
+    def test_orders_answers_within_a_run(self, rows: list[dict[str, Any]]) -> None:
         assert brands_of(sentiment_examples(rows, 'negative')[1]) == ['First', 'Second']
 
     def test_orders_an_answer_by_brand_ignoring_case(self) -> None:

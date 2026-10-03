@@ -47,6 +47,10 @@ def _module_messages(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [record.getMessage() for record in _module_records(caplog)]
 
 
+def _module_levels_and_messages(caplog: pytest.LogCaptureFixture) -> list[tuple[str, str]]:
+    return [(record.levelname, record.getMessage()) for record in _module_records(caplog)]
+
+
 def _fail_inside_handler(message: str) -> None:
     raise ValueError(message)
 
@@ -109,7 +113,7 @@ class TestLogError:
         with caplog.at_level(logging.ERROR, logger=LOGGER_NAME):
             log_error(ValueError('Missing keyword'), 'search handler', include_traceback=False)
 
-        assert [(record.levelname, record.getMessage()) for record in _module_records(caplog)] == [
+        assert _module_levels_and_messages(caplog) == [
             ('ERROR', 'Error in search handler: ValueError - Invalid input data: ValueError'),
         ]
 
@@ -176,7 +180,7 @@ class TestStepFunctionSuccess:
         with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
             step_function_success({}, context='deduplication for hotels')
 
-        assert [(record.levelname, record.getMessage()) for record in _module_records(caplog)] == [
+        assert _module_levels_and_messages(caplog) == [
             ('INFO', 'Success: deduplication for hotels'),
         ]
 

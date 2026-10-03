@@ -16,17 +16,11 @@ import pytest
 
 from testing.env import setdefault_env
 from testing.module_loader import load_handler_module
+from testing.search_handler_fixtures import SEARCH_HANDLER_ENV
 
 # handler.py resolves its table names at import; the autouse fixture below
 # re-patches them per test for the code paths that read the environment.
-setdefault_env({
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-results',
-    'SEARCH_RESULTS_TABLE': 'test-results',
-    'PROVIDER_CONFIG_TABLE': 'test-provider-config',
-    'DYNAMODB_TABLE_PROVIDER_CONFIG': 'test-provider-config',
-    'BRAND_CONFIG_TABLE': 'test-brands',
-    'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brands',
-})
+setdefault_env(SEARCH_HANDLER_ENV)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -64,44 +58,41 @@ def mock_dynamodb():
     return mock, mock_table
 
 
+def _configured_openai_model(mock_dynamodb, item: dict) -> str:
+    """OpenAI's model as read from a config table whose row is ``item``, cache cleared first."""
+    mock_db, mock_table = mock_dynamodb
+    mock_table.get_item.return_value = {'Item': item}
+
+    with patch.object(handler, 'dynamodb', mock_db):
+        handler._provider_model_cache.clear()
+        return handler.get_provider_model('openai')
+
+
 class TestGetProviderModel:
     """Tests for get_provider_model() — runtime model configuration."""
 
-    @staticmethod
-    def _configured_model(mock_dynamodb, item: dict) -> str:
-        """OpenAI's model as read from a config table whose row is ``item``, cache cleared first."""
-        mock_db, mock_table = mock_dynamodb
-        mock_table.get_item.return_value = {'Item': item}
-
-        with patch.object(handler, 'dynamodb', mock_db):
-            handler._provider_model_cache.clear()
-            return handler.get_provider_model('openai')
-
     def test_returns_default_when_no_config(self, mock_dynamodb):
         """Falls back to default model when no config exists."""
-        assert self._configured_model(mock_dynamodb, {}) == 'gpt-5-mini'
+        assert _configured_openai_model(mock_dynamodb, {}) == 'gpt-5-mini'
 
     def test_returns_configured_model(self, mock_dynamodb):
         """Returns model from ProviderConfig table when set."""
-        assert self._configured_model(mock_dynamodb, {'provider_id': 'openai', 'model': 'gpt-5.2'}) == 'gpt-5.2'
+        assert _configured_openai_model(mock_dynamodb, {'provider_id': 'openai', 'model': 'gpt-5.2'}) == 'gpt-5.2'
 
     def test_falls_back_to_the_default_when_the_configured_model_is_blank(self, mock_dynamodb):
         """An empty ``model`` attribute means "not configured", not "use the empty string"."""
-        assert self._configured_model(mock_dynamodb, {'provider_id': 'openai', 'model': ''}) == 'gpt-5-mini'
+        assert _configured_openai_model(mock_dynamodb, {'provider_id': 'openai', 'model': ''}) == 'gpt-5-mini'
 
     def test_caches_result(self, mock_dynamodb):
         """Model is cached after first lookup."""
         mock_db, mock_table = mock_dynamodb
-        mock_table.get_item.return_value = {
-            'Item': {'provider_id': 'openai', 'model': 'gpt-5.2'}
-        }
 
+        _configured_openai_model(mock_dynamodb, {'provider_id': 'openai', 'model': 'gpt-5.2'})
         with patch.object(handler, 'dynamodb', mock_db):
-            handler._provider_model_cache.clear()
             handler.get_provider_model('openai')
-            handler.get_provider_model('openai')
-            # Should only call DynamoDB once
-            assert mock_table.get_item.call_count == 1
+
+        # Should only call DynamoDB once
+        assert mock_table.get_item.call_count == 1
 
     def test_raises_when_dynamodb_fails(self, mock_dynamodb):
         """Fails closed: raises instead of silently substituting the default.
@@ -141,23 +132,15 @@ class TestIsProviderEnabled:
     User intent (the disable flag) must win over infra failures.
     """
 
-    def test_returns_true_when_config_item_has_enabled_true(self, mock_dynamodb):
+    @pytest.mark.parametrize('enabled', [True, False])
+    def test_returns_the_enabled_flag_of_the_config_item(self, mock_dynamodb, enabled):
         mock_db, mock_table = mock_dynamodb
         mock_table.get_item.return_value = {
-            'Item': {'provider_id': 'openai', 'enabled': True}
+            'Item': {'provider_id': 'openai', 'enabled': enabled}
         }
 
         with patch.object(handler, 'dynamodb', mock_db):
-            assert handler.is_provider_enabled('openai') is True
-
-    def test_returns_false_when_config_item_has_enabled_false(self, mock_dynamodb):
-        mock_db, mock_table = mock_dynamodb
-        mock_table.get_item.return_value = {
-            'Item': {'provider_id': 'openai', 'enabled': False}
-        }
-
-        with patch.object(handler, 'dynamodb', mock_db):
-            assert handler.is_provider_enabled('openai') is False
+            assert handler.is_provider_enabled('openai') is enabled
 
     def test_returns_true_when_no_config_row_exists(self, mock_dynamodb):
         """First-run default: no row yet means the provider is enabled."""
@@ -263,12 +246,8 @@ class TestGeminiUsesTheConfiguredModel:
     def test_logs_the_model_a_run_uses(self, mock_dynamodb, caplog):
         import logging
 
-        mock_db, mock_table = mock_dynamodb
-        mock_table.get_item.return_value = {'Item': {'provider_id': 'openai', 'model': 'gpt-5.2'}}
-
-        with patch.object(handler, 'dynamodb', mock_db), caplog.at_level(logging.INFO, logger='search_handler_prompts'):
-            handler._provider_model_cache.clear()
-            handler.get_provider_model('openai')
+        with caplog.at_level(logging.INFO, logger='search_handler_prompts'):
+            _configured_openai_model(mock_dynamodb, {'provider_id': 'openai', 'model': 'gpt-5.2'})
 
         assert 'Provider openai using model: gpt-5.2' in [record.getMessage() for record in caplog.records]
 

@@ -77,30 +77,36 @@ def _search(client_class: type, method: str, answer: dict) -> tuple[dict, MagicM
         return client_class('key-1').search('hotel coruña'), send
 
 
+@pytest.fixture
+def searched(case: _Case) -> tuple[dict, MagicMock]:
+    """The result and the patched ``requests`` call of one search against ``case``'s provider."""
+    return _search(case.client_class, case.method, case.answer)
+
+
 @pytest.mark.parametrize('case', _CASES)
 class TestSearchHttpClients:
-    def test_sends_the_providers_search_request(self, case: _Case):
-        _result, send = _search(case.client_class, case.method, case.answer)
+    def test_sends_the_providers_search_request(self, case: _Case, searched: tuple[dict, MagicMock]):
+        _result, send = searched
 
         send.assert_called_once_with(case.url, **case.request_kwargs)
 
-    def test_maps_hits_with_a_url_to_cleaned_search_results(self, case: _Case):
-        result, _send = _search(case.client_class, case.method, case.answer)
+    def test_maps_hits_with_a_url_to_cleaned_search_results(self, case: _Case, searched: tuple[dict, MagicMock]):
+        result, _send = searched
 
         assert result['search_results'] == [{
             'url': 'https://hotel.es/riazor', 'title': 'Hotel Riazor', 'snippet': 'Frente a la playa',
             **case.extra_fields, 'source': case.client_class.provider_id,
         }]
 
-    def test_returns_a_success_with_the_raw_answer_and_cleaned_citations(self, case: _Case):
-        result, _send = _search(case.client_class, case.method, case.answer)
+    def test_returns_a_success_with_the_raw_answer_and_cleaned_citations(self, case: _Case, searched: tuple[dict, MagicMock]):
+        result, _send = searched
 
         assert (result['status'], result['provider'], result['provider_type'], result['response'], result['citations'], result['raw_response']) == (
             'success', case.client_class.provider_id, 'search', '', ['https://hotel.es/riazor'], case.answer,
         )
 
-    def test_records_the_result_count_and_provider_details_in_metadata(self, case: _Case):
-        result, _send = _search(case.client_class, case.method, case.answer)
+    def test_records_the_result_count_and_provider_details_in_metadata(self, case: _Case, searched: tuple[dict, MagicMock]):
+        result, _send = searched
 
         metadata = dict(result['metadata'])
         latency_ms = metadata.pop('latency_ms')

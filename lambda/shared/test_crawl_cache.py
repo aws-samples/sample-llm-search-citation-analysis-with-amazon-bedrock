@@ -7,7 +7,6 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
-from botocore.exceptions import ClientError
 
 from shared import crawl_cache
 from shared.crawl_cache import (
@@ -16,6 +15,7 @@ from shared.crawl_cache import (
     find_fresh_crawl,
     success_cache_scope,
 )
+from testing.crawl_cache_fixtures import missing_cache_index_error
 
 _NOW = datetime(2026, 9, 19, 12, tzinfo=UTC)
 _URL = 'https://example.com/article'
@@ -84,24 +84,19 @@ def test_returns_success_when_latest_keyword_scope_is_fresh_and_analysis_is_comp
     }
 
 
-def test_returns_blocked_when_latest_url_scope_is_fresh():
-    row = _cache_row(cache_status='blocked', block_reason='captcha')
+@pytest.mark.parametrize(
+    ('block_reason', 'expected_extra'),
+    [
+        pytest.param('captcha', {'block_reason': 'captcha'}, id='with_block_reason'),
+        pytest.param(None, {}, id='block_reason_omitted_when_row_has_none'),
+    ],
+)
+def test_returns_blocked_when_latest_url_scope_is_fresh(block_reason, expected_extra):
+    row = _cache_row(cache_status='blocked', block_reason=block_reason)
 
     result = _find(_table_with_scopes(blocked=row))
 
-    assert result == {
-        'status': 'blocked',
-        'crawled_at': row['crawled_at'],
-        'block_reason': 'captcha',
-    }
-
-
-def test_omits_block_reason_when_blocked_row_has_none():
-    row = _cache_row(cache_status='blocked')
-
-    result = _find(_table_with_scopes(blocked=row))
-
-    assert result == {'status': 'blocked', 'crawled_at': row['crawled_at']}
+    assert result == {'status': 'blocked', 'crawled_at': row['crawled_at'], **expected_extra}
 
 
 def test_queries_only_url_scope_when_success_window_is_zero():
@@ -228,10 +223,7 @@ def test_returns_miss_and_emits_metric_when_transient_cache_read_fails(
 
 def test_raises_configuration_error_when_cache_index_is_missing(capsys):
     table = MagicMock()
-    table.query.side_effect = ClientError(
-        {'Error': {'Code': 'ValidationException', 'Message': 'missing index'}},
-        'Query',
-    )
+    table.query.side_effect = missing_cache_index_error()
 
     with pytest.raises(
         CrawlCacheConfigurationError,
