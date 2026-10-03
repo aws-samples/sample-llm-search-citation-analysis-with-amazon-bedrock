@@ -39,7 +39,6 @@ from shared.provider_health import (
     TIMEOUT,
     UNKNOWN,
     classify_provider_error,
-    describe_category,
     record_provider_failure,
     record_provider_success,
 )
