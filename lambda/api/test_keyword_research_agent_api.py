@@ -325,6 +325,42 @@ class TestCreateTemplate:
         assert message in response['body']
         table.put_item.assert_not_called()
 
+    @pytest.mark.parametrize(('override', 'error'), [
+        ({'name': None}, 'Missing required field: name'),
+        ({'system_prompt': None}, 'Missing required field: system_prompt'),
+        ({'name': ''}, 'name too short (min 1 characters)'),
+        ({'name': 'n' * 101}, 'name too long (max 100 characters)'),
+        ({'system_prompt': f'  {"p" * 19}  '}, 'system_prompt too short (min 20 characters)'),
+        ({'system_prompt': 'p' * 6001}, 'system_prompt too long (max 6000 characters)'),
+        ({'description': 'd' * 501}, 'description too long (max 500 characters)'),
+    ], ids=[
+        'missing-name', 'missing-prompt', 'empty-name', 'name-over-100', 'prompt-under-20-once-trimmed',
+        'prompt-over-6000', 'description-over-500',
+    ])
+    def test_answers_the_field_error_for_a_body_outside_the_schema(self, override, error):
+        field = next(iter(override))
+        table = research_table_stub()
+
+        response = _call_templates(table, 'POST', {'name': 'Gyms', 'system_prompt': _GYMS_PROMPT, **override})
+
+        assert parse_response(response) == (400, {'error': error, 'field': field})
+        table.put_item.assert_not_called()
+
+    def test_trims_the_name_prompt_and_description_it_saves(self):
+        _response, item = _create_template({'name': '  Gyms  ', 'system_prompt': f'  {_GYMS_PROMPT}  ', 'description': '  for members  '})
+
+        assert (item['name'], item['system_prompt'], item['description']) == ('Gyms', _GYMS_PROMPT, 'for members')
+
+    def test_accepts_a_system_prompt_of_exactly_twenty_characters(self):
+        response, item = _create_template({'name': 'Gyms', 'system_prompt': 'p' * 20})
+
+        assert (response['statusCode'], item['system_prompt']) == (201, 'p' * 20)
+
+    def test_saves_an_empty_description_when_none_is_sent(self):
+        _response, item = _create_template({'name': 'Gyms', 'system_prompt': _GYMS_PROMPT})
+
+        assert item['description'] == ''
+
     def test_answers_404_for_an_unknown_base_template(self):
         table = research_table_stub()
 
@@ -357,10 +393,9 @@ class TestUpdateTemplate:
         assert _body(response)['name'] == 'New'
 
     @pytest.mark.parametrize(('stored', 'body', 'template_id', 'message'), [
-        (None, {'name': 'New'}, BUILTIN_TEMPLATE_ID, 'Built-in templates cannot be edited'),
         ({'id': 't1', 'name': 'Gyms'}, {'subject': '!!'}, 't1', 'subject must be a word or short phrase'),
         ({'id': 't1'}, {}, 't1', 'Nothing to update'),
-    ], ids=['builtin-template', 'invalid-subject', 'empty-update'])
+    ], ids=['invalid-subject', 'empty-update'])
     def test_refuses_an_update_with_400_without_writing(self, stored, body, template_id, message):
         table = research_table_stub(stored)
 
@@ -397,14 +432,6 @@ class TestDeleteTemplate:
         assert response['statusCode'] == 200
         table.delete_item.assert_called_once_with(Key={'id': 't1'})
 
-    def test_refuses_to_delete_the_builtin_template(self):
-        table = research_table_stub()
-
-        response = _call_templates(table, 'DELETE', template_id=BUILTIN_TEMPLATE_ID)
-
-        assert response['statusCode'] == 400
-        table.delete_item.assert_not_called()
-
     def test_deleting_a_job_still_reaches_the_job_route(self):
         table = MagicMock()
 
@@ -413,6 +440,22 @@ class TestDeleteTemplate:
 
         assert response['statusCode'] == 200
         table.delete_item.assert_called_once_with(Key={'id': 'job-9'})
+
+
+class TestSavedTemplateAddressing:
+    @pytest.mark.parametrize(('method', 'body', 'template_id', 'error'), [
+        ('PUT', {'name': 'New'}, None, 'Template ID is required'),
+        ('DELETE', None, None, 'Template ID is required'),
+        ('PUT', {'name': 'New'}, BUILTIN_TEMPLATE_ID, 'Built-in templates cannot be edited; save a copy instead'),
+        ('DELETE', None, BUILTIN_TEMPLATE_ID, 'Built-in templates cannot be deleted'),
+    ], ids=['update-without-id', 'delete-without-id', 'update-builtin', 'delete-builtin'])
+    def test_refuses_a_missing_or_builtin_id_with_an_id_field_error_and_no_write(self, method, body, template_id, error):
+        table = research_table_stub()
+
+        response = _call_templates(table, method, body, template_id=template_id)
+
+        assert parse_response(response) == (400, {'error': error, 'field': 'id'})
+        assert (table.update_item.call_count, table.delete_item.call_count) == (0, 0)
 
 
 class TestAgentHistory:

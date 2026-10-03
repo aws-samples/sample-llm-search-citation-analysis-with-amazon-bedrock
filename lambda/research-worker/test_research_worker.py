@@ -208,7 +208,7 @@ class TestPlan:
         assert result['steps'] == [{'step_id': 'r1-openai', 'provider': 'openai'}]
 
     def test_raises_when_no_provider_is_configured(self):
-        with pytest.raises(_mod.NoProviderConfiguredError):
+        with pytest.raises(_mod.NoProviderConfiguredError, match=r'^No API keys configured$'):
             _plan(_expansion_job())
 
     def test_raises_when_the_job_row_is_missing(self):
@@ -257,16 +257,23 @@ class TestExecuteStep:
         assert first['status'] == 'running'
         assert last['status'] == 'completed'
 
-    def test_writes_each_step_under_its_own_key(self):
+    def _gemini_step_writes(self) -> MagicMock:
+        """The table after one ``r1-gemini`` step whose provider answered an empty list."""
         _result, table = _execute_step(_expansion_job(), self._event('gemini'), run_web_search=MagicMock(return_value='[]'))
+        return table
 
-        call = table.update_item.call_args.kwargs
+    def test_writes_each_step_under_its_own_key(self):
+        call = self._gemini_step_writes().update_item.call_args.kwargs
+
         assert call['UpdateExpression'] == (
             'SET steps.#sid = :step, updated_at = :ts ADD checkpoint_revision :revision_increment'
         )
         assert call['ExpressionAttributeNames']['#sid'] == 'r1-gemini'
         assert 'attempt = :attempt' in call['ConditionExpression']
         assert 'execution_arn = :execution_arn' in call['ConditionExpression']
+
+    def test_every_status_write_names_the_step_provider(self):
+        assert [step['provider'] for step in _step_writes(self._gemini_step_writes())] == ['gemini', 'gemini']
 
     def test_bounds_in_process_retries_to_the_step_budget(self):
         run = MagicMock(return_value='[]')
@@ -382,6 +389,17 @@ class TestFailStep:
         _result, table = _run(self._job(), event)
 
         assert _step_writes(table)[-1]['error_message'] == 'Lambda.Unknown'
+
+    @pytest.mark.parametrize(('provider_field', 'written_provider'), [
+        ({'provider': 'openai'}, 'openai'),
+        ({}, None),
+    ])
+    def test_records_the_provider_the_event_names_on_the_failed_step(self, provider_field, written_provider):
+        event = {key: value for key, value in self._event().items() if key != 'provider'}
+
+        _result, table = _run(self._job(), {**event, **provider_field})
+
+        assert _step_writes(table)[-1].get('provider') == written_provider
 
 
 class TestFinalize:
@@ -1136,6 +1154,126 @@ class TestCheckpointRaces:
             for key, value in final_values.items() if key.startswith(':result')
         )
         assert final_values[':observed_revision'] == 2
+
+
+_TS = '2026-10-03T10:00:00.000000Z'
+
+#: The condition every terminal write of job-1's attempt one, round one carries.
+_TERMINAL_CONDITION = (
+    '#s = :observed_status AND attempt = :attempt AND execution_arn = :execution_arn '
+    'AND active_round = :expected_round AND attribute_not_exists(checkpoint_revision)'
+)
+
+
+def _finished_expansion_job() -> dict:
+    return _expansion_job(status='running', steps={
+        'r1-openai': {'provider': 'openai', 'status': 'completed', 'keywords': [{'keyword': 'x'}]},
+    })
+
+
+def _terminal_write(action: str) -> dict:
+    """The ``update_item`` kwargs ``action`` sends for ``_finished_expansion_job`` with the clock frozen at ``_TS``."""
+    _result, table = _run(_finished_expansion_job(), {'action': action, 'job_id': 'job-1'}, get_timestamp=MagicMock(return_value=_TS))
+    return table.update_item.call_args.kwargs
+
+
+class TestCheckpointWriteContract:
+    def test_plan_claims_the_job_for_this_attempt_execution_and_round(self):
+        _result, table = _plan(_expansion_job(), _OPENAI, get_timestamp=MagicMock(return_value=_TS))
+
+        assert table.update_item.call_args_list[0].kwargs == {
+            'Key': {'id': 'job-1'},
+            'UpdateExpression': (
+                'SET #s = :running, attempt = if_not_exists(attempt, :attempt), '
+                'execution_arn = :owner, execution_id = :execution_id, '
+                'active_round = :expected_round, updated_at = :ts'
+            ),
+            'ConditionExpression': (
+                '#s = :observed_status AND (attempt = :attempt OR attribute_not_exists(attempt)) '
+                'AND (attribute_not_exists(execution_arn) OR execution_arn = :owner) '
+                'AND active_round = :observed_active_round'
+            ),
+            'ExpressionAttributeNames': {'#s': 'status'},
+            'ExpressionAttributeValues': {
+                ':observed_status': 'pending', ':attempt': 1, ':running': 'running', ':owner': 'arn:exec',
+                ':execution_id': 'exec', ':expected_round': 1, ':ts': _TS, ':observed_active_round': 1,
+            },
+        }
+
+    def test_plan_claim_lost_to_another_execution_plans_nothing(self):
+        table = _table_with(_expansion_job())
+        pending = table.get_item.return_value['Item']
+        moved = {**pending, 'status': 'running', 'execution_arn': 'arn:other'}
+        table.get_item.side_effect = [{'Item': pending}, {'Item': moved}]
+        table.update_item.side_effect = conditional_check_failure(message='claim won elsewhere')
+        providers = _configured(_OPENAI)
+
+        result = _run_on(table, {'action': 'plan', 'job_id': 'job-1', 'retry': False}, get_web_search_clients=providers)
+
+        assert result['steps'] == []
+        providers.assert_not_called()
+
+    def test_finalize_sets_the_result_and_the_finalized_fields(self):
+        assert _terminal_write('finalize')['UpdateExpression'] == (
+            'SET #s = :s, keyword_count = :kc, steps_done = :sd, steps_failed = :sf, provider = :p, '
+            'finished_at = :ts, updated_at = :ts, finalized_attempt = :finalized_attempt, finalized_round = :finalized_round, '
+            'keywords = :kw, proposal_source = :src, proposal_truncation = :proposal_truncation REMOVE error_message'
+        )
+
+    def test_finalize_values_carry_the_status_clock_attempt_and_round(self):
+        values = _terminal_write('finalize')['ExpressionAttributeValues']
+
+        assert {key: values[key] for key in (':s', ':ts', ':finalized_attempt', ':finalized_round')} == {
+            ':s': 'completed', ':ts': _TS, ':finalized_attempt': 1, ':finalized_round': 1,
+        }
+
+    @pytest.mark.parametrize('action', ['finalize', 'fail'])
+    def test_terminal_write_targets_the_job_only_while_ownership_and_revision_hold(self, action):
+        write = _terminal_write(action)
+
+        assert (write['Key'], write['ConditionExpression']) == ({'id': 'job-1'}, _TERMINAL_CONDITION)
+
+    def test_fail_sets_the_error_the_finalized_fields_and_the_checkpointed_result(self):
+        assert _terminal_write('fail')['UpdateExpression'] == (
+            'SET #s = :s, error_message = :e, finished_at = :ts, updated_at = :ts, '
+            'finalized_attempt = :finalized_attempt, finalized_round = :finalized_round, '
+            'keyword_count = :result0, steps_done = :result1, steps_failed = :result2, provider = :result3, '
+            'keywords = :result4, result_truncation = :result5'
+        )
+
+    def test_lost_terminal_write_to_another_execution_answers_its_state_without_replaying(self):
+        table = _table_with(_finished_expansion_job())
+        observed = table.get_item.return_value['Item']
+        table.get_item.side_effect = [{'Item': observed}, {'Item': {**observed, 'execution_arn': 'arn:other'}}]
+        table.update_item.side_effect = conditional_check_failure(message='execution replaced')
+
+        result = _run_on(table, {'action': 'finalize', 'job_id': 'job-1'})
+
+        assert (result['status'], table.update_item.call_count) == ('running', 1)
+
+    @pytest.mark.parametrize('action', ['finalize', 'fail'])
+    def test_gives_up_after_three_replays_of_a_conflicting_terminal_write(self, action):
+        table = _table_with(_finished_expansion_job())
+        table.update_item.side_effect = conditional_check_failure(message='checkpoints keep moving')
+
+        with pytest.raises(_mod.CheckpointConflictError, match=rf'^Could not {action} research job job-1 while checkpoints were changing$'):
+            _run_on(table, {'action': action, 'job_id': 'job-1'})
+
+        assert table.update_item.call_count == 4
+
+    @pytest.mark.parametrize(('event', 'expected'), [
+        (
+            {'action': 'fail_step', 'job_id': 'missing', 'step_id': 'r1-openai'},
+            {'job_id': 'missing', 'attempt': None, 'round': 1, 'expected_round': 1, 'retry': False, 'step_id': 'r1-openai', 'status': 'failed'},
+        ),
+        (
+            {'action': 'fail', 'job_id': 'missing'},
+            {'job_id': 'missing', 'attempt': None, 'round': 1, 'expected_round': 1, 'retry': False, 'status': 'failed'},
+        ),
+    ])
+    def test_missing_job_answers_failed_for_round_one_when_the_event_names_no_round(self, event, expected):
+        with patch.object(_mod, 'research_table', _table_with(None)):
+            assert _mod.handler(event, None) == expected
 
 
 

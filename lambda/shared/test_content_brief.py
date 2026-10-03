@@ -281,6 +281,39 @@ class TestModeAndSizeValidation:
         assert present(canonical)['current_copy'] == ''
         validator.assert_not_called()
 
+    @pytest.mark.parametrize('field', ['id', 'prompt_template', 'output_language'])
+    def test_reports_field_is_required_when_required_text_is_blank(self, field: str) -> None:
+        canonical, issue = canonicalize(build_group_brief(**{field: '   '}))
+
+        assert canonical is None
+        assert issue == ContentBriefValidationIssue(field, f'{field} is required')
+
+    @pytest.mark.parametrize(
+        ('content_angle', 'field', 'message'),
+        [
+            pytest.param(
+                IMPROVE_CURRENT_URL, 'landing_url',
+                'landing_url is required for improve current URL mode', id='landing_url',
+            ),
+            pytest.param(
+                REWRITE_PASTED_COPY, 'current_copy',
+                'current_copy is required for rewrite pasted copy mode', id='current_copy',
+            ),
+        ],
+    )
+    def test_requires_source_field_when_mode_needs_it_and_the_key_is_absent(
+        self, content_angle: str, field: str, message: str,
+    ) -> None:
+        idea = build_group_brief(
+            content_angle=content_angle, prompt_template=DEFAULT_PROMPT_TEMPLATES[content_angle],
+        )
+        del idea[field]
+
+        canonical, issue = canonicalize(idea)
+
+        assert canonical is None
+        assert issue == ContentBriefValidationIssue(field, message)
+
     def test_rejects_unknown_mode(self) -> None:
         canonical, issue = canonicalize(build_group_brief(content_angle='unknown'))
 

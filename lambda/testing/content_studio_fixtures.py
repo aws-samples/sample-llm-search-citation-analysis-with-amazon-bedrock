@@ -638,6 +638,30 @@ def create_content_template_for_test(
     return status, body, table
 
 
+def create_content_template_without_field(
+    module: Any,
+    field_name: str,
+) -> tuple[int, Any, MagicMock]:
+    """Submit a valid template create request lacking `field_name`; return response plus table spy."""
+    table = fake_table(scan={"Count": 0})
+    request = valid_content_template_body()
+    request.pop(field_name)
+    status, body = call_content_template_route(module, table, "POST", body=request)
+    return status, body, table
+
+
+def racing_batch_table() -> tuple[MagicMock, dict[str, dict[str, Any]]]:
+    """A manifest table where a concurrent request stores the identical manifest just before this write."""
+    rows_holder: list[dict[str, dict[str, Any]]] = []
+
+    def win_race(item: dict[str, Any]) -> None:
+        rows_holder[0][str(item["batch_id"])] = dict(item)
+
+    table, rows = _stateful_conditional_table("batch_id", win_race)
+    rows_holder.append(rows)
+    return table, rows
+
+
 
 def pending_recovery_row(content_id: str) -> dict[str, object]:
     """Return one old versioned pending row eligible for scheduled recovery."""

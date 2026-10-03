@@ -10,6 +10,7 @@ import pytest
 
 from shared.kpi_engine import answers_from_rows, brand_table
 from testing.dynamodb_stubs import fake_table
+from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.search_results_fixtures import report_dynamodb, search_result_row, search_results_table
 
@@ -36,17 +37,33 @@ _ROWS = [
 ]
 
 
+def _persona_dynamodb(rows: list[dict[str, Any]]) -> Any:
+    """A DynamoDB resource holding ``rows`` for the keyword and one named persona, ``default``."""
+    prompts = fake_table(scan={'Items': [{'id': 'default', 'name': 'Default'}]})
+    return report_dynamodb(search_results_table({_KEYWORD: rows}), other_tables={'test-query-prompts': prompts})
+
+
 @pytest.fixture
 def rankings(persona_module):
     """``get_persona_rankings`` reading ``rows`` for the keyword, with one named persona."""
 
     def run(rows: list[dict[str, Any]]) -> dict[str, Any]:
-        prompts = fake_table(scan={'Items': [{'id': 'default', 'name': 'Default'}]})
-        resource = report_dynamodb(search_results_table({_KEYWORD: rows}), other_tables={'test-query-prompts': prompts})
-        with patch.object(persona_module, 'dynamodb', resource):
+        with patch.object(persona_module, 'dynamodb', _persona_dynamodb(rows)):
             return persona_module.get_persona_rankings(_KEYWORD)
 
     return run
+
+
+@pytest.fixture
+def get_rankings(persona_module):
+    """``(status, body)`` of ``GET /api/persona-rankings`` for the keyword with extra ``query`` parameters."""
+
+    def get(query: dict[str, str]) -> tuple[int, Any]:
+        event = api_gateway_event('GET', '/api/persona-rankings', query={'keyword': _KEYWORD, **query})
+        with patch.object(persona_module, 'dynamodb', _persona_dynamodb(_ROWS)):
+            return parse_response(persona_module.handler(event, None))
+
+    return get
 
 
 def _scores(body: dict[str, Any]) -> dict[str, float]:
@@ -71,3 +88,19 @@ def test_keeps_rank_mentions_and_sentiment_from_every_row_of_the_persona(ranking
     assert {key: hotel_sol[key] for key in ('name', 'rank', 'mention_count', 'sentiment', 'classification')} == {
         'name': 'Hotel Sol', 'rank': 1, 'mention_count': 2, 'sentiment': 'positive', 'classification': 'first_party',
     }
+
+
+@pytest.mark.parametrize('query', [
+    pytest.param({}, id='no-persona-filter'),
+    pytest.param({'query_prompt_id': 'default'}, id='known-persona'),
+])
+def test_answers_the_rankings_of_every_matching_persona(get_rankings, query):
+    status, body = get_rankings(query)
+
+    assert (status, [persona['persona_id'] for persona in body['personas']]) == (200, ['default'])
+
+
+def test_rejects_a_persona_missing_from_the_query_prompts_table(get_rankings):
+    assert get_rankings({'query_prompt_id': 'ghost'}) == (
+        400, {'error': 'Persona not found: ghost', 'field': 'query_prompt_id'},
+    )

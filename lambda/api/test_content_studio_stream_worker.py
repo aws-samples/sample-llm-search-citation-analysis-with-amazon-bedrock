@@ -472,3 +472,22 @@ def test_terminalizes_exhausted_pending_row_without_model_dispatch() -> None:
         "max_attempts_exhausted"
     )
     run.lambda_client.invoke.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("row", "page"),
+    [
+        ({**pending_recovery_row("content-1"), "generation_attempts": 3}, "pending"),
+        (_generating_recovery_row("timed-out-owner", 1), "generating"),
+    ],
+    ids=["terminalize_exhausted", "release_expired_lease"],
+)
+def test_recovery_update_aliases_status_attribute_name(row: dict[str, Any], page: str) -> None:
+    run = _reconcile([row], **{page: [row]})
+
+    content_updates = [
+        update.kwargs["ExpressionAttributeNames"]
+        for update in run.table.update_item.call_args_list
+        if update.kwargs["Key"] == {"id": "content-1"}
+    ]
+    assert content_updates == [{"#status": "status"}]

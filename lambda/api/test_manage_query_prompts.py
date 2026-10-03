@@ -7,6 +7,7 @@ Covers:
 """
 
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -94,6 +95,49 @@ class TestCreatePrompt:
         status, _ = invoke(handler_module, make_event('POST', body=body))
 
         assert status == 400
+
+    @pytest.mark.parametrize(('body', 'field'), [
+        pytest.param({'template': 'about {keyword}'}, 'name', id='name'),
+        pytest.param({'name': 'Persona'}, 'template', id='template'),
+    ])
+    def test_create_without_a_required_field_returns_400_naming_it(self, handler_module, body, field):
+        status, response = invoke(handler_module, make_event('POST', body=body))
+
+        assert (status, response) == (400, {'error': f'Missing required field: {field}', 'field': field})
+        assert mock_table.put_item.call_count == 0
+
+    def test_create_stores_the_trimmed_name_template_and_description(self, handler_module, monkeypatch):
+        monkeypatch.setattr(handler_module, 'uuid', SimpleNamespace(uuid4=lambda: 'prompt-1'))
+        monkeypatch.setattr(handler_module, 'get_timestamp', lambda: '2026-10-03T12:00:00Z')
+        event = make_event('POST', body={
+            'name': '  Family Traveler  ',
+            'template': '  As a family traveler, find me {keyword}  ',
+            'description': '  Parents with young children  ',
+        })
+
+        handler_module.handler(event, {})
+
+        mock_table.put_item.assert_called_once_with(Item={
+            'id': 'prompt-1',
+            'name': 'Family Traveler',
+            'template': 'As a family traveler, find me {keyword}',
+            'enabled': 'true',
+            'created_at': '2026-10-03T12:00:00Z',
+            'updated_at': '2026-10-03T12:00:00Z',
+            'description': 'Parents with young children',
+        })
+
+    @pytest.mark.parametrize(('field', 'value', 'limit'), [
+        pytest.param('name', 'n' * 101, 100, id='name'),
+        pytest.param('template', '{keyword}' + 't' * 1992, 2000, id='template'),
+        pytest.param('description', 'd' * 1001, 1000, id='description'),
+    ])
+    def test_create_rejects_a_field_one_character_over_its_limit(self, handler_module, field, value, limit):
+        body = {**PERSONA, field: value}
+
+        status, response = invoke(handler_module, make_event('POST', body=body))
+
+        assert (status, response) == (400, {'error': f'{field} too long (max {limit} characters)', 'field': field})
 
 
 class TestListPrompts:

@@ -376,6 +376,16 @@ class TestStaleResearchSweep:
 
         assert 'timed out' in row['error_message']
 
+    def test_writes_the_terminal_fields_to_the_row_addressed_by_its_id(self):
+        table = _sweep({'id': 'abc', 'status': 'running', 'created_at': STALE_TIMESTAMP})
+
+        call = table.update_item.call_args.kwargs
+        assert (call['Key'], call['UpdateExpression']) == (
+            {'id': 'abc'},
+            'SET #s = :s, error_message = :e, finished_at = :ts, updated_at = :ts, keyword_count = :result0, steps_done = :result1,'
+            ' steps_failed = :result2, provider = :result3, keywords = :result4, result_truncation = :result5',
+        )
+
     @pytest.mark.parametrize(
         ('status', 'timestamps'),
         [

@@ -67,20 +67,17 @@ class TestCreateWithGroups:
         assert body['group_ids'] == sorted(group_ids)
         assert mock_keywords_table.put_item.call_args.kwargs['Item']['group_ids'] == set(group_ids)
 
-    def test_rejects_unknown_group_ids_with_400_before_writing(self):
+    @pytest.mark.parametrize(('group_ids', 'error'), [
+        pytest.param(['g1', 'ghost'], 'Unknown keyword group ids: ghost', id='unknown-group-id'),
+        pytest.param('g1', 'group_ids must be an array of strings', id='non-array-value'),
+    ])
+    def test_rejects_invalid_group_ids_on_the_group_ids_field_before_writing(self, group_ids, error):
         _groups_exist('g1')
 
-        status, body = _send('POST', {'keyword': 'hotel coruña', 'group_ids': ['g1', 'ghost']})
+        response = _send('POST', {'keyword': 'hotel coruña', 'group_ids': group_ids})
 
-        assert status == 400
-        assert body['error'] == 'Unknown keyword group ids: ghost'
+        assert response == (400, {'error': error, 'field': 'group_ids'})
         mock_keywords_table.put_item.assert_not_called()
-
-    def test_rejects_a_non_array_group_ids_value(self):
-        status, body = _send('POST', {'keyword': 'hotel coruña', 'group_ids': 'g1'})
-
-        assert status == 400
-        assert body['error'] == 'group_ids must be an array of strings'
 
 
 class TestUpdateWithGroups:

@@ -8,6 +8,7 @@ from typing import Any, NamedTuple
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 from shared.kpi_alerts import (
@@ -198,11 +199,26 @@ class TestAlertHistory:
         assert body['count'] == 2
         assert tables.alerts.query.call_count == 2
 
-    def test_rejects_alert_limit_over_one_hundred(self, alert_api) -> None:
-        status, body = _call(alert_api, 'GET', '/api/alerts', query={'limit': '101'})
+    def test_queries_fifty_open_alerts_when_no_status_or_limit_is_given(self, alert_api, tables) -> None:
+        tables.alerts.query.return_value = {'Items': []}
 
-        assert status == 400
-        assert body['field'] == 'limit'
+        _call(alert_api, 'GET', '/api/alerts')
+
+        assert tables.alerts.query.call_args_list == [call(
+            IndexName='StatusCreatedIndex',
+            KeyConditionExpression=Key('status').eq('open'),
+            ScanIndexForward=False,
+            Limit=50,
+        )]
+
+    @pytest.mark.parametrize(
+        ('limit', 'message'),
+        [('0', 'limit must be at least 1'), ('101', 'limit must be at most 100')],
+    )
+    def test_rejects_alert_limit_outside_one_to_one_hundred(self, alert_api, limit: str, message: str) -> None:
+        status, body = _call(alert_api, 'GET', '/api/alerts', query={'limit': limit})
+
+        assert (status, body) == (400, {'error': message, 'field': 'limit'})
 
 
 class TestAcknowledgeAlert:
@@ -527,6 +543,18 @@ class TestContentChanges:
 
         assert status == 400
         assert body['field'] == 'url'
+        assert tables.changes.put_item.call_count == 0
+
+    def test_rejects_marker_with_an_unknown_field_without_writing(self, alert_api, tables) -> None:
+        tables.groups.get_item.return_value = {'Item': {'id': 'group-1'}}
+
+        status, body = _post_content_change(alert_api, {
+            'group_id': 'group-1',
+            'description': 'Update',
+            'changed_at': '2026-01-01T00:00:00Z',
+        })
+
+        assert (status, body) == (400, {'error': 'Unknown field: changed_at', 'field': 'changed_at'})
         assert tables.changes.put_item.call_count == 0
 
     def test_rejects_marker_for_unknown_group(self, alert_api, tables) -> None:

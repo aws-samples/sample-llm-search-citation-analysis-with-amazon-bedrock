@@ -83,19 +83,26 @@ def browse():
     sys.modules.pop(_MODULE_NAME, None)
 
 
-def make_event(route: str, key: str, bucket: str = 'responses') -> dict[str, Any]:
-    """Build an API Gateway event for /file or /download."""
-    return api_gateway_event('GET', f'/api/raw-responses{route}', query={'key': key, 'bucket': bucket})
+def _get(module: Any, route: str, query: dict[str, str]) -> tuple[int, Any]:
+    """``(status, decoded body)`` of ``GET /api/raw-responses<route>`` with the query string ``query``."""
+    return parse_response(module.handler(api_gateway_event('GET', f'/api/raw-responses{route}', query=query), None))
 
 
 def _request(module: Any, route: str, key: str, bucket: str = 'responses') -> tuple[int, Any]:
     """``(status, decoded body)`` of ``GET <route>`` for ``key`` in ``bucket``."""
-    return parse_response(module.handler(make_event(route, key, bucket), None))
+    return _get(module, route, {'key': key, 'bucket': bucket})
 
 
 def signed_key(s3: MagicMock) -> str:
     """Return the key from the most recent presigned-URL call."""
     return s3.generate_presigned_url.call_args.kwargs['Params']['Key']
+
+
+def addressed_object(s3: MagicMock, route: str) -> dict[str, str]:
+    """``{'Bucket', 'Key'}`` the most recent /file read or /download signature addressed."""
+    if route == '/file':
+        return s3.get_object.call_args.kwargs
+    return s3.generate_presigned_url.call_args.kwargs['Params']
 
 
 def listed_prefix(module: Any, s3: MagicMock, prefix: str) -> str:
@@ -285,3 +292,56 @@ class TestBrowseRouteUnchanged:
         module, s3 = browse
 
         assert listed_prefix(module, s3, '2026/08') == 'raw-responses/2026/08/'
+
+
+@pytest.mark.parametrize('route', ['/file', '/download'])
+class TestObjectRouteParameters:
+    """The ``key`` / ``bucket`` schema shared by /file and /download."""
+
+    @pytest.mark.parametrize(('query', 'expected'), [
+        pytest.param(
+            {'bucket': 'responses'},
+            {'error': 'Missing required field: key', 'field': 'key'},
+            id='missing-key',
+        ),
+        pytest.param(
+            {'key': 'k' * 1025},
+            {'error': 'key too long (max 1024 characters)', 'field': 'key'},
+            id='key-over-1024-characters',
+        ),
+        pytest.param(
+            {'key': '2026/08/openai.json', 'bucket': 'b' * 21},
+            {'error': 'bucket too long (max 20 characters)', 'field': 'bucket'},
+            id='bucket-over-20-characters',
+        ),
+    ])
+    def test_rejects_an_invalid_parameter_with_its_field(self, browse, route, query, expected) -> None:
+        module, _ = browse
+
+        assert _get(module, route, query) == (400, expected)
+
+    def test_accepts_a_key_of_exactly_1024_characters(self, browse, route) -> None:
+        module, _ = browse
+
+        status, _ = _request(module, route, 'k' * 1024)
+
+        assert status == 200
+
+    @pytest.mark.parametrize(('key', 'bucket', 'expected'), [
+        pytest.param(
+            ' 2026/08/openai.json ', 'responses',
+            {'Bucket': RESPONSES_BUCKET, 'Key': 'raw-responses/2026/08/openai.json'},
+            id='padded-key',
+        ),
+        pytest.param(
+            'shot.png', ' screenshots ',
+            {'Bucket': SCREENSHOTS_BUCKET, 'Key': 'screenshots/shot.png'},
+            id='padded-bucket',
+        ),
+    ])
+    def test_trims_surrounding_spaces_before_addressing_the_object(self, browse, route, key, bucket, expected) -> None:
+        module, s3 = browse
+
+        _request(module, route, key, bucket)
+
+        assert addressed_object(s3, route) == expected

@@ -491,6 +491,17 @@ class TestUpdateSchedule:
         mock_scheduler.update_schedule.assert_not_called()
 
 
+class TestWriteConfirmation:
+    @pytest.mark.parametrize(('event', 'expected'), [
+        pytest.param(make_event('POST', body={}), (201, 'Schedule created successfully'), id='create'),
+        pytest.param(id_event('PUT', 'sch-1a2b3c4d', body={'time': '10:00'}), (200, 'Schedule updated successfully'), id='update'),
+    ])
+    def test_answers_with_the_confirmation_message(self, handler_module, event, expected):
+        status, body = parse_response(handler_module.handler(event, {}))
+
+        assert (status, body['message']) == expected
+
+
 class TestDeleteSchedule:
     def test_deletes_by_id(self, handler_module):
         status, body = parse_response(handler_module.handler(id_event('DELETE', 'sch-1a2b3c4d'), {}))

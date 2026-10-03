@@ -125,6 +125,7 @@ class TestCacheFreshness:
 
     @pytest.mark.parametrize('created_at', [
         pytest.param('2026-09-19T11:30:00.000000Z', id='utc-24.5h-old'),
+        pytest.param('2026-09-19T12:00:00.000000Z', id='utc-exactly-24h-old'),
         pytest.param('2026-09-19T15:00:00+05:00', id='offset-27h-old-in-utc'),
         pytest.param('not-a-date', id='unparseable'),
         pytest.param(None, id='missing'),

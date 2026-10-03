@@ -152,10 +152,7 @@ class TestCreateGroup:
         ids=['blank-name', 'name-over-100-characters'],
     )
     def test_rejects_an_invalid_name_with_400(self, name, error):
-        status, body = _request('POST', {'name': name})
-
-        assert status == 400
-        assert body['error'] == error
+        assert _request('POST', {'name': name}) == (400, {'error': error, 'field': 'name'})
 
 
 class TestUpdateGroup:
@@ -285,12 +282,13 @@ class TestUpdateMemberships:
 
         mock_keywords_table.update_item.assert_called_once_with(**membership_update('k2', {'g1'}, 'DELETE', 'ALL_NEW'))
 
-    def test_reports_unknown_keyword_ids_as_missing_instead_of_failing(self):
+    @pytest.mark.parametrize(('change', 'applied'), [('add', 'added'), ('remove', 'removed')])
+    def test_reports_unknown_keyword_ids_as_missing_instead_of_failing(self, change, applied):
         mock_keywords_table.update_item.side_effect = conditional_check_failure()
 
-        status, body = _change_members({'add': ['ghost']})
+        status, body = _change_members({change: ['ghost']})
 
-        assert (status, body['added'], body['missing']) == (200, [], ['ghost'])
+        assert (status, body[applied], body['missing']) == (200, [], ['ghost'])
 
     def test_rejects_a_body_without_changes(self):
         assert _change_members({}) == (400, {'error': 'Provide keyword ids to add or remove'})

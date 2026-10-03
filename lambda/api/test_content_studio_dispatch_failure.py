@@ -340,6 +340,62 @@ class TestGenerateContentIdeasFromBrandVisibility:
         assert ideas == [seasonal]
         assert suggest.call_args == call(['kw'], _BRAND_CONFIG)
 
+    @pytest.mark.parametrize(
+        ('first_party_rank', 'expected_copy'),
+        [
+            (
+                4,
+                {
+                    'type': 'ranking_improvement',
+                    'priority': 'medium',
+                    'title': 'Improve Ranking for "kw"',
+                    'description': 'Your brand ranks #4. Create better content to reach #1.',
+                    'source': 'ranking_analysis',
+                    'content_angle': 'differentiation',
+                },
+            ),
+            (
+                1,
+                {
+                    'type': 'leadership_maintenance',
+                    'priority': 'low',
+                    'title': 'Maintain Leadership for "kw"',
+                    'description': "You're #1! Create fresh content to stay ahead of 4 competitors.",
+                    'source': 'leadership_analysis',
+                    'content_angle': 'thought_leadership',
+                },
+            ),
+        ],
+        ids=['ranking_improvement', 'leadership_maintenance'],
+    )
+    def test_ranked_keyword_idea_carries_complete_shape_with_top_three_competitors(
+        self, first_party_rank: int, expected_copy: dict[str, str]
+    ):
+        competitors = [_competitor(name, rank=rank) for name, rank in (('A', 2), ('B', 3), ('C', 5), ('D', 6))]
+        items = [
+            _search_result(
+                'kw',
+                brands=[*competitors, _first_party(rank=first_party_rank)],
+                citations=['https://rival.example'],
+            )
+        ]
+
+        with patch.object(_mod.uuid, 'uuid4', return_value='idea-fixed-id'):
+            ideas = _ideas(items)
+
+        assert ideas == [
+            {
+                'id': 'idea-fixed-id',
+                **expected_copy,
+                'keyword': 'kw',
+                'current_rank': first_party_rank,
+                'competitor_brands': ['A', 'B', 'C'],
+                'competitor_urls': ['https://rival.example'],
+                'providers_present': ['openai'],
+                'actionable': True,
+            }
+        ]
+
     def test_caps_the_idea_list_at_fifty(self):
         items = [_search_result(f'kw{n:02d}', brands=[_competitor()]) for n in range(60)]
 

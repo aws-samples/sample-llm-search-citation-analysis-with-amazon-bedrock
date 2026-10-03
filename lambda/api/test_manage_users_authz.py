@@ -390,3 +390,15 @@ class TestCognitoErrorMapping:
         mock_cognito.admin_reset_user_password.side_effect = CognitoInvalidParameter('no verified email')
 
         assert self._answer(handler_module, 'POST', '/reset-password') == (400, {'error': 'An unexpected error occurred'})
+
+
+class TestMissingPathUsername:
+    """The per-user routes refuse a path without ``{username}`` before calling Cognito."""
+
+    @pytest.mark.parametrize(('method', 'path', 'body'), [
+        ('PUT', '/api/users', {'enabled': True}),
+        ('DELETE', '/api/users', None),
+        ('POST', '/api/users/reset-password', None),
+    ], ids=['update', 'delete', 'reset-password'])
+    def test_returns_400_saying_the_username_is_required(self, handler_module, method, path, body):
+        assert invoke(handler_module, make_event(method, path=path, body=body)) == (400, {'error': 'Username required'})

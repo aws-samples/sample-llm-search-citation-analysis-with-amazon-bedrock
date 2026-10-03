@@ -14,7 +14,7 @@ import json
 from unittest.mock import MagicMock
 
 import pytest
-from test_manage_brand_config_fixtures import load_brand_config_module
+from test_manage_brand_config_fixtures import capture_prompts, load_brand_config_module
 
 from testing.events import api_gateway_event, parse_response
 
@@ -198,13 +198,7 @@ class TestGenericIndustryDefaults:
         save_config.assert_called_once_with(_mod._default_config())
 
     def test_uses_general_context_when_helper_industries_are_omitted(self, monkeypatch) -> None:
-        prompts: list[str] = []
-
-        def capture_prompt(prompt: str, *_args, **_kwargs) -> str:
-            prompts.append(prompt)
-            return '{}'
-
-        monkeypatch.setattr(_mod, 'invoke_bedrock', capture_prompt)
+        prompts = capture_prompts(monkeypatch, _mod)
 
         _mod.expand_brand('Acme')
         _mod.expand_brands(['Acme'])

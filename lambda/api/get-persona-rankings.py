@@ -99,7 +99,7 @@ def build_persona_brands(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         results.append({
             'name': data['original_name'],
             'rank': best_rank,
-            'mention_count': to_int(data['mentions'], 0),
+            'mention_count': data['mentions'],
             'sentiment': sentiment_to_label(data['sentiments']),
             'visibility_score': visibility.get(key.strip(), 0.0),
             'classification': data['classification'],

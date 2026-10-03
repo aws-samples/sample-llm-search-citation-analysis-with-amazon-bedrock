@@ -62,7 +62,6 @@ from shared.research_jobs import (
     STEP_PENDING,
     STEP_RUNNING,
     STEP_TERMINAL_STATUSES,
-    TERMINAL_STATUSES,
     TYPE_AGENT,
     TYPE_COMPETITOR,
     bound_final_proposal,
@@ -936,7 +935,7 @@ def _commit_step(job: dict[str, Any], event: dict[str, Any], step_id: str, step:
     if not _write_step(job, event, step_id, step):
         return _step_result(_load_job(job['id']), event, step_id, None)
     logger.info('Step %s of job %s committed %s', step_id, job['id'], step['status'])
-    return _step_result({**job, 'steps': {**job.get('steps', {}), step_id: step}}, event, step_id, step['status'])
+    return _step_result(job, event, step_id, step['status'])
 
 
 def execute_step(event: dict[str, Any]) -> dict[str, Any]:
@@ -1160,7 +1159,7 @@ def _write_terminal_checkpoint(
     if _conditional_update(job_id, expression=expression, condition=condition, names=names, values=values):
         return None
     current = _load_job(job_id)
-    if current.get('status') in TERMINAL_STATUSES or not _owned_for_round(current, event):
+    if not _owned_for_round(current, event):
         return _terminal_response(current, event)
     retries = int(event.get('_checkpoint_retry') or 0)
     if retries < 3:
@@ -1173,8 +1172,6 @@ def _write_terminal_checkpoint(
 def finalize(event: dict[str, Any]) -> dict[str, Any]:
     job_id = event['job_id']
     job = _load_job(job_id)
-    if job.get('status') in TERMINAL_STATUSES:
-        return _terminal_response(job, event)
     if not _owned_for_round(job, event):
         return _terminal_response(job, event)
 
@@ -1254,7 +1251,7 @@ def fail(event: dict[str, Any]) -> dict[str, Any]:
         job = _load_job(job_id)
     except ResearchJobNotFoundError:
         return {**_event_round_result(event), 'status': STATUS_FAILED}
-    if job.get('status') in TERMINAL_STATUSES or not _owned_for_round(job, event):
+    if not _owned_for_round(job, event):
         return _terminal_response(job, event)
 
     status, result = checkpoint_terminal_result(job)
