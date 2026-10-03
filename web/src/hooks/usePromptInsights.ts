@@ -1,5 +1,7 @@
 import type { PromptInsightsResponse } from '../types';
-import { useAnalysisEndpoint } from './useAnalysisEndpoint';
+import {
+  fetchErrors, useAnalysisEndpoint 
+} from './useAnalysisEndpoint';
 
 class PromptInsightsFetchError extends Error {
   constructor(message = 'Failed to fetch prompt insights') {
@@ -16,8 +18,7 @@ const promptInsightsEndpoint = {
   errorContext: 'visibility',
   logMessage: '[promptInsights] Error fetching prompt insights:',
   isValidResponse: isPromptInsightsResponse,
-  createHttpError: () => new PromptInsightsFetchError(),
-  createResponseError: (message: string) => new PromptInsightsFetchError(message),
+  ...fetchErrors(PromptInsightsFetchError),
   // This endpoint never checked for `{error}` bodies; its type guard
   // rejects them as an invalid format instead. Kept as-is to preserve
   // the hook's observable error messages.

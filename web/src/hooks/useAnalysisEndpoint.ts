@@ -3,10 +3,12 @@ import {
 } from 'react';
 import {
   API_BASE_URL,
+  ApiRequestError,
   authenticatedFetch,
   getErrorMessage,
   isAbortError,
 } from '../infrastructure';
+import { isRecord } from '../types/domain/keywordDecoders';
 import { useLatestRequest } from './useLatestRequest';
 
 /**
@@ -50,6 +52,29 @@ export interface AnalysisResponseContract<TResponse> {
 export interface AnalysisEndpointConfig<TArgs extends readonly unknown[], TResponse> extends AnalysisResponseContract<TResponse> {
   buildRequest: (...args: TArgs) => AnalysisRequest;
   errorContext: string;
+}
+
+type ContractErrors = Pick<AnalysisResponseContract<unknown>, 'createHttpError' | 'createResponseError'>;
+
+/** Failures as `ApiRequestError`: a non-OK status gets `httpMessage` and the status code. */
+export function apiRequestErrors(httpMessage: string): ContractErrors {
+  return {
+    createHttpError: (status: number) => new ApiRequestError(httpMessage, status),
+    createResponseError: (message: string) => new ApiRequestError(message),
+  };
+}
+
+/** Failures as the hook's own error class: its default message for a non-OK status. */
+export function fetchErrors(errorType: new (message?: string) => Error): ContractErrors {
+  return {
+    createHttpError: () => new errorType(),
+    createResponseError: (message: string) => new errorType(message),
+  };
+}
+
+/** A JSON object that is not an `{error}` body: where every analysis response guard starts. */
+export function isAnalysisPayload(data: unknown): data is Record<string, unknown> {
+  return isRecord(data) && !('error' in data);
 }
 
 /**

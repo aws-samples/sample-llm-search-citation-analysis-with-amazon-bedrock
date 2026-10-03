@@ -1,13 +1,12 @@
-import { ApiRequestError } from '../infrastructure';
 import type { ReportsOverviewResponse } from '../api/reports';
 import type { ReportScope } from '../types';
-import { isRecord } from '../types/domain/keywordDecoders';
 import { reportScopeParams } from '../components/ui/reportScope';
-import { useAnalysisEndpoint } from './useAnalysisEndpoint';
+import {
+  apiRequestErrors, isAnalysisPayload, useAnalysisEndpoint 
+} from './useAnalysisEndpoint';
 
 function isReportsOverviewResponse(data: unknown): data is ReportsOverviewResponse {
-  return isRecord(data)
-    && !('error' in data)
+  return isAnalysisPayload(data)
     && 'kpis' in data
     && 'summary' in data
     && 'trend_data' in data
@@ -21,8 +20,7 @@ const reportsOverviewEndpoint = {
   errorContext: 'visibility',
   logMessage: '[reportsOverview] Error fetching overview:',
   isValidResponse: isReportsOverviewResponse,
-  createHttpError: (status: number) => new ApiRequestError('Failed to fetch reports overview', status),
-  createResponseError: (message: string) => new ApiRequestError(message),
+  ...apiRequestErrors('Failed to fetch reports overview'),
   buildRequest: (
     days = 30,
     period: 'day' | 'week' | 'month' = 'day',

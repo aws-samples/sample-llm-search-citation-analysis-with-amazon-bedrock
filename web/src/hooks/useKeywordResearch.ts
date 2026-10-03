@@ -196,56 +196,53 @@ export const useKeywordResearch = () => {
     }
   }, []);
 
-  const expandKeywords = useCallback(async (seedKeyword: string, industry: string, count: number) => {
+  /**
+   * Start one run and follow it: `start` asks the API and resolves with the
+   * job to follow; `shownJob` is displayed while it does (a retried job).
+   */
+  const launchRun = useCallback(async (
+    type: TrackedResearchType,
+    start: () => Promise<KeywordResearchItem>,
+    action: string,
+    shownJob: KeywordResearchItem | null = null
+  ) => {
     const isCancelled = claimGeneration();
-    beginRun('expansion');
+    beginRun(type);
+    if (shownJob !== null) setActiveJob(shownJob);
     try {
-      const job = await startKeywordExpansion(seedKeyword, industry, count);
+      const job = await start();
       if (isCancelled()) return;
       setActiveJob(job);
-      await trackJob(job.id, 'expansion', isCancelled);
+      await trackJob(job.id, type, isCancelled);
     } catch (err) {
       if (isCancelled()) return;
       setError(getErrorMessage(err, 'research'));
       setLoading(false);
-      console.error('[research] Error expanding keywords:', err);
+      console.error(`[research] Error ${action}:`, err);
     }
   }, [beginRun, claimGeneration, trackJob]);
 
-  const analyzeCompetitor = useCallback(async (url: string) => {
-    const isCancelled = claimGeneration();
-    beginRun('competitor');
-    try {
-      const job = await startCompetitorAnalysis(url);
-      if (isCancelled()) return;
-      setActiveJob(job);
-      await trackJob(job.id, 'competitor', isCancelled);
-    } catch (err) {
-      if (isCancelled()) return;
-      setError(getErrorMessage(err, 'research'));
-      setLoading(false);
-      console.error('[research] Error analyzing competitor:', err);
-    }
-  }, [beginRun, claimGeneration, trackJob]);
+  const expandKeywords = useCallback(async (seedKeyword: string, industry: string, count: number) => launchRun(
+    'expansion',
+    () => startKeywordExpansion(seedKeyword, industry, count),
+    'expanding keywords'
+  ), [launchRun]);
+
+  const analyzeCompetitor = useCallback(async (url: string) => launchRun(
+    'competitor',
+    () => startCompetitorAnalysis(url),
+    'analyzing competitor'
+  ), [launchRun]);
 
   /** Re-run the failed steps of a partial or failed job and follow it again. */
   const retryResearch = useCallback(async (job: KeywordResearchItem) => {
     // Agent runs are followed by the Research Agent tab (`useResearchAgent`).
     if (job.type === 'agent') return;
-    const isCancelled = claimGeneration();
-    beginRun(job.type);
-    setActiveJob(job);
-    try {
+    await launchRun(job.type, async () => {
       await retryKeywordResearch(job.id);
-      if (isCancelled()) return;
-      await trackJob(job.id, job.type, isCancelled);
-    } catch (err) {
-      if (isCancelled()) return;
-      setError(getErrorMessage(err, 'research'));
-      setLoading(false);
-      console.error('[research] Error retrying research:', err);
-    }
-  }, [beginRun, claimGeneration, trackJob]);
+      return job;
+    }, 'retrying research', job);
+  }, [launchRun]);
 
   // Re-attach to a job the user was waiting on before a refresh or tab switch.
   useEffect(() => {

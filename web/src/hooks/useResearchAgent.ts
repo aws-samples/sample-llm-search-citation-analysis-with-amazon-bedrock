@@ -71,6 +71,13 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
     };
   }, []);
 
+  /** Shows a failed request's error and logs it, unless the tab has been left. */
+  const reportFailure = useCallback((err: unknown, action: string): void => {
+    if (!mountedRef.current) return;
+    setError(getErrorMessage(err, 'research'));
+    console.error(`[research-agent] Error ${action}:`, err);
+  }, []);
+
   const refresh = useCallback(async (): Promise<void> => {
     setLoadingJobs(true);
     try {
@@ -78,13 +85,11 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
       if (!mountedRef.current) return;
       setJobs(items);
     } catch (err) {
-      if (!mountedRef.current || isAbortError(err)) return;
-      setError(getErrorMessage(err, 'research'));
-      console.error('[research-agent] Error loading runs:', err);
+      if (!isAbortError(err)) reportFailure(err, 'loading runs');
     } finally {
       if (mountedRef.current) setLoadingJobs(false);
     }
-  }, []);
+  }, [reportFailure]);
 
   useEffect(() => {
     void refresh();
@@ -147,14 +152,12 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
       setJobs((prev) => replaceJob(prev, job));
       return job;
     } catch (err) {
-      if (!mountedRef.current) return null;
-      setError(getErrorMessage(err, 'research'));
-      console.error('[research-agent] Error starting run:', err);
+      reportFailure(err, 'starting run');
       return null;
     } finally {
       if (mountedRef.current) setStarting(false);
     }
-  }, []);
+  }, [reportFailure]);
 
   const select = useCallback((id: string | null) => {
     setSelectedId(id);
@@ -174,11 +177,9 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
       setSelectedId(job.id);
       await reload(job.id);
     } catch (err) {
-      if (!mountedRef.current) return;
-      setError(getErrorMessage(err, 'research'));
-      console.error('[research-agent] Error retrying run:', err);
+      reportFailure(err, 'retrying run');
     }
-  }, [reload]);
+  }, [reload, reportFailure]);
 
   const remove = useCallback(async (id: string): Promise<void> => {
     try {
@@ -187,11 +188,9 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
       setJobs((prev) => prev.filter((job) => job.id !== id));
       setSelectedId((prev) => (prev === id ? null : prev));
     } catch (err) {
-      if (!mountedRef.current) return;
-      setError(getErrorMessage(err, 'research'));
-      console.error('[research-agent] Error deleting run:', err);
+      reportFailure(err, 'deleting run');
     }
-  }, []);
+  }, [reportFailure]);
 
   return {
     jobs,

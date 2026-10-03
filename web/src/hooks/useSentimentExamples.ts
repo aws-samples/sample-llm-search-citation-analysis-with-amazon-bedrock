@@ -3,7 +3,9 @@ import {
   isSentimentExamplesResponse, type SentimentLabel
 } from '../types/domain/sentimentExamples';
 import { reportScopeParams } from '../components/ui/reportScope';
-import { useAnalysisEndpoint } from './useAnalysisEndpoint';
+import {
+  fetchErrors, useAnalysisEndpoint 
+} from './useAnalysisEndpoint';
 
 class SentimentExamplesFetchError extends Error {
   constructor(message = 'Failed to fetch sentiment examples') {
@@ -16,8 +18,7 @@ const sentimentExamplesEndpoint = {
   errorContext: 'sentimentExamples',
   logMessage: '[sentiment] Error fetching sentiment examples:',
   isValidResponse: isSentimentExamplesResponse,
-  createHttpError: () => new SentimentExamplesFetchError(),
-  createResponseError: (message: string) => new SentimentExamplesFetchError(message),
+  ...fetchErrors(SentimentExamplesFetchError),
   buildRequest: (scope: ReportScope, sentiment: SentimentLabel, provider?: string, limit?: number) => {
     const params = new URLSearchParams(reportScopeParams(scope));
     params.append('sentiment', sentiment);
