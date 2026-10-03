@@ -115,6 +115,16 @@ class TestSearchHttpClients:
         )
 
 
+class TestExaResultShapes:
+    def test_gives_each_hit_without_highlights_its_own_empty_list(self):
+        answer = {'results': [{'url': 'https://hotel.es/a'}, {'url': 'https://hotel.es/b'}]}
+
+        result, _send = _search(ExaSearchClient, 'post', answer)
+
+        first, second = (hit['highlights'] for hit in result['search_results'])
+        assert (first, second, first is second) == ([], [], False)
+
+
 class TestFirecrawlResultShapes:
     def test_reads_a_bare_data_list(self):
         answer = {'data': [{**_HIT, 'description': 'Frente a la playa'}]}
