@@ -11,7 +11,9 @@ import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   CHEVRON_RIGHT_PATHS, GLOBE_PATHS 
 } from '../ui/iconPaths';
-import { ClipboardIcon } from '../ui/ClipboardIcon';
+import {
+  CopyKeywordCell, KeywordSignalCells
+} from './KeywordSignalCells';
 import type { KeywordSelectionProps } from './researchRunView';
 
 type SectionId = 'primary' | 'secondary' | 'longtail' | 'gaps';
@@ -37,25 +39,6 @@ const sections: ReadonlyArray<{
     label: 'Content Gaps' 
   },
 ];
-
-const getIntentColor = (intent: string): string => {
-  const colors: Record<string, string> = {
-    informational: 'bg-blue-100 text-blue-700',
-    commercial: 'bg-purple-100 text-purple-700',
-    transactional: 'bg-green-100 text-green-700',
-    navigational: 'bg-gray-100 text-gray-700',
-  };
-  return colors[intent?.toLowerCase()] ?? 'bg-gray-100 text-gray-600';
-};
-
-const getCompetitionColor = (competition: string): string => {
-  const colors: Record<string, string> = {
-    low: 'text-green-600',
-    medium: 'text-yellow-600',
-    high: 'text-red-600',
-  };
-  return colors[competition?.toLowerCase()] ?? 'text-gray-600';
-};
 
 const getSectionCount = (result: CompetitorAnalysisResult | null, sectionId: SectionId): number => {
   if (!result) return 0;
@@ -309,35 +292,14 @@ const KeywordRow = ({
         </td>
       )}
       <td className="px-6 py-4 text-sm text-gray-900">{kw.keyword}</td>
-      <td className="px-6 py-4">
-        <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${getIntentColor(kw.intent)}`}>
-          {kw.intent}
-        </span>
-      </td>
-      <td className={`px-6 py-4 text-sm font-medium ${getCompetitionColor(kw.competition)}`}>{kw.competition}</td>
-      <td className="px-6 py-4">
-        <div className="flex items-center gap-2">
-          <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-            <div className="h-full bg-gray-900 rounded-full" style={{ width: `${(kw.relevance ?? 0) * 10}%` }} />
-          </div>
-          <span className="text-xs text-gray-500">{kw.relevance}/10</span>
-        </div>
-      </td>
+      <KeywordSignalCells keyword={kw} />
       <td className="px-6 py-4">
         {kw.source && <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600">{kw.source}</span>}
       </td>
       {showOpportunity && (
         <td className="px-6 py-4 text-xs text-gray-600 max-w-xs truncate" title={kw.opportunity}>{kw.opportunity}</td>
       )}
-      <td className="px-6 py-4 text-right">
-        <button
-          onClick={() => void copy(kw.keyword)}
-          className="text-gray-400 hover:text-gray-600 transition-colors"
-          title="Copy keyword"
-        >
-          <ClipboardIcon className="w-4 h-4" />
-        </button>
-      </td>
+      <CopyKeywordCell keyword={kw.keyword} onCopy={(text) => void copy(text)} />
     </tr>
   );
 };

@@ -6,7 +6,9 @@ import {
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { exportResearchKeywords } from './researchExport';
 import { useExportAction } from '../ui/useExportAction';
-import { ClipboardIcon } from '../ui/ClipboardIcon';
+import {
+  CopyKeywordCell, KeywordSignalCells
+} from './KeywordSignalCells';
 import type { KeywordSelectionProps } from './researchRunView';
 
 interface KeywordResultsTableProps extends KeywordSelectionProps {
@@ -15,25 +17,6 @@ interface KeywordResultsTableProps extends KeywordSelectionProps {
   subtitle?: string;
   compact?: boolean;
 }
-
-const getIntentColor = (intent: string) => {
-  switch (intent?.toLowerCase()) {
-    case 'informational': return 'bg-blue-100 text-blue-700';
-    case 'commercial': return 'bg-purple-100 text-purple-700';
-    case 'transactional': return 'bg-green-100 text-green-700';
-    case 'navigational': return 'bg-gray-100 text-gray-700';
-    default: return 'bg-gray-100 text-gray-600';
-  }
-};
-
-const getCompetitionColor = (competition: string) => {
-  switch (competition?.toLowerCase()) {
-    case 'low': return 'text-green-600';
-    case 'medium': return 'text-yellow-600';
-    case 'high': return 'text-red-600';
-    default: return 'text-gray-600';
-  }
-};
 
 interface KeywordResultRowProps extends KeywordSelectionProps {
   keyword: ResearchKeyword;
@@ -58,34 +41,8 @@ const KeywordResultRow = ({
         </td>
       )}
       <td className="px-6 py-4 text-sm text-gray-900">{keyword.keyword}</td>
-      <td className="px-6 py-4">
-        <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${getIntentColor(keyword.intent)}`}>
-          {keyword.intent}
-        </span>
-      </td>
-      <td className={`px-6 py-4 text-sm font-medium ${getCompetitionColor(keyword.competition)}`}>
-        {keyword.competition}
-      </td>
-      <td className="px-6 py-4">
-        <div className="flex items-center gap-2">
-          <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-gray-900 rounded-full"
-              style={{ width: `${(keyword.relevance ?? 0) * 10}%` }}
-            />
-          </div>
-          <span className="text-xs text-gray-500">{keyword.relevance}/10</span>
-        </div>
-      </td>
-      <td className="px-6 py-4 text-right">
-        <button
-          onClick={() => onCopy(keyword.keyword)}
-          className="text-gray-400 hover:text-gray-600 transition-colors"
-          title="Copy keyword"
-        >
-          <ClipboardIcon className="w-4 h-4" />
-        </button>
-      </td>
+      <KeywordSignalCells keyword={keyword} />
+      <CopyKeywordCell keyword={keyword.keyword} onCopy={onCopy} />
     </tr>
   );
 };
