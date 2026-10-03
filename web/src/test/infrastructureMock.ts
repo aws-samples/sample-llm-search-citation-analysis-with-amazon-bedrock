@@ -46,3 +46,16 @@ export function deferAuthenticatedFetch(): DeferredResponse {
   mockAuthenticatedFetch.mockReturnValue(deferred.promise);
   return deferred;
 }
+
+/**
+ * Queues two responses the spec settles by hand, for the next two
+ * `authenticatedFetch` calls in order.
+ */
+export function deferNextTwoAuthenticatedFetches(): [DeferredResponse, DeferredResponse] {
+  const first = createDeferredResponse();
+  const second = createDeferredResponse();
+  mockAuthenticatedFetch
+    .mockReturnValueOnce(first.promise)
+    .mockReturnValueOnce(second.promise);
+  return [first, second];
+}

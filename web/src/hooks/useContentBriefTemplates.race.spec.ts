@@ -18,7 +18,9 @@ import {
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import {
+  deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
+} from '../test/infrastructureMock';
 
 describe('useContentBriefTemplates request ordering', () => {
   it('sorts saved templates by name when ID order conflicts', async () => {
@@ -86,11 +88,7 @@ describe('useContentBriefTemplates request ordering', () => {
   it('keeps loading true until the newest concurrent refresh settles', async () => {
     prepareTemplateHookResponses();
     const { result } = await renderLoadedContentBriefTemplates();
-    const older = createDeferredResponse();
-    const newer = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockReturnValueOnce(older.promise)
-      .mockReturnValueOnce(newer.promise);
+    const [older, newer] = deferNextTwoAuthenticatedFetches();
     const requests = {
       older: Promise.resolve(),
       newer: Promise.resolve(),

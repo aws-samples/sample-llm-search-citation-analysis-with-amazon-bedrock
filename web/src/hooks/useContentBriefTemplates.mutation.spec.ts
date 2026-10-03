@@ -18,7 +18,9 @@ import {
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import {
+  deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
+} from '../test/infrastructureMock';
 
 type ContentBriefTemplatesHook = ReturnType<typeof useContentBriefTemplates>;
 
@@ -89,11 +91,7 @@ describe('useContentBriefTemplates operational errors', () => {
 describe('useContentBriefTemplates overlapping operation state', () => {
   it('keeps loading true when an older mutation settles during a newer refresh', async () => {
     const { result } = await renderLoadedContentBriefTemplates();
-    const mutationResponse = createDeferredResponse();
-    const refreshResponse = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockReturnValueOnce(mutationResponse.promise)
-      .mockReturnValueOnce(refreshResponse.promise);
+    const [mutationResponse, refreshResponse] = deferNextTwoAuthenticatedFetches();
     const pendingMutation = {
       promise: Promise.resolve({
         success: false,

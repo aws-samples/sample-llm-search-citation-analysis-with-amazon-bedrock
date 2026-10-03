@@ -6,10 +6,10 @@ import {
 } from '@testing-library/react';
 import { LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY } from '../api/contentStudioBatchStorage';
 import { buildBatchCandidate } from '../api/contentStudioBatchStorage-fixtures';
+import { createMockJsonResponse } from '../test/fetchResponses';
 import {
-  createDeferredResponse, createMockJsonResponse
-} from '../test/fetchResponses';
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+  deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
+} from '../test/infrastructureMock';
 import {
   advanceContentStudioPoll,
   dispatchBatchCandidateStorageEvent,
@@ -224,11 +224,7 @@ describe('useContentStudioBatchTracking stale response ownership', () => {
     storeActiveContentStudioBatchCandidates([
       buildBatchCandidate('batch-1', 100)
     ]);
-    const staleStatus = createDeferredResponse();
-    const currentStatus = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockReturnValueOnce(staleStatus.promise)
-      .mockReturnValueOnce(currentStatus.promise);
+    const [staleStatus, currentStatus] = deferNextTwoAuthenticatedFetches();
     const rendered = renderHook(() => useContentStudio());
     await flushContentStudioPromises();
 
@@ -248,11 +244,7 @@ describe('useContentStudioBatchTracking stale response ownership', () => {
   it('ignores an accepted start for a candidate replaced while POST was pending', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(100);
-    const startRequest = createDeferredResponse();
-    const currentStatus = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockReturnValueOnce(startRequest.promise)
-      .mockReturnValueOnce(currentStatus.promise);
+    const [startRequest, currentStatus] = deferNextTwoAuthenticatedFetches();
     const {
       result, unmount
     } = renderHook(() => useContentStudio());
