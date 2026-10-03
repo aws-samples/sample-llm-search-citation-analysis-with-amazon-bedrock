@@ -103,3 +103,19 @@ describe('RecommendationsSection — ordering and empty states', () => {
     expect(screen.getByText(/Network down/i)).toBeInTheDocument();
   });
 });
+
+describe('RecommendationsSection — no keyword match', () => {
+  it('titles the note "Recommended actions"', () => {
+    renderRecommendations([OTHER_KEYWORD_SCOPED]);
+
+    expect(screen.getByRole('heading', { name: 'Recommended actions' })).toBeInTheDocument();
+  });
+
+  it('says how many recommendations exist and that none name the keyword', () => {
+    renderRecommendations([OTHER_KEYWORD_SCOPED]);
+
+    expect(screen.getByText(/The Action Center has/u)).toHaveTextContent(
+      'The Action Center has 1 recommendations across all keywords, but none reference best running shoes specifically.'
+    );
+  });
+});

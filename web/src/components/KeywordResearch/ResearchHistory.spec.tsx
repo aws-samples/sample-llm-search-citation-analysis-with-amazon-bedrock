@@ -158,6 +158,14 @@ describe('ResearchHistory promotion UI', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(expansionKeywordFixtures.length);
   });
 
+  it('keeps the row collapsed when its delete button is clicked', async () => {
+    renderHistoryWithItems([buildHistoryItem({ keywords: expansionKeywordFixtures })]);
+
+    await userEvent.click(screen.getByRole('button', { name: /delete/i }));
+
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
   it('clears the selection when a different history item is expanded', async () => {
     renderHistoryWithItems([
       buildHistoryItem({ keywords: expansionKeywordFixtures }),

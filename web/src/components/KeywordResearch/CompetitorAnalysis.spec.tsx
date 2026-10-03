@@ -222,6 +222,15 @@ describe('CompetitorAnalysis', () => {
       expect(screen.getByText('Total Keywords')).toBeInTheDocument();
     });
 
+    it('copies a keyword to the clipboard with its copy button', async () => {
+      const user = userEvent.setup();
+      renderCompetitorResult(competitorResultFixture);
+
+      await user.click(screen.getAllByTitle('Copy keyword')[0]);
+
+      await expect(navigator.clipboard.readText()).resolves.toBe('primary beach hotel');
+    });
+
     it('displays section tabs when result is present', () => {
       renderCompetitorResult(buildResult());
 

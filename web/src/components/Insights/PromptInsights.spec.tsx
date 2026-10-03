@@ -85,6 +85,23 @@ describe('PromptInsights', () => {
       expect(screen.getByText('hotels')).toBeInTheDocument();
     });
 
+    it('shows the winning, losing and opportunity counts of the summary', () => {
+      renderWithInsights({
+        data: buildPromptInsightsResponse({
+          summary: {
+            winning_count: 7,
+            losing_count: 3,
+            opportunity_count: 5,
+            win_rate: 70,
+          },
+        }),
+      });
+
+      expect(screen.getByText('Winning').nextElementSibling).toHaveTextContent('7');
+      expect(screen.getByText('Losing').nextElementSibling).toHaveTextContent('3');
+      expect(screen.getByText('Opportunities').nextElementSibling).toHaveTextContent('5');
+    });
+
     it('shows empty state when no prompts in active tab', () => {
       renderWithInsights({ data: buildPromptInsightsResponse() });
 

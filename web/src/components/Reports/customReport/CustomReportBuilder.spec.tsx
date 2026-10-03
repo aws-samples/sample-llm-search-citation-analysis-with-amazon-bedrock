@@ -184,6 +184,20 @@ describe('Editing a saved custom report', () => {
     expect(mockApiDelete).toHaveBeenCalledWith('/custom-reports/report-board', WRITE_OPTIONS);
   });
 
+  it('offers the way back to Reports when the report is gone', async () => {
+    renderWithoutSavedReports('/reports/custom/report-missing/edit');
+
+    expect(await screen.findByRole('link', { name: 'Back to Reports' })).toBeInTheDocument();
+  });
+
+  it('shows the load failure without the way back when the reports cannot be read', async () => {
+    mockApiGet.mockRejectedValue(new ApiRequestError('HTTP 500', 500));
+    renderCustomReportRoute('/reports/custom/report-board/edit');
+
+    await waitFor(() => expect(screen.queryByText('Loading the report…')).not.toBeInTheDocument());
+    expect(screen.queryByRole('link', { name: 'Back to Reports' })).not.toBeInTheDocument();
+  });
+
   it('says the report is gone when no saved report has the id', async () => {
     renderWithoutSavedReports('/reports/custom/report-missing/edit');
 

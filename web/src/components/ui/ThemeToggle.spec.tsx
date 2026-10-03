@@ -39,6 +39,26 @@ describe('ThemeToggle', () => {
     expect(screen.getByLabelText(label)).toBeInTheDocument();
   });
 
+  it('draws a different, non-empty icon for each theme', () => {
+    const iconOf = (themeName: string) => {
+      mockUseTheme.mockReturnValue({
+        theme: themeName,
+        toggleTheme: vi.fn(),
+      });
+      const {
+        container, unmount 
+      } = render(<ThemeToggle />);
+      const d = container.querySelector('path')?.getAttribute('d') ?? '';
+      unmount();
+      return d;
+    };
+
+    const icons = ['light', 'dark', 'system'].map(iconOf);
+
+    expect(new Set(icons).size).toBe(3);
+    expect(icons.every((d) => d.length > 0)).toBe(true);
+  });
+
   it('calls toggleTheme when button clicked', () => {
     const toggleTheme = vi.fn();
     mockUseTheme.mockReturnValue({
