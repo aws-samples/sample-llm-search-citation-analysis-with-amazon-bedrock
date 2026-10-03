@@ -133,3 +133,9 @@ export async function startMockContentBriefBatch(): Promise<void> {
   await userEvent.click(screen.getByText('Content Brief'));
   await userEvent.click(screen.getByText('Start mock brief batch'));
 }
+
+/** Confirms the open Create Content dialog, first picking `language` as the output language when given. */
+export async function confirmIdeaGeneration(language?: string): Promise<void> {
+  if (language !== undefined) await userEvent.selectOptions(screen.getByLabelText('Output Language'), language);
+  await userEvent.click(screen.getByRole('button', { name: 'Generate Content' }));
+}
