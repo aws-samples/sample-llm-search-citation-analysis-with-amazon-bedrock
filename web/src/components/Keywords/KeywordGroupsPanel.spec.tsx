@@ -5,10 +5,27 @@ import {
   screen, waitFor
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ComponentProps } from 'react';
 import {
   KEYWORD_GROUPS,
   renderKeywordGroupsPanel,
 } from './KeywordGroupsPanel-fixtures';
+import type { KeywordGroupsPanel } from './KeywordGroupsPanel';
+
+function renderNewGroupInput(overrides: Partial<ComponentProps<typeof KeywordGroupsPanel>> = {}) {
+  const props = renderKeywordGroupsPanel(overrides);
+  return {
+    props,
+    user: userEvent.setup(),
+    input: screen.getByRole('textbox', { name: 'New group name' }),
+  };
+}
+
+async function renderAndClick(buttonName: string) {
+  const props = renderKeywordGroupsPanel();
+  await userEvent.setup().click(screen.getByRole('button', { name: buttonName }));
+  return props;
+}
 
 describe('KeywordGroupsPanel', () => {
   it('describes reusable groups with generic examples', () => {
@@ -38,9 +55,9 @@ describe('KeywordGroupsPanel', () => {
   });
 
   it('creates a group from the trimmed input and clears the field on success', async () => {
-    const props = renderKeywordGroupsPanel();
-    const user = userEvent.setup();
-    const input = screen.getByRole('textbox', { name: 'New group name' });
+    const {
+      props, user, input 
+    } = renderNewGroupInput();
 
     await user.type(input, '  Hotel Playa  ');
     await user.click(screen.getByRole('button', { name: 'Create group' }));
@@ -50,14 +67,14 @@ describe('KeywordGroupsPanel', () => {
   });
 
   it('surfaces a failed creation through onNotify and keeps the typed name', async () => {
-    const props = renderKeywordGroupsPanel({
+    const {
+      props, user, input 
+    } = renderNewGroupInput({
       onCreate: vi.fn().mockResolvedValue({
         success: false,
         message: 'A keyword group with this name already exists'
       }),
     });
-    const user = userEvent.setup();
-    const input = screen.getByRole('textbox', { name: 'New group name' });
 
     await user.type(input, 'Hotel Coruña{Enter}');
 
@@ -70,9 +87,7 @@ describe('KeywordGroupsPanel', () => {
   });
 
   it('selects a group as the active filter when its chip is clicked', async () => {
-    const props = renderKeywordGroupsPanel();
-
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Hotel Coruña (3)' }));
+    const props = await renderAndClick('Hotel Coruña (3)');
 
     expect(props.onFilterChange).toHaveBeenCalledWith({ groupId: 'coruna' });
   });
@@ -90,9 +105,7 @@ describe('KeywordGroupsPanel', () => {
   });
 
   it('asks the parent to delete the group with the full group record', async () => {
-    const props = renderKeywordGroupsPanel();
-
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Delete group Hotel Gran Marino' }));
+    const props = await renderAndClick('Delete group Hotel Gran Marino');
 
     expect(props.onDelete).toHaveBeenCalledWith(KEYWORD_GROUPS[1]);
   });

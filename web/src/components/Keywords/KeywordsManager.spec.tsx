@@ -56,6 +56,21 @@ const mockApiDelete = vi.mocked(apiDelete);
 const mockApiPost = vi.mocked(apiPost);
 const mockApiPut = vi.mocked(apiPut);
 
+function renderManager(keywords?: Keyword[]) {
+  const props = createKeywordsManagerProps(keywords);
+  render(<KeywordsManager {...props} />);
+  return props;
+}
+
+async function renderSubmitted<T>(submit: () => Promise<T>) {
+  const props = renderManager();
+  const input = await submit();
+  return {
+    props,
+    input,
+  };
+}
+
 describe('KeywordsManager', () => {
   beforeEach(() => {
     mockApiDelete.mockReset();
@@ -66,45 +81,43 @@ describe('KeywordsManager', () => {
 
   describe('rendering', () => {
     it('renders manager heading when keyword list is empty', () => {
-      const props = createKeywordsManagerProps([]);
-      render(<KeywordsManager {...props} />);
+      renderManager([]);
 
       expect(screen.getByRole('heading', { name: 'Manage Keywords' })).toBeInTheDocument();
     });
 
     it('renders keyword text when keywords exist', () => {
-      const props = createKeywordsManagerProps();
-      render(<KeywordsManager {...props} />);
+      renderManager();
 
       expect(screen.getByText(existingKeywordFixture.keyword)).toBeInTheDocument();
     });
 
     it('shows empty-state message when keyword list is empty', () => {
-      const props = createKeywordsManagerProps([]);
-      render(<KeywordsManager {...props} />);
+      renderManager([]);
 
       expect(screen.getByText(/No keywords yet/u)).toBeInTheDocument();
     });
 
     it('renders single-entry input by default', () => {
-      const props = createKeywordsManagerProps([]);
-      render(<KeywordsManager {...props} />);
+      renderManager([]);
 
       expect(screen.getByPlaceholderText('Enter new keyword...')).toBeInTheDocument();
     });
   });
 
   describe('create mutation', () => {
-    async function renderCreateConflict() {
-      const props = createKeywordsManagerProps();
-      mockApiPost.mockRejectedValue(createApiRequestError(CREATE_CONFLICT_MESSAGE));
-      render(<KeywordsManager {...props} />);
+    function renderCreateRejected(failure: Error) {
+      mockApiPost.mockRejectedValue(failure);
+      return renderSubmitted(submitCreate);
+    }
 
-      const input = await submitCreate();
-      return {
-        props,
-        input,
-      };
+    function renderCreateResolved(response: unknown) {
+      mockApiPost.mockResolvedValue(response);
+      return renderSubmitted(submitCreate);
+    }
+
+    function renderCreateConflict() {
+      return renderCreateRejected(createApiRequestError(CREATE_CONFLICT_MESSAGE));
     }
 
     it('preserves entered text when create returns a conflict', async () => {
@@ -128,21 +141,13 @@ describe('KeywordsManager', () => {
     });
 
     it('clears entered text when create returns a valid keyword', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiPost.mockResolvedValue(createdKeywordFixture);
-      render(<KeywordsManager {...props} />);
-
-      const input = await submitCreate();
+      const { input } = await renderCreateResolved(createdKeywordFixture);
 
       await waitFor(() => expect(input).toHaveValue(''));
     });
 
     it('prepends returned keyword when create succeeds', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiPost.mockResolvedValue(createdKeywordFixture);
-      render(<KeywordsManager {...props} />);
-
-      await submitCreate();
+      const { props } = await renderCreateResolved(createdKeywordFixture);
 
       await waitFor(() => expect(props.setKeywords).toHaveBeenCalledWith([
         createdKeywordFixture,
@@ -156,11 +161,7 @@ describe('KeywordsManager', () => {
     });
 
     it('preserves extended response fields in parent state when create succeeds', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiPost.mockResolvedValue(extendedCreatedKeywordFixture);
-      render(<KeywordsManager {...props} />);
-
-      await submitCreate();
+      const { props } = await renderCreateResolved(extendedCreatedKeywordFixture);
 
       await waitFor(() => expect(props.setKeywords.mock.calls[0]?.[0]).toStrictEqual([
         extendedCreatedKeywordFixture,
@@ -169,11 +170,9 @@ describe('KeywordsManager', () => {
     });
 
     it('preserves create state when success payload is malformed', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiPost.mockResolvedValue(malformedKeywordFixture);
-      render(<KeywordsManager {...props} />);
-
-      const input = await submitCreate();
+      const {
+        props, input 
+      } = await renderCreateResolved(malformedKeywordFixture);
       await screen.findByText(CREATE_FALLBACK_MESSAGE);
 
       expect(input).toHaveValue(createdKeywordFixture.keyword);
@@ -181,24 +180,16 @@ describe('KeywordsManager', () => {
     });
 
     it('shows safe fallback when create transport fails', async () => {
-      const props = createKeywordsManagerProps();
-      mockApiPost.mockRejectedValue(createTransportError());
-      render(<KeywordsManager {...props} />);
-
-      await submitCreate();
+      await renderCreateRejected(createTransportError());
 
       expect(await screen.findByText(CREATE_FALLBACK_MESSAGE)).toBeInTheDocument();
     });
   });
 
   describe('update mutation', () => {
-    async function renderUpdateConflict() {
-      const props = createKeywordsManagerProps();
+    function renderUpdateConflict() {
       mockApiPut.mockRejectedValue(createApiRequestError(UPDATE_CONFLICT_MESSAGE));
-      render(<KeywordsManager {...props} />);
-
-      await submitUpdate();
-      return props;
+      return renderSubmitted(submitUpdate);
     }
 
     it('preserves attempted text in editor when update returns a conflict', async () => {
@@ -215,19 +206,15 @@ describe('KeywordsManager', () => {
     });
 
     it('does not update parent state when update returns a conflict', async () => {
-      const props = await renderUpdateConflict();
+      const { props } = await renderUpdateConflict();
       await screen.findByText(UPDATE_CONFLICT_MESSAGE);
 
       expect(props.setKeywords).not.toHaveBeenCalled();
     });
 
-    async function renderUpdateSuccess() {
-      const props = createKeywordsManagerProps();
+    function renderUpdateSuccess() {
       mockApiPut.mockResolvedValue(updatedKeywordFixture);
-      render(<KeywordsManager {...props} />);
-
-      await submitUpdate();
-      return props;
+      return renderSubmitted(submitUpdate);
     }
 
     it('closes editor when update returns a valid keyword', async () => {
@@ -239,7 +226,7 @@ describe('KeywordsManager', () => {
     });
 
     it('replaces keyword when update returns a valid keyword', async () => {
-      const props = await renderUpdateSuccess();
+      const { props } = await renderUpdateSuccess();
 
       await waitFor(() => expect(props.setKeywords).toHaveBeenCalledWith([
         updatedKeywordFixture,
@@ -253,17 +240,13 @@ describe('KeywordsManager', () => {
   });
 
   describe('delete mutation', () => {
-    async function renderDeleteRejected(failure: Error) {
-      const props = createKeywordsManagerProps();
+    function renderDeleteRejected(failure: Error) {
       mockApiDelete.mockRejectedValue(failure);
-      render(<KeywordsManager {...props} />);
-
-      await submitDelete();
-      return props;
+      return renderSubmitted(submitDelete);
     }
 
     it('preserves keyword when delete targets a missing row', async () => {
-      const props = await renderDeleteRejected(createApiRequestError(DELETE_NOT_FOUND_MESSAGE, 404));
+      const { props } = await renderDeleteRejected(createApiRequestError(DELETE_NOT_FOUND_MESSAGE, 404));
       await screen.findByText(DELETE_NOT_FOUND_MESSAGE);
 
       expect(props.setKeywords).not.toHaveBeenCalled();
@@ -285,11 +268,8 @@ describe('KeywordsManager', () => {
     });
 
     it('removes keyword when delete succeeds', async () => {
-      const props = createKeywordsManagerProps();
       mockApiDelete.mockResolvedValue({ message: 'Keyword deleted successfully' });
-      render(<KeywordsManager {...props} />);
-
-      await submitDelete();
+      const { props } = await renderSubmitted(submitDelete);
 
       await waitFor(() => expect(props.setKeywords).toHaveBeenCalledWith([]));
       expect(mockApiDelete).toHaveBeenCalledWith(
@@ -301,18 +281,11 @@ describe('KeywordsManager', () => {
 
   describe('bulk create mutation', () => {
     /** Submits two keywords of which the first is created and the second rejected. */
-    async function renderPartialBulk() {
-      const props = createKeywordsManagerProps();
+    function renderPartialBulk() {
       mockApiPost
         .mockResolvedValueOnce(bulkCreatedKeywordFixture)
         .mockRejectedValueOnce(createApiRequestError(BULK_CONFLICT_MESSAGE));
-      render(<KeywordsManager {...props} />);
-
-      const input = await submitBulk();
-      return {
-        props,
-        input,
-      };
+      return renderSubmitted(submitBulk);
     }
 
     it('retains failed bulk entry when another entry succeeds', async () => {
@@ -339,11 +312,8 @@ describe('KeywordsManager', () => {
     });
 
     it('includes structured 4xx opt-in when each bulk keyword is submitted', async () => {
-      const props = createKeywordsManagerProps();
       mockApiPost.mockResolvedValue(bulkCreatedKeywordFixture);
-      render(<KeywordsManager {...props} />);
-
-      await submitBulk();
+      await renderSubmitted(submitBulk);
 
       await waitFor(() => expect(mockApiPost).toHaveBeenCalledTimes(2));
       expect(mockApiPost).toHaveBeenNthCalledWith(
@@ -361,7 +331,6 @@ describe('KeywordsManager', () => {
     });
 
     it('starts second bulk create after first request settles', async () => {
-      const props = createKeywordsManagerProps();
       const requestSequence = {
         firstSettled: false,
         firstSettledBeforeSecondStarted: false,
@@ -376,9 +345,7 @@ describe('KeywordsManager', () => {
           requestSequence.firstSettledBeforeSecondStarted = requestSequence.firstSettled;
           return Promise.reject(createApiRequestError(BULK_CONFLICT_MESSAGE));
         });
-      render(<KeywordsManager {...props} />);
-
-      await submitBulk();
+      await renderSubmitted(submitBulk);
 
       await waitFor(() => {
         expect(requestSequence.firstSettledBeforeSecondStarted).toBe(true);
@@ -402,38 +369,45 @@ describe('KeywordsManager', () => {
       status: 'inactive',
     } satisfies Keyword;
 
+    async function renderStatusChange(keyword: Keyword, action: 'Activate' | 'Pause') {
+      const props = renderManager([keyword]);
+      await userEvent.click(screen.getByRole('button', { name: `${action} ${keyword.keyword}` }));
+      return props;
+    }
+
+    async function waitForStatusPut(keyword: Keyword, status: Keyword['status']) {
+      await waitFor(() => {
+        expect(mockApiPut).toHaveBeenCalledWith(
+          `/keywords/${keyword.id}`,
+          {
+            keyword: keyword.keyword,
+            status,
+          },
+          { allowStructured4xx: true }
+        );
+      });
+    }
+
     it('marks a paused keyword in the list', () => {
-      render(<KeywordsManager {...createKeywordsManagerProps([pausedKeyword])} />);
+      renderManager([pausedKeyword]);
 
       expect(screen.getByText('Paused')).toBeInTheDocument();
     });
 
     it('does not mark an active keyword', () => {
-      render(<KeywordsManager {...createKeywordsManagerProps([existingKeywordFixture])} />);
+      renderManager([existingKeywordFixture]);
 
       expect(screen.queryByText('Paused')).not.toBeInTheDocument();
     });
 
     it('activates a paused keyword without changing its text', async () => {
-      const props = createKeywordsManagerProps([pausedKeyword]);
       mockApiPut.mockResolvedValue({
         ...pausedKeyword,
         status: 'active',
       });
-      render(<KeywordsManager {...props} />);
+      const props = await renderStatusChange(pausedKeyword, 'Activate');
 
-      await userEvent.click(screen.getByRole('button', { name: `Activate ${pausedKeyword.keyword}` }));
-
-      await waitFor(() => {
-        expect(mockApiPut).toHaveBeenCalledWith(
-          `/keywords/${pausedKeyword.id}`,
-          {
-            keyword: pausedKeyword.keyword,
-            status: 'active',
-          },
-          { allowStructured4xx: true }
-        );
-      });
+      await waitForStatusPut(pausedKeyword, 'active');
       expect(props.setKeywords).toHaveBeenCalledWith([{
         ...pausedKeyword,
         status: 'active',
@@ -441,25 +415,13 @@ describe('KeywordsManager', () => {
     });
 
     it('pauses an active keyword', async () => {
-      const props = createKeywordsManagerProps([existingKeywordFixture]);
       mockApiPut.mockResolvedValue({
         ...existingKeywordFixture,
         status: 'inactive',
       });
-      render(<KeywordsManager {...props} />);
+      await renderStatusChange(existingKeywordFixture, 'Pause');
 
-      await userEvent.click(screen.getByRole('button', { name: `Pause ${existingKeywordFixture.keyword}` }));
-
-      await waitFor(() => {
-        expect(mockApiPut).toHaveBeenCalledWith(
-          `/keywords/${existingKeywordFixture.id}`,
-          {
-            keyword: existingKeywordFixture.keyword,
-            status: 'inactive',
-          },
-          { allowStructured4xx: true }
-        );
-      });
+      await waitForStatusPut(existingKeywordFixture, 'inactive');
     });
 
     it('activates every paused keyword ticked in the list, and counts them on the button', async () => {
@@ -468,7 +430,6 @@ describe('KeywordsManager', () => {
         id: 'keyword-paused-2',
         keyword: 'top rated family hotels in branson mo',
       } satisfies Keyword;
-      const props = createKeywordsManagerProps([pausedKeyword, secondPaused, existingKeywordFixture]);
       mockApiPut.mockImplementation((path: string) => Promise.resolve(
         path.endsWith(pausedKeyword.id)
           ? {
@@ -480,7 +441,7 @@ describe('KeywordsManager', () => {
             status: 'active',
           }
       ));
-      render(<KeywordsManager {...props} />);
+      renderManager([pausedKeyword, secondPaused, existingKeywordFixture]);
 
       await userEvent.click(screen.getByRole('checkbox', { name: `Select ${pausedKeyword.keyword}` }));
       await userEvent.click(screen.getByRole('checkbox', { name: `Select ${secondPaused.keyword}` }));
@@ -495,7 +456,7 @@ describe('KeywordsManager', () => {
     });
 
     it('offers nothing to activate when every ticked keyword is already active', async () => {
-      render(<KeywordsManager {...createKeywordsManagerProps([existingKeywordFixture])} />);
+      renderManager([existingKeywordFixture]);
 
       await userEvent.click(screen.getByRole('checkbox', { name: `Select ${existingKeywordFixture.keyword}` }));
 
@@ -503,11 +464,8 @@ describe('KeywordsManager', () => {
     });
 
     it('reports the keyword whose status change failed and leaves the list alone', async () => {
-      const props = createKeywordsManagerProps([pausedKeyword]);
       mockApiPut.mockRejectedValue(createTransportError());
-      render(<KeywordsManager {...props} />);
-
-      await userEvent.click(screen.getByRole('button', { name: `Activate ${pausedKeyword.keyword}` }));
+      const props = await renderStatusChange(pausedKeyword, 'Activate');
 
       // Names the keyword and the tally, so a partial bulk failure says which
       // ones did not change rather than just that something went wrong.

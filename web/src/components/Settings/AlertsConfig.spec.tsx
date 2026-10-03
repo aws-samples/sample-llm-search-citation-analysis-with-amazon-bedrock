@@ -1,46 +1,37 @@
 import {
   beforeEach, describe, expect, it, vi
 } from 'vitest';
-import {
-  render, screen
-} from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   buildAlertSettings, buildContentChangeMarker
 } from '../../types/domain/alerts-fixtures';
-import { AlertsConfig } from './AlertsConfig';
 import {
+  ACCEPTED_TEST_OUTCOME,
   buildAlertsConfigContentHookResult,
-  buildAlertsConfigGroupsHookResult,
-  buildAlertsConfigSettingsHookResult,
+  mockAlertsConfigHooks,
   recordContentChangeMock,
+  renderAlertsConfig,
   sendTestNotificationMock,
 } from './AlertsConfig-fixtures';
+import { useContentChanges as contentChangesHook } from './AlertsConfigHookMocks-fixtures';
 
-vi.mock('../../hooks/useAlerts', () => ({
-  useAlertSettings: vi.fn(),
-  useContentChanges: vi.fn(),
-}));
-vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
-
-import {
-  useAlertSettings, useContentChanges
-} from '../../hooks/useAlerts';
-import { useKeywordGroups } from '../../hooks/useKeywordGroups';
-
-const mockUseAlertSettings = vi.mocked(useAlertSettings);
-const mockUseContentChanges = vi.mocked(useContentChanges);
-const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
+vi.mock('../../hooks/useAlerts', () => import('./AlertsConfigHookMocks-fixtures'));
+vi.mock('../../hooks/useKeywordGroups', () => import('./AlertsConfigHookMocks-fixtures'));
 
 beforeEach(() => {
-  mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult());
-  mockUseContentChanges.mockReturnValue(buildAlertsConfigContentHookResult());
-  mockUseKeywordGroups.mockReturnValue(buildAlertsConfigGroupsHookResult());
+  mockAlertsConfigHooks();
+});
+
+/** Settings with no notification address and so no subscription to test. */
+const UNCONFIGURED_SETTINGS = buildAlertSettings({
+  notification_emails: [],
+  subscription_statuses: [],
 });
 
 describe('AlertsConfig', () => {
   it('shows every configured threshold with its server value', () => {
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig();
 
     expect(screen.getByRole('spinbutton', { name: /Mention-rate drop/ })).toHaveValue(10);
     expect(screen.getByRole('spinbutton', { name: /Position loss/ })).toHaveValue(3);
@@ -49,7 +40,7 @@ describe('AlertsConfig', () => {
   });
 
   it('exposes exact threshold constraints to browser validation', () => {
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig();
     const thresholdNames = [
       /Mention-rate drop/,
       /Position loss/,
@@ -91,7 +82,7 @@ describe('AlertsConfig', () => {
   });
 
   it('shows a deduplicated editable notification email list', () => {
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig();
 
     expect(screen.getByLabelText('Notification emails')).toHaveValue(
       'alerts@example.com\nops@example.com'
@@ -99,7 +90,7 @@ describe('AlertsConfig', () => {
   });
 
   it('shows confirmed, pending, and not-subscribed delivery states', () => {
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig();
 
     expect(screen.getByText('Confirmed')).toBeInTheDocument();
     expect(screen.getByText('Pending confirmation')).toBeInTheDocument();
@@ -107,7 +98,7 @@ describe('AlertsConfig', () => {
   });
 
   it('explains the Amazon SNS confirmation step', () => {
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig();
 
     expect(screen.getByText(/Amazon SNS sends a confirmation email to each address/)).toHaveTextContent(
       'Each recipient must choose Confirm subscription before alert emails can be delivered.'
@@ -115,13 +106,13 @@ describe('AlertsConfig', () => {
   });
 
   it('enables the test action when an admin has a persisted confirmed subscription', () => {
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig();
 
     expect(screen.getByRole('button', { name: 'Send test notification' })).toBeEnabled();
   });
 
   it('does not render the test action when the caller is not an admin', () => {
-    render(<AlertsConfig isAdmin={false} />);
+    renderAlertsConfig({}, false);
 
     expect(screen.queryByRole('button', { name: 'Send test notification' })).not.toBeInTheDocument();
   });
@@ -139,25 +130,15 @@ describe('AlertsConfig', () => {
         status: 'not_subscribed',
       }],
     })],
-    ['not configured', buildAlertSettings({
-      notification_emails: [],
-      subscription_statuses: [],
-    })],
+    ['not configured', UNCONFIGURED_SETTINGS],
   ])('disables the test action when persisted delivery is %s', (_condition, settings) => {
-    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({ settings }));
-
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig({ settings });
 
     expect(screen.getByRole('button', { name: 'Send test notification' })).toBeDisabled();
   });
 
   it('keeps the test action disabled when only an unsaved email is entered', async () => {
-    const settings = buildAlertSettings({
-      notification_emails: [],
-      subscription_statuses: [],
-    });
-    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({ settings }));
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig({ settings: UNCONFIGURED_SETTINGS });
     const testButton = screen.getByRole('button', { name: 'Send test notification' });
 
     await userEvent.type(screen.getByLabelText('Notification emails'), 'new@example.com');
@@ -167,7 +148,7 @@ describe('AlertsConfig', () => {
   });
 
   it('requests a test notification without form values when the admin selects the action', async () => {
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig();
 
     await userEvent.click(screen.getByRole('button', { name: 'Send test notification' }));
 
@@ -179,9 +160,7 @@ describe('AlertsConfig', () => {
     ['saving', { saving: true }],
     ['testing', { testing: true }],
   ])('disables every settings action while %s', (_condition, busyState) => {
-    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult(busyState));
-
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig(busyState);
 
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Save alert settings|Saving…/ })).toBeDisabled();
@@ -189,27 +168,18 @@ describe('AlertsConfig', () => {
   });
 
   it('shows the exact accepted outcome when the test request succeeds', () => {
-    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({
-      testOutcome: {
-        success: true,
-        message: 'Test notification accepted for delivery.',
-      },
-    }));
+    renderAlertsConfig({ testOutcome: ACCEPTED_TEST_OUTCOME });
 
-    render(<AlertsConfig isAdmin />);
-
-    expect(screen.getByText('Test notification accepted for delivery.')).toBeInTheDocument();
+    expect(screen.getByText(ACCEPTED_TEST_OUTCOME.message)).toBeInTheDocument();
   });
 
   it('announces the exact failure when the test request is rejected', () => {
-    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({
+    renderAlertsConfig({
       testOutcome: {
         success: false,
         message: 'Confirm an email subscription before testing delivery.',
       },
-    }));
-
-    render(<AlertsConfig isAdmin />);
+    });
 
     expect(screen.getByRole('alert')).toHaveTextContent(
       'Confirm an email subscription before testing delivery.'
@@ -217,7 +187,7 @@ describe('AlertsConfig', () => {
   });
 
   it('prevents non-admin users from saving settings or recording markers', () => {
-    render(<AlertsConfig isAdmin={false} />);
+    renderAlertsConfig({}, false);
 
     expect(screen.getByRole('button', { name: 'Save alert settings' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Record content change' })).toBeDisabled();
@@ -225,45 +195,34 @@ describe('AlertsConfig', () => {
   });
 
   it('keeps refresh enabled while alert settings are idle', () => {
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig();
 
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
   });
 
   it('shows loading status while initial settings are pending', () => {
-    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({
+    renderAlertsConfig({
       settings: null,
       loading: true,
-    }));
-
-    render(<AlertsConfig isAdmin />);
+    });
 
     expect(screen.getByText('Loading alert settings…')).toBeInTheDocument();
   });
 
-  it('hides loading status while persisted settings refresh in place', () => {
-    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({ loading: true }));
-
-    render(<AlertsConfig isAdmin />);
-
-    expect(screen.queryByText('Loading alert settings…')).not.toBeInTheDocument();
-  });
-
-  it('hides loading status when no settings request is pending', () => {
-    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({
+  it.each([
+    ['while persisted settings refresh in place', { loading: true }],
+    ['when no settings request is pending', {
       settings: null,
       loading: false,
-    }));
-
-    render(<AlertsConfig isAdmin />);
+    }],
+  ])('hides loading status %s', (_condition, settingsState) => {
+    renderAlertsConfig(settingsState);
 
     expect(screen.queryByText('Loading alert settings…')).not.toBeInTheDocument();
   });
 
   it('disables refresh while settings are being saved', () => {
-    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({ saving: true }));
-
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig({ saving: true });
 
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeDisabled();
   });
@@ -274,8 +233,7 @@ describe('AlertsConfig', () => {
       message: 'Alert settings saved.',
       warnings: [],
     });
-    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({ saveSettings }));
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig({ saveSettings });
     const emailInput = screen.getByLabelText('Notification emails');
 
     await userEvent.clear(emailInput);
@@ -295,7 +253,7 @@ describe('AlertsConfig', () => {
   });
 
   it('shows the exact save outcome and every server warning', () => {
-    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({
+    renderAlertsConfig({
       saveOutcome: {
         success: true,
         message: 'Alert settings saved.',
@@ -304,9 +262,7 @@ describe('AlertsConfig', () => {
           'ops@example.com is not subscribed.',
         ],
       },
-    }));
-
-    render(<AlertsConfig isAdmin />);
+    });
 
     expect(screen.getByText('Alert settings saved.')).toBeInTheDocument();
     expect(screen.getByText('owner@example.com must confirm the subscription.')).toBeInTheDocument();
@@ -314,44 +270,46 @@ describe('AlertsConfig', () => {
   });
 
   it('announces the exact settings loading failure', () => {
-    mockUseAlertSettings.mockReturnValue(buildAlertsConfigSettingsHookResult({
+    renderAlertsConfig({
       settings: null,
       error: 'Failed to process alert request',
-    }));
-
-    render(<AlertsConfig isAdmin />);
+    });
 
     expect(screen.getByRole('alert')).toHaveTextContent('Failed to process alert request');
   });
 
-  it('requires a description before recording a content change', async () => {
-    render(<AlertsConfig isAdmin />);
-
+  async function renderAndSelectNorthGroup() {
+    renderAlertsConfig();
     await userEvent.selectOptions(screen.getByLabelText('Keyword group'), 'group-north');
+  }
+
+  async function recordContentChange() {
     await userEvent.click(screen.getByRole('button', { name: 'Record content change' }));
+  }
+
+  async function renderAndRecordContentChange(description: string, url: string) {
+    await renderAndSelectNorthGroup();
+    await userEvent.type(screen.getByLabelText('Description'), description);
+    await userEvent.type(screen.getByLabelText('URL (optional)'), url);
+    await recordContentChange();
+  }
+
+  it('requires a description before recording a content change', async () => {
+    await renderAndSelectNorthGroup();
+    await recordContentChange();
 
     expect(screen.getByRole('alert')).toHaveTextContent('Describe the content change');
     expect(recordContentChangeMock.mock.calls).toStrictEqual([]);
   });
 
   it('rejects a content change URL outside HTTP and HTTPS', async () => {
-    render(<AlertsConfig isAdmin />);
-
-    await userEvent.selectOptions(screen.getByLabelText('Keyword group'), 'group-north');
-    await userEvent.type(screen.getByLabelText('Description'), 'Published revised guidance');
-    await userEvent.type(screen.getByLabelText('URL (optional)'), 'ftp://example.com/guidance');
-    await userEvent.click(screen.getByRole('button', { name: 'Record content change' }));
+    await renderAndRecordContentChange('Published revised guidance', 'ftp://example.com/guidance');
 
     expect(screen.getByRole('alert')).toHaveTextContent('URL must start with http:// or https://');
   });
 
   it('records a trimmed marker for the selected group', async () => {
-    render(<AlertsConfig isAdmin />);
-
-    await userEvent.selectOptions(screen.getByLabelText('Keyword group'), 'group-north');
-    await userEvent.type(screen.getByLabelText('Description'), '  Published revised guidance  ');
-    await userEvent.type(screen.getByLabelText('URL (optional)'), '  https://example.com/guidance  ');
-    await userEvent.click(screen.getByRole('button', { name: 'Record content change' }));
+    await renderAndRecordContentChange('  Published revised guidance  ', '  https://example.com/guidance  ');
 
     expect(recordContentChangeMock).toHaveBeenCalledWith({
       group_id: 'group-north',
@@ -366,9 +324,9 @@ describe('AlertsConfig', () => {
       description: 'Published revised guidance',
       url: 'https://example.com/guidance',
     });
-    mockUseContentChanges.mockReturnValue(buildAlertsConfigContentHookResult({ latestMarker: marker }));
+    contentChangesHook.mockReturnValue(buildAlertsConfigContentHookResult({ latestMarker: marker }));
 
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig();
 
     expect(screen.getByText('Published revised guidance')).toBeInTheDocument();
     expect(screen.getByText(/Marker change-latest/)).toBeInTheDocument();
@@ -379,10 +337,29 @@ describe('AlertsConfig', () => {
   });
 
   it('explains that attribution requires a prior content-change marker', () => {
-    render(<AlertsConfig isAdmin />);
+    renderAlertsConfig();
 
     expect(screen.getByText(/This marker is required before an improvement alert/)).toHaveTextContent(
       'can attribute a visibility gain to that content change.'
     );
+  });
+});
+
+describe('AlertsConfig outcomes', () => {
+  it('requests a settings refresh when Refresh is selected', async () => {
+    const refresh = vi.fn().mockResolvedValue(undefined);
+    renderAlertsConfig({ refresh });
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect(refresh).toHaveBeenCalledWith();
+  });
+
+  it('renders no warning list when a test outcome has no warnings', () => {
+    renderAlertsConfig({ testOutcome: ACCEPTED_TEST_OUTCOME });
+
+    const outcome = screen.getByText(ACCEPTED_TEST_OUTCOME.message);
+
+    expect(outcome.parentElement?.querySelector('ul')).toBeNull();
   });
 });

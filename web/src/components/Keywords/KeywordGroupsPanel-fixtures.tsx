@@ -17,6 +17,11 @@ export const KEYWORD_GROUPS = [
   }),
 ];
 
+const SUCCESS_RESULT = {
+  success: true,
+  message: 'ok'
+};
+
 function buildKeywordGroupsPanelProps(
   overrides: Partial<ComponentProps<typeof KeywordGroupsPanel>> = {}
 ): ComponentProps<typeof KeywordGroupsPanel> {
@@ -27,14 +32,8 @@ function buildKeywordGroupsPanelProps(
     ungroupedCount: 2,
     filter: 'all',
     onFilterChange: vi.fn(),
-    onCreate: vi.fn().mockResolvedValue({
-      success: true,
-      message: 'ok'
-    }),
-    onRename: vi.fn().mockResolvedValue({
-      success: true,
-      message: 'ok'
-    }),
+    onCreate: vi.fn().mockResolvedValue(SUCCESS_RESULT),
+    onRename: vi.fn().mockResolvedValue(SUCCESS_RESULT),
     onDelete: vi.fn(),
     onNotify: vi.fn(),
     ...overrides,
