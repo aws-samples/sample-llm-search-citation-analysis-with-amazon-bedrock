@@ -15,6 +15,7 @@ from botocore.exceptions import ClientError
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from testing.cors_fixtures import configured_cors_origin, credentialed_json_headers
 from testing.env import cleared_env
 
 # `shared/__init__.py` re-exports the `api_response` *function*, so
@@ -195,3 +196,16 @@ class TestSsmFailureIsNotCached:
 
         assert first == ''
         assert cors_module._cors_origin_cache == ''
+
+
+class TestCorsJsonHeaders:
+    """`cors_json_headers` reads the request Origin from the event in any header casing."""
+
+    @pytest.mark.parametrize('header_name', ['origin', 'Origin', 'ORIGIN'])
+    def test_echoes_an_allowed_localhost_origin_given_in_any_header_casing(self, header_name):
+        event = {'headers': {header_name: 'http://localhost:5173'}}
+
+        with configured_cors_origin(allow_localhost=True):
+            headers = cors_module.cors_json_headers(event)
+
+        assert headers == credentialed_json_headers('http://localhost:5173')

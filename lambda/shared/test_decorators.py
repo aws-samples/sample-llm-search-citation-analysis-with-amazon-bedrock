@@ -23,6 +23,7 @@ import pytest
 
 from shared.auth import require_group
 from shared.decorators import api_handler, cors_preflight, paginate, parse_json_body, route_handler, validate
+from testing.cors_fixtures import CONFIGURED_ORIGIN, configured_cors_origin, credentialed_json_headers
 from testing.events import parse_response_lenient
 
 PATH_PARAM = 'prompt-42'
@@ -195,3 +196,20 @@ class TestKeywordOnlyCallsStillWork:
 
         assert status == 400
         assert payload['field'] == 'name'
+
+
+class TestCorsPreflight:
+    def test_answers_options_with_an_empty_200_carrying_the_cors_headers(self) -> None:
+        @cors_preflight
+        def mutate(event, context) -> dict[str, Any]:
+            return {'statusCode': 500, 'body': '{}'}
+
+        event = {'httpMethod': 'OPTIONS', 'headers': {'Origin': CONFIGURED_ORIGIN}}
+        with configured_cors_origin():
+            response = mutate(event, None)
+
+        assert response == {
+            'statusCode': 200,
+            'headers': credentialed_json_headers(CONFIGURED_ORIGIN),
+            'body': '',
+        }

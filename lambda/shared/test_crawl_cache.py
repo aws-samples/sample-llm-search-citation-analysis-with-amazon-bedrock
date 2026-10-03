@@ -99,21 +99,45 @@ def test_returns_blocked_when_latest_url_scope_is_fresh(block_reason, expected_e
     assert result == {'status': 'blocked', 'crawled_at': row['crawled_at'], **expected_extra}
 
 
-def test_queries_only_url_scope_when_success_window_is_zero():
-    row = _cache_row(cache_status='blocked', block_reason='captcha')
+_FRESH_SUCCESS_ROW = _cache_row(crawled_at=_timestamp(age=timedelta(hours=1)))
+_FRESH_BLOCKED_ROW = _cache_row(
+    crawled_at=_timestamp(age=timedelta(hours=1)),
+    cache_status='blocked',
+    block_reason='captcha',
+)
+_BLOCKED_SCOPE_HIT = (
+    _FRESH_BLOCKED_ROW,
+    blocked_cache_scope(_URL),
+    {'status': 'blocked', 'crawled_at': _FRESH_BLOCKED_ROW['crawled_at'], 'block_reason': 'captcha'},
+)
+_SUCCESS_SCOPE_HIT = (
+    _FRESH_SUCCESS_ROW,
+    success_cache_scope(_URL, _KEYWORD),
+    {'status': 'success', 'crawled_at': _FRESH_SUCCESS_ROW['crawled_at']},
+)
+
+
+@pytest.mark.parametrize(
+    ('success_days', 'blocked_days', 'scope_hit'),
+    [
+        pytest.param(0, 3, _BLOCKED_SCOPE_HIT, id='success_window_zero'),
+        pytest.param(0, 1, _BLOCKED_SCOPE_HIT, id='one_day_blocked_window'),
+        pytest.param(30, 0, _SUCCESS_SCOPE_HIT, id='blocked_window_zero'),
+        pytest.param(1, 0, _SUCCESS_SCOPE_HIT, id='one_day_success_window'),
+    ],
+)
+def test_returns_open_scope_verdict_from_its_single_query_when_the_other_window_is_zero(
+    success_days, blocked_days, scope_hit,
+):
+    row, expected_scope, expected = scope_hit
     table = MagicMock()
     table.query.return_value = {'Items': [row]}
 
-    result = _find(table, success_days=0)
+    result = _find(table, success_days=success_days, blocked_days=blocked_days)
 
-    assert result == {
-        'status': 'blocked',
-        'crawled_at': row['crawled_at'],
-        'block_reason': 'captcha',
-    }
-    assert table.query.call_count == 1
-    condition = table.query.call_args.kwargs['KeyConditionExpression']
-    assert condition.get_expression()['values'][1] == blocked_cache_scope(_URL)
+    assert result == expected
+    assert [call.kwargs['KeyConditionExpression'].get_expression()['values'][1]
+            for call in table.query.call_args_list] == [expected_scope]
 
 
 def test_returns_newer_keyword_success_when_older_url_block_also_exists():
@@ -161,23 +185,20 @@ def test_returns_miss_when_latest_keyword_scope_is_an_error():
     assert _find(table) is None
 
 
-def test_returns_miss_when_success_is_exactly_at_freshness_boundary():
-    table = _table_with_scopes(
-        success=_cache_row(crawled_at=_timestamp(age=timedelta(days=30)))
-    )
-
-    assert _find(table) is None
-
-
-def test_returns_miss_when_latest_timestamp_is_in_the_future():
-    future = (_NOW + timedelta(seconds=1)).isoformat()
-    table = _table_with_scopes(success=_cache_row(crawled_at=future))
-
-    assert _find(table) is None
-
-
-def test_returns_miss_when_latest_timestamp_is_invalid():
-    table = _table_with_scopes(success=_cache_row(crawled_at='not-a-timestamp'))
+@pytest.mark.parametrize(
+    'crawled_at',
+    [
+        pytest.param(_timestamp(age=timedelta(days=30)), id='exactly_at_freshness_boundary'),
+        pytest.param((_NOW + timedelta(seconds=1)).isoformat(), id='in_the_future'),
+        pytest.param('not-a-timestamp', id='invalid'),
+        pytest.param(
+            (_NOW - timedelta(days=1)).replace(tzinfo=None).isoformat(),
+            id='fresh_but_without_utc_offset',
+        ),
+    ],
+)
+def test_returns_miss_when_latest_success_timestamp_is_not_reusable(crawled_at):
+    table = _table_with_scopes(success=_cache_row(crawled_at=crawled_at))
 
     assert _find(table) is None
 

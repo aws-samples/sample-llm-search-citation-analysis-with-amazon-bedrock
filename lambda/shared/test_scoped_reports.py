@@ -8,6 +8,7 @@ handler's ``ReportScope`` argument or answers 400 without calling it;
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Any
 from unittest.mock import MagicMock
@@ -50,6 +51,11 @@ class TestRequiredReportScope:
         response = handler(_EVENT, None, keyword='a', group_id='coruna')
 
         assert present(response)['statusCode'] == 400
+
+    def test_unwraps_to_the_decorated_handler_so_its_name_reaches_error_logs(self) -> None:
+        handler = required_report_scope(MagicMock)(stub_handler)
+
+        assert inspect.unwrap(handler) is stub_handler
 
     def test_resolves_the_keywords_table_on_every_request(self) -> None:
         keywords_table = MagicMock(return_value=MagicMock())
