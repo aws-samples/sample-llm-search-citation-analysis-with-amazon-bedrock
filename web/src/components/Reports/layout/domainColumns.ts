@@ -1,6 +1,6 @@
 import type { SourceRow } from '../../../types';
 import { formatKpi } from '../../../formatting/kpiFormatter';
-import { engineName } from '../charts/engineKpiChartConfiguration';
+import { providerName } from '../../../constants/providers';
 import type { ReportTableColumn } from './ReportTable';
 
 /** What each figure of a cited domain counts, in its column tooltip. */
@@ -33,7 +33,7 @@ export function domainFigureColumns(info: DomainColumnInfo): ReadonlyArray<Repor
     {
       header: 'Engines',
       info: info.engines,
-      render: (source) => source.engines.map(engineName).join(', '),
+      render: (source) => source.engines.map(providerName).join(', '),
     },
     {
       header: 'Keywords',

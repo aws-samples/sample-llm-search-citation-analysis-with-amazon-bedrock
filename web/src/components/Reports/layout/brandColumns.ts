@@ -1,9 +1,18 @@
 import type { ReactNode } from 'react';
-import type { BrandLeaderboardRow } from '../../../types';
+import type {
+  BrandClassification, BrandLeaderboardRow
+} from '../../../types';
 import type { KpiId } from '../../../constants/kpiDefinitions';
 import { formatKpi } from '../../../formatting/kpiFormatter';
 import { kpiColumn } from './kpiColumn';
 import type { ReportTableColumn } from './ReportTable';
+
+/** How a brand's classification reads in a badge ("first-party", as in docs/kpi-definitions.md). */
+export const BRAND_CLASSIFICATION_LABELS: Readonly<Record<BrandClassification, string>> = {
+  first_party: 'first-party',
+  competitor: 'competitor',
+  other: 'other',
+};
 
 /** The KPIs of each brand of a leaderboard, in column order. */
 const BRAND_KPIS = ['visibility_score', 'mention_rate', 'share_of_voice', 'average_position'] as const satisfies readonly KpiId[];

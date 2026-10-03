@@ -2,7 +2,7 @@ import {
   lazy, Suspense, useCallback, type ReactNode
 } from 'react';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { Spinner } from '../ui/Spinner';
+import { CenteredSpinner } from '../ui/CenteredState';
 import {
   SearchIcon, LinkIcon, GlobeIcon, KeyIcon
 } from '../ui';
@@ -67,18 +67,10 @@ function mergeCreatedKeywords(existing: Keyword[], created: Keyword[]): Keyword[
   return additions.length === 0 ? existing : [...existing, ...additions];
 }
 
-function LazyLoadFallback() {
-  return (
-    <div className="flex items-center justify-center py-12">
-      <Spinner size="lg" />
-    </div>
-  );
-}
-
 function LazyTab({ children }: { readonly children: ReactNode }) {
   return (
     <ErrorBoundary>
-      <Suspense fallback={<LazyLoadFallback />}>
+      <Suspense fallback={<CenteredSpinner />}>
         {children}
       </Suspense>
     </ErrorBoundary>

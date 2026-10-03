@@ -3,8 +3,9 @@ import {
 } from 'vitest';
 import { themedAxis } from '../../ui/chartTheme';
 import {
-  DEFAULT_ENGINE_KPI_IDS, describeEngineKpis, engineKpiSeries, engineName
+  DEFAULT_ENGINE_KPI_IDS, describeEngineKpis, engineKpiSeries
 } from './engineKpiChartConfiguration';
+import { providerName } from '../../../constants/providers';
 import { KPI_COLOURS } from './chartKpis';
 import {
   ENGINES, engineKpiChart, LIGHT_THEME, THEME_VARIANTS
@@ -37,7 +38,7 @@ describe('buildEngineKpiChartConfiguration', () => {
   });
 });
 
-describe('engineName', () => {
+describe('providerName', () => {
   it.each([
     ['openai', 'OpenAI'],
     ['perplexity', 'Perplexity'],
@@ -46,7 +47,7 @@ describe('engineName', () => {
     ['mistral', 'mistral'],
     ['constructor', 'constructor'],
   ])('names the engine %s "%s"', (engine, expected) => {
-    expect(engineName(engine)).toBe(expected);
+    expect(providerName(engine)).toBe(expected);
   });
 });
 

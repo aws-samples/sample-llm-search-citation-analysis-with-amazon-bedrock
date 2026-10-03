@@ -33,3 +33,10 @@ export const CenteredEmpty = ({
     {hint && <p className="text-sm mt-1">{hint}</p>}
   </div>
 );
+
+/** Centred large spinner with no message (a lazy view's Suspense fallback). */
+export const CenteredSpinner = () => (
+  <div className="flex items-center justify-center py-12">
+    <Spinner size="lg" />
+  </div>
+);

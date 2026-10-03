@@ -11,6 +11,7 @@ import {
 import {
   buildProps, buildStatus, localStorageMock
 } from './OnboardingModal-fixtures';
+import { installStorageMock } from '../../test/installStorageMock';
 
 vi.mock('../../hooks/useOnboardingStatus', () => ({useOnboardingStatus: vi.fn(),}));
 
@@ -47,11 +48,7 @@ function renderOnboardingWithStoredFlag(storageKey: string) {
 }
 
 beforeEach(() => {
-  Object.keys(localStorageMock.store).forEach((key) => delete localStorageMock.store[key]);
-  Object.defineProperty(window, 'localStorage', {
-    value: localStorageMock,
-    writable: true,
-  });
+  installStorageMock(localStorageMock);
   // Every onboarding step targets an Admin-only route, so the checklist only
   // renders for admins. Non-admin suppression is asserted separately below.
   mockUseIsAdmin.mockReturnValue({

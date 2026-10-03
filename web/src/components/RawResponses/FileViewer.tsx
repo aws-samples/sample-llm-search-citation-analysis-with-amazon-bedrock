@@ -12,6 +12,7 @@ import {
   ViewerHeader, ViewerLoading
 } from './ViewerHeader';
 import { formatSize } from './fileSizeFormatter';
+import { providerColor } from '../../constants/providers';
 
 interface FileViewerProps {
   file: S3Item;
@@ -22,15 +23,8 @@ interface FileViewerProps {
 
 type ViewTab = 'overview' | 'raw' | 'extracted' | 'metadata';
 
-const getProviderColor = (provider: string): string => {
-  const colors: Record<string, string> = {
-    openai: 'bg-green-100 text-green-800',
-    perplexity: 'bg-blue-100 text-blue-800',
-    gemini: 'bg-purple-100 text-purple-800',
-    claude: 'bg-orange-100 text-orange-800',
-  };
-  return colors[provider?.toLowerCase()] ?? 'bg-gray-100 text-gray-800';
-};
+const getProviderColor = (provider: string): string =>
+  providerColor(provider.toLowerCase())?.badge ?? 'bg-gray-100 text-gray-800';
 
 const hasDocumentContent = (
   content: RawResponseContent

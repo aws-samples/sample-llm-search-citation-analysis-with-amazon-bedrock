@@ -54,5 +54,16 @@ describe('FileViewer', () => {
 
       expect(screen.getByText(text)).toBeInTheDocument();
     });
+
+    it.each([
+      ['openai', 'bg-green-100'],
+      ['perplexity', 'bg-orange-100'],
+      ['gemini', 'bg-blue-100'],
+      ['claude', 'bg-purple-100'],
+    ])('tints the %s provider badge %s, the colour the provider has across the dashboard', (provider, tint) => {
+      renderFileViewer({ content: buildDocumentContent(provider) });
+
+      expect(screen.getByText(provider)).toHaveClass(tint);
+    });
   });
 });

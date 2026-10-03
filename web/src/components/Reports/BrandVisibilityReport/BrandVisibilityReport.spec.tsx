@@ -26,14 +26,18 @@ import {
   SHARE_OF_VOICE_TITLE, SHARE_OF_VOICE_TREND_TITLE
 } from './sections/ReportChartPanels';
 import type { Keyword } from '../../../types';
+import { buildKeywordGroupsHookResult } from '../../../hooks/useKeywordGroups-fixtures';
 
 vi.mock('./useBrandVisibilityReport', () => ({useBrandVisibilityReport: vi.fn()}));
 vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPrintMode: false })),}));
+vi.mock('../../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
 import { useBrandVisibilityReport } from './useBrandVisibilityReport';
+import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
 
 const mockUse = vi.mocked(useBrandVisibilityReport);
+vi.mocked(useKeywordGroups).mockReturnValue(buildKeywordGroupsHookResult([]));
 
 const KEYWORDS: Keyword[] = [
   {

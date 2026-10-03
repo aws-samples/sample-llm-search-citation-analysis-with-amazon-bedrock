@@ -26,16 +26,7 @@ vi.mock('../../hooks/useBrandMentions', () => ({useBrandMentions: mocks.useBrand
 
 vi.mock('./brandMentionsExport', () => ({exportBrandMentions: mocks.exportBrandMentions,}));
 
-vi.mock('../../hooks/useBrandConfig', () => ({
-  useBrandConfig: vi.fn(() => ({
-    config: null,
-    presets: {},
-    loading: false,
-    saveConfig: vi.fn(),
-    expandAllBrands: vi.fn(),
-    findCompetitors: vi.fn(),
-  })),
-}));
+vi.mock('../../hooks/useBrandConfig', () => ({ useBrandConfig: vi.fn() }));
 
 // A bare mock, configured below: the fixtures module renders the real hook in
 // its own helpers, so importing it inside this factory would wait on the very
@@ -44,6 +35,8 @@ vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
 
 import { BrandsView } from './BrandsView';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
+import { useBrandConfig } from '../../hooks/useBrandConfig';
+import { buildBrandConfigHookResult } from '../../test/brandConfigHookMock';
 import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
 
 vi.mock('../Personas/PersonaSelector', () => ({
@@ -89,6 +82,7 @@ describe('BrandsView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useKeywordGroups).mockReturnValue(buildKeywordGroupsHookResult());
+    vi.mocked(useBrandConfig).mockReturnValue(buildBrandConfigHookResult());
     mocks.useBrandMentions.mockReturnValue({
       data: brandMentionsExportResponse,
       loading: false,

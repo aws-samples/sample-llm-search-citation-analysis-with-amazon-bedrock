@@ -5,35 +5,31 @@ import {
 } from '../ui';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import { EXTERNAL_LINK_PATHS } from '../ui/iconPaths';
+import {
+  PROVIDER, providerColor, providerName
+} from '../../constants/providers';
 
-const providerColors: Record<string, {
+interface ChartColors {
   border: string;
-  bg: string 
-}> = {
-  claude: {
-    border: 'rgb(168, 85, 247)',
-    bg: 'rgba(168, 85, 247, 0.5)' 
-  },
-  gemini: {
-    border: 'rgb(59, 130, 246)',
-    bg: 'rgba(59, 130, 246, 0.5)' 
-  },
-  openai: {
-    border: 'rgb(16, 185, 129)',
-    bg: 'rgba(16, 185, 129, 0.5)' 
-  },
-  perplexity: {
-    border: 'rgb(249, 115, 22)',
-    bg: 'rgba(249, 115, 22, 0.5)' 
-  },
-};
+  bg: string;
+}
 
-const defaultProviderColor = {
+const defaultProviderColor: ChartColors = {
   border: 'rgb(107, 114, 128)',
   bg: 'rgba(107, 114, 128, 0.1)',
 };
 
-const providers = ['claude', 'gemini', 'openai', 'perplexity'];
+/** A provider's line/border colour and its half-transparent fill. */
+function chartColors(provider: string): ChartColors {
+  const color = providerColor(provider);
+  return color === undefined ? defaultProviderColor : {
+    border: `rgb(${color.rgb})`,
+    bg: `rgba(${color.rgb}, 0.5)`,
+  };
+}
+
+/** Every engine, in alphabetical id order (the chart legend order). */
+const providers = Object.values(PROVIDER).sort((a, b) => a.localeCompare(b));
 
 export interface KeywordStats {
   totalRuns: number;
@@ -55,8 +51,6 @@ export const groupSearchesByTime = (searches: Search[]): Record<string, Search[]
   return batches;
 };
 
-const providerLabel = (provider: string): string => provider.charAt(0).toUpperCase() + provider.slice(1);
-
 export const buildChartData = (searches: Search[], runBatches: Record<string, Search[]>) => {
   const batchKeys = Object.keys(runBatches).reverse();
   const batchLabels = batchKeys.map((_, idx) => `Batch ${idx + 1}`);
@@ -68,9 +62,9 @@ export const buildChartData = (searches: Search[], runBatches: Record<string, Se
       return providerSearch?.citations?.length ?? 0;
     });
 
-    const colors = providerColors[provider] ?? defaultProviderColor;
+    const colors = chartColors(provider);
     return {
-      label: providerLabel(provider),
+      label: providerName(provider),
       data,
       borderColor: colors.border,
       backgroundColor: colors.bg,
@@ -89,9 +83,9 @@ export const buildChartData = (searches: Search[], runBatches: Record<string, Se
     c.url.length > 40 ? c.url.slice(0, 40) + '...' : c.url
   );
   const barDatasets = providers.map((provider) => {
-    const colors = providerColors[provider] ?? defaultProviderColor;
+    const colors = chartColors(provider);
     return {
-      label: providerLabel(provider),
+      label: providerName(provider),
       data: citationFrequency.map((c) => c.providerCounts[provider] ?? 0),
       backgroundColor: colors.bg,
       borderColor: colors.border,
@@ -206,7 +200,7 @@ export const SearchItem = ({
   buildRawResponsesPath,
 }: SearchItemProps) => {
   const provider = search.provider.toLowerCase();
-  const colors = providerColors[provider] ?? defaultProviderColor;
+  const colors = chartColors(provider);
 
   return (
     <div className="border rounded-lg" style={{

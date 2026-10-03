@@ -11,6 +11,7 @@ import { CompetitorGapReport } from './CompetitorGapReport';
 import {
   buildOutrankedKeyword, buildRollup, buildSource
 } from './sections/rollupSection-fixtures';
+import { buildTrackedBrandsHookResult } from '../../../test/brandConfigHookMock';
 
 vi.mock('./useCompetitorGap', () => ({useCompetitorGap: vi.fn()}));
 vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPrintMode: false })),}));
@@ -20,7 +21,7 @@ import { useCompetitorGap } from './useCompetitorGap';
 import { useBrandConfig } from '../../../hooks/useBrandConfig';
 
 const mockGap = useCompetitorGap as ReturnType<typeof vi.fn>;
-const mockBrand = useBrandConfig as ReturnType<typeof vi.fn>;
+const mockBrand = vi.mocked(useBrandConfig);
 
 /** The one source Adidas is cited from that we are not; it is both an exclusive source and an outreach target. */
 const ADIDAS_EXCLUSIVE_SOURCE = buildSource({
@@ -50,17 +51,7 @@ const POPULATED_DATA = {
 };
 
 function renderAt(path: string, competitors: string[] = ['Adidas', 'Asics']) {
-  mockBrand.mockReturnValue({
-    config: {
-      tracked_brands: {
-        first_party: ['Nike'],
-        competitors 
-      } 
-    },
-    presets: {},
-    loading: false,
-    error: null,
-  });
+  mockBrand.mockReturnValue(buildTrackedBrandsHookResult(['Nike'], competitors));
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>

@@ -9,11 +9,11 @@ import type { ComponentProps } from 'react';
 import { SettingsView } from './SettingsView';
 import {
   buildAdminMembership,
-  buildBrandConfigHookResult,
   buildConfiguredOpenAiProvider,
   buildSettingsViewProps,
   HOSPITALITY_BRAND_CONFIG,
 } from './SettingsView-fixtures';
+import { buildBrandConfigHookResult } from '../../test/brandConfigHookMock';
 import { buildProviderConfigHookResult } from '../ProviderHealth/ProviderHealthBanner-fixtures';
 import {
   createdKeywordFixture, existingKeywordFixture

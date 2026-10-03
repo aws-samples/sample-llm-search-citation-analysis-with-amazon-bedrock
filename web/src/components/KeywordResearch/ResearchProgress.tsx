@@ -12,6 +12,7 @@ import {
   resolveResearchStatus,
 } from '../../formatting/researchStatus';
 import { Spinner } from '../ui/Spinner';
+import { providerName } from '../../constants/providers';
 
 interface ResearchProgressProps {
   job: KeywordResearchItem;
@@ -20,15 +21,11 @@ interface ResearchProgressProps {
   retrying?: boolean;
 }
 
-const PROVIDER_LABELS: Record<string, string> = {
-  perplexity: 'Perplexity',
-  openai: 'OpenAI',
-  gemini: 'Gemini',
-  serpapi: 'Google signals',
-};
+/** The research step that reads Google signals through SerpAPI rather than an AI engine. */
+const GOOGLE_SIGNALS_PROVIDER = 'serpapi';
 
 function providerLabel(provider: string): string {
-  return PROVIDER_LABELS[provider] ?? provider;
+  return provider === GOOGLE_SIGNALS_PROVIDER ? 'Google signals' : providerName(provider);
 }
 
 /**

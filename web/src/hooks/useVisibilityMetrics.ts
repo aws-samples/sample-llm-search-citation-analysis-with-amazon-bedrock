@@ -7,13 +7,6 @@ import {
   brandFilterParams, fetchErrors, isAnalysisPayload, useAnalysisEndpoint
 } from './useAnalysisEndpoint';
 
-class VisibilityFetchError extends Error {
-  constructor(message = 'Failed to fetch visibility metrics') {
-    super(message);
-    this.name = 'VisibilityFetchError';
-  }
-}
-
 /** The one `/visibility` shape of every scope: its scope, pooled KPIs, brand leaderboard and keyword rows. */
 function isVisibilityResponse(value: unknown): value is VisibilityResponse {
   return isAnalysisPayload(value)
@@ -27,7 +20,7 @@ const visibilityMetricsEndpoint = {
   errorContext: 'visibility',
   logMessage: '[visibility] Error fetching metrics:',
   isValidResponse: isVisibilityResponse,
-  ...fetchErrors(VisibilityFetchError),
+  ...fetchErrors('VisibilityFetchError', 'Failed to fetch visibility metrics'),
   buildRequest: (scope: ReportScope, queryPromptId?: string, brand?: string) => {
     const params = brandFilterParams(reportScopeParams(scope), brand, queryPromptId);
     return {

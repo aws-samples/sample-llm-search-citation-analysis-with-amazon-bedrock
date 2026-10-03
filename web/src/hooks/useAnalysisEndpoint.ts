@@ -64,11 +64,28 @@ export function apiRequestErrors(httpMessage: string): ContractErrors {
   };
 }
 
-/** Failures as the hook's own error class: its default message for a non-OK status. */
-export function fetchErrors(errorType: new (message?: string) => Error): ContractErrors {
+/**
+ * A failed-request error class named `name` (`VisibilityFetchError`): the
+ * class is defined under that key, so its constructor name and `name` agree
+ * as the hand-written per-hook classes did.
+ */
+function namedFetchError(name: string) {
   return {
-    createHttpError: () => new errorType(),
-    createResponseError: (message: string) => new errorType(message),
+    [name]: class extends Error {
+      constructor(message: string) {
+        super(message);
+        this.name = name;
+      }
+    },
+  }[name];
+}
+
+/** Failures named `name`: `defaultMessage` for a non-OK status, the body's message otherwise. */
+export function fetchErrors(name: string, defaultMessage: string): ContractErrors {
+  const errorClass = namedFetchError(name);
+  return {
+    createHttpError: () => new errorClass(defaultMessage),
+    createResponseError: (message: string) => new errorClass(message),
   };
 }
 

@@ -66,6 +66,12 @@ describe('ResearchProgress', () => {
     expect(screen.getByText('Waiting')).toBeInTheDocument();
   });
 
+  it('names each provider step by the provider display name', () => {
+    render(<ResearchProgress job={runningJob} />);
+
+    expect(screen.getByText('Google Gemini')).toBeInTheDocument();
+  });
+
   it('says it is planning while no step exists yet', () => {
     render(<ResearchProgress job={buildJob({ status: 'pending' })} />);
 

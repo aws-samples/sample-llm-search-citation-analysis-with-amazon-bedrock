@@ -7,4 +7,3 @@ export { SentimentSplitChart } from './SentimentSplitChart';
 export { TopSourcesChart } from './TopSourcesChart';
 export type { BrandTrendMetric } from './brandTrendChartConfiguration';
 export type { SentimentRow } from './sentimentSplitChartConfiguration';
-export { engineName } from './engineKpiChartConfiguration';

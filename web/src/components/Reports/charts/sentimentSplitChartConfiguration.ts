@@ -58,7 +58,7 @@ function roundedShare(count: number, total: number): number {
 }
 
 /** `count` as a % of `total`, one decimal; `null` without a total. */
-function percentOf(count: number, total: number): number | null {
+export function percentOf(count: number, total: number): number | null {
   return total > 0 ? roundedShare(count, total) : null;
 }
 

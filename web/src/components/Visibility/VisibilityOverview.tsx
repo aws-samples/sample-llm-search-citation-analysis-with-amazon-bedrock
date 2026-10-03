@@ -1,6 +1,4 @@
-import {
-  useState, type ReactNode
-} from 'react';
+import type { ReactNode } from 'react';
 import type {
   HistoricalTrendsResponse, VisibilityResponse
 } from '../../types';
@@ -17,6 +15,7 @@ import {
   VisibilityHistory, type HistoryRangeDays
 } from './VisibilityHistory';
 import { exportVisibilityOverview } from './visibilityOverviewExport';
+import { useExportAction } from '../ui/useExportAction';
 
 interface Props {
   readonly visibility: VisibilityResponse;
@@ -40,18 +39,9 @@ function scopeSummary(visibility: VisibilityResponse): string {
 function ExportButton({
   visibility, trends, scopeLabel
 }: Pick<Props, 'visibility' | 'trends' | 'scopeLabel'>) {
-  const [exporting, setExporting] = useState(false);
-
-  const handleExport = async () => {
-    setExporting(true);
-    try {
-      await exportVisibilityOverview(visibility, trends, scopeLabel);
-    } catch (error) {
-      console.error('[visibility] Excel export failed:', error);
-    } finally {
-      setExporting(false);
-    }
-  };
+  const {
+    exporting, handleExport
+  } = useExportAction(() => exportVisibilityOverview(visibility, trends, scopeLabel), '[visibility] Excel export failed:');
 
   return (
     <button

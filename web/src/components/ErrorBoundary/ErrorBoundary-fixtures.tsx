@@ -1,9 +1,4 @@
-export class TestError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'TestError';
-  }
-}
+import { TestError } from '../../test/testError';
 
 export function ThrowingComponent({ shouldThrow }: Readonly<{ shouldThrow: boolean }>) {
   if (shouldThrow) {

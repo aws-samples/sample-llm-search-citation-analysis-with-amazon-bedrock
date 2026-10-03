@@ -1,5 +1,4 @@
-import { DEFAULT_CONFIG } from '../../../constants/brandConfigDefaults';
-import { buildBrandConfigHookResult } from '../../Settings/SettingsView-fixtures';
+import { buildTrackedBrandsHookResult } from '../../../test/brandConfigHookMock';
 import {
   useReportSources, type ReportSources
 } from './reportSources';
@@ -20,13 +19,5 @@ export function BrandConfigProbe() {
 
 /** `useBrandConfig()` once loaded with `competitors` tracked. */
 export function mockBrandConfigWith(competitors: string[]) {
-  return buildBrandConfigHookResult({
-    config: {
-      ...DEFAULT_CONFIG,
-      tracked_brands: {
-        first_party: ['MyHotel'],
-        competitors,
-      },
-    },
-  });
+  return buildTrackedBrandsHookResult(['MyHotel'], competitors);
 }

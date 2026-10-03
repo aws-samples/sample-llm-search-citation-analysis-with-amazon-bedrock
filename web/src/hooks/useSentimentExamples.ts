@@ -7,18 +7,11 @@ import {
   fetchErrors, useAnalysisEndpoint 
 } from './useAnalysisEndpoint';
 
-class SentimentExamplesFetchError extends Error {
-  constructor(message = 'Failed to fetch sentiment examples') {
-    super(message);
-    this.name = 'SentimentExamplesFetchError';
-  }
-}
-
 const sentimentExamplesEndpoint = {
   errorContext: 'sentimentExamples',
   logMessage: '[sentiment] Error fetching sentiment examples:',
   isValidResponse: isSentimentExamplesResponse,
-  ...fetchErrors(SentimentExamplesFetchError),
+  ...fetchErrors('SentimentExamplesFetchError', 'Failed to fetch sentiment examples'),
   buildRequest: (scope: ReportScope, sentiment: SentimentLabel, provider?: string, limit?: number) => {
     const params = new URLSearchParams(reportScopeParams(scope));
     params.append('sentiment', sentiment);

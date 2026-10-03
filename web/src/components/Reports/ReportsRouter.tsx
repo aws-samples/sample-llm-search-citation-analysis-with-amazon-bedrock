@@ -4,7 +4,7 @@ import {
 import {
   lazy, Suspense 
 } from 'react';
-import { Spinner } from '../ui/Spinner';
+import { CenteredSpinner } from '../ui/CenteredState';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { ReportsLandingView } from './ReportsLandingView';
 import type { Keyword } from '../../types';
@@ -60,14 +60,6 @@ const CustomReportView = lazy(() =>
 
 interface Props {readonly keywords: ReadonlyArray<Keyword>;}
 
-function ReportFallback() {
-  return (
-    <div className="flex items-center justify-center py-12">
-      <Spinner size="lg" />
-    </div>
-  );
-}
-
 /**
  * Sub-router for `/reports/*` paths.
  *
@@ -82,7 +74,7 @@ function ReportFallback() {
 export function ReportsRouter({ keywords }: Props) {
   return (
     <ErrorBoundary>
-      <Suspense fallback={<ReportFallback />}>
+      <Suspense fallback={<CenteredSpinner />}>
         <Routes>
           <Route path="/reports" element={<ReportsLandingView />} />
           <Route

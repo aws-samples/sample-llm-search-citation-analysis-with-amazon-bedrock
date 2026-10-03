@@ -15,7 +15,7 @@ import {
   gateSection,
 } from '../../layout';
 import {
-  brandKpiColumns, brandReachColumns
+  BRAND_CLASSIFICATION_LABELS, brandKpiColumns, brandReachColumns
 } from '../../layout/brandColumns';
 import {
   ShareOfVoicePanel, ShareOfVoiceTrendPanel
@@ -139,19 +139,13 @@ export function PooledRankingsSection({
   );
 }
 
-const CLASSIFICATION_LABELS: Record<BrandClassification, string> = {
-  first_party: 'first-party',
-  competitor: 'competitor',
-  other: 'other',
-};
-
 function ClassificationBadge({ classification }: { readonly classification: BrandClassification }) {
   return (
     <span
       // Stryker disable next-line StringLiteral: Tailwind-only badge styling; the text below names the classification
       className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${badgeStyles(classification)}`}
     >
-      {CLASSIFICATION_LABELS[classification]}
+      {BRAND_CLASSIFICATION_LABELS[classification]}
     </span>
   );
 }

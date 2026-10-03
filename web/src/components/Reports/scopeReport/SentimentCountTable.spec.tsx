@@ -6,8 +6,9 @@ import {
 } from '@testing-library/react';
 import { buildSentimentExamplesResponse } from '../../../types/domain/sentimentExamples-fixtures';
 import {
-  renderCountTable, requestedUrl, stubExamplesAnswer
+  renderCountTable, requestedUrl
 } from './sentimentExamples-fixtures';
+import { answerEveryFetch } from '../../../test/fetchStubs';
 
 vi.mock('../../../infrastructure', () => import('../../../test/infrastructureMock'));
 
@@ -82,7 +83,7 @@ describe('SentimentCountTable', () => {
 
 describe('SentimentCountTable with a count selected', () => {
   beforeEach(() => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
+    answerEveryFetch(buildSentimentExamplesResponse());
   });
 
   it('opens the answers behind a count, titled with its sentiment and engine', () => {

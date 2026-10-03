@@ -3,13 +3,6 @@ import {
   fetchErrors, useAnalysisEndpoint 
 } from './useAnalysisEndpoint';
 
-class PromptInsightsFetchError extends Error {
-  constructor(message = 'Failed to fetch prompt insights') {
-    super(message);
-    this.name = 'PromptInsightsFetchError';
-  }
-}
-
 function isPromptInsightsResponse(data: unknown): data is PromptInsightsResponse {
   return typeof data === 'object' && data !== null && 'total_prompts_analyzed' in data;
 }
@@ -18,7 +11,7 @@ const promptInsightsEndpoint = {
   errorContext: 'visibility',
   logMessage: '[promptInsights] Error fetching prompt insights:',
   isValidResponse: isPromptInsightsResponse,
-  ...fetchErrors(PromptInsightsFetchError),
+  ...fetchErrors('PromptInsightsFetchError', 'Failed to fetch prompt insights'),
   // This endpoint never checked for `{error}` bodies; its type guard
   // rejects them as an invalid format instead. Kept as-is to preserve
   // the hook's observable error messages.
