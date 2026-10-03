@@ -142,12 +142,20 @@ def sighting_from_brand(brand: object) -> Sighting | None:
 
 
 def normalize_domain(value: object) -> str | None:
-    """The host of a URL or domain, lower-case, without ``www.`` or a port; ``None`` when there is none."""
+    """The host of a URL or domain: lower-case, without userinfo, port, edge dots or a leading ``www.``.
+
+    ``None`` when there is no host, including a URL ``urlparse`` rejects
+    (an unclosed IPv6 bracket). ``test-fixtures/domain-identity.json`` pins
+    the cases for every runtime.
+    """
     if not isinstance(value, str) or not value.strip():
         return None
     text = value.strip().lower()
-    host = urlparse(text if '//' in text else f'//{text}').hostname or ''
-    host = host.removeprefix('www.').removesuffix('.')
+    try:
+        host = urlparse(text if '//' in text else f'//{text}').hostname or ''
+    except ValueError:
+        return None
+    host = host.lstrip('.').removeprefix('www.').rstrip('.')
     return host or None
 
 

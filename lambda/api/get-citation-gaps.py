@@ -28,6 +28,7 @@ from shared.api_response import success_response
 from shared.brand_visibility import tracked_brand_names
 from shared.decorators import api_handler, validate
 from shared.dynamodb_batch import query_latest_per_key
+from shared.kpi_engine import is_owned_domain, normalize_domain
 from shared.scope_params import (
     SCOPE_QUERY_PARAMS,
     ReportScope,
@@ -69,11 +70,9 @@ def is_first_party_domain(domain: object, config: dict[str, Any]) -> bool:
     """
     Check whether `domain` belongs to a first-party brand.
 
-    Uses ONLY the explicit `first_party_domains` allow-list from brand config.
-    Match rules, in order of specificity:
-
-    1. Exact match on the registered hostname (`example.com` == `example.com`)
-    2. Subdomain match (`blog.example.com` ends with `.example.com`)
+    Uses ONLY the explicit `first_party_domains` allow-list from brand config,
+    matched the KPI engine's way (`kpi_engine.is_owned_domain` on
+    `normalize_domain` hosts): the registered domain or a subdomain of it.
 
     The previous implementation also fell back to substring matching against
     tracked brand names ("Inn" matching both "Holiday Inn" and "linkedin.com"),
@@ -81,29 +80,8 @@ def is_first_party_domain(domain: object, config: dict[str, Any]) -> bool:
     the first-party bucket. That fallback is removed — if a deployment wants
     a domain treated as first-party, it must be in the config.
     """
-    if not domain or not isinstance(domain, str):
-        return False
-
-    domain_lower = domain.lower().lstrip('.')
-    if domain_lower.startswith('www.'):
-        domain_lower = domain_lower[4:]
-
-    first_party_domains = config.get('first_party_domains', []) or []
-    for first_party_domain in first_party_domains:
-        if not first_party_domain or not isinstance(first_party_domain, str):
-            continue
-        normalized_first_party = first_party_domain.lower().lstrip('.')
-        if normalized_first_party.startswith('www.'):
-            normalized_first_party = normalized_first_party[4:]
-        if not normalized_first_party:
-            continue
-
-        if domain_lower == normalized_first_party:
-            return True
-        if domain_lower.endswith('.' + normalized_first_party):
-            return True
-
-    return False
+    normalized = normalize_domain(domain)
+    return normalized is not None and is_owned_domain(normalized, config.get('first_party_domains') or [])
 
 
 def _batch_crawled_info(urls: list[str]) -> dict[str, dict[str, Any]]:

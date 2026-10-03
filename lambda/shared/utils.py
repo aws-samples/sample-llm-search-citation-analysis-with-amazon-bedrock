@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import boto3
 
 from shared.dynamodb_batch import collect_all_items
+from shared.kpi_engine import normalize_domain
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -212,39 +213,20 @@ def get_timestamp_compact() -> str:
 
 
 def extract_domain(url: str) -> str:
-    """
-    Extract a normalized domain from a URL.
+    """The domain of ``url`` as ``kpi_engine.normalize_domain`` defines it, as a string.
 
-    Normalization:
-    - Lowercase
-    - Strip leading ``www.`` (matches the convention in every current
-      caller so downstream comparisons like
-      ``domain == first_party_domains[i]`` are predictable)
-
-    Args:
-        url: URL to extract domain from
-
-    Returns:
-        Lowercase domain without leading ``www.``. Returns an empty string
-        when ``urlparse`` finds no ``netloc`` (e.g. ``"not a url"`` or
-        ``""``) or when input is not a string. On the rare ``urlparse``
-        exception, returns ``url`` verbatim if it is a string, else ``""``.
-
-        The previous shared implementation returned the literal string
-        ``'unknown'`` on failure which silently bucketed every parse
-        error into the same domain. Callers that want a sentinel should
-        substitute one at the call site.
+    Callers display the domain next to the URL, so they need a string: ``''``
+    when ``url`` has no host or is not a string. A string ``urlparse`` rejects
+    (an unclosed IPv6 bracket) comes back verbatim, so the dashboard still
+    shows what was cited instead of an empty cell.
     """
     if not isinstance(url, str):
         return ""
     try:
-        parsed = urlparse(url)
+        urlparse(url)
     except ValueError:
         return url
-    domain = parsed.netloc.lower()
-    if domain.startswith('www.'):
-        domain = domain[4:]
-    return domain
+    return normalize_domain(url) or ""
 
 
 def brand_names_match(candidate: str, tracked: str) -> bool:
