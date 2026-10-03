@@ -34,9 +34,9 @@ from shared.scope_params import (
     scope_from_request,
     scoped_dynamodb_resource,
 )
-from shared.scoped_reports import capped_scope
+from shared.scoped_reports import TREND_WINDOW_PARAMS, capped_scope
 from shared.utils import get_brand_config
-from shared.visibility_views import PERIODS, trend_view
+from shared.visibility_views import trend_view
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -88,8 +88,7 @@ def trends_for_scope(scope: ReportScope | None, period: str, days: int, owned_do
 @api_handler
 @validate({
     **SCOPE_QUERY_PARAMS,
-    'period': {'type': str, 'choices': list(PERIODS), 'default': 'day'},
-    'days': {'type': int, 'min': 1, 'max': 365, 'default': 30},
+    **TREND_WINDOW_PARAMS,
 })
 def handler(
     event: dict[str, Any],

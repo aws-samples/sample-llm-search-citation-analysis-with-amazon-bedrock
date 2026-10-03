@@ -6,7 +6,8 @@ Wiring shared by the report handlers whose scope is required.
 read at most ``SCOPE_KEYWORDS_CAP`` of the scope's keywords and echo the scope
 next to whether the cap cut it short. ``required_report_scope`` and
 ``capped_scope`` are those two steps; scope parsing itself lives in
-``shared.scope_params``.
+``shared.scope_params``. ``TREND_WINDOW_PARAMS`` are the ``period`` / ``days``
+rules ``/trends`` and ``/reports/overview`` share.
 """
 
 from __future__ import annotations
@@ -16,6 +17,13 @@ from collections.abc import Callable
 from typing import Any
 
 from shared.scope_params import SCOPE_KEYWORDS_CAP, SCOPE_PARAMS, ReportScope, scope_from_request
+from shared.visibility_views import PERIODS
+
+TREND_WINDOW_PARAMS: dict[str, dict[str, Any]] = {
+    'period': {'type': str, 'choices': list(PERIODS), 'default': 'day'},
+    'days': {'type': int, 'min': 1, 'max': 365, 'default': 30},
+}
+"""``@validate`` rules for a trend window: the bucket ``period`` and the last ``days`` days (1-365, default 30)."""
 
 
 def required_report_scope(

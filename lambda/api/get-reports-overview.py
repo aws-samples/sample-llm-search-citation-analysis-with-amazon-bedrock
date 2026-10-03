@@ -44,6 +44,7 @@ from shared.scope_params import (
     load_sibling_function,
     scope_from_request,
 )
+from shared.scoped_reports import TREND_WINDOW_PARAMS
 from shared.utils import get_brand_config, get_timestamp
 
 logger = logging.getLogger(__name__)
@@ -162,10 +163,7 @@ def build_overview(
 
 @api_handler
 @validate({
-    'period': {
-        'type': str, 'choices': ['day', 'week', 'month'], 'default': 'day',
-    },
-    'days': {'type': int, 'min': 1, 'max': 365, 'default': 30},
+    **TREND_WINDOW_PARAMS,
     'top': {'type': int, 'min': 1, 'max': 10, 'default': 3},
     **SCOPE_QUERY_PARAMS,
 })
