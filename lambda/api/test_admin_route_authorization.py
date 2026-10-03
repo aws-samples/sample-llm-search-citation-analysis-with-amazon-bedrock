@@ -26,13 +26,13 @@ this file only asserts uniform denial.
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any, NamedTuple
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.admin_authz_fixtures import caller_event, status_of
 from testing.module_loader import load_handler_module, module_name_for
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -175,30 +175,21 @@ def _reset_aws_mocks():
 
 def make_event(route: Route, groups: str | None) -> dict[str, Any]:
     """Build an API Gateway event for `route` from a caller in `groups`."""
-    claims: dict[str, Any] = {
-        'sub': '11111111-2222-3333-4444-555555555555',
-        'cognito:username': 'reader@example.com',
-        'email': 'reader@example.com',
-    }
-    if groups is not None:
-        claims['cognito:groups'] = groups
-
-    return {
-        'httpMethod': route.method,
-        'path': route.path,
-        'resource': route.path,
-        'pathParameters': route.path_params,
-        'headers': {'origin': 'http://localhost:3000'},
-        'body': json.dumps(route.body) if route.body is not None else None,
-        'requestContext': {'authorizer': {'claims': claims}},
-    }
+    return caller_event(
+        route.method,
+        route.path,
+        groups=groups,
+        caller='reader@example.com',
+        body=route.body,
+        path_params=route.path_params,
+        resource=route.path,
+    )
 
 
 def call(route: Route, groups: str | None) -> tuple[int, MagicMock]:
     """Invoke the route's handler and return its status plus the AWS mock."""
     loaded = _MODULES[route.module]
-    result = loaded.module.handler(make_event(route, groups), {})
-    return result.get('statusCode', 200), loaded.aws
+    return status_of(loaded.module, make_event(route, groups)), loaded.aws
 
 
 @pytest.mark.parametrize('route', MUTATING_ADMIN_ROUTES, ids=str)

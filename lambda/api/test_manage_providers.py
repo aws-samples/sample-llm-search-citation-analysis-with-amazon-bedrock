@@ -31,6 +31,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
+from testing.admin_authz_fixtures import caller_event, invoke
 from testing.module_loader import load_handler_module
 
 _ENV = {
@@ -76,16 +77,7 @@ def _serve_config_rows(rows: dict[str, dict[str, Any]]) -> None:
 
 def _get_providers() -> tuple[int, dict[str, Any]]:
     """Call GET /providers as a group-less authenticated user; parse the response."""
-    event = {
-        'httpMethod': 'GET',
-        'path': '/api/providers',
-        'headers': {'origin': 'http://localhost:3000'},
-        'requestContext': {
-            'authorizer': {'claims': {'cognito:username': 'viewer@example.com'}}
-        },
-    }
-    result = _module.handler(event, {})
-    return result['statusCode'], json.loads(result['body'])
+    return invoke(_module, caller_event('GET', '/api/providers', groups=None, caller='viewer@example.com'))
 
 
 def _provider(body: dict[str, Any], provider_id: str) -> dict[str, Any]:
@@ -200,21 +192,7 @@ class TestGetProvidersSurfacesHealth:
 
 def _put_provider(provider_id: str, body: dict[str, Any]) -> tuple[int, dict[str, Any]]:
     """Call PUT /providers/{id} as an administrator; return status and parsed body."""
-    event = {
-        'httpMethod': 'PUT',
-        'path': f'/api/providers/{provider_id}',
-        'pathParameters': {'id': provider_id},
-        'headers': {'origin': 'http://localhost:3000'},
-        'body': json.dumps(body),
-        'requestContext': {
-            'authorizer': {'claims': {
-                'cognito:username': 'admin@example.com',
-                'cognito:groups': 'Admin',
-            }}
-        },
-    }
-    result = _module.handler(event, {})
-    return result['statusCode'], json.loads(result['body'])
+    return invoke(_module, caller_event('PUT', f'/api/providers/{provider_id}', body=body, path_params={'id': provider_id}))
 
 
 def _only_update() -> dict[str, Any]:
@@ -364,17 +342,8 @@ def _reply(status: int, payload: Any = None) -> MagicMock:
 
 def _list_models(provider_id: str, groups: str = 'Admin') -> tuple[int, dict[str, Any]]:
     """Call GET /providers/{id}/models; return status and parsed body."""
-    event = {
-        'httpMethod': 'GET',
-        'path': f'/api/providers/{provider_id}/models',
-        'pathParameters': {'id': provider_id},
-        'headers': {'origin': 'http://localhost:3000'},
-        'requestContext': {
-            'authorizer': {'claims': {'cognito:username': 'admin@example.com', 'cognito:groups': groups}}
-        },
-    }
-    result = _module.handler(event, {})
-    return result['statusCode'], json.loads(result['body'])
+    event = caller_event('GET', f'/api/providers/{provider_id}/models', path_params={'id': provider_id}, groups=groups)
+    return invoke(_module, event)
 
 
 class TestGetProvidersReportsTheModel:
@@ -606,9 +575,11 @@ OPENAI_LISTING = {'data': [
     {'id': 'gpt-5-mini'},
 ]}
 
+_GEMINI_PRO = {'name': 'models/gemini-2.5-pro', 'supportedGenerationMethods': ['generateContent']}
+
 GEMINI_LISTING = {'models': [
     {'name': 'models/gemini-3-flash-preview', 'supportedGenerationMethods': ['generateContent', 'countTokens']},
-    {'name': 'models/gemini-2.5-pro', 'supportedGenerationMethods': ['generateContent']},
+    _GEMINI_PRO,
     {'name': 'models/gemini-embedding-001', 'supportedGenerationMethods': ['embedContent']},
     {'name': 'models/gemini-2.5-flash-preview-tts', 'supportedGenerationMethods': ['generateContent']},
     {'name': 'models/gemini-2.0-flash-live-001', 'supportedGenerationMethods': ['bidiGenerateContent']},
@@ -883,15 +854,6 @@ class TestModelChecksAndListingsInDetail:
 
         assert _module.list_models('openai', 'sk-test')['models'] == ['gpt-a', 'gpt-b']
 
-    def test_skips_gemini_entries_that_are_not_models(self, requests_stub):
-        requests_stub.return_value = _reply(200, {'models': [
-            'gemini-2.5-pro',
-            {'supportedGenerationMethods': ['generateContent']},
-            {'name': 'models/gemini-2.5-pro', 'supportedGenerationMethods': ['generateContent']},
-        ]})
-
-        assert _module.list_models('gemini', 'gm-test') == {'valid': True, 'models': ['gemini-2.5-pro']}
-
     @pytest.mark.parametrize('model_id', [
         'gpt-4o-audio-preview', 'gpt-realtime', 'gpt-4o-transcribe', 'gpt-4o-mini-tts',
         'gpt-image-1', 'gpt-4o-search-preview', 'gpt-3.5-turbo-instruct',
@@ -901,17 +863,18 @@ class TestModelChecksAndListingsInDetail:
 
         assert _module.list_models('openai', 'sk-test')['models'] == ['gpt-5.2']
 
-    @pytest.mark.parametrize('model_id', [
-        'gemini-embedding-exp', 'gemini-2.5-flash-preview-tts', 'gemini-2.5-flash-image',
-        'gemini-live-2.5-flash', 'gemini-2.5-flash-native-audio',
+    @pytest.mark.parametrize('entry', [
+        *(pytest.param({'name': f'models/{model_id}', 'supportedGenerationMethods': ['generateContent']}, id=model_id) for model_id in (
+            'gemini-embedding-exp', 'gemini-2.5-flash-preview-tts', 'gemini-2.5-flash-image',
+            'gemini-live-2.5-flash', 'gemini-2.5-flash-native-audio',
+        )),
+        pytest.param('gemini-2.5-pro', id='entry-not-an-object'),
+        pytest.param({'supportedGenerationMethods': ['generateContent']}, id='entry-without-a-name'),
     ])
-    def test_leaves_gemini_models_that_cannot_answer_out_of_the_picker(self, requests_stub, model_id):
-        requests_stub.return_value = _reply(200, {'models': [
-            {'name': f'models/{model_id}', 'supportedGenerationMethods': ['generateContent']},
-            {'name': 'models/gemini-2.5-pro', 'supportedGenerationMethods': ['generateContent']},
-        ]})
+    def test_leaves_gemini_entries_that_cannot_answer_out_of_the_picker(self, requests_stub, entry):
+        requests_stub.return_value = _reply(200, {'models': [entry, _GEMINI_PRO]})
 
-        assert _module.list_models('gemini', 'gm-test')['models'] == ['gemini-2.5-pro']
+        assert _module.list_models('gemini', 'gm-test') == {'valid': True, 'models': ['gemini-2.5-pro']}
 
     def test_falls_back_to_the_status_when_an_error_body_is_not_json(self, requests_stub):
         response = _reply(502)

@@ -14,8 +14,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.admin_authz_fixtures import caller_event, invoke
 from testing.dynamodb_stubs import fake_dynamodb_resource
-from testing.events import api_gateway_event, parse_response
 from testing.module_loader import load_handler_module
 
 mock_keywords_table = MagicMock()
@@ -43,10 +43,15 @@ _all = _load('trigger-analysis.py', 'trigger_analysis_under_test')
 
 
 def make_event(body=None, groups: str | None = 'Admin'):
-    claims = {'cognito:username': 'admin@example.com'}
-    if groups is not None:
-        claims['cognito:groups'] = groups
-    return api_gateway_event('POST', '/api/trigger-keyword-analysis', body=body, claims=claims)
+    return caller_event('POST', '/api/trigger-keyword-analysis', body=body, groups=groups)
+
+
+def _trigger(body, groups: str | None = 'Admin'):
+    """``(status, body)`` of a subset run requested with ``body``."""
+    return invoke(_subset, make_event(body, groups))
+
+
+CORUNA_SCOPE = {'mode': 'groups', 'group_ids': ['coruna']}
 
 
 def _keyword_row(keyword_id: str, keyword: str, *group_ids: str) -> dict[str, Any]:
@@ -86,24 +91,24 @@ class TestSubsetTriggerWithScope:
             _keyword_row('k2', 'hotel marino beach', 'marino'),
         )
 
-        status, body = parse_response(_subset.handler(make_event({'scope': {'mode': 'groups', 'group_ids': ['coruna']}}), None))
+        status, body = _trigger({'scope': CORUNA_SCOPE})
 
         assert status == 200
         assert body['keywords'] == ['hotel coruna spa']
         assert body['keywords_count'] == 1
-        assert body['scope'] == {'mode': 'groups', 'group_ids': ['coruna']}
+        assert body['scope'] == CORUNA_SCOPE
 
     def test_starts_the_run_with_the_scope_instead_of_the_keyword_texts(self):
         _stage_active_keywords(_keyword_row('k1', 'hotel coruna spa', 'coruna'))
 
-        _subset.handler(make_event({'scope': {'mode': 'groups', 'group_ids': ['coruna']}}), None)
+        _subset.handler(make_event({'scope': CORUNA_SCOPE}), None)
 
-        assert _started_input() == {'scope': {'mode': 'groups', 'group_ids': ['coruna']}, 'query_prompts': []}
+        assert _started_input() == {'scope': CORUNA_SCOPE, 'query_prompts': []}
 
     def test_runs_only_the_requested_keyword_ids(self):
         _stage_active_keywords(_keyword_row('k1', 'alpha'), _keyword_row('k2', 'beta'))
 
-        status, body = parse_response(_subset.handler(make_event({'scope': {'mode': 'keywords', 'keyword_ids': ['k2']}}), None))
+        status, body = _trigger({'scope': {'mode': 'keywords', 'keyword_ids': ['k2']}})
 
         assert status == 200
         assert body['keywords'] == ['beta']
@@ -111,14 +116,14 @@ class TestSubsetTriggerWithScope:
     def test_rejects_a_scope_that_matches_no_active_keyword_without_starting_a_run(self):
         _stage_active_keywords(_keyword_row('k1', 'alpha', 'other'))
 
-        status, body = parse_response(_subset.handler(make_event({'scope': {'mode': 'groups', 'group_ids': ['coruna']}}), None))
+        status, body = _trigger({'scope': CORUNA_SCOPE})
 
         assert status == 400
         assert body['error'] == 'No active keywords match the selected scope (1 group(s)).'
         mock_stepfunctions.start_execution.assert_not_called()
 
     def test_rejects_an_invalid_scope(self):
-        status, body = parse_response(_subset.handler(make_event({'scope': {'mode': 'nope'}}), None))
+        status, body = _trigger({'scope': {'mode': 'nope'}})
 
         assert status == 400
         assert body['error'] == 'scope.mode must be one of all, groups, keywords'
@@ -128,7 +133,7 @@ class TestSubsetTriggerLegacyKeywords:
     def test_accepts_more_than_100_explicit_keywords(self):
         keywords = [f'keyword {index:03d}' for index in range(150)]
 
-        status, body = parse_response(_subset.handler(make_event({'keywords': keywords}), None))
+        status, body = _trigger({'keywords': keywords})
 
         assert status == 200
         assert body['keywords_count'] == 150
@@ -143,26 +148,23 @@ class TestSubsetTriggerLegacyKeywords:
     def test_refuses_an_explicit_list_too_large_for_the_execution_input(self):
         keywords = [f'{index:03d} ' + 'k' * 490 for index in range(400)]
 
-        status, body = parse_response(_subset.handler(make_event({'keywords': keywords}), None))
+        status, body = _trigger({'keywords': keywords})
 
         assert status == 400
         assert 'Run a keyword group or all keywords with a "scope" instead.' in body['error']
         mock_stepfunctions.start_execution.assert_not_called()
 
-    def test_rejects_a_body_with_neither_keywords_nor_scope(self):
-        status, body = parse_response(_subset.handler(make_event({}), None))
+    @pytest.mark.parametrize(('request_body', 'error'), [
+        pytest.param({}, 'Provide a "keywords" array or a "scope" object in the request body.', id='neither-keywords-nor-scope'),
+        pytest.param({'keywords': ['', None]}, 'No valid keywords provided.', id='every-keyword-empty'),
+    ])
+    def test_rejects_a_body_without_a_usable_keyword_list(self, request_body, error):
+        status, body = _trigger(request_body)
 
-        assert status == 400
-        assert body['error'] == 'Provide a "keywords" array or a "scope" object in the request body.'
-
-    def test_rejects_when_every_keyword_is_empty(self):
-        status, body = parse_response(_subset.handler(make_event({'keywords': ['', None]}), None))
-
-        assert status == 400
-        assert body['error'] == 'No valid keywords provided.'
+        assert (status, body['error']) == (400, error)
 
     def test_refuses_non_admin_callers_before_reading_the_body(self):
-        status, _ = parse_response(_subset.handler(make_event({'keywords': ['a']}, groups=None), None))
+        status, _ = _trigger({'keywords': ['a']}, groups=None)
 
         assert status == 403
         mock_stepfunctions.start_execution.assert_not_called()
@@ -174,7 +176,7 @@ class TestFullTriggerReadsEveryPage:
         second = {'Items': [{'id': f'k{i}', 'keyword': f'kw {i:03d}'} for i in range(100, 130)]}
         mock_keywords_table.query.side_effect = [first, second]
 
-        status, body = parse_response(_all.handler(make_event(), None))
+        status, body = invoke(_all, make_event())
 
         assert status == 200
         assert body['keywords_count'] == 130
@@ -187,7 +189,7 @@ class TestFullTriggerReadsEveryPage:
         assert _started_input() == {'scope': {'mode': 'all'}, 'query_prompts': []}
 
     def test_rejects_when_no_keyword_is_active(self):
-        status, body = parse_response(_all.handler(make_event(), None))
+        status, body = invoke(_all, make_event())
 
         assert status == 400
         assert body['error'] == 'No active keywords found. Please add keywords first.'
