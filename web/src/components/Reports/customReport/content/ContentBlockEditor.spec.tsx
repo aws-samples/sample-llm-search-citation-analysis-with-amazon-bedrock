@@ -1,14 +1,26 @@
 import {
-  describe, expect, it, vi
+  beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
-  fireEvent, render, screen
+  render, screen
 } from '@testing-library/react';
 import { ContentBlockEditor } from './ContentBlockEditor';
-import { newContentBlock } from './contentBlocks';
 import {
-  buildHeadingBlock, buildImageBlock, buildTextBlock, buildVideoBlock
+  newContentBlock, type ContentBlock
+} from './contentBlocks';
+import {
+  buildHeadingBlock, buildImageBlock, buildTextBlock, buildVideoBlock, changeField
 } from '../customReport-fixtures';
+
+/** The editor of `block`, with a spy for its changes. */
+function renderEditor(block: ContentBlock, { revealProblem = false } = {}) {
+  const onChange = vi.fn();
+  const view = render(<ContentBlockEditor block={block} onChange={onChange} revealProblem={revealProblem} />);
+  return {
+    onChange,
+    rerenderBlock: (next: ContentBlock) => view.rerender(<ContentBlockEditor block={next} onChange={onChange} />),
+  };
+}
 
 describe('ContentBlockEditor fields', () => {
   it.each([
@@ -57,25 +69,23 @@ describe('ContentBlockEditor fields', () => {
   ])('sends the $block.type block with the new value of "$label"', ({
     block, label, value, expected
   }) => {
-    const onChange = vi.fn();
-    render(<ContentBlockEditor block={block} onChange={onChange} />);
+    const { onChange } = renderEditor(block);
 
-    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    changeField(label, value);
 
     expect(onChange).toHaveBeenCalledWith(expected);
   });
 
   it('sends a small heading when Small is picked', () => {
-    const onChange = vi.fn();
-    render(<ContentBlockEditor block={buildHeadingBlock()} onChange={onChange} />);
+    const { onChange } = renderEditor(buildHeadingBlock());
 
-    fireEvent.change(screen.getByLabelText('Size'), { target: { value: '3' } });
+    changeField('Size', '3');
 
     expect(onChange).toHaveBeenCalledWith(buildHeadingBlock({ level: 3 }));
   });
 
   it('shows the heading size as Large or Small', () => {
-    render(<ContentBlockEditor block={buildHeadingBlock({ level: 3 })} onChange={vi.fn()} />);
+    renderEditor(buildHeadingBlock({ level: 3 }));
 
     expect(screen.getByRole('combobox', { name: 'Size' })).toHaveDisplayValue('Small');
   });
@@ -104,102 +114,99 @@ describe('ContentBlockEditor fields', () => {
   ])('caps "$label" at $maxLength characters', ({
     block, label, maxLength
   }) => {
-    render(<ContentBlockEditor block={block} onChange={vi.fn()} />);
+    renderEditor(block);
 
     expect(screen.getByLabelText(label)).toHaveAttribute('maxlength', maxLength);
   });
 });
 
 describe('ContentBlockEditor hints', () => {
-  it('explains the markdown the text block understands', () => {
-    render(<ContentBlockEditor block={buildTextBlock()} onChange={vi.fn()} />);
+  it.each([
+    ['explains the markdown the text block understands', buildTextBlock(), 'Text', 'Markdown: **bold**, *italic*, lists, links and tables'],
+    ['asks for a YouTube or Vimeo link', buildVideoBlock(), 'Video link', 'A YouTube or Vimeo link'],
+  ])('%s', (_outcome, block, label, hint) => {
+    renderEditor(block);
 
-    expect(screen.getByLabelText('Text')).toHaveAccessibleDescription('Markdown: **bold**, *italic*, lists, links and tables');
+    expect(screen.getByLabelText(label)).toHaveAccessibleDescription(hint);
   });
 
   it('gives a six-row box for the text', () => {
-    render(<ContentBlockEditor block={buildTextBlock()} onChange={vi.fn()} />);
+    renderEditor(buildTextBlock());
 
     expect(screen.getByLabelText('Text')).toHaveAttribute('rows', '6');
   });
 
   it('counts the characters of the text against the limit', () => {
-    render(<ContentBlockEditor block={buildTextBlock({ markdown: 'Hello world' })} onChange={vi.fn()} />);
+    renderEditor(buildTextBlock({ markdown: 'Hello world' }));
 
     expect(screen.getByText('11 / 5000')).toBeInTheDocument();
-  });
-
-  it('asks for a YouTube or Vimeo link', () => {
-    render(<ContentBlockEditor block={buildVideoBlock()} onChange={vi.fn()} />);
-
-    expect(screen.getByLabelText('Video link')).toHaveAccessibleDescription('A YouTube or Vimeo link');
   });
 });
 
 describe('ContentBlockEditor problem', () => {
-  it('does not flag a fresh block', () => {
-    render(<ContentBlockEditor block={newContentBlock('heading')} onChange={vi.fn()} />);
+  describe('of a fresh heading', () => {
+    it('does not flag a fresh block', () => {
+      renderEditor(newContentBlock('heading'));
 
-    expect(screen.queryByText('Add the heading text')).toBeNull();
-    expect(screen.getByLabelText('Heading text')).toHaveAttribute('aria-invalid', 'false');
+      expect(screen.queryByText('Add the heading text')).toBeNull();
+      expect(screen.getByLabelText('Heading text')).toHaveAttribute('aria-invalid', 'false');
+    });
+
+    it('shows the problem once the user has typed in the block', () => {
+      renderEditor(newContentBlock('heading'));
+
+      changeField('Heading text', ' ');
+
+      expect(screen.getByText('Add the heading text')).toBeInTheDocument();
+    });
+
+    it('shows the problem of an untouched block once a save was refused', () => {
+      renderEditor(newContentBlock('heading'), { revealProblem: true });
+
+      expect(screen.getByText('Add the heading text')).toBeInTheDocument();
+    });
+
+    it('keeps the problem hidden when only the heading size changed', () => {
+      renderEditor(newContentBlock('heading'));
+
+      changeField('Size', '3');
+
+      expect(screen.queryByText('Add the heading text')).toBeNull();
+    });
   });
 
-  it('shows the problem once the user has typed in the block', () => {
-    render(<ContentBlockEditor block={newContentBlock('heading')} onChange={vi.fn()} />);
+  describe('of a fresh image once its caption is typed', () => {
+    beforeEach(() => {
+      renderEditor(newContentBlock('image'));
+      changeField('Caption (optional)', 'Logo');
+    });
 
-    fireEvent.change(screen.getByLabelText('Heading text'), { target: { value: ' ' } });
+    it('marks the field the problem is about and describes it with the problem', () => {
+      const link = screen.getByLabelText('Image link');
 
-    expect(screen.getByText('Add the heading text')).toBeInTheDocument();
-  });
+      expect(link).toHaveAttribute('aria-invalid', 'true');
+      expect(link).toHaveAccessibleDescription('An https link to the image Add the image link');
+    });
 
-  it('shows the problem of an untouched block once a save was refused', () => {
-    render(<ContentBlockEditor block={newContentBlock('heading')} onChange={vi.fn()} revealProblem />);
-
-    expect(screen.getByText('Add the heading text')).toBeInTheDocument();
-  });
-
-  it('marks the field the problem is about and describes it with the problem', () => {
-    render(<ContentBlockEditor block={newContentBlock('image')} onChange={vi.fn()} />);
-
-    fireEvent.change(screen.getByLabelText('Caption (optional)'), { target: { value: 'Logo' } });
-    const link = screen.getByLabelText('Image link');
-
-    expect(link).toHaveAttribute('aria-invalid', 'true');
-    expect(link).toHaveAccessibleDescription('An https link to the image Add the image link');
-  });
-
-  it('leaves the fields the problem is not about unmarked', () => {
-    render(<ContentBlockEditor block={newContentBlock('image')} onChange={vi.fn()} />);
-
-    fireEvent.change(screen.getByLabelText('Caption (optional)'), { target: { value: 'Logo' } });
-
-    expect(screen.getByLabelText('Caption (optional)')).toHaveAttribute('aria-invalid', 'false');
-  });
-
-  it('keeps the problem hidden when only the heading size changed', () => {
-    render(<ContentBlockEditor block={newContentBlock('heading')} onChange={vi.fn()} />);
-
-    fireEvent.change(screen.getByLabelText('Size'), { target: { value: '3' } });
-
-    expect(screen.queryByText('Add the heading text')).toBeNull();
+    it('leaves the fields the problem is not about unmarked', () => {
+      expect(screen.getByLabelText('Caption (optional)')).toHaveAttribute('aria-invalid', 'false');
+    });
   });
 
   it('shows the problem of the block it is given after the user typed', () => {
-    const onChange = vi.fn();
-    const { rerender } = render(<ContentBlockEditor block={newContentBlock('video')} onChange={onChange} />);
+    const { rerenderBlock } = renderEditor(newContentBlock('video'));
 
-    fireEvent.change(screen.getByLabelText('Video link'), { target: { value: 'https://example.com/clip.mp4' } });
-    rerender(<ContentBlockEditor block={buildVideoBlock({ url: 'https://example.com/clip.mp4' })} onChange={onChange} />);
+    changeField('Video link', 'https://example.com/clip.mp4');
+    rerenderBlock(buildVideoBlock({ url: 'https://example.com/clip.mp4' }));
 
     expect(screen.getByText('Use a YouTube or Vimeo link')).toBeInTheDocument();
   });
 
   it('clears the problem once the block would save', () => {
-    const onChange = vi.fn();
-    const { rerender } = render(<ContentBlockEditor block={newContentBlock('text')} onChange={onChange} />);
+    const { rerenderBlock } = renderEditor(newContentBlock('text'));
 
-    fireEvent.change(screen.getByLabelText('Text'), { target: { value: 'Done' } });
-    rerender(<ContentBlockEditor block={buildTextBlock({ markdown: 'Done' })} onChange={onChange} />);
+    changeField('Text', 'Done');
+    rerenderBlock(buildTextBlock({ markdown: 'Done' }));
 
     expect(screen.queryByText('Add some text')).toBeNull();
   });

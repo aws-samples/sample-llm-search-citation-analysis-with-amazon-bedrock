@@ -7,16 +7,12 @@ import {
 import { KPI_COLOURS } from './chartKpis';
 import { LINE_WEIGHTS } from './lineChartConfiguration';
 import {
-  KPI_POINTS, kpiTrendChart
+  KPI_POINTS, kpiTrendChart, THEME_VARIANTS
 } from './charts-fixtures';
 
 describe('buildKpiTrendChartConfiguration', () => {
   it('draws the mention rate, share of voice, visibility score and citation rate by default', () => {
     expect(DEFAULT_KPI_TREND_IDS).toStrictEqual(['mention_rate', 'share_of_voice', 'visibility_score', 'citation_rate']);
-  });
-
-  it('is a line chart', () => {
-    expect(kpiTrendChart().type).toBe('line');
   });
 
   it('labels every line with its KPI definition label', () => {
@@ -36,23 +32,13 @@ describe('buildKpiTrendChartConfiguration', () => {
     expect(kpiTrendChart().data.datasets.map((dataset) => dataset.spanGaps)).toStrictEqual([false, false, false, false]);
   });
 
-  it.each([
-    ['light', false],
-    ['dark', true],
-  ] as const)('draws every KPI in its fixed %s colour', (variant, isDark) => {
+  it.each(THEME_VARIANTS)('draws every KPI in its fixed %s colour', (variant, isDark) => {
     expect(kpiTrendChart(KPI_POINTS, isDark).data.datasets.map((dataset) => dataset.borderColor))
       .toStrictEqual(DEFAULT_KPI_TREND_IDS.map((id) => KPI_COLOURS[id][variant]));
   });
 
   it('draws every KPI line at the regular weight', () => {
     expect(kpiTrendChart().data.datasets.map((dataset) => dataset.borderWidth)).toStrictEqual(Array.from({ length: 4 }, () => LINE_WEIGHTS.regular.borderWidth));
-  });
-
-  it('draws nothing without a point', () => {
-    expect(kpiTrendChart([]).data).toStrictEqual({
-      labels: [],
-      datasets: [],
-    });
   });
 });
 

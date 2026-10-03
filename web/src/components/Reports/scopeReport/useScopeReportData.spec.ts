@@ -10,8 +10,12 @@ import {
   buildTrendView, buildVisibility
 } from '../layout/reportPayload-fixtures';
 import {
-  NETWORK_ERROR, settledSlice
+  FAILED, IN_FLIGHT, settledSlice
 } from './scopeReport-fixtures';
+import type { ReportSlice } from '../layout/sectionGate';
+import type {
+  HistoricalTrendsResponse, ReportScope, VisibilityResponse
+} from '../../../types';
 
 vi.mock('../../../hooks/useHistoricalTrends', () => ({ useHistoricalTrends: vi.fn() }));
 vi.mock('../../../hooks/useVisibilityMetrics', () => ({ useVisibilityMetrics: vi.fn() }));
@@ -24,20 +28,32 @@ const TRENDS = buildTrendView();
 const fetchVisibilityMetrics = vi.fn();
 const fetchHistoricalTrends = vi.fn();
 
+function mockVisibilitySlice(slice: ReportSlice<VisibilityResponse>) {
+  vi.mocked(useVisibilityMetrics).mockReturnValue({
+    ...slice,
+    fetchVisibilityMetrics,
+  });
+}
+
+function mockTrendSlice(slice: ReportSlice<HistoricalTrendsResponse>) {
+  vi.mocked(useHistoricalTrends).mockReturnValue({
+    ...slice,
+    fetchHistoricalTrends,
+  });
+}
+
+function renderScopeReportData(scope: ReportScope = ALL_SCOPE, days = 30) {
+  return renderHook(() => useScopeReportData(scope, days)).result;
+}
+
 describe('useScopeReportData', () => {
   beforeEach(() => {
-    vi.mocked(useVisibilityMetrics).mockReturnValue({
-      ...settledSlice(VISIBILITY),
-      fetchVisibilityMetrics,
-    });
-    vi.mocked(useHistoricalTrends).mockReturnValue({
-      ...settledSlice(TRENDS),
-      fetchHistoricalTrends,
-    });
+    mockVisibilitySlice(settledSlice(VISIBILITY));
+    mockTrendSlice(settledSlice(TRENDS));
   });
 
   it('fetches the latest runs of the scope', () => {
-    renderHook(() => useScopeReportData(keywordScope('best running shoes'), 30));
+    renderScopeReportData(keywordScope('best running shoes'));
 
     expect(fetchVisibilityMetrics).toHaveBeenCalledWith(keywordScope('best running shoes'));
   });
@@ -47,19 +63,19 @@ describe('useScopeReportData', () => {
     [90, 'week'],
     [180, 'week'],
   ] as const)('fetches %s days of trend per %s', (days, period) => {
-    renderHook(() => useScopeReportData(groupScope('hotel-sol'), days));
+    renderScopeReportData(groupScope('hotel-sol'), days);
 
     expect(fetchHistoricalTrends).toHaveBeenCalledWith(groupScope('hotel-sol'), period, days);
   });
 
   it('reports the period of the trend it fetched', () => {
-    const { result } = renderHook(() => useScopeReportData(ALL_SCOPE, 90));
+    const result = renderScopeReportData(ALL_SCOPE, 90);
 
     expect([result.current.days, result.current.period]).toStrictEqual([90, 'week']);
   });
 
   it('reports the scope it covers, for sections that fetch more of it', () => {
-    const { result } = renderHook(() => useScopeReportData(groupScope('hotel-sol'), 30));
+    const result = renderScopeReportData(groupScope('hotel-sol'));
 
     expect(result.current.scope).toStrictEqual(groupScope('hotel-sol'));
   });
@@ -88,39 +104,25 @@ describe('useScopeReportData', () => {
   });
 
   it('hands over both payloads', () => {
-    const { result } = renderHook(() => useScopeReportData(ALL_SCOPE, 30));
+    const result = renderScopeReportData();
 
     expect(result.current.visibility).toStrictEqual(settledSlice(VISIBILITY));
     expect(result.current.trends).toStrictEqual(settledSlice(TRENDS));
   });
 
   it('is ready once both fetches settled', () => {
-    const { result } = renderHook(() => useScopeReportData(ALL_SCOPE, 30));
-
-    expect(result.current.ready).toBe(true);
+    expect(renderScopeReportData().current.ready).toBe(true);
   });
 
   it('is not ready while the trend is in flight', () => {
-    vi.mocked(useHistoricalTrends).mockReturnValue({
-      data: null,
-      loading: true,
-      error: null,
-      fetchHistoricalTrends,
-    });
-    const { result } = renderHook(() => useScopeReportData(ALL_SCOPE, 30));
+    mockTrendSlice(IN_FLIGHT);
 
-    expect(result.current.ready).toBe(false);
+    expect(renderScopeReportData().current.ready).toBe(false);
   });
 
   it('is ready when a fetch failed, so a report with an error still prints', () => {
-    vi.mocked(useVisibilityMetrics).mockReturnValue({
-      data: null,
-      loading: false,
-      error: NETWORK_ERROR,
-      fetchVisibilityMetrics,
-    });
-    const { result } = renderHook(() => useScopeReportData(ALL_SCOPE, 30));
+    mockVisibilitySlice(FAILED);
 
-    expect(result.current.ready).toBe(true);
+    expect(renderScopeReportData().current.ready).toBe(true);
   });
 });

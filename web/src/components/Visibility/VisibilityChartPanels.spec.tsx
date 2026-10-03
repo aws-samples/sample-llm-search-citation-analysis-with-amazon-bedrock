@@ -2,7 +2,7 @@ import {
   describe, it, expect, vi
 } from 'vitest';
 import {
-  render, screen, within
+  render, within
 } from '@testing-library/react';
 import {
   BrandShareOfVoicePanel, ENGINES_TITLE, EnginesPanel, SOURCES_TITLE, SourcesPanel
@@ -12,7 +12,7 @@ import {
   GROUP_ENGINES_CAPTION, GROUP_SHARE_OF_VOICE_CAPTION, GROUP_SOURCES_CAPTION, buildGroupEngines, buildGroupSources, buildVisibility
 } from './visibilityOverview-fixtures';
 import {
-  bodyRowCells, columnHeadingTexts, panelTable, panelTitled
+  aboutButton, bodyRowCells, columnHeadingTexts, panelTable, panelTitled
 } from './visibilityTables-fixtures';
 import { buildSourceRow } from '../Reports/layout/reportPayload-fixtures';
 import { KPI_DEFINITIONS } from '../../constants/kpiDefinitions';
@@ -21,17 +21,29 @@ vi.mock('chart.js', () => import('../Dashboard/chartJs-fixtures'));
 
 const SHARE_OF_VOICE = 'Share of voice';
 
+function renderGroupSharesOfVoice() {
+  return render(<BrandShareOfVoicePanel brands={buildVisibility().brands} />);
+}
+
+function renderGroupEngines() {
+  return render(<EnginesPanel engines={buildGroupEngines()} />);
+}
+
+function renderGroupSources() {
+  return render(<SourcesPanel sources={buildGroupSources()} total={3} />);
+}
+
 describe('BrandShareOfVoicePanel', () => {
   it('charts each brand\'s share of all brand mentions', () => {
-    render(<BrandShareOfVoicePanel brands={buildVisibility().brands} />);
+    renderGroupSharesOfVoice();
 
     expect(within(panelTitled(SHARE_OF_VOICE)).getByRole('figure')).toHaveTextContent(GROUP_SHARE_OF_VOICE_CAPTION);
   });
 
   it('explains the share of voice with its KPI definition', () => {
-    render(<BrandShareOfVoicePanel brands={buildVisibility().brands} />);
+    renderGroupSharesOfVoice();
 
-    expect(screen.getByRole('button', { name: `About ${SHARE_OF_VOICE}` })).toHaveAccessibleDescription(KPI_DEFINITIONS.share_of_voice.definition);
+    expect(aboutButton(SHARE_OF_VOICE)).toHaveAccessibleDescription(KPI_DEFINITIONS.share_of_voice.definition);
   });
 
   it('says no brand has a share of voice when no answer names one', () => {
@@ -43,22 +55,22 @@ describe('BrandShareOfVoicePanel', () => {
 
 describe('EnginesPanel', () => {
   it('charts the mention rate, visibility score and citation rate of each engine', () => {
-    render(<EnginesPanel engines={buildGroupEngines()} />);
+    renderGroupEngines();
 
     expect(within(panelTitled(ENGINES_TITLE)).getByRole('figure')).toHaveTextContent(GROUP_ENGINES_CAPTION);
   });
 
   it('explains what the chart and the table show in the tooltip', () => {
-    render(<EnginesPanel engines={buildGroupEngines()} />);
+    renderGroupEngines();
 
-    expect(screen.getByRole('button', { name: `About ${ENGINES_TITLE}` })).toHaveAccessibleDescription(
+    expect(aboutButton(ENGINES_TITLE)).toHaveAccessibleDescription(
       'The KPIs over each AI engine\'s answers alone. The chart compares the mention rate, '
         + 'visibility score and citation rate on a 0–100 scale; the table adds the other KPIs, and the Excel export every one.',
     );
   });
 
   it('lists each engine by name with its KPIs formatted by unit, in the API order', () => {
-    render(<EnginesPanel engines={buildGroupEngines()} />);
+    renderGroupEngines();
 
     expect(bodyRowCells(panelTable(ENGINES_TITLE))).toStrictEqual([
       ['OpenAI', '10', '7', '70.0%', '25.0%', '1.80', '40.0%', '55.0%', '58.0', '6', '40.0%', '12.5%', '+15.0', '75.0%', '80.0%'],
@@ -76,21 +88,13 @@ describe('EnginesPanel', () => {
 
 describe('SourcesPanel', () => {
   it('charts the answers citing each of the most cited domains', () => {
-    render(<SourcesPanel sources={buildGroupSources()} total={3} />);
+    renderGroupSources();
 
     expect(within(panelTitled(SOURCES_TITLE)).getByRole('figure')).toHaveTextContent(GROUP_SOURCES_CAPTION);
   });
 
-  it('explains the domain chart in the tooltip', () => {
-    render(<SourcesPanel sources={buildGroupSources()} total={3} />);
-
-    expect(screen.getByRole('button', { name: `About ${SOURCES_TITLE}` })).toHaveAccessibleDescription(
-      'The domains the answers cite most, by the answers citing each. Your own domains are marked owned.',
-    );
-  });
-
   it('heads the domain, citations, citation rate, citation share, engines and keywords columns', () => {
-    render(<SourcesPanel sources={buildGroupSources()} total={3} />);
+    renderGroupSources();
 
     expect(columnHeadingTexts(panelTable(SOURCES_TITLE))).toStrictEqual([
       'Domain', 'Citations', 'Citation rate', 'Citation share', 'Engines', 'Keywords',
@@ -98,19 +102,20 @@ describe('SourcesPanel', () => {
   });
 
   it.each([
-    ['Citations', DOMAIN_COLUMN_INFO.citations],
-    ['Citation rate', DOMAIN_COLUMN_INFO.citationRate],
-    ['Citation share', DOMAIN_COLUMN_INFO.citationShare],
-    ['Engines', DOMAIN_COLUMN_INFO.engines],
-    ['Keywords', DOMAIN_COLUMN_INFO.keywords],
-  ])('explains the %s column heading in its tooltip', (heading, explanation) => {
-    render(<SourcesPanel sources={buildGroupSources()} total={3} />);
+    ['explains the domain chart in the tooltip', SOURCES_TITLE, 'The domains the answers cite most, by the answers citing each. Your own domains are marked owned.'],
+    ['explains the Citations column heading in its tooltip', 'Citations', DOMAIN_COLUMN_INFO.citations],
+    ['explains the Citation rate column heading in its tooltip', 'Citation rate', DOMAIN_COLUMN_INFO.citationRate],
+    ['explains the Citation share column heading in its tooltip', 'Citation share', DOMAIN_COLUMN_INFO.citationShare],
+    ['explains the Engines column heading in its tooltip', 'Engines', DOMAIN_COLUMN_INFO.engines],
+    ['explains the Keywords column heading in its tooltip', 'Keywords', DOMAIN_COLUMN_INFO.keywords],
+  ])('%s', (_outcome, name, explanation) => {
+    renderGroupSources();
 
-    expect(screen.getByRole('button', { name: `About ${heading}` })).toHaveAccessibleDescription(explanation);
+    expect(aboutButton(name)).toHaveAccessibleDescription(explanation);
   });
 
   it('lists every domain most cited first, with its figures and the engines by name', () => {
-    render(<SourcesPanel sources={buildGroupSources()} total={3} />);
+    renderGroupSources();
 
     expect(bodyRowCells(panelTable(SOURCES_TITLE))).toStrictEqual([
       ['booking.com', '8', '40.0%', '47.1%', 'Google Gemini, OpenAI', '2'],
@@ -123,7 +128,7 @@ describe('SourcesPanel', () => {
     ['badges and tints', 'hotelsol.com', 'bg-emerald-50'],
     ['leaves untinted', 'booking.com', ''],
   ])('%s the row of %s by whether the brand owns it', (_label, domain, rowClass) => {
-    render(<SourcesPanel sources={buildGroupSources()} total={3} />);
+    renderGroupSources();
 
     expect(within(panelTable(SOURCES_TITLE)).getByText(domain).closest('tr')?.className).toBe(rowClass);
   });

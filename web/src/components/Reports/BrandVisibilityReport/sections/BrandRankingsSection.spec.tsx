@@ -13,14 +13,13 @@ import {
   buildBrandRow, buildBrandTrends, buildVisibility
 } from '../../layout/reportPayload-fixtures';
 import {
-  headerTooltips, sectionTable, sectionTitled, tableRow
+  headerTooltips, kpiColumnTooltips, sectionTable, sectionTitled, tableRow
 } from '../../layout/reportQueries-fixtures';
 import {
   BRAND_TRENDS_SOV_CAPTION, VISIBILITY_BRANDS_SOV_CAPTION, chartCaption, hasChartPanel
 } from './reportChartPanels-fixtures';
 import { rankingsShareOfVoiceCaption } from './brandRankings-fixtures';
 import { SHARE_OF_VOICE_TREND_TITLE } from './ReportChartPanels';
-import { KPI_DEFINITIONS } from '../../../../constants/kpiDefinitions';
 
 vi.mock('chart.js', () => import('../../../Dashboard/chartJs-fixtures'));
 
@@ -62,10 +61,7 @@ describe('BrandRankingsSection columns', () => {
   it('explains each KPI column with its definition', () => {
     renderRankings();
 
-    expect(headerTooltips(TITLE).slice(0, 4)).toStrictEqual(
-      (['visibility_score', 'mention_rate', 'share_of_voice', 'average_position'] as const)
-        .map((id) => [KPI_DEFINITIONS[id].label, KPI_DEFINITIONS[id].definition]),
-    );
+    expect(headerTooltips(TITLE).slice(0, 4)).toStrictEqual(kpiColumnTooltips('visibility_score', 'mention_rate', 'share_of_voice', 'average_position'));
   });
 
   it('explains the best position, engines and keywords columns in their own words', () => {
@@ -145,18 +141,6 @@ describe('BrandRankingsSection states', () => {
     render(<BrandRankingsSection brands={buildVisibility().brands} loading={false} error={null} subtitle="Every brand of every keyword." />);
 
     expect(screen.getByText('Every brand of every keyword.')).toBeInTheDocument();
-  });
-
-  it('shows the loading state', () => {
-    render(<BrandRankingsSection brands={null} loading error={null} />);
-
-    expect(screen.getByText('Loading brand rankings…')).toBeInTheDocument();
-  });
-
-  it('shows the error', () => {
-    render(<BrandRankingsSection brands={null} loading={false} error="Network down" />);
-
-    expect(screen.getByText('Network down')).toBeInTheDocument();
   });
 
   it('drops out of the report without a leaderboard', () => {

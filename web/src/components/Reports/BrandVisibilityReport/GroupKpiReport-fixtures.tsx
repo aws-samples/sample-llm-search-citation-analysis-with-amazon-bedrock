@@ -6,8 +6,15 @@ import type { GroupKpiHistoryResponse } from '../../../types/domain/groupKpiHist
 import userEvent from '@testing-library/user-event';
 import { GroupKpiReport } from './GroupKpiReport';
 import { GroupKpiExportButton } from './GroupKpiExportButton';
-import { buildHistory } from './groupKpiHistory-fixtures';
+import {
+  buildHistory, RUN_1
+} from './groupKpiHistory-fixtures';
 import { sectionTable } from '../layout/reportQueries-fixtures';
+
+/** A headline card footnote of `buildHistory()`'s latest group run: the change since RUN_1. */
+export function groupRunFootnote(change: string): string {
+  return `${change} since ${new Date(RUN_1).toLocaleString()}`;
+}
 
 /** The keyword group every report fixture covers. */
 export const HOTEL_SOL_SCOPE = {
@@ -38,6 +45,29 @@ export function renderGroupKpiReport({
     />,
   );
   return { onDaysChange };
+}
+
+/** The report while its history loads. */
+export const LOADING_HISTORY: Options = {
+  history: null,
+  loading: true,
+};
+
+/** The report of a period without any run. */
+export const NO_RUN_HISTORY: Options = { history: buildHistory({ runs: [] }) };
+
+/** The report whose history request failed with `error`. */
+export function failedHistory(error: string): Options {
+  return {
+    history: null,
+    error,
+  };
+}
+
+/** Mount the report on `buildHistory()` and pick the run at `timestamp`. */
+export async function renderGroupKpiReportAt(timestamp: string): Promise<void> {
+  renderGroupKpiReport();
+  await userEvent.selectOptions(screen.getByLabelText('Run'), timestamp);
 }
 
 /** The "Brand mentioned" cell of each body row of the keyword detail table, top to bottom. */

@@ -1,50 +1,22 @@
 import {
   describe, expect, it, vi
 } from 'vitest';
-import { screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { renderGroupKpiReport } from './GroupKpiReport-fixtures';
 import {
-  headerTooltips, kpiRowTooltips, sectionTable
+  headerTooltips, kpiColumnTooltips, sectionTable
 } from '../layout/reportQueries-fixtures';
 import {
   historyWithoutOwnedDomains, RUN_1
 } from './groupKpiHistory-fixtures';
-import {
-  KPI_DEFINITIONS, KPI_SPECS
-} from '../../../constants/kpiDefinitions';
-import { KPI_TABLE_ROWS } from '../layout/kpiHeadline-fixtures';
+import { KPI_DEFINITIONS } from '../../../constants/kpiDefinitions';
+import { itShowsKpiTable } from '../layout/kpiHeadline-fixtures';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
 const IMPACT_NOTE = 'Share of the group\'s change: the keyword\'s change weighted by its share of the run\'s answers.';
 
 describe('GroupKpiReport KPI table', () => {
-  it('heads the KPI table with the KPI, its value, change and trend', () => {
-    renderGroupKpiReport();
-
-    expect(sectionTable('Headline')[0]).toStrictEqual(['KPI', 'Value', 'Change', 'Trend']);
-  });
-
-  it('lists every KPI of the selected run in report order with its value, change since the previous group run and trend', () => {
-    renderGroupKpiReport();
-
-    expect(sectionTable('Headline').slice(1)).toStrictEqual(KPI_TABLE_ROWS);
-  });
-
-  it('explains every KPI of the table in a tooltip holding its definition', () => {
-    renderGroupKpiReport();
-
-    expect(kpiRowTooltips()).toStrictEqual(KPI_SPECS.map((spec) => [`About ${spec.label}`, spec.definition]));
-  });
-
-  it('shows no change or trend for a run without an earlier group run', async () => {
-    renderGroupKpiReport();
-
-    await userEvent.selectOptions(screen.getByLabelText('Run'), RUN_1);
-
-    expect(sectionTable('Headline').slice(1).map((row) => row.slice(2))).toStrictEqual(KPI_SPECS.map(() => ['—', '—']));
-  });
+  itShowsKpiTable(renderGroupKpiReport);
 
   it('shows the unmeasured citation KPIs as dashes before owned domains are set', () => {
     renderGroupKpiReport({ history: historyWithoutOwnedDomains() });
@@ -70,14 +42,11 @@ describe('GroupKpiReport drivers table', () => {
 
     expect(headerTooltips('What changed')).toStrictEqual([
       ['Brand mention', 'Whether the keyword\'s answers started or stopped naming your brand since the previous group run.'],
-      ['Mention rate', KPI_DEFINITIONS.mention_rate.definition],
+      ...kpiColumnTooltips('mention_rate'),
       ['Mention rate impact', IMPACT_NOTE],
-      ['Visibility score', KPI_DEFINITIONS.visibility_score.definition],
+      ...kpiColumnTooltips('visibility_score'),
       ['Visibility impact', IMPACT_NOTE],
-      ['Share of voice', KPI_DEFINITIONS.share_of_voice.definition],
-      ['Average position', KPI_DEFINITIONS.average_position.definition],
-      ['Top-1 share', KPI_DEFINITIONS.top_1_share.definition],
-      ['Answers', KPI_DEFINITIONS.answers.definition],
+      ...kpiColumnTooltips('share_of_voice', 'average_position', 'top_1_share', 'answers'),
     ]);
   });
 });
@@ -98,13 +67,7 @@ describe('GroupKpiReport keyword detail table', () => {
     expect(headerTooltips('Keyword detail')).toStrictEqual([
       ['Brand mentioned', 'Whether any answer of this run names your brand; "new" and "lost" compare with the keyword\'s previous run.'],
       ['Answers mentioning', KPI_DEFINITIONS.mentions.definition],
-      ['Mention rate', KPI_DEFINITIONS.mention_rate.definition],
-      ['Share of voice', KPI_DEFINITIONS.share_of_voice.definition],
-      ['Average position', KPI_DEFINITIONS.average_position.definition],
-      ['Top-1 share', KPI_DEFINITIONS.top_1_share.definition],
-      ['Visibility score', KPI_DEFINITIONS.visibility_score.definition],
-      ['Citation rate', KPI_DEFINITIONS.citation_rate.definition],
-      ['Net sentiment', KPI_DEFINITIONS.net_sentiment.definition],
+      ...kpiColumnTooltips('mention_rate', 'share_of_voice', 'average_position', 'top_1_share', 'visibility_score', 'citation_rate', 'net_sentiment'),
     ]);
   });
 

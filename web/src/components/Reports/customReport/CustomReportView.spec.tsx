@@ -17,7 +17,7 @@ import {
 } from '../scopeReport/scopeReport-fixtures';
 import { buildHeadingBlock } from './customReport-fixtures';
 import {
-  renderCustomReportRoute, reportsListPayload
+  REPORT_GONE, renderCustomReportRoute, renderWithoutSavedReports, reportsListPayload, sectionHeadingTexts
 } from './customReportPages-fixtures';
 
 vi.mock('../../../api/client', () => import('../../../api/clientMock-fixtures'));
@@ -50,7 +50,7 @@ describe('CustomReportView', () => {
   it('shows the blocks in their saved order', async () => {
     await renderSavedReport([buildHeadingBlock({ text: 'Where we stand' }), { type: 'sources_headline' }, { type: 'kpi_definitions' }]);
 
-    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toStrictEqual([
+    expect(sectionHeadingTexts()).toStrictEqual([
       'Where we stand',
       'Headline',
       'How these KPIs are measured',
@@ -66,7 +66,7 @@ describe('CustomReportView', () => {
   it('skips a block type the catalogue no longer offers', async () => {
     await renderSavedReport([{ type: 'retired_block' }, { type: 'sources_headline' }]);
 
-    expect(screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)).toStrictEqual(['Headline']);
+    expect(sectionHeadingTexts()).toStrictEqual(['Headline']);
   });
 
   it('fetches the scope data for every keyword over the saved period', async () => {
@@ -120,9 +120,8 @@ describe('CustomReportView', () => {
   });
 
   it('says the report is gone when no saved report has the id', async () => {
-    mockApiGet.mockResolvedValue(reportsListPayload());
-    renderCustomReportRoute('/reports/custom/report-missing');
+    renderWithoutSavedReports('/reports/custom/report-missing');
 
-    expect(await screen.findByText('This report no longer exists. It may have been deleted.')).toBeInTheDocument();
+    expect(await screen.findByText(REPORT_GONE)).toBeInTheDocument();
   });
 });

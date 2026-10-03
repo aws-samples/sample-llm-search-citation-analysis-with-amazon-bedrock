@@ -14,8 +14,9 @@ import { useGroupKpiHistory } from '../../../hooks/useGroupKpiHistory';
 import { ALL_SCOPE } from '../../ui/reportScope';
 import { keywordScope as kw } from '../../ui/reportScope-fixtures';
 import {
-  failedSlice, LOADING_SLICE
-} from './useBrandVisibilityReport-fixtures';
+  failedSlice, LOADING_SLICE, settledSlice
+} from '../layout/reportSlice-fixtures';
+import type { ReportSlice } from '../layout/sectionGate';
 import {
   buildTrendView, buildVisibility
 } from '../layout/reportPayload-fixtures';
@@ -32,30 +33,41 @@ const HOTEL_GROUP = {
   groupId: 'hotel-sol' 
 } as const;
 
-describe('useBrandVisibilityReport', () => {
-  const fetchVisibilityMetrics = vi.fn();
-  const fetchHistoricalTrends = vi.fn();
-  const fetchGroupKpiHistory = vi.fn();
+const EMPTY_HISTORY = {
+  runs: [],
+  keywords: [],
+};
 
+const fetchVisibilityMetrics = vi.fn();
+const fetchHistoricalTrends = vi.fn();
+const fetchGroupKpiHistory = vi.fn();
+
+function mockVisibilitySlice(slice: ReportSlice<unknown>): void {
+  mockVisibility.mockReturnValue({
+    ...slice,
+    fetchVisibilityMetrics,
+  });
+}
+
+function mockTrendsSlice(slice: ReportSlice<unknown>): void {
+  mockTrends.mockReturnValue({
+    ...slice,
+    fetchHistoricalTrends,
+  });
+}
+
+function mockGroupHistorySlice(slice: ReportSlice<unknown>): void {
+  mockGroupHistory.mockReturnValue({
+    ...slice,
+    fetchGroupKpiHistory,
+  });
+}
+
+describe('useBrandVisibilityReport', () => {
   beforeEach(() => {
-    mockVisibility.mockReturnValue({
-      data: VISIBILITY,
-      loading: false,
-      error: null,
-      fetchVisibilityMetrics,
-    });
-    mockTrends.mockReturnValue({
-      data: TRENDS,
-      loading: false,
-      error: null,
-      fetchHistoricalTrends,
-    });
-    mockGroupHistory.mockReturnValue({
-      data: null,
-      loading: false,
-      error: null,
-      fetchGroupKpiHistory,
-    });
+    mockVisibilitySlice(settledSlice(VISIBILITY));
+    mockTrendsSlice(settledSlice(TRENDS));
+    mockGroupHistorySlice(settledSlice(null));
   });
 
   it('fetches visibility and trends in per-keyword mode', () => {
@@ -112,19 +124,8 @@ describe('useBrandVisibilityReport', () => {
   });
 
   it('is ready once the group history settled, whatever the trends slice says', () => {
-    mockTrends.mockReturnValue({
-      ...LOADING_SLICE,
-      fetchHistoricalTrends,
-    });
-    mockGroupHistory.mockReturnValue({
-      data: {
-        runs: [],
-        keywords: [] 
-      },
-      loading: false,
-      error: null,
-      fetchGroupKpiHistory,
-    });
+    mockTrendsSlice(LOADING_SLICE);
+    mockGroupHistorySlice(settledSlice(EMPTY_HISTORY));
     const { result } = renderHook(() => useBrandVisibilityReport(HOTEL_GROUP, 90));
     expect(result.current.ready).toBe(true);
   });
@@ -144,50 +145,25 @@ describe('useBrandVisibilityReport', () => {
     expect([result.current.keyword, result.current.visibility]).toStrictEqual([null, null]);
   });
 
-
-
-
-
   it.each([
-    ['a per-keyword report', 'trends', kw('shoes'), false],
-    ['a per-keyword report', 'visibility', kw('shoes'), false],
-    ['an all-keywords report', 'visibility', ALL_SCOPE, true],
-  ] as const)('readiness of %s while the %s slice loads is %s', (_label, slice, scope, ready) => {
-    const loading = slice === 'trends'
-      ? () => mockTrends.mockReturnValue({
-        ...LOADING_SLICE,
-        fetchHistoricalTrends 
-      })
-      : () => mockVisibility.mockReturnValue({
-        ...LOADING_SLICE,
-        fetchVisibilityMetrics 
-      });
-    loading();
+    ['a per-keyword report', 'trends', mockTrendsSlice, kw('shoes'), false],
+    ['a per-keyword report', 'visibility', mockVisibilitySlice, kw('shoes'), false],
+    ['an all-keywords report', 'visibility', mockVisibilitySlice, ALL_SCOPE, true],
+  ] as const)('readiness of %s while the %s slice loads is %s', (_label, _slice, mockSlice, scope, ready) => {
+    mockSlice(LOADING_SLICE);
     const { result } = renderHook(() => useBrandVisibilityReport(scope, 90));
     expect(result.current.ready).toBe(ready);
   });
 
   it('hands no keyword visibility on a failed request', () => {
-    mockVisibility.mockReturnValue({
-      ...failedSlice('boom'),
-      fetchVisibilityMetrics 
-    });
+    mockVisibilitySlice(failedSlice('boom'));
     const { result } = renderHook(() => useBrandVisibilityReport(kw('shoes'), 90));
     expect(result.current.visibility).toBeNull();
   });
 
   it('hands the group history to the report', () => {
-    const history = {
-      runs: [],
-      keywords: [] 
-    };
-    mockGroupHistory.mockReturnValue({
-      data: history,
-      loading: false,
-      error: 'partial',
-      fetchGroupKpiHistory,
-    });
+    mockGroupHistorySlice(settledSlice(EMPTY_HISTORY, 'partial'));
     const { result } = renderHook(() => useBrandVisibilityReport(HOTEL_GROUP, 90));
-    expect([result.current.groupHistory, result.current.groupHistoryError]).toStrictEqual([history, 'partial']);
+    expect([result.current.groupHistory, result.current.groupHistoryError]).toStrictEqual([EMPTY_HISTORY, 'partial']);
   });
 });

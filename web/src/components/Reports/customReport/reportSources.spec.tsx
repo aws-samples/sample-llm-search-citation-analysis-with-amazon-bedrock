@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import {
   describe, expect, it, vi
 } from 'vitest';
@@ -13,7 +14,7 @@ import {
   buildCompetitorSource, buildReportSources
 } from './customReportPages-fixtures';
 import {
-  pickCompetitor, ReportSourcesMissingError, ReportSourcesProvider, sourcesReady
+  pickCompetitor, ReportSourcesMissingError, ReportSourcesProvider, sourcesReady, type SourceId
 } from './reportSources';
 import {
   BrandConfigProbe, mockBrandConfigWith, ReportSourcesProbe
@@ -30,14 +31,19 @@ const INPUTS = {
   competitor: 'Hotel Luna',
 } as const;
 
+/** A provider of the source `source` over `INPUTS`, around `probe`. */
+function renderProvider(source: SourceId, probe: ReactNode) {
+  return render(
+    <ReportSourcesProvider sources={new Set([source])} inputs={INPUTS}>
+      {probe}
+    </ReportSourcesProvider>,
+  );
+}
+
 describe('ReportSourcesProvider', () => {
   it('provides only the sources it was asked for', () => {
     vi.mocked(useScopeReportData).mockReturnValue(buildScopeReport());
-    const { container } = render(
-      <ReportSourcesProvider sources={new Set(['scope'])} inputs={INPUTS}>
-        <ReportSourcesProbe />
-      </ReportSourcesProvider>,
-    );
+    const { container } = renderProvider('scope', <ReportSourcesProbe />);
 
     expect(container).toHaveTextContent('scope');
     expect(useExecutiveSummary).not.toHaveBeenCalled();
@@ -45,11 +51,7 @@ describe('ReportSourcesProvider', () => {
 
   it('feeds the scope source the reader\u2019s scope and period', () => {
     vi.mocked(useScopeReportData).mockReturnValue(buildScopeReport());
-    render(
-      <ReportSourcesProvider sources={new Set(['scope'])} inputs={INPUTS}>
-        <ReportSourcesProbe />
-      </ReportSourcesProvider>,
-    );
+    renderProvider('scope', <ReportSourcesProbe />);
 
     expect(useScopeReportData).toHaveBeenCalledWith({ kind: 'all' }, 90);
   });
@@ -57,11 +59,7 @@ describe('ReportSourcesProvider', () => {
   it('shows the competitor asked for in the URL when it is configured', () => {
     vi.mocked(useBrandConfig).mockReturnValue(mockBrandConfigWith(['Hotel Sol', 'Hotel Luna']));
     vi.mocked(useCompetitorGap).mockReturnValue(buildCompetitorSource().gap);
-    const { container } = render(
-      <ReportSourcesProvider sources={new Set(['competitor'])} inputs={INPUTS}>
-        <BrandConfigProbe />
-      </ReportSourcesProvider>,
-    );
+    const { container } = renderProvider('competitor', <BrandConfigProbe />);
 
     expect(container).toHaveTextContent('Hotel Luna');
     expect(useCompetitorGap).toHaveBeenCalledWith('Hotel Luna');

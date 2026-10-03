@@ -1,4 +1,6 @@
-import type { ReactElement } from 'react';
+import type {
+  ComponentType, ReactElement
+} from 'react';
 import { render } from '@testing-library/react';
 import {
   MemoryRouter, Route, Routes, useLocation
@@ -17,6 +19,7 @@ import { SentimentReport } from '../SentimentReport';
 import { ALL_SCOPE } from '../../ui/reportScope';
 import type { ReportSlice } from '../layout/sectionGate';
 import type { ScopeReportData } from './useScopeReportData';
+import type { ScopeSectionProps } from './scopeSectionGate';
 
 /**
  * Report data for the specs of the Competitor Benchmark, AI Engines,
@@ -36,10 +39,18 @@ export function settledSlice<T>(data: T): ReportSlice<T> {
   };
 }
 
-const IN_FLIGHT = {
+/** A fetch in flight. */
+export const IN_FLIGHT = {
   data: null,
   loading: true,
   error: null,
+} as const;
+
+/** A fetch that failed with NETWORK_ERROR. */
+export const FAILED = {
+  data: null,
+  loading: false,
+  error: NETWORK_ERROR,
 } as const;
 
 /** Both fetches settled with the Nike world for every keyword, over the last 30 days per day, unless overridden. */
@@ -76,14 +87,9 @@ export function loadingScopeReport(): ScopeReportData {
 
 /** Both fetches failed with NETWORK_ERROR. */
 export function failedScopeReport(): ScopeReportData {
-  const failed = {
-    data: null,
-    loading: false,
-    error: NETWORK_ERROR,
-  };
   return buildScopeReport({
-    visibility: failed,
-    trends: failed,
+    visibility: FAILED,
+    trends: FAILED,
   });
 }
 
@@ -111,6 +117,12 @@ export const HOTEL_SOL_GROUP = buildKeywordGroup({
 /** Renders report sections inside a router, for the sections that link elsewhere. */
 export function renderSections(sections: ReactElement) {
   return render(<MemoryRouter>{sections}</MemoryRouter>);
+}
+
+/** A renderer of a report's `Sections` inside a router, fed `buildScopeReport()` unless given a report. */
+export function sectionsRenderer(sections: ComponentType<ScopeSectionProps>) {
+  const Sections = sections;
+  return (report: ScopeReportData = buildScopeReport()) => renderSections(<Sections report={report} />);
 }
 
 type ReportElement = (keywords: Keyword[]) => ReactElement;

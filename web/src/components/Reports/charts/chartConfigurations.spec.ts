@@ -5,10 +5,27 @@ import {
   themedAxis, themedLegend, themedTooltip
 } from '../../ui/chartTheme';
 import {
-  LIGHT_CONFIGURATIONS, LIGHT_THEME, PERCENT_AXES
+  CHART_KINDS, EMPTY_CHART_DATA, LIGHT_CONFIGURATIONS, LIGHT_THEME, PERCENT_AXES, STACKED_ROW_AXES
 } from './charts-fixtures';
 
 describe('every report chart configuration', () => {
+  it.each(CHART_KINDS)('%s draws a %s chart indexed along %s', (_name, buildChart, type, indexAxis) => {
+    const chart = buildChart();
+
+    expect([chart.type, chart.options?.indexAxis]).toStrictEqual([type, indexAxis]);
+  });
+
+  it.each(EMPTY_CHART_DATA)('%s draws nothing without data', (_name, buildData) => {
+    expect(buildData()).toStrictEqual({
+      labels: [],
+      datasets: [],
+    });
+  });
+
+  it.each(STACKED_ROW_AXES)('%s stacks the values of a row in one bar', (_name, buildAxis) => {
+    expect(buildAxis()).toStrictEqual(themedAxis(LIGHT_THEME, { stacked: true }));
+  });
+
   it.each(LIGHT_CONFIGURATIONS)('%s is responsive and fills its fixed-height box', (_name, buildChart) => {
     const chart = buildChart();
 

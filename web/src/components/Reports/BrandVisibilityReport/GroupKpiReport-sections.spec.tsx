@@ -6,13 +6,13 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  keywordDetailMentions, renderGroupKpiReport
+  failedHistory, keywordDetailMentions, LOADING_HISTORY, NO_RUN_HISTORY, renderGroupKpiReport
 } from './GroupKpiReport-fixtures';
 import {
   definitionTerms, definitionTexts, sectionTable
 } from '../layout/reportQueries-fixtures';
 import {
-  buildHistory, buildKeywordChange, buildKeywordRun, buildRun, historyWithKeywordRun, KEYWORD_KPIS, RUN_1, RUN_2
+  buildHistory, buildKeywordChange, buildKeywordRun, buildRun, buildRunSeries, historyWithKeywordRun, KEYWORD_KPIS, RUN_2
 } from './groupKpiHistory-fixtures';
 import { GROUP_REPORT_DEFINITIONS } from '../../../constants/kpiDefinitions';
 
@@ -42,26 +42,13 @@ describe('GroupKpiReport evolution', () => {
   });
 
   it('lists every model of a provider that answered with several', () => {
-    renderGroupKpiReport({
-      history: buildHistory({
-        runs: [
-          buildRun({
-            timestamp: RUN_1,
-            models: { openai: ['a', 'b'] }
-          }),
-          buildRun({
-            timestamp: RUN_2,
-            models: { openai: ['c', 'd'] }
-          }),
-        ],
-      }),
-    });
+    renderGroupKpiReport({ history: buildHistory({ runs: buildRunSeries({ models: { openai: ['a', 'b'] } }, { models: { openai: ['c', 'd'] } }) }) });
 
     expect(screen.getByText(`${new Date(RUN_2).toLocaleDateString()} · openai: a, b → c, d`)).toBeInTheDocument();
   });
 
   it('shows no model list when every run used the same models', () => {
-    renderGroupKpiReport({ history: buildHistory({ runs: [buildRun({ timestamp: RUN_1 }), buildRun({ timestamp: RUN_2 })] }) });
+    renderGroupKpiReport({ history: buildHistory({ runs: buildRunSeries({}, {}) }) });
 
     expect(screen.queryByText('Model changes')).not.toBeInTheDocument();
   });
@@ -167,10 +154,7 @@ describe('GroupKpiReport definitions', () => {
   });
 
   it('keeps the definitions while the history loads', () => {
-    renderGroupKpiReport({
-      history: null,
-      loading: true
-    });
+    renderGroupKpiReport(LOADING_HISTORY);
 
     expect(definitionTerms()).toHaveLength(GROUP_REPORT_DEFINITIONS.length);
   });
@@ -194,27 +178,21 @@ describe('GroupKpiReport period and states', () => {
   });
 
   it('says when the period holds no run and keeps the period picker', () => {
-    renderGroupKpiReport({ history: buildHistory({ runs: [] }) });
+    renderGroupKpiReport(NO_RUN_HISTORY);
 
     expect(screen.getByText('No analysis run of this group in the last 90 days. Run an analysis or choose a longer period.')).toBeInTheDocument();
     expect(screen.getByLabelText('Period')).toBeInTheDocument();
   });
 
   it('shows the loading state and keeps the heading', () => {
-    renderGroupKpiReport({
-      history: null,
-      loading: true
-    });
+    renderGroupKpiReport(LOADING_HISTORY);
 
     expect(screen.getByText('Loading the group KPI history…')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Headline' })).toBeInTheDocument();
   });
 
   it('shows the error', () => {
-    renderGroupKpiReport({
-      history: null,
-      error: 'Failed to fetch the group KPI history'
-    });
+    renderGroupKpiReport(failedHistory('Failed to fetch the group KPI history'));
 
     expect(screen.getByText('Failed to fetch the group KPI history')).toBeInTheDocument();
   });
@@ -228,7 +206,7 @@ describe('GroupKpiReport download and coverage notes', () => {
   });
 
   it('offers no download before there is a run to export', () => {
-    renderGroupKpiReport({ history: buildHistory({ runs: [] }) });
+    renderGroupKpiReport(NO_RUN_HISTORY);
 
     expect(screen.queryByRole('button', { name: 'Export to Excel' })).not.toBeInTheDocument();
   });

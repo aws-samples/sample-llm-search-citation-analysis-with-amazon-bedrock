@@ -7,7 +7,7 @@ import {
 import { SourcesSections } from './SourcesReport';
 import { OWNED_DOMAINS_MISSING } from '../layout/KpiHeadline';
 import {
-  buildScopeReport, renderSections, reportWithVisibility
+  reportWithVisibility, sectionsRenderer
 } from '../scopeReport/scopeReport-fixtures';
 import {
   headerTooltips, sectionTable, sectionTitled, statCardInfo, statFigure, statFootnote
@@ -18,13 +18,15 @@ import {
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
+const renderSources = sectionsRenderer(SourcesSections);
+
 describe('Sources headline', () => {
   it.each([
     ['Citations', '6'],
     ['Citation rate', '30.0%'],
     ['Citation share', '12.5%'],
   ])('shows your %s', (label, figure) => {
-    renderSections(<SourcesSections report={buildScopeReport()} />);
+    renderSources();
 
     expect(statFigure(label).textContent).toBe(figure);
   });
@@ -34,28 +36,28 @@ describe('Sources headline', () => {
     ['Citation rate', '+1.2 pts vs previous run (3 keywords)'],
     ['Citation share', '-2.5 pts vs previous run (3 keywords)'],
   ])('notes the change in %s since each keyword\'s previous run', (label, note) => {
-    renderSections(<SourcesSections report={reportWithVisibility({ change: buildPeriodChange() })} />);
+    renderSources(reportWithVisibility({ change: buildPeriodChange() }));
 
     expect(statFootnote(label)).toBe(note);
   });
 
   it.each([['Citations'], ['Citation rate'], ['Citation share']])('asks for owned domains before measuring the %s', (label) => {
-    renderSections(<SourcesSections report={reportWithVisibility({
+    renderSources(reportWithVisibility({
       citations_configured: false,
       change: buildPeriodChange(),
-    })} />);
+    }));
 
     expect(statFootnote(label)).toBe(OWNED_DOMAINS_MISSING);
   });
 
   it('counts every domain cited, not only the listed ones', () => {
-    renderSections(<SourcesSections report={reportWithVisibility({ sources_total: 42 })} />);
+    renderSources(reportWithVisibility({ sources_total: 42 }));
 
     expect(statFigure('Domains cited').textContent).toBe('42');
   });
 
   it('explains the domains cited in the card tooltip', () => {
-    renderSections(<SourcesSections report={buildScopeReport()} />);
+    renderSources();
 
     expect(statCardInfo('Domains cited')).toBe('How many distinct domains the answers cite as sources, yours and everyone else\'s.');
   });
@@ -63,7 +65,7 @@ describe('Sources headline', () => {
 
 describe('Sources most cited domains', () => {
   it('states each domain\'s citations, yours marked, in the chart caption', () => {
-    renderSections(<SourcesSections report={buildScopeReport()} />);
+    renderSources();
 
     expect(within(sectionTitled('Most cited domains')).getByText(/^Answers citing each/).textContent)
       .toBe('Answers citing each of the 3 most cited domains: runnersworld.com 9, nike.com 6 (yours) and reddit.com 5.');
@@ -72,13 +74,13 @@ describe('Sources most cited domains', () => {
 
 describe('Sources domains table', () => {
   it('heads the domain, its citations, rate, share, engines and keywords', () => {
-    renderSections(<SourcesSections report={buildScopeReport()} />);
+    renderSources();
 
     expect(sectionTable('Cited domains')[0]).toStrictEqual(['Domain', 'Citations', 'Citation rate', 'Citation share', 'Engines', 'Keywords']);
   });
 
   it('explains every per-domain figure in its column tooltip', () => {
-    renderSections(<SourcesSections report={buildScopeReport()} />);
+    renderSources();
 
     expect(headerTooltips('Cited domains')).toStrictEqual([
       ['Citations', 'Answers that cite the domain at least once.'],
@@ -90,31 +92,31 @@ describe('Sources domains table', () => {
   });
 
   it('shows every figure of a domain', () => {
-    renderSections(<SourcesSections report={buildScopeReport()} />);
+    renderSources();
 
     expect(sectionTable('Cited domains')[3]).toStrictEqual(['reddit.com', '5', '25.0%', '25.0%', 'OpenAI', '1']);
   });
 
   it('lists the domains most cited first', () => {
-    renderSections(<SourcesSections report={buildScopeReport()} />);
+    renderSources();
 
     expect(sectionTable('Cited domains').slice(1).map(([domain]) => domain)).toStrictEqual(['runnersworld.com', 'nike.com', 'reddit.com']);
   });
 
   it('badges only your owned domains', () => {
-    renderSections(<SourcesSections report={buildScopeReport()} />);
+    renderSources();
 
     expect(within(sectionTitled('Cited domains')).getByText('Owned').closest('td')?.firstChild?.textContent).toBe('nike.com');
   });
 
   it('notes when only the most cited domains are listed', () => {
-    renderSections(<SourcesSections report={reportWithVisibility({ sources_total: 40 })} />);
+    renderSources(reportWithVisibility({ sources_total: 40 }));
 
     expect(screen.getByText('Listing the 3 most cited of 40 domains.')).toBeInTheDocument();
   });
 
   it('puts only the Citation Gaps pointer under the table when every domain is listed', () => {
-    renderSections(<SourcesSections report={buildScopeReport()} />);
+    renderSources();
 
     expect([...sectionTitled('Cited domains').querySelectorAll('p')].map((paragraph) => paragraph.textContent)).toStrictEqual([
       'The domains the latest runs cite, most cited first. Your owned domains carry a badge.',
@@ -123,16 +125,16 @@ describe('Sources domains table', () => {
   });
 
   it('points to the Citation Gaps analysis', () => {
-    renderSections(<SourcesSections report={buildScopeReport()} />);
+    renderSources();
 
     expect(screen.getByRole('link', { name: 'See the Citation Gaps analysis' })).toHaveAttribute('href', '/citation-gaps');
   });
 
   it('says so when no answer cites a source', () => {
-    renderSections(<SourcesSections report={reportWithVisibility({
+    renderSources(reportWithVisibility({
       sources: [],
       sources_total: 0,
-    })} />);
+    }));
 
     expect(within(sectionTitled('Cited domains')).getByText('No answer cites a source yet.')).toBeInTheDocument();
   });
@@ -141,7 +143,7 @@ describe('Sources domains table', () => {
     [['gemini', 'openai'], 'Google Gemini, OpenAI'],
     [[], ''],
   ])('writes the engines %j citing a domain as "%s"', (engines, names) => {
-    renderSections(<SourcesSections report={reportWithVisibility({ sources: [buildSourceRow('example.org', { engines })] })} />);
+    renderSources(reportWithVisibility({ sources: [buildSourceRow('example.org', { engines })] }));
 
     expect(sectionTable('Cited domains')[1]).toStrictEqual(['example.org', '4', '20.0%', '20.0%', names, '2']);
   });

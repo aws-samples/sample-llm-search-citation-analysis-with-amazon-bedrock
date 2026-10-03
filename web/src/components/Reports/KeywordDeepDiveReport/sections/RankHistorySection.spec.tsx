@@ -1,8 +1,9 @@
+import type { ComponentProps } from 'react';
 import {
   describe, it, expect, vi,
 } from 'vitest';
 import {
-  render, screen 
+  render, screen
 } from '@testing-library/react';
 import { RankHistorySection } from './RankHistorySection';
 import {
@@ -20,9 +21,14 @@ vi.mock('chart.js', () => import('../../../Dashboard/chartJs-fixtures'));
 
 const EMPTY = 'No history yet — run an analysis of this keyword to start one.';
 
+/** The section loaded with `buildTrendView()`, unless `props` say otherwise. */
+function renderRankHistory(props: Partial<ComponentProps<typeof RankHistorySection>> = {}) {
+  render(<RankHistorySection trends={buildTrendView()} loading={false} error={null} {...props} />);
+}
+
 describe('RankHistorySection — chart', () => {
   it('charts the keyword KPIs of every period above the table', () => {
-    render(<RankHistorySection trends={buildTrendView()} loading={false} error={null} />);
+    renderRankHistory();
 
     expect(chartCaption(KPI_TREND_TITLE, sectionTitled('KPI history'))).toBe(TREND_VIEW_KPI_CAPTION);
   });
@@ -30,7 +36,7 @@ describe('RankHistorySection — chart', () => {
 
 describe('RankHistorySection — table', () => {
   it('lists every period of the keyword with its runs and KPIs', () => {
-    render(<RankHistorySection trends={buildTrendView({ trend_data: buildTrendPoints(2) })} loading={false} error={null} />);
+    renderRankHistory({ trends: buildTrendView({ trend_data: buildTrendPoints(2) }) });
 
     expect(sectionTable('KPI history').slice(1)).toStrictEqual([
       ['d-00', '2', '20', '60.0%', '25.0%', '40.0', '1.80', '30.0%'],
@@ -39,13 +45,13 @@ describe('RankHistorySection — table', () => {
   });
 
   it('says over which periods and days the KPIs moved', () => {
-    render(<RankHistorySection trends={buildTrendView({ period_type: 'week' })} loading={false} error={null} />);
+    renderRankHistory({ trends: buildTrendView({ period_type: 'week' }) });
 
     expect(screen.getByText('How this keyword\'s KPIs moved per week over the last 30 days.')).toBeInTheDocument();
   });
 
   it('samples a long history to the printable number of rows, keeping the first and last period', () => {
-    render(<RankHistorySection trends={buildTrendView({ trend_data: buildTrendPoints(30) })} loading={false} error={null} />);
+    renderRankHistory({ trends: buildTrendView({ trend_data: buildTrendPoints(30) }) });
 
     const periods = sectionTable('KPI history').slice(1).map(([period]) => period);
     expect([periods.length, periods[0], periods[periods.length - 1]]).toStrictEqual([14, 'd-00', 'd-29']);
@@ -57,25 +63,28 @@ describe('RankHistorySection — placeholder states', () => {
     ['the trend holds no period', buildTrendView({ trend_data: [] })],
     ['there is no trend answer', null],
   ])('says there is no history yet when %s', (_label, trends) => {
-    render(<RankHistorySection trends={trends} loading={false} error={null} />);
+    renderRankHistory({ trends });
 
     expect(screen.getByText(EMPTY)).toBeInTheDocument();
   });
 
-  it('renders loading state when loading is true', () => {
-    render(<RankHistorySection trends={null} loading error={null} />);
+  it.each([
+    ['shows the loading state', 'Loading trend data…'],
+    ['describes the default 30-day window', 'How this keyword\'s KPIs moved per day over the last 30 days.'],
+  ])('%s while loading', (_outcome, text) => {
+    renderRankHistory({
+      trends: null,
+      loading: true,
+    });
 
-    expect(screen.getByText('Loading trend data…')).toBeInTheDocument();
-  });
-
-  it('describes the default 30-day window while loading', () => {
-    render(<RankHistorySection trends={null} loading error={null} />);
-
-    expect(screen.getByText('How this keyword\'s KPIs moved per day over the last 30 days.')).toBeInTheDocument();
+    expect(screen.getByText(text)).toBeInTheDocument();
   });
 
   it('renders error message when error is set', () => {
-    render(<RankHistorySection trends={null} loading={false} error="Network blew up" />);
+    renderRankHistory({
+      trends: null,
+      error: 'Network blew up',
+    });
 
     expect(screen.getByText('Network blew up')).toBeInTheDocument();
   });

@@ -34,18 +34,14 @@ function renderPanel() {
 }
 
 describe('CustomReportsPanel', () => {
-  it('links every saved report to its page', async () => {
+  it.each([
+    ['links every saved report to its page', 'Board pack', '/reports/custom/report-board'],
+    ['links every saved report to its editor', 'Edit Board pack', '/reports/custom/report-board/edit'],
+  ])('%s', async (_outcome, name, href) => {
     setupListing(BOARD_PACK);
     renderPanel();
 
-    expect(await screen.findByRole('link', { name: 'Board pack' })).toHaveAttribute('href', '/reports/custom/report-board');
-  });
-
-  it('links every saved report to its editor', async () => {
-    setupListing(BOARD_PACK);
-    renderPanel();
-
-    expect(await screen.findByRole('link', { name: 'Edit Board pack' })).toHaveAttribute('href', '/reports/custom/report-board/edit');
+    expect(await screen.findByRole('link', { name })).toHaveAttribute('href', href);
   });
 
   it('says how many blocks and which period a report has, and who changed it last', async () => {

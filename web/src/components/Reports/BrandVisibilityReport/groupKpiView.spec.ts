@@ -5,7 +5,7 @@ import {
   groupRuns, latestGroupRun, modelChanges, runTrend
 } from './groupKpiView';
 import {
-  buildChange, buildRun, buildTrends, RUN_1, RUN_2, RUN_3
+  buildChange, buildRun, buildRunSeries, buildTrends, RUN_1, RUN_2, RUN_3
 } from './groupKpiHistory-fixtures';
 
 const PARTIAL = buildRun({
@@ -33,16 +33,7 @@ describe('latestGroupRun', () => {
 
 describe('modelChanges', () => {
   it('reports a provider that answered with another model than in the previous group run', () => {
-    const runs = [
-      buildRun({
-        timestamp: RUN_1,
-        models: { openai: ['gpt-5-mini'] }
-      }),
-      buildRun({
-        timestamp: RUN_2,
-        models: { openai: ['gpt-5.2'] }
-      }),
-    ];
+    const runs = buildRunSeries({ models: { openai: ['gpt-5-mini'] } }, { models: { openai: ['gpt-5.2'] } });
 
     expect(modelChanges(runs)).toStrictEqual([{
       timestamp: RUN_2,
@@ -53,36 +44,20 @@ describe('modelChanges', () => {
   });
 
   it('ignores partial runs when looking for the previous models', () => {
-    const runs = [
-      buildRun({
-        timestamp: RUN_1,
-        models: { openai: ['gpt-5-mini'] }
-      }),
-      buildRun({
-        timestamp: RUN_2,
+    const runs = buildRunSeries(
+      { models: { openai: ['gpt-5-mini'] } },
+      {
         is_group_run: false,
-        models: { openai: ['gpt-4.1'] }
-      }),
-      buildRun({
-        timestamp: RUN_3,
-        models: { openai: ['gpt-5-mini'] }
-      }),
-    ];
+        models: { openai: ['gpt-4.1'] },
+      },
+      { models: { openai: ['gpt-5-mini'] } },
+    );
 
     expect(modelChanges(runs)).toStrictEqual([]);
   });
 
   it('does not count a provider that is missing from one of the runs', () => {
-    const runs = [
-      buildRun({
-        timestamp: RUN_1,
-        models: { openai: ['gpt-5-mini'] }
-      }),
-      buildRun({
-        timestamp: RUN_2,
-        models: { gemini: ['gemini-2.5-pro'] }
-      }),
-    ];
+    const runs = buildRunSeries({ models: { openai: ['gpt-5-mini'] } }, { models: { gemini: ['gemini-2.5-pro'] } });
 
     expect(modelChanges(runs)).toStrictEqual([]);
   });
@@ -94,16 +69,7 @@ describe('modelChanges', () => {
     ['two models turned into one joined name', ['a', 'b'], ['a\nb']],
     ['the same models in another order', ['a', 'b'], ['b', 'a']],
   ])('counts %s as a model change', (_label, before, after) => {
-    const runs = [
-      buildRun({
-        timestamp: RUN_1,
-        models: { openai: before }
-      }),
-      buildRun({
-        timestamp: RUN_2,
-        models: { openai: after }
-      }),
-    ];
+    const runs = buildRunSeries({ models: { openai: before } }, { models: { openai: after } });
 
     expect(modelChanges(runs)).toHaveLength(1);
   });

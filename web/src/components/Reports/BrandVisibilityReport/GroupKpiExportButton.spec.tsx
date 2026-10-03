@@ -1,5 +1,5 @@
 import {
-  describe, expect, it, vi
+  beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
   screen, waitFor
@@ -23,17 +23,17 @@ const HISTORY = buildHistory();
 const RUN = HISTORY.runs[1];
 
 describe('GroupKpiExportButton', () => {
-  it('fetches the brand mentions of the selected run', async () => {
+  beforeEach(() => {
     vi.mocked(fetchBrandMentionsAtRun).mockResolvedValue(BRAND_MENTIONS_AT_RUN);
+  });
 
+  it('fetches the brand mentions of the selected run', async () => {
     await clickExport();
 
     expect(fetchBrandMentionsAtRun).toHaveBeenCalledWith(HOTEL_SOL_SCOPE, RUN.timestamp);
   });
 
   it('exports the history, the run and its brand mentions', async () => {
-    vi.mocked(fetchBrandMentionsAtRun).mockResolvedValue(BRAND_MENTIONS_AT_RUN);
-
     await clickExport();
 
     await waitFor(() => expect(exportGroupKpiReport).toHaveBeenCalledWith(HISTORY, 'Hotel Sol', RUN, BRAND_MENTIONS_AT_RUN));
@@ -59,7 +59,6 @@ describe('GroupKpiExportButton', () => {
   });
 
   it('reports a workbook that could not be written', async () => {
-    vi.mocked(fetchBrandMentionsAtRun).mockResolvedValue(BRAND_MENTIONS_AT_RUN);
     vi.mocked(exportGroupKpiReport).mockRejectedValue(new WorkbookError('disk full'));
 
     await clickExport();
@@ -75,22 +74,20 @@ describe('GroupKpiExportButton', () => {
     expect(screen.getByRole('button', { name: 'Exporting…' })).toBeDisabled();
   });
 
-  it('frees the button once the workbook is written', async () => {
-    vi.mocked(fetchBrandMentionsAtRun).mockResolvedValue(BRAND_MENTIONS_AT_RUN);
-    vi.mocked(exportGroupKpiReport).mockResolvedValue(undefined);
+  describe('once the workbook is written', () => {
+    beforeEach(async () => {
+      vi.mocked(exportGroupKpiReport).mockResolvedValue(undefined);
+      await clickExport();
+    });
 
-    await clickExport();
+    it('frees the button', async () => {
+      expect(await screen.findByRole('button', { name: 'Export to Excel' })).toBeEnabled();
+    });
 
-    expect(await screen.findByRole('button', { name: 'Export to Excel' })).toBeEnabled();
-  });
+    it('shows no notice after a complete export', async () => {
+      await screen.findByRole('button', { name: 'Export to Excel' });
 
-  it('shows no notice after a complete export', async () => {
-    vi.mocked(fetchBrandMentionsAtRun).mockResolvedValue(BRAND_MENTIONS_AT_RUN);
-    vi.mocked(exportGroupKpiReport).mockResolvedValue(undefined);
-
-    await clickExport();
-    await screen.findByRole('button', { name: 'Export to Excel' });
-
-    expect([screen.queryByRole('status'), screen.queryByRole('alert')]).toStrictEqual([null, null]);
+      expect([screen.queryByRole('status'), screen.queryByRole('alert')]).toStrictEqual([null, null]);
+    });
   });
 });

@@ -1,11 +1,11 @@
 import { buildContentStudioHookResult } from '../../ContentStudio/ContentStudioView-fixtures';
+import { buildCitationGapsResponse } from '../../Insights/CitationGaps-fixtures';
 import type { useCitationGaps } from '../../../hooks/useCitationGaps';
 import type { useContentStudio } from '../../../hooks/useContentStudio';
-import type {
-  CitationGapsResponse,
-  ContentIdea,
-  ContentStudioHistory,
-} from '../../../types';
+import type { CitationGapsResponse } from '../../../types';
+import {
+  buildBrief, buildIdea
+} from './sections/ContentPlanSectionProps-fixtures';
 
 type StudioHookResult = ReturnType<typeof useContentStudio>;
 type GapsHookResult = ReturnType<typeof useCitationGaps>;
@@ -34,7 +34,7 @@ export function buildStudioSnapshot({
 }: StudioSeed): StudioHookResult {
   return buildContentStudioHookResult({
     ideas: Array.from({ length: ideaCount }, (_, i) => buildIdea(`idea-${i}`)),
-    history: Array.from({ length: briefCount }, (_, i) => buildGeneratedBrief(`brief-${i}`)),
+    history: Array.from({ length: briefCount }, (_, i) => buildBrief(`brief-${i}`)),
     loading,
     fetchIdeas,
     fetchHistory,
@@ -65,10 +65,7 @@ export function buildGapsSnapshot({
 
 /** Cross-keyword citation-gaps payload with a single top gap. */
 export function buildCitationGaps(): CitationGapsResponse {
-  return {
-    gaps: [],
-    covered_sources: [],
-    domain_summary: [],
+  return buildCitationGapsResponse({
     summary: {
       gap_count: 1,
       covered_count: 0,
@@ -90,39 +87,5 @@ export function buildCitationGaps(): CitationGapsResponse {
     ],
     total_gaps: 1,
     total_high_priority: 1,
-  };
-}
-
-function buildIdea(id: string): ContentIdea {
-  return {
-    id,
-    type: 'provider_gap',
-    priority: 'medium',
-    title: `Idea ${id}`,
-    description: 'Cover the trail running angle',
-    keyword: 'trail running shoes',
-    source: 'content-studio',
-    actionable: true,
-  };
-}
-
-function buildGeneratedBrief(id: string): ContentStudioHistory {
-  return {
-    id,
-    keyword: 'trail running shoes',
-    idea_title: `Brief ${id}`,
-    content_angle: 'differentiation',
-    generated_content: {
-      title: `Brief ${id}`,
-      meta_description: 'Why trail shoes differ from road shoes',
-      body: 'Generated body',
-      suggested_headings: ['Grip', 'Protection'],
-      key_points: ['Lug depth', 'Rock plate'],
-    },
-    competitor_sources_used: 1,
-    status: 'generated',
-    viewed: false,
-    created_at: '2026-05-10T09:00:00Z',
-    updated_at: '2026-05-10T09:00:00Z',
-  };
+  });
 }

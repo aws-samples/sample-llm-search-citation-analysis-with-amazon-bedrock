@@ -5,8 +5,7 @@ import {
   renderHook, act 
 } from '@testing-library/react';
 import { useKeywordDeepDive } from './useKeywordDeepDive';
-import { settledSlice } from './useKeywordDeepDive-fixtures';
-
+import { settledSlice } from '../scopeReport/scopeReport-fixtures';
 
 vi.mock('../../../hooks/useVisibilityMetrics', () => ({useVisibilityMetrics: vi.fn(),}));
 vi.mock('../../../hooks/useHistoricalTrends', () => ({useHistoricalTrends: vi.fn(),}));
@@ -43,6 +42,15 @@ describe('useKeywordDeepDive', () => {
   const fetchPersonas = vi.fn();
   const fetchGaps = vi.fn();
   const fetchRecs = vi.fn();
+
+  /** Renders the hook for `from`, forgets every fetch so far, then rerenders it for `to`. */
+  function renderKeywordChange(from: string, to: string) {
+    const { rerender } = renderKeywordDeepDive(from);
+    [fetchVisibility, fetchTrends, fetchPersonas, fetchGaps, fetchRecs].forEach((fetch) => fetch.mockClear());
+    act(() => {
+      rerender({ keyword: to });
+    });
+  }
 
   beforeEach(() => {
     mockVisibility.mockReturnValue({
@@ -104,14 +112,7 @@ describe('useKeywordDeepDive', () => {
   });
 
   it('refetches every slice when the keyword changes', () => {
-    const { rerender } = renderKeywordDeepDive('first');
-    fetchVisibility.mockClear();
-    fetchTrends.mockClear();
-    fetchPersonas.mockClear();
-    fetchGaps.mockClear();
-    act(() => {
-      rerender({ keyword: 'second' });
-    });
+    renderKeywordChange('first', 'second');
     expect(fetchVisibility).toHaveBeenCalledWith({
       kind: 'keyword',
       keyword: 'second' 
@@ -128,28 +129,17 @@ describe('useKeywordDeepDive', () => {
   });
 
   it('refetches recommendations when the keyword changes', () => {
-    const { rerender } = renderKeywordDeepDive('first');
-    fetchRecs.mockClear();
-    act(() => {
-      rerender({ keyword: 'second' });
-    });
+    renderKeywordChange('first', 'second');
     expect(fetchRecs).toHaveBeenCalledWith(false);
   });
 
   it('does not refetch when keyword is unchanged across renders', () => {
-    const { rerender } = renderKeywordDeepDive('stable');
-    fetchVisibility.mockClear();
-    act(() => {
-      rerender({ keyword: 'stable' });
-    });
+    renderKeywordChange('stable', 'stable');
     expect(fetchVisibility).not.toHaveBeenCalled();
   });
 
   it('reports ready=true once every slice has settled with data', () => {
-    const { result } = renderHook(() =>
-      useKeywordDeepDive('best running shoes'),
-    );
-    expect(result.current.ready).toBe(true);
+    expect(renderKeywordDeepDive('best running shoes').result.current.ready).toBe(true);
   });
 
   it('reports ready=false when one slice is still loading', () => {
@@ -158,9 +148,6 @@ describe('useKeywordDeepDive', () => {
       loading: true,
       error: null 
     });
-    const { result } = renderHook(() =>
-      useKeywordDeepDive('best running shoes'),
-    );
-    expect(result.current.ready).toBe(false);
+    expect(renderKeywordDeepDive('best running shoes').result.current.ready).toBe(false);
   });
 });

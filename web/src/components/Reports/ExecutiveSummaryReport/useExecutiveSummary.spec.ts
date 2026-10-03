@@ -7,20 +7,25 @@ import { useExecutiveSummary } from './useExecutiveSummary';
 vi.mock('../../../hooks/useReportsOverview', () => ({useReportsOverview: vi.fn()}));
 
 import { useReportsOverview } from '../../../hooks/useReportsOverview';
+import type { ReportsOverviewResponse } from '../../../api/reports';
+import type { ReportSlice } from '../layout';
 import { buildOverview } from '../layout/reportPayload-fixtures';
+import { loadedOverview } from './sections/reportsOverview-fixtures';
 
 const mockOverview = useReportsOverview as ReturnType<typeof vi.fn>;
 
 describe('useExecutiveSummary', () => {
   const fetchReportsOverview = vi.fn();
 
-  beforeEach(() => {
+  function mockOverviewHook(slice: ReportSlice<ReportsOverviewResponse>) {
     mockOverview.mockReturnValue({
-      data: buildOverview(),
-      loading: false,
-      error: null,
+      ...slice,
       fetchReportsOverview,
     });
+  }
+
+  beforeEach(() => {
+    mockOverviewHook(loadedOverview());
   });
 
   it('fetches the overview with default 30-day window over all keywords', () => {
@@ -55,11 +60,10 @@ describe('useExecutiveSummary', () => {
   });
 
   it('reports ready=false while the overview slice is loading', () => {
-    mockOverview.mockReturnValue({
+    mockOverviewHook({
       data: null,
       loading: true,
       error: null,
-      fetchReportsOverview,
     });
     const { result } = renderHook(() => useExecutiveSummary());
     expect(result.current.ready).toBe(false);

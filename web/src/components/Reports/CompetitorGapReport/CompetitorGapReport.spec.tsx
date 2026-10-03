@@ -8,6 +8,9 @@ import {
   MemoryRouter, Routes, Route 
 } from 'react-router-dom';
 import { CompetitorGapReport } from './CompetitorGapReport';
+import {
+  buildOutrankedKeyword, buildRollup, buildSource
+} from './sections/rollupSection-fixtures';
 
 vi.mock('./useCompetitorGap', () => ({useCompetitorGap: vi.fn()}));
 vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPrintMode: false })),}));
@@ -20,33 +23,26 @@ const mockGap = useCompetitorGap as ReturnType<typeof vi.fn>;
 const mockBrand = useBrandConfig as ReturnType<typeof vi.fn>;
 
 /** The one source Adidas is cited from that we are not; it is both an exclusive source and an outreach target. */
-const ADIDAS_EXCLUSIVE_SOURCE = {
-  keyword: 'best running shoes',
+const ADIDAS_EXCLUSIVE_SOURCE = buildSource({
   url: 'https://example.com/shoes',
-  domain: 'example.com',
-  priority: 'high' as const,
   citation_count: 9,
   provider_count: 3,
   providers: ['openai', 'perplexity', 'gemini'],
   lift_score: 6.91,
-};
+});
 
 const POPULATED_DATA = {
   competitor: 'Adidas',
-  rollup: {
-    competitor: 'Adidas',
+  rollup: buildRollup({
     outranked_keywords: [
-      {
+      buildOutrankedKeyword({
         keyword: 'best running shoes',
-        their_best_rank: 1,
-        our_best_rank: 3,
-        rank_delta: 2,
         providers: ['openai', 'perplexity'],
-      },
+      }),
     ],
     exclusive_sources: [ADIDAS_EXCLUSIVE_SOURCE],
     outreach_targets: [ADIDAS_EXCLUSIVE_SOURCE],
-  },
+  }),
   keywordsAnalyzed: 4,
   loading: false,
   error: null,

@@ -15,9 +15,11 @@ import {
   cardFigure, cardFootnote, plainStatCard, statFigure, statFootnote
 } from '../../layout/reportQueries-fixtures';
 import { buildKpis } from '../../BrandVisibilityReport/groupKpiHistory-fixtures';
+import { loadedOverview } from './reportsOverview-fixtures';
+import { sectionPlaceholderCases } from '../../layout/sectionGate-fixtures';
 
 function renderHeadline(overrides: Partial<ReportsOverviewResponse> = {}): void {
-  render(<HeadlineSection data={buildOverview(overrides)} loading={false} error={null} />);
+  render(<HeadlineSection {...loadedOverview(overrides)} />);
 }
 
 describe('HeadlineSection — KPIs', () => {
@@ -79,14 +81,11 @@ describe('HeadlineSection — keyword breadth', () => {
 });
 
 describe('HeadlineSection — placeholder states', () => {
-  it('renders the loading placeholder when loading is true', () => {
-    render(<HeadlineSection data={null} loading error={null} />);
-    expect(screen.getByText('Loading executive summary…')).toBeInTheDocument();
-  });
-
-  it('renders the error message when error is set', () => {
-    render(<HeadlineSection data={null} loading={false} error="boom" />);
-    expect(screen.getByText('boom')).toBeInTheDocument();
+  it.each(sectionPlaceholderCases('Loading executive summary…'))('renders the $name', ({
+    state, text
+  }) => {
+    render(<HeadlineSection data={null} {...state} />);
+    expect(screen.getByText(text)).toBeInTheDocument();
   });
 
   it.each([

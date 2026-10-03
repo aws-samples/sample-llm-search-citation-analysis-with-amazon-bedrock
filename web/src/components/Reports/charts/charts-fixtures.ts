@@ -178,6 +178,7 @@ export function topSourcesChart(sources: readonly SourceRow[] = buildSources(), 
 interface ConfigurationShape {
   readonly type: string;
   readonly options?: {
+    readonly indexAxis?: string;
     readonly responsive?: boolean;
     readonly maintainAspectRatio?: boolean;
     readonly plugins?: {
@@ -206,4 +207,36 @@ export const PERCENT_AXES: ReadonlyArray<readonly [string, () => unknown]> = [
   ['buildKpiTrendChartConfiguration', () => kpiTrendChart().options?.scales?.y],
   ['buildEngineKpiChartConfiguration', () => engineKpiChart().options?.scales?.y],
   ['buildBrandTrendChartConfiguration', () => brandTrendChart().options?.scales?.y],
+];
+
+/** The colour variants a chart draws in, with the `isDark` flag that picks each. */
+export const THEME_VARIANTS = [
+  ['light', false],
+  ['dark', true],
+] as const;
+
+/** Each chart's Chart.js type and index axis (`undefined` for the default x), by builder name. */
+export const CHART_KINDS: ReadonlyArray<readonly [string, () => ConfigurationShape, string, string | undefined]> = [
+  ['buildKpiTrendChartConfiguration', () => kpiTrendChart(), 'line', undefined],
+  ['buildEngineKpiChartConfiguration', () => engineKpiChart(), 'bar', undefined],
+  ['buildShareOfVoiceChartConfiguration', () => shareOfVoiceChart(), 'doughnut', undefined],
+  ['buildSentimentSplitChartConfiguration', () => sentimentChart(), 'bar', 'y'],
+  ['buildTopSourcesChartConfiguration', () => topSourcesChart(), 'bar', 'y'],
+];
+
+/** The chart data of every chart that draws no dataset without data, by builder name; built when a test calls it. */
+export const EMPTY_CHART_DATA: ReadonlyArray<readonly [string, () => unknown]> = [
+  ['buildKpiTrendChartConfiguration', () => kpiTrendChart([]).data],
+  ['buildEngineKpiChartConfiguration', () => engineKpiChart([]).data],
+  ['buildBrandTrendChartConfiguration', () => brandTrendChart('mention_rate', {
+    tracked: [],
+    competitors: [],
+  }).data],
+  ['buildSentimentSplitChartConfiguration', () => sentimentChart([]).data],
+];
+
+/** The row axis of every horizontal stacked bar chart, by builder name; built when a test calls it. */
+export const STACKED_ROW_AXES: ReadonlyArray<readonly [string, () => unknown]> = [
+  ['buildSentimentSplitChartConfiguration', () => sentimentChart().options?.scales?.y],
+  ['buildTopSourcesChartConfiguration', () => topSourcesChart().options?.scales?.y],
 ];

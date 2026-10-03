@@ -7,15 +7,15 @@ import {
 import type { ReportsOverviewResponse } from '../../../../api/reports';
 import { expectRendersNothing } from '../../../../test/renderNothing';
 import { WinsAndGapsSection } from './WinsAndGapsSection';
-import {
-  buildMover, buildOverview
-} from '../../layout/reportPayload-fixtures';
+import { buildMover } from '../../layout/reportPayload-fixtures';
 import {
   moverColumn, moverKeywords, sectionTitled
 } from '../../layout/reportQueries-fixtures';
+import { loadedOverview } from './reportsOverview-fixtures';
+import { sectionPlaceholderCases } from '../../layout/sectionGate-fixtures';
 
 function renderWinsAndGaps(overrides: Partial<ReportsOverviewResponse>): void {
-  render(<WinsAndGapsSection data={buildOverview(overrides)} loading={false} error={null} />);
+  render(<WinsAndGapsSection {...loadedOverview(overrides)} />);
 }
 
 describe('WinsAndGapsSection — content rendering', () => {
@@ -69,13 +69,10 @@ describe('WinsAndGapsSection — placeholder states', () => {
     expectRendersNothing(<WinsAndGapsSection data={null} loading={false} error={null} />);
   });
 
-  it('renders the loading placeholder when loading is true', () => {
-    render(<WinsAndGapsSection data={null} loading error={null} />);
-    expect(screen.getByText(/Loading movers/i)).toBeInTheDocument();
-  });
-
-  it('renders the error message when error is set', () => {
-    render(<WinsAndGapsSection data={null} loading={false} error="boom" />);
-    expect(screen.getByText('boom')).toBeInTheDocument();
+  it.each(sectionPlaceholderCases(/Loading movers/i))('renders the $name', ({
+    state, text
+  }) => {
+    render(<WinsAndGapsSection data={null} {...state} />);
+    expect(screen.getByText(text)).toBeInTheDocument();
   });
 });

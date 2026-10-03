@@ -8,12 +8,11 @@ import { expectRendersNothing } from '../../../../test/renderNothing';
 import {
   ENGINE_CHART_SUBTITLE, EngineKpisSection
 } from './EngineKpisSection';
-import { KPI_SPECS } from '../../../../constants/kpiDefinitions';
 import {
   buildEngineKpis, buildVisibility
 } from '../../layout/reportPayload-fixtures';
 import {
-  headerTooltips, sectionTable, sectionTitled
+  sectionTable, sectionTitled
 } from '../../layout/reportQueries-fixtures';
 import { chartCaption } from '../../BrandVisibilityReport/sections/reportChartPanels-fixtures';
 
@@ -42,18 +41,6 @@ describe('EngineKpisSection', () => {
     expect(within(screen.getByRole('region', { name: 'AI engines compared' })).getByText(ENGINE_CHART_SUBTITLE)).toBeInTheDocument();
   });
 
-  it('heads the table with the engine and its KPIs', () => {
-    renderEngines();
-
-    expect(sectionTable(TITLE)[0]).toStrictEqual(['AI engine', ...KPI_SPECS.map((spec) => spec.label)]);
-  });
-
-  it('explains each KPI column with its definition', () => {
-    renderEngines();
-
-    expect(headerTooltips(TITLE)).toStrictEqual(KPI_SPECS.map((spec) => [spec.label, spec.definition]));
-  });
-
   it('writes each engine by name with its KPIs formatted by unit, in the API order', () => {
     renderEngines();
 
@@ -73,18 +60,6 @@ describe('EngineKpisSection', () => {
     renderEngines(buildVisibility({ engines: [] }));
 
     expect(screen.getByText('No AI engine has answered for this keyword yet.')).toBeInTheDocument();
-  });
-
-  it('shows the loading state', () => {
-    render(<EngineKpisSection visibility={null} loading error={null} />);
-
-    expect(screen.getByText('Loading AI engine KPIs…')).toBeInTheDocument();
-  });
-
-  it('shows the error', () => {
-    render(<EngineKpisSection visibility={null} loading={false} error="Network down" />);
-
-    expect(screen.getByText('Network down')).toBeInTheDocument();
   });
 
   it('drops out of the report without a visibility answer', () => {

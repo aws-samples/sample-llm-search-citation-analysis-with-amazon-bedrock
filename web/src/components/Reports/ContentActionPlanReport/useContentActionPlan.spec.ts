@@ -18,60 +18,64 @@ import { useContentStudio } from '../../../hooks/useContentStudio';
 const mockGaps = useCitationGaps as ReturnType<typeof vi.fn>;
 const mockStudio = useContentStudio as ReturnType<typeof vi.fn>;
 
+function renderPlan() {
+  return renderHook(() => useContentActionPlan());
+}
+
+type GapsSeed = Omit<Parameters<typeof buildGapsSnapshot>[0], 'fetchCitationGaps'>;
+type StudioSeed = Omit<Parameters<typeof buildStudioSnapshot>[0], 'fetchIdeas' | 'fetchHistory'>;
+
 describe('useContentActionPlan', () => {
   const fetchCitationGaps = vi.fn();
   const fetchIdeas = vi.fn();
   const fetchHistory = vi.fn();
-  const studioFetches = {
-    fetchIdeas,
-    fetchHistory 
-  };
   const citationGaps = buildCitationGaps();
 
-  beforeEach(() => {
+  function mockGapsSnapshot(seed: GapsSeed) {
     mockGaps.mockReturnValue(buildGapsSnapshot({
       fetchCitationGaps,
-      data: citationGaps,
+      ...seed,
     }));
+  }
+
+  function mockStudioSnapshot(seed: StudioSeed) {
     mockStudio.mockReturnValue(buildStudioSnapshot({
-      ...studioFetches,
+      fetchIdeas,
+      fetchHistory,
+      ...seed,
+    }));
+  }
+
+  beforeEach(() => {
+    mockGapsSnapshot({ data: citationGaps });
+    mockStudioSnapshot({
       ideaCount: 1,
       briefCount: 1,
-    }));
+    });
   });
 
   it('fires the citation-gaps fetch with limit 50 over all keywords', () => {
-    renderHook(() => useContentActionPlan());
+    renderPlan();
     expect(fetchCitationGaps).toHaveBeenCalledWith({ kind: 'all' }, 50);
   });
 
   it('fires the content-studio ideas and history fetches', () => {
-    renderHook(() => useContentActionPlan());
+    renderPlan();
     expect(fetchIdeas).toHaveBeenCalledWith();
     expect(fetchHistory).toHaveBeenCalledWith();
   });
 
   it('reports ready=true once both data sources have settled with content', () => {
-    const { result } = renderHook(() => useContentActionPlan());
+    const { result } = renderPlan();
     expect(result.current.ready).toBe(true);
   });
 
   it.each<[source: string, stillLoading: () => void]>([
-    ['citation gaps are', () => {
-      mockGaps.mockReturnValue(buildGapsSnapshot({
-        fetchCitationGaps,
-        loading: true,
-      }));
-    }],
-    ['Content Studio is', () => {
-      mockStudio.mockReturnValue(buildStudioSnapshot({
-        ...studioFetches,
-        loading: true,
-      }));
-    }],
+    ['citation gaps are', () => mockGapsSnapshot({ loading: true })],
+    ['Content Studio is', () => mockStudioSnapshot({ loading: true })],
   ])('reports ready=false while %s still loading', (_source, stillLoading) => {
     stillLoading();
-    const { result } = renderHook(() => useContentActionPlan());
+    const { result } = renderPlan();
     expect(result.current.ready).toBe(false);
   });
 
@@ -79,28 +83,24 @@ describe('useContentActionPlan', () => {
     ['ideas present even if history is empty', 1, 0],
     ['history present even if ideas is empty', 0, 1],
   ])('treats Content Studio as ready when %s', (_label, ideaCount, briefCount) => {
-    mockStudio.mockReturnValue(buildStudioSnapshot({
-      ...studioFetches,
+    mockStudioSnapshot({
       ideaCount,
       briefCount,
-    }));
-    const { result } = renderHook(() => useContentActionPlan());
+    });
+    const { result } = renderPlan();
     expect(result.current.ready).toBe(true);
   });
 
   it('exposes the citation gaps, ideas, and history as flat data fields', () => {
-    const { result } = renderHook(() => useContentActionPlan());
+    const { result } = renderPlan();
     expect(result.current.gaps).toStrictEqual(citationGaps);
     expect(result.current.ideas).toHaveLength(1);
     expect(result.current.history).toHaveLength(1);
   });
 
   it('propagates errors from each underlying slice', () => {
-    mockGaps.mockReturnValue(buildGapsSnapshot({
-      fetchCitationGaps,
-      error: 'gaps boom',
-    }));
-    const { result } = renderHook(() => useContentActionPlan());
+    mockGapsSnapshot({ error: 'gaps boom' });
+    const { result } = renderPlan();
     expect(result.current.gapsError).toBe('gaps boom');
   });
 });
