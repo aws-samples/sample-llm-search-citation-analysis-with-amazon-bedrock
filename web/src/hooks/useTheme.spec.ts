@@ -53,7 +53,7 @@ describe('useTheme', () => {
     });
   });
 
-  describe('setTheme', () => {
+  describe('selecting a theme', () => {
     it.each(['dark', 'light'] as const)('updates theme to %s', (theme) => {
       const { result } = renderThemeSetTo(theme);
 

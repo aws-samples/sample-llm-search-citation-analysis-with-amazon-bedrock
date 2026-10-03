@@ -70,23 +70,14 @@ describe('useBrandConfigForm', () => {
     });
   });
 
-  describe('normalizeBrand', () => {
-    it.each([
-      ['lowercase trimmed string', 'input has mixed case and whitespace', '  Marriott  ', 'marriott'],
-      ['the name without diacritics', 'input contains accented characters', 'Café', 'cafe'],
-      ['empty string', 'input is only whitespace', '   ', ''],
-    ])('returns %s when %s', (_outcome, _condition, input, expected) => {
-      const { result } = renderBrandConfigForm();
-
-      expect(result.current.normalizeBrand(input)).toBe(expected);
-    });
-  });
-
   describe('brandExists', () => {
     it.each([
       [true, 'brand exists with exact match', 'Marriott', ['Marriott', 'Hilton']],
       [true, 'brand exists with different case', 'marriott', ['Marriott', 'Hilton']],
       [true, 'brand exists with diacritics difference', 'Cafe', ['Café', 'Bistro']],
+      [true, 'brand exists with surrounding whitespace and mixed case', '  MARRIOTT  ', ['marriott']],
+      [true, 'a whitespace-only name matches an empty name', '   ', ['']],
+      [true, 'only the new name carries the accent', 'Café', ['cafe']],
       [false, 'brand does not exist in list', 'Hyatt', ['Marriott', 'Hilton']],
       [false, 'list is empty', 'Marriott', []],
     ])('returns %s when %s', (expected, _condition, brand, brands) => {

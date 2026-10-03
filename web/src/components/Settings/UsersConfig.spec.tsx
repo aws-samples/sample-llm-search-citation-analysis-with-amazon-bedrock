@@ -35,7 +35,6 @@ function buildMockHook(overrides = {}) {
     loading: false,
     error: null,
     total: 0,
-    hasMore: false,
     refresh: vi.fn(),
     invite: vi.fn().mockResolvedValue({ success: true }),
     update: vi.fn().mockResolvedValue({ success: true }),

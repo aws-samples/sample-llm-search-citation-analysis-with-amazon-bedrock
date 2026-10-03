@@ -26,11 +26,14 @@ export function renderTheme() {
   return renderHook(() => useTheme());
 }
 
-/** Mounts the hook and selects `theme` through `setTheme`. */
+/** Mounts the hook and selects `theme` by cycling `toggleTheme` (light → dark → system) until it is reached. */
 export function renderThemeSetTo(theme: Theme) {
   const rendered = renderTheme();
-  act(() => {
-    rendered.result.current.setTheme(theme);
+  ['light', 'dark', 'system'].forEach(() => {
+    if (rendered.result.current.theme === theme) return;
+    act(() => {
+      rendered.result.current.toggleTheme();
+    });
   });
   return rendered;
 }

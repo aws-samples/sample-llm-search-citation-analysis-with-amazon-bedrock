@@ -48,7 +48,6 @@ interface UseUserManagementReturn {
   loading: boolean;
   error: string | null;
   total: number;
-  hasMore: boolean;
   refresh: () => Promise<void>;
   invite: (request: InviteUserRequest) => Promise<MessageOutcome>;
   update: (username: string, request: UpdateUserRequest) => Promise<boolean>;
@@ -62,7 +61,6 @@ export function useUserManagement(): UseUserManagementReturn {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
-  const [hasMore, setHasMore] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -74,7 +72,6 @@ export function useUserManagement(): UseUserManagementReturn {
       ]);
       setUsers(usersResponse.users);
       setTotal(usersResponse.total);
-      setHasMore(usersResponse.has_more);
       setGroups(groupsResponse.groups);
     } catch (err) {
       setError(errorText(err, 'Failed to load users'));
@@ -133,7 +130,6 @@ export function useUserManagement(): UseUserManagementReturn {
     loading,
     error,
     total,
-    hasMore,
     refresh: fetchData,
     invite,
     update,

@@ -152,9 +152,7 @@ async function fetchAnalysisResponse<TResult>(
  * Pass a module-level config object so the returned callbacks keep a
  * stable identity across renders (consumers list them in effect deps).
  *
- * @returns `data`, `loading`, `error`, the configured `fetchData`, and
- * `runRequest` for hooks that expose a second operation sharing the
- * same state and abort machinery.
+ * @returns `data`, `loading`, `error` and the configured `fetchData`.
  */
 export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>(config: AnalysisEndpointConfig<TArgs, TResponse>) {
   const [data, setData] = useState<TResponse | null>(null);
@@ -169,7 +167,7 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
   const runRequest = useCallback(async <TResult>(
     request: AnalysisRequest,
     contract: AnalysisResponseContract<TResult>,
-    applyResult?: (result: TResult) => void,
+    applyResult: (result: TResult) => void,
   ): Promise<TResult | null> => {
     if (!isMounted()) return null;
 
@@ -180,7 +178,7 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
     try {
       const json = await fetchAnalysisResponse(request, contract, latestRequest.signal);
       if (!latestRequest.isCurrent()) return null;
-      applyResult?.(json);
+      applyResult(json);
       return json;
     } catch (err) {
       if (isAbortError(err)) return null;
@@ -209,6 +207,5 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
     loading,
     error,
     fetchData,
-    runRequest,
   };
 }

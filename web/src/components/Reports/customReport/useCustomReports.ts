@@ -54,8 +54,5 @@ export function useCustomReports() {
     void reload();
   }, [reload]);
 
-  return {
-    ...state,
-    reload,
-  };
+  return state;
 }

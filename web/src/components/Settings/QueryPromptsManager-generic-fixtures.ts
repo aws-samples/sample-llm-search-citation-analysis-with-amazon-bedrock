@@ -29,7 +29,6 @@ export function buildQueryPromptsHookResult(
     prompts,
     loading: false,
     error: null,
-    fetchPrompts: vi.fn(),
     createPrompt: vi.fn(),
     updatePrompt: vi.fn(),
     deletePrompt: vi.fn(),

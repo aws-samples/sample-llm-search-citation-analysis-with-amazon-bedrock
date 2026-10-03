@@ -23,7 +23,6 @@ interface UseResearchAgentReturn {
   jobs: KeywordResearchItem[];
   /** The run the user opened, with its prompt snapshot and trace. */
   selected: KeywordResearchItem | null;
-  selectedId: string | null;
   /** True while a run is being started. */
   starting: boolean;
   loadingJobs: boolean;
@@ -205,7 +204,6 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
   return {
     jobs,
     selected,
-    selectedId,
     starting,
     loadingJobs,
     error,
