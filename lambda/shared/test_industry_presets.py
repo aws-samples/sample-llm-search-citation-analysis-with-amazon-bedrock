@@ -9,6 +9,8 @@ contract. These tests pin the contract.
 
 from __future__ import annotations
 
+import pytest
+
 from shared import industry_presets
 
 REQUIRED_FIELDS = {"name", "description", "entity_types", "example_brands", "extraction_focus"}
@@ -74,6 +76,23 @@ class TestIndustryPresetCatalog:
         custom = industry_presets.INDUSTRY_PRESETS["custom"]
         assert custom["entity_types"] == []
         assert custom["example_brands"] == []
+
+
+class TestBrandMentionFieldLines:
+    """The two field blocks both brand prompts embed; each line documents one key of an extracted mention."""
+
+    @pytest.mark.parametrize(('field_block', 'expected_keys'), [
+        pytest.param(industry_presets.BRAND_NAME_FIELDS, ['name', 'parent_company'], id='name-fields'),
+        pytest.param(
+            industry_presets.BRAND_POSITION_FIELDS,
+            ['mention_count', 'first_position', 'rank'],
+            id='position-fields',
+        ),
+    ])
+    def test_block_documents_each_mention_key_as_one_bullet(self, field_block: str, expected_keys: list[str]) -> None:
+        keys = [line.removeprefix('- ').split(':', 1)[0] for line in field_block.splitlines()]
+
+        assert keys == expected_keys
 
 
 class TestGetPreset:
