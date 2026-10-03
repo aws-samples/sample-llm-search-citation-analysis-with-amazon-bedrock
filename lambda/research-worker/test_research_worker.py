@@ -29,6 +29,12 @@ _mod = load_handler_module_offline(os.path.dirname(__file__), 'handler.py', 'res
 _PERPLEXITY, _OPENAI, _GEMINI = WEB_SEARCH_PROVIDERS
 
 
+def _round_of(step_id: str) -> int:
+    """The round of a ``r<n>-...`` step id; round one for any other id."""
+    prefix = step_id.split('-', 1)[0]
+    return int(prefix[1:]) if prefix.startswith('r') and prefix[1:].isdigit() else 1
+
+
 def _table_with(job: dict | None) -> MagicMock:
     table = MagicMock()
     if job is not None:
@@ -43,8 +49,7 @@ def _table_with(job: dict | None) -> MagicMock:
         job.setdefault('active_round', max(1, int(job.get('round') or 0)))
         for step_id, step in (job.get('steps') or {}).items():
             if isinstance(step, dict):
-                prefix = step_id.split('-', 1)[0]
-                step.setdefault('round', int(prefix[1:]) if prefix.startswith('r') and prefix[1:].isdigit() else 1)
+                step.setdefault('round', _round_of(step_id))
                 step.setdefault('attempt', max(1, int(job['attempt']) - 1))
     table.get_item.return_value = {'Item': job} if job is not None else {}
     return table
@@ -52,17 +57,32 @@ def _table_with(job: dict | None) -> MagicMock:
 
 def _handle(event: dict, context=None) -> dict:
     """Invoke a worker action with the state-machine ownership envelope."""
-    step_id = event.get('step_id', '')
-    prefix = step_id.split('-', 1)[0]
-    inferred_round = int(prefix[1:]) if prefix.startswith('r') and prefix[1:].isdigit() else 1
     owned = {
         'attempt': 2 if event.get('retry') else 1,
-        'expected_round': inferred_round,
+        'expected_round': _round_of(event.get('step_id', '')),
         'execution_arn': 'arn:exec',
         'execution_id': 'exec',
         **event,
     }
     return _mod.handler(owned, context)
+
+
+def _run_on(table: MagicMock, event: dict, **collaborators: Any) -> dict:
+    """Run ``event`` with ``table`` as the research table and ``collaborators`` patched onto the handler module."""
+    with patch.multiple(_mod, research_table=table, **collaborators):
+        return _handle(event, None)
+
+
+def _run(job: dict | None, event: dict, **collaborators: Any) -> tuple[dict, MagicMock]:
+    """``_run_on`` against a table holding ``job``; returns ``(result, table)``."""
+    table = _table_with(job)
+    return _run_on(table, event, **collaborators), table
+
+
+def _plan(job: dict, *providers: Any, retry: bool = False, **collaborators: Any) -> tuple[dict, MagicMock]:
+    """Plan ``job`` with ``providers`` configured; returns ``(result, table)``."""
+    event = {'action': 'plan', 'job_id': job['id'], 'retry': retry}
+    return _run(job, event, get_web_search_clients=_configured(*providers), **collaborators)
 
 
 def _expansion_job(**overrides) -> dict:
@@ -85,6 +105,13 @@ def _configured(*providers):
     return MagicMock(return_value=[(provider, object()) for provider in providers])
 
 
+#: The ``execute_step`` event for job-1's round-one OpenAI step.
+_OPENAI_STEP_EVENT = {'action': 'execute_step', 'job_id': 'job-1', 'step_id': 'r1-openai', 'provider': 'openai'}
+
+#: The conflict a lost terminal write raises when the persisted step is still running.
+_RUNNING_CONFLICT = "Research job job-1 step r1-openai terminal checkpoint conflicted with persisted status 'running'"
+
+
 def _step_writes(table: MagicMock) -> list[dict]:
     """Every step object written through `SET steps.#sid = :step`."""
     return [
@@ -101,8 +128,7 @@ def _execute_step(job: dict, event: dict, *, api_key: str | None = 'sk-test', **
     ``collaborators`` stub the provider call itself (``run_web_search=...`` or
     ``fetch_google_signals=...``).
     """
-    prefix = event['step_id'].split('-', 1)[0]
-    round_number = int(prefix[1:]) if prefix.startswith('r') and prefix[1:].isdigit() else 1
+    round_number = _round_of(event['step_id'])
     steps = dict(job.get('steps') or {})
     steps.setdefault(event['step_id'], {
         'provider': event['provider'], 'status': 'pending', 'round': round_number, 'attempt': 1,
@@ -113,39 +139,24 @@ def _execute_step(job: dict, event: dict, *, api_key: str | None = 'sk-test', **
         'round': max(int(job.get('round') or 0), round_number),
         'steps': steps,
     }
-    table = _table_with(job)
-    with (
-        patch.object(_mod, 'research_table', table),
-        patch.object(_mod, 'get_api_key', MagicMock(return_value=api_key)),
-        patch.multiple(_mod, **collaborators),
-    ):
-        result = _handle(event, None)
-    return result, table
+    return _run(job, event, get_api_key=MagicMock(return_value=api_key), **collaborators)
 
 
-def _handle_with_bedrock_stub(job: dict, event: dict) -> tuple[dict, MagicMock, MagicMock]:
+def _handle_with_bedrock_stub(job: dict, event: dict, bedrock: MagicMock | None = None) -> tuple[dict, MagicMock, MagicMock]:
     """Run ``event`` against a table holding ``job`` with the model stubbed; returns ``(result, table, bedrock)``.
 
-    For the replay and stale-attempt cases, where the assertion is that the
-    worker answered from the persisted checkpoint and never called the model.
+    ``bedrock`` answers the model calls; without one the model has no answer,
+    for the replay and stale-attempt cases where the assertion is that the
+    worker answered from the persisted checkpoint and never called it.
     """
-    table = _table_with(job)
-    bedrock = MagicMock()
-
-    with patch.object(_mod, 'research_table', table), patch.object(_mod, 'invoke_bedrock', bedrock):
-        result = _handle(event, None)
+    bedrock = bedrock or MagicMock()
+    result, table = _run(job, event, invoke_bedrock=bedrock)
     return result, table, bedrock
 
 
 class TestPlan:
     def test_creates_one_pending_step_per_configured_provider(self):
-        table = _table_with(_expansion_job())
-
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_web_search_clients', _configured(_PERPLEXITY, _OPENAI)),
-        ):
-            result = _handle({'action': 'plan', 'job_id': 'job-1', 'retry': False}, None)
+        result, _table = _plan(_expansion_job(), _PERPLEXITY, _OPENAI)
 
         assert result['steps'] == [
             {'step_id': 'r1-perplexity', 'provider': 'perplexity'},
@@ -154,13 +165,7 @@ class TestPlan:
         assert (result['attempt'], result['expected_round'], result['execution_arn']) == (1, 1, 'arn:exec')
 
     def test_marks_the_job_running_with_the_step_total_and_execution_arn(self):
-        table = _table_with(_expansion_job())
-
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_web_search_clients', _configured(_PERPLEXITY, _OPENAI, _GEMINI)),
-        ):
-            _handle({'action': 'plan', 'job_id': 'job-1', 'retry': False, 'execution_arn': 'arn:exec'}, None)
+        _result, table = _plan(_expansion_job(), _PERPLEXITY, _OPENAI, _GEMINI)
 
         values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
         assert (values[':running'], values[':total'], values[':arn']) == ('running', 3, 'arn:exec')
@@ -173,13 +178,8 @@ class TestPlan:
             'r1-openai': {'provider': 'openai', 'status': 'completed', 'keywords': [{'keyword': 'x'}]},
             'r1-gemini': {'provider': 'gemini', 'status': 'running'},
         })
-        table = _table_with(job)
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_web_search_clients', _configured(_PERPLEXITY, _OPENAI, _GEMINI)),
-        ):
-            result = _handle({'action': 'plan', 'job_id': 'job-1', 'retry': True}, None)
+        result, _table = _plan(job, _PERPLEXITY, _OPENAI, _GEMINI, retry=True)
 
         assert result['steps'] == [
             {'step_id': 'r1-perplexity', 'provider': 'perplexity'},
@@ -191,13 +191,8 @@ class TestPlan:
             'r1-perplexity': {'provider': 'perplexity', 'status': 'failed', 'error_message': '401'},
             'r1-openai': {'provider': 'openai', 'status': 'completed', 'keywords': [{'keyword': 'x'}]},
         })
-        table = _table_with(job)
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_web_search_clients', _configured(_PERPLEXITY, _OPENAI)),
-        ):
-            _handle({'action': 'plan', 'job_id': 'job-1', 'retry': True}, None)
+        _result, table = _plan(job, _PERPLEXITY, _OPENAI, retry=True)
 
         call = table.update_item.call_args.kwargs
         assert 'steps = :steps' not in call['UpdateExpression']
@@ -208,55 +203,34 @@ class TestPlan:
         assert call['ExpressionAttributeValues'][':total'] == 2
 
     def test_retry_of_a_job_without_planned_steps_plans_it_fresh(self):
-        table = _table_with(_expansion_job(status='pending', attempt=2, retry_count=1, steps={}))
-
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_web_search_clients', _configured(_OPENAI)),
-        ):
-            result = _handle({'action': 'plan', 'job_id': 'job-1', 'retry': True}, None)
+        result, _table = _plan(_expansion_job(status='pending', attempt=2, retry_count=1, steps={}), _OPENAI, retry=True)
 
         assert result['steps'] == [{'step_id': 'r1-openai', 'provider': 'openai'}]
 
     def test_raises_when_no_provider_is_configured(self):
-        with (
-            patch.object(_mod, 'research_table', _table_with(_expansion_job())),
-            patch.object(_mod, 'get_web_search_clients', MagicMock(return_value=[])),
-            pytest.raises(_mod.NoProviderConfiguredError),
-        ):
-            _handle({'action': 'plan', 'job_id': 'job-1', 'retry': False}, None)
+        with pytest.raises(_mod.NoProviderConfiguredError):
+            _plan(_expansion_job())
 
     def test_raises_when_the_job_row_is_missing(self):
-        with (
-            patch.object(_mod, 'research_table', _table_with(None)),
-            patch.object(_mod, 'get_web_search_clients', _configured(_OPENAI)),
-            pytest.raises(_mod.ResearchJobNotFoundError),
-        ):
-            _handle({'action': 'plan', 'job_id': 'missing', 'retry': False}, None)
+        event = {'action': 'plan', 'job_id': 'missing', 'retry': False}
+
+        with pytest.raises(_mod.ResearchJobNotFoundError):
+            _run(None, event, get_web_search_clients=_configured(_OPENAI))
 
     def test_competitor_plan_scrapes_the_page_once_and_stores_it_on_the_job(self):
-        table = _table_with(_competitor_job())
         page = {'success': True, 'title': 'Rooms', 'domain': 'example.com'}
+        fetch = MagicMock(return_value=page)
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_web_search_clients', _configured(_OPENAI)),
-            patch.object(_mod, 'fetch_page_seo_elements', MagicMock(return_value=page)) as fetch,
-        ):
-            _handle({'action': 'plan', 'job_id': 'job-2', 'retry': False}, None)
+        _result, table = _plan(_competitor_job(), _OPENAI, fetch_page_seo_elements=fetch)
 
         fetch.assert_called_once_with('https://example.com/rooms')
         assert table.update_item.call_args.kwargs['ExpressionAttributeValues'][':page'] == page
 
     def test_competitor_retry_reuses_the_stored_page_data(self):
-        table = _table_with(_competitor_job(page_data={'success': False}, steps={'r1-openai': {'provider': 'openai', 'status': 'failed'}}))
+        job = _competitor_job(page_data={'success': False}, steps={'r1-openai': {'provider': 'openai', 'status': 'failed'}})
+        fetch = MagicMock()
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_web_search_clients', _configured(_OPENAI)),
-            patch.object(_mod, 'fetch_page_seo_elements', MagicMock()) as fetch,
-        ):
-            _handle({'action': 'plan', 'job_id': 'job-2', 'retry': True}, None)
+        _plan(job, _OPENAI, retry=True, fetch_page_seo_elements=fetch)
 
         fetch.assert_not_called()
 
@@ -389,10 +363,7 @@ class TestFailStep:
         )
 
     def test_records_the_cause_as_the_step_error(self):
-        table = _table_with(self._job())
-
-        with patch.object(_mod, 'research_table', table):
-            result = _handle(self._event(), None)
+        result, table = _run(self._job(), self._event())
 
         step = _step_writes(table)[-1]
         assert result['status'] == 'failed'
@@ -400,36 +371,31 @@ class TestFailStep:
         assert step['error_message'] == 'Task timed out after 300.00 seconds'
 
     def test_preserves_the_completed_checkpoint_when_fail_step_replays(self):
-        table = _table_with(self._job('completed'))
-
-        with patch.object(_mod, 'research_table', table):
-            result = _handle(self._event(), None)
+        result, table = _run(self._job('completed'), self._event())
 
         assert result['status'] == 'completed'
         table.update_item.assert_not_called()
 
     def test_falls_back_to_the_error_name_when_there_is_no_cause(self):
-        table = _table_with(self._job())
         event = {**self._event(), 'error': {'Error': 'Lambda.Unknown'}}
 
-        with patch.object(_mod, 'research_table', table):
-            _handle(event, None)
+        _result, table = _run(self._job(), event)
 
         assert _step_writes(table)[-1]['error_message'] == 'Lambda.Unknown'
 
 
 class TestFinalize:
+    def _finalize(self, job: dict) -> tuple[dict, MagicMock]:
+        return _run(job, {'action': 'finalize', 'job_id': job['id']})
+
     def _job(self, **steps) -> dict:
         return _expansion_job(status='running', steps=steps)
 
     def test_persists_the_merged_keywords_and_completed_status(self):
-        table = _table_with(self._job(
+        result, table = self._finalize(self._job(
             a={'provider': 'openai', 'status': 'completed', 'keywords': [{'keyword': 'x', 'relevance': 8.5}]},
             b={'provider': 'gemini', 'status': 'completed', 'keywords': [{'keyword': 'x', 'relevance': 9}, {'keyword': 'y', 'relevance': 3}]},
         ))
-
-        with patch.object(_mod, 'research_table', table):
-            result = _handle({'action': 'finalize', 'job_id': 'job-1'}, None)
 
         call = table.update_item.call_args.kwargs
         values = call['ExpressionAttributeValues']
@@ -439,13 +405,10 @@ class TestFinalize:
         assert 'REMOVE error_message' in call['UpdateExpression']
 
     def test_partial_when_a_provider_failed_and_names_it_in_the_error(self):
-        table = _table_with(self._job(
+        result, table = self._finalize(self._job(
             a={'provider': 'openai', 'status': 'completed', 'keywords': [{'keyword': 'x'}]},
             b={'provider': 'perplexity', 'status': 'failed', 'error_message': '401 invalid_api_key'},
         ))
-
-        with patch.object(_mod, 'research_table', table):
-            result = _handle({'action': 'finalize', 'job_id': 'job-1'}, None)
 
         values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
         assert result['status'] == 'partial'
@@ -453,23 +416,17 @@ class TestFinalize:
         assert (values[':sd'], values[':sf'], values[':kc']) == (2, 1, 1)
 
     def test_failed_when_no_provider_produced_a_result(self):
-        table = _table_with(self._job(
+        result, table = self._finalize(self._job(
             a={'provider': 'openai', 'status': 'failed', 'error_message': 'timeout'},
         ))
-
-        with patch.object(_mod, 'research_table', table):
-            result = _handle({'action': 'finalize', 'job_id': 'job-1'}, None)
 
         assert result['status'] == 'failed'
         assert table.update_item.call_args.kwargs['ExpressionAttributeValues'][':e'] == 'openai: timeout'
 
     def test_competitor_finalize_persists_the_merged_analysis(self):
-        table = _table_with(_competitor_job(status='running', steps={
+        result, table = self._finalize(_competitor_job(status='running', steps={
             'a': {'provider': 'openai', 'status': 'completed', 'analysis': {'industry': 'hospitality', 'page_focus': 'rooms', 'primary_keywords': [{'keyword': 'sea view'}]}},
         }))
-
-        with patch.object(_mod, 'research_table', table):
-            result = _handle({'action': 'finalize', 'job_id': 'job-2'}, None)
 
         values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
         assert (result['job_id'], result['status'], result['keyword_count']) == ('job-2', 'completed', 1)
@@ -482,23 +439,17 @@ class TestFail:
         return {'action': 'fail', 'job_id': 'job-1', 'error': {'Error': 'NoProviderConfiguredError', 'Cause': '{"errorMessage": "No API keys configured"}'}}
 
     def test_marks_the_job_failed_with_the_cause(self):
-        table = _table_with(_expansion_job(status='pending'))
-
-        with patch.object(_mod, 'research_table', table):
-            result = _handle(self._event(), None)
+        result, table = _run(_expansion_job(status='pending'), self._event())
 
         values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
         assert result['status'] == 'failed'
         assert (values[':s'], values[':e']) == ('failed', 'No API keys configured')
 
     def test_persists_partial_result_without_overwriting_step_checkpoints(self):
-        table = _table_with(_expansion_job(status='running', steps={
+        result, table = _run(_expansion_job(status='running', steps={
             'r1-openai': {'provider': 'openai', 'status': 'completed', 'keywords': [{'keyword': 'kept'}]},
             'r1-gemini': {'provider': 'gemini', 'status': 'running'},
-        }))
-
-        with patch.object(_mod, 'research_table', table):
-            result = _handle(self._event(), None)
+        }), self._event())
 
         call = table.update_item.call_args.kwargs
         assert result['status'] == 'partial'
@@ -506,17 +457,13 @@ class TestFail:
         assert any(value == [{'keyword': 'kept', 'providers': ['openai']}] for value in call['ExpressionAttributeValues'].values())
 
     def test_leaves_a_job_that_already_finished_alone(self):
-        table = _table_with(_expansion_job(status='partial'))
-
-        with patch.object(_mod, 'research_table', table):
-            result = _handle(self._event(), None)
+        result, table = _run(_expansion_job(status='partial'), self._event())
 
         assert result['status'] == 'partial'
         table.update_item.assert_not_called()
 
     def test_tolerates_a_job_that_no_longer_exists(self):
-        with patch.object(_mod, 'research_table', _table_with(None)):
-            result = _handle(self._event(), None)
+        result, _table = _run(None, self._event())
 
         assert result['status'] == 'failed'
 
@@ -566,22 +513,19 @@ def _round_one(**evaluation) -> dict:
 
 class TestAgentPlan:
     def _plan(self, job: dict, *, retry: bool = False, bedrock=None, serpapi_key=None) -> tuple[dict, MagicMock]:
-        table = _table_with(job)
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_web_search_clients', _configured(_PERPLEXITY, _OPENAI)),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value=serpapi_key)),
-            patch.object(_mod, 'invoke_bedrock', bedrock or MagicMock(return_value=_PLAN_TEXT)),
-        ):
-            result = _handle({
+        return _run(
+            job,
+            {
                 'action': 'plan',
                 'job_id': job['id'],
                 'retry': retry,
                 'attempt': 2 if retry else 1,
                 'expected_round': max(1, int(job.get('round') or 0) if retry else int(job.get('round') or 0) + 1),
-                'execution_arn': 'arn:exec',
-            }, None)
-        return result, table
+            },
+            get_web_search_clients=_configured(_PERPLEXITY, _OPENAI),
+            get_api_key=MagicMock(return_value=serpapi_key),
+            invoke_bedrock=bedrock or MagicMock(return_value=_PLAN_TEXT),
+        )
 
     def test_first_round_asks_the_planning_model_with_the_job_system_prompt(self):
         bedrock = MagicMock(return_value=_PLAN_TEXT)
@@ -744,11 +688,8 @@ class TestAgentExecuteStep:
 
 class TestEvaluate:
     def _evaluate(self, job: dict, bedrock=None) -> tuple[dict, MagicMock, MagicMock]:
-        table = _table_with(job)
         bedrock = bedrock or MagicMock(return_value='{"decision": "stop", "reason": "saturated", "assessment": "fine", "next_queries": []}')
-        with patch.object(_mod, 'research_table', table), patch.object(_mod, 'invoke_bedrock', bedrock):
-            result = _handle({'action': 'evaluate', 'job_id': job['id']}, None)
-        return result, table, bedrock
+        return _handle_with_bedrock_stub(job, {'action': 'evaluate', 'job_id': job['id']}, bedrock)
 
     def test_non_agent_jobs_stop_without_touching_the_row_or_the_model(self):
         result, table, bedrock = self._evaluate(_expansion_job(id='job-1', status='running'))
@@ -822,11 +763,8 @@ class TestAgentFinalize:
     _SELECTION = '[{"keyword": "hotel coruña centro", "dimension": "destination", "intent": "transactional", "competition": "high", "relevance": 9, "rationale": "core demand"}]'
 
     def _finalize(self, job: dict, bedrock=None) -> tuple[dict, MagicMock, MagicMock]:
-        table = _table_with(job)
         bedrock = bedrock or MagicMock(return_value=self._SELECTION)
-        with patch.object(_mod, 'research_table', table), patch.object(_mod, 'invoke_bedrock', bedrock):
-            result = _handle({'action': 'finalize', 'job_id': job['id']}, None)
-        return result, table, bedrock
+        return _handle_with_bedrock_stub(job, {'action': 'finalize', 'job_id': job['id']}, bedrock)
 
     def test_persists_the_model_selected_proposal_as_the_job_keywords(self):
         result, table, bedrock = self._finalize(_round_one())
@@ -839,16 +777,17 @@ class TestAgentFinalize:
         assert [entry['keyword'] for entry in values[':kw']] == ['hotel coruña centro']
         assert (values[':kc'], values[':tc'], values[':cc'], values[':src']) == (1, 1, 2, 'model')
 
-    def test_selected_keywords_keep_the_providers_that_proposed_them(self):
+    def _proposal(self) -> list[dict]:
+        """The keywords finalize persists for ``_round_one`` with the default model selection."""
         _result, table, _bedrock = self._finalize(_round_one())
+        return table.update_item.call_args.kwargs['ExpressionAttributeValues'][':kw']
 
-        proposal = table.update_item.call_args.kwargs['ExpressionAttributeValues'][':kw']
-        assert proposal[0]['providers'] == ['perplexity']
+    def test_selected_keywords_keep_the_providers_that_proposed_them(self):
+        assert self._proposal()[0]['providers'] == ['perplexity']
 
     def test_marks_the_model_proposal_with_tracking_explanations(self):
-        _result, table, _bedrock = self._finalize(_round_one())
+        proposal = self._proposal()
 
-        proposal = table.update_item.call_args.kwargs['ExpressionAttributeValues'][':kw']
         assert proposal[0]['tracking'] is True
         assert proposal[0]['tracking_score'] == 904.0
         assert proposal[0]['tracking_reason'] == 'Relevance 9/10; transactional intent; 1 provider.'
@@ -905,22 +844,19 @@ class TestAttemptAndRoundFences:
         }
 
     def test_stale_plan_does_not_replace_the_new_attempt_plan(self):
-        table = _table_with(self._new_attempt_job())
         providers = _configured(_OPENAI)
 
-        with patch.object(_mod, 'research_table', table), patch.object(_mod, 'get_web_search_clients', providers):
-            result = _handle(self._stale_event('plan', retry=False), None)
+        result, table = _run(self._new_attempt_job(), self._stale_event('plan', retry=False), get_web_search_clients=providers)
 
         assert result['steps'] == []
         table.update_item.assert_not_called()
         providers.assert_not_called()
 
     def test_stale_provider_action_does_not_call_or_checkpoint_the_provider(self):
-        table = _table_with(self._new_attempt_job())
         run = MagicMock(return_value='[]')
+        event = self._stale_event('execute_step', step_id='r1-openai', provider='openai')
 
-        with patch.object(_mod, 'research_table', table), patch.object(_mod, 'run_web_search', run):
-            result = _handle(self._stale_event('execute_step', step_id='r1-openai', provider='openai'), None)
+        result, table = _run(self._new_attempt_job(), event, run_web_search=run)
 
         assert result['status'] == 'failed'
         run.assert_not_called()
@@ -947,7 +883,6 @@ class TestAttemptAndRoundFences:
         table.update_item.assert_not_called()
 
     def test_stale_fail_step_does_not_fail_the_new_attempt_checkpoint(self):
-        table = _table_with(self._new_attempt_job())
         event = self._stale_event(
             'fail_step',
             step_id='r1-openai',
@@ -955,17 +890,13 @@ class TestAttemptAndRoundFences:
             error={'Error': 'States.Timeout'},
         )
 
-        with patch.object(_mod, 'research_table', table):
-            result = _handle(event, None)
+        result, table = _run(self._new_attempt_job(), event)
 
         assert result['status'] == 'failed'
         table.update_item.assert_not_called()
 
     def test_stale_fail_job_does_not_fail_the_new_attempt(self):
-        table = _table_with(self._new_attempt_job())
-
-        with patch.object(_mod, 'research_table', table):
-            result = _handle(self._stale_event('fail', error={'Error': 'States.Timeout'}), None)
+        result, table = _run(self._new_attempt_job(), self._stale_event('fail', error={'Error': 'States.Timeout'}))
 
         assert result['status'] == 'running'
         table.update_item.assert_not_called()
@@ -974,11 +905,9 @@ class TestAttemptAndRoundFences:
         job = self._new_attempt_job()
         job.update({'attempt': 1, 'retry_count': 0, 'execution_arn': 'arn:exec', 'active_round': 2})
         job['steps']['r1-openai']['attempt'] = 1
-        table = _table_with(job)
         run = MagicMock(return_value='[]')
 
-        with patch.object(_mod, 'research_table', table), patch.object(_mod, 'run_web_search', run):
-            result = _handle({'action': 'execute_step', 'job_id': 'job-1', 'step_id': 'r1-openai', 'provider': 'openai'}, None)
+        result, table = _run(job, _OPENAI_STEP_EVENT, run_web_search=run)
 
         assert result['status'] == 'failed'
         run.assert_not_called()
@@ -987,7 +916,6 @@ class TestAttemptAndRoundFences:
 
 class TestSequentialReplay:
     def test_completed_provider_checkpoint_skips_repeated_external_call(self):
-        event = {'action': 'execute_step', 'job_id': 'job-1', 'step_id': 'r1-openai', 'provider': 'openai'}
         job = _expansion_job(
             status='running', round=1,
             steps={
@@ -997,11 +925,9 @@ class TestSequentialReplay:
                 },
             },
         )
-        table = _table_with(job)
         run = MagicMock(return_value='[]')
 
-        with patch.object(_mod, 'research_table', table), patch.object(_mod, 'run_web_search', run):
-            result = _handle(event, None)
+        result, table = _run(job, _OPENAI_STEP_EVENT, run_web_search=run)
 
         assert result['status'] == 'completed'
         run.assert_not_called()
@@ -1038,16 +964,9 @@ class TestSequentialReplay:
         table.update_item.assert_not_called()
 
     def test_persisted_plan_replays_without_calling_planning_model(self):
-        job = _round_one()
-        table = _table_with(job)
         bedrock = MagicMock()
 
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'invoke_bedrock', bedrock),
-            patch.object(_mod, 'get_web_search_clients', _configured(_OPENAI)),
-        ):
-            result = _handle({'action': 'plan', 'job_id': 'job-a', 'retry': False}, None)
+        result, table = _plan(_round_one(), _OPENAI, invoke_bedrock=bedrock)
 
         assert result['steps'] == []
         bedrock.assert_not_called()
@@ -1088,12 +1007,7 @@ class TestStepCheckpointPersistence:
         )
 
     def _event(self, action: str = 'execute_step') -> dict:
-        return {
-            'action': action,
-            'job_id': 'job-1',
-            'step_id': 'r1-openai',
-            'provider': 'openai',
-        }
+        return {**_OPENAI_STEP_EVENT, 'action': action}
 
     def _terminal_race_table(self, persisted_step: dict) -> MagicMock:
         job = self._job_with_decimal_metadata()
@@ -1107,12 +1021,12 @@ class TestStepCheckpointPersistence:
         return table
 
     def _execute_with_table(self, table: MagicMock) -> dict:
-        with (
-            patch.object(_mod, 'research_table', table),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-            patch.object(_mod, 'run_web_search', MagicMock(return_value='[{"keyword": "losing keyword"}]')),
-        ):
-            return _handle(self._event(), None)
+        return _run_on(
+            table,
+            self._event(),
+            get_api_key=MagicMock(return_value='sk-test'),
+            run_web_search=MagicMock(return_value='[{"keyword": "losing keyword"}]'),
+        )
 
     def test_persists_completed_keywords_when_step_metadata_was_loaded_as_decimal(self):
         response = '[{"keyword": "persisted keyword", "relevance": 8}]'
@@ -1138,10 +1052,7 @@ class TestStepCheckpointPersistence:
         }
         table = self._terminal_race_table(persisted)
 
-        with pytest.raises(
-            _mod.CheckpointConflictError,
-            match="Research job job-1 step r1-openai terminal checkpoint conflicted with persisted status 'running'",
-        ):
+        with pytest.raises(_mod.CheckpointConflictError, match=_RUNNING_CONFLICT):
             self._execute_with_table(table)
 
         assert table.update_item.call_count == 2
@@ -1153,12 +1064,8 @@ class TestStepCheckpointPersistence:
         table.update_item.side_effect = conditional_check_failure(message='terminal checkpoint changed')
         event = {**self._event('fail_step'), 'error': {'Error': 'States.Timeout'}}
 
-        with patch.object(_mod, 'research_table', table):
-            with pytest.raises(
-                _mod.CheckpointConflictError,
-                match="Research job job-1 step r1-openai terminal checkpoint conflicted with persisted status 'running'",
-            ):
-                _handle(event, None)
+        with pytest.raises(_mod.CheckpointConflictError, match=_RUNNING_CONFLICT):
+            _run_on(table, event)
 
         assert table.update_item.call_count == 1
 
@@ -1194,8 +1101,7 @@ class TestCheckpointRaces:
         table.get_item.side_effect = [{'Item': pending}, {'Item': claimed}]
         table.update_item.side_effect = [conditional_check_failure(message='claim won elsewhere'), {}]
 
-        with patch.object(_mod, 'research_table', table), patch.object(_mod, 'get_web_search_clients', _configured(_OPENAI)):
-            result = _handle({'action': 'plan', 'job_id': 'job-1', 'retry': False}, None)
+        result = _run_on(table, {'action': 'plan', 'job_id': 'job-1', 'retry': False}, get_web_search_clients=_configured(_OPENAI))
 
         assert result['steps'] == [{'step_id': 'r1-openai', 'provider': 'openai'}]
         assert table.update_item.call_count == 2
@@ -1221,8 +1127,7 @@ class TestCheckpointRaces:
         table.get_item.side_effect = [{'Item': observed}, {'Item': current}, {'Item': current}]
         table.update_item.side_effect = [conditional_check_failure(message='checkpoint advanced'), {}]
 
-        with patch.object(_mod, 'research_table', table):
-            result = _handle({'action': 'fail', 'job_id': 'job-1', 'error': {'Error': 'States.Timeout'}}, None)
+        result = _run_on(table, {'action': 'fail', 'job_id': 'job-1', 'error': {'Error': 'States.Timeout'}})
 
         final_values = table.update_item.call_args.kwargs['ExpressionAttributeValues']
         assert result['status'] == 'partial'
@@ -1317,15 +1222,25 @@ class TestFetchPageSeoElements:
 
 
 
-def _client_for(provider_id: str, config_table: MagicMock) -> Any:
-    """The client ``_provider_client`` builds for ``provider_id`` when the config table is ``config_table``."""
+def _resource_with(config_table: MagicMock) -> MagicMock:
+    """A DynamoDB resource whose every ``Table`` is ``config_table``."""
     resource = MagicMock()
     resource.Table.return_value = config_table
+    return resource
+
+
+def _client_built_with(provider_id: str, resource: MagicMock) -> Any:
+    """The client ``_provider_client`` builds for ``provider_id`` with ``resource`` as the module's DynamoDB."""
     with (
         patch.object(_mod, 'dynamodb', resource),
         patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
     ):
         return _mod._provider_client(provider_id)[1]
+
+
+def _client_for(provider_id: str, config_table: MagicMock) -> Any:
+    """The client ``_provider_client`` builds for ``provider_id`` when the config table is ``config_table``."""
+    return _client_built_with(provider_id, _resource_with(config_table))
 
 
 def _config_row(row: dict) -> MagicMock:
@@ -1360,14 +1275,9 @@ class TestResearchUsesTheConfiguredModel:
         ({}, 'CitationAnalysis-ProviderConfig'),
     ])
     def test_reads_the_table_the_stack_names(self, environment, table_name):
-        resource = MagicMock()
-        resource.Table.return_value = _config_row({})
+        resource = _resource_with(_config_row({}))
 
-        with (
-            patch.dict(os.environ, environment, clear=True),
-            patch.object(_mod, 'dynamodb', resource),
-            patch.object(_mod, 'get_api_key', MagicMock(return_value='sk-test')),
-        ):
-            _mod._provider_client('openai')
+        with patch.dict(os.environ, environment, clear=True):
+            _client_built_with('openai', resource)
 
         assert resource.Table.call_args.args == (table_name,)
