@@ -67,7 +67,8 @@ TREND_BAND_POSITIONS = 0.5
 FIRST_PARTY = 'first_party'
 COMPETITOR = 'competitor'
 OTHER = 'other'
-_SENTIMENTS = frozenset({'positive', 'neutral', 'negative', 'mixed'})
+#: The sentiment labels a brand mention can carry; any other label counts as unlabelled.
+SENTIMENT_LABELS: tuple[str, ...] = ('positive', 'neutral', 'mixed', 'negative')
 
 #: The SearchResults attributes an answer is read from (`#ts` = timestamp, `#st` = status, `#md` = metadata).
 ANSWER_PROJECTION = 'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model'
@@ -137,7 +138,7 @@ def sighting_from_brand(brand: object) -> Sighting | None:
         name=name,
         classification=classification if classification in {FIRST_PARTY, COMPETITOR} else OTHER,
         rank=_rank(brand.get('rank')),
-        sentiment=label if label in _SENTIMENTS else None,
+        sentiment=label if label in SENTIMENT_LABELS else None,
     )
 
 
@@ -423,6 +424,7 @@ __all__ = [
     'COMPETITOR',
     'KPI_IDS',
     'PERCENT_KPIS',
+    'SENTIMENT_LABELS',
     'TRENDED_KPIS',
     'Answer',
     'Sighting',

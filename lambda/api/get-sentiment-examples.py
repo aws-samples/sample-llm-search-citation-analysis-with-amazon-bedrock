@@ -21,6 +21,7 @@ sys.path.insert(0, '/opt/python')
 from shared.answer_queries import query_latest_run_rows
 from shared.api_response import success_response
 from shared.decorators import api_handler, optional_provider, validate
+from shared.kpi_engine import SENTIMENT_LABELS
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, map_scope_keywords, scoped_dynamodb_resource
 from shared.scoped_reports import capped_scope, required_report_scope
 from shared.sentiment_examples import (
@@ -28,7 +29,6 @@ from shared.sentiment_examples import (
     EXAMPLE_ATTRIBUTE_NAMES,
     EXAMPLE_PROJECTION,
     MAX_LIMIT,
-    SENTIMENT_LABELS,
     sentiment_examples,
 )
 

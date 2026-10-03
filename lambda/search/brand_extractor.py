@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from shared.industry_presets import DEFAULT_INDUSTRY_ID, get_preset
+from shared.kpi_engine import SENTIMENT_LABELS
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
 from shared.prompt_safety import (
@@ -46,9 +47,6 @@ DEFAULT_EXTRACTION_CONFIG = {
 
 # Enough output for a long brand list with a quote and a reason per brand.
 EXTRACTION_MAX_TOKENS = 8000
-
-# The labels the KPI engine counts (shared.kpi_engine); anything else is left unlabelled.
-SENTIMENT_LABELS = ('positive', 'neutral', 'mixed', 'negative')
 
 # The prompt asks for ~200 characters; a longer quote is cut here.
 SENTIMENT_QUOTE_MAX_LENGTH = 300
