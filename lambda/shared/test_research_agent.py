@@ -437,6 +437,11 @@ def _tracking_entry(
     }
 
 
+def _mark_best_destination_entry(proposal: list[dict]) -> list[dict]:
+    """Mark the tracking subset of ``proposal`` for a destination-only job tracking one keyword."""
+    return mark_tracking_subset(proposal, _config(dimensions=['destination'], tracking_count=1))
+
+
 class TestMarkTrackingSubset:
     def test_marks_exactly_the_configured_count_when_the_proposal_is_longer(self):
         proposal = [
@@ -511,7 +516,7 @@ class TestMarkTrackingSubset:
             _tracking_entry('single provider', relevance=8, providers=['openai']),
         ]
 
-        marked = mark_tracking_subset(proposal, _config(dimensions=['destination'], tracking_count=1))
+        marked = _mark_best_destination_entry(proposal)
 
         assert [entry['tracking_score'] for entry in marked] == [803.0, 803.0, 802.0]
         assert [entry['tracking'] for entry in marked] == [True, False, False]
@@ -524,7 +529,7 @@ class TestMarkTrackingSubset:
             _tracking_entry('easy term', relevance=8, competition='low'),
         ]
 
-        marked = mark_tracking_subset(proposal, _config(dimensions=['destination'], tracking_count=1))
+        marked = _mark_best_destination_entry(proposal)
 
         assert [entry['tracking_score'] for entry in marked] == [802.0, 802.0]
         assert [entry['tracking'] for entry in marked] == [True, False]

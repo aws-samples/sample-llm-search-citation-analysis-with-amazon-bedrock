@@ -248,32 +248,29 @@ def html_to_text(html: str | None, max_chars: int = MAX_EXTRACTED_TEXT_LENGTH) -
     return normalized[:max_chars]
 
 
-def _required_text(
-    idea: dict[str, Any], field: str, max_length: int
-) -> str | ContentBriefValidationIssue:
-    value = idea.get(field)
+def _bounded_text(field: str, value: Any, max_length: int) -> str | ContentBriefValidationIssue:
     if not isinstance(value, str):
         return ContentBriefValidationIssue(field, f'{field} must be a string')
-    if not value.strip():
-        return ContentBriefValidationIssue(field, f'{field} is required')
     if len(value) > max_length:
         return ContentBriefValidationIssue(
             field, f'{field} must be at most {max_length} characters'
         )
     return value
+
+
+def _required_text(
+    idea: dict[str, Any], field: str, max_length: int
+) -> str | ContentBriefValidationIssue:
+    value = idea.get(field)
+    if isinstance(value, str) and not value.strip():
+        return ContentBriefValidationIssue(field, f'{field} is required')
+    return _bounded_text(field, value, max_length)
 
 
 def _optional_text(
     idea: dict[str, Any], field: str, max_length: int
 ) -> str | ContentBriefValidationIssue:
-    value = idea.get(field, '')
-    if not isinstance(value, str):
-        return ContentBriefValidationIssue(field, f'{field} must be a string')
-    if len(value) > max_length:
-        return ContentBriefValidationIssue(
-            field, f'{field} must be at most {max_length} characters'
-        )
-    return value
+    return _bounded_text(field, idea.get(field, ''), max_length)
 
 
 def _validate_mode(idea: dict[str, Any]) -> str | ContentBriefValidationIssue:

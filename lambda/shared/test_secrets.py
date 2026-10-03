@@ -61,6 +61,12 @@ def _client_returning(secret_string: str) -> MagicMock:
     return client
 
 
+def _two_lookups(client: MagicMock) -> tuple[str | None, str | None]:
+    """Two successive ``openai-key`` lookups served by ``client``."""
+    with patch.object(secrets, '_secrets_client', client):
+        return secrets.get_api_key('openai-key'), secrets.get_api_key('openai-key')
+
+
 @pytest.fixture(autouse=True)
 def _reset_module_state(monkeypatch):
     """Clear the module cache and pin SECRETS_PREFIX around each test."""
@@ -93,23 +99,17 @@ class TestUnconfiguredProviders:
     """Falsy returns let callers skip providers instead of calling them
     with a bogus key (the old search copy's skip behavior, preserved)."""
 
-    def test_returns_none_when_raw_secret_is_placeholder(self):
-        client = _client_returning('placeholder')
-        with patch.object(secrets, '_secrets_client', client):
-            assert secrets.get_api_key('openai-key') is None
-
-    def test_returns_none_when_json_api_key_is_placeholder(self):
-        client = _client_returning(json.dumps({'api_key': 'placeholder'}))
-        with patch.object(secrets, '_secrets_client', client):
-            assert secrets.get_api_key('openai-key') is None
-
-    def test_returns_none_when_secret_string_is_empty(self):
-        client = _client_returning('')
-        with patch.object(secrets, '_secrets_client', client):
-            assert secrets.get_api_key('openai-key') is None
-
-    def test_returns_none_when_json_api_key_is_empty(self):
-        client = _client_returning(json.dumps({'api_key': ''}))
+    @pytest.mark.parametrize(
+        'secret_string',
+        [
+            pytest.param('placeholder', id='raw_placeholder'),
+            pytest.param(json.dumps({'api_key': 'placeholder'}), id='json_placeholder'),
+            pytest.param('', id='empty_secret_string'),
+            pytest.param(json.dumps({'api_key': ''}), id='json_empty_api_key'),
+        ],
+    )
+    def test_returns_none_when_the_secret_holds_no_usable_key(self, secret_string):
+        client = _client_returning(secret_string)
         with patch.object(secrets, '_secrets_client', client):
             assert secrets.get_api_key('openai-key') is None
 
@@ -163,9 +163,9 @@ class TestPrefixing:
 class TestCaching:
     def test_serves_second_call_within_ttl_from_cache(self):
         client = _client_returning('sk-cached')
-        with patch.object(secrets, '_secrets_client', client):
-            first = secrets.get_api_key('openai-key')
-            second = secrets.get_api_key('openai-key')
+
+        first, second = _two_lookups(client)
+
         assert first == 'sk-cached'
         assert second == 'sk-cached'
         client.get_secret_value.assert_called_once_with(SecretId=f'{_PREFIX}openai-key')
@@ -192,8 +192,8 @@ class TestCaching:
             {'SecretString': 'placeholder'},
             {'SecretString': 'sk-now-configured'},
         ]
-        with patch.object(secrets, '_secrets_client', client):
-            first = secrets.get_api_key('openai-key')
-            second = secrets.get_api_key('openai-key')
+
+        first, second = _two_lookups(client)
+
         assert first is None
         assert second == 'sk-now-configured'

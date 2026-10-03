@@ -43,6 +43,31 @@ def _fake_table_with_items(per_key_items: dict[str, list[dict]]) -> MagicMock:
     return table
 
 
+def _consistent_get(*ids: str) -> dict:
+    """The ``RequestItems`` of a strongly consistent ``batch_get_item`` for these ``id`` keys."""
+    return {"table": {"Keys": [{"id": key} for key in ids], "ConsistentRead": True}}
+
+
+def _consistent_get_one_and_two(resource: MagicMock) -> list[dict]:
+    """Strongly consistent ``batch_get_items`` of keys ``one`` and ``two`` from ``table``."""
+    return dynamodb_batch.batch_get_items(resource, "table", [{"id": "one"}, {"id": "two"}], consistent_read=True)
+
+
+def _query_latest_for_u1(rows: list[dict], **options) -> tuple[MagicMock, dict]:
+    """Query partition ``u1`` (holding ``rows``) and return the table stub with the result."""
+    table = _fake_table_with_items({'u1': rows})
+    return table, dynamodb_batch.query_latest_per_key(table, 'pk', ['u1'], **options)
+
+
+def _paged_operation(*pages: tuple[list[dict], dict | None]) -> MagicMock:
+    """A query/scan stub answering ``(items, last_evaluated_key)`` pages in turn; ``None`` ends paging."""
+    responses = [
+        {'Items': items} if last_key is None else {'Items': items, 'LastEvaluatedKey': last_key}
+        for items, last_key in pages
+    ]
+    return MagicMock(side_effect=responses)
+
+
 class TestBatchGetItems:
     def test_returns_empty_list_when_no_keys_requested(self) -> None:
         resource = MagicMock()
@@ -58,22 +83,10 @@ class TestBatchGetItems:
             "Responses": {"table": [{"id": "two"}, {"id": "one"}]},
         }
 
-        result = dynamodb_batch.batch_get_items(
-            resource,
-            "table",
-            [{"id": "one"}, {"id": "two"}],
-            consistent_read=True,
-        )
+        result = _consistent_get_one_and_two(resource)
 
         assert result == [{"id": "two"}, {"id": "one"}]
-        resource.batch_get_item.assert_called_once_with(
-            RequestItems={
-                "table": {
-                    "Keys": [{"id": "one"}, {"id": "two"}],
-                    "ConsistentRead": True,
-                },
-            }
-        )
+        resource.batch_get_item.assert_called_once_with(RequestItems=_consistent_get("one", "two"))
 
     def test_returns_all_rows_when_unprocessed_keys_succeed_on_retry(self) -> None:
         resource = MagicMock()
@@ -88,31 +101,12 @@ class TestBatchGetItems:
         ]
 
         with patch.object(dynamodb_batch.time, "sleep") as sleep:
-            result = dynamodb_batch.batch_get_items(
-                resource,
-                "table",
-                [{"id": "one"}, {"id": "two"}],
-                consistent_read=True,
-            )
+            result = _consistent_get_one_and_two(resource)
 
         assert result == [{"id": "one"}, {"id": "two"}]
         assert resource.batch_get_item.call_args_list == [
-            call(
-                RequestItems={
-                    "table": {
-                        "Keys": [{"id": "one"}, {"id": "two"}],
-                        "ConsistentRead": True,
-                    },
-                }
-            ),
-            call(
-                RequestItems={
-                    "table": {
-                        "Keys": [{"id": "two"}],
-                        "ConsistentRead": True,
-                    },
-                }
-            ),
+            call(RequestItems=_consistent_get("one", "two")),
+            call(RequestItems=_consistent_get("two")),
         ]
         sleep.assert_called_once_with(0.05)
 
@@ -193,21 +187,15 @@ class TestQueryLatestPerKey:
         }
 
     def test_requests_latest_row_when_a_partition_is_queried(self) -> None:
-        table = _fake_table_with_items({'u1': [{'x': 1}]})
-
-        dynamodb_batch.query_latest_per_key(table, 'pk', ['u1'])
+        table, _result = _query_latest_for_u1([{'x': 1}])
 
         kwargs = table.query.call_args.kwargs
         assert kwargs['ScanIndexForward'] is False
         assert kwargs['Limit'] == 1
 
     def test_forwards_projection_fields_when_the_caller_restricts_attributes(self) -> None:
-        table = _fake_table_with_items({'u1': [{'title': 'One'}]})
-
-        dynamodb_batch.query_latest_per_key(
-            table,
-            'pk',
-            ['u1'],
+        table, _result = _query_latest_for_u1(
+            [{'title': 'One'}],
             projection_expression='#title, crawled_at',
             expression_attribute_names={'#title': 'title'},
         )
@@ -238,9 +226,7 @@ class TestQueryLatestPerKey:
         assert list(result) == urls
 
     def test_returns_none_when_partition_has_no_rows(self) -> None:
-        table = _fake_table_with_items({'u1': []})
-
-        result = dynamodb_batch.query_latest_per_key(table, 'pk', ['u1'])
+        _table, result = _query_latest_for_u1([])
 
         assert result == {'u1': None}
 
@@ -258,29 +244,29 @@ class TestQueryLatestPerKey:
 
 
 class TestCollectAllItems:
-    def test_returns_items_when_operation_has_one_page(self) -> None:
-        operation = MagicMock(return_value={'Items': [{'id': 1}, {'id': 2}]})
+    @pytest.mark.parametrize(
+        ('pages', 'expected'),
+        [
+            pytest.param([{'Items': [{'id': 1}, {'id': 2}]}], [{'id': 1}, {'id': 2}], id='one_page'),
+            pytest.param(
+                [
+                    {'Items': [{'id': 1}], 'LastEvaluatedKey': {'id': 1}},
+                    {'Items': [{'id': 2}], 'LastEvaluatedKey': {'id': 2}},
+                    {'Items': [{'id': 3}]},
+                ],
+                [{'id': 1}, {'id': 2}, {'id': 3}],
+                id='pages_concatenated_in_order_until_last_key_is_absent',
+            ),
+            pytest.param([{}], [], id='page_without_items_key_is_empty'),
+        ],
+    )
+    def test_returns_the_items_of_every_page_in_order(self, pages: list[dict], expected: list[dict]) -> None:
+        operation = MagicMock(side_effect=pages)
 
-        result = dynamodb_batch.collect_all_items(operation)
-
-        assert result == [{'id': 1}, {'id': 2}]
-
-    def test_concatenates_pages_in_order_until_last_key_is_absent(self) -> None:
-        operation = MagicMock(side_effect=[
-            {'Items': [{'id': 1}], 'LastEvaluatedKey': {'id': 1}},
-            {'Items': [{'id': 2}], 'LastEvaluatedKey': {'id': 2}},
-            {'Items': [{'id': 3}]},
-        ])
-
-        result = dynamodb_batch.collect_all_items(operation)
-
-        assert result == [{'id': 1}, {'id': 2}, {'id': 3}]
+        assert dynamodb_batch.collect_all_items(operation) == expected
 
     def test_passes_each_last_key_to_the_next_page_request(self) -> None:
-        operation = MagicMock(side_effect=[
-            {'Items': [], 'LastEvaluatedKey': {'id': 1}},
-            {'Items': []},
-        ])
+        operation = _paged_operation(([], {'id': 1}), ([], None))
 
         dynamodb_batch.collect_all_items(operation, IndexName="StatusIndex")
 
@@ -290,13 +276,7 @@ class TestCollectAllItems:
         ]
 
     def test_repeats_key_condition_on_every_follow_up_page_request(self) -> None:
-        operation = MagicMock(side_effect=[
-            {
-                'Items': [{'id': 'first'}],
-                'LastEvaluatedKey': {'pk': 'first'},
-            },
-            {'Items': [{'id': 'second'}]},
-        ])
+        operation = _paged_operation(([{'id': 'first'}], {'pk': 'first'}), ([{'id': 'second'}], None))
 
         result = dynamodb_batch.collect_all_items(
             operation,
@@ -311,10 +291,3 @@ class TestCollectAllItems:
                 ExclusiveStartKey={"pk": "first"},
             ),
         ]
-
-    def test_returns_empty_list_when_page_has_no_items_key(self) -> None:
-        operation = MagicMock(return_value={})
-
-        result = dynamodb_batch.collect_all_items(operation)
-
-        assert result == []

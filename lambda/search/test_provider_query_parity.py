@@ -29,15 +29,9 @@ from unittest.mock import MagicMock, patch
 
 from testing.env import setdefault_env
 from testing.module_loader import load_handler_module
+from testing.search_handler_fixtures import SEARCH_HANDLER_ENV
 
-setdefault_env({
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
-    'SEARCH_RESULTS_TABLE': 'test-search',
-    'PROVIDER_CONFIG_TABLE': 'test-providers',
-    'DYNAMODB_TABLE_PROVIDER_CONFIG': 'test-providers',
-    'BRAND_CONFIG_TABLE': 'test-brands',
-    'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brands',
-})
+setdefault_env(SEARCH_HANDLER_ENV)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 

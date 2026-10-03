@@ -74,10 +74,17 @@ class TestQueryKeywordItems:
 
         assert query_keyword_items(table, 'best running shoes') == rows
 
-    def test_queries_by_the_keyword_partition_key(self):
+    @pytest.mark.parametrize(
+        'prefix_kwargs',
+        [
+            pytest.param({}, id='no_sort_key_prefix'),
+            pytest.param({'sort_key_prefix': ''}, id='empty_sort_key_prefix_reads_every_run'),
+        ],
+    )
+    def test_queries_by_the_keyword_partition_key_alone(self, prefix_kwargs):
         table = fake_table(query={'Items': []})
 
-        query_keyword_items(table, 'best running shoes')
+        query_keyword_items(table, 'best running shoes', **prefix_kwargs)
 
         table.query.assert_called_once_with(KeyConditionExpression=Key('keyword').eq('best running shoes'))
 
@@ -88,13 +95,6 @@ class TestQueryKeywordItems:
 
         expected = Key('keyword').eq('best running shoes') & Key('timestamp_provider').begins_with(_LATEST)
         table.query.assert_called_once_with(KeyConditionExpression=expected)
-
-    def test_reads_every_run_when_the_sort_key_prefix_is_empty(self):
-        table = fake_table(query={'Items': []})
-
-        query_keyword_items(table, 'best running shoes', sort_key_prefix='')
-
-        table.query.assert_called_once_with(KeyConditionExpression=Key('keyword').eq('best running shoes'))
 
     def test_returns_no_rows_when_the_page_has_no_items_key(self):
         table = MagicMock()

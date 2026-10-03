@@ -20,6 +20,7 @@ from shared.kpi_alerts import (
     validate_settings,
 )
 from shared.kpi_engine import answers_from_rows
+from testing.search_result_fixtures import successful_answer_row
 
 PREVIOUS_TIMESTAMP = '2026-09-01T10:00:00Z'
 CURRENT_TIMESTAMP = '2026-09-02T10:00:00Z'
@@ -245,14 +246,13 @@ class TestBaselineAndDisabledSettings:
 
 
 def _row(keyword: str, *brands: tuple[str, str, int], provider: str = 'openai') -> dict:
-    return {
-        'keyword': keyword,
-        'timestamp': CURRENT_TIMESTAMP,
-        'provider': provider,
-        'status': 'success',
-        'brands': [{'name': name, 'classification': classification, 'rank': rank} for name, classification, rank in brands],
-        'citations': ['https://hotel-sol.com/spa'],
-    }
+    return successful_answer_row(
+        keyword=keyword,
+        timestamp=CURRENT_TIMESTAMP,
+        provider=provider,
+        brands=brands,
+        citations=['https://hotel-sol.com/spa'],
+    )
 
 
 class TestSnapshotMetrics:

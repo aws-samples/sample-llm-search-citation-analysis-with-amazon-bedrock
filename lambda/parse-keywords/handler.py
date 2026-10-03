@@ -19,6 +19,7 @@ import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
+from shared.analysis_runs import query_prompt_from_item
 from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
 from shared.step_function_response import log_error
 
@@ -104,14 +105,7 @@ def read_enabled_query_prompts() -> list[dict[str, Any]]:
             f"Could not read enabled query prompts from {QUERY_PROMPTS_TABLE}"
         ) from e
 
-    prompts = [
-        {
-            'id': item['id'],
-            'name': item.get('name', ''),
-            'template': item.get('template', ''),
-        }
-        for item in response.get('Items', [])
-    ]
+    prompts = [query_prompt_from_item(item) for item in response.get('Items', [])]
     logger.info(f"Read {len(prompts)} enabled query prompts from DynamoDB")
     return prompts
 

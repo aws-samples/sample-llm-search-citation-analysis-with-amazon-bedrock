@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 from testing.module_loader import load_handler_module
 
@@ -83,6 +84,14 @@ def _parsed_keywords() -> list[str]:
     return [item['keyword'] for item in _manifest()]
 
 
+def _query_error(code: str) -> ClientError:
+    return ClientError({'Error': {'Code': code, 'Message': code}}, 'Query')
+
+
+# Prompts a trigger API supplies in the execution input.
+CUSTOM_PROMPTS = [{'id': 'p1', 'name': 'Custom', 'template': 'Find {keyword}'}]
+
+
 @pytest.fixture(autouse=True)
 def _reset_mocks():
     """Reset table mocks before each test."""
@@ -127,9 +136,8 @@ class TestQueryPromptResolution:
 
     def test_passes_through_query_prompts_from_execution_input(self, handler_module):
         """Prompts provided by trigger APIs are forwarded unchanged."""
-        prompts = [{'id': 'p1', 'name': 'Custom', 'template': 'Find {keyword}'}]
-        result = handler_module.handler({'keywords': ['best hotels'], 'query_prompts': prompts}, {})
-        assert result['query_prompts'] == prompts
+        result = handler_module.handler({'keywords': ['best hotels'], 'query_prompts': CUSTOM_PROMPTS}, {})
+        assert result['query_prompts'] == CUSTOM_PROMPTS
         mock_prompts_table.query.assert_not_called()
 
     def test_passes_through_empty_prompt_list_without_loading(self, handler_module):
@@ -178,28 +186,17 @@ class TestQueryPromptReadFailsClosed:
     run is recoverable; silently wrong data is not.
     """
 
-    @staticmethod
-    def _client_error(code: str):
-        from botocore.exceptions import ClientError
-        return ClientError({'Error': {'Code': code, 'Message': code}}, 'Query')
-
-    def test_raises_when_the_prompt_read_throttles(self, handler_module):
-        """The case from the audit: transient failure must not look like success."""
-        mock_prompts_table.query.side_effect = self._client_error('ThrottlingException')
-
-        with pytest.raises(handler_module.QueryPromptReadError):
-            handler_module.handler({'keywords': ['best hotels']}, {})
-
-    def test_raises_on_provisioned_throughput_exceeded(self, handler_module):
-        mock_prompts_table.query.side_effect = self._client_error(
-            'ProvisionedThroughputExceededException'
-        )
-
-        with pytest.raises(handler_module.QueryPromptReadError):
-            handler_module.handler({'keywords': ['best hotels']}, {})
-
-    def test_raises_on_an_unexpected_error(self, handler_module):
-        mock_prompts_table.query.side_effect = RuntimeError('table unavailable')
+    @pytest.mark.parametrize(
+        'failure',
+        [
+            # The case from the audit: transient failure must not look like success.
+            pytest.param(_query_error('ThrottlingException'), id='throttled'),
+            pytest.param(_query_error('ProvisionedThroughputExceededException'), id='provisioned_throughput_exceeded'),
+            pytest.param(RuntimeError('table unavailable'), id='unexpected_error'),
+        ],
+    )
+    def test_raises_when_the_prompt_read_fails(self, handler_module, failure):
+        mock_prompts_table.query.side_effect = failure
 
         with pytest.raises(handler_module.QueryPromptReadError):
             handler_module.handler({'keywords': ['best hotels']}, {})
@@ -210,7 +207,7 @@ class TestQueryPromptReadFailsClosed:
         in this deployment — a configuration state, not a failure. Failing here
         would break bootstrap deploys, so this case stays fail-open on purpose.
         """
-        mock_prompts_table.query.side_effect = self._client_error('ResourceNotFoundException')
+        mock_prompts_table.query.side_effect = _query_error('ResourceNotFoundException')
 
         result = handler_module.handler({'keywords': ['best hotels']}, {})
 
@@ -221,14 +218,13 @@ class TestQueryPromptReadFailsClosed:
         Trigger-API runs pass prompts in the execution input, so a broken
         prompts table must not fail them — only schedule-driven runs read it.
         """
-        mock_prompts_table.query.side_effect = self._client_error('ThrottlingException')
-        prompts = [{'id': 'p1', 'name': 'Custom', 'template': 'Find {keyword}'}]
+        mock_prompts_table.query.side_effect = _query_error('ThrottlingException')
 
         result = handler_module.handler(
-            {'keywords': ['best hotels'], 'query_prompts': prompts}, {}
+            {'keywords': ['best hotels'], 'query_prompts': CUSTOM_PROMPTS}, {}
         )
 
-        assert result['query_prompts'] == prompts
+        assert result['query_prompts'] == CUSTOM_PROMPTS
 
 
 

@@ -18,6 +18,7 @@ from shared.answer_queries import (
     query_latest_run_rows,
 )
 from shared.kpi_engine import ANSWER_ATTRIBUTE_NAMES, ANSWER_PROJECTION
+from testing.dynamodb_stubs import fake_table
 
 RUN_1 = '2026-09-01T06:00:00.000000Z'
 RUN_2 = '2026-09-08T06:00:00.000000Z'
@@ -35,11 +36,23 @@ def _sort_condition(call: Any) -> tuple[str, str, str]:
     return sort.expression_operator, sort.get_expression()['values'][0].name, sort.get_expression()['values'][1]
 
 
+def _table_answering(pages: list[dict[str, Any]]) -> MagicMock:
+    """A table whose successive ``query`` calls answer ``pages`` in turn."""
+    table = MagicMock()
+    table.query.side_effect = pages
+    return table
+
+
+def _projection(table: MagicMock) -> tuple[str, dict[str, str]]:
+    """The projection expression and attribute names of the table's last query."""
+    kwargs = table.query.call_args.kwargs
+    return kwargs['ProjectionExpression'], kwargs['ExpressionAttributeNames']
+
+
 class TestWindowAndRunQueries:
     @pytest.mark.parametrize('query', [query_keyword_rows_since, query_keyword_run_rows])
     def test_reads_one_keyword_partition(self, query):
-        table = MagicMock()
-        table.query.return_value = {'Items': [{'timestamp': RUN_1}]}
+        table = fake_table(query={'Items': [{'timestamp': RUN_1}]})
 
         rows = query(table, 'hotel malaga', RUN_1)
 
@@ -47,16 +60,14 @@ class TestWindowAndRunQueries:
         assert (rows, partition['values'][0].name, partition['values'][1]) == ([{'timestamp': RUN_1}], 'keyword', 'hotel malaga')
 
     def test_reads_the_window_from_its_start_through_the_sort_key(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
+        table = fake_table(query={'Items': []})
 
         query_keyword_rows_since(table, 'hotel malaga', RUN_1)
 
         assert _sort_condition(table.query.call_args) == ('>=', 'timestamp_provider', RUN_1)
 
     def test_reads_one_run_through_the_sort_key_prefix(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
+        table = fake_table(query={'Items': []})
 
         query_keyword_run_rows(table, 'hotel malaga', RUN_2)
 
@@ -64,41 +75,35 @@ class TestWindowAndRunQueries:
 
     @pytest.mark.parametrize('query', [query_keyword_rows_since, query_keyword_run_rows])
     def test_projects_the_answer_fields(self, query):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
+        table = fake_table(query={'Items': []})
 
         query(table, 'hotel malaga', RUN_1)
 
-        kwargs = table.query.call_args.kwargs
-        assert (kwargs['ProjectionExpression'], kwargs['ExpressionAttributeNames']) == (
+        assert _projection(table) == (
             'keyword, #ts, provider, #st, query_prompt_id, brands, citations, #md.model',
             {'#ts': 'timestamp', '#st': 'status', '#md': 'metadata'},
         )
 
     @pytest.mark.parametrize('query', [query_keyword_rows_since, query_keyword_run_rows])
     def test_follows_pagination(self, query):
-        table = MagicMock()
-        table.query.side_effect = [
+        table = _table_answering([
             {'Items': [{'timestamp': RUN_1}], 'LastEvaluatedKey': {'keyword': 'k'}},
             {'Items': [{'timestamp': RUN_2}]},
-        ]
+        ])
 
         assert query(table, 'hotel malaga', RUN_1) == [{'timestamp': RUN_1}, {'timestamp': RUN_2}]
 
     def test_reads_one_run_with_a_wider_projection_when_asked(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
+        table = fake_table(query={'Items': []})
 
         query_keyword_run_rows(table, 'hotel malaga', RUN_2, projection='keyword, #rsp', attribute_names={'#rsp': 'response'})
 
-        kwargs = table.query.call_args.kwargs
-        assert (kwargs['ProjectionExpression'], kwargs['ExpressionAttributeNames']) == ('keyword, #rsp', {'#rsp': 'response'})
+        assert _projection(table) == ('keyword, #rsp', {'#rsp': 'response'})
 
 
 class TestLatestRunRows:
     def test_reads_the_rows_of_the_latest_run_with_the_given_projection(self):
-        table = MagicMock()
-        table.query.side_effect = [{'Items': [{'timestamp': RUN_2}]}, {'Items': [{'timestamp': RUN_2, 'response': 'text'}]}]
+        table = _table_answering([{'Items': [{'timestamp': RUN_2}]}, {'Items': [{'timestamp': RUN_2, 'response': 'text'}]}])
 
         rows = query_latest_run_rows(table, 'hotel malaga', projection='#ts, #rsp', attribute_names={'#ts': 'timestamp', '#rsp': 'response'})
 
@@ -108,26 +113,23 @@ class TestLatestRunRows:
         )
 
     def test_projects_the_answer_fields_by_default(self):
-        table = MagicMock()
-        table.query.side_effect = [{'Items': [{'timestamp': RUN_2}]}, {'Items': []}]
+        table = _table_answering([{'Items': [{'timestamp': RUN_2}]}, {'Items': []}])
 
         query_latest_run_rows(table, 'hotel malaga')
 
-        assert (table.query.call_args.kwargs['ProjectionExpression'], table.query.call_args.kwargs['ExpressionAttributeNames']) == (
+        assert _projection(table) == (
             ANSWER_PROJECTION, ANSWER_ATTRIBUTE_NAMES,
         )
 
     def test_reads_no_run_rows_for_a_keyword_never_analysed(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
+        table = fake_table(query={'Items': []})
 
         assert (query_latest_run_rows(table, 'hotel malaga'), table.query.call_count) == ([], 1)
 
 
 class TestLatestRun:
     def test_reads_only_the_newest_row_of_the_keyword(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': [{'timestamp': RUN_2}]}
+        table = fake_table(query={'Items': [{'timestamp': RUN_2}]})
 
         latest_run_timestamp(table, 'hotel malaga')
 
@@ -139,8 +141,7 @@ class TestLatestRun:
         assert kwargs['ProjectionExpression'] == '#ts'
 
     def test_names_the_timestamp_attribute(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
+        table = fake_table(query={'Items': []})
 
         latest_run_timestamp(table, 'hotel malaga')
 
@@ -153,25 +154,22 @@ class TestLatestRun:
         ([{}], None),
     ])
     def test_answers_the_newest_run_timestamp_or_none(self, items, expected):
-        table = MagicMock()
-        table.query.return_value = {'Items': items}
+        table = fake_table(query={'Items': items})
 
         assert latest_run_timestamp(table, 'hotel malaga') == expected
 
     def test_answers_none_when_the_response_has_no_items(self):
-        table = MagicMock()
-        table.query.return_value = {}
+        table = fake_table(query={})
 
         assert latest_run_timestamp(table, 'hotel malaga') is None
 
     def test_reads_every_row_of_the_latest_and_the_previous_run(self):
-        table = MagicMock()
-        table.query.side_effect = [
+        table = _table_answering([
             {'Items': [{'timestamp': RUN_2}]},
             {'Items': [{'timestamp': RUN_1}]},
             {'Items': [{'timestamp': RUN_1, 'provider': 'gemini'}]},
             {'Items': [{'timestamp': RUN_2, 'provider': 'openai'}]},
-        ]
+        ])
 
         latest, previous = query_last_two_runs_rows(table, 'hotel malaga')
 
@@ -181,22 +179,19 @@ class TestLatestRun:
         )
 
     def test_reads_the_latest_run_alone_when_there_is_no_previous_one(self):
-        table = MagicMock()
-        table.query.side_effect = [{'Items': [{'timestamp': RUN_2}]}, {'Items': []}, {'Items': [{'timestamp': RUN_2}]}]
+        table = _table_answering([{'Items': [{'timestamp': RUN_2}]}, {'Items': []}, {'Items': [{'timestamp': RUN_2}]}])
 
         assert query_last_two_runs_rows(table, 'hotel malaga') == ([{'timestamp': RUN_2}], [])
 
     def test_reads_nothing_more_for_a_keyword_never_analysed(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
+        table = fake_table(query={'Items': []})
 
         assert (query_last_two_runs_rows(table, 'hotel malaga'), table.query.call_count) == (([], []), 1)
 
 
 class TestPreviousRun:
     def test_reads_the_newest_row_strictly_before_the_run(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': [{'timestamp': RUN_1}]}
+        table = fake_table(query={'Items': [{'timestamp': RUN_1}]})
 
         timestamp = previous_run_timestamp(table, 'hotel malaga', RUN_2)
 
@@ -208,13 +203,11 @@ class TestPreviousRun:
         assert kwargs['Limit'] == 1
 
     def test_projects_only_the_timestamp(self):
-        table = MagicMock()
-        table.query.return_value = {'Items': []}
+        table = fake_table(query={'Items': []})
 
         previous_run_timestamp(table, 'hotel malaga', RUN_2)
 
-        kwargs = table.query.call_args.kwargs
-        assert (kwargs['ProjectionExpression'], kwargs['ExpressionAttributeNames']) == ('#ts', {'#ts': 'timestamp'})
+        assert _projection(table) == ('#ts', {'#ts': 'timestamp'})
 
     @pytest.mark.parametrize(('response', 'expected'), [
         ({'Items': [{'timestamp': RUN_1}]}, RUN_1),
@@ -223,8 +216,7 @@ class TestPreviousRun:
         ({}, None),
     ])
     def test_answers_the_previous_run_timestamp_or_none(self, response, expected):
-        table = MagicMock()
-        table.query.return_value = response
+        table = fake_table(query=response)
 
         assert previous_run_timestamp(table, 'hotel malaga', RUN_2) == expected
 

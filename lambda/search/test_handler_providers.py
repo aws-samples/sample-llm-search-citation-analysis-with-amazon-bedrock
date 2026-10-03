@@ -16,15 +16,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from testing.handler_fixtures import handler_fixture
+from testing.search_handler_fixtures import SEARCH_HANDLER_ENV
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_ENV = {
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
-    'DYNAMODB_TABLE_PROVIDER_CONFIG': 'test-providers',
-}
 
 # Unique module name: see test_handler_prompts.py for why `import handler` is contested.
-search_handler = handler_fixture(_HERE, 'handler.py', 'search_handler_providers', env=_ENV)
+search_handler = handler_fixture(_HERE, 'handler.py', 'search_handler_providers', env=SEARCH_HANDLER_ENV)
 
 _BRAVE_RESULT = {
     'provider': 'brave', 'provider_type': 'search', 'response': '', 'status': 'success',
@@ -53,15 +50,17 @@ def providers(search_handler):
 
 
 class TestOneProviderInvocation:
-    def test_reads_only_the_selected_providers_secret(self, search_handler, providers):
+    @pytest.mark.parametrize(
+        ('lookup', 'expected_args'),
+        [
+            pytest.param('get_api_key', [('brave-key',)], id='secret'),
+            pytest.param('is_enabled', [('brave',)], id='enablement'),
+        ],
+    )
+    def test_reads_only_the_selected_providers_configuration(self, search_handler, providers, lookup, expected_args):
         search_handler.execute_all_providers('hotel coruña', providers=['brave'])
 
-        assert [call.args for call in providers.get_api_key.call_args_list] == [('brave-key',)]
-
-    def test_reads_only_the_selected_providers_enablement(self, search_handler, providers):
-        search_handler.execute_all_providers('hotel coruña', providers=['brave'])
-
-        assert [call.args for call in providers.is_enabled.call_args_list] == [('brave',)]
+        assert [call.args for call in getattr(providers, lookup).call_args_list] == expected_args
 
     def test_reads_every_secret_when_no_provider_is_selected(self, search_handler, providers):
         providers.is_enabled.return_value = False

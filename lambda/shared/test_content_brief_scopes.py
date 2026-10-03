@@ -43,6 +43,14 @@ def canonicalize(
     )
 
 
+def _canonical_cross_group_selection() -> dict[str, object]:
+    """The canonical brief for two selected keywords from different groups; it must validate."""
+    idea, members = cross_group_scope_case()
+    canonical, issue = canonicalize(idea, members=members)
+    assert issue is None
+    return present(canonical)
+
+
 class TestAuthoritativeGroupScope:
     def test_resolves_every_active_member_when_group_scope_is_selected(self) -> None:
         members = mixed_group_keyword_rows()
@@ -115,14 +123,11 @@ class TestAuthoritativeKeywordScope:
         assert 'group_id' not in present(canonical)
 
     def test_labels_multiple_selected_keywords_with_exact_count(self) -> None:
-        idea, members = cross_group_scope_case()
+        canonical = _canonical_cross_group_selection()
 
-        canonical, issue = canonicalize(idea, members=members)
-
-        assert issue is None
-        assert present(canonical)['scope_label'] == '2 selected keywords'
-        assert present(canonical)['keyword_ids'] == ['keyword-1', 'keyword-2']
-        assert present(canonical)['keywords'] == ['Alpha', 'Beta']
+        assert canonical['scope_label'] == '2 selected keywords'
+        assert canonical['keyword_ids'] == ['keyword-1', 'keyword-2']
+        assert canonical['keywords'] == ['Alpha', 'Beta']
 
     def test_preserves_all_fifty_authoritative_selected_keywords(self) -> None:
         ids = [f'keyword-{index:02d}' for index in range(MAX_SELECTED_KEYWORDS)]
@@ -138,34 +143,27 @@ class TestAuthoritativeKeywordScope:
         assert present(canonical)['keywords'][0] == 'Keyword 00'
         assert present(canonical)['keywords'][-1] == 'Keyword 49'
 
-    def test_rejects_fifty_one_selected_keyword_ids_before_resolution(self) -> None:
-        ids = [f'keyword-{index}' for index in range(MAX_SELECTED_KEYWORDS + 1)]
-
+    @pytest.mark.parametrize(
+        ('keyword_ids', 'message'),
+        [
+            pytest.param(
+                [f'keyword-{index}' for index in range(MAX_SELECTED_KEYWORDS + 1)],
+                'scope.keyword_ids accepts at most 50 entries',
+                id='fifty_one_ids',
+            ),
+            pytest.param([], 'scope.keyword_ids must contain between 1 and 50 active keyword ids', id='empty_ids'),
+        ],
+    )
+    def test_rejects_selected_keyword_ids_out_of_bounds_before_resolution(self, keyword_ids, message) -> None:
         canonical, issue = canonicalize(
             build_scoped_content_brief(
-                scope={'mode': 'keywords', 'keyword_ids': ids}
+                scope={'mode': 'keywords', 'keyword_ids': keyword_ids}
             ),
             members=[],
         )
 
         assert canonical is None
-        assert issue == ContentBriefValidationIssue(
-            'scope.keyword_ids', 'scope.keyword_ids accepts at most 50 entries'
-        )
-
-    def test_rejects_empty_selected_keyword_ids_before_resolution(self) -> None:
-        canonical, issue = canonicalize(
-            build_scoped_content_brief(
-                scope={'mode': 'keywords', 'keyword_ids': []}
-            ),
-            members=[],
-        )
-
-        assert canonical is None
-        assert issue == ContentBriefValidationIssue(
-            'scope.keyword_ids',
-            'scope.keyword_ids must contain between 1 and 50 active keyword ids',
-        )
+        assert issue == ContentBriefValidationIssue('scope.keyword_ids', message)
 
     @pytest.mark.parametrize('missing_id', ['missing-keyword', 'inactive-keyword'])
     def test_rejects_unresolved_selected_keyword_id(self, missing_id: str) -> None:
@@ -184,12 +182,7 @@ class TestAuthoritativeKeywordScope:
         )
 
     def test_accepts_selected_keywords_without_a_common_group(self) -> None:
-        idea, members = cross_group_scope_case()
-
-        canonical, issue = canonicalize(idea, members=members)
-
-        assert issue is None
-        assert present(canonical)['scope'] == {
+        assert _canonical_cross_group_selection()['scope'] == {
             'mode': 'keywords',
             'keyword_ids': ['keyword-1', 'keyword-2'],
         }

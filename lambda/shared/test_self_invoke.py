@@ -43,6 +43,12 @@ def _boto3_whose_invoke_raises(error: ClientError) -> MagicMock:
     return fake_boto3
 
 
+def _start_generation(function_name: str, fake_boto3: MagicMock, fallback: MagicMock, **options: str) -> None:
+    """Ask ``function_name`` (``""`` = not in Lambda) to start an async generation through ``fake_boto3``."""
+    with _lambda_env(function_name, fake_boto3):
+        invoke_self_async({"async_generation": True}, fallback, description="generation", **options)
+
+
 class TestInvokeSelfAsync:
     def test_runs_fallback_synchronously_when_no_function_name_is_set(self) -> None:
         fallback = MagicMock()
@@ -108,57 +114,28 @@ class TestInvokeSelfAsync:
 class TestDispatchFailureFailsClosed:
     def test_raises_instead_of_running_job_on_callers_request(self) -> None:
         fallback = MagicMock()
-        fake_boto3 = _boto3_whose_invoke_raises(_invoke_error("denied"))
 
-        with _lambda_env("studio-fn", fake_boto3), pytest.raises(SelfInvokeDispatchError):
-            invoke_self_async(
-                {"async_generation": True},
-                fallback,
-                description="generation",
-            )
+        with pytest.raises(SelfInvokeDispatchError):
+            _start_generation("studio-fn", _boto3_whose_invoke_raises(_invoke_error("denied")), fallback)
 
         fallback.assert_not_called()
 
     def test_error_names_operation_that_could_not_start(self) -> None:
-        fallback = MagicMock()
-        fake_boto3 = _boto3_whose_invoke_raises(_invoke_error("denied"))
-
-        with _lambda_env("studio-fn", fake_boto3), pytest.raises(
-            SelfInvokeDispatchError,
-            match="generation",
-        ):
-            invoke_self_async(
-                {"async_generation": True},
-                fallback,
-                description="generation",
-            )
+        with pytest.raises(SelfInvokeDispatchError, match="generation"):
+            _start_generation("studio-fn", _boto3_whose_invoke_raises(_invoke_error("denied")), MagicMock())
 
     def test_preserves_underlying_cause_for_diagnosis(self) -> None:
-        fallback = MagicMock()
         original = _invoke_error("AccessDeniedException")
-        fake_boto3 = _boto3_whose_invoke_raises(original)
 
-        with _lambda_env("studio-fn", fake_boto3), pytest.raises(
-            SelfInvokeDispatchError
-        ) as exc_info:
-            invoke_self_async(
-                {"async_generation": True},
-                fallback,
-                description="generation",
-            )
+        with pytest.raises(SelfInvokeDispatchError) as exc_info:
+            _start_generation("studio-fn", _boto3_whose_invoke_raises(original), MagicMock())
 
         assert exc_info.value.__cause__ is original
 
     def test_runs_inline_outside_lambda_when_no_async_path_exists(self) -> None:
         fallback = MagicMock()
-        fake_boto3 = MagicMock()
 
-        with _lambda_env("", fake_boto3):
-            invoke_self_async(
-                {"async_generation": True},
-                fallback,
-                description="generation",
-            )
+        _start_generation("", MagicMock(), fallback)
 
         fallback.assert_called_once_with()
 
@@ -166,18 +143,9 @@ class TestDispatchFailureFailsClosed:
         self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
-        fallback = MagicMock()
-        fake_boto3 = MagicMock()
-
-        with (
-            _lambda_env("studio-fn", fake_boto3),
-            caplog.at_level(logging.INFO, logger="shared.self_invoke"),
-        ):
-            invoke_self_async(
-                {"async_generation": True},
-                fallback,
-                description="generation",
-                success_log="Triggered async generation for content_id=abc",
+        with caplog.at_level(logging.INFO, logger="shared.self_invoke"):
+            _start_generation(
+                "studio-fn", MagicMock(), MagicMock(), success_log="Triggered async generation for content_id=abc"
             )
 
         assert "Triggered async generation for content_id=abc" in caplog.text

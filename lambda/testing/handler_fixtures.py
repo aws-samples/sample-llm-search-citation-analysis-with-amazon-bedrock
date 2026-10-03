@@ -7,11 +7,11 @@ import sys
 from collections.abc import Iterator, Mapping
 from types import ModuleType
 from typing import Literal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from testing.module_loader import load_handler_module
+from testing.module_loader import load_handler_module, stubbed_boto3
 
 
 def handler_fixture(
@@ -38,11 +38,7 @@ def handler_fixture(
 
     @pytest.fixture(scope=scope)
     def _loaded_handler() -> Iterator[ModuleType]:
-        with (
-            patch.dict(os.environ, env),
-            patch('boto3.resource', MagicMock(name='boto3.resource')),
-            patch('boto3.client', MagicMock(name='boto3.client')),
-        ):
+        with patch.dict(os.environ, env), stubbed_boto3():
             yield load_handler_module(directory, filename, module_name)
         sys.modules.pop(module_name, None)
 

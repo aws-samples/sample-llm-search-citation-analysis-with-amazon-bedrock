@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
@@ -12,9 +14,10 @@ from botocore.exceptions import ClientError
 
 from shared.kpi_alerts import DEFAULT_ALERT_SETTINGS
 from shared.kpi_engine import Answer, answers_from_rows
-from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource
 from testing.handler_fixtures import handler_fixture
 from testing.map_run_fixtures import RESULTS_BUCKET, fake_s3_objects
+from testing.search_result_fixtures import successful_answer_row
 
 _HANDLER_DIR = os.path.dirname(os.path.abspath(__file__))
 _SUMMARY_HANDLER_DIR = os.path.join(os.path.dirname(_HANDLER_DIR), 'generate-summary')
@@ -66,14 +69,13 @@ def _event(status: str = 'completed') -> dict:
 
 def _row(provider: str, *brands: tuple[str, str, int]) -> dict:
     """One engine answer to the shared keyword in the evaluated run."""
-    return {
-        'keyword': 'shared keyword',
-        'timestamp': _RUN_TIMESTAMP,
-        'provider': provider,
-        'status': 'success',
-        'brands': [{'name': name, 'classification': classification, 'rank': rank} for name, classification, rank in brands],
-        'citations': ['https://hotel-mine.com/rooms'],
-    }
+    return successful_answer_row(
+        keyword='shared keyword',
+        timestamp=_RUN_TIMESTAMP,
+        provider=provider,
+        brands=brands,
+        citations=['https://hotel-mine.com/rooms'],
+    )
 
 
 def _answers() -> list[Answer]:
@@ -92,6 +94,15 @@ def _single_group_tables() -> tuple[MagicMock, MagicMock, MagicMock]:
         'alerts': alerts,
     })
     return snapshots, alerts, resource
+
+
+_ALERTS_DISABLED = {**DEFAULT_ALERT_SETTINGS, 'enabled': False}
+_EMAIL_SETTINGS = {**DEFAULT_ALERT_SETTINGS, 'notification_emails': ['ops@example.com']}
+_SHARED_KEYWORD_IN_TWO_GROUPS = [{
+    'id': 'keyword-1',
+    'keyword': 'shared keyword',
+    'group_ids': {'group-1', 'group-2'},
+}]
 
 
 def _complete_group_patches(
@@ -115,6 +126,22 @@ def _complete_group_patches(
     )
 
 
+@contextmanager
+def _complete_group_run(
+    worker_module,
+    resource: MagicMock,
+    settings: dict,
+    previous_snapshot: dict | None = None,
+) -> Iterator[None]:
+    """One complete group whose exact-run answers are `_answers()`, with notification stubbed out."""
+    with (
+        _complete_group_patches(worker_module, resource, settings, _answers()),
+        patch.object(worker_module, '_previous_snapshot', return_value=previous_snapshot),
+        patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
+    ):
+        yield
+
+
 def _run_complete_group(
     worker_module,
     resource: MagicMock,
@@ -122,18 +149,14 @@ def _run_complete_group(
     previous_snapshot: dict | None,
 ) -> dict:
     """Run the worker over one complete group whose exact-run answers are `_answers()`."""
-    with (
-        _complete_group_patches(worker_module, resource, settings, _answers()),
-        patch.object(worker_module, '_previous_snapshot', return_value=previous_snapshot),
-        patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
-    ):
+    with _complete_group_run(worker_module, resource, settings, previous_snapshot):
         return worker_module.handler(_event(), None)
 
 
 def _recorded_snapshot(worker_module) -> dict:
     """The snapshot the worker stores for the complete group, with alerts disabled and no previous snapshot."""
     snapshots, _alerts, resource = _single_group_tables()
-    _run_complete_group(worker_module, resource, {**DEFAULT_ALERT_SETTINGS, 'enabled': False}, None)
+    _run_complete_group(worker_module, resource, _ALERTS_DISABLED, None)
     return snapshots.put_item.call_args.kwargs['Item']
 
 class TestRunEligibility:
@@ -217,14 +240,9 @@ class TestRunEligibility:
         assert skipped == 1
 
     def test_marks_every_membership_of_shared_keyword_as_touched(self, worker_module) -> None:
-        active = [{
-            'id': 'keyword-1',
-            'keyword': 'shared keyword',
-            'group_ids': {'group-1', 'group-2'},
-        }]
         groups = [{'id': 'group-1'}, {'id': 'group-2'}]
 
-        touched = worker_module._touched_groups({}, ['shared keyword'], active, groups)
+        touched = worker_module._touched_groups({}, ['shared keyword'], _SHARED_KEYWORD_IN_TWO_GROUPS, groups)
 
         assert touched == {'group-1', 'group-2'}
 
@@ -233,11 +251,6 @@ class TestCompleteSnapshotEvaluation:
     def test_queries_shared_keyword_once_for_two_complete_groups(self, worker_module) -> None:
         snapshots = MagicMock()
         resource = fake_dynamodb_resource(by_name={'snapshots': snapshots})
-        active = [{
-            'id': 'keyword-1',
-            'keyword': 'shared keyword',
-            'group_ids': {'group-1', 'group-2'},
-        }]
         groups = [
             {'id': 'group-1', 'name': 'Group One'},
             {'id': 'group-2', 'name': 'Group Two'},
@@ -245,9 +258,9 @@ class TestCompleteSnapshotEvaluation:
         load_answers = MagicMock(return_value={'shared keyword': _answers()})
 
         with (
-            patch.object(worker_module, 'query_active_keywords', return_value=active),
+            patch.object(worker_module, 'query_active_keywords', return_value=_SHARED_KEYWORD_IN_TWO_GROUPS),
             patch.object(worker_module, '_load_groups', return_value=groups),
-            patch.object(worker_module, '_settings', return_value={**DEFAULT_ALERT_SETTINGS, 'enabled': False}),
+            patch.object(worker_module, '_settings', return_value=_ALERTS_DISABLED),
             patch.object(worker_module, 'get_brand_config', return_value={}),
             patch.object(worker_module, '_load_run_answers', load_answers),
             patch.object(worker_module, '_previous_snapshot', return_value=None),
@@ -267,7 +280,7 @@ class TestCompleteSnapshotEvaluation:
         result = _run_complete_group(
             worker_module,
             resource,
-            {**DEFAULT_ALERT_SETTINGS, 'enabled': False},
+            _ALERTS_DISABLED,
             {'snapshot_at': '2026-09-01T10:00:00Z'},
         )
 
@@ -284,12 +297,7 @@ class TestCompleteSnapshotEvaluation:
     def test_persists_nested_snapshot_metrics_as_decimals(self, worker_module) -> None:
         snapshots, _alerts, resource = _single_group_tables()
 
-        _run_complete_group(
-            worker_module,
-            resource,
-            {**DEFAULT_ALERT_SETTINGS, 'enabled': False},
-            None,
-        )
+        _run_complete_group(worker_module, resource, _ALERTS_DISABLED, None)
 
         stored_snapshot = snapshots.put_item.call_args.kwargs['Item']
         assert (stored_snapshot['kpi_version'], stored_snapshot['kpis']['visibility_score']) == (2, Decimal('45.0'))
@@ -307,10 +315,8 @@ class TestCompleteSnapshotEvaluation:
         brand_config = MagicMock(return_value={})
 
         with (
-            _complete_group_patches(worker_module, resource, {**DEFAULT_ALERT_SETTINGS, 'enabled': False}, _answers()),
+            _complete_group_run(worker_module, resource, _ALERTS_DISABLED),
             patch.object(worker_module, 'get_brand_config', brand_config),
-            patch.object(worker_module, '_previous_snapshot', return_value=None),
-            patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
         ):
             worker_module.handler(_event(), None)
 
@@ -410,26 +416,28 @@ class TestLoadRunAnswers:
 
 
 class TestIdempotentAlertWrites:
+    @staticmethod
+    def _put_alert_into(worker_module, table: MagicMock) -> bool:
+        """Write `alert-1` through the worker with `table` as the alerts table."""
+        worker_module.dynamodb = fake_dynamodb_resource(by_name={'alerts': table})
+        return worker_module._put_new_alert({'id': 'alert-1'})
+
     def test_reports_new_alert_when_conditional_write_succeeds(self, worker_module) -> None:
         table = MagicMock()
-        worker_module.dynamodb = fake_dynamodb_resource(by_name={'alerts': table})
 
-        created = worker_module._put_new_alert({'id': 'alert-1'})
+        created = self._put_alert_into(worker_module, table)
 
         assert created is True
         assert table.put_item.call_args.kwargs['ConditionExpression'] == 'attribute_not_exists(id)'
 
     def test_reports_duplicate_when_alert_id_already_exists(self, worker_module) -> None:
         table = MagicMock()
-        table.put_item.side_effect = ClientError(
-            {'Error': {'Code': 'ConditionalCheckFailedException', 'Message': 'duplicate'}},
-            'PutItem',
-        )
-        worker_module.dynamodb = fake_dynamodb_resource(by_name={'alerts': table})
+        table.put_item.side_effect = conditional_check_failure('PutItem', message='duplicate')
 
-        created = worker_module._put_new_alert({'id': 'alert-1'})
+        assert self._put_alert_into(worker_module, table) is False
 
-        assert created is False
+
+_ALERT = {'severity': 'warning', 'message': 'Alert'}
 
 
 class TestNotification:
@@ -439,9 +447,8 @@ class TestNotification:
             'severity': 'warning',
             'message': 'Mention rate fell.',
         }]
-        settings = {**DEFAULT_ALERT_SETTINGS, 'notification_emails': ['ops@example.com']}
 
-        result = worker_module._notify(alerts, 'exec-1', settings)
+        result = worker_module._notify(alerts, 'exec-1', _EMAIL_SETTINGS)
 
         assert result == {'status': 'published'}
         assert worker_module.sns.publish.call_count == 1
@@ -454,20 +461,15 @@ class TestNotification:
     def test_keeps_persisted_alerts_when_notification_fails(self, worker_module) -> None:
         worker_module.sns = MagicMock()
         worker_module.sns.publish.side_effect = RuntimeError('SNS unavailable')
-        settings = {**DEFAULT_ALERT_SETTINGS, 'notification_emails': ['ops@example.com']}
 
-        result = worker_module._notify([
-            {'severity': 'warning', 'message': 'Alert'},
-        ], 'exec-1', settings)
+        result = worker_module._notify([_ALERT], 'exec-1', _EMAIL_SETTINGS)
 
         assert result == {'status': 'failed'}
 
     def test_does_not_publish_when_no_email_is_configured(self, worker_module) -> None:
         worker_module.sns = MagicMock()
 
-        result = worker_module._notify([
-            {'severity': 'warning', 'message': 'Alert'},
-        ], 'exec-1', DEFAULT_ALERT_SETTINGS)
+        result = worker_module._notify([_ALERT], 'exec-1', DEFAULT_ALERT_SETTINGS)
 
         assert result == {'status': 'not_sent', 'reason': 'no_configured_emails'}
         assert worker_module.sns.publish.call_count == 0
@@ -494,10 +496,8 @@ class TestFullReportFromS3:
         _snapshots, _alerts, resource = _single_group_tables()
 
         with (
-            _complete_group_patches(worker_module, resource, {**DEFAULT_ALERT_SETTINGS, 'enabled': False}, _answers()),
+            _complete_group_run(worker_module, resource, _ALERTS_DISABLED),
             patch.object(worker_module, 's3', s3),
-            patch.object(worker_module, '_previous_snapshot', return_value=None),
-            patch.object(worker_module, '_notify', return_value={'status': 'not_sent'}),
         ):
             result = worker_module.handler(_compact_event(), None)
 
