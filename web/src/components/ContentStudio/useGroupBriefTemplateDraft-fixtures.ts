@@ -76,7 +76,7 @@ export function renderGroupBriefTemplateDraft(
   return renderHook(() => useGroupBriefTemplateDraft(mode));
 }
 
-export function renderGroupBriefTemplateDraftInStrictMode(
+function renderGroupBriefTemplateDraftInStrictMode(
   mode: GroupBriefMode = 'create_new_landing_page'
 ) {
   return renderHook(() => useGroupBriefTemplateDraft(mode), {wrapper: templateStrictModeBoundary,});

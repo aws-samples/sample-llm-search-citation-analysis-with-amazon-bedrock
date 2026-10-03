@@ -10,7 +10,7 @@ interface AgentRunModalProps extends Omit<ComponentProps<typeof AgentRunDetail>,
 }
 
 /** "Hotels · started 18/09/2026, 12:00:00 by ana" */
-export function describeRunOrigin(job: KeywordResearchItem): string {
+function describeRunOrigin(job: KeywordResearchItem): string {
   const template = job.template_name ? `${job.template_name} · ` : '';
   const by = job.created_by ? ` by ${job.created_by}` : '';
   return `${template}started ${new Date(job.created_at).toLocaleString()}${by}`;

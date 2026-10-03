@@ -17,7 +17,7 @@ export const KEYWORD_GROUPS = [
   }),
 ];
 
-export function buildKeywordGroupsPanelProps(
+function buildKeywordGroupsPanelProps(
   overrides: Partial<ComponentProps<typeof KeywordGroupsPanel>> = {}
 ): ComponentProps<typeof KeywordGroupsPanel> {
   return {

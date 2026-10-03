@@ -58,7 +58,7 @@ const CAPPED_SCOPE_GROUP_ID = 'large-group';
 const CAPPED_SCOPE_KEYWORD_COUNT = 51;
 const CAPPED_SCOPE_MAX_KEYWORDS = 50;
 
-export const cappedScopeKeywords = Array.from(
+const cappedScopeKeywords = Array.from(
   { length: CAPPED_SCOPE_KEYWORD_COUNT },
   (_value, index) => buildKeyword({
     id: `capped-keyword-${index + 1}`,
@@ -66,7 +66,7 @@ export const cappedScopeKeywords = Array.from(
     group_ids: [CAPPED_SCOPE_GROUP_ID],
   })
 );
-export const cappedScopeGroup = buildGroup({
+const cappedScopeGroup = buildGroup({
   id: CAPPED_SCOPE_GROUP_ID,
   name: 'Large group',
   keyword_count: cappedScopeKeywords.length,
@@ -74,12 +74,12 @@ export const cappedScopeGroup = buildGroup({
 export const cappedScopeSelectedIds = cappedScopeKeywords
   .slice(0, CAPPED_SCOPE_MAX_KEYWORDS)
   .map((keyword) => keyword.id);
-export const cappedSelectedKeywordScope: AnalysisScope = {
+const cappedSelectedKeywordScope: AnalysisScope = {
   mode: 'keywords',
   keyword_ids: cappedScopeSelectedIds,
 };
 
-export function buildLegacyKeywordScopePickerProps(
+function buildLegacyKeywordScopePickerProps(
   selectedIds: readonly string[],
   overrides: LegacyPickerOverrides = {}
 ): LegacyKeywordScopePickerProps {

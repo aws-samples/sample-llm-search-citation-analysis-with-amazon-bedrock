@@ -89,7 +89,7 @@ export function buildContentBriefTemplatesHookResult(
   };
 }
 
-export function buildGroupBriefKeywords(): Keyword[] {
+function buildGroupBriefKeywords(): Keyword[] {
   return [
     buildKeyword(),
     buildKeyword({
@@ -109,7 +109,7 @@ export function buildGroupBriefKeywords(): Keyword[] {
   ];
 }
 
-export function buildGroupBriefFormProps(
+function buildGroupBriefFormProps(
   overrides: Partial<ComponentProps<typeof GroupBriefForm>> = {}
 ): ComponentProps<typeof GroupBriefForm> {
   return {
@@ -134,7 +134,7 @@ export async function selectGroupForBrief(): Promise<void> {
   await userEvent.click(screen.getByRole('checkbox', { name: 'Generic Group' }));
 }
 
-export async function selectKeywordForBrief(name = 'Alpha keyword'): Promise<void> {
+async function selectKeywordForBrief(name = 'Alpha keyword'): Promise<void> {
   await userEvent.click(screen.getByRole('checkbox', { name }));
 }
 

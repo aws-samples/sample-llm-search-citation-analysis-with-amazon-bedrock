@@ -13,7 +13,7 @@ export function keywordSignalCells(keyword: ResearchKeyword): Record<string, unk
 }
 
 /** Rows of the keyword research Excel sheet, in the table's current order. */
-export function researchExcelRows(keywords: ResearchKeyword[]): Record<string, unknown>[] {
+function researchExcelRows(keywords: ResearchKeyword[]): Record<string, unknown>[] {
   return keywords.map((keyword) => ({
     Keyword: keyword.keyword,
     ...keywordSignalCells(keyword),

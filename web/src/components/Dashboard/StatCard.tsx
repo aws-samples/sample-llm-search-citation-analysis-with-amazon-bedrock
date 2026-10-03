@@ -7,7 +7,7 @@ import type { ReactNode } from 'react';
  * accent palette (see `docs/design-system.md`). Each tone resolves to a
  * tinted background and matching foreground colour for the icon container.
  */
-export type StatCardTone = 'blue' | 'violet' | 'emerald' | 'amber' | 'gray';
+type StatCardTone = 'blue' | 'violet' | 'emerald' | 'amber' | 'gray';
 
 interface StatCardProps {
   readonly title: string;

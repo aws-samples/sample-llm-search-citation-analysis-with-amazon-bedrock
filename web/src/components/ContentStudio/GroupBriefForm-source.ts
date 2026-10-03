@@ -2,7 +2,7 @@ import type {
   ContentBriefScope, ContentBriefStrategy, GroupBriefMode
 } from '../../types';
 
-export const GROUP_BRIEF_MAX_KEYWORDS = 50;
+const GROUP_BRIEF_MAX_KEYWORDS = 50;
 export const GROUP_BRIEF_BATCH_MAX_KEYWORDS = 10;
 export const GROUP_BRIEF_MAX_URL_LENGTH = 2048;
 export const GROUP_BRIEF_MAX_COPY_LENGTH = 20_000;

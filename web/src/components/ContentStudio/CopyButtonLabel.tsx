@@ -14,7 +14,7 @@ interface CopyButtonLabelProps {
  * Icon-plus-text content of a copy-to-clipboard button: a clipboard with the
  * `label` until the copy lands, then a green check mark with `copiedLabel`.
  */
-export const CopyButtonLabel = ({
+const CopyButtonLabel = ({
   copied, iconClassName, label, copiedLabel = 'Copied!'
 }: CopyButtonLabelProps) => (
   copied ? (

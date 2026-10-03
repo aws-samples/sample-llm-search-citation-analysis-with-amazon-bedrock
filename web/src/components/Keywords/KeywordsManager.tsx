@@ -60,7 +60,7 @@ type DeleteTarget =
   | null;
 
 /** Keywords visible under the current group filter. */
-export function filterKeywords(keywords: Keyword[], filter: GroupFilter, knownGroupIds: ReadonlySet<string>): Keyword[] {
+function filterKeywords(keywords: Keyword[], filter: GroupFilter, knownGroupIds: ReadonlySet<string>): Keyword[] {
   if (filter === 'all') return keywords;
   if (filter === 'ungrouped') {
     return keywords.filter((keyword) => !(keyword.group_ids ?? []).some((id) => knownGroupIds.has(id)));
