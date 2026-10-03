@@ -22,7 +22,9 @@ import {
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import {
+  deferAuthenticatedFetch, mockAuthenticatedFetch
+} from '../test/infrastructureMock';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -162,8 +164,7 @@ describe('useContentBriefTemplates', () => {
   });
 
   it('does not update state when the initial response arrives after unmount', async () => {
-    const deferred = createDeferredResponse();
-    mockAuthenticatedFetch.mockReturnValue(deferred.promise);
+    const deferred = deferAuthenticatedFetch();
     const {
       result, unmount
     } = renderHook(() => useContentBriefTemplates());
@@ -199,8 +200,7 @@ describe('useContentBriefTemplates', () => {
   });
 
   it('starts in loading state while the initial template request is pending', async () => {
-    const deferred = createDeferredResponse();
-    mockAuthenticatedFetch.mockReturnValue(deferred.promise);
+    const deferred = deferAuthenticatedFetch();
     const {
       result, unmount
     } = renderHook(() => useContentBriefTemplates());

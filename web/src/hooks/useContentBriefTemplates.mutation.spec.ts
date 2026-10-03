@@ -4,9 +4,7 @@ import {
 import {
   act, renderHook, waitFor
 } from '@testing-library/react';
-import {
-  createDeferredResponse, createMockJsonResponse
-} from '../test/fetchResponses';
+import { createMockJsonResponse } from '../test/fetchResponses';
 import { useContentBriefTemplates } from './useContentBriefTemplates';
 import {
   builtinCreateTemplate,
@@ -19,7 +17,7 @@ import {
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import {
-  deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
+  deferAuthenticatedFetch, deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
 } from '../test/infrastructureMock';
 
 type ContentBriefTemplatesHook = ReturnType<typeof useContentBriefTemplates>;
@@ -123,8 +121,7 @@ describe('useContentBriefTemplates overlapping operation state', () => {
   });
 
   it('ignores a refresh result that settles after the hook unmounts', async () => {
-    const deferred = createDeferredResponse();
-    mockAuthenticatedFetch.mockReturnValue(deferred.promise);
+    const deferred = deferAuthenticatedFetch();
     const {
       result, unmount
     } = renderHook(() => useContentBriefTemplates());
