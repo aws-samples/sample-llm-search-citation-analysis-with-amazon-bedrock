@@ -5,6 +5,7 @@ import {
 } from 'vitest';
 import { CitationAnalysisStack } from './citation-analysis-stack';
 import {
+  EMPTY_CUSTOM_REPORTS_SNAPSHOT,
   EMPTY_PROVIDER_SEARCH_SNAPSHOT,
   EMPTY_WORKFLOW_SCALE_SNAPSHOT,
   SEARCH_PROVIDER_IDS,
@@ -17,7 +18,9 @@ import {
   extractApiMethods,
   extractBucketLifecycle,
   extractContentStudioInfrastructureSnapshot,
+  extractContentSecurityPolicy,
   extractCrawlerInfrastructureSnapshot,
+  extractCustomReportsSnapshot,
   extractDefinitionTimeoutSeconds,
   extractFunctionMemorySize,
   extractFunctionRoleActions,
@@ -54,12 +57,14 @@ import {
   resolveString,
   retentionForLogGroupName,
   searchFunctionName,
+  sortedHttpMethods,
   statementActions,
   tokenValidityMinutes,
   unguardedVerbs,
   type ApiGatewayMethodSnapshot,
   type ApiMethodAuthSnapshot,
   type BucketLifecycleSnapshot,
+  type CustomReportsSnapshot,
   type IamPolicyStatementSnapshot,
   type LambdaLogGroupSnapshot,
   type ProviderSearchSnapshot,
@@ -170,6 +175,8 @@ const synthesized: {
   statsInsightsFunctionId: string;
   workflowScale: WorkflowScaleSnapshot;
   providerSearch: ProviderSearchSnapshot;
+  customReports: CustomReportsSnapshot;
+  contentSecurityPolicy: Record<string, string[]>;
 } = {
   definitionRaw: '',
   researchDefinitionRaw: '',
@@ -244,6 +251,8 @@ const synthesized: {
   statsInsightsFunctionId: '',
   workflowScale: EMPTY_WORKFLOW_SCALE_SNAPSHOT,
   providerSearch: EMPTY_PROVIDER_SEARCH_SNAPSHOT,
+  customReports: EMPTY_CUSTOM_REPORTS_SNAPSHOT,
+  contentSecurityPolicy: {},
 };
 
 /**
@@ -408,6 +417,8 @@ beforeAll(() => {
   synthesized.statsInsightsFunctionId = findLambdaLogicalId(template, 'CitationAnalysis-API-StatsInsights');
   synthesized.workflowScale = extractWorkflowScaleSnapshot(template);
   synthesized.providerSearch = extractProviderSearchSnapshot(template);
+  synthesized.customReports = extractCustomReportsSnapshot(template);
+  synthesized.contentSecurityPolicy = extractContentSecurityPolicy(template);
 }, 180_000);
 
 describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
@@ -1353,6 +1364,76 @@ describe('Keyword groups', () => {
     expect(synthesized.keywordMgmtEnvVars).toHaveProperty('DYNAMODB_TABLE_KEYWORD_GROUPS');
     expect(synthesized.executionMgmtEnvVars).toHaveProperty('DYNAMODB_TABLE_KEYWORD_GROUPS');
     expect(synthesized.parseKeywordsEnvVars).toHaveProperty('DYNAMODB_TABLE_KEYWORD_GROUPS');
+  });
+});
+
+/**
+ * Saved custom reports: one table keyed by id, served by the ConfigMgmt
+ * function. Every signed-in user may read and write them, so the only gate is
+ * the shared Cognito authorizer.
+ */
+describe('Custom reports', () => {
+  it('creates the CustomReports table keyed by id only', () => {
+    expect(synthesized.customReports.table.keySchema).toStrictEqual([
+      { AttributeName: 'id', KeyType: 'HASH' },
+    ]);
+  });
+
+  it('uses an on-demand, encrypted, retained table with point-in-time recovery', () => {
+    const { table } = synthesized.customReports;
+
+    expect({
+      billingMode: table.billingMode,
+      pointInTimeRecovery: table.pointInTimeRecovery,
+      encryption: table.encryption,
+      deletionPolicy: table.deletionPolicy,
+    }).toStrictEqual({
+      billingMode: 'PAY_PER_REQUEST',
+      pointInTimeRecovery: true,
+      encryption: { SSEEnabled: true },
+      deletionPolicy: RETAIN,
+    });
+  });
+
+  it('hands the table name to ConfigMgmt', () => {
+    expect(synthesized.customReports.configMgmtTableEnv).toStrictEqual({ Ref: synthesized.customReports.tableLogicalId });
+  });
+
+  it('grants ConfigMgmt the reads and writes the CRUD routes make', () => {
+    expect(synthesized.customReports.configMgmtTableActions).toStrictEqual(expect.arrayContaining([
+      'dynamodb:DeleteItem',
+      'dynamodb:PutItem',
+      'dynamodb:Scan',
+      'dynamodb:UpdateItem',
+    ]));
+  });
+
+  it('exposes GET and POST on the collection and PUT and DELETE on a report', () => {
+    expect(sortedHttpMethods(synthesized.customReports.collectionMethods)).toStrictEqual(['GET', 'POST']);
+    expect(sortedHttpMethods(synthesized.customReports.itemMethods)).toStrictEqual(['DELETE', 'PUT']);
+  });
+
+  it('puts all four verbs behind the Cognito authorizer on the ConfigMgmt function', () => {
+    const all = [...synthesized.customReports.collectionMethods, ...synthesized.customReports.itemMethods];
+
+    expect(all).toHaveLength(4);
+    expect(unguardedVerbs(all, synthesized.customReports.configMgmtFunctionLogicalId)).toStrictEqual({
+      withoutCognitoAuthorizer: [],
+      notIntegratedWithFunction: [],
+    });
+  });
+});
+
+describe('Dashboard content security policy', () => {
+  it('allows frames only from the privacy-enhanced YouTube player and the Vimeo player', () => {
+    expect(synthesized.contentSecurityPolicy['frame-src']).toStrictEqual([
+      'https://www.youtube-nocookie.com',
+      'https://player.vimeo.com',
+    ]);
+  });
+
+  it('still forbids every site from framing the dashboard', () => {
+    expect(synthesized.contentSecurityPolicy['frame-ancestors']).toStrictEqual(["'none'"]);
   });
 });
 

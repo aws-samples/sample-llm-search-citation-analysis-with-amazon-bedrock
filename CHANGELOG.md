@@ -9,6 +9,33 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.29.0] - 2026-10-03
+
+### Added
+
+- **Custom reports ("Build your own report").** On **Reports**, *Create custom report* opens a builder: name the
+  report, pick its period (30, 90 or 180 days), and add blocks from a list sorted into categories, with a search box.
+  The blocks are the sections of the nine reports (45 in all) and four content blocks you write yourself: a heading,
+  Markdown text, an https image (with a required description and an optional caption) and a YouTube or Vimeo video.
+  Blocks are added with their Add button or dragged onto the report, and reordered by dragging or with their arrow
+  buttons. A saved report can be edited, saved as a new report or deleted.
+- Saved reports are shared: every signed-in user sees them and can create, edit and delete them (at most 50). A
+  report opens on every keyword over its saved period; the reader can narrow it to a keyword group or one keyword,
+  change the period and pick the competitor of its Competitor Gap blocks, all kept in the URL, and print it to PDF.
+  Each data source is fetched once however many blocks read it. A block that needs a particular scope says which one
+  instead of showing the wrong data, and a block type the dashboard no longer offers is skipped, so a removed block
+  never breaks a saved report. Markdown is rendered without raw HTML; a printed video shows its link.
+- **API:** `GET`/`POST /api/custom-reports` and `PUT`/`DELETE /api/custom-reports/{id}` on API-ConfigMgmt
+  (`lambda/api/manage-custom-reports.py`), validating every block (type, fields, https links, embeddable video links)
+  and answering 409 `limit_reached` past 50 reports. New table `CitationAnalysis-CustomReports` (on demand, PITR,
+  `RETAIN`).
+
+### Security
+
+- The dashboard's content security policy gains `frame-src https://www.youtube-nocookie.com https://player.vimeo.com`
+  for video blocks; no other origin may be framed. Raw HTML blocks are deliberately not offered: saved reports are
+  shared and the policy allows inline scripts, so user HTML could take over another user's session.
+
 ## [2.28.1] - 2026-09-30
 
 ### Security

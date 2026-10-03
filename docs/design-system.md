@@ -382,7 +382,9 @@ Benchmark (`/reports/benchmark`), AI Engines (`/reports/engines`), Sources
 (`/reports/sources`), Sentiment (`/reports/sentiment`), Competitor Gap
 Report (`/reports/competitor[/:competitor]`), Content Action Plan
 (`/reports/content-action-plan`) and Keyword Deep Dive
-(`/reports/keyword[/:keyword]`).
+(`/reports/keyword[/:keyword]`). Custom reports (`Reports/customReport/`):
+the builder at `/reports/custom/new` and `/reports/custom/:id/edit`, a saved
+report at `/reports/custom/:id`.
 
 Chrome and overlays:
 

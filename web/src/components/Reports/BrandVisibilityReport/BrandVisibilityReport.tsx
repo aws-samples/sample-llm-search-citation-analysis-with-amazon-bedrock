@@ -27,7 +27,7 @@ import { GroupKpiReport } from './GroupKpiReport';
 const DEFAULT_GROUP_REPORT_DAYS = 90;
 
 /** What the all-keywords leaderboard covers: the latest period of every keyword. */
-const ALL_KEYWORDS_RANKINGS_SUBTITLE = 'Every brand the AI answers named in each keyword\'s latest period (the leading 10), '
+export const ALL_KEYWORDS_RANKINGS_SUBTITLE = 'Every brand the AI answers named in each keyword\'s latest period (the leading 10), '
   + 'by visibility score, and the share of voice of your brand and its leading competitors over time. First-party rows are highlighted.';
 
 interface Props {readonly keywords: ReadonlyArray<Keyword>;}

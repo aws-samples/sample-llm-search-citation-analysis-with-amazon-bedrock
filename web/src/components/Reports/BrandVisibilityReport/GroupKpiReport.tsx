@@ -8,6 +8,7 @@ import type { ReportScope } from '../../../types';
 import {
   gateSection, KpiDefinitionsSection
 } from '../layout';
+import type { SectionGate } from '../layout/sectionGate';
 import { latestGroupRun } from './groupKpiView';
 import { GroupKpiHeadlineSection } from './sections/GroupKpiHeadlineSection';
 import { GroupKpiTrendSection } from './sections/GroupKpiTrendSection';
@@ -31,16 +32,38 @@ interface Props {
 }
 
 /** The chosen run if it is still in the window, else the latest group run, else the latest run. */
-function resolveRun(runs: readonly GroupRun[], timestamp: string | null): GroupRun {
+export function resolveRun(runs: readonly GroupRun[], timestamp: string | null): GroupRun {
   return runs.find((run) => run.timestamp === timestamp) ?? latestGroupRun(runs) ?? runs[runs.length - 1];
 }
 
 /** The chosen keyword if the group still has it, else the first keyword with runs, else the first keyword. */
-function resolveKeyword(keywords: readonly KeywordRunHistory[], keyword: string | null): KeywordRunHistory | null {
+export function resolveKeyword(keywords: readonly KeywordRunHistory[], keyword: string | null): KeywordRunHistory | null {
   return keywords.find((entry) => entry.keyword === keyword)
     ?? keywords.find((entry) => entry.runs.length > 0)
     ?? keywords[0]
     ?? null;
+}
+
+interface HistoryGateOptions {
+  readonly title: string;
+  readonly history: GroupKpiHistoryResponse | null;
+  readonly loading: boolean;
+  readonly error: string | null;
+  readonly days: number;
+}
+
+/** A group section's loading, error and "no run in the period" states; ready once the group has a run. */
+export function gateGroupHistory({
+  title, history, loading, error, days
+}: HistoryGateOptions): SectionGate<GroupKpiHistoryResponse> {
+  return gateSection({
+    title,
+    loading,
+    loadingMessage: 'Loading the group KPI history…',
+    error,
+    value: history !== null && history.runs.length > 0 ? history : null,
+    emptyMessage: `No analysis run of this group in the last ${days} days. Run an analysis or choose a longer period.`,
+  });
 }
 
 /**
@@ -55,13 +78,12 @@ export function GroupKpiReport({
   const [keyword, setKeyword] = useState<string | null>(null);
   const [includePartial, setIncludePartial] = useState(false);
 
-  const gate = gateSection({
+  const gate = gateGroupHistory({
     title: 'Headline',
+    history,
     loading,
-    loadingMessage: 'Loading the group KPI history…',
     error,
-    value: history !== null && history.runs.length > 0 ? history : null,
-    emptyMessage: `No analysis run of this group in the last ${days} days. Run an analysis or choose a longer period.`,
+    days,
   });
 
   const periodPicker = (

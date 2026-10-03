@@ -125,7 +125,8 @@ export function CompetitorGapReport() {
   );
 }
 
-function CompetitorSwitcher({
+/** The competitor picker of the Competitor Gap report, and of custom reports with its blocks. */
+export function CompetitorSwitcher({
   selected,
   competitors,
   onChange,

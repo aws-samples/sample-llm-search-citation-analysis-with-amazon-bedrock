@@ -1,0 +1,196 @@
+{
+  "videoUrls": [
+    {
+      "description": "YouTube watch link",
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "embed": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    },
+    {
+      "description": "YouTube watch link without www",
+      "url": "https://youtube.com/watch?v=dQw4w9WgXcQ",
+      "embed": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    },
+    {
+      "description": "mobile YouTube watch link",
+      "url": "https://m.youtube.com/watch?v=dQw4w9WgXcQ",
+      "embed": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    },
+    {
+      "description": "YouTube watch link inside a playlist",
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL1234567890",
+      "embed": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    },
+    {
+      "description": "YouTube share link",
+      "url": "https://youtu.be/dQw4w9WgXcQ",
+      "embed": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    },
+    {
+      "description": "YouTube share link with a start time",
+      "url": "https://youtu.be/dQw4w9WgXcQ?t=42",
+      "embed": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    },
+    {
+      "description": "YouTube embed link",
+      "url": "https://www.youtube.com/embed/dQw4w9WgXcQ",
+      "embed": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    },
+    {
+      "description": "YouTube Shorts link",
+      "url": "https://www.youtube.com/shorts/dQw4w9WgXcQ",
+      "embed": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    },
+    {
+      "description": "privacy-enhanced YouTube embed link",
+      "url": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+      "embed": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    },
+    {
+      "description": "link surrounded by whitespace",
+      "url": "  https://youtu.be/dQw4w9WgXcQ  ",
+      "embed": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ"
+    },
+    {
+      "description": "Vimeo link",
+      "url": "https://vimeo.com/76979871",
+      "embed": "https://player.vimeo.com/video/76979871?dnt=1"
+    },
+    {
+      "description": "Vimeo link with www",
+      "url": "https://www.vimeo.com/76979871",
+      "embed": "https://player.vimeo.com/video/76979871?dnt=1"
+    },
+    {
+      "description": "Vimeo player link",
+      "url": "https://player.vimeo.com/video/76979871",
+      "embed": "https://player.vimeo.com/video/76979871?dnt=1"
+    },
+    {
+      "description": "plain http YouTube link",
+      "url": "http://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "embed": null
+    },
+    {
+      "description": "YouTube video id of the wrong length",
+      "url": "https://www.youtube.com/watch?v=dQw4w9",
+      "embed": null
+    },
+    {
+      "description": "YouTube watch link without a video",
+      "url": "https://www.youtube.com/watch",
+      "embed": null
+    },
+    {
+      "description": "YouTube channel page",
+      "url": "https://www.youtube.com/@example",
+      "embed": null
+    },
+    {
+      "description": "YouTube share link without a video",
+      "url": "https://youtu.be/",
+      "embed": null
+    },
+    {
+      "description": "another host serving a watch path",
+      "url": "https://videos.example.com/watch?v=dQw4w9WgXcQ",
+      "embed": null
+    },
+    {
+      "description": "look-alike host ending in a YouTube name",
+      "url": "https://www.youtube.com.example.com/watch?v=dQw4w9WgXcQ",
+      "embed": null
+    },
+    {
+      "description": "YouTube link carrying credentials",
+      "url": "https://user:secret@www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "embed": null
+    },
+    {
+      "description": "Vimeo channel page",
+      "url": "https://vimeo.com/channels/staffpicks",
+      "embed": null
+    },
+    {
+      "description": "YouTube share link with a backslash",
+      "url": "https://youtu.be\\dQw4w9WgXcQ",
+      "embed": null
+    },
+    {
+      "description": "unlisted Vimeo link with a privacy hash",
+      "url": "https://vimeo.com/76979871/abcdef1234",
+      "embed": null
+    },
+    {
+      "description": "script link",
+      "url": "javascript:alert(1)",
+      "embed": null
+    },
+    {
+      "description": "empty link",
+      "url": "",
+      "embed": null
+    }
+  ],
+  "imageUrls": [
+    {
+      "description": "https image",
+      "url": "https://example.com/logo.png",
+      "valid": true
+    },
+    {
+      "description": "https image with a path and query",
+      "url": "https://cdn.example.com/brand/hero.jpg?width=1200",
+      "valid": true
+    },
+    {
+      "description": "https image surrounded by whitespace",
+      "url": " https://example.com/logo.png ",
+      "valid": true
+    },
+    {
+      "description": "plain http image",
+      "url": "http://example.com/logo.png",
+      "valid": false
+    },
+    {
+      "description": "inline data image",
+      "url": "data:image/png;base64,iVBORw0KGgo=",
+      "valid": false
+    },
+    {
+      "description": "script link",
+      "url": "javascript:alert(1)",
+      "valid": false
+    },
+    {
+      "description": "relative path",
+      "url": "/images/logo.png",
+      "valid": false
+    },
+    {
+      "description": "scheme without a host",
+      "url": "https://",
+      "valid": false
+    },
+    {
+      "description": "image link carrying credentials",
+      "url": "https://user:secret@example.com/logo.png",
+      "valid": false
+    },
+    {
+      "description": "host containing a space",
+      "url": "https://exa mple.com/logo.png",
+      "valid": false
+    },
+    {
+      "description": "path containing a backslash",
+      "url": "https://example.com/brand\\logo.png",
+      "valid": false
+    },
+    {
+      "description": "empty link",
+      "url": "",
+      "valid": false
+    }
+  ]
+}
