@@ -36,6 +36,15 @@ def to_int(value, default=0) -> int:
         return default
 
 
+def positive_int(value: object) -> int | None:
+    """``value`` when it is an ``int`` of at least 1 (a ``bool`` is not); ``None`` for anything else.
+
+    For counts and counters in workflow payloads, where a string, float or
+    ``Decimal`` means the payload is not the shape the step wrote.
+    """
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
+
+
 def convert_floats_to_decimal(obj: Any) -> Any:
     """Recursively convert floats to Decimal for DynamoDB compatibility."""
     if isinstance(obj, float):
