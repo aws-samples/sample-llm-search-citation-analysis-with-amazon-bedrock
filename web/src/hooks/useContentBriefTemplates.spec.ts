@@ -2,53 +2,84 @@ import {
   beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
-  act, renderHook, waitFor
+  act, renderHook
 } from '@testing-library/react';
 import { buildApiTemplate } from '../api/contentStudio-fixtures';
 import {
   createDeferredResponse, createMockJsonResponse
 } from '../test/fetchResponses';
-import { useContentBriefTemplates } from './useContentBriefTemplates';
+import { waitForLoaded } from '../test/loadedHook';
 import {
+  useContentBriefTemplates,
+  type ContentBriefTemplateMutationOutcome,
+  type UseContentBriefTemplatesReturn,
+} from './useContentBriefTemplates';
+import {
+  buildTemplateDraft,
   builtinCreateTemplate,
   builtinRewriteTemplate,
   expectedOrderedTemplateIds,
   renderLoadedContentBriefTemplates,
+  renderPendingContentBriefTemplates,
   respondTemplateNotFound,
   savedBeachTemplate,
   savedUrbanTemplate,
-  templateListResponse,
+  serveTemplateList,
+  settleTemplateList,
+  templateIds,
+  templateListJsonResponse,
 } from './useContentBriefTemplates-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import {
-  deferAuthenticatedFetch, mockAuthenticatedFetch
-} from '../test/infrastructureMock';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(templateListResponse([
-    builtinCreateTemplate,
-    builtinRewriteTemplate,
-    savedUrbanTemplate,
-  ])));
+  serveTemplateList([builtinCreateTemplate, builtinRewriteTemplate, savedUrbanTemplate]);
 });
 
+/** Renders the loaded hook and runs `mutation` against a 404 "Template not found" answer. */
+async function renderAfterTemplateNotFound(
+  mutation: (hook: UseContentBriefTemplatesReturn) => Promise<ContentBriefTemplateMutationOutcome>
+): Promise<ContentBriefTemplateMutationOutcome> {
+  const { result } = await renderLoadedContentBriefTemplates();
+  respondTemplateNotFound();
+  return act(() => mutation(result.current));
+}
+
 describe('useContentBriefTemplates', () => {
-  it('keeps built-ins in API order before saved templates sorted by name', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(templateListResponse([
-      builtinCreateTemplate,
-      builtinRewriteTemplate,
-      savedUrbanTemplate,
-      savedBeachTemplate,
-    ])));
+  it.each([
+    {
+      testName: 'keeps built-ins in API order before saved templates sorted by name',
+      listed: [builtinCreateTemplate, builtinRewriteTemplate, savedUrbanTemplate, savedBeachTemplate],
+      expectedIds: expectedOrderedTemplateIds,
+    },
+    {
+      testName: 'sorts case-equivalent saved names by ID after built-ins',
+      listed: [
+        builtinCreateTemplate,
+        buildApiTemplate({
+          id: 'saved-z',
+          name: 'campaign',
+          builtin: false,
+        }),
+        buildApiTemplate({
+          id: 'saved-a',
+          name: 'Campaign',
+          builtin: false,
+        }),
+      ],
+      expectedIds: ['builtin-create-new-landing-page', 'saved-a', 'saved-z'],
+    },
+  ])('$testName', async ({
+    listed, expectedIds
+  }) => {
+    serveTemplateList(listed);
 
     const { result } = await renderLoadedContentBriefTemplates();
 
-    expect(result.current.templates.map((template) => template.id)).toStrictEqual(
-      expectedOrderedTemplateIds
-    );
+    expect(templateIds(result.current.templates)).toStrictEqual(expectedIds);
   });
 
   it('inserts a created template among saved templates by name', async () => {
@@ -58,21 +89,14 @@ describe('useContentBriefTemplates', () => {
       201
     ));
 
-    const outcome = await act(() => result.current.create({
-      name: 'Beach campaign',
-      description: '',
-      contentAngle: 'create_new_landing_page',
-      promptTemplate: 'Create for {scope}.',
-    }));
+    const outcome = await act(() => result.current.create(buildTemplateDraft({ name: 'Beach campaign' })));
 
     expect(outcome).toStrictEqual({
       success: true,
       message: 'Template "Beach campaign" saved',
       template: savedBeachTemplate,
     });
-    expect(result.current.templates.map((template) => template.id)).toStrictEqual(
-      expectedOrderedTemplateIds
-    );
+    expect(templateIds(result.current.templates)).toStrictEqual(expectedOrderedTemplateIds);
   });
 
   it('replaces and re-sorts a template with the exact update response', async () => {
@@ -110,7 +134,7 @@ describe('useContentBriefTemplates', () => {
 
     expect(outcome.success).toBe(true);
     expect(outcome.message).toBe('Template deleted');
-    expect(result.current.templates.map((template) => template.id)).toStrictEqual([
+    expect(templateIds(result.current.templates)).toStrictEqual([
       'builtin-create-new-landing-page',
       'builtin-rewrite-pasted-copy',
     ]);
@@ -148,33 +172,21 @@ describe('useContentBriefTemplates', () => {
       .mockResolvedValueOnce(createMockJsonResponse(campaign, 201));
     const { result } = renderHook(() => useContentBriefTemplates());
 
-    await act(() => result.current.create({
-      name: 'Campaign',
-      description: '',
-      contentAngle: 'create_new_landing_page',
-      promptTemplate: 'Create for {scope}.',
-    }));
-    deferred.resolve(createMockJsonResponse(templateListResponse([builtinCreateTemplate])));
-    await act(async () => {
-      await deferred.promise;
-    });
+    await act(() => result.current.create(buildTemplateDraft()));
+    await settleTemplateList(deferred, [builtinCreateTemplate]);
 
     expect(result.current.templates).toStrictEqual([campaign]);
     expect(result.current.loading).toBe(false);
   });
 
   it('does not update state when the initial response arrives after unmount', async () => {
-    const deferred = deferAuthenticatedFetch();
     const {
-      result, unmount
-    } = renderHook(() => useContentBriefTemplates());
+      deferred, result, unmount
+    } = renderPendingContentBriefTemplates();
     const templatesBeforeUnmount = result.current.templates;
 
     unmount();
-    deferred.resolve(createMockJsonResponse(templateListResponse([builtinCreateTemplate])));
-    await act(async () => {
-      await deferred.promise;
-    });
+    await settleTemplateList(deferred, [builtinCreateTemplate]);
 
     expect(templatesBeforeUnmount).toStrictEqual([]);
     expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(1);
@@ -187,12 +199,7 @@ describe('useContentBriefTemplates', () => {
       field: 'name',
     }, 400));
 
-    const outcome = await act(() => result.current.create({
-      name: '',
-      description: '',
-      contentAngle: 'create_new_landing_page',
-      promptTemplate: 'Create for {scope}.',
-    }));
+    const outcome = await act(() => result.current.create(buildTemplateDraft({ name: '' })));
 
     expect(outcome.success).toBe(false);
     expect(outcome.message).toBe('name is required');
@@ -200,41 +207,13 @@ describe('useContentBriefTemplates', () => {
   });
 
   it('starts in loading state while the initial template request is pending', async () => {
-    const deferred = deferAuthenticatedFetch();
     const {
-      result, unmount
-    } = renderHook(() => useContentBriefTemplates());
+      deferred, result, unmount
+    } = renderPendingContentBriefTemplates();
 
     expect(result.current.loading).toBe(true);
     unmount();
-    deferred.resolve(createMockJsonResponse(templateListResponse([])));
-    await deferred.promise;
-  });
-
-  it('sorts case-equivalent saved names by ID after built-ins', async () => {
-    const lower = buildApiTemplate({
-      id: 'saved-z',
-      name: 'campaign',
-      builtin: false,
-    });
-    const upper = buildApiTemplate({
-      id: 'saved-a',
-      name: 'Campaign',
-      builtin: false,
-    });
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(templateListResponse([
-      builtinCreateTemplate,
-      lower,
-      upper,
-    ])));
-
-    const { result } = await renderLoadedContentBriefTemplates();
-
-    expect(result.current.templates.map((template) => template.id)).toStrictEqual([
-      'builtin-create-new-landing-page',
-      'saved-a',
-      'saved-z',
-    ]);
+    await settleTemplateList(deferred, []);
   });
 
   it('clears a refresh error after a later refresh succeeds', async () => {
@@ -242,9 +221,7 @@ describe('useContentBriefTemplates', () => {
     const { result } = await renderLoadedContentBriefTemplates();
 
     expect(result.current.error).toBe('Content generation failed');
-    mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse(
-      templateListResponse([builtinCreateTemplate])
-    ));
+    mockAuthenticatedFetch.mockResolvedValueOnce(templateListJsonResponse([builtinCreateTemplate]));
     await act(() => result.current.refresh());
 
     expect(result.current.error).toBeNull();
@@ -258,18 +235,13 @@ describe('useContentBriefTemplates', () => {
 
     act(() => { void result.current.refresh(); });
     expect(result.current.loading).toBe(true);
-    deferred.resolve(createMockJsonResponse(templateListResponse([builtinCreateTemplate])));
+    deferred.resolve(templateListJsonResponse([builtinCreateTemplate]));
 
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
+    await waitForLoaded(result);
   });
 
   it('returns the server outcome when an unknown template update fails', async () => {
-    const { result } = await renderLoadedContentBriefTemplates();
-    respondTemplateNotFound();
-
-    const outcome = await act(() => result.current.update('unknown', { name: 'Changed' }));
+    const outcome = await renderAfterTemplateNotFound((hook) => hook.update('unknown', { name: 'Changed' }));
 
     expect(outcome).toStrictEqual({
       success: false,
@@ -278,10 +250,7 @@ describe('useContentBriefTemplates', () => {
   });
 
   it('returns the server outcome when an unknown template delete fails', async () => {
-    const { result } = await renderLoadedContentBriefTemplates();
-    respondTemplateNotFound();
-
-    const outcome = await act(() => result.current.remove('unknown'));
+    const outcome = await renderAfterTemplateNotFound((hook) => hook.remove('unknown'));
 
     expect(outcome.success).toBe(false);
     expect(outcome.message).toBe('Template not found');

@@ -1,30 +1,23 @@
-import {
-  expect, vi 
-} from 'vitest';
-import {
-  renderHook, waitFor 
-} from '@testing-library/react';
+import { vi } from 'vitest';
+import { buildGroup } from '../api/keywordGroups-fixtures';
+import { renderLoadedHook } from '../test/loadedHook';
 import type { KeywordGroup } from '../types';
 import { useKeywordGroups } from './useKeywordGroups';
 
 /** Renders the hook and waits for the initial group load to settle. */
-export async function renderLoadedKeywordGroups(options?: Parameters<typeof useKeywordGroups>[0]) {
-  const rendered = renderHook(() => useKeywordGroups(options));
-  await waitFor(() => expect(rendered.result.current.loading).toBe(false));
-  return rendered;
+export function renderLoadedKeywordGroups(options?: Parameters<typeof useKeywordGroups>[0]) {
+  return renderLoadedHook(() => useKeywordGroups(options));
 }
 
 /** A keyword group as the API returns it; every field can be overridden. */
 export function buildKeywordGroup(overrides: Partial<KeywordGroup> = {}): KeywordGroup {
-  return {
-    id: 'group-coruna',
-    name: 'Hotel Coruña',
+  return buildGroup({
     description: '',
     keyword_count: 1,
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     ...overrides,
-  };
+  });
 }
 
 /**

@@ -7,7 +7,7 @@ import {
   updateGroupMemberships,
 } from './keywordGroups';
 import {
-  buildKeyword, buildKeywordIds, buildMembershipResponse
+  buildKeyword, buildKeywordIds, buildMembershipResponse, sentPutBodies
 } from './keywordGroups-fixtures';
 import { mockApiPut } from './clientMock-fixtures';
 import { ApiRequestError } from '../infrastructure';
@@ -36,7 +36,7 @@ describe('updateGroupMemberships chunking', () => {
 
     await updateGroupMemberships('group-coruna', { add: sixHundredIds });
 
-    expect(mockApiPut.mock.calls.map(([, body]) => body)).toStrictEqual([
+    expect(sentPutBodies()).toStrictEqual([
       { add: sixHundredIds.slice(0, 500) },
       { add: sixHundredIds.slice(500) },
     ]);
@@ -52,7 +52,7 @@ describe('updateGroupMemberships chunking', () => {
       remove: removeIds,
     });
 
-    expect(mockApiPut.mock.calls.map(([, body]) => body)).toStrictEqual([
+    expect(sentPutBodies()).toStrictEqual([
       {
         add: addIds.slice(0, 500),
         remove: removeIds,

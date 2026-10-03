@@ -21,9 +21,12 @@ import {
   countJobPolls,
   findCall,
   renderResearch,
+  retryPartialExpansion,
+  startAndAdvance,
   startCompetitorAnalysis,
   startExpansion,
 } from './useKeywordResearch-harness-fixtures';
+import { advanceBy } from './useResearchAgent-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
@@ -64,10 +67,7 @@ describe('useKeywordResearch', () => {
     it('sends the seed keyword, industry and count to the expand endpoint', async () => {
       const { result } = renderResearch({ snapshots: { 'job-1': [buildCompletedExpansionJob('job-1', 'test keyword')] } });
 
-      await act(async () => {
-        void result.current.expandKeywords('test keyword', 'retail', 30);
-        await vi.advanceTimersByTimeAsync(POLL_FAST_INTERVAL_MS);
-      });
+      await startAndAdvance(result, (hook) => hook.expandKeywords('test keyword', 'retail', 30));
 
       const call = findCall((c) => c.method === 'POST' && c.url.endsWith('/keyword-research/expand'));
       expect(JSON.parse(call?.body ?? '{}')).toStrictEqual({
@@ -217,15 +217,10 @@ describe('useKeywordResearch', () => {
 
   describe('retryResearch', () => {
     it('posts to the retry endpoint and follows the job again', async () => {
-      const partial = buildCompletedExpansionJob('job-1', 'best hotels');
-      partial.status = 'partial';
       const retried = buildCompletedExpansionJob('job-1', 'best hotels');
       const { result } = renderResearch({ snapshots: { 'job-1': [retried] } });
 
-      await act(async () => {
-        void result.current.retryResearch(partial);
-        await vi.advanceTimersByTimeAsync(POLL_FAST_INTERVAL_MS);
-      });
+      await retryPartialExpansion(result);
 
       const call = findCall((c) => c.method === 'POST' && c.url.endsWith('/keyword-research/job-1/retry'));
       expect(call).toStrictEqual({
@@ -238,14 +233,9 @@ describe('useKeywordResearch', () => {
     });
 
     it('shows the job while the retry is pending', async () => {
-      const partial = buildCompletedExpansionJob('job-1', 'best hotels');
-      partial.status = 'partial';
       const { result } = renderResearch(runningJobResearchOptions);
 
-      await act(async () => {
-        void result.current.retryResearch(partial);
-        await vi.advanceTimersByTimeAsync(0);
-      });
+      await retryPartialExpansion(result, 0);
 
       expect(result.current.loading).toBe(true);
       expect(result.current.activeJob?.id).toBe('job-1');
@@ -262,9 +252,7 @@ describe('useKeywordResearch', () => {
       const { result } = renderResearch({ snapshots: { 'job-9': [buildCompletedExpansionJob('job-9', 'resumed')] } });
       expect(result.current.loading).toBe(true);
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(POLL_FAST_INTERVAL_MS);
-      });
+      await advanceBy(POLL_FAST_INTERVAL_MS);
 
       expect(result.current.expansionResult?.seed_keyword).toBe('resumed');
       expect(localStorage.getItem(ACTIVE_JOB_STORAGE_KEY)).toBeNull();
@@ -352,8 +340,10 @@ describe('useKeywordResearch', () => {
   // treated auth failures as "not ready yet" (the user waited the full window
   // to get a bogus timeout).
   describe('polling lifecycle (AUDIT 2.20)', () => {
+    const sessionExpiredResearchOptions = { pollResponse: () => createMockJsonResponse({}, 401) };
+
     it('surfaces an auth error after the first poll when the session expires', async () => {
-      const { result } = renderResearch({ pollResponse: () => createMockJsonResponse({}, 401) });
+      const { result } = renderResearch(sessionExpiredResearchOptions);
 
       await startExpansion(result);
 
@@ -362,7 +352,7 @@ describe('useKeywordResearch', () => {
     });
 
     it('stops polling after an auth failure instead of retrying until timeout', async () => {
-      const { result } = renderResearch({ pollResponse: () => createMockJsonResponse({}, 401) });
+      const { result } = renderResearch(sessionExpiredResearchOptions);
 
       await startExpansion(result, POLL_FAST_INTERVAL_MS * 5);
 
@@ -400,9 +390,7 @@ describe('useKeywordResearch', () => {
       expect(countJobPolls()).toBe(1);
 
       unmount();
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(POLL_FAST_INTERVAL_MS * 5);
-      });
+      await advanceBy(POLL_FAST_INTERVAL_MS * 5);
 
       expect(countJobPolls()).toBe(1);
     });
@@ -434,9 +422,7 @@ describe('useKeywordResearch', () => {
       await startExpansion(result, 60_000);
       expect(countJobPolls()).toBe(20);
 
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(30_000);
-      });
+      await advanceBy(30_000);
 
       expect(countJobPolls()).toBe(23);
     });
