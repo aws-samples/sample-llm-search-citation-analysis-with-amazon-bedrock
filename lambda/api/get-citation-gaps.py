@@ -25,6 +25,7 @@ from botocore.config import Config
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
+from shared.brand_visibility import tracked_brand_names
 from shared.decorators import api_handler, validate
 from shared.dynamodb_batch import query_latest_per_key
 from shared.scope_params import (
@@ -34,6 +35,7 @@ from shared.scope_params import (
     keywords_table_name,
     scope_from_request,
 )
+from shared.search_results import latest_run
 from shared.utils import extract_domain, get_brand_config
 
 # Classification runs in at most six threads, then final response enrichment
@@ -288,9 +290,7 @@ def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str
         return configuration_error
 
     search_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    tracked_brands = config.get('tracked_brands', {})
-    first_party_list = [brand.lower() for brand in tracked_brands.get('first_party', [])]
-    competitors_list = [brand.lower() for brand in tracked_brands.get('competitors', [])]
+    first_party_list, competitors_list = tracked_brand_names(config)
 
     response = search_table.query(
         KeyConditionExpression=Key('keyword').eq(keyword),
@@ -304,8 +304,7 @@ def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str
     if not items:
         return {'error': f'No data found for keyword: {keyword}'}
 
-    latest_timestamp = max(item.get('timestamp', '') for item in items)
-    latest_items = [item for item in items if item.get('timestamp') == latest_timestamp]
+    latest_timestamp, latest_items = latest_run(items)
 
     source_brand_map = _map_sources_to_brands(latest_items, first_party_list, competitors_list)
     gaps, covered_sources = _gaps_and_covered_sources(source_brand_map, config)
