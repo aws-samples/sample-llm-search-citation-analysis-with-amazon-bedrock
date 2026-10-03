@@ -38,7 +38,9 @@ import { useContentStudio } from './useContentStudio';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import {
+  deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
+} from '../test/infrastructureMock';
 
 beforeEach(() => {
   localStorage.clear();
@@ -182,11 +184,7 @@ describe('useContentStudio aggregate batch timer', () => {
   it('does not overlap aggregate requests that are still pending', async () => {
     vi.useFakeTimers();
     storeActiveContentStudioBatchIds(['batch-1', 'batch-2']);
-    const firstStatus = createDeferredResponse();
-    const secondStatus = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockReturnValueOnce(firstStatus.promise)
-      .mockReturnValueOnce(secondStatus.promise);
+    const [firstStatus, secondStatus] = deferNextTwoAuthenticatedFetches();
     const rendered = renderHook(() => useContentStudio());
 
     await advanceContentStudioPoll();
@@ -309,11 +307,7 @@ describe('useContentStudio cross-instance batch synchronization', () => {
     const initialCandidate = buildBatchCandidate('batch-1', Date.now() - 100);
     const replacementCandidate = buildBatchCandidate('batch-1', Date.now());
     storeActiveContentStudioBatchCandidates([initialCandidate]);
-    const staleStatus = createDeferredResponse();
-    const currentStatus = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockReturnValueOnce(staleStatus.promise)
-      .mockReturnValueOnce(currentStatus.promise);
+    const [staleStatus, currentStatus] = deferNextTwoAuthenticatedFetches();
     const {
       result, unmount
     } = renderHook(() => useContentStudio());
@@ -368,11 +362,7 @@ describe('useContentStudio cross-instance batch synchronization', () => {
 describe('useContentStudio batch request races', () => {
   it('keeps a replayed running poll when the discarded poll settles first', async () => {
     storeActiveContentStudioBatchIds(['batch-1']);
-    const firstStatus = createDeferredResponse();
-    const secondStatus = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockReturnValueOnce(firstStatus.promise)
-      .mockReturnValueOnce(secondStatus.promise);
+    const [firstStatus, secondStatus] = deferNextTwoAuthenticatedFetches();
     const {
       result, unmount
     } = renderHook(

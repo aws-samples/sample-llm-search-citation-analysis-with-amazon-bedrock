@@ -1,4 +1,4 @@
-export type S3ItemType = 'folder' | 'file' | 'image';
+type S3ItemType = 'folder' | 'file' | 'image';
 
 export interface S3Item {
   name: string;

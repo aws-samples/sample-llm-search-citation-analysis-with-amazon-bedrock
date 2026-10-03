@@ -1,20 +1,14 @@
-import type {
-  ContentBriefBatchStatus, ContentStatus
-} from '../types';
+import type { ContentBriefBatchStatus } from '../types';
 import {
   apiBatchStartResponse, apiBatchStatusResponse
 } from './contentStudio-fixtures';
 import {
-  invalidIntegerRepresentations, omitDecoderField
+  invalidIntegerRepresentations, omitDecoderField, validContentStatuses
 } from './contentStudioDecoders-fixtures';
 
 export {
-  invalidIntegerRepresentations, omitDecoderField
+  invalidContentStudioResponse, invalidIntegerRepresentations, omitDecoderField, validContentStatuses
 } from './contentStudioDecoders-fixtures';
-
-export const validContentStatuses = [
-  'pending', 'generating', 'generated', 'failed',
-] satisfies readonly ContentStatus[];
 
 export const validContentBriefBatchStatuses = [
   ...validContentStatuses,

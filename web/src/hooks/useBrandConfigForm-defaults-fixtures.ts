@@ -1,5 +1,7 @@
 import { renderHook } from '@testing-library/react';
-import type { IndustryPresets } from '../types';
+import type {
+  BrandConfig, IndustryPresets
+} from '../types';
 import { useBrandConfigForm } from './useBrandConfigForm';
 import {
   GENERAL_AND_CUSTOM_PRESETS,
@@ -32,10 +34,20 @@ export const MULTI_INDUSTRY_OVERRIDE_CONFIG = buildBrandConfig({
   },
 });
 
+export function renderBrandConfigForm(
+  config: BrandConfig | null = null,
+  presets: IndustryPresets | null = null
+) {
+  return renderHook(() => useBrandConfigForm(config, presets));
+}
+
+/** The form over a stored Hotels config with the Hotels preset. */
+export function renderHotelBrandConfigForm() {
+  return renderBrandConfigForm(buildBrandConfig({ industry: 'hotels' }), HOTEL_PRESETS);
+}
+
 export function renderMultiIndustryBrandConfigForm() {
-  return renderHook(
-    () => useBrandConfigForm(MULTI_INDUSTRY_OVERRIDE_CONFIG, HOTEL_GENERAL_AND_CUSTOM_PRESETS)
-  );
+  return renderBrandConfigForm(MULTI_INDUSTRY_OVERRIDE_CONFIG, HOTEL_GENERAL_AND_CUSTOM_PRESETS);
 }
 
 export {

@@ -1,10 +1,7 @@
 import {
   describe, expect, it
 } from 'vitest';
-import {
-  act, renderHook
-} from '@testing-library/react';
-import { useBrandConfigForm } from './useBrandConfigForm';
+import { act } from '@testing-library/react';
 import {
   GENERAL_AND_CUSTOM_PRESETS,
   HOTEL_GENERAL_AND_CUSTOM_PRESETS,
@@ -13,21 +10,18 @@ import {
   UNKNOWN_INDUSTRY_CONFIG,
   UNKNOWN_INDUSTRY_OVERRIDE_CONFIG,
   renderMultiIndustryBrandConfigForm,
+  renderBrandConfigForm,
 } from './useBrandConfigForm-defaults-fixtures';
 
 describe('useBrandConfigForm prompt defaults', () => {
   it('marks a stored unknown-industry override as modified', () => {
-    const { result } = renderHook(
-      () => useBrandConfigForm(UNKNOWN_INDUSTRY_OVERRIDE_CONFIG, GENERAL_AND_CUSTOM_PRESETS)
-    );
+    const { result } = renderBrandConfigForm(UNKNOWN_INDUSTRY_OVERRIDE_CONFIG, GENERAL_AND_CUSTOM_PRESETS);
 
     expect(result.current.form.promptModified).toBe(true);
   });
 
   it('keeps an empty prompt unmodified when no fallback preset exists', () => {
-    const { result } = renderHook(
-      () => useBrandConfigForm(UNKNOWN_INDUSTRY_CONFIG, HOTEL_PRESETS)
-    );
+    const { result } = renderBrandConfigForm(UNKNOWN_INDUSTRY_CONFIG, HOTEL_PRESETS);
 
     act(() => {
       result.current.handlePromptChange('');
@@ -51,9 +45,7 @@ describe('useBrandConfigForm prompt defaults', () => {
       ...MULTI_INDUSTRY_OVERRIDE_CONFIG,
       industry_prompts: {},
     };
-    const { result } = renderHook(
-      () => useBrandConfigForm(config, HOTEL_GENERAL_AND_CUSTOM_PRESETS)
-    );
+    const { result } = renderBrandConfigForm(config, HOTEL_GENERAL_AND_CUSTOM_PRESETS);
     act(() => {
       result.current.setIndustry('general');
     });
@@ -79,9 +71,7 @@ describe('useBrandConfigForm prompt defaults', () => {
   });
 
   it('omits an empty override when unknown industry has no fallback preset', () => {
-    const { result } = renderHook(
-      () => useBrandConfigForm(UNKNOWN_INDUSTRY_CONFIG, HOTEL_PRESETS)
-    );
+    const { result } = renderBrandConfigForm(UNKNOWN_INDUSTRY_CONFIG, HOTEL_PRESETS);
 
     expect(result.current.buildConfig().industry_prompts).toStrictEqual({});
   });

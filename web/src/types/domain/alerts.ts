@@ -1,3 +1,5 @@
+import { isRecord } from './keywordDecoders';
+
 export type AlertType =
   | 'mention_rate_drop'
   // Raised before 2.21.0 on the former keyword-level "citation rate"; still listed until it expires.
@@ -56,7 +58,7 @@ export interface AlertAcknowledgement {
   status: 'acknowledged';
 }
 
-export interface AlertThresholds {
+interface AlertThresholds {
   /** Points of mention rate lost between two group runs that raise an alert. */
   mention_rate_drop: number;
   position_loss: number;
@@ -64,7 +66,7 @@ export interface AlertThresholds {
   improvement_after_content_change: number;
 }
 
-export interface AlertSubscription {
+interface AlertSubscription {
   email: string;
   status: AlertSubscriptionStatus;
 }
@@ -99,10 +101,6 @@ export interface CreateContentChangeRequest {
   group_id: string;
   description: string;
   url?: string;
-}
-
-function isRecord(candidate: unknown): candidate is Record<string, unknown> {
-  return candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate);
 }
 
 function isNonEmptyString(candidate: unknown): candidate is string {
@@ -234,7 +232,7 @@ function hasAlertMetrics(candidate: Record<string, unknown>): boolean {
     && isAlertMetricValue(candidate.threshold);
 }
 
-export function isAlertItem(candidate: unknown): candidate is AlertItem {
+function isAlertItem(candidate: unknown): candidate is AlertItem {
   return isRecord(candidate)
     && hasAlertIdentity(candidate)
     && hasAlertClassification(candidate)

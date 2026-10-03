@@ -2,6 +2,7 @@ import {
   useCallback, useEffect, useRef, useState
 } from 'react';
 import { fetchContentBriefBatch } from '../api/contentStudio';
+import { countBatchChildren } from '../api/contentStudioBatchDecoders';
 import {
   ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY,
   ACTIVE_CONTENT_STUDIO_BATCH_LIMIT,
@@ -14,7 +15,6 @@ import {
 } from '../api/contentStudioBatchStorage';
 import { ApiRequestError } from '../infrastructure';
 import type {
-  ContentBriefBatchCounts,
   ContentBriefBatchStartResponse,
   ContentBriefBatchStatusResponse,
   ContentStudioHistory,
@@ -37,28 +37,13 @@ interface CommittedBatchPollOutcomes {
   readonly expiredNotFoundCandidates: ContentStudioBatchCandidate[];
 }
 
-function batchCountsFromStart(
-  response: ContentBriefBatchStartResponse
-): ContentBriefBatchCounts {
-  const counts: ContentBriefBatchCounts = {
-    pending: 0,
-    generating: 0,
-    generated: 0,
-    failed: 0,
-    missing: 0,
-    total: response.children.length,
-  };
-  for (const child of response.children) counts[child.status] += 1;
-  return counts;
-}
-
 function trackedBatchFromStart(
   response: ContentBriefBatchStartResponse
 ): ContentBriefBatchStatusResponse {
   return {
     batch_id: response.batch_id,
     batch_size: response.batch_size,
-    counts: batchCountsFromStart(response),
+    counts: countBatchChildren(response.children),
     children: response.children.map((child) => ({
       id: child.id,
       idea_id: child.idea_id,

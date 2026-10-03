@@ -14,48 +14,92 @@ import {
   buildGenerationDecoderPayload,
   buildTemplateDecoderRecord,
   buildTemplateListDecoderPayload,
+  invalidContentStudioResponse,
   invalidIntegerRepresentations,
   omitDecoderField,
   validContentStatuses,
   validGroupBriefModes,
 } from './contentStudioDecoders-fixtures';
 
-const invalidGenerationError = {
-  name: 'InvalidContentStudioResponseError',
-  message: 'Content Studio API returned an invalid generation response',
-};
-const invalidTemplateError = {
-  name: 'InvalidContentStudioResponseError',
-  message: 'Content Studio API returned an invalid Content Brief template',
-};
+type Rejected = [condition: string, payload: unknown];
 
-describe('Content Studio generation response decoder', () => {
-  it.each([null, [], 'generation'])(
-    'rejects the generation response when the payload is %j',
-    (payload) => {
-      expect(() => decodeGenerateContentResponse(payload))
-        .toThrow(expect.objectContaining(invalidGenerationError));
-    }
-  );
-
-  it.each(['success', 'id', 'status', 'keyword'])(
-    'rejects the generation response when required field %s is missing',
-    (field) => {
-      const payload = omitDecoderField(buildGenerationDecoderPayload(), field);
-
-      expect(() => decodeGenerateContentResponse(payload))
-        .toThrow(expect.objectContaining(invalidGenerationError));
-    }
-  );
-
-  it.each([
+const rejectedGenerations: Rejected[] = [
+  ...[null, [], 'generation'].map((payload): Rejected => [`the payload is ${JSON.stringify(payload)}`, payload]),
+  ...['success', 'id', 'status', 'keyword'].map((field): Rejected => [
+    `required field ${field} is missing`, omitDecoderField(buildGenerationDecoderPayload(), field),
+  ]),
+  ...([
     ['success', 'true'],
     ['id', 1],
     ['status', 'unknown'],
     ['status', null],
     ['keyword', false],
-  ])('rejects the generation response when required field %s is invalid', (field, invalidValue) => {
-    expect(() => decodeGenerateContentResponse(buildGenerationDecoderPayload({[field]: invalidValue,}))).toThrow(expect.objectContaining(invalidGenerationError));
+    ['message', null],
+    ['error', null],
+    ['idempotent_hit', null],
+    ['idempotent_hit', 'false'],
+    ['idempotent_hit', 0],
+  ] satisfies Array<[string, unknown]>).map(([field, value]): Rejected => [
+    `field ${field} is ${JSON.stringify(value)}`, buildGenerationDecoderPayload({ [field]: value }),
+  ]),
+];
+
+const rejectedTemplates: Rejected[] = [
+  ...[null, [], 'template'].map((payload): Rejected => [`the payload is ${JSON.stringify(payload)}`, payload]),
+  ...[
+    'id',
+    'name',
+    'description',
+    'content_angle',
+    'prompt_template',
+    'builtin',
+    'created_by',
+    'created_at',
+    'updated_at',
+  ].map((field): Rejected => [
+    `required field ${field} is missing`, omitDecoderField(buildTemplateDecoderRecord(), field),
+  ]),
+  ...([
+    ['id', 1],
+    ['name', null],
+    ['description', false],
+    ['content_angle', 'unknown'],
+    ['prompt_template', []],
+    ['builtin', 'true'],
+    ['created_by', 1],
+    ['created_at', false],
+    ['updated_at', {}],
+  ] satisfies Array<[string, unknown]>).map(([field, value]): Rejected => [
+    `field ${field} is ${JSON.stringify(value)}`, buildTemplateDecoderRecord({ [field]: value }),
+  ]),
+];
+
+const rejectedTemplateLists: Array<[condition: string, payload: unknown, subject: string]> = [
+  ...[null, [], 'templates'].map((payload): [string, unknown, string] => [
+    `the payload is ${JSON.stringify(payload)}`, payload, 'template list',
+  ]),
+  ...[undefined, null, {}, 'templates'].map((items): [string, unknown, string] => [
+    `items is ${JSON.stringify(items)}`,
+    {
+      items,
+      count: 0,
+    },
+    'template list',
+  ]),
+  ...invalidIntegerRepresentations.map((count): [string, unknown, string] => [
+    `count is ${JSON.stringify(count)}`, buildTemplateListDecoderPayload([], { count }), 'template count',
+  ]),
+  ...[0, 2].map((count): [string, unknown, string] => [
+    `count ${count} differs from one item`,
+    buildTemplateListDecoderPayload([buildTemplateDecoderRecord()], { count }),
+    'template count',
+  ]),
+];
+
+describe('Content Studio generation response decoder', () => {
+  it.each(rejectedGenerations)('rejects the generation response when %s', (_condition, payload) => {
+    expect(() => decodeGenerateContentResponse(payload))
+      .toThrow(invalidContentStudioResponse('generation response'));
   });
 
   it.each(validContentStatuses)(
@@ -82,20 +126,6 @@ describe('Content Studio generation response decoder', () => {
     });
   });
 
-  it.each(['message', 'error'])(
-    'rejects the generation response when optional string %s is null',
-    (field) => {
-      expect(() => decodeGenerateContentResponse(buildGenerationDecoderPayload({[field]: null,}))).toThrow(expect.objectContaining(invalidGenerationError));
-    }
-  );
-
-  it.each([null, 'false', 0])(
-    'rejects the generation response when idempotent_hit is %j',
-    (idempotentHit) => {
-      expect(() => decodeGenerateContentResponse(buildGenerationDecoderPayload({idempotent_hit: idempotentHit,}))).toThrow(expect.objectContaining(invalidGenerationError));
-    }
-  );
-
   it('omits optional generation fields when the server omits them', () => {
     expect(decodeGenerateContentResponse(buildGenerationDecoderPayload())).toStrictEqual({
       success: true,
@@ -110,106 +140,30 @@ describe('Content Studio generation response decoder', () => {
 });
 
 describe('Content Studio template decoder', () => {
-  it.each([null, [], 'template'])(
-    'rejects a Content Brief template when the payload is %j',
-    (payload) => {
-      expect(() => decodeContentBriefTemplate(payload))
-        .toThrow(expect.objectContaining(invalidTemplateError));
-    }
-  );
-
-  it.each([
-    'id',
-    'name',
-    'description',
-    'content_angle',
-    'prompt_template',
-    'builtin',
-    'created_by',
-    'created_at',
-    'updated_at',
-  ])('rejects a Content Brief template when required field %s is missing', (field) => {
-    expect(() => decodeContentBriefTemplate(omitDecoderField(
-      buildTemplateDecoderRecord(),
-      field
-    ))).toThrow(expect.objectContaining(invalidTemplateError));
-  });
-
-  it.each([
-    ['id', 1],
-    ['name', null],
-    ['description', false],
-    ['content_angle', 'unknown'],
-    ['prompt_template', []],
-    ['builtin', 'true'],
-    ['created_by', 1],
-    ['created_at', false],
-    ['updated_at', {}],
-  ])('rejects a Content Brief template when field %s is invalid', (field, invalidValue) => {
-    expect(() => decodeContentBriefTemplate(buildTemplateDecoderRecord({[field]: invalidValue,}))).toThrow(expect.objectContaining(invalidTemplateError));
+  it.each(rejectedTemplates)('rejects a Content Brief template when %s', (_condition, payload) => {
+    expect(() => decodeContentBriefTemplate(payload))
+      .toThrow(invalidContentStudioResponse('Content Brief template'));
   });
 
   it.each(validGroupBriefModes)(
     'returns template content angle %s when the enum member is valid',
     (contentAngle) => {
-      expect(decodeContentBriefTemplate(buildTemplateDecoderRecord({content_angle: contentAngle,})).content_angle).toBe(contentAngle);
+      expect(decodeContentBriefTemplate(buildTemplateDecoderRecord({ content_angle: contentAngle })).content_angle)
+        .toBe(contentAngle);
     }
   );
 
   it.each(['created_by', 'created_at', 'updated_at'])(
     'returns a Content Brief template when nullable field %s is a string',
     (field) => {
-      expect(decodeContentBriefTemplate(buildTemplateDecoderRecord({[field]: '2026-01-01T00:00:00Z',}))).toMatchObject({ [field]: '2026-01-01T00:00:00Z' });
+      expect(decodeContentBriefTemplate(buildTemplateDecoderRecord({ [field]: '2026-01-01T00:00:00Z' })))
+        .toMatchObject({ [field]: '2026-01-01T00:00:00Z' });
     }
   );
 
-  it.each([null, [], 'templates'])(
-    'rejects the template list when the payload is %j',
-    (payload) => {
-      expect(() => decodeTemplateList(payload)).toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: 'Content Studio API returned an invalid template list',
-      }));
-    }
-  );
-
-  it.each([undefined, null, {}, 'templates'])(
-    'rejects the template list when items is %j',
-    (items) => {
-      expect(() => decodeTemplateList({
-        items,
-        count: 0 
-      }))
-        .toThrow(expect.objectContaining({
-          name: 'InvalidContentStudioResponseError',
-          message: 'Content Studio API returned an invalid template list',
-        }));
-    }
-  );
-
-  it.each(invalidIntegerRepresentations)(
-    'rejects the template list when count is %j',
-    (count) => {
-      expect(() => decodeTemplateList(buildTemplateListDecoderPayload([], { count })))
-        .toThrow(expect.objectContaining({
-          name: 'InvalidContentStudioResponseError',
-          message: 'Content Studio API returned an invalid template count',
-        }));
-    }
-  );
-
-  it.each([0, 2])(
-    'rejects the template list when count %i differs from one item',
-    (count) => {
-      expect(() => decodeTemplateList(buildTemplateListDecoderPayload(
-        [buildTemplateDecoderRecord()],
-        { count }
-      ))).toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: 'Content Studio API returned an invalid template count',
-      }));
-    }
-  );
+  it.each(rejectedTemplateLists)('rejects the template list when %s', (_condition, payload, subject) => {
+    expect(() => decodeTemplateList(payload)).toThrow(invalidContentStudioResponse(subject));
+  });
 
   it('accepts a Decimal string when the template count is exact', () => {
     const template = buildTemplateDecoderRecord();
@@ -227,38 +181,35 @@ describe('Content Studio acknowledgement decoders', () => {
     (status) => {
       expect(decodeContentStatus({
         id: 'content-1',
-        status 
+        status
       }, 'content-1')).toBe(status);
     }
   );
 
   it.each([
-    [null, 'content-1'],
-    [[], 'content-1'],
-    [{
+    null,
+    [],
+    {
       id: 'different',
-      status: 'generated' 
-    }, 'content-1'],
-    [{
+      status: 'generated'
+    },
+    {
       id: 'content-1',
-      status: 'unknown' 
-    }, 'content-1'],
-    [{
+      status: 'unknown'
+    },
+    {
       id: 'content-1',
-      status: 1 
-    }, 'content-1'],
-  ])('rejects content status when payload %j does not match ID %s', (payload, requestedId) => {
-    expect(() => decodeContentStatus(payload, requestedId))
-      .toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: 'Content Studio API returned an invalid content status',
-      }));
+      status: 1
+    },
+  ])('rejects content status when payload %j does not match ID content-1', (payload) => {
+    expect(() => decodeContentStatus(payload, 'content-1'))
+      .toThrow(invalidContentStudioResponse('content status'));
   });
 
   it('returns no value when the viewed acknowledgement matches the requested ID', () => {
     expect(decodeViewedResponse({
       success: true,
-      id: 'content-1' 
+      id: 'content-1'
     }, 'content-1'))
       .toBeUndefined();
   });
@@ -268,24 +219,21 @@ describe('Content Studio acknowledgement decoders', () => {
     [],
     {
       success: false,
-      id: 'content-1' 
+      id: 'content-1'
     },
     {
       success: true,
-      id: 'different' 
+      id: 'different'
     },
   ])('rejects the viewed acknowledgement when payload is %j', (payload) => {
     expect(() => decodeViewedResponse(payload, 'content-1'))
-      .toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: 'Content Studio API returned an invalid viewed response',
-      }));
+      .toThrow(invalidContentStudioResponse('viewed response'));
   });
 
   it('returns no value when generated content deletion succeeds with a message', () => {
     expect(decodeDeletedContent({
       success: true,
-      message: 'Content deleted' 
+      message: 'Content deleted'
     }))
       .toBeUndefined();
   });
@@ -295,18 +243,15 @@ describe('Content Studio acknowledgement decoders', () => {
     [],
     {
       success: false,
-      message: 'Content deleted' 
+      message: 'Content deleted'
     },
     { success: true },
     {
       success: true,
-      message: 1 
+      message: 1
     },
   ])('rejects generated content deletion when payload is %j', (payload) => {
-    expect(() => decodeDeletedContent(payload)).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: 'Content Studio API returned an invalid delete response',
-    }));
+    expect(() => decodeDeletedContent(payload)).toThrow(invalidContentStudioResponse('delete response'));
   });
 
   it('returns no value when the exact template deletion message is received', () => {
@@ -321,9 +266,7 @@ describe('Content Studio acknowledgement decoders', () => {
     { message: 'Template deleted' },
     { message: 1 },
   ])('rejects template deletion when payload is %j', (payload) => {
-    expect(() => decodeDeletedTemplate(payload)).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: 'Content Studio API returned an invalid template delete response',
-    }));
+    expect(() => decodeDeletedTemplate(payload))
+      .toThrow(invalidContentStudioResponse('template delete response'));
   });
 });

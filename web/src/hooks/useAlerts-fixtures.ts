@@ -14,6 +14,7 @@ import type {
   ContentChangeMarker,
   CreateContentChangeRequest,
 } from '../types';
+import type { DeferredValue } from '../test/fetchResponses';
 import {
   buildAlertSettings,
   buildAlertsResponse,
@@ -40,26 +41,9 @@ export const CONTENT_CHANGE_REQUEST = {
   url: 'https://example.com/guidance',
 } satisfies CreateContentChangeRequest;
 
-export interface DeferredValue<TValue> {
-  promise: Promise<TValue>;
-  resolve: (resolvedValue: TValue) => void;
-  reject: (reason: unknown) => void;
-}
-
-export function createDeferredValue<TValue>(): DeferredValue<TValue> {
-  const settlers: Pick<DeferredValue<TValue>, 'resolve' | 'reject'> = {
-    resolve: () => undefined,
-    reject: () => undefined,
-  };
-  const promise = new Promise<TValue>((resolve, reject) => {
-    settlers.resolve = resolve;
-    settlers.reject = reject;
-  });
-  return {
-    promise,
-    ...settlers,
-  };
-}
+export {
+  createDeferredValue, type DeferredValue
+} from '../test/fetchResponses';
 
 export async function resolveDeferredValue<TValue>(
   deferred: DeferredValue<TValue>,

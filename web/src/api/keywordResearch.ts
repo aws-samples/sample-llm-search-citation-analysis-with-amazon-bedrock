@@ -14,6 +14,7 @@ import {
 import type {
   AgentDimensionOption, KeywordResearchItem, ResearchTemplate
 } from '../types';
+import { isRecord } from '../types/domain/keywordDecoders';
 
 export class InvalidKeywordResearchResponseError extends TypeError {
   constructor(message: string) {
@@ -26,15 +27,19 @@ export type ResearchType = KeywordResearchItem['type'];
 
 const RESEARCH_TYPES: readonly string[] = ['expansion', 'competitor', 'agent'];
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 export function isKeywordResearchItem(value: unknown): value is KeywordResearchItem {
   return isRecord(value)
     && typeof value.id === 'string'
     && typeof value.type === 'string'
     && RESEARCH_TYPES.includes(value.type);
+}
+
+/** The `items` array of a list response; throws when the payload has none. */
+function listItems(payload: unknown, subject: string): unknown[] {
+  if (!isRecord(payload) || !Array.isArray(payload.items)) {
+    throw new InvalidKeywordResearchResponseError(`Keyword research API returned an invalid ${subject}`);
+  }
+  return payload.items;
 }
 
 function decodeJob(payload: unknown): KeywordResearchItem {
@@ -116,10 +121,7 @@ export async function fetchKeywordResearchHistory(type?: ResearchType, signal?: 
     params,
     signal
   });
-  if (!isRecord(payload) || !Array.isArray(payload.items)) {
-    throw new InvalidKeywordResearchResponseError('Keyword research API returned an invalid history');
-  }
-  return payload.items.filter(isKeywordResearchItem);
+  return listItems(payload, 'history').filter(isKeywordResearchItem);
 }
 
 export async function deleteKeywordResearch(id: string): Promise<void> {
@@ -152,10 +154,7 @@ function decodeTemplate(payload: unknown): ResearchTemplate {
 /** The built-in templates first (in the API's order), then the saved ones by name. */
 export async function fetchResearchTemplates(signal?: AbortSignal): Promise<ResearchTemplate[]> {
   const payload = await apiGet<unknown>('/keyword-research/templates', { signal });
-  if (!isRecord(payload) || !Array.isArray(payload.items)) {
-    throw new InvalidKeywordResearchResponseError('Keyword research API returned an invalid template list');
-  }
-  return payload.items.filter(isResearchTemplate);
+  return listItems(payload, 'template list').filter(isResearchTemplate);
 }
 
 /**

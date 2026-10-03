@@ -11,23 +11,17 @@ export interface ExportableSearch {
  * placeholder row. Used by the SearchesView export.
  */
 export function searchExcelRows(search: ExportableSearch): Record<string, unknown>[] {
-  if (search.citations && search.citations.length > 0) {
-    return search.citations.map((citation, idx) => ({
-      Keyword: search.keyword,
-      Provider: search.provider,
-      Timestamp: new Date(search.timestamp).toLocaleString(),
-      'Citation #': idx + 1,
-      'Citation URL': citation,
-    }));
-  }
-
-  return [{
+  const row = (citationNumber: number, citationUrl: string): Record<string, unknown> => ({
     Keyword: search.keyword,
     Provider: search.provider,
     Timestamp: new Date(search.timestamp).toLocaleString(),
-    'Citation #': 0,
-    'Citation URL': 'No citations',
-  }];
+    'Citation #': citationNumber,
+    'Citation URL': citationUrl,
+  });
+  if (search.citations && search.citations.length > 0) {
+    return search.citations.map((citation, idx) => row(idx + 1, citation));
+  }
+  return [row(0, 'No citations')];
 }
 
 export const SEARCH_EXCEL_COLUMNS = [

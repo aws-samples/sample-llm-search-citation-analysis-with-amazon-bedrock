@@ -48,7 +48,7 @@ export const successfulPromotionResponseFixture = {
   skipped_keywords: [],
 };
 
-export const inactiveKeywordItemFixture = {
+const inactiveKeywordItemFixture = {
   ...createdKeywordItemFixture,
   id: 'keyword-2',
   keyword: 'beta',

@@ -5,7 +5,7 @@
 /**
  * Expanded keyword from seed keyword research.
  */
-export interface ExpandedKeyword {
+interface ExpandedKeyword {
   keyword: string;
   intent: string;
   competition: string;
@@ -172,7 +172,7 @@ export interface PlannedQuery {
 }
 
 /** The evaluator's verdict on a round. */
-export interface AgentEvaluation {
+interface AgentEvaluation {
   assessment: string;
   decision: 'continue' | 'stop';
   reason: string;

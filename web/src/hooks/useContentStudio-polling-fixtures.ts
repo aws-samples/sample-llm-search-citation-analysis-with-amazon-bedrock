@@ -116,7 +116,7 @@ export function createPollingMockFetch(options: PollingMockFetchOptions = {}) {
   });
 }
 
-export function createDeferredStatusFetch(
+function createDeferredStatusFetch(
   historyResponses: readonly (readonly ContentStudioHistory[])[]
 ) {
   const statusRequests: DeferredStatusRequest[] = [];

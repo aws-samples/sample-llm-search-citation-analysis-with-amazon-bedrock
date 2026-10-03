@@ -65,7 +65,7 @@ export function createMockKeywords(count: number, namePrefix = 'keyword'): Keywo
   }));
 }
 
-export const mockAuthoritativeKeywordsResponse = buildKeywordsPage(mockKeywords);
+const mockAuthoritativeKeywordsResponse = buildKeywordsPage(mockKeywords);
 
 export function createMockDelayedJsonResponse(
   responsePayload: unknown,

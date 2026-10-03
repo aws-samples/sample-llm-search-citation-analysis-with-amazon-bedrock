@@ -1,15 +1,13 @@
-import { ApiRequestError } from '../infrastructure';
 import type {
   CitationGapsResponse, ReportScope
 } from '../types';
 import { reportScopeParams } from '../components/ui/reportScope';
-import { useAnalysisEndpoint } from './useAnalysisEndpoint';
+import {
+  apiRequestErrors, isAnalysisPayload, useAnalysisEndpoint
+} from './useAnalysisEndpoint';
 
 function isCitationGapsResponse(data: unknown): data is CitationGapsResponse {
-  if (typeof data !== 'object' || data === null) return false;
-  
-  // Check for error response from backend
-  if ('error' in data) return false;
+  if (!isAnalysisPayload(data)) return false;
   
   // Single keyword response has gaps and summary
   const hasSingleKeywordFields = 'gaps' in data && 'summary' in data;
@@ -24,8 +22,7 @@ const citationGapsEndpoint = {
   errorContext: 'citationGaps',
   logMessage: '[citationGaps] Error fetching citation gaps:',
   isValidResponse: isCitationGapsResponse,
-  createHttpError: (status: number) => new ApiRequestError('Failed to fetch citation gaps', status),
-  createResponseError: (message: string) => new ApiRequestError(message),
+  ...apiRequestErrors('Failed to fetch citation gaps'),
   buildRequest: (scope: ReportScope, limit = 10) => {
     const params = new URLSearchParams({
       ...reportScopeParams(scope),

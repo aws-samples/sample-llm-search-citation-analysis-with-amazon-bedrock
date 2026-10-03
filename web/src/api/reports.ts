@@ -24,7 +24,7 @@ export interface ReportsOverviewMover {
   change: number;
 }
 
-export interface ReportsOverviewSummary {
+interface ReportsOverviewSummary {
   improving_count: number;
   declining_count: number;
   stable_count: number;

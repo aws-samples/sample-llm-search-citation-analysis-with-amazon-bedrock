@@ -42,6 +42,10 @@ interface LatestAlertLoad<TResponse> {
   onLoaded: (response: TResponse) => void;
 }
 
+function withoutId(ids: string[], id: string): string[] {
+  return ids.filter((currentId) => currentId !== id);
+}
+
 function cancelledAcknowledgement(): AlertMutationOutcome {
   return {
     success: false,
@@ -147,12 +151,15 @@ export function useOpenAlerts(limit = DEFAULT_OPEN_ALERT_LIMIT) {
       setLoading(false);
       setActionError(null);
       setAcknowledgingIds((currentIds) => currentIds.includes(id) ? currentIds : [...currentIds, id]);
+      const release = (): void => {
+        setAcknowledgingIds((currentIds) => withoutId(currentIds, id));
+      };
       try {
         await acknowledgeAlert(id);
         if (!isMounted()) return cancelledAcknowledgement();
         setItems((currentItems) => currentItems.filter((alertItem) => alertItem.id !== id));
         setCount((currentCount) => Math.max(0, currentCount - 1));
-        setAcknowledgingIds((currentIds) => currentIds.filter((currentId) => currentId !== id));
+        release();
         return {
           success: true,
           message: 'Alert acknowledged.',
@@ -163,7 +170,7 @@ export function useOpenAlerts(limit = DEFAULT_OPEN_ALERT_LIMIT) {
         // Stryker disable next-line StringLiteral,CallExpression: diagnostic logging does not affect acknowledgement outcomes
         console.error('[alerts] Error acknowledging alert:', acknowledgementError);
         setActionError(message);
-        setAcknowledgingIds((currentIds) => currentIds.filter((currentId) => currentId !== id));
+        release();
         return {
           success: false,
           message,

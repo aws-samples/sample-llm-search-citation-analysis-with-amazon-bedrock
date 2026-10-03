@@ -97,14 +97,14 @@ export interface BrandTrends {
   }>;
 }
 
-export interface PromptBrandData {
+interface PromptBrandData {
   mentions: number;
   best_rank: number | null;
   provider_coverage: number;
   providers: string[];
 }
 
-export type PromptStatus = 'winning' | 'losing' | 'opportunity' | 'neutral';
+type PromptStatus = 'winning' | 'losing' | 'opportunity' | 'neutral';
 
 export interface PromptInsight {
   keyword: string;
@@ -130,7 +130,7 @@ export interface PromptInsightsResponse {
   };
 }
 
-export type GapPriority = 'high' | 'medium' | 'low';
+type GapPriority = 'high' | 'medium' | 'low';
 
 export interface CitationGap {
   url: string;
@@ -146,7 +146,7 @@ export interface CitationGap {
   keyword?: string;
 }
 
-export interface DomainGapSummary {
+interface DomainGapSummary {
   domain: string;
   gap_count: number;
   total_citations: number;
@@ -232,7 +232,7 @@ export interface TrendDataPoint {
 export type PeriodType = 'day' | 'week' | 'month';
 
 /** A change between two periods: every KPI's delta and each rate's trend. */
-export interface PeriodChange {
+interface PeriodChange {
   deltas: KpiDeltas;
   trends: Record<TrendedKpiId, KpiTrend>;
 }
@@ -280,7 +280,7 @@ export interface HistoricalTrendsResponse {
   brand_trends: BrandTrends;
 }
 
-export interface PersonaBrandRanking {
+interface PersonaBrandRanking {
   name: string;
   rank: number;
   mention_count: number;
@@ -289,7 +289,7 @@ export interface PersonaBrandRanking {
   classification: BrandClassification;
 }
 
-export interface PersonaRankingGroup {
+interface PersonaRankingGroup {
   persona_name: string;
   brands: PersonaBrandRanking[];
 }

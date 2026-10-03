@@ -15,13 +15,17 @@ import {
   buildAlertsResponse,
   buildContentChangeMarker,
   buildContentChangesResponse,
+  settingsUpdateFrom,
 } from '../types/domain/alerts-fixtures';
 import {
+  ALERT_SETTINGS_UPDATE,
+  CONTENT_CHANGE_REQUEST,
   beginHookRequest,
   createDeferredValue,
   renderLoadedAlertSettings,
   renderLoadedOpenAlerts,
 } from './useAlerts-fixtures';
+import { deferNextTwoCalls } from '../test/fetchResponses';
 import {
   useAlertSettings, useContentChanges, useOpenAlerts
 } from './useAlerts';
@@ -218,16 +222,7 @@ describe('useAlertSettings', () => {
   });
 
   it('uses the resolved server settings and warnings after save', async () => {
-    const update = {
-      enabled: false,
-      notification_emails: ['owner@example.com'],
-      thresholds: {
-        mention_rate_drop: 12,
-        position_loss: 4,
-        competitor_top_n: 3,
-        improvement_after_content_change: 9,
-      },
-    };
+    const update = ALERT_SETTINGS_UPDATE;
     const savedSettings = buildAlertSettings({
       ...update,
       warnings: ['owner@example.com must confirm the subscription.'],
@@ -251,11 +246,7 @@ describe('useAlertSettings', () => {
     const deferredRefresh = createDeferredValue<AlertSettings>();
     const staleSettings = buildAlertSettings();
     const savedSettings = buildAlertSettings({ enabled: false });
-    const update = {
-      enabled: savedSettings.enabled,
-      notification_emails: savedSettings.notification_emails,
-      thresholds: savedSettings.thresholds,
-    };
+    const update = settingsUpdateFrom(savedSettings);
     mockUpdateAlertSettings.mockReturnValue(deferredSave.promise);
     const { result } = await renderLoadedAlertSettings();
     mockFetchAlertSettings.mockReturnValueOnce(deferredRefresh.promise);
@@ -361,11 +352,7 @@ describe('useAlertSettings', () => {
   it('replaces the prior save outcome when test delivery is accepted', async () => {
     const { result } = await renderLoadedAlertSettings();
     const settings = buildAlertSettings();
-    await act(() => result.current.saveSettings({
-      enabled: settings.enabled,
-      notification_emails: settings.notification_emails,
-      thresholds: settings.thresholds,
-    }));
+    await act(() => result.current.saveSettings(settingsUpdateFrom(settings)));
 
     await act(() => result.current.sendTestNotification());
 
@@ -447,11 +434,7 @@ describe('useAlertSettings', () => {
   });
 
   it('keeps the latest request pending when stale success arrives first', async () => {
-    const staleResponse = createDeferredValue<AlertTestNotificationResponse>();
-    const latestResponse = createDeferredValue<AlertTestNotificationResponse>();
-    mockSendTestNotification
-      .mockReturnValueOnce(staleResponse.promise)
-      .mockReturnValueOnce(latestResponse.promise);
+    const [staleResponse, latestResponse] = deferNextTwoCalls<AlertTestNotificationResponse>(mockSendTestNotification);
     const { result } = await renderLoadedAlertSettings();
 
     const staleSend = beginHookRequest(result.current.sendTestNotification);
@@ -471,11 +454,7 @@ describe('useAlertSettings', () => {
   });
 
   it('preserves the latest outcome when an older test request settles last', async () => {
-    const older = createDeferredValue<AlertTestNotificationResponse>();
-    const latest = createDeferredValue<AlertTestNotificationResponse>();
-    mockSendTestNotification
-      .mockReturnValueOnce(older.promise)
-      .mockReturnValueOnce(latest.promise);
+    const [older, latest] = deferNextTwoCalls<AlertTestNotificationResponse>(mockSendTestNotification);
     const { result } = await renderLoadedAlertSettings();
 
     const olderSend = beginHookRequest(
@@ -582,11 +561,7 @@ describe('useContentChanges', () => {
 
   it('stores the marker returned after recording a content change', async () => {
     const marker = buildContentChangeMarker({ description: 'Published revised guidance' });
-    const request = {
-      group_id: 'group-north',
-      description: 'Published revised guidance',
-      url: 'https://example.com/guidance',
-    };
+    const request = CONTENT_CHANGE_REQUEST;
     mockCreateContentChange.mockResolvedValue(marker);
     const { result } = renderHook(() => useContentChanges('group-north'));
     await waitFor(() => expect(result.current.loading).toBe(false));

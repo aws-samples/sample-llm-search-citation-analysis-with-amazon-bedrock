@@ -2,7 +2,9 @@ import { useCallback } from 'react';
 import type {
   SelfReflectionResponse, SelfReflectionResult 
 } from '../types';
-import { useAnalysisEndpoint } from './useAnalysisEndpoint';
+import {
+  brandFilterParams, fetchErrors, isAnalysisPayload, useAnalysisEndpoint
+} from './useAnalysisEndpoint';
 
 class SelfReflectionFetchError extends Error {
   constructor(message = 'Failed to fetch self-reflection data') {
@@ -12,8 +14,7 @@ class SelfReflectionFetchError extends Error {
 }
 
 function isSelfReflectionResponse(data: unknown): data is SelfReflectionResponse {
-  if (typeof data !== 'object' || data === null) return false;
-  if ('error' in data) return false;
+  if (!isAnalysisPayload(data)) return false;
   return 'keyword' in data && 'brand' in data && 'explanation' in data;
 }
 
@@ -31,8 +32,7 @@ const reflectionTriggerEndpoint = {
   errorContext: 'self-reflection',
   logMessage: '[self-reflection] Error triggering reflection:',
   isValidResponse: isSelfReflectionResponse,
-  createHttpError: () => new SelfReflectionFetchError(),
-  createResponseError: (message: string) => new SelfReflectionFetchError(message),
+  ...fetchErrors(SelfReflectionFetchError),
   buildRequest: (keyword: string, brand: string, queryPromptId: string, forceRefresh = false) => ({
     path: '/self-reflection',
     init: {
@@ -51,8 +51,7 @@ const reflectionTriggerEndpoint = {
 const reflectionListContract = {
   logMessage: '[self-reflection] Error fetching reflections:',
   isValidResponse: isSelfReflectionListResponse,
-  createHttpError: () => new SelfReflectionFetchError(),
-  createResponseError: (message: string) => new SelfReflectionFetchError(message),
+  ...fetchErrors(SelfReflectionFetchError),
 };
 
 export function useSelfReflection() {
@@ -61,9 +60,7 @@ export function useSelfReflection() {
   } = useAnalysisEndpoint(reflectionTriggerEndpoint);
 
   const fetchReflections = useCallback(async (keyword: string, brand?: string, queryPromptId?: string): Promise<SelfReflectionResult[]> => {
-    const params = new URLSearchParams({ keyword });
-    if (brand) params.append('brand', brand);
-    if (queryPromptId) params.append('query_prompt_id', queryPromptId);
+    const params = brandFilterParams({ keyword }, brand, queryPromptId);
 
     const json = await runRequest({
       path: '/self-reflection',

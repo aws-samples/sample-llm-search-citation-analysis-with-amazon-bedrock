@@ -86,53 +86,26 @@ function isValidationResponse(data: unknown): data is ValidationResponse {
   return typeof data === 'object' && data !== null && 'valid' in data;
 }
 
+/** Defaults shown when the providers API is unreachable: each answer engine with its default model, unconfigured. */
+const FALLBACK_PROVIDER_MODELS = [
+  [PROVIDER.OPENAI, 'gpt-5-mini'],
+  [PROVIDER.PERPLEXITY, 'sonar'],
+  [PROVIDER.GEMINI, 'gemini-3-flash-preview'],
+  [PROVIDER.CLAUDE, 'claude-sonnet-4-5'],
+] as const;
+
 function createDefaultProviders(): ProviderConfig[] {
-  return [
-    {
-      id: PROVIDER.OPENAI,
-      name: PROVIDER_NAMES[PROVIDER.OPENAI],
-      description: PROVIDER_DESCRIPTIONS[PROVIDER.OPENAI],
-      model: 'gpt-5-mini',
-      docs_url: PROVIDER_DOCS_URLS[PROVIDER.OPENAI],
-      enabled: true,
-      configured: false,
-      masked_key: null,
-      last_updated: null,
-    },
-    {
-      id: PROVIDER.PERPLEXITY,
-      name: PROVIDER_NAMES[PROVIDER.PERPLEXITY],
-      description: PROVIDER_DESCRIPTIONS[PROVIDER.PERPLEXITY],
-      model: 'sonar',
-      docs_url: PROVIDER_DOCS_URLS[PROVIDER.PERPLEXITY],
-      enabled: true,
-      configured: false,
-      masked_key: null,
-      last_updated: null,
-    },
-    {
-      id: PROVIDER.GEMINI,
-      name: PROVIDER_NAMES[PROVIDER.GEMINI],
-      description: PROVIDER_DESCRIPTIONS[PROVIDER.GEMINI],
-      model: 'gemini-3-flash-preview',
-      docs_url: PROVIDER_DOCS_URLS[PROVIDER.GEMINI],
-      enabled: true,
-      configured: false,
-      masked_key: null,
-      last_updated: null,
-    },
-    {
-      id: PROVIDER.CLAUDE,
-      name: PROVIDER_NAMES[PROVIDER.CLAUDE],
-      description: PROVIDER_DESCRIPTIONS[PROVIDER.CLAUDE],
-      model: 'claude-sonnet-4-5',
-      docs_url: PROVIDER_DOCS_URLS[PROVIDER.CLAUDE],
-      enabled: true,
-      configured: false,
-      masked_key: null,
-      last_updated: null,
-    },
-  ];
+  return FALLBACK_PROVIDER_MODELS.map(([id, model]) => ({
+    id,
+    name: PROVIDER_NAMES[id],
+    description: PROVIDER_DESCRIPTIONS[id],
+    model,
+    docs_url: PROVIDER_DOCS_URLS[id],
+    enabled: true,
+    configured: false,
+    masked_key: null,
+    last_updated: null,
+  }));
 }
 
 

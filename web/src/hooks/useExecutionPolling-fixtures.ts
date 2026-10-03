@@ -17,7 +17,7 @@ export function renderExecutionPolling(fetch: ReturnType<typeof createMockFetch>
   return renderHook(() => useExecutionPolling());
 }
 
-export function createMockTriggerResponse(overrides: Partial<{
+function createMockTriggerResponse(overrides: Partial<{
   execution_arn: string;
   execution_name: string;
   keywords_count: number;

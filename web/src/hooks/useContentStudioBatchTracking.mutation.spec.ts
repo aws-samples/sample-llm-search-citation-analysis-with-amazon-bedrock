@@ -4,7 +4,6 @@ import {
 import {
   act, waitFor
 } from '@testing-library/react';
-import { createDeferredResponse } from '../test/fetchResponses';
 import {
   advanceContentStudioPoll,
   dispatchBatchStorageEvent,
@@ -30,7 +29,7 @@ import {
 import {
   prepareContentStudioHookTest, restoreContentStudioHookTest
 } from './useContentStudio-test-fixtures';
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { deferNextTwoAuthenticatedFetches } from '../test/infrastructureMock';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
@@ -104,11 +103,7 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
     await startContentStudioBatches(result.current, ['batch-1', 'batch-2']);
     await flushContentStudioPromises();
 
-    const batchTwoStatus = createDeferredResponse();
-    const batchOneStatus = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockReturnValueOnce(batchTwoStatus.promise)
-      .mockReturnValueOnce(batchOneStatus.promise);
+    const [batchTwoStatus, batchOneStatus] = deferNextTwoAuthenticatedFetches();
     await advanceContentStudioPoll();
     await resolveRunningBatchStatus(batchOneStatus, 'batch-1');
 
@@ -126,11 +121,7 @@ describe('useContentStudioBatchTracking mutation boundaries', () => {
 
   it('keeps a storage-removed batch absent when its aggregate poll settles later', async () => {
     storeActiveContentStudioBatchIds(['batch-1', 'batch-2']);
-    const batchOneStatus = createDeferredResponse();
-    const batchTwoStatus = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockReturnValueOnce(batchOneStatus.promise)
-      .mockReturnValueOnce(batchTwoStatus.promise);
+    const [batchOneStatus, batchTwoStatus] = deferNextTwoAuthenticatedFetches();
     const {
       result, unmount
     } = renderContentStudio();

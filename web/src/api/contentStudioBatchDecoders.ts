@@ -2,6 +2,7 @@ import type {
   ContentBriefBatchCounts,
   ContentBriefBatchStartChild,
   ContentBriefBatchStartResponse,
+  ContentBriefBatchStatus,
   ContentBriefBatchStatusChild,
   ContentBriefBatchStatusResponse,
 } from '../types';
@@ -138,8 +139,9 @@ function decodeBatchCounts(value: unknown): ContentBriefBatchCounts {
   };
 }
 
-function observedBatchCounts(
-  children: ContentBriefBatchStatusChild[]
+/** Tally of batch children per status, as the API reports it in `counts`. */
+export function countBatchChildren(
+  children: ReadonlyArray<{ status: ContentBriefBatchStatus }>
 ): ContentBriefBatchCounts {
   const counts: ContentBriefBatchCounts = {
     pending: 0,
@@ -158,7 +160,7 @@ function requireBatchStatusCounts(
   counts: ContentBriefBatchCounts,
   batchSize: number
 ): void {
-  const observed = observedBatchCounts(children);
+  const observed = countBatchChildren(children);
   requireExactCount(children.length, batchSize, 'batch size');
   requireExactCount(counts.total, batchSize, 'batch total');
   requireExactCount(counts.pending, observed.pending, 'pending count');

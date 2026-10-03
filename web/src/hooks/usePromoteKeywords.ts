@@ -189,7 +189,7 @@ function describePromotionFailure(requestError: unknown): PromotionFailure {
 }
 
 /** Which promote button is in flight: the ticked rows, or the whole proposal. */
-export type PromotionAction = 'selected' | 'proposal';
+type PromotionAction = 'selected' | 'proposal';
 
 export interface UsePromoteKeywords {
   /** Selection keys (see `keywordSelectionKey`) of the ticked rows, for the tables' checkboxes. */

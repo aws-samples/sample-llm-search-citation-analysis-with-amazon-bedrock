@@ -1,15 +1,15 @@
-import { ApiRequestError } from '../infrastructure';
 import type {
   HistoricalTrendsResponse, PeriodType, ReportScope
 } from '../types';
 import { isRecord } from '../types/domain/keywordDecoders';
 import { reportScopeParams } from '../components/ui/reportScope';
-import { useAnalysisEndpoint } from './useAnalysisEndpoint';
+import {
+  apiRequestErrors, isAnalysisPayload, useAnalysisEndpoint 
+} from './useAnalysisEndpoint';
 
 /** The one `/trends` shape of every scope: the KPIs per period, the latest standing and each keyword's move. */
 function isHistoricalTrendsResponse(value: unknown): value is HistoricalTrendsResponse {
-  return isRecord(value)
-    && !('error' in value)
+  return isAnalysisPayload(value)
     && isRecord(value.scope)
     && Array.isArray(value.trend_data)
     && isRecord(value.latest)
@@ -20,8 +20,7 @@ const historicalTrendsEndpoint = {
   errorContext: 'visibility',
   logMessage: '[historicalTrends] Error fetching trends:',
   isValidResponse: isHistoricalTrendsResponse,
-  createHttpError: (status: number) => new ApiRequestError('Failed to fetch historical trends', status),
-  createResponseError: (message: string) => new ApiRequestError(message),
+  ...apiRequestErrors('Failed to fetch historical trends'),
   buildRequest: (
     scope: ReportScope,
     period: PeriodType = 'day',

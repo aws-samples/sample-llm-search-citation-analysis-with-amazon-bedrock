@@ -8,7 +8,7 @@ import {
   DEFAULT_BRAND_INDUSTRY, resolveBrandIndustryPreset
 } from '../constants/brandConfigDefaults';
 
-export interface BrandConfigFormState {
+interface BrandConfigFormState {
   industry: string;
   firstPartyBrands: string[];
   firstPartyDomains: string[];
@@ -22,7 +22,7 @@ export interface BrandConfigFormState {
   promptModified: boolean;
 }
 
-export interface BrandConfigFormInputs {
+interface BrandConfigFormInputs {
   newFirstParty: string;
   newFirstPartyDomain: string;
   newCompetitor: string;
@@ -32,7 +32,7 @@ export interface BrandConfigFormInputs {
 type BrandType = 'first_party' | 'competitor';
 export type ConfigTab = 'settings' | 'prompt';
 
-export interface BrandConfigExpansionState {
+interface BrandConfigExpansionState {
   selectedFirstPartyBrand: string | null;
   selectedCompetitorBrand: string | null;
   expandingBrand: BrandType | null;
