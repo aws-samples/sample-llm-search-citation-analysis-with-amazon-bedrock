@@ -16,6 +16,8 @@ from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.module_loader import load_handler_module
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
+# The tables the module resolves at import (both always set on the StatsInsights Lambda).
+_ENV = {'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search', 'DYNAMODB_TABLE_KEYWORDS': 'test-keywords'}
 
 
 # ----------------------------------------------------------------------
@@ -82,7 +84,8 @@ def mod(monkeypatch: pytest.MonkeyPatch):
     The sibling cache is primed with the gap fixture; the per-keyword rank
     lookup and the keyword listing are replaced for the test's lifetime.
     """
-    module = load_handler_module(_API_DIR, 'get-reports-competitor.py')
+    with patch.dict(os.environ, _ENV):
+        module = load_handler_module(_API_DIR, 'get-reports-competitor.py')
 
     module._sibling_cache['gap'] = lambda keyword, config: DEFAULT_GAPS.get(keyword, {})
     monkeypatch.setattr(module, '_latest_brand_ranks', lambda keyword: DEFAULT_RANKS.get(keyword, {}))
@@ -94,7 +97,8 @@ def mod(monkeypatch: pytest.MonkeyPatch):
 def raw_mod():
     """The module without the helper stubs — for testing the real
     DynamoDB-backed _list_tracked_keywords / _latest_brand_ranks."""
-    return load_handler_module(_API_DIR, 'get-reports-competitor.py', 'get_reports_competitor_unstubbed')
+    with patch.dict(os.environ, _ENV):
+        return load_handler_module(_API_DIR, 'get-reports-competitor.py', 'get_reports_competitor_unstubbed')
 
 
 # Adidas outranks Nike on a keyword: the setup under which Adidas's rollup
@@ -429,29 +433,11 @@ def _keywords_table_listing(raw_mod, items, limit):
         return raw_mod._list_tracked_keywords(limit)
 
 
-def test_list_tracked_keywords_reads_from_keywords_table_when_configured(raw_mod):
+def test_list_tracked_keywords_reads_distinct_keywords_from_the_keywords_table(raw_mod):
     # 'shoes' twice to verify de-dup
     items = [{'keyword': 'shoes'}, {'keyword': 'boots'}, {'keyword': 'shoes'}]
 
     assert _keywords_table_listing(raw_mod, items, 50) == ['shoes', 'boots']
-
-
-def test_list_tracked_keywords_falls_back_to_search_results_when_no_keywords_table(raw_mod):
-    fake_dynamodb = _scanning_dynamodb([{'keyword': 'fallback-kw'}])
-
-    with patch.object(raw_mod, 'KEYWORDS_TABLE', None):
-        with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', 'test-search'):
-            with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
-                result = raw_mod._list_tracked_keywords(50)
-
-    assert result == ['fallback-kw']
-
-
-def test_list_tracked_keywords_returns_empty_when_no_tables_configured(raw_mod):
-    with patch.object(raw_mod, 'KEYWORDS_TABLE', None):
-        with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', None):
-            result = raw_mod._list_tracked_keywords(50)
-    assert result == []
 
 
 def test_list_tracked_keywords_caps_result_at_limit(raw_mod):
@@ -472,12 +458,6 @@ def _latest_ranks(raw_mod, items):
     with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', 'test'):
         with patch.object(raw_mod, 'dynamodb', fake_dynamodb):
             return raw_mod._latest_brand_ranks('shoes')
-
-
-def test_latest_brand_ranks_returns_empty_when_search_table_unset(raw_mod):
-    with patch.object(raw_mod, 'SEARCH_RESULTS_TABLE', None):
-        result = raw_mod._latest_brand_ranks('shoes')
-    assert result == {}
 
 
 def test_latest_brand_ranks_returns_empty_when_query_returns_no_items(raw_mod):
