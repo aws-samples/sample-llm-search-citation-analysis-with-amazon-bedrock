@@ -86,17 +86,26 @@ def _batch_returns(loaded: Loaded, *items: dict[str, Any]) -> None:
 
 
 @pytest.mark.parametrize('event', [
-    pytest.param(_post_event('', {'status': 'done'}), id='post-path-id-missing'),
     pytest.param(_post_event('abc', {'status': 'sideways'}), id='status-unknown'),
     pytest.param(_post_event('abc', {}), id='status-missing'),
     pytest.param(_post_event('abc', {'status': 'done', 'notes': 'x' * 5000}), id='notes-exceeds-max-length'),
     pytest.param(_post_event('abc', {'status': 'done', 'related_keyword': 'x' * 1000}), id='related-keyword-exceeds-max-length'),
     pytest.param(_raw_post('{not-json'), id='body-invalid-json'),
     pytest.param(_raw_post('[]'), id='body-a-json-array'),
-    pytest.param(_status_event('GET', ''), id='get-path-id-missing'),
 ])
 def test_returns_400_when_the_request_is_invalid(loaded, event):
     assert loaded.mod.handler(event, None)['statusCode'] == 400
+
+
+@pytest.mark.parametrize('event', [
+    pytest.param(_post_event('', {'status': 'done'}), id='post-path-id-missing'),
+    pytest.param(_post_event('   ', {'status': 'done'}), id='post-path-id-blank'),
+    pytest.param(_status_event('GET', ''), id='get-path-id-missing'),
+])
+def test_returns_400_naming_the_missing_recommendation_id(loaded, event):
+    response = parse_response(loaded.mod.handler(event, None))
+
+    assert response == (400, {'error': 'Missing recommendation id', 'field': 'id'})
 
 
 # --- POST persists ---------------------------------------------------------
