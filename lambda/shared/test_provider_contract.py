@@ -4,7 +4,7 @@
 display names, descriptions, key docs) and ``web/src/hooks/useProviderConfig.ts``
 the default model it shows when the providers API is unreachable. The Lambdas
 hold the same facts in ``shared.config`` (ids), ``api/manage-providers.py``
-(what Settings › AI Providers lists), ``shared.provider_models`` (default
+(what Settings > AI Providers lists), ``shared.provider_models`` (default
 models) and ``search/handler.py`` (the engines an analysis run queries; its
 log labels are not display names and are not compared).
 An engine added, renamed or re-modelled on one side and not the other fails here.
