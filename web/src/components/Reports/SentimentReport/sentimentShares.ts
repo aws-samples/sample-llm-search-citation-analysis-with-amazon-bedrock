@@ -1,5 +1,7 @@
 import type { SentimentSplit } from '../../../types/domain/groupKpiHistory';
-import { labelledMentions } from '../charts/sentimentSplitChartConfiguration';
+import {
+  labelledMentions, percentOf
+} from '../charts/sentimentSplitChartConfiguration';
 
 /** The mentions of the split's headline cards: positive, negative, and the rest together. */
 export interface SentimentCounts {
@@ -19,9 +21,10 @@ export function sentimentCounts(split: SentimentSplit): SentimentCounts {
   };
 }
 
-/** "41.7% of 12 mentions with a sentiment", or why there is no share. */
+/** "41.7% of 12 mentions with a sentiment" (the share the sentiment chart draws), or why there is no share. */
 export function sentimentShareNote(count: number, labelled: number): string {
-  if (labelled === 0) return 'No mention with a sentiment yet';
+  const share = percentOf(count, labelled);
+  if (share === null) return 'No mention with a sentiment yet';
   const mentions = labelled === 1 ? '1 mention' : `${labelled} mentions`;
-  return `${((count / labelled) * 100).toFixed(1)}% of ${mentions} with a sentiment`;
+  return `${share.toFixed(1)}% of ${mentions} with a sentiment`;
 }
