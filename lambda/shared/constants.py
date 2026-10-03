@@ -17,6 +17,8 @@ specific API's throttling behavior), leave it inline with a comment.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 # ---------------------------------------------------------------------------
 # Recommendation priority order — how Action Center recommendations, Content
 # Studio ideas, Citation Gaps and the competitor report's outreach targets
@@ -24,10 +26,10 @@ from __future__ import annotations
 # priority, or a keyword priority such as 'normal', which none of these items
 # carry) sorts with 'low'.
 # ---------------------------------------------------------------------------
-RECOMMENDATION_PRIORITY_ORDER = {'high': 0, 'medium': 1, 'low': 2}
+RECOMMENDATION_PRIORITY_ORDER: Mapping[object, int] = {'high': 0, 'medium': 1, 'low': 2}
 
 
-def priority_rank(priority: str | None) -> int:
+def priority_rank(priority: object) -> int:
     """The sort position of a recommendation priority: 0 for 'high' ... 2 for 'low' and anything unknown."""
     return RECOMMENDATION_PRIORITY_ORDER.get(priority, RECOMMENDATION_PRIORITY_ORDER['low'])
 
