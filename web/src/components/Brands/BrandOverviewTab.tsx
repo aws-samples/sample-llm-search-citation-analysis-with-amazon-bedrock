@@ -3,9 +3,7 @@ import {
   classificationLabel, sentimentTextColor
 } from './brandPresentation';
 
-interface BrandOverviewTabProps {
-  brand: AggregatedBrand;
-}
+interface BrandOverviewTabProps {brand: AggregatedBrand;}
 
 export const BrandOverviewTab = ({ brand }: BrandOverviewTabProps) => {
   const getClassificationColor = (classification: string) => {
