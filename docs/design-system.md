@@ -311,10 +311,16 @@ convention, and uses `EyeIcon`, `PlayIcon`, `ClockIcon`, `CogIcon` and
 ### 6.2 Adding a new icon
 
 1. Pick or trace a Heroicons outline path.
-2. Add its path constant and an exported component to `Icons.tsx`
-   (every icon renders through the shared `OutlineIcon` wrapper; props
-   `className` and `title`).
-3. Re-export it from `components/ui/index.ts`.
+2. Add its path data to `ui/iconPaths.ts` as a `*_PATHS` array (one `d`
+   attribute per `<path>`). Every outline SVG in the app is drawn by
+   `ui/StrokeIcon` from that file (props `paths`, `className`,
+   `strokeWidth` 1.5 or 2, and optional `aria-hidden` / `role`); don't
+   inline a new `<svg>`.
+3. For a named icon, add a component to `Icons.tsx` (it renders through
+   `StrokeIcon`; props `className` and `title`) and re-export it from
+   `components/ui/index.ts`. A one-off glyph can use
+   `<StrokeIcon paths={MY_PATHS} className="w-4 h-4" aria-hidden="true" />`
+   directly.
 4. Use it via `<MyIcon className="w-4 h-4" />`.
 
 ### 6.3 Sizing reference
@@ -408,8 +414,15 @@ its own file.
 | ---- | ------- |
 | `Button.tsx` | Canonical button: variants and sizes (§5). |
 | `Icons.tsx`, `ClipboardIcon.tsx` | Shared SVG icons (§6). |
+| `StrokeIcon.tsx`, `iconPaths.ts` | The 24×24 outline SVG every icon is drawn with, and the path data it draws (§6.2). |
 | `Modal.tsx` | `Modal`, `ConfirmModal`, `AlertModal`. |
+| `ModalCloseFooter.tsx` | Bottom bar of a full-size detail dialog: a rule and a right-aligned Close button. |
 | `Spinner.tsx` | Loading indicator (`sm` / `md` / `lg`). |
+| `CenteredState.tsx` | Centred view states: `CenteredMessage` (grey status line), `CenteredLoading` (spinner above a label), `CenteredEmpty` (illustration, message, hint) and `CenteredSpinner` (the Suspense fallback of lazy tabs and reports). |
+| `PageHeaderCard.tsx` | White card at the top of a view: title, description, and the view's controls (scope picker, persona filter, buttons) stacked under it. |
+| `ErrorAlert.tsx` | Announced (`role="alert"`) red error box; renders nothing while the message is `null`. |
+| `RefreshTextButton.tsx` | Grey "Refresh" text button of a panel header. |
+| `useExportAction.ts` | Busy flag and click handler for an "Export to Excel" button; a failure is logged or handed to a callback. |
 | `ThemeToggle.tsx` | Light / dark / system switcher. |
 | `InfoTooltip.tsx` | "i" button with an explanation; used next to headings and KPI columns. The only tooltip component: it renders into `document.body` with fixed positioning (`tooltipPosition.ts`), so no table or scroll container can clip it or stop its text wrapping. Don't hand-roll another. |
 | `Disclosure.tsx` | A heading that expands the content under it; collapsed on screen, always open in print (§1.4). |
@@ -437,13 +450,20 @@ component into sub-components before it reaches them. See
 
 Reports compose their pages from `components/Reports/layout/`:
 `ReportLayout`, `ReportSection` and `ReportSectionPlaceholder` (page and
-section frames, loading / error / empty states via `sectionGate`),
+section frames, loading / error / empty states via `sectionGate`:
+`gateSection`, `pendingSectionPlaceholder`, and the `SectionFetchState` /
+`ReportSlice` props every gated section takes, built by `reportSlices`),
+`ReportCard` (`REPORT_CARD_CLASS`, `ReportCardHeader`), `ReportSectionNote`,
 `ReportStatCard` / `ReportStatGrid`, `ReportTable` (print-friendly typed
 columns, with `kpiColumn` for KPI columns whose tooltip holds the
-definition), `KpiHeadline`, `TrendPeriodTable`, `KpiDefinitionsSection`
-(the definitions every report ends with), `PriorityBadge` and
-`ReportKeywordSelector`. Use them instead of building report layout from
-scratch.
+definition and `emphasisColumn` for a highlighted figure; `brandColumns`
+and `domainColumns` hold the shared brand and domain columns),
+`KpiHeadline`, `RunKpiHeadline`, `VisibilityHeadlineSection`,
+`TrendHeadlineSection`, `TrendPeriodTable`, `MoverColumn`,
+`KpiDefinitionsSection` (the definitions every report ends with),
+`PriorityBadge` and `ReportKeywordSelector`; `kpiSheets` holds the shared
+Excel sheets of the report exports. Use them instead of building report
+layout from scratch.
 
 ### 7.5 Charts
 

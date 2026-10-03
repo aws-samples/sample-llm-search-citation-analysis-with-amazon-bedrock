@@ -6,9 +6,8 @@ import {
   describe, it, expect, vi, beforeEach, afterEach 
 } from 'vitest';
 import { ErrorBoundary } from './ErrorBoundary';
-import {
-  TestError, ThrowingComponent
-} from './ErrorBoundary-fixtures';
+import { ThrowingComponent } from './ErrorBoundary-fixtures';
+import { TestError } from '../../test/testError';
 
 /** Mounts a boundary around a child that throws `Test error message` on render. */
 function renderThrowingChild(boundaryProps: Omit<ComponentProps<typeof ErrorBoundary>, 'children'> = {}) {

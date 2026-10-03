@@ -10,7 +10,6 @@ import type {
   SentimentExample, SentimentLabel
 } from '../../../types/domain/sentimentExamples';
 import { buildSentimentExample } from '../../../types/domain/sentimentExamples-fixtures';
-import { createMockJsonResponse } from '../../../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../../../test/infrastructureMock';
 import { buildKpis } from '../BrandVisibilityReport/groupKpiHistory-fixtures';
 import {
@@ -70,11 +69,6 @@ const COUNTED_VISIBILITY: VisibilityResponse = buildVisibility({
 });
 
 export const HOTEL_SOL_SCOPE: ReportScope = groupScope('hotel-sol');
-
-/** Answers every request with `body`. */
-export function stubExamplesAnswer(body: unknown, status = 200): void {
-  mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(createMockJsonResponse(body, status)));
-}
 
 /** The URL of the only request made. */
 export function requestedUrl(): unknown {

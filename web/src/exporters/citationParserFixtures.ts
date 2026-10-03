@@ -16,3 +16,15 @@ export function buildCitations(count: number): TopUrl[] {
     keyword_count: i + 1,
   }));
 }
+
+/** Most-cited first (the table's default sort). */
+export const DESC_CITATIONS = {
+  column: 'citations',
+  direction: 'desc',
+} as const;
+
+/** Most keywords first. */
+export const DESC_KEYWORDS = {
+  column: 'keywords',
+  direction: 'desc',
+} as const;

@@ -12,8 +12,9 @@ import {
 } from '../../../types/domain/sentimentExamples-fixtures';
 import { SentimentExamplesModal } from './SentimentExamplesModal';
 import {
-  HOTEL_SOL_SCOPE, renderExamplesModal, requestedUrl, requestSignal, stubExamplesAnswer
+  HOTEL_SOL_SCOPE, renderExamplesModal, requestedUrl, requestSignal
 } from './sentimentExamples-fixtures';
+import { answerEveryFetch } from '../../../test/fetchStubs';
 
 vi.mock('../../../infrastructure', () => import('../../../test/infrastructureMock'));
 
@@ -29,14 +30,14 @@ const NO_ANSWERS = buildSentimentExamplesResponse({
 
 describe('SentimentExamplesModal', () => {
   it('names the sentiment and the engine in its title', () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
+    answerEveryFetch(buildSentimentExamplesResponse());
     renderExamplesModal();
 
     expect(screen.getByRole('dialog', { name: 'Negative answers · OpenAI' })).toBeInTheDocument();
   });
 
   it('names every engine in its title when no engine is picked', () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse({ provider: null }));
+    answerEveryFetch(buildSentimentExamplesResponse({ provider: null }));
     renderExamplesModal({
       sentiment: 'mixed',
       provider: null,
@@ -46,14 +47,14 @@ describe('SentimentExamplesModal', () => {
   });
 
   it('asks for the answers of the scope, the sentiment and the engine', () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
+    answerEveryFetch(buildSentimentExamplesResponse());
     renderExamplesModal();
 
     expect(requestedUrl()).toBe('https://api.test.com/visibility/sentiment-examples?group_id=hotel-sol&sentiment=negative&provider=openai');
   });
 
   it('asks for every engine when no engine is picked', () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
+    answerEveryFetch(buildSentimentExamplesResponse());
     renderExamplesModal({
       sentiment: 'positive',
       provider: null,
@@ -63,14 +64,14 @@ describe('SentimentExamplesModal', () => {
   });
 
   it('says which runs the answers come from under the title', () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
+    answerEveryFetch(buildSentimentExamplesResponse());
     renderExamplesModal();
 
     expect(screen.getByText('Hotel Sol · each keyword\'s latest run')).toBeInTheDocument();
   });
 
   it('notes a scope whose keywords were capped once the answer says so', async () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse({ keywords_truncated: true }));
+    answerEveryFetch(buildSentimentExamplesResponse({ keywords_truncated: true }));
     renderExamplesModal();
 
     expect(await screen.findByText('Hotel Sol · each keyword\'s latest run · not every keyword of the scope is included')).toBeInTheDocument();
@@ -84,7 +85,7 @@ describe('SentimentExamplesModal', () => {
   });
 
   it('shows the error when the answers cannot be loaded', async () => {
-    stubExamplesAnswer({}, 500);
+    answerEveryFetch({}, 500);
     renderExamplesModal();
 
     expect((await screen.findByRole('alert')).textContent).toBe('Unable to load the answers');
@@ -98,7 +99,7 @@ describe('SentimentExamplesModal', () => {
   });
 
   it('shows no error once the answers arrive', async () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
+    answerEveryFetch(buildSentimentExamplesResponse());
     renderExamplesModal();
 
     await screen.findByRole('list', { name: 'Answers' });
@@ -107,7 +108,7 @@ describe('SentimentExamplesModal', () => {
   });
 
   it('asks again when it is pointed at another count', () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
+    answerEveryFetch(buildSentimentExamplesResponse());
     const {
       onClose, rerender
     } = renderExamplesModal();
@@ -121,14 +122,14 @@ describe('SentimentExamplesModal', () => {
   });
 
   it('says so when the count has no answers any more', async () => {
-    stubExamplesAnswer(NO_ANSWERS);
+    answerEveryFetch(NO_ANSWERS);
     renderExamplesModal();
 
     expect(await screen.findByText('No negative answers from OpenAI in the latest runs of this scope any more.')).toBeInTheDocument();
   });
 
   it('leaves the engine out of the empty message for every engine', async () => {
-    stubExamplesAnswer(NO_ANSWERS);
+    answerEveryFetch(NO_ANSWERS);
     renderExamplesModal({
       sentiment: 'neutral',
       provider: null,
@@ -138,7 +139,7 @@ describe('SentimentExamplesModal', () => {
   });
 
   it('lists one card per answer, in the order the API gives', async () => {
-    stubExamplesAnswer(TWO_OF_THIRTY_SEVEN);
+    answerEveryFetch(TWO_OF_THIRTY_SEVEN);
     renderExamplesModal();
 
     const list = await screen.findByRole('list', { name: 'Answers' });
@@ -147,7 +148,7 @@ describe('SentimentExamplesModal', () => {
   });
 
   it('says how many of the matching answers it shows when the list is cut', async () => {
-    stubExamplesAnswer(TWO_OF_THIRTY_SEVEN);
+    answerEveryFetch(TWO_OF_THIRTY_SEVEN);
     renderExamplesModal();
 
     expect(await screen.findByText('Showing 2 of 37')).toBeInTheDocument();
@@ -157,7 +158,7 @@ describe('SentimentExamplesModal', () => {
     [1, '1 answer'],
     [2, '2 answers'],
   ])('counts %s complete answer(s) as "%s"', async (count, line) => {
-    stubExamplesAnswer(buildSentimentExamplesResponse({
+    answerEveryFetch(buildSentimentExamplesResponse({
       total: count,
       examples: Array.from({ length: count }, (_, index) => buildSentimentExample({ keyword: `keyword ${index}` })),
     }));
@@ -167,14 +168,14 @@ describe('SentimentExamplesModal', () => {
   });
 
   it('never prints', () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
+    answerEveryFetch(buildSentimentExamplesResponse());
     renderExamplesModal();
 
     expect(screen.getByRole('dialog').closest('.print-hidden')).not.toBeNull();
   });
 
   it('closes on the close button', () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
+    answerEveryFetch(buildSentimentExamplesResponse());
     const { onClose } = renderExamplesModal();
 
     fireEvent.click(screen.getByRole('button', { name: 'Close modal' }));

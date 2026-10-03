@@ -6,15 +6,9 @@ import {
 } from 'vitest';
 import { CitationTableHeader } from './CitationTableHeader';
 import type { SortConfig } from '../../exporters/citationParser';
-
-const DESC_CITATIONS = {
-  column: 'citations',
-  direction: 'desc' 
-} satisfies SortConfig;
-const DESC_KEYWORDS = {
-  column: 'keywords',
-  direction: 'desc' 
-} satisfies SortConfig;
+import {
+  DESC_CITATIONS, DESC_KEYWORDS
+} from '../../exporters/citationParserFixtures';
 
 /** Renders the header inside a table, sorted by `sort`; returns its `onSort` spy. */
 function renderHeader(sort: SortConfig = DESC_CITATIONS) {
