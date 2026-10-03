@@ -6,7 +6,6 @@ when a group is deleted, and the bulk membership route, all against mocked
 DynamoDB tables.
 """
 
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock, patch
@@ -14,50 +13,67 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
-from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource, reset_tables
+from testing.dynamodb_stubs import conditional_check_failure
 from testing.events import api_gateway_event, parse_response
-from testing.module_loader import load_handler_module
+from testing.keyword_groups_fixtures import (
+    SIGNED_IN_CLAIMS,
+    load_with_groups_table,
+    membership_update,
+    reset_with_no_keywords,
+)
 
 mock_keywords_table = MagicMock()
 mock_groups_table = MagicMock()
-mock_dynamodb = fake_dynamodb_resource(mock_keywords_table, by_name={'test-groups': mock_groups_table})
+_mod = load_with_groups_table('manage-keyword-groups.py', 'manage_keyword_groups', mock_keywords_table, mock_groups_table)
 
-with patch('boto3.resource', return_value=mock_dynamodb), patch.dict(os.environ, {
-    'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
-    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-groups',
-    'CORS_ORIGIN_PARAM': '',
-}):
-    _mod = load_handler_module(os.path.dirname(__file__), 'manage-keyword-groups.py', 'manage_keyword_groups')
+# The group the update / delete / membership routes act on.
+_CORUNA = {'id': 'g1', 'name': 'Coruna'}
+_OLD = {'id': 'g1', 'name': 'Old', 'name_key': 'old'}
 
 
-def make_event(method, body=None, path_params=None, path='/api/keyword-groups'):
-    return api_gateway_event(
-        method, path, resource=path, body=body, path_params=path_params,
-        claims={'cognito:username': 'user@example.com'},
-    )
+def _request(method, body=None, group_id=None, suffix=''):
+    """``<method> /api/keyword-groups[/<group_id><suffix>]``; returns ``(status, body)``."""
+    path = '/api/keyword-groups' if group_id is None else f'/api/keyword-groups/{group_id}{suffix}'
+    path_params = None if group_id is None else {'id': group_id}
+    event = api_gateway_event(method, path, resource=path, body=body, path_params=path_params, claims=SIGNED_IN_CLAIMS)
+    return parse_response(_mod.handler(event, None))
+
+
+def _stored_group(group_id, name):
+    """A group row as the list scan returns it."""
+    return {'id': group_id, 'name': name, 'description': '', 'created_at': 't', 'updated_at': 't'}
+
+
+def _store_groups(*groups):
+    mock_groups_table.scan.return_value = {'Items': list(groups)}
+
+
+def _store_members(*keywords):
+    mock_keywords_table.scan.return_value = {'Items': list(keywords)}
 
 
 @pytest.fixture(autouse=True)
 def _reset_mocks():
-    reset_tables(mock_keywords_table, mock_groups_table)
-    mock_keywords_table.scan.return_value = {'Items': []}
+    reset_with_no_keywords(mock_keywords_table, mock_groups_table)
     mock_groups_table.scan.return_value = {'Items': []}
     mock_groups_table.get_item.return_value = {}
 
 
+@pytest.fixture
+def coruna_exists():
+    mock_groups_table.get_item.return_value = {'Item': _CORUNA}
+
+
 class TestListGroups:
     def test_returns_groups_sorted_by_name_with_member_counts(self):
-        mock_groups_table.scan.return_value = {'Items': [
-            {'id': 'g2', 'name': 'Marino', 'description': '', 'created_at': 't', 'updated_at': 't'},
-            {'id': 'g1', 'name': 'coruna', 'description': 'Galicia', 'created_at': 't', 'updated_at': 't'},
-        ]}
-        mock_keywords_table.scan.return_value = {'Items': [
+        _store_groups(_stored_group('g2', 'Marino'), {**_stored_group('g1', 'coruna'), 'description': 'Galicia'})
+        _store_members(
             {'group_ids': {'g1', 'g2'}, 'status': 'active'},
             {'group_ids': {'g1'}, 'status': 'active'},
             {},
-        ]}
+        )
 
-        status, body = parse_response(_mod.handler(make_event('GET'), None))
+        status, body = _request('GET')
 
         assert status == 200
         assert body['count'] == 2
@@ -72,19 +88,16 @@ class TestListGroups:
         paused, and the run came back "No active keywords match the selected
         scope (1 group(s))".
         """
-        mock_groups_table.scan.return_value = {'Items': [
-            {'id': 'g1', 'name': 'Branson', 'description': '', 'created_at': 't', 'updated_at': 't'},
-            {'id': 'g2', 'name': 'St Louis', 'description': '', 'created_at': 't', 'updated_at': 't'},
-        ]}
-        mock_keywords_table.scan.return_value = {'Items': [
+        _store_groups(_stored_group('g1', 'Branson'), _stored_group('g2', 'St Louis'))
+        _store_members(
             # Every Branson member is paused; St Louis keeps one active member.
             {'group_ids': {'g1'}, 'status': 'inactive'},
             {'group_ids': {'g1'}, 'status': 'paused'},
             {'group_ids': {'g1', 'g2'}, 'status': 'inactive'},
             {'group_ids': {'g2'}, 'status': 'active'},
-        ]}
+        )
 
-        status, body = parse_response(_mod.handler(make_event('GET'), None))
+        status, body = _request('GET')
 
         assert status == 200
         counts = {group['name']: group['keyword_count'] for group in body['groups']}
@@ -97,75 +110,62 @@ class TestListGroups:
         by a run. Counting it would promise work the scope cannot deliver — the
         same mismatch the active-only count exists to remove.
         """
-        mock_groups_table.scan.return_value = {'Items': [
-            {'id': 'g1', 'name': 'Legacy', 'description': '', 'created_at': 't', 'updated_at': 't'},
-        ]}
-        mock_keywords_table.scan.return_value = {'Items': [
-            {'group_ids': {'g1'}},
-            {'group_ids': {'g1'}, 'status': 'active'},
-        ]}
+        _store_groups(_stored_group('g1', 'Legacy'))
+        _store_members({'group_ids': {'g1'}}, {'group_ids': {'g1'}, 'status': 'active'})
 
-        status, body = parse_response(_mod.handler(make_event('GET'), None))
+        status, body = _request('GET')
 
         assert status == 200
         assert body['groups'][0]['keyword_count'] == 1
 
     def test_returns_an_empty_list_when_no_groups_exist(self):
-        status, body = parse_response(_mod.handler(make_event('GET'), None))
-
-        assert status == 200
-        assert body == {'groups': [], 'count': 0}
+        assert _request('GET') == (200, {'groups': [], 'count': 0})
 
 
 class TestCreateGroup:
     def test_creates_a_group_with_a_trimmed_name_and_returns_201(self):
-        status, body = parse_response(_mod.handler(make_event('POST', {'name': '  Hotel  Coruña ', 'description': 'Galicia'}), None))
+        status, body = _request('POST', {'name': '  Hotel  Coruña ', 'description': 'Galicia'})
 
         assert status == 201
-        assert body['name'] == 'Hotel Coruña'
-        assert body['description'] == 'Galicia'
-        assert body['keyword_count'] == 0
+        assert (body['name'], body['description'], body['keyword_count']) == ('Hotel Coruña', 'Galicia', 0)
         written = mock_groups_table.put_item.call_args.kwargs['Item']
         assert written['name_key'] == 'hotel coruña'
 
     def test_rejects_a_duplicate_name_case_insensitively_with_409(self):
-        mock_groups_table.scan.return_value = {'Items': [{'id': 'g1', 'name_key': 'hotel coruña'}]}
+        _store_groups({'id': 'g1', 'name_key': 'hotel coruña'})
 
-        status, body = parse_response(_mod.handler(make_event('POST', {'name': 'HOTEL CORUÑA'}), None))
+        status, body = _request('POST', {'name': 'HOTEL CORUÑA'})
 
         assert status == 409
         assert body['error'] == 'A keyword group with this name already exists'
         mock_groups_table.put_item.assert_not_called()
 
     def test_rejects_a_missing_name_with_400(self):
-        status, body = parse_response(_mod.handler(make_event('POST', {'description': 'x'}), None))
+        status, body = _request('POST', {'description': 'x'})
 
         assert status == 400
         assert 'name' in body['error']
 
-    def test_rejects_a_blank_name_with_400(self):
-        status, body = parse_response(_mod.handler(make_event('POST', {'name': '   '}), None))
+    @pytest.mark.parametrize(
+        ('name', 'error'),
+        [('   ', 'name must not be empty'), ('x' * 101, 'name exceeds maximum length of 100 characters')],
+        ids=['blank-name', 'name-over-100-characters'],
+    )
+    def test_rejects_an_invalid_name_with_400(self, name, error):
+        status, body = _request('POST', {'name': name})
 
         assert status == 400
-        assert body['error'] == 'name must not be empty'
-
-    def test_rejects_a_name_over_100_characters(self):
-        status, body = parse_response(_mod.handler(make_event('POST', {'name': 'x' * 101}), None))
-
-        assert status == 400
-        assert body['error'] == 'name exceeds maximum length of 100 characters'
+        assert body['error'] == error
 
 
 class TestUpdateGroup:
     def test_renames_an_existing_group(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1', 'name': 'Old', 'name_key': 'old'}}
+        mock_groups_table.get_item.return_value = {'Item': _OLD}
         mock_groups_table.update_item.return_value = {'Attributes': {
             'id': 'g1', 'name': 'New Name', 'description': '', 'created_at': 't', 'updated_at': 't2',
         }}
 
-        status, body = parse_response(_mod.handler(
-            make_event('PUT', {'name': 'New Name'}, {'id': 'g1'}, path='/api/keyword-groups/g1'), None
-        ))
+        status, body = _request('PUT', {'name': 'New Name'}, 'g1')
 
         assert status == 200
         assert body['name'] == 'New Name'
@@ -174,46 +174,34 @@ class TestUpdateGroup:
         assert 'new name' in values.values()
 
     def test_returns_404_for_an_unknown_group(self):
-        status, body = parse_response(_mod.handler(
-            make_event('PUT', {'name': 'x'}, {'id': 'missing'}, path='/api/keyword-groups/missing'), None
-        ))
-
-        assert status == 404
-        assert body['error'] == 'Keyword group not found'
+        assert _request('PUT', {'name': 'x'}, 'missing') == (404, {'error': 'Keyword group not found'})
 
     def test_rejects_renaming_onto_another_groups_name(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1', 'name': 'Old', 'name_key': 'old'}}
-        mock_groups_table.scan.return_value = {'Items': [{'id': 'g2', 'name_key': 'taken'}]}
+        mock_groups_table.get_item.return_value = {'Item': _OLD}
+        _store_groups({'id': 'g2', 'name_key': 'taken'})
 
-        status, _ = parse_response(_mod.handler(
-            make_event('PUT', {'name': 'Taken'}, {'id': 'g1'}, path='/api/keyword-groups/g1'), None
-        ))
+        status, _ = _request('PUT', {'name': 'Taken'}, 'g1')
 
         assert status == 409
         mock_groups_table.update_item.assert_not_called()
 
     def test_rejects_an_update_without_any_field(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1', 'name': 'Old', 'name_key': 'old'}}
+        mock_groups_table.get_item.return_value = {'Item': _OLD}
 
-        status, body = parse_response(_mod.handler(
-            make_event('PUT', {}, {'id': 'g1'}, path='/api/keyword-groups/g1'), None
-        ))
+        status, body = _request('PUT', {}, 'g1')
 
         assert status == 400
         assert body['error'] == 'Provide a name or a description to update'
 
 
 class TestDeleteGroup:
+    @pytest.mark.usefixtures('coruna_exists')
     def test_deletes_the_group_and_detaches_every_member_keyword(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1', 'name': 'Coruna'}}
-        mock_keywords_table.scan.return_value = {'Items': [{'id': 'k1'}, {'id': 'k2'}]}
+        _store_members({'id': 'k1'}, {'id': 'k2'})
 
-        status, body = parse_response(_mod.handler(
-            make_event('DELETE', None, {'id': 'g1'}, path='/api/keyword-groups/g1'), None
-        ))
+        status, body = _request('DELETE', None, 'g1')
 
-        assert status == 200
-        assert body == {'message': 'Keyword group deleted', 'detached_keywords': 2}
+        assert (status, body) == (200, {'message': 'Keyword group deleted', 'detached_keywords': 2})
         detach_calls = mock_keywords_table.update_item.call_args_list
         assert sorted(call.kwargs['Key']['id'] for call in detach_calls) == ['k1', 'k2']
         assert all(call.kwargs['UpdateExpression'] == 'DELETE group_ids :gids' for call in detach_calls)
@@ -221,63 +209,58 @@ class TestDeleteGroup:
         mock_groups_table.delete_item.assert_called_once_with(Key={'id': 'g1'})
 
     def test_returns_404_for_an_unknown_group(self):
-        status, _ = parse_response(_mod.handler(
-            make_event('DELETE', None, {'id': 'missing'}, path='/api/keyword-groups/missing'), None
-        ))
+        status, _ = _request('DELETE', None, 'missing')
 
         assert status == 404
         mock_groups_table.delete_item.assert_not_called()
 
+    @pytest.mark.usefixtures('coruna_exists')
     @pytest.mark.parametrize(('member_count', 'expected_workers'), [(25, 10), (3, 3)])
     def test_detaches_members_with_bounded_parallel_writes_when_group_is_deleted(self, member_count, expected_workers):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1', 'name': 'Coruna'}}
-        mock_keywords_table.scan.return_value = {'Items': [{'id': f'k{index}'} for index in range(member_count)]}
+        _store_members(*({'id': f'k{index}'} for index in range(member_count)))
 
         with patch.object(_mod, 'ThreadPoolExecutor', wraps=ThreadPoolExecutor) as executor:
-            _mod.handler(make_event('DELETE', None, {'id': 'g1'}, path='/api/keyword-groups/g1'), None)
+            _request('DELETE', None, 'g1')
 
         assert executor.call_args.kwargs == {'max_workers': expected_workers}
         assert mock_keywords_table.update_item.call_count == member_count
 
+    @pytest.mark.usefixtures('coruna_exists')
     def test_keeps_the_group_when_detaching_a_member_fails(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1', 'name': 'Coruna'}}
-        mock_keywords_table.scan.return_value = {'Items': [{'id': 'k1'}]}
+        _store_members({'id': 'k1'})
         mock_keywords_table.update_item.side_effect = ClientError(
             {'Error': {'Code': 'ThrottlingException', 'Message': 'Rate exceeded'}}, 'UpdateItem'
         )
 
-        status, _ = parse_response(_mod.handler(
-            make_event('DELETE', None, {'id': 'g1'}, path='/api/keyword-groups/g1'), None
-        ))
+        status, _ = _request('DELETE', None, 'g1')
 
         assert status == 500
         mock_groups_table.delete_item.assert_not_called()
 
 
-class TestUpdateMemberships:
-    def _event(self, body):
-        return make_event('PUT', body, {'id': 'g1'}, path='/api/keyword-groups/g1/keywords')
+def _change_members(body):
+    """``PUT /api/keyword-groups/g1/keywords``; returns ``(status, body)``."""
+    return _request('PUT', body, 'g1', '/keywords')
 
+
+@pytest.mark.usefixtures('coruna_exists')
+class TestUpdateMemberships:
     def test_adds_and_removes_memberships_and_returns_the_updated_keywords(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1', 'name': 'Coruna'}}
         mock_keywords_table.update_item.side_effect = [
             {'Attributes': {'id': 'k1', 'keyword': 'a', 'group_ids': {'g1'}}},
             {'Attributes': {'id': 'k2', 'keyword': 'b'}},
         ]
 
-        status, body = parse_response(_mod.handler(self._event({'add': ['k1'], 'remove': ['k2']}), None))
+        status, body = _change_members({'add': ['k1'], 'remove': ['k2']})
 
         assert status == 200
-        assert body['added'] == ['k1']
-        assert body['removed'] == ['k2']
-        assert body['missing'] == []
+        assert (body['added'], body['removed'], body['missing']) == (['k1'], ['k2'], [])
         assert body['keywords'] == [
             {'id': 'k1', 'keyword': 'a', 'group_ids': ['g1']},
             {'id': 'k2', 'keyword': 'b'},
         ]
 
     def test_adds_fifty_first_membership_when_keyword_has_fifty_groups(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
         existing_group_ids = {f'existing-{index}' for index in range(50)}
         mock_keywords_table.update_item.return_value = {'Attributes': {
             'id': 'k1',
@@ -285,65 +268,34 @@ class TestUpdateMemberships:
             'group_ids': existing_group_ids,
         }}
 
-        status, body = parse_response(_mod.handler(self._event({'add': ['k1']}), None))
+        status, body = _change_members({'add': ['k1']})
 
-        assert status == 200
-        assert body['added'] == ['k1']
+        assert (status, body['added']) == (200, ['k1'])
         assert body['keywords'] == [{
             'id': 'k1',
             'keyword': 'a',
             'group_ids': sorted(existing_group_ids | {'g1'}),
         }]
-        mock_keywords_table.update_item.assert_called_once_with(
-            Key={'id': 'k1'},
-            UpdateExpression='ADD group_ids :gids',
-            ConditionExpression='attribute_exists(#id)',
-            ExpressionAttributeNames={'#id': 'id'},
-            ExpressionAttributeValues={':gids': {'g1'}},
-            ReturnValues='ALL_OLD',
-        )
+        mock_keywords_table.update_item.assert_called_once_with(**membership_update('k1', {'g1'}, 'ADD', 'ALL_OLD'))
 
     def test_uses_set_delete_when_membership_is_removed(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
         mock_keywords_table.update_item.return_value = {'Attributes': {'id': 'k2', 'keyword': 'b'}}
 
-        _mod.handler(self._event({'remove': ['k2']}), None)
+        _change_members({'remove': ['k2']})
 
-        mock_keywords_table.update_item.assert_called_once_with(
-            Key={'id': 'k2'},
-            UpdateExpression='DELETE group_ids :gids',
-            ConditionExpression='attribute_exists(#id)',
-            ExpressionAttributeNames={'#id': 'id'},
-            ExpressionAttributeValues={':gids': {'g1'}},
-            ReturnValues='ALL_NEW',
-        )
+        mock_keywords_table.update_item.assert_called_once_with(**membership_update('k2', {'g1'}, 'DELETE', 'ALL_NEW'))
 
     def test_reports_unknown_keyword_ids_as_missing_instead_of_failing(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
         mock_keywords_table.update_item.side_effect = conditional_check_failure()
 
-        status, body = parse_response(_mod.handler(self._event({'add': ['ghost']}), None))
+        status, body = _change_members({'add': ['ghost']})
 
-        assert status == 200
-        assert body['added'] == []
-        assert body['missing'] == ['ghost']
+        assert (status, body['added'], body['missing']) == (200, [], ['ghost'])
 
     def test_rejects_a_body_without_changes(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
-
-        status, body = parse_response(_mod.handler(self._event({}), None))
-
-        assert status == 400
-        assert body['error'] == 'Provide keyword ids to add or remove'
-
-    def test_returns_404_when_the_group_does_not_exist(self):
-        status, _ = parse_response(_mod.handler(self._event({'add': ['k1']}), None))
-
-        assert status == 404
-        mock_keywords_table.update_item.assert_not_called()
+        assert _change_members({}) == (400, {'error': 'Provide keyword ids to add or remove'})
 
     def test_reports_added_ids_in_request_order_when_parallel_writes_finish_out_of_order(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
         keyword_ids = [f'k{index}' for index in range(12)]
 
         def finish_earlier_ids_last(**kwargs):
@@ -353,31 +305,35 @@ class TestUpdateMemberships:
 
         mock_keywords_table.update_item.side_effect = finish_earlier_ids_last
 
-        _status, body = parse_response(_mod.handler(self._event({'add': keyword_ids}), None))
+        _status, body = _change_members({'add': keyword_ids})
 
         assert body['added'] == keyword_ids
 
     def test_writes_memberships_with_at_most_ten_threads_when_a_request_changes_many_keywords(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
         mock_keywords_table.update_item.return_value = {'Attributes': {'id': 'k', 'keyword': 'a'}}
 
         with patch.object(_mod, 'ThreadPoolExecutor', wraps=ThreadPoolExecutor) as executor:
-            _mod.handler(self._event({'add': [f'k{index}' for index in range(_mod.MAX_MEMBERSHIP_CHANGES)]}), None)
+            _change_members({'add': [f'k{index}' for index in range(_mod.MAX_MEMBERSHIP_CHANGES)]})
 
         assert executor.call_args.kwargs == {'max_workers': 10}
 
     def test_rejects_more_than_500_additions_in_one_request(self):
-        mock_groups_table.get_item.return_value = {'Item': {'id': 'g1'}}
-
-        status, body = parse_response(_mod.handler(self._event({'add': [f'k{index}' for index in range(501)]}), None))
+        status, body = _change_members({'add': [f'k{index}' for index in range(501)]})
 
         assert (status, body) == (400, {'error': 'add accepts at most 500 entries', 'field': 'add'})
         mock_keywords_table.update_item.assert_not_called()
 
 
+def test_returns_404_for_membership_changes_when_the_group_does_not_exist():
+    status, _ = _change_members({'add': ['k1']})
+
+    assert status == 404
+    mock_keywords_table.update_item.assert_not_called()
+
+
 class TestRouting:
     def test_rejects_unsupported_methods(self):
-        status, body = parse_response(_mod.handler(make_event('PATCH', {}), None))
+        status, body = _request('PATCH', {})
 
         assert status == 400
         assert body['error'] == 'Method PATCH not allowed'

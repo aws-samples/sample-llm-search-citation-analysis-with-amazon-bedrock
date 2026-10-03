@@ -6,36 +6,26 @@ create and update; the identity/rename behaviour is covered by
 test_manage_keywords_identity.py.
 """
 
-import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from testing.dynamodb_stubs import fake_dynamodb_resource, reset_tables
-from testing.env import KEYWORDS_TABLE_ENV
 from testing.events import api_gateway_event, parse_response
-from testing.module_loader import load_handler_module
+from testing.keyword_groups_fixtures import SIGNED_IN_CLAIMS, load_with_groups_table, reset_with_no_keywords
 
 mock_keywords_table = MagicMock()
 mock_groups_table = MagicMock()
-mock_dynamodb = fake_dynamodb_resource(mock_keywords_table, by_name={'test-groups': mock_groups_table})
-
 # The identity suite loads the same handler without a groups table; here the
 # table is configured so membership can be set on create and update.
-with patch('boto3.resource', return_value=mock_dynamodb), patch.dict(os.environ, {
-    **KEYWORDS_TABLE_ENV,
-    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-groups',
-    'CORS_ORIGIN_PARAM': '',
-}):
-    _mod = load_handler_module(os.path.dirname(__file__), 'manage-keywords.py', 'manage_keywords_with_groups')
+_mod = load_with_groups_table('manage-keywords.py', 'manage_keywords_with_groups', mock_keywords_table, mock_groups_table)
 
 
-def make_event(method, body, path_params=None):
-    path = '/api/keywords' if not path_params else f"/api/keywords/{path_params['id']}"
-    return api_gateway_event(
-        method, path, body=body, path_params=path_params,
-        claims={'cognito:username': 'user@example.com'},
-    )
+def _send(method, body, keyword_id=None):
+    """``<method> /api/keywords[/<keyword_id>]`` as a signed-in user; returns ``(status, body)``."""
+    path = '/api/keywords' if keyword_id is None else f'/api/keywords/{keyword_id}'
+    path_params = None if keyword_id is None else {'id': keyword_id}
+    event = api_gateway_event(method, path, body=body, path_params=path_params, claims=SIGNED_IN_CLAIMS)
+    return parse_response(_mod.handler(event, None))
 
 
 def _groups_exist(*ids):
@@ -44,10 +34,8 @@ def _groups_exist(*ids):
 
 @pytest.fixture(autouse=True)
 def _reset_mocks():
-    reset_tables(mock_keywords_table, mock_groups_table)
     # No pre-existing keywords: the identity scan is empty and puts succeed.
-    mock_keywords_table.scan.return_value = {'Items': []}
-    mock_keywords_table.put_item.return_value = {}
+    reset_with_no_keywords(mock_keywords_table, mock_groups_table)
     mock_groups_table.get_item.return_value = {}
 
 
@@ -55,7 +43,7 @@ class TestCreateWithGroups:
     def test_stores_memberships_as_a_string_set_and_returns_them_as_a_sorted_list(self):
         _groups_exist('g1', 'g2')
 
-        status, body = parse_response(_mod.handler(make_event('POST', {'keyword': 'hotel coruña', 'group_ids': ['g2', 'g1']}), None))
+        status, body = _send('POST', {'keyword': 'hotel coruña', 'group_ids': ['g2', 'g1']})
 
         assert status == 201
         assert body['group_ids'] == ['g1', 'g2']
@@ -63,7 +51,7 @@ class TestCreateWithGroups:
         assert written['group_ids'] == {'g1', 'g2'}
 
     def test_creates_without_memberships_when_group_ids_is_omitted(self):
-        status, body = parse_response(_mod.handler(make_event('POST', {'keyword': 'hotel coruña'}), None))
+        status, body = _send('POST', {'keyword': 'hotel coruña'})
 
         assert status == 201
         assert 'group_ids' not in body
@@ -73,10 +61,7 @@ class TestCreateWithGroups:
         group_ids = [f'group-{index}' for index in range(51)]
         _groups_exist(*group_ids)
 
-        status, body = parse_response(_mod.handler(make_event('POST', {
-            'keyword': 'hotel coruña',
-            'group_ids': group_ids,
-        }), None))
+        status, body = _send('POST', {'keyword': 'hotel coruña', 'group_ids': group_ids})
 
         assert status == 201
         assert body['group_ids'] == sorted(group_ids)
@@ -85,14 +70,14 @@ class TestCreateWithGroups:
     def test_rejects_unknown_group_ids_with_400_before_writing(self):
         _groups_exist('g1')
 
-        status, body = parse_response(_mod.handler(make_event('POST', {'keyword': 'hotel coruña', 'group_ids': ['g1', 'ghost']}), None))
+        status, body = _send('POST', {'keyword': 'hotel coruña', 'group_ids': ['g1', 'ghost']})
 
         assert status == 400
         assert body['error'] == 'Unknown keyword group ids: ghost'
         mock_keywords_table.put_item.assert_not_called()
 
     def test_rejects_a_non_array_group_ids_value(self):
-        status, body = parse_response(_mod.handler(make_event('POST', {'keyword': 'hotel coruña', 'group_ids': 'g1'}), None))
+        status, body = _send('POST', {'keyword': 'hotel coruña', 'group_ids': 'g1'})
 
         assert status == 400
         assert body['error'] == 'group_ids must be an array of strings'
@@ -107,7 +92,7 @@ class TestUpdateWithGroups:
         self._existing()
         _groups_exist('g1')
 
-        status, body = parse_response(_mod.handler(make_event('PUT', {'keyword': 'hotel coruña', 'group_ids': ['g1']}, {'id': 'k1'}), None))
+        status, body = _send('PUT', {'keyword': 'hotel coruña', 'group_ids': ['g1']}, 'k1')
 
         assert status == 200
         assert body['group_ids'] == ['g1']
@@ -119,7 +104,7 @@ class TestUpdateWithGroups:
         self._existing()
         mock_keywords_table.update_item.return_value = {'Attributes': {'id': 'k1', 'keyword': 'hotel coruña'}}
 
-        status, body = parse_response(_mod.handler(make_event('PUT', {'keyword': 'hotel coruña', 'group_ids': []}, {'id': 'k1'}), None))
+        status, body = _send('PUT', {'keyword': 'hotel coruña', 'group_ids': []}, 'k1')
 
         assert status == 200
         assert 'group_ids' not in body
@@ -130,7 +115,7 @@ class TestUpdateWithGroups:
     def test_leaves_memberships_untouched_when_group_ids_is_omitted(self):
         self._existing()
 
-        _mod.handler(make_event('PUT', {'keyword': 'hotel coruña'}, {'id': 'k1'}), None)
+        _send('PUT', {'keyword': 'hotel coruña'}, 'k1')
 
         expression = mock_keywords_table.update_item.call_args.kwargs['UpdateExpression']
         assert 'group_ids' not in expression

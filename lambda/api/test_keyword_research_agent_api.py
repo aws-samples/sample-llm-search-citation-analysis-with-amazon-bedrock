@@ -13,7 +13,6 @@ Tests for the research-agent routes of `keyword-research.py`:
 from __future__ import annotations
 
 import json
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,22 +24,33 @@ from shared.research_agent import (
     GENERIC_TEMPLATE,
     LEGACY_DIMENSION_CATALOG,
 )
-from testing.env import KEYWORD_RESEARCH_ENV, setdefault_env
-from testing.module_loader import load_handler_module_offline
+from testing.events import parse_response
+from testing.keyword_research_fixtures import (
+    history_event,
+    job_event,
+    load_keyword_research,
+    research_table_stub,
+    started_stepfunctions,
+)
 
-setdefault_env(KEYWORD_RESEARCH_ENV)
-_mod = load_handler_module_offline(os.path.dirname(__file__), 'keyword-research.py', 'keyword_research_agent_api_under_test')
+_mod = load_keyword_research('keyword_research_agent_api_under_test')
 
 _CLAIMS = {'requestContext': {'authorizer': {'claims': {'cognito:username': 'bastian', 'email': 'bastian@example.com'}}}}
+_GROUP_G1 = {'id': 'g1', 'name': 'Hotel Gran Marino'}
+_GYMS_PROMPT = 'You research gyms for members.'
+_GENERIC_PROFILE = ('generic', 'business', 'customers')
+_RESORT_TEMPLATE = {'id': 't1', 'name': 'Resort prompt', 'system_prompt': 'You research resorts. ' * 3}
+
+# The brief every start sends unless a test overrides a field.
+_BRIEF = {
+    'seed': 'Hotel Gran Marino', 'country': 'es', 'language': 'es',
+    'dimensions': ['destination', 'audience'], 'instruction': 'also events',
+    'target_count': 50, 'max_rounds': 2,
+}
 
 
 def _agent_event(**overrides) -> dict:
-    body = {
-        'seed': 'Hotel Gran Marino', 'country': 'es', 'language': 'es',
-        'dimensions': ['destination', 'audience'], 'instruction': 'also events',
-        'target_count': 50, 'max_rounds': 2,
-        **overrides,
-    }
+    body = {**_BRIEF, **overrides}
     return {'httpMethod': 'POST', 'path': '/api/keyword-research/agent', 'body': json.dumps(body), **_CLAIMS}
 
 
@@ -53,31 +63,46 @@ def _templates_event(method: str, body: dict | None = None, template_id: str | N
     return event
 
 
-def _table(item: dict | None = None, items: list | None = None) -> MagicMock:
-    table = MagicMock()
-    table.get_item.return_value = {'Item': item} if item is not None else {}
-    table.scan.return_value = {'Items': items or [], 'Count': len(items or [])}
-    return table
-
-
-def _stepfunctions() -> MagicMock:
-    client = MagicMock()
-    client.start_execution.return_value = {'executionArn': 'arn:exec'}
-    return client
+def _call_templates(table: MagicMock, method: str, body: dict | None = None, template_id: str | None = None) -> dict:
+    """A templates-route request against ``table``; returns the raw response."""
+    with patch.object(_mod, 'templates_table', table):
+        return _mod.handler(_templates_event(method, body, template_id), None)
 
 
 def _body(response: dict) -> dict:
-    return json.loads(response['body'])
+    return parse_response(response)[1]
+
+
+def _create_template(body: dict) -> tuple[dict, dict]:
+    """POST /templates with ``body`` on an empty table; returns ``(response, row written by put_item)``."""
+    table = research_table_stub()
+    response = _call_templates(table, 'POST', body)
+    return response, table.put_item.call_args.kwargs['Item']
+
+
+def _profile(template: dict) -> tuple[str, str, str]:
+    return template['industry'], template['subject'], template['audience']
+
+
+def _start(started: dict, **overrides) -> dict:
+    """POST /agent with ``overrides`` on the default brief; returns the persisted job row."""
+    _mod.handler(_agent_event(**overrides), None)
+    return started['research_table'].put_item.call_args.kwargs['Item']
 
 
 @pytest.fixture
 def started():
-    """Patch every collaborator for a successful agent start; yields the mocks."""
+    """Patch every collaborator for a successful agent start; yields the mocks.
+
+    The only stored group is ``g1``; the templates table holds nothing.
+    """
+    groups_table = MagicMock()
+    groups_table.get_item.side_effect = lambda Key: {'Item': _GROUP_G1} if Key['id'] == 'g1' else {}
     mocks = {
         'research_table': MagicMock(),
-        'templates_table': _table(),
-        'groups_table': _table({'id': 'g1', 'name': 'Hotel Gran Marino'}),
-        'stepfunctions': _stepfunctions(),
+        'templates_table': research_table_stub(),
+        'groups_table': groups_table,
+        'stepfunctions': started_stepfunctions(),
         'get_web_search_clients': MagicMock(return_value=[('perplexity', object())]),
     }
     with patch.multiple(_mod, **mocks):
@@ -86,57 +111,41 @@ def started():
 
 class TestStartAgent:
     def test_returns_202_with_a_pending_agent_job(self, started):
-        response = _mod.handler(_agent_event(), None)
+        status, body = parse_response(_mod.handler(_agent_event(), None))
 
-        body = _body(response)
-        assert response['statusCode'] == 202
+        assert status == 202
         assert (body['type'], body['status'], body['round']) == ('agent', 'pending', 0)
 
     def test_persists_the_validated_config_and_the_seed_for_history(self, started):
-        _mod.handler(_agent_event(), None)
+        item = _start(started)
 
-        item = started['research_table'].put_item.call_args.kwargs['Item']
         assert item['config'] == {
-            'seed': 'Hotel Gran Marino', 'country': 'es', 'language': 'es', 'dimensions': ['destination', 'audience'],
-            'instruction': 'also events', 'target_count': 50, 'tracking_count': 15, 'max_rounds': 2, 'group_id': None,
+            **_BRIEF, 'tracking_count': 15, 'group_id': None,
             'subject': 'hotel', 'audience': 'travellers', 'dimension_catalog': LEGACY_DIMENSION_CATALOG,
         }
         assert (item['seed_keyword'], item['rounds'], item['created_by']) == ('Hotel Gran Marino', [], 'bastian')
 
-    def test_persists_an_explicit_tracking_count(self, started):
-        _mod.handler(_agent_event(tracking_count=12), None)
-
-        config = started['research_table'].put_item.call_args.kwargs['Item']['config']
-        assert config['tracking_count'] == 12
-
-    def test_resolves_an_omitted_tracking_count_to_a_shorter_target(self, started):
-        _mod.handler(_agent_event(target_count=10), None)
-
-        config = started['research_table'].put_item.call_args.kwargs['Item']['config']
-        assert config['tracking_count'] == 10
+    @pytest.mark.parametrize(
+        ('overrides', 'tracking_count'),
+        [({'tracking_count': 12}, 12), ({'target_count': 10}, 10)],
+        ids=['explicit-tracking-count-is-kept', 'omitted-tracking-count-shrinks-to-a-shorter-target'],
+    )
+    def test_persists_the_resolved_tracking_count(self, started, overrides, tracking_count):
+        assert _start(started, **overrides)['config']['tracking_count'] == tracking_count
 
     def test_rejects_an_explicit_tracking_count_above_the_target(self, started):
-        response = _mod.handler(_agent_event(target_count=10, tracking_count=11), None)
+        status, body = parse_response(_mod.handler(_agent_event(target_count=10, tracking_count=11), None))
 
-        assert response['statusCode'] == 400
-        assert _body(response)['field'] == 'tracking_count'
-        assert _body(response)['error'] == 'tracking_count cannot exceed target_count'
+        assert status == 400
+        assert (body['field'], body['error']) == ('tracking_count', 'tracking_count cannot exceed target_count')
         started['research_table'].put_item.assert_not_called()
 
     def test_snapshots_the_industry_profile_of_the_chosen_template(self, started):
-        _mod.handler(_agent_event(template_id='builtin-cafes', dimensions=['menu', 'occasion']), None)
+        item = _start(started, template_id='builtin-cafes', dimensions=['menu', 'occasion'])
 
-        item = started['research_table'].put_item.call_args.kwargs['Item']
         assert (item['config']['subject'], item['config']['audience']) == ('café', 'coffee drinkers')
         assert [dimension['id'] for dimension in item['config']['dimension_catalog']] == ['menu', 'location', 'occasion', 'attributes', 'audience', 'products']
         assert (item['template_id'], item['template_name'], item['system_prompt']) == ('builtin-cafes', 'Cafés & coffee shops', CAFE_TEMPLATE.system_prompt)
-
-    def test_rejects_a_dimension_the_chosen_template_does_not_offer(self, started):
-        response = _mod.handler(_agent_event(template_id='builtin-cafes', dimensions=['menu', 'trip_type']), None)
-
-        assert response['statusCode'] == 400
-        assert 'Unknown dimensions: trip_type. Must be one of: menu, location, occasion, attributes, audience, products' in response['body']
-        started['research_table'].put_item.assert_not_called()
 
     def test_uses_the_saved_templates_own_catalogue(self, started):
         started['templates_table'].get_item.return_value = {'Item': {
@@ -145,67 +154,41 @@ class TestStartAgent:
             'dimensions': [{'id': 'classes', 'label': 'Classes', 'description': 'd'}, {'id': 'location', 'label': 'Location', 'description': 'd'}],
         }}
 
-        _mod.handler(_agent_event(template_id='t1', dimensions=['classes']), None)
+        item = _start(started, template_id='t1', dimensions=['classes'])
 
-        item = started['research_table'].put_item.call_args.kwargs['Item']
         assert (item['config']['subject'], item['config']['audience'], item['config']['dimensions']) == ('gym', 'members', ['classes'])
         assert item['config']['dimension_catalog'][0] == {'id': 'classes', 'label': 'Classes', 'description': 'd'}
 
     def test_snapshots_the_builtin_prompt_when_no_template_is_chosen(self, started):
-        _mod.handler(_agent_event(), None)
+        item = _start(started)
 
-        item = started['research_table'].put_item.call_args.kwargs['Item']
         assert (item['system_prompt'], item['template_id']) == (DEFAULT_SYSTEM_PROMPT, BUILTIN_TEMPLATE_ID)
         assert item['template_name'] == 'Hotels'
 
     def test_snapshots_the_saved_template_prompt_and_name(self, started):
-        started['templates_table'].get_item.return_value = {'Item': {'id': 't1', 'name': 'Resort prompt', 'system_prompt': 'You research resorts. ' * 3}}
+        started['templates_table'].get_item.return_value = {'Item': _RESORT_TEMPLATE}
 
-        _mod.handler(_agent_event(template_id='t1', dimensions=['offering']), None)
+        item = _start(started, template_id='t1', dimensions=['offering'])
 
-        item = started['research_table'].put_item.call_args.kwargs['Item']
         assert (item['system_prompt'], item['template_id'], item['template_name']) == ('You research resorts. ' * 3, 't1', 'Resort prompt')
 
     def test_a_saved_template_without_a_profile_reads_as_the_generic_industry(self, started):
-        started['templates_table'].get_item.return_value = {'Item': {'id': 't1', 'name': 'Resort prompt', 'system_prompt': 'You research resorts. ' * 3}}
+        started['templates_table'].get_item.return_value = {'Item': _RESORT_TEMPLATE}
 
-        _mod.handler(_agent_event(template_id='t1', dimensions=['offering', 'location']), None)
+        config = _start(started, template_id='t1', dimensions=['offering', 'location'])['config']
 
-        config = started['research_table'].put_item.call_args.kwargs['Item']['config']
         assert (config['subject'], config['audience']) == ('business', 'customers')
         assert config['dimension_catalog'] == GENERIC_TEMPLATE.to_view()['dimensions']
 
     def test_an_inline_prompt_edit_wins_over_the_template(self, started):
-        started['templates_table'].get_item.return_value = {'Item': {'id': 't1', 'name': 'Resort prompt', 'system_prompt': 'template text'}}
+        started['templates_table'].get_item.return_value = {'Item': {**_RESORT_TEMPLATE, 'system_prompt': 'template text'}}
 
-        _mod.handler(_agent_event(template_id='t1', dimensions=['offering'], system_prompt='edited inline prompt'), None)
+        item = _start(started, template_id='t1', dimensions=['offering'], system_prompt='edited inline prompt')
 
-        item = started['research_table'].put_item.call_args.kwargs['Item']
         assert (item['system_prompt'], item['template_name']) == ('edited inline prompt', 'Resort prompt')
 
-    def test_answers_404_when_the_template_vanished(self, started):
-        started['templates_table'].get_item.return_value = {}
-
-        response = _mod.handler(_agent_event(template_id='gone'), None)
-
-        assert response['statusCode'] == 404
-        assert 'Template not found' in response['body']
-        started['research_table'].put_item.assert_not_called()
-
     def test_records_the_destination_group_when_it_exists(self, started):
-        _mod.handler(_agent_event(group_id='g1'), None)
-
-        item = started['research_table'].put_item.call_args.kwargs['Item']
-        assert item['config']['group_id'] == 'g1'
-
-    def test_rejects_an_unknown_destination_group(self, started):
-        started['groups_table'].get_item.return_value = {}
-
-        response = _mod.handler(_agent_event(group_id='nope'), None)
-
-        assert response['statusCode'] == 400
-        assert 'Keyword group not found' in response['body']
-        started['research_table'].put_item.assert_not_called()
+        assert _start(started, group_id='g1')['config']['group_id'] == 'g1'
 
     def test_starts_the_execution_with_retry_false(self, started):
         _mod.handler(_agent_event(), None)
@@ -213,25 +196,41 @@ class TestStartAgent:
         kwargs = started['stepfunctions'].start_execution.call_args.kwargs
         assert json.loads(kwargs['input'])['retry'] is False
 
-    @pytest.mark.parametrize(('override', 'field'), [
-        ({'dimensions': []}, 'dimensions'),
-        ({'dimensions': ['weather']}, 'dimensions'),
-        ({'country': 'spain'}, 'country'),
-        ({'language': '1'}, 'language'),
-        ({'target_count': 5}, 'target_count'),
-        ({'tracking_count': 0}, 'tracking_count'),
-        ({'tracking_count': 51}, 'tracking_count'),
-        ({'tracking_count': None}, 'tracking_count'),
-        ({'tracking_count': True}, 'tracking_count'),
-        ({'max_rounds': 4}, 'max_rounds'),
-        ({'seed': 'x'}, 'seed'),
-        ({'system_prompt': '   '}, 'system_prompt'),
+    @pytest.mark.parametrize(('override', 'status', 'message'), [
+        ({'dimensions': []}, 400, 'dimensions'),
+        ({'dimensions': ['weather']}, 400, 'dimensions'),
+        ({'dimensions': [1]}, 400, 'dimensions'),
+        ({'dimensions': [None]}, 400, 'dimensions'),
+        ({'dimensions': [{'nested': 'value'}]}, 400, 'dimensions'),
+        (
+            {'template_id': 'builtin-cafes', 'dimensions': ['menu', 'trip_type']}, 400,
+            'Unknown dimensions: trip_type. Must be one of: menu, location, occasion, attributes, audience, products',
+        ),
+        ({'country': 'spain'}, 400, 'country'),
+        ({'language': '1'}, 400, 'language'),
+        ({'target_count': 5}, 400, 'target_count'),
+        ({'tracking_count': 0}, 400, 'tracking_count'),
+        ({'tracking_count': 51}, 400, 'tracking_count'),
+        ({'tracking_count': None}, 400, 'tracking_count'),
+        ({'tracking_count': True}, 400, 'tracking_count'),
+        ({'max_rounds': 4}, 400, 'max_rounds'),
+        ({'seed': 'x'}, 400, 'seed'),
+        ({'system_prompt': '   '}, 400, 'system_prompt'),
+        ({'template_id': 'gone'}, 404, 'Template not found'),
+        ({'group_id': 'nope'}, 400, 'Keyword group not found'),
+    ], ids=[
+        'empty-dimensions', 'unknown-dimension', 'integer-dimension', 'null-dimension', 'object-dimension',
+        'dimension-the-chosen-template-does-not-offer',
+        'country-not-a-code', 'language-not-a-code', 'target-count-too-small',
+        'tracking-count-zero', 'tracking-count-above-target', 'tracking-count-null', 'tracking-count-boolean',
+        'too-many-rounds', 'seed-too-short', 'blank-system-prompt',
+        'template-vanished', 'unknown-destination-group',
     ])
-    def test_rejects_an_invalid_brief(self, started, override, field):
+    def test_refuses_an_invalid_brief_without_persisting_a_job(self, started, override, status, message):
         response = _mod.handler(_agent_event(**override), None)
 
-        assert response['statusCode'] == 400
-        assert field in response['body']
+        assert response['statusCode'] == status
+        assert message in response['body']
         started['research_table'].put_item.assert_not_called()
 
     def test_returns_400_when_no_web_search_provider_is_configured(self, started):
@@ -250,8 +249,7 @@ class TestListTemplates:
             {'id': 't1', 'name': 'Beach resorts', 'system_prompt': 'p1', 'created_at': 'a', 'created_by': 'ana'},
         ]
 
-        with patch.object(_mod, 'templates_table', _table(items=saved)):
-            body = _body(_mod.handler(_templates_event('GET'), None))
+        body = _body(_call_templates(research_table_stub(items=saved), 'GET'))
 
         assert [(item['id'], item['name'], item['builtin']) for item in body['items']] == [
             (BUILTIN_TEMPLATE_ID, 'Hotels', True), ('builtin-restaurants', 'Restaurants', True), ('builtin-cafes', 'Cafés & coffee shops', True),
@@ -264,62 +262,46 @@ class TestListTemplates:
     def test_every_listed_template_carries_an_industry_profile(self):
         saved = [{'id': 't1', 'name': 'Old prompt-only template', 'system_prompt': 'p1', 'created_at': 'a'}]
 
-        with patch.object(_mod, 'templates_table', _table(items=saved)):
-            body = _body(_mod.handler(_templates_event('GET'), None))
+        body = _body(_call_templates(research_table_stub(items=saved), 'GET'))
 
         legacy = body['items'][-1]
-        assert (legacy['industry'], legacy['subject'], legacy['audience']) == ('generic', 'business', 'customers')
+        assert _profile(legacy) == _GENERIC_PROFILE
         assert legacy['dimensions'] == GENERIC_TEMPLATE.to_view()['dimensions']
         assert body['items'][0]['dimensions'][0] == LEGACY_DIMENSION_CATALOG[0]
 
 
 class TestCreateTemplate:
     def test_saves_the_prompt_with_the_author_and_answers_201(self):
-        table = _table()
+        response, item = _create_template({'name': 'Beach resorts', 'system_prompt': 'You research beach resorts for families.', 'description': 'd'})
 
-        with patch.object(_mod, 'templates_table', table):
-            response = _mod.handler(_templates_event('POST', {'name': 'Beach resorts', 'system_prompt': 'You research beach resorts for families.', 'description': 'd'}), None)
-
-        item = table.put_item.call_args.kwargs['Item']
         assert response['statusCode'] == 201
         assert (item['name'], item['system_prompt'], item['description'], item['created_by']) == ('Beach resorts', 'You research beach resorts for families.', 'd', 'bastian')
         assert _body(response)['builtin'] is False
 
     def test_copies_the_profile_from_the_base_template(self):
-        table = _table()
+        response, item = _create_template({
+            'name': 'Specialty coffee', 'system_prompt': 'You research specialty coffee shops.', 'base_template_id': 'builtin-cafes',
+        })
 
-        with patch.object(_mod, 'templates_table', table):
-            response = _mod.handler(_templates_event('POST', {
-                'name': 'Specialty coffee', 'system_prompt': 'You research specialty coffee shops.', 'base_template_id': 'builtin-cafes',
-            }), None)
-
-        item = table.put_item.call_args.kwargs['Item']
-        assert (item['industry'], item['subject'], item['audience']) == ('cafes', 'café', 'coffee drinkers')
+        assert _profile(item) == ('cafes', 'café', 'coffee drinkers')
         assert item['dimensions'] == CAFE_TEMPLATE.to_view()['dimensions']
         assert _body(response)['dimensions'] == item['dimensions']
 
     def test_defaults_the_profile_to_the_generic_template_without_a_base(self):
-        table = _table()
+        _response, item = _create_template({'name': 'Gyms', 'system_prompt': _GYMS_PROMPT})
 
-        with patch.object(_mod, 'templates_table', table):
-            _mod.handler(_templates_event('POST', {'name': 'Gyms', 'system_prompt': 'You research gyms for members.'}), None)
-
-        item = table.put_item.call_args.kwargs['Item']
-        assert (item['industry'], item['subject'], item['audience']) == ('generic', 'business', 'customers')
+        assert _profile(item) == _GENERIC_PROFILE
         assert item['dimensions'] == GENERIC_TEMPLATE.to_view()['dimensions']
 
     def test_request_profile_fields_override_the_base(self):
-        table = _table()
         dimensions = [{'id': 'classes', 'label': ' Classes ', 'description': 'yoga, spinning'}, {'id': 'location', 'label': 'Location', 'description': ''}]
 
-        with patch.object(_mod, 'templates_table', table):
-            response = _mod.handler(_templates_event('POST', {
-                'name': 'Gyms', 'system_prompt': 'You research gyms for members.', 'base_template_id': 'builtin-generic',
-                'subject': 'gym', 'audience': 'members', 'dimensions': dimensions,
-            }), None)
+        response, item = _create_template({
+            'name': 'Gyms', 'system_prompt': _GYMS_PROMPT, 'base_template_id': 'builtin-generic',
+            'subject': 'gym', 'audience': 'members', 'dimensions': dimensions,
+        })
 
-        item = table.put_item.call_args.kwargs['Item']
-        assert (item['industry'], item['subject'], item['audience']) == ('generic', 'gym', 'members')
+        assert _profile(item) == ('generic', 'gym', 'members')
         assert item['dimensions'] == [{'id': 'classes', 'label': 'Classes', 'description': 'yoga, spinning'}, {'id': 'location', 'label': 'Location', 'description': ''}]
         assert response['statusCode'] == 201
 
@@ -329,39 +311,33 @@ class TestCreateTemplate:
         ({'dimensions': [{'id': 'classes', 'label': 'Classes'}]}, 'at least 2 dimensions'),
         ({'dimensions': [{'id': 'other', 'label': 'Other'}, {'id': 'ok', 'label': 'Ok'}]}, "'other' is reserved"),
         ({'dimensions': [{'id': 'a b', 'label': 'A'}, {'id': 'ok', 'label': 'Ok'}]}, 'must be 2-40 characters'),
+        ({'name': 'x', 'system_prompt': 'short'}, 'system_prompt'),
+    ], ids=[
+        'subject-not-a-phrase', 'audience-not-a-phrase', 'single-dimension', 'reserved-dimension-id',
+        'malformed-dimension-id', 'prompt-too-short-to-mean-anything',
     ])
-    def test_rejects_an_invalid_profile(self, override, message):
-        table = _table()
+    def test_rejects_an_invalid_template_without_saving(self, override, message):
+        table = research_table_stub()
 
-        with patch.object(_mod, 'templates_table', table):
-            response = _mod.handler(_templates_event('POST', {'name': 'Gyms', 'system_prompt': 'You research gyms for members.', **override}), None)
+        response = _call_templates(table, 'POST', {'name': 'Gyms', 'system_prompt': _GYMS_PROMPT, **override})
 
         assert response['statusCode'] == 400
         assert message in response['body']
         table.put_item.assert_not_called()
 
     def test_answers_404_for_an_unknown_base_template(self):
-        table = _table()
+        table = research_table_stub()
 
-        with patch.object(_mod, 'templates_table', table):
-            response = _mod.handler(_templates_event('POST', {'name': 'Gyms', 'system_prompt': 'You research gyms for members.', 'base_template_id': 'gone'}), None)
+        response = _call_templates(table, 'POST', {'name': 'Gyms', 'system_prompt': _GYMS_PROMPT, 'base_template_id': 'gone'})
 
         assert response['statusCode'] == 404
         table.put_item.assert_not_called()
 
-    def test_rejects_a_prompt_that_is_too_short_to_mean_anything(self):
-        with patch.object(_mod, 'templates_table', _table()):
-            response = _mod.handler(_templates_event('POST', {'name': 'x', 'system_prompt': 'short'}), None)
-
-        assert response['statusCode'] == 400
-        assert 'system_prompt' in response['body']
-
     def test_enforces_the_template_cap(self):
-        table = _table()
+        table = research_table_stub()
         table.scan.return_value = {'Count': _mod.MAX_TEMPLATES}
 
-        with patch.object(_mod, 'templates_table', table):
-            response = _mod.handler(_templates_event('POST', {'name': 'x', 'system_prompt': 'You research beach resorts for families.'}), None)
+        response = _call_templates(table, 'POST', {'name': 'x', 'system_prompt': 'You research beach resorts for families.'})
 
         assert response['statusCode'] == 400
         table.put_item.assert_not_called()
@@ -369,11 +345,10 @@ class TestCreateTemplate:
 
 class TestUpdateTemplate:
     def test_updates_only_the_fields_sent(self):
-        table = _table({'id': 't1', 'name': 'Old', 'system_prompt': 'old prompt text for research'})
+        table = research_table_stub({'id': 't1', 'name': 'Old', 'system_prompt': 'old prompt text for research'})
         table.update_item.return_value = {'Attributes': {'id': 't1', 'name': 'New', 'system_prompt': 'old prompt text for research'}}
 
-        with patch.object(_mod, 'templates_table', table):
-            response = _mod.handler(_templates_event('PUT', {'name': 'New'}, template_id='t1'), None)
+        response = _call_templates(table, 'PUT', {'name': 'New'}, template_id='t1')
 
         call = table.update_item.call_args.kwargs
         assert response['statusCode'] == 200
@@ -381,68 +356,51 @@ class TestUpdateTemplate:
         assert call['ExpressionAttributeValues'][':v0'] == 'New'
         assert _body(response)['name'] == 'New'
 
-    def test_refuses_to_edit_the_builtin_template(self):
-        table = _table()
+    @pytest.mark.parametrize(('stored', 'body', 'template_id', 'message'), [
+        (None, {'name': 'New'}, BUILTIN_TEMPLATE_ID, 'Built-in templates cannot be edited'),
+        ({'id': 't1', 'name': 'Gyms'}, {'subject': '!!'}, 't1', 'subject must be a word or short phrase'),
+        ({'id': 't1'}, {}, 't1', 'Nothing to update'),
+    ], ids=['builtin-template', 'invalid-subject', 'empty-update'])
+    def test_refuses_an_update_with_400_without_writing(self, stored, body, template_id, message):
+        table = research_table_stub(stored)
 
-        with patch.object(_mod, 'templates_table', table):
-            response = _mod.handler(_templates_event('PUT', {'name': 'New'}, template_id=BUILTIN_TEMPLATE_ID), None)
+        response = _call_templates(table, 'PUT', body, template_id=template_id)
 
         assert response['statusCode'] == 400
-        assert 'Built-in templates cannot be edited' in response['body']
+        assert message in response['body']
         table.update_item.assert_not_called()
 
     def test_updates_the_dimension_catalogue_of_a_saved_template(self):
-        table = _table({'id': 't1', 'name': 'Gyms', 'system_prompt': 'old prompt text for research'})
+        table = research_table_stub({'id': 't1', 'name': 'Gyms', 'system_prompt': 'old prompt text for research'})
         cleaned = [{'id': 'classes', 'label': 'Classes', 'description': ''}, {'id': 'trainers', 'label': 'Trainers', 'description': 'pt'}]
         table.update_item.return_value = {'Attributes': {'id': 't1', 'name': 'Gyms', 'system_prompt': 'old prompt text for research', 'dimensions': cleaned}}
 
-        with patch.object(_mod, 'templates_table', table):
-            response = _mod.handler(_templates_event('PUT', {'dimensions': [{'id': ' Classes ', 'label': 'Classes'}, {'id': 'trainers', 'label': 'Trainers', 'description': 'pt'}]}, template_id='t1'), None)
+        response = _call_templates(table, 'PUT', {'dimensions': [{'id': ' Classes ', 'label': 'Classes'}, {'id': 'trainers', 'label': 'Trainers', 'description': 'pt'}]}, template_id='t1')
 
         call = table.update_item.call_args.kwargs
         assert call['UpdateExpression'] == 'SET updated_at = :ts, dimensions = :v0'
         assert call['ExpressionAttributeValues'][':v0'] == cleaned
         assert _body(response)['dimensions'] == cleaned
 
-    def test_rejects_an_invalid_subject_on_update(self):
-        table = _table({'id': 't1', 'name': 'Gyms'})
-
-        with patch.object(_mod, 'templates_table', table):
-            response = _mod.handler(_templates_event('PUT', {'subject': '!!'}, template_id='t1'), None)
-
-        assert response['statusCode'] == 400
-        assert 'subject must be a word or short phrase' in response['body']
-        table.update_item.assert_not_called()
-
     def test_returns_404_for_an_unknown_template(self):
-        with patch.object(_mod, 'templates_table', _table()):
-            response = _mod.handler(_templates_event('PUT', {'name': 'New'}, template_id='missing'), None)
+        response = _call_templates(research_table_stub(), 'PUT', {'name': 'New'}, template_id='missing')
 
         assert response['statusCode'] == 404
-
-    def test_rejects_an_empty_update(self):
-        with patch.object(_mod, 'templates_table', _table({'id': 't1'})):
-            response = _mod.handler(_templates_event('PUT', {}, template_id='t1'), None)
-
-        assert response['statusCode'] == 400
-        assert 'Nothing to update' in response['body']
 
 
 class TestDeleteTemplate:
     def test_deletes_a_saved_template(self):
-        table = _table()
+        table = research_table_stub()
 
-        with patch.object(_mod, 'templates_table', table):
-            response = _mod.handler(_templates_event('DELETE', template_id='t1'), None)
+        response = _call_templates(table, 'DELETE', template_id='t1')
 
         assert response['statusCode'] == 200
         table.delete_item.assert_called_once_with(Key={'id': 't1'})
 
     def test_refuses_to_delete_the_builtin_template(self):
-        table = _table()
+        table = research_table_stub()
 
-        with patch.object(_mod, 'templates_table', table):
-            response = _mod.handler(_templates_event('DELETE', template_id=BUILTIN_TEMPLATE_ID), None)
+        response = _call_templates(table, 'DELETE', template_id=BUILTIN_TEMPLATE_ID)
 
         assert response['statusCode'] == 400
         table.delete_item.assert_not_called()
@@ -451,7 +409,7 @@ class TestDeleteTemplate:
         table = MagicMock()
 
         with patch.object(_mod, 'research_table', table):
-            response = _mod.handler({'httpMethod': 'DELETE', 'path': '/api/keyword-research/job-9', 'pathParameters': {'id': 'job-9'}}, None)
+            response = _mod.handler(job_event('DELETE', 'job-9'), None)
 
         assert response['statusCode'] == 200
         table.delete_item.assert_called_once_with(Key={'id': 'job-9'})
@@ -469,7 +427,7 @@ class TestAgentHistory:
         table.query.side_effect = lambda **kwargs: {'Items': [self._agent_row()]} if kwargs['KeyConditionExpression']._values[1] == 'agent' else {'Items': []}
 
         with patch.object(_mod, 'research_table', table):
-            body = _body(_mod.handler({'httpMethod': 'GET', 'path': '/api/keyword-research/history'}, None))
+            body = _body(_mod.handler(history_event(), None))
 
         assert [item['type'] for item in body['items']] == ['agent']
         assert table.query.call_count == 3
@@ -480,8 +438,8 @@ class TestAgentHistory:
         table.get_item.return_value = {'Item': self._agent_row()}
 
         with patch.object(_mod, 'research_table', table):
-            listed = _body(_mod.handler({'httpMethod': 'GET', 'path': '/api/keyword-research/history', 'queryStringParameters': {'type': 'agent'}}, None))
-            detail = _body(_mod.handler({'httpMethod': 'GET', 'path': '/api/keyword-research/job-a', 'pathParameters': {'id': 'job-a'}}, None))
+            listed = _body(_mod.handler(history_event('agent'), None))
+            detail = _body(_mod.handler(job_event('GET', 'job-a'), None))
 
         assert 'system_prompt' not in listed['items'][0]
         assert detail['system_prompt'] == 'secret sauce'
@@ -491,18 +449,7 @@ class TestAgentHistory:
         table.query.return_value = {'Items': []}
 
         with patch.object(_mod, 'research_table', table):
-            response = _mod.handler({'httpMethod': 'GET', 'path': '/api/keyword-research/history', 'queryStringParameters': {'type': 'agent'}}, None)
+            response = _mod.handler(history_event('agent'), None)
 
         assert response['statusCode'] == 200
         assert table.query.call_args.kwargs['KeyConditionExpression']._values[1] == 'agent'
-
-
-
-class TestAgentDimensionValidation:
-    @pytest.mark.parametrize('dimensions', [[1], [None], [{'nested': 'value'}]])
-    def test_returns_400_when_a_dimension_is_not_a_string(self, started, dimensions):
-        response = _mod.handler(_agent_event(dimensions=dimensions), None)
-
-        assert response['statusCode'] == 400
-        assert 'dimensions' in response['body']
-        started['research_table'].put_item.assert_not_called()

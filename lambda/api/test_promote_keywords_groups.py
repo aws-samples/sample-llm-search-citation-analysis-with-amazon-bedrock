@@ -1,46 +1,30 @@
 """Focused tests for destination-group behavior during keyword promotion."""
 
-import json
-import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource, reset_tables
-from testing.env import KEYWORDS_TABLE_ENV
-from testing.module_loader import load_handler_module
+from testing.dynamodb_stubs import conditional_check_failure
+from testing.keyword_groups_fixtures import load_with_groups_table, membership_update, reset_with_no_keywords
+from testing.keyword_promotion_fixtures import invoke_promotion
 
 mock_keywords_table = MagicMock()
 mock_groups_table = MagicMock()
-mock_dynamodb = fake_dynamodb_resource(
-    mock_keywords_table,
-    by_name={'test-keyword-groups': mock_groups_table},
-)
-
-with patch('boto3.resource', return_value=mock_dynamodb), patch.dict(os.environ, {
-    **KEYWORDS_TABLE_ENV,
-    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
-    'CORS_ORIGIN_PARAM': '',
-}):
-    _mod = load_handler_module(
-        os.path.dirname(__file__),
-        'promote-keywords.py',
-        'promote_keywords_with_groups',
-    )
+_mod = load_with_groups_table('promote-keywords.py', 'promote_keywords_with_groups', mock_keywords_table, mock_groups_table)
 
 
 def _invoke(keywords, group_ids=None):
     body = {'keywords': keywords}
     if group_ids is not None:
         body['group_ids'] = group_ids
-    event = {
-        'httpMethod': 'POST',
-        'path': '/api/keywords/promote',
-        'headers': {},
-        'body': json.dumps(body),
-    }
-    response = _mod.handler(event, None)
-    return response['statusCode'], json.loads(response['body'])
+    return invoke_promotion(_mod, mock_keywords_table, body)
+
+
+def _store_hotel_coruna(group_ids):
+    """Store "Hotel Coruña" under a legacy random id, already in ``group_ids``."""
+    previous = {'id': 'legacy-random-id', 'keyword': 'Hotel Coruña', 'group_ids': group_ids}
+    mock_keywords_table.scan.return_value = {'Items': [previous]}
+    mock_keywords_table.update_item.return_value = {'Attributes': previous}
 
 
 # What promoting the already-stored "Hotel Coruña" answers when no group was attached to it.
@@ -55,44 +39,25 @@ _HOTEL_CORUNA_ALREADY_STORED = {
 
 @pytest.fixture(autouse=True)
 def _reset_mocks():
-    reset_tables(mock_keywords_table, mock_groups_table)
-    mock_keywords_table.scan.return_value = {'Items': []}
-    mock_keywords_table.put_item.return_value = {}
+    reset_with_no_keywords(mock_keywords_table, mock_groups_table)
     mock_groups_table.get_item.side_effect = lambda Key: {'Item': {'id': Key['id']}}
 
 
 def test_unions_destination_group_under_stored_legacy_id_when_keyword_exists():
-    previous = {
-        'id': 'legacy-random-id',
-        'keyword': 'Hotel Coruña',
-        'group_ids': {'existing-group'},
-    }
-    mock_keywords_table.scan.return_value = {'Items': [previous]}
-    mock_keywords_table.update_item.return_value = {'Attributes': previous}
+    _store_hotel_coruna({'existing-group'})
 
     status, body = _invoke([{'keyword': '  hotel coruña  '}], ['destination-group'])
 
     assert status == 200
     assert body['grouped_keywords'] == ['hotel coruña']
     mock_keywords_table.update_item.assert_called_once_with(
-        Key={'id': 'legacy-random-id'},
-        UpdateExpression='ADD group_ids :gids',
-        ConditionExpression='attribute_exists(#id)',
-        ExpressionAttributeNames={'#id': 'id'},
-        ExpressionAttributeValues={':gids': {'destination-group'}},
-        ReturnValues='ALL_OLD',
+        **membership_update('legacy-random-id', {'destination-group'}, 'ADD', 'ALL_OLD'),
     )
     mock_keywords_table.put_item.assert_not_called()
 
 
 def test_reports_existing_outcome_when_destination_membership_already_exists():
-    previous = {
-        'id': 'legacy-random-id',
-        'keyword': 'Hotel Coruña',
-        'group_ids': {'destination-group'},
-    }
-    mock_keywords_table.scan.return_value = {'Items': [previous]}
-    mock_keywords_table.update_item.return_value = {'Attributes': previous}
+    _store_hotel_coruna({'destination-group'})
 
     status, body = _invoke([{'keyword': 'Hotel Coruña'}], ['destination-group'])
 

@@ -198,6 +198,15 @@ def _first_text_by_key(module, keywords):
     return first
 
 
+def _duplicate_texts(module, keywords, existing_keys):
+    """Trimmed texts of the request entries that match an existing key, in request order."""
+    return [
+        _trimmed(rk)
+        for rk in keywords
+        if _trimmed(rk) and module.normalize_keyword(_trimmed(rk)) in existing_keys
+    ]
+
+
 def _created_keys(module, to_create):
     """Normalized keys of the created entries, in creation order."""
     return [module.normalize_keyword(entry['keyword']) for entry in to_create]
@@ -323,11 +332,7 @@ class TestPartitionDuplicateProperty:
     ):
         existing_texts, keywords = scenario
         existing_keys = _existing_keys(promotion_handler, existing_texts)
-        matching = [
-            _trimmed(rk)
-            for rk in keywords
-            if _trimmed(rk) and promotion_handler.normalize_keyword(_trimmed(rk)) in existing_keys
-        ]
+        matching = _duplicate_texts(promotion_handler, keywords, existing_keys)
 
         to_create, skipped = promotion_handler.partition_keywords(keywords, existing_keys)
 
@@ -356,11 +361,7 @@ class TestPartitionSkipReportingProperty:
     ):
         existing_texts, keywords = scenario
         existing_keys = _existing_keys(promotion_handler, existing_texts)
-        expected_duplicates = [
-            _trimmed(rk)
-            for rk in keywords
-            if _trimmed(rk) and promotion_handler.normalize_keyword(_trimmed(rk)) in existing_keys
-        ]
+        expected_duplicates = _duplicate_texts(promotion_handler, keywords, existing_keys)
         known_reasons = (promotion_handler.REASON_DUPLICATE, promotion_handler.REASON_EMPTY)
 
         to_create, skipped = promotion_handler.partition_keywords(keywords, existing_keys)
