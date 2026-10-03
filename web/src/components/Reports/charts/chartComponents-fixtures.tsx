@@ -18,6 +18,8 @@ type ChartElement = () => ReactElement;
 const KPI_TREND_CHART: ChartElement = () => <KpiTrendChart points={KPI_POINTS} />;
 const SENTIMENT_SPLIT_CHART: ChartElement = () => <SentimentSplitChart rows={SENTIMENT_ROWS} />;
 const TOP_SOURCES_CHART: ChartElement = () => <TopSourcesChart sources={buildSources()} />;
+const SHARE_OF_VOICE_CHART: ChartElement = () => <ShareOfVoiceChart brands={buildLatestBrands()} />;
+const ENGINE_KPI_CHART: ChartElement = () => <EngineKpiChart engines={ENGINES.slice(0, 1)} />;
 
 /** A chart with data: its name, the element, the Chart.js type it draws and its caption. */
 export type DrawnChartCase = readonly [string, ChartElement, string, string];
@@ -33,13 +35,13 @@ export const DRAWN_CHARTS: readonly DrawnChartCase[] = [
   ],
   [
     'ShareOfVoiceChart',
-    () => <ShareOfVoiceChart brands={buildLatestBrands()} />,
+    SHARE_OF_VOICE_CHART,
     'doughnut',
     'Share of voice: Nike 25.0%, Adidas 20.8% and Puma 12.5%.',
   ],
   [
     'EngineKpiChart',
-    () => <EngineKpiChart engines={ENGINES.slice(0, 1)} />,
+    ENGINE_KPI_CHART,
     'bar',
     'Mention rate, Visibility score and Citation rate per AI engine, on a 0–100 scale. '
       + 'Google Gemini: Mention rate 70.0%, Visibility score 61.5, Citation rate 40.0%.',
@@ -104,13 +106,13 @@ export const REDRAWN_CHARTS: readonly RedrawnChartCase[] = [
   ],
   [
     'ShareOfVoiceChart',
-    () => <ShareOfVoiceChart brands={buildLatestBrands()} />,
+    SHARE_OF_VOICE_CHART,
     () => <ShareOfVoiceChart brands={LEADERBOARD} />,
     () => shareOfVoiceChart(LEADERBOARD).data,
   ],
   [
     'EngineKpiChart',
-    () => <EngineKpiChart engines={ENGINES.slice(0, 1)} />,
+    ENGINE_KPI_CHART,
     () => <EngineKpiChart engines={ENGINES} />,
     () => engineKpiChart(ENGINES).data,
   ],
