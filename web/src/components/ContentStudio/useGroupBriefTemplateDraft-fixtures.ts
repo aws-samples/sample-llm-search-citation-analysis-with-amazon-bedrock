@@ -48,7 +48,7 @@ export const saveFailedOutcome = {
   message: 'Save failed',
 } satisfies ContentBriefTemplateMutationOutcome;
 
-export const templateDeletedOutcome = {
+const templateDeletedOutcome = {
   success: true,
   message: 'Template deleted',
 } satisfies ContentBriefTemplateMutationOutcome;

@@ -31,7 +31,7 @@ export const recordContentChangeMock = vi.fn().mockResolvedValue({
   message: 'Content change recorded.',
 });
 
-export function buildAlertsConfigSettingsHookResult(
+function buildAlertsConfigSettingsHookResult(
   overrides: Partial<ReturnType<typeof useAlertSettings>> = {}
 ): ReturnType<typeof useAlertSettings> {
   return buildAlertSettingsHookResult({
@@ -70,7 +70,7 @@ export function buildAlertsConfigContentHookResult(
   });
 }
 
-export function buildAlertsConfigGroupsHookResult(
+function buildAlertsConfigGroupsHookResult(
   overrides: Partial<ReturnType<typeof useKeywordGroups>> = {}
 ): ReturnType<typeof useKeywordGroups> {
   return {

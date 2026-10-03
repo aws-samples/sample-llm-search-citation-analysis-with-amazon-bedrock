@@ -41,7 +41,7 @@ export const SAVED_COPY = buildCafeTemplate({
   builtin: false,
 });
 
-export const DISCLOSURE = 'Customise the instructions or create your own template';
+const DISCLOSURE = 'Customise the instructions or create your own template';
 
 export function renderBriefForm() {
   const handlers = {
