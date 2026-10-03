@@ -21,8 +21,6 @@ import {
 
 interface SearchesViewProps {
   searches: Search[];
-  onRerunSuccess?: (executionArn: string, executionName: string) => void;
-  isRunning?: boolean;
   onNavigateToRawResponses?: (path: string) => void;
 }
 

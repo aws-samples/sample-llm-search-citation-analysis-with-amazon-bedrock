@@ -54,9 +54,7 @@ describe('brand configuration defaults', () => {
     expect(DEFAULT_PRESETS.general).toStrictEqual({
       name: 'General',
       description: 'Track brands and companies in any industry',
-      entity_types: [],
       example_brands: [],
-      extraction_focus: 'brand and company recommendations',
       default_prompt: DEFAULT_PRESETS.general.default_prompt,
     });
   });

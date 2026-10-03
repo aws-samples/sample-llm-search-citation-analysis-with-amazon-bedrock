@@ -8,13 +8,13 @@ import type { AnalysisScope } from '../types';
 import { useExecutionPolling } from './useExecutionPolling';
 
 export const mockExecutionArn = 'arn:aws:states:us-east-1:123456789:execution:test';
-export const mockExecutionName = 'test-execution-123';
+const mockExecutionName = 'test-execution-123';
 
 /**
  * Points the mocked network layer at `fetch` (the default trigger/status mock
  * unless a spec hands in another) and renders the hook.
  */
-export function renderExecutionPolling(fetch: ReturnType<typeof createMockFetch> = createMockFetch()) {
+function renderExecutionPolling(fetch: ReturnType<typeof createMockFetch> = createMockFetch()) {
   mockAuthenticatedFetch.mockImplementation(fetch);
   return renderHook(() => useExecutionPolling());
 }

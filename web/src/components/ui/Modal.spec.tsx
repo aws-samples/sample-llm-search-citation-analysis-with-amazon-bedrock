@@ -66,8 +66,8 @@ describe('Modal', () => {
   });
 
   it('applies correct size class for each size option', () => {
-    const { rerender } = render(modalElement({ size: 'sm' }));
-    expect(document.querySelector('dialog')).toHaveClass('max-w-sm');
+    const { rerender } = render(modalElement());
+    expect(document.querySelector('dialog')).toHaveClass('max-w-md');
 
     rerender(modalElement({ size: 'xl' }));
     expect(document.querySelector('dialog')).toHaveClass('max-w-xl');
@@ -119,16 +119,15 @@ describe('ConfirmModal', () => {
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
-  it('uses custom button text when provided', () => {
+  it('uses custom confirm text next to the Cancel button when provided', () => {
     renderConfirmModal({
       title: 'Confirm Action',
       message: 'Proceed with action?',
       confirmText: 'Yes, proceed',
-      cancelText: 'No, cancel',
     });
     
     expect(screen.getByText('Yes, proceed')).toBeInTheDocument();
-    expect(screen.getByText('No, cancel')).toBeInTheDocument();
+    expect(screen.getByText('Cancel')).toBeInTheDocument();
   });
 
   it('applies danger styling when confirmVariant is danger', () => {

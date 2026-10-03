@@ -13,16 +13,12 @@ export const INDUSTRY_PRESETS = {
     name: 'Hospitality',
     description: 'Hotels and travel',
     example_brands: ['Marriott', 'Hilton'],
-    entity_types: ['hotel'],
-    extraction_focus: 'brands',
     default_prompt: 'test',
   },
   retail: {
     name: 'Retail',
     description: 'Retail stores',
     example_brands: ['Amazon', 'Walmart'],
-    entity_types: ['store'],
-    extraction_focus: 'brands',
     default_prompt: 'test',
   },
 } satisfies IndustryPresets;

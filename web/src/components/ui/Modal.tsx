@@ -11,7 +11,7 @@ interface ModalProps {
   title?: string;
   children: React.ReactNode;
   showCloseButton?: boolean;
-  size?: 'sm' | 'md' | 'lg' | 'xl' | '4xl';
+  size?: 'md' | 'xl' | '4xl';
 }
 
 export const Modal = ({
@@ -41,9 +41,7 @@ export const Modal = ({
   if (!isOpen) return null;
 
   const sizeClasses = {
-    sm: 'max-w-sm',
     md: 'max-w-md',
-    lg: 'max-w-lg',
     xl: 'max-w-xl',
     '4xl': 'max-w-4xl',
   };
@@ -117,7 +115,6 @@ interface ConfirmModalProps {
   title: string;
   message: string;
   confirmText?: string;
-  cancelText?: string;
   confirmVariant?: 'danger' | 'primary';
 }
 
@@ -128,7 +125,6 @@ export const ConfirmModal = ({
   title,
   message,
   confirmText = 'OK',
-  cancelText = 'Cancel',
   confirmVariant = 'primary',
 }: ConfirmModalProps) => {
   const handleConfirm = () => {
@@ -148,7 +144,7 @@ export const ConfirmModal = ({
           onClick={onClose}
           className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
         >
-          {cancelText}
+          Cancel
         </button>
         <button
           onClick={handleConfirm}

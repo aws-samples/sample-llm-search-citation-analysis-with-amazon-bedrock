@@ -40,20 +40,12 @@ interface ProviderConfigMockFetchOptions {
   providers?: ProviderConfig[];
   shouldFail?: boolean;
   updateSuccess?: boolean;
-  validationResult?: {
-    valid: boolean;
-    error?: string 
-  };
 }
 
 function createMockFetch(options: ProviderConfigMockFetchOptions = {}) {
   return vi.fn<typeof authenticatedFetch>().mockImplementation((url, init) => {
     if (options.shouldFail) {
       return Promise.resolve(createMockJsonResponse({ error: 'Server error' }, 500));
-    }
-
-    if (url.includes('/providers/') && url.includes('/validate')) {
-      return Promise.resolve(createMockJsonResponse(options.validationResult ?? { valid: true }));
     }
 
     if (url.includes('/providers/') && init?.method === 'PUT') {

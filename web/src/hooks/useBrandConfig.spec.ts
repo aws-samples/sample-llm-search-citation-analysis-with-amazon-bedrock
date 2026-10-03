@@ -75,9 +75,7 @@ describe('useBrandConfig', () => {
       expect(result.current.presets?.general).toMatchObject({
         name: 'General',
         description: 'Track brands and companies in any industry',
-        entity_types: [],
         example_brands: [],
-        extraction_focus: 'brand and company recommendations',
       });
       expect(result.current.presets?.general?.default_prompt).toContain(
         'INDUSTRY CONTEXT: General\nFOCUS: brand and company recommendations'

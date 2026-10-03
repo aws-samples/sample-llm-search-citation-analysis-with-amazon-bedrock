@@ -7,20 +7,19 @@ interface CopyButtonLabelProps {
   /** Tailwind size classes shared by the clipboard and the check mark. */
   iconClassName: string;
   label: string;
-  copiedLabel?: string;
 }
 
 /**
  * Icon-plus-text content of a copy-to-clipboard button: a clipboard with the
- * `label` until the copy lands, then a green check mark with `copiedLabel`.
+ * `label` until the copy lands, then a green check mark with "Copied!".
  */
 const CopyButtonLabel = ({
-  copied, iconClassName, label, copiedLabel = 'Copied!'
+  copied, iconClassName, label
 }: CopyButtonLabelProps) => (
   copied ? (
     <>
       <StrokeIcon className={`${iconClassName} text-green-500`} paths={CHECK_PATHS} strokeWidth={2} />
-      {copiedLabel}
+      Copied!
     </>
   ) : (
     <>
@@ -30,7 +29,7 @@ const CopyButtonLabel = ({
   )
 );
 
-interface CopyButtonProps extends Omit<CopyButtonLabelProps, 'copiedLabel'> {
+interface CopyButtonProps extends CopyButtonLabelProps {
   onCopy: () => void;
   className: string;
 }

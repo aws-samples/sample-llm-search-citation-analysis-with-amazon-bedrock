@@ -15,15 +15,6 @@ export type ErrorCategory =
   | 'config'
   | 'unknown';
 
-interface ApiError {
-  message: string;
-  category: ErrorCategory;
-  originalError?: Error;
-  statusCode?: number;
-  recoverable: boolean;
-  suggestion?: string;
-}
-
 export interface ApiRequestErrorOptions {
   statusCode?: number;
   responseMessage?: string;
@@ -48,63 +39,17 @@ const STATUS_TO_CATEGORY: Record<number, ErrorCategory> = {
   504: 'timeout',
 };
 
-interface CategoryInfo {
-  message: string;
-  suggestion: string;
-  recoverable: boolean;
-}
-
-const CATEGORY_MESSAGES: Record<ErrorCategory, CategoryInfo> = {
-  network: {
-    message: 'Unable to connect to the server',
-    suggestion: 'Check your internet connection and try again',
-    recoverable: true,
-  },
-  auth: {
-    message: 'Authentication required',
-    suggestion: 'Please check your API configuration',
-    recoverable: false,
-  },
-  permission: {
-    message: 'You do not have permission to perform this action',
-    suggestion: 'Contact an administrator if you need access',
-    recoverable: false,
-  },
-  not_found: {
-    message: 'The requested resource was not found',
-    suggestion: 'The data may have been deleted or moved',
-    recoverable: false,
-  },
-  validation: {
-    message: 'Invalid request',
-    suggestion: 'Please check your input and try again',
-    recoverable: true,
-  },
-  rate_limit: {
-    message: 'Too many requests',
-    suggestion: 'Please wait a moment before trying again',
-    recoverable: true,
-  },
-  server: {
-    message: 'Server error occurred',
-    suggestion: 'The server encountered an issue. Try again later',
-    recoverable: true,
-  },
-  timeout: {
-    message: 'Request timed out',
-    suggestion: 'The server took too long to respond. Try again',
-    recoverable: true,
-  },
-  config: {
-    message: 'Configuration error',
-    suggestion: 'Please check your API settings',
-    recoverable: false,
-  },
-  unknown: {
-    message: 'An unexpected error occurred',
-    suggestion: 'Please try again or contact support if the issue persists',
-    recoverable: true,
-  },
+const CATEGORY_MESSAGES: Record<ErrorCategory, string> = {
+  network: 'Unable to connect to the server',
+  auth: 'Authentication required',
+  permission: 'You do not have permission to perform this action',
+  not_found: 'The requested resource was not found',
+  validation: 'Invalid request',
+  rate_limit: 'Too many requests',
+  server: 'Server error occurred',
+  timeout: 'Request timed out',
+  config: 'Configuration error',
+  unknown: 'An unexpected error occurred',
 };
 
 const CONTEXT_MESSAGES: Record<string, Record<ErrorCategory, string>> = {
@@ -342,13 +287,6 @@ function categorizeError(error: unknown, statusCode?: number): ErrorCategory {
   return 'unknown';
 }
 
-class UnknownApiError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'UnknownApiError';
-  }
-}
-
 /** Error thrown when an API request fails */
 export class ApiRequestError extends Error {
   readonly statusCode?: number;
@@ -380,15 +318,12 @@ export class ApiConfigError extends Error {
   }
 }
 
-export function parseApiError(
+export function getErrorMessage(
   error: unknown,
-  context?: keyof typeof CONTEXT_MESSAGES,
-  statusCode?: number
-): ApiError {
-  const resolvedStatusCode = statusCode
-    ?? (error instanceof ApiRequestError ? error.statusCode : undefined);
-  const category = categorizeError(error, resolvedStatusCode);
-  const categoryInfo = CATEGORY_MESSAGES[category];
+  context?: keyof typeof CONTEXT_MESSAGES
+): string {
+  const statusCode = error instanceof ApiRequestError ? error.statusCode : undefined;
+  const category = categorizeError(error, statusCode);
   // Server text passes through only for definitive client rejections
   // (bugs.md 4.2): 5xx bodies can carry internals and a timeout's body is
   // not a rejection verdict, so both fall back to the safe local messages.
@@ -396,28 +331,7 @@ export function parseApiError(
     ? error.responseMessage
     : undefined;
   const contextMessage = context ? CONTEXT_MESSAGES[context]?.[category] : undefined;
-  const message = responseMessage ?? contextMessage ?? categoryInfo.message;
-
-  const originalError = error instanceof Error 
-    ? error 
-    : new UnknownApiError(String(error));
-
-  return {
-    message,
-    category,
-    originalError,
-    statusCode: resolvedStatusCode,
-    recoverable: categoryInfo.recoverable,
-    suggestion: categoryInfo.suggestion,
-  };
-}
-
-export function getErrorMessage(
-  error: unknown,
-  context?: keyof typeof CONTEXT_MESSAGES,
-  statusCode?: number
-): string {
-  return parseApiError(error, context, statusCode).message;
+  return responseMessage ?? contextMessage ?? CATEGORY_MESSAGES[category];
 }
 
 export function isAbortError(error: unknown): boolean {

@@ -86,7 +86,6 @@ function decodeKeywordProgress(value: unknown): KeywordProgress | null {
  * @returns Object containing:
  * - `execution` - Current execution status and events
  * - `triggerAnalysis` - Function to start a new analysis (optionally with specific keywords)
- * - `startMonitoring` - Function to start monitoring an existing execution
  * - `isRunning` - Whether an execution is currently running
  * 
  * @example
@@ -232,25 +231,9 @@ export const useExecutionPolling = (onComplete?: () => void) => {
     return () => stopPolling();
   }, [stopPolling]);
 
-  const startMonitoring = useCallback((executionArn: string, executionName: string) => {
-    const now = new Date().toISOString();
-    setExecution({
-      arn: executionArn,
-      name: executionName,
-      status: 'RUNNING',
-      start_date: now,
-      events: [],
-    });
-
-    void fetchExecutionStatus(executionArn).then((alreadyTerminal) => {
-      if (!alreadyTerminal) startPolling(executionArn);
-    });
-  }, [fetchExecutionStatus, startPolling]);
-
   return {
     execution,
     triggerAnalysis,
-    startMonitoring,
     isRunning: execution?.status === 'RUNNING',
   };
 };

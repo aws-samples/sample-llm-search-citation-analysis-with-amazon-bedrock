@@ -67,9 +67,7 @@ export const DEFAULT_PRESETS: IndustryPresets = {
   general: {
     name: 'General',
     description: 'Track brands and companies in any industry',
-    entity_types: [],
     example_brands: [],
-    extraction_focus: 'brand and company recommendations',
     default_prompt: generateDefaultPrompt(
       'General',
       'brand and company recommendations',
@@ -79,9 +77,7 @@ export const DEFAULT_PRESETS: IndustryPresets = {
   hotels: {
     name: 'Hotels & Hospitality',
     description: 'Track hotel brands, chains, and individual properties',
-    entity_types: ['hotel chains', 'hotel brands', 'individual properties', 'resorts', 'boutique hotels'],
     example_brands: ['Marriott', 'Hilton', 'Hyatt', 'InterContinental', 'Four Seasons'],
-    extraction_focus: 'hotel and accommodation recommendations',
     default_prompt: generateDefaultPrompt(
       'Hotels & Hospitality',
       'hotel and accommodation recommendations',
@@ -91,9 +87,7 @@ export const DEFAULT_PRESETS: IndustryPresets = {
   restaurants: {
     name: 'Restaurants & Food Service',
     description: 'Track restaurant chains, fast food, and dining brands',
-    entity_types: ['restaurant chains', 'fast food brands', 'casual dining', 'fine dining', 'coffee shops'],
     example_brands: ["McDonald's", 'Starbucks', 'Chipotle', 'Olive Garden', "Domino's"],
-    extraction_focus: 'restaurant and dining recommendations',
     default_prompt: generateDefaultPrompt(
       'Restaurants & Food Service',
       'restaurant and dining recommendations',
@@ -103,9 +97,7 @@ export const DEFAULT_PRESETS: IndustryPresets = {
   airlines: {
     name: 'Airlines & Aviation',
     description: 'Track airline brands and aviation companies',
-    entity_types: ['airlines', 'aviation companies', 'low-cost carriers', 'premium airlines'],
     example_brands: ['Delta', 'United', 'American Airlines', 'Southwest', 'JetBlue', 'Ryanair'],
-    extraction_focus: 'airline and flight recommendations',
     default_prompt: generateDefaultPrompt(
       'Airlines & Aviation',
       'airline and flight recommendations',
@@ -115,9 +107,7 @@ export const DEFAULT_PRESETS: IndustryPresets = {
   retail: {
     name: 'Retail & Consumer Brands',
     description: 'Track retail stores and consumer product brands',
-    entity_types: ['retail stores', 'e-commerce brands', 'consumer products', 'fashion brands'],
     example_brands: ['Amazon', 'Walmart', 'Target', 'Nike', 'Adidas', 'Apple'],
-    extraction_focus: 'product and retail recommendations',
     default_prompt: generateDefaultPrompt(
       'Retail & Consumer Brands',
       'product and retail recommendations',
@@ -127,9 +117,7 @@ export const DEFAULT_PRESETS: IndustryPresets = {
   fashion: {
     name: 'Fashion & Apparel',
     description: 'Track fashion brands, clothing, and footwear',
-    entity_types: ['fashion brands', 'clothing brands', 'footwear brands', 'luxury brands', 'sportswear'],
     example_brands: ['Nike', 'Adidas', 'Zara', 'H&M', 'Gucci', 'Louis Vuitton', 'Puma'],
-    extraction_focus: 'fashion and apparel recommendations',
     default_prompt: generateDefaultPrompt(
       'Fashion & Apparel',
       'fashion and apparel recommendations',
@@ -139,9 +127,7 @@ export const DEFAULT_PRESETS: IndustryPresets = {
   automotive: {
     name: 'Automotive',
     description: 'Track car brands and automotive companies',
-    entity_types: ['car manufacturers', 'automotive brands', 'EV companies', 'luxury car brands'],
     example_brands: ['Toyota', 'Ford', 'Tesla', 'BMW', 'Mercedes-Benz', 'Honda'],
-    extraction_focus: 'vehicle and automotive recommendations',
     default_prompt: generateDefaultPrompt('Automotive', 'vehicle and automotive recommendations', [
       'car manufacturers', 'automotive brands', 'EV companies', 'luxury car brands',
     ]),
@@ -149,9 +135,7 @@ export const DEFAULT_PRESETS: IndustryPresets = {
   technology: {
     name: 'Technology & Software',
     description: 'Track tech companies and software brands',
-    entity_types: ['tech companies', 'software brands', 'SaaS products', 'hardware brands'],
     example_brands: ['Apple', 'Google', 'Microsoft', 'Amazon', 'Meta', 'Salesforce'],
-    extraction_focus: 'technology and software recommendations',
     default_prompt: generateDefaultPrompt(
       'Technology & Software',
       'technology and software recommendations',
@@ -161,9 +145,7 @@ export const DEFAULT_PRESETS: IndustryPresets = {
   finance: {
     name: 'Finance & Banking',
     description: 'Track banks, financial services, and fintech',
-    entity_types: ['banks', 'credit card companies', 'fintech', 'insurance companies', 'investment firms'],
     example_brands: ['Chase', 'Bank of America', 'PayPal', 'Visa', 'Mastercard', 'Goldman Sachs'],
-    extraction_focus: 'financial service recommendations',
     default_prompt: generateDefaultPrompt(
       'Finance & Banking',
       'financial service recommendations',
@@ -173,9 +155,7 @@ export const DEFAULT_PRESETS: IndustryPresets = {
   custom: {
     name: 'Custom Industry',
     description: 'Define your own industry and brand types',
-    entity_types: [],
     example_brands: [],
-    extraction_focus: 'brand and company recommendations',
     default_prompt: generateDefaultPrompt('Custom Industry', 'brand and company recommendations', [
       'brand names', 'company names',
     ]),

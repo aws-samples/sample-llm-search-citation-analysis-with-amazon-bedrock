@@ -32,25 +32,19 @@ const mockPresets: IndustryPresets = {
   hospitality: {
     name: 'Hospitality',
     description: 'Hotels and travel',
-    entity_types: ['hotel', 'resort'],
     example_brands: ['Marriott', 'Hilton'],
-    extraction_focus: 'hotel brands',
     default_prompt: 'Extract hotel brand mentions',
   },
   retail: {
     name: 'Retail',
     description: 'Retail stores',
-    entity_types: ['store'],
     example_brands: ['Amazon'],
-    extraction_focus: 'retail brands',
     default_prompt: 'Extract retail brand mentions',
   },
   custom: {
     name: 'Custom Industry',
     description: 'Define your own industry and brand types',
-    entity_types: [],
     example_brands: [],
-    extraction_focus: 'brand and company recommendations',
     default_prompt: 'Extract brand and company mentions',
   },
 };
