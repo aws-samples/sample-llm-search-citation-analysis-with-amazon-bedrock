@@ -88,7 +88,6 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 KEYWORD_RESEARCH_TABLE = (
     os.environ.get('DYNAMODB_TABLE_KEYWORD_RESEARCH')
-    or os.environ.get('KEYWORD_RESEARCH_TABLE')
     or 'CitationAnalysis-KeywordResearch'
 )
 research_table = dynamodb.Table(KEYWORD_RESEARCH_TABLE)

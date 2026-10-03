@@ -25,7 +25,7 @@
 # attributes that production reads (`mod.s3_client = ...`), which look unused
 # when production is out of the picture.
 #
-# Shared vulture settings (exclusions, ignored names and decorators, the 60%
+# Shared vulture settings (exclusions, the ignored fixture decorator, the 60%
 # confidence floor) live in pyproject.toml [tool.vulture]. CLI flags replace
 # rather than extend those values, so the production scan restates the base
 # exclusions before adding its own.

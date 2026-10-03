@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, call
 
 import pytest
 
@@ -64,14 +64,15 @@ def _deliver(resource: MagicMock, event: dict[str, Any], *, times: int = 1) -> M
     return generation
 
 
-def _run_legacy_generation(**idea_overrides: object) -> tuple[dict[str, Any], dict[str, dict[str, Any]], MagicMock]:
-    """Run a forwarded legacy generation event whose idea is the saved idea plus overrides."""
+def _run_direct_generation(**idea_overrides: object) -> tuple[dict[str, Any], dict[str, dict[str, Any]], MagicMock]:
+    """Run a direct `generate` worker event whose idea is the saved idea plus overrides."""
     resource, rows, _ = stream_worker_case()
     generation = MagicMock(return_value=_GENERATED)
     event = {
-        "legacy_generation": True,
+        "action": "generate",
         "content_id": "content-1",
         "idea": {**rows["content-1"]["idea_data"], **idea_overrides},
+        "generation_owner": "reconcile:recovery-id",
     }
 
     with patched_stream_worker(_mod, resource, generation):
@@ -283,75 +284,17 @@ def test_generates_content_when_same_event_retries_after_crash() -> None:
     assert generation.call_count == 2
 
 
-def test_forwards_old_async_event_to_worker_without_running_model() -> None:
-    resource, rows, _ = stream_worker_case()
-    generation = MagicMock(return_value=_GENERATED)
-    lambda_client = MagicMock()
-    lambda_client.invoke.return_value = {"StatusCode": 202}
-    event = {
-        "async_generation": True,
-        "content_id": "content-1",
-        "idea": rows["content-1"]["idea_data"],
-    }
-    expected_payload = json.dumps(
-        {
-            "legacy_generation": True,
-            "content_id": "content-1",
-            "idea": rows["content-1"]["idea_data"],
-        },
-        separators=(",", ":"),
-    ).encode()
-
-    with (
-        patched_stream_worker(_mod, resource, generation),
-        patch.object(_mod.boto3, "client", return_value=lambda_client),
-    ):
-        result = _mod.handler(event, None)
-
-    assert result == {"statusCode": 202, "body": "Legacy generation forwarded"}
-    lambda_client.invoke.assert_called_once_with(
-        FunctionName="CitationAnalysis-ContentStudioWorker",
-        InvocationType="Event",
-        Payload=expected_payload,
-    )
-    generation.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    ("content_id", "idea"),
-    [
-        ("   ", {"keyword": "Keyword one"}),
-        ("content-1", {}),
-    ],
-    ids=["blank-content-id", "empty-idea"],
-)
-def test_rejects_invalid_old_async_event_without_invoking_worker(
-    content_id: str,
-    idea: dict[str, str],
-) -> None:
-    lambda_client = MagicMock()
-
-    with patch.object(_mod.boto3, "client", return_value=lambda_client):
-        result = _mod.handler(
-            {"async_generation": True, "content_id": content_id, "idea": idea},
-            None,
-        )
-
-    assert result == {"statusCode": 400, "body": "Invalid async event"}
-    lambda_client.invoke.assert_not_called()
-
-
-def test_processes_forwarded_legacy_generation_in_worker() -> None:
-    result, rows, generation = _run_legacy_generation()
+def test_processes_direct_generation_event_under_its_owner() -> None:
+    result, rows, generation = _run_direct_generation()
 
     assert result == {"statusCode": 200, "body": "Generation processing completed"}
     assert rows["content-1"]["status"] == "generated"
-    assert rows["content-1"]["generation_owner"] == "legacy:content-1"
+    assert rows["content-1"]["generation_owner"] == "reconcile:recovery-id"
     generation.assert_called_once_with(rows["content-1"]["idea_data"], _BRAND_CONFIG)
 
 
-def test_rejects_forwarded_generation_when_idea_differs_from_saved_row() -> None:
-    result, rows, generation = _run_legacy_generation(keyword="Changed")
+def test_rejects_direct_generation_when_idea_differs_from_saved_row() -> None:
+    result, rows, generation = _run_direct_generation(keyword="Changed")
 
     assert result == {"statusCode": 400, "body": "Invalid generation event"}
     assert rows["content-1"]["status"] == "pending"

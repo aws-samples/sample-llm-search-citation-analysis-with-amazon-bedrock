@@ -67,8 +67,8 @@ def scope_visibility(
     scope: ReportScope,
     owned_domains: list[str],
     *,
-    persona: str | None = None,
-    brand: str | None = None,
+    persona: str | None,
+    brand: str | None,
 ) -> dict[str, Any]:
     """The visibility view of ``scope``, capped at ``SCOPE_KEYWORDS_CAP`` keywords."""
     keywords, scope_fields = capped_scope(scope)

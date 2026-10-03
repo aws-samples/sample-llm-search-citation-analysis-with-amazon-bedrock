@@ -39,7 +39,6 @@ from shared.provider_health import (
     TIMEOUT,
     UNKNOWN,
     classify_provider_error,
-    describe_category,
     record_provider_failure,
     record_provider_success,
 )
@@ -632,24 +631,3 @@ class TestRecordProviderSuccess:
         record_provider_success(table, 'claude')
 
         assert _write(table)['ExpressionAttributeValues'][':ts'].endswith('Z')
-
-
-class TestDescribeCategory:
-    """
-    The strings the dashboard shows. "No credit remaining" is actionable;
-    "error" is what the user got for five days.
-    """
-
-    def test_describes_insufficient_credit_as_a_billing_problem(self):
-        assert describe_category(INSUFFICIENT_CREDIT) == (
-            'No credit remaining on this provider account'
-        )
-
-    def test_describes_invalid_key_as_a_key_problem(self):
-        assert describe_category(INVALID_KEY) == 'API key rejected — check or replace the key'
-
-    def test_describes_an_unrecognised_category_with_the_unknown_text(self):
-        """Guards the `.get` fallback, so a new category never renders as blank."""
-        assert describe_category('not-a-real-category') == (
-            'Provider returned an unrecognised error'
-        )

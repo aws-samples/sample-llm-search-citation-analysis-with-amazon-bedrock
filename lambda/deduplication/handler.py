@@ -27,12 +27,8 @@ logger.setLevel(logging.INFO)
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb')
 
-# Fail-fast: Required environment variables. Reads the canonical
-# DYNAMODB_TABLE_CITATIONS name first, falls back to the legacy
-# CITATIONS_TABLE_NAME until the CDK stack stops setting it (audit #12).
-CITATIONS_TABLE = resolve_table_env(
-    'DYNAMODB_TABLE_CITATIONS', 'CITATIONS_TABLE_NAME', 'CITATIONS_TABLE',
-)
+# Fail-fast: Required environment variables (audit #12 canonical naming).
+CITATIONS_TABLE = resolve_table_env('DYNAMODB_TABLE_CITATIONS')
 citations_table = dynamodb.Table(CITATIONS_TABLE)
 
 # Runtime override for the citations-per-keyword cap. Defaults to the shared

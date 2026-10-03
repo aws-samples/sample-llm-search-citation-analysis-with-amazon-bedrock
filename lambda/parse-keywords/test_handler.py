@@ -46,8 +46,8 @@ def _mock_boto3_client(*args, **kwargs):
 
 _KEYWORDS_BUCKET = 'test-keywords-bucket'
 _test_env = {
-    'KEYWORDS_TABLE': 'test-keywords-table',
-    'QUERY_PROMPTS_TABLE': 'test-prompts-table',
+    'DYNAMODB_TABLE_KEYWORDS': 'test-keywords-table',
+    'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-prompts-table',
     'KEYWORDS_BUCKET': _KEYWORDS_BUCKET,
 }
 

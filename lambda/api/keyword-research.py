@@ -101,7 +101,7 @@ dynamodb = boto3.resource('dynamodb')
 stepfunctions = boto3.client('stepfunctions')
 
 # Fail-fast: Required environment variables
-KEYWORD_RESEARCH_TABLE = os.environ['KEYWORD_RESEARCH_TABLE']
+KEYWORD_RESEARCH_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORD_RESEARCH')
 RESEARCH_STATE_MACHINE_ARN = os.environ['RESEARCH_STATE_MACHINE_ARN']
 RESEARCH_TEMPLATES_TABLE = resolve_table_env('DYNAMODB_TABLE_RESEARCH_TEMPLATES')
 KEYWORD_GROUPS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORD_GROUPS')

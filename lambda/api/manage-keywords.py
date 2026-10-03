@@ -35,7 +35,7 @@ from shared.utils import get_timestamp, load_keyword_identities, normalize_keywo
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
-KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
+KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS')
 keywords_table = dynamodb.Table(KEYWORDS_TABLE)
 # Optional until every deployment carries the groups table.
 GROUPS_TABLE = resolve_table_env(KEYWORD_GROUPS_TABLE_ENV, required=False)

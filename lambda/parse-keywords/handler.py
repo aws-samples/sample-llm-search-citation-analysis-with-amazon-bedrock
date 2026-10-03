@@ -40,13 +40,11 @@ RUNS_PREFIX = 'runs/'
 
 KEYWORDS_TABLE = (
     os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    or os.environ.get('KEYWORDS_TABLE')
     or 'CitationAnalysis-Keywords'
 )
 
 QUERY_PROMPTS_TABLE = (
     os.environ.get('DYNAMODB_TABLE_QUERY_PROMPTS')
-    or os.environ.get('QUERY_PROMPTS_TABLE')
     or 'CitationAnalysis-QueryPrompts'
 )
 

@@ -78,8 +78,8 @@ SCOPE_PARAMS = tuple(SCOPE_QUERY_PARAMS)
 
 
 def keywords_table_name() -> str:
-    """The Keywords table scopes resolve against: canonical env name, legacy name, then the stack default."""
-    return resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE', required=False, default='CitationAnalysis-Keywords')
+    """The Keywords table scopes resolve against: the canonical env name, then the stack default."""
+    return resolve_table_env('DYNAMODB_TABLE_KEYWORDS', required=False, default='CitationAnalysis-Keywords')
 
 
 @dataclass(frozen=True)

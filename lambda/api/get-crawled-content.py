@@ -25,9 +25,7 @@ dynamodb = boto3.resource('dynamodb')
 s3_client = boto3.client('s3')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
-CRAWLED_CONTENT_TABLE = resolve_table_env(
-    'DYNAMODB_TABLE_CRAWLED_CONTENT', 'CRAWLED_CONTENT_TABLE',
-)
+CRAWLED_CONTENT_TABLE = resolve_table_env('DYNAMODB_TABLE_CRAWLED_CONTENT')
 
 
 def generate_presigned_url(s3_uri: str, expiration: int = 900) -> str | None:

@@ -38,7 +38,7 @@ dynamodb = boto3.resource('dynamodb')
 
 SEARCH_RESULTS_TABLE = search_results_table_name()
 SELF_REFLECTION_TABLE = os.environ['DYNAMODB_TABLE_SELF_REFLECTION']
-QUERY_PROMPTS_TABLE = os.environ['QUERY_PROMPTS_TABLE']
+QUERY_PROMPTS_TABLE = os.environ['DYNAMODB_TABLE_QUERY_PROMPTS']
 CACHE_TTL_HOURS = 24
 
 SELF_REFLECTION_PROMPT = """You are analysing an AI search response to explain brand ranking decisions.

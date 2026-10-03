@@ -33,13 +33,12 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
 STATE_MACHINE_ARN = os.environ['STATE_MACHINE_ARN']
-KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
+KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS')
 # Query prompts table is optional — the analysis flow has a no-prompt fallback
 # for deployments that haven't enabled the feature yet. Default mirrors the
 # CDK stack's resource name for bootstrap deploys.
 QUERY_PROMPTS_TABLE = resolve_table_env(
-    'DYNAMODB_TABLE_QUERY_PROMPTS', 'QUERY_PROMPTS_TABLE',
-    required=False, default='CitationAnalysis-QueryPrompts',
+    'DYNAMODB_TABLE_QUERY_PROMPTS', required=False, default='CitationAnalysis-QueryPrompts',
 )
 
 keywords_table = dynamodb.Table(KEYWORDS_TABLE)

@@ -63,7 +63,6 @@ _KEYWORD_ANALYSIS_WORKERS = 6
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
-CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 
 
@@ -325,7 +324,7 @@ def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any
     return result
 
 
-def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10, scope: ReportScope | None = None) -> dict[str, Any]:
+def analyze_all_keywords_gaps(config: dict[str, Any], limit: int, scope: ReportScope | None) -> dict[str, Any]:
     """Analyze citation gaps across the active keywords of a scope."""
     configuration_error = _first_party_brand_error(config)
     if configuration_error is not None:
@@ -384,7 +383,7 @@ def gaps_for_scope(scope: ReportScope | None, config: dict[str, Any], limit: int
     """Return one-keyword analysis or a rollup for the requested scope."""
     if scope is not None and scope.is_single_keyword:
         return analyze_citation_gaps(scope.keywords[0], config)
-    return analyze_all_keywords_gaps(config, limit, scope=scope)
+    return analyze_all_keywords_gaps(config, limit, scope)
 
 
 @api_handler

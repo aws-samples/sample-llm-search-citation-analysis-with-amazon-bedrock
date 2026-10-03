@@ -56,11 +56,6 @@ const bedrockTierEnv = {
  */
 const CONTENT_STUDIO_WORKER_FUNCTION_NAME = 'CitationAnalysis-ContentStudioWorker';
 const CONTENT_STUDIO_WORKER_CONCURRENCY = 10;
-// First rollout compatibility: old code can still self-invoke while Lambda
-// configuration and code update sequentially. Remove these only after the old
-// async queue and execution environments have drained in a later rollout.
-const CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS = 300;
-const CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY = 10;
 const CONTENT_STUDIO_STREAM_RETRY_ATTEMPTS = 2;
 const CONTENT_STUDIO_STREAM_MAX_RECORD_AGE_MINUTES = 60;
 const CONTENT_STUDIO_RECONCILE_INTERVAL_MINUTES = 5;
@@ -77,9 +72,7 @@ const CONTENT_STUDIO_RECONCILE_INTERVAL_MINUTES = 5;
  * failure then surfaces as a Lambda timeout — visible in the function's own
  * Duration/Errors metrics — instead of only as an opaque gateway 504.
  *
- * Two deliberate exceptions are documented at their definitions:
- *   - `contentStudioFunction` temporarily retains its old worker timeout while
- *     pre-rollout self-invocations drain through the new forwarding handler.
+ * One deliberate exception is documented at its definition:
  *   - `selfReflectionFunction` persists its result as the last step of a
  *     synchronous Bedrock call, so a 504 today is still recoverable from the
  *     cache it writes. Capping it at 29s would turn a slow request into
@@ -757,12 +750,6 @@ export class CitationAnalysisStack extends cdk.Stack {
       partitionKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
       sortKey: { name: 'normalized_url', type: dynamodb.AttributeType.STRING },
       globalSecondaryIndexes: [
-        // GSI: CitationCountIndex - Query citations by popularity
-        {
-          indexName: 'CitationCountIndex',
-          partitionKey: { name: 'keyword', type: dynamodb.AttributeType.STRING },
-          sortKey: { name: 'citation_count', type: dynamodb.AttributeType.NUMBER },
-        },
         // GSI: UrlIndex - Inverse index for "which keywords cite this URL?"
         //
         // The base table is keyed by (keyword, normalized_url) which makes the
@@ -1224,14 +1211,11 @@ export class CitationAnalysisStack extends cdk.Stack {
       memorySize: 256,
       description: 'Parse keywords from S3 or direct input',
       environment: {
-        // Audit #12 canonical name + legacy for in-flight rollouts.
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
-        KEYWORDS_TABLE: keywordsTable.tableName,
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         // Enabled query prompts are resolved here for executions whose input
         // does not carry them (EventBridge schedules).
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
-        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
         // Every run's keyword list is written here as the ProcessKeywords
         // item source (`runs/<execution>/keywords.json`).
         KEYWORDS_BUCKET: keywordsBucket.bucketName,
@@ -1262,10 +1246,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
-        // Canonical name (audit #12). Legacy PROVIDER_CONFIG_TABLE kept for
-        // in-flight deploys; can be dropped after one full rollout.
         DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
-        PROVIDER_CONFIG_TABLE: providerConfigTable.tableName,
         SECRETS_PREFIX: 'citation-analysis/',
         RAW_RESPONSES_BUCKET: rawResponsesBucket.bucketName,
         ...bedrockTierEnv,
@@ -1290,10 +1271,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       memorySize: 256,
       description: 'Deduplicate and prioritize citations',
       environment: {
-        // Canonical name (audit #12). Legacy CITATIONS_TABLE_NAME kept for
-        // in-flight deploys; can be dropped after one full rollout.
         DYNAMODB_TABLE_CITATIONS: citationsTable.tableName,
-        CITATIONS_TABLE_NAME: citationsTable.tableName,
       },
     });
 
@@ -1880,22 +1858,15 @@ export class CitationAnalysisStack extends cdk.Stack {
       memorySize: 512,
       description: 'API: Consolidated stats, visibility, insights, gaps, recommendations, and trends',
       environment: {
-        // Audit #12: canonical DYNAMODB_TABLE_* names. Legacy names kept
-        // for in-flight deploys; can be dropped after one full rollout.
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_CITATIONS: citationsTable.tableName,
         DYNAMODB_TABLE_CRAWLED_CONTENT: crawledContentTable.tableName,
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
-        // Legacy names (to be removed once rollout is verified):
-        SEARCH_RESULTS_TABLE: searchResultsTable.tableName,
-        CITATIONS_TABLE: citationsTable.tableName,
-        CRAWLED_CONTENT_TABLE: crawledContentTable.tableName,
-        KEYWORDS_TABLE: keywordsTable.tableName,
         ...bedrockTierEnv,
         // recommendation status (read for left-join, write for the
         // POST /recommendations/{id}/status route)
-        RECOMMENDATION_STATUS_TABLE: recommendationStatusTable.tableName,
+        DYNAMODB_TABLE_RECOMMENDATION_STATUS: recommendationStatusTable.tableName,
       },
     });
 
@@ -1924,10 +1895,6 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_CRAWLED_CONTENT: crawledContentTable.tableName,
         // /citations resolves group_id / keyword_ids scopes against the keywords table.
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
-        // Legacy names, dropped once rollout verified.
-        CITATIONS_TABLE: citationsTable.tableName,
-        SEARCH_RESULTS_TABLE: searchResultsTable.tableName,
-        CRAWLED_CONTENT_TABLE: crawledContentTable.tableName,
         RAW_RESPONSES_BUCKET: rawResponsesBucket.bucketName,
         SCREENSHOTS_BUCKET: screenshotsBucket.bucketName,
       },
@@ -1977,9 +1944,6 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         DYNAMODB_TABLE_KEYWORD_RESEARCH: keywordResearchTable.tableName,
         DYNAMODB_TABLE_RESEARCH_TEMPLATES: researchTemplatesTable.tableName,
-        // Legacy names, dropped once rollout verified.
-        KEYWORDS_TABLE: keywordsTable.tableName,
-        KEYWORD_RESEARCH_TABLE: keywordResearchTable.tableName,
         RESEARCH_STATE_MACHINE_ARN: researchStateMachine.stateMachineArn,
         SECRETS_PREFIX: 'citation-analysis/',
       },
@@ -2009,9 +1973,6 @@ export class CitationAnalysisStack extends cdk.Stack {
         KPI_ALERTS_TOPIC_ARN: kpiAlertsTopic.topicArn,
         // Schedules and content-change markers validate group ids.
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
-        // Legacy names, dropped once rollout verified.
-        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
-        PROVIDER_CONFIG_TABLE: providerConfigTable.tableName,
         STATE_MACHINE_ARN: stateMachine.stateMachineArn,
         SCHEDULE_ROLE_ARN: schedulerRole.roleArn,
         SECRETS_PREFIX: 'citation-analysis/',
@@ -2035,9 +1996,6 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
-        // Legacy names, dropped once rollout verified.
-        KEYWORDS_TABLE: keywordsTable.tableName,
-        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
       },
     });
 
@@ -2146,7 +2104,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       description: 'API: Get per-persona brand ranking breakdowns',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
-        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
+        DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
       },
     });
     searchResultsTable.grantReadData(getPersonaRankingsFunction);
@@ -2180,7 +2138,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_SELF_REFLECTION: selfReflectionTable.tableName,
-        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
+        DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
         // NOTE: `shared/models.py` resolves the analysis model from
         // BEDROCK_TIER_<ROLE> (see `bedrockTierEnv`), which this function does
         // not spread, so ModelRole.ANALYSIS falls through to its hardcoded
@@ -2461,16 +2419,11 @@ export class CitationAnalysisStack extends cdk.Stack {
     const contentStudioStatusIndexArn = `${contentStudioTable.tableArn}/index/StatusCreatedIndex`;
     const keywordsStatusIndexArn = `${keywordsTable.tableArn}/index/StatusIndex`;
 
-    // New requests only persist stream-owned rows. This first rollout keeps
-    // the old timeout and concurrency cap because CloudFormation updates
-    // Lambda configuration before code: old async_generation code must remain
-    // runnable until the forwarding handler is active and its queue drains.
+    // Requests only persist stream-owned rows; generation runs in the worker.
     const contentStudioFunction = apiFunction(this, 'ContentStudio', sharedLayer, {
       functionName: 'CitationAnalysis-API-ContentStudio',
       handlerFiles: ['content-studio.py'],
-      timeout: cdk.Duration.seconds(CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS),
       memorySize: 512,
-      reservedConcurrentExecutions: CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY,
       description: 'API: Content Studio - ideas and durable content queues',
       environment: contentStudioEnvironment,
     });
@@ -2481,9 +2434,6 @@ export class CitationAnalysisStack extends cdk.Stack {
       'dynamodb:DeleteItem',
       'dynamodb:GetItem',
       'dynamodb:PutItem',
-      // Temporary legacy drain: old history code scanned this table before
-      // the StatusCreatedIndex reader was active.
-      'dynamodb:Scan',
       'dynamodb:UpdateItem',
     ], [contentStudioTable.tableArn]);
     allow(contentStudioFunction, ['dynamodb:Query'], [contentStudioStatusIndexArn]);
@@ -2497,10 +2447,6 @@ export class CitationAnalysisStack extends cdk.Stack {
     ], [contentBriefTemplatesTable.tableArn]);
     allow(contentStudioFunction, ['dynamodb:Scan'], [keywordsTable.tableArn]);
     allow(contentStudioFunction, ['dynamodb:Query'], [keywordsStatusIndexArn]);
-    // Temporary legacy drain: old async workers query crawled sources and
-    // invoke Bedrock until every pre-rollout event reaches the new forwarder.
-    allow(contentStudioFunction, ['dynamodb:Query'], [crawledContentTable.tableArn]);
-    contentStudioFunction.addToRolePolicy(claudeInvokeModelStatement(this));
 
     const contentStudioWorkerFunction = workerFunction(this, 'ContentStudioWorker', {
       functionName: CONTENT_STUDIO_WORKER_FUNCTION_NAME,
@@ -2519,20 +2465,14 @@ export class CitationAnalysisStack extends cdk.Stack {
     allow(contentStudioWorkerFunction, ['dynamodb:Query'], [crawledContentTable.tableArn]);
     contentStudioWorkerFunction.addToRolePolicy(claudeInvokeModelStatement(this));
 
-    // Phase-one compatibility keeps both exact API targets: old code can
-    // still invoke itself during the configuration-before-code update, while
-    // the new handler forwards those queued events to the worker. New request
-    // paths never call either target directly.
-    const stack = cdk.Stack.of(this);
-    const functionArnByName = (resourceName: string): string => stack.formatArn({
+    // Reconciliation re-dispatches recovered rows to the worker itself. The
+    // API never invokes a Lambda: generation starts from the table stream.
+    const contentStudioWorkerFunctionArn = cdk.Stack.of(this).formatArn({
       service: 'lambda',
       resource: 'function',
-      resourceName,
+      resourceName: CONTENT_STUDIO_WORKER_FUNCTION_NAME,
       arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
     });
-    const contentStudioApiFunctionArn = functionArnByName('CitationAnalysis-API-ContentStudio');
-    const contentStudioWorkerFunctionArn = functionArnByName(CONTENT_STUDIO_WORKER_FUNCTION_NAME);
-    allow(contentStudioFunction, ['lambda:InvokeFunction'], [contentStudioApiFunctionArn, contentStudioWorkerFunctionArn]);
     allow(contentStudioWorkerFunction, ['lambda:InvokeFunction'], [contentStudioWorkerFunctionArn]);
 
     const contentStudioStreamDlq = new sqs.Queue(this, 'ContentStudioStreamDlq', {

@@ -17,7 +17,7 @@ from testing.search_results_fixtures import report_dynamodb, search_result_row, 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 _ENV = {
     'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
-    'QUERY_PROMPTS_TABLE': 'test-query-prompts',
+    'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-query-prompts',
     'CORS_ORIGIN_PARAM': '',
 }
 _KEYWORD = 'hotel sol spa'

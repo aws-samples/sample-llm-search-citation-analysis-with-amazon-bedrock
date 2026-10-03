@@ -71,9 +71,9 @@ def test_uses_distinct_portfolio_rules_when_brand_type_changes(monkeypatch) -> N
     model = MagicMock(return_value='{"parent_companies": [], "suggestions": [], "notes": ""}')
     monkeypatch.setattr(_mod, 'invoke_bedrock', model)
 
-    _mod.expand_brands(['Acme'], industry='general')
+    _mod.expand_brands(['Acme'], 'general', 'first_party')
     first_party_prompt = model.call_args.args[0]
-    _mod.expand_brands(['Rival'], industry='general', brand_type='competitor')
+    _mod.expand_brands(['Rival'], 'general', 'competitor')
     competitor_prompt = model.call_args.args[0]
 
     assert (

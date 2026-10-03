@@ -53,7 +53,6 @@ _SHARED_ENV = {
     'DYNAMODB_TABLE_ALERT_SETTINGS': 'test-alert-settings',
     'DYNAMODB_TABLE_CONTENT_CHANGES': 'test-content-changes',
     'KPI_ALERTS_TOPIC_ARN': 'arn:aws:sns:us-east-1:123456789012:test-kpi-alerts',
-    'QUERY_PROMPTS_TABLE': 'test-query-prompts',
 }
 
 
