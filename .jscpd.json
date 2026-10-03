@@ -1,6 +1,10 @@
 {
-  "minTokens": 40,
-  "threshold": 0,
+  "minTokens": 25,
+  "minLines": 3,
+  "mode": "weak",
+  "crossFormats": "typescript,tsx",
+  "baseline": ".jscpd-baseline/typescript.json",
+  "failOnNewClones": 0,
   "gitignore": true,
   "format": ["typescript", "tsx"],
   "reporters": ["console"],

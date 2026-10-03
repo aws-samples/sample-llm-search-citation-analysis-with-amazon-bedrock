@@ -9,6 +9,42 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.30.0] - 2026-10-03
+
+### Fixed
+
+- **Persona Rankings** show the KPI visibility score (`kpi_engine`, position-weighted). They used a second,
+  differently weighted formula, so the same brand scored differently there (for example 85.6 instead of 100.0).
+- **First-party domains are matched one way everywhere.** Citation Gaps now treats `example.com:443`, `example.com.`
+  and bare-domain citations as first-party, as the KPIs already did, and a malformed citation URL no longer breaks
+  the KPI calculation. Adding an owned domain in Brand Tracking stores the same canonical domain (no port, query,
+  credentials or edge dots). `test-fixtures/domain-identity.json` pins the rules for Python and TypeScript.
+- Adding a keyword flags full-width, decomposed-accent and other Unicode variants of an existing keyword as
+  duplicates, matching what the API already rejected.
+- Provider names read "OpenAI", "Google Gemini" and "Anthropic Claude" everywhere (keyword details showed
+  "Openai"); provider badges use the chart colours. A contract test pins provider ids, names and default models
+  between the dashboard and the Lambdas.
+- The Visibility leaderboard says "first-party", like the KPI guide and the reports.
+- A sentiment share note rounds like its chart (28.8%, not 28.7%).
+- The self-reflection 24-hour cache is measured in UTC; a stored timestamp with an offset is converted instead of
+  having its offset dropped, and a malformed one is a cache miss instead of a 500.
+- The decorative Refresh and Invite icons in Settings › Users are hidden from screen readers.
+
+### Changed
+
+- **Duplicate and dead code sweep.** Clones at the new 25-token / 3-line floor went from about 1,950 to 508, all
+  reviewed as incidental and recorded in `.jscpd-baseline/`; production code shrank by about 950 lines. One factory
+  per Lambda kind, IAM grant and route in the CDK stack (synthesized template unchanged); one search flow for every
+  search provider; one conditional-write, paginator, timestamp, percent, priority-order and sentiment-label helper in
+  `lambda/shared`; one saved-template hook, error factory and icon component in the dashboard; exports nothing
+  imports were removed.
+- **Duplication gate:** jscpd runs at 25 tokens / 3 lines, ignoring comments and comparing `.ts` with `.tsx`; any
+  clone not in the baseline fails `npm run validate`. `npm run duplication:baseline` rewrites the baseline.
+- The lines the sweep changed were mutation-tested (mutmut and Stryker); about 150 Python and 260 web test cases
+  were added for the survivors. Contract tests now also pin the research state-machine timeout against the stale-job
+  sweep and the Bedrock tier defaults between the CDK stack and `shared/models.py`.
+- `npm run contracts` no longer counts fixture modules under `web/src/types` as type declarations.
+
 ## [2.29.0] - 2026-10-03
 
 ### Added
