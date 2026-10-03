@@ -215,7 +215,8 @@ def answers_from_rows(rows: Iterable[Mapping[str, Any]]) -> list[Answer]:
 # KPIs of the tracked brand
 # ---------------------------------------------------------------------------
 
-def _percent(numerator: int, denominator: int) -> float | None:
+def percent(numerator: int, denominator: int) -> float | None:
+    """``numerator`` as a percentage of ``denominator``, to one decimal; ``None`` when there is nothing to divide by."""
     return round(numerator / denominator * 100, 1) if denominator else None
 
 
@@ -257,8 +258,8 @@ def _citation_kpis(answers: list[Answer], owned_domains: list[str]) -> dict[str,
         all_pairs += len(answer.cited_domains)
     return {
         'citations': citing,
-        'citation_rate': _percent(citing, len(answers)),
-        'citation_share': _percent(owned_pairs, all_pairs),
+        'citation_rate': percent(citing, len(answers)),
+        'citation_share': percent(owned_pairs, all_pairs),
     }
 
 
@@ -280,16 +281,16 @@ def brand_kpis(answers: Iterable[Answer], owned_domains: Iterable[str] = ()) -> 
     return {
         'answers': len(pool),
         'mentions': len(mentioning),
-        'mention_rate': _percent(len(mentioning), len(pool)),
-        'share_of_voice': _percent(first_party_mentions, total_mentions),
+        'mention_rate': percent(len(mentioning), len(pool)),
+        'share_of_voice': percent(first_party_mentions, total_mentions),
         'average_position': round(sum(ranks) / len(ranks), 2) if ranks else None,
-        'top_1_share': _percent(sum(rank == 1 for rank in ranks), len(pool)),
-        'top_3_share': _percent(sum(rank <= 3 for rank in ranks), len(pool)),
+        'top_1_share': percent(sum(rank == 1 for rank in ranks), len(pool)),
+        'top_3_share': percent(sum(rank <= 3 for rank in ranks), len(pool)),
         'visibility_score': round(visibility / len(pool) * 100, 1) if pool else None,
         **_citation_kpis(pool, domains),
         **_net_sentiment(sighting for answer in mentioning for sighting in answer.first_party()),
-        'engine_coverage': _percent(len({answer.provider for answer in mentioning}), len(engines)),
-        'keyword_coverage': _percent(len({answer.keyword for answer in mentioning}), len(keywords)),
+        'engine_coverage': percent(len({answer.provider for answer in mentioning}), len(engines)),
+        'keyword_coverage': percent(len({answer.keyword for answer in mentioning}), len(keywords)),
         'engines': len(engines),
         'keywords': len(keywords),
     }
@@ -321,8 +322,8 @@ def brand_table(answers: Iterable[Answer]) -> list[dict[str, Any]]:
             'name': first.name,
             'classification': first.classification,
             'mentions': counts[key],
-            'mention_rate': _percent(counts[key], len(pool)),
-            'share_of_voice': _percent(counts[key], total_mentions),
+            'mention_rate': percent(counts[key], len(pool)),
+            'share_of_voice': percent(counts[key], total_mentions),
             'average_position': round(sum(ranks) / len(ranks), 2) if ranks else None,
             'best_position': min(ranks) if ranks else None,
             'visibility_score': round(sum(position_weight(sighting.rank) for _answer, sighting in seen) / len(pool) * 100, 1),
@@ -367,8 +368,8 @@ def source_table(answers: Iterable[Answer], owned_domains: Iterable[str] = ()) -
             'domain': domain,
             'owned': is_owned_domain(domain, domains),
             'citations': len(answers_citing),
-            'citation_rate': _percent(len(answers_citing), len(pool)),
-            'citation_share': _percent(len(answers_citing), all_pairs),
+            'citation_rate': percent(len(answers_citing), len(pool)),
+            'citation_share': percent(len(answers_citing), all_pairs),
             'engines': sorted({answer.provider for answer in answers_citing}),
             'keywords': len({answer.keyword for answer in answers_citing}),
         }
@@ -435,6 +436,7 @@ __all__ = [
     'kpi_trends',
     'normalize_domain',
     'owned_domains_from',
+    'percent',
     'position_weight',
     'sighting_from_brand',
     'source_table',

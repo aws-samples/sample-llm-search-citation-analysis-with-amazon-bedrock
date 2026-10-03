@@ -27,6 +27,7 @@ from shared.api_response import success_response, validation_error
 from shared.brand_visibility import load_recent_search_results, tracked_brand_names
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
+from shared.kpi_engine import percent
 from shared.search_results import latest_run, scan_keyword_texts, search_results_table_name
 from shared.utils import get_brand_config
 
@@ -189,7 +190,7 @@ def _rank_prompts(prompts: list[dict[str, Any]]) -> dict[str, Any]:
             'winning_count': len(winning_prompts),
             'losing_count': len(losing_prompts),
             'opportunity_count': len(opportunity_prompts),
-            'win_rate': round(len(winning_prompts) / len(prompts) * 100, 1) if prompts else 0
+            'win_rate': percent(len(winning_prompts), len(prompts)) if prompts else 0
         }
     }
 

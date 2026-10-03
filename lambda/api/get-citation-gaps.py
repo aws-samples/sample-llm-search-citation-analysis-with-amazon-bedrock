@@ -29,7 +29,7 @@ from shared.brand_visibility import tracked_brand_names
 from shared.constants import priority_rank
 from shared.decorators import api_handler, validate
 from shared.dynamodb_batch import query_latest_per_key
-from shared.kpi_engine import is_owned_domain, normalize_domain
+from shared.kpi_engine import is_owned_domain, normalize_domain, percent
 from shared.scope_params import (
     SCOPE_QUERY_PARAMS,
     ReportScope,
@@ -310,7 +310,7 @@ def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str
             'gap_count': len(gaps),
             'covered_count': len(covered_sources),
             'high_priority_gaps': len(high_priority_gaps),
-            'coverage_rate': round(len(covered_sources) / len(source_brand_map) * 100, 1) if source_brand_map else 0,
+            'coverage_rate': percent(len(covered_sources), len(source_brand_map)) if source_brand_map else 0,
         },
     }
 
