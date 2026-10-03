@@ -52,13 +52,13 @@ from shared.content_brief import (
     validate_template_placeholders,
 )
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
-from shared.dynamo_conditions import is_conditional_check_failure
 from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import (
     BatchGetUnprocessedError,
     batch_get_items,
     query_latest_per_key,
 )
+from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure
 from shared.keyword_groups import MAX_GROUP_ID_LENGTH
 from shared.models import BedrockInvocationError, ModelRole, get_model_tier, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
@@ -2693,19 +2693,13 @@ def _conditional_recovery_update(
     condition_expression: str,
     values: dict[str, Any],
 ) -> bool:
-    try:
-        dynamodb.Table(CONTENT_STUDIO_TABLE).update_item(
-            Key={"id": content_id},
-            UpdateExpression=update_expression,
-            ConditionExpression=condition_expression,
-            ExpressionAttributeNames={"#status": "status"},
-            ExpressionAttributeValues=values,
-        )
-    except ClientError as error:
-        if is_conditional_check_failure(error):
-            return False
-        raise
-    return True
+    return applied_conditionally(lambda: dynamodb.Table(CONTENT_STUDIO_TABLE).update_item(
+        Key={"id": content_id},
+        UpdateExpression=update_expression,
+        ConditionExpression=condition_expression,
+        ExpressionAttributeNames={"#status": "status"},
+        ExpressionAttributeValues=values,
+    ))
 
 
 def _terminalize_exhausted_row(row: dict[str, Any], now_epoch: int) -> bool:
