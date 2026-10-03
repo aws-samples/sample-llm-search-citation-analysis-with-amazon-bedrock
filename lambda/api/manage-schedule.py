@@ -421,6 +421,19 @@ def _written_detail(schedule_id: str, display_name: str, form: dict[str, Any], s
     }
 
 
+def _written_view(
+    schedule_id: str,
+    display_name: str,
+    form: dict[str, Any],
+    scope: dict[str, Any],
+    enabled: bool,
+    *,
+    message: str,
+) -> dict[str, Any]:
+    """The API view of the schedule just written, with the confirmation ``message``."""
+    return {**describe_schedule(_written_detail(schedule_id, display_name, form, scope, enabled)), 'message': message}
+
+
 @require_group(ADMIN_GROUP)
 @parse_json_body
 def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str, Any]) -> dict[str, Any]:
@@ -453,10 +466,11 @@ def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
         return api_response(409, {'error': 'Could not allocate a schedule id, please retry'}, event)
 
     logger.info(f"Created schedule {schedule_id} ({display_name!r}, {describe_scope(scope)})")
-    return success_response({
-        **describe_schedule(_written_detail(schedule_id, display_name, form, scope, enabled)),
-        'message': 'Schedule created successfully',
-    }, event, 201)
+    return success_response(
+        _written_view(schedule_id, display_name, form, scope, enabled, message='Schedule created successfully'),
+        event,
+        201,
+    )
 
 
 def _scope_to_update(body: dict[str, Any], current: dict[str, Any]) -> Any:
@@ -507,10 +521,10 @@ def _update_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
         return validation_error(_validation_exception_message(exc), event)
 
     logger.info(f"Updated schedule {schedule_id} ({display_name!r}, {describe_scope(scope)})")
-    return success_response({
-        **describe_schedule(_written_detail(schedule_id, display_name, form, scope, enabled)),
-        'message': 'Schedule updated successfully',
-    }, event)
+    return success_response(
+        _written_view(schedule_id, display_name, form, scope, enabled, message='Schedule updated successfully'),
+        event,
+    )
 
 
 @require_group(ADMIN_GROUP)

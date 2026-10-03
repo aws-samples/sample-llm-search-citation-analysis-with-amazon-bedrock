@@ -218,24 +218,6 @@ class TestUpdateReport:
         assert (body['report']['title'], body['report']['days']) == ('Renamed', 180)
         assert (body['report']['created_by'], body['report']['updated_by']) == ('author@example.com', CALLER_EMAIL)
 
-    def test_answers_404_when_no_report_has_the_id(self) -> None:
-        table = fake_table()
-        table.update_item.side_effect = conditional_check_failure('UpdateItem')
-
-        status, body = call_custom_reports(_mod, table, 'PUT', body=report_body(), report_id=REPORT_ID)
-
-        assert (status, body) == (404, _NOT_FOUND)
-
-    def test_answers_500_when_the_write_fails_for_another_reason(self) -> None:
-        table = fake_table()
-        table.update_item.side_effect = ClientError(
-            {'Error': {'Code': 'ProvisionedThroughputExceededException', 'Message': 'busy'}}, 'UpdateItem'
-        )
-
-        status, body = call_custom_reports(_mod, table, 'PUT', body=report_body(), report_id=REPORT_ID)
-
-        assert (status, body) == (500, {'error': 'Service temporarily unavailable'})
-
     def test_refuses_an_invalid_body_without_writing(self) -> None:
         table = fake_table()
 
@@ -258,13 +240,27 @@ class TestDeleteReport:
             ExpressionAttributeNames={'#id': 'id'},
         )
 
-    def test_answers_404_when_no_report_has_the_id(self) -> None:
+
+class TestWriteFailures:
+    @pytest.mark.parametrize(('method', 'body', 'write', 'failure', 'expected'), [
+        pytest.param('PUT', report_body(), 'update_item', conditional_check_failure('UpdateItem'), (404, _NOT_FOUND),
+                     id='update 404 when no report has the id'),
+        pytest.param(
+            'PUT', report_body(), 'update_item',
+            ClientError({'Error': {'Code': 'ProvisionedThroughputExceededException', 'Message': 'busy'}}, 'UpdateItem'),
+            (500, {'error': 'Service temporarily unavailable'}),
+            id='update 500 when the write fails for another reason',
+        ),
+        pytest.param('DELETE', None, 'delete_item', conditional_check_failure('DeleteItem'), (404, _NOT_FOUND),
+                     id='delete 404 when no report has the id'),
+    ])
+    def test_answers_with_the_status_the_failed_write_maps_to(
+        self, method: str, body: dict[str, Any] | None, write: str, failure: Exception, expected: tuple[int, Any]
+    ) -> None:
         table = fake_table()
-        table.delete_item.side_effect = conditional_check_failure('DeleteItem')
+        getattr(table, write).side_effect = failure
 
-        status, body = call_custom_reports(_mod, table, 'DELETE', report_id=REPORT_ID)
-
-        assert (status, body) == (404, _NOT_FOUND)
+        assert call_custom_reports(_mod, table, method, body=body, report_id=REPORT_ID) == expected
 
 
 class TestReportIdGuard:
@@ -353,165 +349,131 @@ class TestBlockListValidation:
         assert status == 201
         assert body['report']['blocks'] == [_DATA_BLOCK] * 30
 
-    @pytest.mark.parametrize(
-        'block',
-        [
-            {'text': 'No type'},
-            {'type': 'h'},
-            {'type': 'Heading'},
-            {'type': '1heading'},
-            {'type': 'sentiment-headline'},
-            {'type': 'x' * 49},
-            {'type': 'heading\n'},
-            {'type': 7},
-        ],
-        ids=['absent', 'one character', 'uppercase', 'leading digit', 'hyphen', '49 characters', 'trailing newline', 'number'],
-    )
-    def test_refuses_a_block_type_that_is_not_a_lowercase_identifier(self, block: dict[str, Any]) -> None:
-        _, body, _ = create_report_for_test(_mod, single_block_body(block))
 
-        assert body == {'error': _TYPE_ERROR, 'field': 'blocks'}
-
-    def test_stores_an_unknown_data_block_type_as_given(self) -> None:
-        block = {'type': 'x' + 'y' * 47}
-
-        _, body, _ = create_report_for_test(_mod, single_block_body(block))
-
-        assert body['report']['blocks'] == [block]
-
-    @pytest.mark.parametrize(
-        ('block', 'message'),
-        [
-            ({'type': 'sentiment_headline', 'color': 'red'}, 'Block 1: sentiment_headline does not accept color'),
-            ({**_HEADING, 'id': 'client-key'}, 'Block 1: heading does not accept id'),
-            ({**_VIDEO, 'autoplay': True}, 'Block 1: video does not accept autoplay'),
-        ],
-        ids=['data block', 'heading', 'video'],
-    )
-    def test_refuses_a_block_carrying_a_key_its_type_does_not_take(self, block: dict[str, Any], message: str) -> None:
-        _, body, _ = create_report_for_test(_mod, single_block_body(block))
-
-        assert body == {'error': message, 'field': 'blocks'}
+def _post_single_block(block: dict[str, Any]) -> tuple[int, Any]:
+    """``(status, body)`` of creating a report whose only block is ``block``."""
+    status, body, _ = create_report_for_test(_mod, single_block_body(block))
+    return status, body
 
 
-class TestContentBlockValidation:
+def _video(url: str) -> dict[str, str]:
+    return {'type': 'video', 'url': url}
+
+
+# `test-fixtures/custom-report-blocks.json`: the dashboard must agree on every vector.
+_STORED_LINK_VECTORS = [
+    *(pytest.param(_video(vector['url']), _video(vector['url'].strip()), id=vector_description(vector))
+      for vector in EMBEDDABLE_VIDEO_LINKS),
+    *(pytest.param({**_IMAGE, 'url': vector['url']}, {**_IMAGE, 'url': vector['url'].strip()}, id=vector_description(vector))
+      for vector in VALID_IMAGE_LINKS),
+]
+_REFUSED_LINK_VECTORS = [
+    *(pytest.param(_video(vector['url']), 'video', id=vector_description(vector)) for vector in UNEMBEDDABLE_VIDEO_LINKS),
+    *(pytest.param({**_IMAGE, 'url': vector['url']}, 'image', id=vector_description(vector)) for vector in INVALID_IMAGE_LINKS),
+]
+
+
+class TestBlockValidation:
     @pytest.mark.parametrize(
         ('block', 'message'),
         [
-            ({'type': 'heading', 'level': 2}, 'Block 1: heading text is required'),
-            ({**_HEADING, 'text': '   '}, 'Block 1: heading text is required'),
-            ({**_HEADING, 'text': 'h' * 121}, 'Block 1: heading text must be at most 120 characters'),
-            ({**_HEADING, 'text': 5}, 'Block 1: heading text must be a string'),
-            ({'type': 'heading', 'text': 'Title'}, 'Block 1: heading level is required'),
-            ({**_HEADING, 'level': 1}, 'Block 1: heading level must be 2 or 3'),
-            ({**_HEADING, 'level': 4}, 'Block 1: heading level must be 2 or 3'),
-            ({**_HEADING, 'level': True}, 'Block 1: heading level must be 2 or 3'),
-            ({**_HEADING, 'level': 2.0}, 'Block 1: heading level must be 2 or 3'),
-            ({**_HEADING, 'level': '2'}, 'Block 1: heading level must be 2 or 3'),
-            ({'type': 'text'}, 'Block 1: text markdown is required'),
-            ({'type': 'text', 'markdown': 'm' * 5001}, 'Block 1: text markdown must be at most 5000 characters'),
-            ({'type': 'image', 'alt': 'Logo'}, 'Block 1: image url is required'),
-            ({'type': 'image', 'url': 'https://example.com/logo.png'}, 'Block 1: image alt is required'),
-            ({**_IMAGE, 'alt': 'a' * 201}, 'Block 1: image alt must be at most 200 characters'),
-            ({**_IMAGE, 'caption': 'c' * 201}, 'Block 1: image caption must be at most 200 characters'),
-            ({**_IMAGE, 'caption': None}, 'Block 1: image caption must be a string'),
-            ({**_IMAGE, 'url': 'https://example.com/' + 'a' * 2029}, 'Block 1: image url must be at most 2048 characters'),
-            ({**_IMAGE, 'url': 'https://example.com:abc/logo.png'}, 'Block 1: image url must be an https link'),
-            ({**_IMAGE, 'url': 'https://example.com:0/logo.png'}, 'Block 1: image url must be an https link'),
-            ({**_IMAGE, 'url': 'https://example.com/lo\x00go.png'}, 'Block 1: image url must be an https link'),
-            ({**_IMAGE, 'url': 'https://@example.com/logo.png'}, 'Block 1: image url must be an https link'),
-            ({**_IMAGE, 'url': 'https://[::1/logo.png'}, 'Block 1: image url must be an https link'),
-            ({**_VIDEO, 'caption': 'c' * 201}, 'Block 1: video caption must be at most 200 characters'),
-            ({**_VIDEO, 'url': 'https://www.youtube.com:443/watch?v=dQw4w9WgXcQ'},
-             'Block 1: video url must be a YouTube or Vimeo video link'),
-            ({**_VIDEO, 'url': 'https://youtu.be:/dQw4w9WgXcQ'}, 'Block 1: video url must be a YouTube or Vimeo video link'),
-            ({**_VIDEO, 'url': 'https://www.youtube.com/embed/dQw4w9WgXcQ/'},
-             'Block 1: video url must be a YouTube or Vimeo video link'),
-            ({**_VIDEO, 'url': 'https://player.vimeo.com/video/1234567890123'},
-             'Block 1: video url must be a YouTube or Vimeo video link'),
-        ],
-        ids=[
-            'heading text absent', 'heading text blank', 'heading text 121 characters', 'heading text a number',
-            'heading level absent', 'heading level 1', 'heading level 4', 'heading level a boolean',
-            'heading level a float', 'heading level a string', 'text markdown absent', 'text markdown 5001 characters',
-            'image url absent', 'image alt absent', 'image alt 201 characters', 'image caption 201 characters',
-            'image caption null', 'image url 2049 characters', 'image url malformed port', 'image url port zero',
-            'image url control character', 'image url empty user name', 'image url broken IPv6 host',
-            'video caption 201 characters', 'video url explicit port', 'video url empty port',
-            'video url trailing slash', 'video url 13-digit Vimeo id',
+            pytest.param({'text': 'No type'}, _TYPE_ERROR, id='type absent'),
+            pytest.param({'type': 'h'}, _TYPE_ERROR, id='type one character'),
+            pytest.param({'type': 'Heading'}, _TYPE_ERROR, id='type uppercase'),
+            pytest.param({'type': '1heading'}, _TYPE_ERROR, id='type leading digit'),
+            pytest.param({'type': 'sentiment-headline'}, _TYPE_ERROR, id='type hyphen'),
+            pytest.param({'type': 'x' * 49}, _TYPE_ERROR, id='type 49 characters'),
+            pytest.param({'type': 'heading\n'}, _TYPE_ERROR, id='type trailing newline'),
+            pytest.param({'type': 7}, _TYPE_ERROR, id='type number'),
+            pytest.param({'type': 'sentiment_headline', 'color': 'red'}, 'Block 1: sentiment_headline does not accept color',
+                         id='data block carrying a key its type does not take'),
+            pytest.param({**_HEADING, 'id': 'client-key'}, 'Block 1: heading does not accept id',
+                         id='heading carrying a key its type does not take'),
+            pytest.param({**_VIDEO, 'autoplay': True}, 'Block 1: video does not accept autoplay',
+                         id='video carrying a key its type does not take'),
+            pytest.param({'type': 'heading', 'level': 2}, 'Block 1: heading text is required', id='heading text absent'),
+            pytest.param({**_HEADING, 'text': '   '}, 'Block 1: heading text is required', id='heading text blank'),
+            pytest.param({**_HEADING, 'text': 'h' * 121}, 'Block 1: heading text must be at most 120 characters',
+                         id='heading text 121 characters'),
+            pytest.param({**_HEADING, 'text': 5}, 'Block 1: heading text must be a string', id='heading text a number'),
+            pytest.param({'type': 'heading', 'text': 'Title'}, 'Block 1: heading level is required', id='heading level absent'),
+            pytest.param({**_HEADING, 'level': 1}, 'Block 1: heading level must be 2 or 3', id='heading level 1'),
+            pytest.param({**_HEADING, 'level': 4}, 'Block 1: heading level must be 2 or 3', id='heading level 4'),
+            pytest.param({**_HEADING, 'level': True}, 'Block 1: heading level must be 2 or 3', id='heading level a boolean'),
+            pytest.param({**_HEADING, 'level': 2.0}, 'Block 1: heading level must be 2 or 3', id='heading level a float'),
+            pytest.param({**_HEADING, 'level': '2'}, 'Block 1: heading level must be 2 or 3', id='heading level a string'),
+            pytest.param({'type': 'text'}, 'Block 1: text markdown is required', id='text markdown absent'),
+            pytest.param({'type': 'text', 'markdown': 'm' * 5001}, 'Block 1: text markdown must be at most 5000 characters',
+                         id='text markdown 5001 characters'),
+            pytest.param({'type': 'image', 'alt': 'Logo'}, 'Block 1: image url is required', id='image url absent'),
+            pytest.param({'type': 'image', 'url': 'https://example.com/logo.png'}, 'Block 1: image alt is required',
+                         id='image alt absent'),
+            pytest.param({**_IMAGE, 'alt': 'a' * 201}, 'Block 1: image alt must be at most 200 characters',
+                         id='image alt 201 characters'),
+            pytest.param({**_IMAGE, 'caption': 'c' * 201}, 'Block 1: image caption must be at most 200 characters',
+                         id='image caption 201 characters'),
+            pytest.param({**_IMAGE, 'caption': None}, 'Block 1: image caption must be a string', id='image caption null'),
+            pytest.param({**_IMAGE, 'url': 'https://example.com/' + 'a' * 2029}, 'Block 1: image url must be at most 2048 characters',
+                         id='image url 2049 characters'),
+            pytest.param({**_IMAGE, 'url': 'https://example.com:abc/logo.png'}, 'Block 1: image url must be an https link',
+                         id='image url malformed port'),
+            pytest.param({**_IMAGE, 'url': 'https://example.com:0/logo.png'}, 'Block 1: image url must be an https link',
+                         id='image url port zero'),
+            pytest.param({**_IMAGE, 'url': 'https://example.com/lo\x00go.png'}, 'Block 1: image url must be an https link',
+                         id='image url control character'),
+            pytest.param({**_IMAGE, 'url': 'https://@example.com/logo.png'}, 'Block 1: image url must be an https link',
+                         id='image url empty user name'),
+            pytest.param({**_IMAGE, 'url': 'https://[::1/logo.png'}, 'Block 1: image url must be an https link',
+                         id='image url broken IPv6 host'),
+            pytest.param({**_VIDEO, 'caption': 'c' * 201}, 'Block 1: video caption must be at most 200 characters',
+                         id='video caption 201 characters'),
+            pytest.param(_video('https://www.youtube.com:443/watch?v=dQw4w9WgXcQ'),
+                         'Block 1: video url must be a YouTube or Vimeo video link', id='video url explicit port'),
+            pytest.param(_video('https://youtu.be:/dQw4w9WgXcQ'),
+                         'Block 1: video url must be a YouTube or Vimeo video link', id='video url empty port'),
+            pytest.param(_video('https://www.youtube.com/embed/dQw4w9WgXcQ/'),
+                         'Block 1: video url must be a YouTube or Vimeo video link', id='video url trailing slash'),
+            pytest.param(_video('https://player.vimeo.com/video/1234567890123'),
+                         'Block 1: video url must be a YouTube or Vimeo video link', id='video url 13-digit Vimeo id'),
         ],
     )
-    def test_refuses_the_content_block_naming_field_and_problem(self, block: dict[str, Any], message: str) -> None:
-        status, body, _ = create_report_for_test(_mod, single_block_body(block))
+    def test_refuses_the_block_naming_field_and_problem(self, block: dict[str, Any], message: str) -> None:
+        assert _post_single_block(block) == (400, {'error': message, 'field': 'blocks'})
 
-        assert (status, body) == (400, {'error': message, 'field': 'blocks'})
+    @pytest.mark.parametrize(('block', 'kind'), _REFUSED_LINK_VECTORS)
+    def test_refuses_a_link_the_dashboard_cannot_embed_or_link_to(self, block: dict[str, Any], kind: str) -> None:
+        status, body = _post_single_block(block)
+
+        assert (status, body['field']) == (400, 'blocks')
+        assert body['error'] in _LINK_ERRORS[kind]
 
     @pytest.mark.parametrize(
         ('block', 'stored'),
         [
-            ({'type': 'heading', 'text': '  Title  ', 'level': 3}, {'type': 'heading', 'text': 'Title', 'level': 3}),
-            ({'type': 'text', 'markdown': '  **Bold** move  '}, {'type': 'text', 'markdown': '**Bold** move'}),
-            ({**_IMAGE, 'alt': ' Logo ', 'caption': ' Our logo '}, {**_IMAGE, 'caption': 'Our logo'}),
-            ({**_IMAGE, 'caption': '   '}, _IMAGE),
-            ({**_VIDEO, 'caption': ' Launch film '}, {**_VIDEO, 'caption': 'Launch film'}),
-            ({**_VIDEO, 'caption': ''}, _VIDEO),
-            ({'type': 'video', 'url': 'https://WWW.YouTube.com/watch?v=dQw4w9WgXcQ'},
-             {'type': 'video', 'url': 'https://WWW.YouTube.com/watch?v=dQw4w9WgXcQ'}),
-        ],
-        ids=[
-            'heading', 'text', 'image with caption', 'image blank caption dropped', 'video with caption',
-            'video empty caption dropped', 'video host in mixed case',
+            pytest.param({'type': 'x' + 'y' * 47}, {'type': 'x' + 'y' * 47}, id='unknown data block type as given'),
+            pytest.param({'type': 'heading', 'text': '  Title  ', 'level': 3}, {'type': 'heading', 'text': 'Title', 'level': 3},
+                         id='heading stripped'),
+            pytest.param({'type': 'text', 'markdown': '  **Bold** move  '}, {'type': 'text', 'markdown': '**Bold** move'},
+                         id='text stripped'),
+            pytest.param({**_IMAGE, 'alt': ' Logo ', 'caption': ' Our logo '}, {**_IMAGE, 'caption': 'Our logo'},
+                         id='image with caption stripped'),
+            pytest.param({**_IMAGE, 'caption': '   '}, _IMAGE, id='image blank caption dropped'),
+            pytest.param({**_VIDEO, 'caption': ' Launch film '}, {**_VIDEO, 'caption': 'Launch film'}, id='video with caption stripped'),
+            pytest.param({**_VIDEO, 'caption': ''}, _VIDEO, id='video empty caption dropped'),
+            pytest.param(_video('https://WWW.YouTube.com/watch?v=dQw4w9WgXcQ'), _video('https://WWW.YouTube.com/watch?v=dQw4w9WgXcQ'),
+                         id='video host in mixed case'),
+            pytest.param({**_HEADING, 'text': 'h' * 120}, {**_HEADING, 'text': 'h' * 120}, id='heading text at its limit'),
+            pytest.param({'type': 'text', 'markdown': 'm' * 5000}, {'type': 'text', 'markdown': 'm' * 5000},
+                         id='text markdown at its limit'),
+            pytest.param({**_IMAGE, 'alt': 'a' * 200, 'caption': 'c' * 200}, {**_IMAGE, 'alt': 'a' * 200, 'caption': 'c' * 200},
+                         id='image alt and caption at their limit'),
+            pytest.param({**_IMAGE, 'url': 'https://example.com/' + 'a' * 2028}, {**_IMAGE, 'url': 'https://example.com/' + 'a' * 2028},
+                         id='image url at its limit'),
+            pytest.param(_video('https://vimeo.com/123456789012'), _video('https://vimeo.com/123456789012'), id='Vimeo id at its limit'),
+            *_STORED_LINK_VECTORS,
         ],
     )
-    def test_stores_the_content_block_with_its_strings_stripped(
-        self, block: dict[str, Any], stored: dict[str, Any]
-    ) -> None:
-        _, body, _ = create_report_for_test(_mod, single_block_body(block))
+    def test_stores_the_block_normalised(self, block: dict[str, Any], stored: dict[str, Any]) -> None:
+        status, body = _post_single_block(block)
 
-        assert body['report']['blocks'] == [stored]
-
-    @pytest.mark.parametrize(
-        'block',
-        [
-            {**_HEADING, 'text': 'h' * 120},
-            {'type': 'text', 'markdown': 'm' * 5000},
-            {**_IMAGE, 'alt': 'a' * 200, 'caption': 'c' * 200},
-            {**_IMAGE, 'url': 'https://example.com/' + 'a' * 2028},
-            {**_VIDEO, 'url': 'https://vimeo.com/123456789012'},
-        ],
-        ids=['heading text', 'text markdown', 'image alt and caption', 'image url', 'Vimeo id'],
-    )
-    def test_stores_content_at_its_exact_length_limit(self, block: dict[str, Any]) -> None:
-        _, body, _ = create_report_for_test(_mod, single_block_body(block))
-
-        assert body['report']['blocks'] == [block]
-
-
-class TestSharedLinkVectors:
-    """``test-fixtures/custom-report-blocks.json``: the dashboard must agree on every vector."""
-
-    @pytest.mark.parametrize('vector', EMBEDDABLE_VIDEO_LINKS, ids=vector_description)
-    def test_stores_a_video_link_the_dashboard_can_embed(self, vector: dict[str, Any]) -> None:
-        _, body, _ = create_report_for_test(_mod, single_block_body({'type': 'video', 'url': vector['url']}))
-
-        assert body['report']['blocks'] == [{'type': 'video', 'url': vector['url'].strip()}]
-
-    @pytest.mark.parametrize('vector', UNEMBEDDABLE_VIDEO_LINKS, ids=vector_description)
-    def test_refuses_a_video_link_the_dashboard_cannot_embed(self, vector: dict[str, Any]) -> None:
-        status, body, _ = create_report_for_test(_mod, single_block_body({'type': 'video', 'url': vector['url']}))
-
-        assert (status, body['field']) == (400, 'blocks')
-        assert body['error'] in _LINK_ERRORS['video']
-
-    @pytest.mark.parametrize('vector', VALID_IMAGE_LINKS, ids=vector_description)
-    def test_stores_an_https_image_link(self, vector: dict[str, Any]) -> None:
-        _, body, _ = create_report_for_test(_mod, single_block_body({**_IMAGE, 'url': vector['url']}))
-
-        assert body['report']['blocks'] == [{**_IMAGE, 'url': vector['url'].strip()}]
-
-    @pytest.mark.parametrize('vector', INVALID_IMAGE_LINKS, ids=vector_description)
-    def test_refuses_an_image_link_that_is_not_plain_https(self, vector: dict[str, Any]) -> None:
-        status, body, _ = create_report_for_test(_mod, single_block_body({**_IMAGE, 'url': vector['url']}))
-
-        assert (status, body['field']) == (400, 'blocks')
-        assert body['error'] in _LINK_ERRORS['image']
+        assert (status, body['report']['blocks']) == (201, [stored])

@@ -14,85 +14,21 @@ Context:
     `/api/keywords/promote` is a child of the generic `/api/keywords` route, so
     without a dedicated check ahead of it a promotion POST would fall through to
     `manage-keywords.py` as a single-keyword create; these tests pin the
-    ordering. The router is loaded through the `keyword_mgmt_router` fixture (the
-    `_load_router` pattern from `test_routers_404.py`), which seeds the router's
-    `HandlerLoader` cache with a distinct `MagicMock` per sub-handler, so
-    dispatch is asserted without executing a real worker or reaching AWS.
+    ordering. The router is loaded through the `keyword_mgmt_router` fixture
+    (`testing.keyword_mgmt_fixtures`), which seeds the router's `HandlerLoader`
+    cache with a distinct `MagicMock` per sub-handler, so dispatch is asserted
+    without executing a real worker or reaching AWS.
 """
-
-import os
-import sys
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from testing.module_loader import load_handler_module
-
-# --- Import-boundary bootstrap ----------------------------------------------
-#
-# `keyword-mgmt.py` is hyphenated and its sub-handlers build AWS clients at
-# import time, so it is loaded fresh via `load_handler_module` under a module
-# name unique to THIS file (the `_load_router` pattern from `test_routers_404.py`)
-# with env vars set and `boto3` patched BEFORE the load. The `HandlerLoader`
-# cache is seeded with a `MagicMock` per sub-handler, so dispatch is asserted
-# without executing a real worker or reaching AWS. Every global mutation is
-# undone on teardown; nothing is autouse.
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
-_KEYWORD_MGMT_ROUTER_FILE = 'keyword-mgmt.py'
-_KEYWORD_MGMT_MODULE_NAME = 'keyword_mgmt_under_test_promote_routing'
-_TEST_TABLE_NAME = 'test-keywords-table'
-
-# Env vars the keyword-mgmt sub-handlers read at import time. Set so no real AWS
-# client could be built even if a sub-handler were ever loaded.
-_KEYWORD_MGMT_ENV = {
-    'KEYWORD_RESEARCH_TABLE': 'test-keyword-research-table',
-    'SECRETS_PREFIX': 'test-citation-analysis/',
-    'DYNAMODB_TABLE_KEYWORDS': _TEST_TABLE_NAME,
-    'KEYWORDS_TABLE': _TEST_TABLE_NAME,
-}
-
-# Every sub-handler `keyword-mgmt.py` can dispatch to. Each is stubbed with a
-# distinct result so a test can assert exactly which target ran.
-_KEYWORD_MGMT_SUB_HANDLERS = (
-    'keyword-research.py',
-    'get-keywords.py',
-    'manage-keywords.py',
-    'promote-keywords.py',
+from testing.keyword_mgmt_fixtures import (
+    assert_dispatched_only_to,
+    assert_nothing_dispatched,
+    keyword_mgmt_router_fixture,
 )
 
-
-@pytest.fixture
-def keyword_mgmt_router():
-    """Fresh `keyword-mgmt.py` router with every sub-handler stubbed distinctly.
-
-    Seeding the router's `HandlerLoader` cache means no real sub-handler file is
-    loaded or executed. Yields `(module, stubs_by_filename)`.
-    """
-    saved = {name: os.environ.get(name) for name in _KEYWORD_MGMT_ENV}
-    os.environ.update(_KEYWORD_MGMT_ENV)
-
-    with (
-        patch('boto3.resource', MagicMock(name='boto3.resource')),
-        patch('boto3.client', MagicMock(name='boto3.client')),
-    ):
-        module = load_handler_module(_API_DIR, _KEYWORD_MGMT_ROUTER_FILE, _KEYWORD_MGMT_MODULE_NAME)
-        stubs = {}
-        for name in _KEYWORD_MGMT_SUB_HANDLERS:
-            stub = MagicMock(name=f'{name}_handler')
-            stub.return_value = {'statusCode': 200, 'handler': name}
-            module._handlers._cache[name] = stub
-            stubs[name] = stub
-
-        yield module, stubs
-
-    for name, value in saved.items():
-        if value is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = value
-    sys.modules.pop(_KEYWORD_MGMT_MODULE_NAME, None)
+keyword_mgmt_router = keyword_mgmt_router_fixture('keyword_mgmt_under_test_promote_routing')
 
 
 _PROMOTE_PATH = '/api/keywords/promote'
@@ -118,8 +54,9 @@ _UNMATCHED_COLLISION_PATHS = [
 ]
 
 
-def _request_event(resource, path, method, path_parameters=None):
-    """Build an API Gateway proxy event for a routing decision."""
+def _dispatch(router, resource, path, method, path_parameters=None):
+    """Send an API Gateway proxy event through ``router``; returns ``(event, result, stubs)``."""
+    mod, stubs = router
     event = {
         'resource': resource,
         'path': path,
@@ -128,18 +65,7 @@ def _request_event(resource, path, method, path_parameters=None):
     }
     if path_parameters is not None:
         event['pathParameters'] = path_parameters
-    return event
-
-
-def _assert_only_target_called(stubs, target, event, result):
-    """Assert `target` handled `event` exclusively and returned its result."""
-    stubs[target].assert_called_once_with(event, None)
-    assert result == stubs[target].return_value, (
-        f'{event["httpMethod"]} {event["path"]} did not return the {target} result'
-    )
-    for name, stub in stubs.items():
-        if name != target:
-            stub.assert_not_called()
+    return event, mod.handler(event, None), stubs
 
 
 # --- Promotion route -------------------------------------------------------
@@ -149,66 +75,42 @@ class TestPromoteRoutingUnit:
     """Dispatch cases for the new `/api/keywords/promote` route."""
 
     def test_routes_to_promote_keywords_when_post_to_promote_path(self, keyword_mgmt_router):
-        # Arrange
-        mod, stubs = keyword_mgmt_router
-        event = _request_event(_PROMOTE_PATH, _PROMOTE_PATH, 'POST')
+        event, result, stubs = _dispatch(keyword_mgmt_router, _PROMOTE_PATH, _PROMOTE_PATH, 'POST')
 
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
-        _assert_only_target_called(stubs, 'promote-keywords.py', event, result)
+        assert_dispatched_only_to(stubs, 'promote-keywords.py', event, result)
         stubs['manage-keywords.py'].assert_not_called()
 
     @pytest.mark.parametrize('field_mode', ['resource', 'path', 'both'])
     def test_routes_to_promote_keywords_when_promote_path_in_any_event_field(
         self, keyword_mgmt_router, field_mode
     ):
-        # Arrange
-        mod, stubs = keyword_mgmt_router
-        event = _request_event(
+        event, result, stubs = _dispatch(
+            keyword_mgmt_router,
             _PROMOTE_PATH if field_mode in ('resource', 'both') else '',
             _PROMOTE_PATH if field_mode in ('path', 'both') else '',
             'POST',
         )
 
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
-        _assert_only_target_called(stubs, 'promote-keywords.py', event, result)
+        assert_dispatched_only_to(stubs, 'promote-keywords.py', event, result)
 
     @pytest.mark.parametrize('method', ['PUT', 'DELETE'])
     def test_does_not_dispatch_when_other_method_targets_promote_path(
         self, keyword_mgmt_router, method
     ):
-        # Arrange
-        mod, stubs = keyword_mgmt_router
-        event = _request_event(_PROMOTE_PATH, _PROMOTE_PATH, method)
+        _event, result, stubs = _dispatch(keyword_mgmt_router, _PROMOTE_PATH, _PROMOTE_PATH, method)
 
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
         assert result['statusCode'] == 400
-        for stub in stubs.values():
-            stub.assert_not_called()
+        assert_nothing_dispatched(stubs)
 
     def test_returns_not_found_when_post_targets_promote_descendant(
         self, keyword_mgmt_router
     ):
-        # Arrange
-        mod, stubs = keyword_mgmt_router
         child_path = f'{_PROMOTE_PATH}/unexpected'
-        event = _request_event(child_path, child_path, 'POST')
 
-        # Act
-        result = mod.handler(event, None)
+        _event, result, stubs = _dispatch(keyword_mgmt_router, child_path, child_path, 'POST')
 
-        # Assert
         assert result['statusCode'] == 404
-        for stub in stubs.values():
-            stub.assert_not_called()
+        assert_nothing_dispatched(stubs)
 
 
 # --- Pre-existing routes ---------------------------------------------------
@@ -217,63 +119,37 @@ class TestPromoteRoutingUnit:
 class TestExistingRoutingUnit:
     """The routes that existed before promotion must dispatch unchanged."""
 
-    def test_routes_to_get_keywords_when_get_keywords_list_without_id(self, keyword_mgmt_router):
-        # Arrange
-        mod, stubs = keyword_mgmt_router
-        event = _request_event('/api/keywords', '/api/keywords', 'GET', None)
-
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
-        _assert_only_target_called(stubs, 'get-keywords.py', event, result)
-
-    def test_routes_to_manage_keywords_when_post_to_keywords_collection(self, keyword_mgmt_router):
-        # Arrange
-        mod, stubs = keyword_mgmt_router
-        event = _request_event('/api/keywords', '/api/keywords', 'POST')
-
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
-        _assert_only_target_called(stubs, 'manage-keywords.py', event, result)
-
-    @pytest.mark.parametrize('method', ['GET', 'PUT', 'DELETE'])
-    def test_routes_to_manage_keywords_when_request_carries_a_keyword_id(
-        self, keyword_mgmt_router, method
-    ):
-        # Arrange
-        mod, stubs = keyword_mgmt_router
-        event = _request_event(
-            '/api/keywords/{id}', '/api/keywords/abc123', method, {'id': 'abc123'}
-        )
-
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
-        _assert_only_target_called(stubs, 'manage-keywords.py', event, result)
-
     @pytest.mark.parametrize(
-        'route_path',
+        ('resource', 'path', 'method', 'path_parameters', 'target'),
         [
-            '/api/keyword-research',
-            '/api/keyword-research/expand',
-            '/api/keyword-research/competitor',
-            '/api/keyword-research/history',
+            ('/api/keywords', '/api/keywords', 'GET', None, 'get-keywords.py'),
+            ('/api/keywords', '/api/keywords', 'POST', None, 'manage-keywords.py'),
+            ('/api/keywords/{id}', '/api/keywords/abc123', 'GET', {'id': 'abc123'}, 'manage-keywords.py'),
+            ('/api/keywords/{id}', '/api/keywords/abc123', 'PUT', {'id': 'abc123'}, 'manage-keywords.py'),
+            ('/api/keywords/{id}', '/api/keywords/abc123', 'DELETE', {'id': 'abc123'}, 'manage-keywords.py'),
+            ('/api/keyword-research', '/api/keyword-research', 'POST', None, 'keyword-research.py'),
+            ('/api/keyword-research/expand', '/api/keyword-research/expand', 'POST', None, 'keyword-research.py'),
+            ('/api/keyword-research/competitor', '/api/keyword-research/competitor', 'POST', None, 'keyword-research.py'),
+            ('/api/keyword-research/history', '/api/keyword-research/history', 'POST', None, 'keyword-research.py'),
+        ],
+        ids=[
+            'get-keywords-list-without-id-to-get-keywords',
+            'post-to-keywords-collection-to-manage-keywords',
+            'get-with-keyword-id-to-manage-keywords',
+            'put-with-keyword-id-to-manage-keywords',
+            'delete-with-keyword-id-to-manage-keywords',
+            'research-root-to-keyword-research',
+            'research-expand-to-keyword-research',
+            'research-competitor-to-keyword-research',
+            'research-history-to-keyword-research',
         ],
     )
-    def test_routes_to_keyword_research_when_research_path(self, keyword_mgmt_router, route_path):
-        # Arrange
-        mod, stubs = keyword_mgmt_router
-        event = _request_event(route_path, route_path, 'POST')
+    def test_routes_to_the_pre_existing_handler_of_the_route(
+        self, keyword_mgmt_router, resource, path, method, path_parameters, target
+    ):
+        event, result, stubs = _dispatch(keyword_mgmt_router, resource, path, method, path_parameters)
 
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
-        _assert_only_target_called(stubs, 'keyword-research.py', event, result)
+        assert_dispatched_only_to(stubs, target, event, result)
 
 
 # --- Prefix collisions -----------------------------------------------------
@@ -286,33 +162,20 @@ class TestPromoteRoutingCollisionUnit:
     def test_routes_to_manage_keywords_when_promote_prefix_collision_path(
         self, keyword_mgmt_router, collision_path
     ):
-        # Arrange
-        mod, stubs = keyword_mgmt_router
-        event = _request_event(collision_path, collision_path, 'POST')
+        event, result, stubs = _dispatch(keyword_mgmt_router, collision_path, collision_path, 'POST')
 
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
         # These are segment children of the generic /api/keywords route, so the
         # pre-existing mutation dispatch stands; only the promotion handler must
         # stay out of it.
-        _assert_only_target_called(stubs, 'manage-keywords.py', event, result)
+        assert_dispatched_only_to(stubs, 'manage-keywords.py', event, result)
 
     @pytest.mark.parametrize('collision_path', _UNMATCHED_COLLISION_PATHS)
     def test_returns_not_found_when_path_is_no_route_child(
         self, keyword_mgmt_router, collision_path
     ):
-        # Arrange
-        mod, stubs = keyword_mgmt_router
-        event = _request_event(collision_path, collision_path, 'POST')
+        _event, result, stubs = _dispatch(keyword_mgmt_router, collision_path, collision_path, 'POST')
 
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
         assert result.get('statusCode') == 404, (
             f'prefix-collision path {collision_path} did not return not-found'
         )
-        for stub in stubs.values():
-            stub.assert_not_called()
+        assert_nothing_dispatched(stubs)

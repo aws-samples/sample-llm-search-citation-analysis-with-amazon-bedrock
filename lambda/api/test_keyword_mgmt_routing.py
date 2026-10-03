@@ -15,105 +15,25 @@ router and there is nothing to special-case: a flag-only event is just an
 unmatched route.
 
 Sub-handlers load lazily through `shared.router.HandlerLoader` (`_handlers`),
-so these tests seed `_handlers._cache[...]` with MagicMocks to assert dispatch
-without executing the real handlers or reaching AWS. boto3 is patched for the
-duration of this module's tests and required env vars are set so no real AWS
-clients are created.
+so the router is loaded through `testing.keyword_mgmt_fixtures`, which seeds
+`_handlers._cache[...]` with a distinct MagicMock per sub-handler to assert
+dispatch without executing the real handlers or reaching AWS.
 """
-
-import os
-from unittest.mock import MagicMock, patch
 
 import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from testing.env import setdefault_env
-from testing.module_loader import load_handler_module
+from testing.keyword_mgmt_fixtures import (
+    assert_dispatched_only_to,
+    assert_nothing_dispatched,
+    keyword_mgmt_router_fixture,
+    load_stubbed_keyword_mgmt,
+)
 
-# --- Test bootstrap (import boundary) --------------------------------------
+_MODULE_NAME = 'keyword_mgmt_router_under_test'
 
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
-# Required env vars must exist before `keyword-research.py` is ever imported
-# (it reads its table and state machine ARN at module level).
-setdefault_env({
-    'KEYWORD_RESEARCH_TABLE': 'test-keyword-research-table',
-    'RESEARCH_STATE_MACHINE_ARN': 'arn:aws:states:us-west-2:123456789012:stateMachine:test',
-    'DYNAMODB_TABLE_RESEARCH_TEMPLATES': 'test-research-templates',
-    'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',
-    'SECRETS_PREFIX': 'test-citation-analysis/',
-})
-
-
-@pytest.fixture(scope='module', autouse=True)
-def _mock_boto3():
-    """Patch boto3 for every test in this module.
-
-    Ensures no real AWS clients are created if a sub-handler module is ever
-    loaded during a test. Scoped to this module (rather than started at
-    import time and never stopped) so the patch is guaranteed to be undone
-    and cannot leak into other test modules in the same pytest session.
-    """
-    with (
-        patch('boto3.resource', MagicMock(name='boto3.resource')),
-        patch('boto3.client', MagicMock(name='boto3.client')),
-    ):
-        yield
-
-
-def _load_keyword_mgmt():
-    """Load `keyword-mgmt.py` (hyphenated name) as a fresh module."""
-    return load_handler_module(_API_DIR, 'keyword-mgmt.py', 'keyword_mgmt_router_under_test')
-
-
-@pytest.fixture(autouse=True)
-def _clean_env():
-    """Ensure required env vars are present and restored around each test."""
-    keys = ('KEYWORD_RESEARCH_TABLE', 'SECRETS_PREFIX')
-    prev = {k: os.environ.get(k) for k in keys}
-    os.environ['KEYWORD_RESEARCH_TABLE'] = 'test-keyword-research-table'
-    os.environ['SECRETS_PREFIX'] = 'test-citation-analysis/'
-    yield
-    for k, v in prev.items():
-        if v is None:
-            os.environ.pop(k, None)
-        else:
-            os.environ[k] = v
-
-
-# --- Sub-handler stubs ------------------------------------------------------
-#
-# Distinguishing every routing target requires stubbing all sub-handlers. Each
-# stub returns a distinct non-404 result so a test can assert exactly which
-# target ran and that the not-found fallback (statusCode 404) is only reached
-# when no route matches. Seeding the router's HandlerLoader cache means no real
-# sub-handler is loaded and no AWS / AI-provider calls occur.
-
-_SUB_HANDLER_FILES = ('keyword-research.py', 'get-keywords.py', 'manage-keywords.py', 'manage-keyword-groups.py')
-
-
-def _install_all_handler_mocks(mod):
-    """Seed the router's cache with a distinct stub for every sub-handler.
-
-    Returns a dict keyed by sub-handler filename so callers can assert which
-    routing target was invoked.
-    """
-    mocks = {}
-    for name in _SUB_HANDLER_FILES:
-        sub_mock = MagicMock(name=f'{name}_handler')
-        sub_mock.return_value = {'statusCode': 200, 'handler': name}
-        mod._handlers._cache[name] = sub_mock
-        mocks[name] = sub_mock
-    return mocks
-
-
-@pytest.fixture
-def keyword_mgmt_all():
-    """Fresh keyword-mgmt router with ALL sub-handlers stubbed distinctly."""
-    mod = _load_keyword_mgmt()
-    mocks = _install_all_handler_mocks(mod)
-    return mod, mocks
+keyword_mgmt_all = keyword_mgmt_router_fixture(_MODULE_NAME)
 
 
 # --- Event strategies -------------------------------------------------------
@@ -240,8 +160,7 @@ class TestRoutingProperty:
     def test_routes_to_the_target_the_path_selects(self, case):
         # Arrange
         event, expected_target = case
-        mod = _load_keyword_mgmt()
-        mocks = _install_all_handler_mocks(mod)
+        mod, mocks = load_stubbed_keyword_mgmt(_MODULE_NAME)
 
         # Act
         result = mod.handler(event, None)
@@ -251,16 +170,9 @@ class TestRoutingProperty:
             assert result.get('statusCode') == 404, (
                 f"unmatched event {event!r} did not return not-found"
             )
-            for sub_mock in mocks.values():
-                sub_mock.assert_not_called()
+            assert_nothing_dispatched(mocks)
         else:
-            mocks[expected_target].assert_called_once_with(event, None)
-            assert result == mocks[expected_target].return_value, (
-                f"event {event!r} did not return the {expected_target} result"
-            )
-            for name, sub_mock in mocks.items():
-                if name != expected_target:
-                    sub_mock.assert_not_called()
+            assert_dispatched_only_to(mocks, expected_target, event, result)
 
 
 # --- Example / unit tests ---------------------------------------------------
@@ -269,117 +181,47 @@ class TestRoutingProperty:
 class TestRoutingUnit:
     """Explicit cases for each route."""
 
-    def test_returns_not_found_when_event_carries_only_a_retired_async_flag(self, keyword_mgmt_all):
-        """The self-invoke payloads (no resource/path) no longer reach any handler."""
+    @pytest.mark.parametrize(
+        ('event', 'target'),
+        [
+            ({'resource': '/api/keyword-research', 'path': '/api/keyword-research', 'httpMethod': 'POST'}, 'keyword-research.py'),
+            ({'resource': '/api/keywords', 'path': '/api/keywords', 'httpMethod': 'GET', 'pathParameters': None}, 'get-keywords.py'),
+            ({'resource': '/api/keywords', 'path': '/api/keywords', 'httpMethod': 'POST'}, 'manage-keywords.py'),
+            (
+                {'resource': '/api/keywords/{id}', 'path': '/api/keywords/abc123', 'httpMethod': 'GET', 'pathParameters': {'id': 'abc123'}},
+                'manage-keywords.py',
+            ),
+        ],
+        ids=[
+            'research-path-to-keyword-research',
+            'keywords-list-without-id-to-get-keywords',
+            'mutation-under-keywords-to-manage-keywords',
+            'path-parameter-id-to-manage-keywords',
+        ],
+    )
+    def test_routes_to_the_handler_the_route_selects(self, keyword_mgmt_all, event, target):
         mod, mocks = keyword_mgmt_all
-        event = {'async_expand': True, 'research_id': 'abc', 'seed_keyword': 'running shoes'}
+
+        result = mod.handler(event, None)
+
+        assert_dispatched_only_to(mocks, target, event, result)
+
+    @pytest.mark.parametrize(
+        'event',
+        [
+            # The self-invoke payloads (no resource/path) no longer reach any handler.
+            {'async_expand': True, 'research_id': 'abc', 'seed_keyword': 'running shoes'},
+            {'resource': '/api/keywords-bogus', 'path': '/api/keywords-bogus', 'httpMethod': 'GET'},
+        ],
+        ids=['retired-async-flag-only', 'unmatched-prefix-collision-route'],
+    )
+    def test_returns_not_found_without_dispatching(self, keyword_mgmt_all, event):
+        mod, mocks = keyword_mgmt_all
 
         result = mod.handler(event, None)
 
         assert result.get('statusCode') == 404
-        for sub_mock in mocks.values():
-            sub_mock.assert_not_called()
-
-    def test_routes_to_keyword_research_when_research_path(self, keyword_mgmt_all):
-        # Arrange
-        mod, mocks = keyword_mgmt_all
-        event = {
-            'resource': '/api/keyword-research',
-            'path': '/api/keyword-research',
-            'httpMethod': 'POST',
-        }
-
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
-        mocks['keyword-research.py'].assert_called_once_with(event, None)
-        assert result == mocks['keyword-research.py'].return_value, (
-            'keyword-research path did not return the keyword-research result'
-        )
-        mocks['get-keywords.py'].assert_not_called()
-        mocks['manage-keywords.py'].assert_not_called()
-
-    def test_routes_to_get_keywords_when_get_keywords_list_without_id(self, keyword_mgmt_all):
-        # Arrange
-        mod, mocks = keyword_mgmt_all
-        event = {
-            'resource': '/api/keywords',
-            'path': '/api/keywords',
-            'httpMethod': 'GET',
-            'pathParameters': None,
-        }
-
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
-        mocks['get-keywords.py'].assert_called_once_with(event, None)
-        assert result == mocks['get-keywords.py'].return_value, (
-            'GET /api/keywords did not return the get-keywords result'
-        )
-        mocks['keyword-research.py'].assert_not_called()
-        mocks['manage-keywords.py'].assert_not_called()
-
-    def test_routes_to_manage_keywords_when_mutation_under_keywords(self, keyword_mgmt_all):
-        # Arrange
-        mod, mocks = keyword_mgmt_all
-        event = {
-            'resource': '/api/keywords',
-            'path': '/api/keywords',
-            'httpMethod': 'POST',
-        }
-
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
-        mocks['manage-keywords.py'].assert_called_once_with(event, None)
-        assert result == mocks['manage-keywords.py'].return_value, (
-            'POST /api/keywords did not return the manage-keywords result'
-        )
-        mocks['keyword-research.py'].assert_not_called()
-        mocks['get-keywords.py'].assert_not_called()
-
-    def test_routes_to_manage_keywords_when_request_bears_path_parameter_id(self, keyword_mgmt_all):
-        # Arrange
-        mod, mocks = keyword_mgmt_all
-        event = {
-            'resource': '/api/keywords/{id}',
-            'path': '/api/keywords/abc123',
-            'httpMethod': 'GET',
-            'pathParameters': {'id': 'abc123'},
-        }
-
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
-        mocks['manage-keywords.py'].assert_called_once_with(event, None)
-        assert result == mocks['manage-keywords.py'].return_value, (
-            'GET /api/keywords with id did not return the manage-keywords result'
-        )
-        mocks['keyword-research.py'].assert_not_called()
-        mocks['get-keywords.py'].assert_not_called()
-
-    def test_returns_not_found_when_unmatched_prefix_collision_route(self, keyword_mgmt_all):
-        # Arrange
-        mod, mocks = keyword_mgmt_all
-        event = {
-            'resource': '/api/keywords-bogus',
-            'path': '/api/keywords-bogus',
-            'httpMethod': 'GET',
-        }
-
-        # Act
-        result = mod.handler(event, None)
-
-        # Assert
-        assert result.get('statusCode') == 404, (
-            'prefix-collision route /api/keywords-bogus did not return not-found'
-        )
-        for sub_mock in mocks.values():
-            sub_mock.assert_not_called()
+        assert_nothing_dispatched(mocks)
 
 
 
@@ -403,10 +245,7 @@ class TestKeywordGroupsRouting:
 
         result = mod.handler(event, None)
 
-        mocks['manage-keyword-groups.py'].assert_called_once_with(event, None)
-        assert result == mocks['manage-keyword-groups.py'].return_value
-        mocks['manage-keywords.py'].assert_not_called()
-        mocks['get-keywords.py'].assert_not_called()
+        assert_dispatched_only_to(mocks, 'manage-keyword-groups.py', event, result)
 
     def test_keeps_keyword_routes_away_from_the_groups_handler(self, keyword_mgmt_all):
         mod, mocks = keyword_mgmt_all

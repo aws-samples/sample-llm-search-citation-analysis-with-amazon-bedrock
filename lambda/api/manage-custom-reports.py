@@ -45,6 +45,7 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import get_caller_claims, get_caller_identity
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.dynamo_conditions import delete_existing_item, is_conditional_check_failure
 from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
@@ -344,11 +345,6 @@ def _for_report_id(route: _Route) -> _Route:
     return wrapper
 
 
-def _is_missing_report(error: ClientError) -> bool:
-    """The ``attribute_exists(id)`` condition failed: no report has this id."""
-    return error.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException'
-
-
 def _caller(event: dict[str, Any]) -> str:
     """The signed-in user to record as author or editor: the email claim, else the Cognito identity."""
     email = get_caller_claims(event).get('email')
@@ -432,7 +428,7 @@ def update_report(event: dict[str, Any], context: Any, content: _ReportContent, 
             ReturnValues='ALL_NEW',
         )
     except ClientError as error:
-        if not _is_missing_report(error):
+        if not is_conditional_check_failure(error):
             raise
         return _report_not_found(event)
     return success_response({'report': _report_view(response['Attributes'])}, event)
@@ -441,15 +437,7 @@ def update_report(event: dict[str, Any], context: Any, content: _ReportContent, 
 @_for_report_id
 def delete_report(event: dict[str, Any], context: Any, id: str, **_: Any) -> dict[str, Any]:
     """DELETE /api/custom-reports/{id}"""
-    try:
-        reports_table.delete_item(
-            Key={'id': id},
-            ConditionExpression='attribute_exists(#id)',
-            ExpressionAttributeNames={'#id': 'id'},
-        )
-    except ClientError as error:
-        if not _is_missing_report(error):
-            raise
+    if not delete_existing_item(reports_table, id):
         return _report_not_found(event)
     return success_response({'deleted': id}, event)
 

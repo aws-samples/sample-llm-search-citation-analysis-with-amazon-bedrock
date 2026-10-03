@@ -11,45 +11,44 @@ unparseable, and raising model calls, and each endpoint's success shaping.
 from __future__ import annotations
 
 import json
-import os
 from unittest.mock import MagicMock
 
 import pytest
+from test_manage_brand_config_fixtures import load_brand_config_module
 
-from shared.industry_presets import DEFAULT_INDUSTRY_ID
 from testing.events import api_gateway_event, parse_response
-from testing.module_loader import load_handler_module
 
-# The table name the module reads at import time, so it loads without touching AWS.
-os.environ.setdefault('DYNAMODB_TABLE_BRAND_CONFIG', 'test-brand-config')
-_mod = load_handler_module(os.path.dirname(__file__), 'manage-brand-config.py')
+_mod = load_brand_config_module('manage_brand_config_under_test')
 
 
 class BedrockUnavailableError(Exception):
     """Stand-in for a Bedrock invocation failure."""
 
 
+def _model_answers(monkeypatch, text: str) -> None:
+    """Make every Bedrock call answer with ``text``."""
+    monkeypatch.setattr(_mod, 'invoke_bedrock', lambda *_args, **_kwargs: text)
+
+
+def _fetch_config() -> tuple[int, dict]:
+    """``(status, body)`` of GET /api/brand-config."""
+    return parse_response(_mod._get_config(api_gateway_event('GET', '/api/brand-config'), None))
+
+
 class TestErrorDefaults:
-    def test_expand_brand_returns_defaults_when_model_returns_empty_text(self, monkeypatch) -> None:
-        monkeypatch.setattr(_mod, 'invoke_bedrock', lambda *_args, **_kwargs: '')
+    @pytest.mark.parametrize(('model_text', 'error'), [
+        pytest.param('', 'Empty response', id='model-returns-empty-text'),
+        pytest.param('sorry, no JSON here', 'Invalid response format', id='response-is-not-json'),
+    ])
+    def test_expand_brand_returns_defaults_when_the_model_answer_is_unusable(self, monkeypatch, model_text, error) -> None:
+        _model_answers(monkeypatch, model_text)
 
         result = _mod.expand_brand('Barceló', industry='hotels')
 
         assert result == {
             'main_brand': 'Barceló',
             'suggestions': ['Barceló'],
-            'error': 'Empty response',
-        }
-
-    def test_expand_brand_returns_defaults_when_response_is_not_json(self, monkeypatch) -> None:
-        monkeypatch.setattr(_mod, 'invoke_bedrock', lambda *_args, **_kwargs: 'sorry, no JSON here')
-
-        result = _mod.expand_brand('Barceló', industry='hotels')
-
-        assert result == {
-            'main_brand': 'Barceló',
-            'suggestions': ['Barceló'],
-            'error': 'Invalid response format',
+            'error': error,
         }
 
     def test_expand_brands_returns_defaults_when_model_invocation_raises(self, monkeypatch) -> None:
@@ -75,7 +74,7 @@ class TestSuccessShaping:
             'suggestions': ['Occidental', 'Allegro'],
             'notes': 'sub-brands',
         })
-        monkeypatch.setattr(_mod, 'invoke_bedrock', lambda *_args, **_kwargs: payload)
+        _model_answers(monkeypatch, payload)
 
         result = _mod.expand_brand('Barceló', industry='hotels')
 
@@ -88,7 +87,7 @@ class TestSuccessShaping:
             'suggestions': ['BARCELÓ', 'Occidental', 'occidental', 'Allegro'],
             'notes': 'found some',
         })
-        monkeypatch.setattr(_mod, 'invoke_bedrock', lambda *_args, **_kwargs: payload)
+        _model_answers(monkeypatch, payload)
 
         result = _mod.expand_brands(['Barceló'], industry='hotels')
 
@@ -108,13 +107,12 @@ class TestSuccessShaping:
             ],
             'notes': 'landscape',
         })
-        monkeypatch.setattr(_mod, 'invoke_bedrock', lambda *_args, **_kwargs: payload)
+        _model_answers(monkeypatch, payload)
 
         result = _mod.find_competitors(['Barceló'], industry='hotels')
 
         assert result['competitors'] == ['Meliá', 'Iberostar']
         assert result['first_party_brands'] == ['Barceló']
-
 
 
 class TestDefaultPrompt:
@@ -160,13 +158,12 @@ class TestDefaultPrompt:
         assert 'ENTITY TYPES TO EXTRACT:\n- Brand names and company names\n' in prompt
 
 
-
 class TestGenericIndustryDefaults:
     def test_returns_general_when_config_has_not_been_saved(self, monkeypatch) -> None:
         monkeypatch.setattr(_mod, 'get_config', lambda: None)
         monkeypatch.setattr(_mod, 'get_timestamp', lambda: '2026-10-01T00:00:00Z')
 
-        status, payload = parse_response(_mod._get_config(api_gateway_event('GET', '/api/brand-config'), None))
+        status, payload = _fetch_config()
 
         assert status == 200
         assert payload['industry'] == 'general'
@@ -175,7 +172,7 @@ class TestGenericIndustryDefaults:
         stored_config = {'config_id': 'default', 'industry': 'hotels'}
         monkeypatch.setattr(_mod, 'get_config', lambda: stored_config)
 
-        status, payload = parse_response(_mod._get_config(api_gateway_event('GET', '/api/brand-config'), None))
+        status, payload = _fetch_config()
 
         assert status == 200
         assert payload == stored_config
@@ -216,55 +213,6 @@ class TestGenericIndustryDefaults:
         assert 'You are a brand expert for the General industry.' in prompts[0]
         assert 'You are a brand expert for the General industry.' in prompts[1]
         assert 'You are a competitive intelligence expert for the General industry.' in prompts[2]
-
-    @pytest.mark.parametrize(
-        ('path', 'body', 'function_name', 'expected_arguments'),
-        [
-            pytest.param(
-                '/api/brand-config/expand',
-                {'brand_name': 'Acme'},
-                'expand_brand',
-                ('Acme', DEFAULT_INDUSTRY_ID, []),
-                id='expand-brand',
-            ),
-            pytest.param(
-                '/api/brand-config/expand-all',
-                {'existing_brands': ['Acme']},
-                'expand_brands',
-                (['Acme'], DEFAULT_INDUSTRY_ID, 'first_party'),
-                id='expand-all-brands',
-            ),
-            pytest.param(
-                '/api/brand-config/find-competitors',
-                {'first_party_brands': ['Acme']},
-                'find_competitors',
-                (['Acme'], DEFAULT_INDUSTRY_ID, []),
-                id='find-competitors',
-            ),
-        ],
-    )
-    def test_passes_general_when_request_omits_industry(
-        self,
-        monkeypatch,
-        path: str,
-        body: dict[str, object],
-        function_name: str,
-        expected_arguments: tuple[object, ...],
-    ) -> None:
-        operation = MagicMock(return_value={})
-        monkeypatch.setattr(_mod, function_name, operation)
-        event = api_gateway_event(
-            'POST',
-            path,
-            body=body,
-            claims={'cognito:groups': _mod.ADMIN_GROUP},
-            resource=path,
-        )
-
-        status, _payload = parse_response(_mod.handler(event, None))
-
-        assert status == 200
-        operation.assert_called_once_with(*expected_arguments)
 
     def test_uses_custom_context_when_explicit_industry_is_unknown(self) -> None:
         context = _mod._industry_context('legacy-industry')

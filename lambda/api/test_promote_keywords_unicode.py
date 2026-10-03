@@ -1,10 +1,10 @@
 """Unicode validation tests for keyword promotion requests."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from testing.events import api_gateway_event, parse_response
+from testing.keyword_promotion_fixtures import assert_rejected_before_dynamodb, invoke_promotion
 from testing.promotion_fixtures import promotion_handler_fixture
 
 promotion_handler = promotion_handler_fixture('promote_keywords_under_test_unicode')
@@ -15,10 +15,7 @@ LOW_SURROGATE = chr(0xDFFF)
 
 
 def _invoke(module, table, keyword):
-    event = api_gateway_event('POST', '/api/keywords/promote', body={'keywords': [{'keyword': keyword}]})
-    with patch.object(module, 'keywords_table', table):
-        response = module.handler(event, None)
-    return parse_response(response)
+    return invoke_promotion(module, table, {'keywords': [{'keyword': keyword}]})
 
 
 @pytest.mark.parametrize(
@@ -35,8 +32,7 @@ def test_returns_400_before_dynamodb_when_promoted_keyword_has_unpaired_surrogat
 
     assert status_code == 400
     assert body['field'] == 'keywords[0].keyword'
-    table.scan.assert_not_called()
-    table.put_item.assert_not_called()
+    assert_rejected_before_dynamodb(table)
 
 
 def test_creates_keyword_when_promoted_text_contains_valid_astral_character(promotion_handler):

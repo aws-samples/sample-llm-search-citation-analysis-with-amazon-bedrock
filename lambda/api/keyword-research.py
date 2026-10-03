@@ -49,6 +49,7 @@ from shared.api_views import named_item_view
 from shared.auth import get_caller_identity
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.dynamo_conditions import is_conditional_check_failure
 from shared.env_vars import resolve_table_env
 from shared.research_agent import (
     AGENT_DEFAULT_ROUNDS,
@@ -121,10 +122,6 @@ groups_table = dynamodb.Table(KEYWORD_GROUPS_TABLE)
 # Job bookkeeping
 # =============================================================================
 
-def _is_conditional_failure(error: ClientError) -> bool:
-    return error.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException'
-
-
 def _replace_row(target: dict[str, Any], replacement: dict[str, Any]) -> None:
     target.clear()
     target.update(replacement)
@@ -175,7 +172,7 @@ def _persist_terminal_attempt(
             ExpressionAttributeValues=values,
         )
     except ClientError as exc:
-        if _is_conditional_failure(exc):
+        if is_conditional_check_failure(exc):
             return False
         raise
 
@@ -576,11 +573,21 @@ def _validated_profile_changes(
     return changes
 
 
+def _template_body_rules(*, creating: bool) -> dict[str, dict[str, Any]]:
+    """The ``@validate`` schema of a template body; a create requires a name and a system prompt."""
+    required = {'required': True} if creating else {}
+    return {
+        'name': {**required, 'type': str, 'min_length': 1, 'max_length': TEMPLATE_NAME_MAX_LENGTH, 'source': 'body'},
+        'system_prompt': {**required, 'type': str, 'min_length': 20, 'max_length': SYSTEM_PROMPT_MAX_LENGTH, 'source': 'body'},
+        'description': {
+            'type': str, 'max_length': TEMPLATE_DESCRIPTION_MAX_LENGTH, **({'default': ''} if creating else {}), 'source': 'body',
+        },
+    }
+
+
 @parse_json_body
 @validate({
-    'name': {'required': True, 'type': str, 'min_length': 1, 'max_length': TEMPLATE_NAME_MAX_LENGTH, 'source': 'body'},
-    'system_prompt': {'required': True, 'type': str, 'min_length': 20, 'max_length': SYSTEM_PROMPT_MAX_LENGTH, 'source': 'body'},
-    'description': {'type': str, 'max_length': TEMPLATE_DESCRIPTION_MAX_LENGTH, 'default': '', 'source': 'body'},
+    **_template_body_rules(creating=True),
     'base_template_id': {'type': str, 'max_length': 100, 'source': 'body'},
     **TEMPLATE_PROFILE_RULES,
 })
@@ -623,11 +630,19 @@ def _create_template(
     return success_response(_template_view(item), event, 201)
 
 
+def _saved_template_id(event: dict[str, Any], builtin_refusal: str) -> str | dict[str, Any]:
+    """The id of the saved template a PUT/DELETE addresses, else the 400 for a missing or built-in id."""
+    template_id = _path_id(event)
+    if not template_id:
+        return validation_error('Template ID is required', event, 'id')
+    if builtin_template(template_id):
+        return validation_error(builtin_refusal, event, 'id')
+    return template_id
+
+
 @parse_json_body
 @validate({
-    'name': {'type': str, 'min_length': 1, 'max_length': TEMPLATE_NAME_MAX_LENGTH, 'source': 'body'},
-    'system_prompt': {'type': str, 'min_length': 20, 'max_length': SYSTEM_PROMPT_MAX_LENGTH, 'source': 'body'},
-    'description': {'type': str, 'max_length': TEMPLATE_DESCRIPTION_MAX_LENGTH, 'source': 'body'},
+    **_template_body_rules(creating=False),
     **TEMPLATE_PROFILE_RULES,
 })
 def _update_template(
@@ -635,11 +650,9 @@ def _update_template(
     subject: str | None, audience: str | None, dimensions: list | None,
 ) -> dict[str, Any]:
     """PUT /api/keyword-research/templates/{id} — edit a saved template (built-ins are read-only)."""
-    template_id = _path_id(event)
-    if not template_id:
-        return validation_error('Template ID is required', event, 'id')
-    if builtin_template(template_id):
-        return validation_error('Built-in templates cannot be edited; save a copy instead', event, 'id')
+    template_id = _saved_template_id(event, 'Built-in templates cannot be edited; save a copy instead')
+    if isinstance(template_id, dict):
+        return template_id
     if not templates_table.get_item(Key={'id': template_id}).get('Item'):
         return not_found_response(resource='Template', event=event)
 
@@ -671,11 +684,9 @@ def _update_template(
 
 def _delete_template(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """DELETE /api/keyword-research/templates/{id}"""
-    template_id = _path_id(event)
-    if not template_id:
-        return validation_error('Template ID is required', event, 'id')
-    if builtin_template(template_id):
-        return validation_error('Built-in templates cannot be deleted', event, 'id')
+    template_id = _saved_template_id(event, 'Built-in templates cannot be deleted')
+    if isinstance(template_id, dict):
+        return template_id
     templates_table.delete_item(Key={'id': template_id})
     return success_response({'message': 'Template deleted successfully'}, event)
 
@@ -722,7 +733,7 @@ def _retry_research(event: dict[str, Any], context: Any, job: dict[str, Any]) ->
             ReturnValues='ALL_NEW',
         )
     except ClientError as exc:
-        if _is_conditional_failure(exc):
+        if is_conditional_check_failure(exc):
             return validation_error('This research was already retried or changed. Refresh and try again.', event, 'status')
         raise
 

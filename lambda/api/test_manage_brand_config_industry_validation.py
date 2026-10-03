@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from typing import get_args
 from unittest.mock import MagicMock, call
 
@@ -11,45 +10,51 @@ from test_manage_brand_config_fixtures import (
     BRAND_INDUSTRY_ENDPOINT_CASES,
     BrandIndustryEndpointCase,
     build_brand_industry_event,
+    load_brand_config_module,
 )
 
 from testing.events import parse_response
-from testing.module_loader import load_handler_module
 
-os.environ.setdefault('DYNAMODB_TABLE_BRAND_CONFIG', 'test-brand-config')
-_mod = load_handler_module(
-    os.path.dirname(__file__),
-    'manage-brand-config.py',
-    'manage_brand_config_industry_validation_under_test',
-)
+_mod = load_brand_config_module('manage_brand_config_industry_validation_under_test')
 
 _CASE_IDS = [case.pytest_id for case in BRAND_INDUSTRY_ENDPOINT_CASES]
 
 
+@pytest.fixture
+def operation(monkeypatch, case: BrandIndustryEndpointCase) -> MagicMock:
+    """Stand-in for the brand operation ``case`` routes to."""
+    stub = MagicMock(return_value={})
+    monkeypatch.setattr(_mod, case.function_name, stub)
+    return stub
+
+
 @pytest.mark.parametrize('case', BRAND_INDUSTRY_ENDPOINT_CASES, ids=_CASE_IDS)
 def test_passes_trimmed_industry_when_body_contains_surrounding_whitespace(
-    monkeypatch,
+    operation: MagicMock,
     case: BrandIndustryEndpointCase,
 ) -> None:
-    operation = MagicMock(return_value={})
-    monkeypatch.setattr(_mod, case.function_name, operation)
-    event = build_brand_industry_event(case, ' hotels ', _mod.ADMIN_GROUP)
-
-    _mod.handler(event, None)
+    _mod.handler(build_brand_industry_event(case, ' hotels ', _mod.ADMIN_GROUP), None)
 
     assert operation.call_args_list == [call(*case.hotels_arguments)]
 
 
 @pytest.mark.parametrize('case', BRAND_INDUSTRY_ENDPOINT_CASES, ids=_CASE_IDS)
-def test_rejects_industry_when_body_value_exceeds_fifty_characters(
-    monkeypatch,
+def test_passes_general_when_request_omits_industry(
+    operation: MagicMock,
     case: BrandIndustryEndpointCase,
 ) -> None:
-    operation = MagicMock(return_value={})
-    monkeypatch.setattr(_mod, case.function_name, operation)
-    event = build_brand_industry_event(case, 'x' * 51, _mod.ADMIN_GROUP)
+    status, _payload = parse_response(_mod.handler(build_brand_industry_event(case, None, _mod.ADMIN_GROUP), None))
 
-    status, payload = parse_response(_mod.handler(event, None))
+    assert status == 200
+    operation.assert_called_once_with(*case.general_arguments)
+
+
+@pytest.mark.parametrize('case', BRAND_INDUSTRY_ENDPOINT_CASES, ids=_CASE_IDS)
+def test_rejects_industry_when_body_value_exceeds_fifty_characters(
+    operation: MagicMock,
+    case: BrandIndustryEndpointCase,
+) -> None:
+    status, payload = parse_response(_mod.handler(build_brand_industry_event(case, 'x' * 51, _mod.ADMIN_GROUP), None))
 
     assert (status, payload) == (400, {
         'error': 'industry too long (max 50 characters)',

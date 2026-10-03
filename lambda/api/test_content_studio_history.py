@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
+import pytest
 from botocore.exceptions import ClientError
 
 from testing.content_studio_fixtures import (
@@ -41,19 +43,69 @@ def history_row(
     return row
 
 
+def history_for(limit: int, **pages: list[dict[str, object]]) -> tuple[list[dict[str, object]], MagicMock]:
+    """Read `limit` history rows from per-status query pages; return them and the table spy."""
+    table = fake_table()
+    table.query.side_effect = status_query_pages(**pages)
+
+    with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
+        history = _mod.get_content_history(limit)
+    return history, table
+
+
+def call_api(event: dict[str, object], resource: MagicMock) -> tuple[int, Any]:
+    """Route one API event through the handler against `resource`."""
+    with patch.object(_mod, "dynamodb", resource):
+        return parse_response(_mod._api_handler(event, None))
+
+
+def batch_child_status(position: int, status: str, **fields: object) -> dict[str, object]:
+    """One batch-status child for manifest position `position`, before any stored row is observed."""
+    child_id = f"child-{position}"
+    child: dict[str, object] = {
+        "id": child_id,
+        "idea_id": f"idea-{child_id}",
+        "keyword_id": f"keyword-{position}",
+        "keyword": f"Keyword {child_id}",
+        "status": status,
+        "batch_position": position,
+        "created_at": None,
+        "updated_at": None,
+        "has_content": False,
+        "error_message": None,
+        "generation_attempts": 0,
+        "generation_terminal_reason": None,
+    }
+    child.update(fields)
+    return child
+
+
+def missing_batch_child(position: int) -> dict[str, object]:
+    """The tombstone reported for a manifest child whose row is absent."""
+    return batch_child_status(position, "missing", error_message="Content record is unavailable.")
+
+
+def batch_counts(total: int, **observed: int) -> dict[str, int]:
+    """Batch-status counts with every unlisted status at zero."""
+    counts: dict[str, int] = dict.fromkeys(("pending", "generating", "generated", "failed", "missing"), 0)
+    counts.update(observed)
+    return {**counts, "total": total}
+
+
+def batch_status_body(children: list[dict[str, object]], counts: dict[str, int]) -> dict[str, object]:
+    """The full batch-status response for batch-1."""
+    return {"batch_id": "batch-1", "batch_size": len(children), "children": children, "counts": counts}
+
+
 class TestIndexedHistory:
     def test_merges_status_queries_into_newest_global_order(self) -> None:
-        table = fake_table()
-        table.query.side_effect = status_query_pages(
+        history, table = history_for(
+            3,
             pending=[history_row("pending", "pending", "2026-09-20T10:04:00Z")],
             generating=[history_row("generating", "generating", "2026-09-20T10:02:00Z")],
             generated=[history_row("generated", "generated", "2026-09-20T10:05:00Z")],
             failed=[history_row("failed", "failed", "2026-09-20T10:03:00Z")],
         )
-        resource = content_studio_resource(content_table=table)
-
-        with patch.object(_mod, "dynamodb", resource):
-            history = _mod.get_content_history(3)
 
         assert [item["id"] for item in history] == ["generated", "pending", "failed"]
         assert table.query.call_count == 4
@@ -73,22 +125,15 @@ class TestIndexedHistory:
             updated_at="2026-09-20T10:05:00Z",
             generated_content={"title": "Ready"},
         )
-        table = fake_table()
-        table.query.side_effect = status_query_pages(pending=[stale], generated=[current])
 
-        with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
-            history = _mod.get_content_history(20)
+        history, _ = history_for(20, pending=[stale], generated=[current])
 
         assert len(history) == 1
         assert history[0]["status"] == "generated"
         assert history[0]["updated_at"] == "2026-09-20T10:05:00Z"
 
     def test_queries_each_status_newest_first_with_requested_limit(self) -> None:
-        table = fake_table(query={"Items": []})
-        resource = content_studio_resource(content_table=table)
-
-        with patch.object(_mod, "dynamodb", resource):
-            _mod.get_content_history(7)
+        _, table = history_for(7)
 
         assert [current.kwargs["IndexName"] for current in table.query.call_args_list] == [
             "StatusCreatedIndex",
@@ -112,11 +157,8 @@ class TestIndexedHistory:
             idea_type="visibility_gap",
             idea_data={"id": "old-idea", "keyword": "Legacy keyword"},
         )
-        table = fake_table()
-        table.query.side_effect = status_query_pages(generated=[legacy])
 
-        with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
-            history = _mod.get_content_history(20)
+        history, _ = history_for(20, generated=[legacy])
 
         assert history == [legacy]
         assert "scope" not in history[0]
@@ -131,8 +173,7 @@ class TestIndexedHistory:
         ]
         event = api_gateway_event("GET", "/content-studio/history", query={"limit": "20"})
 
-        with patch.object(_mod, "dynamodb", content_studio_resource(content_table=table)):
-            status, body = parse_response(_mod._api_handler(event, None))
+        status, body = call_api(event, content_studio_resource(content_table=table))
 
         assert status == 200
         assert body == {
@@ -232,48 +273,28 @@ class TestBatchStatus:
         status, body = call_batch_status(_mod, resource)
 
         assert status == 200
-        assert body == {
-            "batch_id": "batch-1",
-            "batch_size": 2,
-            "children": [
-                {
-                    "id": "child-1",
-                    "idea_id": "idea-child-1",
-                    "keyword_id": "keyword-1",
-                    "keyword": "Keyword child-1",
-                    "status": "generated",
-                    "batch_position": 1,
-                    "created_at": "2099-09-20T10:01:00Z",
-                    "updated_at": "2099-09-20T10:01:00Z",
-                    "has_content": True,
-                    "error_message": None,
-                    "generation_attempts": 1,
-                    "generation_terminal_reason": None,
-                },
-                {
-                    "id": "child-2",
-                    "idea_id": "idea-child-2",
-                    "keyword_id": "keyword-2",
-                    "keyword": "Keyword child-2",
-                    "status": "failed",
-                    "batch_position": 2,
-                    "created_at": "2099-09-20T10:02:00Z",
-                    "updated_at": "2099-09-20T10:02:00Z",
-                    "has_content": False,
-                    "error_message": "failed",
-                    "generation_attempts": 3,
-                    "generation_terminal_reason": "max_attempts_exhausted",
-                },
+        assert body == batch_status_body(
+            [
+                batch_child_status(
+                    1,
+                    "generated",
+                    created_at="2099-09-20T10:01:00Z",
+                    updated_at="2099-09-20T10:01:00Z",
+                    has_content=True,
+                    generation_attempts=1,
+                ),
+                batch_child_status(
+                    2,
+                    "failed",
+                    created_at="2099-09-20T10:02:00Z",
+                    updated_at="2099-09-20T10:02:00Z",
+                    error_message="failed",
+                    generation_attempts=3,
+                    generation_terminal_reason="max_attempts_exhausted",
+                ),
             ],
-            "counts": {
-                "pending": 0,
-                "generating": 0,
-                "generated": 1,
-                "failed": 1,
-                "missing": 0,
-                "total": 2,
-            },
-        }
+            batch_counts(2, generated=1, failed=1),
+        )
 
     def test_reads_manifest_and_children_with_strong_consistency(self) -> None:
         resource, batch_table = batch_status_resource(batch_manifest_item(["child-1", "child-2"]))
@@ -344,28 +365,8 @@ class TestBatchStatus:
         status, body = call_batch_status(_mod, resource)
 
         assert status == 200
-        assert body["children"][1] == {
-            "id": "child-2",
-            "idea_id": "idea-child-2",
-            "keyword_id": "keyword-2",
-            "keyword": "Keyword child-2",
-            "status": "missing",
-            "batch_position": 2,
-            "created_at": None,
-            "updated_at": None,
-            "has_content": False,
-            "error_message": "Content record is unavailable.",
-            "generation_attempts": 0,
-            "generation_terminal_reason": None,
-        }
-        assert body["counts"] == {
-            "pending": 1,
-            "generating": 0,
-            "generated": 1,
-            "failed": 0,
-            "missing": 1,
-            "total": 3,
-        }
+        assert body["children"][1] == missing_batch_child(2)
+        assert body["counts"] == batch_counts(3, pending=1, generated=1, missing=1)
         assert body["counts"]["total"] == body["batch_size"]
 
     def test_reports_missing_tombstone_when_every_manifest_child_is_absent(self) -> None:
@@ -374,34 +375,7 @@ class TestBatchStatus:
         status, body = call_batch_status(_mod, resource)
 
         assert status == 200
-        assert body == {
-            "batch_id": "batch-1",
-            "batch_size": 1,
-            "children": [
-                {
-                    "id": "child-1",
-                    "idea_id": "idea-child-1",
-                    "keyword_id": "keyword-1",
-                    "keyword": "Keyword child-1",
-                    "status": "missing",
-                    "batch_position": 1,
-                    "created_at": None,
-                    "updated_at": None,
-                    "has_content": False,
-                    "error_message": "Content record is unavailable.",
-                    "generation_attempts": 0,
-                    "generation_terminal_reason": None,
-                }
-            ],
-            "counts": {
-                "pending": 0,
-                "generating": 0,
-                "generated": 0,
-                "failed": 0,
-                "missing": 1,
-                "total": 1,
-            },
-        }
+        assert body == batch_status_body([missing_batch_child(1)], batch_counts(1, missing=1))
 
     def test_returns_404_when_manifest_is_absent(self) -> None:
         resource, _ = batch_status_resource(None)
@@ -411,28 +385,24 @@ class TestBatchStatus:
         assert body == {"error": "Batch not found"}
         resource.batch_get_item.assert_not_called()
 
-    def test_returns_safe_operational_error_when_manifest_read_fails(self) -> None:
-        resource, batch_table = batch_status_resource(None)
-        batch_table.get_item.side_effect = ClientError(
+    @pytest.mark.parametrize(
+        ("operation", "child_reads"),
+        [("GetItem", 0), ("BatchGetItem", 1)],
+        ids=["manifest-read-fails", "child-read-fails"],
+    )
+    def test_returns_safe_operational_error_when_storage_read_fails(self, operation: str, child_reads: int) -> None:
+        resource, batch_table = batch_status_resource(batch_manifest_item(["child-1"]))
+        failing_reads = {"GetItem": batch_table.get_item, "BatchGetItem": resource.batch_get_item}
+        failing_reads[operation].side_effect = ClientError(
             {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "private"}},
-            "GetItem",
+            operation,
         )
+
         status, body = call_batch_status(_mod, resource)
 
         assert status == 500
         assert body == {"error": "Service temporarily unavailable"}
-        resource.batch_get_item.assert_not_called()
-
-    def test_returns_safe_operational_error_when_child_read_fails(self) -> None:
-        resource, _ = batch_status_resource(batch_manifest_item(["child-1"]))
-        resource.batch_get_item.side_effect = ClientError(
-            {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "private"}},
-            "BatchGetItem",
-        )
-        status, body = call_batch_status(_mod, resource)
-
-        assert status == 500
-        assert body == {"error": "Service temporarily unavailable"}
+        assert resource.batch_get_item.call_count == child_reads
 
 
 class TestBatchChildDeletion:
@@ -449,8 +419,7 @@ class TestBatchChildDeletion:
             path_params={"id": "child-1"},
         )
 
-        with patch.object(_mod, "dynamodb", resource):
-            status, body = parse_response(_mod._api_handler(event, None))
+        status, body = call_api(event, resource)
 
         assert status == 200
         assert body == {

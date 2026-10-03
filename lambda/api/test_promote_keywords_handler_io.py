@@ -31,9 +31,8 @@ Context:
     keeps the table env vars unset while the tests run.
 """
 
-import json
 from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, call
 
 import pytest
 from botocore.exceptions import ClientError
@@ -41,7 +40,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from testing.dynamodb_stubs import conditional_check_failure
-from testing.events import api_gateway_event, parse_response
+from testing.keyword_promotion_fixtures import assert_rejected_before_dynamodb, invoke_promotion
 from testing.keyword_strategies import (
     BASE_TEXTS,
     CASE_TRANSFORMS,
@@ -114,10 +113,7 @@ def _invoke(module, table, keywords, status=None, priority=None):
     if priority is not None:
         body['priority'] = priority
 
-    with patch.object(module, 'keywords_table', table):
-        response = module.handler(api_gateway_event('POST', '/api/keywords/promote', body=body), None)
-
-    return parse_response(response)
+    return invoke_promotion(module, table, body)
 
 
 def _supplied(drawn, allowed_values):
@@ -470,41 +466,30 @@ class TestPromotionValidationUnit:
         assert status_code == 400, f'Expected 400, got {status_code}: {body}'
         assert body['field'] == 'keywords', f'Unexpected field {body.get("field")!r}'
         assert 'error' in body, f'Missing error message in {body}'
-        table.scan.assert_not_called()
-        table.put_item.assert_not_called()
+        assert_rejected_before_dynamodb(table)
 
-    def test_request_is_rejected_when_keyword_count_exceeds_the_maximum(self, promotion_handler):
+    @pytest.mark.parametrize(
+        ('limit_name', 'build_keywords'),
+        [
+            ('MAX_KEYWORDS', lambda limit: [{'keyword': f'keyword {index}'} for index in range(limit + 1)]),
+            ('MAX_KEYWORD_LENGTH', lambda limit: [{'keyword': 'best running shoes'}, {'keyword': f"  {'a' * (limit + 1)}  "}]),
+            ('MAX_NOTES_LENGTH', lambda limit: [{'keyword': 'running shoes', 'intent': 'x' * limit}]),
+        ],
+        ids=[
+            'keyword-count-exceeds-the-maximum',
+            'trimmed-keyword-exceeds-the-length-limit',
+            'generated-notes-exceed-the-keyword-notes-limit',
+        ],
+    )
+    def test_request_is_rejected_naming_the_limit_it_exceeds(self, promotion_handler, limit_name, build_keywords):
         table = _mock_table()
-        keywords = [
-            {'keyword': f'keyword {index}'}
-            for index in range(promotion_handler.MAX_KEYWORDS + 1)
-        ]
+        limit = getattr(promotion_handler, limit_name)
 
-        status_code, body = _invoke(promotion_handler, table, keywords)
+        status_code, body = _invoke(promotion_handler, table, build_keywords(limit))
 
         assert status_code == 400, f'Expected 400, got {status_code}: {body}'
-        assert str(promotion_handler.MAX_KEYWORDS) in body['error'], (
-            f'Error should name the {promotion_handler.MAX_KEYWORDS} limit: {body["error"]!r}'
-        )
-        table.scan.assert_not_called()
-        table.put_item.assert_not_called()
-
-    def test_request_is_rejected_when_a_trimmed_keyword_exceeds_the_length_limit(
-        self, promotion_handler
-    ):
-        table = _mock_table()
-        too_long = 'a' * (promotion_handler.MAX_KEYWORD_LENGTH + 1)
-        keywords = [{'keyword': 'best running shoes'}, {'keyword': f'  {too_long}  '}]
-
-        status_code, body = _invoke(promotion_handler, table, keywords)
-
-        assert status_code == 400, f'Expected 400, got {status_code}: {body}'
-        assert str(promotion_handler.MAX_KEYWORD_LENGTH) in body['error'], (
-            f'Error should name the {promotion_handler.MAX_KEYWORD_LENGTH}-character limit: '
-            f'{body["error"]!r}'
-        )
-        table.scan.assert_not_called()
-        table.put_item.assert_not_called()
+        assert str(limit) in body['error'], f'Error should name the {limit} limit: {body["error"]!r}'
+        assert_rejected_before_dynamodb(table)
 
     @pytest.mark.parametrize(
         'keywords',
@@ -524,8 +509,7 @@ class TestPromotionValidationUnit:
 
         assert status_code == 400, f'Expected 400, got {status_code}: {body}'
         assert body['field'] == 'keywords', f'Unexpected field {body.get("field")!r}'
-        table.scan.assert_not_called()
-        table.put_item.assert_not_called()
+        assert_rejected_before_dynamodb(table)
 
 
     def test_request_is_rejected_before_any_write_when_one_keyword_status_is_invalid(
@@ -541,8 +525,7 @@ class TestPromotionValidationUnit:
 
         assert status_code == 400
         assert body['field'] == 'keywords[1].status'
-        table.scan.assert_not_called()
-        table.put_item.assert_not_called()
+        assert_rejected_before_dynamodb(table)
 
 
 class TestPromotionMalformedInputUnit:
@@ -553,19 +536,11 @@ class TestPromotionMalformedInputUnit:
         self, promotion_handler, body
     ):
         table = _mock_table()
-        event = {
-            'httpMethod': 'POST',
-            'path': '/api/keywords/promote',
-            'headers': {},
-            'body': json.dumps(body),
-        }
 
-        with patch.object(promotion_handler, 'keywords_table', table):
-            response = promotion_handler.handler(event, None)
+        status_code, _body = invoke_promotion(promotion_handler, table, body)
 
-        assert response['statusCode'] == 400
-        table.scan.assert_not_called()
-        table.put_item.assert_not_called()
+        assert status_code == 400
+        assert_rejected_before_dynamodb(table)
 
     @pytest.mark.parametrize('entry', [None, 'keyword', 1, []])
     def test_returns_400_when_keyword_entry_is_not_an_object(
@@ -577,8 +552,7 @@ class TestPromotionMalformedInputUnit:
 
         assert status_code == 400
         assert body['field'] == 'keywords[0]'
-        table.scan.assert_not_called()
-        table.put_item.assert_not_called()
+        assert_rejected_before_dynamodb(table)
 
     @pytest.mark.parametrize('value', [1, [], {}])
     def test_returns_400_when_keyword_value_is_not_a_string(
@@ -592,21 +566,4 @@ class TestPromotionMalformedInputUnit:
 
         assert status_code == 400
         assert body['field'] == 'keywords[0].keyword'
-        table.scan.assert_not_called()
-        table.put_item.assert_not_called()
-
-    def test_returns_400_when_generated_notes_exceed_keyword_notes_limit(
-        self, promotion_handler
-    ):
-        table = _mock_table()
-        keywords = [{
-            'keyword': 'running shoes',
-            'intent': 'x' * promotion_handler.MAX_NOTES_LENGTH,
-        }]
-
-        status_code, body = _invoke(promotion_handler, table, keywords)
-
-        assert status_code == 400
-        assert str(promotion_handler.MAX_NOTES_LENGTH) in body['error']
-        table.scan.assert_not_called()
-        table.put_item.assert_not_called()
+        assert_rejected_before_dynamodb(table)

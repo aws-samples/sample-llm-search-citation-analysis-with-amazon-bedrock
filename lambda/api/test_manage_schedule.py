@@ -20,8 +20,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.admin_authz_fixtures import caller_event
 from testing.dynamodb_stubs import fake_dynamodb_resource
-from testing.events import api_gateway_event, parse_response
+from testing.events import parse_response
 from testing.module_loader import load_handler_module
 
 
@@ -67,10 +68,7 @@ STATE_MACHINE_ARN = _test_env['STATE_MACHINE_ARN']
 
 def make_event(method, body=None, path_params=None, groups='Admin', path='/api/schedules'):
     """Build a minimal API Gateway event; defaults to an Admin caller."""
-    claims = {'cognito:username': 'admin@example.com', 'email': 'admin@example.com'}
-    if groups is not None:
-        claims['cognito:groups'] = groups
-    return api_gateway_event(method, path, resource=path, body=body, path_params=path_params, claims=claims)
+    return caller_event(method, path, resource=path, body=body, path_params=path_params, groups=groups)
 
 
 def id_event(method, schedule_id, body=None, suffix='', groups='Admin'):
@@ -105,14 +103,18 @@ def v2_detail(schedule_id='sch-1a2b3c4d', display_name='Hotel Coruña — weekly
     }
 
 
-def legacy_detail(name, target_input, expression='cron(0 9 * * ? *)'):
-    return {
+LEGACY_ALL_KEYWORDS = {'source': 'dynamodb'}
+
+
+def serve_legacy(name, target_input, expression='cron(0 9 * * ? *)'):
+    """Make GetSchedule answer with a pre-v2 schedule; a dict ``target_input`` is sent as JSON."""
+    mock_scheduler.get_schedule.return_value = {
         'Name': name,
         'Description': 'Automated daily citation analysis (all keywords)',
         'ScheduleExpression': expression,
         'ScheduleExpressionTimezone': 'UTC',
         'State': 'ENABLED',
-        'Target': {'Arn': STATE_MACHINE_ARN, 'Input': target_input},
+        'Target': {'Arn': STATE_MACHINE_ARN, 'Input': target_input if isinstance(target_input, str) else json.dumps(target_input)},
     }
 
 
@@ -343,12 +345,6 @@ class TestCreateSchedule:
         assert status == 400
         assert 'Invalid Schedule Expression' in body['error']
 
-    def test_denies_non_admins_before_touching_the_scheduler(self, handler_module):
-        status, _ = parse_response(handler_module.handler(make_event('POST', body={}, groups='Users'), {}))
-
-        assert status == 403
-        assert mock_scheduler.method_calls == []
-
 
 class TestListSchedules:
     """Tests for GET /api/schedules."""
@@ -369,7 +365,7 @@ class TestListSchedules:
 
     def test_translates_a_legacy_all_keywords_schedule(self, handler_module):
         mock_scheduler.list_schedules.return_value = {'Schedules': [{'Name': 'daily-analysis'}]}
-        mock_scheduler.get_schedule.return_value = legacy_detail('daily-analysis', json.dumps({'source': 'dynamodb'}))
+        serve_legacy('daily-analysis', LEGACY_ALL_KEYWORDS)
 
         _, body = self._list(handler_module)
 
@@ -379,9 +375,7 @@ class TestListSchedules:
 
     def test_translates_a_legacy_keyword_text_schedule_without_inventing_a_scope(self, handler_module):
         mock_scheduler.list_schedules.return_value = {'Schedules': [{'Name': 'priority-daily'}]}
-        mock_scheduler.get_schedule.return_value = legacy_detail(
-            'priority-daily', json.dumps({'keywords': ['best hotels malaga']}), 'cron(0 7 ? * FRI *)'
-        )
+        serve_legacy('priority-daily', {'keywords': ['best hotels malaga']}, 'cron(0 7 ? * FRI *)')
 
         _, body = self._list(handler_module)
 
@@ -393,7 +387,7 @@ class TestListSchedules:
 
     def test_tolerates_malformed_target_input(self, handler_module):
         mock_scheduler.list_schedules.return_value = {'Schedules': [{'Name': 'legacy'}]}
-        mock_scheduler.get_schedule.return_value = legacy_detail('legacy', 'not-json')
+        serve_legacy('legacy', 'not-json')
 
         status, body = self._list(handler_module)
 
@@ -428,13 +422,6 @@ class TestGetSchedule:
         assert status == 200
         assert body['id'] == 'sch-1a2b3c4d'
         mock_scheduler.get_schedule.assert_called_once_with(Name='sch-1a2b3c4d', GroupName='citation-analysis-schedules')
-
-    def test_returns_404_for_an_unknown_id(self, handler_module):
-        mock_scheduler.get_schedule.side_effect = SchedulerResourceNotFound()
-
-        status, _ = parse_response(handler_module.handler(id_event('GET', 'sch-missing'), {}))
-
-        assert status == 404
 
 
 class TestUpdateSchedule:
@@ -472,7 +459,7 @@ class TestUpdateSchedule:
         assert (target['Arn'], target['RoleArn']) == (STATE_MACHINE_ARN, _test_env['SCHEDULE_ROLE_ARN'])
 
     def test_upgrades_a_legacy_all_keywords_schedule_to_v2_under_the_same_name(self, handler_module):
-        mock_scheduler.get_schedule.return_value = legacy_detail('daily-analysis', json.dumps({'source': 'dynamodb'}))
+        serve_legacy('daily-analysis', LEGACY_ALL_KEYWORDS)
 
         status, body = self._update(handler_module, {'display_name': 'Daily — all hotels'}, schedule_id='daily-analysis')
 
@@ -488,20 +475,12 @@ class TestUpdateSchedule:
         assert body['legacy'] is False
 
     def test_requires_a_scope_to_edit_a_legacy_keyword_text_schedule(self, handler_module):
-        mock_scheduler.get_schedule.return_value = legacy_detail('priority-daily', json.dumps({'keywords': ['best hotels']}))
+        serve_legacy('priority-daily', {'keywords': ['best hotels']})
 
         status, body = self._update(handler_module, {'time': '10:00'}, schedule_id='priority-daily')
 
         assert status == 400
         assert body['field'] == 'scope'
-        mock_scheduler.update_schedule.assert_not_called()
-
-    def test_returns_404_for_an_unknown_id(self, handler_module):
-        mock_scheduler.get_schedule.side_effect = SchedulerResourceNotFound()
-
-        status, _ = self._update(handler_module, {'time': '10:00'}, schedule_id='sch-missing')
-
-        assert status == 404
         mock_scheduler.update_schedule.assert_not_called()
 
     def test_rejects_invalid_fields_without_writing(self, handler_module):
@@ -510,14 +489,6 @@ class TestUpdateSchedule:
         assert status == 400
         assert body['field'] == 'time'
         mock_scheduler.update_schedule.assert_not_called()
-
-    def test_denies_non_admins_before_touching_the_scheduler(self, handler_module):
-        event = id_event('PUT', 'sch-1a2b3c4d', body={'time': '10:00'}, groups='Users')
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-        assert mock_scheduler.method_calls == []
 
 
 class TestDeleteSchedule:
@@ -563,7 +534,7 @@ class TestRunNow:
         assert body['execution_name'] == kwargs['name']
 
     def test_runs_a_legacy_keyword_text_schedule_with_its_keywords(self, handler_module):
-        mock_scheduler.get_schedule.return_value = legacy_detail('priority-daily', json.dumps({'keywords': ['best hotels']}))
+        serve_legacy('priority-daily', {'keywords': ['best hotels']})
 
         status, _ = self._run(handler_module, 'priority-daily')
 
@@ -571,14 +542,14 @@ class TestRunNow:
         assert json.loads(mock_stepfunctions.start_execution.call_args.kwargs['input'])['keywords'] == ['best hotels']
 
     def test_runs_a_legacy_all_keywords_schedule_with_scope_all(self, handler_module):
-        mock_scheduler.get_schedule.return_value = legacy_detail('daily-analysis', json.dumps({'source': 'dynamodb'}))
+        serve_legacy('daily-analysis', LEGACY_ALL_KEYWORDS)
 
         self._run(handler_module, 'daily-analysis')
 
         assert json.loads(mock_stepfunctions.start_execution.call_args.kwargs['input'])['scope'] == {'mode': 'all'}
 
     def test_refuses_a_schedule_with_no_usable_scope(self, handler_module):
-        mock_scheduler.get_schedule.return_value = legacy_detail('broken', 'not-json')
+        serve_legacy('broken', 'not-json')
 
         status, body = self._run(handler_module, 'broken')
 
@@ -586,17 +557,31 @@ class TestRunNow:
         assert body['field'] == 'scope'
         mock_stepfunctions.start_execution.assert_not_called()
 
-    def test_returns_404_for_an_unknown_id(self, handler_module):
+
+class TestUnknownScheduleId:
+    """GET, PUT and run-now all read the schedule first; a missing one is a 404 and nothing is written."""
+
+    @pytest.mark.parametrize(('event', 'write'), [
+        pytest.param(id_event('GET', 'sch-missing'), mock_scheduler.update_schedule, id='get'),
+        pytest.param(id_event('PUT', 'sch-missing', body={'time': '10:00'}), mock_scheduler.update_schedule, id='update'),
+        pytest.param(id_event('POST', 'sch-missing', body={}, suffix='/run'), mock_stepfunctions.start_execution, id='run-now'),
+    ])
+    def test_returns_404_without_writing(self, handler_module, event, write):
         mock_scheduler.get_schedule.side_effect = SchedulerResourceNotFound()
 
-        status, _ = self._run(handler_module, 'sch-missing')
+        status, _ = parse_response(handler_module.handler(event, {}))
 
         assert status == 404
-        mock_stepfunctions.start_execution.assert_not_called()
+        write.assert_not_called()
 
-    def test_denies_non_admins_before_touching_aws(self, handler_module):
-        event = id_event('POST', 'sch-1a2b3c4d', body={}, suffix='/run', groups='Users')
 
+class TestNonAdminCallers:
+    @pytest.mark.parametrize('event', [
+        pytest.param(make_event('POST', body={}, groups='Users'), id='create'),
+        pytest.param(id_event('PUT', 'sch-1a2b3c4d', body={'time': '10:00'}, groups='Users'), id='update'),
+        pytest.param(id_event('POST', 'sch-1a2b3c4d', body={}, suffix='/run', groups='Users'), id='run-now'),
+    ])
+    def test_are_denied_before_any_aws_call(self, handler_module, event):
         status, _ = parse_response(handler_module.handler(event, {}))
 
         assert status == 403

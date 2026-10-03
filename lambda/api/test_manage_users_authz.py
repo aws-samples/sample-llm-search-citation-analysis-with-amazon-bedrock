@@ -21,7 +21,6 @@ and the one Cognito error mapping every route shares.
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -29,11 +28,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
+from testing.admin_authz_fixtures import ADMIN_EMAIL, caller_event, invoke, status_of
 from testing.module_loader import load_handler_module
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 
-CALLER = 'admin@example.com'
+CALLER = ADMIN_EMAIL
 OTHER_USER = 'victim@example.com'
 
 
@@ -80,31 +80,10 @@ def make_event(
     method: str,
     path: str = '/api/users',
     body: dict[str, Any] | None = None,
-    path_params: dict[str, str] | None = None,
     groups: str | None = 'Admin',
-    caller: str = CALLER,
 ) -> dict[str, Any]:
-    """Build an API Gateway event with Cognito authorizer claims.
-
-    `groups=None` builds an authenticated-but-ungrouped caller, which is what
-    an invited read-only user actually looks like.
-    """
-    claims: dict[str, Any] = {
-        'sub': '11111111-2222-3333-4444-555555555555',
-        'cognito:username': caller,
-        'email': caller,
-    }
-    if groups is not None:
-        claims['cognito:groups'] = groups
-
-    return {
-        'httpMethod': method,
-        'path': path,
-        'pathParameters': path_params,
-        'headers': {'origin': 'http://localhost:3000'},
-        'body': json.dumps(body) if body is not None else None,
-        'requestContext': {'authorizer': {'claims': claims}},
-    }
+    """An event addressing a collection route as an Admin unless ``groups`` says otherwise."""
+    return caller_event(method, path, body=body, groups=groups)
 
 
 def user_event(
@@ -115,21 +94,17 @@ def user_event(
     suffix: str = '',
 ) -> dict[str, Any]:
     """An event addressing ``/api/users/{username}`` (plus ``suffix``) as an Admin unless ``groups`` says otherwise."""
-    return make_event(
+    return caller_event(
         method,
-        path=f'/api/users/{username}{suffix}',
+        f'/api/users/{username}{suffix}',
         body=body,
         path_params={'username': username},
         groups=groups,
     )
 
 
-def parse_response(result: dict[str, Any]) -> tuple[int, dict[str, Any]]:
-    """Extract status code and parsed body from a Lambda response."""
-    status = result.get('statusCode', 200)
-    raw = result.get('body')
-    body = json.loads(raw) if isinstance(raw, str) and raw else {}
-    return status, body
+PROMOTE = {'groups': ['Admin']}
+INVITE = {'email': 'new@example.com'}
 
 
 def cognito_user(username: str, enabled: bool = True) -> dict[str, Any]:
@@ -150,27 +125,22 @@ def cognito_failure(operation: str) -> ClientError:
     return ClientError({'Error': {'Code': 'InternalErrorException', 'Message': 'boom'}}, operation)
 
 
+def listed_user(username: str) -> dict[str, Any]:
+    """One list_users entry."""
+    return {
+        'Username': username,
+        'Attributes': [{'Name': 'email', 'Value': username}],
+        'UserStatus': 'CONFIRMED',
+        'Enabled': True,
+    }
+
+
 @pytest.fixture(autouse=True)
 def _reset_mocks():
     """Reset Cognito mocks before each test."""
     mock_cognito.reset_mock(return_value=True, side_effect=True)
     _restore_cognito_exception_classes()
-    mock_cognito.list_users.return_value = {
-        'Users': [
-            {
-                'Username': CALLER,
-                'Attributes': [{'Name': 'email', 'Value': CALLER}],
-                'UserStatus': 'CONFIRMED',
-                'Enabled': True,
-            },
-            {
-                'Username': OTHER_USER,
-                'Attributes': [{'Name': 'email', 'Value': OTHER_USER}],
-                'UserStatus': 'CONFIRMED',
-                'Enabled': True,
-            },
-        ]
-    }
+    mock_cognito.list_users.return_value = {'Users': [listed_user(CALLER), listed_user(OTHER_USER)]}
     mock_cognito.admin_get_user.return_value = cognito_user(OTHER_USER)
     mock_cognito.admin_list_groups_for_user.return_value = {'Groups': [{'GroupName': 'Users'}]}
     mock_cognito.list_groups.return_value = {'Groups': [{'GroupName': 'Admin'}, {'GroupName': 'Users'}]}
@@ -190,80 +160,36 @@ def handler_module(monkeypatch):
 
 class TestPrivilegeEscalation:
     """
-    §0.1 — the self-service promotion path.
+    §0.1 — the self-service promotion path, and §0.2 — irreversible deletion.
 
     A read-only invited user enumerated group names via GET /api/users/groups,
     then PUT their own record with {"groups":["Admin"]}.
     """
 
-    def test_non_admin_promoting_another_user_to_admin_returns_403(self, handler_module):
-        event = user_event('PUT', OTHER_USER, body={'groups': ['Admin']}, groups='Users')
+    @pytest.mark.parametrize(('event', 'mutation'), [
+        pytest.param(user_event('PUT', OTHER_USER, body=PROMOTE, groups='Users'), 'admin_add_user_to_group', id='non-admin-promoting-another-user'),
+        # The exact attack: no group claim at all, targeting own record.
+        pytest.param(user_event('PUT', CALLER, body=PROMOTE, groups=None), 'admin_add_user_to_group', id='ungrouped-user-promoting-themselves'),
+        # Self-modification of `groups` is refused regardless of caller group;
+        # on the wire it is indistinguishable from the escalation attack.
+        pytest.param(user_event('PUT', CALLER, body=PROMOTE), 'admin_add_user_to_group', id='admin-promoting-themselves'),
+        # Pool usernames are lowercased emails; the path param may not be.
+        pytest.param(user_event('PUT', 'Admin@Example.COM', body=PROMOTE), 'admin_add_user_to_group', id='self-reference-across-letter-case'),
+        # Self-disable can lock the last administrator out of the deployment.
+        pytest.param(user_event('PUT', CALLER, body={'enabled': False}), 'admin_disable_user', id='admin-disabling-their-own-account'),
+        # §0.2: `admin_delete_user` is irreversible.
+        pytest.param(user_event('DELETE', OTHER_USER, groups='Users'), 'admin_delete_user', id='non-admin-deleting-a-user'),
+        # Irreversible, and the caller may be the last Admin.
+        pytest.param(user_event('DELETE', CALLER), 'admin_delete_user', id='admin-deleting-their-own-account'),
+    ])
+    def test_refuses_the_change_with_403_before_cognito_is_called(self, handler_module, event, mutation):
+        status = status_of(handler_module, event)
 
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_non_admin_promotion_attempt_never_reaches_cognito(self, handler_module):
-        event = user_event('PUT', OTHER_USER, body={'groups': ['Admin']}, groups='Users')
-
-        handler_module.handler(event, {})
-
-        assert mock_cognito.admin_add_user_to_group.call_count == 0
-
-    def test_ungrouped_user_promoting_themselves_returns_403(self, handler_module):
-        """The exact attack: no group claim at all, targeting own record."""
-        event = user_event('PUT', CALLER, body={'groups': ['Admin']}, groups=None)
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_admin_promoting_themselves_returns_403(self, handler_module):
-        """
-        Self-modification of `groups` is refused regardless of caller group —
-        on the wire it is indistinguishable from the escalation attack.
-        """
-        event = user_event('PUT', CALLER, body={'groups': ['Admin']})
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_admin_self_promotion_attempt_never_reaches_cognito(self, handler_module):
-        event = user_event('PUT', CALLER, body={'groups': ['Admin']})
-
-        handler_module.handler(event, {})
-
-        assert mock_cognito.admin_add_user_to_group.call_count == 0
-
-    def test_self_reference_is_detected_across_letter_case(self, handler_module):
-        """Pool usernames are lowercased emails; the path param may not be."""
-        event = user_event('PUT', 'Admin@Example.COM', body={'groups': ['Admin']})
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_admin_disabling_their_own_account_returns_403(self, handler_module):
-        """Self-disable can lock the last administrator out of the deployment."""
-        event = user_event('PUT', CALLER, body={'enabled': False})
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_admin_self_disable_never_reaches_cognito(self, handler_module):
-        event = user_event('PUT', CALLER, body={'enabled': False})
-
-        handler_module.handler(event, {})
-
-        assert mock_cognito.admin_disable_user.call_count == 0
+        assert (status, getattr(mock_cognito, mutation).call_count) == (403, 0)
 
     def test_admin_can_still_change_another_users_groups(self, handler_module):
         """The legitimate workflow must survive the guard."""
-        event = user_event('PUT', OTHER_USER, body={'groups': ['Admin']})
-
-        status, _ = parse_response(handler_module.handler(event, {}))
+        status, _ = invoke(handler_module, user_event('PUT', OTHER_USER, body=PROMOTE))
 
         assert status == 200
         mock_cognito.admin_add_user_to_group.assert_any_call(
@@ -273,9 +199,8 @@ class TestPrivilegeEscalation:
     def test_admin_can_still_rename_their_own_non_privileged_fields(self, handler_module):
         """The guard covers `groups` and `enabled` only, not the whole route."""
         mock_cognito.admin_get_user.return_value = cognito_user(CALLER)
-        event = user_event('PUT', CALLER, body={})
 
-        status, _ = parse_response(handler_module.handler(event, {}))
+        status, _ = invoke(handler_module, user_event('PUT', CALLER, body={}))
 
         assert status == 200
 
@@ -288,73 +213,29 @@ class TestGroupsPayloadValidation:
     Cognito calls for `"Admin"`; a non-iterable raised TypeError into a 500.
     """
 
-    def test_returns_400_when_groups_is_a_bare_string(self, handler_module):
-        event = user_event('PUT', OTHER_USER, body={'groups': 'Admin'})
-
-        status, body = parse_response(handler_module.handler(event, {}))
+    @pytest.mark.parametrize('groups', [
+        pytest.param('Admin', id='bare-string'),
+        pytest.param(42, id='not-a-list'),
+        pytest.param(['Admin', 7], id='list-with-a-non-string'),
+    ])
+    def test_returns_400_naming_the_groups_field(self, handler_module, groups):
+        status, body = invoke(handler_module, user_event('PUT', OTHER_USER, body={'groups': groups}))
 
         assert status == 400
         assert body['field'] == 'groups'
 
     def test_does_not_call_cognito_with_per_character_groups(self, handler_module):
         """REGRESSION: 'Admin' must not expand to {'A','d','m','i','n'}."""
-        event = user_event('PUT', OTHER_USER, body={'groups': 'Admin'})
-
-        handler_module.handler(event, {})
+        handler_module.handler(user_event('PUT', OTHER_USER, body={'groups': 'Admin'}), {})
 
         assert mock_cognito.admin_add_user_to_group.call_count == 0
 
-    def test_returns_400_when_groups_is_not_a_list(self, handler_module):
-        event = user_event('PUT', OTHER_USER, body={'groups': 42})
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 400
-
-    def test_returns_400_when_groups_contains_a_non_string(self, handler_module):
-        event = user_event('PUT', OTHER_USER, body={'groups': ['Admin', 7]})
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 400
-
 
 class TestUserDeletion:
-    """§0.2 — `admin_delete_user` is irreversible."""
-
-    def test_non_admin_deleting_a_user_returns_403(self, handler_module):
-        event = user_event('DELETE', OTHER_USER, groups='Users')
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_non_admin_deletion_never_reaches_cognito(self, handler_module):
-        event = user_event('DELETE', OTHER_USER, groups='Users')
-
-        handler_module.handler(event, {})
-
-        assert mock_cognito.admin_delete_user.call_count == 0
-
-    def test_admin_deleting_their_own_account_returns_403(self, handler_module):
-        """Irreversible, and the caller may be the last Admin."""
-        event = user_event('DELETE', CALLER)
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_admin_self_deletion_never_reaches_cognito(self, handler_module):
-        event = user_event('DELETE', CALLER)
-
-        handler_module.handler(event, {})
-
-        assert mock_cognito.admin_delete_user.call_count == 0
+    """§0.2 — `admin_delete_user` is irreversible; the refusals are in TestPrivilegeEscalation."""
 
     def test_admin_can_still_delete_another_user(self, handler_module):
-        event = user_event('DELETE', OTHER_USER)
-
-        status, _ = parse_response(handler_module.handler(event, {}))
+        status, _ = invoke(handler_module, user_event('DELETE', OTHER_USER))
 
         assert status == 200
         mock_cognito.admin_delete_user.assert_called_once_with(
@@ -370,56 +251,21 @@ class TestReadRoutesRequireAdmin:
     enumerates the group names the escalation path needs, so both are gated.
     """
 
-    def test_listing_users_without_the_admin_group_returns_403(self, handler_module):
-        status, _ = parse_response(
-            handler_module.handler(make_event('GET', groups='Users'), {})
-        )
+    @pytest.mark.parametrize(('event', 'cognito_call'), [
+        pytest.param(make_event('GET', groups='Users'), 'list_users', id='listing-users'),
+        pytest.param(make_event('GET', path='/api/users/groups', groups='Users'), 'list_groups', id='listing-groups'),
+        pytest.param(make_event('POST', body=INVITE, groups='Users'), 'admin_create_user', id='inviting-a-user'),
+        pytest.param(
+            user_event('POST', OTHER_USER, groups='Users', suffix='/reset-password'), 'admin_reset_user_password', id='resetting-a-password',
+        ),
+        # The Step Functions role can invoke this function directly, bypassing
+        # API Gateway. That event has no claims and must not be trusted.
+        pytest.param({'httpMethod': 'GET', 'path': '/api/users'}, 'list_users', id='direct-lambda-invoke-with-no-request-context'),
+    ])
+    def test_returns_403_without_the_admin_group_before_cognito_is_called(self, handler_module, event, cognito_call):
+        status = status_of(handler_module, event)
 
-        assert status == 403
-
-    def test_listing_users_never_reaches_cognito_when_denied(self, handler_module):
-        handler_module.handler(make_event('GET', groups='Users'), {})
-
-        assert mock_cognito.list_users.call_count == 0
-
-    def test_listing_groups_without_the_admin_group_returns_403(self, handler_module):
-        event = make_event('GET', path='/api/users/groups', groups='Users')
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_inviting_a_user_without_the_admin_group_returns_403(self, handler_module):
-        event = make_event('POST', body={'email': 'new@example.com'}, groups='Users')
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_invite_never_creates_the_user_when_denied(self, handler_module):
-        event = make_event('POST', body={'email': 'new@example.com'}, groups='Users')
-
-        handler_module.handler(event, {})
-
-        assert mock_cognito.admin_create_user.call_count == 0
-
-    def test_resetting_a_password_without_the_admin_group_returns_403(self, handler_module):
-        event = user_event('POST', OTHER_USER, groups='Users', suffix='/reset-password')
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_returns_403_for_a_direct_lambda_invoke_with_no_request_context(self, handler_module):
-        """
-        The Step Functions role can invoke this function directly, bypassing
-        API Gateway. That event has no claims and must not be trusted.
-        """
-        status, _ = parse_response(
-            handler_module.handler({'httpMethod': 'GET', 'path': '/api/users'}, {})
-        )
-
-        assert status == 403
+        assert (status, getattr(mock_cognito, cognito_call).call_count) == (403, 0)
 
 
 class TestCorsPreflightIsNotGated:
@@ -438,7 +284,7 @@ class TestCorsPreflightIsNotGated:
             'headers': {'origin': 'http://localhost:3000'},
         }
 
-        status, _ = parse_response(handler_module.handler(event, {}))
+        status, _ = invoke(handler_module, event)
 
         assert status == 200
 
@@ -453,27 +299,25 @@ class TestGetUserRouting:
     def test_get_with_a_username_returns_that_single_user(self, handler_module):
         mock_cognito.admin_get_user.return_value = cognito_user(OTHER_USER)
 
-        status, body = parse_response(handler_module.handler(user_event('GET', OTHER_USER), {}))
+        status, body = invoke(handler_module, user_event('GET', OTHER_USER))
 
         assert status == 200
         assert body['user']['username'] == OTHER_USER
 
     def test_get_with_a_username_does_not_return_the_roster(self, handler_module):
-        _, body = parse_response(handler_module.handler(user_event('GET', OTHER_USER), {}))
+        _, body = invoke(handler_module, user_event('GET', OTHER_USER))
 
         assert 'users' not in body
 
     def test_get_without_a_username_returns_the_roster(self, handler_module):
-        status, body = parse_response(handler_module.handler(make_event('GET'), {}))
+        status, body = invoke(handler_module, make_event('GET'))
 
         assert status == 200
         assert [user['username'] for user in body['users']] == [CALLER, OTHER_USER]
 
     def test_get_groups_still_routes_to_the_group_list(self, handler_module):
         """The static /groups segment must keep winning over the parametric route."""
-        event = make_event('GET', path='/api/users/groups')
-
-        status, body = parse_response(handler_module.handler(event, {}))
+        status, body = invoke(handler_module, make_event('GET', path='/api/users/groups'))
 
         assert status == 200
         assert [group['name'] for group in body['groups']] == ['Admin', 'Users']
@@ -490,12 +334,12 @@ class TestCognitoErrorMapping:
     @staticmethod
     def _answer(handler_module, method: str, suffix: str = '', body: dict[str, Any] | None = None) -> tuple[int, dict[str, Any]]:
         """``(status, body)`` the route addressing OTHER_USER answers an Admin with."""
-        return parse_response(handler_module.handler(user_event(method, OTHER_USER, body=body, suffix=suffix), {}))
+        return invoke(handler_module, user_event(method, OTHER_USER, body=body, suffix=suffix))
 
     @staticmethod
     def _invite(handler_module) -> tuple[int, dict[str, Any]]:
         """``(status, body)`` of inviting a new address as an Admin."""
-        return parse_response(handler_module.handler(make_event('POST', body={'email': 'new@example.com'}), {}))
+        return invoke(handler_module, make_event('POST', body=INVITE))
 
     @pytest.mark.parametrize(('method', 'suffix', 'body', 'failing_call'), [
         ('GET', '', None, 'admin_get_user'),
@@ -530,9 +374,7 @@ class TestCognitoErrorMapping:
     def test_returns_500_with_the_listings_message_when_cognito_fails(self, handler_module, path, failing_call, message):
         getattr(mock_cognito, failing_call).side_effect = cognito_failure(failing_call)
 
-        status, response = parse_response(handler_module.handler(make_event('GET', path=path), {}))
-
-        assert (status, response) == (500, {'error': message})
+        assert invoke(handler_module, make_event('GET', path=path)) == (500, {'error': message})
 
     def test_returns_409_when_the_invited_email_is_already_a_user(self, handler_module):
         mock_cognito.admin_create_user.side_effect = CognitoUsernameExists()

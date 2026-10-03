@@ -19,7 +19,6 @@ job back. These tests pin the contract the frontend and the worker rely on:
 from __future__ import annotations
 
 import json
-import os
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -27,11 +26,16 @@ from botocore.exceptions import ClientError
 
 from shared.utils import get_timestamp
 from testing.dynamodb_stubs import conditional_check_failure
-from testing.env import KEYWORD_RESEARCH_ENV, setdefault_env
-from testing.module_loader import load_handler_module_offline
+from testing.events import parse_response
+from testing.keyword_research_fixtures import (
+    history_event,
+    job_event,
+    load_keyword_research,
+    research_table_stub,
+    started_stepfunctions,
+)
 
-setdefault_env(KEYWORD_RESEARCH_ENV)
-_mod = load_handler_module_offline(os.path.dirname(__file__), 'keyword-research.py', 'keyword_research_lifecycle_under_test')
+_mod = load_keyword_research('keyword_research_lifecycle_under_test')
 
 # Well above the 30-minute state machine timeout.
 STATE_MACHINE_TIMEOUT_SECONDS = 30 * 60
@@ -54,38 +58,12 @@ def _competitor_event() -> dict:
     }
 
 
-def _id_event(method: str, job_id: str, suffix: str = '') -> dict:
-    return {
-        'httpMethod': method,
-        'path': f'/api/keyword-research/{job_id}{suffix}',
-        'pathParameters': {'id': job_id},
-    }
-
-
 def _start_fails() -> MagicMock:
     stepfunctions = MagicMock()
     stepfunctions.start_execution.side_effect = ClientError(
         {'Error': {'Code': 'ExecutionLimitExceeded', 'Message': 'boom'}}, 'StartExecution'
     )
     return stepfunctions
-
-
-def _start_succeeds() -> MagicMock:
-    stepfunctions = MagicMock()
-    stepfunctions.start_execution.return_value = {
-        'executionArn': 'arn:aws:states:us-west-2:123456789012:execution:research:abc'
-    }
-    return stepfunctions
-
-
-def _configured():
-    return MagicMock(return_value=[('perplexity', object())])
-
-
-def _table_with(item: dict | None) -> MagicMock:
-    table = MagicMock()
-    table.get_item.return_value = {'Item': item} if item is not None else {}
-    return table
 
 
 def _statuses_written(table: MagicMock) -> list[str]:
@@ -103,10 +81,32 @@ def _collaborators(**overrides: MagicMock):
     """
     return patch.multiple(_mod, **{
         'research_table': MagicMock(),
-        'get_web_search_clients': _configured(),
-        'stepfunctions': _start_succeeds(),
+        'get_web_search_clients': MagicMock(return_value=[('perplexity', object())]),
+        'stepfunctions': started_stepfunctions(),
         **overrides,
     })
+
+
+def _persisted_start(event: dict, **overrides: MagicMock) -> tuple[dict, dict]:
+    """Start a job from ``event``; returns ``(response, row written by put_item)``."""
+    table = MagicMock()
+    with _collaborators(research_table=table, **overrides):
+        response = _mod.handler(event, None)
+    return response, table.put_item.call_args.kwargs['Item']
+
+
+def _read_job(job: dict) -> dict:
+    """``GET /job-1`` against a table holding ``job``; returns the decoded body."""
+    with patch.object(_mod, 'research_table', research_table_stub(job)):
+        return parse_response(_mod.handler(job_event('GET', 'job-1'), None))[1]
+
+
+def _sweep(row: dict, table: MagicMock | None = None) -> MagicMock:
+    """Run the reader-side stale sweep on ``row``; returns the table it wrote to."""
+    table = table or MagicMock()
+    with patch.object(_mod, 'research_table', table):
+        _mod._fail_if_research_timed_out(row)
+    return table
 
 
 class TestStartDispatchFailure:
@@ -136,20 +136,15 @@ class TestStartDispatchFailure:
 class TestStartSuccess:
     def test_returns_202_with_a_pending_job(self):
         with _collaborators():
-            response = _mod.handler(_expand_event(), None)
+            status, body = parse_response(_mod.handler(_expand_event(), None))
 
-        body = json.loads(response['body'])
-        assert response['statusCode'] == 202
+        assert status == 202
         assert body['status'] == 'pending'
         assert body['type'] == 'expansion'
 
     def test_persists_the_pending_row_with_the_request_fields(self):
-        table = MagicMock()
+        response, item = _persisted_start(_expand_event())
 
-        with _collaborators(research_table=table):
-            response = _mod.handler(_expand_event(), None)
-
-        item = table.put_item.call_args.kwargs['Item']
         assert item['id'] == json.loads(response['body'])['id']
         assert (item['seed_keyword'], item['industry'], item['count'], item['status']) == (
             'best hotels malaga', 'hotels', 20, 'pending',
@@ -157,7 +152,7 @@ class TestStartSuccess:
         assert item['steps'] == {}
 
     def test_starts_the_execution_named_after_the_job_with_retry_false(self):
-        stepfunctions = _start_succeeds()
+        stepfunctions = started_stepfunctions()
 
         with _collaborators(stepfunctions=stepfunctions):
             response = _mod.handler(_expand_event(), None)
@@ -170,12 +165,8 @@ class TestStartSuccess:
         }
 
     def test_competitor_job_records_the_normalised_url_and_domain(self):
-        table = MagicMock()
+        response, item = _persisted_start(_competitor_event(), validate_url_safe=MagicMock(return_value=(True, None)))
 
-        with _collaborators(research_table=table, validate_url_safe=MagicMock(return_value=(True, None))):
-            response = _mod.handler(_competitor_event(), None)
-
-        item = table.put_item.call_args.kwargs['Item']
         assert response['statusCode'] == 202
         assert (item['type'], item['url'], item['domain']) == ('competitor', 'https://example.com/rooms', 'example.com')
 
@@ -190,13 +181,13 @@ class TestStartSuccess:
 
 class TestGetResearch:
     def test_returns_404_for_an_unknown_job(self):
-        with patch.object(_mod, 'research_table', _table_with(None)):
-            response = _mod.handler(_id_event('GET', 'missing'), None)
+        with patch.object(_mod, 'research_table', research_table_stub(None)):
+            response = _mod.handler(job_event('GET', 'missing'), None)
 
         assert response['statusCode'] == 404
 
     def test_merges_completed_steps_while_the_job_is_still_running(self):
-        job = {
+        body = _read_job({
             'id': 'job-1', 'type': 'expansion', 'status': 'running', 'created_at': get_timestamp(),
             'steps_total': 2,
             'steps': {
@@ -204,31 +195,32 @@ class TestGetResearch:
                                   'keywords': [{'keyword': 'hotel malaga', 'relevance': 9}]},
                 'r1-openai': {'provider': 'openai', 'status': 'running'},
             },
-        }
+        })
 
-        with patch.object(_mod, 'research_table', _table_with(job)):
-            response = _mod.handler(_id_event('GET', 'job-1'), None)
-
-        body = json.loads(response['body'])
         assert body['status'] == 'running'
         assert [entry['keyword'] for entry in body['keywords']] == ['hotel malaga']
         assert (body['steps_done'], body['steps_total']) == (1, 2)
 
     def test_lists_every_step_with_its_status(self):
-        job = {
+        steps = _read_job({
             'id': 'job-1', 'type': 'expansion', 'status': 'running', 'created_at': get_timestamp(),
             'steps': {
                 'r1-perplexity': {'provider': 'perplexity', 'status': 'failed', 'error_message': '401'},
                 'r1-openai': {'provider': 'openai', 'status': 'pending'},
             },
-        }
+        })['steps']
 
-        with patch.object(_mod, 'research_table', _table_with(job)):
-            response = _mod.handler(_id_event('GET', 'job-1'), None)
-
-        steps = json.loads(response['body'])['steps']
         assert [(step['provider'], step['status']) for step in steps] == [('openai', 'pending'), ('perplexity', 'failed')]
         assert steps[1]['error_message'] == '401'
+
+
+def _retry(job: dict | None, stepfunctions: MagicMock | None = None, job_id: str = 'job-1') -> tuple[dict, MagicMock, MagicMock]:
+    """``POST /<job_id>/retry`` against a table holding ``job``; returns ``(response, table, stepfunctions)``."""
+    table = research_table_stub(job)
+    stepfunctions = stepfunctions or started_stepfunctions()
+    with _collaborators(research_table=table, stepfunctions=stepfunctions):
+        response = _mod.handler(job_event('POST', job_id, '/retry'), None)
+    return response, table, stepfunctions
 
 
 class TestRetry:
@@ -242,20 +234,8 @@ class TestRetry:
             },
         }
 
-    def _retry(self, job: dict, stepfunctions: MagicMock | None = None) -> tuple[dict, MagicMock, MagicMock]:
-        """``POST /job-1/retry`` against a table holding ``job``; returns ``(response, table, stepfunctions)``."""
-        table = _table_with(job)
-        stepfunctions = stepfunctions or _start_succeeds()
-        with _collaborators(research_table=table, stepfunctions=stepfunctions):
-            response = _mod.handler(_id_event('POST', 'job-1', '/retry'), None)
-        return response, table, stepfunctions
-
     def test_returns_404_for_an_unknown_job(self):
-        with (
-            patch.object(_mod, 'research_table', _table_with(None)),
-            patch.object(_mod, 'stepfunctions', _start_succeeds()),
-        ):
-            response = _mod.handler(_id_event('POST', 'missing', '/retry'), None)
+        response, _table, _stepfunctions = _retry(None, job_id='missing')
 
         assert response['statusCode'] == 404
 
@@ -263,13 +243,13 @@ class TestRetry:
     def test_refuses_jobs_that_are_not_failed_or_partial(self, status):
         job = {**self._failed_job(status), 'created_at': get_timestamp()}
 
-        response, _table, stepfunctions = self._retry(job)
+        response, _table, stepfunctions = _retry(job)
 
         assert response['statusCode'] == 400
         stepfunctions.start_execution.assert_not_called()
 
     def test_starts_a_uniquely_named_execution_with_retry_true(self):
-        response, _table, stepfunctions = self._retry(self._failed_job())
+        response, _table, stepfunctions = _retry(self._failed_job())
 
         call = stepfunctions.start_execution.call_args.kwargs
         assert response['statusCode'] == 202
@@ -279,7 +259,7 @@ class TestRetry:
         }
 
     def test_claims_the_next_attempt_and_retry_count_atomically(self):
-        response, table, _stepfunctions = self._retry(self._failed_job())
+        response, table, _stepfunctions = _retry(self._failed_job())
 
         claim = table.update_item.call_args_list[0].kwargs
         values = claim['ExpressionAttributeValues']
@@ -292,13 +272,13 @@ class TestRetry:
         """A job whose execution died is retryable without waiting for another read."""
         job = {**self._failed_job('running'), 'retry_count': 0}
 
-        response, _table, stepfunctions = self._retry(job)
+        response, _table, stepfunctions = _retry(job)
 
         assert response['statusCode'] == 202
         assert stepfunctions.start_execution.call_args.kwargs['name'] == 'job-1-r1'
 
     def test_returns_503_and_preserves_checkpointed_results_when_retry_dispatch_fails(self):
-        response, table, _stepfunctions = self._retry(self._failed_job(), stepfunctions=_start_fails())
+        response, table, _stepfunctions = _retry(self._failed_job(), stepfunctions=_start_fails())
 
         assert response['statusCode'] == 503
         assert _statuses_written(table)[-1] == 'partial'
@@ -322,12 +302,8 @@ class TestHistory:
 
     def _history(self, table: MagicMock, job_type: str | None = None) -> list[dict]:
         """``GET /history`` (filtered to ``job_type`` when given) against ``table``; returns the listed items."""
-        event: dict = {'httpMethod': 'GET', 'path': '/api/keyword-research/history'}
-        if job_type is not None:
-            event['queryStringParameters'] = {'type': job_type}
-
         with patch.object(_mod, 'research_table', table):
-            response = _mod.handler(event, None)
+            response = _mod.handler(history_event(job_type), None)
 
         return json.loads(response['body'])['items']
 
@@ -389,47 +365,39 @@ class TestStaleResearchSweep:
     def test_marks_a_stranded_active_row_failed(self, status):
         row = {'id': 'abc', 'status': status, 'created_at': STALE_TIMESTAMP}
 
-        with patch.object(_mod, 'research_table', MagicMock()):
-            _mod._fail_if_research_timed_out(row)
+        _sweep(row)
 
         assert row['status'] == 'failed'
 
     def test_records_an_error_message_the_ui_can_show(self):
         row = {'id': 'abc', 'status': 'running', 'created_at': STALE_TIMESTAMP}
 
-        with patch.object(_mod, 'research_table', MagicMock()):
-            _mod._fail_if_research_timed_out(row)
+        _sweep(row)
 
         assert 'timed out' in row['error_message']
 
-    def test_measures_from_the_current_attempt_not_the_original_start(self):
-        """A retry of an old job must not be swept the moment it starts."""
-        table = MagicMock()
-        row = {'id': 'abc', 'status': 'running', 'created_at': STALE_TIMESTAMP, 'retried_at': get_timestamp()}
+    @pytest.mark.parametrize(
+        ('status', 'timestamps'),
+        [
+            # A retry of an old job must not be swept the moment it starts.
+            ('running', {'created_at': STALE_TIMESTAMP, 'retried_at': get_timestamp()}),
+            ('running', {'created_at': get_timestamp()}),
+            ('completed', {'created_at': STALE_TIMESTAMP}),
+            ('partial', {'created_at': STALE_TIMESTAMP}),
+            ('failed', {'created_at': STALE_TIMESTAMP}),
+        ],
+        ids=[
+            'measures-from-the-current-attempt-not-the-original-start',
+            'recent-row',
+            'terminal-completed-row',
+            'terminal-partial-row',
+            'terminal-failed-row',
+        ],
+    )
+    def test_leaves_the_row_untouched(self, status, timestamps):
+        row = {'id': 'abc', 'status': status, **timestamps}
 
-        with patch.object(_mod, 'research_table', table):
-            _mod._fail_if_research_timed_out(row)
-
-        assert row['status'] == 'running'
-        table.update_item.assert_not_called()
-
-    def test_leaves_a_recent_row_untouched(self):
-        table = MagicMock()
-        row = {'id': 'abc', 'status': 'running', 'created_at': get_timestamp()}
-
-        with patch.object(_mod, 'research_table', table):
-            _mod._fail_if_research_timed_out(row)
-
-        assert row['status'] == 'running'
-        table.update_item.assert_not_called()
-
-    @pytest.mark.parametrize('status', ['completed', 'partial', 'failed'])
-    def test_leaves_a_terminal_row_untouched(self, status):
-        table = MagicMock()
-        row = {'id': 'abc', 'status': status, 'created_at': STALE_TIMESTAMP}
-
-        with patch.object(_mod, 'research_table', table):
-            _mod._fail_if_research_timed_out(row)
+        table = _sweep(row)
 
         assert row['status'] == status
         table.update_item.assert_not_called()
@@ -442,12 +410,12 @@ class TestRetryClaimRaces:
             'id': 'job-race', 'type': 'expansion', 'status': 'partial', 'attempt': 2,
             'retry_count': 1, 'created_at': STALE_TIMESTAMP, 'steps': {},
         }
-        table = _table_with(job)
+        table = research_table_stub(job)
         table.update_item.side_effect = conditional_check_failure(message='lost race')
-        stepfunctions = _start_succeeds()
+        stepfunctions = started_stepfunctions()
 
         with _collaborators(research_table=table, stepfunctions=stepfunctions):
-            response = _mod.handler(_id_event('POST', 'job-race', '/retry'), None)
+            response = _mod.handler(job_event('POST', 'job-race', '/retry'), None)
 
         assert response['statusCode'] == 400
         stepfunctions.start_execution.assert_not_called()
@@ -459,53 +427,49 @@ class TestRetryClaimRaces:
             'id': 'job-consistent', 'type': 'expansion', 'status': 'failed', 'attempt': 1,
             'retry_count': 0, 'created_at': STALE_TIMESTAMP, 'steps': {},
         }
-        table = _table_with(job)
 
-        with _collaborators(research_table=table):
-            response = _mod.handler(_id_event('POST', 'job-consistent', '/retry'), None)
+        response, table, _stepfunctions = _retry(job, job_id='job-consistent')
 
         assert response['statusCode'] == 202
         table.get_item.assert_called_with(Key={'id': 'job-consistent'}, ConsistentRead=True)
 
 
 class TestStaleAttemptVisibility:
-    def test_timeout_persists_checkpointed_keywords_as_a_partial_result(self):
-        row = {
+    def _stale_attempt(self, **fields) -> dict:
+        """A first-attempt expansion row whose attempt started long before the sweep budget."""
+        return {
             'id': 'job-timeout', 'type': 'expansion', 'status': 'running', 'attempt': 1,
-            'attempt_started_at': STALE_TIMESTAMP, 'created_at': STALE_TIMESTAMP,
-            'steps': {
-                'r1-openai': {
-                    'provider': 'openai', 'status': 'completed',
-                    'keywords': [{'keyword': 'visible keyword', 'relevance': 9}],
-                },
-                'r1-gemini': {'provider': 'gemini', 'status': 'running'},
-            },
+            'attempt_started_at': STALE_TIMESTAMP, 'created_at': STALE_TIMESTAMP, 'steps': {},
+            **fields,
         }
-        table = _table_with(row)
 
-        with patch.object(_mod, 'research_table', table):
-            _mod._fail_if_research_timed_out(row)
+    def test_timeout_persists_checkpointed_keywords_as_a_partial_result(self):
+        row = self._stale_attempt(steps={
+            'r1-openai': {
+                'provider': 'openai', 'status': 'completed',
+                'keywords': [{'keyword': 'visible keyword', 'relevance': 9}],
+            },
+            'r1-gemini': {'provider': 'gemini', 'status': 'running'},
+        })
+
+        table = _sweep(row, research_table_stub(row))
 
         assert row['status'] == 'partial'
         assert row['keywords'] == [{'keyword': 'visible keyword', 'relevance': 9, 'providers': ['openai']}]
         assert 'attempt = :attempt' in table.update_item.call_args.kwargs['ConditionExpression']
 
     def test_timeout_losing_to_retry_leaves_the_new_attempt_unchanged(self):
-        stale = {
-            'id': 'job-timeout', 'type': 'expansion', 'status': 'running', 'attempt': 1,
-            'attempt_started_at': STALE_TIMESTAMP, 'created_at': STALE_TIMESTAMP, 'steps': {},
-        }
+        stale = self._stale_attempt()
         current = {
             **stale,
             'status': 'pending',
             'attempt': 2,
             'attempt_started_at': get_timestamp(),
         }
-        table = _table_with(current)
+        table = research_table_stub(current)
         table.update_item.side_effect = conditional_check_failure(message='retry won')
 
-        with patch.object(_mod, 'research_table', table):
-            _mod._fail_if_research_timed_out(stale)
+        _sweep(stale, table)
 
         assert (stale['attempt'], stale['status']) == (2, 'pending')
         assert 'error_message' not in stale

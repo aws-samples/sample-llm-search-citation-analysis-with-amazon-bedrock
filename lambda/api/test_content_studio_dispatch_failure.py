@@ -46,27 +46,20 @@ class TestDurableQueueAcceptance:
         assert second["idempotent_hit"] is True
         assert len(rows) == 1
 
-    def test_does_not_process_generation_on_request_after_insert(self) -> None:
+    @pytest.mark.parametrize(
+        "generation_path",
+        ["_process_generation_async", "_invoke_worker"],
+        ids=["does_not_process_generation_on_request", "does_not_invoke_worker_directly"],
+    )
+    def test_leaves_generation_to_the_stream_when_a_new_request_inserts_a_row(self, generation_path: str) -> None:
         table, _ = stateful_content_table()
-        process = MagicMock()
+        generation = MagicMock()
 
-        with patch.object(_mod, "_process_generation_async", process):
+        with patch.object(_mod, generation_path, generation):
             status, body = queue_content_for_test(_mod, IDEA, table)
 
-        assert status == 200
-        assert body["status"] == "pending"
-        process.assert_not_called()
-
-    def test_does_not_invoke_worker_directly_when_new_request_inserts_stream_row(self) -> None:
-        table, _ = stateful_content_table()
-        invoke_worker = MagicMock()
-
-        with patch.object(_mod, "_invoke_worker", invoke_worker):
-            status, body = queue_content_for_test(_mod, IDEA, table)
-
-        assert status == 200
-        assert body["status"] == "pending"
-        invoke_worker.assert_not_called()
+        assert (status, body["status"]) == (200, "pending")
+        generation.assert_not_called()
 
 
 class TestGenerationTimeoutSweep:
@@ -87,41 +80,30 @@ class TestGenerationTimeoutSweep:
 
         assert row['status'] == 'failed'
 
-    def test_leaves_a_recent_row_untouched(self):
-        row = {'id': 'abc', 'status': 'generating', 'created_at': get_timestamp()}
+    @pytest.mark.parametrize(
+        "row",
+        [
+            {'id': 'abc', 'status': 'generating', 'created_at': get_timestamp()},
+            {'id': 'abc', 'status': 'generated', 'created_at': '2020-01-01T00:00:00Z'},
+            {
+                'id': 'abc',
+                'status': 'generating',
+                'generation_transport': 'dynamodb_stream',
+                'generation_owner': 'stream-event-1',
+                'created_at': '2020-01-01T00:00:00Z',
+            },
+        ],
+        ids=["recent_row", "already_terminal_row", "stream_owned_row_past_threshold"],
+    )
+    def test_leaves_row_untouched_when_it_is_recent_terminal_or_stream_owned(self, row: dict) -> None:
+        """A completed row must never be rewritten to failed; a stream-owned row stays retryable."""
+        original_status = row['status']
         update = MagicMock()
 
         with patch.object(_mod, 'update_content_status', update):
             _mod._fail_if_generation_timed_out(row)
 
-        assert row['status'] == 'generating'
-        update.assert_not_called()
-
-    def test_leaves_an_already_terminal_row_untouched(self):
-        """A completed row must never be rewritten to failed by the sweep."""
-        row = {'id': 'abc', 'status': 'generated', 'created_at': '2020-01-01T00:00:00Z'}
-        update = MagicMock()
-
-        with patch.object(_mod, 'update_content_status', update):
-            _mod._fail_if_generation_timed_out(row)
-
-        assert row['status'] == 'generated'
-        update.assert_not_called()
-
-    def test_leaves_stream_owned_row_retryable_after_timeout(self) -> None:
-        row = {
-            'id': 'abc',
-            'status': 'generating',
-            'generation_transport': 'dynamodb_stream',
-            'generation_owner': 'stream-event-1',
-            'created_at': '2020-01-01T00:00:00Z',
-        }
-        update = MagicMock()
-
-        with patch.object(_mod, 'update_content_status', update):
-            _mod._fail_if_generation_timed_out(row)
-
-        assert row['status'] == 'generating'
+        assert row['status'] == original_status
         update.assert_not_called()
 
 
@@ -169,6 +151,11 @@ def _ideas(items: list[dict], config: dict | None = None) -> list[dict]:
         return _mod.generate_content_ideas(config or _BRAND_CONFIG)
 
 
+def _type_and_priority(ideas: list[dict]) -> list[tuple[str, str]]:
+    """The (type, priority) pair of every idea, in list order."""
+    return [(idea['type'], idea['priority']) for idea in ideas]
+
+
 class TestGenerateContentIdeasPlaceholders:
     """Before there is anything to analyse, the list carries a single non-actionable prompt."""
 
@@ -209,19 +196,29 @@ class TestGenerateContentIdeasWithoutBrandData:
 
         assert [idea['keyword'] for idea in ideas] == ['cited']
 
-    def test_skips_rows_with_a_blank_keyword(self):
-        items = [_search_result('', citations=['https://a.example']), _search_result('kw', citations=['https://b.example'])]
-
-        ideas = _ideas(items)
-
-        assert [idea['keyword'] for idea in ideas] == ['kw']
-
     def test_caps_citation_opportunities_at_thirty(self):
         items = [_search_result(f'kw{n:02d}', citations=['https://a.example']) for n in range(40)]
 
         ideas = _ideas(items)
 
         assert len(ideas) == 30
+
+
+class TestGenerateContentIdeasKeywordFilter:
+    """Blank keywords are dropped whether or not brand extraction ran."""
+
+    @pytest.mark.parametrize(
+        'items',
+        [
+            [_search_result('', citations=['https://a.example']), _search_result('kw', citations=['https://b.example'])],
+            [_search_result('', brands=[_competitor()]), _search_result('kw', brands=[_competitor()])],
+        ],
+        ids=['rows_without_brand_data', 'rows_with_brand_data'],
+    )
+    def test_skips_rows_with_a_blank_keyword(self, items):
+        ideas = _ideas(items)
+
+        assert [idea['keyword'] for idea in ideas] == ['kw']
 
 
 class TestGenerateContentIdeasFromBrandVisibility:
@@ -232,7 +229,7 @@ class TestGenerateContentIdeasFromBrandVisibility:
 
         ideas = _ideas(items)
 
-        assert [(idea['type'], idea['priority']) for idea in ideas] == [('visibility_gap', 'high')]
+        assert _type_and_priority(ideas) == [('visibility_gap', 'high')]
         assert ideas[0]['description'] == "Your brand doesn't appear but 2 competitors do."
         assert ideas[0]['content_angle'] == 'comprehensive_guide'
 
@@ -253,7 +250,7 @@ class TestGenerateContentIdeasFromBrandVisibility:
 
         ideas = _ideas(items)
 
-        assert [(idea['type'], idea['priority']) for idea in ideas] == [('ranking_improvement', 'medium')]
+        assert _type_and_priority(ideas) == [('ranking_improvement', 'medium')]
         assert ideas[0]['current_rank'] == 4
         assert ideas[0]['description'] == 'Your brand ranks #4. Create better content to reach #1.'
         assert ideas[0]['content_angle'] == 'differentiation'
@@ -263,7 +260,7 @@ class TestGenerateContentIdeasFromBrandVisibility:
 
         ideas = _ideas(items)
 
-        assert [(idea['type'], idea['priority']) for idea in ideas] == [('ranking_improvement', 'low')]
+        assert _type_and_priority(ideas) == [('ranking_improvement', 'low')]
 
     def test_suggests_nothing_for_a_trailing_first_party_when_no_competitor_is_mentioned(self):
         items = [_search_result('kw', brands=[_first_party(rank=5)])]
@@ -280,7 +277,7 @@ class TestGenerateContentIdeasFromBrandVisibility:
 
         ideas = _ideas(items)
 
-        assert [(idea['type'], idea['priority']) for idea in ideas] == [('leadership_maintenance', 'low')]
+        assert _type_and_priority(ideas) == [('leadership_maintenance', 'low')]
         assert ideas[0]['description'] == "You're #1! Create fresh content to stay ahead of 1 competitors."
         assert sorted(ideas[0]['competitor_urls']) == ['https://mine.example', 'https://rival.example']
         assert ideas[0]['content_angle'] == 'thought_leadership'
@@ -293,7 +290,7 @@ class TestGenerateContentIdeasFromBrandVisibility:
 
         ideas = _ideas(items)
 
-        assert [(idea['type'], idea['priority']) for idea in ideas] == [('provider_gap', 'medium')]
+        assert _type_and_priority(ideas) == [('provider_gap', 'medium')]
         assert ideas[0]['title'] == 'Target Gemini for "kw"'
         assert ideas[0]['providers_missing'] == ['gemini']
         assert ideas[0]['providers_present'] == ['openai']
@@ -303,7 +300,7 @@ class TestGenerateContentIdeasFromBrandVisibility:
 
         ideas = _ideas(items)
 
-        assert [(idea['type'], idea['priority']) for idea in ideas] == [('sentiment_improvement', 'high')]
+        assert _type_and_priority(ideas) == [('sentiment_improvement', 'high')]
         assert ideas[0]['description'] == 'Your brand has negative sentiment in 1 provider(s). Create positive content.'
         assert ideas[0]['content_angle'] == 'reputation_management'
 
@@ -316,13 +313,6 @@ class TestGenerateContentIdeasFromBrandVisibility:
         ideas = _ideas(items)
 
         assert [idea['type'] for idea in ideas] == ['visibility_gap']
-
-    def test_skips_rows_with_a_blank_keyword(self):
-        items = [_search_result('', brands=[_competitor()]), _search_result('kw', brands=[_competitor()])]
-
-        ideas = _ideas(items)
-
-        assert [idea['keyword'] for idea in ideas] == ['kw']
 
     def test_orders_ideas_by_priority_then_keyword(self):
         items = [
@@ -814,36 +804,23 @@ class TestJsonOutputContractParsing:
         assert result == _EMPTY_PARSED_CONTENT
 
 
-class TestLegacyOutputFallback:
-    def test_preserves_entire_markdown_when_title_json_is_embedded_between_prose(self):
-        response = """# JSON authoring notes
+_TITLE_JSON_BETWEEN_PROSE = """# JSON authoring notes
 
 The model may return this metadata example:
 {"title": "Example title"}
 
 Keep the explanation after the sample as part of the document."""
 
-        result = _mod.parse_generated_content(response)
-
-        assert result == (_EMPTY_PARSED_CONTENT | {'body': response})
-
-    def test_preserves_entire_markdown_when_long_body_json_is_an_embedded_code_sample(self):
-        embedded_contract = json.dumps({'body': _JSON_BODY})
-        response = f"""# Content contract example
+_BODY_JSON_CODE_SAMPLE = f"""# Content contract example
 
 Use this sample when documenting the response format:
 ```json
-{embedded_contract}
+{json.dumps({'body': _JSON_BODY})}
 ```
 
 This explanation after the sample must also remain in the document."""
 
-        result = _mod.parse_generated_content(response)
-
-        assert result == (_EMPTY_PARSED_CONTENT | {'body': response})
-
-    def test_preserves_markdown_body_when_it_contains_unrelated_embedded_json(self):
-        response = f"""# Malaga hotel guide
+_UNRELATED_JSON_IN_MARKDOWN = f"""# Malaga hotel guide
 
 {_JSON_BODY}
 
@@ -853,6 +830,18 @@ This explanation after the sample must also remain in the document."""
 
 Use these recommendations when planning a family stay."""
 
+
+class TestLegacyOutputFallback:
+    @pytest.mark.parametrize(
+        'response',
+        [_TITLE_JSON_BETWEEN_PROSE, _BODY_JSON_CODE_SAMPLE, _UNRELATED_JSON_IN_MARKDOWN],
+        ids=[
+            'title_json_embedded_between_prose',
+            'long_body_json_in_embedded_code_sample',
+            'unrelated_json_embedded_in_markdown_body',
+        ],
+    )
+    def test_preserves_entire_markdown_as_body_when_json_is_only_embedded(self, response):
         result = _mod.parse_generated_content(response)
 
         assert result == (_EMPTY_PARSED_CONTENT | {'body': response})
@@ -928,54 +917,36 @@ class TestGeneratedOutputValidation:
         }
         assert result['raw_content'] == raw_content
 
-    def test_rejects_truncated_json_looking_output_instead_of_using_it_as_the_body(self):
-        raw_content = (
-            '{"title": "Truncated draft", "body": "## Overview\\n\\n'
-            'This incomplete response has enough readable text to pass the body length threshold.'
-        )
-
-        result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
-
-        assert result == _invalid_output_result(raw_content)
-
-    def test_rejects_output_when_preamble_precedes_truncated_json_fence(self):
-        raw_content = (
-            'Here is the JSON:\n```json\n'
-            '{"title": "Truncated draft", "body": "## Overview\\n\\n'
-            'This fenced response was truncated despite containing enough readable text.'
-        )
-
-        result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
-
-        assert result == _invalid_output_result(raw_content)
-
-    def test_rejects_output_when_complete_contract_has_an_unclosed_json_fence(self):
-        raw_content = f'```json\n{json.dumps(_VALID_JSON_CONTRACT)}'
-
-        result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
-
-        assert result == _invalid_output_result(raw_content)
-
-    def test_rejects_output_when_raw_contract_json_has_trailing_prose(self):
-        raw_content = json.dumps({'body': _JSON_BODY}) + '\nI hope this draft helps.'
-
-        result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
-
-        assert result == _invalid_output_result(raw_content)
-
-    def test_rejects_a_whole_unrelated_json_object_instead_of_using_it_as_the_body(self):
-        raw_content = json.dumps({
-            'article_schema': 'This unrelated value is deliberately long enough to look useful.',
-            'sections': ['Overview', 'Recommendations'],
-        })
-
-        result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
-
-        assert result == _invalid_output_result(raw_content)
-
-    def test_fails_generation_and_preserves_raw_content_when_body_is_unusable(self):
-        raw_content = 'TITLE: Empty draft\nMETA: Missing body\nHEADINGS: Intro\nPOINTS:\n- None'
-
+    @pytest.mark.parametrize(
+        'raw_content',
+        [
+            (
+                '{"title": "Truncated draft", "body": "## Overview\\n\\n'
+                'This incomplete response has enough readable text to pass the body length threshold.'
+            ),
+            (
+                'Here is the JSON:\n```json\n'
+                '{"title": "Truncated draft", "body": "## Overview\\n\\n'
+                'This fenced response was truncated despite containing enough readable text.'
+            ),
+            f'```json\n{json.dumps(_VALID_JSON_CONTRACT)}',
+            json.dumps({'body': _JSON_BODY}) + '\nI hope this draft helps.',
+            json.dumps({
+                'article_schema': 'This unrelated value is deliberately long enough to look useful.',
+                'sections': ['Overview', 'Recommendations'],
+            }),
+            'TITLE: Empty draft\nMETA: Missing body\nHEADINGS: Intro\nPOINTS:\n- None',
+        ],
+        ids=[
+            'truncated_json_looking_output',
+            'preamble_before_truncated_json_fence',
+            'complete_contract_in_unclosed_json_fence',
+            'raw_contract_json_with_trailing_prose',
+            'whole_unrelated_json_object',
+            'markers_without_a_usable_body',
+        ],
+    )
+    def test_fails_generation_and_preserves_raw_content_when_output_is_unusable(self, raw_content):
         result = _run_generation(IDEA, bedrock=MagicMock(return_value=raw_content))
 
         assert result == _invalid_output_result(raw_content)
