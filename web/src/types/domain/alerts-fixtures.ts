@@ -1,6 +1,7 @@
 import type {
   AlertItem,
   AlertSettings,
+  AlertSettingsUpdate,
   AlertSubscriptionStatus,
   AlertTestNotificationResponse,
   AlertsResponse,
@@ -144,6 +145,15 @@ export function buildAlertSettings(overrides: Partial<AlertSettings> = {}): Aler
       status: 'confirmed',
     }],
     ...overrides,
+  };
+}
+
+/** The editable part of `settings`, as a save sends it. */
+export function settingsUpdateFrom(settings: AlertSettings): AlertSettingsUpdate {
+  return {
+    enabled: settings.enabled,
+    notification_emails: settings.notification_emails,
+    thresholds: settings.thresholds,
   };
 }
 

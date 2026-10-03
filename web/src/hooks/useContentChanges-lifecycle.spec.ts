@@ -28,6 +28,7 @@ import {
   renderLoadedContentChanges,
   resolveDeferredValue,
 } from './useAlerts-fixtures';
+import { deferNextTwoCalls } from '../test/fetchResponses';
 import { useContentChanges } from './useAlerts';
 
 vi.mock('../api/alerts', () => import('./alertsApiMock-fixtures'));
@@ -197,11 +198,7 @@ describe('useContentChanges lifecycle', () => {
   });
 
   it('keeps a new-group record pending when the old-group record settles', async () => {
-    const oldRecord = createDeferredValue<ContentChangeMarker>();
-    const currentRecord = createDeferredValue<ContentChangeMarker>();
-    mockCreateContentChange
-      .mockReturnValueOnce(oldRecord.promise)
-      .mockReturnValueOnce(currentRecord.promise);
+    const [oldRecord, currentRecord] = deferNextTwoCalls<ContentChangeMarker>(mockCreateContentChange);
     const {
       result, rerender
     } = renderContentChangesForGroup();

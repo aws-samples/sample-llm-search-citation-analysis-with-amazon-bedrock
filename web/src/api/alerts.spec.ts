@@ -20,6 +20,7 @@ import {
   buildAlertsResponse,
   buildContentChangeMarker,
   buildContentChangesResponse,
+  settingsUpdateFrom,
 } from '../types/domain/alerts-fixtures';
 import {
   mockApiGet, mockApiPost, mockApiPut
@@ -206,16 +207,8 @@ describe('alerts API', () => {
       const settings = buildAlertSettings();
       mockApiPut.mockResolvedValue({ config_id: 'default' });
 
-      await expect(updateAlertSettings({
-        enabled: settings.enabled,
-        notification_emails: settings.notification_emails,
-        thresholds: settings.thresholds,
-      })).rejects.toThrow(InvalidAlertResponseError);
-      await expect(updateAlertSettings({
-        enabled: settings.enabled,
-        notification_emails: settings.notification_emails,
-        thresholds: settings.thresholds,
-      })).rejects.toThrow('Alerts API returned invalid settings');
+      await expect(updateAlertSettings(settingsUpdateFrom(settings))).rejects.toThrow(InvalidAlertResponseError);
+      await expect(updateAlertSettings(settingsUpdateFrom(settings))).rejects.toThrow('Alerts API returned invalid settings');
     });
 
     it('posts an empty object when requesting a test notification', async () => {

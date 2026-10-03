@@ -21,6 +21,7 @@ import {
   resolveDeferredValue,
   resolveSavedSettings,
 } from './useAlerts-fixtures';
+import { deferNextTwoCalls } from '../test/fetchResponses';
 
 vi.mock('../api/alerts', () => import('./alertsApiMock-fixtures'));
 
@@ -28,11 +29,7 @@ beforeEach(prepareAlertHookTest);
 
 describe('alert action settlement state', () => {
   it('removes only the failed acknowledgement id when another id is pending', async () => {
-    const failed = createDeferredValue<AlertAcknowledgement>();
-    const pending = createDeferredValue<AlertAcknowledgement>();
-    mockAcknowledgeAlert
-      .mockReturnValueOnce(failed.promise)
-      .mockReturnValueOnce(pending.promise);
+    const [failed, pending] = deferNextTwoCalls<AlertAcknowledgement>(mockAcknowledgeAlert);
     const { result } = await renderLoadedOpenAlerts();
     const failedRequest = beginHookRequest(() => result.current.acknowledge('alert-failed'));
     const pendingRequest = beginHookRequest(() => result.current.acknowledge('alert-pending'));
