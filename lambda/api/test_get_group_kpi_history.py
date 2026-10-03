@@ -12,6 +12,13 @@ import pytest
 
 from testing.module_loader import load_handler_module
 from testing.report_scope_fixtures import REPORT_TABLES_ENV
+from testing.search_results_fixtures import (
+    PartitionReadFailure,
+    active_keywords_table,
+    report_dynamodb,
+    search_result_row,
+    search_results_table,
+)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -28,42 +35,20 @@ RUN = '2026-09-20T06:00:00.000000Z'
 
 
 def _answer(keyword: str) -> dict[str, Any]:
-    return {
-        'keyword': keyword,
-        'timestamp': RUN,
-        'provider': 'openai',
-        'query_prompt_id': 'default',
-        'brands': [{'name': 'Hotel Sol', 'classification': 'first_party', 'rank': 1, 'mention_count': 1}],
-        'citations': ['https://www.hotel-sol.com/spa'],
-        'metadata': {'model': 'gpt-5.2'},
-    }
+    return search_result_row(
+        keyword, 'openai', [{'name': 'Hotel Sol', 'classification': 'first_party', 'rank': 1, 'mention_count': 1}],
+        timestamp=RUN, citations=['https://www.hotel-sol.com/spa'], metadata={'model': 'gpt-5.2'},
+    )
 
 
 # One answered keyword of the 'sol' group; its sibling 'hotel sol beach' has no rows.
 SPA_ROWS = {'hotel sol spa': [_answer('hotel sol spa')]}
 
 
-class ReadFailure(Exception):
-    """A SearchResults partition that cannot be read."""
-
-
 def _resource(search_rows: dict[str, Any], active: list[dict[str, Any]] = ACTIVE_KEYWORDS) -> tuple[MagicMock, MagicMock]:
     """A boto3 resource: the keywords table lists ``active``, search answers per keyword."""
-    keywords_table = MagicMock(name='keywords')
-    keywords_table.query.return_value = {'Items': active}
-
-    def search_query(**kwargs: Any) -> dict[str, Any]:
-        keyword = kwargs['KeyConditionExpression'].get_expression()['values'][0].get_expression()['values'][1]
-        rows = search_rows.get(keyword, [])
-        if isinstance(rows, Exception):
-            raise rows
-        return {'Items': rows}
-
-    search_table = MagicMock(name='search')
-    search_table.query.side_effect = search_query
-    resource = MagicMock()
-    resource.Table.side_effect = lambda name: {'test-keywords': keywords_table, 'test-search-results': search_table}[name]
-    return resource, search_table
+    search_table = search_results_table(search_rows)
+    return report_dynamodb(search_table, active_keywords_table(active)), search_table
 
 
 def _call(
@@ -145,7 +130,7 @@ class TestGroupKpiHistoryRoute:
         assert _call({'group_id': 'sol', 'days': days})[1]['days'] == int(days)
 
     def test_answers_an_unexpected_failure_with_a_500(self):
-        with patch.object(_mod, 'build_group_kpi_history', side_effect=ReadFailure('boom')):
+        with patch.object(_mod, 'build_group_kpi_history', side_effect=PartitionReadFailure('boom')):
             status, _ = _call({'group_id': 'sol'})
 
         assert status == 500
@@ -154,7 +139,7 @@ class TestGroupKpiHistoryRoute:
         with caplog.at_level(logging.ERROR):
             status, body = _call({'group_id': 'sol'}, {
                 **SPA_ROWS,
-                'hotel sol beach': ReadFailure('throttled'),
+                'hotel sol beach': PartitionReadFailure('throttled'),
             })
 
         assert (status, body['runs'][0]['keywords_with_data']) == (200, 1)
@@ -163,13 +148,14 @@ class TestGroupKpiHistoryRoute:
 
 class TestLoadRows:
     def test_reads_each_keyword_from_the_window_start(self):
-        resource, search_table = _resource({'a': [{'timestamp': RUN}]})
+        row = search_result_row('a', 'openai', [], timestamp=RUN)
+        resource, search_table = _resource({'a': [row]})
 
         with patch.object(_mod, 'dynamodb', resource):
             rows = _mod.load_rows(['a', 'b'], '2026-09-01T00:00:00.000000Z')
 
         windows = [call.kwargs['KeyConditionExpression'].get_expression()['values'][1].get_expression()['values'][1] for call in search_table.query.call_args_list]
-        assert (rows, windows) == ({'a': [{'timestamp': RUN}], 'b': []}, ['2026-09-01T00:00:00.000000Z'] * 2)
+        assert (rows, windows) == ({'a': [row], 'b': []}, ['2026-09-01T00:00:00.000000Z'] * 2)
 
     def test_reads_nothing_for_no_keywords(self):
         assert _mod.load_rows([], '2026-09-01T00:00:00.000000Z') == {}

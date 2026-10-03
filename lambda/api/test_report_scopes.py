@@ -33,10 +33,10 @@ from testing.report_scope_fixtures import (
     fail_reads_of,
     load_scoped_handler,
     scoped_report,
-    sort_condition,
 )
 from testing.report_scope_fixtures import brand as _brand
 from testing.report_scope_fixtures import result as _result
+from testing.search_results_fixtures import sort_condition
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 

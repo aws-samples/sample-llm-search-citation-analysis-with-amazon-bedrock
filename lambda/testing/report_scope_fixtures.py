@@ -3,8 +3,8 @@
 ``api/test_report_scopes.py`` drives ``/visibility``, ``/brand-mentions``,
 ``/citations``, ``/trends``, ``/citation-gaps`` and ``/reports/overview``
 through one fake: the Keywords table lists ``ACTIVE_KEYWORDS`` and the
-SearchResults partitions answer from ``SEARCH_ROWS`` honouring the sort-key
-condition (``begins_with``, ``<``, ``>=``), ``ScanIndexForward`` and ``Limit``.
+SearchResults partitions answer from ``SEARCH_ROWS`` through
+``testing.search_results_fixtures.search_results_table``.
 """
 
 from __future__ import annotations
@@ -18,9 +18,15 @@ from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from testing.assertions import present
-from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.module_loader import load_handler_module, module_name_for
+from testing.search_results_fixtures import (
+    PartitionReadFailure,
+    active_keywords_table,
+    key_parts,
+    report_dynamodb,
+    search_result_row,
+    search_results_table,
+)
 
 # The tables the report handlers resolve at import (and CORS without an origin parameter).
 REPORT_TABLES_ENV: Mapping[str, str] = {
@@ -66,11 +72,10 @@ def result(
     query_prompt_id: str = 'default',
 ) -> dict[str, Any]:
     """One stored SearchResults row (with a long ``response`` the scoped reads must not project)."""
-    return {
-        'keyword': keyword, 'timestamp': timestamp, 'timestamp_provider': f'{timestamp}#{provider}#{query_prompt_id}',
-        'provider': provider, 'brands': brands, 'response': 'long llm text ' * 50, 'citations': citations or [],
-        'metadata': {'model': model or f'{provider}-model'}, 'query_prompt_id': query_prompt_id,
-    }
+    return search_result_row(
+        keyword, provider, brands, timestamp=timestamp, query_prompt_id=query_prompt_id,
+        response='long llm text ' * 50, citations=citations or [], metadata={'model': model or f'{provider}-model'},
+    )
 
 
 SEARCH_ROWS = {
@@ -86,73 +91,26 @@ SEARCH_ROWS = {
 }
 
 
-def key_parts(condition: Any) -> tuple[str, Any]:
-    """The partition value and the sort-key condition (or ``None``) of a key condition."""
-    expression = condition.get_expression()
-    if expression['operator'] == 'AND':
-        partition, sort = expression['values']
-        return partition.get_expression()['values'][1], sort
-    return expression['values'][1], None
-
-
-def sort_condition(query_kwargs: Mapping[str, Any]) -> tuple[str, str]:
-    """The operator and value of a query's sort-key condition."""
-    sort = present(key_parts(query_kwargs['KeyConditionExpression'])[1])
-    return sort.expression_operator, sort.get_expression()['values'][1]
-
-
-def _sort_key_matches(row: Mapping[str, Any], sort: Any) -> bool:
-    if sort is None:
-        return True
-    value = sort.get_expression()['values'][1]
-    if sort.expression_operator == 'begins_with':
-        return row['timestamp_provider'].startswith(value)
-    if sort.expression_operator == '<':
-        return row['timestamp_provider'] < value
-    assert sort.expression_operator == '>='
-    return row['timestamp_provider'] >= value
-
-
 def fake_scope_dynamodb(
     search_rows: Mapping[str, list[dict[str, Any]]] = SEARCH_ROWS,
     citation_rows: Mapping[str, list[dict[str, Any]]] | None = None,
     active: list[dict[str, Any]] = ACTIVE_KEYWORDS,
 ) -> tuple[MagicMock, dict[str, MagicMock]]:
     """A boto3 resource whose tables answer from the fixtures above, and those tables by role."""
-    keywords_table = MagicMock(name='keywords')
-    keywords_table.query.return_value = {'Items': active}
-
-    def search_query(**kwargs: Any) -> dict[str, Any]:
-        keyword, sort = key_parts(kwargs['KeyConditionExpression'])
-        rows = [row for row in search_rows.get(keyword, []) if _sort_key_matches(row, sort)]
-        if kwargs.get('ScanIndexForward') is False:
-            rows.sort(key=lambda row: row['timestamp_provider'], reverse=True)
-        return {'Items': rows[:kwargs['Limit']] if 'Limit' in kwargs else rows}
-
-    search_table = MagicMock(name='search')
-    search_table.query.side_effect = search_query
-
+    keywords_table = active_keywords_table(active)
+    search_table = search_results_table(search_rows)
     citations = citation_rows or {}
     citations_table = MagicMock(name='citations')
     citations_table.query.side_effect = lambda **kwargs: {'Items': list(citations.get(key_parts(kwargs['KeyConditionExpression'])[0], []))}
     citations_table.scan.return_value = {'Items': [row for rows in citations.values() for row in rows]}
 
     tables = {'keywords': keywords_table, 'search': search_table, 'citations': citations_table}
-    resource = fake_dynamodb_resource(by_name={
-        'test-keywords': keywords_table,
-        'test-search-results': search_table,
-        'test-citations': citations_table,
-    })
-    return resource, tables
+    return report_dynamodb(search_table, keywords_table, {'test-citations': citations_table}), tables
 
 
 def aggregated_brand(body: Mapping[str, Any], name: str) -> dict[str, Any]:
     """The ``/brand-mentions`` aggregate entry of the brand called ``name``."""
     return next(entry for entry in body['aggregated']['brands'] if entry['name'] == name)
-
-
-class PartitionFailure(Exception):
-    """A SearchResults partition that cannot be read."""
 
 
 def fail_reads_of(search_table: MagicMock, keyword: str) -> None:
@@ -161,7 +119,7 @@ def fail_reads_of(search_table: MagicMock, keyword: str) -> None:
 
     def search_query(**kwargs: Any) -> dict[str, Any]:
         if key_parts(kwargs['KeyConditionExpression'])[0] == keyword:
-            raise PartitionFailure('throttled')
+            raise PartitionReadFailure('throttled')
         return succeed(**kwargs)
 
     search_table.query.side_effect = search_query
