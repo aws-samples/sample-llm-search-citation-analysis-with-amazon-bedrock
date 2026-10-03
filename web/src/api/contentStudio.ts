@@ -94,13 +94,9 @@ export async function startContentBriefBatch(
   ), request.batch_id);
 }
 
-export async function fetchContentBriefBatch(
-  batchId: string,
-  signal?: AbortSignal
-): Promise<ContentBriefBatchStatusResponse> {
+export async function fetchContentBriefBatch(batchId: string): Promise<ContentBriefBatchStatusResponse> {
   return decodeBatchStatusResponse(await apiGet<unknown>(
-    `/content-studio/batches/${encodeURIComponent(batchId)}`,
-    { signal }
+    `/content-studio/batches/${encodeURIComponent(batchId)}`
   ), batchId);
 }
 
@@ -118,11 +114,9 @@ export async function deleteGeneratedContent(id: string): Promise<void> {
   ));
 }
 
-export async function fetchContentBriefTemplates(
-  signal?: AbortSignal
-): Promise<ContentBriefTemplate[]> {
+export async function fetchContentBriefTemplates(): Promise<ContentBriefTemplate[]> {
   return decodeTemplateList(
-    await apiGet<unknown>('/content-studio/templates', { signal })
+    await apiGet<unknown>('/content-studio/templates')
   );
 }
 

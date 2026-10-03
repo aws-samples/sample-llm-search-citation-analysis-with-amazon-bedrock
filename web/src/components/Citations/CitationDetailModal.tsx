@@ -190,7 +190,7 @@ export const CitationDetailModal = ({
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      const items = await fetchCrawlHistory(citation.normalized_url, 20);
+      const items = await fetchCrawlHistory(citation.normalized_url);
       setHistory(items);
       setSelectedHistoryIndex(0);
     } catch (err) {

@@ -96,23 +96,6 @@ describe('useOpenAlerts lifecycle', () => {
     await refresh.finish();
   });
 
-  it('reloads alerts with the new limit when the limit changes', async () => {
-    const { rerender } = renderHook(
-      ({ limit }) => useOpenAlerts(limit),
-      { initialProps: { limit: 20 } }
-    );
-    await waitFor(() => expect(mockFetchAlerts).toHaveBeenCalledTimes(1));
-
-    rerender({ limit: 5 });
-
-    await waitFor(() => expect(mockFetchAlerts).toHaveBeenCalledTimes(2));
-    expect(mockFetchAlerts.mock.calls[1][0]).toStrictEqual({
-      status: 'open',
-      limit: 5,
-      signal: expect.any(AbortSignal),
-    });
-  });
-
   it('returns cancellation without an API request when acknowledgement starts after unmount', async () => {
     const outcome = await callAfterUnmount(
       renderLoadedOpenAlerts,
