@@ -249,7 +249,7 @@ Every variant gets `rounded-lg`, `transition-colors`, a
 
 ### 5.3 Composition
 
-Use `leadingIcon` / `trailingIcon` instead of hand-placing icons:
+Use `leadingIcon` instead of hand-placing icons:
 
 ```tsx
 <Button
@@ -263,14 +263,7 @@ Use `leadingIcon` / `trailingIcon` instead of hand-placing icons:
 For loading, swap the children for a loading label (`'Saving…'`) and pass
 `disabled`; do not add custom spinners to primary buttons.
 
-### 5.4 Dark-mode inversion
-
-`primary` relies on the global override, so `bg-gray-900` works in both
-themes. On a surface that must stay high-contrast in dark mode, set
-`invertOnDark`: the button becomes a light pill
-(`dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200`).
-
-### 5.5 Anti-patterns
+### 5.4 Anti-patterns
 
 - Inline `className="px-4 py-2 bg-gray-900 text-white …"` strings.
 - Mixing sizes in the same row.
