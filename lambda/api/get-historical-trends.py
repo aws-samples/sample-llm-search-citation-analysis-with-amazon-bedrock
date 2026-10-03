@@ -34,6 +34,7 @@ from shared.scope_params import (
     scope_from_request,
     scoped_dynamodb_resource,
 )
+from shared.scoped_reports import capped_scope
 from shared.utils import get_brand_config
 from shared.visibility_views import PERIODS, trend_view
 
@@ -71,16 +72,14 @@ def _resolve_scope(scope: ReportScope | None) -> tuple[ReportScope, int]:
 
 def trends_for_scope(scope: ReportScope | None, period: str, days: int, owned_domains: list[str]) -> dict[str, Any]:
     """The trend view of ``scope`` over the last ``days`` days (also behind ``/reports/overview``)."""
-    resolved, cap = _resolve_scope(scope)
-    keywords = list(resolved.keywords)[:cap]
+    keywords, scope_fields = capped_scope(*_resolve_scope(scope))
     since = history_since(days)
     return {
-        'scope': resolved.describe(),
+        **scope_fields,
         'period_type': period,
         'days_analyzed': days,
         'since': since,
         'keywords_analyzed': len(keywords),
-        'keywords_truncated': len(resolved.keywords) > len(keywords),
         'citations_configured': bool(owned_domains),
         **trend_view(keywords, load_window_answers(keywords, since), period, owned_domains),
     }

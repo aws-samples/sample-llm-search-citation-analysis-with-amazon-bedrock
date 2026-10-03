@@ -19,14 +19,8 @@ from shared.api_response import success_response
 from shared.decorators import api_handler, validate
 from shared.group_kpi_history import GROUP_RUN_MIN_COVERAGE, build_group_kpi_history
 from shared.kpi_engine import owned_domains_from
-from shared.scope_params import (
-    SCOPE_KEYWORDS_CAP,
-    SCOPE_QUERY_PARAMS,
-    keywords_table_name,
-    map_scope_keywords,
-    scope_from_request,
-    scoped_dynamodb_resource,
-)
+from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, map_scope_keywords, scoped_dynamodb_resource
+from shared.scoped_reports import capped_scope, required_report_scope
 from shared.search_results import search_results_table_name
 from shared.utils import get_brand_config
 
@@ -60,22 +54,18 @@ def load_rows(keywords: list[str], since: str) -> dict[str, list[dict[str, Any]]
     **SCOPE_QUERY_PARAMS,
     'days': {'type': int, 'min': 1, 'max': 365, 'default': 90},
 })
-def handler(event, context, *, days, **scope_params):
+@required_report_scope(lambda: dynamodb.Table(KEYWORDS_TABLE))
+def handler(event, context, report_scope, *, days):
     """GET /api/reports/group-kpis - per-run KPI history of a keyword group (``days`` defaults to 90 in ``@validate``)."""
-    report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE), required=True)
-    if report_scope is None:
-        return rejected
-
-    keywords = list(report_scope.keywords)[:SCOPE_KEYWORDS_CAP]
+    keywords, scope_fields = capped_scope(report_scope)
     since = history_since(days)
     owned_domains = owned_domains_from(get_brand_config())
     history = build_group_kpi_history(keywords, load_rows(keywords, since), owned_domains)
     return success_response({
-        'scope': report_scope.describe(),
+        **scope_fields,
         'days': days,
         'since': since,
         'group_run_min_coverage': GROUP_RUN_MIN_COVERAGE,
-        'keywords_truncated': len(report_scope.keywords) > len(keywords),
         'citations_configured': bool(owned_domains),
         **history,
     }, event)

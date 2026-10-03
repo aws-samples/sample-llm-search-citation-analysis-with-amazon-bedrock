@@ -21,14 +21,8 @@ sys.path.insert(0, '/opt/python')
 from shared.answer_queries import query_latest_run_rows
 from shared.api_response import success_response
 from shared.decorators import api_handler, optional_provider, validate
-from shared.scope_params import (
-    SCOPE_KEYWORDS_CAP,
-    SCOPE_QUERY_PARAMS,
-    keywords_table_name,
-    map_scope_keywords,
-    scope_from_request,
-    scoped_dynamodb_resource,
-)
+from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, map_scope_keywords, scoped_dynamodb_resource
+from shared.scoped_reports import capped_scope, required_report_scope
 from shared.sentiment_examples import (
     DEFAULT_LIMIT,
     EXAMPLE_ATTRIBUTE_NAMES,
@@ -73,19 +67,14 @@ def load_latest_run_rows(keywords: list[str]) -> list[dict[str, Any]]:
     'provider': optional_provider(),
     'limit': {'type': int, 'min': 1, 'max': MAX_LIMIT, 'default': DEFAULT_LIMIT},
 })
-def handler(event, context, sentiment, provider, limit, **scope_params):
+@required_report_scope(lambda: dynamodb.Table(KEYWORDS_TABLE))
+def handler(event, context, report_scope, sentiment, provider, limit):
     """GET /api/visibility/sentiment-examples — see the module docstring."""
-    report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE), required=True)
-    if report_scope is None:
-        # A required scope resolves to exactly one of (scope, None) / (None, rejection).
-        return rejected
-
-    keywords = list(report_scope.keywords)[:SCOPE_KEYWORDS_CAP]
+    keywords, scope_fields = capped_scope(report_scope)
     total, examples = sentiment_examples(load_latest_run_rows(keywords), sentiment, provider=provider, limit=limit)
     return success_response(
         {
-            'scope': report_scope.describe(),
-            'keywords_truncated': len(report_scope.keywords) > len(keywords),
+            **scope_fields,
             'sentiment': sentiment,
             'provider': provider,
             'total': total,
