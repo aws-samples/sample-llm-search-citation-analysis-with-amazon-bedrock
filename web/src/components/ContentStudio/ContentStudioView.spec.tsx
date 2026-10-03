@@ -273,12 +273,12 @@ describe('ContentStudioView', () => {
   });
 
   it.each([
-    ['says how many competitor sources will be analyzed', ['https://a.example/', 'https://b.example/'], 1],
-    ['mentions no competitor sources when the idea has none', [], 0],
+    ['says how many competitor sources will be analyzed', ['https://a.example/', 'https://b.example/'], ['2 competitor sources will be analyzed']],
+    ['mentions no competitor sources when the idea has none', [], []],
   ])('%s', async (_condition, competitorUrls, mentions) => {
     await renderIdeaConfirmation({ competitor_urls: competitorUrls });
 
-    expect(screen.queryAllByText('2 competitor sources will be analyzed')).toHaveLength(mentions);
+    expect(screen.queryAllByText(/competitor sources will be analyzed/u).map((line) => line.textContent)).toStrictEqual(mentions);
   });
 
   it('loads neither ideas nor history when the Content Brief tab opens', async () => {
