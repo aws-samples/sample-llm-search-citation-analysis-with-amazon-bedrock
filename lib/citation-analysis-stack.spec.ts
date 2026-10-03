@@ -13,6 +13,7 @@ import {
   allProjectionIndexSchema,
   allowStatementsOfRole,
   allowStatementsOfTemplate,
+  bedrockTierEnvironments,
   collectRefTargets,
   extractApiAuthSnapshots,
   extractApiBackedFunctionTimeouts,
@@ -54,6 +55,8 @@ import {
   methodRouteLabels,
   providerSearchBranch,
   providerSearchBranchStarts,
+  pythonResearchStaleAfterSeconds,
+  pythonRoleDefaultTierEnv,
   pythonTierFoundationModelIds,
   regionalArnJoin,
   resolvePath,
@@ -65,6 +68,7 @@ import {
   tokenValidityMinutes,
   unguardedVerbs,
   useCaseToleratedErrorNames,
+  COGNITO_AUTH,
   FULLY_GUARDED,
   type ApiGatewayMethodSnapshot,
   type ApiMethodAuthSnapshot,
@@ -88,7 +92,6 @@ const CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY = 10;
 
 const PUBLIC_ROUTE = '/api/health';
 const MUTATING_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
-const COGNITO_AUTH = 'COGNITO_USER_POOLS';
 const ONE_HOUR_IN_MINUTES = 60;
 const SEVEN_DAYS_IN_MINUTES = 7 * 24 * 60;
 
@@ -1030,7 +1033,7 @@ describe('Keyword research state machine', () => {
    * dedicated state machine. One execution per job, one parallel step per
    * web-search provider, every step checkpointed into the job row.
    */
-  const SWEEP_THRESHOLD_SECONDS = 35 * 60;
+  const SWEEP_THRESHOLD_SECONDS = pythonResearchStaleAfterSeconds();
 
   it('fans out one step per provider through a Map that fails steps, not the job', () => {
     expect(synthesized.researchDefinitionRaw).toContain('"ItemsPath":"$.steps"');
@@ -1081,10 +1084,10 @@ describe('Keyword research state machine', () => {
 
   it('times out below the API sweep threshold so a live job is never swept', () => {
     /**
-     * `shared/research_jobs.RESEARCH_STALE_AFTER_SECONDS` marks jobs failed
-     * after 35 minutes. An execution allowed to outlive that could finish
-     * after being failed and flip the row back — the inversion the sweep
-     * exists to avoid.
+     * `shared/research_jobs.RESEARCH_STALE_AFTER_SECONDS` (read from the
+     * Python source) marks jobs failed after 35 minutes. An execution allowed
+     * to outlive that could finish after being failed and flip the row back —
+     * the inversion the sweep exists to avoid.
      */
     expect(synthesized.researchStateMachineTimeoutSeconds).toBe(30 * 60);
     expect(synthesized.researchStateMachineTimeoutSeconds).toBeLessThan(SWEEP_THRESHOLD_SECONDS);
@@ -1132,13 +1135,6 @@ describe('Keyword research routes', () => {
   it('exposes POST only on the retry sub-resource', () => {
     expect(sortedHttpMethods(synthesized.keywordResearchRetryMethods)).toStrictEqual(['POST']);
   });
-
-  it('requires the Cognito authorizer on every job route', () => {
-    const all = [...synthesized.keywordResearchIdMethods, ...synthesized.keywordResearchRetryMethods];
-
-    expect(all).toHaveLength(3);
-    expect(unguardedVerbs(all, synthesized.keywordMgmtFunctionId)).toStrictEqual(FULLY_GUARDED);
-  });
 });
 
 describe('Research agent (2.5.0)', () => {
@@ -1176,13 +1172,6 @@ describe('Research agent (2.5.0)', () => {
   it('exposes GET and POST on the templates collection and PUT and DELETE on a template', () => {
     expect(sortedHttpMethods(synthesized.researchTemplatesMethods)).toStrictEqual(['GET', 'POST']);
     expect(sortedHttpMethods(synthesized.researchTemplateIdMethods)).toStrictEqual(['DELETE', 'PUT']);
-  });
-
-  it('requires the Cognito authorizer and the KeywordMgmt integration on every agent route', () => {
-    const all = [...synthesized.keywordResearchAgentMethods, ...synthesized.researchTemplatesMethods, ...synthesized.researchTemplateIdMethods];
-
-    expect(all).toHaveLength(5);
-    expect(unguardedVerbs(all, synthesized.keywordMgmtFunctionId)).toStrictEqual(FULLY_GUARDED);
   });
 });
 
@@ -1226,13 +1215,6 @@ describe('Schedule routes (Schedules v2)', () => {
     expect(sortedHttpMethods(synthesized.scheduleRunMethods)).toStrictEqual(['POST']);
   });
 
-  it('requires the Cognito authorizer on every schedule route', () => {
-    const all = [...synthesized.schedulesMethods, ...synthesized.scheduleIdMethods, ...synthesized.scheduleRunMethods];
-
-    expect(all).toHaveLength(6);
-    expect(all.every((method) => method.authorizationType === COGNITO_AUTH)).toBe(true);
-  });
-
   it('lets ConfigMgmt start workflow executions for run-now and read the groups table for scope checks', () => {
     expect(synthesized.configMgmtStateMachineActions).toContain('states:StartExecution');
     expect(synthesized.configMgmtEnvVars).toHaveProperty('DYNAMODB_TABLE_KEYWORD_GROUPS');
@@ -1242,10 +1224,6 @@ describe('Schedule routes (Schedules v2)', () => {
 describe('Sentiment examples route', () => {
   it('exposes GET only on /api/visibility/sentiment-examples', () => {
     expect(sortedHttpMethods(synthesized.sentimentExamplesMethods)).toStrictEqual(['GET']);
-  });
-
-  it('puts the route behind the Cognito authorizer on the stats and insights function', () => {
-    expect(unguardedVerbs(synthesized.sentimentExamplesMethods, synthesized.statsInsightsFunctionId)).toStrictEqual(FULLY_GUARDED);
   });
 });
 
@@ -1279,7 +1257,7 @@ describe('Keyword promotion route', () => {
   });
 
   it('requires the shared Cognito authorizer', () => {
-    expect(synthesized.promoteMethods[0]?.authorizationType).toBe('COGNITO_USER_POOLS');
+    expect(synthesized.promoteMethods[0]?.authorizationType).toBe(COGNITO_AUTH);
     expect(synthesized.promoteMethods[0]?.authorizerId).not.toBe('');
   });
 
@@ -1315,17 +1293,6 @@ describe('Keyword groups', () => {
 
   it('exposes PUT only on the membership sub-resource', () => {
     expect(sortedHttpMethods(synthesized.keywordGroupMembersMethods)).toStrictEqual(['PUT']);
-  });
-
-  it('requires the Cognito authorizer on every keyword-group route', () => {
-    const all = [
-      ...synthesized.keywordGroupsMethods,
-      ...synthesized.keywordGroupIdMethods,
-      ...synthesized.keywordGroupMembersMethods,
-    ];
-
-    expect(all).toHaveLength(5);
-    expect(all.every((method) => method.authorizationType === 'COGNITO_USER_POOLS')).toBe(true);
   });
 
   it('hands the groups table name to the functions that resolve scopes', () => {
@@ -1380,12 +1347,57 @@ describe('Custom reports', () => {
     expect(sortedHttpMethods(synthesized.customReports.collectionMethods)).toStrictEqual(['GET', 'POST']);
     expect(sortedHttpMethods(synthesized.customReports.itemMethods)).toStrictEqual(['DELETE', 'PUT']);
   });
+});
 
-  it('puts all four verbs behind the Cognito authorizer on the ConfigMgmt function', () => {
-    const all = [...synthesized.customReports.collectionMethods, ...synthesized.customReports.itemMethods];
-
-    expect(all).toHaveLength(4);
-    expect(unguardedVerbs(all, synthesized.customReports.configMgmtFunctionLogicalId)).toStrictEqual(FULLY_GUARDED);
+describe('Cognito-guarded route families', () => {
+  it.each([
+    {
+      family: 'keyword research job',
+      routes: () => [...synthesized.keywordResearchIdMethods, ...synthesized.keywordResearchRetryMethods],
+      verbCount: 3,
+      functionId: () => synthesized.keywordMgmtFunctionId,
+    },
+    {
+      family: 'research agent',
+      routes: () => [
+        ...synthesized.keywordResearchAgentMethods,
+        ...synthesized.researchTemplatesMethods,
+        ...synthesized.researchTemplateIdMethods,
+      ],
+      verbCount: 5,
+      functionId: () => synthesized.keywordMgmtFunctionId,
+    },
+    {
+      family: 'schedule',
+      routes: () => [...synthesized.schedulesMethods, ...synthesized.scheduleIdMethods, ...synthesized.scheduleRunMethods],
+      verbCount: 6,
+      functionId: () => synthesized.configMgmtFunctionId,
+    },
+    {
+      family: 'keyword-group',
+      routes: () => [
+        ...synthesized.keywordGroupsMethods,
+        ...synthesized.keywordGroupIdMethods,
+        ...synthesized.keywordGroupMembersMethods,
+      ],
+      verbCount: 5,
+      functionId: () => synthesized.keywordMgmtFunctionId,
+    },
+    {
+      family: 'custom report',
+      routes: () => [...synthesized.customReports.collectionMethods, ...synthesized.customReports.itemMethods],
+      verbCount: 4,
+      functionId: () => synthesized.customReports.configMgmtFunctionLogicalId,
+    },
+    {
+      family: 'sentiment examples',
+      routes: () => synthesized.sentimentExamplesMethods,
+      verbCount: 1,
+      functionId: () => synthesized.statsInsightsFunctionId,
+    },
+  ])('puts every $family verb behind the Cognito authorizer on its API function', ({ routes, verbCount, functionId }) => {
+    expect(routes()).toHaveLength(verbCount);
+    expect(unguardedVerbs(routes(), functionId())).toStrictEqual(FULLY_GUARDED);
   });
 });
 
@@ -2312,6 +2324,13 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
       .sort((left, right) => left.localeCompare(right));
 
     expect(subscribed).toStrictEqual(pythonTierFoundationModelIds());
+  });
+
+  it('gives every Bedrock-calling Lambda the role tiers lambda/shared/models.py defaults to', () => {
+    const tierEnvironments = bedrockTierEnvironments(template);
+
+    expect(tierEnvironments).toHaveLength(15);
+    expect(tierEnvironments).toStrictEqual(tierEnvironments.map(() => pythonRoleDefaultTierEnv()));
   });
 
   it('creates the agreements in the stack region, where the Lambdas call Bedrock', () => {

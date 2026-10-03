@@ -4,13 +4,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const PREFLIGHT_METHOD = 'OPTIONS';
-const COGNITO_AUTH = 'COGNITO_USER_POOLS';
+export const COGNITO_AUTH = 'COGNITO_USER_POOLS';
 
-/** Thrown when lambda/shared/models.py no longer exposes a readable _TIER_MODELS. */
-class MissingTierModelsError extends Error {
+/** Thrown when a lambda/shared module no longer exposes a constant a contract test reads. */
+class MissingPythonConstantError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'MissingTierModelsError';
+    this.name = 'MissingPythonConstantError';
   }
 }
 
@@ -155,6 +155,16 @@ export function extractStateMachineDefinition(template: Template, stateMachineNa
 export function extractLambdaEnvVars(template: Template, functionName: string): Record<string, unknown> {
   const envVars = functionProperty(template, functionName, ['Environment', 'Variables']);
   return isRecord(envVars) ? envVars : {};
+}
+
+/** The `BEDROCK_TIER_*` variables of every Lambda that sets any, one map per function. */
+export function bedrockTierEnvironments(template: Template): Record<string, unknown>[] {
+  return Object.values(template.findResources('AWS::Lambda::Function'))
+    .map((resource) => resolvePath(resource, ['Properties', 'Environment', 'Variables']))
+    .map((variables) => Object.fromEntries(
+      Object.entries(isRecord(variables) ? variables : {}).filter(([name]) => name.startsWith('BEDROCK_TIER_'))
+    ))
+    .filter((tierVariables) => Object.keys(tierVariables).length > 0);
 }
 
 /** Map function names to timeouts for every Lambda reachable from API Gateway. */
@@ -1193,17 +1203,63 @@ export function extractContentStudioInfrastructureSnapshot(
  * which fails at runtime with AccessDenied rather than at synth.
  */
 export function pythonTierFoundationModelIds(): string[] {
-  const source = fs.readFileSync(
-    path.join(__dirname, '../lambda/shared/models.py'),
-    'utf8'
-  );
-  const block = /_TIER_MODELS: dict\[ModelTier, str\] = \{([\s\S]*?)\}/.exec(source);
-  if (!block) {
-    throw new MissingTierModelsError('Could not find _TIER_MODELS in lambda/shared/models.py');
-  }
-  return [...block[1].matchAll(/"([^"]+)"/g)]
+  const block = capturedPythonSource('models.py', /_TIER_MODELS: dict\[ModelTier, str\] = \{([\s\S]*?)\}/, '_TIER_MODELS');
+  return [...block.matchAll(/"([^"]+)"/g)]
     .map((match) => match[1].replace(/^global\./, ''))
     .sort((left, right) => left.localeCompare(right));
+}
+
+/**
+ * `BEDROCK_TIER_<ROLE>` → tier for every role in `_ROLE_DEFAULT_TIER` of
+ * `lambda/shared/models.py`: the defaults the stack's `bedrockTierEnv` restates.
+ */
+export function pythonRoleDefaultTierEnv(): Record<string, string> {
+  const roles = pythonStrEnumValues('ModelRole');
+  const tiers = pythonStrEnumValues('ModelTier');
+  const block = capturedPythonSource(
+    'models.py',
+    /_ROLE_DEFAULT_TIER: dict\[ModelRole, ModelTier\] = \{([\s\S]*?)\}/,
+    '_ROLE_DEFAULT_TIER'
+  );
+  return Object.fromEntries(
+    [...block.matchAll(/ModelRole\.(\w+): ModelTier\.(\w+)/g)].map(([, role, tier]) => [
+      `BEDROCK_TIER_${enumValue(roles, role).toUpperCase()}`,
+      enumValue(tiers, tier),
+    ])
+  );
+}
+
+/** `RESEARCH_STALE_AFTER_SECONDS` of `lambda/shared/research_jobs.py`, evaluated (`35 * 60` → 2100). */
+export function pythonResearchStaleAfterSeconds(): number {
+  const expression = capturedPythonSource(
+    'research_jobs.py',
+    /^RESEARCH_STALE_AFTER_SECONDS = ([\d *]+)$/m,
+    'RESEARCH_STALE_AFTER_SECONDS'
+  );
+  return expression.split('*').reduce((product, factor) => product * Number(factor), 1);
+}
+
+function pythonStrEnumValues(className: string): Map<string, string> {
+  const body = capturedPythonSource('models.py', new RegExp(`class ${className}\\(StrEnum\\):([\\s\\S]*?)\\n\\n\\n`), className);
+  return new Map([...body.matchAll(/^ +(\w+) = "([^"]+)"/gm)].map(([, member, value]) => [member, value]));
+}
+
+function enumValue(members: Map<string, string>, member: string): string {
+  const value = members.get(member);
+  if (value === undefined) {
+    throw new MissingPythonConstantError(`Unknown enum member ${member} in lambda/shared/models.py`);
+  }
+  return value;
+}
+
+/** First capture group of `pattern` in `lambda/shared/<fileName>`; throws when the constant is gone. */
+function capturedPythonSource(fileName: string, pattern: RegExp, constantName: string): string {
+  const source = fs.readFileSync(path.join(__dirname, '../lambda/shared', fileName), 'utf8');
+  const match = pattern.exec(source);
+  if (!match) {
+    throw new MissingPythonConstantError(`Could not find ${constantName} in lambda/shared/${fileName}`);
+  }
+  return match[1];
 }
 
 
