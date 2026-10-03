@@ -61,19 +61,18 @@ describe('brand configuration defaults', () => {
     });
   });
 
-  it('uses generic brand entities when the General entity list is empty', async () => {
+  it.each([
+    {
+      name: 'uses generic brand entities when the General entity list is empty',
+      fragment: 'ENTITY TYPES TO EXTRACT:\n- Brand names and company names\n\n{{TRACKED_BRANDS}}',
+    },
+    {
+      name: 'identifies General context and focus in its extraction prompt',
+      fragment: 'INDUSTRY CONTEXT: General\nFOCUS: brand and company recommendations',
+    },
+  ])('$name', async ({ fragment }) => {
     const { DEFAULT_PRESETS } = await loadBrandConfigDefaults();
 
-    expect(DEFAULT_PRESETS.general.default_prompt).toContain(
-      'ENTITY TYPES TO EXTRACT:\n- Brand names and company names\n\n{{TRACKED_BRANDS}}'
-    );
-  });
-
-  it('identifies General context and focus in its extraction prompt', async () => {
-    const { DEFAULT_PRESETS } = await loadBrandConfigDefaults();
-
-    expect(DEFAULT_PRESETS.general.default_prompt).toContain(
-      'INDUSTRY CONTEXT: General\nFOCUS: brand and company recommendations'
-    );
+    expect(DEFAULT_PRESETS.general.default_prompt).toContain(fragment);
   });
 });

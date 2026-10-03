@@ -5,6 +5,10 @@ import { renderHook } from '@testing-library/react';
 import { usePromptInsights } from './usePromptInsights';
 import { mockPromptInsightsResponse } from './usePromptInsights-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
+import { idleEndpointState } from '../test/idleEndpointState';
+import {
+  INVALID_REQUEST_ON_TYPE_GUARD_FAILURE, UNABLE_TO_LOAD_ON_NON_OK_STATUS
+} from './useAnalysisEndpoint-failure-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
@@ -14,12 +18,7 @@ describe('usePromptInsights', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => usePromptInsights());
 
-    expect(result.current).toStrictEqual({
-      data: null,
-      loading: false,
-      error: null,
-      fetchPromptInsights: expect.any(Function),
-    });
+    expect(result.current).toStrictEqual(idleEndpointState('fetchPromptInsights'));
   });
 
   describeEndpointHookContract({
@@ -38,8 +37,8 @@ describe('usePromptInsights', () => {
       ['prompt insights', mockPromptInsightsResponse, []],
     ],
     failures: [
-      ['Unable to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
-      ['Invalid visibility request', 'payload fails the type guard', { invalidResponse: true }],
+      UNABLE_TO_LOAD_ON_NON_OK_STATUS,
+      INVALID_REQUEST_ON_TYPE_GUARD_FAILURE,
     ],
   });
 });

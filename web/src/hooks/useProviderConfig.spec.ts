@@ -39,20 +39,25 @@ describe('useProviderConfig', () => {
     ]);
   });
 
-  it('returns true when updateProvider succeeds', async () => {
-    const { result } = await renderLoadedProviderConfig();
+  it.each([
+    {
+      name: 'returns true when updateProvider succeeds',
+      options: {},
+      expected: true,
+    },
+    {
+      name: 'returns false when updateProvider fails',
+      options: { updateSuccess: false },
+      expected: false,
+    },
+  ])('$name', async ({
+    options, expected 
+  }) => {
+    const { result } = await renderLoadedProviderConfig(options);
 
     const updated = await act(() => result.current.updateProvider('openai', { enabled: false }));
 
-    expect(updated).toBe(true);
-  });
-
-  it('returns false when updateProvider fails', async () => {
-    const { result } = await renderLoadedProviderConfig({ updateSuccess: false });
-
-    const updated = await act(() => result.current.updateProvider('openai', { enabled: false }));
-
-    expect(updated).toBe(false);
+    expect(updated).toBe(expected);
   });
 
   it('sends correct payload when updating provider with api_key', async () => {

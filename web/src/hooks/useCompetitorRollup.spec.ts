@@ -7,6 +7,8 @@ import {
   mockSingleCompetitorRollup, mockAllCompetitorsRollup 
 } from './useCompetitorRollup-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
+import { idleEndpointState } from '../test/idleEndpointState';
+import {failedToLoadOnBackendError} from './useAnalysisEndpoint-failure-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
@@ -16,12 +18,7 @@ describe('useCompetitorRollup', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useCompetitorRollup());
 
-    expect(result.current).toStrictEqual({
-      data: null,
-      loading: false,
-      error: null,
-      fetchCompetitorRollup: expect.any(Function),
-    });
+    expect(result.current).toStrictEqual(idleEndpointState('fetchCompetitorRollup'));
   });
 
   describeEndpointHookContract({
@@ -46,7 +43,7 @@ describe('useCompetitorRollup', () => {
         shouldFail: true,
         failStatus: 400,
       }],
-      ['Failed to load visibility metrics', 'response is a backend {error} body', { errorResponse: { error: 'Unknown competitor' } }],
+      failedToLoadOnBackendError('Unknown competitor'),
       ['Invalid visibility request', 'payload has neither rollup nor rollups', { invalidResponse: true }],
     ],
   });

@@ -112,85 +112,93 @@ describe('ApiConfigError', () => {
   });
 });
 
+/** One `parseApiError` call (`error` plus the optional context and status) and the one field it must set. */
+interface ParseApiErrorCase {
+  name: string;
+  error: Error;
+  args: Parameters<typeof parseApiError> extends [unknown, ...infer TRest] ? TRest : never;
+  field: keyof ReturnType<typeof parseApiError>;
+  expected: unknown;
+}
+
 describe('parseApiError', () => {
-  it('returns network category for fetch TypeError', () => {
-    const error = new TypeError('Failed to fetch');
+  it.each<ParseApiErrorCase>([
+    {
+      name: 'returns network category for fetch TypeError',
+      error: new TypeError('Failed to fetch'),
+      args: [],
+      field: 'category',
+      expected: 'network',
+    },
+    {
+      name: 'returns timeout category for timeout message',
+      error: new TimeoutError(),
+      args: [],
+      field: 'category',
+      expected: 'timeout',
+    },
+    {
+      name: 'returns auth category for 401 status code',
+      error: new UnauthorizedError(),
+      args: [undefined, 401],
+      field: 'category',
+      expected: 'auth',
+    },
+    {
+      name: 'returns status code embedded in ApiRequestError',
+      error: new ApiRequestError('HTTP 403: Forbidden', 403),
+      args: [],
+      field: 'statusCode',
+      expected: 403,
+    },
+    {
+      name: 'returns category inferred from ApiRequestError status',
+      error: new ApiRequestError('Request rejected', 429),
+      args: [],
+      field: 'category',
+      expected: 'rate_limit',
+    },
+    {
+      name: 'returns context-specific message when context provided',
+      error: new NetworkError(),
+      args: ['dashboard'],
+      field: 'message',
+      expected: 'Unable to load dashboard data',
+    },
+    {
+      name: 'returns generic message when no context provided',
+      error: new TypeError('Failed to fetch'),
+      args: [],
+      field: 'message',
+      expected: 'Unable to connect to the server',
+    },
+    {
+      name: 'sets recoverable to true for network errors',
+      error: new TypeError('Failed to fetch'),
+      args: [],
+      field: 'recoverable',
+      expected: true,
+    },
+    {
+      name: 'sets recoverable to false for auth errors',
+      error: new UnauthorizedError(),
+      args: [undefined, 401],
+      field: 'recoverable',
+      expected: false,
+    },
+    {
+      name: 'includes suggestion for error category',
+      error: new RateLimitError(),
+      args: [],
+      field: 'suggestion',
+      expected: 'Please wait a moment before trying again',
+    },
+  ])('$name', ({
+    error, args, field, expected
+  }) => {
+    const result = parseApiError(error, ...args);
 
-    const result = parseApiError(error);
-
-    expect(result.category).toBe('network');
-  });
-
-  it('returns timeout category for timeout message', () => {
-    const error = new TimeoutError();
-
-    const result = parseApiError(error);
-
-    expect(result.category).toBe('timeout');
-  });
-
-  it('returns auth category for 401 status code', () => {
-    const error = new UnauthorizedError();
-
-    const result = parseApiError(error, undefined, 401);
-
-    expect(result.category).toBe('auth');
-  });
-
-  it('returns status code embedded in ApiRequestError', () => {
-    const error = new ApiRequestError('HTTP 403: Forbidden', 403);
-
-    const result = parseApiError(error);
-
-    expect(result.statusCode).toBe(403);
-  });
-
-  it('returns category inferred from ApiRequestError status', () => {
-    const error = new ApiRequestError('Request rejected', 429);
-
-    const result = parseApiError(error);
-
-    expect(result.category).toBe('rate_limit');
-  });
-
-  it('returns context-specific message when context provided', () => {
-    const error = new NetworkError();
-
-    const result = parseApiError(error, 'dashboard');
-
-    expect(result.message).toBe('Unable to load dashboard data');
-  });
-
-  it('returns generic message when no context provided', () => {
-    const error = new TypeError('Failed to fetch');
-
-    const result = parseApiError(error);
-
-    expect(result.message).toBe('Unable to connect to the server');
-  });
-
-  it('sets recoverable to true for network errors', () => {
-    const error = new TypeError('Failed to fetch');
-
-    const result = parseApiError(error);
-
-    expect(result.recoverable).toBe(true);
-  });
-
-  it('sets recoverable to false for auth errors', () => {
-    const error = new UnauthorizedError();
-
-    const result = parseApiError(error, undefined, 401);
-
-    expect(result.recoverable).toBe(false);
-  });
-
-  it('includes suggestion for error category', () => {
-    const error = new RateLimitError();
-
-    const result = parseApiError(error);
-
-    expect(result.suggestion).toBe('Please wait a moment before trying again');
+    expect(result[field]).toBe(expected);
   });
 });
 

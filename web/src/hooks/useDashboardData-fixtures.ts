@@ -1,10 +1,7 @@
-import {
-  expect, vi 
-} from 'vitest';
-import {
-  act, renderHook, waitFor 
-} from '@testing-library/react';
+import { vi } from 'vitest';
+import { act } from '@testing-library/react';
 import { createMockJsonResponse } from '../test/fetchResponses';
+import { renderLoadedHook } from '../test/loadedHook';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import type { Keyword } from '../types';
 import { buildKeywordsPage } from '../api/keywordPages-fixtures';
@@ -117,8 +114,13 @@ export function createMockFetch(overrides: MockFetchOverrides = {}) {
  */
 export async function renderLoadedDashboard(overrides: MockFetchOverrides = {}) {
   mockAuthenticatedFetch.mockImplementation(createMockFetch(overrides));
-  const rendered = renderHook(() => useDashboardData());
-  await waitFor(() => expect(rendered.result.current.loading).toBe(false));
+  return renderLoadedHook(useDashboardData);
+}
+
+/** `renderLoadedDashboard(overrides)`, then one completed keyword reconciliation. */
+export async function renderReconciledDashboard(overrides: MockFetchOverrides = {}) {
+  const rendered = await renderLoadedDashboard(overrides);
+  await act(() => rendered.result.current.reconcileKeywords());
   return rendered;
 }
 

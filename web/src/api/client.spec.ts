@@ -138,58 +138,56 @@ describe('API response errors', () => {
     )).resolves.toStrictEqual(responseBody);
   });
 
-  it('stores no field when an opted-in structured response omits it', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(
-      { error: 'Keyword conflicts with an active keyword' },
-      409,
-      'Conflict'
-    ));
+  it.each([
+    {
+      name: 'stores no field when an opted-in structured response omits it',
+      response: () => createMockJsonResponse(
+        { error: 'Keyword conflicts with an active keyword' },
+        409,
+        'Conflict'
+      ),
+      request: () => apiPost<unknown>('/test', requestBodyFixture, { allowStructured4xx: true }),
+      expected: {
+        message: 'Keyword conflicts with an active keyword',
+        statusCode: 409,
+        responseMessage: 'Keyword conflicts with an active keyword',
+      },
+    },
+    {
+      name: 'uses the HTTP fallback when an opted-in 4xx JSON error shape is invalid',
+      response: () => createMockJsonResponse({
+        error: 'Keyword is invalid',
+        field: 0,
+      }, 400, 'Bad Request'),
+      request: () => apiPost<unknown>('/test', requestBodyFixture, { allowStructured4xx: true }),
+      expected: {
+        message: 'HTTP 400: Bad Request',
+        statusCode: 400,
+        responseMessage: undefined,
+      },
+    },
+    {
+      name: 'uses the HTTP fallback when an opted-in 4xx response body is not JSON',
+      response: () => new Response('<html>Bad request</html>', {
+        status: 400,
+        statusText: 'Bad Request',
+        headers: { 'Content-Type': 'text/html' },
+      }),
+      request: () => apiGet<unknown>('/test', { allowStructured4xx: true }),
+      expected: {
+        message: 'HTTP 400: Bad Request',
+        statusCode: 400,
+        responseMessage: undefined,
+      },
+    },
+  ])('$name', async ({
+    response, request, expected 
+  }) => {
+    mockAuthenticatedFetch.mockResolvedValue(response());
 
-    await expect(apiPost<unknown>(
-      '/test',
-      requestBodyFixture,
-      { allowStructured4xx: true }
-    )).rejects.toMatchObject({
-      message: 'Keyword conflicts with an active keyword',
-      statusCode: 409,
-      responseMessage: 'Keyword conflicts with an active keyword',
-      field: undefined,
-    });
-  });
-
-  it('uses the HTTP fallback when an opted-in 4xx JSON error shape is invalid', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({
-      error: 'Keyword is invalid',
-      field: 0,
-    }, 400, 'Bad Request'));
-
-    await expect(apiPost<unknown>(
-      '/test',
-      requestBodyFixture,
-      { allowStructured4xx: true }
-    )).rejects.toMatchObject({
-      message: 'HTTP 400: Bad Request',
-      statusCode: 400,
-      responseMessage: undefined,
-      field: undefined,
-    });
-  });
-
-  it('uses the HTTP fallback when an opted-in 4xx response body is not JSON', async () => {
-    mockAuthenticatedFetch.mockResolvedValue(new Response('<html>Bad request</html>', {
-      status: 400,
-      statusText: 'Bad Request',
-      headers: { 'Content-Type': 'text/html' },
-    }));
-
-    await expect(apiGet<unknown>(
-      '/test',
-      { allowStructured4xx: true }
-    )).rejects.toMatchObject({
-      message: 'HTTP 400: Bad Request',
-      statusCode: 400,
-      responseMessage: undefined,
-      field: undefined,
+    await expect(request()).rejects.toMatchObject({
+      ...expected,
+      field: undefined 
     });
   });
 });

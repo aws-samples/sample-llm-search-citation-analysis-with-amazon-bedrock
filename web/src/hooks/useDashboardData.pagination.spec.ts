@@ -14,6 +14,7 @@ import {
   createMockFetch,
   createMockKeywords,
   renderLoadedDashboard,
+  renderReconciledDashboard,
 } from './useDashboardData-fixtures';
 import {
   buildKeyword, buildKeywordsPage
@@ -54,37 +55,37 @@ describe('useDashboardData keyword pagination', () => {
     expect(result.current.keywords).toStrictEqual([]);
   });
 
-  it('replaces keywords with every authoritative page when reconciliation crosses pages', async () => {
-    const { result } = await renderLoadedDashboard({
-      authoritativeResponse: buildKeywordsPage([olderKeyword], 'page-2'),
-      extraPayloads: { [MOCK_AUTHORITATIVE_SECOND_PAGE_URL]: buildKeywordsPage([newerKeyword]) },
-    });
+  it.each([
+    {
+      name: 'replaces keywords with every authoritative page when reconciliation crosses pages',
+      overrides: {
+        authoritativeResponse: buildKeywordsPage([olderKeyword], 'page-2'),
+        extraPayloads: { [MOCK_AUTHORITATIVE_SECOND_PAGE_URL]: buildKeywordsPage([newerKeyword]) },
+      },
+      expectedKeywords: [newerKeyword, olderKeyword],
+    },
+    {
+      name: 'preserves keywords when a later authoritative page fails',
+      overrides: {
+        authoritativeResponse: reconciledPage,
+        failingUrls: [MOCK_AUTHORITATIVE_SECOND_PAGE_URL],
+      },
+      expectedKeywords: mockKeywords,
+    },
+    {
+      name: 'preserves keywords when the authoritative pages repeat a continuation token',
+      overrides: {
+        authoritativeResponse: reconciledPage,
+        extraPayloads: { [MOCK_AUTHORITATIVE_SECOND_PAGE_URL]: reconciledPage },
+      },
+      expectedKeywords: mockKeywords,
+    },
+  ])('$name', async ({
+    overrides, expectedKeywords 
+  }) => {
+    const { result } = await renderReconciledDashboard(overrides);
 
-    await act(() => result.current.reconcileKeywords());
-
-    expect(result.current.keywords).toStrictEqual([newerKeyword, olderKeyword]);
-  });
-
-  it('preserves keywords when a later authoritative page fails', async () => {
-    const { result } = await renderLoadedDashboard({
-      authoritativeResponse: reconciledPage,
-      failingUrls: [MOCK_AUTHORITATIVE_SECOND_PAGE_URL],
-    });
-
-    await act(() => result.current.reconcileKeywords());
-
-    expect(result.current.keywords).toStrictEqual(mockKeywords);
-  });
-
-  it('preserves keywords when the authoritative pages repeat a continuation token', async () => {
-    const { result } = await renderLoadedDashboard({
-      authoritativeResponse: reconciledPage,
-      extraPayloads: { [MOCK_AUTHORITATIVE_SECOND_PAGE_URL]: reconciledPage },
-    });
-
-    await act(() => result.current.reconcileKeywords());
-
-    expect(result.current.keywords).toStrictEqual(mockKeywords);
+    expect(result.current.keywords).toStrictEqual(expectedKeywords);
   });
 
   it('applies no reconciled keywords when a refetch supersedes reconciliation between pages', async () => {

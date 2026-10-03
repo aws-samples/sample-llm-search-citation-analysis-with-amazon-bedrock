@@ -4,6 +4,7 @@ import {
   KEYWORD_SCOPE_INFO, buildKeywordRow, buildVisibility
 } from '../components/Visibility/visibilityOverview-fixtures';
 import { renderDeferredEndpoint } from './useAnalysisEndpoint-fixtures';
+import { rejectedBodiesFor } from './useAnalysisEndpoint-failure-fixtures';
 
 /** What a visibility or trends hook holds after a body that fails its type guard. */
 export const INVALID_REQUEST_STATE = {
@@ -57,11 +58,7 @@ export const mockKeywordVisibilityResponse: VisibilityResponse = buildVisibility
  * shape whose keyword rows are not a list.
  */
 export const REJECTED_VISIBILITY_BODIES: ReadonlyArray<[description: string, body: unknown]> = [
-  ['a null body', null],
-  ['a full body flagged with a structured error', {
-    ...mockVisibilityResponse,
-    error: { message: 'No data available' },
-  }],
+  ...rejectedBodiesFor(mockVisibilityResponse, 'No data available'),
   ['a body without its scope', {
     ...mockVisibilityResponse,
     scope: null,

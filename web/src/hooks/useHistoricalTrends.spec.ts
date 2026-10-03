@@ -10,6 +10,10 @@ import {
   ALL_SCOPE, groupScope, keywordScope
 } from '../components/ui/reportScope-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
+import { idleEndpointState } from '../test/idleEndpointState';
+import {
+  FAILED_TO_LOAD_ON_NON_OK_STATUS, INVALID_REQUEST_ON_TYPE_GUARD_FAILURE, failedToLoadOnBackendError
+} from './useAnalysisEndpoint-failure-fixtures';
 import {
   INVALID_REQUEST_STATE, renderAnsweredWith
 } from './useVisibilityMetrics-fixtures';
@@ -22,12 +26,7 @@ describe('useHistoricalTrends', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useHistoricalTrends());
 
-    expect(result.current).toStrictEqual({
-      data: null,
-      loading: false,
-      error: null,
-      fetchHistoricalTrends: expect.any(Function),
-    });
+    expect(result.current).toStrictEqual(idleEndpointState('fetchHistoricalTrends'));
   });
 
   describeEndpointHookContract({
@@ -49,9 +48,9 @@ describe('useHistoricalTrends', () => {
       ['first-period keyword trend without a change', mockFirstPeriodTrendsResponse, [keywordScope('hotel sol spa')]],
     ],
     failures: [
-      ['Failed to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
-      ['Failed to load visibility metrics', 'response is a backend {error} body', { errorResponse: { error: 'No data' } }],
-      ['Invalid visibility request', 'payload fails the type guard', { invalidResponse: true }],
+      FAILED_TO_LOAD_ON_NON_OK_STATUS,
+      failedToLoadOnBackendError('No data'),
+      INVALID_REQUEST_ON_TYPE_GUARD_FAILURE,
     ],
   });
 

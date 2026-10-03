@@ -1,5 +1,7 @@
 import { vi } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import {
+  act, renderHook
+} from '@testing-library/react';
 import type {
   S3BrowseResponse, RawResponseContent 
 } from '../types';
@@ -10,9 +12,25 @@ import { useRawResponses } from './useRawResponses';
  * Points the mocked network layer at `fetch` (the default browse/file/download
  * mock unless a spec hands in another) and renders the hook.
  */
-export function renderRawResponses(fetch: ReturnType<typeof createMockFetch> = createMockFetch()) {
+function renderRawResponses(fetch: ReturnType<typeof createMockFetch> = createMockFetch()) {
   mockAuthenticatedFetch.mockImplementation(fetch);
   return renderHook(() => useRawResponses());
+}
+
+/**
+ * `renderRawResponses(fetch)`, then runs `operation` on the hook once inside
+ * `act`; `returned` is what the operation resolved with.
+ */
+export async function renderRawResponsesAfter<TResult>(
+  operation: (hook: ReturnType<typeof useRawResponses>) => Promise<TResult>,
+  fetch: ReturnType<typeof createMockFetch> = createMockFetch()
+) {
+  const rendered = renderRawResponses(fetch);
+  const returned = await act(() => operation(rendered.result.current));
+  return {
+    returned,
+    ...rendered,
+  };
 }
 
 export const mockBrowseResponse: S3BrowseResponse = {

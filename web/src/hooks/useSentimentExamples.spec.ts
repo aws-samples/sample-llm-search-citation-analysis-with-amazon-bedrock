@@ -8,6 +8,7 @@ import { useSentimentExamples } from './useSentimentExamples';
 import { renderAnsweredWith } from './useVisibilityMetrics-fixtures';
 import { renderDeferredEndpoint } from './useAnalysisEndpoint-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
+import { idleEndpointState } from '../test/idleEndpointState';
 import { createEndpointMockFetch } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import {
@@ -28,12 +29,7 @@ describe('useSentimentExamples', () => {
   it('starts with no examples, not loading, and no error', () => {
     const { result } = renderHook(() => useSentimentExamples());
 
-    expect(result.current).toStrictEqual({
-      data: null,
-      loading: false,
-      error: null,
-      fetchSentimentExamples: expect.any(Function),
-    });
+    expect(result.current).toStrictEqual(idleEndpointState('fetchSentimentExamples'));
   });
 
   describeEndpointHookContract({

@@ -3,7 +3,9 @@ import {
   renderHook, act 
 } from '@testing-library/react';
 import type { authenticatedFetch } from '../infrastructure/auth';
-import { createMockJsonResponse } from '../test/fetchResponses';
+import {
+  createEndpointMockFetch, createMockJsonResponse, type EndpointMockFetchOptions
+} from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import { useAnalysisEndpoint } from './useAnalysisEndpoint';
 
@@ -104,7 +106,7 @@ function createDeferredMockFetch(options: { rejectOnAbort?: boolean } = {}) {
  * inspect their abort signals, and settle them out of order.
  * `startRequest` runs one hook operation inside `act` without awaiting it,
  * so the request stays in flight and the returned promise can be asserted
- * on once the test settles it.
+ * on once the test settles it with `respondTo`.
  */
 export function renderDeferredEndpoint<THook>(
   useHook: () => THook,
@@ -122,9 +124,39 @@ export function renderDeferredEndpoint<THook>(
     return started[0];
   };
 
+  /** Settles the `index`-th recorded request with `payload` inside `act`. */
+  const respondTo = (index: number, payload: unknown, status?: number): Promise<void> => act(async () => {
+    deferred.requests[index].respond(payload, status);
+  });
+
   return {
     deferred,
     startRequest,
+    respondTo,
+    ...rendered,
+  };
+}
+
+/**
+ * `renderProbeEndpoint` over a mocked endpoint: `answer` is either the exact
+ * `Response` every call resolves with, or how the probe endpoint behaves
+ * (the probe payload by default).
+ */
+export function renderAnsweringProbeEndpoint(answer: Response | EndpointMockFetchOptions<ProbeResponse> = {}) {
+  if (answer instanceof Response) {
+    mockAuthenticatedFetch.mockResolvedValue(answer);
+  } else {
+    mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(probeResponse, answer));
+  }
+  return renderProbeEndpoint();
+}
+
+/** `renderAnsweringProbeEndpoint`, then one `fetchData('best hotels')`; `returned` is what it resolved with. */
+export async function renderFetchedProbeEndpoint(answer: Response | EndpointMockFetchOptions<ProbeResponse> = {}) {
+  const rendered = renderAnsweringProbeEndpoint(answer);
+  const returned = await act(() => rendered.result.current.fetchData('best hotels'));
+  return {
+    returned,
     ...rendered,
   };
 }
@@ -156,9 +188,7 @@ export async function renderSupersededFetch(
   const rendered = renderDeferredProbeEndpoint({ rejectOnAbort: options.rejectOnAbort });
   const stale = rendered.startFetch('first');
   rendered.startFetch('second');
-  await act(async () => {
-    rendered.deferred.requests[1].respond(options.payload ?? newerProbeResponse);
-  });
+  await rendered.respondTo(1, options.payload ?? newerProbeResponse);
   return {
     stale,
     ...rendered,

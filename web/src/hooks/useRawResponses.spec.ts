@@ -2,13 +2,14 @@ import {
   describe, it, expect, vi 
 } from 'vitest';
 import {
-  renderHook, waitFor, act 
+  renderHook, act
 } from '@testing-library/react';
 import { useRawResponses } from './useRawResponses';
 import {
-  mockBrowseResponse, mockFileContent, createMockFetch, renderRawResponses 
+  mockBrowseResponse, mockFileContent, createMockFetch, renderRawResponsesAfter
 } from './useRawResponses-fixtures';
 import { createMockJsonResponse } from '../test/fetchResponses';
+import { waitForLoaded } from '../test/loadedHook';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
@@ -42,18 +43,16 @@ describe('useRawResponses', () => {
     ['https://api.test.com/raw-responses/file?key=file.png&bucket=screenshots', 'fetching a file from the screenshots bucket', (hook) => hook.getFile('file.png', 'screenshots')],
     ['https://api.test.com/raw-responses/download?key=path%2Fto%2Ffile.json&bucket=responses', 'requesting a download URL by key', (hook) => hook.getDownloadUrl('path/to/file.json')],
   ])('requests %s when %s', async (url, _condition, run) => {
-    const { result } = renderRawResponses();
-
-    await act(() => run(result.current));
+    await renderRawResponsesAfter(run);
 
     expect(mockAuthenticatedFetch).toHaveBeenCalledWith(url);
   });
 
   describe('browse', () => {
     it('returns and stores the folder listing when the response has a prefix', async () => {
-      const { result } = renderRawResponses();
-
-      const returned = await act(() => result.current.browse());
+      const {
+        returned, result
+      } = await renderRawResponsesAfter((hook) => hook.browse());
 
       expect(returned).toStrictEqual(mockBrowseResponse);
       expect(result.current.browseData).toStrictEqual(mockBrowseResponse);
@@ -71,13 +70,13 @@ describe('useRawResponses', () => {
       await act(async () => {
         deferred.resolve(createMockJsonResponse(mockBrowseResponse));
       });
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      await waitForLoaded(result);
     });
 
     it('resolves null and reports the server failure when browsing fails', async () => {
-      const { result } = renderRawResponses(createMockFetch({ shouldFail: true }));
-
-      const returned = await act(() => result.current.browse());
+      const {
+        returned, result
+      } = await renderRawResponsesAfter((hook) => hook.browse(), createMockFetch({ shouldFail: true }));
 
       expect(returned).toBeNull();
       expect(result.current.error).toBe('Failed to load response data');
@@ -86,18 +85,18 @@ describe('useRawResponses', () => {
 
   describe('getFile', () => {
     it('returns and stores the file content when the response has a key', async () => {
-      const { result } = renderRawResponses();
-
-      const returned = await act(() => result.current.getFile('responses/file1.json'));
+      const {
+        returned, result
+      } = await renderRawResponsesAfter((hook) => hook.getFile('responses/file1.json'));
 
       expect(returned).toStrictEqual(mockFileContent);
       expect(result.current.fileContent).toStrictEqual(mockFileContent);
     });
 
     it('resolves null and reports the missing file when the file request fails', async () => {
-      const { result } = renderRawResponses(createMockFetch({ shouldFailFile: true }));
-
-      const returned = await act(() => result.current.getFile('nonexistent.json'));
+      const {
+        returned, result
+      } = await renderRawResponsesAfter((hook) => hook.getFile('nonexistent.json'), createMockFetch({ shouldFailFile: true }));
 
       expect(returned).toBeNull();
       expect(result.current.error).toBe('Response file not found');
@@ -105,27 +104,29 @@ describe('useRawResponses', () => {
   });
 
   describe('getDownloadUrl', () => {
-    it('returns the presigned download URL when the request succeeds', async () => {
-      const { result } = renderRawResponses();
+    it.each([
+      {
+        name: 'returns the presigned download URL when the request succeeds',
+        fetch: createMockFetch(),
+        expected: 'https://s3.example.com/presigned-url',
+      },
+      {
+        name: 'resolves null when the download request fails',
+        fetch: createMockFetch({ shouldFailDownload: true }),
+        expected: null,
+      },
+    ])('$name', async ({
+      fetch, expected 
+    }) => {
+      const { returned: downloadUrl } = await renderRawResponsesAfter((hook) => hook.getDownloadUrl('file.json'), fetch);
 
-      const downloadUrl = await act(() => result.current.getDownloadUrl('file.json'));
-
-      expect(downloadUrl).toBe('https://s3.example.com/presigned-url');
-    });
-
-    it('resolves null when the download request fails', async () => {
-      const { result } = renderRawResponses(createMockFetch({ shouldFailDownload: true }));
-
-      const downloadUrl = await act(() => result.current.getDownloadUrl('file.json'));
-
-      expect(downloadUrl).toBeNull();
+      expect(downloadUrl).toBe(expected);
     });
   });
 
   describe('clearFile', () => {
     it('resets fileContent to null after a file was loaded', async () => {
-      const { result } = renderRawResponses();
-      await act(() => result.current.getFile('file.json'));
+      const { result } = await renderRawResponsesAfter((hook) => hook.getFile('file.json'));
       expect(result.current.fileContent).toStrictEqual(mockFileContent);
 
       act(() => {

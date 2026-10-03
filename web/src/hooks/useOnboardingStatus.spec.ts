@@ -1,7 +1,7 @@
 import {
   describe, it, expect 
 } from 'vitest';
-import { waitFor } from '@testing-library/react';
+import { waitForLoaded } from '../test/loadedHook';
 import type { OnboardingSetupStatus } from './useOnboardingStatus';
 import {
   type OnboardingMockApiOptions,
@@ -27,7 +27,7 @@ describe('useOnboardingStatus', () => {
 
       expect(result.current.loading).toBe(true);
 
-      await waitFor(() => expect(result.current.loading).toBe(false));
+      await waitForLoaded(result);
     });
 
     it('fetches providers, brand config, schedules, and personas exactly once on mount', async () => {

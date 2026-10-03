@@ -1,15 +1,17 @@
 import {
   describe, it, expect, vi
 } from 'vitest';
-import {
-  renderHook, act
-} from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { useVisibilityMetrics } from './useVisibilityMetrics';
 import {
   INVALID_REQUEST_STATE, REJECTED_VISIBILITY_BODIES, mockKeywordVisibilityResponse, mockVisibilityResponse, renderAnsweredWith
 } from './useVisibilityMetrics-fixtures';
 import { renderDeferredEndpoint } from './useAnalysisEndpoint-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
+import { idleEndpointState } from '../test/idleEndpointState';
+import {
+  INVALID_REQUEST_ON_TYPE_GUARD_FAILURE, UNABLE_TO_LOAD_ON_NON_OK_STATUS, failedToLoadOnBackendError
+} from './useAnalysisEndpoint-failure-fixtures';
 import {
   ALL_SCOPE, groupScope, keywordScope
 } from '../components/ui/reportScope-fixtures';
@@ -22,12 +24,7 @@ describe('useVisibilityMetrics', () => {
   it('starts with no data, not loading, and no error', () => {
     const { result } = renderHook(() => useVisibilityMetrics());
 
-    expect(result.current).toStrictEqual({
-      data: null,
-      loading: false,
-      error: null,
-      fetchVisibilityMetrics: expect.any(Function),
-    });
+    expect(result.current).toStrictEqual(idleEndpointState('fetchVisibilityMetrics'));
   });
 
   describeEndpointHookContract({
@@ -49,9 +46,9 @@ describe('useVisibilityMetrics', () => {
       ['single-keyword visibility in the same shape', mockKeywordVisibilityResponse, [keywordScope('hotel sol spa')]],
     ],
     failures: [
-      ['Unable to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
-      ['Failed to load visibility metrics', 'response is a backend {error} body', { errorResponse: { error: 'No data available' } }],
-      ['Invalid visibility request', 'payload fails the type guard', { invalidResponse: true }],
+      UNABLE_TO_LOAD_ON_NON_OK_STATUS,
+      failedToLoadOnBackendError('No data available'),
+      INVALID_REQUEST_ON_TYPE_GUARD_FAILURE,
     ],
   });
 
@@ -75,17 +72,13 @@ describe('useVisibilityMetrics', () => {
 
     it('keeps the newer scope data when a stale response resolves late', async () => {
       const {
-        deferred, result, startRequest
+        respondTo, result, startRequest
       } = renderDeferredEndpoint(useVisibilityMetrics);
 
       startRequest((hook) => hook.fetchVisibilityMetrics(keywordScope('hotel sol spa')));
       startRequest((hook) => hook.fetchVisibilityMetrics(groupScope('grp-sol')));
-      await act(async () => {
-        deferred.requests[1].respond(mockVisibilityResponse);
-      });
-      await act(async () => {
-        deferred.requests[0].respond(mockKeywordVisibilityResponse);
-      });
+      await respondTo(1, mockVisibilityResponse);
+      await respondTo(0, mockKeywordVisibilityResponse);
 
       expect(result.current.data).toStrictEqual(mockVisibilityResponse);
       expect(result.current.error).toBeNull();
