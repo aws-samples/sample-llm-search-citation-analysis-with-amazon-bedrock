@@ -105,6 +105,10 @@ function jsonBodyRequest(method: 'POST' | 'PUT', body: unknown): RequestInit {
   };
 }
 
+function requestEndpoint<T>(endpoint: string, init: RequestInit, options: ApiRequestOptions): Promise<T> {
+  return requestJson<T>(`${API_BASE_URL}${endpoint}`, init, options);
+}
+
 /**
  * Validates that the API is properly configured.
  * @throws {ApiConfigError} If API URL contains placeholder or is not set
@@ -138,27 +142,26 @@ export async function apiGet<T>(
   return requestJson<T>(url, {}, requestOptions);
 }
 
+/** An authenticated request with a JSON body, for the verbs that carry one. */
+function jsonBodyVerb(method: 'POST' | 'PUT') {
+  return async function sendJsonBody<T>(
+    endpoint: string,
+    body: unknown,
+    options: ApiRequestOptions = {}
+  ): Promise<T> {
+    return requestEndpoint<T>(endpoint, jsonBodyRequest(method, body), options);
+  };
+}
+
 /**
  * Makes an authenticated POST request to the API.
  */
-export async function apiPost<T>(
-  endpoint: string,
-  body: unknown,
-  options: ApiRequestOptions = {}
-): Promise<T> {
-  return requestJson<T>(`${API_BASE_URL}${endpoint}`, jsonBodyRequest('POST', body), options);
-}
+export const apiPost = jsonBodyVerb('POST');
 
 /**
  * Makes an authenticated PUT request to the API.
  */
-export async function apiPut<T>(
-  endpoint: string,
-  body: unknown,
-  options: ApiRequestOptions = {}
-): Promise<T> {
-  return requestJson<T>(`${API_BASE_URL}${endpoint}`, jsonBodyRequest('PUT', body), options);
-}
+export const apiPut = jsonBodyVerb('PUT');
 
 /**
  * Makes an authenticated DELETE request to the API.
@@ -167,5 +170,5 @@ export async function apiDelete<T>(
   endpoint: string,
   options: ApiRequestOptions = {}
 ): Promise<T> {
-  return requestJson<T>(`${API_BASE_URL}${endpoint}`, { method: 'DELETE' }, options);
+  return requestEndpoint<T>(endpoint, { method: 'DELETE' }, options);
 }
