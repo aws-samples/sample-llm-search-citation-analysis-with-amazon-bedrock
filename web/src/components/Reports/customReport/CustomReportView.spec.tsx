@@ -124,4 +124,25 @@ describe('CustomReportView', () => {
 
     expect(await screen.findByText(REPORT_GONE)).toBeInTheDocument();
   });
+
+  it('says the report is gone when only other reports are saved', async () => {
+    mockApiGet.mockResolvedValue(reportsListPayload(buildCustomReport({ blocks: [] })));
+    renderCustomReportRoute('/reports/custom/report-missing');
+
+    expect(await screen.findByText(REPORT_GONE)).toBeInTheDocument();
+  });
+
+  it('offers the way back to Reports when the report is gone', async () => {
+    renderWithoutSavedReports('/reports/custom/report-missing');
+
+    expect(await screen.findByRole('link', { name: 'Back to Reports' })).toBeInTheDocument();
+  });
+
+  it('offers no way back while the saved reports are loading', () => {
+    mockApiGet.mockReturnValue(new Promise(vi.fn()));
+    renderCustomReportRoute(REPORT_PATH);
+
+    expect(screen.getByText('Loading the report…')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Back to Reports' })).not.toBeInTheDocument();
+  });
 });
