@@ -110,6 +110,11 @@ def claude_web_search_payload(
         payload["system"] = system_prompt
     return payload
 
+# ``retry_with_backoff``: attempts for timeouts and 5xx when the call names no
+# ``max_retries``, and the statuses that are retried at all.
+DEFAULT_MAX_RETRIES = 5
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
 # Extra attempts a 429 earns on top of the caller's ``max_retries``. Throttling
 # answers in milliseconds, so waiting it out is cheap — unlike the timeouts the
 # caller's budget is sized for (the research worker allows two attempts because
@@ -285,33 +290,26 @@ def _raise_for_status_with_body(response: requests.Response) -> None:
         ) from http_error
 
 
-def retry_with_backoff(
-    provider_name: str,
-    max_retries: int = 5,
-    retryable_codes: set[int] | None = None,
-    timeout: int = 60
-):
+def retry_with_backoff(provider_name: str, timeout: int = 60):
     """
     Decorator for HTTP requests with exponential backoff retry logic.
 
+    The wrapped call's ``max_retries`` keyword (default ``DEFAULT_MAX_RETRIES``)
+    bounds the attempts for timeouts and 5xx answers. A 429 gets
+    ``throttle_extra_attempts()`` more (env ``PROVIDER_THROTTLE_EXTRA_ATTEMPTS``,
+    default 3), with jittered, ``Retry-After`` / ``x-ratelimit-reset``-aware
+    waits — throttling is fast to fail and cheap to wait out, so it should not
+    spend the budget sized for slow failures. ``RETRYABLE_STATUS_CODES`` are
+    retried.
+
     Args:
         provider_name: Name of the provider for logging (e.g., "OPENAI", "PERPLEXITY")
-        max_retries: Maximum number of retry attempts for timeouts and 5xx
-            answers. A 429 gets ``throttle_extra_attempts()`` more (env
-            ``PROVIDER_THROTTLE_EXTRA_ATTEMPTS``, default 3), with jittered,
-            ``Retry-After`` / ``x-ratelimit-reset``-aware waits — throttling is fast to fail and cheap
-            to wait out, so it should not spend the budget sized for slow failures.
-        retryable_codes: HTTP status codes that should trigger a retry
         timeout: Request timeout in seconds
     """
-    if retryable_codes is None:
-        retryable_codes = {429, 500, 502, 503, 504}
-
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> dict[str, Any]:
-            # Allow override of max_retries via kwargs
-            actual_max_retries = kwargs.pop('max_retries', max_retries)
+            actual_max_retries = kwargs.pop('max_retries', DEFAULT_MAX_RETRIES)
             throttle_attempts = actual_max_retries + throttle_extra_attempts()
 
             attempt = 0
@@ -319,7 +317,7 @@ def retry_with_backoff(
                 try:
                     response = func(*args, timeout=timeout, **kwargs)
 
-                    if response.status_code in retryable_codes:
+                    if response.status_code in RETRYABLE_STATUS_CODES:
                         wait_time = _status_retry_wait(
                             provider_name, response, attempt,
                             max_retries=actual_max_retries, throttle_attempts=throttle_attempts,
