@@ -66,7 +66,7 @@ describe('CitationTableHeader', () => {
 
     const ascendingIcon = ascending.querySelector('path')?.getAttribute('d') ?? '';
 
-    expect(ascendingIcon).not.toBe('');
-    expect(ascendingIcon).not.toBe(descending.querySelector('path')?.getAttribute('d'));
+    expect(ascendingIcon).toBe('M5 15l7-7 7 7');
+    expect(descending.querySelector('path')?.getAttribute('d')).not.toBe(ascendingIcon);
   });
 });

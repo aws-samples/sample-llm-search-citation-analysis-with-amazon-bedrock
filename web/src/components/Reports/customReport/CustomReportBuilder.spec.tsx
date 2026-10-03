@@ -194,7 +194,7 @@ describe('Editing a saved custom report', () => {
     mockApiGet.mockRejectedValue(new ApiRequestError('HTTP 500', 500));
     renderCustomReportRoute('/reports/custom/report-board/edit');
 
-    await waitFor(() => expect(screen.queryByText('Loading the report…')).not.toBeInTheDocument());
+    expect(await screen.findByText('Server error occurred')).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Back to Reports' })).not.toBeInTheDocument();
   });
 

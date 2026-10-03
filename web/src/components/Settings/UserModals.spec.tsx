@@ -168,6 +168,6 @@ describe('UserDetailsModal', () => {
   it('shows no group choice when there are no groups', () => {
     renderUserDetailsModal({ groups: [] });
 
-    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByText('Groups')).not.toBeInTheDocument();
   });
 });
