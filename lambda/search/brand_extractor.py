@@ -142,12 +142,8 @@ def _normalize_sentiment_fields(brand: dict[str, Any], include_sentiment: bool) 
 class LLMBrandExtractor:
     """Extract brand mentions using LLM for intelligent parsing and classification."""
 
-    def __init__(self, model_id: str | None = None, config: dict | None = None):
-        # model_id is accepted for backward compatibility but ignored.
-        # Model resolution now flows through shared.models.ModelRole.EXTRACTION.
-        if model_id is not None:
-            logger.debug("model_id argument to LLMBrandExtractor is ignored; "
-                         "models are resolved via shared.models.ModelRole.EXTRACTION")
+    def __init__(self, config: dict | None = None):
+        # The model is resolved via shared.models.ModelRole.EXTRACTION.
         # Use default config if None or empty dict
         self.config = config if config else DEFAULT_EXTRACTION_CONFIG
         self.industry = self.config.get("industry") or DEFAULT_INDUSTRY_ID
