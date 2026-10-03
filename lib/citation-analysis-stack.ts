@@ -2118,11 +2118,8 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordGroupsTable.grantReadData(executionMgmtFunction);
     queryPromptsTable.grantReadData(executionMgmtFunction);
     allow(executionMgmtFunction, ['states:StartExecution'], [stateMachine.stateMachineArn]);
-    allow(
-      executionMgmtFunction,
-      ['states:DescribeExecution', 'states:GetExecutionHistory'],
-      [`arn:aws:states:${this.region}:${this.account}:execution:CitationAnalysis-Workflow:*`]
-    );
+    const workflowExecutionArns = `arn:aws:states:${this.region}:${this.account}:execution:${WORKFLOW_STATE_MACHINE_NAME}:*`;
+    allow(executionMgmtFunction, ['states:DescribeExecution', 'states:GetExecutionHistory'], [workflowExecutionArns]);
     allow(executionMgmtFunction, ['states:ListExecutions'], [stateMachine.stateMachineArn]);
     // Keyword progress of a running execution comes from its ProcessKeywords
     // map run (item counts). DescribeMapRun is authorized on the map run ARN,
@@ -2132,11 +2129,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       ['states:DescribeMapRun'],
       [`arn:aws:states:${this.region}:${this.account}:mapRun:${WORKFLOW_STATE_MACHINE_NAME}/*`]
     );
-    allow(
-      executionMgmtFunction,
-      ['states:ListMapRuns'],
-      [`arn:aws:states:${this.region}:${this.account}:execution:${WORKFLOW_STATE_MACHINE_NAME}:*`]
-    );
+    allow(executionMgmtFunction, ['states:ListMapRuns'], [workflowExecutionArns]);
 
     searchResultsTable.grantReadData(getBrandMentionsFunction);
     brandConfigTable.grantReadData(getBrandMentionsFunction);
