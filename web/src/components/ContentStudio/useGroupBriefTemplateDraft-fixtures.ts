@@ -2,19 +2,28 @@ import {
   StrictMode, createElement, type ReactNode
 } from 'react';
 import {
-  act, renderHook
+  act, renderHook, waitFor, type RenderHookResult
 } from '@testing-library/react';
-import { vi } from 'vitest';
+import {
+  expect, vi
+} from 'vitest';
 import {
   useContentBriefTemplates,
   type ContentBriefTemplateMutationOutcome,
 } from '../../hooks/useContentBriefTemplates';
-import type { GroupBriefMode } from '../../types';
+import type {
+  ContentBriefTemplate, GroupBriefMode
+} from '../../types';
+import { GROUP_BRIEF_DEFAULT_TEMPLATES } from './GroupBriefForm-source';
 import {
   buildContentBriefTemplate,
   buildContentBriefTemplatesHookResult,
 } from './GroupBriefForm-fixtures';
 import { useGroupBriefTemplateDraft } from './useGroupBriefTemplateDraft';
+
+type TemplatesHookResult = ReturnType<typeof useContentBriefTemplates>;
+type TemplateDraftResult = ReturnType<typeof useGroupBriefTemplateDraft>;
+type TemplateDraftRender = RenderHookResult<TemplateDraftResult, unknown>;
 
 export const mockUseContentBriefTemplates = vi.mocked(useContentBriefTemplates);
 
@@ -34,6 +43,34 @@ export const createdGroupBriefTemplate = buildContentBriefTemplate({
   builtin: false,
 });
 
+export const saveFailedOutcome = {
+  success: false,
+  message: 'Save failed',
+} satisfies ContentBriefTemplateMutationOutcome;
+
+export const templateDeletedOutcome = {
+  success: true,
+  message: 'Template deleted',
+} satisfies ContentBriefTemplateMutationOutcome;
+
+export function buildTemplateSavedOutcome(
+  template: ContentBriefTemplate
+): ContentBriefTemplateMutationOutcome {
+  return {
+    success: true,
+    message: 'Template saved',
+    template,
+  };
+}
+
+export function buildFallbackTemplateDraft(mode: GroupBriefMode) {
+  return {
+    name: '',
+    description: '',
+    prompt: GROUP_BRIEF_DEFAULT_TEMPLATES[mode],
+  };
+}
+
 interface DeferredTemplateSettlers { resolve: (outcome: ContentBriefTemplateMutationOutcome) => void; }
 
 export function createDeferredTemplateMutation() {
@@ -50,8 +87,8 @@ export function createDeferredTemplateMutation() {
 }
 
 export function buildGroupBriefTemplateDraftHookResult(
-  overrides: Partial<ReturnType<typeof useContentBriefTemplates>> = {}
-): ReturnType<typeof useContentBriefTemplates> {
+  overrides: Partial<TemplatesHookResult> = {}
+): TemplatesHookResult {
   const base = buildContentBriefTemplatesHookResult();
   return buildContentBriefTemplatesHookResult({
     templates: [...base.templates, savedGroupBriefTemplate],
@@ -70,61 +107,87 @@ export function templateStrictModeBoundary({ children }: TemplateStrictModeBound
   return createElement(StrictMode, null, children);
 }
 
-export function renderGroupBriefTemplateDraft(
-  mode: GroupBriefMode = 'create_new_landing_page'
-) {
-  return renderHook(() => useGroupBriefTemplateDraft(mode));
+interface TemplateDraftRenderOptions {
+  readonly mode?: GroupBriefMode;
+  readonly strict?: boolean;
 }
 
-function renderGroupBriefTemplateDraftInStrictMode(
-  mode: GroupBriefMode = 'create_new_landing_page'
-) {
-  return renderHook(() => useGroupBriefTemplateDraft(mode), {wrapper: templateStrictModeBoundary,});
+export function renderGroupBriefTemplateDraft({
+  mode = 'create_new_landing_page',
+  strict = false,
+}: TemplateDraftRenderOptions = {}): TemplateDraftRender {
+  const wrapper = strict ? templateStrictModeBoundary : undefined;
+  return renderHook(() => useGroupBriefTemplateDraft(mode), { wrapper });
 }
 
 export function renderGroupBriefTemplateDraftWithHooks(
-  overrides: Partial<ReturnType<typeof useContentBriefTemplates>> = {},
-  mode: GroupBriefMode = 'create_new_landing_page'
-) {
+  overrides: Partial<TemplatesHookResult> = {},
+  options: TemplateDraftRenderOptions = {}
+): TemplateDraftRender {
   mockUseContentBriefTemplates.mockReturnValue(
     buildGroupBriefTemplateDraftHookResult(overrides)
   );
-  return renderGroupBriefTemplateDraft(mode);
+  return renderGroupBriefTemplateDraft(options);
 }
 
-export function renderGroupBriefTemplateDraftWithHooksInStrictMode(
-  overrides: Partial<ReturnType<typeof useContentBriefTemplates>> = {},
-  mode: GroupBriefMode = 'create_new_landing_page'
-) {
-  mockUseContentBriefTemplates.mockReturnValue(
-    buildGroupBriefTemplateDraftHookResult(overrides)
-  );
-  return renderGroupBriefTemplateDraftInStrictMode(mode);
-}
-
-export function renderSelectedSavedTemplateDraft(
-  overrides: Partial<ReturnType<typeof useContentBriefTemplates>> = {}
-) {
-  const rendered = renderGroupBriefTemplateDraftWithHooks(overrides);
-  act(() => rendered.result.current.select(savedGroupBriefTemplate.id));
+export function renderGroupBriefTemplateDraftAcrossTemplateRefresh(
+  initial: Partial<TemplatesHookResult>,
+  refreshed: TemplatesHookResult
+): TemplateDraftRender {
+  mockUseContentBriefTemplates.mockReturnValue(buildContentBriefTemplatesHookResult(initial));
+  const rendered = renderGroupBriefTemplateDraft();
+  mockUseContentBriefTemplates.mockReturnValue(refreshed);
+  rendered.rerender();
   return rendered;
 }
 
-export function renderSelectedSavedTemplateDraftInStrictMode(
-  overrides: Partial<ReturnType<typeof useContentBriefTemplates>> = {}
-) {
-  const rendered = renderGroupBriefTemplateDraftWithHooksInStrictMode(overrides);
+export function renderSelectedSavedTemplateDraft(
+  overrides: Partial<TemplatesHookResult> = {},
+  options: TemplateDraftRenderOptions = {}
+): TemplateDraftRender {
+  const rendered = renderGroupBriefTemplateDraftWithHooks(overrides, options);
   act(() => rendered.result.current.select(savedGroupBriefTemplate.id));
   return rendered;
 }
 
 export function renderTemplateDraftWithCreateOutcome(
-  outcome: ContentBriefTemplateMutationOutcome
+  outcome: ContentBriefTemplateMutationOutcome,
+  options: TemplateDraftRenderOptions = {}
 ) {
   const create = vi.fn().mockResolvedValue(outcome);
   return {
-    ...renderGroupBriefTemplateDraftWithHooks({ create }),
+    ...renderGroupBriefTemplateDraftWithHooks({ create }, options),
     create,
+  };
+}
+
+export function renderSelectedTemplateDraftWithUpdateOutcome(
+  outcome: ContentBriefTemplateMutationOutcome,
+  options: TemplateDraftRenderOptions = {}
+) {
+  const update = vi.fn().mockResolvedValue(outcome);
+  return {
+    ...renderSelectedSavedTemplateDraft({ update }, options),
+    update,
+  };
+}
+
+interface SavedTemplateDeletionOptions extends TemplateDraftRenderOptions {
+  readonly confirmed: boolean;
+  readonly outcome?: ContentBriefTemplateMutationOutcome;
+}
+
+export function renderSelectedTemplateDraftForDeletion({
+  confirmed,
+  outcome = templateDeletedOutcome,
+  ...options
+}: SavedTemplateDeletionOptions) {
+  const remove = vi.fn().mockResolvedValue(outcome);
+  const confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(confirmed);
+  return {
+    ...renderSelectedSavedTemplateDraft({ remove }, options),
+    confirmSpy,
+    remove,
   };
 }
 
@@ -136,4 +199,29 @@ export function renderTemplateDraftWithDeferredCreate() {
     create,
     deferred,
   };
+}
+
+interface TemplateDraftFields {
+  readonly name: string;
+  readonly description: string;
+  readonly prompt: string;
+}
+
+export function fillTemplateDraftFields(
+  draft: TemplateDraftResult,
+  fields: TemplateDraftFields
+): void {
+  act(() => {
+    draft.setName(fields.name);
+    draft.setDescription(fields.description);
+    draft.setPrompt(fields.prompt);
+  });
+}
+
+export async function waitForTemplateSavingToSettle(
+  rendered: Pick<TemplateDraftRender, 'result'>
+): Promise<void> {
+  await waitFor(() => {
+    expect(rendered.result.current.saving).toBe(false);
+  });
 }

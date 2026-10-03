@@ -2,7 +2,7 @@ import {
   afterEach, describe, expect, it, vi
 } from 'vitest';
 import {
-  buildContentBriefKeywordScope, buildGroupBriefDraft
+  buildContentBriefGroupScope, buildContentBriefKeywordScope, buildGroupBriefDraft
 } from './GroupBriefForm-fixtures';
 import {
   GROUP_BRIEF_BATCH_LIMIT_GUIDANCE,
@@ -147,25 +147,17 @@ describe('isHttpLandingUrl', () => {
 });
 
 describe('validateGroupBriefDraft scope', () => {
-  it('requires exactly one group ID when group mode is empty', () => {
-    expect(validateGroupBriefDraft(buildGroupBriefDraft({
-      scope: {
-        mode: 'groups',
-        group_ids: [],
-      },
-    }))).toStrictEqual([{
-      field: 'scope',
-      message: 'Select one keyword group.',
-    }]);
-  });
-
-  it('requires exactly one group ID when multiple groups reach validation', () => {
-    expect(validateGroupBriefDraft(buildGroupBriefDraft({
-      scope: {
-        mode: 'groups',
-        group_ids: ['group-1', 'group-2'],
-      },
-    }))).toStrictEqual([{
+  it.each([
+    {
+      testName: 'requires exactly one group ID when group mode is empty',
+      groupIds: [],
+    },
+    {
+      testName: 'requires exactly one group ID when multiple groups reach validation',
+      groupIds: ['group-1', 'group-2'],
+    },
+  ])('$testName', ({ groupIds }) => {
+    expect(validateGroupBriefDraft(buildGroupBriefDraft({ scope: buildContentBriefGroupScope(groupIds) }))).toStrictEqual([{
       field: 'scope',
       message: 'Select one keyword group.',
     }]);
@@ -173,10 +165,7 @@ describe('validateGroupBriefDraft scope', () => {
 
   it('reports an empty active group when its authoritative count is zero', () => {
     expect(validateGroupBriefDraft(buildGroupBriefDraft({
-      scope: {
-        mode: 'groups',
-        group_ids: ['group-1'],
-      },
+      scope: buildContentBriefGroupScope(['group-1']),
       selectedKeywordCount: 0,
     }))).toStrictEqual([{
       field: 'scope',
@@ -326,10 +315,7 @@ describe('validateGroupBriefDraft template fields', () => {
 
   it('accepts the legacy group placeholder for group scope', () => {
     expect(validateGroupBriefDraft(buildGroupBriefDraft({
-      scope: {
-        mode: 'groups',
-        group_ids: ['group-1'],
-      },
+      scope: buildContentBriefGroupScope(['group-1']),
       promptTemplate: 'Create for {group}.',
     }))).toStrictEqual([]);
   });

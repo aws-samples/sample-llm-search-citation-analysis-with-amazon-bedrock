@@ -10,6 +10,7 @@ import type {
   ContentBriefBatchRequest,
   ContentBriefBatchStatusResponse,
   ContentIdea,
+  GenerateContentResponse,
   GroupBriefIdea,
 } from '../../types';
 
@@ -116,6 +117,15 @@ export function buildMissingActiveBatch(
       total: 2,
     }),
     batch_id: batchId,
+  };
+}
+
+export function buildPendingGenerateContentResponse(keyword: string): GenerateContentResponse {
+  return {
+    success: true,
+    id: 'content-1',
+    status: 'pending',
+    keyword,
   };
 }
 
