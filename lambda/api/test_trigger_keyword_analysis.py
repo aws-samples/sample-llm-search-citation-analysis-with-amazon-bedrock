@@ -13,6 +13,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 
 from testing.admin_authz_fixtures import caller_event, invoke
 from testing.dynamodb_stubs import fake_dynamodb_resource
@@ -187,6 +188,20 @@ class TestFullTriggerReadsEveryPage:
         _all.handler(make_event(), None)
 
         assert _started_input() == {'scope': {'mode': 'all'}, 'query_prompts': []}
+
+    def test_scans_for_status_active_when_the_status_index_is_unavailable(self):
+        mock_keywords_table.query.side_effect = ClientError(
+            {'Error': {'Code': 'ValidationException', 'Message': 'no StatusIndex'}}, 'Query',
+        )
+        mock_keywords_table.scan.return_value = {'Items': [_keyword_row('k1', 'alpha')]}
+
+        _all.handler(make_event(), None)
+
+        assert mock_keywords_table.scan.call_args.kwargs == {
+            'FilterExpression': '#status = :status',
+            'ExpressionAttributeNames': {'#status': 'status'},
+            'ExpressionAttributeValues': {':status': 'active'},
+        }
 
     def test_rejects_when_no_keyword_is_active(self):
         status, body = invoke(_all, make_event())

@@ -116,6 +116,16 @@ def test_returns_409_without_update_when_canonical_keyword_identity_changes(mana
     table.update_item.assert_not_called()
 
 
+def test_returns_409_when_the_keyword_changes_before_the_conditional_update_lands(manage_handler):
+    module, table = manage_handler
+    _store_alpha(table)
+    table.update_item.side_effect = conditional_check_failure()
+
+    assert _update_alpha(module, table, {'keyword': 'alpha'}) == (
+        409, {'error': 'Keyword changed while it was being updated'},
+    )
+
+
 def test_updates_display_text_when_canonical_keyword_identity_is_unchanged(manage_handler):
     module, table = manage_handler
     updated = {**_store_alpha(table), 'keyword': _FULLWIDTH_ALPHA}
