@@ -9,41 +9,13 @@ import {
 } from './CrawlHistory';
 import { BlockedPageBanner } from './BlockedPageBanner';
 import type {
-  BlockReason, CrawlStatus 
-} from './BlockedPageBanner';
+  CrawledContent, CrawlStatus, SEOAnalysis
+} from '../../types';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   CHART_BAR_PATHS, CLOCK_PATHS, DOCUMENT_TEXT_PATHS, PHOTO_PATHS 
 } from '../ui/iconPaths';
 import { ModalCloseFooter } from '../ui/ModalCloseFooter';
-
-interface SEOAnalysis {
-  relevance_score?: number;
-  keyword_usage?: string;
-  strengths?: string[];
-  weaknesses?: string[];
-  recommendations?: string[];
-  competitive_advantage?: string;
-}
-
-/** A crawled citation page as `GET /crawled-content` returns it; the shape both the table and this modal work from. */
-export interface CrawledContent {
-  normalized_url: string;
-  title: string;
-  summary: string;
-  content: string;
-  screenshot_url?: string;
-  seo_analysis?: SEOAnalysis;
-  crawled_at: string;
-  keyword: string;
-  citation_count: number;
-  citing_providers: string[];
-  page_load_time_ms?: number;
-  content_length?: number;
-  status?: CrawlStatus;
-  block_reason?: BlockReason;
-  error_message?: string;
-}
 
 interface CitationDetailModalProps {
   citation: CrawledContent;

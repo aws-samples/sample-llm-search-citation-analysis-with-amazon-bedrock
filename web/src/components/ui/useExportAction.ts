@@ -2,11 +2,14 @@ import { useState } from 'react';
 
 /**
  * Busy flag plus click handler for an export button: `exporting` is true
- * while `run` is in flight; a failure is logged with `failureLog` and the
- * button is released either way. A `null` run (nothing to export yet) makes
- * the handler a no-op.
+ * while `run` is in flight; a failure is logged with `onFailure` (a console
+ * prefix) or handed to it (a callback), and the button is released either
+ * way. A `null` run (nothing to export yet) makes the handler a no-op.
  */
-export function useExportAction(run: (() => Promise<void>) | null, failureLog: string) {
+export function useExportAction(
+  run: (() => Promise<void>) | null,
+  onFailure: string | ((error: unknown) => void),
+) {
   const [exporting, setExporting] = useState(false);
 
   const handleExport = async () => {
@@ -15,7 +18,8 @@ export function useExportAction(run: (() => Promise<void>) | null, failureLog: s
     try {
       await run();
     } catch (error) {
-      console.error(failureLog, error);
+      if (typeof onFailure === 'string') console.error(onFailure, error);
+      else onFailure(error);
     } finally {
       setExporting(false);
     }

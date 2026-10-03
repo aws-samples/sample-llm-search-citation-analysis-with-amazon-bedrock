@@ -2,15 +2,15 @@ import React, {
   useState,
   useMemo,
 } from 'react';
-import type { TopUrl } from '../../types';
+import type {
+  CrawledContent, TopUrl
+} from '../../types';
 import {
   API_BASE_URL, authenticatedFetch 
 } from '../../infrastructure';
 import { getDomain } from '../../formatting/urlFormatter';
 import { KeywordDetail } from '../Keywords/KeywordDetail';
-import {
-  CitationDetailModal, type CrawledContent
-} from './CitationDetailModal';
+import { CitationDetailModal } from './CitationDetailModal';
 import { CitationFilters } from './CitationFilters';
 import { CitationTableHeader } from './CitationTableHeader';
 import { CitationRow } from './CitationRow';

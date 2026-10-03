@@ -6,6 +6,7 @@ import type {
 import { fetchBrandMentionsAtRun } from '../../../api/brandMentions';
 import { getErrorMessage } from '../../../infrastructure';
 import { exportGroupKpiReport } from './groupKpiExport';
+import { useExportAction } from '../../ui/useExportAction';
 
 interface Props {
   readonly scope: ReportScope;
@@ -33,11 +34,11 @@ type Notice =
 export function GroupKpiExportButton({
   scope, scopeLabel, history, run
 }: Props) {
-  const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
 
-  const handleExport = async () => {
-    setExporting(true);
+  const {
+    exporting, handleExport
+  } = useExportAction(async () => {
     setNotice(null);
     const mentions = await fetchBrandMentionsAtRun(scope, run.timestamp).catch((error: unknown) => {
       setNotice({
@@ -46,17 +47,13 @@ export function GroupKpiExportButton({
       });
       return null;
     });
-    try {
-      await exportGroupKpiReport(history, scopeLabel, run, mentions);
-    } catch (error) {
-      setNotice({
-        tone: 'error',
-        text: `Excel export failed: ${getErrorMessage(error)}`,
-      });
-    } finally {
-      setExporting(false);
-    }
-  };
+    await exportGroupKpiReport(history, scopeLabel, run, mentions);
+  }, (error) => {
+    setNotice({
+      tone: 'error',
+      text: `Excel export failed: ${getErrorMessage(error)}`,
+    });
+  });
 
   return (
     <span className="inline-flex flex-col items-end gap-1 print-hidden">

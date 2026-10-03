@@ -1,7 +1,6 @@
 import { StrokeIcon } from '../ui/StrokeIcon';
 import { WARNING_PATHS } from '../ui/iconPaths';
-export type CrawlStatus = 'success' | 'blocked' | 'error';
-export type BlockReason = 'captcha' | 'access_denied' | 'rate_limited' | 'geo_blocked' | 'login_required';
+import type { BlockReason } from '../../types';
 
 export const BLOCK_REASON_LABELS: Record<BlockReason, string> = {
   captcha: 'CAPTCHA verification required',

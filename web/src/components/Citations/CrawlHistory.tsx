@@ -5,7 +5,7 @@ import { CenteredEmpty } from '../ui/CenteredState';
 import {
   BLOCK_REASON_LABELS, BlockedPageBanner, isBlockReason 
 } from './BlockedPageBanner';
-import type { CrawlStatus } from './BlockedPageBanner';
+import type { CrawlStatus } from '../../types';
 
 export interface HistoryCrawl {
   crawled_at: string;
