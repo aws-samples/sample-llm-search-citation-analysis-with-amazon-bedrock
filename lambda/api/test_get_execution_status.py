@@ -560,7 +560,7 @@ class TestTimelineFiltering:
     def test_keeps_identical_messages_that_belong_to_different_states(self, stepfunctions):
         events = _timeline(
             stepfunctions,
-            _entered(1, 'ParseKeywords'), _history_event(2, 'TaskFailed', 1),
+            *_task_outcome('ParseKeywords', 'TaskFailed'),
             _entered(3, 'GenerateSummary'), _history_event(4, 'TaskFailed', 3),
         )
 
@@ -570,7 +570,7 @@ class TestTimelineFiltering:
         ]
 
     def test_keeps_an_identical_message_when_only_one_occurrence_names_a_state(self, stepfunctions):
-        events = _timeline(stepfunctions, _entered(1, 'ParseKeywords'), _history_event(2, 'TaskFailed', 1), _history_event(3, 'TaskFailed', None))
+        events = _timeline(stepfunctions, *_task_outcome('ParseKeywords', 'TaskFailed'), _history_event(3, 'TaskFailed', None))
 
         assert [(e['id'], e.get('state_name')) for e in events] == [(2, 'ParseKeywords'), (3, None)]
 
