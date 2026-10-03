@@ -1,17 +1,14 @@
-import type { CompetitorRollup } from '../../../../api/reports';
 import {
   ReportSection,
   ReportStatCard,
   ReportStatGrid,
   gateSection,
 } from '../../layout';
+import type { RollupSectionProps } from './rollupSection';
 
-interface Props {
+interface Props extends RollupSectionProps {
   readonly competitor: string;
-  readonly rollup: CompetitorRollup | null;
   readonly keywordsAnalyzed: number;
-  readonly loading: boolean;
-  readonly error: string | null;
 }
 
 /**

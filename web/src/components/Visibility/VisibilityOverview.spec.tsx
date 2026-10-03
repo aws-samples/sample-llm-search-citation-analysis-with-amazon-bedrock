@@ -18,7 +18,7 @@ import {
 import {
   definitionTerms, headlineCardLabels, statFigure, statFootnote
 } from '../Reports/layout/reportQueries-fixtures';
-import { NO_PREVIOUS_RUN } from '../Reports/layout';
+import { NO_PREVIOUS_RUN } from '../Reports/layout/periodComparison';
 import { OWNED_DOMAINS_MISSING } from '../Reports/layout/KpiHeadline';
 import { RUN_2 } from '../Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
 import { VISIBILITY_DEFINITIONS } from '../../constants/kpiDefinitions';

@@ -7,7 +7,7 @@ import {
   KPI_DEFINITIONS, type KpiId
 } from '../../../../constants/kpiDefinitions';
 import {
-  kpiColumn, ReportSection, ReportTable, type ReportTableColumn
+  emphasisColumn, kpiColumn, ReportSection, ReportTable, type ReportTableColumn
 } from '../../layout';
 
 interface Props {readonly run: GroupRun;}
@@ -31,12 +31,7 @@ function deltaColumn(id: KpiId): ReportTableColumn<GroupRunDriver> {
 /** Built per render (not at import) so every column is exercised by the tests that render the table. */
 function driverColumns(): ReadonlyArray<ReportTableColumn<GroupRunDriver>> {
   return [
-    {
-      header: 'Keyword',
-      // Stryker disable next-line StringLiteral: Tailwind-only cell styling
-      cellClassName: 'font-medium',
-      render: (driver) => driver.keyword,
-    },
+    emphasisColumn('Keyword', (driver) => driver.keyword),
     {
       header: 'Brand mention',
       info: 'Whether the keyword\'s answers started or stopped naming your brand since the previous group run.',

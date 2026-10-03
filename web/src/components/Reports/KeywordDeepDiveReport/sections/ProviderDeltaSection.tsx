@@ -2,18 +2,16 @@ import type {
   AggregatedBrand, BrandMentionsResponse 
 } from '../../../../types';
 import {
+  emphasisColumn,
   ReportSection,
   ReportSectionPlaceholder,
   ReportTable,
   type ReportTableColumn,
+  type SectionFetchState,
   gateSection,
 } from '../../layout';
 
-interface Props {
-  readonly mentions: BrandMentionsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
+interface Props extends SectionFetchState {readonly mentions: BrandMentionsResponse | null;}
 
 /**
  * Per-provider ranking breakdown for first-party brands. Shows where each AI
@@ -69,20 +67,12 @@ function providerColumns(
   providers: ReadonlyArray<string>,
 ): ReadonlyArray<ReportTableColumn<AggregatedBrand>> {
   return [
-    {
-      header: 'Brand',
-      cellClassName: 'font-medium',
-      render: (brand) => brand.name,
-    },
+    emphasisColumn('Brand', (brand) => brand.name),
     ...providers.map((provider): ReportTableColumn<AggregatedBrand> => ({
       header: provider,
       render: (brand) => rankOn(brand, provider),
     })),
-    {
-      header: 'Best rank',
-      cellClassName: 'font-medium',
-      render: (brand) => `#${brand.best_rank}`,
-    },
+    emphasisColumn('Best rank', (brand) => `#${brand.best_rank}`),
   ];
 }
 

@@ -1,23 +1,19 @@
 import type {
-  HistoricalTrendsResponse, KeywordTrend, TrendDirection
+  KeywordTrend, TrendDirection
 } from '../../../../types';
 import { TREND_DEFINITION } from '../../../../constants/kpiDefinitions';
 import {
   formatKpi, formatKpiDelta
 } from '../../../../formatting/kpiFormatter';
 import {
+  emphasisColumn,
   kpiColumn,
   ReportSection,
   ReportTable,
   type ReportTableColumn,
+  type TrendSectionProps,
 } from '../../layout';
 import { gateKeywordTrendRows } from './keywordTrendRows';
-
-interface Props {
-  readonly trends: HistoricalTrendsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
 
 /** A keyword's visibility-score trend since its previous period; `undefined` before it has one. */
 function visibilityTrend(row: KeywordTrend): TrendDirection | undefined {
@@ -31,12 +27,7 @@ function periodsText(row: KeywordTrend): string {
 /** Built per render (not at import) so every column is exercised by the tests that render the table. */
 function keywordColumns(): ReadonlyArray<ReportTableColumn<KeywordTrend>> {
   return [
-    {
-      header: 'Keyword',
-      // Stryker disable next-line StringLiteral: Tailwind-only cell styling
-      cellClassName: 'font-medium',
-      render: (row) => row.keyword,
-    },
+    emphasisColumn('Keyword', (row) => row.keyword),
     kpiColumn<KeywordTrend>('visibility_score', (row) => formatKpi('visibility_score', row.kpis.visibility_score)),
     {
       header: 'Visibility change',
@@ -68,7 +59,7 @@ function keywordColumns(): ReadonlyArray<ReportTableColumn<KeywordTrend>> {
  */
 export function PerKeywordTableSection({
   trends, loading, error 
-}: Props) {
+}: TrendSectionProps) {
   const gate = gateKeywordTrendRows({
     title: 'Per-keyword leaderboard',
     loading,

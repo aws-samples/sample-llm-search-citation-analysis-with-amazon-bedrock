@@ -4,9 +4,12 @@ import {
 } from 'react-router-dom';
 import { usePrintMode } from '../../../hooks/usePrintMode';
 import {
+  headlineSlice,
   KpiDefinitionsSection,
   ReportLayout,
   ReportKeywordSelector,
+  trendSlice,
+  visibilitySlice,
   VisibilityHeadlineSection,
 } from '../layout';
 import { useKeywordDeepDive } from './useKeywordDeepDive';
@@ -17,7 +20,7 @@ import { ProviderDeltaSection } from './sections/ProviderDeltaSection';
 import { TopSourcesSection } from './sections/TopSourcesSection';
 import { SentimentExamplesSection } from './sections/SentimentExamplesSection';
 import { RecommendationsSection } from './sections/RecommendationsSection';
-import { BrandRankingsSection } from '../BrandVisibilityReport/sections/BrandRankingsSection';
+import { LatestRunRankingsSection } from '../BrandVisibilityReport/sections/BrandRankingsSection';
 import type { Keyword } from '../../../types';
 import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 
@@ -97,6 +100,11 @@ export function KeywordDeepDiveReport({ keywords }: Props) {
     );
   }
 
+  const mentions = {
+    mentions: data.mentions,
+    loading: data.mentionsLoading,
+    error: data.mentionsError,
+  };
   return (
     <ReportLayout
       title={`Keyword Deep Dive: ${selectedKeyword}`}
@@ -110,48 +118,25 @@ export function KeywordDeepDiveReport({ keywords }: Props) {
       }
     >
       <VisibilityHeadlineSection
-        visibility={data.visibility}
-        trends={data.trends}
-        loading={data.visibilityLoading || data.trendsLoading}
-        error={data.visibilityError ?? data.trendsError}
+        {...headlineSlice(data)}
         emptyMessage="No visibility data found for this keyword. Run an analysis to populate the report."
       />
-      <RankHistorySection
-        trends={data.trends}
-        loading={data.trendsLoading}
-        error={data.trendsError}
-      />
-      <BrandRankingsSection
-        brands={data.visibility?.brands ?? null}
-        loading={data.visibilityLoading}
-        error={data.visibilityError}
-      />
+      <RankHistorySection {...trendSlice(data)} />
+      <LatestRunRankingsSection {...visibilitySlice(data)} />
       <PersonaImpactSection
         personas={data.personas}
         loading={data.personasLoading}
         error={data.personasError}
       />
-      <EngineKpisSection
-        visibility={data.visibility}
-        loading={data.visibilityLoading}
-        error={data.visibilityError}
-      />
-      <ProviderDeltaSection
-        mentions={data.mentions}
-        loading={data.mentionsLoading}
-        error={data.mentionsError}
-      />
+      <EngineKpisSection {...visibilitySlice(data)} />
+      <ProviderDeltaSection {...mentions} />
       <TopSourcesSection
         gaps={data.gaps}
         mentions={data.mentions}
         loading={data.gapsLoading || data.mentionsLoading}
         error={data.gapsError ?? data.mentionsError}
       />
-      <SentimentExamplesSection
-        mentions={data.mentions}
-        loading={data.mentionsLoading}
-        error={data.mentionsError}
-      />
+      <SentimentExamplesSection {...mentions} />
       <RecommendationsSection
         recommendations={data.recommendations}
         keyword={selectedKeyword}

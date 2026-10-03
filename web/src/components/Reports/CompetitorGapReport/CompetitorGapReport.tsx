@@ -11,6 +11,7 @@ import { useCompetitorGap } from './useCompetitorGap';
 import { HeadlineSection } from './sections/HeadlineSection';
 import { OutrankedKeywordsSection } from './sections/OutrankedKeywordsSection';
 import { OutreachTargetsSection } from './sections/OutreachTargetsSection';
+import { rollupSlice } from './sections/rollupSection';
 
 /**
  * Competitor Gap report. Per-competitor printable layout aimed at a
@@ -106,21 +107,11 @@ export function CompetitorGapReport() {
     >
       <HeadlineSection
         competitor={selected}
-        rollup={data.rollup}
         keywordsAnalyzed={data.keywordsAnalyzed}
-        loading={data.loading}
-        error={data.error}
+        {...rollupSlice(data)}
       />
-      <OutrankedKeywordsSection
-        rollup={data.rollup}
-        loading={data.loading}
-        error={data.error}
-      />
-      <OutreachTargetsSection
-        rollup={data.rollup}
-        loading={data.loading}
-        error={data.error}
-      />
+      <OutrankedKeywordsSection {...rollupSlice(data)} />
+      <OutreachTargetsSection {...rollupSlice(data)} />
     </ReportLayout>
   );
 }

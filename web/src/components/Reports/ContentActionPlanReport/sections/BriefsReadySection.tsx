@@ -3,15 +3,17 @@ import {
   formatContentWarning, getContentTitle
 } from '../../../ContentStudio/contentPresentation';
 import {
-  ReportSection, SectionPlaceholder
+  REPORT_CARD_CLASS,
+  ReportCardHeader,
+  ReportSection,
+  ReportSectionNote,
+  pendingSectionPlaceholder,
+  type SectionFetchState,
 } from '../../layout';
 
-interface Props {
-  readonly history: ReadonlyArray<ContentStudioHistory>;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
+interface Props extends SectionFetchState {readonly history: ReadonlyArray<ContentStudioHistory>;}
 
+const TITLE = 'Briefs ready to use';
 const MAX_BRIEFS = 8;
 
 /**
@@ -26,21 +28,13 @@ const MAX_BRIEFS = 8;
 export function BriefsReadySection({
   history, loading, error
 }: Props) {
-  if (loading) {
-    return (
-      <ReportSection title="Briefs ready to use">
-        <SectionPlaceholder variant="loading" message="Loading content history…" />
-      </ReportSection>
-    );
-  }
-
-  if (error) {
-    return (
-      <ReportSection title="Briefs ready to use">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
+  const pending = pendingSectionPlaceholder({
+    title: TITLE,
+    loading,
+    loadingMessage: 'Loading content history…',
+    error,
+  });
+  if (pending) return pending;
 
   const ready = history
     .filter((item) => item.status === 'generated')
@@ -48,20 +42,15 @@ export function BriefsReadySection({
 
   if (ready.length === 0) {
     return (
-      <ReportSection
-        title="Briefs ready to use"
-        subtitle="No generated briefs are waiting to be published."
-      >
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          Generate content from the Content Studio to populate this section.
-        </p>
-      </ReportSection>
+      <ReportSectionNote title={TITLE} subtitle="No generated briefs are waiting to be published.">
+        Generate content from the Content Studio to populate this section.
+      </ReportSectionNote>
     );
   }
 
   return (
     <ReportSection
-      title="Briefs ready to use"
+      title={TITLE}
       subtitle="Generated content awaiting review or publish. Pair each brief with the corresponding citation target to close a gap."
       startNewPage
     >
@@ -77,20 +66,20 @@ export function BriefsReadySection({
 function BriefCard({ item }: { readonly item: ContentStudioHistory }) {
   const generated = item.generated_content;
   return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 avoid-break-inside">
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-            {getContentTitle(item)}
-          </h3>
+    <div className={REPORT_CARD_CLASS}>
+      <ReportCardHeader
+        title={getContentTitle(item)}
+        detail={(
           <p className="text-xs text-gray-500 dark:text-gray-400">
             Target keyword: {item.keyword}
           </p>
-        </div>
-        <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
-          {new Date(item.created_at).toLocaleDateString()}
-        </span>
-      </div>
+        )}
+        aside={(
+          <span className="text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">
+            {new Date(item.created_at).toLocaleDateString()}
+          </span>
+        )}
+      />
       {item.content_warning && (
         <output className="block rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
           <span className="font-semibold">Needs review: </span>

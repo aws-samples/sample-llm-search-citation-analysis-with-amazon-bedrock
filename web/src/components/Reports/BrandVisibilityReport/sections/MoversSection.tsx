@@ -1,15 +1,8 @@
-import type { HistoricalTrendsResponse } from '../../../../types';
 import {
-  MoverColumn, ReportSection 
+  MoverColumn, ReportSection, type TrendSectionProps
 } from '../../layout';
 import { gateKeywordTrendRows } from './keywordTrendRows';
 import { keywordMovers } from './keywordMovers';
-
-interface Props {
-  readonly trends: HistoricalTrendsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
 
 const NO_MOVERS_MESSAGE = 'No keyword\'s visibility score moved this way.';
 
@@ -21,7 +14,7 @@ const NO_MOVERS_MESSAGE = 'No keyword\'s visibility score moved this way.';
  */
 export function MoversSection({
   trends, loading, error 
-}: Props) {
+}: TrendSectionProps) {
   const gate = gateKeywordTrendRows({
     title: 'Top movers',
     loading,

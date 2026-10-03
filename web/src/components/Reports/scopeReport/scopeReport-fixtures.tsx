@@ -15,9 +15,8 @@ import { AiEnginesReport } from '../AiEnginesReport';
 import { SourcesReport } from '../SourcesReport';
 import { SentimentReport } from '../SentimentReport';
 import { ALL_SCOPE } from '../../ui/reportScope';
-import type {
-  ReportSlice, ScopeReportData
-} from './useScopeReportData';
+import type { ReportSlice } from '../layout/sectionGate';
+import type { ScopeReportData } from './useScopeReportData';
 
 /**
  * Report data for the specs of the Competitor Benchmark, AI Engines,

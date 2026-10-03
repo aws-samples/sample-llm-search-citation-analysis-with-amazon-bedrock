@@ -3,18 +3,17 @@ import type {
   ContentIdea,
   ContentStudioHistory,
 } from '../../../../types';
+import type { SectionFetchState } from '../../layout';
 import type { useContentActionPlan } from '../useContentActionPlan';
 
 /**
  * Props for the Content Action Plan sections that join all three data
  * sources (citation gaps, Content Studio ideas, generated briefs).
  */
-export interface ContentPlanSectionProps {
+export interface ContentPlanSectionProps extends SectionFetchState {
   readonly gaps: CitationGapsResponse | null;
   readonly ideas: ReadonlyArray<ContentIdea>;
   readonly history: ReadonlyArray<ContentStudioHistory>;
-  readonly loading: boolean;
-  readonly error: string | null;
 }
 
 /**

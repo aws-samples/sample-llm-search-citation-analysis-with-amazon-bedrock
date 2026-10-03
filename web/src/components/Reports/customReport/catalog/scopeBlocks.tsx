@@ -1,12 +1,14 @@
 import type { ComponentType } from 'react';
-import type { HistoricalTrendsResponse } from '../../../../types';
 import {
   EngineSentimentSection, type ScopeSectionProps
 } from '../../scopeReport';
 import type { ScopeReportData } from '../../scopeReport/useScopeReportData';
-import { VisibilityHeadlineSection } from '../../layout';
-import { ALL_KEYWORDS_RANKINGS_SUBTITLE } from '../../BrandVisibilityReport/BrandVisibilityReport';
-import { BrandRankingsSection } from '../../BrandVisibilityReport/sections/BrandRankingsSection';
+import {
+  VisibilityHeadlineSection, type TrendSectionProps
+} from '../../layout';
+import {
+  LatestRunRankingsSection, PooledRankingsSection
+} from '../../BrandVisibilityReport/sections/BrandRankingsSection';
 import { CrossKeywordHeadlineSection } from '../../BrandVisibilityReport/sections/CrossKeywordHeadlineSection';
 import { MoversSection } from '../../BrandVisibilityReport/sections/MoversSection';
 import { PerKeywordTableSection } from '../../BrandVisibilityReport/sections/PerKeywordTableSection';
@@ -34,13 +36,7 @@ import {
  * Sources and Sentiment reports.
  */
 
-interface TrendSliceProps {
-  readonly trends: HistoricalTrendsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
-
-function trendSlice(report: ScopeReportData): TrendSliceProps {
+function trendSlice(report: ScopeReportData): TrendSectionProps {
   return {
     trends: report.trends.data,
     loading: report.trends.loading,
@@ -49,7 +45,7 @@ function trendSlice(report: ScopeReportData): TrendSliceProps {
 }
 
 /** A Brand Visibility section that reads `/trends` alone, fed from the scope source. */
-function fromTrends(section: ComponentType<TrendSliceProps>): ComponentType<ScopeSectionProps> {
+function fromTrends(section: ComponentType<TrendSectionProps>): ComponentType<ScopeSectionProps> {
   const Section = section;
   return function TrendBlock({ report }: ScopeSectionProps) {
     return <Section {...trendSlice(report)} />;
@@ -71,24 +67,9 @@ function VisibilityHeadlineBlock({ report }: ScopeSectionProps) {
 /** One keyword ranks the brands of its latest run; a wider scope pools each keyword's latest period. */
 function BrandRankingsBlock({ report }: ScopeSectionProps) {
   if (report.scope.kind === 'keyword') {
-    return (
-      <BrandRankingsSection
-        brands={report.visibility.data?.brands ?? null}
-        loading={report.visibility.loading}
-        error={report.visibility.error}
-      />
-    );
+    return <LatestRunRankingsSection visibility={report.visibility.data} loading={report.visibility.loading} error={report.visibility.error} />;
   }
-  return (
-    <BrandRankingsSection
-      brands={report.trends.data?.latest_brands ?? null}
-      brandTrends={report.trends.data?.brand_trends}
-      loading={report.trends.loading}
-      error={report.trends.error}
-      subtitle={ALL_KEYWORDS_RANKINGS_SUBTITLE}
-      emptyMessage="No brand mentions extracted in the latest periods."
-    />
-  );
+  return <PooledRankingsSection {...trendSlice(report)} />;
 }
 
 function ExploredEngineSentimentBlock({ report }: ScopeSectionProps) {

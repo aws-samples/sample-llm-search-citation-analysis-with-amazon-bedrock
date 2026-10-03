@@ -1,23 +1,17 @@
-import type { VisibilityResponse } from '../../../../types';
 import {
   ReportSection,
   ReportSectionPlaceholder,
   gateSection,
+  type VisibilitySectionProps,
 } from '../../layout';
 import {
   ChartPanel, EngineKpiChart
 } from '../../charts';
 import { EngineKpiTable } from '../../layout/EngineKpiTable';
 
-interface Props {
-  readonly visibility: VisibilityResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
-
 const TITLE = 'KPIs per AI engine';
 
-export const ENGINE_CHART_TITLE = 'AI engines compared';
+const ENGINE_CHART_TITLE = 'AI engines compared';
 export const ENGINE_CHART_SUBTITLE = 'Mention rate, visibility score and citation rate of each AI engine\'s answers alone, on a 0–100 scale.';
 
 /**
@@ -27,7 +21,7 @@ export const ENGINE_CHART_SUBTITLE = 'Mention rate, visibility score and citatio
  */
 export function EngineKpisSection({
   visibility, loading, error
-}: Props) {
+}: VisibilitySectionProps) {
   const gate = gateSection({
     title: TITLE,
     loading,

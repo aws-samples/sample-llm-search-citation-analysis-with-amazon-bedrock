@@ -1,14 +1,21 @@
 import type { ReactElement } from 'react';
 import { ReportSectionPlaceholder } from './ReportSectionPlaceholder';
 
-interface PendingSectionOptions {
+/** Whether the fetch a report section renders from is still in flight, or failed. */
+export interface SectionFetchState {
+  readonly loading: boolean;
+  readonly error: string | null;
+}
+
+/** A report section's payload (`null` until it is loaded) and the state of its fetch. */
+export interface ReportSlice<T> extends SectionFetchState {readonly data: T | null;}
+
+interface PendingSectionOptions extends SectionFetchState {
   /** Section heading, kept visible in every placeholder state. */
   readonly title: string;
-  readonly loading: boolean;
   readonly loadingMessage: string;
   /** Subtitle shown under the heading while loading, for sections that want one. */
   readonly loadingSubtitle?: string;
-  readonly error: string | null;
 }
 
 /**

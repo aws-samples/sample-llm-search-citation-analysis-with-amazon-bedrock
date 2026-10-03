@@ -5,9 +5,7 @@ import type {
   HistoricalTrendsResponse, VisibilityResponse
 } from '../../types';
 import { formatDate } from '../../formatting/dateFormatter';
-import {
-  KpiHeadline, NO_PREVIOUS_RUN, runComparison
-} from '../Reports/layout';
+import { RunKpiHeadline } from '../Reports/layout';
 import { BrandLeaderboard } from './BrandLeaderboard';
 import { KeywordVisibilityTable } from './KeywordVisibilityTable';
 import { OverviewPanel } from './OverviewPanel';
@@ -88,12 +86,7 @@ export function VisibilityOverview({
       </div>
 
       <OverviewPanel title="Headline">
-        <KpiHeadline
-          kpis={visibility.kpis}
-          comparison={runComparison(visibility.change)}
-          noComparisonNote={NO_PREVIOUS_RUN}
-          citationsConfigured={visibility.citations_configured}
-        />
+        <RunKpiHeadline visibility={visibility} />
       </OverviewPanel>
 
       <VisibilityHistory trends={trends} error={trendsError} rangeDays={rangeDays} onRangeChange={onRangeChange} />

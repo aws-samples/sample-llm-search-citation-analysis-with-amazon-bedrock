@@ -6,7 +6,9 @@ import {
   GROUP_REPORT_DEFINITIONS, VISIBILITY_DEFINITIONS
 } from '../../../../constants/kpiDefinitions';
 import type { GroupKpiHistoryResponse } from '../../../../types/domain/groupKpiHistory';
-import { KpiDefinitionsSection } from '../../layout';
+import {
+  KpiDefinitionsSection, type ReportSlice
+} from '../../layout';
 import {
   gateGroupHistory, resolveKeyword, resolveRun
 } from '../../BrandVisibilityReport/GroupKpiReport';
@@ -25,14 +27,8 @@ import {
 
 /** Blocks of the Executive Summary (`/reports/overview`), the keyword group KPIs and the KPI definitions. */
 
-interface OverviewSectionProps {
-  readonly data: ReportsOverviewResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
-
 /** `[type, label, description, section]`; the type is what saved reports store. */
-type OverviewBlockRow = readonly [string, string, string, ComponentType<OverviewSectionProps>];
+type OverviewBlockRow = readonly [string, string, string, ComponentType<ReportSlice<ReportsOverviewResponse>>];
 
 const OVERVIEW_BLOCK_ROWS: readonly OverviewBlockRow[] = [
   ['executive_headline', 'Headline', 'Every KPI with its change, and the keywords by trend.', OverviewHeadlineSection],

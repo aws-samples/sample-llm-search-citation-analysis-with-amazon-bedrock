@@ -2,13 +2,8 @@ import type { ReportsOverviewResponse } from '../../../../api/reports';
 import {
   TrendHeadlineSection,
   gateSection,
+  type ReportSlice,
 } from '../../layout';
-
-interface Props {
-  readonly data: ReportsOverviewResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
 
 /**
  * Top-of-deck answer to "are we winning, level or losing right now": every
@@ -18,7 +13,7 @@ interface Props {
  */
 export function HeadlineSection({
   data, loading, error 
-}: Props) {
+}: ReportSlice<ReportsOverviewResponse>) {
   const gate = gateSection({
     title: 'Headline',
     loading,
