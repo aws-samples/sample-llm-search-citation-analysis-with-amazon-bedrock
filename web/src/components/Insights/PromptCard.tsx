@@ -7,6 +7,28 @@ const STATUS_STYLES: Record<string, string> = {
   neutral: 'bg-gray-100 text-gray-800'
 };
 
+function SideStats({
+  label, stats
+}: {
+  readonly label: string;
+  readonly stats: PromptInsight['first_party'] 
+}) {
+  return (
+    <div>
+      <div className="text-gray-500 text-xs mb-1">{label}</div>
+      <div className="flex items-center gap-2">
+        <span className="font-medium">{stats.mentions} mentions</span>
+        {stats.best_rank && (
+          <span className="text-gray-400">Rank #{stats.best_rank}</span>
+        )}
+      </div>
+      <div className="text-xs text-gray-400">
+        {stats.provider_coverage}% provider coverage
+      </div>
+    </div>
+  );
+}
+
 export function PromptCard({ prompt }: { readonly prompt: PromptInsight }) {
   return (
     <div className="bg-white p-4 rounded-lg shadow border-l-4 border-l-blue-500">
@@ -18,30 +40,8 @@ export function PromptCard({ prompt }: { readonly prompt: PromptInsight }) {
       </div>
       
       <div className="grid grid-cols-2 gap-4 text-sm">
-        <div>
-          <div className="text-gray-500 text-xs mb-1">Your Brand</div>
-          <div className="flex items-center gap-2">
-            <span className="font-medium">{prompt.first_party.mentions} mentions</span>
-            {prompt.first_party.best_rank && (
-              <span className="text-gray-400">Rank #{prompt.first_party.best_rank}</span>
-            )}
-          </div>
-          <div className="text-xs text-gray-400">
-            {prompt.first_party.provider_coverage}% provider coverage
-          </div>
-        </div>
-        <div>
-          <div className="text-gray-500 text-xs mb-1">Competitors</div>
-          <div className="flex items-center gap-2">
-            <span className="font-medium">{prompt.competitors.mentions} mentions</span>
-            {prompt.competitors.best_rank && (
-              <span className="text-gray-400">Rank #{prompt.competitors.best_rank}</span>
-            )}
-          </div>
-          <div className="text-xs text-gray-400">
-            {prompt.competitors.provider_coverage}% provider coverage
-          </div>
-        </div>
+        <SideStats label="Your Brand" stats={prompt.first_party} />
+        <SideStats label="Competitors" stats={prompt.competitors} />
       </div>
 
       {prompt.score !== undefined && (

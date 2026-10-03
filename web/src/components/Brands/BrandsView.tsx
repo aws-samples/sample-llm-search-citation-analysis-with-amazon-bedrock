@@ -17,6 +17,7 @@ import { useExportAction } from '../ui/useExportAction';
 import type {
   Keyword, KeywordGroup, AggregatedBrand, BrandMentionsResponse, BrandConfig, ReportScope
 } from '../../types';
+import { PageHeaderCard } from '../ui/PageHeaderCard';
 
 interface BrandsViewProps {keywords: Keyword[];}
 
@@ -110,22 +111,22 @@ const Header = ({
   competitorCount: number;
   onConfigClick: () => void;
 }) => (
-  <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
-    <div className="flex flex-col gap-4">
-      <div className="flex-1">
-        <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Brand Mentions</h2>
-        <p className="text-sm text-gray-500 mt-2">See which brands AI search engines mention.</p>
+  <PageHeaderCard
+    title="Brand Mentions"
+    description="See which brands AI search engines mention."
+    relaxed={false}
+    footer={(
+      <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2 text-sm">
+        <span className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg">{industryName}</span>
+        {firstPartyCount > 0 && <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg">{firstPartyCount} first-party</span>}
+        {competitorCount > 0 && <span className="px-3 py-1.5 bg-red-50 text-red-700 rounded-lg">{competitorCount} competitors</span>}
       </div>
-      <button onClick={onConfigClick} className="px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 self-start">
-        Configure Brands
-      </button>
-    </div>
-    <div className="mt-4 pt-4 border-t border-gray-100 flex flex-wrap items-center gap-2 text-sm">
-      <span className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg">{industryName}</span>
-      {firstPartyCount > 0 && <span className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-lg">{firstPartyCount} first-party</span>}
-      {competitorCount > 0 && <span className="px-3 py-1.5 bg-red-50 text-red-700 rounded-lg">{competitorCount} competitors</span>}
-    </div>
-  </div>
+    )}
+  >
+    <button onClick={onConfigClick} className="px-4 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 self-start">
+      Configure Brands
+    </button>
+  </PageHeaderCard>
 );
 
 const getFilterCounts = (data: BrandMentionsResponse | null) => ({

@@ -1,10 +1,10 @@
 import {
-  useEffect, useMemo, useState
+  useMemo, useState
 } from 'react';
 import type { CompetitorAnalysisResult } from '../../types';
-import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
+import { useRunPromotion } from './useRunPromotion';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
-import { ResearchProgress } from './ResearchProgress';
+import { ResearchRunStatus } from './ResearchRunStatus';
 import type { ResearchRunViewProps } from './researchRunView';
 import {
   InputForm,
@@ -36,15 +36,9 @@ export const CompetitorAnalysis = ({
     () => getKeywordsForSection(result, activeSection),
     [result, activeSection]
   );
-  const promotion = usePromoteKeywords(currentKeywords, onKeywordsAdded);
-  const { clearSelection } = promotion;
-
-  // Each section is a distinct set of research keywords, so a section switch clears
-  // the selection just like a new result does: a promotion must never carry keywords
-  // the user can no longer see.
-  useEffect(() => {
-    clearSelection();
-  }, [result, activeSection, clearSelection]);
+  // Each section is a distinct set of research keywords (a new array per result and
+  // section), so a section switch clears the selection just like a new result does.
+  const promotion = useRunPromotion(currentKeywords, onKeywordsAdded, currentKeywords);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,13 +50,7 @@ export const CompetitorAnalysis = ({
     <div className="space-y-6">
       <InputForm url={url} setUrl={setUrl} loading={loading} onSubmit={handleSubmit} />
 
-      {activeJob?.type === 'competitor' && (
-        <ResearchProgress job={activeJob} onRetry={onRetry} retrying={loading} />
-      )}
-
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">{error}</div>
-      )}
+      <ResearchRunStatus jobType="competitor" loading={loading} error={error} activeJob={activeJob} onRetry={onRetry} />
 
       {result && (
         <div className="space-y-4">
