@@ -157,20 +157,25 @@ export function extractLambdaEnvVars(template: Template, functionName: string): 
   return isRecord(envVars) ? envVars : {};
 }
 
-/** Env var names on any Lambda that name a table without the canonical `DYNAMODB_TABLE_` prefix (audit #12). */
-export function nonCanonicalTableEnvNames(template: Template): string[] {
+/** The environment variables of every Lambda in the template, one map per function (`{}` when unset). */
+function lambdaEnvironments(template: Template): Record<string, unknown>[] {
   return Object.values(template.findResources('AWS::Lambda::Function'))
     .map((resource) => resolvePath(resource, ['Properties', 'Environment', 'Variables']))
-    .flatMap((variables) => Object.keys(isRecord(variables) ? variables : {}))
+    .map((variables) => (isRecord(variables) ? variables : {}));
+}
+
+/** Env var names on any Lambda that name a table without the canonical `DYNAMODB_TABLE_` prefix (audit #12). */
+export function nonCanonicalTableEnvNames(template: Template): string[] {
+  return lambdaEnvironments(template)
+    .flatMap((variables) => Object.keys(variables))
     .filter((name) => /_TABLE(_NAME)?$/.test(name) && !name.startsWith('DYNAMODB_TABLE_'));
 }
 
 /** The `BEDROCK_TIER_*` variables of every Lambda that sets any, one map per function. */
 export function bedrockTierEnvironments(template: Template): Record<string, unknown>[] {
-  return Object.values(template.findResources('AWS::Lambda::Function'))
-    .map((resource) => resolvePath(resource, ['Properties', 'Environment', 'Variables']))
+  return lambdaEnvironments(template)
     .map((variables) => Object.fromEntries(
-      Object.entries(isRecord(variables) ? variables : {}).filter(([name]) => name.startsWith('BEDROCK_TIER_'))
+      Object.entries(variables).filter(([name]) => name.startsWith('BEDROCK_TIER_'))
     ))
     .filter((tierVariables) => Object.keys(tierVariables).length > 0);
 }
