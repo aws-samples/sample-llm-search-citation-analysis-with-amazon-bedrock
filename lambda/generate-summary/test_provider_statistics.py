@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from testing.env import cleared_env
+from testing.map_run_fixtures import compact_keyword_result
 from testing.module_loader import load_handler_module_offline
 from testing.provider_summary_fixtures import provider_bucket, provider_row
 
@@ -168,6 +169,14 @@ class TestMalformedRollupsAreTolerated:
         stats = module.aggregate_statistics([result])
 
         assert stats['total_providers_queried'] == 0
+
+    @pytest.mark.parametrize('count', [None, 0, -2, '3', True])
+    def test_counts_a_compact_count_that_is_not_a_positive_integer_as_zero(self, module, count: object) -> None:
+        result = compact_keyword_result(unique_citations=count, total_citations_found=count, pages_crawled=count)
+
+        stats = module.aggregate_statistics([result])
+
+        assert (stats['total_unique_citations'], stats['total_citations_found'], stats['total_pages_crawled']) == (0, 0, 0)
 
 
 class TestRawSearchResultsStillSupported:

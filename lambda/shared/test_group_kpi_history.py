@@ -187,6 +187,13 @@ class TestGroupRunCoverage:
     def test_rounds_coverage_to_one_decimal(self):
         assert _run(_one_of_three_keywords_answered(), RUN_1)['coverage'] == 33.3
 
+    def test_reports_zero_coverage_when_the_answered_share_rounds_below_a_tenth(self):
+        keywords = [f'k{index}' for index in range(1, 2002)]
+
+        history = _history({'k1': [_hotel_first(RUN_1)]}, keywords)
+
+        assert (_run(history, RUN_1)['keywords_total'], _run(history, RUN_1)['coverage']) == (2001, 0.0)
+
 
 def _one_of_three_keywords_answered() -> dict[str, Any]:
     """History where only one of three keywords answered in `RUN_1`."""
