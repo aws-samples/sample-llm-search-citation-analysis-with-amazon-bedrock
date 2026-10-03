@@ -3,25 +3,27 @@ import type {
   BrandLeaderboardRow,
   BrandTrends,
 } from '../../../../types';
-import type { KpiId } from '../../../../constants/kpiDefinitions';
-import { formatKpi } from '../../../../formatting/kpiFormatter';
 import {
-  kpiColumn,
+  emphasisColumn,
   ReportSection,
   ReportSectionPlaceholder,
   ReportTable,
   type ReportTableColumn,
+  type SectionFetchState,
+  type TrendSectionProps,
+  type VisibilitySectionProps,
   gateSection,
 } from '../../layout';
+import {
+  brandKpiColumns, brandReachColumns
+} from '../../layout/brandColumns';
 import {
   ShareOfVoicePanel, ShareOfVoiceTrendPanel
 } from './ReportChartPanels';
 
-interface Props {
+interface Props extends SectionFetchState {
   /** The leaderboard, best visibility score first; `null` until it is loaded. */
   readonly brands: readonly BrandLeaderboardRow[] | null;
-  readonly loading: boolean;
-  readonly error: string | null;
   /** What the leaderboard covers, under the title. */
   readonly subtitle?: string;
   /** What to say when no answer named a brand. */
@@ -31,42 +33,25 @@ interface Props {
 }
 
 /** The subtitle of the leaderboard of one keyword's latest run. */
-export const KEYWORD_RANKINGS_SUBTITLE = 'Every brand the AI answers named for this keyword in its latest run, by visibility score. '
+const KEYWORD_RANKINGS_SUBTITLE = 'Every brand the AI answers named for this keyword in its latest run, by visibility score. '
   + 'First-party rows are highlighted.';
-export const KEYWORD_RANKINGS_EMPTY = 'No brand mentions extracted for this keyword.';
+const KEYWORD_RANKINGS_EMPTY = 'No brand mentions extracted for this keyword.';
 
 /** The most brands a printed leaderboard lists; the API sorts them by visibility score. */
 export const MAX_BRANDS = 15;
 
-/** The KPIs of each brand, in column order. */
-const BRAND_KPIS = ['visibility_score', 'mention_rate', 'share_of_voice', 'average_position'] as const satisfies readonly KpiId[];
-
 /** Built per render (not at import) so every column is exercised by the tests that render the table. */
 function rankingColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>> {
   return [
-    {
-      header: 'Brand',
-      // Stryker disable next-line StringLiteral: Tailwind-only cell styling
-      cellClassName: 'font-medium',
-      render: (brand) => brand.name,
-    },
-    ...BRAND_KPIS.map((id) => kpiColumn<BrandLeaderboardRow>(id, (brand) => formatKpi(id, brand[id]))),
+    emphasisColumn('Brand', (brand) => brand.name),
+    ...brandKpiColumns(),
     {
       header: 'Best position',
       info: 'The best place the brand reached in any answer (1 = named first). '
         + 'Answers where its place is unknown are left out.',
       render: (brand) => brand.best_position ?? '—',
     },
-    {
-      header: 'Engines',
-      info: 'The AI engines whose answers name the brand.',
-      render: (brand) => brand.engines.join(', '),
-    },
-    {
-      header: 'Keywords',
-      info: 'How many keywords\' answers name the brand.',
-      render: (brand) => brand.keywords,
-    },
+    ...brandReachColumns((brand) => brand.engines.join(', ')),
     {
       header: 'Type',
       render: (brand) => <ClassificationBadge classification={brand.classification} />,
@@ -125,6 +110,33 @@ export function BrandRankingsSection({
 
 function firstPartyRowClass(brand: BrandLeaderboardRow): string {
   return brand.classification === 'first_party' ? 'bg-emerald-50 dark:bg-emerald-950/20' : '';
+}
+
+/** The leaderboard of one keyword's latest run (`/visibility`). */
+export function LatestRunRankingsSection({
+  visibility, loading, error
+}: VisibilitySectionProps) {
+  return <BrandRankingsSection brands={visibility?.brands ?? null} loading={loading} error={error} />;
+}
+
+/** What the all-keywords leaderboard covers: the latest period of every keyword. */
+const ALL_KEYWORDS_RANKINGS_SUBTITLE = 'Every brand the AI answers named in each keyword\'s latest period (the leading 10), '
+  + 'by visibility score, and the share of voice of your brand and its leading competitors over time. First-party rows are highlighted.';
+
+/** The leaderboard pooled over each keyword's latest period (`/trends`), with the share of voice over time. */
+export function PooledRankingsSection({
+  trends, loading, error
+}: TrendSectionProps) {
+  return (
+    <BrandRankingsSection
+      brands={trends?.latest_brands ?? null}
+      brandTrends={trends?.brand_trends}
+      loading={loading}
+      error={error}
+      subtitle={ALL_KEYWORDS_RANKINGS_SUBTITLE}
+      emptyMessage="No brand mentions extracted in the latest periods."
+    />
+  );
 }
 
 const CLASSIFICATION_LABELS: Record<BrandClassification, string> = {

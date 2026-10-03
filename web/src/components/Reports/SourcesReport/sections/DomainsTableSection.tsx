@@ -2,22 +2,15 @@ import { Link } from 'react-router-dom';
 import type {
   SourceRow, VisibilityResponse
 } from '../../../../types';
-import { formatKpi } from '../../../../formatting/kpiFormatter';
-import { engineName } from '../../charts';
 import {
   ReportTable, type ReportTableColumn
 } from '../../layout/ReportTable';
+import { domainFigureColumns } from '../../layout/domainColumns';
 import {
   LatestRunSection, type ScopeSectionProps
 } from '../../scopeReport';
 
-export const CITATION_GAPS_PATH = '/citation-gaps';
-
-export const DOMAIN_CITATIONS_INFO = 'Answers that cite the domain at least once.';
-
-export const DOMAIN_RATE_INFO = 'Share of the AI answers that cite the domain as a source.';
-
-export const DOMAIN_SHARE_INFO = 'The domain\'s share of all the sources the answers cite; each domain counts once per answer.';
+const CITATION_GAPS_PATH = '/citation-gaps';
 
 const COLUMNS: ReadonlyArray<ReportTableColumn<SourceRow>> = [
   {
@@ -35,35 +28,17 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<SourceRow>> = [
       </>
     ),
   },
-  {
-    header: 'Citations',
-    info: DOMAIN_CITATIONS_INFO,
-    render: (source) => source.citations,
-  },
-  {
-    header: 'Citation rate',
-    info: DOMAIN_RATE_INFO,
-    render: (source) => formatKpi('citation_rate', source.citation_rate),
-  },
-  {
-    header: 'Citation share',
-    info: DOMAIN_SHARE_INFO,
-    render: (source) => formatKpi('citation_share', source.citation_share),
-  },
-  {
-    header: 'Engines',
-    info: 'The AI engines whose answers cite the domain.',
-    render: (source) => source.engines.map(engineName).join(', '),
-  },
-  {
-    header: 'Keywords',
-    info: 'How many keywords have an answer citing the domain.',
-    render: (source) => source.keywords,
-  },
+  ...domainFigureColumns({
+    citations: 'Answers that cite the domain at least once.',
+    citationRate: 'Share of the AI answers that cite the domain as a source.',
+    citationShare: 'The domain\'s share of all the sources the answers cite; each domain counts once per answer.',
+    engines: 'The AI engines whose answers cite the domain.',
+    keywords: 'How many keywords have an answer citing the domain.',
+  }),
 ];
 
 /** "Listing the 25 most cited of 40 domains." when the API listed only the top of them; `null` otherwise. */
-export function listedDomainsNote({
+function listedDomainsNote({
   sources, sources_total: total
 }: VisibilityResponse): string | null {
   return sources.length < total ? `Listing the ${sources.length} most cited of ${total} domains.` : null;

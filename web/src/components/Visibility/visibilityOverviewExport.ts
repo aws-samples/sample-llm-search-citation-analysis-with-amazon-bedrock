@@ -15,57 +15,26 @@ import {
 import type {
   BrandLeaderboardRow, EngineKpis, HistoricalTrendsResponse, KeywordVisibilityRow, SourceRow, TrendDataPoint, VisibilityResponse
 } from '../../types';
-import type {
-  BrandKpis, KpiTrend
-} from '../../types/domain/groupKpiHistory';
+import type { KpiTrend } from '../../types/domain/groupKpiHistory';
 import {
-  KPI_DEFINITIONS, KPI_SPECS, VISIBILITY_DEFINITIONS, type KpiId, type KpiUnit
+  KPI_DEFINITIONS, KPI_SPECS, VISIBILITY_DEFINITIONS, type KpiId
 } from '../../constants/kpiDefinitions';
+import {
+  contextRow, definitionsSheet, kpiCells, kpiSummaryRows, kpiValueHeader as kpiSpecHeader, sheetWidths, yesNo, type Cell
+} from '../Reports/layout/kpiSheets';
 
-type Cell = string | number;
 type Row = Record<string, Cell>;
-
-/** The unit a KPI value heading ends with; counts and positions need none. */
-const VALUE_HEADING_UNIT: Readonly<Record<KpiUnit, string>> = {
-  percent: ' (%)',
-  score: ' (0-100)',
-  net: ' (-100 to +100)',
-  count: '',
-  position: '',
-};
 
 /** The heading of a KPI value, e.g. "Mention rate (%)" (the per-group report's convention). */
 function kpiValueHeader(id: KpiId): string {
-  const {
-    label, unit
-  } = KPI_DEFINITIONS[id];
-  return `${label}${VALUE_HEADING_UNIT[unit]}`;
+  return kpiSpecHeader(KPI_DEFINITIONS[id]);
 }
 
 /** Column widths in characters: `fixed` first, then `perKpi` for each KPI. */
 function columnWidths(fixed: readonly number[], perKpi: number | null): ExcelSheet['columns'] {
   // Stryker disable next-line ArrowFunction: the per-KPI width is presentation only; the column count is pinned by the specs
   const kpiWidths = perKpi === null ? [] : KPI_SPECS.map(() => perKpi);
-  // Stryker disable next-line ObjectLiteral,ArrowFunction: column widths are presentation only
-  return [...fixed, ...kpiWidths].map((wch) => ({ wch }));
-}
-
-/** Every KPI as one cell each; all empty when the KPIs are unknown. */
-function kpiCells(kpis: BrandKpis | null): Row {
-  return Object.fromEntries(KPI_SPECS.map((spec) => [kpiValueHeader(spec.id), kpis?.[spec.id] ?? '']));
-}
-
-function yesNo(value: boolean): 'Yes' | 'No' {
-  return value ? 'Yes' : 'No';
-}
-
-function contextRow(metric: string, value: Cell): Row {
-  return {
-    Metric: metric,
-    Value: value,
-    Change: '',
-    Trend: '',
-  };
+  return sheetWidths(...fixed, ...kpiWidths);
 }
 
 function scopeContextRows(visibility: VisibilityResponse, trends: HistoricalTrendsResponse | null, scopeLabel: string): Row[] {
@@ -100,26 +69,8 @@ function summarySheet(visibility: VisibilityResponse, trends: HistoricalTrendsRe
     columns: columnWidths([38, 32, 18, 12], null),
     data: [
       ...scopeContextRows(visibility, trends, scopeLabel),
-      ...KPI_SPECS.map((spec) => ({
-        Metric: kpiValueHeader(spec.id),
-        Value: visibility.kpis[spec.id] ?? '',
-        Change: change?.deltas[spec.id] ?? '',
-        Trend: kpiTrends[spec.id] ?? '',
-      })),
+      ...kpiSummaryRows(visibility.kpis, change?.deltas, (id) => kpiTrends[id]),
     ],
-  };
-}
-
-function definitionsSheet(): ExcelSheet {
-  return {
-    name: 'Definitions',
-    columns: columnWidths([18, 120], null),
-    data: VISIBILITY_DEFINITIONS.map(({
-      label, definition
-    }) => ({
-      KPI: label,
-      'How it is measured': definition,
-    })),
   };
 }
 
@@ -184,7 +135,7 @@ export function visibilityOverviewSheets(
 ): ExcelSheet[] {
   return [
     summarySheet(visibility, trends, scopeLabel),
-    definitionsSheet(),
+    definitionsSheet(VISIBILITY_DEFINITIONS),
     {
       name: 'Keywords',
       columns: columnWidths([40, 10, 28], 16),

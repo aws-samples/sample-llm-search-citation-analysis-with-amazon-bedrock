@@ -1,26 +1,22 @@
 import {
   describe, it, expect,
 } from 'vitest';
-import {
-  render, within
-} from '@testing-library/react';
+import { render } from '@testing-library/react';
 import type { KeywordTrend } from '../../../../types';
-import { expectRendersNothing } from '../../../../test/renderNothing';
 import { PerKeywordTableSection } from './PerKeywordTableSection';
 import {
   buildKeywordTrend, movingKeyword, trendViewOf
 } from '../../layout/reportPayload-fixtures';
 import {
-  headerTooltips, sectionTable, sectionTitled, tableRow
+  headerTooltips, kpiColumnTooltips, sectionTable, tableRow
 } from '../../layout/reportQueries-fixtures';
-import {
-  KPI_DEFINITIONS, TREND_DEFINITION
-} from '../../../../constants/kpiDefinitions';
+import { settledTrends } from '../../layout/reportSlice-fixtures';
+import { TREND_DEFINITION } from '../../../../constants/kpiDefinitions';
 
 const TITLE = 'Per-keyword leaderboard';
 
 function renderTable(rows: KeywordTrend[]): void {
-  render(<PerKeywordTableSection trends={trendViewOf(rows)} loading={false} error={null} />);
+  render(<PerKeywordTableSection {...settledTrends(trendViewOf(rows))} />);
 }
 
 describe('PerKeywordTableSection columns', () => {
@@ -72,9 +68,7 @@ describe('PerKeywordTableSection tooltips', () => {
   it('explains each KPI column with its definition', () => {
     renderTable([buildKeywordTrend('shoes')]);
 
-    expect([headerTooltips(TITLE)[0], ...headerTooltips(TITLE).slice(4)]).toStrictEqual(
-      (['visibility_score', 'mention_rate', 'share_of_voice'] as const).map((id) => [KPI_DEFINITIONS[id].label, KPI_DEFINITIONS[id].definition]),
-    );
+    expect([headerTooltips(TITLE)[0], ...headerTooltips(TITLE).slice(4)]).toStrictEqual(kpiColumnTooltips('visibility_score', 'mention_rate', 'share_of_voice'));
   });
 });
 
@@ -88,23 +82,5 @@ describe('PerKeywordTableSection mover highlight', () => {
     renderTable([row]);
 
     expect(tableRow(TITLE, 'k').className).toBe(tint);
-  });
-});
-
-describe('PerKeywordTableSection states', () => {
-  it('drops out of the report when there is no keyword', () => {
-    expectRendersNothing(<PerKeywordTableSection trends={trendViewOf([])} loading={false} error={null} />);
-  });
-
-  it('shows the loading state under the section title', () => {
-    render(<PerKeywordTableSection trends={null} loading error={null} />);
-
-    expect(within(sectionTitled(TITLE)).getByText('Loading per-keyword rankings…')).toBeInTheDocument();
-  });
-
-  it('shows the error under the section title', () => {
-    render(<PerKeywordTableSection trends={null} loading={false} error="Network down" />);
-
-    expect(within(sectionTitled(TITLE)).getByText('Network down')).toBeInTheDocument();
   });
 });

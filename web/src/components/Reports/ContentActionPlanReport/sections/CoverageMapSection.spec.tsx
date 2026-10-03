@@ -6,14 +6,10 @@ import {
 } from '@testing-library/react';
 import { expectRendersNothing } from '../../../../test/renderNothing';
 import { CoverageMapSection } from './CoverageMapSection';
+import type { ContentPlanSectionProps } from './ContentPlanSectionProps';
 import {
-  brief, buildGaps, idea
-} from './CoverageMapSection-fixtures';
-import type {
-  CitationGapsResponse,
-  ContentIdea,
-  ContentStudioHistory,
-} from '../../../../types';
+  buildBrief, buildGaps, buildIdea, fetchPlaceholderCases
+} from './ContentPlanSectionProps-fixtures';
 
 /**
  * CoverageMapSection joins three data sources keyword-by-keyword:
@@ -22,70 +18,71 @@ import type {
  * for existing — these tests pin every transition.
  */
 
+const SHOE_GAPS = buildGaps([{
+  keyword: 'shoes',
+  gap_count: 3,
+  high_priority_gaps: 1 
+}]);
+
+const NO_PLAN: ContentPlanSectionProps = {
+  gaps: buildGaps([]),
+  ideas: [],
+  history: [],
+  loading: false,
+  error: null,
+};
+
+function renderCoverage(props: Partial<ContentPlanSectionProps>) {
+  return render(<CoverageMapSection {...NO_PLAN} {...props} />);
+}
+
+function getShoeRowElement(): HTMLElement | null {
+  return screen.getByText('shoes').closest('tr');
+}
+
+function getShoeCellElements(): HTMLElement[] {
+  return within(getShoeRowElement() as HTMLElement).getAllByRole('cell');
+}
+
 describe('CoverageMapSection — joining gaps + briefs + ideas', () => {
   it('counts only briefs with status=generated against the briefCount column', () => {
-    const gaps = buildGaps([{
-      keyword: 'shoes',
-      gap_count: 3,
-      high_priority_gaps: 1 
-    }]);
-    const history = [
-      brief('h1', 'shoes', 'generated'),
-      brief('h2', 'shoes', 'pending'),
-      brief('h3', 'shoes', 'failed'),
-    ];
-    render(
-      <CoverageMapSection
-        gaps={gaps}
-        ideas={[]}
-        history={history}
-        loading={false}
-        error={null}
-      />,
-    );
-    const row = screen.getByText('shoes').closest('tr');
-    expect(row).not.toBeNull();
+    renderCoverage({
+      gaps: SHOE_GAPS,
+      history: [
+        buildBrief('h1', { keyword: 'shoes' }),
+        buildBrief('h2', {
+          keyword: 'shoes',
+          status: 'pending' 
+        }),
+        buildBrief('h3', {
+          keyword: 'shoes',
+          status: 'failed' 
+        }),
+      ],
+    });
+    expect(getShoeRowElement()).not.toBeNull();
     // Columns: keyword, gaps(3), hi-pri(1), briefs(1 — only 'generated'), ideas(0), status
-    const cells = within(row as HTMLElement).getAllByRole('cell');
-    expect(cells[3]).toHaveTextContent('1');
+    expect(getShoeCellElements()[3]).toHaveTextContent('1');
   });
 
   it('counts only ideas with a non-null keyword', () => {
-    const gaps = buildGaps([{
-      keyword: 'shoes',
-      gap_count: 3,
-      high_priority_gaps: 1 
-    }]);
-    const ideas = [
-      idea('i1', 'shoes'),
-      idea('i2', null),
-      idea('i3', 'shoes'),
-    ];
-    render(
-      <CoverageMapSection
-        gaps={gaps}
-        ideas={ideas}
-        history={[]}
-        loading={false}
-        error={null}
-      />,
-    );
-    const row = screen.getByText('shoes').closest('tr');
-    const cells = within(row as HTMLElement).getAllByRole('cell');
+    renderCoverage({
+      gaps: SHOE_GAPS,
+      ideas: [
+        buildIdea('i1', { keyword: 'shoes' }),
+        buildIdea('i2', { keyword: null }),
+        buildIdea('i3', { keyword: 'shoes' }),
+      ],
+    });
     // Columns: keyword, gaps, hi-pri, briefs, ideas, status
-    expect(cells[4]).toHaveTextContent('2');
+    expect(getShoeCellElements()[4]).toHaveTextContent('2');
   });
 
   it('creates a row from history-only or idea-only keywords (no gaps)', () => {
-    render(
-      <CoverageMapSection
-        gaps={buildGaps([])}
-        ideas={[idea('i1', 'orphan-from-ideas')]}
-        history={[brief('h1', 'orphan-from-briefs', 'generated')]}
-        loading={false}
-        error={null}
-      />,
-    );
+    renderCoverage({
+      ideas: [buildIdea('i1', { keyword: 'orphan-from-ideas' })],
+      history: [buildBrief('h1', { keyword: 'orphan-from-briefs' })],
+    });
     expect(screen.getByText('orphan-from-ideas')).toBeInTheDocument();
     expect(screen.getByText('orphan-from-briefs')).toBeInTheDocument();
   });
@@ -97,49 +94,43 @@ describe('CoverageMapSection — status labels', () => {
     gap_count: 5,
     high_priority_gaps: 2 
   }]);
+  const shoeIdeas = [buildIdea('i1', { keyword: 'shoes' })];
+  const shoeBriefs = [buildBrief('h1', { keyword: 'shoes' })];
 
-  it.each<[label: string, situation: string, gaps: CitationGapsResponse, ideas: ContentIdea[], history: ContentStudioHistory[]]>([
-    ['Blocked', 'gaps but no briefs and no ideas', shoeGaps, [], []],
-    ['Planned', 'gaps + ideas but no briefs', shoeGaps, [idea('i1', 'shoes')], []],
-    ['In progress', 'gaps + briefs', shoeGaps, [], [brief('h1', 'shoes', 'generated')]],
-    ['Covered', 'no gaps but briefs', buildGaps([]), [], [brief('h1', 'shoes', 'generated')]],
-  ])('labels the keyword %s when it has %s', (label, _situation, gaps, ideas, history) => {
-    render(
-      <CoverageMapSection
-        gaps={gaps}
-        ideas={ideas}
-        history={history}
-        loading={false}
-        error={null}
-      />,
-    );
+  it.each<[label: string, situation: string, props: Partial<ContentPlanSectionProps>]>([
+    ['Blocked', 'gaps but no briefs and no ideas', { gaps: shoeGaps }],
+    ['Planned', 'gaps + ideas but no briefs', {
+      gaps: shoeGaps,
+      ideas: shoeIdeas 
+    }],
+    ['In progress', 'gaps + briefs', {
+      gaps: shoeGaps,
+      history: shoeBriefs 
+    }],
+    ['Covered', 'no gaps but briefs', { history: shoeBriefs }],
+  ])('labels the keyword %s when it has %s', (label, _situation, props) => {
+    renderCoverage(props);
     expect(screen.getByText(label)).toBeInTheDocument();
   });
 });
 
 describe('CoverageMapSection — sort + placeholder states', () => {
   it('orders blocked rows above non-blocked rows', () => {
-    const gaps = buildGaps([
-      {
-        keyword: 'a-non-blocked',
-        gap_count: 5,
-        high_priority_gaps: 1 
-      },
-      {
-        keyword: 'b-blocked',
-        gap_count: 2,
-        high_priority_gaps: 1 
-      },
-    ]);
-    render(
-      <CoverageMapSection
-        gaps={gaps}
-        ideas={[]}
-        history={[brief('h1', 'a-non-blocked', 'generated')]}
-        loading={false}
-        error={null}
-      />,
-    );
+    renderCoverage({
+      gaps: buildGaps([
+        {
+          keyword: 'a-non-blocked',
+          gap_count: 5,
+          high_priority_gaps: 1 
+        },
+        {
+          keyword: 'b-blocked',
+          gap_count: 2,
+          high_priority_gaps: 1 
+        },
+      ]),
+      history: [buildBrief('h1', { keyword: 'a-non-blocked' })],
+    });
     const rows = screen.getAllByRole('row');
     // Header is rows[0]; first data row should be the blocked one even though
     // alphabetically a-non-blocked sorts first.
@@ -148,34 +139,16 @@ describe('CoverageMapSection — sort + placeholder states', () => {
   });
 
   it('returns null (no section rendered) when there is no data at all', () => {
-    expectRendersNothing(
-      <CoverageMapSection gaps={buildGaps([])} ideas={[]} history={[]} loading={false} error={null} />,
-    );
+    expectRendersNothing(<CoverageMapSection {...NO_PLAN} />);
   });
 
-  it('renders the loading placeholder when loading is true', () => {
-    render(
-      <CoverageMapSection
-        gaps={null}
-        ideas={[]}
-        history={[]}
-        loading
-        error={null}
-      />,
-    );
-    expect(screen.getByText(/Building coverage map/i)).toBeInTheDocument();
-  });
-
-  it('renders the error placeholder when error is set', () => {
-    render(
-      <CoverageMapSection
-        gaps={null}
-        ideas={[]}
-        history={[]}
-        loading={false}
-        error="Backend down"
-      />,
-    );
-    expect(screen.getByText(/Backend down/i)).toBeInTheDocument();
+  it.each(fetchPlaceholderCases(/Building coverage map/i))('renders the $name', ({
+    state, text
+  }) => {
+    renderCoverage({
+      gaps: null,
+      ...state,
+    });
+    expect(screen.getByText(text)).toBeInTheDocument();
   });
 });

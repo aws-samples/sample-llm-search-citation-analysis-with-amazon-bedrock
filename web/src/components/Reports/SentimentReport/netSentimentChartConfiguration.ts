@@ -11,7 +11,7 @@ import {
 import { EMERALD } from '../charts/chartPalette';
 import { chartOptions } from '../charts/chartOptions';
 import {
-  periodsInWords, seriesLabels, type ChartSeries
+  trendCaption, type ChartSeries
 } from '../charts/chartSeries';
 import { lineChartConfiguration } from '../charts/lineChartConfiguration';
 
@@ -53,9 +53,6 @@ export function buildNetSentimentChartConfiguration(
 
 /** "Net sentiment over 2 periods from A to B, from −100 (all negative) to +100 (all positive). Latest (B): +15.0." */
 export function describeNetSentimentTrend(series: readonly ChartSeries[]): string {
-  const labels = seriesLabels(series);
-  if (labels.length === 0) return '';
-  const latest = labels.length - 1;
-  return `Net sentiment over ${periodsInWords(labels)}, from −100 (all negative) to +100 (all positive). `
-    + `Latest (${labels[latest]}): ${formatKpi('net_sentiment', series[0].points[latest].value)}.`;
+  return trendCaption(series, (periods, latest) => `Net sentiment over ${periods}, from −100 (all negative) to +100 (all positive). `
+    + `Latest (${latest.label}): ${formatKpi('net_sentiment', series[0].points[latest.index].value)}.`);
 }

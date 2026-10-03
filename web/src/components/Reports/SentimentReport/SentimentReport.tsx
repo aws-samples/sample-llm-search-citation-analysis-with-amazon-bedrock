@@ -6,7 +6,7 @@ import { SentimentHeadlineSection } from './sections/SentimentHeadlineSection';
 import { NetSentimentTrendSection } from './sections/NetSentimentTrendSection';
 import { BrandSentimentSection } from './sections/BrandSentimentSection';
 
-export const SENTIMENT_PATH = '/reports/sentiment';
+const SENTIMENT_PATH = '/reports/sentiment';
 
 /** The sections of the Sentiment report, in order. */
 export function SentimentSections({ report }: ScopeSectionProps) {

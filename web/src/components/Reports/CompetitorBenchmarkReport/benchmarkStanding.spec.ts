@@ -17,24 +17,31 @@ describe('benchmarkStanding', () => {
     expect(benchmarkStanding([buildBrandRow('Adidas')]).rank).toBeNull();
   });
 
-  it('picks the brand with the largest share of voice as the leader', () => {
-    const brands = [buildBrandRow('Nike', { share_of_voice: 10 }), buildBrandRow('Adidas', { share_of_voice: 40 })];
-
-    expect(benchmarkStanding(brands).leader?.name).toBe('Adidas');
-  });
-
-  it('keeps the leaderboard\'s first brand as the leader on a tied share', () => {
-    expect(benchmarkStanding([buildBrandRow('Nike'), buildBrandRow('Adidas')]).leader?.name).toBe('Nike');
-  });
-
-  it('skips brands without a share of voice when picking the leader', () => {
-    const brands = [buildBrandRow('Nike', { share_of_voice: null }), buildBrandRow('Adidas', { share_of_voice: 5 })];
-
-    expect(benchmarkStanding(brands).leader?.name).toBe('Adidas');
-  });
-
-  it('takes a brand with a zero share as the leader when no brand has more', () => {
-    expect(benchmarkStanding([buildBrandRow('Nike', { share_of_voice: 0 })]).leader?.name).toBe('Nike');
+  it.each([
+    {
+      name: 'picks the brand with the largest share of voice as the leader',
+      brands: [buildBrandRow('Nike', { share_of_voice: 10 }), buildBrandRow('Adidas', { share_of_voice: 40 })],
+      leader: 'Adidas',
+    },
+    {
+      name: 'keeps the leaderboard\'s first brand as the leader on a tied share',
+      brands: [buildBrandRow('Nike'), buildBrandRow('Adidas')],
+      leader: 'Nike',
+    },
+    {
+      name: 'skips brands without a share of voice when picking the leader',
+      brands: [buildBrandRow('Nike', { share_of_voice: null }), buildBrandRow('Adidas', { share_of_voice: 5 })],
+      leader: 'Adidas',
+    },
+    {
+      name: 'takes a brand with a zero share as the leader when no brand has more',
+      brands: [buildBrandRow('Nike', { share_of_voice: 0 })],
+      leader: 'Nike',
+    },
+  ])('$name', ({
+    brands, leader,
+  }) => {
+    expect(benchmarkStanding(brands).leader?.name).toBe(leader);
   });
 
   it('has no leader before any brand has a share', () => {

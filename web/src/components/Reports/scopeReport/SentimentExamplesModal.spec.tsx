@@ -22,6 +22,11 @@ const TWO_OF_THIRTY_SEVEN = buildSentimentExamplesResponse({
   examples: [buildSentimentExample(), buildSentimentExample({ brand: 'Sol Spa' })],
 });
 
+const NO_ANSWERS = buildSentimentExamplesResponse({
+  total: 0,
+  examples: [],
+});
+
 describe('SentimentExamplesModal', () => {
   it('names the sentiment and the engine in its title', () => {
     stubExamplesAnswer(buildSentimentExamplesResponse());
@@ -116,20 +121,14 @@ describe('SentimentExamplesModal', () => {
   });
 
   it('says so when the count has no answers any more', async () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse({
-      total: 0,
-      examples: [],
-    }));
+    stubExamplesAnswer(NO_ANSWERS);
     renderExamplesModal();
 
     expect(await screen.findByText('No negative answers from OpenAI in the latest runs of this scope any more.')).toBeInTheDocument();
   });
 
   it('leaves the engine out of the empty message for every engine', async () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse({
-      total: 0,
-      examples: [],
-    }));
+    stubExamplesAnswer(NO_ANSWERS);
     renderExamplesModal({
       sentiment: 'neutral',
       provider: null,

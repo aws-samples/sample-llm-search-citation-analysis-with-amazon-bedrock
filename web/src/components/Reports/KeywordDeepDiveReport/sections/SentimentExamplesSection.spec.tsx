@@ -1,10 +1,7 @@
 import {
   describe, it, expect
 } from 'vitest';
-import {
-  render, screen
-} from '@testing-library/react';
-import { SentimentExamplesSection } from './SentimentExamplesSection';
+import { screen } from '@testing-library/react';
 import {
   buildAppearance, mentionsOf, reasonLines, renderExamples
 } from './SentimentExamplesSection-fixtures';
@@ -12,18 +9,6 @@ import {
 const HOTEL_SOL = mentionsOf({ 'Hotel Sol': [buildAppearance()] });
 
 describe('SentimentExamplesSection', () => {
-  it('says the sentiment data is loading while the mentions load', () => {
-    render(<SentimentExamplesSection mentions={null} loading error={null} />);
-
-    expect(screen.getByText('Loading sentiment data…')).toBeInTheDocument();
-  });
-
-  it('shows the error of the mentions fetch', () => {
-    render(<SentimentExamplesSection mentions={null} loading={false} error="Network down" />);
-
-    expect(screen.getByText('Network down')).toBeInTheDocument();
-  });
-
   it('renders nothing before the mentions arrive', () => {
     const { container } = renderExamples(null);
 

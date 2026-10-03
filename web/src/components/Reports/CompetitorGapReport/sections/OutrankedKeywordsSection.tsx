@@ -1,25 +1,19 @@
-import type {
-  CompetitorOutrankedKeyword, CompetitorRollup 
-} from '../../../../api/reports';
+import type { CompetitorOutrankedKeyword } from '../../../../api/reports';
 import {
+  emphasisColumn,
   ReportSection,
+  ReportSectionNote,
   ReportTable,
   type ReportTableColumn,
-  gateSection,
 } from '../../layout';
+import {
+  gateRollup, type RollupSectionProps
+} from './rollupSection';
 
-interface Props {
-  readonly rollup: CompetitorRollup | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
+const TITLE = 'Outranked keywords';
 
 const COLUMNS: ReadonlyArray<ReportTableColumn<CompetitorOutrankedKeyword>> = [
-  {
-    header: 'Keyword',
-    cellClassName: 'font-medium',
-    render: (row) => row.keyword,
-  },
+  emphasisColumn('Keyword', (row) => row.keyword),
   {
     header: 'Their rank',
     render: (row) => `#${row.their_best_rank}`,
@@ -49,35 +43,22 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<CompetitorOutrankedKeyword>> = [
  * top of the table — those are the keywords where the strategist
  * would invest first.
  */
-export function OutrankedKeywordsSection({
-  rollup, loading, error 
-}: Props) {
-  const gate = gateSection({
-    title: 'Outranked keywords',
-    loading,
-    loadingMessage: 'Loading…',
-    error,
-    value: rollup,
-  });
+export function OutrankedKeywordsSection(props: RollupSectionProps) {
+  const gate = gateRollup(TITLE, props);
   if (!gate.ready) return gate.placeholder;
 
   const outranked = gate.value.outranked_keywords;
   if (outranked.length === 0) {
     return (
-      <ReportSection
-        title="Outranked keywords"
-        subtitle="No keywords where this competitor beats us right now."
-      >
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          Maintain current investment on the keywords already covered.
-        </p>
-      </ReportSection>
+      <ReportSectionNote title={TITLE} subtitle="No keywords where this competitor beats us right now.">
+        Maintain current investment on the keywords already covered.
+      </ReportSectionNote>
     );
   }
 
   return (
     <ReportSection
-      title="Outranked keywords"
+      title={TITLE}
       subtitle="Keywords where this competitor's best rank beats every first-party brand. Largest gap to us first."
     >
       <ReportTable

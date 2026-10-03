@@ -5,7 +5,7 @@ import {
   render, screen
 } from '@testing-library/react';
 import { VisibilityHeadlineSection } from './VisibilityHeadlineSection';
-import type { VisibilityHeadlineProps } from './visibilityHeadline';
+import type { VisibilityHeadlineProps } from './reportSlices';
 import { OWNED_DOMAINS_MISSING } from './KpiHeadline';
 import { NO_PREVIOUS_RUN } from './periodComparison';
 import {

@@ -6,18 +6,18 @@ import {
   GROUP_DELTAS, GROUP_TRENDS, RUN_2, buildKpis
 } from '../Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
 import {
-  buildBrandTrendPoint, buildEngineKpis, buildSourceRow
+  buildBrandRow as buildLeaderboardRow, buildBrandTrendPoint, buildEngineKpis, buildSourceRow, buildVisibility as buildKeywordVisibility
 } from '../Reports/layout/reportPayload-fixtures';
 
 /** The latest runs against the previous ones, over the one keyword analysed twice. */
-export const RUN_CHANGE: ScopeChange = {
+const RUN_CHANGE: ScopeChange = {
   keywords_compared: 1,
   deltas: GROUP_DELTAS,
   trends: GROUP_TRENDS,
 };
 
 /** The "Hotel Sol" group with two keywords, as the endpoints echo it back. */
-export const GROUP_SCOPE_INFO: ReportScopeInfo = {
+const GROUP_SCOPE_INFO: ReportScopeInfo = {
   kind: 'group',
   label: 'Hotel Sol',
   keyword_count: 2,
@@ -51,20 +51,11 @@ export const KEYWORD_WITHOUT_DATA: KeywordVisibilityRow = {
 
 /** The tracked brand "Hotel Sol"; every figure is distinct from the competitor's. */
 export function buildBrandRow(overrides: Partial<BrandLeaderboardRow> = {}): BrandLeaderboardRow {
-  return {
-    name: 'Hotel Sol',
+  return buildLeaderboardRow('Hotel Sol', {
     classification: 'first_party',
-    mentions: 12,
-    mention_rate: 60,
-    share_of_voice: 25,
-    average_position: 1.8,
-    best_position: 1,
-    visibility_score: 52.4,
-    engines: ['gemini', 'openai'],
     keywords: 2,
-    net_sentiment: 15,
     ...overrides,
-  };
+  });
 }
 
 /** The competitor "Hotel Luna": fewer mentions, a worse position, no labelled sentiment. */
@@ -132,7 +123,7 @@ export function buildGroupSources(): SourceRow[] {
  * RUN_2's KPIs) against Hotel Luna (latest point as COMPETITOR_ROW) and
  * Hotel Mar, which no answer named on the first day.
  */
-export function buildGroupBrandTrends(overrides: Partial<BrandTrends> = {}): BrandTrends {
+function buildGroupBrandTrends(overrides: Partial<BrandTrends> = {}): BrandTrends {
   return {
     tracked: [buildBrandTrendPoint('2026-09-01', { visibility_score: 60.6 }), buildBrandTrendPoint('2026-09-08')],
     competitors: [
@@ -180,22 +171,16 @@ export function buildGroupBrandTrends(overrides: Partial<BrandTrends> = {}): Bra
  * never analysed, and the tracked brand ahead of one competitor.
  */
 export function buildVisibility(overrides: Partial<VisibilityResponse> = {}): VisibilityResponse {
-  return {
+  return buildKeywordVisibility({
     scope: GROUP_SCOPE_INFO,
-    timestamp: RUN_2,
-    keywords_truncated: false,
-    citations_configured: true,
     keywords_analyzed: 2,
-    keywords_with_data: 1,
-    kpis: buildKpis(),
     change: RUN_CHANGE,
     brands: [buildBrandRow(), COMPETITOR_ROW],
     engines: buildGroupEngines(),
     sources: buildGroupSources(),
-    sources_total: 3,
     keywords: [buildKeywordRow(), KEYWORD_WITHOUT_DATA],
     ...overrides,
-  };
+  });
 }
 
 /** One day of the trend: the RUN_2 KPIs unless overridden. */

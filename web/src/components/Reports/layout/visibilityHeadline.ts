@@ -1,17 +1,8 @@
-import type {
-  HistoricalTrendsResponse, VisibilityResponse
-} from '../../../types';
+import type { VisibilityResponse } from '../../../types';
+import type { VisibilityHeadlineProps } from './reportSlices';
 import {
   gateSection, type SectionGate
 } from './sectionGate';
-
-/** Inputs of a report's "Headline" section: the visibility snapshot it renders and the trend whose change annotates it. */
-export interface VisibilityHeadlineProps {
-  readonly visibility: VisibilityResponse | null;
-  readonly trends: HistoricalTrendsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
 
 /**
  * Gates a "Headline" section on its visibility payload. Every headline opens

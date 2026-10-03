@@ -1,17 +1,10 @@
 import type { HistoricalTrendsResponse } from '../../../../types';
 import {
-  ReportSection,
   ReportSectionPlaceholder,
-  TrendPeriodTable,
   pendingSectionPlaceholder,
+  type TrendSectionProps,
 } from '../../layout';
-import { KpiTrendPanel } from '../../BrandVisibilityReport/sections/ReportChartPanels';
-
-interface Props {
-  readonly trends: HistoricalTrendsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
+import { KpiHistorySection } from '../../BrandVisibilityReport/sections/TrendHistorySection';
 
 const TITLE = 'KPI history';
 
@@ -29,7 +22,7 @@ function subtitleFor(trends: HistoricalTrendsResponse | null): string {
  */
 export function RankHistorySection({
   trends, loading, error 
-}: Props) {
+}: TrendSectionProps) {
   const pending = pendingSectionPlaceholder({
     title: TITLE,
     loading,
@@ -50,10 +43,5 @@ export function RankHistorySection({
     );
   }
 
-  return (
-    <ReportSection title={TITLE} subtitle={subtitleFor(trends)}>
-      <KpiTrendPanel points={points} className="mb-4" />
-      <TrendPeriodTable points={points} />
-    </ReportSection>
-  );
+  return <KpiHistorySection title={TITLE} subtitle={subtitleFor(trends)} points={points} />;
 }

@@ -4,6 +4,7 @@ import type {
   ContentStudioHistory,
 } from '../../../../types';
 import {
+  emphasisColumn,
   ReportSection,
   ReportTable,
   type ReportTableColumn,
@@ -20,11 +21,7 @@ interface KeywordCoverage {
 }
 
 const COLUMNS: ReadonlyArray<ReportTableColumn<KeywordCoverage>> = [
-  {
-    header: 'Keyword',
-    cellClassName: 'font-medium',
-    render: (row) => row.keyword,
-  },
+  emphasisColumn('Keyword', (row) => row.keyword),
   {
     header: 'Gaps',
     render: (row) => row.gapCount,
@@ -62,17 +59,12 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<KeywordCoverage>> = [
  * but isn't blocking for the v1 of this report.
  */
 export function CoverageMapSection({
-  gaps,
-  ideas,
-  history,
-  loading,
-  error,
+  gaps, ideas, history, ...fetch
 }: ContentPlanSectionProps) {
   const pending = pendingSectionPlaceholder({
+    ...fetch,
     title: 'Coverage map',
-    loading,
     loadingMessage: 'Building coverage map…',
-    error,
   });
   if (pending) return pending;
 

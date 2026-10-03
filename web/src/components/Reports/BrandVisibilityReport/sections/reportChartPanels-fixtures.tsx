@@ -7,8 +7,9 @@ import {
   buildBrandTrends, buildLatestBrands, buildTrendView
 } from '../../layout/reportPayload-fixtures';
 import {
-  KpiTrendPanel, ShareOfVoicePanel, ShareOfVoiceTrendPanel
+  KPI_TREND_TITLE, KpiTrendPanel, ShareOfVoicePanel, ShareOfVoiceTrendPanel
 } from './ReportChartPanels';
+import { sectionTitled } from '../../layout/reportQueries-fixtures';
 
 /** The words of the KPI trend chart of `buildTrendView()`: both periods, the latest with the KPIs of `buildKpis()`. */
 export const TREND_VIEW_KPI_CAPTION = 'Mention rate, Share of voice, Visibility score and Citation rate over 2 periods '
@@ -67,4 +68,9 @@ export function chartCaption(title: string, container: HTMLElement = document.bo
 /** Whether a chart panel named `title` is on the page. */
 export function hasChartPanel(title: string): boolean {
   return screen.queryByRole('region', { name: title }) !== null;
+}
+
+/** The words of the KPI trend chart of the rendered trend history section. */
+export function trendHistoryKpiCaption(): string | null {
+  return chartCaption(KPI_TREND_TITLE, sectionTitled('Trend history'));
 }

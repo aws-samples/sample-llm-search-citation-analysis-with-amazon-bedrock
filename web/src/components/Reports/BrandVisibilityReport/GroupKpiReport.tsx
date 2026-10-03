@@ -6,7 +6,7 @@ import type {
 } from '../../../types/domain/groupKpiHistory';
 import type { ReportScope } from '../../../types';
 import {
-  gateSection, KpiDefinitionsSection
+  gateSection, KpiDefinitionsSection, type SectionFetchState
 } from '../layout';
 import type { SectionGate } from '../layout/sectionGate';
 import { latestGroupRun } from './groupKpiView';
@@ -18,16 +18,18 @@ import { GroupKpiExportButton } from './GroupKpiExportButton';
 import { GROUP_REPORT_DEFINITIONS } from '../../../constants/kpiDefinitions';
 
 /** The periods the report offers, in days. */
-export const GROUP_REPORT_PERIODS = [30, 90, 180, 365] as const;
+const GROUP_REPORT_PERIODS = [30, 90, 180, 365] as const;
 
-interface Props {
+interface HistoryGateOptions extends SectionFetchState {
+  readonly title: string;
+  readonly history: GroupKpiHistoryResponse | null;
+  readonly days: number;
+}
+
+interface Props extends Omit<HistoryGateOptions, 'title'> {
   /** The keyword group the report covers, and its name for the export. */
   readonly scope: ReportScope;
   readonly scopeLabel: string;
-  readonly history: GroupKpiHistoryResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-  readonly days: number;
   readonly onDaysChange: (days: number) => void;
 }
 
@@ -42,14 +44,6 @@ export function resolveKeyword(keywords: readonly KeywordRunHistory[], keyword: 
     ?? keywords.find((entry) => entry.runs.length > 0)
     ?? keywords[0]
     ?? null;
-}
-
-interface HistoryGateOptions {
-  readonly title: string;
-  readonly history: GroupKpiHistoryResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-  readonly days: number;
 }
 
 /** A group section's loading, error and "no run in the period" states; ready once the group has a run. */

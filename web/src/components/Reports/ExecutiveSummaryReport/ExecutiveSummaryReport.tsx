@@ -46,6 +46,11 @@ export function ExecutiveSummaryReport() {
     groupId 
   } : ALL_SCOPE;
   const data = useExecutiveSummary(undefined, scope);
+  const overview = {
+    data: data.data,
+    loading: data.loading,
+    error: data.error,
+  };
 
   usePrintMode({ ready: data.ready });
 
@@ -70,26 +75,10 @@ export function ExecutiveSummaryReport() {
         />
       )}
     >
-      <HeadlineSection
-        data={data.data}
-        loading={data.loading}
-        error={data.error}
-      />
-      <TrendSnapshotSection
-        data={data.data}
-        loading={data.loading}
-        error={data.error}
-      />
-      <WinsAndGapsSection
-        data={data.data}
-        loading={data.loading}
-        error={data.error}
-      />
-      <NextActionsSection
-        data={data.data}
-        loading={data.loading}
-        error={data.error}
-      />
+      <HeadlineSection {...overview} />
+      <TrendSnapshotSection {...overview} />
+      <WinsAndGapsSection {...overview} />
+      <NextActionsSection {...overview} />
       <KpiDefinitionsSection definitions={VISIBILITY_DEFINITIONS} />
     </ReportLayout>
   );

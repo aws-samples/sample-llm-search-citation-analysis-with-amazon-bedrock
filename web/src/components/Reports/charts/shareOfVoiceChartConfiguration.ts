@@ -63,7 +63,7 @@ export function shareOfVoiceSlices(brands: readonly BrandLeaderboardRow[], limit
 }
 
 /** A slice's legend and tooltip label: "Nike 25.0%". */
-export function sliceLabel(slice: ShareOfVoiceSlice): string {
+function sliceLabel(slice: ShareOfVoiceSlice): string {
   return `${slice.name} ${formatKpi('share_of_voice', slice.share)}`;
 }
 

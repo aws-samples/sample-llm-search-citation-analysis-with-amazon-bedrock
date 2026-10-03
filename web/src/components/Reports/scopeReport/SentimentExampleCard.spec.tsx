@@ -1,22 +1,23 @@
 import {
-  describe, it, expect, vi
+  describe, it, expect, vi, beforeEach
 } from 'vitest';
 import {
   fireEvent, screen
 } from '@testing-library/react';
-import { buildSentimentExample } from '../../../types/domain/sentimentExamples-fixtures';
+import {
+  buildSentimentExample, SPARSE_SENTIMENT_EXAMPLES
+} from '../../../types/domain/sentimentExamples-fixtures';
 import { formatDateOnly } from '../../../formatting/dateFormatter';
 import { renderExampleCard } from './sentimentExamples-fixtures';
 
 vi.mock('../../../infrastructure', () => import('../../../test/infrastructureMock'));
 
-const BARE = buildSentimentExample({
-  persona_name: null,
-  rank: null,
-  quote: null,
-  reason: null,
-  ranking_context: null,
-});
+const [BARE] = SPARSE_SENTIMENT_EXAMPLES.examples;
+
+/** The heading of the example's full answer, present only while it is unfolded. */
+function queryAnswerHeadingElement() {
+  return screen.queryByRole('heading', { name: 'Spa hotels' });
+}
 
 describe('SentimentExampleCard', () => {
   it('names the brand, its sentiment and its rank', () => {
@@ -87,28 +88,28 @@ describe('SentimentExampleCard', () => {
     renderExampleCard();
 
     expect(screen.getByRole('button', { name: 'Show full answer' })).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByRole('heading', { name: 'Spa hotels' })).toBeNull();
+    expect(queryAnswerHeadingElement()).toBeNull();
   });
 
-  it('renders the full answer as markdown when unfolded', () => {
-    renderExampleCard(undefined, true);
+  describe('unfolded', () => {
+    beforeEach(() => {
+      renderExampleCard(undefined, true);
+    });
 
-    expect(screen.getByRole('heading', { name: 'Spa hotels' })).toBeInTheDocument();
-    expect(screen.getByText('cheaper').tagName).toBe('STRONG');
-  });
+    it('renders the full answer as markdown', () => {
+      expect(queryAnswerHeadingElement()).toBeInTheDocument();
+      expect(screen.getByText('cheaper').tagName).toBe('STRONG');
+    });
 
-  it('marks the unfolded toggle as expanded', () => {
-    renderExampleCard(undefined, true);
+    it('marks the toggle as expanded', () => {
+      expect(screen.getByRole('button', { name: 'Hide full answer' })).toHaveAttribute('aria-expanded', 'true');
+    });
 
-    expect(screen.getByRole('button', { name: 'Hide full answer' })).toHaveAttribute('aria-expanded', 'true');
-  });
+    it('folds the full answer again', () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Hide full answer' }));
 
-  it('folds the full answer again', () => {
-    renderExampleCard(undefined, true);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Hide full answer' }));
-
-    expect(screen.queryByRole('heading', { name: 'Spa hotels' })).toBeNull();
+      expect(queryAnswerHeadingElement()).toBeNull();
+    });
   });
 
   it('strips markup the answer should not run', () => {

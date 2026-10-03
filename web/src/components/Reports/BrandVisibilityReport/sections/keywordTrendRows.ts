@@ -1,15 +1,12 @@
 import type { ReactElement } from 'react';
-import type {
-  HistoricalTrendsResponse, KeywordTrend
-} from '../../../../types';
-import { gateSection } from '../../layout';
+import type { KeywordTrend } from '../../../../types';
+import {
+  gateSection, type TrendSectionProps
+} from '../../layout';
 
-interface KeywordTrendRowsOptions {
+interface KeywordTrendRowsOptions extends TrendSectionProps {
   readonly title: string;
-  readonly loading: boolean;
   readonly loadingMessage: string;
-  readonly error: string | null;
-  readonly trends: HistoricalTrendsResponse | null;
 }
 
 export type KeywordTrendRowsGate =

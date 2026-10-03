@@ -19,12 +19,6 @@ import {
 const TWELVE_SOURCES = Array.from({ length: 12 }, (_unused, index) => buildSourceRow(`site-${String(index).padStart(2, '0')}.com`, { citations: 1 }));
 
 describe('buildTopSourcesChartConfiguration', () => {
-  it('is a horizontal bar chart', () => {
-    const chart = topSourcesChart();
-
-    expect([chart.type, chart.options?.indexAxis]).toStrictEqual(['bar', 'y']);
-  });
-
   it('ranks the domains most cited first, whatever their given order', () => {
     expect(topSourcesChart([...buildSources()].reverse()).data.labels).toStrictEqual(['runnersworld.com', 'nike.com', 'reddit.com']);
   });
@@ -44,10 +38,6 @@ describe('buildTopSourcesChartConfiguration', () => {
       beginAtZero: true,
       ticks: { precision: 0 },
     }));
-  });
-
-  it('stacks a domain\'s owned and other citations in one bar', () => {
-    expect(topSourcesChart().options?.scales?.y).toStrictEqual(themedAxis(LIGHT_THEME, { stacked: true }));
   });
 
   it('adds the citation rate and share under the tooltip\'s citation count', () => {

@@ -6,11 +6,11 @@ import {
 } from '../../scopeReport';
 import { benchmarkStanding } from '../benchmarkStanding';
 
-export const RANK_INFO = 'Your brand\'s place among every brand the answers name, by visibility score (1 = the most visible).';
+const RANK_INFO = 'Your brand\'s place among every brand the answers name, by visibility score (1 = the most visible).';
 
-export const LEADER_INFO = 'The brand with the largest share of voice: the largest share of all brand mentions in the answers.';
+const LEADER_INFO = 'The brand with the largest share of voice: the largest share of all brand mentions in the answers.';
 
-export const BRANDS_NAMED_INFO = 'How many distinct brands the answers name: yours, competitors\' and others\'.';
+const BRANDS_NAMED_INFO = 'How many distinct brands the answers name: yours, competitors\' and others\'.';
 
 function BenchmarkCards({ visibility }: { readonly visibility: VisibilityResponse }) {
   const {

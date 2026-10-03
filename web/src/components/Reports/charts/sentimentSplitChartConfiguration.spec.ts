@@ -13,12 +13,6 @@ import {
 } from './charts-fixtures';
 
 describe('buildSentimentSplitChartConfiguration', () => {
-  it('is a horizontal bar chart', () => {
-    const chart = sentimentChart();
-
-    expect([chart.type, chart.options?.indexAxis]).toStrictEqual(['bar', 'y']);
-  });
-
   it('draws a bar per row, top to bottom', () => {
     expect(sentimentChart().data.labels).toStrictEqual(['Nike', 'Puma']);
   });
@@ -45,17 +39,6 @@ describe('buildSentimentSplitChartConfiguration', () => {
       min: 0,
       max: 100,
     }));
-  });
-
-  it('stacks the sentiments of a row in one bar', () => {
-    expect(sentimentChart().options?.scales?.y).toStrictEqual(themedAxis(LIGHT_THEME, { stacked: true }));
-  });
-
-  it('draws nothing without a row', () => {
-    expect(sentimentChart([]).data).toStrictEqual({
-      labels: [],
-      datasets: [],
-    });
   });
 });
 

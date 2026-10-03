@@ -9,9 +9,9 @@ import type { ScopeReportData } from './useScopeReportData';
 /** What a section of a scope report receives. */
 export interface ScopeSectionProps {readonly report: ScopeReportData;}
 
-export const LATEST_RUNS_LOADING = 'Loading the latest runs…';
+const LATEST_RUNS_LOADING = 'Loading the latest runs…';
 
-export const TREND_LOADING = 'Loading the trend…';
+const TREND_LOADING = 'Loading the trend…';
 
 /** Shown by every latest-run section while the scope has no answered run. */
 export const NO_ANSWERED_RUN = 'No AI answers in this scope yet. Run an analysis or choose another scope.';

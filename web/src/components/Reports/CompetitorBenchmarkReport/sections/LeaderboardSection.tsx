@@ -7,7 +7,7 @@ import {
   BRAND_COLUMN, brandKpiColumn, brandRowKey, firstPartyRowClass, LatestRunSection, noBrandNamed, type ScopeSectionProps
 } from '../../scopeReport';
 
-export const TOP_PLACE_INFO = 'The earliest place the brand reached in any answer (1 = named first); answers without a known place are left out.';
+const TOP_PLACE_INFO = 'The earliest place the brand reached in any answer (1 = named first); answers without a known place are left out.';
 
 /** The leaderboard's columns, built when the table renders rather than when the module loads. */
 function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>> {

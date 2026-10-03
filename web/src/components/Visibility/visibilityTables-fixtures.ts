@@ -3,6 +3,7 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { KeywordVisibilityRow } from '../../types';
+import { HISTORY_TITLE } from './VisibilityHistory';
 import { buildKpis } from '../Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
 import {
   KEYWORD_WITHOUT_DATA, buildKeywordRow
@@ -39,9 +40,29 @@ export function panelTitled(title: string): HTMLElement {
   return screen.getByRole('region', { name: title });
 }
 
+/** Queries within the KPI history panel. */
+export function historyPanel() {
+  return within(panelTitled(HISTORY_TITLE));
+}
+
+/** The info button explaining `name` ("About <name>"). */
+export function aboutButton(name: string): HTMLElement {
+  return screen.getByRole('button', { name: `About ${name}` });
+}
+
+/** The line naming the scope, its keywords with data and the latest run. */
+export function scopeLine(): HTMLElement {
+  return screen.getByText(/keywords have analysis data/);
+}
+
 /** The one table in the panel headed `title`. */
 export function panelTable(title: string): HTMLElement {
   return within(panelTitled(title)).getByRole('table');
+}
+
+/** Clicks the history range button of `days` days. */
+export async function clickRangeButton(days: number): Promise<void> {
+  await userEvent.click(screen.getByRole('button', { name: `${days} days` }));
 }
 
 /** Clicks the buttons named `names`, one after the other. */

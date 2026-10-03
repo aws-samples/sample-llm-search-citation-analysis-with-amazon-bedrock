@@ -11,9 +11,9 @@ import {
 import { KeywordDeepDiveReport } from './KeywordDeepDiveReport';
 import { settledData } from './KeywordDeepDiveReport-fixtures';
 import {
-  definitionTerms, sectionTable, sectionTitles, statFigure, statFootnote
+  definitionTerms, VISIBILITY_DEFINITION_TERMS, sectionTable, sectionTitles, statFigure, statFootnote
 } from '../layout/reportQueries-fixtures';
-import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
+import type { Keyword } from '../../../types';
 import { VISIBILITY_BRANDS_SOV_CAPTION } from '../BrandVisibilityReport/sections/reportChartPanels-fixtures';
 import {
   rankedBrandNames, rankingsShareOfVoiceCaption
@@ -26,29 +26,23 @@ vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
 import { useKeywordDeepDive } from './useKeywordDeepDive';
 
-const mockUseKeywordDeepDive = useKeywordDeepDive as ReturnType<typeof vi.fn>;
+const mockUseKeywordDeepDive = vi.mocked(useKeywordDeepDive);
 
-const KEYWORDS = [
-  { keyword: 'best running shoes' },
-  { keyword: 'best hiking boots' },
-];
+const KEYWORDS: Keyword[] = ['best running shoes', 'best hiking boots'].map((keyword, index) => ({
+  id: String(index + 1),
+  keyword,
+  created_at: '2026-01-01T00:00:00Z',
+}));
 
-function renderAt(path: string) {
+const REPORT = <KeywordDeepDiveReport keywords={KEYWORDS} />;
+
+/** The report opened at `path`, the "best running shoes" deep dive unless given. */
+function renderDeepDive(path = '/reports/keyword/best%20running%20shoes') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route
-          path="/reports/keyword/:keyword"
-          element={
-            <KeywordDeepDiveReport keywords={KEYWORDS as never} />
-          }
-        />
-        <Route
-          path="/reports/keyword"
-          element={
-            <KeywordDeepDiveReport keywords={KEYWORDS as never} />
-          }
-        />
+        <Route path="/reports/keyword/:keyword" element={REPORT} />
+        <Route path="/reports/keyword" element={REPORT} />
       </Routes>
     </MemoryRouter>,
   );
@@ -60,7 +54,7 @@ describe('KeywordDeepDiveReport', () => {
   });
 
   it('renders the H1 with the keyword from the URL params', () => {
-    renderAt('/reports/keyword/best%20running%20shoes');
+    renderDeepDive();
     expect(
       screen.getByRole('heading', {
         level: 1,
@@ -70,38 +64,38 @@ describe('KeywordDeepDiveReport', () => {
   });
 
   it('shows the keyword KPIs of the visibility answer in the headline', () => {
-    renderAt('/reports/keyword/best%20running%20shoes');
+    renderDeepDive();
 
     expect(statFigure('Visibility score').textContent).toBe('52.4');
   });
 
   it('writes the headline change against the previous run', () => {
-    renderAt('/reports/keyword/best%20running%20shoes');
+    renderDeepDive();
 
     expect(statFootnote('Share of voice')).toBe('+5.0 pts vs previous run (3 keywords)');
   });
 
   it('shows the KPI history after the headline and ends with the definitions', () => {
-    renderAt('/reports/keyword/best%20running%20shoes');
+    renderDeepDive();
 
     const titles = sectionTitles();
     expect([...titles.slice(0, 2), ...titles.slice(-1)]).toStrictEqual(['Headline', 'KPI history', 'How these KPIs are measured']);
   });
 
   it('ranks the brands of the keyword after its KPI history, then compares the AI engines', () => {
-    renderAt('/reports/keyword/best%20running%20shoes');
+    renderDeepDive();
 
     expect(sectionTitles().slice(1, 4)).toStrictEqual(['KPI history', 'Brand rankings', 'KPIs per AI engine']);
   });
 
   it('lists the brands of the visibility answer in the brand rankings', () => {
-    renderAt('/reports/keyword/best%20running%20shoes');
+    renderDeepDive();
 
     expect(rankedBrandNames()).toStrictEqual(['Nike', 'Adidas']);
   });
 
   it('charts the share of voice of the visibility answer in the brand rankings', () => {
-    renderAt('/reports/keyword/best%20running%20shoes');
+    renderDeepDive();
 
     expect(rankingsShareOfVoiceCaption()).toBe(VISIBILITY_BRANDS_SOV_CAPTION);
   });
@@ -112,25 +106,25 @@ describe('KeywordDeepDiveReport', () => {
       visibility: null,
       visibilityLoading: true,
     });
-    renderAt('/reports/keyword/best%20running%20shoes');
+    renderDeepDive();
 
     expect(screen.getByText('Loading brand rankings…')).toBeInTheDocument();
   });
 
   it('lists every AI engine of the visibility answer in the engine table', () => {
-    renderAt('/reports/keyword/best%20running%20shoes');
+    renderDeepDive();
 
     expect(sectionTable('KPIs per AI engine').slice(1).map(([engine]) => engine)).toStrictEqual(['Google Gemini', 'OpenAI']);
   });
 
   it('defines every KPI and the trend rule in the definitions block', () => {
-    renderAt('/reports/keyword/best%20running%20shoes');
+    renderDeepDive();
 
-    expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITIONS.map((entry) => entry.label));
+    expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITION_TERMS);
   });
 
   it('renders the keyword selector populated with every configured keyword', () => {
-    renderAt('/reports/keyword/best%20running%20shoes');
+    renderDeepDive();
     const select = screen.getAllByRole('combobox')[0] as HTMLSelectElement;
     const optionValues = Array.from(select.options).map((o) => o.value);
     expect(optionValues).toContain('best running shoes');
@@ -139,7 +133,7 @@ describe('KeywordDeepDiveReport', () => {
 
   it('navigates to a new keyword when the selector changes', async () => {
     const user = userEvent.setup();
-    renderAt('/reports/keyword/best%20running%20shoes');
+    renderDeepDive();
     const select = screen.getAllByRole('combobox')[0];
     await user.selectOptions(select, 'best hiking boots');
     expect(

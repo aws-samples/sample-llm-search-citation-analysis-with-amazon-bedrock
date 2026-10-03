@@ -7,7 +7,7 @@ import {
   AMBER, EMERALD, GRAY, RED, type ThemedColour
 } from './chartPalette';
 import {
-  barSeries, chartOptions, percentAxis
+  barChartConfiguration, chartOptions, percentAxis
 } from './chartOptions';
 import type { ChartSeries } from './chartSeries';
 
@@ -86,17 +86,13 @@ export function buildSentimentSplitChartConfiguration(
   theme: ChartTheme,
   isDark: boolean,
 ): ChartConfiguration<'bar'> {
-  return {
-    type: 'bar',
-    data: barSeries(series, isDark),
-    options: {
-      ...chartOptions(theme, {
-        x: percentAxis(theme, { stacked: true }),
-        y: themedAxis(theme, { stacked: true }),
-      }),
-      indexAxis: 'y',
-    },
-  };
+  return barChartConfiguration(series, isDark, {
+    ...chartOptions(theme, {
+      x: percentAxis(theme, { stacked: true }),
+      y: themedAxis(theme, { stacked: true }),
+    }),
+    indexAxis: 'y',
+  });
 }
 
 function rowInWords(row: SentimentRow): string {

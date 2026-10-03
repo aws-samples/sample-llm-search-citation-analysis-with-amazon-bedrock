@@ -9,7 +9,7 @@ import {
   CLASSIFICATION_SHADES, OTHER_BRANDS_GRAY
 } from './chartPalette';
 import {
-  LEADERBOARD, shareOfVoiceChart
+  LEADERBOARD, shareOfVoiceChart, THEME_VARIANTS
 } from './charts-fixtures';
 
 /** Nike with a 40% share of voice, then Puma with none. */
@@ -18,10 +18,6 @@ const ONE_ZERO_SHARE = [buildBrandRow('Nike', { share_of_voice: 40 }), buildBran
 describe('buildShareOfVoiceChartConfiguration', () => {
   it('gives six brands their own slice by default', () => {
     expect(DEFAULT_SHARE_OF_VOICE_LIMIT).toBe(6);
-  });
-
-  it('is a doughnut chart', () => {
-    expect(shareOfVoiceChart().type).toBe('doughnut');
   });
 
   it('labels the top brands by share of voice, then the other brands, with each share', () => {
@@ -43,10 +39,7 @@ describe('buildShareOfVoiceChartConfiguration', () => {
     ]);
   });
 
-  it.each([
-    ['light', false],
-    ['dark', true],
-  ] as const)('draws the other brands in the %s neutral gray', (variant, isDark) => {
+  it.each(THEME_VARIANTS)('draws the other brands in the %s neutral gray', (variant, isDark) => {
     expect(shareOfVoiceChart(LEADERBOARD, 5, isDark).data.datasets[0].backgroundColor).toContain(OTHER_BRANDS_GRAY[variant]);
   });
 

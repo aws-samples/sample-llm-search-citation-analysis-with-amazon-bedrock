@@ -19,7 +19,7 @@ export const KPI_TREND_INFO = 'Mention rate, share of voice, visibility score an
   + 'on a 0–100 scale. A period without answers is a gap in the line.';
 export const SHARE_OF_VOICE_TITLE = 'Share of voice';
 export const SHARE_OF_VOICE_TREND_TITLE = 'Share of voice over time';
-export const SHARE_OF_VOICE_TREND_SUBTITLE = 'Each brand\'s share of voice per period: your brand in the thick emerald line, '
+const SHARE_OF_VOICE_TREND_SUBTITLE = 'Each brand\'s share of voice per period: your brand in the thick emerald line, '
   + 'its leading competitors in thinner lines. A period where no answer names a brand is a gap.';
 
 interface PanelProps {readonly className?: string;}

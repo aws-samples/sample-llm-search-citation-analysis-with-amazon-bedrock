@@ -6,7 +6,7 @@ import {
 import { OverviewPanel } from './OverviewPanel';
 
 export type HistoryRangeDays = 7 | 30 | 90;
-export const HISTORY_RANGES: readonly HistoryRangeDays[] = [7, 30, 90];
+const HISTORY_RANGES: readonly HistoryRangeDays[] = [7, 30, 90];
 
 export const HISTORY_TITLE = 'KPI history';
 

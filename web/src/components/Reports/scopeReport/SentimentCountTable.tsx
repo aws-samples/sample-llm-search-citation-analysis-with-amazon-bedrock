@@ -8,6 +8,7 @@ import { Button } from '../../ui';
 import {
   ReportTable, type ReportTableColumn
 } from '../layout/ReportTable';
+import { emphasisColumn } from '../layout/kpiColumn';
 import { SENTIMENTS } from '../charts/sentimentSplitChartConfiguration';
 import {
   engineLabel, SentimentExamplesModal
@@ -74,12 +75,7 @@ function CountCell({
 
 function countColumns(onSelect: SelectCount): Array<ReportTableColumn<CountRow>> {
   return [
-    {
-      header: 'AI engine',
-      // Stryker disable next-line StringLiteral: Tailwind-only cell styling
-      cellClassName: 'font-medium',
-      render: (row) => row.label,
-    },
+    emphasisColumn('AI engine', (row) => row.label),
     ...SENTIMENTS.map(({
       key, label
     }): ReportTableColumn<CountRow> => ({

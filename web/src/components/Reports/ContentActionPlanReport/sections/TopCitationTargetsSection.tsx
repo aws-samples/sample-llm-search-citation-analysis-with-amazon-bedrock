@@ -8,13 +8,10 @@ import {
   ReportTable,
   type ReportTableColumn,
   pendingSectionPlaceholder,
+  type SectionFetchState,
 } from '../../layout';
 
-interface Props {
-  readonly gaps: CitationGapsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
+interface Props extends SectionFetchState {readonly gaps: CitationGapsResponse | null;}
 
 const MAX_TARGETS = 15;
 

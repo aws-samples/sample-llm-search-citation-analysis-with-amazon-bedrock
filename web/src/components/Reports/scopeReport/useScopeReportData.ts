@@ -8,14 +8,8 @@ import {
   decodeReportScope, encodeReportScope
 } from '../../ui/reportScope';
 import { useReportReady } from '../layout/useReportReady';
+import type { ReportSlice } from '../layout/sectionGate';
 import { trendPeriodFor } from './scopeReportRoute';
-
-/** One fetch of a report: its payload once settled, and whether it is loading or failed. */
-export interface ReportSlice<T> {
-  readonly data: T | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
 
 /** What every scope report renders from. */
 export interface ScopeReportData {

@@ -43,3 +43,20 @@ export function periodsInWords(labels: readonly string[]): string {
   if (labels.length === 1) return `1 period (${labels[0]})`;
   return `${labels.length} periods from ${labels[0]} to ${labels[labels.length - 1]}`;
 }
+
+/** The latest period of a trend chart: its label and its index in every series' points. */
+interface LatestPeriod {
+  readonly label: string;
+  readonly index: number;
+}
+
+/** The caption of a trend chart: `describe` given its periods in words and the latest one; empty without a period. */
+export function trendCaption(series: readonly ChartSeries[], describe: (periods: string, latest: LatestPeriod) => string): string {
+  const labels = seriesLabels(series);
+  if (labels.length === 0) return '';
+  const index = labels.length - 1;
+  return describe(periodsInWords(labels), {
+    label: labels[index],
+    index,
+  });
+}

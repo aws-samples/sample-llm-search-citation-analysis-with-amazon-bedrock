@@ -3,7 +3,7 @@ import {
   KpiChangeCard, LatestRunHeadline, type ScopeSectionProps
 } from '../../scopeReport';
 
-export const DOMAINS_CITED_INFO = 'How many distinct domains the answers cite as sources, yours and everyone else\'s.';
+const DOMAINS_CITED_INFO = 'How many distinct domains the answers cite as sources, yours and everyone else\'s.';
 
 /** How often the answers cite your website, its share of every cited source, and how many domains they cite. */
 export function SourcesHeadlineSection({ report }: ScopeSectionProps) {

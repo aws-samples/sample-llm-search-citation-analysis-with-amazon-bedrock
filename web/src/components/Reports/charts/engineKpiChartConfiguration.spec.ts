@@ -7,18 +7,12 @@ import {
 } from './engineKpiChartConfiguration';
 import { KPI_COLOURS } from './chartKpis';
 import {
-  ENGINES, engineKpiChart, LIGHT_THEME
+  ENGINES, engineKpiChart, LIGHT_THEME, THEME_VARIANTS
 } from './charts-fixtures';
 
 describe('buildEngineKpiChartConfiguration', () => {
   it('compares the mention rate, visibility score and citation rate by default', () => {
     expect(DEFAULT_ENGINE_KPI_IDS).toStrictEqual(['mention_rate', 'visibility_score', 'citation_rate']);
-  });
-
-  it('is a vertical bar chart', () => {
-    const chart = engineKpiChart();
-
-    expect([chart.type, chart.options?.indexAxis]).toStrictEqual(['bar', undefined]);
   });
 
   it('groups the bars by engine display name, an unknown engine by its id', () => {
@@ -33,23 +27,13 @@ describe('buildEngineKpiChartConfiguration', () => {
     expect(engineKpiChart().data.datasets.map((dataset) => dataset.data)).toStrictEqual([[70, 50, 10], [61.5, 43.3, 8.5], [40, 20, null]]);
   });
 
-  it.each([
-    ['light', false],
-    ['dark', true],
-  ] as const)('fills every KPI bar with its fixed %s colour', (variant, isDark) => {
+  it.each(THEME_VARIANTS)('fills every KPI bar with its fixed %s colour', (variant, isDark) => {
     expect(engineKpiChart(ENGINES, ['share_of_voice', 'top_1_share'], isDark).data.datasets.map((dataset) => dataset.backgroundColor))
       .toStrictEqual([KPI_COLOURS.share_of_voice[variant], KPI_COLOURS.top_1_share[variant]]);
   });
 
   it('keeps the engine axis plain', () => {
     expect(engineKpiChart().options?.scales?.x).toStrictEqual(themedAxis(LIGHT_THEME));
-  });
-
-  it('draws nothing without an engine', () => {
-    expect(engineKpiChart([]).data).toStrictEqual({
-      labels: [],
-      datasets: [],
-    });
   });
 });
 

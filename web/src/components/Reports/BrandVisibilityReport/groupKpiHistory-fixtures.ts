@@ -161,6 +161,15 @@ export function buildRun(overrides: Partial<GroupRun> = {}): GroupRun {
   };
 }
 
+/** One `buildRun` per override, at RUN_1, RUN_2 and RUN_3 in turn. */
+export function buildRunSeries(...overrides: [Partial<GroupRun>, Partial<GroupRun>, Partial<GroupRun>?]): GroupRun[] {
+  const timestamps = [RUN_1, RUN_2, RUN_3];
+  return overrides.map((override, index) => buildRun({
+    timestamp: timestamps[index],
+    ...override,
+  }));
+}
+
 /** The KPIs of "hotel sol spa" at RUN_1, when two of its four answers named the brand. */
 export const KEYWORD_KPIS: BrandKpis = buildKpis({
   answers: 4,
@@ -195,7 +204,7 @@ export function buildKeywordChange(mention: MentionChange, deltas: Partial<KpiDe
 }
 
 /** "hotel sol spa" at RUN_2: no answer names the brand any more. */
-export const LOST_KEYWORD_RUN: KeywordRun = buildKeywordRun({
+const LOST_KEYWORD_RUN: KeywordRun = buildKeywordRun({
   timestamp: RUN_2,
   kpis: {
     ...KEYWORD_KPIS,

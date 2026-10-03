@@ -2,22 +2,26 @@ import {
   describe, it, expect
 } from 'vitest';
 import {
-  render, screen, within
+  render, within
 } from '@testing-library/react';
 import { BrandLeaderboard } from './BrandLeaderboard';
 import {
   COMPETITOR_ROW, buildBrandRow
 } from './visibilityOverview-fixtures';
 import {
-  bodyRowCells, columnHeadingTexts, panelTable, panelTitled
+  aboutButton, bodyRowCells, columnHeadingTexts, panelTable, panelTitled
 } from './visibilityTables-fixtures';
 import { KPI_DEFINITIONS } from '../../constants/kpiDefinitions';
 
 const LEADERBOARD = 'Brand leaderboard';
 
+function renderLeaderboard(brands = [buildBrandRow()]) {
+  return render(<BrandLeaderboard brands={brands} />);
+}
+
 describe('BrandLeaderboard', () => {
   it('heads the brand, four KPI, best position, engines, keywords and type columns', () => {
-    render(<BrandLeaderboard brands={[buildBrandRow()]} />);
+    renderLeaderboard();
 
     expect(columnHeadingTexts(panelTable(LEADERBOARD))).toStrictEqual([
       'Brand',
@@ -41,13 +45,13 @@ describe('BrandLeaderboard', () => {
     ['Engines', 'The AI engines whose answers name the brand.'],
     ['Keywords', 'How many keywords\' answers name the brand.'],
   ])('explains the %s column heading in its tooltip', (heading, explanation) => {
-    render(<BrandLeaderboard brands={[buildBrandRow()]} />);
+    renderLeaderboard();
 
-    expect(screen.getByRole('button', { name: `About ${heading}` })).toHaveAccessibleDescription(explanation);
+    expect(aboutButton(heading)).toHaveAccessibleDescription(explanation);
   });
 
   it('shows every figure of the tracked brand, formatted by unit', () => {
-    render(<BrandLeaderboard brands={[buildBrandRow()]} />);
+    renderLeaderboard();
 
     expect(bodyRowCells(panelTable(LEADERBOARD))).toStrictEqual([
       ['Hotel Sol', '52.4', '60.0%', '25.0%', '1.80', '1', 'geminiopenai', '2', 'first party'],
@@ -55,7 +59,7 @@ describe('BrandLeaderboard', () => {
   });
 
   it('shows a competitor with its own engines and classification', () => {
-    render(<BrandLeaderboard brands={[COMPETITOR_ROW]} />);
+    renderLeaderboard([COMPETITOR_ROW]);
 
     expect(bodyRowCells(panelTable(LEADERBOARD))).toStrictEqual([
       ['Hotel Luna', '33.1', '40.0%', '16.7%', '2.50', '2', 'perplexity', '1', 'competitor'],
@@ -63,7 +67,7 @@ describe('BrandLeaderboard', () => {
   });
 
   it('shows dashes for unknown rates and positions', () => {
-    render(<BrandLeaderboard brands={[buildBrandRow({
+    renderLeaderboard([buildBrandRow({
       name: 'Hotel Mar',
       classification: 'other',
       mention_rate: null,
@@ -71,7 +75,7 @@ describe('BrandLeaderboard', () => {
       average_position: null,
       best_position: null,
       engines: [],
-    })]} />);
+    })]);
 
     expect(bodyRowCells(panelTable(LEADERBOARD))).toStrictEqual([
       ['Hotel Mar', '52.4', '—', '—', '—', '—', '', '2', 'other'],
@@ -79,14 +83,14 @@ describe('BrandLeaderboard', () => {
   });
 
   it('shows each engine as its own chip', () => {
-    render(<BrandLeaderboard brands={[buildBrandRow()]} />);
+    renderLeaderboard();
 
     expect(within(panelTitled(LEADERBOARD)).getByText('gemini')).toHaveClass('bg-blue-100');
     expect(within(panelTitled(LEADERBOARD)).getByText('openai')).toHaveClass('bg-blue-100');
   });
 
   it('highlights first-party rows only', () => {
-    render(<BrandLeaderboard brands={[buildBrandRow(), COMPETITOR_ROW]} />);
+    renderLeaderboard([buildBrandRow(), COMPETITOR_ROW]);
 
     const [, tracked, competitor] = within(panelTitled(LEADERBOARD)).getAllByRole('row');
 
@@ -95,7 +99,7 @@ describe('BrandLeaderboard', () => {
   });
 
   it('says there is no brand data when no answer names a brand', () => {
-    render(<BrandLeaderboard brands={[]} />);
+    renderLeaderboard([]);
 
     expect(within(panelTitled(LEADERBOARD)).getByText('No brand data available.')).toBeInTheDocument();
     expect(within(panelTitled(LEADERBOARD)).queryByRole('table')).not.toBeInTheDocument();

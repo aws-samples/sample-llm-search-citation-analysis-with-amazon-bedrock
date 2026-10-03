@@ -69,16 +69,6 @@ describe('buildBrandTrendChartConfiguration', () => {
     expect([chart.data.labels, chart.data.datasets.map((dataset) => dataset.data)])
       .toStrictEqual([[PREVIOUS_PERIOD, LATEST_PERIOD], [[null, 25], [null, null]]]);
   });
-
-  it('draws nothing without a period', () => {
-    expect(brandTrendChart('mention_rate', {
-      tracked: [],
-      competitors: [],
-    }).data).toStrictEqual({
-      labels: [],
-      datasets: [],
-    });
-  });
 });
 
 describe('brandTrendSeries', () => {

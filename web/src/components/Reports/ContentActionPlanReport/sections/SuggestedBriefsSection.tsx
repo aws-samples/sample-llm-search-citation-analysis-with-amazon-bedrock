@@ -1,14 +1,16 @@
 import type { ContentIdea } from '../../../../types';
 import {
-  PriorityBadge, ReportSection, pendingSectionPlaceholder 
+  PriorityBadge,
+  REPORT_CARD_CLASS,
+  ReportSection,
+  ReportSectionNote,
+  pendingSectionPlaceholder,
+  type SectionFetchState,
 } from '../../layout';
 
-interface Props {
-  readonly ideas: ReadonlyArray<ContentIdea>;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
+interface Props extends SectionFetchState {readonly ideas: ReadonlyArray<ContentIdea>;}
 
+const TITLE = 'Suggested next briefs';
 const MAX_IDEAS = 10;
 const PRIORITY_RANK = {
   high: 0,
@@ -30,7 +32,7 @@ export function SuggestedBriefsSection({
   ideas, loading, error 
 }: Props) {
   const pending = pendingSectionPlaceholder({
-    title: 'Suggested next briefs',
+    title: TITLE,
     loading,
     loadingMessage: 'Loading content ideas…',
     error,
@@ -43,21 +45,16 @@ export function SuggestedBriefsSection({
 
   if (sorted.length === 0) {
     return (
-      <ReportSection
-        title="Suggested next briefs"
-        subtitle="No open content ideas right now."
-      >
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          Run the Content Studio analysis to generate fresh ideas based on
-          current visibility gaps.
-        </p>
-      </ReportSection>
+      <ReportSectionNote title={TITLE} subtitle="No open content ideas right now.">
+        Run the Content Studio analysis to generate fresh ideas based on
+        current visibility gaps.
+      </ReportSectionNote>
     );
   }
 
   return (
     <ReportSection
-      title="Suggested next briefs"
+      title={TITLE}
       subtitle="Top content ideas from Content Studio, ordered by priority. Generate these to fill the gaps surfaced above."
     >
       <div className="space-y-3">
@@ -71,7 +68,7 @@ export function SuggestedBriefsSection({
 
 function IdeaCard({ idea }: { readonly idea: ContentIdea }) {
   return (
-    <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 avoid-break-inside">
+    <div className={REPORT_CARD_CLASS}>
       <div className="flex items-start gap-3">
         <PriorityBadge priority={idea.priority} />
         <div className="min-w-0 flex-1">

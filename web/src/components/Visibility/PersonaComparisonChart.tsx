@@ -12,12 +12,24 @@ import type { TooltipItem } from 'chart.js';
 import type { PersonaRankingsResponse } from '../../types';
 import { useTheme } from '../../hooks/useTheme';
 import {
-  getChartTheme, themedTooltip
+  getChartTheme, themedAxis, themedTooltip, type ChartTheme
 } from '../ui/chartTheme';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 interface PersonaComparisonChartProps { readonly data: PersonaRankingsResponse | null; }
+
+/** A themed axis with its title in the theme's text colour. */
+function titledAxis(theme: ChartTheme, text: string, extra: Record<string, unknown> = {}) {
+  return themedAxis(theme, {
+    ...extra,
+    title: {
+      display: true,
+      text,
+      color: theme.textColor,
+    },
+  });
+}
 
 function computeAverageRank(brands: ReadonlyArray<{ rank: number }>): number | null {
   if (brands.length === 0) return null;
@@ -109,26 +121,11 @@ export function PersonaComparisonChart({ data }: PersonaComparisonChartProps) {
       },
     },
     scales: {
-      y: {
+      y: titledAxis(theme, 'Average Brand Rank (lower is better)', {
         reverse: true,
         beginAtZero: false,
-        title: {
-          display: true,
-          text: 'Average Brand Rank (lower is better)',
-          color: theme.textColor,
-        },
-        ticks: { color: theme.textColor },
-        grid: { color: theme.gridColor },
-      },
-      x: {
-        title: {
-          display: true,
-          text: 'Persona',
-          color: theme.textColor,
-        },
-        ticks: { color: theme.textColor },
-        grid: { color: theme.gridColor },
-      },
+      }),
+      x: titledAxis(theme, 'Persona'),
     },
   };
 

@@ -1,13 +1,7 @@
 import type { ReportsOverviewResponse } from '../../../../api/reports';
 import {
-  MoverColumn, ReportSection, gateSection 
+  MoverColumn, ReportSection, gateSection, type ReportSlice
 } from '../../layout';
-
-interface Props {
-  readonly data: ReportsOverviewResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
 
 /**
  * The "what worked / what didn't" pair: the keywords whose visibility score
@@ -17,7 +11,7 @@ interface Props {
  */
 export function WinsAndGapsSection({
   data, loading, error 
-}: Props) {
+}: ReportSlice<ReportsOverviewResponse>) {
   const gate = gateSection({
     title: 'Top wins and gaps',
     loading,
