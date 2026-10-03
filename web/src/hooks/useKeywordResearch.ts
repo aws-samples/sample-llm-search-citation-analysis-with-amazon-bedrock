@@ -208,7 +208,7 @@ export const useKeywordResearch = () => {
   ) => {
     const isCancelled = claimGeneration();
     beginRun(type);
-    if (shownJob !== null) setActiveJob(shownJob);
+    setActiveJob(shownJob);
     try {
       const job = await start();
       if (isCancelled()) return;
@@ -226,12 +226,14 @@ export const useKeywordResearch = () => {
     'expansion',
     () => startKeywordExpansion(seedKeyword, industry, count),
     'expanding keywords'
+  // Stryker disable next-line ArrayDeclaration: React dependency list; launchRun has a stable identity, so omitting it cannot stale this callback
   ), [launchRun]);
 
   const analyzeCompetitor = useCallback(async (url: string) => launchRun(
     'competitor',
     () => startCompetitorAnalysis(url),
     'analyzing competitor'
+  // Stryker disable next-line ArrayDeclaration: React dependency list; launchRun has a stable identity, so omitting it cannot stale this callback
   ), [launchRun]);
 
   /** Re-run the failed steps of a partial or failed job and follow it again. */
@@ -242,6 +244,7 @@ export const useKeywordResearch = () => {
       await retryKeywordResearch(job.id);
       return job;
     }, 'retrying research', job);
+  // Stryker disable next-line ArrayDeclaration: React dependency list; launchRun has a stable identity, so omitting it cannot stale this callback
   }, [launchRun]);
 
   // Re-attach to a job the user was waiting on before a refresh or tab switch.

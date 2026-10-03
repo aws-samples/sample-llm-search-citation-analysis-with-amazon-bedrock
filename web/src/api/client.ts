@@ -26,6 +26,7 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
 }
 
 function decodeApiErrorResponse(data: unknown): ApiErrorResponse | null {
+  // Stryker disable next-line ConditionalExpression: equivalent, a JSON non-object yields null either way (null throws into readApiErrorResponse's catch; primitives and arrays carry no string error)
   if (!isRecord(data)) return null;
 
   const {

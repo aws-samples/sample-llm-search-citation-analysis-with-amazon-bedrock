@@ -122,6 +122,7 @@ export function useSavedTemplates<TTemplate extends SavedTemplate, TDraft, TChan
       console.error(`${source.logTag} Error loading ${source.subject}s:`, requestError);
     } finally {
       if (request.isCurrent()) setLoading(false);
+      // Stryker disable next-line CallExpression: equivalent, finish only stops a later cancel from aborting this settled request's signal, which nothing reads after it settles
       request.finish();
     }
   }, [beginRequest, replaceTemplates, source]);
@@ -153,13 +154,16 @@ export function useSavedTemplates<TTemplate extends SavedTemplate, TDraft, TChan
       };
     } finally {
       if (operation.isCurrent()) setLoading(false);
+      // Stryker disable next-line CallExpression: equivalent, finish only stops a later cancel from aborting this settled request's signal, which nothing reads after it settles
       operation.finish();
     }
   }, [beginRequest, source]);
   // Stryker restore ArrayDeclaration
 
+  // Stryker disable ArrayDeclaration: React dependency list; source is the caller's module-level constant, so omitting it cannot stale the guard
   const isGuardedBuiltin = useCallback((id: string): boolean => source.guardBuiltins
     && templatesRef.current.find((template) => template.id === id)?.builtin === true, [source]);
+  // Stryker restore ArrayDeclaration
 
   // Stryker disable ArrayDeclaration: replaceTemplates and runMutation have proven stable identities, so omitting them cannot stale create.
   const create = useCallback(async (draft: TDraft) => runMutation(

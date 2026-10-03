@@ -91,6 +91,7 @@ export function useUserManagement(): UseUserManagementReturn {
     const response = await inviteUser(request);
     await fetchData();
     return response;
+  // Stryker disable next-line ArrayDeclaration: React dependency list; fetchData has a stable identity, so omitting it cannot stale this callback
   }, 'Failed to invite user'), [fetchData]);
 
   const mutateAndRefresh = useCallback(async (mutation: () => Promise<unknown>, failure: string) => {
@@ -109,16 +110,19 @@ export function useUserManagement(): UseUserManagementReturn {
       () => updateUser(username, request),
       'Failed to update user'
     ),
+    // Stryker disable next-line ArrayDeclaration: React dependency list; mutateAndRefresh has a stable identity, so omitting it cannot stale this callback
     [mutateAndRefresh]
   );
 
   const remove = useCallback(
     async (username: string) => mutateAndRefresh(() => deleteUser(username), 'Failed to delete user'),
+    // Stryker disable next-line ArrayDeclaration: React dependency list; mutateAndRefresh has a stable identity, so omitting it cannot stale this callback
     [mutateAndRefresh]
   );
 
   const resetPassword = useCallback(
     async (username: string) => messageOutcome(() => resetUserPassword(username), 'Failed to reset password'),
+    // Stryker disable next-line ArrayDeclaration: React dependency list; the callback reads only module functions, so any list keeps it correct
     []
   );
 

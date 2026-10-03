@@ -76,6 +76,7 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
     if (!mountedRef.current) return;
     setError(getErrorMessage(err, 'research'));
     console.error(`[research-agent] Error ${action}:`, err);
+  // Stryker disable next-line ArrayDeclaration: React dependency list; the callback reads only a ref and state setters, so any list keeps it correct
   }, []);
 
   const refresh = useCallback(async (): Promise<void> => {
@@ -89,6 +90,7 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
     } finally {
       if (mountedRef.current) setLoadingJobs(false);
     }
+  // Stryker disable next-line ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
   }, [reportFailure]);
 
   useEffect(() => {
@@ -157,6 +159,7 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
     } finally {
       if (mountedRef.current) setStarting(false);
     }
+  // Stryker disable next-line ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
   }, [reportFailure]);
 
   const select = useCallback((id: string | null) => {
@@ -179,6 +182,7 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
     } catch (err) {
       reportFailure(err, 'retrying run');
     }
+  // Stryker disable next-line ArrayDeclaration: React dependency list; reload and reportFailure have a stable identity, so omitting them cannot stale this callback
   }, [reload, reportFailure]);
 
   const remove = useCallback(async (id: string): Promise<void> => {
@@ -190,6 +194,7 @@ export const useResearchAgent = (): UseResearchAgentReturn => {
     } catch (err) {
       reportFailure(err, 'deleting run');
     }
+  // Stryker disable next-line ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
   }, [reportFailure]);
 
   return {

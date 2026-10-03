@@ -87,6 +87,7 @@ export const useRawResponses = () => {
     } finally {
       setLoading(false);
     }
+  // Stryker disable next-line ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
   }, [reportFailure]);
 
   const browse = useCallback(async (prefix = '', bucket: BucketType = 'responses') => load({
@@ -94,6 +95,7 @@ export const useRawResponses = () => {
     param: 'prefix',
     value: prefix,
     bucket,
+  // Stryker disable next-line ArrayDeclaration: React dependency list; load has a stable identity, so omitting it cannot stale this callback
   }, isS3BrowseResponse, setBrowseData, 'browsing'), [load]);
 
   const getFile = useCallback(async (key: string, bucket: BucketType = 'responses') => load({
@@ -101,6 +103,7 @@ export const useRawResponses = () => {
     param: 'key',
     value: key,
     bucket,
+  // Stryker disable next-line ArrayDeclaration: React dependency list; load has a stable identity, so omitting it cannot stale this callback
   }, isRawResponseContent, setFileContent, 'getting file'), [load]);
 
   const getDownloadUrl = useCallback(async (key: string, bucket: BucketType = 'responses'): Promise<string | null> => {
@@ -115,6 +118,7 @@ export const useRawResponses = () => {
     } catch (err) {
       return reportFailure(err, 'getting download URL');
     }
+  // Stryker disable next-line ArrayDeclaration: React dependency list; reportFailure has a stable identity, so omitting it cannot stale this callback
   }, [reportFailure]);
 
   const clearFile = useCallback(() => {
