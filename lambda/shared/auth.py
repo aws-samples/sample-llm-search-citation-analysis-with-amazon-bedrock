@@ -56,15 +56,14 @@ from shared.api_response import forbidden_response
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Cognito group names. These are the literal `groupName` values created by
-# `lib/constructs/auth.ts` — keep the two in lockstep. Renaming a group there
+# Cognito group name. This is the literal `groupName` created by
+# `lib/constructs/auth.ts` — keep the two in lockstep. Renaming the group there
 # without changing it here silently removes every authorization check, because
 # an unmatched group name simply means "caller is not in the required group".
 # The CDK synth test in `lib/citation-analysis-stack.spec.ts` pins the names on
 # the infrastructure side.
 # ---------------------------------------------------------------------------
 ADMIN_GROUP = 'Admin'
-USERS_GROUP = 'Users'
 
 # The claim API Gateway populates from the ID token's group membership.
 GROUPS_CLAIM = 'cognito:groups'
@@ -283,7 +282,6 @@ def require_group(*allowed_groups: str) -> Callable:
 __all__ = [
     'ADMIN_GROUP',
     'GROUPS_CLAIM',
-    'USERS_GROUP',
     'get_caller_claims',
     'get_caller_groups',
     'get_caller_identity',

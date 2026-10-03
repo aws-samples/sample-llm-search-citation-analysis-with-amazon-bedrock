@@ -166,21 +166,6 @@ def classify_provider_error(error: object, status_code: int | None = None) -> st
     return UNKNOWN
 
 
-def describe_category(category: str) -> str:
-    """A short, user-facing explanation for a category.
-
-    Returned to the dashboard so a provider card can say what is actually
-    wrong instead of "error".
-    """
-    return {
-        INSUFFICIENT_CREDIT: 'No credit remaining on this provider account',
-        INVALID_KEY: 'API key rejected — check or replace the key',
-        RATE_LIMITED: 'Rate limited by the provider',
-        TIMEOUT: 'Provider did not respond in time',
-        UNKNOWN: 'Provider returned an unrecognised error',
-    }.get(category, 'Provider returned an unrecognised error')
-
-
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
@@ -332,7 +317,6 @@ __all__ = [
     'TIMEOUT',
     'UNKNOWN',
     'classify_provider_error',
-    'describe_category',
     'record_provider_failure',
     'record_provider_success',
 ]
