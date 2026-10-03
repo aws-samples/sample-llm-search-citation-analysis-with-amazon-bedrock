@@ -247,6 +247,25 @@ class TestBrandMentionsScope:
             'aggregated_brands': [],
         }
 
+    @pytest.mark.parametrize(('filter_params', 'expected_providers'), [
+        pytest.param({'query_prompt_id': 'family'}, ['openai'], id='named-persona'),
+        pytest.param({'query_prompt_id': 'default'}, ['gemini'], id='row-without-persona-is-default'),
+        pytest.param({'provider': 'gemini'}, ['gemini'], id='provider'),
+    ])
+    def test_single_keyword_keeps_the_latest_run_rows_matching_the_filter(
+        self, brand_mentions_env, filter_params, expected_providers,
+    ):
+        unlabelled = _result('hotel coruna spa', 'gemini', [_brand('Hotel Coruna', 'first_party')])
+        del unlabelled['query_prompt_id']
+        brand_mentions_env.tables['search'].query.side_effect = [{'Items': [
+            _result('hotel coruna spa', 'openai', [_brand('Rival Inn', 'competitor')], query_prompt_id='family'),
+            unlabelled,
+        ]}]
+
+        body = brand_mentions_env.body({'keyword': 'hotel coruna spa', **filter_params})
+
+        assert [entry['provider'] for entry in body['by_provider']] == expected_providers
+
     def test_group_scope_aggregates_the_latest_run_of_every_keyword(self, brand_mentions_env):
         body = brand_mentions_env.body({'group_id': 'coruna'})
 
@@ -513,21 +532,40 @@ def missing_first_party_aggregate(gaps, request):
 
 class TestCitationGapsScope:
     @staticmethod
-    def _analyze(gaps, params: dict, summary: dict) -> tuple[list[str], dict]:
+    def _analyze(
+        gaps, params: dict, summary: dict, keyword_gaps: dict[str, list[dict]] | None = None,
+    ) -> tuple[list[str], dict]:
         """Call the handler with `_build_citation_gap_result` recording its keywords.
 
-        Every keyword answers `summary`; returns the keywords analysed, in call
-        order, and the decoded response body.
+        Every keyword answers `summary` and its entry of `keyword_gaps` (none
+        by default), with source enrichment stubbed out; returns the keywords
+        analysed, in call order, and the decoded response body.
         """
         analyzed: list[str] = []
 
         def record(keyword, _config):
             analyzed.append(keyword)
-            return {'summary': summary, 'gaps': []}
+            return {'summary': summary, 'gaps': (keyword_gaps or {}).get(keyword, [])}
 
-        with scoped_report(gaps, GAPS_CONFIG) as report, patch.object(gaps, '_build_citation_gap_result', record):
+        with (
+            scoped_report(gaps, GAPS_CONFIG) as report,
+            patch.object(gaps, '_build_citation_gap_result', record),
+            patch.object(gaps, '_enrich_sources', MagicMock()),
+        ):
             body = report.body(params)
         return analyzed, body
+
+    def test_group_scope_ranks_top_gaps_by_priority_before_citation_count(self, gaps):
+        _, body = self._analyze(
+            gaps, {'group_id': 'coruna'},
+            {'gap_count': 1, 'high_priority_gaps': 0, 'coverage_rate': 0},
+            {
+                'hotel coruna spa': [{'url': 'https://low.example', 'priority': 'low', 'citation_count': 9}],
+                'best hotels galicia': [{'url': 'https://high.example', 'priority': 'high', 'citation_count': 1}],
+            },
+        )
+
+        assert [gap['url'] for gap in body['top_gaps']] == ['https://high.example', 'https://low.example']
 
     def test_group_scope_analyzes_every_keyword_of_the_group(self, gaps):
         analyzed, body = self._analyze(

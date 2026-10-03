@@ -91,6 +91,12 @@ SEARCH_ROWS = {
 }
 
 
+def _citation_partition(citations: Mapping[str, list[dict[str, Any]]], condition: Any) -> list[dict[str, Any]]:
+    """The Citations rows of the ``keyword`` partition ``condition`` selects; none when it keys on another attribute."""
+    key, keyword = condition.get_expression()['values']
+    return list(citations.get(keyword, [])) if key.name == 'keyword' else []
+
+
 def fake_scope_dynamodb(
     search_rows: Mapping[str, list[dict[str, Any]]] = SEARCH_ROWS,
     citation_rows: Mapping[str, list[dict[str, Any]]] | None = None,
@@ -101,7 +107,7 @@ def fake_scope_dynamodb(
     search_table = search_results_table(search_rows)
     citations = citation_rows or {}
     citations_table = MagicMock(name='citations')
-    citations_table.query.side_effect = lambda **kwargs: {'Items': list(citations.get(key_parts(kwargs['KeyConditionExpression'])[0], []))}
+    citations_table.query.side_effect = lambda **kwargs: {'Items': _citation_partition(citations, kwargs['KeyConditionExpression'])}
     citations_table.scan.return_value = {'Items': [row for rows in citations.values() for row in rows]}
 
     tables = {'keywords': keywords_table, 'search': search_table, 'citations': citations_table}
