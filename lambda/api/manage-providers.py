@@ -49,9 +49,7 @@ secrets_client = boto3.client('secretsmanager')
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
-PROVIDER_CONFIG_TABLE = resolve_table_env(
-    'DYNAMODB_TABLE_PROVIDER_CONFIG', 'PROVIDER_CONFIG_TABLE',
-)
+PROVIDER_CONFIG_TABLE = resolve_table_env('DYNAMODB_TABLE_PROVIDER_CONFIG')
 SECRETS_PREFIX = os.environ.get('SECRETS_PREFIX', 'citation-analysis/')
 
 # Provider type constants

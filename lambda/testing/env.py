@@ -11,17 +11,16 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from unittest.mock import patch
 
-# The two names the Keywords-table handlers resolve their table from
-# (``resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')``).
+# The name the Keywords-table handlers resolve their table from
+# (``resolve_table_env('DYNAMODB_TABLE_KEYWORDS')``).
 KEYWORDS_TABLE_ENV: Mapping[str, str] = {
     'DYNAMODB_TABLE_KEYWORDS': 'test-keywords-table',
-    'KEYWORDS_TABLE': 'test-keywords-table',
 }
 
 # What the keyword-research handler resolves at import: its job table, the
 # state machine it starts, and the templates / groups tables it reads.
 KEYWORD_RESEARCH_ENV: Mapping[str, str] = {
-    'KEYWORD_RESEARCH_TABLE': 'test-keyword-research',
+    'DYNAMODB_TABLE_KEYWORD_RESEARCH': 'test-keyword-research',
     'RESEARCH_STATE_MACHINE_ARN': 'arn:aws:states:us-west-2:123456789012:stateMachine:research',
     'DYNAMODB_TABLE_RESEARCH_TEMPLATES': 'test-research-templates',
     'DYNAMODB_TABLE_KEYWORD_GROUPS': 'test-keyword-groups',

@@ -31,9 +31,7 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
-CITATIONS_TABLE = resolve_table_env(
-    'DYNAMODB_TABLE_CITATIONS', 'CITATIONS_TABLE',
-)
+CITATIONS_TABLE = resolve_table_env('DYNAMODB_TABLE_CITATIONS')
 citations_table = dynamodb.Table(CITATIONS_TABLE)
 
 # Inverse index GSI: PK=normalized_url, SK=keyword, projection=ALL.

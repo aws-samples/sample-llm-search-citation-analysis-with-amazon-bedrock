@@ -31,7 +31,7 @@ reflection_handler = handler_fixture(
     env={
         'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results-table',
         'DYNAMODB_TABLE_SELF_REFLECTION': 'test-self-reflection-table',
-        'QUERY_PROMPTS_TABLE': 'test-query-prompts-table',
+        'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-query-prompts-table',
     },
 )
 

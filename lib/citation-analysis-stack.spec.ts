@@ -53,6 +53,7 @@ import {
   findUseCaseSubmission,
   keywordChildStates,
   methodRouteLabels,
+  nonCanonicalTableEnvNames,
   providerSearchBranch,
   providerSearchBranchStarts,
   pythonResearchStaleAfterSeconds,
@@ -141,6 +142,7 @@ const synthesized: CrawlerInfrastructureSnapshot & {
   configMgmtStateMachineActions: string[];
   scopedReadFunctionEnvVars: Record<string, Record<string, unknown>>;
   parseKeywordsEnvVars: Record<string, unknown>;
+  nonCanonicalTableEnvNames: string[];
   keywordMgmtEnvVars: Record<string, unknown>;
   executionMgmtEnvVars: Record<string, unknown>;
   keywordMgmtFunctionId: string;
@@ -214,6 +216,7 @@ const synthesized: CrawlerInfrastructureSnapshot & {
   browserSigningRoleActions: [],
   browserSigningTrustConditions: {},
   parseKeywordsEnvVars: {},
+  nonCanonicalTableEnvNames: [],
   keywordMgmtEnvVars: {},
   executionMgmtEnvVars: {},
   keywordMgmtFunctionId: '',
@@ -300,6 +303,7 @@ beforeAll(() => {
   synthesized.keywordResearchTableTtl = extractTableProperty(template, 'CitationAnalysis-KeywordResearch', 'TimeToLiveSpecification');
   Object.assign(synthesized, extractCrawlerInfrastructureSnapshot(template));
   synthesized.parseKeywordsEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-ParseKeywords');
+  synthesized.nonCanonicalTableEnvNames = nonCanonicalTableEnvNames(template);
   synthesized.keywordMgmtEnvVars = extractLambdaEnvVars(template, KEYWORD_MGMT_FUNCTION_NAME);
   synthesized.executionMgmtEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-API-ExecutionMgmt');
   synthesized.keywordMgmtFunctionId = findLambdaLogicalId(template, KEYWORD_MGMT_FUNCTION_NAME);
@@ -1237,10 +1241,15 @@ describe('Report scope resolution (group KPIs)', () => {
   });
 });
 
+describe('Lambda table environment names', () => {
+  it('names every table through a DYNAMODB_TABLE_ variable on every function', () => {
+    expect(synthesized.nonCanonicalTableEnvNames).toStrictEqual([]);
+  });
+});
+
 describe('ParseKeywords Lambda environment', () => {
   it('includes the query prompts table for execution-time prompt resolution', () => {
     expect(synthesized.parseKeywordsEnvVars).toHaveProperty('DYNAMODB_TABLE_QUERY_PROMPTS');
-    expect(synthesized.parseKeywordsEnvVars).toHaveProperty('QUERY_PROMPTS_TABLE');
   });
 
   it('names the keywords bucket the run manifest is written to', () => {

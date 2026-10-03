@@ -29,9 +29,7 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
-QUERY_PROMPTS_TABLE = resolve_table_env(
-    'DYNAMODB_TABLE_QUERY_PROMPTS', 'QUERY_PROMPTS_TABLE',
-)
+QUERY_PROMPTS_TABLE = resolve_table_env('DYNAMODB_TABLE_QUERY_PROMPTS')
 query_prompts_table = dynamodb.Table(QUERY_PROMPTS_TABLE)
 
 # Soft business cap — bounded per-user prompts. Override with

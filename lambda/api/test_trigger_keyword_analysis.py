@@ -28,7 +28,6 @@ _ENV = {
     'STATE_MACHINE_ARN': 'arn:aws:states:us-east-1:123456789012:stateMachine:test',
     'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
     'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-prompts',
-    'QUERY_PROMPTS_TABLE': 'test-prompts',
     'CORS_ORIGIN_PARAM': '',
 }
 

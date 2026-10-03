@@ -54,7 +54,7 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
+KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS')
 GROUPS_TABLE = resolve_table_env(KEYWORD_GROUPS_TABLE_ENV)
 keywords_table = dynamodb.Table(KEYWORDS_TABLE)
 groups_table = dynamodb.Table(GROUPS_TABLE)

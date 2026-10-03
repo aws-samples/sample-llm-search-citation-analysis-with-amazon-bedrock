@@ -65,12 +65,10 @@ def get_extraction_config() -> dict[str, Any]:
 # Environment variables
 DYNAMODB_TABLE_SEARCH_RESULTS = os.environ.get('DYNAMODB_TABLE_SEARCH_RESULTS')
 RAW_RESPONSES_BUCKET = os.environ.get('RAW_RESPONSES_BUCKET')
-# Provider config table — canonical name first, legacy fallback for in-flight
-# deploys. Default mirrors the CDK resource name so a bootstrap deploy works
-# even before env vars flow through. Audit #12.
+# Provider config table. Default mirrors the CDK resource name so a bootstrap
+# deploy works even before env vars flow through. Audit #12.
 PROVIDER_CONFIG_TABLE = (
     os.environ.get('DYNAMODB_TABLE_PROVIDER_CONFIG')
-    or os.environ.get('PROVIDER_CONFIG_TABLE')
     or 'CitationAnalysis-ProviderConfig'
 )
 

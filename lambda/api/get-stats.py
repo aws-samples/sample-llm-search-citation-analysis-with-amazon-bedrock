@@ -28,10 +28,10 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
-SEARCH_RESULTS_TABLE = resolve_table_env('DYNAMODB_TABLE_SEARCH_RESULTS', 'SEARCH_RESULTS_TABLE')
-CITATIONS_TABLE = resolve_table_env('DYNAMODB_TABLE_CITATIONS', 'CITATIONS_TABLE')
-CRAWLED_CONTENT_TABLE = resolve_table_env('DYNAMODB_TABLE_CRAWLED_CONTENT', 'CRAWLED_CONTENT_TABLE')
-KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
+SEARCH_RESULTS_TABLE = resolve_table_env('DYNAMODB_TABLE_SEARCH_RESULTS')
+CITATIONS_TABLE = resolve_table_env('DYNAMODB_TABLE_CITATIONS')
+CRAWLED_CONTENT_TABLE = resolve_table_env('DYNAMODB_TABLE_CRAWLED_CONTENT')
+KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS')
 
 search_results_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
 citations_table = dynamodb.Table(CITATIONS_TABLE)

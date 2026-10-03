@@ -29,7 +29,7 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = search_results_table_name()
-QUERY_PROMPTS_TABLE = os.environ['QUERY_PROMPTS_TABLE']
+QUERY_PROMPTS_TABLE = os.environ['DYNAMODB_TABLE_QUERY_PROMPTS']
 
 
 def sentiment_to_label(sentiments: list[str]) -> str:

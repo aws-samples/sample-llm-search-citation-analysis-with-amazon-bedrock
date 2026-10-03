@@ -1224,14 +1224,11 @@ export class CitationAnalysisStack extends cdk.Stack {
       memorySize: 256,
       description: 'Parse keywords from S3 or direct input',
       environment: {
-        // Audit #12 canonical name + legacy for in-flight rollouts.
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
-        KEYWORDS_TABLE: keywordsTable.tableName,
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         // Enabled query prompts are resolved here for executions whose input
         // does not carry them (EventBridge schedules).
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
-        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
         // Every run's keyword list is written here as the ProcessKeywords
         // item source (`runs/<execution>/keywords.json`).
         KEYWORDS_BUCKET: keywordsBucket.bucketName,
@@ -1262,10 +1259,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
-        // Canonical name (audit #12). Legacy PROVIDER_CONFIG_TABLE kept for
-        // in-flight deploys; can be dropped after one full rollout.
         DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
-        PROVIDER_CONFIG_TABLE: providerConfigTable.tableName,
         SECRETS_PREFIX: 'citation-analysis/',
         RAW_RESPONSES_BUCKET: rawResponsesBucket.bucketName,
         ...bedrockTierEnv,
@@ -1290,10 +1284,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       memorySize: 256,
       description: 'Deduplicate and prioritize citations',
       environment: {
-        // Canonical name (audit #12). Legacy CITATIONS_TABLE_NAME kept for
-        // in-flight deploys; can be dropped after one full rollout.
         DYNAMODB_TABLE_CITATIONS: citationsTable.tableName,
-        CITATIONS_TABLE_NAME: citationsTable.tableName,
       },
     });
 
@@ -1880,22 +1871,15 @@ export class CitationAnalysisStack extends cdk.Stack {
       memorySize: 512,
       description: 'API: Consolidated stats, visibility, insights, gaps, recommendations, and trends',
       environment: {
-        // Audit #12: canonical DYNAMODB_TABLE_* names. Legacy names kept
-        // for in-flight deploys; can be dropped after one full rollout.
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_CITATIONS: citationsTable.tableName,
         DYNAMODB_TABLE_CRAWLED_CONTENT: crawledContentTable.tableName,
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
-        // Legacy names (to be removed once rollout is verified):
-        SEARCH_RESULTS_TABLE: searchResultsTable.tableName,
-        CITATIONS_TABLE: citationsTable.tableName,
-        CRAWLED_CONTENT_TABLE: crawledContentTable.tableName,
-        KEYWORDS_TABLE: keywordsTable.tableName,
         ...bedrockTierEnv,
         // recommendation status (read for left-join, write for the
         // POST /recommendations/{id}/status route)
-        RECOMMENDATION_STATUS_TABLE: recommendationStatusTable.tableName,
+        DYNAMODB_TABLE_RECOMMENDATION_STATUS: recommendationStatusTable.tableName,
       },
     });
 
@@ -1924,10 +1908,6 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_CRAWLED_CONTENT: crawledContentTable.tableName,
         // /citations resolves group_id / keyword_ids scopes against the keywords table.
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
-        // Legacy names, dropped once rollout verified.
-        CITATIONS_TABLE: citationsTable.tableName,
-        SEARCH_RESULTS_TABLE: searchResultsTable.tableName,
-        CRAWLED_CONTENT_TABLE: crawledContentTable.tableName,
         RAW_RESPONSES_BUCKET: rawResponsesBucket.bucketName,
         SCREENSHOTS_BUCKET: screenshotsBucket.bucketName,
       },
@@ -1977,9 +1957,6 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         DYNAMODB_TABLE_KEYWORD_RESEARCH: keywordResearchTable.tableName,
         DYNAMODB_TABLE_RESEARCH_TEMPLATES: researchTemplatesTable.tableName,
-        // Legacy names, dropped once rollout verified.
-        KEYWORDS_TABLE: keywordsTable.tableName,
-        KEYWORD_RESEARCH_TABLE: keywordResearchTable.tableName,
         RESEARCH_STATE_MACHINE_ARN: researchStateMachine.stateMachineArn,
         SECRETS_PREFIX: 'citation-analysis/',
       },
@@ -2009,9 +1986,6 @@ export class CitationAnalysisStack extends cdk.Stack {
         KPI_ALERTS_TOPIC_ARN: kpiAlertsTopic.topicArn,
         // Schedules and content-change markers validate group ids.
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
-        // Legacy names, dropped once rollout verified.
-        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
-        PROVIDER_CONFIG_TABLE: providerConfigTable.tableName,
         STATE_MACHINE_ARN: stateMachine.stateMachineArn,
         SCHEDULE_ROLE_ARN: schedulerRole.roleArn,
         SECRETS_PREFIX: 'citation-analysis/',
@@ -2035,9 +2009,6 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
-        // Legacy names, dropped once rollout verified.
-        KEYWORDS_TABLE: keywordsTable.tableName,
-        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
       },
     });
 
@@ -2146,7 +2117,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       description: 'API: Get per-persona brand ranking breakdowns',
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
-        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
+        DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
       },
     });
     searchResultsTable.grantReadData(getPersonaRankingsFunction);
@@ -2180,7 +2151,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       environment: {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_SELF_REFLECTION: selfReflectionTable.tableName,
-        QUERY_PROMPTS_TABLE: queryPromptsTable.tableName,
+        DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
         // NOTE: `shared/models.py` resolves the analysis model from
         // BEDROCK_TIER_<ROLE> (see `bedrockTierEnv`), which this function does
         // not spread, so ModelRole.ANALYSIS falls through to its hardcoded

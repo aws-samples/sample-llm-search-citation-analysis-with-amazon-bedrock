@@ -42,7 +42,7 @@ def _env_vars():
     """Set required environment variables."""
     with patch.dict(os.environ, {
         'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-results',
-        'PROVIDER_CONFIG_TABLE': 'test-provider-config',
+        'DYNAMODB_TABLE_PROVIDER_CONFIG': 'test-provider-config',
         'RAW_RESPONSES_BUCKET': 'test-bucket',
         'SECRETS_PREFIX': 'test/',
     }):

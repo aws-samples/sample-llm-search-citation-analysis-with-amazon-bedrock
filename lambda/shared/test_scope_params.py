@@ -202,21 +202,18 @@ class TestScopeQueryParams:
 
 
 class TestKeywordsTableName:
-    def test_prefers_the_canonical_env_var(self, monkeypatch):
+    def test_returns_the_canonical_env_var(self, monkeypatch):
         monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'canonical-keywords')
-        monkeypatch.setenv('KEYWORDS_TABLE', 'legacy-keywords')
 
         assert keywords_table_name() == 'canonical-keywords'
 
-    def test_falls_back_to_the_legacy_env_var_when_the_canonical_one_is_blank(self, monkeypatch):
+    def test_defaults_to_the_stack_table_name_when_the_env_var_is_blank(self, monkeypatch):
         monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', '')
-        monkeypatch.setenv('KEYWORDS_TABLE', 'legacy-keywords')
 
-        assert keywords_table_name() == 'legacy-keywords'
+        assert keywords_table_name() == 'CitationAnalysis-Keywords'
 
     def test_defaults_to_the_stack_table_name_when_nothing_is_set(self, monkeypatch):
         monkeypatch.delenv('DYNAMODB_TABLE_KEYWORDS', raising=False)
-        monkeypatch.delenv('KEYWORDS_TABLE', raising=False)
 
         assert keywords_table_name() == 'CitationAnalysis-Keywords'
 
