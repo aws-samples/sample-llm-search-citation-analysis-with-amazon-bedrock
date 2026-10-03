@@ -32,6 +32,16 @@ async function renderAndSubmitEmptyMentionRate() {
 }
 
 describe('AlertSettingsForm', () => {
+  it.each([
+    ['Mention-rate drop', 'points of mention rate'],
+    ['Position loss', 'places of average position'],
+    ['Competitor top N', 'positions'],
+    ['Improvement after content change', 'points of visibility score'],
+  ])('states the %s threshold in %s', (label, unit) => {
+    renderAlertSettingsForm();
+
+    expect(screen.getByLabelText(new RegExp(`^${label}`, 'u')).nextElementSibling).toHaveTextContent(unit);
+  });
   it('submits the exact settings represented by every edited control', async () => {
     const { props } = renderAlertSettingsForm();
     const user = userEvent.setup();
