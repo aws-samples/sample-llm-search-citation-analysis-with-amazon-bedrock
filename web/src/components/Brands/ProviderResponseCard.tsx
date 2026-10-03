@@ -7,18 +7,13 @@ import {
 } from '../ui/MarkdownProcessor';
 import { safeHref } from '../../infrastructure';
 import { ChevronDownIcon } from '../ui';
+import { sentimentTextColor } from './brandPresentation';
 
 interface ProviderResponseCardProps {
   provider: ProviderBrandData;
   brand: AggregatedBrand;
   keyword: string;
 }
-
-const getSentimentColor = (sentiment: string): string => {
-  if (sentiment === 'positive') return 'text-green-600';
-  if (sentiment === 'negative') return 'text-red-600';
-  return 'text-gray-600';
-};
 
 const getDisplayText = (fullText: string, isExpanded: boolean): string => {
   if (isExpanded || fullText.length <= 300) return fullText;
@@ -150,7 +145,7 @@ const ResponseHeader = ({
           {brandData.sentiment && (
             <div className="text-sm text-gray-600 mt-1">
               Sentiment:{' '}
-              <span className={`font-medium ${getSentimentColor(brandData.sentiment)}`}>
+              <span className={`font-medium ${sentimentTextColor(brandData.sentiment)}`}>
                 {brandData.sentiment}
               </span>
             </div>

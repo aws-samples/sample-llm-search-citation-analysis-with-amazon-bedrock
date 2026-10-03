@@ -1,4 +1,5 @@
 import type { RefObject } from 'react';
+import { StrokeIcon } from '../ui/StrokeIcon';
 
 interface DashboardChartCardProps {
   readonly title: string;
@@ -33,22 +34,7 @@ export const DashboardChartCard = ({
       {!hasData && (
         <div className="absolute inset-0 flex items-center justify-center text-gray-400 text-center">
           <div>
-            <svg
-              className="w-10 h-10 mx-auto mb-3 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              {emptyIconPaths.map((d) => (
-                <path
-                  key={d}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d={d}
-                />
-              ))}
-            </svg>
+            <StrokeIcon className="w-10 h-10 mx-auto mb-3 text-gray-400" paths={emptyIconPaths} />
             <p className="text-sm">No data available</p>
             <p className="text-xs mt-1">{emptyHint}</p>
           </div>

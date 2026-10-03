@@ -5,31 +5,35 @@ import {
   render, screen
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ComponentProps } from 'react';
 import { CompetitorAnalysis } from './CompetitorAnalysis';
-import {
-  SELECTION_LIMIT, promotionSuccessMessage
-} from '../../hooks/usePromoteKeywords';
+import { promotionSuccessMessage } from '../../hooks/usePromoteKeywords';
 import type { CompetitorAnalysisResult } from '../../types';
 import { buildResult } from './CompetitorAnalysis-fixtures';
 import {
-  getPromoteButtonElement, selectKeywordCheckbox
+  buildCreatedKeywordItem,
+  buildPromotionWire,
+  getPromoteButtonElement,
+  promotionRequestArguments,
+  selectKeywordCheckbox,
+  selectionCountText,
 } from './expandedKeyword-fixtures';
 
 vi.mock('../../api/client', () => import('./apiClientMock-fixtures'));
 
 import { mockApiPost } from './apiClientMock-fixtures';
 
-const promotionEndpoint = '/keywords/promote';
-
 const defaultProps = {
   onAnalyze: vi.fn(),
   loading: false,
   result: null,
   error: null,
-};
+} satisfies ComponentProps<typeof CompetitorAnalysis>;
 
-const renderCompetitorResult = (result: CompetitorAnalysisResult) =>
-  render(<CompetitorAnalysis {...defaultProps} result={result} />);
+const renderCompetitor = (overrides: Partial<ComponentProps<typeof CompetitorAnalysis>> = {}) =>
+  render(<CompetitorAnalysis {...defaultProps} {...overrides} />);
+
+const renderCompetitorResult = (result: CompetitorAnalysisResult) => renderCompetitor({ result });
 
 /**
  * A competitor result with all four sections populated by distinguishable
@@ -158,64 +162,34 @@ const sectionFixtures = [
 
 const [firstPrimaryKeyword, secondPrimaryKeyword] = competitorResultFixture.primary_keywords;
 
-/**
- * `created_keywords` entries: the COMPLETE created items as the backend writes
- * them, a superset of the `Keyword` fields the active keyword list reads.
- */
 const createdKeywordItemFixtures = [
-  {
-    id: 'keyword-1',
+  buildCreatedKeywordItem({
     keyword: firstPrimaryKeyword.keyword,
-    status: 'active',
-    created_at: '2024-01-15T10:30:00Z',
-    updated_at: '2024-01-15T10:30:00Z',
-    region: 'global',
-    language: 'en',
-    category: '',
-    priority: 'normal',
     notes: 'intent: transactional; competition: high; source: title',
-  },
-  {
+  }),
+  buildCreatedKeywordItem({
     id: 'keyword-2',
     keyword: secondPrimaryKeyword.keyword,
-    status: 'active',
-    created_at: '2024-01-15T10:30:00Z',
-    updated_at: '2024-01-15T10:30:00Z',
-    region: 'global',
-    language: 'en',
-    category: '',
-    priority: 'normal',
     notes: 'intent: commercial; competition: medium; source: h1',
-  },
+  }),
 ];
 
-const promotionResponseFixture = {
-  created: 2,
-  skipped: 0,
-  created_keywords: createdKeywordItemFixtures,
-  skipped_keywords: [],
-};
+const promotionResponseFixture = buildPromotionWire(createdKeywordItemFixtures);
 
 /** The success line shown for `promotionResponseFixture`. */
-const promotionSuccessText = promotionSuccessMessage({
-  created: promotionResponseFixture.created,
-  skipped: promotionResponseFixture.skipped,
-  createdKeywords: [],
-  createdItems: [],
-  skippedKeywords: [],
-});
+const promotionSuccessText = promotionSuccessMessage(promotionResponseFixture);
 
 describe('CompetitorAnalysis', () => {
   describe('input form', () => {
     it('renders URL input field', () => {
-      render(<CompetitorAnalysis {...defaultProps} />);
+      renderCompetitor();
 
       expect(screen.getByPlaceholderText('https://competitor.com')).toBeInTheDocument();
     });
 
     it('calls onAnalyze with URL when form submitted', async () => {
       const onAnalyze = vi.fn();
-      render(<CompetitorAnalysis {...defaultProps} onAnalyze={onAnalyze} />);
+      renderCompetitor({ onAnalyze });
 
       await userEvent.type(screen.getByPlaceholderText('https://competitor.com'), 'https://test.com');
       await userEvent.click(screen.getByRole('button', { name: /analyze/i }));
@@ -225,7 +199,7 @@ describe('CompetitorAnalysis', () => {
 
     it('does not call onAnalyze when URL is empty', async () => {
       const onAnalyze = vi.fn();
-      render(<CompetitorAnalysis {...defaultProps} onAnalyze={onAnalyze} />);
+      renderCompetitor({ onAnalyze });
 
       await userEvent.click(screen.getByRole('button', { name: /analyze/i }));
 
@@ -235,7 +209,7 @@ describe('CompetitorAnalysis', () => {
 
   describe('error state', () => {
     it('displays error message when error prop is set', () => {
-      render(<CompetitorAnalysis {...defaultProps} error="Invalid URL" />);
+      renderCompetitor({ error: 'Invalid URL' });
 
       expect(screen.getByText('Invalid URL')).toBeInTheDocument();
     });
@@ -259,7 +233,7 @@ describe('CompetitorAnalysis', () => {
 
   describe('loading state', () => {
     it('disables analyze button when loading', () => {
-      render(<CompetitorAnalysis {...defaultProps} loading={true} />);
+      renderCompetitor({ loading: true });
 
       expect(screen.getByRole('button', { name: /analyzing/i })).toBeDisabled();
     });
@@ -291,7 +265,7 @@ describe('CompetitorAnalysis', () => {
 
       await userEvent.click(screen.getByRole('button', { name: /Secondary Keywords/ }));
 
-      expect(screen.getByText(`0 of ${SELECTION_LIMIT} keywords selected`)).toBeInTheDocument();
+      expect(screen.getByText(selectionCountText(0))).toBeInTheDocument();
       expect(screen.queryAllByRole('checkbox', { checked: true })).toHaveLength(0);
       expect(getPromoteButtonElement()).toBeDisabled();
     });
@@ -302,7 +276,7 @@ describe('CompetitorAnalysis', () => {
 
       rerender(<CompetitorAnalysis {...defaultProps} result={refreshedCompetitorResultFixture} />);
 
-      expect(screen.getByText(`0 of ${SELECTION_LIMIT} keywords selected`)).toBeInTheDocument();
+      expect(screen.getByText(selectionCountText(0))).toBeInTheDocument();
       expect(screen.queryAllByRole('checkbox', { checked: true })).toHaveLength(0);
     });
 
@@ -317,12 +291,7 @@ describe('CompetitorAnalysis', () => {
 
       expect(mockApiPost).toHaveBeenCalledTimes(1);
       expect(mockApiPost).toHaveBeenCalledWith(
-        promotionEndpoint,
-        { keywords: [firstPrimaryKeyword, secondPrimaryKeyword] },
-        {
-          signal: expect.any(AbortSignal),
-          allowStructured4xx: true,
-        }
+        ...promotionRequestArguments([firstPrimaryKeyword, secondPrimaryKeyword])
       );
     });
   });

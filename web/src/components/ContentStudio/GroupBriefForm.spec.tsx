@@ -1,10 +1,14 @@
 import {
-  afterEach, beforeEach, describe, expect, it, vi
+  beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
   fireEvent, screen, waitFor, within
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import {
+  buildApiBatchRequest,
+  buildApiGroupBriefIdea,
+} from '../../api/contentStudio-fixtures';
 import { useContentBriefTemplates } from '../../hooks/useContentBriefTemplates';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import * as groupBriefSource from './GroupBriefForm-source';
@@ -13,20 +17,29 @@ import {
   GROUP_BRIEF_DEFAULT_TEMPLATES,
 } from './GroupBriefForm-source';
 import {
+  buildContentBriefGroupScope,
   buildContentBriefKeywordScope,
   buildContentBriefTemplate,
   buildContentBriefTemplatesHookResult,
+  buildContentBriefTemplatesHookResultWithSaved,
   buildKeyword,
   buildKeywordGroupHookResult,
   buildNumberedKeywords,
+  buildSavedContentBriefTemplate,
+  chooseGroupBriefMode,
   confirmGroupBrief,
   fillImproveUrlBrief,
   renderGroupBriefForm,
   reviewGroupBrief,
+  selectAllKeywordsForBrief,
+  selectGroupBriefMode,
   selectGroupForBrief,
   selectKeywordsForBrief,
+  selectPerKeywordBatch,
   selectPerKeywordStrategy,
+  readFieldIdentity,
   submitGroupBrief,
+  submitKeywordBrief,
 } from './GroupBriefForm-fixtures';
 
 vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
@@ -35,16 +48,29 @@ vi.mock('../../hooks/useContentBriefTemplates', () => ({ useContentBriefTemplate
 const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
 const mockUseContentBriefTemplates = vi.mocked(useContentBriefTemplates);
 
+const THREE_KEYWORD_NAMES = ['Alpha keyword', 'Beta keyword', 'Other group keyword'];
+
+const modeFieldIdentityCases = [
+  {
+    testName: 'associates the URL field with its group-brief identity',
+    mode: /Improve current URL/u,
+    label: 'Current landing URL',
+    identity: 'group-brief-url',
+  },
+  {
+    testName: 'associates the copy field with its group-brief identity',
+    mode: /Rewrite pasted copy/u,
+    label: 'Current copy',
+    identity: 'group-brief-copy',
+  },
+];
+
 beforeEach(() => {
   mockUseKeywordGroups.mockReturnValue(buildKeywordGroupHookResult());
   mockUseContentBriefTemplates.mockReturnValue(buildContentBriefTemplatesHookResult());
   vi.spyOn(groupBriefSource, 'createGroupBriefIdeaId')
     .mockReturnValueOnce('brief-stable-id')
     .mockReturnValue('brief-next-id');
-});
-
-afterEach(() => {
-  vi.restoreAllMocks();
 });
 
 describe('GroupBriefForm scope', () => {
@@ -74,28 +100,17 @@ describe('GroupBriefForm scope', () => {
 
     await submitGroupBrief();
 
-    expect(formProps.onGenerate).toHaveBeenCalledWith({
+    expect(formProps.onGenerate).toHaveBeenCalledWith(buildApiGroupBriefIdea({
       id: 'brief-stable-id',
-      type: 'group_brief',
-      scope: {
-        mode: 'groups',
-        group_ids: ['group-1'],
-      },
-      content_angle: 'create_new_landing_page',
-      landing_url: '',
-      current_copy: '',
-      template_id: 'builtin-create-new-landing-page',
-      prompt_template: GROUP_BRIEF_DEFAULT_TEMPLATES.create_new_landing_page,
-      output_language: 'English',
-    });
+      scope: buildContentBriefGroupScope(['group-1']),
+    }));
   });
 
   it('sends arbitrary active keyword IDs without requiring a group', async () => {
     mockUseKeywordGroups.mockReturnValue(buildKeywordGroupHookResult({ groups: [] }));
     const formProps = renderGroupBriefForm();
-    await selectKeywordsForBrief(['Alpha keyword', 'Other group keyword']);
 
-    await submitGroupBrief();
+    await submitKeywordBrief(['Alpha keyword', 'Other group keyword']);
 
     expect(formProps.onGenerate).toHaveBeenCalledWith(expect.objectContaining({ scope: buildContentBriefKeywordScope(['keyword-1', 'keyword-other']) }));
     expect(formProps.onGenerateBatch).not.toHaveBeenCalledWith(expect.anything());
@@ -103,9 +118,8 @@ describe('GroupBriefForm scope', () => {
 
   it('treats one selected keyword as an ordinary combined brief', async () => {
     const formProps = renderGroupBriefForm();
-    await selectKeywordsForBrief(['Alpha keyword']);
 
-    await submitGroupBrief();
+    await submitKeywordBrief(['Alpha keyword']);
 
     expect(formProps.onGenerate).toHaveBeenCalledWith(expect.objectContaining({ scope: buildContentBriefKeywordScope(['keyword-1']) }));
     expect(screen.queryByText(/keyword group is required/iu)).not.toBeInTheDocument();
@@ -114,7 +128,7 @@ describe('GroupBriefForm scope', () => {
   it('preserves all 50 selected keyword IDs in a combined request', async () => {
     const keywords = buildNumberedKeywords(50);
     const formProps = renderGroupBriefForm({ keywords });
-    await userEvent.click(screen.getByRole('button', { name: 'Select all' }));
+    await selectAllKeywordsForBrief();
 
     await submitGroupBrief();
 
@@ -155,33 +169,23 @@ describe('GroupBriefForm scope', () => {
 describe('GroupBriefForm strategy', () => {
   it('starts one batch request for three selected keywords after confirmation', async () => {
     const formProps = renderGroupBriefForm();
-    await selectKeywordsForBrief(['Alpha keyword', 'Beta keyword', 'Other group keyword']);
-    await selectPerKeywordStrategy();
+    await selectPerKeywordBatch(THREE_KEYWORD_NAMES);
 
     await reviewGroupBrief();
     await confirmGroupBrief(3);
 
-    expect(formProps.onGenerateBatch).toHaveBeenCalledWith({
+    expect(formProps.onGenerateBatch).toHaveBeenCalledWith(buildApiBatchRequest({
       batch_id: 'brief-stable-id',
       scope: buildContentBriefKeywordScope([
         'keyword-1', 'keyword-2', 'keyword-other'
       ]),
-      brief: {
-        content_angle: 'create_new_landing_page',
-        landing_url: '',
-        current_copy: '',
-        template_id: 'builtin-create-new-landing-page',
-        prompt_template: GROUP_BRIEF_DEFAULT_TEMPLATES.create_new_landing_page,
-        output_language: 'English',
-      },
-    });
+    }));
     expect(formProps.onGenerate).not.toHaveBeenCalledWith(expect.anything());
   });
 
   it('shows the exact paid-call count before a three-keyword batch starts', async () => {
     const formProps = renderGroupBriefForm();
-    await selectKeywordsForBrief(['Alpha keyword', 'Beta keyword', 'Other group keyword']);
-    await selectPerKeywordStrategy();
+    await selectPerKeywordBatch(THREE_KEYWORD_NAMES);
 
     expect(screen.getByText('Estimated paid model calls: 3')).toBeInTheDocument();
     await reviewGroupBrief();
@@ -193,12 +197,8 @@ describe('GroupBriefForm strategy', () => {
   });
 
   it('blocks a per-keyword batch above ten with actionable guidance', async () => {
-    const keywords = Array.from({ length: 11 }, (_, index) => buildKeyword({
-      id: `keyword-${index + 1}`,
-      keyword: `Keyword ${index + 1}`,
-    }));
-    renderGroupBriefForm({ keywords });
-    await userEvent.click(screen.getByRole('button', { name: 'Select all' }));
+    renderGroupBriefForm({ keywords: buildNumberedKeywords(11) });
+    await selectAllKeywordsForBrief();
     await selectPerKeywordStrategy();
 
     expect(screen.getByText(GROUP_BRIEF_BATCH_LIMIT_GUIDANCE)).toBeInTheDocument();
@@ -208,8 +208,7 @@ describe('GroupBriefForm strategy', () => {
 
   it('explains equivalence when one keyword uses the per-keyword strategy', async () => {
     renderGroupBriefForm();
-    await selectKeywordsForBrief(['Alpha keyword']);
-    await selectPerKeywordStrategy();
+    await selectPerKeywordBatch(['Alpha keyword']);
 
     expect(screen.getByText(/combined option is equivalent/iu)).toBeInTheDocument();
     expect(screen.getByText('Estimated paid model calls: 1')).toBeInTheDocument();
@@ -219,8 +218,7 @@ describe('GroupBriefForm strategy', () => {
 describe('GroupBriefForm content fields', () => {
   it('requires an http or https URL when improve current URL mode is selected', async () => {
     renderGroupBriefForm();
-    await selectGroupForBrief();
-    await userEvent.click(screen.getByRole('radio', { name: /Improve current URL/u }));
+    await selectGroupBriefMode(/Improve current URL/u);
 
     await reviewGroupBrief();
 
@@ -243,8 +241,7 @@ describe('GroupBriefForm content fields', () => {
 
   it('requires non-whitespace copy when rewrite pasted copy mode is selected', async () => {
     renderGroupBriefForm();
-    await selectGroupForBrief();
-    await userEvent.click(screen.getByRole('radio', { name: /Rewrite pasted copy/u }));
+    await selectGroupBriefMode(/Rewrite pasted copy/u);
     await userEvent.type(screen.getByLabelText('Current copy'), '   ');
 
     await reviewGroupBrief();
@@ -334,17 +331,13 @@ describe('GroupBriefForm templates', () => {
   });
 
   it('offers update and delete controls only for a saved template', async () => {
-    const saved = buildContentBriefTemplate({
-      id: 'saved-template',
-      name: 'Saved template',
-      builtin: false,
+    const saved = buildSavedContentBriefTemplate({
       created_by: 'user-1',
       created_at: '2026-01-01T00:00:00Z',
       updated_at: '2026-01-01T00:00:00Z',
     });
-    const templates = [...buildContentBriefTemplatesHookResult().templates, saved];
     mockUseContentBriefTemplates.mockReturnValue(
-      buildContentBriefTemplatesHookResult({ templates })
+      buildContentBriefTemplatesHookResultWithSaved(saved)
     );
     renderGroupBriefForm();
 
@@ -355,12 +348,7 @@ describe('GroupBriefForm templates', () => {
   });
 
   it('uses the exact server snapshot returned by a later template update', async () => {
-    const saved = buildContentBriefTemplate({
-      id: 'saved-template',
-      name: 'Saved template',
-      prompt_template: 'Original {scope}',
-      builtin: false,
-    });
+    const saved = buildSavedContentBriefTemplate({ prompt_template: 'Original {scope}' });
     const updated = {
       ...saved,
       prompt_template: 'Authoritative updated {scope}',
@@ -371,10 +359,9 @@ describe('GroupBriefForm templates', () => {
       message: 'Template "Saved template" updated',
       template: updated,
     });
-    mockUseContentBriefTemplates.mockReturnValue(buildContentBriefTemplatesHookResult({
-      templates: [...buildContentBriefTemplatesHookResult().templates, saved],
-      update,
-    }));
+    mockUseContentBriefTemplates.mockReturnValue(
+      buildContentBriefTemplatesHookResultWithSaved(saved, { update })
+    );
     const formProps = renderGroupBriefForm();
     await userEvent.selectOptions(screen.getByLabelText('Saved template'), saved.id);
     fireEvent.change(
@@ -387,9 +374,8 @@ describe('GroupBriefForm templates', () => {
         'Authoritative updated {scope}'
       );
     });
-    await selectKeywordsForBrief(['Alpha keyword']);
 
-    await submitGroupBrief();
+    await submitKeywordBrief(['Alpha keyword']);
 
     expect(formProps.onGenerate).toHaveBeenCalledWith(expect.objectContaining({
       template_id: 'saved-template',
@@ -398,19 +384,14 @@ describe('GroupBriefForm templates', () => {
   });
 
   it('deletes a saved template only after confirmation', async () => {
-    const saved = buildContentBriefTemplate({
-      id: 'saved-template',
-      name: 'Saved template',
-      builtin: false,
-    });
+    const saved = buildSavedContentBriefTemplate();
     const remove = vi.fn().mockResolvedValue({
       success: true,
       message: 'Template deleted',
     });
-    mockUseContentBriefTemplates.mockReturnValue(buildContentBriefTemplatesHookResult({
-      templates: [...buildContentBriefTemplatesHookResult().templates, saved],
-      remove,
-    }));
+    mockUseContentBriefTemplates.mockReturnValue(
+      buildContentBriefTemplatesHookResultWithSaved(saved, { remove })
+    );
     vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
     renderGroupBriefForm();
     await userEvent.selectOptions(screen.getByLabelText('Saved template'), saved.id);
@@ -440,11 +421,7 @@ describe('GroupBriefForm request state', () => {
       screen.getByLabelText<HTMLSelectElement>(label)
     ));
 
-    expect(fields.map((field) => ({
-      id: field.id,
-      labelFor: field.labels?.[0]?.htmlFor,
-      name: field.name,
-    }))).toStrictEqual([
+    expect(fields.map(readFieldIdentity)).toStrictEqual([
       {
         id: 'group-brief-language',
         labelFor: 'group-brief-language',
@@ -460,9 +437,7 @@ describe('GroupBriefForm request state', () => {
       .getAllByRole<HTMLInputElement>('radio');
 
     expect(modes.map((mode) => ({
-      id: mode.id,
-      labelFor: mode.labels?.[0]?.htmlFor,
-      name: mode.name,
+      ...readFieldIdentity(mode),
       value: mode.value,
     }))).toStrictEqual([
       {
@@ -489,14 +464,12 @@ describe('GroupBriefForm request state', () => {
   it('gives keyword checkboxes unique ids with one plural name', () => {
     renderGroupBriefForm();
 
-    const checkboxes = ['Alpha keyword', 'Beta keyword', 'Other group keyword'].map((name) => (
+    const checkboxes = THREE_KEYWORD_NAMES.map((name) => (
       screen.getByRole<HTMLInputElement>('checkbox', { name })
     ));
 
     expect(checkboxes.map((checkbox) => ({
-      id: checkbox.id,
-      labelFor: checkbox.labels?.[0]?.htmlFor,
-      name: checkbox.name,
+      ...readFieldIdentity(checkbox),
       value: checkbox.value,
     }))).toStrictEqual([
       {
@@ -520,37 +493,18 @@ describe('GroupBriefForm request state', () => {
     ]);
   });
 
-  it('associates the URL field with its group-brief identity', async () => {
+  it.each(modeFieldIdentityCases)('$testName', async ({
+    mode, label, identity
+  }) => {
     renderGroupBriefForm();
 
-    await userEvent.click(screen.getByRole('radio', { name: /Improve current URL/u }));
-    const landingUrl = screen.getByLabelText<HTMLInputElement>('Current landing URL');
+    await chooseGroupBriefMode(mode);
+    const field = screen.getByLabelText<HTMLInputElement | HTMLTextAreaElement>(label);
 
-    expect({
-      id: landingUrl.id,
-      labelFor: landingUrl.labels?.[0]?.htmlFor,
-      name: landingUrl.name,
-    }).toStrictEqual({
-      id: 'group-brief-url',
-      labelFor: 'group-brief-url',
-      name: 'group-brief-url',
-    });
-  });
-
-  it('associates the copy field with its group-brief identity', async () => {
-    renderGroupBriefForm();
-
-    await userEvent.click(screen.getByRole('radio', { name: /Rewrite pasted copy/u }));
-    const currentCopy = screen.getByLabelText<HTMLTextAreaElement>('Current copy');
-
-    expect({
-      id: currentCopy.id,
-      labelFor: currentCopy.labels?.[0]?.htmlFor,
-      name: currentCopy.name,
-    }).toStrictEqual({
-      id: 'group-brief-copy',
-      labelFor: 'group-brief-copy',
-      name: 'group-brief-copy',
+    expect(readFieldIdentity(field)).toStrictEqual({
+      id: identity,
+      labelFor: identity,
+      name: identity,
     });
   });
 

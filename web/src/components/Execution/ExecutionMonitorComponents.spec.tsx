@@ -8,6 +8,9 @@ import {
   buildGroup, buildKeyword
 } from '../../api/keywordGroups-fixtures';
 import { TriggerSection } from './ExecutionMonitorComponents';
+import {
+  checkboxIdentity, inputIdentity
+} from '../ui/KeywordScopePicker-fixtures';
 
 describe('TriggerSection', () => {
   const renderTriggerSection = (props: Partial<Parameters<typeof TriggerSection>[0]> = {}) => render(
@@ -38,21 +41,12 @@ describe('TriggerSection', () => {
     const search = screen.getByLabelText<HTMLInputElement>('Search keywords');
     const keyword = screen.getByRole<HTMLInputElement>('checkbox', { name: 'accessible hotels' });
 
-    expect({
-      id: search.id,
-      labelFor: search.labels?.[0]?.htmlFor,
-      name: search.name,
-    }).toStrictEqual({
+    expect(inputIdentity(search)).toStrictEqual({
       id: 'execution-keyword-scope-search',
       labelFor: 'execution-keyword-scope-search',
       name: 'execution-keyword-scope-search',
     });
-    expect({
-      id: keyword.id,
-      labelFor: keyword.labels?.[0]?.htmlFor,
-      name: keyword.name,
-      value: keyword.value,
-    }).toStrictEqual({
+    expect(checkboxIdentity(keyword)).toStrictEqual({
       id: 'execution-keyword-scope-section-__ungrouped__-keyword-keyword-1',
       labelFor: 'execution-keyword-scope-section-__ungrouped__-keyword-keyword-1',
       name: 'execution-keyword-ids',

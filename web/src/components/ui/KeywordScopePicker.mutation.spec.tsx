@@ -15,6 +15,8 @@ import {
   buildGroupScopePickerProps,
   buildKeywordScopePickerProps,
   buildScopedKeywordScopePickerProps,
+  clickLegacyPickerControl,
+  clickScopedPickerControl,
   collapseScopePickerSection,
   renderLegacyKeywordScopePicker,
   renderScopedKeywordScopePicker,
@@ -22,6 +24,8 @@ import {
   scopePickerCorunaGroup,
   scopePickerGroups,
   scopePickerKeywords,
+  sectionHeaderState,
+  typeScopePickerSearch,
 } from './KeywordScopePicker-fixtures';
 import {buildCappedSectionKeywordScopePickerProps} from './KeywordScopePicker-mutation-fixtures';
 
@@ -80,29 +84,87 @@ const sectionDisclosureCases = [
   },
 ];
 
-const globalCapSelectionCases = [
+/** The Alpha section header while the cap leaves room for one of its two keywords. */
+const ALPHA_FIRST_ONE_CONTROL = {
+  role: 'checkbox',
+  name: 'Select first 1 in Alpha group',
+} as const;
+
+const keywordCapClickCases = [
   {
     testName: 'floors a fractional keyword cap before selecting a prefix',
-    selectedIds: [],
-    maxKeywords: 1.9,
-    buttonName: 'Select first 1',
+    props: buildKeywordScopePickerProps([], { maxKeywords: 1.9 }),
+    control: {
+      role: 'button',
+      name: 'Select first 1',
+    },
     expectedIds: ['k1'],
   },
   {
     testName: 'offers uncapped selection when the cap equals the keyword count',
-    selectedIds: [],
-    maxKeywords: 4,
-    buttonName: 'Select all',
+    props: buildKeywordScopePickerProps([], { maxKeywords: 4 }),
+    control: {
+      role: 'button',
+      name: 'Select all',
+    },
     expectedIds: ['k1', 'k2', 'k3', 'k4'],
   },
   {
     testName: 'normalizes an over-cap controlled selection to the first capped prefix',
-    selectedIds: scopePickerKeywords.map((keyword) => keyword.id),
-    maxKeywords: 3,
-    buttonName: 'Select first 3',
+    props: buildKeywordScopePickerProps(
+      scopePickerKeywords.map((keyword) => keyword.id),
+      { maxKeywords: 3 }
+    ),
+    control: {
+      role: 'button',
+      name: 'Select first 3',
+    },
     expectedIds: ['k1', 'k2', 'k3'],
   },
-];
+  {
+    testName: 'selects only remaining section capacity while preserving outside IDs',
+    props: buildCappedSectionKeywordScopePickerProps(['beta-1', 'beta-2'], { maxKeywords: 3 }),
+    control: ALPHA_FIRST_ONE_CONTROL,
+    expectedIds: ['alpha-1', 'beta-1', 'beta-2'],
+  },
+  {
+    testName: 'clears a capped section prefix while preserving outside IDs',
+    props: buildCappedSectionKeywordScopePickerProps(['alpha-1', 'beta-1', 'beta-2'], { maxKeywords: 3 }),
+    control: ALPHA_FIRST_ONE_CONTROL,
+    expectedIds: ['beta-1', 'beta-2'],
+  },
+  {
+    testName: 'normalizes a non-prefix section selection to the capped prefix',
+    props: buildCappedSectionKeywordScopePickerProps(['alpha-2', 'beta-1', 'beta-2'], { maxKeywords: 3 }),
+    control: ALPHA_FIRST_ONE_CONTROL,
+    expectedIds: ['alpha-1', 'beta-1', 'beta-2'],
+  },
+  {
+    testName: 'normalizes extra selected section members instead of clearing the target prefix',
+    props: buildCappedSectionKeywordScopePickerProps(['alpha-1', 'alpha-2', 'beta-1'], { maxKeywords: 2 }),
+    control: ALPHA_FIRST_ONE_CONTROL,
+    expectedIds: ['alpha-1', 'beta-1'],
+  },
+  {
+    testName: 'emits outside IDs when a selected section has a zero target',
+    props: buildCappedSectionKeywordScopePickerProps(['alpha-1', 'beta-1'], { maxKeywords: 1 }),
+    control: {
+      role: 'checkbox',
+      name: 'Select first 0 in Alpha group',
+    },
+    expectedIds: ['beta-1'],
+  },
+  {
+    testName: 'counts hidden selected keywords against a filtered section cap',
+    props: buildCappedSectionKeywordScopePickerProps(['beta-1'], { maxKeywords: 2 }),
+    control: {
+      role: 'checkbox',
+      name: 'Select all in Alpha group',
+      search: 'Alpha first',
+    },
+    expectedIds: ['alpha-1', 'beta-1'],
+  },
+] as const;
 
 const nonFiniteCapCases = [
   {
@@ -112,44 +174,6 @@ const nonFiniteCapCases = [
   {
     testName: 'offers uncapped selection when the cap is infinite',
     maxKeywords: Number.POSITIVE_INFINITY,
-  },
-];
-
-const cappedSectionToggleCases = [
-  {
-    testName: 'selects only remaining section capacity while preserving outside IDs',
-    selectedIds: ['beta-1', 'beta-2'],
-    maxKeywords: 3,
-    controlName: 'Select first 1 in Alpha group',
-    expectedIds: ['alpha-1', 'beta-1', 'beta-2'],
-  },
-  {
-    testName: 'clears a capped section prefix while preserving outside IDs',
-    selectedIds: ['alpha-1', 'beta-1', 'beta-2'],
-    maxKeywords: 3,
-    controlName: 'Select first 1 in Alpha group',
-    expectedIds: ['beta-1', 'beta-2'],
-  },
-  {
-    testName: 'normalizes a non-prefix section selection to the capped prefix',
-    selectedIds: ['alpha-2', 'beta-1', 'beta-2'],
-    maxKeywords: 3,
-    controlName: 'Select first 1 in Alpha group',
-    expectedIds: ['alpha-1', 'beta-1', 'beta-2'],
-  },
-  {
-    testName: 'normalizes extra selected section members instead of clearing the target prefix',
-    selectedIds: ['alpha-1', 'alpha-2', 'beta-1'],
-    maxKeywords: 2,
-    controlName: 'Select first 1 in Alpha group',
-    expectedIds: ['alpha-1', 'beta-1'],
-  },
-  {
-    testName: 'emits outside IDs when a selected section has a zero target',
-    selectedIds: ['alpha-1', 'beta-1'],
-    maxKeywords: 1,
-    controlName: 'Select first 0 in Alpha group',
-    expectedIds: ['beta-1'],
   },
 ];
 
@@ -230,10 +254,7 @@ describe('KeywordScopePicker search and tri-state outcomes', () => {
   it('matches a keyword when search text has different case and surrounding whitespace', async () => {
     renderLegacyKeywordScopePicker();
 
-    await userEvent.setup().type(
-      screen.getByRole('searchbox', { name: 'Search keywords' }),
-      '  BEACH  '
-    );
+    await typeScopePickerSearch('  BEACH  ');
 
     expect(screen.getByText('marino beach')).toBeInTheDocument();
     expect(screen.queryByText('coruña spa')).not.toBeInTheDocument();
@@ -242,10 +263,7 @@ describe('KeywordScopePicker search and tri-state outcomes', () => {
   it('shows the empty result when no keyword matches search text', async () => {
     renderLegacyKeywordScopePicker();
 
-    await userEvent.setup().type(
-      screen.getByRole('searchbox', { name: 'Search keywords' }),
-      'not present'
-    );
+    await typeScopePickerSearch('not present');
 
     expect(screen.getByText('No keywords match your search.')).toBeInTheDocument();
     expect(screen.queryAllByRole('region')).toStrictEqual([]);
@@ -255,25 +273,18 @@ describe('KeywordScopePicker search and tri-state outcomes', () => {
     selectedIds, expectedState
   }) => {
     renderLegacyKeywordScopePicker(selectedIds);
-    const header = screen.getByRole<HTMLInputElement>(
-      'checkbox',
-      { name: 'Select all in Hotel Coruña' }
-    );
 
-    expect({
-      checked: header.checked,
-      indeterminate: header.indeterminate,
-    }).toStrictEqual(expectedState);
+    expect(sectionHeaderState('Select all in Hotel Coruña')).toStrictEqual(expectedState);
   });
 
   it('emits no keyword IDs when uncapped global selection is complete', async () => {
-    const onChange = vi.fn();
-    renderLegacyKeywordScopePicker(
+    const onChange = await clickLegacyPickerControl(
       scopePickerKeywords.map((keyword) => keyword.id),
-      { onChange }
+      {
+        role: 'button',
+        name: 'Clear all',
+      }
     );
-
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Clear all' }));
 
     expect(onChange).toHaveBeenCalledWith([]);
   });
@@ -292,14 +303,11 @@ describe('KeywordScopePicker search and tri-state outcomes', () => {
   });
 
   it('keeps global bulk selection independent of a keyword search', async () => {
-    const onChange = vi.fn();
-    renderLegacyKeywordScopePicker([], { onChange });
-    await userEvent.setup().type(
-      screen.getByRole('searchbox', { name: 'Search keywords' }),
-      'beach'
-    );
-
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Select all' }));
+    const onChange = await clickLegacyPickerControl([], {
+      role: 'button',
+      name: 'Select all',
+      search: 'beach',
+    });
 
     expect(onChange.mock.calls).toStrictEqual([[['k1', 'k2', 'k3', 'k4']]]);
   });
@@ -318,7 +326,7 @@ describe('KeywordScopePicker empty and stale input outcomes', () => {
   });
 
   it('shows the empty group outcome when no groups are available', () => {
-    render(<KeywordScopePicker {...buildGroupScopePickerProps([], { groups: [] })} />);
+    renderScopedKeywordScopePicker(buildGroupScopePickerProps([], { groups: [] }));
 
     expect(screen.getByText('0 of 0 groups selected')).toBeInTheDocument();
     expect(screen.getByText('No keyword groups available.')).toBeInTheDocument();
@@ -326,7 +334,7 @@ describe('KeywordScopePicker empty and stale input outcomes', () => {
 
   it('ignores stale group IDs without emitting a corrective change', () => {
     const onChange = vi.fn();
-    render(<KeywordScopePicker {...buildGroupScopePickerProps(['missing'], { onChange })} />);
+    renderScopedKeywordScopePicker(buildGroupScopePickerProps(['missing'], { onChange }));
 
     expect(screen.getByText('0 of 2 groups selected')).toBeInTheDocument();
     expect(onChange).not.toHaveBeenCalled();
@@ -346,7 +354,7 @@ describe('KeywordScopePicker empty and stale input outcomes', () => {
 
 describe('KeywordScopePicker cap boundaries', () => {
   it.each(disabledGroupCases)('$testName', ({ props }) => {
-    render(<KeywordScopePicker {...props} />);
+    renderScopedKeywordScopePicker(props);
 
     expect({
       corunaDisabled: screen.getByRole<HTMLInputElement>(
@@ -364,26 +372,17 @@ describe('KeywordScopePicker cap boundaries', () => {
   });
 
   it('clamps a negative keyword cap to zero', () => {
-    render(<KeywordScopePicker {...buildKeywordScopePickerProps([], { maxKeywords: -1 })} />);
+    renderScopedKeywordScopePicker(buildKeywordScopePickerProps([], { maxKeywords: -1 }));
 
     expect(screen.getByRole('button', { name: 'Select first 0' })).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: 'Select first 0 in Hotel Coruña' })).toBeDisabled();
     expect(screen.getByRole('checkbox', { name: 'coruña spa' })).toBeDisabled();
   });
 
-  it.each(globalCapSelectionCases)('$testName', async ({
-    selectedIds,
-    maxKeywords,
-    buttonName,
-    expectedIds,
+  it.each(keywordCapClickCases)('$testName', async ({
+    props, control, expectedIds,
   }) => {
-    const onChange = vi.fn();
-    render(<KeywordScopePicker {...buildKeywordScopePickerProps(selectedIds, {
-      maxKeywords,
-      onChange,
-    })} />);
-
-    await userEvent.setup().click(screen.getByRole('button', { name: buttonName }));
+    const onChange = await clickScopedPickerControl(props, control);
 
     expect(onChange).toHaveBeenCalledWith({
       mode: 'keywords',
@@ -392,14 +391,14 @@ describe('KeywordScopePicker cap boundaries', () => {
   });
 
   it('offers uncapped selection when the cap exceeds the keyword count', () => {
-    render(<KeywordScopePicker {...buildKeywordScopePickerProps([], { maxKeywords: 5 })} />);
+    renderScopedKeywordScopePicker(buildKeywordScopePickerProps([], { maxKeywords: 5 }));
 
     expect(screen.getByRole('button', { name: 'Select all' })).toBeEnabled();
     expect(screen.queryByRole('button', { name: /Select first/u })).not.toBeInTheDocument();
   });
 
   it.each(nonFiniteCapCases)('$testName', ({ maxKeywords }) => {
-    render(<KeywordScopePicker {...buildKeywordScopePickerProps([], { maxKeywords })} />);
+    renderScopedKeywordScopePicker(buildKeywordScopePickerProps([], { maxKeywords }));
 
     expect({
       selectAllDisabled: screen.getByRole<HTMLButtonElement>(
@@ -416,62 +415,21 @@ describe('KeywordScopePicker cap boundaries', () => {
     });
   });
 
-  it.each(cappedSectionToggleCases)('$testName', async ({
-    selectedIds,
-    maxKeywords,
-    controlName,
-    expectedIds,
-  }) => {
-    const onChange = vi.fn();
-    render(<KeywordScopePicker {...buildCappedSectionKeywordScopePickerProps(selectedIds, {
-      maxKeywords,
-      onChange,
-    })} />);
-
-    await userEvent.setup().click(screen.getByRole('checkbox', { name: controlName }));
-
-    expect(onChange).toHaveBeenCalledWith({
-      mode: 'keywords',
-      keyword_ids: expectedIds,
-    });
-  });
-
   it('disables an empty section when outside selections consume the cap', () => {
-    render(<KeywordScopePicker {...buildCappedSectionKeywordScopePickerProps(
+    renderScopedKeywordScopePicker(buildCappedSectionKeywordScopePickerProps(
       ['beta-1', 'beta-2'],
       { maxKeywords: 2 }
-    )} />);
+    ));
 
     expect(
       screen.getByRole('checkbox', { name: 'Select first 0 in Alpha group' })
     ).toBeDisabled();
   });
-
-  it('counts hidden selected keywords against a filtered section cap', async () => {
-    const onChange = vi.fn();
-    render(<KeywordScopePicker {...buildCappedSectionKeywordScopePickerProps(['beta-1'], {
-      maxKeywords: 2,
-      onChange,
-    })} />);
-    await userEvent.setup().type(
-      screen.getByRole('searchbox', { name: 'Search keywords' }),
-      'Alpha first'
-    );
-
-    await userEvent.setup().click(
-      screen.getByRole('checkbox', { name: 'Select all in Alpha group' })
-    );
-
-    expect(onChange).toHaveBeenCalledWith({
-      mode: 'keywords',
-      keyword_ids: ['alpha-1', 'beta-1'],
-    });
-  });
 });
 
 describe('KeywordScopePicker modes and disabled outcomes', () => {
   it('renders allowed modes in canonical order when caller order differs', () => {
-    render(<KeywordScopePicker {...buildScopedKeywordScopePickerProps({allowedModes: ['keywords', 'all', 'groups'],})} />);
+    renderScopedKeywordScopePicker({ allowedModes: ['keywords', 'all', 'groups'] });
 
     expect(
       screen.getAllByRole('radio').map((radio) => radio.nextElementSibling?.textContent)
@@ -480,10 +438,10 @@ describe('KeywordScopePicker modes and disabled outcomes', () => {
 
   it('renders no picker when the authoritative mode is disallowed', () => {
     const onChange = vi.fn();
-    render(<KeywordScopePicker {...buildKeywordScopePickerProps(['k1'], {
+    renderScopedKeywordScopePicker(buildKeywordScopePickerProps(['k1'], {
       allowedModes: ['groups'],
       onChange,
-    })} />);
+    }));
 
     expect(screen.queryByRole('searchbox')).not.toBeInTheDocument();
     expect(screen.queryByText(/selected$/u)).not.toBeInTheDocument();
@@ -491,7 +449,7 @@ describe('KeywordScopePicker modes and disabled outcomes', () => {
   });
 
   it('disables scoped keyword selection controls when the picker is disabled', () => {
-    render(<KeywordScopePicker {...buildKeywordScopePickerProps([], { disabled: true })} />);
+    renderScopedKeywordScopePicker(buildKeywordScopePickerProps([], { disabled: true }));
 
     expect(screen.getByRole('radio', { name: 'Keywords' })).toBeDisabled();
     expect(screen.getByRole('searchbox', { name: 'Search keywords' })).toBeDisabled();
@@ -500,19 +458,19 @@ describe('KeywordScopePicker modes and disabled outcomes', () => {
   });
 
   it('does not emit a mode change when disabled', async () => {
-    const onChange = vi.fn();
-    render(<KeywordScopePicker {...buildKeywordScopePickerProps([], {
-      disabled: true,
-      onChange,
-    })} />);
-
-    await userEvent.setup().click(screen.getByRole('radio', { name: 'Groups' }));
+    const onChange = await clickScopedPickerControl(
+      buildKeywordScopePickerProps([], { disabled: true }),
+      {
+        role: 'radio',
+        name: 'Groups',
+      }
+    );
 
     expect(onChange).not.toHaveBeenCalled();
   });
 
   it.each(singularCopyCases)('$testName', ({ props }) => {
-    render(<KeywordScopePicker {...props} />);
+    renderScopedKeywordScopePicker(props);
 
     expect(screen.getByText('1 keyword')).toBeInTheDocument();
   });
@@ -535,17 +493,17 @@ describe('KeywordScopePicker remaining mutation outcomes', () => {
   });
 
   it('hides the empty-group message when groups exist', () => {
-    render(<KeywordScopePicker {...buildGroupScopePickerProps([])} />);
+    renderScopedKeywordScopePicker(buildGroupScopePickerProps([]));
 
     expect(screen.queryByText('No keyword groups available.')).not.toBeInTheDocument();
   });
 
   it('keeps a second group enabled while a finite group cap has capacity', async () => {
     const onChange = vi.fn();
-    render(<KeywordScopePicker {...buildGroupScopePickerProps(['coruna'], {
+    renderScopedKeywordScopePicker(buildGroupScopePickerProps(['coruna'], {
       maxGroups: 2,
       onChange,
-    })} />);
+    }));
     const secondGroup = screen.getByRole('checkbox', { name: 'Hotel Gran Marino' });
 
     expect(secondGroup).toBeEnabled();
@@ -557,13 +515,13 @@ describe('KeywordScopePicker remaining mutation outcomes', () => {
   });
 
   it('keeps another keyword enabled while a finite keyword cap has capacity', () => {
-    render(<KeywordScopePicker {...buildKeywordScopePickerProps(['k1'], {maxKeywords: 2,})} />);
+    renderScopedKeywordScopePicker(buildKeywordScopePickerProps(['k1'], { maxKeywords: 2 }));
 
     expect(screen.getByRole('checkbox', { name: 'marino beach' })).toBeEnabled();
   });
 
   it('keeps a selectable capped section enabled', () => {
-    render(<KeywordScopePicker {...buildKeywordScopePickerProps([], {maxKeywords: 2,})} />);
+    renderScopedKeywordScopePicker(buildKeywordScopePickerProps([], { maxKeywords: 2 }));
 
     expect(
       screen.getByRole('checkbox', { name: 'Select all in Hotel Coruña' })
@@ -581,16 +539,16 @@ describe('KeywordScopePicker remaining mutation outcomes', () => {
       keyword,
       group_ids: [threeKeywordGroup.id],
     }));
-    const onChange = vi.fn();
-    render(<KeywordScopePicker {...buildKeywordScopePickerProps(['three-1', 'three-3'], {
-      keywords: threeKeywords,
-      groups: [threeKeywordGroup],
-      maxKeywords: 2,
-      onChange,
-    })} />);
-
-    await userEvent.setup().click(
-      screen.getByRole('checkbox', { name: 'Select first 2 in Three keyword group' })
+    const onChange = await clickScopedPickerControl(
+      buildKeywordScopePickerProps(['three-1', 'three-3'], {
+        keywords: threeKeywords,
+        groups: [threeKeywordGroup],
+        maxKeywords: 2,
+      }),
+      {
+        role: 'checkbox',
+        name: 'Select first 2 in Three keyword group',
+      }
     );
 
     expect(onChange).toHaveBeenCalledWith({
@@ -606,7 +564,7 @@ describe('KeywordScopePicker remaining mutation outcomes', () => {
   });
 
   it('reports plural keyword copy when a group contains multiple keywords', () => {
-    render(<KeywordScopePicker {...buildGroupScopePickerProps([])} />);
+    renderScopedKeywordScopePicker(buildGroupScopePickerProps([]));
 
     expect(screen.getAllByText('2 keywords')).toHaveLength(2);
   });
@@ -624,7 +582,7 @@ describe('KeywordScopePicker remaining mutation outcomes', () => {
   });
 
   it('checks only the authoritative scope mode', () => {
-    render(<KeywordScopePicker {...buildKeywordScopePickerProps([])} />);
+    renderScopedKeywordScopePicker(buildKeywordScopePickerProps([]));
 
     expect(screen.getByRole('radio', { name: 'All' })).not.toBeChecked();
     expect(screen.getByRole('radio', { name: 'Groups' })).not.toBeChecked();
@@ -678,10 +636,10 @@ describe('KeywordScopePicker remaining mutation outcomes', () => {
 
 describe('KeywordScopePicker controlled over-cap recovery', () => {
   it('keeps a selected section enabled when outside IDs leave a zero target', () => {
-    render(<KeywordScopePicker {...buildCappedSectionKeywordScopePickerProps(
+    renderScopedKeywordScopePicker(buildCappedSectionKeywordScopePickerProps(
       ['alpha-1', 'beta-1'],
       { maxKeywords: 1 }
-    )} />);
+    ));
 
     expect(screen.getByRole(
       'checkbox',

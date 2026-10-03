@@ -13,37 +13,30 @@ import { useTheme } from '../../hooks/useTheme';
 const mockUseTheme = useTheme as ReturnType<typeof vi.fn>;
 
 describe('ThemeToggle', () => {
-  it('displays light mode label when theme is light', () => {
+  it.each([
+    {
+      themeName: 'light',
+      label: 'Current: Light mode. Click to change.',
+    },
+    {
+      themeName: 'dark',
+      label: 'Current: Dark mode. Click to change.',
+    },
+    {
+      themeName: 'system',
+      label: 'Current: System theme. Click to change.',
+    },
+  ])('displays the $themeName label when theme is $themeName', ({
+    themeName, label
+  }) => {
     mockUseTheme.mockReturnValue({
-      theme: 'light',
+      theme: themeName,
       toggleTheme: vi.fn(),
     });
     
     render(<ThemeToggle />);
     
-    expect(screen.getByLabelText('Current: Light mode. Click to change.')).toBeInTheDocument();
-  });
-
-  it('displays dark mode label when theme is dark', () => {
-    mockUseTheme.mockReturnValue({
-      theme: 'dark',
-      toggleTheme: vi.fn(),
-    });
-    
-    render(<ThemeToggle />);
-    
-    expect(screen.getByLabelText('Current: Dark mode. Click to change.')).toBeInTheDocument();
-  });
-
-  it('displays system theme label when theme is system', () => {
-    mockUseTheme.mockReturnValue({
-      theme: 'system',
-      toggleTheme: vi.fn(),
-    });
-    
-    render(<ThemeToggle />);
-    
-    expect(screen.getByLabelText('Current: System theme. Click to change.')).toBeInTheDocument();
+    expect(screen.getByLabelText(label)).toBeInTheDocument();
   });
 
   it('calls toggleTheme when button clicked', () => {

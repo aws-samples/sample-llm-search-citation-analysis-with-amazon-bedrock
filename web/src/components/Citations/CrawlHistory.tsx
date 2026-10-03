@@ -1,6 +1,7 @@
 import { formatDate } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
 import { ClockIcon } from '../ui';
+import { CenteredEmpty } from '../ui/CenteredState';
 import {
   BLOCK_REASON_LABELS, BlockedPageBanner, isBlockReason 
 } from './BlockedPageBanner';
@@ -148,12 +149,7 @@ export const HistoryTab = ({
   }
 
   if (history.length === 0) {
-    return (
-      <div className="text-center py-12 text-gray-500">
-        <ClockIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-        <p>No crawl history available</p>
-      </div>
-    );
+    return <CenteredEmpty icon={<ClockIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />} title="No crawl history available" />;
   }
 
   return (

@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react';
 import {
   render, screen, fireEvent 
 } from '@testing-library/react';
@@ -8,6 +9,15 @@ import { ErrorBoundary } from './ErrorBoundary';
 import {
   TestError, ThrowingComponent
 } from './ErrorBoundary-fixtures';
+
+/** Mounts a boundary around a child that throws `Test error message` on render. */
+function renderThrowingChild(boundaryProps: Omit<ComponentProps<typeof ErrorBoundary>, 'children'> = {}) {
+  return render(
+    <ErrorBoundary {...boundaryProps}>
+      <ThrowingComponent shouldThrow={true} />
+    </ErrorBoundary>
+  );
+}
 
 describe('ErrorBoundary', () => {
   // Suppress console.error for expected errors in tests
@@ -30,22 +40,14 @@ describe('ErrorBoundary', () => {
   });
 
   it('renders default error UI when child throws', () => {
-    render(
-      <ErrorBoundary>
-        <ThrowingComponent shouldThrow={true} />
-      </ErrorBoundary>
-    );
+    renderThrowingChild();
     
     expect(screen.getByText('Something went wrong')).toBeInTheDocument();
     expect(screen.getByText('Test error message')).toBeInTheDocument();
   });
 
   it('renders custom fallback when provided and child throws', () => {
-    render(
-      <ErrorBoundary fallback={<div>Custom error fallback</div>}>
-        <ThrowingComponent shouldThrow={true} />
-      </ErrorBoundary>
-    );
+    renderThrowingChild({ fallback: <div>Custom error fallback</div> });
     
     expect(screen.getByText('Custom error fallback')).toBeInTheDocument();
     expect(screen.queryByText('Something went wrong')).not.toBeInTheDocument();
@@ -53,11 +55,7 @@ describe('ErrorBoundary', () => {
 
   it('calls onError callback when child throws', () => {
     const onError = vi.fn();
-    render(
-      <ErrorBoundary onError={onError}>
-        <ThrowingComponent shouldThrow={true} />
-      </ErrorBoundary>
-    );
+    renderThrowingChild({ onError });
     
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError.mock.calls[0][0]).toBeInstanceOf(TestError);
@@ -90,11 +88,7 @@ describe('ErrorBoundary', () => {
   });
 
   it('displays error message in UI when error has message', () => {
-    render(
-      <ErrorBoundary>
-        <ThrowingComponent shouldThrow={true} />
-      </ErrorBoundary>
-    );
+    renderThrowingChild();
     
     expect(screen.getByText('Test error message')).toBeInTheDocument();
   });

@@ -25,7 +25,7 @@ export const firstCapKeywordIds = overCapKeywords
   .slice(0, MAX_SCOPE_KEYWORD_IDS)
   .map((keyword) => keyword.id);
 
-export const lastOverCapKeyword = overCapKeywords[MAX_SCOPE_KEYWORD_IDS];
+const lastOverCapKeyword = overCapKeywords[MAX_SCOPE_KEYWORD_IDS];
 
 /**
  * Checkbox id of the 1001st keyword under the shared `test-keyword-scope`

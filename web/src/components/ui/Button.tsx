@@ -25,14 +25,14 @@ import type {
   ButtonHTMLAttributes, ReactNode 
 } from 'react';
 
-export type ButtonVariant =
+type ButtonVariant =
   | 'primary'
   | 'secondary'
   | 'ghost'
   | 'danger'
   | 'iconOnly';
 
-export type ButtonSize = 'sm' | 'md';
+type ButtonSize = 'sm' | 'md';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   readonly variant?: ButtonVariant;

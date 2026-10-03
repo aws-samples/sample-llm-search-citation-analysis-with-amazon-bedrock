@@ -11,7 +11,7 @@ import {
   GROUP_CORUNA, GROUP_MARINO, mockKeywords
 } from './ScheduleManager-fixtures';
 
-export function buildScheduleFormData(
+function buildScheduleFormData(
   overrides: Partial<ScheduleFormData> = {}
 ): ScheduleFormData {
   return {
@@ -27,7 +27,7 @@ export function buildScheduleFormData(
   };
 }
 
-export function buildScheduleFormProps(
+function buildScheduleFormProps(
   formDataOverrides: Partial<ScheduleFormData> = {}
 ): ComponentProps<typeof ScheduleForm> {
   return {

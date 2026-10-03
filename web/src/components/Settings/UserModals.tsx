@@ -1,10 +1,12 @@
 import {useState} from 'react';
+import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { formatDateOnly } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
 import type {
   CognitoUser, UserGroup 
 } from '../../api/users';
+import { SettingsErrorNotice } from './SettingsErrorNotice';
 
 function createGroupToggler(setSelectedGroups: React.Dispatch<React.SetStateAction<string[]>>) {
   return (groupName: string) => {
@@ -46,6 +48,53 @@ export function getStatusLabel(status: string, enabled: boolean): string {
   }
 }
 
+/** Dimmed full-screen overlay, portalled to `document.body`, with a white panel. */
+function UserModalShell({
+  panelClassName, children
+}: {
+  readonly panelClassName: string;
+  readonly children: ReactNode 
+}) {
+  return createPortal(
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div className={`bg-white rounded-lg shadow-xl ${panelClassName}`}>
+        {children}
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+interface GroupCheckboxesProps {
+  readonly groups: UserGroup[];
+  readonly selected: string[];
+  readonly onToggle: (groupName: string) => void;
+  readonly showDescriptions?: boolean;
+}
+
+function GroupCheckboxes({
+  groups, selected, onToggle, showDescriptions = false
+}: GroupCheckboxesProps) {
+  return (
+    <div className="space-y-2">
+      {groups.map(group => (
+        <label key={group.name} className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={selected.includes(group.name)}
+            onChange={() => onToggle(group.name)}
+            className="rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+          />
+          <span className="text-sm text-gray-700">{group.name}</span>
+          {showDescriptions && group.description && (
+            <span className="text-xs text-gray-500">- {group.description}</span>
+          )}
+        </label>
+      ))}
+    </div>
+  );
+}
+
 interface InviteModalProps {
   readonly groups: UserGroup[];
   readonly onClose: () => void;
@@ -78,82 +127,60 @@ export function InviteModal({
 
   const toggleGroup = createGroupToggler(setSelectedGroups);
 
-  return createPortal(
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
-        <div className="p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Invite User</h3>
+  return (
+    <UserModalShell panelClassName="max-w-md w-full mx-4">
+      <div className="p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Invite User</h3>
           
-          <form onSubmit={handleSubmit}>
-            <div className="space-y-4">
+        <form onSubmit={handleSubmit}>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Email Address
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="user@example.com"
+                className="w-full p-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
+                autoFocus
+                required
+              />
+            </div>
+              
+            {groups.length > 0 && (
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Email Address
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Groups (optional)
                 </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="user@example.com"
-                  className="w-full p-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
-                  autoFocus
-                  required
-                />
+                <GroupCheckboxes groups={groups} selected={selectedGroups} onToggle={toggleGroup} showDescriptions />
               </div>
+            )}
               
-              {groups.length > 0 && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Groups (optional)
-                  </label>
-                  <div className="space-y-2">
-                    {groups.map(group => (
-                      <label key={group.name} className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={selectedGroups.includes(group.name)}
-                          onChange={() => toggleGroup(group.name)}
-                          className="rounded border-gray-300 text-gray-900 focus:ring-gray-900"
-                        />
-                        <span className="text-sm text-gray-700">{group.name}</span>
-                        {group.description && (
-                          <span className="text-xs text-gray-500">- {group.description}</span>
-                        )}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              {error && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                  {error}
-                </div>
-              )}
-            </div>
+            <SettingsErrorNotice error={error} />
+          </div>
             
-            <div className="flex justify-end gap-3 mt-6">
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={loading || !email.trim()}
-                className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
-                {loading && <Spinner size="sm" />}
-                Send Invite
-              </button>
-            </div>
-          </form>
-        </div>
+          <div className="flex justify-end gap-3 mt-6">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading || !email.trim()}
+              className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center gap-2"
+            >
+              {loading && <Spinner size="sm" />}
+              Send Invite
+            </button>
+          </div>
+        </form>
       </div>
-    </div>,
-    document.body
+    </UserModalShell>
   );
 }
 
@@ -214,124 +241,109 @@ export function UserDetailsModal({
 
   const toggleGroup = createGroupToggler(setSelectedGroups);
 
-  return createPortal(
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
-        <div className="p-6">
-          <div className="flex items-start justify-between mb-4">
+  return (
+    <UserModalShell panelClassName="max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+      <div className="p-6">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900">{user.email}</h3>
+            <p className="text-sm text-gray-500">User Details</p>
+          </div>
+          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(user.status, user.enabled)}`}>
+            {getStatusLabel(user.status, user.enabled)}
+          </span>
+        </div>
+          
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
-              <h3 className="text-lg font-semibold text-gray-900">{user.email}</h3>
-              <p className="text-sm text-gray-500">User Details</p>
+              <span className="text-gray-500">Username</span>
+              <p className="font-mono text-gray-900 truncate">{user.username}</p>
             </div>
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(user.status, user.enabled)}`}>
-              {getStatusLabel(user.status, user.enabled)}
-            </span>
+            <div>
+              <span className="text-gray-500">Email Verified</span>
+              <p className="text-gray-900">{user.email_verified ? 'Yes' : 'No'}</p>
+            </div>
+            <div>
+              <span className="text-gray-500">Created</span>
+              <p className="text-gray-900">{formatDateOnly(user.created_at)}</p>
+            </div>
+            <div>
+              <span className="text-gray-500">Last Updated</span>
+              <p className="text-gray-900">{formatDateOnly(user.updated_at)}</p>
+            </div>
           </div>
-          
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <span className="text-gray-500">Username</span>
-                <p className="font-mono text-gray-900 truncate">{user.username}</p>
-              </div>
-              <div>
-                <span className="text-gray-500">Email Verified</span>
-                <p className="text-gray-900">{user.email_verified ? 'Yes' : 'No'}</p>
-              </div>
-              <div>
-                <span className="text-gray-500">Created</span>
-                <p className="text-gray-900">{formatDateOnly(user.created_at)}</p>
-              </div>
-              <div>
-                <span className="text-gray-500">Last Updated</span>
-                <p className="text-gray-900">{formatDateOnly(user.updated_at)}</p>
-              </div>
-            </div>
             
+          <div className="border-t border-gray-200 pt-4">
+            <label className="flex items-center justify-between cursor-pointer">
+              <span className="text-sm font-medium text-gray-700">Account Enabled</span>
+              <button
+                onClick={() => setEnabled(!enabled)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  enabled ? 'bg-emerald-500' : 'bg-gray-300'
+                }`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  enabled ? 'translate-x-6' : 'translate-x-1'
+                }`} />
+              </button>
+            </label>
+          </div>
+            
+          {groups.length > 0 && (
             <div className="border-t border-gray-200 pt-4">
-              <label className="flex items-center justify-between cursor-pointer">
-                <span className="text-sm font-medium text-gray-700">Account Enabled</span>
-                <button
-                  onClick={() => setEnabled(!enabled)}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                    enabled ? 'bg-emerald-500' : 'bg-gray-300'
-                  }`}
-                >
-                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                    enabled ? 'translate-x-6' : 'translate-x-1'
-                  }`} />
-                </button>
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Groups</label>
+              <GroupCheckboxes groups={groups} selected={selectedGroups} onToggle={toggleGroup} />
             </div>
+          )}
             
-            {groups.length > 0 && (
-              <div className="border-t border-gray-200 pt-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Groups</label>
-                <div className="space-y-2">
-                  {groups.map(group => (
-                    <label key={group.name} className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedGroups.includes(group.name)}
-                        onChange={() => toggleGroup(group.name)}
-                        className="rounded border-gray-300 text-gray-900 focus:ring-gray-900"
-                      />
-                      <span className="text-sm text-gray-700">{group.name}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
+          <div className="border-t border-gray-200 pt-4">
+            <h4 className="text-sm font-medium text-gray-700 mb-3">Actions</h4>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={handleResetPassword}
+                disabled={loading}
+                className="px-3 py-1.5 text-xs bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors disabled:opacity-50"
+              >
+                Reset Password
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={loading}
+                className={`px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50 ${
+                  confirmDelete 
+                    ? 'bg-red-600 text-white hover:bg-red-700' 
+                    : 'bg-red-100 text-red-700 hover:bg-red-200'
+                }`}
+              >
+                {confirmDelete ? 'Confirm Delete' : 'Delete User'}
+              </button>
+            </div>
+            {confirmDelete && (
+              <p className="text-xs text-red-600 mt-2">
+                Click again to confirm deletion. This cannot be undone.
+              </p>
             )}
-            
-            <div className="border-t border-gray-200 pt-4">
-              <h4 className="text-sm font-medium text-gray-700 mb-3">Actions</h4>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={handleResetPassword}
-                  disabled={loading}
-                  className="px-3 py-1.5 text-xs bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors disabled:opacity-50"
-                >
-                  Reset Password
-                </button>
-                <button
-                  onClick={handleDelete}
-                  disabled={loading}
-                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50 ${
-                    confirmDelete 
-                      ? 'bg-red-600 text-white hover:bg-red-700' 
-                      : 'bg-red-100 text-red-700 hover:bg-red-200'
-                  }`}
-                >
-                  {confirmDelete ? 'Confirm Delete' : 'Delete User'}
-                </button>
-              </div>
-              {confirmDelete && (
-                <p className="text-xs text-red-600 mt-2">
-                  Click again to confirm deletion. This cannot be undone.
-                </p>
-              )}
-            </div>
-          </div>
-          
-          <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-200">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={loading || !hasChanges}
-              className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center gap-2"
-            >
-              {loading && <Spinner size="sm" />}
-              Save Changes
-            </button>
           </div>
         </div>
+          
+        <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-200">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={loading || !hasChanges}
+            className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            {loading && <Spinner size="sm" />}
+            Save Changes
+          </button>
+        </div>
       </div>
-    </div>,
-    document.body
+    </UserModalShell>
   );
 }

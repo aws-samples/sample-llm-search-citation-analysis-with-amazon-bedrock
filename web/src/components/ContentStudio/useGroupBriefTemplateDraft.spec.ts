@@ -1,9 +1,7 @@
 import {
-  afterEach, beforeEach, describe, expect, it, vi
+  beforeEach, describe, expect, it, vi
 } from 'vitest';
-import {
-  act, waitFor
-} from '@testing-library/react';
+import { act } from '@testing-library/react';
 import {
   buildContentBriefTemplate,
   buildContentBriefTemplatesHookResult,
@@ -11,17 +9,24 @@ import {
 import { GROUP_BRIEF_DEFAULT_TEMPLATES } from './GroupBriefForm-source';
 import type { useGroupBriefTemplateDraft } from './useGroupBriefTemplateDraft';
 import {
+  buildFallbackTemplateDraft,
   buildGroupBriefTemplateDraftHookResult,
+  buildTemplateSavedOutcome,
   createDeferredTemplateMutation,
   createdGroupBriefTemplate,
-  mockUseContentBriefTemplates,
+  fillTemplateDraftFields,
   prepareGroupBriefTemplateDraftMocks,
   renderGroupBriefTemplateDraft,
+  renderGroupBriefTemplateDraftAcrossTemplateRefresh,
   renderGroupBriefTemplateDraftWithHooks,
   renderSelectedSavedTemplateDraft,
+  renderSelectedTemplateDraftForDeletion,
+  renderSelectedTemplateDraftWithUpdateOutcome,
   renderTemplateDraftWithCreateOutcome,
   renderTemplateDraftWithDeferredCreate,
+  saveFailedOutcome,
   savedGroupBriefTemplate,
+  waitForTemplateSavingToSettle,
 } from './useGroupBriefTemplateDraft-fixtures';
 
 vi.mock('../../hooks/useContentBriefTemplates', () => ({ useContentBriefTemplates: vi.fn() }));
@@ -33,6 +38,56 @@ const SAVED_TEMPLATE_DRAFT = {
   description: SAVED_TEMPLATE.description,
   prompt: SAVED_TEMPLATE.prompt_template,
 };
+
+type TemplateDraftResult = ReturnType<typeof useGroupBriefTemplateDraft>;
+
+const rewriteBuiltinCases = [
+  {
+    testName: 'selects the matching built-in snapshot when generation mode changes',
+    arrange: () => {
+      const rendered = renderGroupBriefTemplateDraft();
+      act(() => rendered.result.current.selectBuiltin('rewrite_pasted_copy'));
+      return rendered;
+    },
+  },
+  {
+    testName: 'uses the requested built-in when the hook starts in rewrite mode',
+    arrange: () => renderGroupBriefTemplateDraft({ mode: 'rewrite_pasted_copy' }),
+  },
+];
+
+const dirtyFieldCases = [
+  {
+    testName: 'becomes dirty when only the template name changes',
+    edit: (draft: TemplateDraftResult) => draft.setName('Changed name'),
+  },
+  {
+    testName: 'becomes dirty when only the description changes',
+    edit: (draft: TemplateDraftResult) => draft.setDescription('Changed description'),
+  },
+  {
+    testName: 'becomes dirty when only the prompt changes',
+    edit: (draft: TemplateDraftResult) => draft.setPrompt('Changed {scope}'),
+  },
+];
+
+const singleFieldEditCases = [
+  {
+    testName: 'changes only the name when setName is called',
+    edit: (draft: TemplateDraftResult) => draft.setName('Renamed template'),
+    expectedChange: { name: 'Renamed template' },
+  },
+  {
+    testName: 'changes only the description when setDescription is called',
+    edit: (draft: TemplateDraftResult) => draft.setDescription('Changed description'),
+    expectedChange: { description: 'Changed description' },
+  },
+  {
+    testName: 'changes only the prompt when setPrompt is called',
+    edit: (draft: TemplateDraftResult) => draft.setPrompt('Changed prompt for {scope}.'),
+    expectedChange: { prompt: 'Changed prompt for {scope}.' },
+  },
+];
 
 const createMutationCases = [
   {
@@ -53,10 +108,7 @@ const createMutationCases = [
   },
   {
     testName: 'preserves the built-in state when a create fails',
-    outcome: {
-      success: false,
-      message: 'Save failed',
-    },
+    outcome: saveFailedOutcome,
     expectedState: {
       selectedTemplateId: 'builtin-create-new-landing-page',
       draftName: 'Create new landing page',
@@ -136,8 +188,6 @@ const updateStateCases = [
   },
 ];
 
-type TemplateDraftResult = ReturnType<typeof useGroupBriefTemplateDraft>;
-
 const noticeSelectionCases = [
   {
     testName: 'clears an earlier mutation notice when a different template is selected',
@@ -164,10 +214,6 @@ const undeletableSelectionCases = [
 
 beforeEach(prepareGroupBriefTemplateDraftMocks);
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
 describe('useGroupBriefTemplateDraft selection', () => {
   it('uses empty metadata and the local default while templates are loading', () => {
     const { result } = renderGroupBriefTemplateDraftWithHooks({
@@ -175,27 +221,20 @@ describe('useGroupBriefTemplateDraft selection', () => {
       loading: true,
     });
 
-    expect(result.current.draft).toStrictEqual({
-      name: '',
-      description: '',
-      prompt: GROUP_BRIEF_DEFAULT_TEMPLATES.create_new_landing_page,
-    });
+    expect(result.current.draft).toStrictEqual(
+      buildFallbackTemplateDraft('create_new_landing_page')
+    );
     expect(result.current.selectedTemplateId).toBe('builtin-create-new-landing-page');
   });
 
   it('hydrates the complete selected template when templates load later', () => {
-    mockUseContentBriefTemplates.mockReturnValue(buildContentBriefTemplatesHookResult({
-      templates: [],
-      loading: true,
-    }));
-    const {
-      result, rerender
-    } = renderGroupBriefTemplateDraft();
-    mockUseContentBriefTemplates.mockReturnValue(
+    const { result } = renderGroupBriefTemplateDraftAcrossTemplateRefresh(
+      {
+        templates: [],
+        loading: true,
+      },
       buildContentBriefTemplatesHookResult({ templates: [buildContentBriefTemplate()] })
     );
-
-    rerender();
 
     expect(result.current.draft).toStrictEqual({
       name: 'Create new landing page',
@@ -221,10 +260,8 @@ describe('useGroupBriefTemplateDraft selection', () => {
     expect(result.current.draft).toStrictEqual(draftBeforeSelection);
   });
 
-  it('selects the matching built-in snapshot when generation mode changes', () => {
-    const { result } = renderGroupBriefTemplateDraft();
-
-    act(() => result.current.selectBuiltin('rewrite_pasted_copy'));
+  it.each(rewriteBuiltinCases)('$testName', ({ arrange }) => {
+    const { result } = arrange();
 
     expect(result.current.selectedTemplateId).toBe('builtin-rewrite-pasted-copy');
     expect(result.current.draft.prompt).toBe(
@@ -237,44 +274,17 @@ describe('useGroupBriefTemplateDraft selection', () => {
 
     act(() => result.current.selectBuiltin('rewrite_pasted_copy'));
 
-    expect(result.current.draft).toStrictEqual({
-      name: '',
-      description: '',
-      prompt: GROUP_BRIEF_DEFAULT_TEMPLATES.rewrite_pasted_copy,
-    });
-  });
-
-  it('uses the requested built-in when the hook starts in rewrite mode', () => {
-    const { result } = renderGroupBriefTemplateDraft('rewrite_pasted_copy');
-
-    expect(result.current.selectedTemplateId).toBe('builtin-rewrite-pasted-copy');
-    expect(result.current.draft.prompt).toBe(
-      GROUP_BRIEF_DEFAULT_TEMPLATES.rewrite_pasted_copy
+    expect(result.current.draft).toStrictEqual(
+      buildFallbackTemplateDraft('rewrite_pasted_copy')
     );
   });
 });
 
 describe('useGroupBriefTemplateDraft dirty state', () => {
-  it('becomes dirty when only the template name changes', () => {
+  it.each(dirtyFieldCases)('$testName', ({ edit }) => {
     const { result } = renderGroupBriefTemplateDraft();
 
-    act(() => result.current.setName('Changed name'));
-
-    expect(result.current.dirty).toBe(true);
-  });
-
-  it('becomes dirty when only the description changes', () => {
-    const { result } = renderGroupBriefTemplateDraft();
-
-    act(() => result.current.setDescription('Changed description'));
-
-    expect(result.current.dirty).toBe(true);
-  });
-
-  it('becomes dirty when only the prompt changes', () => {
-    const { result } = renderGroupBriefTemplateDraft();
-
-    act(() => result.current.setPrompt('Changed {scope}'));
+    act(() => edit(result.current));
 
     expect(result.current.dirty).toBe(true);
   });
@@ -297,64 +307,34 @@ describe('useGroupBriefTemplateDraft exact state', () => {
     expect(result.current.saving).toBe(false);
   });
 
-  it('changes only the name when setName is called', () => {
+  it.each(singleFieldEditCases)('$testName', ({
+    edit, expectedChange
+  }) => {
     const { result } = renderGroupBriefTemplateDraft();
     const original = result.current.draft;
 
-    act(() => result.current.setName('Renamed template'));
+    act(() => edit(result.current));
 
     expect(result.current.draft).toStrictEqual({
       ...original,
-      name: 'Renamed template',
-    });
-  });
-
-  it('changes only the description when setDescription is called', () => {
-    const { result } = renderGroupBriefTemplateDraft();
-    const original = result.current.draft;
-
-    act(() => result.current.setDescription('Changed description'));
-
-    expect(result.current.draft).toStrictEqual({
-      ...original,
-      description: 'Changed description',
-    });
-  });
-
-  it('changes only the prompt when setPrompt is called', () => {
-    const { result } = renderGroupBriefTemplateDraft();
-    const original = result.current.draft;
-
-    act(() => result.current.setPrompt('Changed prompt for {scope}.'));
-
-    expect(result.current.draft).toStrictEqual({
-      ...original,
-      prompt: 'Changed prompt for {scope}.',
+      ...expectedChange,
     });
   });
 });
 
 describe('useGroupBriefTemplateDraft create mutations', () => {
   it('keeps saving true until a create mutation settles', async () => {
-    const {
-      deferred, result
-    } = renderTemplateDraftWithDeferredCreate();
+    const rendered = renderTemplateDraftWithDeferredCreate();
 
-    act(() => { void result.current.saveAsNew(); });
-    expect(result.current.saving).toBe(true);
-    deferred.resolve({
-      success: true,
-      message: 'Template saved',
-      template: SAVED_TEMPLATE,
-    });
+    act(() => { void rendered.result.current.saveAsNew(); });
+    expect(rendered.result.current.saving).toBe(true);
+    rendered.deferred.resolve(buildTemplateSavedOutcome(SAVED_TEMPLATE));
 
-    await waitFor(() => {
-      expect(result.current.saving).toBe(false);
-    });
+    await waitForTemplateSavingToSettle(rendered);
   });
 
   it.each(createMutationCases)('$testName', async ({
-    outcome, expectedState 
+    outcome, expectedState
   }) => {
     const { result } = renderTemplateDraftWithCreateOutcome(outcome);
 
@@ -374,10 +354,10 @@ describe('useGroupBriefTemplateDraft create mutations', () => {
       success: false,
       message: 'Captured draft',
     });
-    act(() => {
-      result.current.setName('Latest name');
-      result.current.setDescription('Latest description');
-      result.current.setPrompt('Latest prompt for {scope}.');
+    fillTemplateDraftFields(result.current, {
+      name: 'Latest name',
+      description: 'Latest description',
+      prompt: 'Latest prompt for {scope}.',
     });
 
     await act(() => result.current.saveAsNew());
@@ -393,10 +373,7 @@ describe('useGroupBriefTemplateDraft create mutations', () => {
   it('allows a second create after the first create settles', async () => {
     const {
       create, result
-    } = renderTemplateDraftWithCreateOutcome({
-      success: false,
-      message: 'Save failed',
-    });
+    } = renderTemplateDraftWithCreateOutcome(saveFailedOutcome);
 
     await act(() => result.current.saveAsNew());
     await act(() => result.current.saveAsNew());
@@ -407,16 +384,17 @@ describe('useGroupBriefTemplateDraft create mutations', () => {
 
 describe('useGroupBriefTemplateDraft update outcomes', () => {
   it('sends the selected ID and exact current draft when a saved template is updated', async () => {
-    const update = vi.fn().mockResolvedValue({
+    const {
+      result, update
+    } = renderSelectedTemplateDraftWithUpdateOutcome({
       success: true,
       message: 'Template updated',
       template: CREATED_TEMPLATE,
     });
-    const { result } = renderSelectedSavedTemplateDraft({ update });
-    act(() => {
-      result.current.setName('Requested name');
-      result.current.setDescription('Requested description');
-      result.current.setPrompt('Requested prompt for {scope}.');
+    fillTemplateDraftFields(result.current, {
+      name: 'Requested name',
+      description: 'Requested description',
+      prompt: 'Requested prompt for {scope}.',
     });
 
     await act(() => result.current.updateSelected());
@@ -430,10 +408,9 @@ describe('useGroupBriefTemplateDraft update outcomes', () => {
   });
 
   it.each(updateStateCases)('$testName', async ({
-    outcome, expectedState 
+    outcome, expectedState
   }) => {
-    const update = vi.fn().mockResolvedValue(outcome);
-    const { result } = renderSelectedSavedTemplateDraft({ update });
+    const { result } = renderSelectedTemplateDraftWithUpdateOutcome(outcome);
 
     await act(() => result.current.updateSelected());
 
@@ -458,29 +435,22 @@ describe('useGroupBriefTemplateDraft race and idempotency outcomes', () => {
     });
 
     expect(create).toHaveBeenCalledTimes(1);
-    deferred.resolve({
-      success: true,
-      message: 'Template saved',
-      template: CREATED_TEMPLATE,
-    });
+    deferred.resolve(buildTemplateSavedOutcome(CREATED_TEMPLATE));
     await pending.promise;
   });
 
   it('keeps a later mode selection when an earlier create settles', async () => {
-    const {
-      deferred, result
-    } = renderTemplateDraftWithDeferredCreate();
+    const rendered = renderTemplateDraftWithDeferredCreate();
+    const { result } = rendered;
     act(() => { void result.current.saveAsNew(); });
 
     act(() => result.current.selectBuiltin('rewrite_pasted_copy'));
-    deferred.resolve({
+    rendered.deferred.resolve({
       success: true,
       message: 'Old create finished',
       template: CREATED_TEMPLATE,
     });
-    await waitFor(() => {
-      expect(result.current.saving).toBe(false);
-    });
+    await waitForTemplateSavingToSettle(rendered);
 
     expect({
       selectedTemplateId: result.current.selectedTemplateId,
@@ -503,11 +473,7 @@ describe('useGroupBriefTemplateDraft race and idempotency outcomes', () => {
     });
 
     unmount();
-    deferred.resolve({
-      success: true,
-      message: 'Template saved',
-      template: CREATED_TEMPLATE,
-    });
+    deferred.resolve(buildTemplateSavedOutcome(CREATED_TEMPLATE));
     await pending.promise;
 
     expect(create).toHaveBeenCalledTimes(1);
@@ -517,10 +483,7 @@ describe('useGroupBriefTemplateDraft race and idempotency outcomes', () => {
     selectTemplate,
     expectedTemplateId,
   }) => {
-    const { result } = renderTemplateDraftWithCreateOutcome({
-      success: false,
-      message: 'Save failed',
-    });
+    const { result } = renderTemplateDraftWithCreateOutcome(saveFailedOutcome);
     await act(() => result.current.saveAsNew());
 
     act(() => selectTemplate(result.current));
@@ -537,7 +500,8 @@ describe('useGroupBriefTemplateDraft race and idempotency outcomes', () => {
         message: 'First failed'
       })
       .mockReturnValueOnce(deferred.promise);
-    const { result } = renderGroupBriefTemplateDraftWithHooks({ create });
+    const rendered = renderGroupBriefTemplateDraftWithHooks({ create });
+    const { result } = rendered;
     await act(() => result.current.saveAsNew());
 
     act(() => { void result.current.saveAsNew(); });
@@ -548,9 +512,7 @@ describe('useGroupBriefTemplateDraft race and idempotency outcomes', () => {
       success: false,
       message: 'Second failed'
     });
-    await waitFor(() => {
-      expect(result.current.saving).toBe(false);
-    });
+    await waitForTemplateSavingToSettle(rendered);
   });
 });
 
@@ -560,7 +522,7 @@ describe('useGroupBriefTemplateDraft deletion outcomes', () => {
     const confirmSpy = vi.spyOn(globalThis, 'confirm');
     const { result } = renderGroupBriefTemplateDraftWithHooks({
       templates,
-      remove 
+      remove
     });
 
     await act(() => result.current.deleteSelected());
@@ -579,12 +541,9 @@ describe('useGroupBriefTemplateDraft deletion outcomes', () => {
     expectedRemoveCalls,
     expectedTemplateId,
   }) => {
-    const remove = vi.fn().mockResolvedValue({
-      success: true,
-      message: 'Template deleted',
-    });
-    vi.spyOn(globalThis, 'confirm').mockReturnValue(confirmed);
-    const { result } = renderSelectedSavedTemplateDraft({ remove });
+    const {
+      remove, result
+    } = renderSelectedTemplateDraftForDeletion({ confirmed });
 
     await act(() => result.current.deleteSelected());
 
@@ -593,12 +552,13 @@ describe('useGroupBriefTemplateDraft deletion outcomes', () => {
   });
 
   it('keeps a saved template selected when deletion fails', async () => {
-    const remove = vi.fn().mockResolvedValue({
-      success: false,
-      message: 'Delete failed',
+    const { result } = renderSelectedTemplateDraftForDeletion({
+      confirmed: true,
+      outcome: {
+        success: false,
+        message: 'Delete failed',
+      },
     });
-    vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
-    const { result } = renderSelectedSavedTemplateDraft({ remove });
 
     await act(() => result.current.deleteSelected());
 
@@ -615,12 +575,9 @@ describe('useGroupBriefTemplateDraft deletion outcomes', () => {
   });
 
   it('uses the selected template name in the deletion confirmation', async () => {
-    const remove = vi.fn().mockResolvedValue({
-      success: true,
-      message: 'Template deleted',
-    });
-    const confirmSpy = vi.spyOn(globalThis, 'confirm').mockReturnValue(false);
-    const { result } = renderSelectedSavedTemplateDraft({ remove });
+    const {
+      confirmSpy, result
+    } = renderSelectedTemplateDraftForDeletion({ confirmed: false });
 
     await act(() => result.current.deleteSelected());
 
@@ -632,12 +589,10 @@ describe('useGroupBriefTemplateDraft deletion outcomes', () => {
 
 describe('useGroupBriefTemplateDraft refreshed closures', () => {
   it('selects a template that appears after the initial render', () => {
-    mockUseContentBriefTemplates.mockReturnValue(buildContentBriefTemplatesHookResult({templates: [buildContentBriefTemplate()],}));
-    const {
-      result, rerender
-    } = renderGroupBriefTemplateDraft();
-    mockUseContentBriefTemplates.mockReturnValue(buildGroupBriefTemplateDraftHookResult());
-    rerender();
+    const { result } = renderGroupBriefTemplateDraftAcrossTemplateRefresh(
+      { templates: [buildContentBriefTemplate()] },
+      buildGroupBriefTemplateDraftHookResult()
+    );
 
     act(() => result.current.select(SAVED_TEMPLATE.id));
 
@@ -653,16 +608,10 @@ describe('useGroupBriefTemplateDraft refreshed closures', () => {
       content_angle: 'rewrite_pasted_copy',
       prompt_template: 'Server rewrite prompt for {scope}.',
     });
-    mockUseContentBriefTemplates.mockReturnValue(
-      buildContentBriefTemplatesHookResult({ templates: [] })
-    );
-    const {
-      result, rerender
-    } = renderGroupBriefTemplateDraft();
-    mockUseContentBriefTemplates.mockReturnValue(
+    const { result } = renderGroupBriefTemplateDraftAcrossTemplateRefresh(
+      { templates: [] },
       buildContentBriefTemplatesHookResult({ templates: [rewriteTemplate] })
     );
-    rerender();
 
     act(() => result.current.selectBuiltin('rewrite_pasted_copy'));
 

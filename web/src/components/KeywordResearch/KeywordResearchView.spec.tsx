@@ -71,28 +71,30 @@ describe('KeywordResearchView', () => {
       expect(screen.queryByTestId('research-agent')).toBeNull();
     });
 
-    it('switches to the research agent when its tab is clicked', async () => {
+    it.each([
+      {
+        outcome: 'switches to the research agent when its tab is clicked',
+        tab: /research agent/i,
+        view: 'research-agent',
+      },
+      {
+        outcome: 'switches to competitor analysis tab when clicked',
+        tab: /competitor analysis/i,
+        view: 'competitor-analysis',
+      },
+      {
+        outcome: 'switches to history tab when clicked',
+        tab: /history/i,
+        view: 'research-history',
+      },
+    ])('$outcome', async ({
+      tab, view
+    }) => {
       render(<KeywordResearchView />);
 
-      await userEvent.click(screen.getByRole('button', { name: /research agent/i }));
+      await userEvent.click(screen.getByRole('button', { name: tab }));
 
-      expect(screen.getByTestId('research-agent')).toBeInTheDocument();
-    });
-
-    it('switches to competitor analysis tab when clicked', async () => {
-      render(<KeywordResearchView />);
-
-      await userEvent.click(screen.getByRole('button', { name: /competitor analysis/i }));
-
-      expect(screen.getByTestId('competitor-analysis')).toBeInTheDocument();
-    });
-
-    it('switches to history tab when clicked', async () => {
-      render(<KeywordResearchView />);
-
-      await userEvent.click(screen.getByRole('button', { name: /history/i }));
-
-      expect(screen.getByTestId('research-history')).toBeInTheDocument();
+      expect(screen.getByTestId(view)).toBeInTheDocument();
     });
 
     it('jumps to the research agent tab when an agent run is retried from History', async () => {

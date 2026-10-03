@@ -13,6 +13,8 @@ import {
   validateContentChangeForm,
 } from './alertFormModel';
 import type { ContentChangeFormValues } from './alertFormModel';
+import { useFormValues } from './useFormValues';
+import { ErrorAlert } from '../ui/ErrorAlert';
 
 interface ContentChangeFormProps {
   readonly groups: KeywordGroup[];
@@ -26,17 +28,6 @@ const EMPTY_CONTENT_CHANGE: ContentChangeFormValues = {
   description: '',
   url: '',
 };
-
-interface ErrorNoticeProps { readonly message: string | null; }
-
-function ErrorNotice({ message }: ErrorNoticeProps) {
-  if (message === null) return null;
-  return (
-    <p role="alert" className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-      {message}
-    </p>
-  );
-}
 
 interface ContentChangeAvailabilityHintsProps {
   readonly isAdmin: boolean;
@@ -110,7 +101,9 @@ function LatestMarkerCard({
 export function ContentChangeForm({
   groups, groupsLoading, groupsError, isAdmin
 }: ContentChangeFormProps) {
-  const [values, setValues] = useState<ContentChangeFormValues>(EMPTY_CONTENT_CHANGE);
+  const {
+    values, setValues, updateValue
+  } = useFormValues<ContentChangeFormValues>(EMPTY_CONTENT_CHANGE);
   const [validationError, setValidationError] = useState<string | null>(null);
   const {
     latestMarker,
@@ -120,16 +113,6 @@ export function ContentChangeForm({
     recordOutcome,
     recordContentChange,
   } = useContentChanges(values.groupId);
-
-  const updateValue = <TField extends keyof ContentChangeFormValues>(
-    field: TField,
-    value: ContentChangeFormValues[TField]
-  ): void => {
-    setValues((currentValues) => ({
-      ...currentValues,
-      [field]: value,
-    }));
-  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>): Promise<void> => {
     event.preventDefault();
@@ -159,8 +142,8 @@ export function ContentChangeForm({
         can attribute a visibility gain to that content change.
       </p>
 
-      <ErrorNotice message={groupsError} />
-      <ErrorNotice message={error} />
+      <ErrorAlert message={groupsError} spacingClassName="mt-4 " />
+      <ErrorAlert message={error} spacingClassName="mt-4 " />
 
       <form onSubmit={handleSubmit} noValidate className="mt-4 space-y-4">
         <fieldset disabled={controlsDisabled} className="space-y-4">
@@ -222,11 +205,7 @@ export function ContentChangeForm({
         groupsError={groupsError}
         groupCount={groups.length}
       />
-      {validationError !== null && (
-        <p role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {validationError}
-        </p>
-      )}
+      <ErrorAlert message={validationError} spacingClassName="mt-3 " />
       <RecordOutcomeMessage outcome={recordOutcome} />
 
       <LatestMarkerCard marker={latestMarker} loading={loading} />

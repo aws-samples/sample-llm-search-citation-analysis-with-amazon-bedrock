@@ -2,12 +2,12 @@ import {
   describe, it, expect, vi, beforeEach, afterEach
 } from 'vitest';
 import {
-  render, screen, fireEvent, act
+  render, screen, act
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ComponentProps } from 'react';
 import { KeywordExpansion } from './KeywordExpansion';
 import {
-  SELECTION_LIMIT,
   PROMOTION_TIMEOUT_MS,
   PROMOTION_TIMEOUT_MESSAGE,
   PROMOTION_SUCCESS_MESSAGE_MS,
@@ -25,113 +25,21 @@ import {
 } from './KeywordExpansion-fixtures';
 import {
   beachResortsFixture,
+  buildCreatedKeywordItem,
+  buildPromotionWire,
   expansionKeywordFixtures,
+  firePromoteKeyword,
   getPromoteButtonElement,
   luxuryHotelsFixture,
   promoteKeyword,
+  promotionRequestArguments,
   selectKeywordCheckbox,
+  selectionCountText,
 } from './expandedKeyword-fixtures';
 
 vi.mock('../../api/client', () => import('./apiClientMock-fixtures'));
 
 import { mockApiPost } from './apiClientMock-fixtures';
-
-describe('KeywordExpansion', () => {
-  describe('initial render', () => {
-    it('shows a generic project-management seed example', () => {
-      render(<KeywordExpansion {...buildProps()} />);
-
-      expect(screen.getByRole('textbox')).toHaveAttribute(
-        'placeholder',
-        'e.g. project management software'
-      );
-    });
-
-    it('renders industry selector', () => {
-      render(<KeywordExpansion {...buildProps()} />);
-
-      expect(screen.getByText('General')).toBeInTheDocument();
-    });
-
-    it('renders expand button', () => {
-      render(<KeywordExpansion {...buildProps()} />);
-
-      expect(screen.getByRole('button', { name: /find keywords/i })).toBeInTheDocument();
-    });
-  });
-
-  describe('form submission', () => {
-    it('calls onExpand with input values', async () => {
-      const onExpand = vi.fn();
-      render(<KeywordExpansion {...buildProps({ onExpand })} />);
-
-      const input = screen.getByRole('textbox');
-      await userEvent.type(input, 'hotels');
-
-      const button = screen.getByRole('button', { name: /find keywords/i });
-      await userEvent.click(button);
-
-      expect(onExpand).toHaveBeenCalledWith('hotels', 'general', 20);
-    });
-
-    it('submits Hotels when Hotels & Hospitality is selected', async () => {
-      const onExpand = vi.fn();
-      render(<KeywordExpansion {...buildProps({ onExpand })} />);
-
-      await userEvent.type(screen.getByRole('textbox'), 'boutique hotels');
-      await userEvent.selectOptions(screen.getByDisplayValue('General'), 'hotels');
-      await userEvent.click(screen.getByRole('button', { name: /find keywords/i }));
-
-      expect(onExpand).toHaveBeenCalledWith('boutique hotels', 'hotels', 20);
-    });
-
-    it('disables button when loading', () => {
-      render(<KeywordExpansion {...buildProps({ loading: true })} />);
-
-      expect(screen.getByRole('button', { name: /expanding/i })).toBeDisabled();
-    });
-
-    it('does not call onExpand when seed keyword is empty', async () => {
-      const onExpand = vi.fn();
-      render(<KeywordExpansion {...buildProps({ onExpand })} />);
-
-      // Button should be disabled when empty
-      const button = screen.getByRole('button', { name: /find keywords/i });
-      expect(button).toBeDisabled();
-    });
-  });
-
-  describe('with results', () => {
-    it('renders keyword results table', () => {
-      render(<KeywordExpansion {...buildProps({
-        result: {
-          id: 'research-1',
-          seed_keyword: 'hotels',
-          industry: 'general',
-          keyword_count: 1,
-          keywords: [
-            {
-              keyword: 'luxury hotels',
-              intent: 'commercial',
-              competition: 'medium',
-              relevance: 0.9
-            },
-          ],
-        },
-      })} />);
-
-      expect(screen.getByText('luxury hotels')).toBeInTheDocument();
-    });
-  });
-
-  describe('error state', () => {
-    it('shows error message when error occurs', () => {
-      render(<KeywordExpansion {...buildProps({ error: 'Failed to expand keywords' })} />);
-
-      expect(screen.getByText('Failed to expand keywords')).toBeInTheDocument();
-    });
-  });
-});
 
 const expansionResultFixture: KeywordExpansionResult = {
   id: 'research-1',
@@ -151,41 +59,17 @@ const replacementResultFixture: KeywordExpansionResult = {
   seed_keyword: 'resorts',
 };
 
-/**
- * A `created_keywords` wire entry: the COMPLETE created item as the backend
- * writes it, which is a superset of the `Keyword` fields the active keyword list
- * reads.
- */
-const createdKeywordItemFixture = {
-  id: 'keyword-1',
+const createdKeywordItemFixture = buildCreatedKeywordItem({
   keyword: luxuryHotelsFixture.keyword,
-  status: 'active',
-  created_at: '2024-01-15T10:30:00Z',
-  updated_at: '2024-01-15T10:30:00Z',
-  region: 'global',
-  language: 'en',
-  category: '',
-  priority: 'normal',
   notes: 'intent: commercial; competition: high; source: expansion',
-};
-
-const promotionWireFixture = {
-  created: 1,
-  skipped: 1,
-  created_keywords: [createdKeywordItemFixture],
-  skipped_keywords: [{
-    keyword: beachResortsFixture.keyword,
-    reason: 'duplicate',
-  }],
-};
-
-const successMessage = promotionSuccessMessage({
-  created: promotionWireFixture.created,
-  skipped: promotionWireFixture.skipped,
-  createdKeywords: [],
-  createdItems: [],
-  skippedKeywords: [],
 });
+
+const promotionWireFixture = buildPromotionWire([createdKeywordItemFixture], [{
+  keyword: beachResortsFixture.keyword,
+  reason: 'duplicate',
+}]);
+
+const successMessage = promotionSuccessMessage(promotionWireFixture);
 
 /** A request that never settles, so the in-flight state can be observed. */
 const mockPendingRequest = () => new Promise<never>(() => undefined);
@@ -203,18 +87,104 @@ const mockAbortableRequest = (
   signal?.addEventListener('abort', () => reject(signal.reason));
 });
 
-const renderExpansionWithResult = (
-  result: KeywordExpansionResult,
-  onKeywordsAdded?: (created: Keyword[]) => void
-) => render(
-  <KeywordExpansion
-    onExpand={vi.fn()}
-    loading={false}
-    result={result}
-    error={null}
-    onKeywordsAdded={onKeywordsAdded}
-  />
-);
+const renderExpansion = (overrides: Partial<ComponentProps<typeof KeywordExpansion>> = {}) =>
+  render(<KeywordExpansion {...buildProps(overrides)} />);
+
+/** Renders the expansion result and promotes 'luxury hotels' through the UI. */
+async function renderAndPromote(onKeywordsAdded?: (created: Keyword[]) => void): Promise<void> {
+  renderExpansion({
+    result: expansionResultFixture,
+    onKeywordsAdded,
+  });
+  await promoteKeyword(luxuryHotelsFixture.keyword);
+}
+
+/** `renderAndPromote` without user-event, for tests running on fake timers. */
+function renderAndFirePromote(): void {
+  renderExpansion({ result: expansionResultFixture });
+  firePromoteKeyword(luxuryHotelsFixture.keyword);
+}
+
+describe('KeywordExpansion', () => {
+  describe('initial render', () => {
+    it('shows a generic project-management seed example', () => {
+      renderExpansion();
+
+      expect(screen.getByRole('textbox')).toHaveAttribute(
+        'placeholder',
+        'e.g. project management software'
+      );
+    });
+
+    it('renders industry selector', () => {
+      renderExpansion();
+
+      expect(screen.getByText('General')).toBeInTheDocument();
+    });
+
+    it('renders expand button', () => {
+      renderExpansion();
+
+      expect(screen.getByRole('button', { name: /find keywords/i })).toBeInTheDocument();
+    });
+  });
+
+  describe('form submission', () => {
+    it('calls onExpand with input values', async () => {
+      const onExpand = vi.fn();
+      renderExpansion({ onExpand });
+
+      const input = screen.getByRole('textbox');
+      await userEvent.type(input, 'hotels');
+
+      const button = screen.getByRole('button', { name: /find keywords/i });
+      await userEvent.click(button);
+
+      expect(onExpand).toHaveBeenCalledWith('hotels', 'general', 20);
+    });
+
+    it('submits Hotels when Hotels & Hospitality is selected', async () => {
+      const onExpand = vi.fn();
+      renderExpansion({ onExpand });
+
+      await userEvent.type(screen.getByRole('textbox'), 'boutique hotels');
+      await userEvent.selectOptions(screen.getByDisplayValue('General'), 'hotels');
+      await userEvent.click(screen.getByRole('button', { name: /find keywords/i }));
+
+      expect(onExpand).toHaveBeenCalledWith('boutique hotels', 'hotels', 20);
+    });
+
+    it('disables button when loading', () => {
+      renderExpansion({ loading: true });
+
+      expect(screen.getByRole('button', { name: /expanding/i })).toBeDisabled();
+    });
+
+    it('does not call onExpand when seed keyword is empty', () => {
+      renderExpansion();
+
+      // Button should be disabled when empty
+      const button = screen.getByRole('button', { name: /find keywords/i });
+      expect(button).toBeDisabled();
+    });
+  });
+
+  describe('with results', () => {
+    it('renders keyword results table', () => {
+      renderExpansion({ result: expansionResultFixture });
+
+      expect(screen.getByText('luxury hotels')).toBeInTheDocument();
+    });
+  });
+
+  describe('error state', () => {
+    it('shows error message when error occurs', () => {
+      renderExpansion({ error: 'Failed to expand keywords' });
+
+      expect(screen.getByText('Failed to expand keywords')).toBeInTheDocument();
+    });
+  });
+});
 
 describe('KeywordExpansion promotion UI', () => {
   beforeEach(() => {
@@ -226,33 +196,24 @@ describe('KeywordExpansion promotion UI', () => {
   });
 
   it('renders one selection checkbox per keyword row', () => {
-    renderExpansionWithResult(expansionResultFixture);
+    renderExpansion({ result: expansionResultFixture });
 
     expect(screen.getAllByRole('checkbox')).toHaveLength(expansionKeywordFixtures.length);
   });
 
   it('sends a single request carrying the selected keyword research context on trigger', async () => {
     mockApiPost.mockResolvedValue(promotionWireFixture);
-    renderExpansionWithResult(expansionResultFixture);
 
-    await promoteKeyword(luxuryHotelsFixture.keyword);
+    await renderAndPromote();
 
     expect(mockApiPost).toHaveBeenCalledTimes(1);
-    expect(mockApiPost).toHaveBeenCalledWith(
-      '/keywords/promote',
-      { keywords: [luxuryHotelsFixture] },
-      {
-        signal: expect.any(AbortSignal),
-        allowStructured4xx: true,
-      }
-    );
+    expect(mockApiPost).toHaveBeenCalledWith(...promotionRequestArguments([luxuryHotelsFixture]));
   });
 
   it('shows a progress indicator and disables the trigger while the request is in flight', async () => {
     mockApiPost.mockImplementation(mockPendingRequest);
-    renderExpansionWithResult(expansionResultFixture);
 
-    await promoteKeyword(luxuryHotelsFixture.keyword);
+    await renderAndPromote();
 
     expect(screen.getByText(/adding selected keywords/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /adding/i })).toBeDisabled();
@@ -260,9 +221,8 @@ describe('KeywordExpansion promotion UI', () => {
 
   it('displays a success message when the promotion succeeds', async () => {
     mockApiPost.mockResolvedValue(promotionWireFixture);
-    renderExpansionWithResult(expansionResultFixture);
 
-    await promoteKeyword(luxuryHotelsFixture.keyword);
+    await renderAndPromote();
 
     expect(await screen.findByText(successMessage)).toBeInTheDocument();
   });
@@ -272,10 +232,8 @@ describe('KeywordExpansion promotion UI', () => {
     // success is the one this test advances.
     vi.useFakeTimers();
     mockApiPost.mockResolvedValue(promotionWireFixture);
-    renderExpansionWithResult(expansionResultFixture);
+    renderAndFirePromote();
 
-    fireEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    fireEvent.click(getPromoteButtonElement());
     await act(async () => undefined);
     expect(screen.getByText(successMessage)).toBeInTheDocument();
 
@@ -289,9 +247,8 @@ describe('KeywordExpansion promotion UI', () => {
   it('reports the created keywords to its owner when the promotion succeeds', async () => {
     mockApiPost.mockResolvedValue(promotionWireFixture);
     const onKeywordsAdded = vi.fn();
-    renderExpansionWithResult(expansionResultFixture, onKeywordsAdded);
 
-    await promoteKeyword(luxuryHotelsFixture.keyword);
+    await renderAndPromote(onKeywordsAdded);
     await screen.findByText(successMessage);
 
     expect(onKeywordsAdded).toHaveBeenCalledTimes(1);
@@ -301,9 +258,8 @@ describe('KeywordExpansion promotion UI', () => {
   it('reports no created keywords to its owner when the request fails', async () => {
     mockApiPost.mockRejectedValue(new ApiRequestError('HTTP 500: Server Error', 500));
     const onKeywordsAdded = vi.fn();
-    renderExpansionWithResult(expansionResultFixture, onKeywordsAdded);
 
-    await promoteKeyword(luxuryHotelsFixture.keyword);
+    await renderAndPromote(onKeywordsAdded);
     await screen.findByRole('alert');
 
     expect(onKeywordsAdded).not.toHaveBeenCalled();
@@ -311,39 +267,39 @@ describe('KeywordExpansion promotion UI', () => {
 
   it('shows an error and retains the selection when the request fails', async () => {
     mockApiPost.mockRejectedValue(new ApiRequestError('HTTP 500: Server Error', 500));
-    renderExpansionWithResult(expansionResultFixture);
 
-    await promoteKeyword(luxuryHotelsFixture.keyword);
+    await renderAndPromote();
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/adding keywords failed/i);
     expect(selectKeywordCheckbox(luxuryHotelsFixture.keyword)).toBeChecked();
     expect(getPromoteButtonElement()).toBeEnabled();
   });
 
-  it('shows exact field-qualified backend message when promotion is rejected', async () => {
-    mockApiPost.mockRejectedValue(createDefinitiveRejection(definitiveRejectionField));
-    renderExpansionWithResult(expansionResultFixture);
+  it.each([
+    {
+      outcome: 'shows exact field-qualified backend message when promotion is rejected',
+      field: definitiveRejectionField,
+      expectedText: `${definitiveRejectionMessage} (field: ${definitiveRejectionField})`,
+    },
+    {
+      outcome: 'shows exact backend message when rejection omits field',
+      field: undefined,
+      expectedText: definitiveRejectionMessage,
+    },
+  ])('$outcome', async ({
+    field, expectedText
+  }) => {
+    mockApiPost.mockRejectedValue(createDefinitiveRejection(field));
 
-    await promoteKeyword(luxuryHotelsFixture.keyword);
+    await renderAndPromote();
 
-    expect((await screen.findByRole('alert')).textContent)
-      .toBe(`${definitiveRejectionMessage} (field: ${definitiveRejectionField})`);
-  });
-
-  it('shows exact backend message when rejection omits field', async () => {
-    mockApiPost.mockRejectedValue(createDefinitiveRejection());
-    renderExpansionWithResult(expansionResultFixture);
-
-    await promoteKeyword(luxuryHotelsFixture.keyword);
-
-    expect((await screen.findByRole('alert')).textContent).toBe(definitiveRejectionMessage);
+    expect((await screen.findByRole('alert')).textContent).toBe(expectedText);
   });
 
   it('retains selection when promotion receives a definitive rejection', async () => {
     mockApiPost.mockRejectedValue(createDefinitiveRejection(definitiveRejectionField));
-    renderExpansionWithResult(expansionResultFixture);
 
-    await promoteKeyword(luxuryHotelsFixture.keyword);
+    await renderAndPromote();
     await screen.findByRole('alert');
 
     expect(selectKeywordCheckbox(luxuryHotelsFixture.keyword)).toBeChecked();
@@ -352,10 +308,8 @@ describe('KeywordExpansion promotion UI', () => {
   it('shows the timeout message when the request does not settle within the promotion timeout', async () => {
     vi.useFakeTimers();
     mockApiPost.mockImplementation(mockAbortableRequest);
-    renderExpansionWithResult(expansionResultFixture);
+    renderAndFirePromote();
 
-    fireEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    fireEvent.click(getPromoteButtonElement());
     await act(async () => {
       vi.advanceTimersByTime(PROMOTION_TIMEOUT_MS);
     });
@@ -365,20 +319,13 @@ describe('KeywordExpansion promotion UI', () => {
   });
 
   it('clears the selection when a new expansion result is displayed', async () => {
-    const { rerender } = renderExpansionWithResult(expansionResultFixture);
+    const { rerender } = renderExpansion({ result: expansionResultFixture });
     await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    expect(screen.getByText(`1 of ${SELECTION_LIMIT} keywords selected`)).toBeInTheDocument();
+    expect(screen.getByText(selectionCountText(1))).toBeInTheDocument();
 
-    rerender(
-      <KeywordExpansion
-        onExpand={vi.fn()}
-        loading={false}
-        result={replacementResultFixture}
-        error={null}
-      />
-    );
+    rerender(<KeywordExpansion {...buildProps({ result: replacementResultFixture })} />);
 
-    expect(screen.getByText(`0 of ${SELECTION_LIMIT} keywords selected`)).toBeInTheDocument();
+    expect(screen.getByText(selectionCountText(0))).toBeInTheDocument();
     expect(selectKeywordCheckbox(luxuryHotelsFixture.keyword)).not.toBeChecked();
   });
 });

@@ -26,6 +26,11 @@ beforeEach(() => {
   mockUseIsAdmin.mockReturnValue(buildAlertsPanelMembership());
 });
 
+async function renderPanelAndClick(buttonName: string) {
+  render(<AlertsPanel />);
+  await userEvent.click(screen.getByRole('button', { name: buttonName }));
+}
+
 describe('AlertsPanel', () => {
   it('shows a loading status while the first request is pending', () => {
     mockUseOpenAlerts.mockReturnValue(buildAlertsPanelHookResult({
@@ -114,8 +119,7 @@ describe('AlertsPanel', () => {
     });
     mockUseOpenAlerts.mockReturnValue(buildAlertsPanelHookResult({ acknowledge }));
 
-    render(<AlertsPanel />);
-    await userEvent.click(screen.getByRole('button', { name: 'Acknowledge' }));
+    await renderPanelAndClick('Acknowledge');
 
     expect(acknowledge).toHaveBeenCalledWith('alert-d9c3a09f6c91aeb393b663030c383310');
   });
@@ -132,8 +136,7 @@ describe('AlertsPanel', () => {
     const refresh = vi.fn().mockResolvedValue(undefined);
     mockUseOpenAlerts.mockReturnValue(buildAlertsPanelHookResult({ refresh }));
 
-    render(<AlertsPanel />);
-    await userEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await renderPanelAndClick('Refresh');
 
     expect(refresh).toHaveBeenCalledWith();
   });

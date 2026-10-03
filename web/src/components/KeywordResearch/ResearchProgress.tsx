@@ -151,12 +151,21 @@ const ProgressSummary = ({
   );
 };
 
-/** The job-level failure reason, shown once the run has stopped. */
-const JobFailureMessage = ({ message }: { message?: string }) => {
+/**
+ * A job's failure reason. The raw text stays on `title`: it carries the
+ * untranslated second count and any provider detail, which is what you want
+ * when debugging a stranded run.
+ */
+export const JobFailureMessage = ({
+  message, spacingClassName = ''
+}: {
+  message?: string;
+  spacingClassName?: string 
+}) => {
   if (message === undefined || message === '') return null;
 
   return (
-    <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1" title={message}>
+    <p className={`${spacingClassName}text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1`} title={message}>
       {formatResearchFailureMessage(message)}
     </p>
   );

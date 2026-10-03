@@ -4,10 +4,16 @@ import remarkGfm from 'remark-gfm';
 import type { ContentStudioHistory } from '../../types';
 import { Spinner } from '../ui/Spinner';
 import { exportToDocx } from '../../exporters/documentGenerator';
-import { CopyButtonLabel } from './CopyButtonLabel';
+import { CopyButton } from './CopyButtonLabel';
+import { useExportAction } from '../ui/useExportAction';
+import { OverlayDialog } from './OverlayDialog';
 import {
   formatContentWarning, getContentTitle
 } from './contentPresentation';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  CHECK_PATHS, CLOSE_PATHS, DOWNLOAD_PATHS, HASHTAG_PATHS 
+} from '../ui/iconPaths';
 
 interface ContentDetailModalProps {
   item: ContentStudioHistory;
@@ -20,56 +26,45 @@ export const ContentDetailModal = ({
   item, onClose, onCopy, copied
 }: ContentDetailModalProps) => {
   const [viewMode, setViewMode] = useState<'preview' | 'raw'>('preview');
-  const [exporting, setExporting] = useState(false);
 
   const content = item.generated_content;
   const displayTitle = getContentTitle(item);
   const fullContent = `# ${displayTitle}\n\n${content?.meta_description ?? ''}\n\n${content?.body ?? ''}`;
 
-  const handleExportDocx = async () => {
-    if (!content) return;
-    setExporting(true);
-
-    try {
-      await exportToDocx({
+  const {
+    exporting, handleExport: handleExportDocx 
+  } = useExportAction(
+    content
+      ? () => exportToDocx({
         content: {
           ...content,
           title: displayTitle,
         },
         keyword: item.keyword
-      });
-    } catch (error) {
-      console.error('Error exporting to DOCX:', error);
-    } finally {
-      setExporting(false);
-    }
-  };
+      })
+      : null,
+    'Error exporting to DOCX:',
+  );
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex min-h-full items-center justify-center p-4">
-        <div className="fixed inset-0 bg-gray-900/50 transition-opacity" onClick={onClose} />
-
-        <div className="relative bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
-          <ContentDetailHeader
-            item={item}
-            title={displayTitle}
-            viewMode={viewMode}
-            setViewMode={setViewMode}
-            exporting={exporting}
-            onExportDocx={handleExportDocx}
-            onCopy={() => onCopy(fullContent)}
-            copied={copied}
-            onClose={onClose}
-          />
-          <ContentDetailBody
-            content={content}
-            contentWarning={item.content_warning}
-            viewMode={viewMode}
-          />
-        </div>
-      </div>
-    </div>
+    <OverlayDialog onDismiss={onClose} panelClassName="max-w-4xl w-full max-h-[90vh] overflow-hidden">
+      <ContentDetailHeader
+        item={item}
+        title={displayTitle}
+        viewMode={viewMode}
+        setViewMode={setViewMode}
+        exporting={exporting}
+        onExportDocx={handleExportDocx}
+        onCopy={() => onCopy(fullContent)}
+        copied={copied}
+        onClose={onClose}
+      />
+      <ContentDetailBody
+        content={content}
+        contentWarning={item.content_warning}
+        viewMode={viewMode}
+      />
+    </OverlayDialog>
   );
 };
 
@@ -95,9 +90,7 @@ const ContentDetailHeader = ({
       </h2>
       <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
         <span className="flex items-center gap-1">
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
-          </svg>
+          <StrokeIcon className="w-3.5 h-3.5" paths={HASHTAG_PATHS} />
           {item.keyword}
         </span>
         <span>•</span>
@@ -113,7 +106,13 @@ const ContentDetailHeader = ({
     <div className="flex items-center gap-2">
       <ViewModeToggle viewMode={viewMode} setViewMode={setViewMode} />
       <ExportButton exporting={exporting} onExport={onExportDocx} />
-      <CopyButton copied={copied} onCopy={onCopy} />
+      <CopyButton
+        copied={copied}
+        onCopy={onCopy}
+        className="px-3 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
+        iconClassName="w-4 h-4"
+        label="Copy All"
+      />
       <CloseButton onClose={onClose} />
     </div>
   </div>
@@ -168,27 +167,9 @@ const ExportButton = ({
     {exporting ? (
       <Spinner size="sm" />
     ) : (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-      </svg>
+      <StrokeIcon className="w-4 h-4" paths={DOWNLOAD_PATHS} />
     )}
     .docx
-  </button>
-);
-
-interface CopyButtonProps {
-  copied: boolean;
-  onCopy: () => void;
-}
-
-const CopyButton = ({
-  copied, onCopy
-}: CopyButtonProps) => (
-  <button
-    onClick={onCopy}
-    className="px-3 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
-  >
-    <CopyButtonLabel copied={copied} iconClassName="w-4 h-4" label="Copy All" />
   </button>
 );
 
@@ -200,9 +181,7 @@ const CloseButton = ({ onClose }: CloseButtonProps) => (
     className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
     aria-label="Close content details"
   >
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M6 18L18 6M6 6l12 12" />
-    </svg>
+    <StrokeIcon className="w-5 h-5" paths={CLOSE_PATHS} />
   </button>
 );
 
@@ -272,9 +251,7 @@ const ContentDetailBody = ({
         <ul className="mt-2 space-y-2">
           {content.key_points.map((point) => (
             <li key={point} className="text-sm text-gray-700 flex items-start gap-2">
-              <svg className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
+              <StrokeIcon className="w-4 h-4 text-green-500 mt-0.5 flex-shrink-0" paths={CHECK_PATHS} strokeWidth={2} />
               {point}
             </li>
           ))}

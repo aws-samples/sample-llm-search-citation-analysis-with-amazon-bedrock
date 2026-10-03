@@ -18,6 +18,19 @@ import {
   thresholdValues,
 } from './AlertSettingsForm-fixtures';
 
+function renderWithChangedSettings(settings: Parameters<typeof buildAlertSettings>[0]) {
+  const { rerender } = renderAlertSettingsForm();
+  rerender(<AlertSettingsForm {...buildAlertSettingsFormProps({ settings: buildAlertSettings(settings) })} />);
+}
+
+async function renderAndSubmitEmptyMentionRate() {
+  const { props } = renderAlertSettingsForm();
+  return {
+    props,
+    ...await submitEmptyMentionRate(),
+  };
+}
+
 describe('AlertSettingsForm', () => {
   it('submits the exact settings represented by every edited control', async () => {
     const { props } = renderAlertSettingsForm();
@@ -52,42 +65,30 @@ describe('AlertSettingsForm', () => {
   });
 
   it('replaces threshold controls when persisted settings change', () => {
-    const { rerender } = renderAlertSettingsForm();
-    const nextProps = buildAlertSettingsFormProps({
-      settings: buildAlertSettings({
-        thresholds: {
-          mention_rate_drop: 0.5,
-          position_loss: 6,
-          competitor_top_n: 10,
-          improvement_after_content_change: 100,
-        },
-      }),
+    renderWithChangedSettings({
+      thresholds: {
+        mention_rate_drop: 0.5,
+        position_loss: 6,
+        competitor_top_n: 10,
+        improvement_after_content_change: 100,
+      },
     });
-
-    rerender(<AlertSettingsForm {...nextProps} />);
 
     expect(thresholdValues()).toStrictEqual(['0.5', '6', '10', '100']);
   });
 
   it('replaces delivery controls when persisted settings change', () => {
-    const { rerender } = renderAlertSettingsForm();
-    const nextProps = buildAlertSettingsFormProps({
-      settings: buildAlertSettings({
-        enabled: false,
-        notification_emails: ['new@example.com'],
-      }),
+    renderWithChangedSettings({
+      enabled: false,
+      notification_emails: ['new@example.com'],
     });
-
-    rerender(<AlertSettingsForm {...nextProps} />);
 
     expect(screen.getByRole('checkbox', { name: /Enable alerts/u })).not.toBeChecked();
     expect(screen.getByLabelText('Notification emails')).toHaveValue('new@example.com');
   });
 
   it('shows the exact validation failure without saving invalid settings', async () => {
-    const { props } = renderAlertSettingsForm();
-
-    await submitEmptyMentionRate();
+    const { props } = await renderAndSubmitEmptyMentionRate();
 
     expect(screen.getByRole('alert')).toHaveTextContent('Mention-rate drop must be a number');
     expect(props.onSave).not.toHaveBeenCalled();
@@ -104,10 +105,9 @@ describe('AlertSettingsForm', () => {
   });
 
   it('removes the validation failure after valid settings are submitted', async () => {
-    const { props } = renderAlertSettingsForm();
     const {
-      mentionRate, user
-    } = await submitEmptyMentionRate();
+      props, mentionRate, user
+    } = await renderAndSubmitEmptyMentionRate();
 
     await user.type(mentionRate, '1');
     await user.click(screen.getByRole('button', { name: 'Save alert settings' }));

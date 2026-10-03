@@ -91,14 +91,9 @@ const EmptyState = ({ isAdmin }: { isAdmin: boolean }) => (
   </div>
 );
 
-interface ScheduleItemProps {
+interface ScheduleItemProps extends Pick<ScheduleListProps, 'groups' | 'onEdit' | 'onRun' | 'onDelete' | 'isAdmin'> {
   schedule: Schedule;
-  groups: KeywordGroup[];
-  onEdit: (schedule: Schedule) => void;
-  onRun: (schedule: Schedule) => void;
-  onDelete: (schedule: Schedule) => void;
   running: boolean;
-  isAdmin: boolean;
 }
 
 /**

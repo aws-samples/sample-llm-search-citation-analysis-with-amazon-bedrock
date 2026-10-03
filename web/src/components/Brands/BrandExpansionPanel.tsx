@@ -2,13 +2,17 @@ import type { BrandExpansionAllResult } from '../../types';
 import { WarningIcon } from '../ui';
 import { SuggestionPanelHeader } from './SuggestionPanelHeader';
 
-interface BrandExpansionPanelProps {
-  readonly result: BrandExpansionAllResult;
-  readonly target: 'first_party' | 'competitor';
+/** Ticking suggested brands, then adding the ticked ones or dismissing the panel. */
+export interface PendingBrandSelectionProps {
   readonly pendingBrands: string[];
   readonly onToggleBrand: (brand: string) => void;
   readonly onAccept: () => void;
   readonly onCancel: () => void;
+}
+
+interface BrandExpansionPanelProps extends PendingBrandSelectionProps {
+  readonly result: BrandExpansionAllResult;
+  readonly target: 'first_party' | 'competitor';
 }
 
 export const BrandExpansionPanel = ({

@@ -11,6 +11,8 @@ import {
   validateAlertSettingsForm,
 } from './alertFormModel';
 import type { AlertSettingsFormValues } from './alertFormModel';
+import { useFormValues } from './useFormValues';
+import { ErrorAlert } from '../ui/ErrorAlert';
 
 // Stryker disable next-line ObjectLiteral: replacing the Tailwind-only status palette has no behavioral effect
 const SUBSCRIPTION_CLASSES: Record<AlertSubscriptionStatus, string> = {
@@ -67,6 +69,47 @@ function ThresholdField({
   );
 }
 
+type ThresholdKey = 'mentionRateDrop' | 'positionLoss' | 'competitorTopN' | 'improvementAfterContentChange';
+
+const SCORE_DELTA_RANGE = {
+  minimum: 0.1,
+  maximum: 100,
+  step: 0.1,
+};
+
+const THRESHOLD_FIELDS: ReadonlyArray<Omit<ThresholdFieldProps, 'value' | 'onChange'> & { readonly field: ThresholdKey }> = [
+  {
+    field: 'mentionRateDrop',
+    id: 'alert-mention-rate-drop',
+    label: 'Mention-rate drop',
+    unit: 'points of mention rate',
+    ...SCORE_DELTA_RANGE,
+  },
+  {
+    field: 'positionLoss',
+    id: 'alert-position-loss',
+    label: 'Position loss',
+    unit: 'places of average position',
+    ...SCORE_DELTA_RANGE,
+  },
+  {
+    field: 'competitorTopN',
+    id: 'alert-competitor-top-n',
+    label: 'Competitor top N',
+    unit: 'positions',
+    minimum: 1,
+    maximum: 10,
+    step: 1,
+  },
+  {
+    field: 'improvementAfterContentChange',
+    id: 'alert-improvement-after-change',
+    label: 'Improvement after content change',
+    unit: 'points of visibility score',
+    ...SCORE_DELTA_RANGE,
+  },
+];
+
 interface AlertSettingsFormProps {
   readonly settings: AlertSettings;
   readonly isAdmin: boolean;
@@ -86,7 +129,9 @@ export function AlertSettingsForm({
   onSave,
   onSendTestNotification,
 }: AlertSettingsFormProps) {
-  const [values, setValues] = useState<AlertSettingsFormValues>(() => alertSettingsFormValues(settings));
+  const {
+    values, setValues, updateValue
+  } = useFormValues<AlertSettingsFormValues>(() => alertSettingsFormValues(settings));
   const [validationError, setValidationError] = useState<string | null>(null);
   const busy = loading || saving || testing;
   const hasConfirmedSubscription = settings.subscription_statuses.some(
@@ -97,16 +142,6 @@ export function AlertSettingsForm({
     setValues(alertSettingsFormValues(settings));
     setValidationError(null);
   }, [settings]);
-
-  const updateValue = <TField extends keyof AlertSettingsFormValues>(
-    field: TField,
-    value: AlertSettingsFormValues[TField]
-  ): void => {
-    setValues((currentValues) => ({
-      ...currentValues,
-      [field]: value,
-    }));
-  };
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
@@ -135,46 +170,16 @@ export function AlertSettingsForm({
         </label>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <ThresholdField
-            id="alert-mention-rate-drop"
-            label="Mention-rate drop"
-            unit="points of mention rate"
-            value={values.mentionRateDrop}
-            minimum={0.1}
-            maximum={100}
-            step={0.1}
-            onChange={(value) => updateValue('mentionRateDrop', value)}
-          />
-          <ThresholdField
-            id="alert-position-loss"
-            label="Position loss"
-            unit="places of average position"
-            value={values.positionLoss}
-            minimum={0.1}
-            maximum={100}
-            step={0.1}
-            onChange={(value) => updateValue('positionLoss', value)}
-          />
-          <ThresholdField
-            id="alert-competitor-top-n"
-            label="Competitor top N"
-            unit="positions"
-            value={values.competitorTopN}
-            minimum={1}
-            maximum={10}
-            step={1}
-            onChange={(value) => updateValue('competitorTopN', value)}
-          />
-          <ThresholdField
-            id="alert-improvement-after-change"
-            label="Improvement after content change"
-            unit="points of visibility score"
-            value={values.improvementAfterContentChange}
-            minimum={0.1}
-            maximum={100}
-            step={0.1}
-            onChange={(value) => updateValue('improvementAfterContentChange', value)}
-          />
+          {THRESHOLD_FIELDS.map(({
+            field, ...fieldProps
+          }) => (
+            <ThresholdField
+              key={field}
+              {...fieldProps}
+              value={values[field]}
+              onChange={(value) => updateValue(field, value)}
+            />
+          ))}
         </div>
 
         <label htmlFor="alert-notification-emails" className="block">
@@ -213,11 +218,7 @@ export function AlertSettingsForm({
       {!isAdmin && (
         <p className="text-sm text-gray-600">Only administrators can change or save alert settings.</p>
       )}
-      {validationError !== null && (
-        <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {validationError}
-        </p>
-      )}
+      <ErrorAlert message={validationError} />
 
       <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
         <h4 className="text-sm font-semibold text-gray-900">Email subscription status</h4>

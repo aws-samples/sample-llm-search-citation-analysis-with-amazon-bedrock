@@ -1,12 +1,16 @@
 import {
-  useState, useEffect
+  useState, useEffect, useCallback
 } from 'react';
+import type { ReactNode } from 'react';
 import { useContentStudio } from '../../hooks/useContentStudio';
 import { ContentIdeaCard } from './ContentIdeaCard';
 import { ContentHistory } from './ContentHistory';
 import { GroupBriefForm } from './GroupBriefForm';
 import { GROUP_BRIEF_LANGUAGES } from './GroupBriefForm-source';
 import { Spinner } from '../ui/Spinner';
+import {
+  CenteredEmpty, CenteredLoading
+} from '../ui/CenteredState';
 import type {
   ContentBriefBatchRequest,
   ContentIdea,
@@ -14,6 +18,11 @@ import type {
   Keyword,
 } from '../../types';
 import { ContentBriefBatchProgress } from './ContentBriefBatchProgress';
+import { OverlayDialog } from './OverlayDialog';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  BOLT_PATHS, DOCUMENT_TEXT_PATHS, LIGHTBULB_PATHS, REFRESH_PATHS, WARNING_PATHS 
+} from '../ui/iconPaths';
 
 type TabType = 'ideas' | 'brief' | 'history';
 
@@ -32,23 +41,16 @@ const IdeasTabContent = ({
   loading, ideas, actionableIdeas, generating, selectedIdea, onCreateContent
 }: IdeasTabContentProps) => {
   if (loading && ideas.length === 0) {
-    return (
-      <div className="text-center py-12 text-gray-500">
-        <Spinner size="lg" className="mx-auto mb-4" />
-        Analyzing your data for content opportunities...
-      </div>
-    );
+    return <CenteredLoading label="Analyzing your data for content opportunities..." />;
   }
 
   if (actionableIdeas.length === 0) {
     return (
-      <div className="text-center py-12 text-gray-500">
-        <svg className="w-12 h-12 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>
-        <p>No content ideas available yet.</p>
-        <p className="text-sm mt-1">Run an analysis and configure your brands to get started.</p>
-      </div>
+      <CenteredEmpty
+        icon={<StrokeIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" paths={DOCUMENT_TEXT_PATHS} />}
+        title="No content ideas available yet."
+        hint="Run an analysis and configure your brands to get started."
+      />
     );
   }
 
@@ -75,9 +77,7 @@ const NonActionableIdeas = ({ ideas }: { ideas: ContentIdea[] }) => {
       {nonActionable.map(idea => (
         <div key={idea.id} className="bg-amber-50 border border-amber-200 rounded-lg p-4">
           <div className="flex items-start gap-3">
-            <svg className="w-5 h-5 text-amber-500 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-            </svg>
+            <StrokeIcon className="w-5 h-5 text-amber-500 mt-0.5" paths={WARNING_PATHS} />
             <div>
               <h4 className="font-medium text-amber-800">{idea.title}</h4>
               <p className="text-sm text-amber-700 mt-1">{idea.description}</p>
@@ -101,70 +101,60 @@ function ConfirmGenerateModal({
   const [outputLanguage, setOutputLanguage] = useState('English');
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div className="flex min-h-full items-center justify-center p-4">
-        <div className="fixed inset-0 bg-gray-900/50 transition-opacity" onClick={onCancel} />
-
-        <div className="relative bg-white rounded-xl shadow-xl max-w-md w-full p-6">
-          <div className="flex items-start gap-4">
-            <div className="p-3 bg-orange-100 rounded-full">
-              <svg className="w-6 h-6 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
-            </div>
-            <div className="flex-1">
-              <h3 className="text-lg font-semibold text-gray-900">Create Content</h3>
-              <p className="text-sm text-gray-600 mt-2">
-                AI will analyze competitor content and generate optimized content for:
-              </p>
-              <div className="mt-3 p-3 bg-gray-50 rounded-lg">
-                <p className="font-medium text-gray-900">{idea.title}</p>
-                <p className="text-sm text-gray-500 mt-1">Keyword: {idea.keyword}</p>
-                {idea.competitor_urls && idea.competitor_urls.length > 0 && (
-                  <p className="text-sm text-gray-500">{idea.competitor_urls.length} competitor sources will be analyzed</p>
-                )}
-              </div>
-              <div className="mt-3">
-                <label htmlFor="output-language" className="block text-sm font-medium text-gray-700 mb-1">
-                  Output Language
-                </label>
-                <select
-                  id="output-language"
-                  value={outputLanguage}
-                  onChange={e => setOutputLanguage(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
-                >
-                  {GROUP_BRIEF_LANGUAGES.map(lang => (
-                    <option key={lang} value={lang}>{lang}</option>
-                  ))}
-                </select>
-              </div>
-              <p className="text-xs text-gray-500 mt-3">
-                This may take up to a minute. You&apos;ll be notified when it&apos;s ready.
-              </p>
-            </div>
+    <OverlayDialog onDismiss={onCancel} panelClassName="max-w-md w-full p-6">
+      <div className="flex items-start gap-4">
+        <div className="p-3 bg-orange-100 rounded-full">
+          <StrokeIcon className="w-6 h-6 text-orange-600" paths={LIGHTBULB_PATHS} />
+        </div>
+        <div className="flex-1">
+          <h3 className="text-lg font-semibold text-gray-900">Create Content</h3>
+          <p className="text-sm text-gray-600 mt-2">
+            AI will analyze competitor content and generate optimized content for:
+          </p>
+          <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+            <p className="font-medium text-gray-900">{idea.title}</p>
+            <p className="text-sm text-gray-500 mt-1">Keyword: {idea.keyword}</p>
+            {idea.competitor_urls && idea.competitor_urls.length > 0 && (
+              <p className="text-sm text-gray-500">{idea.competitor_urls.length} competitor sources will be analyzed</p>
+            )}
           </div>
-
-          <div className="flex gap-3 mt-6">
-            <button
-              onClick={onCancel}
-              className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+          <div className="mt-3">
+            <label htmlFor="output-language" className="block text-sm font-medium text-gray-700 mb-1">
+              Output Language
+            </label>
+            <select
+              id="output-language"
+              value={outputLanguage}
+              onChange={e => setOutputLanguage(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-gray-200"
             >
-              Cancel
-            </button>
-            <button
-              onClick={() => onConfirm(outputLanguage)}
-              className="flex-1 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              Generate Content
-            </button>
+              {GROUP_BRIEF_LANGUAGES.map(lang => (
+                <option key={lang} value={lang}>{lang}</option>
+              ))}
+            </select>
           </div>
+          <p className="text-xs text-gray-500 mt-3">
+            This may take up to a minute. You&apos;ll be notified when it&apos;s ready.
+          </p>
         </div>
       </div>
-    </div>
+
+      <div className="flex gap-3 mt-6">
+        <button
+          onClick={onCancel}
+          className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => onConfirm(outputLanguage)}
+          className="flex-1 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
+        >
+          <StrokeIcon className="w-4 h-4" paths={BOLT_PATHS} />
+          Generate Content
+        </button>
+      </div>
+    </OverlayDialog>
   );
 }
 
@@ -190,13 +180,35 @@ const Header = ({
       {loading ? (
         <Spinner size="sm" />
       ) : (
-        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
+        <StrokeIcon className="w-4 h-4" paths={REFRESH_PATHS} />
       )}
       Refresh
     </button>
   </div>
+);
+
+interface TabButtonProps {
+  tab: TabType;
+  activeTab: TabType;
+  setActiveTab: (tab: TabType) => void;
+  /** Appended to the base classes, before the active-state classes. */
+  positionClassName?: string;
+  children: ReactNode;
+}
+
+const TabButton = ({
+  tab, activeTab, setActiveTab, positionClassName = '', children
+}: TabButtonProps) => (
+  <button
+    onClick={() => setActiveTab(tab)}
+    className={`pb-3 text-sm font-medium border-b-2 transition-colors${positionClassName} ${
+      activeTab === tab
+        ? 'border-gray-900 text-gray-900'
+        : 'border-transparent text-gray-500 hover:text-gray-700'
+    }`}
+  >
+    {children}
+  </button>
 );
 
 interface TabsProps {
@@ -212,39 +224,18 @@ const Tabs = ({
 }: TabsProps) => (
   <div className="border-b border-gray-200">
     <nav className="flex gap-8 overflow-x-auto">
-      <button
-        onClick={() => setActiveTab('ideas')}
-        className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-          activeTab === 'ideas'
-            ? 'border-gray-900 text-gray-900'
-            : 'border-transparent text-gray-500 hover:text-gray-700'
-        }`}
-      >
+      <TabButton tab="ideas" activeTab={activeTab} setActiveTab={setActiveTab}>
         Content Ideas
         {highPriorityCount > 0 && (
           <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">
             {highPriorityCount} high priority
           </span>
         )}
-      </button>
-      <button
-        onClick={() => setActiveTab('brief')}
-        className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-          activeTab === 'brief'
-            ? 'border-gray-900 text-gray-900'
-            : 'border-transparent text-gray-500 hover:text-gray-700'
-        }`}
-      >
+      </TabButton>
+      <TabButton tab="brief" activeTab={activeTab} setActiveTab={setActiveTab}>
         Content Brief
-      </button>
-      <button
-        onClick={() => setActiveTab('history')}
-        className={`pb-3 text-sm font-medium border-b-2 transition-colors relative ${
-          activeTab === 'history'
-            ? 'border-gray-900 text-gray-900'
-            : 'border-transparent text-gray-500 hover:text-gray-700'
-        }`}
-      >
+      </TabButton>
+      <TabButton tab="history" activeTab={activeTab} setActiveTab={setActiveTab} positionClassName=" relative">
         Generated Content
         {unviewedCount > 0 && (
           <span className="ml-2 px-2 py-0.5 text-xs bg-orange-500 text-white rounded-full font-semibold animate-pulse">
@@ -256,7 +247,7 @@ const Tabs = ({
             {historyLength}
           </span>
         )}
-      </button>
+      </TabButton>
     </nav>
   </div>
 );
@@ -295,15 +286,19 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
     deleteContent
   } = useContentStudio();
 
-  useEffect(() => {
-    if (activeTab === 'ideas') {
+  const loadTab = useCallback((tab: TabType) => {
+    if (tab === 'ideas') {
       fetchIdeas();
       return;
     }
-    if (activeTab === 'history') {
+    if (tab === 'history') {
       fetchHistory();
     }
-  }, [activeTab, fetchIdeas, fetchHistory]);
+  }, [fetchIdeas, fetchHistory]);
+
+  useEffect(() => {
+    loadTab(activeTab);
+  }, [activeTab, loadTab]);
 
   const handleCreateContent = (idea: ContentIdea) => {
     setPendingIdea(idea);
@@ -351,15 +346,7 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
     setPendingIdea(null);
   };
 
-  const handleRefresh = () => {
-    if (activeTab === 'ideas') {
-      fetchIdeas();
-      return;
-    }
-    if (activeTab === 'history') {
-      fetchHistory();
-    }
-  };
+  const handleRefresh = () => loadTab(activeTab);
 
   const actionableIdeas = ideas.filter(idea => idea.actionable);
   const highPriorityCount = actionableIdeas.filter(i => i.priority === 'high').length;

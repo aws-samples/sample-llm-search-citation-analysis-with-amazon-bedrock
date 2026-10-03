@@ -1,3 +1,6 @@
+import {
+  fireEvent, screen 
+} from '@testing-library/react';
 import { vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import type { IndustryPresets } from '../../types';
@@ -36,4 +39,9 @@ export function buildIndustrySelectorProps(
     onIndustryChange: vi.fn(),
     ...overrides,
   };
+}
+
+/** Picks the retail preset in the (only) industry combobox. */
+export function chooseRetailIndustry(): void {
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'retail' } });
 }

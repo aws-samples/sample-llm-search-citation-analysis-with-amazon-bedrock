@@ -7,6 +7,14 @@ import {
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { safeHref } from '../../infrastructure';
 import { Spinner } from '../ui/Spinner';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  CHEVRON_RIGHT_PATHS, GLOBE_PATHS 
+} from '../ui/iconPaths';
+import {
+  CopyKeywordCell, KeywordSignalCells
+} from './KeywordSignalCells';
+import type { KeywordSelectionProps } from './researchRunView';
 
 type SectionId = 'primary' | 'secondary' | 'longtail' | 'gaps';
 
@@ -31,25 +39,6 @@ const sections: ReadonlyArray<{
     label: 'Content Gaps' 
   },
 ];
-
-const getIntentColor = (intent: string): string => {
-  const colors: Record<string, string> = {
-    informational: 'bg-blue-100 text-blue-700',
-    commercial: 'bg-purple-100 text-purple-700',
-    transactional: 'bg-green-100 text-green-700',
-    navigational: 'bg-gray-100 text-gray-700',
-  };
-  return colors[intent?.toLowerCase()] ?? 'bg-gray-100 text-gray-600';
-};
-
-const getCompetitionColor = (competition: string): string => {
-  const colors: Record<string, string> = {
-    low: 'text-green-600',
-    medium: 'text-yellow-600',
-    high: 'text-red-600',
-  };
-  return colors[competition?.toLowerCase()] ?? 'text-gray-600';
-};
 
 const getSectionCount = (result: CompetitorAnalysisResult | null, sectionId: SectionId): number => {
   if (!result) return 0;
@@ -115,14 +104,7 @@ export const InputForm = ({
           </>
         ) : (
           <>
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={1.5}
-                d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
-              />
-            </svg>
+            <StrokeIcon className="w-4 h-4" paths={GLOBE_PATHS} />
             Analyze
           </>
         )}
@@ -210,9 +192,7 @@ export const SeoElementsDisplay = ({ seoElements }: SeoElementsDisplayProps) => 
   return (
     <div className="mt-4 pt-4 border-t border-gray-100">
       <div className="flex items-center gap-2 text-xs font-medium text-gray-700 mb-3">
-        <svg className="w-4 h-4 rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-        </svg>
+        <StrokeIcon className="w-4 h-4 rotate-90" paths={CHEVRON_RIGHT_PATHS} strokeWidth={2} />
         <span>Extracted SEO Elements</span>
         <span className="text-gray-400 font-normal">(actual page data)</span>
       </div>
@@ -283,12 +263,9 @@ export const SectionTabs = ({
   </div>
 );
 
-interface KeywordRowProps {
+interface KeywordRowProps extends KeywordSelectionProps {
   keyword: ExpandedKeywordWithSource;
   showOpportunity: boolean;
-  selectable?: boolean;
-  selected?: Set<string>;
-  onToggle?: (keyword: string) => void;
 }
 
 const KeywordRow = ({
@@ -315,47 +292,21 @@ const KeywordRow = ({
         </td>
       )}
       <td className="px-6 py-4 text-sm text-gray-900">{kw.keyword}</td>
-      <td className="px-6 py-4">
-        <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${getIntentColor(kw.intent)}`}>
-          {kw.intent}
-        </span>
-      </td>
-      <td className={`px-6 py-4 text-sm font-medium ${getCompetitionColor(kw.competition)}`}>{kw.competition}</td>
-      <td className="px-6 py-4">
-        <div className="flex items-center gap-2">
-          <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-            <div className="h-full bg-gray-900 rounded-full" style={{ width: `${(kw.relevance ?? 0) * 10}%` }} />
-          </div>
-          <span className="text-xs text-gray-500">{kw.relevance}/10</span>
-        </div>
-      </td>
+      <KeywordSignalCells keyword={kw} />
       <td className="px-6 py-4">
         {kw.source && <span className="inline-flex px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600">{kw.source}</span>}
       </td>
       {showOpportunity && (
         <td className="px-6 py-4 text-xs text-gray-600 max-w-xs truncate" title={kw.opportunity}>{kw.opportunity}</td>
       )}
-      <td className="px-6 py-4 text-right">
-        <button
-          onClick={() => void copy(kw.keyword)}
-          className="text-gray-400 hover:text-gray-600 transition-colors"
-          title="Copy keyword"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-          </svg>
-        </button>
-      </td>
+      <CopyKeywordCell keyword={kw.keyword} onCopy={(text) => void copy(text)} />
     </tr>
   );
 };
 
-interface KeywordsTableProps {
+interface KeywordsTableProps extends KeywordSelectionProps {
   keywords: ExpandedKeywordWithSource[];
   showOpportunity: boolean;
-  selectable?: boolean;
-  selected?: Set<string>;
-  onToggle?: (keyword: string) => void;
 }
 
 export const KeywordsTable = ({

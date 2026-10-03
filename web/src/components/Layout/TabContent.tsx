@@ -15,6 +15,7 @@ import { keywordSelectionKey } from '../../hooks/keywordIdentity';
 import type {
   TabType, Stats, Citations, Search, Keyword, Execution, Schedule, AnalysisScope
 } from '../../types';
+import { StrokeIcon } from '../ui/StrokeIcon';
 
 const ExecutionMonitor = lazy(() => import('../Execution/ExecutionMonitor').then(module => ({ default: module.ExecutionMonitor })));
 const ScheduleManager = lazy(() => import('../Schedule/ScheduleManager').then(module => ({ default: module.ScheduleManager })));
@@ -104,13 +105,15 @@ function DashboardCharts({ citations }: { readonly citations: Citations | null }
   );
 }
 
-function QuickActions({
-  citations, keywords, setActiveTab
-}: {
+interface QuickActionsProps {
   readonly citations: Citations | null;
   readonly keywords: Keyword[];
   readonly setActiveTab: (tab: TabType) => void;
-}) {
+}
+
+function QuickActions({
+  citations, keywords, setActiveTab
+}: QuickActionsProps) {
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
       <h3 className="text-sm font-medium text-gray-900 mb-4">Quick Actions</h3>
@@ -120,9 +123,7 @@ function QuickActions({
           onClick={() => setActiveTab('execution')}
           className="px-3 sm:px-4 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors flex items-center gap-2"
         >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
-          </svg>
+          <StrokeIcon className="w-4 h-4" paths={['M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z']} />
           <span className="hidden sm:inline">Run Analysis</span>
           <span className="sm:hidden">Run</span>
         </button>
@@ -157,12 +158,7 @@ function QuickActions({
 
 function DashboardContent({
   stats, citations, keywords, setActiveTab
-}: {
-  readonly stats: Stats | null;
-  readonly citations: Citations | null;
-  readonly keywords: Keyword[];
-  readonly setActiveTab: (tab: TabType) => void;
-}) {
+}: QuickActionsProps & { readonly stats: Stats | null }) {
   return (
     <ErrorBoundary>
       <DashboardStats stats={stats} />

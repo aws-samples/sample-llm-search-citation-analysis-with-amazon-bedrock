@@ -1,6 +1,10 @@
 import { useState } from 'react';
 import type { KeywordGroup } from '../../types';
 import type { MutationOutcome } from '../../hooks/useKeywordGroups';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  PENCIL_PATHS, TRASH_PATHS 
+} from '../ui/iconPaths';
 
 /** Which keywords the list below shows: everything, the ungrouped ones, or one group. */
 export type GroupFilter = 'all' | 'ungrouped' | { groupId: string };
@@ -35,37 +39,35 @@ export const KeywordGroupsPanel = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
 
-  const submitCreate = async () => {
-    const name = newName.trim();
+  const submitName = async (
+    rawName: string,
+    mutate: (name: string) => Promise<MutationOutcome>,
+    onSuccess: () => void,
+    failureTitle: string,
+  ) => {
+    const name = rawName.trim();
     if (!name || busy) return;
     setBusy(true);
     try {
-      const outcome = await onCreate(name);
+      const outcome = await mutate(name);
       if (outcome.success) {
-        setNewName('');
+        onSuccess();
       } else {
-        onNotify('Could not create group', outcome.message, 'error');
+        onNotify(failureTitle, outcome.message, 'error');
       }
     } finally {
       setBusy(false);
     }
   };
 
-  const submitRename = async (id: string) => {
-    const name = editName.trim();
-    if (!name || busy) return;
-    setBusy(true);
-    try {
-      const outcome = await onRename(id, name);
-      if (outcome.success) {
-        setEditingId(null);
-      } else {
-        onNotify('Could not rename group', outcome.message, 'error');
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
+  const submitCreate = () => submitName(newName, onCreate, () => setNewName(''), 'Could not create group');
+
+  const submitRename = (id: string) => submitName(
+    editName,
+    (name) => onRename(id, name),
+    () => setEditingId(null),
+    'Could not rename group',
+  );
 
   const filterButtonClass = (active: boolean) =>
     `px-3 py-1.5 text-sm rounded-lg border transition-colors ${
@@ -168,13 +170,9 @@ export const KeywordGroupsPanel = ({
 };
 
 const PencilGlyph = () => (
-  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-  </svg>
+  <StrokeIcon className="w-3.5 h-3.5" paths={PENCIL_PATHS} aria-hidden="true" />
 );
 
 const TrashGlyph = () => (
-  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-  </svg>
+  <StrokeIcon className="w-3.5 h-3.5" paths={TRASH_PATHS} aria-hidden="true" />
 );

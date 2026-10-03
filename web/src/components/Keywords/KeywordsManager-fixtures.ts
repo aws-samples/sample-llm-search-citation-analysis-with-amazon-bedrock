@@ -102,7 +102,7 @@ export async function submitCreate(keyword = createdKeywordFixture.keyword) {
   return input;
 }
 
-export function getKeywordActionButtons() {
+function getKeywordActionButtons() {
   return [
     screen.getByRole('button', { name: `Edit ${existingKeywordFixture.keyword}` }),
     screen.getByRole('button', { name: `Delete ${existingKeywordFixture.keyword}` }),

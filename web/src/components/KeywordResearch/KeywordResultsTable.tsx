@@ -5,54 +5,54 @@ import {
 } from '../../hooks/keywordIdentity';
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { exportResearchKeywords } from './researchExport';
+import { useExportAction } from '../ui/useExportAction';
+import {
+  CopyKeywordCell, KeywordSignalCells
+} from './KeywordSignalCells';
+import type { KeywordSelectionProps } from './researchRunView';
 
-interface KeywordResultsTableProps {
+interface KeywordResultsTableProps extends KeywordSelectionProps {
   keywords: ResearchKeyword[];
   title: string;
   subtitle?: string;
   compact?: boolean;
-  selectable?: boolean;
-  selected?: Set<string>;
-  onToggle?: (keyword: string) => void;
 }
+
+interface KeywordResultRowProps extends KeywordSelectionProps {
+  keyword: ResearchKeyword;
+  onCopy: (text: string) => void;
+}
+
+const KeywordResultRow = ({
+  keyword, selectable, selected, onToggle, onCopy
+}: KeywordResultRowProps) => {
+  const selectionKey = keywordSelectionKey(keyword.keyword);
+  return (
+    <tr className="hover:bg-gray-50">
+      {selectable && (
+        <td className="px-6 py-4">
+          <input
+            type="checkbox"
+            checked={selected?.has(selectionKey) ?? false}
+            onChange={() => onToggle?.(keyword.keyword)}
+            aria-label={`Select ${keyword.keyword}`}
+            className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+          />
+        </td>
+      )}
+      <td className="px-6 py-4 text-sm text-gray-900">{keyword.keyword}</td>
+      <KeywordSignalCells keyword={keyword} />
+      <CopyKeywordCell keyword={keyword.keyword} onCopy={onCopy} />
+    </tr>
+  );
+};
 
 export const KeywordResultsTable = ({
   keywords, title, subtitle, compact = false, selectable = false, selected, onToggle
 }: KeywordResultsTableProps) => {
   const [sortBy, setSortBy] = useState<'relevance' | 'competition'>('relevance');
   const [filterIntent, setFilterIntent] = useState<string>('all');
-  const [exporting, setExporting] = useState(false);
   const { copy } = useClipboardCopy();
-
-  const handleExport = async () => {
-    setExporting(true);
-    try {
-      await exportResearchKeywords(sortedKeywords, title);
-    } catch (error) {
-      console.error('[research] Excel export failed:', error);
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const getIntentColor = (intent: string) => {
-    switch (intent?.toLowerCase()) {
-      case 'informational': return 'bg-blue-100 text-blue-700';
-      case 'commercial': return 'bg-purple-100 text-purple-700';
-      case 'transactional': return 'bg-green-100 text-green-700';
-      case 'navigational': return 'bg-gray-100 text-gray-700';
-      default: return 'bg-gray-100 text-gray-600';
-    }
-  };
-
-  const getCompetitionColor = (competition: string) => {
-    switch (competition?.toLowerCase()) {
-      case 'low': return 'text-green-600';
-      case 'medium': return 'text-yellow-600';
-      case 'high': return 'text-red-600';
-      default: return 'text-gray-600';
-    }
-  };
 
   const uniqueKeywords = uniqueResearchKeywords(keywords);
   const filteredKeywords = uniqueKeywords.filter((keyword) =>
@@ -70,6 +70,12 @@ export const KeywordResultsTable = ({
     const rightCompetition = right.competition?.toLowerCase() ?? '';
     return (competitionOrder[leftCompetition] ?? 2) - (competitionOrder[rightCompetition] ?? 2);
   });
+  const {
+    exporting, handleExport 
+  } = useExportAction(
+    () => exportResearchKeywords(sortedKeywords, title),
+    '[research] Excel export failed:',
+  );
 
   if (uniqueKeywords.length === 0) return null;
 
@@ -123,63 +129,23 @@ export const KeywordResultsTable = ({
               {selectable && (
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Select</th>
               )}
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Keyword</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Intent</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Competition</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Relevance</th>
+              {['Keyword', 'Intent', 'Competition', 'Relevance'].map((column) => (
+                <th key={column} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{column}</th>
+              ))}
               <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {sortedKeywords.map((keyword) => {
-              const selectionKey = keywordSelectionKey(keyword.keyword);
-              return (
-                <tr key={selectionKey} className="hover:bg-gray-50">
-                  {selectable && (
-                    <td className="px-6 py-4">
-                      <input
-                        type="checkbox"
-                        checked={selected?.has(selectionKey) ?? false}
-                        onChange={() => onToggle?.(keyword.keyword)}
-                        aria-label={`Select ${keyword.keyword}`}
-                        className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-900"
-                      />
-                    </td>
-                  )}
-                  <td className="px-6 py-4 text-sm text-gray-900">{keyword.keyword}</td>
-                  <td className="px-6 py-4">
-                    <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${getIntentColor(keyword.intent)}`}>
-                      {keyword.intent}
-                    </span>
-                  </td>
-                  <td className={`px-6 py-4 text-sm font-medium ${getCompetitionColor(keyword.competition)}`}>
-                    {keyword.competition}
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-2">
-                      <div className="w-16 h-2 bg-gray-200 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gray-900 rounded-full"
-                          style={{ width: `${(keyword.relevance ?? 0) * 10}%` }}
-                        />
-                      </div>
-                      <span className="text-xs text-gray-500">{keyword.relevance}/10</span>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={() => void copy(keyword.keyword)}
-                      className="text-gray-400 hover:text-gray-600 transition-colors"
-                      title="Copy keyword"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
+            {sortedKeywords.map((keyword) => (
+              <KeywordResultRow
+                key={keywordSelectionKey(keyword.keyword)}
+                keyword={keyword}
+                selectable={selectable}
+                selected={selected}
+                onToggle={onToggle}
+                onCopy={(text) => void copy(text)}
+              />
+            ))}
           </tbody>
         </table>
       </div>

@@ -55,7 +55,13 @@ export function buildProvidersConfigProps(
   };
 }
 
-/** Mounts the panel, loaded and as an admin, showing the given provider rows. */
-export function renderProvidersConfig(providers: ProviderConfig[]) {
-  return render(<ProvidersConfig {...buildProvidersConfigProps({ providers })} />);
+/** Mounts the panel showing the given provider rows, loaded and as an admin unless overridden. */
+export function renderProvidersConfig(
+  providers: ProviderConfig[],
+  overrides: Partial<ProvidersConfigProps> = {}
+) {
+  return render(<ProvidersConfig {...buildProvidersConfigProps({
+    providers,
+    ...overrides,
+  })} />);
 }

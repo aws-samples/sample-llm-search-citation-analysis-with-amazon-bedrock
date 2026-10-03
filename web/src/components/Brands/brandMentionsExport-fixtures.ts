@@ -7,7 +7,7 @@ import type {
 
 export const LATEST_BRAND_RUN = '2026-09-18T10:00:00Z';
 export const HISTORICAL_BRAND_RUN = '2026-09-10T10:00:00Z';
-export const KEYWORD_SCOPE_VALUE = 'keyword:hotels';
+const KEYWORD_SCOPE_VALUE = 'keyword:hotels';
 export const GROUP_SCOPE_VALUE = 'group:group-coruna';
 
 export const KEYWORD_REPORT_SCOPE = {

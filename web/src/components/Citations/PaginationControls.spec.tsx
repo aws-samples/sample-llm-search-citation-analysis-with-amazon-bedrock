@@ -44,36 +44,17 @@ describe('PaginationControls', () => {
     expect(props.onItemsPerPageChange).toHaveBeenCalledWith(50);
   });
 
-  it('calls onPageChange with 1 when First button clicked', () => {
+  it.each([
+    ['First', 'page 1', 1],
+    ['Prev', 'the previous page', 2],
+    ['Next', 'the next page', 4],
+    ['Last', 'the last page', 5],
+  ])('calls onPageChange when the %s button is clicked on page 3 with %s', (button, _target, expectedPage) => {
     const props = buildProps({ currentPage: 3 });
     render(<PaginationControls {...props} />);
 
-    fireEvent.click(screen.getByText('First'));
-    expect(props.onPageChange).toHaveBeenCalledWith(1);
-  });
-
-  it('calls onPageChange with previous page when Prev button clicked', () => {
-    const props = buildProps({ currentPage: 3 });
-    render(<PaginationControls {...props} />);
-
-    fireEvent.click(screen.getByText('Prev'));
-    expect(props.onPageChange).toHaveBeenCalledWith(2);
-  });
-
-  it('calls onPageChange with next page when Next button clicked', () => {
-    const props = buildProps({ currentPage: 3 });
-    render(<PaginationControls {...props} />);
-
-    fireEvent.click(screen.getByText('Next'));
-    expect(props.onPageChange).toHaveBeenCalledWith(4);
-  });
-
-  it('calls onPageChange with last page when Last button clicked', () => {
-    const props = buildProps({ currentPage: 3 });
-    render(<PaginationControls {...props} />);
-
-    fireEvent.click(screen.getByText('Last'));
-    expect(props.onPageChange).toHaveBeenCalledWith(5);
+    fireEvent.click(screen.getByText(button));
+    expect(props.onPageChange).toHaveBeenCalledWith(expectedPage);
   });
 
   it('disables First and Prev buttons on first page', () => {

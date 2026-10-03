@@ -4,12 +4,20 @@ import {
 import {
   render, screen 
 } from '@testing-library/react';
-import { ProvidersConfig } from './ProvidersConfig';
+import {
+  ProvidersConfig, type ProvidersConfigProps
+} from './ProvidersConfig';
+import type { ProviderConfig } from '../../hooks/useProviderConfig';
 import {
   buildCreditExhaustedProvider, buildProviderConfig, buildProvidersConfigProps, renderProvidersConfig 
 } from './ProvidersConfig-fixtures';
 
 describe('ProvidersConfig', () => {
+  const configurableGemini = buildProviderConfig({
+    id: 'gemini',
+    model_configurable: true,
+  });
+
   it('shows the masked key of a configured provider', () => {
     render(<ProvidersConfig {...buildProvidersConfigProps()} />);
 
@@ -17,38 +25,20 @@ describe('ProvidersConfig', () => {
   });
 
   it('offers an administrator a model change for a configurable provider', () => {
-    renderProvidersConfig([buildProviderConfig({
-      id: 'gemini',
-      model_configurable: true 
-    })]);
+    renderProvidersConfig([configurableGemini]);
 
     expect(screen.getByRole('button', { name: 'Change model' })).toBeInTheDocument();
   });
 
-  it('offers no model change for a provider whose model is fixed', () => {
-    renderProvidersConfig([buildProviderConfig({ model_configurable: false })]);
-
-    expect(screen.queryByRole('button', { name: 'Change model' })).not.toBeInTheDocument();
-  });
-
-  it('offers no model change before an API key is stored', () => {
-    renderProvidersConfig([buildProviderConfig({
-      id: 'gemini',
-      model_configurable: true,
-      configured: false 
-    })]);
-
-    expect(screen.queryByRole('button', { name: 'Change model' })).not.toBeInTheDocument();
-  });
-
-  it('offers no model change to a user without the admin group', () => {
-    render(<ProvidersConfig {...buildProvidersConfigProps({
-      isAdmin: false,
-      providers: [buildProviderConfig({
-        id: 'gemini',
-        model_configurable: true 
-      })],
-    })} />);
+  it.each<[condition: string, provider: ProviderConfig, overrides: Partial<ProvidersConfigProps>]>([
+    ['for a provider whose model is fixed', buildProviderConfig({ model_configurable: false }), {}],
+    ['before an API key is stored', {
+      ...configurableGemini,
+      configured: false,
+    }, {}],
+    ['to a user without the admin group', configurableGemini, { isAdmin: false }],
+  ])('offers no model change %s', (_condition, provider, overrides) => {
+    renderProvidersConfig([provider], overrides);
 
     expect(screen.queryByRole('button', { name: 'Change model' })).not.toBeInTheDocument();
   });

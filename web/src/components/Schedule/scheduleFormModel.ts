@@ -45,7 +45,7 @@ export const DAYS_OF_WEEK: readonly {
 
 /** Days 29-31 are refused: a schedule on them would skip the shorter months. */
 export const MAX_DAY_OF_MONTH = 28;
-export const MAX_DISPLAY_NAME_LENGTH = 100;
+const MAX_DISPLAY_NAME_LENGTH = 100;
 
 const FALLBACK_TIMEZONES = [
   'UTC',

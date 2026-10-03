@@ -76,8 +76,12 @@ export function suggestedModels(): (string | null)[] {
 }
 
 
-/** The providers panel with OpenAI and Gemini, Gemini's model editor opened and settled; returns the props. */
+/**
+ * The providers panel with OpenAI and Gemini, Gemini's model editor opened on
+ * an empty model list and settled; returns the props.
+ */
 export async function openGeminiModelEditor() {
+  mockModelListing([]);
   const props = buildProvidersConfigProps({ providers: [OPENAI_AT_DEFAULT, GEMINI_AT_DEFAULT] });
   render(<ProvidersConfig {...props} />);
   await userEvent.click(screen.getAllByRole('button', { name: 'Change model' })[1]);

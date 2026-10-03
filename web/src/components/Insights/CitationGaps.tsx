@@ -11,6 +11,7 @@ import {
 } from '../ui/reportScope';
 import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
 import { GapCard } from './GapCard';
+import { PageHeaderCard } from '../ui/PageHeaderCard';
 
 interface Props { readonly keywords: Array<Keyword>; }
 
@@ -166,21 +167,15 @@ export function CitationGaps({ keywords }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
-        <div className="flex flex-col gap-4">
-          <div className="flex-1">
-            <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Citation Gap Analysis</h2>
-            <p className="text-sm text-gray-500 mt-2 leading-relaxed">Discover sources that AI cites for competitors but not you.</p>
-          </div>
-          <KeywordScopeSelector
-            keywords={activeKeywords}
-            groups={groups}
-            value={scope}
-            onChange={selectScope}
-            label="Filter by keyword or group"
-          />
-        </div>
-      </div>
+      <PageHeaderCard title="Citation Gap Analysis" description="Discover sources that AI cites for competitors but not you.">
+        <KeywordScopeSelector
+          keywords={activeKeywords}
+          groups={groups}
+          value={scope}
+          onChange={selectScope}
+          label="Filter by keyword or group"
+        />
+      </PageHeaderCard>
 
       <CitationGapResults
         data={data}

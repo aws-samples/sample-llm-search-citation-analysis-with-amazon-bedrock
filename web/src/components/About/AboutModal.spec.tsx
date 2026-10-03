@@ -16,6 +16,7 @@ vi.mock('./VersionTab', () => ({VersionTab: () => <div>Version Content</div>}));
 
 describe('AboutModal', () => {
   const mockOnClose = vi.fn();
+  const renderOpenAboutModal = () => render(<AboutModal isOpen={true} onClose={mockOnClose} />);
 
   beforeEach(() => {
     mockOnClose.mockClear();
@@ -27,37 +28,40 @@ describe('AboutModal', () => {
   });
 
   it('renders modal when open', () => {
-    render(<AboutModal isOpen={true} onClose={mockOnClose} />);
+    renderOpenAboutModal();
     expect(screen.getByText('Citation Analysis System')).toBeInTheDocument();
   });
 
   it('calls onClose when the labelled close button is clicked', () => {
-    render(<AboutModal isOpen={true} onClose={mockOnClose} />);
+    renderOpenAboutModal();
 
     fireEvent.click(screen.getByLabelText('Close modal'));
     expect(mockOnClose).toHaveBeenCalledTimes(1);
   });
 
   it('shows About tab content by default', () => {
-    render(<AboutModal isOpen={true} onClose={mockOnClose} />);
+    renderOpenAboutModal();
     expect(screen.getByText('About Content')).toBeInTheDocument();
   });
 
-  it('shows Architecture tab content when Architecture tab clicked', () => {
-    render(<AboutModal isOpen={true} onClose={mockOnClose} />);
-    fireEvent.click(screen.getByText('Architecture'));
-    expect(screen.getByText('Architecture Content')).toBeInTheDocument();
-  });
-
-  it('shows Open Source tab content when Open Source tab clicked', () => {
-    render(<AboutModal isOpen={true} onClose={mockOnClose} />);
-    fireEvent.click(screen.getByText('Open Source'));
-    expect(screen.getByText('Licenses Content')).toBeInTheDocument();
-  });
-
-  it('shows Version tab content when Version tab clicked', () => {
-    render(<AboutModal isOpen={true} onClose={mockOnClose} />);
-    fireEvent.click(screen.getByText('Version'));
-    expect(screen.getByText('Version Content')).toBeInTheDocument();
+  it.each([
+    {
+      tab: 'Architecture',
+      content: 'Architecture Content',
+    },
+    {
+      tab: 'Open Source',
+      content: 'Licenses Content',
+    },
+    {
+      tab: 'Version',
+      content: 'Version Content',
+    },
+  ])('shows $tab tab content when $tab tab clicked', ({
+    tab, content
+  }) => {
+    renderOpenAboutModal();
+    fireEvent.click(screen.getByText(tab));
+    expect(screen.getByText(content)).toBeInTheDocument();
   });
 });

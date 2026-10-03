@@ -6,14 +6,17 @@ import {
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
-  DISCLOSURE,
   fillSeedAndStart,
   getPromptTextarea,
   getTemplateSelect,
+  openInstructions,
+  queryResetButtonElement,
   renderBriefForm,
   SAVED_COPY,
+  selectTemplate,
   TEMPLATES,
 } from './AgentBriefForm-fixtures';
+import { clickButton } from './AgentTemplateEditor-fixtures';
 
 describe('AgentBriefForm', () => {
   it('groups the templates into industry and saved ones with the hotels built-in selected', () => {
@@ -43,7 +46,7 @@ describe('AgentBriefForm', () => {
   it('switches label, placeholder and dimensions when another template is chosen', async () => {
     renderBriefForm();
 
-    await userEvent.selectOptions(getTemplateSelect(), 'builtin-cafes');
+    await selectTemplate('builtin-cafes');
 
     expect(screen.getByRole('heading', { name: 'Research a café' })).toBeInTheDocument();
     expect(screen.getByLabelText('Café (or seed)')).toHaveAttribute('placeholder', 'e.g. Café Central');
@@ -54,7 +57,7 @@ describe('AgentBriefForm', () => {
   it('starts the run with the template, all its dimensions and no prompt override when nothing was edited', async () => {
     const handlers = renderBriefForm();
 
-    await userEvent.selectOptions(getTemplateSelect(), 'builtin-cafes');
+    await selectTemplate('builtin-cafes');
     await fillSeedAndStart('Café Central');
 
     expect(handlers.onStart).toHaveBeenCalledWith({
@@ -86,7 +89,7 @@ describe('AgentBriefForm', () => {
   it('sends the edited prompt when the instructions were changed', async () => {
     const handlers = renderBriefForm();
 
-    await userEvent.click(screen.getByText(DISCLOSURE));
+    await openInstructions();
     await userEvent.type(getPromptTextarea(), ' Prefer Galician cities.');
     await fillSeedAndStart('Hotel Gran Marino');
 
@@ -98,34 +101,34 @@ describe('AgentBriefForm', () => {
 
   it('keeps an edited prompt across a template switch and offers to reset it', async () => {
     renderBriefForm();
-    await userEvent.click(screen.getByText(DISCLOSURE));
+    await openInstructions();
     await userEvent.type(getPromptTextarea(), '!');
 
-    await userEvent.selectOptions(getTemplateSelect(), 'builtin-cafes');
+    await selectTemplate('builtin-cafes');
     expect(getPromptTextarea()).toHaveValue('You are a hotel SEO researcher for a hotel group.!');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Reset to template' }));
+    await clickButton('Reset to template');
     expect(getPromptTextarea()).toHaveValue('You are an SEO researcher for independent cafés.');
-    expect(screen.queryByRole('button', { name: 'Reset to template' })).toBeNull();
+    expect(queryResetButtonElement()).toBeNull();
   });
 
   it('adopts the new template prompt on a switch when the instructions were not edited', async () => {
     renderBriefForm();
 
-    await userEvent.selectOptions(getTemplateSelect(), 't1');
+    await selectTemplate('t1');
 
     expect(getPromptTextarea()).toHaveValue('You research urban hotels for business travellers.');
-    expect(screen.queryByRole('button', { name: 'Reset to template' })).toBeNull();
+    expect(queryResetButtonElement()).toBeNull();
   });
 
   it('lists the problems instead of starting when the brief is incomplete', async () => {
     const handlers = renderBriefForm();
 
-    await userEvent.selectOptions(getTemplateSelect(), 'builtin-cafes');
+    await selectTemplate('builtin-cafes');
     await userEvent.click(screen.getByRole('checkbox', { name: /^Menu & drinks/ }));
     await userEvent.click(screen.getByRole('checkbox', { name: /^Location/ }));
     await userEvent.click(screen.getByRole('checkbox', { name: /^Occasion/ }));
-    await userEvent.click(screen.getByRole('button', { name: 'Start research' }));
+    await clickButton('Start research');
 
     expect(handlers.onStart).not.toHaveBeenCalled();
     expect(within(screen.getByRole('alert')).getAllByRole('listitem').map((item) => item.textContent)).toStrictEqual([
@@ -136,10 +139,10 @@ describe('AgentBriefForm', () => {
 
   it('selects the saved copy after saving the template as new', async () => {
     const handlers = renderBriefForm();
-    await userEvent.selectOptions(getTemplateSelect(), 'builtin-cafes');
-    await userEvent.click(screen.getByText(DISCLOSURE));
+    await selectTemplate('builtin-cafes');
+    await openInstructions();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Save as new template' }));
+    await clickButton('Save as new template');
     handlers.rerenderWith([...TEMPLATES, SAVED_COPY]);
 
     expect(handlers.onSaveTemplate).toHaveBeenCalledWith(expect.objectContaining({
@@ -153,10 +156,10 @@ describe('AgentBriefForm', () => {
   it('falls back to the hotels built-in after deleting the selected template', async () => {
     vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
     const handlers = renderBriefForm();
-    await userEvent.selectOptions(getTemplateSelect(), 't1');
-    await userEvent.click(screen.getByText(DISCLOSURE));
+    await selectTemplate('t1');
+    await openInstructions();
 
-    await userEvent.click(screen.getByRole('button', { name: 'Delete template' }));
+    await clickButton('Delete template');
 
     expect(handlers.onDeleteTemplate).toHaveBeenCalledWith('t1');
     expect(getTemplateSelect()).toHaveValue('builtin-default');

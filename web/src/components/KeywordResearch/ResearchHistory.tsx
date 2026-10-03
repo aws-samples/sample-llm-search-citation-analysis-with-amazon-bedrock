@@ -1,31 +1,34 @@
 import {
   useEffect, useMemo, useState
 } from 'react';
+import type { MouseEvent } from 'react';
 import type {
-  Keyword, KeywordResearchItem, ResearchKeyword, ResearchStatus
+  KeywordResearchItem, ResearchKeyword, ResearchStatus
 } from '../../types';
 import { uniqueResearchKeywords } from '../../hooks/keywordIdentity';
-import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
+import { useRunPromotion } from './useRunPromotion';
+import { JobFailureMessage } from './ResearchProgress';
+import type { ResearchRunViewProps } from './researchRunView';
 import { KeywordResultsTable } from './KeywordResultsTable';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
 import { formatDate } from '../../formatting/dateFormatter';
 import {
-  formatResearchFailureMessage,
   getResearchStatusClass,
   getResearchStatusLabel,
   isRetryableResearchStatus,
   resolveResearchStatus
 } from '../../formatting/researchStatus';
 import { Spinner } from '../ui/Spinner';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  CHEVRON_RIGHT_PATHS, CLOCK_PATHS, REFRESH_PATHS, TRASH_PATHS 
+} from '../ui/iconPaths';
 
-interface ResearchHistoryProps {
+interface ResearchHistoryProps extends Pick<ResearchRunViewProps, 'onRetry' | 'onKeywordsAdded'> {
   history: KeywordResearchItem[];
   loading: boolean;
   onDelete: (id: string) => Promise<void>;
   onRefresh: () => void;
-  /** Re-run the failed steps of a partial or failed job. */
-  onRetry?: (job: KeywordResearchItem) => void;
-  onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
 const getKeywordsForItem = (item: KeywordResearchItem): ResearchKeyword[] => {
@@ -108,19 +111,7 @@ const Header = ({
       disabled={loading}
       className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors flex items-center gap-2"
     >
-      <svg
-        className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`}
-        fill="none"
-        stroke="currentColor"
-        viewBox="0 0 24 24"
-      >
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.5}
-          d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-        />
-      </svg>
+      <StrokeIcon className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} paths={REFRESH_PATHS} />
       Refresh
     </button>
   </div>
@@ -135,19 +126,7 @@ const LoadingState = () => (
 
 const EmptyState = () => (
   <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-    <svg
-      className="w-12 h-12 mx-auto text-gray-300"
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-    >
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-      />
-    </svg>
+    <StrokeIcon className="w-12 h-12 mx-auto text-gray-300" paths={CLOCK_PATHS} />
     <p className="mt-4 text-sm text-gray-500">No research history yet</p>
     <p className="text-xs text-gray-400 mt-1">
       Start by expanding a keyword or analyzing a competitor
@@ -155,13 +134,11 @@ const EmptyState = () => (
   </div>
 );
 
-interface HistoryItemProps {
+interface HistoryItemProps extends Pick<ResearchRunViewProps, 'onRetry' | 'onKeywordsAdded'> {
   item: KeywordResearchItem;
   isExpanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
-  onRetry?: (job: KeywordResearchItem) => void;
-  onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
 const HistoryItem = ({
@@ -172,12 +149,12 @@ const HistoryItem = ({
   const itemTitle = getItemTitle(item);
   const panelId = `research-history-keywords-${item.id}`;
 
-  const promotion = usePromoteKeywords(keywords, onKeywordsAdded);
-  const { clearSelection } = promotion;
-
-  useEffect(() => {
-    clearSelection();
-  }, [isExpanded, keywords, clearSelection]);
+  // A new identity whenever the row expands, collapses or gets new keywords.
+  const shown = useMemo(() => ({
+    isExpanded,
+    keywords,
+  }), [isExpanded, keywords]);
+  const promotion = useRunPromotion(keywords, onKeywordsAdded, shown);
 
   return (
     <div>
@@ -215,7 +192,7 @@ const HistoryItem = ({
                 )}
               </div>
 
-              <FailureMessage message={item.error_message} />
+              <JobFailureMessage message={item.error_message} spacingClassName="mt-2 " />
             </div>
           </div>
 
@@ -266,14 +243,7 @@ const ExpandButton = ({
       onToggle();
     }}
   >
-    <svg
-      className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-      fill="none"
-      stroke="currentColor"
-      viewBox="0 0 24 24"
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" />
-    </svg>
+    <StrokeIcon className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-90' : ''}`} paths={CHEVRON_RIGHT_PATHS} />
   </button>
 );
 
@@ -320,23 +290,6 @@ const StatusBadge = ({ status }: { status?: ResearchStatus }) => {
 };
 
 /**
- * The raw text stays on `title`: it carries the untranslated second count and
- * any provider detail, which is what you want when debugging a stranded run.
- */
-const FailureMessage = ({ message }: { message?: string }) => {
-  if (message === undefined || message === '') return null;
-
-  return (
-    <p
-      className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1"
-      title={message}
-    >
-      {formatResearchFailureMessage(message)}
-    </p>
-  );
-};
-
-/**
  * Providers finished out of providers planned. Jobs from before 2.2.0 have
  * no steps and render nothing here.
  */
@@ -356,48 +309,32 @@ const StepSummary = ({ item }: { item: KeywordResearchItem }) => {
   );
 };
 
-interface RetryButtonProps {onClick: () => void;}
+interface RowActionProps {onClick: () => void;}
+
+/** Runs a row action without also toggling the row it sits in. */
+const withoutRowToggle = (action: () => void) => (event: MouseEvent) => {
+  event.stopPropagation();
+  action();
+};
 
 /** Re-runs only the failed steps; the completed providers' results are kept. */
-const RetryButton = ({ onClick }: RetryButtonProps) => (
+const RetryButton = ({ onClick }: RowActionProps) => (
   <button
-    onClick={(event) => {
-      event.stopPropagation();
-      onClick();
-    }}
+    onClick={withoutRowToggle(onClick)}
     className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
     title="Retry failed providers"
     aria-label="Retry failed providers"
   >
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-      />
-    </svg>
+    <StrokeIcon className="w-4 h-4" paths={REFRESH_PATHS} />
   </button>
 );
 
-interface DeleteButtonProps {onClick: () => void;}
-
-const DeleteButton = ({ onClick }: DeleteButtonProps) => (
+const DeleteButton = ({ onClick }: RowActionProps) => (
   <button
-    onClick={(event) => {
-      event.stopPropagation();
-      onClick();
-    }}
+    onClick={withoutRowToggle(onClick)}
     className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
     title="Delete"
   >
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth={1.5}
-        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-      />
-    </svg>
+    <StrokeIcon className="w-4 h-4" paths={TRASH_PATHS} />
   </button>
 );

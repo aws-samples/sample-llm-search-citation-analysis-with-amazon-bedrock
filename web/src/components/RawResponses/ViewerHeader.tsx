@@ -1,3 +1,4 @@
+import { Spinner } from '../ui/Spinner';
 import type { ReactNode } from 'react';
 
 interface ViewerHeaderProps {
@@ -19,5 +20,13 @@ export const ViewerHeader = ({
       <p className="text-xs sm:text-sm text-gray-500">{details}</p>
     </div>
     <div className="flex items-center gap-2 shrink-0">{children}</div>
+  </div>
+);
+
+/** Centred spinner a viewer shows while its file loads. */
+export const ViewerLoading = ({ label }: { readonly label: string }) => (
+  <div className="flex items-center justify-center py-12">
+    <Spinner size="lg" className="text-blue-600" />
+    <span className="ml-3 text-gray-600">{label}</span>
   </div>
 );
