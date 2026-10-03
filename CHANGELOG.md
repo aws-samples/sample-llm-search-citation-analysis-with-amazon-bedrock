@@ -40,9 +40,10 @@ process.
   imports were removed.
 - **Duplication gate:** jscpd runs at 25 tokens / 3 lines, ignoring comments and comparing `.ts` with `.tsx`; any
   clone not in the baseline fails `npm run validate`. `npm run duplication:baseline` rewrites the baseline.
-- The lines the sweep changed were mutation-tested (mutmut and Stryker); about 150 Python and 260 web test cases
-  were added for the survivors. Contract tests now also pin the research state-machine timeout against the stale-job
-  sweep and the Bedrock tier defaults between the CDK stack and `shared/models.py`.
+- The lines the sweep changed were mutation-tested (mutmut and Stryker) and the survivors closed with tests or
+  removed as dead code: Python tests went from 3,372 to 3,644 and dashboard tests from 4,600 to 4,867. Contract tests
+  now also pin the research state-machine timeout against the stale-job sweep and the Bedrock tier defaults between
+  the CDK stack and `shared/models.py`.
 - `npm run contracts` no longer counts fixture modules under `web/src/types` as type declarations.
 
 ## [2.29.0] - 2026-10-03
