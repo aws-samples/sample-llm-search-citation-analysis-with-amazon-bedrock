@@ -252,6 +252,49 @@ describe('ContentStudioView', () => {
     });
   });
 
+  it('generates the content in the output language picked in the confirmation', async () => {
+    const idea = buildActionableIdea();
+    const generateContent = vi.fn().mockResolvedValue(
+      buildPendingGenerateContentResponse('product comparisons')
+    );
+    renderContentStudioView({
+      ideas: [idea],
+      generateContent,
+    });
+    await userEvent.click(screen.getByText('Create content for product comparisons'));
+
+    await userEvent.selectOptions(screen.getByLabelText('Output Language'), 'Spanish');
+    await userEvent.click(screen.getByRole('button', { name: 'Generate Content' }));
+
+    await waitFor(() => {
+      expect(generateContent).toHaveBeenCalledWith({
+        ...idea,
+        output_language: 'Spanish',
+      });
+    });
+  });
+
+  it.each([
+    ['says how many competitor sources will be analyzed', ['https://a.example/', 'https://b.example/'], 1],
+    ['mentions no competitor sources when the idea has none', [], 0],
+  ])('%s', async (_condition, competitorUrls, mentions) => {
+    renderContentStudioView({ ideas: [buildActionableIdea({ competitor_urls: competitorUrls })] });
+
+    await userEvent.click(screen.getByText('Create content for product comparisons'));
+
+    expect(screen.queryAllByText('2 competitor sources will be analyzed')).toHaveLength(mentions);
+  });
+
+  it('loads neither ideas nor history when the Content Brief tab opens', async () => {
+    const hookResult = buildContentStudioHookResult();
+    mockUseContentStudio.mockReturnValue(hookResult);
+    render(<ContentStudioView keywords={[]} />);
+
+    await userEvent.click(screen.getByText('Content Brief'));
+
+    expect(hookResult.fetchHistory).not.toHaveBeenCalledWith();
+  });
+
   it('shows the unviewed count when generated content exists', () => {
     renderContentStudioView({ unviewedCount: 5 });
 
