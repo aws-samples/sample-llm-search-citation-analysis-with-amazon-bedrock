@@ -589,14 +589,19 @@ def merge_expansion_keywords(steps: list[dict[str, Any]]) -> list[dict[str, Any]
     )
 
 
-def merge_competitor_analyses(steps: list[dict[str, Any]]) -> dict[str, Any]:
-    """Merge bounded competitor categories without duplicate keywords."""
-    result: dict[str, Any] = {
+def empty_competitor_analysis() -> dict[str, Any]:
+    """A competitor analysis with no domain, an unknown industry and every category empty."""
+    return {
         'domain': '',
         'industry': 'unknown',
         'page_focus': '',
         **{category: [] for category in COMPETITOR_CATEGORIES},
     }
+
+
+def merge_competitor_analyses(steps: list[dict[str, Any]]) -> dict[str, Any]:
+    """Merge bounded competitor categories without duplicate keywords."""
+    result = empty_competitor_analysis()
     seen: set[str] = set()
     for step in steps:
         analysis = step.get('analysis') or {}

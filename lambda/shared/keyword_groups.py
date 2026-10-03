@@ -20,6 +20,7 @@ from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 from shared.dynamodb_batch import collect_all_items
+from shared.dynamodb_conditions import is_conditional_check_failure
 from shared.utils import get_timestamp
 
 KEYWORD_GROUPS_TABLE_ENV = 'DYNAMODB_TABLE_KEYWORD_GROUPS'
@@ -181,7 +182,7 @@ def add_keyword_groups(
             ReturnValues='ALL_OLD',
         )
     except ClientError as error:
-        if error.response.get('Error', {}).get('Code') != 'ConditionalCheckFailedException':
+        if not is_conditional_check_failure(error):
             raise
         return None, set()
 

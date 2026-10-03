@@ -16,9 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from botocore.exceptions import ClientError
-
 from shared.constants import MAX_KEYWORD_LENGTH
+from shared.dynamodb_conditions import applied_conditionally
 from shared.utils import is_unicode_scalar_text, keyword_id, trim_keyword
 
 # Allowed enum values and item defaults. manage-keywords feeds them into its
@@ -100,14 +99,8 @@ def put_keyword_if_absent(table: Any, item: dict[str, Any]) -> bool:
     Uses ``attribute_not_exists(id)`` so two concurrent creates cannot both
     win. Every non-conditional ``ClientError`` propagates unchanged.
     """
-    try:
-        table.put_item(
-            Item=item,
-            ConditionExpression='attribute_not_exists(#id)',
-            ExpressionAttributeNames={'#id': 'id'},
-        )
-    except ClientError as error:
-        if error.response.get('Error', {}).get('Code') != 'ConditionalCheckFailedException':
-            raise
-        return False
-    return True
+    return applied_conditionally(lambda: table.put_item(
+        Item=item,
+        ConditionExpression='attribute_not_exists(#id)',
+        ExpressionAttributeNames={'#id': 'id'},
+    ))

@@ -20,11 +20,11 @@ from typing import Any
 from urllib.parse import urlparse
 
 import boto3
-from botocore.exceptions import ClientError
 from bs4 import BeautifulSoup, Tag
 
 from shared.ai_clients import WebSearchProvider, get_web_search_clients, get_web_search_provider, run_web_search
 from shared.dynamo_decimal import convert_floats_to_decimal
+from shared.dynamodb_conditions import applied_conditionally
 from shared.keyword_signals import fetch_google_signals
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
@@ -71,6 +71,7 @@ from shared.research_jobs import (
     bound_step_result,
     checkpoint_terminal_result,
     completed_steps,
+    empty_competitor_analysis,
     final_status,
     job_attempt,
     merge_expansion_keywords,
@@ -260,18 +261,35 @@ def _load_job(job_id: str) -> dict[str, Any]:
     return job
 
 
-def _is_conditional_failure(error: ClientError) -> bool:
-    return error.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException'
+def _conditional_update(
+    job_id: str,
+    *,
+    expression: str,
+    condition: str,
+    names: dict[str, str],
+    values: dict[str, Any],
+) -> bool:
+    """Apply one conditional update to the job row; ``False`` when its condition no longer holds."""
+    return applied_conditionally(lambda: research_table.update_item(
+        Key={'id': job_id},
+        UpdateExpression=expression,
+        ConditionExpression=condition,
+        ExpressionAttributeNames=names,
+        ExpressionAttributeValues=values,
+    ))
+
+
+def _event_positive_int(event: dict[str, Any], key: str) -> int | None:
+    value = event.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
 
 
 def _event_attempt(event: dict[str, Any]) -> int | None:
-    value = event.get('attempt')
-    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
+    return _event_positive_int(event, 'attempt')
 
 
 def _event_round(event: dict[str, Any]) -> int | None:
-    value = event.get('expected_round')
-    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
+    return _event_positive_int(event, 'expected_round')
 
 
 def _event_owner(event: dict[str, Any]) -> str | None:
@@ -291,6 +309,11 @@ def _base_result(event: dict[str, Any], round_number: int) -> dict[str, Any]:
         if event.get(key):
             result[key] = event[key]
     return result
+
+
+def _event_round_result(event: dict[str, Any]) -> dict[str, Any]:
+    """``_base_result`` for the event's own round (round one when it names none)."""
+    return _base_result(event, _event_round(event) or 1)
 
 
 def _owned_for_round(job: dict[str, Any], event: dict[str, Any]) -> bool:
@@ -371,22 +394,18 @@ def _claim_plan(job: dict[str, Any], event: dict[str, Any]) -> bool:
     else:
         condition += ' AND attribute_not_exists(active_round)'
 
-    try:
-        research_table.update_item(
-            Key={'id': job['id']},
-            UpdateExpression=(
-                'SET #s = :running, attempt = if_not_exists(attempt, :attempt), '
-                'execution_arn = :owner, execution_id = :execution_id, '
-                'active_round = :expected_round, updated_at = :ts'
-            ),
-            ConditionExpression=condition,
-            ExpressionAttributeNames=names,
-            ExpressionAttributeValues=values,
-        )
-    except ClientError as exc:
-        if _is_conditional_failure(exc):
-            return False
-        raise
+    if not _conditional_update(
+        job['id'],
+        expression=(
+            'SET #s = :running, attempt = if_not_exists(attempt, :attempt), '
+            'execution_arn = :owner, execution_id = :execution_id, '
+            'active_round = :expected_round, updated_at = :ts'
+        ),
+        condition=condition,
+        names=names,
+        values=values,
+    ):
+        return False
 
     job.update({
         'status': STATUS_RUNNING,
@@ -403,10 +422,11 @@ def _write_step(
     event: dict[str, Any],
     step_id: str,
     step: dict[str, Any],
-    *,
-    allowed_statuses: tuple[str, ...],
 ) -> bool:
-    """Write one bounded checkpoint if its attempt, owner, round and state still match."""
+    """Write one bounded checkpoint if its attempt, owner, round and state still match.
+
+    The step must still be pending or running: a terminal step is never overwritten.
+    """
     names = {'#sid': step_id, '#step_status': 'status', '#step_round': 'round'}
     values: dict[str, Any] = {
         ':step': convert_floats_to_decimal(bound_step_result(step)),
@@ -416,27 +436,21 @@ def _write_step(
     condition = _active_condition(job, event, names, values)
     condition += ' AND steps.#sid.#step_round = :expected_round'
     status_tokens = []
-    for index, status in enumerate(allowed_statuses):
+    for index, status in enumerate((STEP_PENDING, STEP_RUNNING)):
         token = f':allowed_status{index}'
         values[token] = status
         status_tokens.append(token)
     condition += f" AND steps.#sid.#step_status IN ({', '.join(status_tokens)})"
-    try:
-        research_table.update_item(
-            Key={'id': job['id']},
-            UpdateExpression=(
-                'SET steps.#sid = :step, updated_at = :ts '
-                'ADD checkpoint_revision :revision_increment'
-            ),
-            ConditionExpression=condition,
-            ExpressionAttributeNames=names,
-            ExpressionAttributeValues=values,
-        )
-    except ClientError as exc:
-        if _is_conditional_failure(exc):
-            return False
-        raise
-    return True
+    return _conditional_update(
+        job['id'],
+        expression=(
+            'SET steps.#sid = :step, updated_at = :ts '
+            'ADD checkpoint_revision :revision_increment'
+        ),
+        condition=condition,
+        names=names,
+        values=values,
+    )
 
 
 def _error_text(error: Any) -> str:
@@ -469,7 +483,7 @@ def _step_result(
             )
         status = default
     return {
-        **_base_result(event, _event_round(event) or 1),
+        **_event_round_result(event),
         'step_id': step_id,
         'status': status,
     }
@@ -495,8 +509,7 @@ def _steps_for_round(job: dict[str, Any], round_number: int) -> list[tuple[str, 
 # =============================================================================
 
 def _plan_result(event: dict[str, Any], steps: list[dict[str, str]]) -> dict[str, Any]:
-    round_number = _event_round(event) or 1
-    return {**_base_result(event, round_number), 'steps': steps}
+    return {**_event_round_result(event), 'steps': steps}
 
 
 def _reset_step(step: dict[str, Any], attempt: int) -> dict[str, Any]:
@@ -574,19 +587,7 @@ def _persist_plan(job: dict[str, Any], event: dict[str, Any], write: _PlanWrite)
     if write.removes:
         expression += f" REMOVE {', '.join(write.removes)}"
     expression += ' ADD checkpoint_revision :revision_increment'
-    try:
-        research_table.update_item(
-            Key={'id': job['id']},
-            UpdateExpression=expression,
-            ConditionExpression=condition,
-            ExpressionAttributeNames=names,
-            ExpressionAttributeValues=values,
-        )
-    except ClientError as exc:
-        if _is_conditional_failure(exc):
-            return False
-        raise
-    return True
+    return _conditional_update(job['id'], expression=expression, condition=condition, names=names, values=values)
 
 
 def _replay_steps(job: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
@@ -613,6 +614,14 @@ def _commit_plan(job: dict[str, Any], event: dict[str, Any], to_run: list[dict[s
     return _plan_result(event, to_run)
 
 
+def _configured_provider_ids() -> list[str]:
+    """The web-search providers with an API key, in registry order."""
+    provider_ids = [provider.provider_id for provider, _client in get_web_search_clients()]
+    if not provider_ids:
+        raise NoProviderConfiguredError('No API keys configured')
+    return provider_ids
+
+
 def _plan_standard(job: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
     round_number = _event_round(event) or 1
     attempt = _event_attempt(event) or 1
@@ -625,9 +634,6 @@ def _plan_standard(job: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]
     if existing:
         to_run = _runnable_steps(existing, attempt, write)
     else:
-        provider_ids = [provider.provider_id for provider, _client in get_web_search_clients()]
-        if not provider_ids:
-            raise NoProviderConfiguredError('No API keys configured')
         steps = {
             step_id_for(provider_id, round_number): {
                 'provider': provider_id,
@@ -635,7 +641,7 @@ def _plan_standard(job: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]
                 'round': round_number,
                 'attempt': attempt,
             }
-            for provider_id in provider_ids
+            for provider_id in _configured_provider_ids()
         }
         write.values.update({':steps': steps, ':total': len(steps), ':round': round_number})
         write.sets.extend(['steps = :steps', '#round = :round'])
@@ -658,18 +664,18 @@ def _agent_system_prompt(job: dict[str, Any]) -> str:
     return job.get('system_prompt') or DEFAULT_SYSTEM_PROMPT
 
 
+def _invoke_agent_model(job: dict[str, Any], prompt: str, role: ModelRole, max_tokens: int) -> str:
+    """Ask Bedrock ``prompt`` under the job's agent system prompt."""
+    return invoke_bedrock(prompt, role, max_tokens=max_tokens, system=_agent_system_prompt(job))
+
+
 def _agent_candidates(job: dict[str, Any], through_round: int) -> list[dict[str, Any]]:
     return merge_expansion_keywords(completed_steps(job, through_round=through_round))
 
 
 def _plan_first_round(job: dict[str, Any]) -> dict[str, Any]:
     config = job.get('config') or {}
-    text = invoke_bedrock(
-        build_plan_prompt(config),
-        ModelRole.RESEARCH_PLANNING,
-        max_tokens=PLAN_MAX_TOKENS,
-        system=_agent_system_prompt(job),
-    )
+    text = _invoke_agent_model(job, build_plan_prompt(config), ModelRole.RESEARCH_PLANNING, PLAN_MAX_TOKENS)
     planned = parse_plan(text, config)
     if planned is None:
         raise AgentPlanningError('The planning model returned no usable search queries')
@@ -729,12 +735,9 @@ def _plan_agent(job: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
     if not queries:
         return _plan_result(event, [])
 
-    provider_ids = [provider.provider_id for provider, _client in get_web_search_clients()]
-    if not provider_ids:
-        raise NoProviderConfiguredError('No API keys configured')
     new_steps = assign_steps(
         queries,
-        provider_ids,
+        _configured_provider_ids(),
         round_number,
         with_signals=bool(get_api_key(SIGNALS_SECRET_NAME)),
     )
@@ -881,13 +884,7 @@ def _parse_competitor(text: str, page_data: dict[str, Any]) -> dict[str, Any]:
     parsed = parse_llm_json(text, expect='object')
     if not isinstance(parsed, dict):
         raise StepFailedError('Provider returned no parseable analysis')
-    analysis: dict[str, Any] = {
-        'domain': '',
-        'industry': 'unknown',
-        'page_focus': '',
-        **{category: [] for category in COMPETITOR_CATEGORIES},
-        **parsed,
-    }
+    analysis: dict[str, Any] = {**empty_competitor_analysis(), **parsed}
     for category in COMPETITOR_CATEGORIES:
         if not isinstance(analysis.get(category), list):
             analysis[category] = []
@@ -918,11 +915,36 @@ def _run_step(job: dict[str, Any], provider_id: str) -> dict[str, Any]:
     return result
 
 
+def _step_checkpoint(
+    planned: dict[str, Any],
+    provider_id: str,
+    status: str,
+    event: dict[str, Any],
+    **timing: str,
+) -> dict[str, Any]:
+    """A step checkpoint: the planned fields, provider, ``status``, the event's attempt, then ``timing`` (timestamps, error)."""
+    return {**planned, 'provider': provider_id, 'status': status, 'attempt': _event_attempt(event), **timing}
+
+
+def _owned_step(job: dict[str, Any], event: dict[str, Any], step_id: str) -> dict[str, Any] | None:
+    """The persisted ``step_id`` when the event owns the job's active round, else ``None``."""
+    persisted = (job.get('steps') or {}).get(step_id)
+    return persisted if _owned_for_round(job, event) and isinstance(persisted, dict) else None
+
+
+def _commit_step(job: dict[str, Any], event: dict[str, Any], step_id: str, step: dict[str, Any]) -> dict[str, Any]:
+    """Write the terminal ``step`` and answer with its status, or with the persisted one after a lost race."""
+    if not _write_step(job, event, step_id, step):
+        return _step_result(_load_job(job['id']), event, step_id, None)
+    logger.info('Step %s of job %s committed %s', step_id, job['id'], step['status'])
+    return _step_result({**job, 'steps': {**job.get('steps', {}), step_id: step}}, event, step_id, step['status'])
+
+
 def execute_step(event: dict[str, Any]) -> dict[str, Any]:
     job_id, step_id, provider_id = event['job_id'], event['step_id'], event['provider']
     job = _load_job(job_id)
-    persisted = (job.get('steps') or {}).get(step_id)
-    if not _owned_for_round(job, event) or not isinstance(persisted, dict):
+    persisted = _owned_step(job, event, step_id)
+    if persisted is None:
         return _step_result(job, event, step_id, STEP_FAILED)
     if persisted.get('provider') != provider_id or int(persisted.get('round') or 0) != _event_round(event):
         return _step_result(job, event, step_id, STEP_FAILED)
@@ -933,20 +955,8 @@ def execute_step(event: dict[str, Any]) -> dict[str, Any]:
 
     planned = step_plan_fields(persisted)
     started_at = get_timestamp()
-    running = {
-        **planned,
-        'provider': provider_id,
-        'status': STEP_RUNNING,
-        'attempt': _event_attempt(event),
-        'started_at': started_at,
-    }
-    if not _write_step(
-        job,
-        event,
-        step_id,
-        running,
-        allowed_statuses=(STEP_PENDING, STEP_RUNNING),
-    ):
+    running = _step_checkpoint(planned, provider_id, STEP_RUNNING, event, started_at=started_at)
+    if not _write_step(job, event, step_id, running):
         return _step_result(_load_job(job_id), event, step_id, STEP_FAILED)
 
     # At-least-once boundary: another Lambda invocation can be in the same
@@ -955,36 +965,16 @@ def execute_step(event: dict[str, Any]) -> dict[str, Any]:
     try:
         result = _run_agent_step(job, planned, provider_id) if job.get('type') == TYPE_AGENT else _run_step(job, provider_id)
         step = {
-            **planned,
-            'provider': provider_id,
-            'status': STEP_COMPLETED,
-            'attempt': _event_attempt(event),
-            'started_at': started_at,
-            'finished_at': get_timestamp(),
+            **_step_checkpoint(planned, provider_id, STEP_COMPLETED, event, started_at=started_at, finished_at=get_timestamp()),
             **result,
         }
     except Exception as exc:
         logger.exception('Step %s of job %s failed', step_id, job_id)
-        step = {
-            **planned,
-            'provider': provider_id,
-            'status': STEP_FAILED,
-            'attempt': _event_attempt(event),
-            'started_at': started_at,
-            'finished_at': get_timestamp(),
-            'error_message': _error_text(exc),
-        }
-
-    if not _write_step(
-        job,
-        event,
-        step_id,
-        step,
-        allowed_statuses=(STEP_PENDING, STEP_RUNNING),
-    ):
-        return _step_result(_load_job(job_id), event, step_id, None)
-    logger.info('Step %s of job %s committed %s', step_id, job_id, step['status'])
-    return _step_result({**job, 'steps': {**job.get('steps', {}), step_id: step}}, event, step_id, step['status'])
+        step = _step_checkpoint(
+            planned, provider_id, STEP_FAILED, event,
+            started_at=started_at, finished_at=get_timestamp(), error_message=_error_text(exc),
+        )
+    return _commit_step(job, event, step_id, step)
 
 
 def fail_step(event: dict[str, Any]) -> dict[str, Any]:
@@ -992,30 +982,18 @@ def fail_step(event: dict[str, Any]) -> dict[str, Any]:
     try:
         job = _load_job(job_id)
     except ResearchJobNotFoundError:
-        return {**_base_result(event, _event_round(event) or 1), 'step_id': step_id, 'status': STEP_FAILED}
-    persisted = (job.get('steps') or {}).get(step_id)
-    if not _owned_for_round(job, event) or not isinstance(persisted, dict):
+        return {**_event_round_result(event), 'step_id': step_id, 'status': STEP_FAILED}
+    persisted = _owned_step(job, event, step_id)
+    if persisted is None:
         return _step_result(job, event, step_id, STEP_FAILED)
     if persisted.get('status') in STEP_TERMINAL_STATUSES:
         return _step_result(job, event, step_id, persisted['status'])
 
-    step = {
-        **step_plan_fields(persisted),
-        'provider': event.get('provider', ''),
-        'status': STEP_FAILED,
-        'attempt': _event_attempt(event),
-        'finished_at': get_timestamp(),
-        'error_message': _error_text(event.get('error')),
-    }
-    if not _write_step(
-        job,
-        event,
-        step_id,
-        step,
-        allowed_statuses=(STEP_PENDING, STEP_RUNNING),
-    ):
-        return _step_result(_load_job(job_id), event, step_id, None)
-    return {**_base_result(event, _event_round(event) or 1), 'step_id': step_id, 'status': STEP_FAILED}
+    step = _step_checkpoint(
+        step_plan_fields(persisted), event.get('provider', ''), STEP_FAILED, event,
+        finished_at=get_timestamp(), error_message=_error_text(event.get('error')),
+    )
+    return _commit_step(job, event, step_id, step)
 
 
 # =============================================================================
@@ -1029,11 +1007,8 @@ def _stop_evaluation(reason: str) -> dict[str, Any]:
 def _evaluate_round(job: dict[str, Any], round_number: int, candidates: list[dict[str, Any]]) -> dict[str, Any]:
     config = job.get('config') or {}
     try:
-        text = invoke_bedrock(
-            build_evaluate_prompt(config, round_number, candidates),
-            ModelRole.RESEARCH_EVALUATION,
-            max_tokens=EVALUATE_MAX_TOKENS,
-            system=_agent_system_prompt(job),
+        text = _invoke_agent_model(
+            job, build_evaluate_prompt(config, round_number, candidates), ModelRole.RESEARCH_EVALUATION, EVALUATE_MAX_TOKENS,
         )
     except Exception as exc:
         logger.exception('Agent job %s evaluation failed', job['id'])
@@ -1088,20 +1063,16 @@ def evaluate(event: dict[str, Any]) -> dict[str, Any]:
     }
     condition = _active_condition(job, event, names, values)
     condition += f' AND attribute_not_exists(rounds[{round_index}].evaluation)'
-    try:
-        research_table.update_item(
-            Key={'id': job_id},
-            UpdateExpression=(
-                f'SET rounds[{round_index}].evaluation = :ev, updated_at = :ts '
-                'ADD checkpoint_revision :revision_increment'
-            ),
-            ConditionExpression=condition,
-            ExpressionAttributeNames=names,
-            ExpressionAttributeValues=values,
-        )
-    except ClientError as exc:
-        if not _is_conditional_failure(exc):
-            raise
+    if not _conditional_update(
+        job_id,
+        expression=(
+            f'SET rounds[{round_index}].evaluation = :ev, updated_at = :ts '
+            'ADD checkpoint_revision :revision_increment'
+        ),
+        condition=condition,
+        names=names,
+        values=values,
+    ):
         current = _load_job(job_id)
         _current_index, current_round = _round_entry(current, round_number)
         current_evaluation = current_round.get('evaluation') if isinstance(current_round, dict) else None
@@ -1117,11 +1088,8 @@ def _select_proposal(job: dict[str, Any], candidates: list[dict[str, Any]]) -> t
         return [], 'none'
     config = job.get('config') or {}
     try:
-        text = invoke_bedrock(
-            build_selection_prompt(config, candidates),
-            ModelRole.RESEARCH_PLANNING,
-            max_tokens=SELECTION_MAX_TOKENS,
-            system=_agent_system_prompt(job),
+        text = _invoke_agent_model(
+            job, build_selection_prompt(config, candidates), ModelRole.RESEARCH_PLANNING, SELECTION_MAX_TOKENS,
         )
         proposal = parse_selection(text, config, candidates)
     except Exception:
@@ -1150,44 +1118,57 @@ def _terminal_response(job: dict[str, Any], event: dict[str, Any]) -> dict[str, 
     }
 
 
+#: SET clauses every terminal write ends its status-specific clauses with; values from ``_terminal_values``.
+_FINALIZED_SETS = (
+    'finished_at = :ts',
+    'updated_at = :ts',
+    'finalized_attempt = :finalized_attempt',
+    'finalized_round = :finalized_round',
+)
+
+
+def _terminal_values(event: dict[str, Any], status: str) -> dict[str, Any]:
+    """The ``:s`` status and the ``_FINALIZED_SETS`` values of a terminal write."""
+    return {
+        ':s': status,
+        ':ts': get_timestamp(),
+        ':finalized_attempt': _event_attempt(event),
+        ':finalized_round': _event_round(event),
+    }
+
+
 def _write_terminal_checkpoint(
-    job_id: str,
+    job: dict[str, Any],
     event: dict[str, Any],
     *,
     action: Callable[[dict[str, Any]], dict[str, Any]],
     expression: str,
-    condition: str,
-    names: dict[str, str],
     values: dict[str, Any],
 ) -> dict[str, Any] | None:
     """Apply a terminal write; return ``None`` on success or the response to answer with after a lost race.
 
-    A conditional failure means another writer moved the row. When the job is
+    The write holds only while the event still owns the job's active round
+    and no checkpoint landed since ``job`` was read. A conditional failure
+    means another writer moved the row. When the job is
     already terminal or no longer ours, answer with its current state;
     otherwise replay ``action`` against the fresh row, giving up after three
     replays.
     """
-    try:
-        research_table.update_item(
-            Key={'id': job_id},
-            UpdateExpression=expression,
-            ConditionExpression=condition,
-            ExpressionAttributeNames=names,
-            ExpressionAttributeValues=values,
-        )
-    except ClientError as exc:
-        if not _is_conditional_failure(exc):
-            raise
-        current = _load_job(job_id)
-        if current.get('status') in TERMINAL_STATUSES or not _owned_for_round(current, event):
-            return _terminal_response(current, event)
-        retries = int(event.get('_checkpoint_retry') or 0)
-        if retries < 3:
-            return action({**event, '_checkpoint_retry': retries + 1})
-        raise CheckpointConflictError(
-            f'Could not {action.__name__} research job {job_id} while checkpoints were changing',
-        ) from exc
-    return None
+    job_id = job['id']
+    names: dict[str, str] = {}
+    condition = _active_condition(job, event, names, values)
+    condition += f' AND {_revision_condition(job, values)}'
+    if _conditional_update(job_id, expression=expression, condition=condition, names=names, values=values):
+        return None
+    current = _load_job(job_id)
+    if current.get('status') in TERMINAL_STATUSES or not _owned_for_round(current, event):
+        return _terminal_response(current, event)
+    retries = int(event.get('_checkpoint_retry') or 0)
+    if retries < 3:
+        return action({**event, '_checkpoint_retry': retries + 1})
+    raise CheckpointConflictError(
+        f'Could not {action.__name__} research job {job_id} while checkpoints were changing',
+    )
 
 
 def finalize(event: dict[str, Any]) -> dict[str, Any]:
@@ -1200,17 +1181,12 @@ def finalize(event: dict[str, Any]) -> dict[str, Any]:
 
     summary = summarize_job(job)
     status = final_status(job)
-    names: dict[str, str] = {}
-    timestamp = get_timestamp()
     values: dict[str, Any] = {
-        ':s': status,
+        **_terminal_values(event, status),
         ':kc': summary['keyword_count'],
         ':sd': summary['steps_done'],
         ':sf': summary['steps_failed'],
         ':p': summary['provider'],
-        ':ts': timestamp,
-        ':finalized_attempt': _event_attempt(event),
-        ':finalized_round': _event_round(event),
     }
     sets = [
         '#s = :s',
@@ -1218,10 +1194,7 @@ def finalize(event: dict[str, Any]) -> dict[str, Any]:
         'steps_done = :sd',
         'steps_failed = :sf',
         'provider = :p',
-        'finished_at = :ts',
-        'updated_at = :ts',
-        'finalized_attempt = :finalized_attempt',
-        'finalized_round = :finalized_round',
+        *_FINALIZED_SETS,
     ]
     if job.get('type') == TYPE_COMPETITOR:
         analysis = summary['analysis']
@@ -1259,23 +1232,13 @@ def finalize(event: dict[str, Any]) -> dict[str, Any]:
             'proposal_truncation = :proposal_truncation',
         ])
 
-    condition = _active_condition(job, event, names, values)
-    condition += f' AND {_revision_condition(job, values)}'
     expression = f"SET {', '.join(sets)}"
     if status == STATUS_COMPLETED:
         expression += ' REMOVE error_message'
     else:
         values[':e'] = _failure_summary(job)
         expression += ', error_message = :e'
-    conflict = _write_terminal_checkpoint(
-        job_id,
-        event,
-        action=finalize,
-        expression=expression,
-        condition=condition,
-        names=names,
-        values=values,
-    )
+    conflict = _write_terminal_checkpoint(job, event, action=finalize, expression=expression, values=values)
     if conflict is not None:
         return conflict
 
@@ -1291,43 +1254,18 @@ def fail(event: dict[str, Any]) -> dict[str, Any]:
     try:
         job = _load_job(job_id)
     except ResearchJobNotFoundError:
-        return {**_base_result(event, _event_round(event) or 1), 'status': STATUS_FAILED}
+        return {**_event_round_result(event), 'status': STATUS_FAILED}
     if job.get('status') in TERMINAL_STATUSES or not _owned_for_round(job, event):
         return _terminal_response(job, event)
 
     status, result = checkpoint_terminal_result(job)
-    names: dict[str, str] = {}
-    timestamp = get_timestamp()
-    values: dict[str, Any] = {
-        ':s': status,
-        ':e': message,
-        ':ts': timestamp,
-        ':finalized_attempt': _event_attempt(event),
-        ':finalized_round': _event_round(event),
-    }
-    sets = [
-        '#s = :s',
-        'error_message = :e',
-        'finished_at = :ts',
-        'updated_at = :ts',
-        'finalized_attempt = :finalized_attempt',
-        'finalized_round = :finalized_round',
-    ]
+    values: dict[str, Any] = {**_terminal_values(event, status), ':e': message}
+    sets = ['#s = :s', 'error_message = :e', *_FINALIZED_SETS]
     for index, (attribute, value) in enumerate(result.items()):
         token = f':result{index}'
         values[token] = convert_floats_to_decimal(value)
         sets.append(f'{attribute} = {token}')
-    condition = _active_condition(job, event, names, values)
-    condition += f' AND {_revision_condition(job, values)}'
-    conflict = _write_terminal_checkpoint(
-        job_id,
-        event,
-        action=fail,
-        expression=f"SET {', '.join(sets)}",
-        condition=condition,
-        names=names,
-        values=values,
-    )
+    conflict = _write_terminal_checkpoint(job, event, action=fail, expression=f"SET {', '.join(sets)}", values=values)
     if conflict is not None:
         return conflict
 
