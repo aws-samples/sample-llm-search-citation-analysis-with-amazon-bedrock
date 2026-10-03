@@ -21,6 +21,7 @@ from botocore.exceptions import ClientError
 
 from shared.dynamodb_batch import collect_all_items
 from shared.dynamodb_conditions import is_conditional_check_failure
+from shared.string_lists import normalize_string_list
 from shared.utils import get_timestamp
 
 KEYWORD_GROUPS_TABLE_ENV = 'DYNAMODB_TABLE_KEYWORD_GROUPS'
@@ -90,23 +91,20 @@ def validate_id_list(
     """
     if value is None:
         return [], None
-    if not isinstance(value, list):
-        return None, f'{field} must be an array of strings'
-    if limit is not None and len(value) > limit:
-        return None, f'{field} accepts at most {limit} entries'
+    return normalize_string_list(
+        value,
+        limit=limit,
+        normalize=_group_id_entry,
+        type_error=f'{field} must be an array of strings',
+        limit_error=f'{field} accepts at most {limit} entries',
+        entry_error=f'{field} entries must be non-empty ids of at most {MAX_GROUP_ID_LENGTH} characters',
+    )
 
-    ids: list[str] = []
-    seen: set[str] = set()
-    for entry in value:
-        if not isinstance(entry, str):
-            return None, f'{field} must be an array of strings'
-        candidate = entry.strip()
-        if not candidate or len(candidate) > MAX_GROUP_ID_LENGTH:
-            return None, f'{field} entries must be non-empty ids of at most {MAX_GROUP_ID_LENGTH} characters'
-        if candidate not in seen:
-            seen.add(candidate)
-            ids.append(candidate)
-    return ids, None
+
+def _group_id_entry(entry: str) -> str | None:
+    """``entry`` trimmed, or ``None`` when that leaves nothing or more than ``MAX_GROUP_ID_LENGTH`` characters."""
+    candidate = entry.strip()
+    return candidate if candidate and len(candidate) <= MAX_GROUP_ID_LENGTH else None
 
 
 def validate_scope(value: Any) -> tuple[dict[str, Any] | None, str | None]:

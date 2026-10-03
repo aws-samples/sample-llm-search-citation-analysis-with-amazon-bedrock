@@ -14,6 +14,7 @@ import boto3
 from shared.constants import MAX_CITATIONS_PER_KEYWORD_DEFAULT, MAX_KEYWORD_LENGTH
 from shared.env_vars import resolve_table_env
 from shared.prompt_safety import sanitize_user_input
+from shared.provider_counts import add_error_categories, empty_provider_counts
 from shared.step_function_response import log_error, step_function_success
 
 # Import shared utilities
@@ -130,23 +131,14 @@ def summarize_providers(results: list[dict[str, Any]]) -> dict[str, Any]:
 
     for result in results:
         provider = result.get('provider', 'unknown')
-        counts = by_provider.setdefault(provider, {
-            'queries': 0,
-            'citations': 0,
-            'failures': 0,
-            'error_categories': [],
-        })
+        counts = by_provider.setdefault(provider, empty_provider_counts())
         counts['queries'] += 1
         counts['citations'] += len(result.get('citations', []))
 
         if result.get('status') == 'error':
             counts['failures'] += 1
-            # Classified upstream by `shared.provider_health`. Kept as a list
-            # so a provider failing two different ways in one run reports both
-            # rather than the last one silently winning.
-            category = result.get('error_category', 'unknown')
-            if category not in counts['error_categories']:
-                counts['error_categories'].append(category)
+            # Classified upstream by `shared.provider_health`.
+            add_error_categories(counts, [result.get('error_category', 'unknown')])
 
     return {
         'result_count': len(results),
