@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import boto3
 
 from shared.dynamodb_batch import collect_all_items
+
 # Set up logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
