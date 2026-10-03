@@ -4,18 +4,8 @@ import {
 import { buildChartData } from './KeywordDetailComponents';
 
 describe('buildChartData', () => {
-  it('labels the per-run citation lines with the provider display names', () => {
-    const { lineChartData } = buildChartData([], {});
-
-    expect(lineChartData.datasets.map((dataset) => dataset.label)).toStrictEqual([
-      'Anthropic Claude', 'Google Gemini', 'OpenAI', 'Perplexity',
-    ]);
-  });
-
-  it('labels the citation-frequency bars with the provider display names', () => {
-    const { barChartData } = buildChartData([], {});
-
-    expect(barChartData.datasets.map((dataset) => dataset.label)).toStrictEqual([
+  it.each(['lineChartData', 'barChartData'] as const)('labels the %s datasets with the provider display names', (chart) => {
+    expect(buildChartData([], {})[chart].datasets.map((dataset) => dataset.label)).toStrictEqual([
       'Anthropic Claude', 'Google Gemini', 'OpenAI', 'Perplexity',
     ]);
   });
