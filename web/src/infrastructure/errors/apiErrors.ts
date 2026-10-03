@@ -15,7 +15,7 @@ export type ErrorCategory =
   | 'config'
   | 'unknown';
 
-export interface ApiError {
+interface ApiError {
   message: string;
   category: ErrorCategory;
   originalError?: Error;
