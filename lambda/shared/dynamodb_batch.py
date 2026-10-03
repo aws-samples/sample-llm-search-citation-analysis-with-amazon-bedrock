@@ -8,7 +8,7 @@ keys, so callers do not implement subtly different completeness semantics.
 
 Usage:
 
-    from shared.dynamodb_batch import batch_get_items, collect_all_items, query_latest_per_key
+    from shared.dynamodb_batch import batch_get_items, collect_all_items, collect_capped_items, query_latest_per_key
 
     items = batch_get_items(
         dynamodb_resource,
@@ -27,6 +27,7 @@ Usage:
     # latest item (or None if no rows).
 
     rows = collect_all_items(my_table.query, IndexName='StatusIndex', KeyConditionExpression=...)
+    first_rows, truncated = collect_capped_items(my_table.scan, 3)
 """
 
 from __future__ import annotations
@@ -96,21 +97,45 @@ def batch_get_items(
     return items
 
 
-def collect_all_items(operation: Callable[..., Mapping[str, Any]], **params: Any) -> list[dict[str, Any]]:
-    """Every item a table's ``query`` or ``scan`` returns, following pagination.
+def _collect_pages(
+    operation: Callable[..., Mapping[str, Any]], max_pages: int | None, params: dict[str, Any],
+) -> tuple[list[dict[str, Any]], bool]:
+    """The items of up to ``max_pages`` pages (every page when ``None``) and whether the cap cut the read short.
 
     DynamoDB pages at 1 MB: each page's ``LastEvaluatedKey`` becomes the next
-    call's ``ExclusiveStartKey`` until a page arrives without one. ``params``
-    are the keyword arguments of ``operation`` and are not mutated.
+    call's ``ExclusiveStartKey`` until a page arrives without one.
     """
     items: list[dict[str, Any]] = []
-    while True:
+    pages_read = 0
+    while max_pages is None or pages_read < max_pages:
         response = operation(**params)
+        pages_read += 1
         items.extend(response.get("Items", []))
         last_key = response.get("LastEvaluatedKey")
         if not last_key:
-            return items
+            return items, False
         params["ExclusiveStartKey"] = last_key
+    return items, True
+
+
+def collect_all_items(operation: Callable[..., Mapping[str, Any]], **params: Any) -> list[dict[str, Any]]:
+    """Every item a table's ``query`` or ``scan`` returns, following pagination.
+
+    ``params`` are the keyword arguments of ``operation`` and are not mutated.
+    """
+    items, _truncated = _collect_pages(operation, None, params)
+    return items
+
+
+def collect_capped_items(
+    operation: Callable[..., Mapping[str, Any]], max_pages: int, **params: Any,
+) -> tuple[list[dict[str, Any]], bool]:
+    """The items of at most ``max_pages`` pages of ``operation`` (a table's ``query`` or ``scan``).
+
+    Returns ``(items, truncated)``: ``truncated`` is true when the last page
+    read still had a ``LastEvaluatedKey``, i.e. the cap cut the read short.
+    """
+    return _collect_pages(operation, max_pages, params)
 
 
 def query_latest_per_key(

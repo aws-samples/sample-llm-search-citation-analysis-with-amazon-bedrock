@@ -17,8 +17,9 @@ import boto3
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
-from shared.bounded_reads import collect_capped_items, collect_capped_partition
+from shared.bounded_reads import collect_capped_partition
 from shared.decorators import api_handler, validate
+from shared.dynamodb_batch import collect_capped_items
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scope_from_request
 from shared.utils import get_brand_config
 
