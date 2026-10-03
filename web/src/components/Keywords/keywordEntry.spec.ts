@@ -18,6 +18,7 @@ import {
   processBulkKeyword,
 } from './keywordEntry';
 import type { BulkKeywordResult } from './keywordEntry';
+import identityFixtures from '../../../../test-fixtures/keyword-identity.json';
 
 vi.mock('../../api/client', () => ({ apiPost: vi.fn() }));
 
@@ -101,9 +102,49 @@ describe('isDuplicateKeyword', () => {
   it('returns false when no keyword matches', () => {
     expect(isDuplicateKeyword('best hotels in lisbon', [KEYWORD_FIXTURE])).toBe(false);
   });
+
+  it.each(identityFixtures.valid)(
+    'matches the stored keyword $expected when the candidate is its $description form',
+    ({
+      input, expected
+    }) => {
+      expect(isDuplicateKeyword(input, [buildKeyword({ keyword: expected })])).toBe(true);
+    }
+  );
+
+  it.each(identityFixtures.boundaryWhitespace)(
+    'matches the stored keyword when the candidate has $description boundaries',
+    ({ codePoint }) => {
+      const boundary = String.fromCodePoint(codePoint);
+
+      expect(isDuplicateKeyword(`${boundary}ALPHA${boundary}`, [buildKeyword({ keyword: 'alpha' })])).toBe(true);
+    }
+  );
+
+  it('matches a stored fullwidth keyword when the candidate is its ASCII form', () => {
+    expect(isDuplicateKeyword('full', [buildKeyword({ keyword: 'ＦＵＬＬ' })])).toBe(true);
+  });
+
+  it.each(identityFixtures.preservedBoundaryControls)(
+    'keeps $description at the boundary apart from the bare keyword',
+    ({ codePoint }) => {
+      const control = String.fromCodePoint(codePoint);
+
+      expect(isDuplicateKeyword(`${control}alpha${control}`, [buildKeyword({ keyword: 'alpha' })])).toBe(false);
+    }
+  );
 });
 
 describe('parseBulkKeywords', () => {
+  it.each(identityFixtures.valid)(
+    'keeps only the first of two lines that are both $expected once normalised ($description)',
+    ({
+      input, expected
+    }) => {
+      expect(parseBulkKeywords(`${expected}\n${input}`)).toStrictEqual([expected]);
+    }
+  );
+
   it('splits lines and trims whitespace', () => {
     expect(parseBulkKeywords('  first  \nsecond\n third')).toStrictEqual([
       'first', 'second', 'third',
