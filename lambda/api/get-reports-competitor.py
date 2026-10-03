@@ -55,6 +55,7 @@ import boto3
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
+from shared.constants import priority_rank
 from shared.decorators import api_handler, validate
 from shared.scope_params import load_sibling_function
 from shared.search_results import latest_run, query_keyword_items, scan_keyword_texts
@@ -237,9 +238,8 @@ def _build_competitor_rollup(
         key=lambda r: (r['rank_delta'] if r['rank_delta'] is not None else -1),
         reverse=True,
     )
-    priority_order = {'high': 0, 'medium': 1, 'low': 2}
     exclusive_sources.sort(
-        key=lambda s: (-s['lift_score'], priority_order.get(s['priority'], 2)),
+        key=lambda s: (-s['lift_score'], priority_rank(s['priority'])),
     )
 
     return {

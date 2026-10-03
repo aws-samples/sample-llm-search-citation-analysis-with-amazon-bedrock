@@ -31,7 +31,7 @@ from shared.api_response import (
 )
 from shared.auth import get_caller_identity
 from shared.brand_visibility import classify_brand, load_recent_search_results, tracked_brand_names
-from shared.constants import MAX_KEYWORD_LENGTH
+from shared.constants import MAX_KEYWORD_LENGTH, priority_rank
 from shared.content_brief import (
     CONTENT_OUTPUT_CONTRACT,
     GROUP_BRIEF_MODES,
@@ -521,10 +521,9 @@ def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
             visibility = _analyze_keyword_visibility(results, first_party, competitors)
             ideas.extend(_keyword_ideas(keyword, visibility))
     ideas.extend(_get_seasonal_suggestions(list(keyword_data), config))
-    priority_order = {"high": 0, "medium": 1, "low": 2}
     ideas.sort(
         key=lambda idea: (
-            priority_order.get(idea.get("priority", "low"), 2),
+            priority_rank(idea.get("priority")),
             idea.get("keyword", ""),
         )
     )

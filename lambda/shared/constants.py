@@ -17,6 +17,21 @@ specific API's throttling behavior), leave it inline with a comment.
 
 from __future__ import annotations
 
+# ---------------------------------------------------------------------------
+# Recommendation priority order — how Action Center recommendations, Content
+# Studio ideas, Citation Gaps and the competitor report's outreach targets
+# sort their 'high' / 'medium' / 'low' items. Anything else (a missing
+# priority, or a keyword priority such as 'normal', which none of these items
+# carry) sorts with 'low'.
+# ---------------------------------------------------------------------------
+RECOMMENDATION_PRIORITY_ORDER = {'high': 0, 'medium': 1, 'low': 2}
+
+
+def priority_rank(priority: str | None) -> int:
+    """The sort position of a recommendation priority: 0 for 'high' ... 2 for 'low' and anything unknown."""
+    return RECOMMENDATION_PRIORITY_ORDER.get(priority, RECOMMENDATION_PRIORITY_ORDER['low'])
+
+
 # Sentinel for "not ranked" — flows through best_rank reducers; any real
 # position is below it, so 999 is arbitrary but safe.
 UNRANKED_SENTINEL = 999

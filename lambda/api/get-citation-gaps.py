@@ -26,6 +26,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
 from shared.brand_visibility import tracked_brand_names
+from shared.constants import priority_rank
 from shared.decorators import api_handler, validate
 from shared.dynamodb_batch import query_latest_per_key
 from shared.kpi_engine import is_owned_domain, normalize_domain
@@ -243,9 +244,8 @@ def _gaps_and_covered_sources(
         elif data['first_party']:
             covered_sources.append(source_info)
 
-    priority_order = {'high': 0, 'medium': 1, 'low': 2}
     gaps.sort(key=lambda source: (
-        priority_order.get(source.get('priority', 'low'), 2),
+        priority_rank(source.get('priority')),
         -source['citation_count'],
     ))
     covered_sources.sort(key=lambda source: -source['citation_count'])
@@ -363,9 +363,8 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10, scope: Re
                 gap['keyword'] = keyword
                 all_gaps.append(gap)
 
-    priority_order = {'high': 0, 'medium': 1, 'low': 2}
     all_gaps.sort(key=lambda gap: (
-        priority_order.get(gap.get('priority', 'low'), 2),
+        priority_rank(gap.get('priority')),
         -gap['citation_count'],
     ))
     top_gaps = all_gaps[:30]

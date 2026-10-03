@@ -28,6 +28,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
 from shared.brand_visibility import classify_brand, load_recent_search_results, tracked_brand_names
+from shared.constants import priority_rank
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.llm_json import parse_llm_json
@@ -278,8 +279,7 @@ def generate_rule_based_recommendations(config: dict[str, Any], keywords: list[s
         })
 
     # Sort by priority
-    priority_order = {'high': 0, 'medium': 1, 'low': 2}
-    recommendations.sort(key=lambda x: priority_order.get(x.get('priority', 'low'), 2))
+    recommendations.sort(key=lambda x: priority_rank(x.get('priority')))
 
     return recommendations
 
