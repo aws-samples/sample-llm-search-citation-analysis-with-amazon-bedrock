@@ -49,6 +49,7 @@ from shared.api_views import named_item_view
 from shared.auth import get_caller_identity
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.dynamo_conditions import is_conditional_check_failure
 from shared.env_vars import resolve_table_env
 from shared.research_agent import (
     AGENT_DEFAULT_ROUNDS,
@@ -121,10 +122,6 @@ groups_table = dynamodb.Table(KEYWORD_GROUPS_TABLE)
 # Job bookkeeping
 # =============================================================================
 
-def _is_conditional_failure(error: ClientError) -> bool:
-    return error.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException'
-
-
 def _replace_row(target: dict[str, Any], replacement: dict[str, Any]) -> None:
     target.clear()
     target.update(replacement)
@@ -175,7 +172,7 @@ def _persist_terminal_attempt(
             ExpressionAttributeValues=values,
         )
     except ClientError as exc:
-        if _is_conditional_failure(exc):
+        if is_conditional_check_failure(exc):
             return False
         raise
 
@@ -722,7 +719,7 @@ def _retry_research(event: dict[str, Any], context: Any, job: dict[str, Any]) ->
             ReturnValues='ALL_NEW',
         )
     except ClientError as exc:
-        if _is_conditional_failure(exc):
+        if is_conditional_check_failure(exc):
             return validation_error('This research was already retried or changed. Refresh and try again.', event, 'status')
         raise
 

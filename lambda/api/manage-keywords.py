@@ -15,13 +15,12 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, success_response, validation_error
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.dynamo_conditions import delete_existing_item, is_conditional_check_failure
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import (
     KEYWORD_GROUPS_TABLE_ENV,
     MAX_GROUPS_PER_KEYWORD,
-    load_existing_group_ids,
     serialize_keyword_item,
-    validate_id_list,
 )
 from shared.keyword_store import (
     ALLOWED_KEYWORD_PRIORITIES,
@@ -30,6 +29,7 @@ from shared.keyword_store import (
     put_keyword_if_absent,
     validate_keyword_text,
 )
+from shared.requested_group_ids import validate_requested_group_ids
 from shared.utils import get_timestamp, load_keyword_identities, normalize_keyword
 
 dynamodb = boto3.resource('dynamodb')
@@ -53,43 +53,23 @@ _OPTIONAL_UPDATE_FIELDS = (
 )
 
 
-def _validated_group_ids(body, event):
-    """Validate an optional ``group_ids`` list and confirm every id exists.
+def _validated_request(keyword, body, event):
+    """Validate the keyword text and the optional ``group_ids`` of a create/update body.
 
-    Returns ``(group_ids, None)`` — ``None`` group_ids when the field was
-    omitted — or ``(None, error_response)``.
-    """
-    if 'group_ids' not in body:
-        return None, None
-    group_ids, message = validate_id_list(body.get('group_ids'), field='group_ids', limit=MAX_GROUPS_PER_KEYWORD)
-    if message:
-        return None, validation_error(message, event, 'group_ids')
-    if group_ids and groups_table is None:
-        return None, validation_error('Keyword groups are not available on this deployment', event, 'group_ids')
-    if group_ids:
-        unknown = sorted(set(group_ids) - load_existing_group_ids(groups_table, group_ids))
-        if unknown:
-            return None, validation_error(f"Unknown keyword group ids: {', '.join(unknown)}", event, 'group_ids')
-    return group_ids, None
+    The keyword is trimmed without runtime-specific strip: the shared sequence
+    (type → surrogate check → trim → length) lives in ``shared.keyword_store``,
+    and empty-after-trim rejects on this route (bugs.md 3.3). ``group_ids`` is
+    ``None`` when the field was omitted; every listed id must exist.
 
-
-def _validated_keyword(keyword, event):
-    """Validate and explicitly trim a keyword without runtime-specific strip.
-
-    Delegates the shared sequence (type → surrogate check → trim → length)
-    to ``shared.keyword_store`` — empty-after-trim rejects on this route
-    (bugs.md 3.3). Returns ``(text, None)`` or ``(None, error_response)``;
-    callers branch on ``text`` being ``None``.
+    Returns ``(text, group_ids, None)`` or ``(None, None, error_response)``.
     """
     text, message = validate_keyword_text(keyword)
     if message:
-        return None, validation_error(message, event, 'keyword')
-    return text, None
-
-
-def _is_conditional_conflict(error):
-    """Return whether a DynamoDB error is a failed write condition."""
-    return error.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException'
+        return None, None, validation_error(message, event, 'keyword')
+    group_ids, message = validate_requested_group_ids(body, groups_table, limit=MAX_GROUPS_PER_KEYWORD)
+    if message:
+        return None, None, validation_error(message, event, 'group_ids')
+    return text, group_ids, None
 
 
 def _duplicate_response(event):
@@ -156,11 +136,8 @@ def _update_request(
 })
 def create_keyword(event, context, body, keyword, region, language, category, priority, notes):
     """Create a keyword under its canonical deterministic identity."""
-    text, error = _validated_keyword(keyword, event)
+    text, group_ids, error = _validated_request(keyword, body, event)
     if text is None:
-        return error
-    group_ids, error = _validated_group_ids(body, event)
-    if error:
         return error
 
     identity = normalize_keyword(text)
@@ -200,11 +177,8 @@ def update_keyword(event, context, body, keyword, status, region, language, cate
     if not id:
         return validation_error('Keyword ID is required', event, 'id')
 
-    text, error = _validated_keyword(keyword, event)
+    text, group_ids, error = _validated_request(keyword, body, event)
     if text is None:
-        return error
-    group_ids, error = _validated_group_ids(body, event)
-    if error:
         return error
 
     existing = keywords_table.get_item(
@@ -239,7 +213,7 @@ def update_keyword(event, context, body, keyword, status, region, language, cate
             ReturnValues='ALL_NEW'
         )
     except ClientError as write_error:
-        if not _is_conditional_conflict(write_error):
+        if not is_conditional_check_failure(write_error):
             raise
         return api_response(
             409,
@@ -255,15 +229,7 @@ def delete_keyword(event, context, id=None):
     if not id:
         return validation_error('Keyword ID is required', event, 'id')
 
-    try:
-        keywords_table.delete_item(
-            Key={'id': id},
-            ConditionExpression='attribute_exists(#id)',
-            ExpressionAttributeNames={'#id': 'id'},
-        )
-    except ClientError as write_error:
-        if not _is_conditional_conflict(write_error):
-            raise
+    if not delete_existing_item(keywords_table, id):
         return api_response(404, {'error': 'Keyword not found'}, event)
 
     return success_response({'message': 'Keyword deleted successfully'}, event)

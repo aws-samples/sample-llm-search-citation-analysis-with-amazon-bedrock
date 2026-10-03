@@ -33,6 +33,7 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.api_views import named_item_view
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.dynamo_conditions import is_conditional_check_failure
 from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import (
@@ -271,7 +272,7 @@ def _apply_membership(keyword_id: str, group_id: str, *, add: bool) -> dict[str,
             ReturnValues='ALL_NEW',
         )['Attributes']
     except ClientError as error:
-        if error.response.get('Error', {}).get('Code') != 'ConditionalCheckFailedException':
+        if not is_conditional_check_failure(error):
             raise
         return None
 

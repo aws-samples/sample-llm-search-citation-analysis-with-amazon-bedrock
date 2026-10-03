@@ -51,6 +51,7 @@ from shared.content_brief import (
     validate_template_placeholders,
 )
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.dynamo_conditions import is_conditional_check_failure
 from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import (
     BatchGetUnprocessedError,
@@ -1137,7 +1138,7 @@ def create_pending_content(
     try:
         table.put_item(Item=item, ConditionExpression="attribute_not_exists(id)")
     except ClientError as error:
-        if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+        if not is_conditional_check_failure(error):
             raise
         return _existing_content_row(table, resolved_content_id, error), False
     return item, True
@@ -1403,10 +1404,6 @@ def _canonical_content_brief(
     return canonical, issue
 
 
-def _is_conditional_failure(error: ClientError) -> bool:
-    return error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
-
-
 def _claim_generation(content_id: str, owner: str) -> _GenerationClaim | None:
     """Atomically acquire one paid-model attempt with a bounded lease."""
     now_epoch = int(utc_now().timestamp())
@@ -1445,7 +1442,7 @@ def _claim_generation(content_id: str, owner: str) -> _GenerationClaim | None:
             ReturnValues="ALL_NEW",
         )
     except ClientError as error:
-        if _is_conditional_failure(error):
+        if is_conditional_check_failure(error):
             return None
         raise
     attributes = response.get("Attributes", {})
@@ -1838,7 +1835,7 @@ def _register_batch_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
             ConditionExpression="attribute_not_exists(batch_id)",
         )
     except ClientError as error:
-        if not _is_conditional_failure(error):
+        if not is_conditional_check_failure(error):
             raise _BatchManifestStorageError("Could not write batch manifest") from error
         existing = _load_batch_manifest(batch_id)
         if existing is None:
@@ -2713,7 +2710,7 @@ def _conditional_recovery_update(
             ExpressionAttributeValues=values,
         )
     except ClientError as error:
-        if _is_conditional_failure(error):
+        if is_conditional_check_failure(error):
             return False
         raise
     return True

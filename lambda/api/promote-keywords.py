@@ -14,13 +14,12 @@ from shared.api_response import error_response, success_response, validation_err
 # derive their over-length fixtures from `promotion_handler.MAX_KEYWORD_LENGTH`.
 from shared.constants import MAX_KEYWORD_LENGTH as MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body, route_handler
+from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import (
     KEYWORD_GROUPS_TABLE_ENV,
     add_keyword_groups,
-    load_existing_group_ids,
     serialize_keyword_item,
-    validate_id_list,
 )
 from shared.keyword_store import (
     ALLOWED_KEYWORD_PRIORITIES,
@@ -31,6 +30,7 @@ from shared.keyword_store import (
     put_keyword_if_absent,
     validate_keyword_text,
 )
+from shared.requested_group_ids import validate_requested_group_ids
 from shared.utils import (
     get_timestamp,
     load_keyword_identities,
@@ -139,17 +139,9 @@ def _promote_keywords(event, context, body):
 
 def _validated_group_ids(body):
     """Validate the optional ``group_ids`` list (target groups for every keyword)."""
-    if 'group_ids' not in body:
-        return None, None
-    group_ids, message = validate_id_list(body.get('group_ids'), field='group_ids')
+    group_ids, message = validate_requested_group_ids(body, groups_table)
     if message:
         return None, {'message': message, 'field': 'group_ids'}
-    if group_ids and groups_table is None:
-        return None, {'message': 'Keyword groups are not available on this deployment', 'field': 'group_ids'}
-    if group_ids:
-        unknown = sorted(set(group_ids) - load_existing_group_ids(groups_table, group_ids))
-        if unknown:
-            return None, {'message': f"Unknown keyword group ids: {', '.join(unknown)}", 'field': 'group_ids'}
     return group_ids, None
 
 
@@ -278,27 +270,21 @@ def validate_request(keywords, status, priority):
 def load_keyword_items_by_identity(table):
     """Load stored keyword items by normalized identity, preserving legacy ids."""
     items_by_identity = {}
-    scan_params = {
-        'ProjectionExpression': '#id, #kw',
-        'ExpressionAttributeNames': {'#id': 'id', '#kw': 'keyword'},
-        'ConsistentRead': True,
-    }
-
-    while True:
-        response = table.scan(**scan_params)
-        for item in response.get('Items', []):
-            stored_id = item.get('id')
-            stored_keyword = item.get('keyword')
-            if not isinstance(stored_id, str) or not isinstance(stored_keyword, str):
-                continue
-            identity = normalize_keyword(stored_keyword)
-            if identity:
-                items_by_identity.setdefault(identity, item)
-
-        last_key = response.get('LastEvaluatedKey')
-        if not last_key:
-            return items_by_identity
-        scan_params['ExclusiveStartKey'] = last_key
+    stored_items = collect_all_items(
+        table.scan,
+        ProjectionExpression='#id, #kw',
+        ExpressionAttributeNames={'#id': 'id', '#kw': 'keyword'},
+        ConsistentRead=True,
+    )
+    for item in stored_items:
+        stored_id = item.get('id')
+        stored_keyword = item.get('keyword')
+        if not isinstance(stored_id, str) or not isinstance(stored_keyword, str):
+            continue
+        identity = normalize_keyword(stored_keyword)
+        if identity:
+            items_by_identity.setdefault(identity, item)
+    return items_by_identity
 
 
 def partition_keywords(keywords, existing_keys):

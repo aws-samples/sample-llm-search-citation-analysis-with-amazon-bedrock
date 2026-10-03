@@ -22,6 +22,7 @@ from shared.decorators import (
     route_handler,
     validate,
 )
+from shared.dynamo_conditions import is_conditional_check_failure
 from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.kpi_alerts import (
     deterministic_content_change_id,
@@ -61,10 +62,6 @@ class TestNotificationServiceError(RuntimeError):
 
 dynamodb = boto3.resource('dynamodb')
 sns = boto3.client('sns')
-
-
-def _conditional_failure(exc: ClientError) -> bool:
-    return exc.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException'
 
 
 def _query_alert_status(status: str, limit: int) -> list[dict[str, Any]]:
@@ -127,7 +124,7 @@ def _acknowledge_alert(event: dict[str, Any], context: Any) -> dict[str, Any]:
             },
         )
     except ClientError as exc:
-        if _conditional_failure(exc):
+        if is_conditional_check_failure(exc):
             return not_found_response('Alert', event)
         raise
     return success_response({
