@@ -189,23 +189,21 @@ function convertNode(node: RootContent, listLevel = 0): DocxChild[] {
     case 'list': {
       const isOrdered = node.ordered ?? false;
       node.children.forEach((item) => {
-        if (item.type === 'listItem') {
-          item.children.forEach(child => {
-            if (child.type === 'paragraph') {
-              elements.push(new Paragraph({
-                children: convertInlineContent(child.children),
-                bullet: isOrdered ? undefined : { level: listLevel },
-                numbering: isOrdered ? {
-                  reference: 'default-numbering',
-                  level: listLevel 
-                } : undefined,
-                spacing: { after: 100 },
-              }));
-            } else if (child.type === 'list') {
-              elements.push(...convertNode(child, listLevel + 1));
-            }
-          });
-        }
+        item.children.forEach(child => {
+          if (child.type === 'paragraph') {
+            elements.push(new Paragraph({
+              children: convertInlineContent(child.children),
+              bullet: isOrdered ? undefined : { level: listLevel },
+              numbering: isOrdered ? {
+                reference: 'default-numbering',
+                level: listLevel 
+              } : undefined,
+              spacing: { after: 100 },
+            }));
+          } else if (child.type === 'list') {
+            elements.push(...convertNode(child, listLevel + 1));
+          }
+        });
       });
       break;
     }
