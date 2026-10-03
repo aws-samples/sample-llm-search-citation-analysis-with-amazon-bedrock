@@ -21,6 +21,7 @@ from typing import Any
 import pytest
 
 from shared import utils
+from testing.assertions import present
 
 
 class TestGetTimestamp:
@@ -168,7 +169,7 @@ class TestParseTimestamp:
         assert utils.parse_timestamp(value) == expected
 
     def test_offset_results_carry_the_utc_timezone(self) -> None:
-        assert utils.parse_timestamp('2026-04-18T01:30:00+02:00').tzinfo == UTC
+        assert present(utils.parse_timestamp('2026-04-18T01:30:00+02:00')).tzinfo == UTC
 
     def test_refuses_a_naive_timestamp_when_asked(self) -> None:
         assert utils.parse_timestamp('2026-04-18T01:30:00', naive_as_utc=False) is None
