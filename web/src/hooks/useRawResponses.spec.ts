@@ -83,6 +83,31 @@ describe('useRawResponses', () => {
     });
   });
 
+  it('keeps the stored folder listing when a later browse response has no prefix', async () => {
+    const { result } = await renderRawResponsesAfter((hook) => hook.browse());
+    mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse({ folders: [] }));
+
+    const returned = await act(() => result.current.browse('2024-01-01/'));
+
+    expect(returned).toBeNull();
+    expect(result.current.browseData).toStrictEqual(mockBrowseResponse);
+  });
+
+  it.each<[action: string, run: (hook: RawResponsesHook) => Promise<unknown>]>([
+    ['browsing', (hook) => hook.browse()],
+    ['getting file', (hook) => hook.getFile('file.json')],
+    ['getting download URL', (hook) => hook.getDownloadUrl('file.json')],
+  ])('logs "[rawResponses] Error %s:" with the HTTP status when the request fails', async (action, run) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+
+    await renderRawResponsesAfter(run, createMockFetch({ shouldFail: true }));
+
+    expect(consoleError).toHaveBeenCalledWith(`[rawResponses] Error ${action}:`, expect.objectContaining({
+      name: 'RawResponsesError',
+      message: 'HTTP 500',
+    }));
+  });
+
   describe('getFile', () => {
     it('returns and stores the file content when the response has a key', async () => {
       const {

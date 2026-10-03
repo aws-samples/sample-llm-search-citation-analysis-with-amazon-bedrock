@@ -1,4 +1,6 @@
-import { expect } from 'vitest';
+import {
+  expect, vi
+} from 'vitest';
 import {
   act, renderHook, waitFor
 } from '@testing-library/react';
@@ -90,6 +92,19 @@ export interface BrandConfigMockApiOptions {
   shouldFailExpand?: boolean;
   shouldFailExpandAll?: boolean;
   shouldFailFindCompetitors?: boolean;
+  /** Bodies of the three expansion routes, replacing the full default answers. */
+  expandResponse?: unknown;
+  expandAllResponse?: unknown;
+  findCompetitorsResponse?: unknown;
+  /** Makes every expansion request reject with this value instead of answering. */
+  expansionRejection?: unknown;
+}
+
+/** An expansion route: rejects with `options.expansionRejection` when set, else a `createMockEndpoint`. */
+function mockExpansionEndpoint(options: BrandConfigMockApiOptions, shouldFail: boolean | undefined, payload: unknown) {
+  if (options.expansionRejection === undefined) return createMockEndpoint(shouldFail, payload);
+  const rejection: unknown = options.expansionRejection;
+  return vi.fn(() => Promise.reject(rejection));
 }
 
 function createMockApi(options: BrandConfigMockApiOptions = {}) {
@@ -100,9 +115,9 @@ function createMockApi(options: BrandConfigMockApiOptions = {}) {
     fetchPresets: createMockEndpoint(options.shouldFailPresets, { presets }),
     saveConfig: createMockEndpoint(options.shouldFailSave, { config: storedConfig }),
     deleteConfig: createMockEndpoint(options.shouldFailDelete, { config: {} }),
-    expandBrand: createMockEndpoint(options.shouldFailExpand, mockBrandExpansion),
-    expandAllBrands: createMockEndpoint(options.shouldFailExpandAll, mockAllBrandsExpansion),
-    findCompetitors: createMockEndpoint(options.shouldFailFindCompetitors, mockCompetitorDiscovery),
+    expandBrand: mockExpansionEndpoint(options, options.shouldFailExpand, options.expandResponse ?? mockBrandExpansion),
+    expandAllBrands: mockExpansionEndpoint(options, options.shouldFailExpandAll, options.expandAllResponse ?? mockAllBrandsExpansion),
+    findCompetitors: mockExpansionEndpoint(options, options.shouldFailFindCompetitors, options.findCompetitorsResponse ?? mockCompetitorDiscovery),
   } satisfies BrandConfigApi;
 }
 
@@ -134,4 +149,13 @@ export async function renderLoadedBrandConfig(options: BrandConfigMockApiOptions
   const rendered = renderBrandConfig(options);
   await waitFor(() => expect(rendered.result.current.loading).toBe(false));
   return rendered;
+}
+
+/** The init the default API's POST routes send with `body`. */
+export function brandConfigPostInit(body: unknown) {
+  return {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  };
 }

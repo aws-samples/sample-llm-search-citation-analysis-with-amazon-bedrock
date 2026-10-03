@@ -236,6 +236,44 @@ describe('useUserManagement', () => {
     });
   });
 
+  describe('fallback messages for a non-Error rejection', () => {
+    it('reports "Failed to load users" when the list request rejects', async () => {
+      Object.assign(mockApi, createMockApi({ nonErrorRejection: 'offline' }));
+
+      const result = await renderLoadedUserManagement();
+
+      expect(result.current.error).toBe('Failed to load users');
+    });
+
+    it.each<[mutation: string, run: (hook: UserManagementHook) => Promise<unknown>, outcome: unknown]>([
+      ['invite', inviteNewUser, {
+        success: false,
+        message: 'Failed to invite user',
+      }],
+      ['password reset', resetUser1, {
+        success: false,
+        message: 'Failed to reset password',
+      }],
+    ])('answers the %s fallback message', async (_mutation, run, outcome) => {
+      const result = await renderLoadedUserManagement();
+      Object.assign(mockApi, createMockApi({ nonErrorRejection: 'offline' }));
+
+      await expect(act(() => run(result.current))).resolves.toStrictEqual(outcome);
+    });
+
+    it.each<[message: string, run: (hook: UserManagementHook) => Promise<unknown>]>([
+      ['Failed to update user', updateUser1],
+      ['Failed to delete user', removeUser1],
+    ])('shows "%s" when the mutation rejects', async (message, run) => {
+      const result = await renderLoadedUserManagement();
+      Object.assign(mockApi, createMockApi({ nonErrorRejection: 'offline' }));
+
+      await act(() => run(result.current));
+
+      expect(result.current.error).toBe(message);
+    });
+  });
+
   it('refetches users and groups', async (): Promise<void> => {
     const result = await renderLoadedUserManagement();
 

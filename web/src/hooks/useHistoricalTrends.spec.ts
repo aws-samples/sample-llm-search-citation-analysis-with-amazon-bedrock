@@ -52,6 +52,11 @@ describe('useHistoricalTrends', () => {
       failedToLoadOnBackendError('No data'),
       INVALID_REQUEST_ON_TYPE_GUARD_FAILURE,
     ],
+    loggedHttpError: {
+      logMessage: '[historicalTrends] Error fetching trends:',
+      name: 'ApiRequestError',
+      message: 'Failed to fetch historical trends',
+    },
   });
 
   it.each(REJECTED_TRENDS_BODIES)('stores no trends and reports an invalid request for %s', async (_description, body) => {

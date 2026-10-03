@@ -206,6 +206,24 @@ describe('useKeywordResearch', () => {
       expect(result.current.competitorResult?.secondary_keywords.map((k) => k.keyword)).toStrictEqual(['vacation packages']);
     });
 
+    it('remembers a running analysis as a competitor job', async () => {
+      const { result } = renderResearch({
+        snapshots: {
+          'job-1': [buildJob({
+            type: 'competitor',
+            status: 'running',
+          })],
+        },
+      });
+
+      await startCompetitorAnalysis(result, 'https://competitor.com');
+
+      expect(JSON.parse(localStorage.getItem(ACTIVE_JOB_STORAGE_KEY) ?? '{}')).toStrictEqual({
+        id: 'job-1',
+        type: 'competitor',
+      });
+    });
+
     it('shows the server rejection when the URL is refused', async () => {
       const { result } = renderResearch({ startError: { error: 'Invalid URL' } });
 
@@ -240,6 +258,31 @@ describe('useKeywordResearch', () => {
       expect(result.current.loading).toBe(true);
       expect(result.current.activeJob?.id).toBe('job-1');
     });
+  });
+
+  it('shows the retried job before the retry request answers', async () => {
+    mockAuthenticatedFetch.mockImplementation(() => new Promise(vi.fn()));
+    const { result } = renderHook(() => useKeywordResearch());
+    const partial = buildJob({ status: 'partial' });
+
+    act(() => {
+      void result.current.retryResearch(partial);
+    });
+
+    expect(result.current.activeJob).toStrictEqual(partial);
+  });
+
+  it.each<[action: string, run: (hook: ReturnType<typeof useKeywordResearch>) => Promise<unknown>]>([
+    ['expanding keywords', (hook) => hook.expandKeywords('test', 'hospitality', 10)],
+    ['analyzing competitor', (hook) => hook.analyzeCompetitor('https://competitor.com')],
+    ['retrying research', (hook) => hook.retryResearch(buildJob({ status: 'partial' }))],
+  ])('logs "[research] Error %s:" with the rejection when the request is refused', async (action, run) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+    const { result } = renderResearch({ startError: { error: 'Refused' } });
+
+    await act(() => run(result.current));
+
+    expect(consoleError).toHaveBeenCalledWith(`[research] Error ${action}:`, expect.objectContaining({ responseMessage: 'Refused' }));
   });
 
   describe('re-attaching after a refresh', () => {

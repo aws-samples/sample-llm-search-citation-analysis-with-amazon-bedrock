@@ -106,6 +106,28 @@ describe('useResearchTemplates', () => {
     expect(result.current.templates.map((template) => template.id)).toStrictEqual(['builtin-default', 'builtin-cafes']);
   });
 
+  it('asks the API to delete a built-in template instead of refusing it locally', async () => {
+    const result = await renderLoadedTemplates();
+    mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse({ error: 'Built-in templates cannot be deleted' }, 400));
+
+    await act(() => result.current.remove('builtin-default'));
+
+    expect(mockAuthenticatedFetch).toHaveBeenLastCalledWith(
+      'https://api.test.com/keyword-research/templates/builtin-default',
+      expect.objectContaining({ method: 'DELETE' })
+    );
+  });
+
+  it('shows the research server error and logs "[research] Error loading templates:" when the list fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+    mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch({}, { shouldFail: true }));
+
+    const result = await renderLoadedTemplates();
+
+    expect(result.current.error).toBe('Keyword research failed');
+    expect(consoleError).toHaveBeenCalledWith('[research] Error loading templates:', expect.objectContaining({ statusCode: 500 }));
+  });
+
   it('reports a rejected save without touching the list', async () => {
     const result = await renderLoadedTemplates();
     mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse({ error: 'system_prompt too short (min 20 characters)' }, 400));

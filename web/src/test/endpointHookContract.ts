@@ -9,7 +9,7 @@
  * hook's fixtures and tables, and adds only the tests specific to that hook.
  */
 import {
-  describe, expect, it
+  describe, expect, it, vi
 } from 'vitest';
 import {
   act, renderHook, waitFor
@@ -58,6 +58,15 @@ export interface EndpointHookContract<THook extends EndpointHookState<TResponse>
   readonly successes: ReadonlyArray<EndpointSuccessCase<NoInfer<TArgs>, NoInfer<TResponse>>>;
   /** At least one row; the first also drives the error-clearing test. */
   readonly failures: readonly [EndpointFailureCase<NoInfer<TResponse>>, ...EndpointFailureCase<NoInfer<TResponse>>[]];
+  /** What the hook logs, with which error, when the request returns HTTP 500. */
+  readonly loggedHttpError?: LoggedHttpError;
+}
+
+/** The `console.error` call a failed request makes: the hook's log prefix and the error it built. */
+export interface LoggedHttpError {
+  readonly logMessage: string;
+  readonly name: string;
+  readonly message: string;
 }
 
 /** `authenticatedFetch` arguments of a request made through `useAnalysisEndpoint`. */
@@ -78,6 +87,7 @@ export function describeEndpointHookContract<THook extends EndpointHookState<TRe
   requests,
   successes,
   failures,
+  loggedHttpError,
 }: EndpointHookContract<THook, TArgs, TResponse>): void {
   const anyFunction: unknown = expect.any(Function);
   const hookState = (state: EndpointHookState<TResponse>): Record<string, unknown> => ({
@@ -145,6 +155,19 @@ export function describeEndpointHookContract<THook extends EndpointHookState<TRe
         data: null,
         loading: false,
         error: message,
+      }));
+    });
+
+    it.each(loggedHttpError ? [loggedHttpError] : [])(`logs a $name "$message" when the ${subject} request returns a non-ok status`, async ({
+      logMessage, name, message
+    }) => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+
+      await fetchOnce(defaultResponse, defaultArgs, { shouldFail: true });
+
+      expect(consoleError).toHaveBeenCalledWith(logMessage, expect.objectContaining({
+        name,
+        message,
       }));
     });
 

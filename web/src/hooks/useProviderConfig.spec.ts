@@ -39,6 +39,19 @@ describe('useProviderConfig', () => {
     ]);
   });
 
+  it('falls back to enabled, unconfigured providers with no stored key when fetch fails', async () => {
+    const { result } = await renderLoadedProviderConfig({ shouldFail: true });
+
+    expect(result.current.providers.map((provider) => [
+      provider.id, provider.model, provider.enabled, provider.configured, provider.masked_key, provider.last_updated,
+    ])).toStrictEqual([
+      ['openai', 'gpt-5-mini', true, false, null, null],
+      ['perplexity', 'sonar', true, false, null, null],
+      ['gemini', 'gemini-3-flash-preview', true, false, null, null],
+      ['claude', 'claude-sonnet-4-5', true, false, null, null],
+    ]);
+  });
+
   it.each([
     {
       name: 'returns true when updateProvider succeeds',

@@ -40,5 +40,10 @@ describe('usePromptInsights', () => {
       UNABLE_TO_LOAD_ON_NON_OK_STATUS,
       INVALID_REQUEST_ON_TYPE_GUARD_FAILURE,
     ],
+    loggedHttpError: {
+      logMessage: '[promptInsights] Error fetching prompt insights:',
+      name: 'PromptInsightsFetchError',
+      message: 'Failed to fetch prompt insights',
+    },
   });
 });
