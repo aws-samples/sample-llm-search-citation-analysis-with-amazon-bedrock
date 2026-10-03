@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import boto3
 
+from shared.dynamodb_batch import collect_all_items
 # Set up logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -102,28 +103,19 @@ def load_keyword_identities(table: Any) -> set[str]:
     writers converge on one primary key after this legacy check.
     """
     identities: set[str] = set()
-    scan_params: dict[str, Any] = {
-        'ProjectionExpression': '#kw',
-        'ExpressionAttributeNames': {'#kw': 'keyword'},
-        'ConsistentRead': True,
-    }
-
-    while True:
-        response = table.scan(**scan_params)
-
-        for item in response.get('Items', []):
-            stored_keyword = item.get('keyword')
-            if not isinstance(stored_keyword, str):
-                continue
-            identity = normalize_keyword(stored_keyword)
-            if identity:
-                identities.add(identity)
-
-        last_key = response.get('LastEvaluatedKey')
-        if not last_key:
-            return identities
-
-        scan_params['ExclusiveStartKey'] = last_key
+    for item in collect_all_items(
+        table.scan,
+        ProjectionExpression='#kw',
+        ExpressionAttributeNames={'#kw': 'keyword'},
+        ConsistentRead=True,
+    ):
+        stored_keyword = item.get('keyword')
+        if not isinstance(stored_keyword, str):
+            continue
+        identity = normalize_keyword(stored_keyword)
+        if identity:
+            identities.add(identity)
+    return identities
 
 
 def get_brand_config(table_name: str | None = None) -> dict[str, Any]:

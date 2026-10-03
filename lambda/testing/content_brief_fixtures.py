@@ -19,36 +19,37 @@ def _brief_content_defaults() -> dict[str, object]:
     }
 
 
-def build_group_brief(**overrides: object) -> dict[str, object]:
-    """Return the legacy group-plus-selected-keywords request shape."""
-    brief: dict[str, object] = {
+def _group_brief() -> dict[str, object]:
+    """The fields every group brief request shares: content defaults, id, type and client display fields."""
+    return {
         **_brief_content_defaults(),
         'id': 'brief-1',
         'type': GROUP_BRIEF_TYPE,
-        'group_id': 'group-1',
         'group_name': 'Client supplied group',
-        'keyword': 'client supplied group',
-        'keyword_ids': ['keyword-1'],
         'keywords': ['client supplied keyword'],
     }
-    brief.update(overrides)
-    return brief
+
+
+def build_group_brief(**overrides: object) -> dict[str, object]:
+    """Return the legacy group-plus-selected-keywords request shape."""
+    return {
+        **_group_brief(),
+        'group_id': 'group-1',
+        'keyword': 'client supplied group',
+        'keyword_ids': ['keyword-1'],
+        **overrides,
+    }
 
 
 def build_scoped_content_brief(**overrides: object) -> dict[str, object]:
     """Return a current group-scope request with stale display fields."""
-    brief: dict[str, object] = {
-        **_brief_content_defaults(),
-        'id': 'brief-1',
-        'type': GROUP_BRIEF_TYPE,
+    return {
+        **_group_brief(),
         'scope': {'mode': 'groups', 'group_ids': ['group-1']},
-        'group_name': 'Client supplied group',
         'keyword': 'client supplied scope',
         'keyword_ids': ['stale-keyword-id'],
-        'keywords': ['client supplied keyword'],
+        **overrides,
     }
-    brief.update(overrides)
-    return brief
 
 
 def build_batch_request(**overrides: object) -> dict[str, object]:
