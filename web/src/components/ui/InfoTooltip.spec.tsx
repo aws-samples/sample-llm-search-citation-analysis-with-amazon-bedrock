@@ -89,34 +89,35 @@ describe('InfoTooltip', () => {
     expect([screen.getByRole('tooltip').style.top, screen.getByRole('tooltip').style.left]).toStrictEqual(['8px', '8px']);
   });
 
-  it('follows its button when the page scrolls while it is open', async () => {
+  it.each([
+    {
+      cause: 'the page scrolls',
+      buttonTop: 200,
+      dispatch: () => fireEvent.scroll(window),
+      expectedTop: '224px',
+    },
+    {
+      cause: 'a scroll container around it scrolls',
+      buttonTop: 300,
+      dispatch: (button: HTMLElement) => fireEvent.scroll(button.parentElement ?? button),
+      expectedTop: '324px',
+    },
+    {
+      cause: 'the window is resized',
+      buttonTop: 400,
+      dispatch: () => fireEvent(window, new Event('resize')),
+      expectedTop: '424px',
+    },
+  ])('follows its button when $cause while it is open', async ({
+    buttonTop, dispatch, expectedTop
+  }) => {
     const button = renderTooltip();
     await userEvent.tab();
 
-    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 200, 16, 16));
-    fireEvent.scroll(window);
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, buttonTop, 16, 16));
+    dispatch(button);
 
-    expect(screen.getByRole('tooltip').style.top).toBe('224px');
-  });
-
-  it('follows its button when a scroll container around it scrolls', async () => {
-    const button = renderTooltip();
-    await userEvent.tab();
-
-    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 300, 16, 16));
-    fireEvent.scroll(button.parentElement ?? button);
-
-    expect(screen.getByRole('tooltip').style.top).toBe('324px');
-  });
-
-  it('follows its button when the window is resized while it is open', async () => {
-    const button = renderTooltip();
-    await userEvent.tab();
-
-    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 400, 16, 16));
-    fireEvent(window, new Event('resize'));
-
-    expect(screen.getByRole('tooltip').style.top).toBe('424px');
+    expect(screen.getByRole('tooltip').style.top).toBe(expectedTop);
   });
 
   it('does not listen to scroll or resize while it is closed', () => {

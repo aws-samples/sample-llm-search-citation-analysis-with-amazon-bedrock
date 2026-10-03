@@ -8,46 +8,55 @@ import userEvent from '@testing-library/user-event';
 import { Disclosure } from './Disclosure';
 
 const TITLE = 'How these KPIs are measured';
+const CONTENT = 'Mention rate: answers naming the brand.';
 
 function renderDisclosure(headingLevel: 2 | 3 = 2) {
   return render(
     <Disclosure title={TITLE} headingLevel={headingLevel} headingClassName="text-base" headingId="definitions-heading">
-      <p>Mention rate: answers naming the brand.</p>
+      <p>{CONTENT}</p>
     </Disclosure>,
   );
+}
+
+function getToggleElement() {
+  return screen.getByRole('button', { name: TITLE });
+}
+
+function getControlledElement() {
+  return document.getElementById(getToggleElement().getAttribute('aria-controls') ?? '');
 }
 
 describe('Disclosure', () => {
   it('starts collapsed, with its content hidden', () => {
     renderDisclosure();
 
-    expect(screen.getByRole('button', { name: TITLE }).getAttribute('aria-expanded')).toBe('false');
-    expect(screen.getByText('Mention rate: answers naming the brand.')).not.toBeVisible();
+    expect(getToggleElement().getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByText(CONTENT)).not.toBeVisible();
   });
 
   it('shows its content when the heading is clicked', async () => {
     renderDisclosure();
 
-    await userEvent.click(screen.getByRole('button', { name: TITLE }));
+    await userEvent.click(getToggleElement());
 
-    expect(screen.getByText('Mention rate: answers naming the brand.')).toBeVisible();
+    expect(screen.getByText(CONTENT)).toBeVisible();
   });
 
   it('marks itself expanded when open', async () => {
     renderDisclosure();
 
-    await userEvent.click(screen.getByRole('button', { name: TITLE }));
+    await userEvent.click(getToggleElement());
 
-    expect(screen.getByRole('button', { name: TITLE }).getAttribute('aria-expanded')).toBe('true');
+    expect(getToggleElement().getAttribute('aria-expanded')).toBe('true');
   });
 
   it('collapses again on a second click', async () => {
     renderDisclosure();
 
-    await userEvent.click(screen.getByRole('button', { name: TITLE }));
-    await userEvent.click(screen.getByRole('button', { name: TITLE }));
+    await userEvent.click(getToggleElement());
+    await userEvent.click(getToggleElement());
 
-    expect(screen.getByText('Mention rate: answers naming the brand.')).not.toBeVisible();
+    expect(screen.getByText(CONTENT)).not.toBeVisible();
   });
 
   it('opens from the keyboard', async () => {
@@ -56,27 +65,25 @@ describe('Disclosure', () => {
     await userEvent.tab();
     await userEvent.keyboard('{Enter}');
 
-    expect(screen.getByText('Mention rate: answers naming the brand.')).toBeVisible();
+    expect(screen.getByText(CONTENT)).toBeVisible();
   });
 
   it('points the toggle at the content it controls', () => {
     renderDisclosure();
-    const controlled = screen.getByRole('button', { name: TITLE }).getAttribute('aria-controls') ?? '';
 
-    expect(document.getElementById(controlled)?.textContent).toBe('Mention rate: answers naming the brand.');
+    expect(getControlledElement()?.textContent).toBe(CONTENT);
   });
 
   it('keeps the collapsed content in the page for print', () => {
     renderDisclosure();
-    const controlled = screen.getByRole('button', { name: TITLE }).getAttribute('aria-controls') ?? '';
 
-    expect(document.getElementById(controlled)?.classList.contains('print-reveal')).toBe(true);
+    expect(getControlledElement()?.classList.contains('print-reveal')).toBe(true);
   });
 
   it('leaves the chevron off paper, so a printout shows a plain heading', () => {
     renderDisclosure();
 
-    expect(screen.getByRole('button', { name: TITLE }).querySelector('svg')?.classList.contains('print-hidden')).toBe(true);
+    expect(getToggleElement().querySelector('svg')?.classList.contains('print-hidden')).toBe(true);
   });
 
   it.each([[2, 'H2'], [3, 'H3']] as const)('renders an h%s heading named by its title', (level, tag) => {

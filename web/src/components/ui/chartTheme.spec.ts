@@ -6,13 +6,14 @@ import {
 } from './chartTheme';
 
 const DARK = getChartTheme(true);
+const DARK_AXIS_COLOURS = {
+  ticks: { color: DARK.textColor },
+  grid: { color: DARK.gridColor },
+};
 
 describe('themedAxis', () => {
   it('colours ticks and grid from the theme', () => {
-    expect(themedAxis(DARK)).toStrictEqual({
-      ticks: { color: DARK.textColor },
-      grid: { color: DARK.gridColor },
-    });
+    expect(themedAxis(DARK)).toStrictEqual(DARK_AXIS_COLOURS);
   });
 
   it('keeps the theme tick colour when the caller adds tick options', () => {
@@ -29,8 +30,7 @@ describe('themedAxis', () => {
     })).toStrictEqual({
       min: 0,
       stacked: true,
-      ticks: { color: DARK.textColor },
-      grid: { color: DARK.gridColor },
+      ...DARK_AXIS_COLOURS,
     });
   });
 });
