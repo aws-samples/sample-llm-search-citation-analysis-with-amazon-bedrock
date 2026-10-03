@@ -1556,10 +1556,9 @@ def _terminalize_unexpected_failure(content_id: str, owner: str) -> None:
 def _process_generation_async(
     content_id: str,
     idea: dict[str, Any],
-    owner: str | None = None,
+    claim_owner: str,
 ) -> bool:
     """Claim and run one generation without exceeding three model attempts."""
-    claim_owner = owner or f"legacy:{content_id}"
     try:
         claim = _claim_generation(content_id, claim_owner)
     except Exception:
@@ -2503,35 +2502,15 @@ def _validated_content_and_idea(event: dict[str, Any]) -> tuple[str, dict[str, A
 def _invoke_worker(payload: dict[str, Any]) -> None:
     try:
         response = invoke_self_async(
-            payload,
-            None,
+            CONTENT_STUDIO_WORKER_FUNCTION_NAME,
+            _worker_event_bytes(payload),
             description="Content Studio generation",
-            function_name=CONTENT_STUDIO_WORKER_FUNCTION_NAME,
-            payload_bytes=_worker_event_bytes(payload),
             lambda_client=boto3.client("lambda"),
         )
     except SelfInvokeDispatchError as error:
         raise _WorkerDispatchError("Content Studio worker invocation failed") from error
-    if response is None or to_int(response.get("StatusCode"), 0) != 202:
+    if to_int(response.get("StatusCode"), 0) != 202:
         raise _WorkerDispatchError("Content Studio worker did not accept the event")
-
-
-def _forward_legacy_generation(event: dict[str, Any]) -> dict[str, Any]:
-    """Temporarily bridge already-queued API self-invocations to the worker."""
-    validated = _validated_content_and_idea(event)
-    if validated is None:
-        logger.error("Invalid legacy async generation event")
-        return {"statusCode": 400, "body": "Invalid async event"}
-    content_id, idea = validated
-    _invoke_worker(
-        {
-            "legacy_generation": True,
-            "content_id": content_id,
-            "idea": idea,
-        }
-    )
-    logger.info("Forwarded legacy generation for content_id=%s", content_id)
-    return {"statusCode": 202, "body": "Legacy generation forwarded"}
 
 
 def _load_direct_generation_idea(
@@ -2549,20 +2528,14 @@ def _load_direct_generation_idea(
     return event_idea
 
 
-def _run_direct_generation(
-    event: dict[str, Any],
-    *,
-    legacy: bool,
-) -> dict[str, Any]:
+def _run_direct_generation(event: dict[str, Any]) -> dict[str, Any]:
     validated = _validated_content_and_idea(event)
     owner = event.get("generation_owner")
-    if validated is None or (
-        not legacy
-        and (
-            not isinstance(owner, str)
-            or not owner
-            or len(owner) > _MAX_CONTENT_ID_LENGTH
-        )
+    if (
+        validated is None
+        or not isinstance(owner, str)
+        or not owner
+        or len(owner) > _MAX_CONTENT_ID_LENGTH
     ):
         logger.error("Invalid direct generation event")
         return {"statusCode": 400, "body": "Invalid generation event"}
@@ -2570,8 +2543,7 @@ def _run_direct_generation(
     idea = _load_direct_generation_idea(content_id, event_idea)
     if idea is None:
         return {"statusCode": 400, "body": "Invalid generation event"}
-    claim_owner = f"legacy:{content_id}" if legacy else str(owner)
-    _process_generation_async(content_id, idea, claim_owner)
+    _process_generation_async(content_id, idea, owner)
     return {"statusCode": 200, "body": "Generation processing completed"}
 
 
@@ -2862,16 +2834,12 @@ def _process_stream_event(event: dict[str, Any]) -> None:
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Handle API, versioned stream, recovery, and temporary rollout events."""
+    """Handle API, versioned stream, and recovery events."""
     if isinstance(event.get("Records"), list):
         _process_stream_event(event)
         return {"batchItemFailures": []}
-    if event.get("async_generation") is True:
-        return _forward_legacy_generation(event)
-    if event.get("legacy_generation") is True:
-        return _run_direct_generation(event, legacy=True)
     if event.get("action") == "generate":
-        return _run_direct_generation(event, legacy=False)
+        return _run_direct_generation(event)
     if event.get("action") == "reconcile":
         return _reconcile_generation()
     return _api_handler(event, context)

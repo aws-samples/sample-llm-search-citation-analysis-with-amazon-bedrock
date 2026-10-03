@@ -56,11 +56,6 @@ const bedrockTierEnv = {
  */
 const CONTENT_STUDIO_WORKER_FUNCTION_NAME = 'CitationAnalysis-ContentStudioWorker';
 const CONTENT_STUDIO_WORKER_CONCURRENCY = 10;
-// First rollout compatibility: old code can still self-invoke while Lambda
-// configuration and code update sequentially. Remove these only after the old
-// async queue and execution environments have drained in a later rollout.
-const CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS = 300;
-const CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY = 10;
 const CONTENT_STUDIO_STREAM_RETRY_ATTEMPTS = 2;
 const CONTENT_STUDIO_STREAM_MAX_RECORD_AGE_MINUTES = 60;
 const CONTENT_STUDIO_RECONCILE_INTERVAL_MINUTES = 5;
@@ -77,9 +72,7 @@ const CONTENT_STUDIO_RECONCILE_INTERVAL_MINUTES = 5;
  * failure then surfaces as a Lambda timeout — visible in the function's own
  * Duration/Errors metrics — instead of only as an opaque gateway 504.
  *
- * Two deliberate exceptions are documented at their definitions:
- *   - `contentStudioFunction` temporarily retains its old worker timeout while
- *     pre-rollout self-invocations drain through the new forwarding handler.
+ * One deliberate exception is documented at its definition:
  *   - `selfReflectionFunction` persists its result as the last step of a
  *     synchronous Bedrock call, so a 504 today is still recoverable from the
  *     cache it writes. Capping it at 29s would turn a slow request into
@@ -2426,16 +2419,11 @@ export class CitationAnalysisStack extends cdk.Stack {
     const contentStudioStatusIndexArn = `${contentStudioTable.tableArn}/index/StatusCreatedIndex`;
     const keywordsStatusIndexArn = `${keywordsTable.tableArn}/index/StatusIndex`;
 
-    // New requests only persist stream-owned rows. This first rollout keeps
-    // the old timeout and concurrency cap because CloudFormation updates
-    // Lambda configuration before code: old async_generation code must remain
-    // runnable until the forwarding handler is active and its queue drains.
+    // Requests only persist stream-owned rows; generation runs in the worker.
     const contentStudioFunction = apiFunction(this, 'ContentStudio', sharedLayer, {
       functionName: 'CitationAnalysis-API-ContentStudio',
       handlerFiles: ['content-studio.py'],
-      timeout: cdk.Duration.seconds(CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS),
       memorySize: 512,
-      reservedConcurrentExecutions: CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY,
       description: 'API: Content Studio - ideas and durable content queues',
       environment: contentStudioEnvironment,
     });
@@ -2446,9 +2434,6 @@ export class CitationAnalysisStack extends cdk.Stack {
       'dynamodb:DeleteItem',
       'dynamodb:GetItem',
       'dynamodb:PutItem',
-      // Temporary legacy drain: old history code scanned this table before
-      // the StatusCreatedIndex reader was active.
-      'dynamodb:Scan',
       'dynamodb:UpdateItem',
     ], [contentStudioTable.tableArn]);
     allow(contentStudioFunction, ['dynamodb:Query'], [contentStudioStatusIndexArn]);
@@ -2462,10 +2447,6 @@ export class CitationAnalysisStack extends cdk.Stack {
     ], [contentBriefTemplatesTable.tableArn]);
     allow(contentStudioFunction, ['dynamodb:Scan'], [keywordsTable.tableArn]);
     allow(contentStudioFunction, ['dynamodb:Query'], [keywordsStatusIndexArn]);
-    // Temporary legacy drain: old async workers query crawled sources and
-    // invoke Bedrock until every pre-rollout event reaches the new forwarder.
-    allow(contentStudioFunction, ['dynamodb:Query'], [crawledContentTable.tableArn]);
-    contentStudioFunction.addToRolePolicy(claudeInvokeModelStatement(this));
 
     const contentStudioWorkerFunction = workerFunction(this, 'ContentStudioWorker', {
       functionName: CONTENT_STUDIO_WORKER_FUNCTION_NAME,
@@ -2484,20 +2465,14 @@ export class CitationAnalysisStack extends cdk.Stack {
     allow(contentStudioWorkerFunction, ['dynamodb:Query'], [crawledContentTable.tableArn]);
     contentStudioWorkerFunction.addToRolePolicy(claudeInvokeModelStatement(this));
 
-    // Phase-one compatibility keeps both exact API targets: old code can
-    // still invoke itself during the configuration-before-code update, while
-    // the new handler forwards those queued events to the worker. New request
-    // paths never call either target directly.
-    const stack = cdk.Stack.of(this);
-    const functionArnByName = (resourceName: string): string => stack.formatArn({
+    // Reconciliation re-dispatches recovered rows to the worker itself. The
+    // API never invokes a Lambda: generation starts from the table stream.
+    const contentStudioWorkerFunctionArn = cdk.Stack.of(this).formatArn({
       service: 'lambda',
       resource: 'function',
-      resourceName,
+      resourceName: CONTENT_STUDIO_WORKER_FUNCTION_NAME,
       arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
     });
-    const contentStudioApiFunctionArn = functionArnByName('CitationAnalysis-API-ContentStudio');
-    const contentStudioWorkerFunctionArn = functionArnByName(CONTENT_STUDIO_WORKER_FUNCTION_NAME);
-    allow(contentStudioFunction, ['lambda:InvokeFunction'], [contentStudioApiFunctionArn, contentStudioWorkerFunctionArn]);
     allow(contentStudioWorkerFunction, ['lambda:InvokeFunction'], [contentStudioWorkerFunctionArn]);
 
     const contentStudioStreamDlq = new sqs.Queue(this, 'ContentStudioStreamDlq', {

@@ -88,8 +88,6 @@ const KEYWORD_MGMT_FUNCTION_NAME = 'CitationAnalysis-API-KeywordMgmt';
 const CONTENT_STUDIO_FUNCTION_NAME = 'CitationAnalysis-API-ContentStudio';
 const CONTENT_STUDIO_WORKER_FUNCTION_NAME = 'CitationAnalysis-ContentStudioWorker';
 const CONTENT_STUDIO_WORKER_CONCURRENCY = 10;
-const CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS = 300;
-const CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY = 10;
 
 const PUBLIC_ROUTE = '/api/health';
 const MUTATING_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
@@ -441,10 +439,6 @@ describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
    * a look at the reasoning recorded at its definition.
    */
   const DOCUMENTED_EXCEPTIONS = new Map<string, number>([
-    // First rollout only: Lambda updates configuration before code, so old
-    // self-invoked generations need their original timeout until forwarding
-    // is active and the asynchronous queue has drained.
-    [CONTENT_STUDIO_FUNCTION_NAME, CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS],
     // Persists its Bedrock result as the last step, so a 504 today is still
     // recoverable from the cache it writes. 29s would put the SIGKILL before
     // that write and make a slow keyword permanently broken.
@@ -514,10 +508,8 @@ describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
     expect(synthesized.apiBackedFunctionTimeouts[KEYWORD_MGMT_FUNCTION_NAME]).toBe(GATEWAY_CEILING);
   });
 
-  it('retains Content Studio worker timeout while legacy events drain', () => {
-    expect(synthesized.apiBackedFunctionTimeouts[CONTENT_STUDIO_FUNCTION_NAME]).toBe(
-      CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS
-    );
+  it('caps the Content Studio API now that generation runs in its worker', () => {
+    expect(synthesized.apiBackedFunctionTimeouts[CONTENT_STUDIO_FUNCTION_NAME]).toBe(GATEWAY_CEILING);
   });
 });
 
@@ -540,10 +532,8 @@ describe('Content Studio group brief infrastructure', () => {
 });
 
 describe('Content Studio API and worker concurrency separation', () => {
-  it('retains the old API cap while pre-rollout events drain', () => {
-    expect(synthesized.contentStudioConcurrency).toBe(
-      CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY
-    );
+  it('reserves no concurrency for the Content Studio API, which no longer generates', () => {
+    expect(synthesized.contentStudioConcurrency).toBeUndefined();
   });
 
   it('caps the durable generation worker at ten concurrent model calls', () => {
@@ -2140,12 +2130,12 @@ describe('Content Studio scopes batches and saved templates', () => {
     expect(snapshot.routes.every((route) => route.integrationUri.includes(snapshot.functionLogicalId))).toBe(true);
   });
 
-  it('retains API worker timeout while pre-rollout events drain', () => {
-    expect(snapshot.apiTimeout).toBe(CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS);
+  it('caps the API at the gateway integration timeout', () => {
+    expect(snapshot.apiTimeout).toBe(29);
   });
 
-  it('retains API concurrency cap while pre-rollout events drain', () => {
-    expect(snapshot.reservedConcurrency).toBe(CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY);
+  it('reserves no API concurrency', () => {
+    expect(snapshot.reservedConcurrency).toBeUndefined();
   });
 
   it('creates a five-minute worker with reserved concurrency ten', () => {
@@ -2254,17 +2244,14 @@ describe('Content Studio scopes batches and saved templates', () => {
         'dynamodb:DeleteItem',
         'dynamodb:GetItem',
         'dynamodb:PutItem',
-        'dynamodb:Scan',
         'dynamodb:UpdateItem',
       ],
       statusIndex: ['dynamodb:Query'],
     });
   });
 
-  it('retains API crawled-source query while pre-rollout events drain', () => {
-    expect(snapshot.apiCrawledContentTableActions).toStrictEqual([
-      'dynamodb:Query',
-    ]);
+  it('grants the API no crawled-source access', () => {
+    expect(snapshot.apiCrawledContentTableActions).toStrictEqual([]);
   });
 
   it('grants the worker exact source-table read access', () => {
@@ -2291,22 +2278,18 @@ describe('Content Studio scopes batches and saved templates', () => {
     expect(snapshot.workerRoleActions).toContain('bedrock:InvokeModel');
   });
 
-  it('retains API Bedrock permission while pre-rollout events drain', () => {
-    expect(snapshot.apiRoleActions).toContain('bedrock:InvokeModel');
+  it('grants the API no Bedrock permission', () => {
+    expect(snapshot.apiRoleActions).not.toContain('bedrock:InvokeModel');
   });
 
-  it('scopes every Content Studio invoke to its compatibility targets', () => {
-    const apiArn = regionalArnJoin('lambda', 'function:CitationAnalysis-API-ContentStudio');
+  it('lets only the worker invoke a Lambda, and only itself', () => {
     const workerArn = regionalArnJoin('lambda', 'function:CitationAnalysis-ContentStudioWorker');
 
     expect({
       api: snapshot.apiInvokeStatements,
       worker: snapshot.workerInvokeStatements,
     }).toStrictEqual({
-      api: [{
-        actions: ['lambda:InvokeFunction'],
-        resources: [apiArn, workerArn],
-      }],
+      api: [],
       worker: [{
         actions: ['lambda:InvokeFunction'],
         resources: [workerArn],
