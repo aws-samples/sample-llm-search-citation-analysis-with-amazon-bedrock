@@ -318,7 +318,7 @@ class TestAllKeywordsOrchestration:
 
         monkeypatch.setattr(_mod, '_build_citation_gap_result', record)
 
-        _mod.analyze_all_keywords_gaps(CONFIG, limit=2)
+        _mod.analyze_all_keywords_gaps(CONFIG, 2, None)
 
         assert sorted(analyzed) == ['alpha', 'mid']
 
@@ -334,7 +334,7 @@ class TestAllKeywordsOrchestration:
 
         monkeypatch.setattr(_mod, '_build_citation_gap_result', per_keyword)
 
-        result = _mod.analyze_all_keywords_gaps(CONFIG, limit=2)
+        result = _mod.analyze_all_keywords_gaps(CONFIG, 2, None)
 
         by_keyword = {summary['keyword']: summary['gap_count'] for summary in result['keyword_summaries']}
         assert by_keyword == {'kw-a': 3, 'kw-b': 7}
@@ -353,7 +353,7 @@ class TestAllKeywordsOrchestration:
         monkeypatch.setattr(_mod, '_build_citation_gap_result', per_keyword)
         monkeypatch.setattr(_mod, '_batch_crawled_info', crawled_info)
 
-        result = _mod.analyze_all_keywords_gaps(CONFIG, limit=7)
+        result = _mod.analyze_all_keywords_gaps(CONFIG, 7, None)
 
         expected_urls = [
             f'https://kw-{keyword_index}.example/{gap_index}'
@@ -375,7 +375,7 @@ class TestAllKeywordsOrchestration:
         crawled_info = MagicMock(return_value={shared_url: {'title': 'Shared article'}})
         monkeypatch.setattr(_mod, '_batch_crawled_info', crawled_info)
 
-        result = _mod.analyze_all_keywords_gaps(CONFIG, limit=2)
+        result = _mod.analyze_all_keywords_gaps(CONFIG, 2, None)
 
         assert crawled_info.mock_calls == [call([shared_url])]
         assert [gap['keyword'] for gap in result['top_gaps']] == ['alpha', 'beta']

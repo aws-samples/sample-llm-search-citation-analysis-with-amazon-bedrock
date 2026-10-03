@@ -246,8 +246,8 @@ _BRAND_PORTFOLIO_PROMPT: dict[BrandPortfolio, tuple[str, str]] = {
 
 def expand_brands(
     existing_brands: list,
-    industry: str = DEFAULT_INDUSTRY_ID,
-    brand_type: BrandPortfolio = "first_party",
+    industry: str,
+    brand_type: BrandPortfolio,
 ) -> dict[str, Any]:
     """
     Use LLM to expand ALL existing brands into related sub-brands, variations, and owned properties.
@@ -341,7 +341,7 @@ JSON OUTPUT:"""
     )
 
 
-def expand_brand(brand_name: str, industry: str = DEFAULT_INDUSTRY_ID, existing_brands: list | None = None) -> dict[str, Any]:
+def expand_brand(brand_name: str, industry: str, existing_brands: list) -> dict[str, Any]:
     """
     Use LLM to expand a brand name into related sub-brands, variations, and owned properties.
 
@@ -353,9 +353,6 @@ def expand_brand(brand_name: str, industry: str = DEFAULT_INDUSTRY_ID, existing_
         industry: Industry context
         existing_brands: List of brands already added (to exclude from suggestions)
     """
-    if existing_brands is None:
-        existing_brands = []
-
     industry_context = _industry_context(industry)
 
     exclude_str = _wrapped_brands(existing_brands, when_empty="none")
@@ -418,16 +415,13 @@ JSON OUTPUT:"""
     )
 
 
-def find_competitors(first_party_brands: list, industry: str = DEFAULT_INDUSTRY_ID, existing_competitors: list | None = None) -> dict[str, Any]:
+def find_competitors(first_party_brands: list, industry: str, existing_competitors: list) -> dict[str, Any]:
     """
     Use LLM to find competitor brands based on first-party brands.
 
     This helps users discover competitors they should be tracking based on
     their own brand portfolio.
     """
-    if existing_competitors is None:
-        existing_competitors = []
-
     industry_context = _industry_context(industry)
 
     brands_list = _wrapped_brands(first_party_brands)

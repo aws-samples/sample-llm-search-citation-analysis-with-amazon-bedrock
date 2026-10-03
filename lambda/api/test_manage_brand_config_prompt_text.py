@@ -39,7 +39,7 @@ class TestPromptOpening:
     @pytest.mark.parametrize(('function_name', 'arguments', 'expected_opening'), [
         pytest.param(
             'expand_brands',
-            (['Barceló', 'Occidental'], 'hotels'),
+            (['Barceló', 'Occidental'], 'hotels', 'first_party'),
             f'{_BRAND_EXPERT}\n\n'
             'FIRST-PARTY BRANDS ALREADY BEING TRACKED (DO NOT INCLUDE THESE IN YOUR RESPONSE):\n'
             '<brand>Barceló</brand>, <brand>Occidental</brand>\n\n',
@@ -47,7 +47,7 @@ class TestPromptOpening:
         ),
         pytest.param(
             'expand_brand',
-            ('Barceló', 'hotels'),
+            ('Barceló', 'hotels', []),
             f'{_BRAND_EXPERT}{_HOTELS_EXAMPLES}\n\n'
             'ALREADY TRACKED (do NOT suggest these): none\n\n'
             'Given the brand name <brand>Barceló</brand>,',
@@ -63,7 +63,7 @@ class TestPromptOpening:
         ),
         pytest.param(
             'find_competitors',
-            ([], 'hotels'),
+            ([], 'hotels', []),
             f'{_COMPETITIVE_EXPERT}\n\n'
             "FIRST-PARTY BRANDS (the user's brands): \n\n"
             'ALREADY TRACKED (do not suggest these): none\n\n',
@@ -84,7 +84,7 @@ class TestSuccessPayload:
     @pytest.mark.parametrize(('function_name', 'arguments', 'model_answer', 'expected'), [
         pytest.param(
             'expand_brands',
-            (['Barceló'], 'hotels'),
+            (['Barceló'], 'hotels', 'first_party'),
             {'parent_companies': ['Barceló Group'], 'suggestions': ['Occidental'], 'notes': 'one tier missing'},
             {
                 'existing_brands': ['Barceló'],
@@ -98,7 +98,7 @@ class TestSuccessPayload:
         ),
         pytest.param(
             'expand_brand',
-            ('Barceló', 'hotels'),
+            ('Barceló', 'hotels', []),
             {'parent_company': 'Barceló Group', 'suggestions': ['Occidental'], 'notes': 'one tier missing'},
             {
                 'main_brand': 'Barceló',
@@ -111,7 +111,7 @@ class TestSuccessPayload:
         ),
         pytest.param(
             'find_competitors',
-            (['Barceló'], 'hotels'),
+            (['Barceló'], 'hotels', []),
             {'competitors': ['Meliá'], 'notes': 'one tier missing'},
             {
                 'first_party_brands': ['Barceló'],
@@ -135,6 +135,6 @@ class TestSuccessPayload:
     def test_notes_are_empty_when_the_model_omits_them(self, monkeypatch) -> None:
         capture_prompts(monkeypatch, _mod, answer=json.dumps({'competitors': []}))
 
-        result = _mod.find_competitors(['Barceló'], 'hotels')
+        result = _mod.find_competitors(['Barceló'], 'hotels', [])
 
         assert result['notes'] == ''

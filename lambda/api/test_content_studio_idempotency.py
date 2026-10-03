@@ -228,6 +228,11 @@ class TestComputeIdempotencyKey:
 _IDEA = {'id': 'x', 'keyword': 'kw', 'content_angle': 'a'}
 
 
+def _create_single(idea: dict) -> tuple[dict, bool]:
+    """``create_pending_content`` as a single-idea request makes it: time-bucketed key, no batch metadata, no preset id."""
+    return _mod.create_pending_content(idea, include_time_bucket=True, metadata=None, content_id=None)
+
+
 class TestCreatePendingContent:
     """The conditional write + get_item fallback behaviour."""
 
@@ -254,7 +259,7 @@ class TestCreatePendingContent:
         idea = {'id': 'idea-1', 'keyword': 'hotels', 'content_angle': 'comprehensive_guide'}
 
         with self._table():
-            item, created = _mod.create_pending_content(idea)
+            item, created = _create_single(idea)
 
         assert created is True
         # The row's primary key must equal the idempotency key.
@@ -264,7 +269,7 @@ class TestCreatePendingContent:
         """Regression guard: someone removing the ConditionExpression would
         re-introduce the duplicate-write bug."""
         with self._table() as table:
-            _mod.create_pending_content(_IDEA)
+            _create_single(_IDEA)
 
         put_kwargs = table.put_item.call_args.kwargs
         assert put_kwargs['ConditionExpression'] == 'attribute_not_exists(id)'
@@ -287,7 +292,7 @@ class TestCreatePendingContent:
         error = _FakeClientError('ConditionalCheckFailedException')
 
         with self._table(put_raises=error, get_item_return=existing_row) as table:
-            item, created = _mod.create_pending_content(idea)
+            item, created = _create_single(idea)
 
         assert created is False
         assert item == existing_row
@@ -302,7 +307,7 @@ class TestCreatePendingContent:
         error = _FakeClientError('ProvisionedThroughputExceededException')
 
         with self._table(put_raises=error), pytest.raises(_FakeClientError):
-            _mod.create_pending_content(_IDEA)
+            _create_single(_IDEA)
 
     def test_raises_runtime_error_when_existing_item_disappears(self) -> None:
         """Very unlikely race: row existed when put failed, gone when we read
@@ -314,13 +319,13 @@ class TestCreatePendingContent:
             self._table(put_raises=error, get_item_return=None),
             pytest.raises(RuntimeError, match=r'(?i)disappeared'),
         ):
-            _mod.create_pending_content(_IDEA)
+            _create_single(_IDEA)
 
     def test_returned_tuple_order_is_item_then_created_flag(self) -> None:
         """Regression guard: callers unpack `item, created = ...`. Reversing
         the order would silently break every caller."""
         with self._table():
-            result = _mod.create_pending_content(_IDEA)
+            result = _create_single(_IDEA)
 
         assert isinstance(result, tuple)
         assert len(result) == 2

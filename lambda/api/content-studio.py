@@ -1126,9 +1126,9 @@ def _existing_content_row(table: Any, content_id: str, conflict: ClientError) ->
 def create_pending_content(
     idea: dict[str, Any],
     *,
-    include_time_bucket: bool = True,
-    metadata: dict[str, Any] | None = None,
-    content_id: str | None = None,
+    include_time_bucket: bool,
+    metadata: dict[str, Any] | None,
+    content_id: str | None,
 ) -> tuple[dict[str, Any], bool]:
     """Conditionally create one pending row and report whether it was new."""
     table = dynamodb.Table(CONTENT_STUDIO_TABLE)

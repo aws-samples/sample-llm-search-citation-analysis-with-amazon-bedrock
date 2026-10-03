@@ -43,7 +43,7 @@ class TestErrorDefaults:
     def test_expand_brand_returns_defaults_when_the_model_answer_is_unusable(self, monkeypatch, model_text, error) -> None:
         _model_answers(monkeypatch, model_text)
 
-        result = _mod.expand_brand('Barceló', industry='hotels')
+        result = _mod.expand_brand('Barceló', 'hotels', [])
 
         assert result == {
             'main_brand': 'Barceló',
@@ -57,7 +57,7 @@ class TestErrorDefaults:
 
         monkeypatch.setattr(_mod, 'invoke_bedrock', raise_unavailable)
 
-        result = _mod.expand_brands(['Barceló'], industry='hotels')
+        result = _mod.expand_brands(['Barceló'], 'hotels', 'first_party')
 
         assert result == {
             'suggestions': [],
@@ -76,7 +76,7 @@ class TestSuccessShaping:
         })
         _model_answers(monkeypatch, payload)
 
-        result = _mod.expand_brand('Barceló', industry='hotels')
+        result = _mod.expand_brand('Barceló', 'hotels', [])
 
         assert result['suggestions'] == ['Barceló', 'Occidental', 'Allegro']
         assert result['parent_company'] == 'Barceló Group'
@@ -89,7 +89,7 @@ class TestSuccessShaping:
         })
         _model_answers(monkeypatch, payload)
 
-        result = _mod.expand_brands(['Barceló'], industry='hotels')
+        result = _mod.expand_brands(['Barceló'], 'hotels', 'first_party')
 
         # The existing brand is filtered out (case-insensitive) and the
         # duplicated suggestion is collapsed to its first occurrence.
@@ -109,7 +109,7 @@ class TestSuccessShaping:
         })
         _model_answers(monkeypatch, payload)
 
-        result = _mod.find_competitors(['Barceló'], industry='hotels')
+        result = _mod.find_competitors(['Barceló'], 'hotels', [])
 
         assert result['competitors'] == ['Meliá', 'Iberostar']
         assert result['first_party_brands'] == ['Barceló']
@@ -197,12 +197,12 @@ class TestGenericIndustryDefaults:
         assert payload['config']['industry'] == 'general'
         save_config.assert_called_once_with(_mod._default_config())
 
-    def test_uses_general_context_when_helper_industries_are_omitted(self, monkeypatch) -> None:
+    def test_uses_general_context_for_the_default_industry(self, monkeypatch) -> None:
         prompts = capture_prompts(monkeypatch, _mod)
 
-        _mod.expand_brand('Acme')
-        _mod.expand_brands(['Acme'])
-        _mod.find_competitors(['Acme'])
+        _mod.expand_brand('Acme', _mod.DEFAULT_INDUSTRY_ID, [])
+        _mod.expand_brands(['Acme'], _mod.DEFAULT_INDUSTRY_ID, 'first_party')
+        _mod.find_competitors(['Acme'], _mod.DEFAULT_INDUSTRY_ID, [])
 
         assert 'You are a brand expert for the General industry.' in prompts[0]
         assert 'You are a brand expert for the General industry.' in prompts[1]

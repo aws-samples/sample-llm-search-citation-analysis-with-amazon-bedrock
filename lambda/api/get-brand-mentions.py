@@ -51,7 +51,7 @@ def _result_model(result: dict[str, Any], provider: str) -> str:
     return provider
 
 
-def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, Any] | None = None) -> dict[str, Any]:
+def aggregate_brand_mentions(results: list[dict[str, Any]]) -> dict[str, Any]:
     """
     Aggregate brand mentions across all providers.
 
@@ -147,11 +147,9 @@ def aggregate_brand_mentions(results: list[dict[str, Any]], config: dict[str, An
     }
 
 
-def _aggregate_classified(
-    items: list[dict[str, Any]], brand_config: dict[str, Any], classification: str | None,
-) -> dict[str, Any]:
+def _aggregate_classified(items: list[dict[str, Any]], classification: str | None) -> dict[str, Any]:
     """``aggregate_brand_mentions`` with ``brands`` narrowed to ``classification`` when one is given."""
-    aggregated = aggregate_brand_mentions(items, brand_config)
+    aggregated = aggregate_brand_mentions(items)
     if classification:
         aggregated['brands'] = [b for b in aggregated['brands'] if b.get('classification') == classification]
     return aggregated
@@ -196,7 +194,7 @@ def get_scope_brand_mentions(
     query_prompt_id: str | None,
     provider: str | None,
     classification: str | None,
-    timestamp: str | None = None,
+    timestamp: str | None,
 ) -> dict[str, Any]:
     """Brand mentions aggregated over the selected run for every keyword.
 
@@ -220,7 +218,7 @@ def get_scope_brand_mentions(
         {run for _rows, runs in loaded for run in runs},
         reverse=True,
     )[:_AVAILABLE_RUN_LIMIT]
-    aggregated = _aggregate_classified(items, brand_config, classification)
+    aggregated = _aggregate_classified(items, classification)
 
     return {
         'scope': scope.describe(),
@@ -319,7 +317,7 @@ def handler(event: dict[str, Any], context: Any, report_scope: ReportScope, time
         })
 
     # Aggregate across providers
-    aggregated = _aggregate_classified(items, brand_config, classification)
+    aggregated = _aggregate_classified(items, classification)
 
     result = {
         'keyword': keyword,
