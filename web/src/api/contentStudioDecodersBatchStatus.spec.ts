@@ -11,126 +11,110 @@ import {
   buildReversedBatchStatusDecoderPayload,
   buildSingleBatchStatusDecoderPayload,
   invalidBatchStatusMetadataDecoderCases,
+  invalidContentStudioResponse,
   omitDecoderField,
   requiredBatchStatusChildFields,
   validContentBriefBatchStatuses,
 } from './contentStudioDecodersBatch-fixtures';
 
-const invalidBatchStatusChildError = {
-  name: 'InvalidContentStudioResponseError',
-  message: 'Content Studio API returned an invalid batch status child',
-};
+type RejectedStatus = [condition: string, payload: unknown, subject: string];
 
-const invalidBatchStatusChildCases = [
-  {
-    testName: 'rejects a batch status child when id is numeric',
-    field: 'id',
-    invalidValue: 1,
-  },
-  {
-    testName: 'rejects a batch status child when idea_id is null',
-    field: 'idea_id',
-    invalidValue: null,
-  },
-  {
-    testName: 'rejects a batch status child when keyword_id is boolean',
-    field: 'keyword_id',
-    invalidValue: false,
-  },
-  {
-    testName: 'rejects a batch status child when keyword is an array',
-    field: 'keyword',
-    invalidValue: [],
-  },
-  {
-    testName: 'rejects a batch status child when status is unknown',
-    field: 'status',
-    invalidValue: 'unknown',
-  },
-  {
-    testName: 'rejects a batch status child when has_content is a string',
-    field: 'has_content',
-    invalidValue: 'true',
-  },
+const rejectedStatusResponses: RejectedStatus[] = [
+  ...[null, [], 'batch status'].map((payload): RejectedStatus => [
+    `payload is ${JSON.stringify(payload)}`, payload, 'batch status response',
+  ]),
+  ...['batch_id', 'children'].map((field): RejectedStatus => [
+    `required field ${field} is missing`,
+    omitDecoderField(buildBatchStatusDecoderPayload(), field),
+    'batch status response',
+  ]),
+  ...([
+    ['batch_id', 1],
+    ['children', {}],
+  ] satisfies Array<[string, unknown]>).map(([field, value]): RejectedStatus => [
+    `field ${field} is ${JSON.stringify(value)}`,
+    buildBatchStatusDecoderPayload({ [field]: value }),
+    'batch status response',
+  ]),
+  ...[undefined, null, [], 'counts'].map((counts): RejectedStatus => [
+    `counts is ${JSON.stringify(counts)}`, buildBatchStatusDecoderPayload({ counts }), 'batch counts',
+  ]),
+  ...([
+    ['pending', 'pending count'],
+    ['generating', 'generating count'],
+    ['generated', 'generated count'],
+    ['failed', 'failed count'],
+    ['missing', 'missing count'],
+    ['total', 'batch total'],
+  ] satisfies Array<[string, string]>).map(([field, subject]): RejectedStatus => [
+    `count field ${field} is negative`,
+    buildBatchStatusDecoderPayload({ counts: buildBatchStatusCounts({ [field]: -1 }) }),
+    subject,
+  ]),
+  [
+    'child count differs from batch size',
+    buildBatchStatusDecoderPayload({
+      batch_size: 3,
+      counts: buildBatchStatusCounts({ total: 3 }),
+    }),
+    'batch size',
+  ],
+  [
+    'total differs from batch size',
+    buildBatchStatusDecoderPayload({ counts: buildBatchStatusCounts({ total: 3 }) }),
+    'batch total',
+  ],
+  ['children are outside manifest order', buildReversedBatchStatusDecoderPayload(), 'batch position'],
+  ...([
+    ['pending', { pending: 1 }],
+    ['generating', { generating: 1 }],
+    ['generated', { generated: 0 }],
+    ['failed', { failed: 0 }],
+    ['missing', { missing: 1 }],
+  ] satisfies Array<[string, Record<string, number>]>).map(([field, counts]): RejectedStatus => [
+    `${field} count differs from child statuses`,
+    buildBatchStatusDecoderPayload({ counts: buildBatchStatusCounts(counts) }),
+    `${field} count`,
+  ]),
+  ['batch_size is negative', buildBatchStatusDecoderPayload({ batch_size: -1 }), 'batch size'],
+];
+
+const invalidStatusChildren: Array<[condition: string, child: Record<string, unknown>]> = [
+  ...requiredBatchStatusChildFields.map((field): [string, Record<string, unknown>] => [
+    `required field ${field} is missing`, omitDecoderField(buildBatchStatusChildDecoderRecord(), field),
+  ]),
+  ...([
+    ['id is numeric', 'id', 1],
+    ['idea_id is null', 'idea_id', null],
+    ['keyword_id is boolean', 'keyword_id', false],
+    ['keyword is an array', 'keyword', []],
+    ['status is unknown', 'status', 'unknown'],
+    ['has_content is a string', 'has_content', 'true'],
+  ] satisfies Array<[string, string, unknown]>).map(([condition, field, value]): [string, Record<string, unknown>] => [
+    condition, buildBatchStatusChildDecoderRecord({ [field]: value }),
+  ]),
 ];
 
 describe('Content Studio batch status decoder', () => {
-  it.each([null, [], 'batch status'])(
-    'rejects the batch status response when payload is %j',
-    (payload) => {
-      expect(() => decodeBatchStatusResponse(payload)).toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: 'Content Studio API returned an invalid batch status response',
-      }));
-    }
-  );
-
-  it.each(['batch_id', 'children'])(
-    'rejects the batch status response when required field %s is missing',
-    (field) => {
-      const payload = omitDecoderField(buildBatchStatusDecoderPayload(), field);
-
-      expect(() => decodeBatchStatusResponse(payload)).toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: 'Content Studio API returned an invalid batch status response',
-      }));
-    }
-  );
-
-  it.each([
-    ['batch_id', 1],
-    ['children', {}],
-  ])('rejects the batch status response when field %s is invalid', (field, invalidValue) => {
-    const payload = buildBatchStatusDecoderPayload({ [field]: invalidValue });
-
-    expect(() => decodeBatchStatusResponse(payload)).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: 'Content Studio API returned an invalid batch status response',
-    }));
+  it.each(rejectedStatusResponses)('rejects the batch status response when %s', (_condition, payload, subject) => {
+    expect(() => decodeBatchStatusResponse(payload)).toThrow(invalidContentStudioResponse(subject));
   });
 
   it('rejects the batch status response when its ID differs from the requested ID', () => {
-    expect(() => decodeBatchStatusResponse(
-      buildBatchStatusDecoderPayload(),
-      'different-batch'
-    )).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: 'Content Studio API returned an invalid batch status response',
-    }));
+    expect(() => decodeBatchStatusResponse(buildBatchStatusDecoderPayload(), 'different-batch'))
+      .toThrow(invalidContentStudioResponse('batch status response'));
   });
 
-  it.each(requiredBatchStatusChildFields)(
-    'rejects a batch status child when required field %s is missing',
-    (field) => {
-      const child = omitDecoderField(buildBatchStatusChildDecoderRecord(), field);
-      const decodeMissingChild = () => decodeBatchStatusResponse(
-        buildSingleBatchStatusDecoderPayload(child)
-      );
-
-      expect(decodeMissingChild).toThrow(
-        'Content Studio API returned an invalid batch status child'
-      );
-    }
-  );
+  it.each(invalidStatusChildren)('rejects a batch status child when %s', (_condition, child) => {
+    expect(() => decodeBatchStatusResponse(buildSingleBatchStatusDecoderPayload(child)))
+      .toThrow(invalidContentStudioResponse('batch status child'));
+  });
 
   it.each(invalidBatchStatusMetadataDecoderCases)('$testName', ({
     child, errorField
   }) => {
     expect(() => decodeBatchStatusResponse(buildSingleBatchStatusDecoderPayload(child)))
-      .toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: `Content Studio API returned an invalid ${errorField}`,
-      }));
-  });
-
-  it.each(invalidBatchStatusChildCases)('$testName', ({
-    field,
-    invalidValue,
-  }) => {
-    const child = buildBatchStatusChildDecoderRecord({ [field]: invalidValue });
-
-    expect(() => decodeBatchStatusResponse(buildSingleBatchStatusDecoderPayload(child)))
-      .toThrow(expect.objectContaining(invalidBatchStatusChildError));
+      .toThrow(invalidContentStudioResponse(errorField));
   });
 
   it.each(['created_at', 'updated_at', 'error_message'])(
@@ -160,35 +144,7 @@ describe('Content Studio batch status decoder', () => {
     ['rejects a missing tombstone when its safe error is empty', { error_message: '   ' }],
   ])('%s', (_testName, overrides) => {
     expect(() => decodeBatchStatusResponse(buildMissingBatchStatusDecoderPayload(overrides)))
-      .toThrow(expect.objectContaining(invalidBatchStatusChildError));
-  });
-
-  it.each([undefined, null, [], 'counts'])(
-    'rejects batch status when counts is %j',
-    (counts) => {
-      expect(() => decodeBatchStatusResponse(buildBatchStatusDecoderPayload({ counts })))
-        .toThrow(expect.objectContaining({
-          name: 'InvalidContentStudioResponseError',
-          message: 'Content Studio API returned an invalid batch counts',
-        }));
-    }
-  );
-
-  it.each([
-    ['pending', 'pending count'],
-    ['generating', 'generating count'],
-    ['generated', 'generated count'],
-    ['failed', 'failed count'],
-    ['missing', 'missing count'],
-    ['total', 'batch total'],
-  ])('rejects batch status when count field %s is negative', (field, errorField) => {
-    const counts = buildBatchStatusCounts({ [field]: -1 });
-
-    expect(() => decodeBatchStatusResponse(buildBatchStatusDecoderPayload({ counts })))
-      .toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: `Content Studio API returned an invalid ${errorField}`,
-      }));
+      .toThrow(invalidContentStudioResponse('batch status child'));
   });
 
   it('normalizes every batch status Decimal string', () => {
@@ -242,58 +198,5 @@ describe('Content Studio batch status decoder', () => {
     expect(decoded.children.map((child) => child.status)).toStrictEqual(
       validContentBriefBatchStatuses
     );
-  });
-
-  it.each([
-    [
-      'rejects batch status when child count differs from batch size',
-      {
-        batch_size: 3,
-        counts: buildBatchStatusCounts({ total: 3 }),
-      },
-      'batch size',
-    ],
-    [
-      'rejects batch status when total differs from batch size',
-      { counts: buildBatchStatusCounts({ total: 3 }) },
-      'batch total',
-    ],
-  ])('%s', (_testName, overrides, errorField) => {
-    expect(() => decodeBatchStatusResponse(buildBatchStatusDecoderPayload(overrides)))
-      .toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: `Content Studio API returned an invalid ${errorField}`,
-      }));
-  });
-
-  it('rejects batch status when children are outside manifest order', () => {
-    expect(() => decodeBatchStatusResponse(buildReversedBatchStatusDecoderPayload()))
-      .toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: 'Content Studio API returned an invalid batch position',
-      }));
-  });
-
-  it.each([
-    ['pending', buildBatchStatusCounts({ pending: 1 })],
-    ['generating', buildBatchStatusCounts({ generating: 1 })],
-    ['generated', buildBatchStatusCounts({ generated: 0 })],
-    ['failed', buildBatchStatusCounts({ failed: 0 })],
-    ['missing', buildBatchStatusCounts({ missing: 1 })],
-  ])('rejects batch status when %s count differs from child statuses', (field, counts) => {
-    expect(() => decodeBatchStatusResponse(buildBatchStatusDecoderPayload({ counts })))
-      .toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: `Content Studio API returned an invalid ${field} count`,
-      }));
-  });
-
-  it('rejects the batch status response when batch_size is negative', () => {
-    const payload = buildBatchStatusDecoderPayload({ batch_size: -1 });
-
-    expect(() => decodeBatchStatusResponse(payload)).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: 'Content Studio API returned an invalid batch size',
-    }));
   });
 });

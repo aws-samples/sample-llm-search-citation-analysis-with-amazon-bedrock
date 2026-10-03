@@ -1,3 +1,4 @@
+import { expect } from 'vitest';
 import type {
   ContentAngle,
   ContentIdeaType,
@@ -84,6 +85,73 @@ export function omitDecoderField(
   Reflect.deleteProperty(omitted, field);
   return omitted;
 }
+
+/** Matches the error a Content Studio decoder throws for an invalid `subject`. */
+export function invalidContentStudioResponse(subject: string): unknown {
+  return expect.objectContaining({
+    name: 'InvalidContentStudioResponseError',
+    message: `Content Studio API returned an invalid ${subject}`,
+  });
+}
+
+/** Optional idea fields, each with a valid value. */
+export const completeOptionalIdeaFields: Record<string, unknown> = {
+  competitor_brands: ['Competitor'],
+  competitor_urls: ['https://competitor.example'],
+  providers_missing: ['openai'],
+  providers_present: ['perplexity'],
+  current_rank: 2.5,
+  content_angle: 'differentiation',
+  persona_name: 'Buyer',
+  seasonal_theme: 'Summer',
+  trending_topic: 'Launch',
+  output_language: 'Spanish',
+};
+
+const OPTIONAL_IDEA_ARRAYS = ['competitor_brands', 'competitor_urls', 'providers_missing', 'providers_present'];
+
+/** Content idea records the decoder must reject, named by what is wrong with them. */
+export const invalidContentIdeaCases: ReadonlyArray<[string, Record<string, unknown>]> = [
+  ...['id', 'type', 'priority', 'title', 'description', 'keyword', 'source', 'actionable']
+    .map((field): [string, Record<string, unknown>] => [
+      `required field ${field} is missing`,
+      omitDecoderField(buildContentIdeaDecoderRecord(), field),
+    ]),
+  ...([
+    ['id', 1],
+    ['title', null],
+    ['description', false],
+    ['keyword', 1],
+    ['source', []],
+    ['actionable', 'true'],
+    ['type', 'unknown_type'],
+    ['type', 1],
+    ['priority', 'urgent'],
+    ['priority', null],
+    ['content_angle', 'unknown_angle'],
+    ['content_angle', 1],
+  ] satisfies Array<[string, unknown]>).map(([field, value]): [string, Record<string, unknown>] => [
+    `field ${field} is ${JSON.stringify(value)}`,
+    buildContentIdeaDecoderRecord({ [field]: value }),
+  ]),
+  ...OPTIONAL_IDEA_ARRAYS.map((field): [string, Record<string, unknown>] => [
+    `optional array ${field} is not an array`,
+    buildContentIdeaDecoderRecord({ [field]: 'provider' }),
+  ]),
+  ...OPTIONAL_IDEA_ARRAYS.map((field): [string, Record<string, unknown>] => [
+    `optional array ${field} contains a non-string`,
+    buildContentIdeaDecoderRecord({ [field]: ['valid', 1] }),
+  ]),
+  ...['persona_name', 'seasonal_theme', 'trending_topic', 'output_language']
+    .map((field): [string, Record<string, unknown>] => [
+      `optional string ${field} is null`,
+      buildContentIdeaDecoderRecord({ [field]: null }),
+    ]),
+  ...[null, 'first', Number.NaN].map((currentRank): [string, Record<string, unknown>] => [
+    `optional current_rank is ${String(currentRank)}`,
+    buildContentIdeaDecoderRecord({ current_rank: currentRank }),
+  ]),
+];
 
 export function buildContentIdeaDecoderRecord(
   overrides: Record<string, unknown> = {}
@@ -190,6 +258,34 @@ export function buildHistoryItemWithGeneratedContent(
 ): Record<string, unknown> {
   return buildHistoryItemDecoderRecord({ generated_content: generatedContent });
 }
+
+/** History item records the decoder must reject, named by what is wrong with them. */
+export const invalidHistoryItemCases: ReadonlyArray<[string, Record<string, unknown>]> = [
+  ...['id', 'keyword', 'status', 'created_at', 'updated_at']
+    .map((field): [string, Record<string, unknown>] => [
+      `required field ${field} is missing`,
+      omitDecoderField(buildHistoryItemDecoderRecord(), field),
+    ]),
+  ...([
+    ['id', 1],
+    ['keyword', null],
+    ['status', 'unknown'],
+    ['created_at', 1],
+    ['updated_at', false],
+  ] satisfies Array<[string, unknown]>).map(([field, value]): [string, Record<string, unknown>] => [
+    `required field ${field} is ${JSON.stringify(value)}`,
+    buildHistoryItemDecoderRecord({ [field]: value }),
+  ]),
+  ...['idea_title', 'content_angle', 'error_message', 'batch_id', 'keyword_id']
+    .map((field): [string, Record<string, unknown>] => [
+      `optional string ${field} is null`,
+      buildHistoryItemDecoderRecord({ [field]: null }),
+    ]),
+  ...[null, 'true', 1].map((viewed): [string, Record<string, unknown>] => [
+    `optional viewed is ${JSON.stringify(viewed)}`,
+    buildHistoryItemDecoderRecord({ viewed }),
+  ]),
+];
 
 export function buildHistoryDecoderPayload(
   historyItem: Record<string, unknown> = buildHistoryItemDecoderRecord(),

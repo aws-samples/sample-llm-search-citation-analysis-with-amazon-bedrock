@@ -8,89 +8,121 @@ import {
   buildReversedBatchStartDecoderPayload,
   buildSingleBatchStartDecoderPayload,
   invalidBatchPositionDecoderCases,
+  invalidContentStudioResponse,
   invalidIntegerRepresentations,
   omitDecoderField,
   requiredBatchStartChildFields,
   validContentStatuses,
 } from './contentStudioDecodersBatch-fixtures';
 
-const invalidBatchChildError = {
-  name: 'InvalidContentStudioResponseError',
-  message: 'Content Studio API returned an invalid batch child',
-};
+type RejectedStart = [condition: string, payload: unknown, subject: string];
 
-describe('Content Studio batch start decoder', () => {
-  it.each([null, [], 'batch'])(
-    'rejects the batch start response when payload is %j',
-    (payload) => {
-      expect(() => decodeBatchStartResponse(payload)).toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: 'Content Studio API returned an invalid batch response',
-      }));
-    }
-  );
+const existingAndNewChildren = [
+  buildBatchStartChildDecoderRecord({ idempotent_hit: true }),
+  buildBatchStartChildDecoderRecord({
+    id: 'content-2',
+    idea_id: 'idea-2',
+    keyword_id: 'keyword-2',
+    keyword: 'Beta keyword',
+    batch_position: 2,
+    idempotent_hit: false,
+  }),
+];
 
-  it.each(['success', 'batch_id', 'children'])(
-    'rejects the batch start response when required field %s is missing',
-    (field) => {
-      const payload = omitDecoderField(buildBatchStartDecoderPayload(), field);
-
-      expect(() => decodeBatchStartResponse(payload)).toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: 'Content Studio API returned an invalid batch response',
-      }));
-    }
-  );
-
-  it.each([
+const rejectedStartResponses: RejectedStart[] = [
+  ...[null, [], 'batch'].map((payload): RejectedStart => [
+    `payload is ${JSON.stringify(payload)}`, payload, 'batch response',
+  ]),
+  ...['success', 'batch_id', 'children'].map((field): RejectedStart => [
+    `required field ${field} is missing`, omitDecoderField(buildBatchStartDecoderPayload(), field), 'batch response',
+  ]),
+  ...([
     ['success', 'true'],
     ['batch_id', 1],
     ['children', {}],
     ['error', null],
     ['error', 1],
-  ])('rejects the batch start response when field %s is invalid', (field, invalidValue) => {
-    const payload = buildBatchStartDecoderPayload({ [field]: invalidValue });
+  ] satisfies Array<[string, unknown]>).map(([field, value]): RejectedStart => [
+    `field ${field} is ${JSON.stringify(value)}`, buildBatchStartDecoderPayload({ [field]: value }), 'batch response',
+  ]),
+  ...([
+    ['batch_size', 'batch size'],
+    ['accepted_count', 'accepted count'],
+    ['existing_count', 'existing count'],
+    ['failed_count', 'failed count'],
+  ] satisfies Array<[string, string]>).map(([field, subject]): RejectedStart => [
+    `numeric field ${field} is negative`, buildBatchStartDecoderPayload({ [field]: -1 }), subject,
+  ]),
+  ...invalidIntegerRepresentations.map((batchSize): RejectedStart => [
+    `batch_size is ${JSON.stringify(batchSize)}`, buildBatchStartDecoderPayload({ batch_size: batchSize }), 'batch size',
+  ]),
+  [
+    'child count differs from batch size',
+    buildBatchStartDecoderPayload({
+      accepted_count: 3,
+      batch_size: 3,
+    }),
+    'batch size',
+  ],
+  ['children are outside manifest order', buildReversedBatchStartDecoderPayload(), 'batch position'],
+  ['accepted_count contradicts child idempotency', buildBatchStartDecoderPayload({ accepted_count: 0 }), 'accepted count'],
+  [
+    'existing_count contradicts child idempotency',
+    buildBatchStartDecoderPayload({
+      existing_count: 1,
+      accepted_count: 1,
+    }),
+    'existing count',
+  ],
+  [
+    'an existing child is counted as newly accepted',
+    buildBatchStartDecoderPayload({ children: existingAndNewChildren }),
+    'existing count',
+  ],
+  [
+    'it reports immediate dispatch failures',
+    buildBatchStartDecoderPayload({
+      accepted_count: 1,
+      failed_count: 1,
+    }),
+    'failed count',
+  ],
+];
 
-    expect(() => decodeBatchStartResponse(payload)).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: 'Content Studio API returned an invalid batch response',
-    }));
+describe('Content Studio batch start decoder', () => {
+  it.each(rejectedStartResponses)('rejects the batch start response when %s', (_condition, payload, subject) => {
+    expect(() => decodeBatchStartResponse(payload)).toThrow(invalidContentStudioResponse(subject));
   });
 
   it('rejects the batch start response when its ID differs from the requested ID', () => {
-    expect(() => decodeBatchStartResponse(
-      buildBatchStartDecoderPayload(),
-      'different-batch'
-    )).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: 'Content Studio API returned an invalid batch response',
-    }));
+    expect(() => decodeBatchStartResponse(buildBatchStartDecoderPayload(), 'different-batch'))
+      .toThrow(invalidContentStudioResponse('batch response'));
   });
 
-  it.each(requiredBatchStartChildFields)(
-    'rejects a batch start child when required field %s is missing',
-    (field) => {
-      const child = omitDecoderField(buildBatchStartChildDecoderRecord(), field);
-
-      expect(() => decodeBatchStartResponse(buildSingleBatchStartDecoderPayload(child)))
-        .toThrow(expect.objectContaining(invalidBatchChildError));
-    }
-  );
-
   it.each([
-    ['id', 1],
-    ['idea_id', null],
-    ['keyword_id', false],
-    ['keyword', []],
-    ['status', 'unknown'],
-    ['status', 'missing'],
-    ['status', 1],
-    ['idempotent_hit', 'false'],
-  ])('rejects a batch start child when field %s is invalid', (field, invalidValue) => {
-    const child = buildBatchStartChildDecoderRecord({ [field]: invalidValue });
-
+    ...requiredBatchStartChildFields.map((field): [string, Record<string, unknown>] => [
+      `required field ${field} is missing`, omitDecoderField(buildBatchStartChildDecoderRecord(), field),
+    ]),
+    ...([
+      ['id', 1],
+      ['idea_id', null],
+      ['keyword_id', false],
+      ['keyword', []],
+      ['status', 'unknown'],
+      ['status', 'missing'],
+      ['status', 1],
+      ['idempotent_hit', 'false'],
+    ] satisfies Array<[string, unknown]>).map(([field, value]): [string, Record<string, unknown>] => [
+      `field ${field} is ${JSON.stringify(value)}`, buildBatchStartChildDecoderRecord({ [field]: value }),
+    ]),
+  ])('rejects a batch start child when %s', (_condition, child) => {
     expect(() => decodeBatchStartResponse(buildSingleBatchStartDecoderPayload(child)))
-      .toThrow(expect.objectContaining(invalidBatchChildError));
+      .toThrow(invalidContentStudioResponse('batch child'));
+  });
+
+  it.each(invalidBatchPositionDecoderCases)('$testName', ({ child }) => {
+    expect(() => decodeBatchStartResponse(buildSingleBatchStartDecoderPayload(child)))
+      .toThrow(invalidContentStudioResponse('batch position'));
   });
 
   it.each(validContentStatuses)(
@@ -130,112 +162,5 @@ describe('Content Studio batch start decoder', () => {
       }],
       error: 'Batch already existed',
     });
-  });
-
-  it.each([
-    ['batch_size', 'batch size'],
-    ['accepted_count', 'accepted count'],
-    ['existing_count', 'existing count'],
-    ['failed_count', 'failed count'],
-  ])('rejects the batch start response when numeric field %s is negative', (field, errorField) => {
-    const payload = buildBatchStartDecoderPayload({ [field]: -1 });
-
-    expect(() => decodeBatchStartResponse(payload)).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: `Content Studio API returned an invalid ${errorField}`,
-    }));
-  });
-
-  it.each(invalidIntegerRepresentations)(
-    'rejects the batch start response when batch_size is %j',
-    (batchSize) => {
-      const payload = buildBatchStartDecoderPayload({ batch_size: batchSize });
-
-      expect(() => decodeBatchStartResponse(payload)).toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: 'Content Studio API returned an invalid batch size',
-      }));
-    }
-  );
-
-  it.each(invalidBatchPositionDecoderCases)('$testName', ({ child }) => {
-    expect(() => decodeBatchStartResponse(buildSingleBatchStartDecoderPayload(child)))
-      .toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: 'Content Studio API returned an invalid batch position',
-      }));
-  });
-
-  it('rejects the batch start response when child count differs from batch size', () => {
-    const payload = buildBatchStartDecoderPayload({
-      accepted_count: 3,
-      batch_size: 3,
-    });
-
-    expect(() => decodeBatchStartResponse(payload)).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: 'Content Studio API returned an invalid batch size',
-    }));
-  });
-
-  it('rejects the batch start response when children are outside manifest order', () => {
-    expect(() => decodeBatchStartResponse(buildReversedBatchStartDecoderPayload()))
-      .toThrow(expect.objectContaining({
-        name: 'InvalidContentStudioResponseError',
-        message: 'Content Studio API returned an invalid batch position',
-      }));
-  });
-
-  it('rejects accepted_count when it contradicts child idempotency', () => {
-    const payload = buildBatchStartDecoderPayload({ accepted_count: 0 });
-
-    expect(() => decodeBatchStartResponse(payload)).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: 'Content Studio API returned an invalid accepted count',
-    }));
-  });
-
-  it('rejects existing_count when it contradicts child idempotency', () => {
-    const payload = buildBatchStartDecoderPayload({
-      existing_count: 1,
-      accepted_count: 1,
-    });
-
-    expect(() => decodeBatchStartResponse(payload)).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: 'Content Studio API returned an invalid existing count',
-    }));
-  });
-
-  it('rejects an existing child counted as newly accepted', () => {
-    const children = [
-      buildBatchStartChildDecoderRecord({ idempotent_hit: true }),
-      buildBatchStartChildDecoderRecord({
-        id: 'content-2',
-        idea_id: 'idea-2',
-        keyword_id: 'keyword-2',
-        keyword: 'Beta keyword',
-        batch_position: 2,
-        idempotent_hit: false,
-      }),
-    ];
-    const payload = buildBatchStartDecoderPayload({ children });
-
-    expect(() => decodeBatchStartResponse(payload)).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: 'Content Studio API returned an invalid existing count',
-    }));
-  });
-
-  it('rejects immediate dispatch failures in a batch start response', () => {
-    const payload = buildBatchStartDecoderPayload({
-      accepted_count: 1,
-      failed_count: 1,
-    });
-
-    expect(() => decodeBatchStartResponse(payload)).toThrow(expect.objectContaining({
-      name: 'InvalidContentStudioResponseError',
-      message: 'Content Studio API returned an invalid failed count',
-    }));
   });
 });
