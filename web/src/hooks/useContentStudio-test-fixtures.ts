@@ -67,7 +67,7 @@ export function historyItemWithStatus(
   };
 }
 
-export async function renderFetchedContentStudio() {
+async function renderFetchedContentStudio() {
   const rendered = renderHook(() => useContentStudio());
   await act(() => rendered.result.current.fetchHistory());
   return rendered;

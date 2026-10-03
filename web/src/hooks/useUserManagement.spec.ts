@@ -63,11 +63,6 @@ describe('useUserManagement', () => {
         read: (hook) => hook.total,
         expected: 2,
       },
-      {
-        testName: 'sets hasMore based on total vs users length',
-        read: (hook) => hook.hasMore,
-        expected: false,
-      },
     ];
 
     it.each(loadedFields)('$testName', async ({

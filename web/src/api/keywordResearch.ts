@@ -110,17 +110,14 @@ export async function retryKeywordResearch(id: string): Promise<void> {
 }
 
 /** The job with its steps and (partial) merged results. */
-export async function fetchKeywordResearch(id: string, signal?: AbortSignal): Promise<KeywordResearchItem> {
-  return decodeJob(await apiGet<unknown>(`/keyword-research/${encodeURIComponent(id)}`, { signal }));
+export async function fetchKeywordResearch(id: string): Promise<KeywordResearchItem> {
+  return decodeJob(await apiGet<unknown>(`/keyword-research/${encodeURIComponent(id)}`));
 }
 
-export async function fetchKeywordResearchHistory(type?: ResearchType, signal?: AbortSignal): Promise<KeywordResearchItem[]> {
+export async function fetchKeywordResearchHistory(type?: ResearchType): Promise<KeywordResearchItem[]> {
   const params: Record<string, string> = { limit: '50' };
   if (type) params.type = type;
-  const payload = await apiGet<unknown>('/keyword-research/history', {
-    params,
-    signal
-  });
+  const payload = await apiGet<unknown>('/keyword-research/history', { params });
   return listItems(payload, 'history').filter(isKeywordResearchItem);
 }
 
@@ -152,8 +149,8 @@ function decodeTemplate(payload: unknown): ResearchTemplate {
 }
 
 /** The built-in templates first (in the API's order), then the saved ones by name. */
-export async function fetchResearchTemplates(signal?: AbortSignal): Promise<ResearchTemplate[]> {
-  const payload = await apiGet<unknown>('/keyword-research/templates', { signal });
+export async function fetchResearchTemplates(): Promise<ResearchTemplate[]> {
+  const payload = await apiGet<unknown>('/keyword-research/templates');
   return listItems(payload, 'template list').filter(isResearchTemplate);
 }
 

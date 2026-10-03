@@ -60,7 +60,6 @@ describe('useResearchAgent', () => {
     });
 
     expect(result.current.jobs.map((job) => job.id)).toStrictEqual(['job-new', 'job-a']);
-    expect(result.current.selectedId).toBeNull();
     expect(result.current.selected).toBeNull();
   });
 
@@ -124,7 +123,7 @@ describe('useResearchAgent', () => {
 
     expect(requests()).toContain('POST /keyword-research/job-a/retry');
     expect(result.current.jobs[0].status).toBe('running');
-    expect(result.current.selectedId).toBe('job-a');
+    expect(result.current.selected?.id).toBe('job-a');
   });
 
   it('deleting the opened run closes it', async () => {
@@ -140,7 +139,7 @@ describe('useResearchAgent', () => {
     });
 
     expect(result.current.jobs).toStrictEqual([]);
-    expect(result.current.selectedId).toBeNull();
+    expect(result.current.selected).toBeNull();
   });
 
   it.each<[action: string, operation: AgentOperation, run: (result: AgentHookResult) => Promise<unknown>]>([

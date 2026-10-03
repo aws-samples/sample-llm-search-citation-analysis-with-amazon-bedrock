@@ -17,7 +17,9 @@ type ChartElement = () => ReactElement;
 
 const KPI_TREND_CHART: ChartElement = () => <KpiTrendChart points={KPI_POINTS} />;
 const SENTIMENT_SPLIT_CHART: ChartElement = () => <SentimentSplitChart rows={SENTIMENT_ROWS} />;
-const TOP_SOURCES_CHART: ChartElement = () => <TopSourcesChart sources={buildSources()} limit={2} />;
+const TOP_SOURCES_CHART: ChartElement = () => <TopSourcesChart sources={buildSources()} />;
+const SHARE_OF_VOICE_CHART: ChartElement = () => <ShareOfVoiceChart brands={buildLatestBrands()} />;
+const ENGINE_KPI_CHART: ChartElement = () => <EngineKpiChart engines={ENGINES.slice(0, 1)} />;
 
 /** A chart with data: its name, the element, the Chart.js type it draws and its caption. */
 export type DrawnChartCase = readonly [string, ChartElement, string, string];
@@ -33,15 +35,16 @@ export const DRAWN_CHARTS: readonly DrawnChartCase[] = [
   ],
   [
     'ShareOfVoiceChart',
-    () => <ShareOfVoiceChart brands={buildLatestBrands()} limit={2} />,
+    SHARE_OF_VOICE_CHART,
     'doughnut',
-    'Share of voice: Nike 25.0%, Adidas 20.8% and Other brands 12.5%.',
+    'Share of voice: Nike 25.0%, Adidas 20.8% and Puma 12.5%.',
   ],
   [
     'EngineKpiChart',
-    () => <EngineKpiChart engines={ENGINES.slice(0, 1)} ids={['mention_rate']} />,
+    ENGINE_KPI_CHART,
     'bar',
-    'Mention rate per AI engine, on a 0–100 scale. Google Gemini: Mention rate 70.0%.',
+    'Mention rate, Visibility score and Citation rate per AI engine, on a 0–100 scale. '
+      + 'Google Gemini: Mention rate 70.0%, Visibility score 61.5, Citation rate 40.0%.',
   ],
   [
     'BrandTrendChart',
@@ -61,7 +64,7 @@ export const DRAWN_CHARTS: readonly DrawnChartCase[] = [
     'TopSourcesChart',
     TOP_SOURCES_CHART,
     'bar',
-    'Answers citing each of the 2 most cited domains: runnersworld.com 9 and nike.com 6 (yours).',
+    'Answers citing each of the 3 most cited domains: runnersworld.com 9, nike.com 6 (yours) and reddit.com 5.',
   ],
 ];
 
@@ -103,13 +106,13 @@ export const REDRAWN_CHARTS: readonly RedrawnChartCase[] = [
   ],
   [
     'ShareOfVoiceChart',
-    () => <ShareOfVoiceChart brands={buildLatestBrands()} limit={6} />,
-    () => <ShareOfVoiceChart brands={LEADERBOARD} limit={6} />,
-    () => shareOfVoiceChart(LEADERBOARD, 6).data,
+    SHARE_OF_VOICE_CHART,
+    () => <ShareOfVoiceChart brands={LEADERBOARD} />,
+    () => shareOfVoiceChart(LEADERBOARD).data,
   ],
   [
     'EngineKpiChart',
-    () => <EngineKpiChart engines={ENGINES.slice(0, 1)} />,
+    ENGINE_KPI_CHART,
     () => <EngineKpiChart engines={ENGINES} />,
     () => engineKpiChart(ENGINES).data,
   ],
@@ -128,7 +131,7 @@ export const REDRAWN_CHARTS: readonly RedrawnChartCase[] = [
   [
     'TopSourcesChart',
     TOP_SOURCES_CHART,
-    () => <TopSourcesChart sources={buildSources()} limit={1} />,
-    () => topSourcesChart(buildSources(), 1).data,
+    () => <TopSourcesChart sources={buildSources().slice(0, 1)} />,
+    () => topSourcesChart(buildSources().slice(0, 1)).data,
   ],
 ];

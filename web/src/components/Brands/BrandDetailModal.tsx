@@ -126,10 +126,10 @@ export const BrandDetailModal = ({
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {activeTab === 'overview' && (
-            <BrandOverviewTab brand={brand} providerData={providerData} />
+            <BrandOverviewTab brand={brand} />
           )}
           {activeTab === 'responses' && (
-            <ProviderResponsesTab brand={brand} providerData={providerData} keyword={keyword} />
+            <ProviderResponsesTab brand={brand} providerData={providerData} />
           )}
           {activeTab === 'ranking-analysis' && (
             <SelfReflectionPanel

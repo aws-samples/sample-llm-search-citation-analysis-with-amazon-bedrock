@@ -6,17 +6,11 @@ import {
   buildTopSourcesChartConfiguration, DEFAULT_TOP_SOURCES_LIMIT, describeTopSources, topSources
 } from './topSourcesChartConfiguration';
 
-interface Props {
-  readonly sources: readonly SourceRow[];
-  /** How many of the most cited domains to rank. */
-  readonly limit?: number;
-}
+interface Props {readonly sources: readonly SourceRow[];}
 
 /** The most cited domains by answers citing them, your owned domains in emerald. */
-export function TopSourcesChart({
-  sources, limit = DEFAULT_TOP_SOURCES_LIMIT
-}: Props) {
-  const bars = useMemo(() => topSources(sources, limit), [sources, limit]);
+export function TopSourcesChart({ sources }: Props) {
+  const bars = useMemo(() => topSources(sources, DEFAULT_TOP_SOURCES_LIMIT), [sources]);
   const {
     canvasRef, hasData
   } = useThemedChart(bars, buildTopSourcesChartConfiguration);

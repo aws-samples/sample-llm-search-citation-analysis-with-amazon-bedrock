@@ -1,10 +1,4 @@
-import {
-  act, renderHook
-} from '@testing-library/react';
 import type { SelfReflectionResult } from '../types';
-import { createMockJsonResponse } from '../test/fetchResponses';
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
-import { useSelfReflection } from './useSelfReflection';
 
 /** One stored self-reflection: why Hotel Sol ranks second for the family persona. */
 export const mockSelfReflection: SelfReflectionResult = {
@@ -26,19 +20,3 @@ export const mockSelfReflection: SelfReflectionResult = {
   industry: 'hospitality',
   created_at: '2026-03-01T10:00:00Z',
 };
-
-/** The GET /self-reflection list answer carrying `results`. */
-export function buildReflectionList(results: SelfReflectionResult[]) {
-  return {
-    keyword: 'hotels in madrid',
-    results,
-    count: results.length,
-  };
-}
-
-/** Answers GET /self-reflection with `body`, renders the hook and fetches the reflections of 'hotels in madrid' with `filters`. */
-export async function fetchReflectionsAnsweredWith(body: unknown, ...filters: [brand?: string, queryPromptId?: string]) {
-  mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(body));
-  const { result } = renderHook(() => useSelfReflection());
-  return act(() => result.current.fetchReflections('hotels in madrid', ...filters));
-}

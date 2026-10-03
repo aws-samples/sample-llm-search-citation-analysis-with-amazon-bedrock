@@ -4,12 +4,6 @@ interface Props {
   readonly keywords: ReadonlyArray<Keyword>;
   readonly selected: string | null;
   readonly onChange: (keyword: string) => void;
-  /**
-   * Optional label override. Defaults to "Keyword" — most keyword-scoped
-   * reports want this generic label, but a per-keyword report might want
-   * something more specific like "Drill into".
-   */
-  readonly label?: string;
 }
 
 /**
@@ -21,7 +15,6 @@ export function ReportKeywordSelector({
   keywords,
   selected,
   onChange,
-  label = 'Keyword',
 }: Props) {
   return (
     <div className="flex flex-col gap-1">
@@ -29,7 +22,7 @@ export function ReportKeywordSelector({
         htmlFor="report-keyword-select"
         className="text-xs font-medium text-gray-500 dark:text-gray-400"
       >
-        {label}
+        Keyword
       </label>
       <select
         id="report-keyword-select"

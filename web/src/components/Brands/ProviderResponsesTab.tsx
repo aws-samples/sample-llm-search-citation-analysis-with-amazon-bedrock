@@ -7,11 +7,10 @@ import { ProviderResponseCard } from './ProviderResponseCard';
 interface ProviderResponsesTabProps {
   brand: AggregatedBrand;
   providerData: ProviderBrandData[];
-  keyword: string;
 }
 
 export const ProviderResponsesTab = ({
-  brand, providerData, keyword 
+  brand, providerData 
 }: ProviderResponsesTabProps) => {
   const [selectedProvider, setSelectedProvider] = useState<string | 'ALL'>('ALL');
 
@@ -68,7 +67,6 @@ export const ProviderResponsesTab = ({
               key={provider.provider}
               provider={provider}
               brand={brand}
-              keyword={keyword}
             />
           ))}
         </div>
@@ -77,7 +75,6 @@ export const ProviderResponsesTab = ({
           <ProviderResponseCard
             provider={currentProvider}
             brand={brand}
-            keyword={keyword}
           />
         )
       )}

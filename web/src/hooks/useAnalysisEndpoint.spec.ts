@@ -34,7 +34,6 @@ describe('useAnalysisEndpoint', () => {
         loading: false,
         error: null,
         fetchData: expect.any(Function),
-        runRequest: expect.any(Function),
       });
     });
   });
@@ -209,40 +208,11 @@ describe('useAnalysisEndpoint', () => {
 
   describe('request shape', () => {
     it('sends no query string when the request has no params', async () => {
-      const {
-        result, config
-      } = renderAnsweringProbeEndpoint();
+      const { result } = renderAnsweringProbeEndpoint({}, { paramless: true });
 
-      await act(() => result.current.runRequest({ path: '/probe' }, config));
+      await act(() => result.current.fetchData('best hotels'));
 
       expect(mockAuthenticatedFetch.mock.calls[0][0]).toBe('https://api.test.com/probe');
-    });
-  });
-
-  describe('runRequest', () => {
-    it('leaves stored data untouched when a secondary request resolves', async () => {
-      const {
-        result, config
-      } = renderAnsweringProbeEndpoint();
-
-      const returned = await act(() => result.current.runRequest({
-        path: '/probe',
-        params: new URLSearchParams({ keyword: 'secondary' }),
-      }, config));
-
-      expect(returned).toStrictEqual(probeResponse);
-      expect(result.current.data).toBeNull();
-    });
-
-    it('aborts an in-flight secondary request when a new fetch starts', () => {
-      const {
-        deferred, config, startRequest, startFetch 
-      } = renderDeferredProbeEndpoint();
-
-      startRequest((hook) => hook.runRequest({ path: '/probe' }, config));
-      startFetch('next');
-
-      expect(deferred.requests[0].signal?.aborted).toBe(true);
     });
   });
 });

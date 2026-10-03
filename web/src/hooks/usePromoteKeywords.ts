@@ -47,7 +47,7 @@ export function promotionSuccessMessage<
   return outcome.skipped > 0 ? `${added}, ${outcome.skipped} already existed` : added;
 }
 
-export type SelectionAction =
+type SelectionAction =
   | {
     type: 'toggle';
     keyword: string;

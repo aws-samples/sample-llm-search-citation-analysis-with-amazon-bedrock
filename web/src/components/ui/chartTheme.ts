@@ -75,7 +75,7 @@ export const themedAxis = (theme: ChartTheme, extra: Record<string, unknown> = {
     ...rest,
     ticks: {
       color: theme.textColor,
-      ...(ticks as object ?? {}),
+      ...(ticks as object | undefined),
     },
     grid: { color: theme.gridColor },
   };

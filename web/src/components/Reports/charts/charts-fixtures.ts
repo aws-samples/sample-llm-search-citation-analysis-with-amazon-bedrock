@@ -31,7 +31,7 @@ import {
   buildSentimentSplitChartConfiguration, sentimentSeries, type SentimentRow
 } from './sentimentSplitChartConfiguration';
 import {
-  buildTopSourcesChartConfiguration, topSources
+  buildTopSourcesChartConfiguration, DEFAULT_TOP_SOURCES_LIMIT, topSources
 } from './topSourcesChartConfiguration';
 
 /** The light chart chrome. */
@@ -169,9 +169,9 @@ export function sentimentChart(rows: readonly SentimentRow[] = SENTIMENT_ROWS, i
   return buildSentimentSplitChartConfiguration(sentimentSeries(rows), getChartTheme(isDark), isDark);
 }
 
-/** The top-sources chart of `sources` (`buildSources()`) with `limit` bars, in light mode. */
-export function topSourcesChart(sources: readonly SourceRow[] = buildSources(), limit = 10) {
-  return buildTopSourcesChartConfiguration(topSources(sources, limit), LIGHT_THEME, false);
+/** The top-sources chart of `sources` (`buildSources()`) with the default number of bars, in light mode. */
+export function topSourcesChart(sources: readonly SourceRow[] = buildSources()) {
+  return buildTopSourcesChartConfiguration(topSources(sources, DEFAULT_TOP_SOURCES_LIMIT), LIGHT_THEME, false);
 }
 
 /** What every chart configuration shares, whatever its type. */

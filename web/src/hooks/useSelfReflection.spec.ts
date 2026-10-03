@@ -5,9 +5,7 @@ import {
   act, renderHook
 } from '@testing-library/react';
 import { useSelfReflection } from './useSelfReflection';
-import {
-  buildReflectionList, fetchReflectionsAnsweredWith, mockSelfReflection
-} from './useSelfReflection-fixtures';
+import { mockSelfReflection } from './useSelfReflection-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
 import { createMockJsonResponse } from '../test/fetchResponses';
 
@@ -28,7 +26,6 @@ describe('useSelfReflection', () => {
       loading: false,
       error: null,
       triggerReflection: expect.any(Function),
-      fetchReflections: expect.any(Function),
     });
   });
 
@@ -37,7 +34,6 @@ describe('useSelfReflection', () => {
     useHook: useSelfReflection,
     fetchName: 'triggerReflection',
     fetch: (hook, ...args: TriggerReflectionArgs) => hook.triggerReflection(...args),
-    otherFunctions: ['fetchReflections'],
     defaultResponse: mockSelfReflection,
     defaultArgs: ['hotels in madrid', 'Hotel Sol', 'prompt-family'],
     expectedRequest: (url) => {
@@ -85,35 +81,6 @@ describe('useSelfReflection', () => {
         force_refresh: sentForceRefresh,
       }),
       signal: anySignal,
-    });
-  });
-
-  describe('fetchReflections', () => {
-    it.each([
-      ['https://api.test.com/self-reflection?keyword=hotels+in+madrid', 'only a keyword is given', [] as const],
-      ['https://api.test.com/self-reflection?keyword=hotels+in+madrid&brand=Hotel+Sol&query_prompt_id=prompt-family', 'a brand and persona are given', ['Hotel Sol', 'prompt-family'] as const],
-    ])('requests %s when %s', async (url, _condition, filters) => {
-      await fetchReflectionsAnsweredWith(buildReflectionList([]), ...filters);
-
-      expect(mockAuthenticatedFetch).toHaveBeenCalledWith(url, { signal: anySignal });
-    });
-
-    it('returns the stored reflections of the list response', async () => {
-      const reflections = await fetchReflectionsAnsweredWith(buildReflectionList([mockSelfReflection]));
-
-      expect(reflections).toStrictEqual([mockSelfReflection]);
-    });
-
-    it('returns no reflections and logs the list failure when the response has no results array', async () => {
-      const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
-
-      const reflections = await fetchReflectionsAnsweredWith({ results: 'none' });
-
-      expect(reflections).toStrictEqual([]);
-      expect(consoleError).toHaveBeenCalledWith('[self-reflection] Error fetching reflections:', expect.objectContaining({
-        name: 'SelfReflectionFetchError',
-        message: 'Invalid response format',
-      }));
     });
   });
 });

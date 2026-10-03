@@ -98,7 +98,7 @@ function contentHistoryRefreshFailure(
 }
 
 /** `createMockFetch` plus the per-item status failures and delayed history refresh failure the polling specs need. */
-export function createPollingMockFetch(options: PollingMockFetchOptions = {}) {
+function createPollingMockFetch(options: PollingMockFetchOptions = {}) {
   const baseFetch = createMockFetch({ historyResponse: options.historyResponse });
   const historyRequestCount = { value: 0 };
   return vi.fn<typeof authenticatedFetch>().mockImplementation((input, init) => {

@@ -29,7 +29,7 @@ export interface AlertMutationOutcome {
 
 export interface AlertSettingsSaveOutcome extends AlertMutationOutcome { warnings: string[]; }
 
-const DEFAULT_OPEN_ALERT_LIMIT = 20;
+const OPEN_ALERT_LIMIT = 20;
 const LATEST_CONTENT_CHANGE_LIMIT = 1;
 
 interface LatestAlertLoadOptions {
@@ -111,7 +111,7 @@ function useLatestAlertLoad({
   };
 }
 
-export function useOpenAlerts(limit = DEFAULT_OPEN_ALERT_LIMIT) {
+export function useOpenAlerts() {
   const [items, setItems] = useState<AlertItem[]>([]);
   const [count, setCount] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -129,7 +129,7 @@ export function useOpenAlerts(limit = DEFAULT_OPEN_ALERT_LIMIT) {
     await load({
       request: (signal) => fetchAlerts({
         status: 'open',
-        limit,
+        limit: OPEN_ALERT_LIMIT,
         signal,
       }),
       onLoaded: (response) => {
@@ -137,7 +137,7 @@ export function useOpenAlerts(limit = DEFAULT_OPEN_ALERT_LIMIT) {
         setCount(response.count);
       },
     });
-  }, [limit, load]);
+  }, [load]);
 
   useEffect(() => {
     void refresh();

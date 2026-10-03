@@ -53,7 +53,6 @@ export const useTheme = () => {
 
   return {
     theme,
-    setTheme,
     toggleTheme,
     isDark 
   };

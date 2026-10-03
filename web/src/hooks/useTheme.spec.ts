@@ -21,39 +21,62 @@ describe('useTheme', () => {
     document.documentElement.classList.remove('dark');
   });
 
-  describe('initial state', () => {
+  describe('theme from the stored preference', () => {
     it.each([
       {
         name: 'returns system theme by default when no stored preference',
         stored: {},
+        render: renderTheme,
         expected: 'system',
       },
       {
         name: 'returns stored theme from localStorage',
         stored: { theme: 'dark' },
+        render: renderTheme,
         expected: 'dark',
       },
       {
         name: 'returns light theme when stored',
         stored: { theme: 'light' },
+        render: renderTheme,
         expected: 'light',
       },
       {
         name: 'ignores invalid stored theme values',
         stored: { theme: 'invalid' },
+        render: renderTheme,
         expected: 'system',
       },
+      {
+        name: 'toggleTheme cycles from light to dark',
+        stored: { theme: 'light' },
+        render: renderThemeToggledOnce,
+        expected: 'dark',
+      },
+      {
+        name: 'toggleTheme cycles from dark to system',
+        stored: { theme: 'dark' },
+        render: renderThemeToggledOnce,
+        expected: 'system',
+      },
+      {
+        name: 'toggleTheme cycles from system to light',
+        stored: {},
+        render: renderThemeToggledOnce,
+        expected: 'light',
+      },
     ])('$name', ({
-      stored, expected 
+      stored, render, expected
     }) => {
       Object.assign(localStorageMock.store, stored);
 
-      const { result } = renderTheme();
+      const { result } = render();
+
       expect(result.current.theme).toBe(expected);
     });
   });
 
-  describe('setTheme', () => {
+  describe('selecting a theme', () => {
     it.each(['dark', 'light'] as const)('updates theme to %s', (theme) => {
       const { result } = renderThemeSetTo(theme);
 
@@ -78,34 +101,6 @@ describe('useTheme', () => {
       renderThemeSetTo('light');
 
       expect(document.documentElement.classList.contains('dark')).toBe(false);
-    });
-  });
-
-  describe('toggleTheme', () => {
-    it.each([
-      {
-        name: 'cycles from light to dark',
-        stored: { theme: 'light' },
-        expected: 'dark',
-      },
-      {
-        name: 'cycles from dark to system',
-        stored: { theme: 'dark' },
-        expected: 'system',
-      },
-      {
-        name: 'cycles from system to light',
-        stored: {},
-        expected: 'light',
-      },
-    ])('$name', ({
-      stored, expected 
-    }) => {
-      Object.assign(localStorageMock.store, stored);
-
-      const { result } = renderThemeToggledOnce();
-
-      expect(result.current.theme).toBe(expected);
     });
   });
 

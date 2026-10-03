@@ -18,7 +18,6 @@ interface Props {
    */
   readonly startNewPage?: boolean;
   readonly children: ReactNode;
-  readonly className?: string;
 }
 
 /**
@@ -39,14 +38,12 @@ export function ReportSection({
   subtitle,
   startNewPage = false,
   children,
-  className,
 }: Props) {
   const breakClass = startNewPage ? 'page-break-before' : '';
   const wrapperClass = [
     'avoid-break-inside',
     'mb-8',
     breakClass,
-    className,
   ]
     .filter(Boolean)
     .join(' ');

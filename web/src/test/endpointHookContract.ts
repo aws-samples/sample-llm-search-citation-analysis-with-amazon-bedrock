@@ -63,7 +63,7 @@ export interface EndpointHookContract<THook extends EndpointHookState<TResponse>
 }
 
 /** The `console.error` call a failed request makes: the hook's log prefix and the error it built. */
-export interface LoggedHttpError {
+interface LoggedHttpError {
   readonly logMessage: string;
   readonly name: string;
   readonly message: string;

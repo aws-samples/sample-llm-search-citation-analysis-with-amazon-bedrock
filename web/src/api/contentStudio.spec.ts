@@ -242,6 +242,7 @@ describe('Content Brief template transport', () => {
     const received = await fetchContentBriefTemplates();
 
     expect(received).toStrictEqual(templates);
+    expect(mockAuthenticatedFetch).toHaveBeenCalledWith('https://api.test.com/content-studio/templates', { signal: undefined });
   });
 
   it('rejects a template list containing a malformed item', async () => {

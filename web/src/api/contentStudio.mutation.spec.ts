@@ -4,8 +4,6 @@ import {
 import {
   deleteContentBriefTemplate,
   deleteGeneratedContent,
-  fetchContentBriefBatch,
-  fetchContentBriefTemplates,
   fetchContentHistory,
   fetchContentIdeas,
   fetchContentStatus,
@@ -17,22 +15,18 @@ import {
 import { createMockJsonResponse } from '../test/fetchResponses';
 import {
   apiBatchRequest,
-  apiBatchStatusResponse,
   apiGroupBriefIdea,
   buildApiContentIdea,
   buildApiTemplate,
   buildJsonRequestInit,
 } from './contentStudio-fixtures';
-import {
-  buildIdeasDecoderPayload, buildTemplateListDecoderPayload
-} from './contentStudioDecoders-fixtures';
+import { buildIdeasDecoderPayload } from './contentStudioDecoders-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 const readIdea = buildApiContentIdea();
-const readTemplate = buildApiTemplate();
 
 const signalledReadCases: {
   name: string;
@@ -71,20 +65,6 @@ const signalledReadCases: {
     read: (signal) => fetchContentStatus('content/id', signal),
     expected: 'generated',
     url: 'https://api.test.com/content-studio/status/content%2Fid',
-  },
-  {
-    name: 'gets encoded batch status with the caller abort signal',
-    payload: apiBatchStatusResponse,
-    read: (signal) => fetchContentBriefBatch('batch/id', signal),
-    expected: apiBatchStatusResponse,
-    url: 'https://api.test.com/content-studio/batches/batch%2Fid',
-  },
-  {
-    name: 'gets templates from the exact endpoint with the caller abort signal',
-    payload: buildTemplateListDecoderPayload([readTemplate]),
-    read: (signal) => fetchContentBriefTemplates(signal),
-    expected: [readTemplate],
-    url: 'https://api.test.com/content-studio/templates',
   },
 ];
 

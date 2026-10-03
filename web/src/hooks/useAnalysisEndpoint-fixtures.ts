@@ -49,16 +49,18 @@ function buildProbeEndpoint() {
   };
 }
 
-/**
- * Renders `useAnalysisEndpoint` against a fresh probe config. The config is
- * returned so tests can hand it to `runRequest` as the response contract.
- */
-export function renderProbeEndpoint() {
-  const config = buildProbeEndpoint();
+/** The probe config with a request that carries no query parameters. */
+function buildParamlessProbeEndpoint() {
   return {
-    config,
-    ...renderHook(() => useAnalysisEndpoint(config)),
+    ...buildProbeEndpoint(),
+    buildRequest: () => ({ path: '/probe' }),
   };
+}
+
+/** Renders `useAnalysisEndpoint` against a fresh probe config (`paramless`: one whose request has no query string). */
+export function renderProbeEndpoint(options: { paramless?: boolean } = {}) {
+  const config = options.paramless === true ? buildParamlessProbeEndpoint() : buildProbeEndpoint();
+  return renderHook(() => useAnalysisEndpoint(config));
 }
 
 interface RecordedAnalysisRequest {
@@ -142,13 +144,16 @@ export function renderDeferredEndpoint<THook>(
  * `Response` every call resolves with, or how the probe endpoint behaves
  * (the probe payload by default).
  */
-export function renderAnsweringProbeEndpoint(answer: Response | EndpointMockFetchOptions<ProbeResponse> = {}) {
+export function renderAnsweringProbeEndpoint(
+  answer: Response | EndpointMockFetchOptions<ProbeResponse> = {},
+  options: { paramless?: boolean } = {},
+) {
   if (answer instanceof Response) {
     mockAuthenticatedFetch.mockResolvedValue(answer);
   } else {
     mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(probeResponse, answer));
   }
-  return renderProbeEndpoint();
+  return renderProbeEndpoint(options);
 }
 
 /** `renderAnsweringProbeEndpoint`, then one `fetchData('best hotels')`; `returned` is what it resolved with. */
@@ -166,7 +171,6 @@ export function renderDeferredProbeEndpoint(options: { rejectOnAbort?: boolean }
   const config = buildProbeEndpoint();
   const rendered = renderDeferredEndpoint(() => useAnalysisEndpoint(config), options);
   return {
-    config,
     startFetch: (keyword: string) => rendered.startRequest((hook) => hook.fetchData(keyword)),
     ...rendered,
   };

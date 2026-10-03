@@ -10,21 +10,14 @@ interface CrawledContentResponse {
 }
 
 /**
- * Fetches crawl history for a specific URL.
+ * Fetches the 20 latest crawls of a specific URL.
  */
-export async function fetchCrawlHistory(
-  url: string,
-  limit = 20,
-  signal?: AbortSignal
-): Promise<CrawledContent[]> {
+export async function fetchCrawlHistory(url: string): Promise<CrawledContent[]> {
   const params = new URLSearchParams({
     url,
     include_history: 'true',
-    limit: limit.toString(),
+    limit: '20',
   });
-  const response = await apiGet<CrawledContentResponse>(
-    `/crawled-content?${params.toString()}`,
-    { signal }
-  );
+  const response = await apiGet<CrawledContentResponse>(`/crawled-content?${params.toString()}`);
   return response.items ?? [];
 }
