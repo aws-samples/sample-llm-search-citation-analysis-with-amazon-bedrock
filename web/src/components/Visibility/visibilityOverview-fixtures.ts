@@ -10,14 +10,14 @@ import {
 } from '../Reports/layout/reportPayload-fixtures';
 
 /** The latest runs against the previous ones, over the one keyword analysed twice. */
-export const RUN_CHANGE: ScopeChange = {
+const RUN_CHANGE: ScopeChange = {
   keywords_compared: 1,
   deltas: GROUP_DELTAS,
   trends: GROUP_TRENDS,
 };
 
 /** The "Hotel Sol" group with two keywords, as the endpoints echo it back. */
-export const GROUP_SCOPE_INFO: ReportScopeInfo = {
+const GROUP_SCOPE_INFO: ReportScopeInfo = {
   kind: 'group',
   label: 'Hotel Sol',
   keyword_count: 2,
@@ -132,7 +132,7 @@ export function buildGroupSources(): SourceRow[] {
  * RUN_2's KPIs) against Hotel Luna (latest point as COMPETITOR_ROW) and
  * Hotel Mar, which no answer named on the first day.
  */
-export function buildGroupBrandTrends(overrides: Partial<BrandTrends> = {}): BrandTrends {
+function buildGroupBrandTrends(overrides: Partial<BrandTrends> = {}): BrandTrends {
   return {
     tracked: [buildBrandTrendPoint('2026-09-01', { visibility_score: 60.6 }), buildBrandTrendPoint('2026-09-08')],
     competitors: [

@@ -7,11 +7,11 @@ import {
 } from '../../scopeReport';
 import { engineCoverage } from '../engineCoverage';
 
-export const ENGINES_ANSWERING_INFO = 'The AI engines with at least one answer in the latest runs.';
+const ENGINES_ANSWERING_INFO = 'The AI engines with at least one answer in the latest runs.';
 
-export const ENGINES_NAMING_INFO = 'The AI engines with at least one answer that names your brand.';
+const ENGINES_NAMING_INFO = 'The AI engines with at least one answer that names your brand.';
 
-export const STRONGEST_ENGINE_INFO = 'The AI engine whose answers give your brand the highest visibility score.';
+const STRONGEST_ENGINE_INFO = 'The AI engine whose answers give your brand the highest visibility score.';
 
 function EngineCards({ visibility }: { readonly visibility: VisibilityResponse }) {
   const {

@@ -11,13 +11,13 @@ import {
   LatestRunSection, type ScopeSectionProps
 } from '../../scopeReport';
 
-export const CITATION_GAPS_PATH = '/citation-gaps';
+const CITATION_GAPS_PATH = '/citation-gaps';
 
-export const DOMAIN_CITATIONS_INFO = 'Answers that cite the domain at least once.';
+const DOMAIN_CITATIONS_INFO = 'Answers that cite the domain at least once.';
 
-export const DOMAIN_RATE_INFO = 'Share of the AI answers that cite the domain as a source.';
+const DOMAIN_RATE_INFO = 'Share of the AI answers that cite the domain as a source.';
 
-export const DOMAIN_SHARE_INFO = 'The domain\'s share of all the sources the answers cite; each domain counts once per answer.';
+const DOMAIN_SHARE_INFO = 'The domain\'s share of all the sources the answers cite; each domain counts once per answer.';
 
 const COLUMNS: ReadonlyArray<ReportTableColumn<SourceRow>> = [
   {
@@ -63,7 +63,7 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<SourceRow>> = [
 ];
 
 /** "Listing the 25 most cited of 40 domains." when the API listed only the top of them; `null` otherwise. */
-export function listedDomainsNote({
+function listedDomainsNote({
   sources, sources_total: total
 }: VisibilityResponse): string | null {
   return sources.length < total ? `Listing the ${sources.length} most cited of ${total} domains.` : null;

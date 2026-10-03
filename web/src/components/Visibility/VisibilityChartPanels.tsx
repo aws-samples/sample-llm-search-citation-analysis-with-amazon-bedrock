@@ -10,10 +10,10 @@ import { OverviewPanel } from './OverviewPanel';
 import { TopDomainsTable } from './TopDomainsTable';
 
 export const ENGINES_TITLE = 'AI engines';
-export const ENGINES_INFO = 'The KPIs over each AI engine\'s answers alone. The chart compares the mention rate, '
+const ENGINES_INFO = 'The KPIs over each AI engine\'s answers alone. The chart compares the mention rate, '
   + 'visibility score and citation rate on a 0–100 scale; the table adds the other KPIs, and the Excel export every one.';
 export const SOURCES_TITLE = 'Top cited domains';
-export const SOURCES_INFO = 'The domains the answers cite most, by the answers citing each. Your own domains are marked owned.';
+const SOURCES_INFO = 'The domains the answers cite most, by the answers citing each. Your own domains are marked owned.';
 
 /** Each brand's share of all brand mentions in the scope's latest runs. */
 export function BrandShareOfVoicePanel({ brands }: { readonly brands: readonly BrandLeaderboardRow[] }) {

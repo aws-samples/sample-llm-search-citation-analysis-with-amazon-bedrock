@@ -9,7 +9,7 @@ import {
 } from '../../scopeReport';
 
 /** The metrics the chart can draw, in toggle order. */
-export const BRAND_TREND_METRICS: readonly BrandTrendMetric[] = ['share_of_voice', 'mention_rate', 'visibility_score'];
+const BRAND_TREND_METRICS: readonly BrandTrendMetric[] = ['share_of_voice', 'mention_rate', 'visibility_score'];
 
 /** The tracked brand's name in the latest leaderboard, for the chart legend. */
 function trackedName(brands: readonly BrandLeaderboardRow[]): string | undefined {

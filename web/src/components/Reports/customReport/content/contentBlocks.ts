@@ -23,7 +23,7 @@ export const MAX_ALT_LENGTH = 200;
 export const MAX_CAPTION_LENGTH = 200;
 
 /** 2 renders a large heading (`<h2>`), 3 a small one (`<h3>`). */
-export type HeadingLevel = 2 | 3;
+type HeadingLevel = 2 | 3;
 
 export type HeadingBlock = {
   readonly type: 'heading';

@@ -76,7 +76,7 @@ export function renderCustomReportRoute(path: string) {
 }
 
 /** The `dataTransfer` a drag event needs, which jsdom does not provide. */
-export function fakeDataTransfer() {
+function fakeDataTransfer() {
   return {
     setData: vi.fn(),
     effectAllowed: 'none',
@@ -137,7 +137,7 @@ export function dropZone(): HTMLElement {
   return screen.getByText(/^(Drop a block here|Your report is empty)/u);
 }
 
-export class MissingFixtureElementError extends Error {
+class MissingFixtureElementError extends Error {
   constructor(what: string) {
     super(`No ${what} found`);
     this.name = 'MissingFixtureElementError';

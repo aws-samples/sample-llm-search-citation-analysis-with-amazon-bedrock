@@ -11,14 +11,14 @@ import {
   sentimentCounts, sentimentShareNote
 } from '../sentimentShares';
 
-export const POSITIVE_INFO = 'Mentions of your brand that the AI answers word favourably.';
+const POSITIVE_INFO = 'Mentions of your brand that the AI answers word favourably.';
 
-export const NEGATIVE_INFO = 'Mentions of your brand that the AI answers word unfavourably.';
+const NEGATIVE_INFO = 'Mentions of your brand that the AI answers word unfavourably.';
 
-export const NEUTRAL_OR_MIXED_INFO = 'Mentions worded neither way, or both ways at once; they pull the net sentiment towards 0.';
+const NEUTRAL_OR_MIXED_INFO = 'Mentions worded neither way, or both ways at once; they pull the net sentiment towards 0.';
 
 /** The label of the split bar under the cards. */
-export const SPLIT_ROW_LABEL = 'All engines';
+const SPLIT_ROW_LABEL = 'All engines';
 
 function SplitCards({ split }: { readonly split: SentimentSplit }) {
   const counts = sentimentCounts(split);

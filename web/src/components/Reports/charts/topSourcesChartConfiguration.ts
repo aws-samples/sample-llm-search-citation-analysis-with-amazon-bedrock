@@ -16,8 +16,8 @@ import { listInWords } from './chartSeries';
 /** How many domains the chart ranks unless told otherwise. */
 export const DEFAULT_TOP_SOURCES_LIMIT = 10;
 
-export const OWNED_DOMAINS_LABEL = 'Your domains';
-export const OTHER_DOMAINS_LABEL = 'Other domains';
+const OWNED_DOMAINS_LABEL = 'Your domains';
+const OTHER_DOMAINS_LABEL = 'Other domains';
 
 /** The `limit` most cited domains, most cited first (ties in the given order). */
 export function topSources(sources: readonly SourceRow[], limit: number): SourceRow[] {

@@ -195,7 +195,7 @@ export function buildKeywordChange(mention: MentionChange, deltas: Partial<KpiDe
 }
 
 /** "hotel sol spa" at RUN_2: no answer names the brand any more. */
-export const LOST_KEYWORD_RUN: KeywordRun = buildKeywordRun({
+const LOST_KEYWORD_RUN: KeywordRun = buildKeywordRun({
   timestamp: RUN_2,
   kpis: {
     ...KEYWORD_KPIS,

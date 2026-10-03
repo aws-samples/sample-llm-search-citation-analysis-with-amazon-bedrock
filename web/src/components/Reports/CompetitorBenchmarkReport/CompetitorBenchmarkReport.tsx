@@ -7,7 +7,7 @@ import { ShareOfVoiceSection } from './sections/ShareOfVoiceSection';
 import { BrandTrendSection } from './sections/BrandTrendSection';
 import { LeaderboardSection } from './sections/LeaderboardSection';
 
-export const BENCHMARK_PATH = '/reports/benchmark';
+const BENCHMARK_PATH = '/reports/benchmark';
 
 /** The sections of the Competitor Benchmark, in order. */
 export function BenchmarkSections({ report }: ScopeSectionProps) {

@@ -43,7 +43,7 @@ export const KPI_TABLE_ROWS = [
 export const COMPARISON_LABEL = 'vs previous day (3 keywords)';
 
 /** `GROUP_DELTAS` and `GROUP_TRENDS`, labelled as a day-over-day change. */
-export const DAY_COMPARISON: KpiComparison = {
+const DAY_COMPARISON: KpiComparison = {
   deltas: GROUP_DELTAS,
   trends: GROUP_TRENDS,
   label: COMPARISON_LABEL,
