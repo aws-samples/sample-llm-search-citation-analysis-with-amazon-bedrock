@@ -50,4 +50,23 @@ describe('CitationTableHeader', () => {
     const keywordsHeader = screen.getByText('Keywords').closest('th');
     expect(keywordsHeader?.querySelector('svg')).toBeInTheDocument();
   });
+
+  it('shows no sort indicator on the inactive columns', () => {
+    renderHeader(DESC_KEYWORDS);
+
+    expect(screen.getByText('Citations').closest('th')?.querySelector('svg')).toBeNull();
+  });
+
+  it('draws a different indicator for an ascending sort than for a descending one', () => {
+    const { container: descending } = render(<table><CitationTableHeader sort={DESC_KEYWORDS} onSort={vi.fn()} /></table>);
+    const { container: ascending } = render(<table><CitationTableHeader sort={{
+      ...DESC_KEYWORDS,
+      direction: 'asc',
+    }} onSort={vi.fn()} /></table>);
+
+    const ascendingIcon = ascending.querySelector('path')?.getAttribute('d') ?? '';
+
+    expect(ascendingIcon).not.toBe('');
+    expect(ascendingIcon).not.toBe(descending.querySelector('path')?.getAttribute('d'));
+  });
 });
