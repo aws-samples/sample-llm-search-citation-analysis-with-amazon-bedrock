@@ -58,15 +58,6 @@ def fetch_persona_names() -> dict[str, str]:
     return {item['id']: item.get('name', 'Unknown Persona') for item in items}
 
 
-def get_valid_persona_ids() -> set[str]:
-    """Return the set of all persona IDs stored in the QueryPrompts table."""
-    table = dynamodb.Table(QUERY_PROMPTS_TABLE)
-    response = table.scan(ProjectionExpression='id')
-    items: list[dict[str, Any]] = response.get('Items', [])
-    return {item['id'] for item in items}
-
-
-
 def build_persona_brands(items: list[dict[str, Any]], total_providers: int) -> list[dict[str, Any]]:
     """
     Build per-brand metrics from a list of search result items belonging to one persona.
@@ -248,14 +239,12 @@ def handler(event, context, keyword, query_prompt_id=None):
         - query_prompt_id: Filter to a specific persona (optional)
     """
     # If a persona filter was provided, validate it exists in the QueryPrompts table
-    if query_prompt_id:
-        valid_ids = get_valid_persona_ids()
-        if query_prompt_id not in valid_ids:
-            return validation_error(
-                f'Persona not found: {query_prompt_id}',
-                event,
-                'query_prompt_id',
-            )
+    if query_prompt_id and query_prompt_id not in fetch_persona_names():
+        return validation_error(
+            f'Persona not found: {query_prompt_id}',
+            event,
+            'query_prompt_id',
+        )
 
     result = get_persona_rankings(keyword, query_prompt_id)
     return success_response(result, event)

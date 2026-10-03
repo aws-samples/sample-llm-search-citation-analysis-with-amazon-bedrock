@@ -402,22 +402,19 @@ def _describe_transition_event(event_info: dict[str, Any], evt: Mapping[str, Any
     if event_type in _MAP_RUN_MESSAGES:
         _describe_map_run_event(event_info, evt)
 
-    elif event_type == 'TaskStateExited':
-        # Important for tracking step completion
+    elif event_type in ('TaskStateExited', 'MapStateExited'):
+        # Important for tracking step completion: a task exit has a message only
+        # for the known steps, a Map exit falls back to "Completed: <state>".
         state_name = evt.get('stateExitedEventDetails', {}).get('name', '')
         event_info['state_name'] = state_name
-        # Generate completion message
-        event_info['message'] = _STATE_EXITED_MESSAGES.get(state_name)
+        event_info['message'] = (
+            _STATE_EXITED_MESSAGES.get(state_name) if event_type == 'TaskStateExited'
+            else _MAP_EXITED_MESSAGES.get(state_name, f"Completed: {state_name}")
+        )
 
     elif event_type == 'MapStateStarted':
         event_info['message'] = "Processing keywords in parallel"
         event_info['state_name'] = 'ProcessKeywords'
-
-    elif event_type == 'MapStateExited':
-        state_name = evt.get('stateExitedEventDetails', {}).get('name', '')
-        event_info['state_name'] = state_name
-        # Map state names to friendly messages
-        event_info['message'] = _MAP_EXITED_MESSAGES.get(state_name, f"Completed: {state_name}")
 
     elif event_type == 'ExecutionFailed':
         details = evt.get('executionFailedEventDetails', {})
