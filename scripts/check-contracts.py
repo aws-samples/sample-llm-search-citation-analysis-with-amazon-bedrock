@@ -261,7 +261,7 @@ def type_members() -> dict[str, set[str]]:
     """Member name -> files declaring it, for every interface/type block under web/src/types."""
     members: dict[str, set[str]] = {}
     for path in sorted(WEB_TYPES.rglob('*.ts')):
-        if path.name.endswith('.spec.ts'):
+        if _is_test_source(path):
             continue
         text = path.read_text(encoding='utf-8')
         for block in _type_blocks(text):
@@ -284,6 +284,11 @@ def _type_blocks(text: str) -> Iterator[str]:
                     break
 
 
+def _is_test_source(path: Path) -> bool:
+    """Specs and fixture modules: they neither declare the dashboard's types nor read them."""
+    return '.spec.' in path.name or path.name.endswith(('-fixtures.ts', '-fixtures.tsx', 'Fixtures.ts', 'Fixtures.tsx'))
+
+
 def _consumer_sources(root: Path) -> Iterable[str]:
     """Non-test dashboard source; under web/src/types only the member declaration lines are removed.
 
@@ -294,7 +299,7 @@ def _consumer_sources(root: Path) -> Iterable[str]:
     stripped, and only where declarations live.
     """
     for path in sorted(root.rglob('*.ts*')):
-        if '.spec.' in path.name or path.name.endswith(('-fixtures.ts', '-fixtures.tsx', 'Fixtures.ts', 'Fixtures.tsx')):
+        if _is_test_source(path):
             continue
         if 'test' in path.relative_to(root).parts:
             continue
