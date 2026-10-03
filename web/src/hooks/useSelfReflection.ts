@@ -6,13 +6,6 @@ import {
   brandFilterParams, fetchErrors, isAnalysisPayload, useAnalysisEndpoint
 } from './useAnalysisEndpoint';
 
-class SelfReflectionFetchError extends Error {
-  constructor(message = 'Failed to fetch self-reflection data') {
-    super(message);
-    this.name = 'SelfReflectionFetchError';
-  }
-}
-
 function isSelfReflectionResponse(data: unknown): data is SelfReflectionResponse {
   if (!isAnalysisPayload(data)) return false;
   return 'keyword' in data && 'brand' in data && 'explanation' in data;
@@ -28,11 +21,14 @@ function isSelfReflectionListResponse(data: unknown): data is SelfReflectionList
   return typeof data === 'object' && data !== null && 'results' in data && Array.isArray((data as SelfReflectionListResponse).results);
 }
 
+/** Both self-reflection requests fail as one error type. */
+const SELF_REFLECTION_ERRORS = fetchErrors('SelfReflectionFetchError', 'Failed to fetch self-reflection data');
+
 const reflectionTriggerEndpoint = {
   errorContext: 'self-reflection',
   logMessage: '[self-reflection] Error triggering reflection:',
   isValidResponse: isSelfReflectionResponse,
-  ...fetchErrors(SelfReflectionFetchError),
+  ...SELF_REFLECTION_ERRORS,
   buildRequest: (keyword: string, brand: string, queryPromptId: string, forceRefresh = false) => ({
     path: '/self-reflection',
     init: {
@@ -51,7 +47,7 @@ const reflectionTriggerEndpoint = {
 const reflectionListContract = {
   logMessage: '[self-reflection] Error fetching reflections:',
   isValidResponse: isSelfReflectionListResponse,
-  ...fetchErrors(SelfReflectionFetchError),
+  ...SELF_REFLECTION_ERRORS,
 };
 
 export function useSelfReflection() {

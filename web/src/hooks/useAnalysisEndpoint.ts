@@ -64,11 +64,19 @@ export function apiRequestErrors(httpMessage: string): ContractErrors {
   };
 }
 
-/** Failures as the hook's own error class: its default message for a non-OK status. */
-export function fetchErrors(errorType: new (message?: string) => Error): ContractErrors {
+/** A failed analysis request, named after the hook that made it (`VisibilityFetchError`). */
+class AnalysisFetchError extends Error {
+  constructor(name: string, message: string) {
+    super(message);
+    this.name = name;
+  }
+}
+
+/** Failures named `name`: `defaultMessage` for a non-OK status, the body's message otherwise. */
+export function fetchErrors(name: string, defaultMessage: string): ContractErrors {
   return {
-    createHttpError: () => new errorType(),
-    createResponseError: (message: string) => new errorType(message),
+    createHttpError: () => new AnalysisFetchError(name, defaultMessage),
+    createResponseError: (message: string) => new AnalysisFetchError(name, message),
   };
 }
 
