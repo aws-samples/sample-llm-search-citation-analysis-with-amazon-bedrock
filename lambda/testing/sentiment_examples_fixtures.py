@@ -6,7 +6,7 @@ Shared by ``shared/test_sentiment_examples.py`` (the selection) and
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import functools
 from typing import Any
 
 from hypothesis import strategies as st
@@ -29,16 +29,8 @@ def stored_brand(
     return {'name': name, 'classification': classification, 'rank': rank, 'sentiment': sentiment, **fields}
 
 
-def stored_answer(
-    keyword: str,
-    provider: str,
-    brands: Sequence[Mapping[str, Any]],
-    *,
-    timestamp: str = RUN,
-    **fields: object,
-) -> dict[str, Any]:
-    """One SearchResults row of a successful answer; ``fields`` adds or overrides attributes (``response`` ...)."""
-    return search_result_row(keyword, provider, brands, timestamp=timestamp, **{'status': 'success', **fields})
+#: One SearchResults row of a successful answer from ``RUN``; keywords add or override attributes (``response`` ...).
+stored_answer = functools.partial(search_result_row, timestamp=RUN, status='success')
 
 
 # Brand dicts as models write them: names that collide across case, every
