@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,11 +13,12 @@ from shared.content_brief import (
     IMPROVE_CURRENT_URL,
     ContentBriefFetchError,
 )
-from testing.content_brief_fixtures import build_group_brief
+from testing.content_brief_fixtures import build_group_brief, mixed_group_keyword_rows
 from testing.content_studio_fixtures import (
     content_generation_event as generation_event,
 )
 from testing.content_studio_fixtures import (
+    content_studio_resource,
     load_content_studio_module,
 )
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
@@ -27,29 +29,18 @@ _mod = load_content_studio_module('content_studio_group_brief_under_test')
 
 def dynamodb_with_group(
     *,
-    group: dict[str, object] | None = None,
     members: list[dict[str, object]] | None = None,
 ) -> tuple[MagicMock, MagicMock]:
-    group_item = {'id': 'group-1', 'name': 'Authoritative Group'} if group is None else group
-    groups_table = fake_table(get_item={'Item': group_item})
-    active_members = [
-        {'id': 'keyword-1', 'keyword': 'Alpha', 'group_ids': {'group-1'}},
-        {'id': 'keyword-2', 'keyword': 'Beta', 'group_ids': {'group-1'}},
-    ] if members is None else members
-    keywords_table = fake_table(query={'Items': active_members})
+    """Return tables for group 'Authoritative Group' whose default members are Alpha and Beta."""
+    active_members = mixed_group_keyword_rows() if members is None else members
     content_table = fake_table()
-    resource = fake_dynamodb_resource(by_name={
-        'test-keyword-groups': groups_table,
-        'test-keywords': keywords_table,
-        'test-content-studio': content_table,
-    })
-    return resource, content_table
+    return content_studio_resource(content_table=content_table, keyword_items=active_members), content_table
 
 
-def generate_response(idea: dict[str, object], resource: MagicMock) -> dict[str, object]:
-    """Run the decorated generate route against a supplied DynamoDB resource."""
+def generate_response(idea: dict[str, object], resource: MagicMock) -> tuple[int, Any]:
+    """Run the decorated generate route against a supplied DynamoDB resource; return status and body."""
     with patch.object(_mod, 'dynamodb', resource):
-        return _mod._generate_content(generation_event(idea), None)
+        return parse_response(_mod._generate_content(generation_event(idea), None))
 
 
 class TestGroupBriefGenerateRoute:
@@ -60,11 +51,10 @@ class TestGroupBriefGenerateRoute:
             keywords=['stale beta', 'stale alpha'],
         )
 
-        with patch.object(_mod, 'dynamodb', resource):
-            response = _mod._generate_content(generation_event(idea), None)
+        status, _ = generate_response(idea, resource)
 
         persisted = content_table.put_item.call_args.kwargs['Item']
-        assert response['statusCode'] == 200
+        assert status == 200
         assert persisted['idea_data']['group_name'] == 'Authoritative Group'
         assert persisted['idea_data']['keywords'] == ['Alpha', 'Beta']
         assert persisted['generation_transport'] == 'dynamodb_stream_v1'
@@ -73,10 +63,7 @@ class TestGroupBriefGenerateRoute:
         resource, content_table = dynamodb_with_group()
         custom_template = 'Create for {brand} with {keywords} in {output_language}.'
 
-        with patch.object(_mod, 'dynamodb', resource):
-            _mod._generate_content(
-                generation_event(build_group_brief(prompt_template=custom_template)), None
-            )
+        generate_response(build_group_brief(prompt_template=custom_template), resource)
 
         persisted = content_table.put_item.call_args.kwargs['Item']['idea_data']
         assert persisted['prompt_template'] == custom_template
@@ -86,9 +73,8 @@ class TestGroupBriefGenerateRoute:
             members=[{'id': 'keyword-1', 'keyword': 'Alpha', 'group_ids': {'other-group'}}]
         )
 
-        response = generate_response(build_group_brief(), resource)
+        status, body = generate_response(build_group_brief(), resource)
 
-        status, body = parse_response(response)
         assert status == 400
         assert body == {
             'error': 'keyword_ids must contain only active keywords in the selected group',
@@ -99,11 +85,10 @@ class TestGroupBriefGenerateRoute:
     def test_returns_field_specific_400_when_template_placeholder_is_unknown(self) -> None:
         resource, content_table = dynamodb_with_group()
 
-        response = generate_response(
+        status, body = generate_response(
             build_group_brief(prompt_template='Use {industry}'), resource
         )
 
-        status, body = parse_response(response)
         assert status == 400
         assert body == {
             'error': 'prompt_template contains unknown placeholder(s): industry',
@@ -119,9 +104,8 @@ class TestGroupBriefGenerateRoute:
             prompt_template=DEFAULT_PROMPT_TEMPLATES[IMPROVE_CURRENT_URL],
         )
 
-        response = generate_response(idea, resource)
+        status, body = generate_response(idea, resource)
 
-        status, body = parse_response(response)
         assert status == 400
         assert body['field'] == 'landing_url'
         assert body['error'] == 'landing_url is invalid: URL points to a restricted address'
@@ -137,10 +121,8 @@ class TestGroupBriefGenerateRoute:
             'content_angle': 'comprehensive_guide',
         }
 
-        with patch.object(_mod, 'dynamodb', resource):
-            response = _mod._generate_content(generation_event(legacy_idea), None)
+        status, body = generate_response(legacy_idea, resource)
 
-        status, body = parse_response(response)
         persisted = content_table.put_item.call_args.kwargs['Item']
         assert status == 200
         assert body['keyword'] == 'generic keyword'
@@ -211,10 +193,8 @@ def test_group_brief_requires_bounded_contract_field(field: str) -> None:
     idea = build_group_brief()
     idea.pop(field)
 
-    with patch.object(_mod, 'dynamodb', resource):
-        response = _mod._generate_content(generation_event(idea), None)
+    status, body = generate_response(idea, resource)
 
-    status, body = parse_response(response)
     assert status == 400
     assert body['field'] == field
     content_table.put_item.assert_not_called()
