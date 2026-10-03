@@ -3,29 +3,27 @@
 import base64
 import json
 import os
-import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from testing.dynamodb_stubs import fake_dynamodb_resource
 from testing.env import KEYWORDS_TABLE_ENV
-from testing.module_loader import load_handler_module
+from testing.handler_fixtures import handler_fixture
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
 _MODULE_NAME = 'get_keywords_under_test'
 _INVALID_TOKEN_BODY = {'error': 'Invalid next_token', 'field': 'next_token'}
 
 
+get_keywords_module = handler_fixture(_API_DIR, 'get-keywords.py', _MODULE_NAME, env=KEYWORDS_TABLE_ENV, scope='function')
+
+
 @pytest.fixture
-def get_keywords_handler():
-    """`get-keywords.py` bound to a fresh mock table, loaded per test."""
+def get_keywords_handler(get_keywords_module):
+    """`get-keywords.py`, loaded per test, reading a fresh mock keywords table."""
     table = MagicMock()
-    with patch.dict(os.environ, KEYWORDS_TABLE_ENV):
-        with patch('boto3.resource', return_value=fake_dynamodb_resource(table)):
-            module = load_handler_module(_API_DIR, 'get-keywords.py', _MODULE_NAME)
-        yield module, table
-    sys.modules.pop(_MODULE_NAME, None)
+    with patch.object(get_keywords_module, 'keywords_table', table):
+        yield get_keywords_module, table
 
 
 def _invoke(module, query=None):
