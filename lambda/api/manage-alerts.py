@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import KeysView
 from typing import Any
 
 import boto3
@@ -44,6 +45,8 @@ ALERTS_TOPIC_ARN = os.environ['KPI_ALERTS_TOPIC_ARN']
 
 _MAX_DESCRIPTION_LENGTH = 200
 _MAX_URL_LENGTH = 2048
+# The page size every list route accepts.
+_LIMIT_RULE = {'type': int, 'min': 1, 'max': 100, 'default': 50}
 _CONFIRMED_ARN_PREFIX = 'arn:'
 _TEST_NOTIFICATION_SUBJECT = 'Citation Analysis test notification'
 _TEST_NOTIFICATION_MESSAGE = (
@@ -80,7 +83,7 @@ def _query_alert_status(status: str, limit: int) -> list[dict[str, Any]]:
         'choices': ['open', 'acknowledged', 'all'],
         'default': 'open',
     },
-    'limit': {'type': int, 'min': 1, 'max': 100, 'default': 50},
+    'limit': _LIMIT_RULE,
 })
 def _list_alerts(
     event: dict[str, Any],
@@ -352,6 +355,33 @@ def _reconcile_subscriptions(settings: dict[str, Any]) -> tuple[list[dict[str, A
     return remaining, warnings
 
 
+def _key_set_error(
+    keys: KeysView[str],
+    *,
+    required: set[str],
+    allowed: set[str],
+    noun: str,
+    event: dict[str, Any],
+) -> dict[str, Any] | None:
+    """The 400 for the first missing ``required`` key, else for the first key outside ``required | allowed``."""
+    missing = sorted(required - keys)
+    if missing:
+        return validation_error(f'Missing required {noun}: {missing[0]}', event, missing[0])
+    unexpected = sorted(keys - required - allowed)
+    if unexpected:
+        return validation_error(f'Unknown {noun}: {unexpected[0]}', event, unexpected[0])
+    return None
+
+
+_SETTING_FIELDS = {'enabled', 'notification_emails', 'thresholds'}
+_THRESHOLD_FIELDS = {
+    'mention_rate_drop',
+    'position_loss',
+    'competitor_top_n',
+    'improvement_after_content_change',
+}
+
+
 def _validate_settings_update(
     body: Any,
     event: dict[str, Any],
@@ -359,31 +389,18 @@ def _validate_settings_update(
     if not isinstance(body, dict):
         return None, validation_error('Request body must be a JSON object', event, 'body')
 
-    required = {'enabled', 'notification_emails', 'thresholds'}
-    missing = sorted(required - body.keys())
-    if missing:
-        return None, validation_error(f'Missing required setting: {missing[0]}', event, missing[0])
-    unexpected = sorted(body.keys() - required)
-    if unexpected:
-        return None, validation_error(f'Unknown setting: {unexpected[0]}', event, unexpected[0])
+    rejected = _key_set_error(body.keys(), required=_SETTING_FIELDS, allowed=set(), noun='setting', event=event)
+    if rejected:
+        return None, rejected
 
     thresholds = body.get('thresholds')
-    threshold_fields = {
-        'mention_rate_drop',
-        'position_loss',
-        'competitor_top_n',
-        'improvement_after_content_change',
-    }
     if not isinstance(thresholds, dict):
         return None, validation_error('thresholds must be a JSON object', event, 'thresholds')
-    missing_thresholds = sorted(threshold_fields - thresholds.keys())
-    if missing_thresholds:
-        field = missing_thresholds[0]
-        return None, validation_error(f'Missing required threshold: {field}', event, field)
-    unexpected_thresholds = sorted(thresholds.keys() - threshold_fields)
-    if unexpected_thresholds:
-        field = unexpected_thresholds[0]
-        return None, validation_error(f'Unknown threshold: {field}', event, field)
+    rejected = _key_set_error(
+        thresholds.keys(), required=_THRESHOLD_FIELDS, allowed=set(), noun='threshold', event=event,
+    )
+    if rejected:
+        return None, rejected
 
     settings, error, field = validate_settings({
         'enabled': body['enabled'],
@@ -443,7 +460,7 @@ def _content_change_response(item: dict[str, Any]) -> dict[str, Any]:
 
 @validate({
     'group_id': {'required': True, 'type': str, 'max_length': 64},
-    'limit': {'type': int, 'min': 1, 'max': 100, 'default': 50},
+    'limit': _LIMIT_RULE,
 })
 def _list_content_changes(
     event: dict[str, Any],
@@ -466,9 +483,11 @@ def _validate_content_change(
 ) -> tuple[dict[str, str] | None, dict[str, Any] | None]:
     if not isinstance(body, dict):
         return None, validation_error('Request body must be a JSON object', event, 'body')
-    unexpected = sorted(body.keys() - {'group_id', 'description', 'url'})
-    if unexpected:
-        return None, validation_error(f'Unknown field: {unexpected[0]}', event, unexpected[0])
+    rejected = _key_set_error(
+        body.keys(), required=set(), allowed={'group_id', 'description', 'url'}, noun='field', event=event,
+    )
+    if rejected:
+        return None, rejected
 
     group_id = body.get('group_id')
     if not isinstance(group_id, str) or not group_id.strip() or len(group_id.strip()) > 64:

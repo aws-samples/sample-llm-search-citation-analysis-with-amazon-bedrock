@@ -10,6 +10,7 @@ import re
 import sys
 import uuid
 from collections import Counter, defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, cast
@@ -358,6 +359,31 @@ def _analyze_keyword_visibility(
     return visibility
 
 
+def _ranked_keyword_idea(
+    keyword: str,
+    visibility: _KeywordVisibility,
+    *,
+    copy: dict[str, str],
+    competitor_urls: list[str],
+) -> dict[str, Any]:
+    """An idea for a keyword where the brand already ranks; ``copy`` carries the per-kind text fields."""
+    return {
+        "id": str(uuid.uuid4()),
+        "type": copy["type"],
+        "priority": copy["priority"],
+        "title": copy["title"],
+        "description": copy["description"],
+        "keyword": keyword,
+        "source": copy["source"],
+        "current_rank": visibility.fp_best_rank,
+        "competitor_brands": [item["name"] for item in visibility.comp_mentions[:3]],
+        "competitor_urls": competitor_urls,
+        "providers_present": list(visibility.fp_providers),
+        "actionable": True,
+        "content_angle": copy["content_angle"],
+    }
+
+
 def _primary_keyword_idea(keyword: str, visibility: _KeywordVisibility) -> dict[str, Any] | None:
     if not visibility.fp_found and visibility.comp_mentions:
         return {
@@ -375,37 +401,33 @@ def _primary_keyword_idea(keyword: str, visibility: _KeywordVisibility) -> dict[
             "content_angle": "comprehensive_guide",
         }
     if visibility.fp_found and visibility.fp_best_rank > 2 and visibility.comp_mentions:
-        return {
-            "id": str(uuid.uuid4()),
-            "type": "ranking_improvement",
-            "priority": "medium" if visibility.fp_best_rank > 3 else "low",
-            "title": f'Improve Ranking for "{keyword}"',
-            "description": f"Your brand ranks #{visibility.fp_best_rank}. Create better content to reach #1.",
-            "keyword": keyword,
-            "source": "ranking_analysis",
-            "current_rank": visibility.fp_best_rank,
-            "competitor_brands": [item["name"] for item in visibility.comp_mentions[:3]],
-            "competitor_urls": visibility.competitor_citations,
-            "providers_present": list(visibility.fp_providers),
-            "actionable": True,
-            "content_angle": "differentiation",
-        }
+        return _ranked_keyword_idea(
+            keyword,
+            visibility,
+            copy={
+                "type": "ranking_improvement",
+                "priority": "medium" if visibility.fp_best_rank > 3 else "low",
+                "title": f'Improve Ranking for "{keyword}"',
+                "description": f"Your brand ranks #{visibility.fp_best_rank}. Create better content to reach #1.",
+                "source": "ranking_analysis",
+                "content_angle": "differentiation",
+            },
+            competitor_urls=visibility.competitor_citations,
+        )
     if visibility.fp_found and visibility.fp_best_rank <= 2:
-        return {
-            "id": str(uuid.uuid4()),
-            "type": "leadership_maintenance",
-            "priority": "low",
-            "title": f'Maintain Leadership for "{keyword}"',
-            "description": f"You're #{visibility.fp_best_rank}! Create fresh content to stay ahead of {len(visibility.comp_mentions)} competitors.",
-            "keyword": keyword,
-            "source": "leadership_analysis",
-            "current_rank": visibility.fp_best_rank,
-            "competitor_brands": [item["name"] for item in visibility.comp_mentions[:3]],
-            "competitor_urls": visibility.all_citations,
-            "providers_present": list(visibility.fp_providers),
-            "actionable": True,
-            "content_angle": "thought_leadership",
-        }
+        return _ranked_keyword_idea(
+            keyword,
+            visibility,
+            copy={
+                "type": "leadership_maintenance",
+                "priority": "low",
+                "title": f'Maintain Leadership for "{keyword}"',
+                "description": f"You're #{visibility.fp_best_rank}! Create fresh content to stay ahead of {len(visibility.comp_mentions)} competitors.",
+                "source": "leadership_analysis",
+                "content_angle": "thought_leadership",
+            },
+            competitor_urls=visibility.all_citations,
+        )
     return None
 
 
@@ -1734,6 +1756,14 @@ def _batch_content_ids(children: list[dict[str, Any]]) -> list[str]:
     return [_compute_idempotency_key(child, include_time_bucket=False) for child in children]
 
 
+def _numbered_children(
+    children: list[dict[str, Any]],
+    child_ids: list[str],
+) -> Iterator[tuple[int, tuple[dict[str, Any], str]]]:
+    """Each child with its stable row id, at its 1-based batch position."""
+    return enumerate(zip(children, child_ids, strict=True), start=1)
+
+
 def _batch_child_descriptors(
     children: list[dict[str, Any]],
     child_ids: list[str],
@@ -1747,10 +1777,7 @@ def _batch_child_descriptors(
             "keyword": str(child["keyword"]),
             "position": position,
         }
-        for position, (child, content_id) in enumerate(
-            zip(children, child_ids, strict=True),
-            start=1,
-        )
+        for position, (child, content_id) in _numbered_children(children, child_ids)
     ]
 
 
@@ -1874,10 +1901,7 @@ def _queue_batch_children(
     """Queue every missing deterministic child after its manifest is durable."""
     outcomes: list[_QueueResult] = []
     batch_size = len(children)
-    for position, (child, content_id) in enumerate(
-        zip(children, child_ids, strict=True),
-        start=1,
-    ):
+    for position, (child, content_id) in _numbered_children(children, child_ids):
         outcomes.append(
             _queue_canonical_idea(
                 child,
@@ -2126,37 +2150,30 @@ def _template_body_issue(name: str | None, prompt_template: str | None) -> Conte
     return None
 
 
-@parse_json_body
-@validate(
-    {
-        "name": {
-            "required": True,
-            "type": str,
-            "min_length": 1,
-            "max_length": MAX_TEMPLATE_NAME_LENGTH,
-            "source": "body",
-        },
+def _template_body_rules(*, creating: bool) -> dict[str, dict[str, Any]]:
+    """The ``@validate`` schema of a saved template body; a create requires every field but ``description``."""
+    required = {"required": True} if creating else {}
+    return {
+        "name": {**required, "type": str, "min_length": 1, "max_length": MAX_TEMPLATE_NAME_LENGTH, "source": "body"},
         "description": {
             "type": str,
             "max_length": MAX_TEMPLATE_DESCRIPTION_LENGTH,
-            "default": "",
+            **({"default": ""} if creating else {}),
             "source": "body",
         },
-        "content_angle": {
-            "required": True,
-            "type": str,
-            "choices": list(GROUP_BRIEF_MODES),
-            "source": "body",
-        },
+        "content_angle": {**required, "type": str, "choices": list(GROUP_BRIEF_MODES), "source": "body"},
         "prompt_template": {
-            "required": True,
+            **required,
             "type": str,
             "min_length": 1,
             "max_length": MAX_PROMPT_TEMPLATE_LENGTH,
             "source": "body",
         },
     }
-)
+
+
+@parse_json_body
+@validate(_template_body_rules(creating=True))
 def _create_template(
     event: dict[str, Any],
     context: Any,
@@ -2221,32 +2238,7 @@ def _saved_template_target(
 
 
 @parse_json_body
-@validate(
-    {
-        "name": {
-            "type": str,
-            "min_length": 1,
-            "max_length": MAX_TEMPLATE_NAME_LENGTH,
-            "source": "body",
-        },
-        "description": {
-            "type": str,
-            "max_length": MAX_TEMPLATE_DESCRIPTION_LENGTH,
-            "source": "body",
-        },
-        "content_angle": {
-            "type": str,
-            "choices": list(GROUP_BRIEF_MODES),
-            "source": "body",
-        },
-        "prompt_template": {
-            "type": str,
-            "min_length": 1,
-            "max_length": MAX_PROMPT_TEMPLATE_LENGTH,
-            "source": "body",
-        },
-    }
-)
+@validate(_template_body_rules(creating=False))
 def _update_template(
     event: dict[str, Any],
     context: Any,
