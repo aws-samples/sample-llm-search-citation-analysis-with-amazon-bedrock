@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, call
 import pytest
 from boto3.dynamodb.conditions import Key
 
-from shared.bounded_reads import collect_capped_items, newest_items
+from shared.bounded_reads import collect_capped_items, collect_capped_partition, newest_items
 
 
 def _pages(*pages: dict) -> MagicMock:
@@ -45,6 +45,28 @@ class TestCollectCappedItems:
 
     def test_reads_a_page_without_items_as_empty(self) -> None:
         assert collect_capped_items(_pages({}), 1) == ([], False)
+
+
+class TestCollectCappedPartition:
+    def test_pages_through_the_named_index_partition(self) -> None:
+        table = MagicMock()
+        table.query.side_effect = [{'Items': [{'id': 1}], 'LastEvaluatedKey': {'id': 1}}, {'Items': [{'id': 2}]}]
+
+        items, truncated = collect_capped_partition(table, 'normalized_url', 'https://a.com/x', 3, index_name='UrlIndex')
+
+        assert (items, truncated, table.query.call_args.kwargs) == ([{'id': 1}, {'id': 2}], False, {
+            'KeyConditionExpression': Key('normalized_url').eq('https://a.com/x'),
+            'IndexName': 'UrlIndex',
+            'ExclusiveStartKey': {'id': 1},
+        })
+
+    def test_reads_the_tables_own_partition_without_an_index(self) -> None:
+        table = MagicMock()
+        table.query.return_value = {'Items': []}
+
+        collect_capped_partition(table, 'keyword', 'k', 1)
+
+        table.query.assert_called_once_with(KeyConditionExpression=Key('keyword').eq('k'))
 
 
 class TestNewestItems:

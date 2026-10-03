@@ -12,13 +12,12 @@ from collections import Counter, defaultdict
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
-from shared.bounded_reads import collect_capped_items
+from shared.bounded_reads import collect_capped_items, collect_capped_partition
 from shared.decorators import api_handler, validate
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, scope_from_request
 from shared.utils import get_brand_config
@@ -75,7 +74,7 @@ _MAX_SCAN_PAGES = 25
 
 def _query_keyword_citations(keyword: str) -> tuple[list[dict[str, Any]], bool]:
     """Query the Citations partition of one keyword, bounded by ``_MAX_SCAN_PAGES``."""
-    return collect_capped_items(citations_table.query, _MAX_SCAN_PAGES, KeyConditionExpression=Key('keyword').eq(keyword))
+    return collect_capped_partition(citations_table, 'keyword', keyword, _MAX_SCAN_PAGES)
 
 
 def _scan_all_citations(keyword=None, keywords=None) -> list[dict[str, Any]]:
