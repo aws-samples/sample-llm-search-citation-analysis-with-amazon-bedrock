@@ -18,6 +18,7 @@ from testing.content_studio_fixtures import (
     content_generation_event,
     content_template_generation_case,
     create_content_template_for_test,
+    create_content_template_without_field,
     load_content_studio_module,
     patched_content_studio,
     queue_content_brief_for_test,
@@ -141,6 +142,34 @@ class TestTemplateCreation:
         assert status == 400
         assert body['field'] == 'content_angle'
         table.put_item.assert_not_called()
+
+    @pytest.mark.parametrize('field_name', ['name', 'content_angle', 'prompt_template'])
+    def test_rejects_creation_naming_the_missing_required_field(self, field_name: str) -> None:
+        status, body, table = create_content_template_without_field(_mod, field_name)
+
+        assert (status, body) == (400, {'error': f'Missing required field: {field_name}', 'field': field_name})
+        table.put_item.assert_not_called()
+
+    @pytest.mark.parametrize('name', ['', '   '], ids=['empty', 'whitespace_only'])
+    def test_rejects_blank_name_as_shorter_than_one_character(self, name: str) -> None:
+        status, body, table = create_content_template_for_test(_mod, name=name)
+
+        assert (status, body) == (400, {'error': 'name too short (min 1 characters)', 'field': 'name'})
+        table.put_item.assert_not_called()
+
+    def test_stores_empty_description_when_creation_omits_it(self) -> None:
+        status, _, table = create_content_template_without_field(_mod, 'description')
+
+        assert status == 201
+        assert table.put_item.call_args.kwargs['Item']['description'] == ''
+
+    def test_stores_content_mode_trimmed_of_surrounding_whitespace(self) -> None:
+        status, body, _table = create_content_template_for_test(
+            _mod, content_angle=f'  {CREATE_NEW_LANDING_PAGE}  '
+        )
+
+        assert status == 201
+        assert body['content_angle'] == CREATE_NEW_LANDING_PAGE
 
 
 class TestTemplateMutation:

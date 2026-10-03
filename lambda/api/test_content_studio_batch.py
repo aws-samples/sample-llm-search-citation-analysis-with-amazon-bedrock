@@ -23,6 +23,7 @@ from testing.content_studio_fixtures import (
     content_studio_resource,
     failing_batch_manifest_table,
     load_content_studio_module,
+    racing_batch_table,
     selected_keyword_scope,
     stateful_batch_table,
     stateful_content_table,
@@ -351,6 +352,15 @@ class TestBatchManifestFailures:
         assert status == 500
         assert body == {"error": "Service temporarily unavailable"}
         assert content_rows == {}
+
+    def test_queues_children_from_concurrent_winner_manifest_when_own_write_loses_race(self) -> None:
+        content_table, content_rows = stateful_content_table()
+        batch_table, _ = racing_batch_table()
+
+        status, body = run_batch(build_batch_request(), content_table=content_table, batch_table=batch_table)
+
+        assert (status, outcome_counts(body)) == (202, (2, 0, 0))
+        assert len(content_rows) == 2
 
 
 class TestBatchIdempotency:
