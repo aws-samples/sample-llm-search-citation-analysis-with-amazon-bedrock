@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from .utils import utc_now
+from .utils import parse_timestamp, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -57,16 +57,12 @@ def stale_elapsed_seconds(
         return None
 
     reference = now if now is not None else utc_now()
-    try:
-        created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-    except (ValueError, TypeError) as exc:
-        logger.warning(f"Could not parse created_at {created_at!r}: {exc}")
+    # Naive timestamps are historical rows written before timestamps carried
+    # an offset; parse_timestamp reads them as UTC, like the rows meant.
+    created = parse_timestamp(created_at)
+    if created is None:
+        logger.warning(f"Could not parse created_at {created_at!r}")
         return None
-
-    if created.tzinfo is None:
-        # Naive timestamps are historical rows written before timestamps
-        # carried an offset. Compare naive-to-naive rather than raising.
-        reference = reference.replace(tzinfo=None)
 
     elapsed = (reference - created).total_seconds()
     return elapsed if elapsed > timeout_seconds else None

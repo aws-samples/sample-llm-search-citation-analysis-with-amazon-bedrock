@@ -19,8 +19,8 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, require_keyword, validate
 from shared.dynamo_decimal import to_int
+from shared.kpi_engine import answers_from_rows, brand_table
 from shared.search_results import latest_run, query_keyword_items, search_results_table_name
-from shared.visibility_score import calculate_visibility_score, sentiment_to_score
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -58,16 +58,18 @@ def fetch_persona_names() -> dict[str, str]:
     return {item['id']: item.get('name', 'Unknown Persona') for item in items}
 
 
-def build_persona_brands(items: list[dict[str, Any]], total_providers: int) -> list[dict[str, Any]]:
+def build_persona_brands(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     Build per-brand metrics from a list of search result items belonging to one persona.
 
-    Returns a list of brand dicts sorted by rank ascending.
+    ``visibility_score`` is the KPI engine's per-brand score over the persona's
+    successful answers (``0.0`` for a brand named in none of them). Returns a
+    list of brand dicts sorted by rank ascending.
     """
+    visibility = {row['name'].lower(): row['visibility_score'] for row in brand_table(answers_from_rows(items))}
     brand_data: dict[str, dict[str, Any]] = {}
 
     for item in items:
-        provider = item.get('provider', 'unknown')
         brands = item.get('brands', [])
 
         for brand in brands:
@@ -80,39 +82,26 @@ def build_persona_brands(items: list[dict[str, Any]], total_providers: int) -> l
                 brand_data[key] = {
                     'original_name': name,
                     'classification': brand.get('classification', 'other'),
-                    'providers': set(),
                     'mentions': 0,
                     'ranks': [],
                     'sentiments': [],
                 }
 
-            brand_data[key]['providers'].add(provider)
             brand_data[key]['mentions'] += to_int(brand.get('mention_count'), 1)
             brand_data[key]['ranks'].append(to_int(brand.get('rank'), 999))
             if brand.get('sentiment'):
                 brand_data[key]['sentiments'].append(brand.get('sentiment'))
 
     results = []
-    for data in brand_data.values():
+    for key, data in brand_data.items():
         best_rank = min(data['ranks']) if data['ranks'] else 999
-        sentiment_scores = [sentiment_to_score(s) for s in data['sentiments']]
-        avg_sentiment = sum(sentiment_scores) / len(sentiment_scores) if sentiment_scores else 0.0
-        mentions = to_int(data['mentions'], 0)
-
-        visibility = calculate_visibility_score(
-            provider_count=len(data['providers']),
-            total_mentions=mentions,
-            best_rank=best_rank,
-            avg_sentiment_score=float(avg_sentiment),
-            total_providers=total_providers,
-        )
 
         results.append({
             'name': data['original_name'],
             'rank': best_rank,
-            'mention_count': mentions,
+            'mention_count': to_int(data['mentions'], 0),
             'sentiment': sentiment_to_label(data['sentiments']),
-            'visibility_score': visibility,
+            'visibility_score': visibility.get(key.strip(), 0.0),
             'classification': data['classification'],
         })
 
@@ -185,10 +174,6 @@ def get_persona_rankings(keyword: str, query_prompt_id: str | None = None) -> di
     # Use the latest timestamp only
     _, latest_items = latest_run(items)
 
-    # Determine total provider count from the data
-    all_providers = {item.get('provider', 'unknown') for item in latest_items}
-    total_providers = len(all_providers) if all_providers else 1
-
     # Group items by query_prompt_id
     grouped: dict[str, list[dict[str, Any]]] = {}
     for item in latest_items:
@@ -201,7 +186,7 @@ def get_persona_rankings(keyword: str, query_prompt_id: str | None = None) -> di
     # Build per-persona brand lists
     personas = []
     for pid, group_items in grouped.items():
-        brands = build_persona_brands(group_items, total_providers)
+        brands = build_persona_brands(group_items)
         personas.append({
             'persona_id': pid,
             'persona_name': persona_names.get(pid, pid),

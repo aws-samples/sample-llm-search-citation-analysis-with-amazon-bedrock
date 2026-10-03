@@ -3,8 +3,8 @@ Conditional DynamoDB writes: tell a failed ``ConditionExpression`` apart from
 every other error.
 
 A write whose condition no longer holds is an expected outcome (an id already
-taken, a row another writer moved), so callers branch on it; every other
-``ClientError`` propagates unchanged.
+taken, a row another writer moved, a row that is absent), so callers branch on
+it; every other ``ClientError`` propagates unchanged.
 """
 
 from collections.abc import Callable
@@ -32,3 +32,17 @@ def applied_conditionally(write: Callable[[], Any]) -> bool:
             return False
         raise
     return True
+
+
+def delete_existing_item(table: Any, item_id: str) -> bool:
+    """Delete the row whose ``id`` is ``item_id``; ``False`` when no such row exists.
+
+    The ``attribute_exists`` condition makes the existence check and the delete
+    one atomic call, so a missing row is reported instead of silently "deleted".
+    Any other ``ClientError`` propagates.
+    """
+    return applied_conditionally(lambda: table.delete_item(
+        Key={'id': item_id},
+        ConditionExpression='attribute_exists(#id)',
+        ExpressionAttributeNames={'#id': 'id'},
+    ))

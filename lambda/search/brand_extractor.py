@@ -13,7 +13,8 @@ import json
 import logging
 from typing import Any
 
-from shared.industry_presets import DEFAULT_INDUSTRY_ID, get_preset
+from shared.industry_presets import BRAND_NAME_FIELDS, BRAND_POSITION_FIELDS, DEFAULT_INDUSTRY_ID, get_preset
+from shared.kpi_engine import SENTIMENT_LABELS
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
 from shared.prompt_safety import (
@@ -46,9 +47,6 @@ DEFAULT_EXTRACTION_CONFIG = {
 
 # Enough output for a long brand list with a quote and a reason per brand.
 EXTRACTION_MAX_TOKENS = 8000
-
-# The labels the KPI engine counts (shared.kpi_engine); anything else is left unlabelled.
-SENTIMENT_LABELS = ('positive', 'neutral', 'mixed', 'negative')
 
 # The prompt asks for ~200 characters; a longer quote is cut here.
 SENTIMENT_QUOTE_MAX_LENGTH = 300
@@ -299,12 +297,9 @@ ENTITY TYPES TO EXTRACT:
 {classification_instruction}
 
 For each brand found, provide:
-- name: Full brand/company name as mentioned
-- parent_company: Parent company if identifiable (or null)
+{BRAND_NAME_FIELDS}
 - classification: REQUIRED - must be "first_party", "competitor", or "other" based on the rules above
-- mention_count: Number of times mentioned
-- first_position: Character position of first mention (approximate)
-- rank: Order of first appearance (1 = first mentioned){sentiment_instruction}{ranking_instruction}
+{BRAND_POSITION_FIELDS}{sentiment_instruction}{ranking_instruction}
 {custom_additions}
 Return ONLY a valid JSON array with no additional text. Format:
 {_format_example(include_sentiment)}

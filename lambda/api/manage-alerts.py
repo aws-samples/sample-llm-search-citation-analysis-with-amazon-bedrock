@@ -23,8 +23,8 @@ from shared.decorators import (
     route_handler,
     validate,
 )
-from shared.dynamo_conditions import is_conditional_check_failure
 from shared.dynamo_decimal import convert_floats_to_decimal
+from shared.dynamodb_conditions import is_conditional_check_failure
 from shared.kpi_alerts import (
     deterministic_content_change_id,
     resolve_settings,

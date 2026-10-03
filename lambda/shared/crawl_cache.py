@@ -14,6 +14,8 @@ from typing import Any, Literal, NotRequired, TypedDict
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
+from shared.utils import parse_timestamp
+
 logger = logging.getLogger(__name__)
 
 _CACHE_PROJECTION = "#crawled_at, #cache_status, #analysis_status, #block_reason"
@@ -54,18 +56,6 @@ def success_cache_scope(normalized_url: str, keyword: str) -> str:
 def blocked_cache_scope(normalized_url: str) -> str:
     """Return the non-sensitive GSI key for a URL-wide blocked verdict."""
     return f"blocked#{_scope_digest(normalized_url)}"
-
-
-def _parse_timestamp(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return None
-    return parsed.astimezone(UTC)
 
 
 def _error_code(exc: Exception) -> str:
@@ -190,7 +180,7 @@ def _newest_candidate(
     """Return the candidate with the latest valid timestamp, ignoring unparseable rows."""
     timestamped: list[tuple[_Verdict, Mapping[str, object], datetime]] = []
     for status, item in candidates:
-        crawled_at = _parse_timestamp(item.get('crawled_at'))
+        crawled_at = parse_timestamp(item.get('crawled_at'), naive_as_utc=False)
         if crawled_at is not None:
             timestamped.append((status, item, crawled_at))
     return max(timestamped, key=lambda entry: entry[2], default=None)

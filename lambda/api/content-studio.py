@@ -31,7 +31,7 @@ from shared.api_response import (
 )
 from shared.auth import get_caller_identity
 from shared.brand_visibility import classify_brand, load_recent_search_results, tracked_brand_names
-from shared.constants import MAX_KEYWORD_LENGTH
+from shared.constants import MAX_KEYWORD_LENGTH, priority_rank
 from shared.content_brief import (
     CONTENT_OUTPUT_CONTRACT,
     GROUP_BRIEF_MODES,
@@ -52,13 +52,13 @@ from shared.content_brief import (
     validate_template_placeholders,
 )
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
-from shared.dynamo_conditions import is_conditional_check_failure
 from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import (
     BatchGetUnprocessedError,
     batch_get_items,
     query_latest_per_key,
 )
+from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure
 from shared.keyword_groups import MAX_GROUP_ID_LENGTH
 from shared.models import BedrockInvocationError, ModelRole, get_model_tier, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
@@ -521,10 +521,9 @@ def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
             visibility = _analyze_keyword_visibility(results, first_party, competitors)
             ideas.extend(_keyword_ideas(keyword, visibility))
     ideas.extend(_get_seasonal_suggestions(list(keyword_data), config))
-    priority_order = {"high": 0, "medium": 1, "low": 2}
     ideas.sort(
         key=lambda idea: (
-            priority_order.get(idea.get("priority", "low"), 2),
+            priority_rank(idea.get("priority")),
             idea.get("keyword", ""),
         )
     )
@@ -2693,19 +2692,13 @@ def _conditional_recovery_update(
     condition_expression: str,
     values: dict[str, Any],
 ) -> bool:
-    try:
-        dynamodb.Table(CONTENT_STUDIO_TABLE).update_item(
-            Key={"id": content_id},
-            UpdateExpression=update_expression,
-            ConditionExpression=condition_expression,
-            ExpressionAttributeNames={"#status": "status"},
-            ExpressionAttributeValues=values,
-        )
-    except ClientError as error:
-        if is_conditional_check_failure(error):
-            return False
-        raise
-    return True
+    return applied_conditionally(lambda: dynamodb.Table(CONTENT_STUDIO_TABLE).update_item(
+        Key={"id": content_id},
+        UpdateExpression=update_expression,
+        ConditionExpression=condition_expression,
+        ExpressionAttributeNames={"#status": "status"},
+        ExpressionAttributeValues=values,
+    ))
 
 
 def _terminalize_exhausted_row(row: dict[str, Any], now_epoch: int) -> bool:

@@ -23,7 +23,7 @@ import boto3
 from bs4 import BeautifulSoup, Tag
 
 from shared.ai_clients import WebSearchProvider, get_web_search_clients, get_web_search_provider, run_web_search
-from shared.dynamo_decimal import convert_floats_to_decimal
+from shared.dynamo_decimal import convert_floats_to_decimal, positive_int
 from shared.dynamodb_conditions import applied_conditionally
 from shared.keyword_signals import fetch_google_signals
 from shared.llm_json import parse_llm_json
@@ -280,8 +280,7 @@ def _conditional_update(
 
 
 def _event_positive_int(event: dict[str, Any], key: str) -> int | None:
-    value = event.get(key)
-    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else None
+    return positive_int(event.get(key))
 
 
 def _event_attempt(event: dict[str, Any]) -> int | None:

@@ -49,7 +49,7 @@ from shared.api_views import named_item_view
 from shared.auth import get_caller_identity
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
-from shared.dynamo_conditions import is_conditional_check_failure
+from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure
 from shared.env_vars import resolve_table_env
 from shared.research_agent import (
     AGENT_DEFAULT_ROUNDS,
@@ -163,18 +163,15 @@ def _persist_terminal_attempt(
     if require_unowned:
         condition += ' AND attribute_not_exists(execution_arn)'
 
-    try:
-        research_table.update_item(
-            Key={'id': row['id']},
-            UpdateExpression=f"SET {', '.join(sets)}",
-            ConditionExpression=condition,
-            ExpressionAttributeNames=names,
-            ExpressionAttributeValues=values,
-        )
-    except ClientError as exc:
-        if is_conditional_check_failure(exc):
-            return False
-        raise
+    applied = applied_conditionally(lambda: research_table.update_item(
+        Key={'id': row['id']},
+        UpdateExpression=f"SET {', '.join(sets)}",
+        ConditionExpression=condition,
+        ExpressionAttributeNames=names,
+        ExpressionAttributeValues=values,
+    ))
+    if not applied:
+        return False
 
     row.update(result)
     row.update({'status': status, 'error_message': message[:500], 'finished_at': timestamp, 'updated_at': timestamp})

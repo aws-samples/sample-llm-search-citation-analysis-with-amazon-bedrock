@@ -15,7 +15,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, success_response, validation_error
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
-from shared.dynamo_conditions import delete_existing_item, is_conditional_check_failure
+from shared.dynamodb_conditions import delete_existing_item, is_conditional_check_failure
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import (
     KEYWORD_GROUPS_TABLE_ENV,

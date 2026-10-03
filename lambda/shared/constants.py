@@ -17,35 +17,25 @@ specific API's throttling behavior), leave it inline with a comment.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 # ---------------------------------------------------------------------------
-# Legacy visibility score (0-100) weights — used only by /persona-rankings
-# (shared/visibility_score.py) until it moves to the KPI engine. Every other
-# page reports the visibility score of docs/kpi-definitions.md.
-#
-# The weights sum to 100 intentionally:
-#   40 (provider coverage) + 30 (rank) + 20 (mentions) + 10 (sentiment) = 100.
+# Recommendation priority order — how Action Center recommendations, Content
+# Studio ideas, Citation Gaps and the competitor report's outreach targets
+# sort their 'high' / 'medium' / 'low' items. Anything else (a missing
+# priority, or a keyword priority such as 'normal', which none of these items
+# carry) sorts with 'low'.
 # ---------------------------------------------------------------------------
-VISIBILITY_PROVIDER_WEIGHT = 40
-VISIBILITY_RANK_WEIGHT = 30
-VISIBILITY_MENTION_WEIGHT = 20
-VISIBILITY_SENTIMENT_WEIGHT = 10
+RECOMMENDATION_PRIORITY_ORDER: Mapping[object, int] = {'high': 0, 'medium': 1, 'low': 2}
 
-# Rank math caps: treat ranks worse than 10 as "off the list". `11 - rank`
-# produces a 0-10 inverse, divided by 10 to normalize to 0-1.
-VISIBILITY_RANK_CAP = 10
-VISIBILITY_RANK_INVERSE_BASE = 11
 
-# Mention math: logarithmic saturation at 50 mentions. After 50 mentions
-# additional counts stop contributing to the score — prevents one extremely
-# prolific brand from washing out everyone else.
-VISIBILITY_MENTION_SATURATION_COUNT = 50
-# The log base is `saturation + 1` because log(50 + 1) maps 50 mentions to
-# the score's ceiling. Callers use `math.log(n + 1) / math.log(51)`.
-VISIBILITY_MENTION_LOG_BASE = VISIBILITY_MENTION_SATURATION_COUNT + 1
+def priority_rank(priority: object) -> int:
+    """The sort position of a recommendation priority: 0 for 'high' ... 2 for 'low' and anything unknown."""
+    return RECOMMENDATION_PRIORITY_ORDER.get(priority, RECOMMENDATION_PRIORITY_ORDER['low'])
 
-# Sentinel for "not ranked" — flows through best_rank reducers. Any number
-# above VISIBILITY_RANK_CAP gives the same score (zero rank contribution),
-# so 999 is arbitrary but safe.
+
+# Sentinel for "not ranked" — flows through best_rank reducers; any real
+# position is below it, so 999 is arbitrary but safe.
 UNRANKED_SENTINEL = 999
 
 

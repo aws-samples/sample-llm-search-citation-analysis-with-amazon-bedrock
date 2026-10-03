@@ -15,12 +15,13 @@ The helpers under test:
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
 
 from shared import utils
+from testing.assertions import present
 
 
 class TestGetTimestamp:
@@ -141,6 +142,42 @@ class TestWireFormatCompatibility:
         fixed = datetime(2026, 4, 18, 0, 0, 0, tzinfo=UTC)
         formatted = fixed.isoformat().replace('+00:00', 'Z')
         assert formatted == '2026-04-18T00:00:00Z'
+
+
+class TestFormatTimestamp:
+    @pytest.mark.parametrize(('moment', 'expected'), [
+        pytest.param(datetime(2026, 4, 18, 12, 34, 56, 789012, tzinfo=UTC), '2026-04-18T12:34:56.789012Z', id='aware-utc'),
+        pytest.param(datetime(2026, 4, 18, 0, 0, tzinfo=UTC), '2026-04-18T00:00:00.000000Z', id='always-microseconds'),
+        pytest.param(datetime(2026, 4, 18, 1, 30, tzinfo=timezone(timedelta(hours=2))), '2026-04-17T23:30:00.000000Z', id='offset-to-utc'),
+        pytest.param(datetime(2026, 4, 18, 1, 30), '2026-04-18T01:30:00.000000Z', id='naive-read-as-utc'),
+    ])
+    def test_formats_the_utc_wire_timestamp(self, moment, expected) -> None:
+        assert utils.format_timestamp(moment) == expected
+
+
+class TestParseTimestamp:
+    @pytest.mark.parametrize(('value', 'expected'), [
+        pytest.param('2026-04-18T12:34:56.789012Z', datetime(2026, 4, 18, 12, 34, 56, 789012, tzinfo=UTC), id='z-suffix'),
+        pytest.param('2026-04-18T01:30:00+02:00', datetime(2026, 4, 17, 23, 30, tzinfo=UTC), id='offset-to-utc'),
+        pytest.param('2026-04-18T01:30:00', datetime(2026, 4, 18, 1, 30, tzinfo=UTC), id='naive-read-as-utc'),
+        pytest.param('not-a-date', None, id='unparseable'),
+        pytest.param('', None, id='empty'),
+        pytest.param(None, None, id='missing'),
+        pytest.param(20260418, None, id='not-a-string'),
+    ])
+    def test_reads_an_aware_utc_datetime(self, value, expected) -> None:
+        assert utils.parse_timestamp(value) == expected
+
+    def test_offset_results_carry_the_utc_timezone(self) -> None:
+        assert present(utils.parse_timestamp('2026-04-18T01:30:00+02:00')).tzinfo == UTC
+
+    def test_refuses_a_naive_timestamp_when_asked(self) -> None:
+        assert utils.parse_timestamp('2026-04-18T01:30:00', naive_as_utc=False) is None
+
+    def test_round_trips_format_timestamp(self) -> None:
+        moment = datetime(2026, 4, 18, 12, 34, 56, 789012, tzinfo=UTC)
+
+        assert utils.parse_timestamp(utils.format_timestamp(moment)) == moment
 
 
 

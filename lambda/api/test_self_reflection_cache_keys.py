@@ -14,7 +14,12 @@ with the table env vars set and `boto3` patched BEFORE the load
 """
 
 import os
+from datetime import UTC, datetime
+from unittest.mock import patch
 
+import pytest
+
+from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.handler_fixtures import handler_fixture
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -86,3 +91,44 @@ class TestPersonaKeyPrefix:
         prefix = reflection_handler._persona_key_prefix('default')
 
         assert prefix == 'default#', f'Expected trailing delimiter, got {prefix!r}'
+
+
+_NOW = datetime(2026, 9, 20, 12, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def cached_row(reflection_handler):
+    """``check_cache`` at ``_NOW`` against a stored reflection created at ``created_at``."""
+
+    def check(created_at: object) -> dict | None:
+        row = {'keyword_brand': 'kw#brand', 'created_at': created_at}
+        table = fake_table(query={'Items': [row]})
+        with (
+            patch.object(reflection_handler, 'dynamodb', fake_dynamodb_resource(table)),
+            patch.object(reflection_handler, 'utc_now', return_value=_NOW),
+        ):
+            return reflection_handler.check_cache('kw', 'brand', 'default')
+
+    return check
+
+
+class TestCacheFreshness:
+    """A stored reflection is served while it is younger than 24 hours, measured in UTC."""
+
+    @pytest.mark.parametrize('created_at', [
+        pytest.param('2026-09-19T12:30:00.000000Z', id='utc-23.5h-old'),
+        pytest.param('2026-09-19T12:30:00', id='naive-read-as-utc'),
+        pytest.param('2026-09-19T10:00:00-05:00', id='offset-21h-old-in-utc'),
+    ])
+    def test_serves_a_reflection_younger_than_a_day(self, cached_row, created_at):
+        assert cached_row(created_at) == {'keyword_brand': 'kw#brand', 'created_at': created_at}
+
+    @pytest.mark.parametrize('created_at', [
+        pytest.param('2026-09-19T11:30:00.000000Z', id='utc-24.5h-old'),
+        pytest.param('2026-09-19T15:00:00+05:00', id='offset-27h-old-in-utc'),
+        pytest.param('not-a-date', id='unparseable'),
+        pytest.param(None, id='missing'),
+        pytest.param(20260919, id='not-a-string'),
+    ])
+    def test_misses_a_reflection_that_is_stale_or_undated(self, cached_row, created_at):
+        assert cached_row(created_at) is None

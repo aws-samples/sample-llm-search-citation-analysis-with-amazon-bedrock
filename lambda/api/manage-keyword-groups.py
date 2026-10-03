@@ -33,8 +33,8 @@ sys.path.insert(0, '/opt/python')
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.api_views import named_item_view
 from shared.decorators import api_handler, parse_json_body, route_handler, validate
-from shared.dynamo_conditions import is_conditional_check_failure
 from shared.dynamodb_batch import collect_all_items
+from shared.dynamodb_conditions import is_conditional_check_failure
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import (
     ACTIVE_KEYWORD_STATUS,

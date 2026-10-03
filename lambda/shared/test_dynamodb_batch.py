@@ -12,11 +12,13 @@ uses a bounded executor, projects only caller-requested attributes, and treats
 one failed partition as missing without discarding successful partitions.
 
 ``collect_all_items`` concatenates pages in order and feeds each page's
-``LastEvaluatedKey`` into the next request.
+``LastEvaluatedKey`` into the next request; ``collect_capped_items`` does the
+same for at most ``max_pages`` pages and reports whether the cap cut it short.
 """
 
 from __future__ import annotations
 
+import functools
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -265,10 +267,14 @@ class TestCollectAllItems:
 
         assert dynamodb_batch.collect_all_items(operation) == expected
 
-    def test_passes_each_last_key_to_the_next_page_request(self) -> None:
+    @pytest.mark.parametrize('collect', [
+        pytest.param(dynamodb_batch.collect_all_items, id='every-page'),
+        pytest.param(functools.partial(dynamodb_batch.collect_capped_items, max_pages=5), id='page-capped'),
+    ])
+    def test_passes_each_last_key_to_the_next_page_request(self, collect) -> None:
         operation = _paged_operation(([], {'id': 1}), ([], None))
 
-        dynamodb_batch.collect_all_items(operation, IndexName="StatusIndex")
+        collect(operation, IndexName="StatusIndex")
 
         assert [page_call.kwargs for page_call in operation.call_args_list] == [
             {'IndexName': 'StatusIndex'},
@@ -291,3 +297,21 @@ class TestCollectAllItems:
                 ExclusiveStartKey={"pk": "first"},
             ),
         ]
+
+
+class TestCollectCappedItems:
+    @pytest.mark.parametrize('max_pages', [pytest.param(5, id='under-the-cap'), pytest.param(2, id='exactly-at-the-cap')])
+    def test_concatenates_the_pages_until_one_has_no_last_evaluated_key(self, max_pages: int) -> None:
+        operation = _paged_operation(([{'id': 1}], {'id': 1}), ([{'id': 2}], None))
+
+        assert dynamodb_batch.collect_capped_items(operation, max_pages) == ([{'id': 1}, {'id': 2}], False)
+
+    def test_stops_at_the_cap_and_reports_the_read_as_truncated(self) -> None:
+        operation = MagicMock(return_value={'Items': [{'id': 'x'}], 'LastEvaluatedKey': {'id': 'x'}})
+
+        items, truncated = dynamodb_batch.collect_capped_items(operation, 3)
+
+        assert (operation.call_count, len(items), truncated) == (3, 3, True)
+
+    def test_reads_a_page_without_items_as_empty(self) -> None:
+        assert dynamodb_batch.collect_capped_items(MagicMock(side_effect=[{}]), 1) == ([], False)

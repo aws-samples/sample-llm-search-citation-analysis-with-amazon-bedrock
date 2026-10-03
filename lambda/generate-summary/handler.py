@@ -17,6 +17,7 @@ from typing import Any
 import boto3
 from map_run_results import load_keyword_results
 
+from shared.dynamo_decimal import positive_int
 from shared.provider_counts import add_error_categories, empty_provider_counts
 from shared.step_function_response import log_error
 from shared.utils import get_timestamp, get_timestamp_compact
@@ -147,7 +148,7 @@ def merge_raw_provider_results(stats: dict[str, Any], results: list[dict[str, An
 
 def _count(value: Any) -> int:
     """A non-negative integer count from a compact child result; anything else counts as zero."""
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+    return positive_int(value) or 0
 
 
 def merge_citation_counts(stats: dict[str, Any], result: dict[str, Any]) -> None:

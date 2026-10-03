@@ -7,12 +7,11 @@ from typing import Any
 import pytest
 from hypothesis import given
 
-from shared.kpi_engine import answers_from_rows, brand_kpis, engine_breakdown
+from shared.kpi_engine import SENTIMENT_LABELS, answers_from_rows, brand_kpis, engine_breakdown
 from shared.sentiment_examples import (
     ANSWER_TEXT_CAP,
     EXAMPLE_ATTRIBUTE_NAMES,
     EXAMPLE_PROJECTION,
-    SENTIMENT_LABELS,
     sentiment_examples,
 )
 from testing.sentiment_examples_fixtures import OLDER_RUN, RUN, STORED_ROWS, stored_answer, stored_brand

@@ -23,6 +23,8 @@ from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler, validate
 from shared.industry_presets import (
+    BRAND_NAME_FIELDS,
+    BRAND_POSITION_FIELDS,
     DEFAULT_INDUSTRY_ID,
     IndustryPreset,
 )
@@ -114,11 +116,8 @@ ENTITY TYPES TO EXTRACT:
 {{{{TRACKED_BRANDS}}}}
 
 For each brand found, provide:
-- name: Full brand/company name as mentioned
-- parent_company: Parent company if identifiable (or null)
-- mention_count: Number of times mentioned
-- first_position: Character position of first mention (approximate)
-- rank: Order of first appearance (1 = first mentioned)
+{BRAND_NAME_FIELDS}
+{BRAND_POSITION_FIELDS}
 {{{{SENTIMENT_FIELDS}}}}
 {{{{RANKING_CONTEXT_FIELD}}}}
 

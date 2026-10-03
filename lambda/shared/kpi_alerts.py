@@ -11,12 +11,13 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Iterable, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from shared.constants import UNRANKED_SENTINEL
 from shared.kpi_engine import COMPETITOR, Answer, brand_kpis, brand_table
 from shared.string_lists import normalize_string_list
+from shared.utils import parse_timestamp
 from shared.visibility_score import finite_number
 
 RETENTION_DAYS = 365
@@ -161,9 +162,9 @@ def resolve_settings(item: Any) -> dict[str, Any]:
 
 def ttl_for_timestamp(timestamp: str, days: int = RETENTION_DAYS) -> int:
     """Return a deterministic epoch TTL relative to a canonical run timestamp."""
-    parsed = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
+    parsed = parse_timestamp(timestamp)
+    if parsed is None:
+        raise ValueError(f'Invalid isoformat string: {timestamp!r}')
     return int((parsed + timedelta(days=days)).timestamp())
 
 
