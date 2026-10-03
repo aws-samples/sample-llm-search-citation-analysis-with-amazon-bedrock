@@ -4,7 +4,7 @@ import type {
 import { isRecord } from '../types/domain/keywordDecoders';
 import { reportScopeParams } from '../components/ui/reportScope';
 import {
-  fetchErrors, isAnalysisPayload, useAnalysisEndpoint 
+  brandFilterParams, fetchErrors, isAnalysisPayload, useAnalysisEndpoint
 } from './useAnalysisEndpoint';
 
 class VisibilityFetchError extends Error {
@@ -29,9 +29,7 @@ const visibilityMetricsEndpoint = {
   isValidResponse: isVisibilityResponse,
   ...fetchErrors(VisibilityFetchError),
   buildRequest: (scope: ReportScope, queryPromptId?: string, brand?: string) => {
-    const params = new URLSearchParams(reportScopeParams(scope));
-    if (brand) params.append('brand', brand);
-    if (queryPromptId) params.append('query_prompt_id', queryPromptId);
+    const params = brandFilterParams(reportScopeParams(scope), brand, queryPromptId);
     return {
       path: '/visibility',
       params,

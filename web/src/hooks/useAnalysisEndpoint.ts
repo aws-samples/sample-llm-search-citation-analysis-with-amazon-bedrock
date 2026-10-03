@@ -77,6 +77,18 @@ export function isAnalysisPayload(data: unknown): data is Record<string, unknown
   return isRecord(data) && !('error' in data);
 }
 
+/** Query parameters plus the optional brand and persona (query prompt) filters, when set. */
+export function brandFilterParams(
+  base: Record<string, string>,
+  brand?: string,
+  queryPromptId?: string
+): URLSearchParams {
+  const params = new URLSearchParams(base);
+  if (brand) params.append('brand', brand);
+  if (queryPromptId) params.append('query_prompt_id', queryPromptId);
+  return params;
+}
+
 /**
  * Performs one analysis request and returns its validated body. Throws the
  * contract's own errors on a non-OK status, a 200 `{error}` body (unless the

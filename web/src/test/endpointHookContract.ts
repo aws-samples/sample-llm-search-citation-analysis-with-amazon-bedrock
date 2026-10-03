@@ -85,6 +85,21 @@ export function describeEndpointHookContract<THook extends EndpointHookState<TRe
     ...Object.fromEntries([fetchName, ...otherFunctions].map((name) => [name, anyFunction])),
   });
 
+  /** Renders the hook over a mocked endpoint and runs one fetch with `args`. */
+  const fetchOnce = async (
+    response: TResponse,
+    args: TArgs,
+    options?: EndpointMockFetchOptions<TResponse>
+  ) => {
+    mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(response, options));
+    const { result } = renderHook(useHook);
+    const returned = await act(() => fetch(result.current, ...args));
+    return {
+      result,
+      returned,
+    };
+  };
+
   describe(fetchName, () => {
     it(`sets loading true while the ${subject} request is in flight`, async () => {
       const deferred = deferAuthenticatedFetch();
@@ -102,19 +117,15 @@ export function describeEndpointHookContract<THook extends EndpointHookState<TRe
     });
 
     it.each(requests)('requests %s when %s', async (url, _condition, args) => {
-      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(defaultResponse));
-      const { result } = renderHook(useHook);
-
-      await act(() => fetch(result.current, ...args));
+      await fetchOnce(defaultResponse, args);
 
       expect(mockAuthenticatedFetch).toHaveBeenCalledWith(...expectedRequest(url));
     });
 
     it.each(successes)(`returns and stores the %s when the response passes the ${subject} type guard`, async (_payload, response, args) => {
-      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(response));
-      const { result } = renderHook(useHook);
-
-      const returned = await act(() => fetch(result.current, ...args));
+      const {
+        result, returned
+      } = await fetchOnce(response, args);
 
       expect(returned).toStrictEqual(response);
       expect(result.current).toStrictEqual(hookState({
@@ -125,10 +136,9 @@ export function describeEndpointHookContract<THook extends EndpointHookState<TRe
     });
 
     it.each(failures)(`resolves null and reports "%s" when the ${subject} %s`, async (message, _failure, options) => {
-      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(defaultResponse, options));
-      const { result } = renderHook(useHook);
-
-      const returned = await act(() => fetch(result.current, ...defaultArgs));
+      const {
+        result, returned
+      } = await fetchOnce(defaultResponse, defaultArgs, options);
 
       expect(returned).toBeNull();
       expect(result.current).toStrictEqual(hookState({

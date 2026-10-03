@@ -3,7 +3,7 @@ import type {
   SelfReflectionResponse, SelfReflectionResult 
 } from '../types';
 import {
-  fetchErrors, isAnalysisPayload, useAnalysisEndpoint 
+  brandFilterParams, fetchErrors, isAnalysisPayload, useAnalysisEndpoint
 } from './useAnalysisEndpoint';
 
 class SelfReflectionFetchError extends Error {
@@ -60,9 +60,7 @@ export function useSelfReflection() {
   } = useAnalysisEndpoint(reflectionTriggerEndpoint);
 
   const fetchReflections = useCallback(async (keyword: string, brand?: string, queryPromptId?: string): Promise<SelfReflectionResult[]> => {
-    const params = new URLSearchParams({ keyword });
-    if (brand) params.append('brand', brand);
-    if (queryPromptId) params.append('query_prompt_id', queryPromptId);
+    const params = brandFilterParams({ keyword }, brand, queryPromptId);
 
     const json = await runRequest({
       path: '/self-reflection',

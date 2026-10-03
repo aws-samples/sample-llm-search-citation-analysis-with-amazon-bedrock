@@ -1,6 +1,7 @@
 import type {
   BrandConfig, IndustryPresets
 } from '../types';
+import { DEFAULT_PRESETS } from '../constants/brandConfigDefaults';
 
 const BRAND_CONFIG_DEFAULTS: BrandConfig = {
   industry: 'hotels',
@@ -52,19 +53,11 @@ export const HOTEL_PRESETS = {
 
 export const GENERAL_AND_CUSTOM_PRESETS = {
   general: {
-    name: 'General',
-    description: 'Track brands and companies in any industry',
-    entity_types: [],
-    example_brands: [],
-    extraction_focus: 'brand and company recommendations',
+    ...DEFAULT_PRESETS.general,
     default_prompt: 'Extract general brand and company mentions.',
   },
   custom: {
-    name: 'Custom Industry',
-    description: 'Define your own industry and brand types',
-    entity_types: [],
-    example_brands: [],
-    extraction_focus: 'brand and company recommendations',
+    ...DEFAULT_PRESETS.custom,
     default_prompt: 'Extract custom brand and company mentions.',
   },
 } satisfies IndustryPresets;
