@@ -14,6 +14,7 @@ from shared.scope_params import SCOPE_KEYWORDS_CAP
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.module_loader import load_handler_module
+from testing.report_scope_fixtures import REPORT_TABLES_ENV
 from testing.sentiment_examples_fixtures import (
     OLDER_RUN,
     RUN,
@@ -25,13 +26,8 @@ from testing.sentiment_examples_fixtures import (
 )
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
-_ENV = {
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
-    'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
-    'CORS_ORIGIN_PARAM': '',
-}
 
-sentiment_handler = handler_fixture(_API_DIR, 'get-sentiment-examples.py', 'get_sentiment_examples_under_test', env=_ENV)
+sentiment_handler = handler_fixture(_API_DIR, 'get-sentiment-examples.py', 'get_sentiment_examples_under_test', env=REPORT_TABLES_ENV)
 
 
 class KeywordsReadFailure(Exception):
@@ -144,7 +140,7 @@ class TestReads:
 
     def test_builds_its_dynamodb_resource_with_the_pooled_scope_helper(self) -> None:
         pooled = MagicMock(name='pooled-scope-resource')
-        with patch.dict(os.environ, _ENV), patch.object(scope_params, 'scoped_dynamodb_resource', return_value=pooled):
+        with patch.dict(os.environ, REPORT_TABLES_ENV), patch.object(scope_params, 'scoped_dynamodb_resource', return_value=pooled):
             loaded = load_handler_module(_API_DIR, 'get-sentiment-examples.py', 'get_sentiment_examples_pooled_under_test')
         sys.modules.pop('get_sentiment_examples_pooled_under_test', None)
 
