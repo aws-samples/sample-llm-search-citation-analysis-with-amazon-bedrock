@@ -30,7 +30,6 @@ interface TriggerAnalysisResponse {
   execution_arn: string;
   execution_name: string;
   keywords_count: number;
-  error?: string;
 }
 
 /** Result returned from triggerAnalysis */

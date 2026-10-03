@@ -7,9 +7,7 @@ import { useCompetitorGap } from './useCompetitorGap';
 vi.mock('../../../hooks/useCompetitorRollup', () => ({useCompetitorRollup: vi.fn()}));
 
 import { useCompetitorRollup } from '../../../hooks/useCompetitorRollup';
-import {
-  mockAllCompetitorsRollup, mockSingleCompetitorRollup
-} from '../../../hooks/useCompetitorRollup-fixtures';
+import { mockSingleCompetitorRollup } from '../../../hooks/useCompetitorRollup-fixtures';
 import type { CompetitorReportResponse } from '../../../api/reports';
 
 const mockHook = useCompetitorRollup as ReturnType<typeof vi.fn>;
@@ -43,16 +41,6 @@ describe('useCompetitorGap', () => {
   it('exposes the narrowed rollup field for single-competitor responses', () => {
     const { result } = renderHook(() => useCompetitorGap('Adidas'));
     expect(result.current.rollup?.competitor).toBe('Adidas');
-  });
-
-  it('returns null rollup for all-competitors response shape', () => {
-    mockRollupHook({
-      ...mockAllCompetitorsRollup,
-      competitors: ['Adidas'],
-      rollups: [],
-    });
-    const { result } = renderHook(() => useCompetitorGap('Adidas'));
-    expect(result.current.rollup).toBeNull();
   });
 
   it('reports ready=true once the rollup has loaded for a competitor', () => {

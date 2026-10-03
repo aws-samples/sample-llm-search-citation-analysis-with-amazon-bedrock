@@ -5,23 +5,6 @@
  */
 
 /**
- * Result from expanding a single brand.
- * Contains suggested sub-brands and variations.
- */
-export interface BrandExpansionResult {
-  /** The main brand that was expanded */
-  main_brand: string;
-  /** Parent company if identified */
-  parent_company?: string | null;
-  /** Suggested sub-brands and variations */
-  suggestions: string[];
-  /** Additional notes about the expansion */
-  notes?: string;
-  /** Error message if expansion failed */
-  error?: string;
-}
-
-/**
  * Result from expanding all tracked brands.
  * Contains suggestions for missing sub-brands across all brands.
  */
@@ -36,7 +19,6 @@ export interface BrandExpansionAllResult {
   duplicates_found: Array<{
     brand: string;
     duplicate_of: string;
-    reason: string;
   }>;
   /** Additional notes */
   notes?: string;

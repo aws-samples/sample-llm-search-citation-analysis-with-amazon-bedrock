@@ -15,13 +15,11 @@ const basePrompt: PromptInsight = {
     mentions: 10,
     best_rank: 1,
     provider_coverage: 75,
-    providers: ['openai'] 
   },
   competitors: {
     mentions: 5,
     best_rank: 3,
     provider_coverage: 50,
-    providers: ['perplexity'] 
   },
 };
 

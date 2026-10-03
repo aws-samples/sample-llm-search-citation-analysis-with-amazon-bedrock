@@ -430,7 +430,6 @@ export function useContentChanges(groupId: string) {
     error,
     recording,
     recordOutcome,
-    refresh,
     recordContentChange,
   };
 }

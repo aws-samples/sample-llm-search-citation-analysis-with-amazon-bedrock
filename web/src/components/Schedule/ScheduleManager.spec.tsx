@@ -96,13 +96,7 @@ describe('ScheduleManager', () => {
     mockCreateSchedule.mockResolvedValue(weeklySchedule);
     mockUpdateSchedule.mockResolvedValue(weeklySchedule);
     mockDeleteSchedule.mockResolvedValue();
-    mockRunSchedule.mockResolvedValue({
-      execution_arn: 'arn',
-      execution_name: 'schedule-run-1',
-      schedule_id: weeklySchedule.id,
-      scope_summary: '1 group(s)',
-      message: 'Analysis started for Hotel Coruña — weekly (1 group(s))',
-    });
+    mockRunSchedule.mockResolvedValue({message: 'Analysis started for Hotel Coruña — weekly (1 group(s))',});
   });
 
   describe('schedule list', () => {

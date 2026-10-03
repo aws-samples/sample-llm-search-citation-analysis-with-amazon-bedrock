@@ -101,7 +101,6 @@ interface PromptBrandData {
   mentions: number;
   best_rank: number | null;
   provider_coverage: number;
-  providers: string[];
 }
 
 type PromptStatus = 'winning' | 'losing' | 'opportunity' | 'neutral';
@@ -177,7 +176,7 @@ export interface CitationGapsResponse {
   total_high_priority?: number;
 }
 
-export type RecommendationStatus =
+type RecommendationStatus =
   | 'new'
   | 'in_progress'
   | 'done'
@@ -281,11 +280,7 @@ export interface HistoricalTrendsResponse {
 }
 
 interface PersonaBrandRanking {
-  name: string;
   rank: number;
-  mention_count: number;
-  sentiment: string;
-  visibility_score: number;
   classification: BrandClassification;
 }
 
@@ -318,16 +313,12 @@ export interface ContentRecommendation {
 export interface SelfReflectionResult {
   keyword: string;
   brand: string;
-  query_prompt_id: string;
-  query_prompt_name: string;
   current_rank: number | null;
   explanation: string;
   content_contributions: string;
   competitor_advantages: string;
   missing_data_points: string;
   recommendations: ContentRecommendation[];
-  industry: string;
-  created_at: string;
 }
 
 export type SelfReflectionResponse = SelfReflectionResult;

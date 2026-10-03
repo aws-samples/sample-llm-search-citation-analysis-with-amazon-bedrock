@@ -2,7 +2,6 @@ import {
   describe, expect, it
 } from 'vitest';
 import {
-  PRESETS_WITHOUT_CUSTOM,
   renderLoadedBrandConfig,
   runOnLoadedBrandConfig,
 } from './useBrandConfig-fixtures';
@@ -31,10 +30,4 @@ describe('useBrandConfig General defaults', () => {
     }
   );
 
-  it('returns an empty prompt when unknown industry has no Custom preset', async () => {
-    const presetsResponse = PRESETS_WITHOUT_CUSTOM;
-    const { result } = await renderLoadedBrandConfig({ presetsResponse });
-
-    expect(result.current.getPromptForIndustry('legacy-industry')).toBe('');
-  });
 });

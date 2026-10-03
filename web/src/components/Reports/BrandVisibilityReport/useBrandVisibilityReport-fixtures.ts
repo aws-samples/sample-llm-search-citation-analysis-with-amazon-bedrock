@@ -9,8 +9,6 @@ type ReportData = ReturnType<typeof useBrandVisibilityReport>;
 /** Every slice of the report settled and empty, unless overridden. */
 function settledReport(overrides: Partial<ReportData>): ReportData {
   return {
-    scope: { kind: 'all' },
-    keyword: null,
     visibility: null,
     visibilityLoading: false,
     visibilityError: null,
@@ -28,11 +26,6 @@ function settledReport(overrides: Partial<ReportData>): ReportData {
 /** The per-keyword report of "best running shoes": `buildVisibility()` and a two-day trend. */
 export function keywordReportData(): ReportData {
   return settledReport({
-    scope: {
-      kind: 'keyword',
-      keyword: 'best running shoes',
-    },
-    keyword: 'best running shoes',
     visibility: buildVisibility(),
     trends: buildTrendView(),
   });
@@ -57,11 +50,5 @@ export function allKeywordsReportData(): ReportData {
 
 /** The group report of "hotel-sol": `buildHistory()`. */
 export function groupReportData(): ReportData {
-  return settledReport({
-    scope: {
-      kind: 'group',
-      groupId: 'hotel-sol',
-    },
-    groupHistory: buildHistory(),
-  });
+  return settledReport({ groupHistory: buildHistory() });
 }

@@ -33,7 +33,6 @@ export function buildContentStudioHookResult(
     generateContentBatch: vi.fn(),
     markViewed: vi.fn(),
     deleteContent: vi.fn(),
-    refreshGeneratingItems: vi.fn(),
     ...overrides,
   };
 }

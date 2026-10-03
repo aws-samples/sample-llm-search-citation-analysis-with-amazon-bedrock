@@ -7,8 +7,7 @@ function isCompetitorReportResponse(
   data: unknown,
 ): data is CompetitorReportResponse {
   if (!isAnalysisPayload(data)) return false;
-  // Single-competitor variant has `rollup`; all-competitors has `rollups`.
-  return 'rollup' in data || 'rollups' in data;
+  return 'rollup' in data;
 }
 
 const competitorRollupEndpoint = {
@@ -16,9 +15,11 @@ const competitorRollupEndpoint = {
   logMessage: '[competitorRollup] Error:',
   isValidResponse: isCompetitorReportResponse,
   ...apiRequestErrors('Failed to fetch competitor rollup'),
-  buildRequest: (competitor?: string, keywordLimit = 50) => {
-    const params = new URLSearchParams({ keyword_limit: keywordLimit.toString() });
-    if (competitor) params.append('competitor', competitor);
+  buildRequest: (competitor: string, keywordLimit = 50) => {
+    const params = new URLSearchParams({
+      keyword_limit: keywordLimit.toString(),
+      competitor,
+    });
     return {
       path: '/reports/competitor',
       params,

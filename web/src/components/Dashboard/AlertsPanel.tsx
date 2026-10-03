@@ -19,13 +19,11 @@ const ALERT_TYPE_LABELS: Record<AlertType, string> = {
 const SEVERITY_LABELS: Record<AlertSeverity, string> = {
   info: 'Info',
   warning: 'Warning',
-  critical: 'Critical',
 };
 
 const SEVERITY_CLASSES: Record<AlertSeverity, string> = {
   info: 'border-blue-200 bg-blue-50 text-blue-800',
   warning: 'border-amber-200 bg-amber-50 text-amber-800',
-  critical: 'border-red-300 bg-red-50 text-red-800',
 };
 
 function countLabel(count: number): string {

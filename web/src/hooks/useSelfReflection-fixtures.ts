@@ -4,8 +4,6 @@ import type { SelfReflectionResult } from '../types';
 export const mockSelfReflection: SelfReflectionResult = {
   keyword: 'hotels in madrid',
   brand: 'Hotel Sol',
-  query_prompt_id: 'prompt-family',
-  query_prompt_name: 'Family traveller',
   current_rank: 2,
   explanation: 'Hotel Sol is cited for its family rooms but not its pool.',
   content_contributions: 'Family room pages',
@@ -17,6 +15,4 @@ export const mockSelfReflection: SelfReflectionResult = {
     priority: 'high',
     content_type: 'guide',
   }],
-  industry: 'hospitality',
-  created_at: '2026-03-01T10:00:00Z',
 };

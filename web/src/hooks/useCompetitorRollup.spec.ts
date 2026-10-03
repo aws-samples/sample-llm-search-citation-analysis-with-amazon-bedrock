@@ -3,9 +3,7 @@ import {
 } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useCompetitorRollup } from './useCompetitorRollup';
-import {
-  mockSingleCompetitorRollup, mockAllCompetitorsRollup 
-} from './useCompetitorRollup-fixtures';
+import { mockSingleCompetitorRollup } from './useCompetitorRollup-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
 import { idleEndpointState } from '../test/idleEndpointState';
 import {failedToLoadOnBackendError} from './useAnalysisEndpoint-failure-fixtures';
@@ -32,11 +30,9 @@ describe('useCompetitorRollup', () => {
       ['https://api.test.com/reports/competitor?keyword_limit=50&competitor=Adidas', 'a competitor is given', ['Adidas']],
       ['https://api.test.com/reports/competitor?keyword_limit=50&competitor=Brand+%26+Co', 'the competitor name has special characters', ['Brand & Co']],
       ['https://api.test.com/reports/competitor?keyword_limit=75&competitor=Adidas', 'a keyword limit is given', ['Adidas', 75]],
-      ['https://api.test.com/reports/competitor?keyword_limit=50', 'no competitor is given', []],
     ],
     successes: [
       ['single-competitor rollup', mockSingleCompetitorRollup, ['Adidas']],
-      ['all-competitors rollup', mockAllCompetitorsRollup, []],
     ],
     failures: [
       ['Invalid visibility request', 'request is rejected with a 400', {
@@ -44,7 +40,7 @@ describe('useCompetitorRollup', () => {
         failStatus: 400,
       }],
       failedToLoadOnBackendError('Unknown competitor'),
-      ['Invalid visibility request', 'payload has neither rollup nor rollups', { invalidResponse: true }],
+      ['Invalid visibility request', 'payload has no rollup', { invalidResponse: true }],
       ['Invalid visibility request', 'payload is null', { nullResponse: true }],
     ],
     loggedHttpError: {

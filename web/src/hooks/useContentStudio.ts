@@ -385,15 +385,6 @@ export function useContentStudio() {
     }
   }, [history]);
 
-  const refreshGeneratingItems = useCallback(() => {
-    stopItemPolling();
-    pollingFailureCountsRef.current.clear();
-    if (!mountedRef.current) return;
-    setError(null);
-    setPollingError(null);
-    startItemPolling();
-  }, [startItemPolling, stopItemPolling]);
-
   return {
     ideas,
     history,
@@ -408,6 +399,5 @@ export function useContentStudio() {
     fetchHistory,
     markViewed,
     deleteContent,
-    refreshGeneratingItems,
   };
 }

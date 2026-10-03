@@ -47,12 +47,10 @@ export const HOTELS_WINNING_PROMPT: PromptInsight = {
     mentions: 5,
     best_rank: 1,
     provider_coverage: 100,
-    providers: ['openai'],
   },
   competitors: {
     mentions: 3,
     best_rank: 2,
     provider_coverage: 100,
-    providers: ['openai'],
   },
 };

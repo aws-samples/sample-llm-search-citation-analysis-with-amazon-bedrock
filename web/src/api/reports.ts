@@ -80,26 +80,8 @@ export interface CompetitorRollup {
   outreach_targets: CompetitorExclusiveSource[];
 }
 
-export interface CompetitorReportSingleResponse {
-  generated_at: string;
+/** `GET /reports/competitor?competitor=…`: the rollup of that one competitor. */
+export interface CompetitorReportResponse {
   keywords_analyzed: number;
-  competitor: string;
   rollup: CompetitorRollup;
-}
-
-export interface CompetitorReportAllResponse {
-  generated_at: string;
-  keywords_analyzed: number;
-  competitors: string[];
-  rollups: CompetitorRollup[];
-}
-
-export type CompetitorReportResponse =
-  | CompetitorReportSingleResponse
-  | CompetitorReportAllResponse;
-
-export function isSingleCompetitorResponse(
-  response: CompetitorReportResponse,
-): response is CompetitorReportSingleResponse {
-  return 'rollup' in response;
 }

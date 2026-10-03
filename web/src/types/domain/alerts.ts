@@ -9,7 +9,7 @@ export type AlertType =
   | 'keyword_lost_mention'
   | 'improvement_after_content_change';
 
-export type AlertSeverity = 'info' | 'warning' | 'critical';
+export type AlertSeverity = 'info' | 'warning';
 export type AlertStatus = 'open' | 'acknowledged';
 export type AlertStatusFilter = AlertStatus | 'all';
 export type AlertMetricValue = number | string | boolean | null;
@@ -176,8 +176,7 @@ function isAlertType(candidate: unknown): candidate is AlertType {
 
 function isAlertSeverity(candidate: unknown): candidate is AlertSeverity {
   return candidate === 'info'
-    || candidate === 'warning'
-    || candidate === 'critical';
+    || candidate === 'warning';
 }
 
 function isAlertStatus(candidate: unknown): candidate is AlertStatus {

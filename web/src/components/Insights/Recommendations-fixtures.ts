@@ -15,7 +15,6 @@ export function buildRecommendationsHookResult(
     loading: false,
     error: null,
     fetchRecommendations: vi.fn(),
-    updateRecommendationStatus: vi.fn(),
     ...overrides,
   };
 }

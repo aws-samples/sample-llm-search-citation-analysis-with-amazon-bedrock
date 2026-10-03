@@ -48,8 +48,6 @@ export function useBrandVisibilityReport(scope: ReportScope, days: number) {
   const ready = useReportReady(isKeyword ? [visibility, trends] : [isGroup ? groupHistory : trends]);
 
   return {
-    scope,
-    keyword: isKeyword ? scope.keyword : null,
     visibility: isKeyword ? visibility.data : null,
     visibilityLoading: visibility.loading,
     visibilityError: visibility.error,

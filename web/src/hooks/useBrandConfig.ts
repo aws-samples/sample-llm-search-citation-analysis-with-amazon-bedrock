@@ -5,23 +5,15 @@ import {
   API_BASE_URL, authenticatedFetch, ApiRequestError
 } from '../infrastructure';
 import type {
-  BrandConfig, IndustryPresets, BrandExpansionResult, BrandExpansionAllResult, CompetitorDiscoveryResult
+  BrandConfig, IndustryPresets, BrandExpansionAllResult, CompetitorDiscoveryResult
 } from '../types';
 import {
-  DEFAULT_BRAND_INDUSTRY, DEFAULT_CONFIG, DEFAULT_PRESETS, resolveBrandIndustryPreset
+  DEFAULT_BRAND_INDUSTRY, DEFAULT_CONFIG, DEFAULT_PRESETS
 } from '../constants/brandConfigDefaults';
 
 interface BrandConfigResponse {config?: BrandConfig;}
 
 interface PresetsResponse {presets: IndustryPresets;}
-
-interface ExpandBrandResponse {
-  main_brand: string;
-  parent_company?: string | null;
-  suggestions?: string[];
-  notes?: string;
-  error?: string;
-}
 
 interface ExpandAllBrandsResponse {
   existing_brands?: string[];
@@ -30,7 +22,6 @@ interface ExpandAllBrandsResponse {
   duplicates_found?: Array<{
     brand: string;
     duplicate_of: string;
-    reason: string
   }>;
   notes?: string;
   error?: string;
@@ -48,12 +39,6 @@ export interface BrandConfigApi {
   fetchConfig: () => Promise<Response>;
   fetchPresets: () => Promise<Response>;
   saveConfig: (config: Partial<BrandConfig>) => Promise<Response>;
-  deleteConfig: () => Promise<Response>;
-  expandBrand: (body: {
-    brand_name: string;
-    industry: string;
-    existing_brands: string[]
-  }) => Promise<Response>;
   expandAllBrands: (body: {
     existing_brands: string[];
     industry: string;
@@ -81,8 +66,6 @@ const defaultBrandConfigApi: BrandConfigApi = {
   fetchConfig: () => authenticatedFetch(BRAND_CONFIG_URL),
   fetchPresets: () => authenticatedFetch(`${BRAND_CONFIG_URL}/presets`),
   saveConfig: (config) => postBrandConfig('', config),
-  deleteConfig: () => authenticatedFetch(BRAND_CONFIG_URL, { method: 'DELETE' }),
-  expandBrand: (body) => postBrandConfig('/expand', body),
   expandAllBrands: (body) => postBrandConfig('/expand-all', body),
   findCompetitors: (body) => postBrandConfig('/find-competitors', body),
 };
@@ -125,7 +108,6 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
   const [config, setConfig] = useState<BrandConfig>(DEFAULT_CONFIG);
   const [presets, setPresets] = useState<IndustryPresets | null>(DEFAULT_PRESETS);
   const [loading, setLoading] = useState(true);
-  const [error] = useState<string | null>(null);
   const expansionIndustry = config.industry === '' ? DEFAULT_BRAND_INDUSTRY : config.industry;
 
   const fetchConfig = useCallback(async () => {
@@ -198,48 +180,6 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
     await adoptServerConfig(() => api.saveConfig(newConfig), 'Could not save to API, config saved locally only');
   }, [config, api, adoptServerConfig]);
 
-  const resetConfig = useCallback(async () => {
-    setConfig(DEFAULT_CONFIG);
-    await adoptServerConfig(() => api.deleteConfig(), 'Could not reset via API, using local defaults');
-  }, [api, adoptServerConfig]);
-
-  const getPromptForIndustry = useCallback(
-    (industryKey: string): string => {
-      if (config.industry_prompts[industryKey]) {
-        return config.industry_prompts[industryKey];
-      }
-      return resolveBrandIndustryPreset(presets, industryKey)?.default_prompt ?? '';
-    },
-    [config, presets]
-  );
-
-  const expandBrand = useCallback(
-    async (brandName: string, existingBrands: string[] = []): Promise<BrandExpansionResult> => runExpansion<ExpandBrandResponse, BrandExpansionResult>(
-      () => api.expandBrand({
-        brand_name: brandName,
-        industry: expansionIndustry,
-        existing_brands: existingBrands,
-      }),
-      (data) => ({
-        main_brand: data.main_brand,
-        parent_company: data.parent_company,
-        suggestions: data.suggestions ?? [],
-        notes: data.notes ?? '',
-        error: data.error,
-      }),
-      {
-        log: 'Error expanding brand:',
-        message: 'Failed to expand brand',
-        fallback: (error) => ({
-          main_brand: brandName,
-          suggestions: [],
-          error,
-        }),
-      }
-    ),
-    [expansionIndustry, api]
-  );
-
   const expandAllBrands = useCallback(
     async (existingBrands: string[], brandType: 'first_party' | 'competitor' = 'first_party'): Promise<BrandExpansionAllResult> => runExpansion<ExpandAllBrandsResponse, BrandExpansionAllResult>(
       () => api.expandAllBrands({
@@ -299,12 +239,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
     config,
     presets,
     loading,
-    error,
     saveConfig,
-    resetConfig,
-    refetch: fetchConfig,
-    getPromptForIndustry,
-    expandBrand,
     expandAllBrands,
     findCompetitors,
   };

@@ -60,7 +60,6 @@ const PER_KEYWORD_STATES = new Set([
 
 interface StepEvent {
   type?: string;
-  timestamp?: string;
   error?: string;
 }
 

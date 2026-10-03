@@ -287,29 +287,6 @@ describe('useContentStudio status polling', () => {
     unmount();
   });
 
-  it('preserves newer successful status when a superseded request fails later', async () => {
-    const generatingItem = buildPollingHistoryItem('content-a');
-    const generatedItem = buildPollingHistoryItem('content-a', 'generated');
-    const {
-      deferredStatusFetch, result, unmount
-    } = await renderContentStudioWithDeferredPolling([
-      [generatingItem],
-      [generatedItem],
-    ]);
-    const initialRequest = deferredStatusFetch.statusRequests[0];
-    act(() => result.current.refreshGeneratingItems());
-    const replacementRequest = deferredStatusFetch.statusRequests[1];
-
-    await settleDeferredStatusBatch([replacementRequest], ['generated']);
-    await settleDeferredStatusBatch([initialRequest], ['network-failure']);
-
-    expect(initialRequest.signal?.aborted).toBe(true);
-    expect(result.current.history.map((item) => item.status)).toStrictEqual(['generated']);
-    expect(result.current.error).toBeNull();
-    expect(deferredStatusFetch.statusRequests).toHaveLength(2);
-    unmount();
-  });
-
   it('stops polling with exact local terminal state when terminal history refresh fails', async () => {
     const {
       result, unmount
@@ -457,20 +434,5 @@ describe('useContentStudio status polling', () => {
 
     expect(clearIntervalSpy).toHaveBeenCalledTimes(callsBeforeUnmount + 1);
     clearIntervalSpy.mockRestore();
-  });
-});
-
-describe('useContentStudio refreshGeneratingItems', () => {
-  it('retries an exhausted item when manual refresh resets failure accounting', async () => {
-    const {
-      result, unmount
-    } = await renderContentStudioAfterStatusFailureLimit('network');
-
-    act(() => result.current.refreshGeneratingItems());
-    await advanceContentStudioTimersAsync(0);
-
-    expect(countContentStatusRequests()).toBe(4);
-    expect(result.current.error).toBeNull();
-    unmount();
   });
 });

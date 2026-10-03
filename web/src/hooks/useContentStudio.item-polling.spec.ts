@@ -150,29 +150,6 @@ describe('useContentStudio single-item polling', () => {
     ]);
   });
 
-  it('aborts the pending item poll and issues one replacement when refreshed', async () => {
-    const {
-      rendered, statusRequest
-    } = await renderPendingItemStatus();
-    const replacementStatus = createDeferredResponse();
-    mockAuthenticatedFetch.mockReturnValueOnce(replacementStatus.promise);
-
-    act(() => rendered.result.current.refreshGeneratingItems());
-
-    const pendingSignal = mockAuthenticatedFetch.mock.calls[1]?.[1]?.signal;
-    expect(pendingSignal?.aborted).toBe(true);
-    expect(mockAuthenticatedFetch).toHaveBeenCalledTimes(3);
-    rendered.unmount();
-    await settleDeferredJson(
-      statusRequest,
-      contentStatusPayload('content-2', 'generating')
-    );
-    await settleDeferredJson(
-      replacementStatus,
-      contentStatusPayload('content-2', 'generating')
-    );
-  });
-
   it('clears the item polling interval when the hook unmounts', async () => {
     const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
     const {

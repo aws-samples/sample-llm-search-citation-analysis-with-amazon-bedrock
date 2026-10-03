@@ -145,7 +145,6 @@ export function describeProviderHealth(
 
 export interface UnhealthyProviderSummary {
   readonly id: string;
-  readonly tone: ProviderHealthTone;
   /** One-line sentence naming the provider and the problem. */
   readonly summary: string;
 }
@@ -182,7 +181,6 @@ export function findUnhealthyProviders(
       if (health === null || health.tone === 'ok') return [];
       return [{
         id: provider.id,
-        tone: health.tone,
         summary: summarize(provider),
       }];
     });

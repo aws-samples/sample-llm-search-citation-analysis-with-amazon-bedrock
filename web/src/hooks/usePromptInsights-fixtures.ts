@@ -11,13 +11,11 @@ export const mockPromptInsightsResponse: PromptInsightsResponse = {
         mentions: 10,
         best_rank: 1,
         provider_coverage: 75,
-        providers: ['openai', 'claude', 'gemini']
       },
       competitors: {
         mentions: 5,
         best_rank: 3,
         provider_coverage: 50,
-        providers: ['openai', 'claude']
       },
     },
   ],
@@ -30,13 +28,11 @@ export const mockPromptInsightsResponse: PromptInsightsResponse = {
         mentions: 2,
         best_rank: 5,
         provider_coverage: 25,
-        providers: ['openai']
       },
       competitors: {
         mentions: 8,
         best_rank: 1,
         provider_coverage: 75,
-        providers: ['openai', 'claude', 'gemini']
       },
     },
   ],

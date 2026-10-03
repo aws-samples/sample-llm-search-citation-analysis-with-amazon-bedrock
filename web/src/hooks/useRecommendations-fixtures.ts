@@ -1,12 +1,4 @@
-import {
-  renderHook, act 
-} from '@testing-library/react';
-import type {
-  RecommendationsResponse, RecommendationStatus 
-} from '../types';
-import { createMockJsonResponse } from '../test/fetchResponses';
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
-import { useRecommendations } from './useRecommendations';
+import type { RecommendationsResponse } from '../types';
 
 export const mockRecommendationsResponse: RecommendationsResponse = {
   recommendations: [
@@ -40,26 +32,3 @@ export const mockRecommendationsResponse: RecommendationsResponse = {
     low: 0,
   },
 };
-
-/** The row the status endpoint returns after persisting `status` for rec-001. */
-export function buildRecommendationStatusRow(status: RecommendationStatus) {
-  return {
-    recommendation_id: 'rec-001',
-    status,
-    updated_at: '2026-05-15T10:00:00Z',
-  };
-}
-
-/**
- * Renders the hook with the recommendations already fetched, so a status
- * update has local state to mutate. The next request (the status POST)
- * receives `statusResponse`.
- */
-export async function renderLoadedRecommendations(statusResponse: Response) {
-  mockAuthenticatedFetch
-    .mockResolvedValueOnce(createMockJsonResponse(mockRecommendationsResponse))
-    .mockResolvedValueOnce(statusResponse);
-  const rendered = renderHook(() => useRecommendations());
-  await act(() => rendered.result.current.fetchRecommendations());
-  return rendered;
-}

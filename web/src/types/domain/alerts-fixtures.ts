@@ -24,7 +24,6 @@ export const VALID_ALERT_TYPES = [
 export const VALID_ALERT_SEVERITIES = [
   'info',
   'warning',
-  'critical',
 ] satisfies readonly AlertSeverity[];
 
 export const VALID_ALERT_STATUSES = [
