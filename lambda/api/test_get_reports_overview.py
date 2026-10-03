@@ -130,30 +130,28 @@ def test_top_movers_leaves_out_unchanged_keywords_and_keywords_with_one_period(o
 # --- build_overview ---------------------------------------------------------
 
 
-def test_build_overview_reports_the_latest_kpis_and_their_change(overview_mod):
-    result = overview_mod.build_overview({}, period='day', days=30, top=3)
-
-    assert (result['kpis'], result['change']) == (LATEST, CHANGE)
-
-
-def test_build_overview_carries_the_trend_series_and_the_latest_leaderboard(overview_mod):
-    result = overview_mod.build_overview({}, period='day', days=30, top=3)
-
-    assert (result['trend_data'], result['latest_brands']) == (DEFAULT_FAKE_TRENDS['trend_data'], DEFAULT_FAKE_TRENDS['latest_brands'])
+@pytest.fixture
+def default_overview(overview_mod):
+    """The overview of the default fake trends over 30 days per day, top 3."""
+    return overview_mod.build_overview({}, period='day', days=30, top=3)
 
 
-def test_build_overview_reports_the_keyword_counts(overview_mod):
-    result = overview_mod.build_overview({}, period='day', days=30, top=3)
+def test_build_overview_reports_the_latest_kpis_and_their_change(default_overview):
+    assert (default_overview['kpis'], default_overview['change']) == (LATEST, CHANGE)
 
-    assert (result['keywords_analyzed'], result['keywords_with_data'], result['summary']) == (
+
+def test_build_overview_carries_the_trend_series_and_the_latest_leaderboard(default_overview):
+    assert (default_overview['trend_data'], default_overview['latest_brands']) == (DEFAULT_FAKE_TRENDS['trend_data'], DEFAULT_FAKE_TRENDS['latest_brands'])
+
+
+def test_build_overview_reports_the_keyword_counts(default_overview):
+    assert (default_overview['keywords_analyzed'], default_overview['keywords_with_data'], default_overview['summary']) == (
         5, 5, {'improving_count': 3, 'declining_count': 1, 'stable_count': 2},
     )
 
 
-def test_build_overview_lists_the_top_movers(overview_mod):
-    result = overview_mod.build_overview({}, period='day', days=30, top=3)
-
-    assert ([mover['keyword'] for mover in result['top_improving']], [mover['keyword'] for mover in result['top_declining']]) == (
+def test_build_overview_lists_the_top_movers(default_overview):
+    assert ([mover['keyword'] for mover in default_overview['top_improving']], [mover['keyword'] for mover in default_overview['top_declining']]) == (
         ['e', 'a', 'b'], ['c'],
     )
 
@@ -185,10 +183,8 @@ def test_build_overview_passes_the_owned_domains_to_the_trends(overview_mod):
     assert seen == {'scope': None, 'period': 'month', 'days': 90, 'owned_domains': ['hotel.com']}
 
 
-def test_build_overview_returns_iso_generated_at_with_zulu(overview_mod):
-    result = overview_mod.build_overview({}, period='day', days=30, top=3)
-
-    assert result['generated_at'].endswith('Z')
+def test_build_overview_returns_iso_generated_at_with_zulu(default_overview):
+    assert default_overview['generated_at'].endswith('Z')
 
 
 def test_build_overview_has_no_change_before_a_second_period(overview_mod):
@@ -204,19 +200,20 @@ def test_build_overview_has_no_change_before_a_second_period(overview_mod):
 # --- handler ----------------------------------------------------------------
 
 
-def test_handler_returns_200_with_the_overview(overview_mod):
+@pytest.fixture
+def default_response(overview_mod):
+    """The handler's answer to a request without parameters and without brand configuration."""
     with patch.object(overview_mod, 'get_brand_config', return_value={}):
-        result = overview_mod.handler(_empty_event(), None)
-
-    body = json.loads(result['body'])
-    assert (result['statusCode'], body['kpis'], body['top_improving'][0]['keyword']) == (200, LATEST, 'e')
+        return overview_mod.handler(_empty_event(), None)
 
 
-def test_handler_returns_recommendations_capped_at_default_three(overview_mod):
-    with patch.object(overview_mod, 'get_brand_config', return_value={}):
-        result = overview_mod.handler(_empty_event(), None)
+def test_handler_returns_200_with_the_overview(default_response):
+    body = json.loads(default_response['body'])
+    assert (default_response['statusCode'], body['kpis'], body['top_improving'][0]['keyword']) == (200, LATEST, 'e')
 
-    assert len(json.loads(result['body'])['top_recommendations']) == 3
+
+def test_handler_returns_recommendations_capped_at_default_three(default_response):
+    assert len(json.loads(default_response['body'])['top_recommendations']) == 3
 
 
 @pytest.mark.parametrize('params', [{'period': 'fortnight'}, {'top': '99'}, {'days': '0'}])

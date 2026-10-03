@@ -10,21 +10,13 @@ nested keyword-by-URL query fan-out.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 from unittest.mock import MagicMock, call
 
+from testing.citation_gaps_fixtures import load_citation_gaps
 from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
-from testing.env import setdefault_env
-from testing.module_loader import load_handler_module
 
-# Table names the module reads at import time, so it loads without touching AWS.
-setdefault_env({
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
-    'DYNAMODB_TABLE_CITATIONS': 'test-citations',
-    'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
-})
-_mod = load_handler_module(os.path.dirname(__file__), 'get-citation-gaps.py', 'get_citation_gaps_query_under_test')
+_mod = load_citation_gaps('get_citation_gaps_query_under_test')
 
 
 CONFIG: dict[str, Any] = {

@@ -100,22 +100,22 @@ def test_annotate_assigns_distinct_ids_to_recs_with_distinct_titles(mod):
 # --- status join (when table configured) ---------------------------------
 
 
-def test_annotate_joins_status_row_when_table_returns_match(mod):
+def _joined_with_status_row(mod, **row_fields):
+    """The 'Pitch X' recommendation after the join found its status row with ``row_fields``."""
     rec = _make_rec(title='Pitch X')
     rec_id = recommendation_id(rec)
     recs = [rec]
+    _annotate_with_status_rows(mod, recs, {rec_id: {'recommendation_id': rec_id, **row_fields}})
+    return recs[0]
 
-    _annotate_with_status_rows(mod, recs, {
-        rec_id: {
-            'recommendation_id': rec_id,
-            'status': 'in_progress',
-            'notes': 'reaching out next week',
-            'updated_at': '2026-05-15T10:00:00Z',
-        },
-    })
 
-    assert recs[0]['status'] == 'in_progress'
-    assert recs[0]['notes'] == 'reaching out next week'
+def test_annotate_joins_status_row_when_table_returns_match(mod):
+    joined = _joined_with_status_row(
+        mod, status='in_progress', notes='reaching out next week', updated_at='2026-05-15T10:00:00Z',
+    )
+
+    assert joined['status'] == 'in_progress'
+    assert joined['notes'] == 'reaching out next week'
 
 
 def test_annotate_falls_back_to_new_status_when_join_lookup_fails(mod):
@@ -131,23 +131,17 @@ def test_annotate_falls_back_to_new_status_when_join_lookup_fails(mod):
 
 
 def test_annotate_propagates_optional_fields_from_status_row(mod):
-    rec = _make_rec(title='Pitch X')
-    rec_id = recommendation_id(rec)
-    recs = [rec]
+    joined = _joined_with_status_row(
+        mod,
+        status='done',
+        completed_at='2026-05-15T10:00:00Z',
+        related_keyword='best running shoes',
+        related_content_id='content-42',
+    )
 
-    _annotate_with_status_rows(mod, recs, {
-        rec_id: {
-            'recommendation_id': rec_id,
-            'status': 'done',
-            'completed_at': '2026-05-15T10:00:00Z',
-            'related_keyword': 'best running shoes',
-            'related_content_id': 'content-42',
-        },
-    })
-
-    assert recs[0]['completed_at'] == '2026-05-15T10:00:00Z'
-    assert recs[0]['related_keyword'] == 'best running shoes'
-    assert recs[0]['related_content_id'] == 'content-42'
+    assert joined['completed_at'] == '2026-05-15T10:00:00Z'
+    assert joined['related_keyword'] == 'best running shoes'
+    assert joined['related_content_id'] == 'content-42'
 
 
 def test_annotate_handles_empty_recommendations_list(mod):

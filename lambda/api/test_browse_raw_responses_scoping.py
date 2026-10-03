@@ -33,6 +33,9 @@ _MODULE_NAME = 'browse_raw_responses_under_test'
 RESPONSES_BUCKET = 'test-raw-responses'
 SCREENSHOTS_BUCKET = 'test-screenshots'
 
+# A key already confined to the raw-responses root prefix.
+_SCOPED_KEY = 'raw-responses/2026/08/openai.json'
+
 _TEST_ENV = {
     'RAW_RESPONSES_BUCKET': RESPONSES_BUCKET,
     'SCREENSHOTS_BUCKET': SCREENSHOTS_BUCKET,
@@ -151,14 +154,13 @@ class TestFileRouteContainment:
 
     def test_reads_an_already_scoped_key_verbatim(self, browse) -> None:
         module, s3 = browse
-        key = 'raw-responses/2026/08/openai.json'
 
-        status, _ = parse_response(module.handler(make_event('/file', key), None))
+        status, _ = parse_response(module.handler(make_event('/file', _SCOPED_KEY), None))
 
         assert status == 200
         assert s3.get_object.call_args.kwargs == {
             'Bucket': RESPONSES_BUCKET,
-            'Key': key,
+            'Key': _SCOPED_KEY,
         }
 
     def test_scopes_a_relative_key_before_reading(self, browse) -> None:
@@ -222,12 +224,11 @@ class TestDownloadRouteContainment:
 
     def test_signs_an_already_scoped_key_verbatim(self, browse) -> None:
         module, s3 = browse
-        key = 'raw-responses/2026/08/openai.json'
 
-        status, _ = parse_response(module.handler(make_event('/download', key), None))
+        status, _ = parse_response(module.handler(make_event('/download', _SCOPED_KEY), None))
 
         assert status == 200
-        assert signed_key(s3) == key
+        assert signed_key(s3) == _SCOPED_KEY
 
     def test_scopes_a_relative_key_before_signing(self, browse) -> None:
         module, s3 = browse

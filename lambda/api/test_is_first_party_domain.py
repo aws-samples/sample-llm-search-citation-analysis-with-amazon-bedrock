@@ -17,20 +17,9 @@ These tests would FAIL if the substring fallback were reintroduced.
 
 from __future__ import annotations
 
-import os
+from testing.citation_gaps_fixtures import load_citation_gaps
 
-from testing.env import setdefault_env
-from testing.module_loader import load_handler_module
-
-# Table names the module reads at import time, so it loads without touching AWS.
-setdefault_env({
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
-    'DYNAMODB_TABLE_CITATIONS': 'test-citations',
-    'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
-})
-is_first_party_domain = load_handler_module(
-    os.path.dirname(__file__), 'get-citation-gaps.py', 'get_citation_gaps_under_test'
-).is_first_party_domain
+is_first_party_domain = load_citation_gaps('get_citation_gaps_under_test').is_first_party_domain
 
 
 class TestExactDomainMatch:
