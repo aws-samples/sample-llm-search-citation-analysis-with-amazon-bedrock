@@ -1732,10 +1732,7 @@ def _batch_request_idea(
     ):
         if field_name in brief:
             idea[field_name] = brief[field_name]
-    try:
-        return _canonical_content_brief(idea)
-    except ContentBriefTemplateNotFoundError:
-        raise
+    return _canonical_content_brief(idea)
 
 
 def _batch_children(batch_id: str, canonical: dict[str, Any]) -> list[dict[str, Any]]:
