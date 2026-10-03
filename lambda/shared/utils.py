@@ -185,8 +185,8 @@ def utc_now() -> datetime:
 
     Use this anywhere the legacy code called `datetime.utcnow()`. The return
     is timezone-aware (tzinfo=UTC), so arithmetic against it must use other
-    timezone-aware datetimes. Use `.replace(tzinfo=None)` only when comparing
-    against naive datetimes parsed from stored ISO strings.
+    timezone-aware datetimes; read stored ISO strings with `parse_timestamp`,
+    which always returns an aware UTC datetime.
     """
     return datetime.now(UTC)
 
@@ -196,10 +196,40 @@ def get_timestamp() -> str:
 
     Wire format: `YYYY-MM-DDTHH:MM:SS.ffffffZ` (microsecond precision). This
     is the canonical wire format for DynamoDB sort keys, API responses, and
-    S3 object metadata in this project. Downstream code parses with either
-    `fromisoformat(s.replace('Z', '+00:00'))` or strict prefix matching.
+    S3 object metadata in this project. Downstream code parses with
+    `parse_timestamp` or strict prefix matching.
     """
     return utc_now().isoformat().replace(_UTC_SUFFIX_NATIVE, _UTC_SUFFIX_WIRE)
+
+
+def format_timestamp(moment: datetime) -> str:
+    """``moment`` in the wire format ``YYYY-MM-DDTHH:MM:SS.ffffffZ``, always with microseconds.
+
+    An aware ``moment`` is converted to UTC first; a naive one is read as UTC.
+    """
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(UTC)
+    return moment.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+
+
+def parse_timestamp(value: object, *, naive_as_utc: bool = True) -> datetime | None:
+    """An ISO 8601 timestamp as an aware UTC datetime; ``None`` for a non-string or unparseable value.
+
+    A trailing ``Z`` and any offset are honoured. A timestamp without an
+    offset (rows written before timestamps carried one) is read as UTC, or
+    refused (``None``) with ``naive_as_utc=False``.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace(_UTC_SUFFIX_WIRE, _UTC_SUFFIX_NATIVE))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        if not naive_as_utc:
+            return None
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def get_timestamp_compact() -> str:
