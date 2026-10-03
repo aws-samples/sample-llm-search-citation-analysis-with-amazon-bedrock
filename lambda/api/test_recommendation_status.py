@@ -6,7 +6,7 @@ Covers:
 - POST sets status, includes ttl + updated_at
 - POST status=done populates completed_at
 - GET returns the row, 404 when missing
-- list_statuses degrades gracefully when env var is missing
+- list_statuses batch-reads and keys rows by recommendation id
 """
 
 import os
@@ -41,7 +41,7 @@ def loaded() -> Loaded:
     mock_dynamodb.batch_get_item.return_value = {'Responses': {}}
 
     with (
-        patch.dict(os.environ, {'RECOMMENDATION_STATUS_TABLE': 'test-rec-status'}),
+        patch.dict(os.environ, {'DYNAMODB_TABLE_RECOMMENDATION_STATUS': 'test-rec-status'}),
         patch('boto3.resource', return_value=mock_dynamodb),
     ):
         mod = load_handler_module(_API_DIR, 'recommendation-status.py')
@@ -179,11 +179,6 @@ def test_get_returns_404_when_no_row_exists(loaded):
 # --- list_statuses --------------------------------------------------------
 
 
-def test_list_statuses_returns_empty_dict_when_table_unconfigured(loaded):
-    loaded.mod.RECOMMENDATION_STATUS_TABLE = None
-    assert loaded.mod.list_statuses(['abc', 'def']) == {}
-
-
 def test_list_statuses_calls_batch_get_and_keys_by_recommendation_id(loaded):
     _batch_returns(
         loaded,
@@ -209,12 +204,6 @@ def test_handler_returns_405_for_unsupported_method(loaded):
 
 
 # --- additional coverage gaps --------------------------------------------
-
-
-def test_table_helper_raises_runtime_error_when_env_var_unset(loaded):
-    loaded.mod.RECOMMENDATION_STATUS_TABLE = None
-    with pytest.raises(RuntimeError):
-        loaded.mod._table()
 
 
 def test_list_statuses_skips_response_items_without_recommendation_id(loaded):

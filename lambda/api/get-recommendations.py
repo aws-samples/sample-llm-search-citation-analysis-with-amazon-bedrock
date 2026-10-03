@@ -44,8 +44,6 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
-CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
-CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 
 
 @dataclass(frozen=True)
@@ -335,10 +333,9 @@ def _annotate_with_status(recommendations: list[dict[str, Any]]) -> None:
     Mutate each recommendation in place to add `id` + persisted status.
 
     The id is the same hash that `recommendation-status.py` looks up in
-    DynamoDB. The status fields are merged in only when the status
-    table is configured (production); otherwise every recommendation
-    gets `status: 'new'` so the response shape stays consistent for
-    the frontend.
+    DynamoDB. The status fields are merged in when a status row exists;
+    otherwise the recommendation gets `status: 'new'` so the response
+    shape stays consistent for the frontend.
 
     Failure to load the status table is non-fatal: the recommendations
     are still surfaced, just without per-row tracking. The failure is
@@ -350,12 +347,10 @@ def _annotate_with_status(recommendations: list[dict[str, Any]]) -> None:
     rec_ids = [r['id'] for r in recommendations]
     statuses: dict[str, dict[str, Any]] = {}
 
-    status_table = os.environ.get('RECOMMENDATION_STATUS_TABLE')
-    if status_table and rec_ids:
+    if rec_ids:
         try:
-            # Loaded lazily, and the way the report aggregators load their
-            # sibling KPI functions: recommendation-status.py is hyphen-named,
-            # and this module's other tests run without the status table.
+            # Loaded lazily, the way the report aggregators load their sibling
+            # KPI functions: recommendation-status.py is hyphen-named.
             list_statuses = load_sibling_function(__file__, 'recommendation-status.py', 'list_statuses', '_for_join')
             statuses = list_statuses(rec_ids)
         except Exception:
@@ -389,8 +384,8 @@ def handler(event: dict[str, Any], context: Any, use_llm: bool = False, keyword:
     # Generate rule-based recommendations
     recommendations = generate_rule_based_recommendations(config)
 
-    # Annotate each recommendation with a deterministic id and (when the
-    # status table is configured) the persisted action-tracking state.
+    # Annotate each recommendation with a deterministic id and the
+    # persisted action-tracking state.
     # Done here rather than inside `generate_rule_based_recommendations`
     # so the rule generator stays a pure data shaper. The id is computed
     # from `type + title + sorted keywords` so it survives list

@@ -13,7 +13,6 @@ _API_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 # Table names the module reads at import time, so it loads without touching AWS.
 CITATION_GAPS_ENV = {
     'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
-    'DYNAMODB_TABLE_CITATIONS': 'test-citations',
     'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
 }
 
