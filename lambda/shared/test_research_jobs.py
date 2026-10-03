@@ -286,11 +286,10 @@ class TestPublicView:
 
         assert [entry['keyword'] for entry in view['keywords']] == ['persisted']
 
-    def test_includes_the_raw_response_only_on_request(self):
+    def test_omits_the_raw_response(self):
         job = {'id': 'legacy', 'type': 'expansion', 'status': 'completed', 'raw_response': 'blob'}
 
         assert 'raw_response' not in public_view(job)
-        assert public_view(job, include_raw=True)['raw_response'] == 'blob'
 
 
     def test_agent_steps_expose_their_planned_query_dimension_and_round(self):
