@@ -51,6 +51,7 @@ DYNAMODB_TABLE_BRAND_CONFIG = os.environ['DYNAMODB_TABLE_BRAND_CONFIG']
 def _run_brand_prompt(
     prompt: str,
     *,
+    industry: str,
     max_tokens: int,
     error_defaults: dict[str, Any],
     shape: Callable[[dict[str, Any]], dict[str, Any]],
@@ -62,9 +63,10 @@ def _run_brand_prompt(
     find_competitors) each hand-rolled this same invoke -> guard-empty ->
     parse -> guard-invalid -> shape -> except ladder (bugs.md §5).
     `error_defaults` is what the endpoint returns when the model response is
-    unusable; `shape` builds the success payload from the parsed object and
-    runs inside the try so shaping bugs degrade to the same defaults instead
-    of crashing the handler.
+    unusable; `shape` builds the endpoint-specific part of the success payload
+    from the parsed object, which then ends with the model's ``notes`` and the
+    ``industry``. Shaping runs inside the try so shaping bugs degrade to the
+    same defaults instead of crashing the handler.
     """
     try:
         response_text = invoke_bedrock(prompt, ModelRole.ANALYSIS, max_tokens=max_tokens, temperature=0)
@@ -76,7 +78,7 @@ def _run_brand_prompt(
         if not isinstance(result, dict):
             return {**error_defaults, "error": "Invalid response format"}
 
-        return shape(result)
+        return {**shape(result), "notes": result.get("notes", ""), "industry": industry}
 
     except Exception as e:
         logger.exception(f"Error {log_context}")
@@ -178,6 +180,30 @@ def _industry_context(industry: str) -> _IndustryContext:
     )
 
 
+def _expert_preamble(role: str, industry_context: _IndustryContext, *, with_examples: bool) -> str:
+    """The opening every brand prompt shares: the untrusted-input rule, the expert role, the industry context."""
+    preamble = (
+        f"{untrusted_input_system_instruction()}\n\n"
+        f"You are a {role} for the {industry_context.name} industry.\n\n"
+        "INDUSTRY CONTEXT:\n"
+        f"- Entity types: {industry_context.entity_types}"
+    )
+    if with_examples:
+        preamble += f"\n- Example brands in this industry: {industry_context.examples}"
+    return preamble
+
+
+def _wrapped_brands(brands: list, *, when_empty: str = "") -> str:
+    """The non-blank ``brands``, comma-separated, each wrapped in ``<brand>`` tags.
+
+    The tags keep a malicious user-supplied name from escaping into the
+    surrounding prompt instructions. ``when_empty`` stands in for an empty list.
+    """
+    if not brands:
+        return when_empty
+    return ", ".join(wrap_user_input(b, "brand") for b in brands if b)
+
+
 def normalize_brand(name: str) -> str:
     """Normalize brand name for comparison - remove accents, lowercase, trim."""
     import unicodedata
@@ -243,9 +269,7 @@ def expand_brands(
 
     portfolio_label, portfolio_exclusion_rule = _BRAND_PORTFOLIO_PROMPT[brand_type]
     industry_context = _industry_context(industry)
-    # Wrap each user-supplied brand in `<brand>` tags so malicious names
-    # cannot escape into the surrounding prompt instructions.
-    brands_list = ", ".join(wrap_user_input(b, "brand") for b in existing_brands if b)
+    brands_list = _wrapped_brands(existing_brands)
 
     # Check for existing duplicates first
     existing_duplicates = find_duplicates(existing_brands)
@@ -253,12 +277,7 @@ def expand_brands(
     # Normalize existing brands for filtering
     existing_normalized = {normalize_brand(b) for b in existing_brands}
 
-    prompt = f"""{untrusted_input_system_instruction()}
-
-You are a brand expert for the {industry_context.name} industry.
-
-INDUSTRY CONTEXT:
-- Entity types: {industry_context.entity_types}
+    prompt = f"""{_expert_preamble("brand expert", industry_context, with_examples=False)}
 
 {portfolio_label} BRANDS ALREADY BEING TRACKED (DO NOT INCLUDE THESE IN YOUR RESPONSE):
 {brands_list}
@@ -311,12 +330,11 @@ JSON OUTPUT:"""
             "parent_companies": result.get("parent_companies", []),
             "suggestions": unique_suggestions,
             "duplicates_found": existing_duplicates,
-            "notes": result.get("notes", ""),
-            "industry": industry
         }
 
     return _run_brand_prompt(
         prompt,
+        industry=industry,
         max_tokens=2000,
         error_defaults={"suggestions": [], "duplicates_found": existing_duplicates},
         shape=shape,
@@ -341,20 +359,10 @@ def expand_brand(brand_name: str, industry: str = DEFAULT_INDUSTRY_ID, existing_
 
     industry_context = _industry_context(industry)
 
-    # Wrap user-supplied brand names so a malicious entry cannot escape the prompt.
-    exclude_str = (
-        ", ".join(wrap_user_input(b, "brand") for b in existing_brands if b)
-        if existing_brands else "none"
-    )
+    exclude_str = _wrapped_brands(existing_brands, when_empty="none")
     brand_name_wrapped = wrap_user_input(brand_name, "brand")
 
-    prompt = f"""{untrusted_input_system_instruction()}
-
-You are a brand expert for the {industry_context.name} industry.
-
-INDUSTRY CONTEXT:
-- Entity types: {industry_context.entity_types}
-- Example brands in this industry: {industry_context.examples}
+    prompt = f"""{_expert_preamble("brand expert", industry_context, with_examples=True)}
 
 ALREADY TRACKED (do NOT suggest these): {exclude_str}
 
@@ -399,12 +407,11 @@ JSON OUTPUT:"""
             "main_brand": brand_name,
             "parent_company": result.get("parent_company"),
             "suggestions": suggestions,
-            "notes": result.get("notes", ""),
-            "industry": industry
         }
 
     return _run_brand_prompt(
         prompt,
+        industry=industry,
         max_tokens=1500,
         error_defaults={"main_brand": brand_name, "suggestions": [brand_name]},
         shape=shape,
@@ -424,23 +431,13 @@ def find_competitors(first_party_brands: list, industry: str = DEFAULT_INDUSTRY_
 
     industry_context = _industry_context(industry)
 
-    # Wrap user-supplied brand names to neutralize injection attempts.
-    brands_list = ", ".join(wrap_user_input(b, "brand") for b in first_party_brands if b)
+    brands_list = _wrapped_brands(first_party_brands)
 
     # Build exclusion list
     exclude_brands = first_party_brands + existing_competitors
-    exclude_str = (
-        ", ".join(wrap_user_input(b, "brand") for b in exclude_brands if b)
-        if exclude_brands else "none"
-    )
+    exclude_str = _wrapped_brands(exclude_brands, when_empty="none")
 
-    prompt = f"""{untrusted_input_system_instruction()}
-
-You are a competitive intelligence expert for the {industry_context.name} industry.
-
-INDUSTRY CONTEXT:
-- Entity types: {industry_context.entity_types}
-- Example brands in this industry: {industry_context.examples}
+    prompt = f"""{_expert_preamble("competitive intelligence expert", industry_context, with_examples=True)}
 
 FIRST-PARTY BRANDS (the user's brands): {brands_list}
 
@@ -486,12 +483,11 @@ JSON OUTPUT:"""
             "first_party_brands": first_party_brands,
             "competitors": competitor_names,
             "competitor_details": competitors,
-            "notes": result.get("notes", ""),
-            "industry": industry
         }
 
     return _run_brand_prompt(
         prompt,
+        industry=industry,
         max_tokens=2000,
         error_defaults={"first_party_brands": first_party_brands, "competitors": []},
         shape=shape,

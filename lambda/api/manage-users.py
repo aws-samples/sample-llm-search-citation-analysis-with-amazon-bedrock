@@ -65,6 +65,22 @@ def _group_names(response: Mapping[str, Any]) -> list[str]:
     return [group['GroupName'] for group in response.get('Groups', [])]
 
 
+def _path_username(event: dict[str, Any]) -> str | None:
+    """The ``{username}`` the request path names, if any."""
+    return (event.get('pathParameters') or {}).get('username')
+
+
+def _for_path_username(route: _Route) -> _Route:
+    """Pass the path's ``{username}`` to ``route`` as ``username``; a path without one is a 400."""
+    @wraps(route)
+    def wrapper(event: dict[str, Any], context: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        username = _path_username(event)
+        if not username:
+            return validation_error('Username required', event)
+        return route(event, context, *args, username=username, **kwargs)
+    return wrapper
+
+
 def _cognito_errors(failure: str) -> Callable[[_Route], _Route]:
     """Answer the Cognito failures a user route lets escape.
 
@@ -80,8 +96,7 @@ def _cognito_errors(failure: str) -> Callable[[_Route], _Route]:
             try:
                 return route(event, context, *args, **kwargs)
             except cognito_client.exceptions.UserNotFoundException:
-                username = (event.get('pathParameters') or {}).get('username')
-                return not_found_response(f'User {username}', event)
+                return not_found_response(f'User {_path_username(event)}', event)
             except ClientError:
                 logger.exception(failure)
                 return api_response(500, {'error': failure}, event)
@@ -192,14 +207,9 @@ def _get_user_with_groups(username: str) -> dict:
 
 
 @_cognito_errors('Failed to get user')
-def handle_get_user(event: dict, context: Any, **kwargs) -> dict:
+@_for_path_username
+def handle_get_user(event: dict, context: Any, username: str, **kwargs) -> dict:
     """GET /users/{username} - Get user details."""
-    path_params = event.get('pathParameters') or {}
-    username = path_params.get('username')
-
-    if not username:
-        return validation_error('Username required', event)
-
     return success_response({'user': _get_user_with_groups(username)}, event)
 
 
@@ -258,18 +268,13 @@ def handle_invite_user(event: dict, context: Any, body: dict | None = None, **kw
 
 @parse_json_body
 @_cognito_errors('Failed to update user')
-def handle_update_user(event: dict, context: Any, body: dict | None = None, **kwargs) -> dict:
+@_for_path_username
+def handle_update_user(event: dict, context: Any, username: str, body: dict | None = None, **kwargs) -> dict:
     """PUT /users/{username} - Update user (enable/disable, groups).
 
     Requires Admin (gated on `handler`). Self-modification of the two
     privilege-bearing fields is refused on top of that — see the guard below.
     """
-    path_params = event.get('pathParameters') or {}
-    username = path_params.get('username')
-
-    if not username:
-        return validation_error('Username required', event)
-
     body = body or {}
 
     # Refused regardless of the caller's group: an Admin editing their own
@@ -341,18 +346,13 @@ def handle_update_user(event: dict, context: Any, body: dict | None = None, **kw
 
 
 @_cognito_errors('Failed to delete user')
-def handle_delete_user(event: dict, context: Any, **kwargs) -> dict:
+@_for_path_username
+def handle_delete_user(event: dict, context: Any, username: str, **kwargs) -> dict:
     """DELETE /users/{username} - Delete a user.
 
     Requires Admin (gated on `handler`). Self-deletion is refused because
     `admin_delete_user` is irreversible and the caller may be the last Admin.
     """
-    path_params = event.get('pathParameters') or {}
-    username = path_params.get('username')
-
-    if not username:
-        return validation_error('Username required', event)
-
     if is_self_reference(event, username):
         logger.warning("Refused self-deletion of %r", username)
         return forbidden_response('You cannot delete your own account', event)
@@ -367,14 +367,9 @@ def handle_delete_user(event: dict, context: Any, **kwargs) -> dict:
 
 @parse_json_body
 @_cognito_errors('Failed to reset password')
-def handle_reset_password(event: dict, context: Any, body: dict | None = None, **kwargs) -> dict:
+@_for_path_username
+def handle_reset_password(event: dict, context: Any, username: str, body: dict | None = None, **kwargs) -> dict:
     """POST /users/{username}/reset-password - Reset user password."""
-    path_params = event.get('pathParameters') or {}
-    username = path_params.get('username')
-
-    if not username:
-        return validation_error('Username required', event)
-
     try:
         # This sends a password reset email to the user
         cognito_client.admin_reset_user_password(
@@ -424,9 +419,7 @@ def handle_get_users_route(event: dict, context: Any, **kwargs) -> dict:
     `GET /api/users/{username}` returned the entire roster, leaving
     `handle_get_user` unreachable.
     """
-    path_params = event.get('pathParameters') or {}
-
-    if path_params.get('username'):
+    if _path_username(event):
         return handle_get_user(event, context, **kwargs)
 
     return handle_list_users(event, context, **kwargs)

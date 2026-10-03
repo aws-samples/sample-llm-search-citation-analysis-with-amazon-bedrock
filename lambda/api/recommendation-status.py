@@ -55,7 +55,9 @@ import json
 import logging
 import os
 import sys
+from collections.abc import Callable
 from datetime import datetime, timedelta
+from functools import wraps
 from typing import Any
 
 import boto3
@@ -104,6 +106,17 @@ def _path_id(event: dict[str, Any]) -> str:
     return (params.get('id') or '').strip()
 
 
+def _with_rec_id(route: Callable[[dict[str, Any], str], dict[str, Any]]) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Call ``route`` with the path's recommendation id; a path without one is a 400."""
+    @wraps(route)
+    def wrapper(event: dict[str, Any]) -> dict[str, Any]:
+        rec_id = _path_id(event)
+        if not rec_id:
+            return validation_error('Missing recommendation id', event, 'id')
+        return route(event, rec_id)
+    return wrapper
+
+
 def _validate_post_body(body: dict[str, Any]) -> dict[str, Any] | None:
     """Return a validation error event if the body is bad, else None."""
     status = body.get('status')
@@ -136,11 +149,8 @@ def _validate_post_body(body: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _post_status(event: dict[str, Any]) -> dict[str, Any]:
-    rec_id = _path_id(event)
-    if not rec_id:
-        return validation_error('Missing recommendation id', event, 'id')
-
+@_with_rec_id
+def _post_status(event: dict[str, Any], rec_id: str) -> dict[str, Any]:
     raw_body = event.get('body') or '{}'
     try:
         body = json.loads(raw_body)
@@ -176,11 +186,8 @@ def _post_status(event: dict[str, Any]) -> dict[str, Any]:
     return success_response(item, event)
 
 
-def _get_status(event: dict[str, Any]) -> dict[str, Any]:
-    rec_id = _path_id(event)
-    if not rec_id:
-        return validation_error('Missing recommendation id', event, 'id')
-
+@_with_rec_id
+def _get_status(event: dict[str, Any], rec_id: str) -> dict[str, Any]:
     response = _table().get_item(Key={'recommendation_id': rec_id})
     item = response.get('Item')
     if not item:

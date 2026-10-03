@@ -152,6 +152,17 @@ def _duplicate_name_response(event: dict[str, Any]) -> dict[str, Any]:
     return api_response(409, {'error': 'A keyword group with this name already exists'}, event)
 
 
+def _available_name(name: Any, event: dict[str, Any], *, exclude_id: str | None = None) -> str | dict[str, Any]:
+    """The storable, not-yet-taken group name; else the 400 (unstorable) or 409 (taken) to answer with."""
+    try:
+        text = _group_name(name)
+    except _InvalidGroupName as exc:
+        return validation_error(str(exc), event, 'name')
+    if _name_taken(text, exclude_id=exclude_id):
+        return _duplicate_name_response(event)
+    return text
+
+
 def _for_existing_group(route: _Route) -> _Route:
     """Answer 400/404 before ``route`` runs unless the ``{id}`` path parameter names a stored group."""
     @wraps(route)
@@ -184,12 +195,9 @@ def list_groups(event: dict[str, Any], context: Any, **_: Any) -> dict[str, Any]
 })
 def create_group(event: dict[str, Any], context: Any, body: dict, name: Any, description: str, **_: Any) -> dict[str, Any]:
     """POST /api/keyword-groups"""
-    try:
-        text = _group_name(name)
-    except _InvalidGroupName as exc:
-        return validation_error(str(exc), event, 'name')
-    if _name_taken(text):
-        return _duplicate_name_response(event)
+    text = _available_name(name, event)
+    if isinstance(text, dict):
+        return text
 
     item = build_group_item(str(uuid.uuid4()), text, description)
     groups_table.put_item(Item=item)
@@ -209,12 +217,9 @@ def update_group(event: dict[str, Any], context: Any, body: dict, name: Any, des
 
     updates: dict[str, Any] = {'updated_at': get_timestamp()}
     if name is not None:
-        try:
-            text = _group_name(name)
-        except _InvalidGroupName as exc:
-            return validation_error(str(exc), event, 'name')
-        if _name_taken(text, exclude_id=id):
-            return _duplicate_name_response(event)
+        text = _available_name(name, event, exclude_id=id)
+        if isinstance(text, dict):
+            return text
         updates['name'] = text
         updates['name_key'] = normalize_group_name(text)
     if description is not None:
