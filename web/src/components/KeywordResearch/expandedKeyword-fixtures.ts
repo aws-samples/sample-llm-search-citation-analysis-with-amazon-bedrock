@@ -1,6 +1,13 @@
-import { screen } from '@testing-library/react';
+import { expect } from 'vitest';
+import {
+  fireEvent, screen
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ExpandedKeywordWithSource } from '../../types';
+import { SELECTION_LIMIT } from '../../hooks/usePromoteKeywords';
+import { createdKeywordItemFixture } from '../../hooks/usePromoteKeywords-fixtures';
+import type {
+  ExpandedKeywordWithSource, ResearchKeyword
+} from '../../types';
 
 /** Keyword rows an expansion run returns, shared by the expansion and history specs. */
 export const luxuryHotelsFixture: ExpandedKeywordWithSource = {
@@ -33,4 +40,56 @@ export const getPromoteButtonElement = () =>
 export async function promoteKeyword(keyword: string): Promise<void> {
   await userEvent.click(selectKeywordCheckbox(keyword));
   await userEvent.click(getPromoteButtonElement());
+}
+
+/** `promoteKeyword` without user-event, for specs running on fake timers. */
+export function firePromoteKeyword(keyword: string): void {
+  fireEvent.click(selectKeywordCheckbox(keyword));
+  fireEvent.click(getPromoteButtonElement());
+}
+
+/** The selection counter `KeywordPromotionControls` shows. */
+export const selectionCountText = (count: number) => `${count} of ${SELECTION_LIMIT} keywords selected`;
+
+type CreatedKeywordItem = typeof createdKeywordItemFixture;
+
+/**
+ * A `created_keywords` wire entry: the COMPLETE created item as the backend
+ * writes it, which is a superset of the `Keyword` fields the active keyword list
+ * reads.
+ */
+export function buildCreatedKeywordItem(overrides: Partial<CreatedKeywordItem> = {}): CreatedKeywordItem {
+  return {
+    ...createdKeywordItemFixture,
+    ...overrides,
+  };
+}
+
+interface SkippedKeyword {
+  keyword: string;
+  reason: string;
+}
+
+/** The `/keywords/promote` response for the given created and skipped rows. */
+export function buildPromotionWire(createdKeywords: CreatedKeywordItem[], skippedKeywords: SkippedKeyword[] = []) {
+  return {
+    created: createdKeywords.length,
+    skipped: skippedKeywords.length,
+    created_keywords: createdKeywords,
+    skipped_keywords: skippedKeywords,
+  };
+}
+
+type PromotionRequestArguments = [endpoint: string, body: { keywords: ResearchKeyword[] }, options: Record<string, unknown>];
+
+/** The `apiPost` arguments of one promotion request carrying `keywords`. */
+export function promotionRequestArguments(keywords: ResearchKeyword[]): PromotionRequestArguments {
+  return [
+    '/keywords/promote',
+    { keywords },
+    {
+      signal: expect.any(AbortSignal),
+      allowStructured4xx: true,
+    },
+  ];
 }

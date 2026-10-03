@@ -19,6 +19,10 @@ function renderDetail(job: KeywordResearchItem) {
   return { onRetry };
 }
 
+const getProposalElement = () => screen.getByRole('region', { name: 'Proposed keywords' });
+
+const queryProposalElement = () => screen.queryByRole('region', { name: 'Proposed keywords' });
+
 describe('AgentRunDetail', () => {
   it('summarises the brief with the subject, audience and catalogue labels', () => {
     renderDetail(buildAgentJob());
@@ -55,7 +59,7 @@ describe('AgentRunDetail', () => {
   it('puts the proposal right before the collapsed reasoning trace when the run has finished', () => {
     renderDetail(buildAgentJob());
 
-    const proposal = screen.getByRole('region', { name: 'Proposed keywords' });
+    const proposal = getProposalElement();
     const trace = screen.getByText('Reasoning trace').closest('details');
     expect(proposal.nextElementSibling).toBe(trace);
     expect(trace?.open).toBe(false);
@@ -71,14 +75,14 @@ describe('AgentRunDetail', () => {
 
     expect(screen.getByRole('region', { name: 'Research progress' })).toBeInTheDocument();
     expect(screen.getByText(/3 candidate keywords found so far/)).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Proposed keywords' })).toBeNull();
+    expect(queryProposalElement()).toBeNull();
   });
 
   it('keeps the progress with its retry next to the proposal when the run is partial', async () => {
     const partial = buildAgentJob({ status: 'partial' });
     const { onRetry } = renderDetail(partial);
 
-    expect(screen.getByRole('region', { name: 'Proposed keywords' })).toBeInTheDocument();
+    expect(getProposalElement()).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Retry failed steps' }));
 
     expect(onRetry).toHaveBeenCalledWith(partial);
@@ -103,6 +107,6 @@ describe('AgentRunDetail', () => {
     }));
 
     expect(screen.getByText(/The run finished without candidates/)).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Proposed keywords' })).toBeNull();
+    expect(queryProposalElement()).toBeNull();
   });
 });

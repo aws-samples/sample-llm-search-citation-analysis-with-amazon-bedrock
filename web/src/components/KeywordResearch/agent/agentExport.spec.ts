@@ -9,10 +9,10 @@ import {
 } from './agent-fixtures';
 
 describe('proposalExcelRows', () => {
-  it('ranks keywords in table order with their catalogue label and sources', () => {
-    const rows = proposalExcelRows(buildAgentJob().keywords ?? [], HOTEL_DIMENSIONS);
+  const hotelProposalRows = proposalExcelRows(buildAgentJob().keywords ?? [], HOTEL_DIMENSIONS);
 
-    expect(rows[0]).toStrictEqual({
+  it('ranks keywords in table order with their catalogue label and sources', () => {
+    expect(hotelProposalRows[0]).toStrictEqual({
       Rank: 1,
       Keyword: 'hotel coruña centro',
       Dimension: 'Destination',
@@ -25,21 +25,17 @@ describe('proposalExcelRows', () => {
       Rationale: 'core demand',
       Sources: 'perplexity',
     });
-    expect(rows[1].Sources).toBe('perplexity, serpapi');
+    expect(hotelProposalRows[1].Sources).toBe('perplexity, serpapi');
   });
 
   it('exports unselected recommendations as library terms with their explanation', () => {
-    const rows = proposalExcelRows(buildAgentJob().keywords ?? [], HOTEL_DIMENSIONS);
-
-    expect(rows[2].Tracking).toBe('Library');
-    expect(rows[2]['Tracking score']).toBe(602);
-    expect(rows[2]['Tracking reason']).toBe('Relevance 6/10; informational intent; 1 provider.');
+    expect(hotelProposalRows[2].Tracking).toBe('Library');
+    expect(hotelProposalRows[2]['Tracking score']).toBe(602);
+    expect(hotelProposalRows[2]['Tracking reason']).toBe('Relevance 6/10; informational intent; 1 provider.');
   });
 
   it('labels a dimension the catalogue does not know as Other', () => {
-    const rows = proposalExcelRows(buildAgentJob().keywords ?? [], HOTEL_DIMENSIONS);
-
-    expect(rows[2].Dimension).toBe('Other');
+    expect(hotelProposalRows[2].Dimension).toBe('Other');
   });
 
   it('labels the same id with the wording of the catalogue it is given', () => {

@@ -10,6 +10,9 @@ import { AgentBriefForm } from './AgentBriefForm';
 import {
   buildCafeTemplate, buildSavedTemplate, buildTemplate
 } from './agent-fixtures';
+import {
+  clickButton, mockTemplateAction
+} from './AgentTemplateEditor-fixtures';
 
 const GROUPS: KeywordGroup[] = [
   {
@@ -48,14 +51,8 @@ export function renderBriefForm() {
       message: 'Template "Cafés (copy)" saved',
       template: SAVED_COPY,
     })),
-    onUpdateTemplate: vi.fn(() => Promise.resolve({
-      success: true,
-      message: 'updated',
-    })),
-    onDeleteTemplate: vi.fn(() => Promise.resolve({
-      success: true,
-      message: 'Template deleted',
-    })),
+    onUpdateTemplate: mockTemplateAction('updated'),
+    onDeleteTemplate: mockTemplateAction('Template deleted'),
   };
   const form = (templates: ResearchTemplate[]) => (
     <AgentBriefForm groups={GROUPS} templates={templates} templatesLoading={false} starting={false} {...handlers} />
@@ -77,5 +74,16 @@ export function getPromptTextarea(): HTMLTextAreaElement {
 
 export async function fillSeedAndStart(seed: string): Promise<void> {
   await userEvent.type(screen.getByLabelText(/\(or seed\)/), seed);
-  await userEvent.click(screen.getByRole('button', { name: 'Start research' }));
+  await clickButton('Start research');
 }
+
+export async function selectTemplate(templateId: string): Promise<void> {
+  await userEvent.selectOptions(getTemplateSelect(), templateId);
+}
+
+/** Expands the template editor disclosure under the brief. */
+export async function openInstructions(): Promise<void> {
+  await userEvent.click(screen.getByText(DISCLOSURE));
+}
+
+export const queryResetButtonElement = () => screen.queryByRole('button', { name: 'Reset to template' });
