@@ -12,7 +12,6 @@ import { sentimentTextColor } from './brandPresentation';
 interface ProviderResponseCardProps {
   provider: ProviderBrandData;
   brand: AggregatedBrand;
-  keyword: string;
 }
 
 const getDisplayText = (fullText: string, isExpanded: boolean): string => {

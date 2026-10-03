@@ -1,13 +1,10 @@
-import type {
-  AggregatedBrand, ProviderBrandData 
-} from '../../types';
+import type { AggregatedBrand } from '../../types';
 import {
   classificationLabel, sentimentTextColor
 } from './brandPresentation';
 
 interface BrandOverviewTabProps {
   brand: AggregatedBrand;
-  providerData: ProviderBrandData[];
 }
 
 export const BrandOverviewTab = ({ brand }: BrandOverviewTabProps) => {
