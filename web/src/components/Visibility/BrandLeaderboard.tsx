@@ -6,7 +6,7 @@ import {
   ReportTable, type ReportTableColumn
 } from '../Reports/layout';
 import {
-  brandKpiColumns, brandReachColumns
+  BRAND_CLASSIFICATION_LABELS, brandKpiColumns, brandReachColumns
 } from '../Reports/layout/brandColumns';
 import { OverviewPanel } from './OverviewPanel';
 
@@ -18,12 +18,6 @@ const CLASSIFICATION_BADGES: Readonly<Record<BrandClassification, string>> = {
   competitor: 'bg-red-100 text-red-800',
   // Stryker disable next-line StringLiteral: other-brand badge colors are presentation-only
   other: 'bg-gray-100 text-gray-800',
-};
-
-const CLASSIFICATION_LABELS: Readonly<Record<BrandClassification, string>> = {
-  first_party: 'first party',
-  competitor: 'competitor',
-  other: 'other',
 };
 
 /** Built per render (not at import) so every column is exercised by the tests that render the table. */
@@ -53,7 +47,7 @@ function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardR
       render: (brand) => (
         // Stryker disable next-line StringLiteral: Tailwind-only badge styling; the label below names the classification
         <span className={`px-2 py-1 rounded text-xs ${CLASSIFICATION_BADGES[brand.classification]}`}>
-          {CLASSIFICATION_LABELS[brand.classification]}
+          {BRAND_CLASSIFICATION_LABELS[brand.classification]}
         </span>
       ),
     },

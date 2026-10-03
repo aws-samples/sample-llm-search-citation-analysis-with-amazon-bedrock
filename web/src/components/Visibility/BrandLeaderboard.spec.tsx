@@ -54,7 +54,7 @@ describe('BrandLeaderboard', () => {
     renderLeaderboard();
 
     expect(bodyRowCells(panelTable(LEADERBOARD))).toStrictEqual([
-      ['Hotel Sol', '52.4', '60.0%', '25.0%', '1.80', '1', 'geminiopenai', '2', 'first party'],
+      ['Hotel Sol', '52.4', '60.0%', '25.0%', '1.80', '1', 'geminiopenai', '2', 'first-party'],
     ]);
   });
 

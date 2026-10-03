@@ -9,7 +9,7 @@ import {
   getStatusLabel,
 } from './UserModals';
 import { StrokeIcon } from '../ui/StrokeIcon';
-import { REFRESH_PATHS } from '../ui/iconPaths';
+import { RefreshIcon } from '../ui';
 import { CenteredMessage } from '../ui/CenteredState';
 import { SettingsErrorNotice } from './SettingsErrorNotice';
 import { SettingsSectionHeader } from './SettingsSectionHeader';
@@ -86,14 +86,14 @@ export function UsersConfig() {
             onClick={refresh}
             className="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
           >
-            <StrokeIcon className="w-4 h-4" paths={REFRESH_PATHS} />
+            <RefreshIcon className="w-4 h-4" />
             Refresh
           </button>
           <button
             onClick={() => setShowInviteModal(true)}
             className="px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-2"
           >
-            <StrokeIcon className="w-4 h-4" paths={['M12 4.5v15m7.5-7.5h-15']} />
+            <StrokeIcon className="w-4 h-4" paths={['M12 4.5v15m7.5-7.5h-15']} aria-hidden="true" />
             Invite User
           </button>
         </div>

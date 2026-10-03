@@ -75,6 +75,12 @@ describe('UsersConfig', () => {
 
       expect(screen.getByRole('button', { name: /invite/i })).toBeInTheDocument();
     });
+
+    it.each(['Refresh', 'Invite User'])('hides the decorative icon of the %s button from assistive technology', (name) => {
+      renderUsersConfig();
+
+      expect(screen.getByRole('button', { name }).querySelector('svg')).toHaveAttribute('aria-hidden', 'true');
+    });
   });
 
   describe('with users', () => {
