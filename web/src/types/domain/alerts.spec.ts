@@ -14,9 +14,6 @@ import {
 import {
   BACKEND_ALERT_WIRE_FIXTURE,
   PUBLIC_DEFAULT_ALERT_SETTINGS,
-  VALID_ALERT_SEVERITIES,
-  VALID_ALERT_STATUSES,
-  VALID_ALERT_TYPES,
   VALID_SUBSCRIPTION_STATUSES,
   buildAlertItem,
   buildAlertItemCandidate,
@@ -29,6 +26,12 @@ import {
   buildContentChangeMarkerCandidate,
   buildContentChangesResponse,
 } from './alerts-fixtures';
+import {
+  EMPTY_LIST,
+  SUPPORTED_ALERT_FIELD_VALUES,
+  buildMalformedListEnvelopes,
+  buildSingleItemList,
+} from './alerts-list-fixtures';
 
 describe('alert runtime decoders', () => {
   describe('isNotificationEmail', () => {
@@ -75,87 +78,35 @@ describe('alert runtime decoders', () => {
     });
 
     it('accepts an empty alert list when count is zero', () => {
-      expect(isAlertsResponse({
-        items: [],
-        count: 0
-      })).toBe(true);
+      expect(isAlertsResponse(EMPTY_LIST)).toBe(true);
     });
 
     it('accepts the backend wire alert with Dynamo metadata', () => {
-      expect(isAlertsResponse({
-        items: [BACKEND_ALERT_WIRE_FIXTURE],
-        count: 1,
-      })).toBe(true);
+      expect(isAlertsResponse(buildSingleItemList(BACKEND_ALERT_WIRE_FIXTURE))).toBe(true);
     });
 
-    it.each(VALID_ALERT_TYPES)('accepts %s when the alert type is supported', (type) => {
-      expect(isAlertsResponse({
-        items: [buildAlertItem({ type })],
-        count: 1,
-      })).toBe(true);
-    });
-
-    it.each(VALID_ALERT_SEVERITIES)('accepts %s when the alert severity is supported', (severity) => {
-      expect(isAlertsResponse({
-        items: [buildAlertItem({ severity })],
-        count: 1,
-      })).toBe(true);
-    });
-
-    it.each(VALID_ALERT_STATUSES)('accepts %s when the alert status is supported', (status) => {
-      expect(isAlertsResponse({
-        items: [buildAlertItem({ status })],
-        count: 1,
-      })).toBe(true);
+    it.each(SUPPORTED_ALERT_FIELD_VALUES)('accepts $value when the alert $field is supported', ({
+      field, value
+    }) => {
+      expect(isAlertsResponse(buildSingleItemList(buildAlertItemCandidate({ [field]: value })))).toBe(true);
     });
 
     it('accepts an improvement alert with the complete nested marker', () => {
-      expect(isAlertsResponse({
-        items: [buildAlertItem({
-          type: 'improvement_after_content_change',
-          content_change: buildContentChangeMarker(),
-        })],
-        count: 1,
-      })).toBe(true);
+      expect(isAlertsResponse(buildSingleItemList(buildAlertItem({
+        type: 'improvement_after_content_change',
+        content_change: buildContentChangeMarker(),
+      })))).toBe(true);
     });
 
     it('accepts an alert without an optional entity', () => {
-      expect(isAlertsResponse({
-        items: [buildAlertItem({ entity: undefined })],
-        count: 1,
-      })).toBe(true);
+      expect(isAlertsResponse(buildSingleItemList(buildAlertItem({ entity: undefined })))).toBe(true);
     });
 
-    it.each([
-      ['null', null],
-      ['an array', []],
-      ['an array carrying otherwise valid response properties', Object.assign([], buildAlertsResponse())],
-      ['a missing items array', { count: 0 }],
-      ['a negative count', {
-        items: [],
-        count: -1
-      }],
-      ['a fractional count', {
-        items: [],
-        count: 0.5
-      }],
-      ['a string count', {
-        items: [],
-        count: '0'
-      }],
-      ['a non-finite count', {
-        items: [],
-        count: Number.POSITIVE_INFINITY
-      }],
-      ['a count smaller than the returned items', {
-        items: [buildAlertItem()],
-        count: 0,
-      }],
-      ['a mixed valid and malformed alert list', {
-        items: [buildAlertItem(), buildAlertItemCandidate({ id: '' })],
-        count: 2,
-      }],
-    ])('rejects the top level when it is %s', (_condition, candidate) => {
+    it.each(buildMalformedListEnvelopes({
+      response: buildAlertsResponse(),
+      validItem: buildAlertItem(),
+      malformedItem: buildAlertItemCandidate({ id: '' }),
+    }))('rejects an alert list when %s', (_condition, candidate) => {
       expect(isAlertsResponse(candidate)).toBe(false);
     });
 
@@ -175,10 +126,7 @@ describe('alert runtime decoders', () => {
       ['threshold value', { threshold: [10] }],
       ['message', { message: '' }],
     ])('rejects an alert when its required %s is malformed', (_field, overrides) => {
-      expect(isAlertsResponse({
-        items: [buildAlertItemCandidate(overrides)],
-        count: 1,
-      })).toBe(false);
+      expect(isAlertsResponse(buildSingleItemList(buildAlertItemCandidate(overrides)))).toBe(false);
     });
 
     it.each([
@@ -187,10 +135,7 @@ describe('alert runtime decoders', () => {
       ['string', '12.5'],
       ['finite number', 12.5],
     ])('accepts a %s metric value', (_kind, metricValue) => {
-      expect(isAlertsResponse({
-        items: [buildAlertItem({ previous: metricValue })],
-        count: 1,
-      })).toBe(true);
+      expect(isAlertsResponse(buildSingleItemList(buildAlertItem({ previous: metricValue })))).toBe(true);
     });
 
     it.each([
@@ -198,27 +143,18 @@ describe('alert runtime decoders', () => {
       Number.POSITIVE_INFINITY,
       Number.NEGATIVE_INFINITY,
     ])('rejects %s when an alert metric is not finite', (metricValue) => {
-      expect(isAlertsResponse({
-        items: [buildAlertItemCandidate({ previous: metricValue })],
-        count: 1,
-      })).toBe(false);
+      expect(isAlertsResponse(buildSingleItemList(buildAlertItemCandidate({ previous: metricValue })))).toBe(false);
     });
 
     it('rejects an alert when its optional entity is blank', () => {
-      expect(isAlertsResponse({
-        items: [buildAlertItem({ entity: '   ' })],
-        count: 1,
-      })).toBe(false);
+      expect(isAlertsResponse(buildSingleItemList(buildAlertItem({ entity: '   ' })))).toBe(false);
     });
 
     it('rejects an alert when its optional content change is malformed', () => {
       const marker = buildContentChangeMarkerCandidate({ url: 'ftp://example.com/page' });
       const alertCandidate = buildAlertItemCandidate({ content_change: marker });
 
-      expect(isAlertsResponse({
-        items: [alertCandidate],
-        count: 1,
-      })).toBe(false);
+      expect(isAlertsResponse(buildSingleItemList(alertCandidate))).toBe(false);
     });
   });
 
@@ -430,43 +366,17 @@ describe('alert runtime decoders', () => {
     });
 
     it('accepts an empty content-change list when count is zero', () => {
-      expect(isContentChangesResponse({
-        items: [],
-        count: 0
-      })).toBe(true);
+      expect(isContentChangesResponse(EMPTY_LIST)).toBe(true);
     });
 
     it.each([
-      ['the payload is null', null],
-      ['the payload is an array', []],
-      ['an array carries otherwise valid response properties', Object.assign([], buildContentChangesResponse())],
-      ['items is missing', { count: 0 }],
+      ...buildMalformedListEnvelopes({
+        response: buildContentChangesResponse(),
+        validItem: buildContentChangeMarker(),
+        malformedItem: buildContentChangeMarkerCandidate({ id: '' }),
+      }),
       ['items is not an array', {
         items: {},
-        count: 0
-      }],
-      ['items mixes valid and malformed markers', {
-        items: [buildContentChangeMarker(), buildContentChangeMarkerCandidate({ id: '' })],
-        count: 2,
-      }],
-      ['count is negative', {
-        items: [],
-        count: -1
-      }],
-      ['count is fractional', {
-        items: [],
-        count: 0.5
-      }],
-      ['count is a string', {
-        items: [],
-        count: '0'
-      }],
-      ['count is not finite', {
-        items: [],
-        count: Number.POSITIVE_INFINITY
-      }],
-      ['count is smaller than the item list', {
-        items: [buildContentChangeMarker()],
         count: 0,
       }],
     ])('rejects a content-change list when %s', (_condition, candidate) => {

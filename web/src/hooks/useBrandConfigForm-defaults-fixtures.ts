@@ -1,4 +1,6 @@
-import { renderHook } from '@testing-library/react';
+import {
+  act, renderHook
+} from '@testing-library/react';
 import type {
   BrandConfig, IndustryPresets
 } from '../types';
@@ -33,6 +35,26 @@ export const MULTI_INDUSTRY_OVERRIDE_CONFIG = buildBrandConfig({
     general: 'Stored general prompt',
   },
 });
+
+interface BrandConfigFormResult { current: ReturnType<typeof useBrandConfigForm> }
+
+export function changePrompt(result: BrandConfigFormResult, prompt: string): void {
+  act(() => {
+    result.current.handlePromptChange(prompt);
+  });
+}
+
+export function selectIndustry(result: BrandConfigFormResult, industry: string): void {
+  act(() => {
+    result.current.setIndustry(industry);
+  });
+}
+
+export function resetPrompt(result: BrandConfigFormResult): void {
+  act(() => {
+    result.current.resetPromptToDefault();
+  });
+}
 
 export function renderBrandConfigForm(
   config: BrandConfig | null = null,

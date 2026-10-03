@@ -11,14 +11,13 @@ import {
 } from './alertsApiMock-fixtures';
 import { AlertHookFailure } from './alertHookErrors-fixtures';
 import {
-  ALERT_SETTINGS_UPDATE,
-  beginHookRequest,
-  buildAlertAcknowledgement,
-  createDeferredValue,
+  beginAlertAcknowledgement,
+  beginSettingsSave,
+  deferNextCall,
   rejectDeferredValue,
   renderLoadedAlertSettings,
   renderLoadedOpenAlerts,
-  resolveDeferredValue,
+  resolveAcknowledgement,
   resolveSavedSettings,
 } from './useAlerts-fixtures';
 import { deferNextTwoCalls } from '../test/fetchResponses';
@@ -31,26 +30,21 @@ describe('alert action settlement state', () => {
   it('removes only the failed acknowledgement id when another id is pending', async () => {
     const [failed, pending] = deferNextTwoCalls<AlertAcknowledgement>(mockAcknowledgeAlert);
     const { result } = await renderLoadedOpenAlerts();
-    const failedRequest = beginHookRequest(() => result.current.acknowledge('alert-failed'));
-    const pendingRequest = beginHookRequest(() => result.current.acknowledge('alert-pending'));
+    const failedRequest = beginAlertAcknowledgement(result.current, 'alert-failed');
+    const pendingRequest = beginAlertAcknowledgement(result.current, 'alert-pending');
 
     await rejectDeferredValue(failed, new AlertHookFailure(), failedRequest);
 
     expect(result.current.acknowledgingIds).toStrictEqual(['alert-pending']);
 
-    await resolveDeferredValue(
-      pending,
-      buildAlertAcknowledgement('alert-pending'),
-      pendingRequest
-    );
+    await resolveAcknowledgement(pending, 'alert-pending', pendingRequest);
   });
 
   it('clears saving when a pending save succeeds', async () => {
-    const response = createDeferredValue<AlertSettings>();
-    mockUpdateAlertSettings.mockReturnValueOnce(response.promise);
+    const response = deferNextCall<AlertSettings>(mockUpdateAlertSettings);
     const { result } = await renderLoadedAlertSettings();
 
-    const pending = beginHookRequest(() => result.current.saveSettings(ALERT_SETTINGS_UPDATE));
+    const pending = beginSettingsSave(result.current);
     expect(result.current.saving).toBe(true);
 
     await resolveSavedSettings(response, pending);

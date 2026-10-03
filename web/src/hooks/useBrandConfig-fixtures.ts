@@ -1,6 +1,6 @@
 import { expect } from 'vitest';
 import {
-  renderHook, waitFor
+  act, renderHook, waitFor
 } from '@testing-library/react';
 import type {
   BrandConfig, IndustryPresets
@@ -79,7 +79,7 @@ const mockCompetitorDiscovery = {
   notes: 'Found competitors',
 };
 
-interface BrandConfigMockApiOptions {
+export interface BrandConfigMockApiOptions {
   /** Partial stored config returned by GET and echoed back by POST `/brand-config`. */
   configResponse?: Partial<BrandConfig>;
   presetsResponse?: IndustryPresets;
@@ -104,6 +104,19 @@ function createMockApi(options: BrandConfigMockApiOptions = {}) {
     expandAllBrands: createMockEndpoint(options.shouldFailExpandAll, mockAllBrandsExpansion),
     findCompetitors: createMockEndpoint(options.shouldFailFindCompetitors, mockCompetitorDiscovery),
   } satisfies BrandConfigApi;
+}
+
+/** Renders the hook, waits for the initial load, then runs one hook action inside `act`. */
+export async function runOnLoadedBrandConfig<TValue>(
+  run: (hook: ReturnType<typeof useBrandConfig>) => Promise<TValue>,
+  options: BrandConfigMockApiOptions = {}
+) {
+  const rendered = await renderLoadedBrandConfig(options);
+  const value = await act(() => run(rendered.result.current));
+  return {
+    ...rendered,
+    value,
+  };
 }
 
 /** Renders the hook against a mocked API without waiting for the initial load. */

@@ -1,7 +1,6 @@
 import {
   describe, expect, it
 } from 'vitest';
-import { act } from '@testing-library/react';
 import {
   GENERAL_AND_CUSTOM_PRESETS,
   HOTEL_GENERAL_AND_CUSTOM_PRESETS,
@@ -9,8 +8,11 @@ import {
   MULTI_INDUSTRY_OVERRIDE_CONFIG,
   UNKNOWN_INDUSTRY_CONFIG,
   UNKNOWN_INDUSTRY_OVERRIDE_CONFIG,
+  changePrompt,
   renderMultiIndustryBrandConfigForm,
   renderBrandConfigForm,
+  resetPrompt,
+  selectIndustry,
 } from './useBrandConfigForm-defaults-fixtures';
 
 describe('useBrandConfigForm prompt defaults', () => {
@@ -23,9 +25,7 @@ describe('useBrandConfigForm prompt defaults', () => {
   it('keeps an empty prompt unmodified when no fallback preset exists', () => {
     const { result } = renderBrandConfigForm(UNKNOWN_INDUSTRY_CONFIG, HOTEL_PRESETS);
 
-    act(() => {
-      result.current.handlePromptChange('');
-    });
+    changePrompt(result, '');
 
     expect(result.current.form.promptModified).toBe(false);
   });
@@ -33,9 +33,7 @@ describe('useBrandConfigForm prompt defaults', () => {
   it('uses the next industry default when industry selection changes', () => {
     const { result } = renderMultiIndustryBrandConfigForm();
 
-    act(() => {
-      result.current.setIndustry('general');
-    });
+    selectIndustry(result, 'general');
 
     expect(result.current.form.currentPrompt).toBe('Stored general prompt');
   });
@@ -46,26 +44,18 @@ describe('useBrandConfigForm prompt defaults', () => {
       industry_prompts: {},
     };
     const { result } = renderBrandConfigForm(config, HOTEL_GENERAL_AND_CUSTOM_PRESETS);
-    act(() => {
-      result.current.setIndustry('general');
-    });
+    selectIndustry(result, 'general');
 
-    act(() => {
-      result.current.handlePromptChange('Extract general brand and company mentions.');
-    });
+    changePrompt(result, 'Extract general brand and company mentions.');
 
     expect(result.current.form.promptModified).toBe(false);
   });
 
   it('removes the newly selected industry override when reset', () => {
     const { result } = renderMultiIndustryBrandConfigForm();
-    act(() => {
-      result.current.setIndustry('general');
-    });
+    selectIndustry(result, 'general');
 
-    act(() => {
-      result.current.resetPromptToDefault();
-    });
+    resetPrompt(result);
 
     expect(result.current.buildConfig().industry_prompts).toStrictEqual({ hotels: 'Stored hotel prompt' });
   });

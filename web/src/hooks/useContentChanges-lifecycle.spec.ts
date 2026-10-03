@@ -21,8 +21,9 @@ import { AlertHookFailure } from './alertHookErrors-fixtures';
 import {
   CONTENT_CHANGE_REQUEST,
   beginContentChangeRecord,
-  beginHookRequest,
-  createDeferredValue,
+  beginDeferredRefresh,
+  beginRecordThenSwitchGroup,
+  deferNextCall,
   rejectDeferredValue,
   renderContentChangesForGroup,
   renderLoadedContentChanges,
@@ -55,8 +56,7 @@ describe('useContentChanges lifecycle', () => {
   });
 
   it('cancels a pending marker load and returns to idle when selection is cleared', async () => {
-    const response = createDeferredValue<ContentChangesResponse>();
-    mockFetchContentChanges.mockReturnValueOnce(response.promise);
+    const response = deferNextCall<ContentChangesResponse>(mockFetchContentChanges);
     const {
       result, rerender
     } = renderContentChangesForGroup();
@@ -85,27 +85,18 @@ describe('useContentChanges lifecycle', () => {
     mockCreateContentChange.mockResolvedValueOnce(marker);
     const { result } = await renderLoadedContentChanges();
     await beginContentChangeRecord(result.current);
-    const refreshResponse = createDeferredValue<ContentChangesResponse>();
-    mockFetchContentChanges.mockReturnValueOnce(refreshResponse.promise);
-
-    const pendingRefresh = beginHookRequest(result.current.refresh);
+    const refresh = beginDeferredRefresh(mockFetchContentChanges, result.current, buildContentChangesResponse());
 
     expect(result.current.latestMarker).toBeNull();
     expect(result.current.recordOutcome).toBeNull();
     expect(result.current.recording).toBe(false);
 
-    await resolveDeferredValue(
-      refreshResponse,
-      buildContentChangesResponse(),
-      pendingRefresh
-    );
+    await refresh.finish();
   });
 
   it('aborts marker loading and enters recording state when a record starts', async () => {
-    const loadResponse = createDeferredValue<ContentChangesResponse>();
-    const recordResponse = createDeferredValue<ContentChangeMarker>();
-    mockFetchContentChanges.mockReturnValueOnce(loadResponse.promise);
-    mockCreateContentChange.mockReturnValueOnce(recordResponse.promise);
+    const loadResponse = deferNextCall<ContentChangesResponse>(mockFetchContentChanges);
+    const recordResponse = deferNextCall<ContentChangeMarker>(mockCreateContentChange);
     const { result } = renderContentChangesForGroup();
     await waitFor(() => expect(mockFetchContentChanges).toHaveBeenCalledTimes(1));
     const loadSignal = mockFetchContentChanges.mock.calls[0][0].signal;
@@ -131,8 +122,7 @@ describe('useContentChanges lifecycle', () => {
   it('clears a load error while a content-change record is pending', async () => {
     mockFetchContentChanges.mockRejectedValueOnce(new ApiRequestError('HTTP 500', 500));
     const { result } = await renderLoadedContentChanges();
-    const recordResponse = createDeferredValue<ContentChangeMarker>();
-    mockCreateContentChange.mockReturnValueOnce(recordResponse.promise);
+    const recordResponse = deferNextCall<ContentChangeMarker>(mockCreateContentChange);
 
     const pendingRecord = beginContentChangeRecord(result.current);
 
@@ -162,11 +152,10 @@ describe('useContentChanges lifecycle', () => {
       id: 'change-south',
       group_id: 'group-south',
     });
-    const oldRecord = createDeferredValue<ContentChangeMarker>();
     mockFetchContentChanges
       .mockResolvedValueOnce(buildContentChangesResponse({ items: [northMarker] }))
       .mockResolvedValueOnce(buildContentChangesResponse({ items: [southMarker] }));
-    mockCreateContentChange.mockReturnValueOnce(oldRecord.promise);
+    const oldRecord = deferNextCall<ContentChangeMarker>(mockCreateContentChange);
     const {
       result, rerender
     } = renderContentChangesForGroup();
@@ -182,16 +171,10 @@ describe('useContentChanges lifecycle', () => {
   });
 
   it('does not apply an old record failure after the selected group changes', async () => {
-    const oldRecord = createDeferredValue<ContentChangeMarker>();
-    mockCreateContentChange.mockReturnValueOnce(oldRecord.promise);
+    const oldRecord = deferNextCall<ContentChangeMarker>(mockCreateContentChange);
     const {
-      result, rerender
-    } = renderContentChangesForGroup();
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    const pendingRecord = beginContentChangeRecord(result.current);
-
-    rerender({ selectedGroupId: 'group-south' });
-    await waitFor(() => expect(result.current.loading).toBe(false));
+      result, pendingRecord
+    } = await beginRecordThenSwitchGroup();
     await rejectDeferredValue(oldRecord, new AlertHookFailure(), pendingRecord);
 
     expect(result.current.recordOutcome).toBeNull();
@@ -200,12 +183,8 @@ describe('useContentChanges lifecycle', () => {
   it('keeps a new-group record pending when the old-group record settles', async () => {
     const [oldRecord, currentRecord] = deferNextTwoCalls<ContentChangeMarker>(mockCreateContentChange);
     const {
-      result, rerender
-    } = renderContentChangesForGroup();
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    const oldPending = beginContentChangeRecord(result.current);
-    rerender({ selectedGroupId: 'group-south' });
-    await waitFor(() => expect(result.current.loading).toBe(false));
+      result, pendingRecord: oldPending
+    } = await beginRecordThenSwitchGroup();
     const currentRequest = {
       ...CONTENT_CHANGE_REQUEST,
       group_id: 'group-south',

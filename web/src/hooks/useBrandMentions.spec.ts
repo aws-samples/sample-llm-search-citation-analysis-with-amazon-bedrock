@@ -9,12 +9,15 @@ import {
   mockBrandMentionsResponse, createMockFetch
 } from './useBrandMentions-fixtures';
 import { createMockJsonResponse } from '../test/fetchResponses';
+import {
+  renderLoadedHook, waitForLoaded
+} from '../test/loadedHook';
 import { keywordScope as kw } from '../components/ui/reportScope-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import {
-  deferAuthenticatedFetch, mockAuthenticatedFetch 
+  deferAuthenticatedFetch, mockAuthenticatedFetch
 } from '../test/infrastructureMock';
 
 interface BrandMentionsProps {
@@ -36,53 +39,43 @@ describe('useBrandMentions', () => {
   it('returns brand mentions when the request succeeds', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
 
-    const { result } = renderHook(() => useBrandMentions(kw('test keyword')));
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedHook(() => useBrandMentions(kw('test keyword')));
 
     expect(result.current.data).toStrictEqual(mockBrandMentionsResponse);
     expect(result.current.error).toBeNull();
   });
 
-  it('includes the encoded keyword when building the request URL', async () => {
+  it.each([
+    {
+      name: 'includes the encoded keyword when building the request URL',
+      useScopedMentions: () => useBrandMentions(kw('best hotels in paris')),
+      expectedQuery: 'keyword=best+hotels+in+paris',
+    },
+    {
+      name: 'includes classification when a filter is selected',
+      useScopedMentions: () => useBrandMentions(kw('test'), 'first_party'),
+      expectedQuery: 'classification=first_party',
+    },
+    {
+      name: 'includes timestamp when a historical run is selected',
+      useScopedMentions: () => useBrandMentions(
+        kw('test'),
+        null,
+        null,
+        '2026-01-10T00:00:00Z'
+      ),
+      expectedQuery: 'timestamp=2026-01-10T00%3A00%3A00Z',
+    },
+  ])('$name', async ({
+    useScopedMentions, expectedQuery
+  }) => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
 
-    renderHook(() => useBrandMentions(kw('best hotels in paris')));
+    renderHook(useScopedMentions);
 
     await waitFor(() => {
       expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-        expect.stringContaining('keyword=best+hotels+in+paris'),
-        expect.any(Object)
-      );
-    });
-  });
-
-  it('includes classification when a filter is selected', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-    renderHook(() => useBrandMentions(kw('test'), 'first_party'));
-
-    await waitFor(() => {
-      expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-        expect.stringContaining('classification=first_party'),
-        expect.any(Object)
-      );
-    });
-  });
-
-  it('includes timestamp when a historical run is selected', async () => {
-    mockAuthenticatedFetch.mockImplementation(createMockFetch());
-
-    renderHook(() => useBrandMentions(
-      kw('test'),
-      null,
-      null,
-      '2026-01-10T00:00:00Z'
-    ));
-
-    await waitFor(() => {
-      expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
-        expect.stringContaining('timestamp=2026-01-10T00%3A00%3A00Z'),
+        expect.stringContaining(expectedQuery),
         expect.any(Object)
       );
     });
@@ -91,9 +84,7 @@ describe('useBrandMentions', () => {
   it('reports the brands server-error message when the fetch fails', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch({ shouldFail: true }));
 
-    const { result } = renderHook(() => useBrandMentions(kw('test')));
-
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    const { result } = await renderLoadedHook(() => useBrandMentions(kw('test')));
 
     expect(result.current.error).toBe('Failed to load brand mentions');
     expect(result.current.data).toBeNull();
@@ -121,12 +112,12 @@ describe('useBrandMentions', () => {
       result, rerender
     } = renderHook(
       ({
-        keyword, filter 
+        keyword, filter
       }: BrandMentionsProps) => useBrandMentions(kw(keyword), filter),
       { initialProps }
     );
 
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitForLoaded(result);
 
     const initialCallCount = mockAuthenticatedFetch.mock.calls.length;
 
@@ -176,6 +167,6 @@ describe('useBrandMentions', () => {
 
     deferred.resolve(createMockJsonResponse(mockBrandMentionsResponse));
 
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitForLoaded(result);
   });
 });

@@ -13,8 +13,10 @@ import {
   GENERAL_AND_CUSTOM_PRESETS,
   HOTEL_PRESETS,
   UNKNOWN_INDUSTRY_CONFIG,
+  changePrompt,
   renderBrandConfigForm,
   renderHotelBrandConfigForm,
+  resetPrompt,
 } from './useBrandConfigForm-defaults-fixtures';
 
 describe('useBrandConfigForm', () => {
@@ -126,9 +128,7 @@ describe('useBrandConfigForm', () => {
     it('includes custom prompt in industry_prompts when prompt modified', () => {
       const { result } = renderHotelBrandConfigForm();
 
-      act(() => {
-        result.current.handlePromptChange('Custom prompt text');
-      });
+      changePrompt(result, 'Custom prompt text');
 
       const config = result.current.buildConfig();
 
@@ -153,32 +153,22 @@ describe('useBrandConfigForm', () => {
   });
 
   describe('handlePromptChange', () => {
-    it('sets promptModified to true when prompt differs from default', () => {
+    it.each([
+      [true, 'prompt differs from default', 'Modified prompt'],
+      [false, 'prompt matches default', 'Extract hotel brands from text.'],
+    ])('sets promptModified to %s when %s', (expected, _condition, prompt) => {
       const { result } = renderHotelBrandConfigForm();
 
-      act(() => {
-        result.current.handlePromptChange('Modified prompt');
-      });
+      changePrompt(result, prompt);
 
-      expect(result.current.form.promptModified).toBe(true);
+      expect(result.current.form.promptModified).toBe(expected);
     });
 
-    it('sets promptModified to false when prompt matches default', () => {
-      const { result } = renderHotelBrandConfigForm();
-
-      act(() => {
-        result.current.handlePromptChange('Extract hotel brands from text.');
-      });
-
-      expect(result.current.form.promptModified).toBe(false);
-    });
     it('keeps Custom default unmodified when configured industry is unknown', () => {
       const config = UNKNOWN_INDUSTRY_CONFIG;
       const { result } = renderBrandConfigForm(config, GENERAL_AND_CUSTOM_PRESETS);
 
-      act(() => {
-        result.current.handlePromptChange('Extract custom brand and company mentions.');
-      });
+      changePrompt(result, 'Extract custom brand and company mentions.');
 
       expect(result.current.form.promptModified).toBe(false);
     });
@@ -188,12 +178,8 @@ describe('useBrandConfigForm', () => {
     it('restores default prompt when called after modification', () => {
       const { result } = renderHotelBrandConfigForm();
 
-      act(() => {
-        result.current.handlePromptChange('Custom prompt');
-      });
-      act(() => {
-        result.current.resetPromptToDefault();
-      });
+      changePrompt(result, 'Custom prompt');
+      resetPrompt(result);
 
       expect(result.current.form.currentPrompt).toBe('Extract hotel brands from text.');
       expect(result.current.form.promptModified).toBe(false);
@@ -205,9 +191,7 @@ describe('useBrandConfigForm', () => {
       });
       const { result } = renderBrandConfigForm(config, GENERAL_AND_CUSTOM_PRESETS);
 
-      act(() => {
-        result.current.resetPromptToDefault();
-      });
+      resetPrompt(result);
 
       expect(result.current.form.currentPrompt).toBe('Extract custom brand and company mentions.');
       expect(result.current.form.promptModified).toBe(false);
