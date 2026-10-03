@@ -144,6 +144,10 @@ function bracePattern(): RegExp {
   return /[{}]/gu;
 }
 
+const distinctSorted = (names: string[]): string[] => names
+  .filter((name, index) => names.indexOf(name) === index)
+  .sort((left, right) => left.localeCompare(right));
+
 export function promptTemplateError(template: string): string | null {
   const placeholderMatches = [...template.matchAll(placeholderPattern())];
   const braceCount = [...template.matchAll(bracePattern())].length;
@@ -153,18 +157,14 @@ export function promptTemplateError(template: string): string | null {
 
   const allowed = new Set<string>(GROUP_BRIEF_ALLOWED_PLACEHOLDERS);
   const placeholderNames = placeholderMatches.map((match) => match[1]);
-  const unknown = placeholderNames
-    .filter((name) => !allowed.has(name))
-    .filter((name, index, names) => names.indexOf(name) === index)
-    .sort((left, right) => left.localeCompare(right));
+  const unknown = distinctSorted(placeholderNames.filter((name) => !allowed.has(name)));
   if (unknown.length > 0) {
     return `Prompt template contains unknown placeholder(s): ${unknown.join(', ')}.`;
   }
 
-  const repeated = placeholderNames
-    .filter((name) => placeholderNames.filter((candidate) => candidate === name).length > 2)
-    .filter((name, index, names) => names.indexOf(name) === index)
-    .sort((left, right) => left.localeCompare(right));
+  const repeated = distinctSorted(
+    placeholderNames.filter((name) => placeholderNames.filter((candidate) => candidate === name).length > 2),
+  );
   return repeated.length > 0
     ? `Prompt template repeats placeholder(s) too many times: ${repeated.join(', ')}.`
     : null;

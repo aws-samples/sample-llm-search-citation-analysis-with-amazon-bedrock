@@ -8,6 +8,9 @@ import { ContentHistory } from './ContentHistory';
 import { GroupBriefForm } from './GroupBriefForm';
 import { GROUP_BRIEF_LANGUAGES } from './GroupBriefForm-source';
 import { Spinner } from '../ui/Spinner';
+import {
+  CenteredEmpty, CenteredLoading
+} from '../ui/CenteredState';
 import type {
   ContentBriefBatchRequest,
   ContentIdea,
@@ -38,21 +41,16 @@ const IdeasTabContent = ({
   loading, ideas, actionableIdeas, generating, selectedIdea, onCreateContent
 }: IdeasTabContentProps) => {
   if (loading && ideas.length === 0) {
-    return (
-      <div className="text-center py-12 text-gray-500">
-        <Spinner size="lg" className="mx-auto mb-4" />
-        Analyzing your data for content opportunities...
-      </div>
-    );
+    return <CenteredLoading label="Analyzing your data for content opportunities..." />;
   }
 
   if (actionableIdeas.length === 0) {
     return (
-      <div className="text-center py-12 text-gray-500">
-        <StrokeIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" paths={DOCUMENT_TEXT_PATHS} />
-        <p>No content ideas available yet.</p>
-        <p className="text-sm mt-1">Run an analysis and configure your brands to get started.</p>
-      </div>
+      <CenteredEmpty
+        icon={<StrokeIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" paths={DOCUMENT_TEXT_PATHS} />}
+        title="No content ideas available yet."
+        hint="Run an analysis and configure your brands to get started."
+      />
     );
   }
 

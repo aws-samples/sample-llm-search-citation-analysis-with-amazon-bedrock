@@ -29,3 +29,17 @@ export const CopyButtonLabel = ({
     </>
   )
 );
+
+interface CopyButtonProps extends Omit<CopyButtonLabelProps, 'copiedLabel'> {
+  onCopy: () => void;
+  className: string;
+}
+
+/** A copy-to-clipboard button whose content is a `CopyButtonLabel`. */
+export const CopyButton = ({
+  onCopy, className, ...labelProps
+}: CopyButtonProps) => (
+  <button onClick={onCopy} className={className}>
+    <CopyButtonLabel {...labelProps} />
+  </button>
+);

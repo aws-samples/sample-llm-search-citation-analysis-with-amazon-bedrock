@@ -8,6 +8,7 @@ import {
   GROUP_BRIEF_MAX_TEMPLATE_LENGTH,
   GROUP_BRIEF_MAX_TEMPLATE_NAME_LENGTH,
 } from './GroupBriefForm-source';
+import { FieldIssue } from './GroupBriefFields';
 
 interface GroupBriefPromptEditorProps {
   readonly mode: GroupBriefMode;
@@ -173,7 +174,7 @@ function PromptField({
           ? 'Edited — generation uses this exact snapshot. Save it to reuse the changes.'
           : 'Generation uses this exact saved template snapshot.'}
       </p>
-      {issue && <p role="alert" className="mt-1 text-sm text-red-600">{issue}</p>}
+      <FieldIssue issue={issue} />
     </div>
   );
 }
@@ -186,15 +187,7 @@ function TemplateActions({
   onSaveAsNew,
   onUpdate,
   onDelete,
-}: {
-  readonly selectedTemplate: ContentBriefTemplate | undefined;
-  readonly dirty: boolean;
-  readonly disabled: boolean;
-  readonly saving: boolean;
-  readonly onSaveAsNew: () => Promise<void>;
-  readonly onUpdate: () => Promise<void>;
-  readonly onDelete: () => Promise<void>;
-}) {
+}: Pick<GroupBriefPromptEditorProps, 'selectedTemplate' | 'dirty' | 'disabled' | 'saving' | 'onSaveAsNew' | 'onUpdate' | 'onDelete'>) {
   const actionsDisabled = disabled || saving;
   return (
     <div className="flex flex-wrap items-center gap-2">

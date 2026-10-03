@@ -6,8 +6,7 @@ import {
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { exportResearchKeywords } from './researchExport';
 import { useExportAction } from '../ui/useExportAction';
-import { StrokeIcon } from '../ui/StrokeIcon';
-import { DUPLICATE_PATHS } from '../ui/iconPaths';
+import { ClipboardIcon } from '../ui/ClipboardIcon';
 
 interface KeywordResultsTableProps {
   keywords: ResearchKeyword[];
@@ -169,7 +168,7 @@ export const KeywordResultsTable = ({
                       className="text-gray-400 hover:text-gray-600 transition-colors"
                       title="Copy keyword"
                     >
-                      <StrokeIcon className="w-4 h-4" paths={DUPLICATE_PATHS} />
+                      <ClipboardIcon className="w-4 h-4" />
                     </button>
                   </td>
                 </tr>

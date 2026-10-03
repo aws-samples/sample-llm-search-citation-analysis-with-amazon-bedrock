@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import type { ContentStudioHistory } from '../../types';
 import { Spinner } from '../ui/Spinner';
 import { exportToDocx } from '../../exporters/documentGenerator';
-import { CopyButtonLabel } from './CopyButtonLabel';
+import { CopyButton } from './CopyButtonLabel';
 import { useExportAction } from '../ui/useExportAction';
 import { OverlayDialog } from './OverlayDialog';
 import {
@@ -106,7 +106,13 @@ const ContentDetailHeader = ({
     <div className="flex items-center gap-2">
       <ViewModeToggle viewMode={viewMode} setViewMode={setViewMode} />
       <ExportButton exporting={exporting} onExport={onExportDocx} />
-      <CopyButton copied={copied} onCopy={onCopy} />
+      <CopyButton
+        copied={copied}
+        onCopy={onCopy}
+        className="px-3 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
+        iconClassName="w-4 h-4"
+        label="Copy All"
+      />
       <CloseButton onClose={onClose} />
     </div>
   </div>
@@ -164,22 +170,6 @@ const ExportButton = ({
       <StrokeIcon className="w-4 h-4" paths={DOWNLOAD_PATHS} />
     )}
     .docx
-  </button>
-);
-
-interface CopyButtonProps {
-  copied: boolean;
-  onCopy: () => void;
-}
-
-const CopyButton = ({
-  copied, onCopy
-}: CopyButtonProps) => (
-  <button
-    onClick={onCopy}
-    className="px-3 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
-  >
-    <CopyButtonLabel copied={copied} iconClassName="w-4 h-4" label="Copy All" />
   </button>
 );
 

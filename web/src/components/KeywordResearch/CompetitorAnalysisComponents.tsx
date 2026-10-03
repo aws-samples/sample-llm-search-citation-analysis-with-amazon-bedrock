@@ -9,8 +9,9 @@ import { safeHref } from '../../infrastructure';
 import { Spinner } from '../ui/Spinner';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
-  CHEVRON_RIGHT_PATHS, DUPLICATE_PATHS, GLOBE_PATHS 
+  CHEVRON_RIGHT_PATHS, GLOBE_PATHS 
 } from '../ui/iconPaths';
+import { ClipboardIcon } from '../ui/ClipboardIcon';
 
 type SectionId = 'primary' | 'secondary' | 'longtail' | 'gaps';
 
@@ -336,7 +337,7 @@ const KeywordRow = ({
           className="text-gray-400 hover:text-gray-600 transition-colors"
           title="Copy keyword"
         >
-          <StrokeIcon className="w-4 h-4" paths={DUPLICATE_PATHS} />
+          <ClipboardIcon className="w-4 h-4" />
         </button>
       </td>
     </tr>

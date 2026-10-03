@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import type { ContentStudioHistory } from '../../types';
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
-import { Spinner } from '../ui/Spinner';
+import {
+  CenteredEmpty, CenteredLoading
+} from '../ui/CenteredState';
 import { ConfirmModal } from '../ui/Modal';
 import { CollectionIcon } from '../ui';
 import { ContentDetailModal } from './ContentDetailModal';
@@ -56,21 +58,16 @@ export const ContentHistory = ({
   };
 
   if (loading && history.length === 0) {
-    return (
-      <div className="text-center py-12 text-gray-500">
-        <Spinner size="lg" className="mx-auto mb-4" />
-        Loading content history...
-      </div>
-    );
+    return <CenteredLoading label="Loading content history..." />;
   }
 
   if (history.length === 0) {
     return (
-      <div className="text-center py-12 text-gray-500">
-        <CollectionIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-        <p>No generated content yet.</p>
-        <p className="text-sm mt-1">Generate content from the Ideas tab to see it here.</p>
-      </div>
+      <CenteredEmpty
+        icon={<CollectionIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" />}
+        title="No generated content yet."
+        hint="Generate content from the Ideas tab to see it here."
+      />
     );
   }
 
