@@ -37,3 +37,44 @@ export const PROVIDER_DOCS_URLS: Record<ProviderId, string> = {
   [PROVIDER.GEMINI]: 'https://aistudio.google.com/apikey',
   [PROVIDER.CLAUDE]: 'https://console.anthropic.com/settings/keys',
 };
+
+function isProviderId(provider: string): provider is ProviderId {
+  return Object.keys(PROVIDER_NAMES).includes(provider);
+}
+
+/** A provider's display name ("OpenAI"), or its id for a provider the dashboard does not know. */
+export function providerName(provider: string): string {
+  return isProviderId(provider) ? PROVIDER_NAMES[provider] : provider;
+}
+
+interface ProviderColor {
+  /** The provider's chart colour as `r, g, b`, for `rgb()` / `rgba()`. */
+  rgb: string;
+  /** Tinted badge classes in the same hue. */
+  badge: string;
+}
+
+/** One hue per provider, so charts and badges agree on which colour is which engine. */
+const PROVIDER_COLORS: Record<ProviderId, ProviderColor> = {
+  [PROVIDER.OPENAI]: {
+    rgb: '16, 185, 129',
+    badge: 'bg-green-100 text-green-800',
+  },
+  [PROVIDER.PERPLEXITY]: {
+    rgb: '249, 115, 22',
+    badge: 'bg-orange-100 text-orange-800',
+  },
+  [PROVIDER.GEMINI]: {
+    rgb: '59, 130, 246',
+    badge: 'bg-blue-100 text-blue-800',
+  },
+  [PROVIDER.CLAUDE]: {
+    rgb: '168, 85, 247',
+    badge: 'bg-purple-100 text-purple-800',
+  },
+};
+
+/** The colour of a known provider; `undefined` for one the dashboard does not know. */
+export function providerColor(provider: string): ProviderColor | undefined {
+  return isProviderId(provider) ? PROVIDER_COLORS[provider] : undefined;
+}

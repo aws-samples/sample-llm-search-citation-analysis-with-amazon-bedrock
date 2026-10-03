@@ -3,6 +3,7 @@ import type {
   AggregatedBrand, BrandConfig 
 } from '../../types';
 import { ArrowRightIcon } from '../ui';
+import { providerName } from '../../constants/providers';
 
 interface BrandMentionsTableProps {
   brands: AggregatedBrand[];
@@ -154,7 +155,7 @@ export const BrandMentionsTable = ({
                         <span
                           key={provider}
                           className="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs"
-                          title={provider}
+                          title={providerName(provider)}
                         >
                           {provider.slice(0, 3).toUpperCase()}
                         </span>

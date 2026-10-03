@@ -25,11 +25,11 @@ export function buildContent(overrides: Partial<RawResponseContent> = {}): RawRe
   };
 }
 
-export function buildDocumentContent(): RawResponseContent {
+export function buildDocumentContent(provider = 'openai'): RawResponseContent {
   return {
     key: 'responses/test-file.json',
     content: {
-      provider: 'openai',
+      provider,
       keyword: 'test keyword',
       timestamp: '2024-01-15T10:30:00Z',
       raw_api_response: {},

@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
 import type { EngineKpis } from '../../../types';
 import {
-  engineName, SentimentSplitChart, type SentimentRow
+  SentimentSplitChart, type SentimentRow
 } from '../charts';
+import { providerName } from '../../../constants/providers';
 import type { ScopeSectionProps } from './scopeSectionGate';
 import { LatestRunSection } from './ScopeSections';
 import { SentimentCountTable } from './SentimentCountTable';
@@ -10,7 +11,7 @@ import { SentimentCountTable } from './SentimentCountTable';
 /** One sentiment row per AI engine, labelled with the engine's name. */
 function engineSentimentRows(engines: readonly EngineKpis[]): SentimentRow[] {
   return engines.map((engine) => ({
-    label: engineName(engine.engine),
+    label: providerName(engine.engine),
     split: engine.kpis.sentiment_split,
   }));
 }

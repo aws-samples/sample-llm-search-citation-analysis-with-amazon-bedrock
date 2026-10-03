@@ -1,5 +1,5 @@
 import type { BrandLeaderboardRow } from '../../../../types';
-import { engineName } from '../../charts';
+import { providerName } from '../../../../constants/providers';
 import {
   ReportTable, type ReportTableColumn
 } from '../../layout/ReportTable';
@@ -26,7 +26,7 @@ function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardR
     {
       header: 'Engines',
       info: 'The AI engines whose answers name the brand.',
-      render: (brand) => brand.engines.map(engineName).join(', '),
+      render: (brand) => brand.engines.map(providerName).join(', '),
     },
     {
       header: 'Keywords',

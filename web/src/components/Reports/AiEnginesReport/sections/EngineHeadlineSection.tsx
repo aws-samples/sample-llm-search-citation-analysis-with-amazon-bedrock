@@ -1,6 +1,6 @@
 import type { VisibilityResponse } from '../../../../types';
 import { formatKpi } from '../../../../formatting/kpiFormatter';
-import { engineName } from '../../charts';
+import { providerName } from '../../../../constants/providers';
 import { ReportStatCard } from '../../layout/ReportStatCard';
 import {
   KpiChangeCard, LatestRunHeadline, type ScopeSectionProps
@@ -29,7 +29,7 @@ function EngineCards({ visibility }: { readonly visibility: VisibilityResponse }
       />
       <ReportStatCard
         label="Strongest engine"
-        value={strongest === null ? '—' : engineName(strongest.engine)}
+        value={strongest === null ? '—' : providerName(strongest.engine)}
         footnote={strongest === null ? 'No visibility score yet' : `Visibility score ${formatKpi('visibility_score', strongest.kpis.visibility_score)}`}
         info={STRONGEST_ENGINE_INFO}
       />
