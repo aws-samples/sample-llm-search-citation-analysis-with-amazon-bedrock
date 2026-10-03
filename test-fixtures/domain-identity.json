@@ -22,6 +22,9 @@
     { "description": "whitespace only", "input": "   ", "expected": null },
     { "description": "scheme without host", "input": "https://", "expected": null },
     { "description": "www label alone", "input": "www.", "expected": null },
-    { "description": "malformed URL (unclosed IPv6 bracket)", "input": "http://[::1", "expected": null }
+    { "description": "malformed URL (unclosed IPv6 bracket)", "input": "http://[::1", "expected": null },
+    { "description": "a scheme with a digit", "input": "h2://example.com/feed", "expected": "example.com" },
+    { "description": "a scheme-relative URL", "input": "//example.com/rooms", "expected": "example.com" },
+    { "description": "several leading dots on a bare domain", "input": "..example.com", "expected": "example.com" }
   ]
 }

@@ -13,6 +13,12 @@
 //
 // `mutate` here is the default scope when no --mutate is given; always pass
 // --mutate for a targeted run.
+//
+// The sandbox is a copy of web/ only. Specs that import the cross-language
+// fixtures in ../test-fixtures (keyword and domain identity) cannot load there,
+// so their subjects show false survivors. Before such a run, link the fixtures
+// next to the sandboxes: `ln -s ../../test-fixtures .stryker-tmp/test-fixtures`
+// (from web/; use the matching depth for a nested --tempDirName).
 
 export default {
   testRunner: 'vitest',
