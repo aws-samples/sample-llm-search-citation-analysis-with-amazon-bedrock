@@ -66,13 +66,7 @@ _TASK_SUCCEEDED_MESSAGES = {
 }
 # TaskStateExited only earns a timeline entry for these states; the others
 # produce no message and are dropped with the message-less entries.
-_STATE_EXITED_MESSAGES = {
-    'ParseKeywords': 'Keywords parsed successfully',
-    'SearchAllProviders': 'Search completed',
-    'DeduplicateCitations': 'Deduplication completed',
-    'CrawlSingleCitation': 'Citation crawled',
-    'GenerateSummary': 'Summary generated',
-}
+_STATE_EXITED_MESSAGES = {**_TASK_SUCCEEDED_MESSAGES, 'ParseKeywords': 'Keywords parsed successfully'}
 _MAP_EXITED_MESSAGES = {
     'ProcessKeywords': 'All keywords processed',
     'CrawlCitations': 'All citations crawled',
