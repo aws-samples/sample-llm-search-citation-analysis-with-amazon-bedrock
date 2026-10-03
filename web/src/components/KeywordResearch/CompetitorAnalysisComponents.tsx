@@ -12,6 +12,7 @@ import {
   CHEVRON_RIGHT_PATHS, GLOBE_PATHS 
 } from '../ui/iconPaths';
 import { ClipboardIcon } from '../ui/ClipboardIcon';
+import type { KeywordSelectionProps } from './researchRunView';
 
 type SectionId = 'primary' | 'secondary' | 'longtail' | 'gaps';
 
@@ -279,12 +280,9 @@ export const SectionTabs = ({
   </div>
 );
 
-interface KeywordRowProps {
+interface KeywordRowProps extends KeywordSelectionProps {
   keyword: ExpandedKeywordWithSource;
   showOpportunity: boolean;
-  selectable?: boolean;
-  selected?: Set<string>;
-  onToggle?: (keyword: string) => void;
 }
 
 const KeywordRow = ({
@@ -344,12 +342,9 @@ const KeywordRow = ({
   );
 };
 
-interface KeywordsTableProps {
+interface KeywordsTableProps extends KeywordSelectionProps {
   keywords: ExpandedKeywordWithSource[];
   showOpportunity: boolean;
-  selectable?: boolean;
-  selected?: Set<string>;
-  onToggle?: (keyword: string) => void;
 }
 
 export const KeywordsTable = ({

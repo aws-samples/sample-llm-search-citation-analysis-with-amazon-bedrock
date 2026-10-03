@@ -10,6 +10,8 @@ import {
 } from './UserModals';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import { REFRESH_PATHS } from '../ui/iconPaths';
+import { CenteredMessage } from '../ui/CenteredState';
+import { SettingsErrorNotice } from './SettingsErrorNotice';
 
 class InviteError extends Error {
   constructor(message: string) {
@@ -72,7 +74,7 @@ export function UsersConfig() {
   };
 
   if (loading) {
-    return <div className="text-center py-12 text-gray-500">Loading users...</div>;
+    return <CenteredMessage>Loading users...</CenteredMessage>;
   }
 
   return (
@@ -102,9 +104,7 @@ export function UsersConfig() {
         </div>
       </div>
 
-      {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
-      )}
+      <SettingsErrorNotice error={error} />
 
       {successMessage && (
         <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">{successMessage}</div>

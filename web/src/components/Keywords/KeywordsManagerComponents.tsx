@@ -223,22 +223,11 @@ const TagIcon = () => (
   <StrokeIcon className="w-12 h-12 mx-auto mb-4 text-gray-300" paths={KEY_PATHS} />
 );
 
-interface KeywordItemProps {
-  keyword: Keyword;
+interface KeywordItemProps extends EditingViewProps, DisplayViewProps {
   isEditing: boolean;
-  editText: string;
-  setEditText: (value: string) => void;
-  onStartEdit: () => void;
-  onUpdateKeyword: () => void;
-  onCancelEdit: () => void;
-  onDeleteKeyword: () => void;
-  groupsById: ReadonlyMap<string, KeywordGroup>;
   bulkSelected: boolean;
   onToggleBulkSelect?: () => void;
   groupMenu: ReactNode;
-  onOpenGroups?: () => void;
-  onSetStatus?: (active: boolean) => void;
-  statusBusy?: boolean;
 }
 
 const KeywordItem = ({

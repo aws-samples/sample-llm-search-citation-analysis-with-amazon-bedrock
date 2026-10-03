@@ -3,6 +3,11 @@ import { Spinner } from './Spinner';
 
 const FRAME_CLASS = 'text-center py-12 text-gray-500';
 
+/** Centred grey status line (a plain loading or empty message). */
+export const CenteredMessage = ({ children }: { readonly children: ReactNode }) => (
+  <div className={FRAME_CLASS}>{children}</div>
+);
+
 /** Centred large spinner above a loading message. */
 export const CenteredLoading = ({ label }: { readonly label: string }) => (
   <div className={FRAME_CLASS}>

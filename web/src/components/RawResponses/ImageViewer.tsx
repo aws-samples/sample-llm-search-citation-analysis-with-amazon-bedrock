@@ -3,7 +3,9 @@ import type { S3Item } from '../../types';
 import { formatDate } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
 import { DownloadButton } from './DownloadButton';
-import { ViewerHeader } from './ViewerHeader';
+import {
+  ViewerHeader, ViewerLoading
+} from './ViewerHeader';
 import { formatSize } from './fileSizeFormatter';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import { PHOTO_PATHS } from '../ui/iconPaths';
@@ -22,12 +24,7 @@ export const ImageViewer = ({
   const [imageError, setImageError] = useState(false);
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner size="lg" className="text-blue-600" />
-        <span className="ml-3 text-gray-600">Loading image...</span>
-      </div>
-    );
+    return <ViewerLoading label="Loading image..." />;
   }
 
   return (

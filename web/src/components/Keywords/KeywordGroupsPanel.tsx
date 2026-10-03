@@ -39,37 +39,35 @@ export const KeywordGroupsPanel = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
 
-  const submitCreate = async () => {
-    const name = newName.trim();
+  const submitName = async (
+    rawName: string,
+    mutate: (name: string) => Promise<MutationOutcome>,
+    onSuccess: () => void,
+    failureTitle: string,
+  ) => {
+    const name = rawName.trim();
     if (!name || busy) return;
     setBusy(true);
     try {
-      const outcome = await onCreate(name);
+      const outcome = await mutate(name);
       if (outcome.success) {
-        setNewName('');
+        onSuccess();
       } else {
-        onNotify('Could not create group', outcome.message, 'error');
+        onNotify(failureTitle, outcome.message, 'error');
       }
     } finally {
       setBusy(false);
     }
   };
 
-  const submitRename = async (id: string) => {
-    const name = editName.trim();
-    if (!name || busy) return;
-    setBusy(true);
-    try {
-      const outcome = await onRename(id, name);
-      if (outcome.success) {
-        setEditingId(null);
-      } else {
-        onNotify('Could not rename group', outcome.message, 'error');
-      }
-    } finally {
-      setBusy(false);
-    }
-  };
+  const submitCreate = () => submitName(newName, onCreate, () => setNewName(''), 'Could not create group');
+
+  const submitRename = (id: string) => submitName(
+    editName,
+    (name) => onRename(id, name),
+    () => setEditingId(null),
+    'Could not rename group',
+  );
 
   const filterButtonClass = (active: boolean) =>
     `px-3 py-1.5 text-sm rounded-lg border transition-colors ${

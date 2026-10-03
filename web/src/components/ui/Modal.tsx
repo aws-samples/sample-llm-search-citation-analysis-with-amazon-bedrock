@@ -86,6 +86,30 @@ export const Modal = ({
   );
 };
 
+interface MessageDialogProps {
+  isOpen: boolean;
+  onClose: () => void;
+  title: string;
+  message: string;
+  icon?: React.ReactNode;
+  /** The dialog's buttons, under the message. */
+  children: React.ReactNode;
+}
+
+/** Centred title and message (with an optional icon above) in a modal without a close button. */
+const MessageDialog = ({
+  isOpen, onClose, title, message, icon, children
+}: MessageDialogProps) => (
+  <Modal isOpen={isOpen} onClose={onClose} showCloseButton={false}>
+    <div className="text-center">
+      {icon}
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">{title}</h3>
+      <p className="text-gray-600 dark:text-gray-300 mb-6">{message}</p>
+      {children}
+    </div>
+  </Modal>
+);
+
 interface ConfirmModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -118,27 +142,22 @@ export const ConfirmModal = ({
       : 'bg-gray-900 hover:bg-gray-800 text-white';
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} showCloseButton={false}>
-      <div className="text-center">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">{title}</h3>
-        <p className="text-gray-600 dark:text-gray-300 mb-6">{message}</p>
-
-        <div className="flex gap-3 justify-center">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
-          >
-            {cancelText}
-          </button>
-          <button
-            onClick={handleConfirm}
-            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${confirmButtonClass}`}
-          >
-            {confirmText}
-          </button>
-        </div>
+    <MessageDialog isOpen={isOpen} onClose={onClose} title={title} message={message}>
+      <div className="flex gap-3 justify-center">
+        <button
+          onClick={onClose}
+          className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+        >
+          {cancelText}
+        </button>
+        <button
+          onClick={handleConfirm}
+          className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${confirmButtonClass}`}
+        >
+          {confirmText}
+        </button>
       </div>
-    </Modal>
+    </MessageDialog>
   );
 };
 
@@ -163,32 +182,30 @@ export const AlertModal = ({
     info: 'text-gray-600',
   };
 
-  const icons = {
-    success: (
-      <StrokeIcon className="w-12 h-12 mx-auto mb-4" paths={CHECK_PATHS} />
-    ),
-    error: (
-      <StrokeIcon className="w-12 h-12 mx-auto mb-4" paths={CLOSE_PATHS} />
-    ),
-    info: (
-      <StrokeIcon className="w-12 h-12 mx-auto mb-4" paths={INFO_CIRCLE_PATHS} />
-    ),
+  const iconPaths = {
+    success: CHECK_PATHS,
+    error: CLOSE_PATHS,
+    info: INFO_CIRCLE_PATHS,
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} showCloseButton={false}>
-      <div className="text-center">
-        <div className={iconColors[variant]}>{icons[variant]}</div>
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">{title}</h3>
-        <p className="text-gray-600 dark:text-gray-300 mb-6">{message}</p>
-
-        <button
-          onClick={onClose}
-          className="px-6 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors"
-        >
-          OK
-        </button>
-      </div>
-    </Modal>
+    <MessageDialog
+      isOpen={isOpen}
+      onClose={onClose}
+      title={title}
+      message={message}
+      icon={(
+        <div className={iconColors[variant]}>
+          <StrokeIcon className="w-12 h-12 mx-auto mb-4" paths={iconPaths[variant]} />
+        </div>
+      )}
+    >
+      <button
+        onClick={onClose}
+        className="px-6 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors"
+      >
+        OK
+      </button>
+    </MessageDialog>
   );
 };

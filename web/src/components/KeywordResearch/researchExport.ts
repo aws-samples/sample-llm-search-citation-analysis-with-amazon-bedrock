@@ -3,13 +3,20 @@ import {
 } from '../../exporters/excelGenerator';
 import type { ResearchKeyword } from '../../types';
 
+/** The Intent, Competition and Relevance cells every research keyword sheet carries. */
+export function keywordSignalCells(keyword: ResearchKeyword): Record<string, unknown> {
+  return {
+    Intent: keyword.intent ?? '',
+    Competition: keyword.competition ?? '',
+    Relevance: keyword.relevance ?? '',
+  };
+}
+
 /** Rows of the keyword research Excel sheet, in the table's current order. */
 export function researchExcelRows(keywords: ResearchKeyword[]): Record<string, unknown>[] {
   return keywords.map((keyword) => ({
     Keyword: keyword.keyword,
-    Intent: keyword.intent ?? '',
-    Competition: keyword.competition ?? '',
-    Relevance: keyword.relevance ?? '',
+    ...keywordSignalCells(keyword),
     Opportunity: keyword.opportunity ?? '',
     Providers: (keyword.providers ?? []).join(', '),
   }));

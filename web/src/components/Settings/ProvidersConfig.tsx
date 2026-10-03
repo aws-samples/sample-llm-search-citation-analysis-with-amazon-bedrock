@@ -12,6 +12,8 @@ import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   EXCLAMATION_TRIANGLE_PATHS, EXTERNAL_LINK_PATHS 
 } from '../ui/iconPaths';
+import { CenteredMessage } from '../ui/CenteredState';
+import { SettingsErrorNotice } from './SettingsErrorNotice';
 
 export interface ProvidersConfigProps {
   readonly providers: ProviderConfig[];
@@ -230,7 +232,7 @@ export const ProvidersConfig = ({
   };
 
   if (loading) {
-    return <div className="text-center py-12 text-gray-500">Loading providers...</div>;
+    return <CenteredMessage>Loading providers...</CenteredMessage>;
   }
 
   return (
@@ -246,9 +248,7 @@ export const ProvidersConfig = ({
         </button>
       </div>
 
-      {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
-      )}
+      <SettingsErrorNotice error={error} />
 
       <div className="space-y-4">
         {providers.map((provider) => (

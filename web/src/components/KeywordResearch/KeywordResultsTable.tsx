@@ -7,15 +7,13 @@ import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { exportResearchKeywords } from './researchExport';
 import { useExportAction } from '../ui/useExportAction';
 import { ClipboardIcon } from '../ui/ClipboardIcon';
+import type { KeywordSelectionProps } from './researchRunView';
 
-interface KeywordResultsTableProps {
+interface KeywordResultsTableProps extends KeywordSelectionProps {
   keywords: ResearchKeyword[];
   title: string;
   subtitle?: string;
   compact?: boolean;
-  selectable?: boolean;
-  selected?: Set<string>;
-  onToggle?: (keyword: string) => void;
 }
 
 export const KeywordResultsTable = ({

@@ -177,18 +177,16 @@ export const CitationsView = ({
 
         {/* Stats Cards */}
         <div className="grid grid-cols-3 gap-3 sm:gap-4">
-          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
-            <div className="text-xs sm:text-sm text-gray-500">Total URLs</div>
-            <div className="text-lg sm:text-2xl font-semibold text-gray-900">{citations.length.toLocaleString()}</div>
-          </div>
-          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
-            <div className="text-xs sm:text-sm text-gray-500">Citations</div>
-            <div className="text-lg sm:text-2xl font-semibold text-gray-900">{totalCitationCount.toLocaleString()}</div>
-          </div>
-          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
-            <div className="text-xs sm:text-sm text-gray-500">Avg/URL</div>
-            <div className="text-lg sm:text-2xl font-semibold text-gray-900">{avgCitations}</div>
-          </div>
+          {([
+            ['Total URLs', citations.length.toLocaleString()],
+            ['Citations', totalCitationCount.toLocaleString()],
+            ['Avg/URL', avgCitations],
+          ] as const).map(([label, value]) => (
+            <div key={label} className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
+              <div className="text-xs sm:text-sm text-gray-500">{label}</div>
+              <div className="text-lg sm:text-2xl font-semibold text-gray-900">{value}</div>
+            </div>
+          ))}
         </div>
 
         {/* Filters */}

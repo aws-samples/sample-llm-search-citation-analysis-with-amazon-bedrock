@@ -1,16 +1,18 @@
 import {
   useEffect, useMemo, useState
 } from 'react';
+import type { MouseEvent } from 'react';
 import type {
-  Keyword, KeywordResearchItem, ResearchKeyword, ResearchStatus
+  KeywordResearchItem, ResearchKeyword, ResearchStatus
 } from '../../types';
 import { uniqueResearchKeywords } from '../../hooks/keywordIdentity';
-import { usePromoteKeywords } from '../../hooks/usePromoteKeywords';
+import { useRunPromotion } from './useRunPromotion';
+import { JobFailureMessage } from './ResearchProgress';
+import type { ResearchRunViewProps } from './researchRunView';
 import { KeywordResultsTable } from './KeywordResultsTable';
 import { KeywordPromotionControls } from './KeywordPromotionControls';
 import { formatDate } from '../../formatting/dateFormatter';
 import {
-  formatResearchFailureMessage,
   getResearchStatusClass,
   getResearchStatusLabel,
   isRetryableResearchStatus,
@@ -22,14 +24,11 @@ import {
   CHEVRON_RIGHT_PATHS, CLOCK_PATHS, REFRESH_PATHS, TRASH_PATHS 
 } from '../ui/iconPaths';
 
-interface ResearchHistoryProps {
+interface ResearchHistoryProps extends Pick<ResearchRunViewProps, 'onRetry' | 'onKeywordsAdded'> {
   history: KeywordResearchItem[];
   loading: boolean;
   onDelete: (id: string) => Promise<void>;
   onRefresh: () => void;
-  /** Re-run the failed steps of a partial or failed job. */
-  onRetry?: (job: KeywordResearchItem) => void;
-  onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
 const getKeywordsForItem = (item: KeywordResearchItem): ResearchKeyword[] => {
@@ -135,13 +134,11 @@ const EmptyState = () => (
   </div>
 );
 
-interface HistoryItemProps {
+interface HistoryItemProps extends Pick<ResearchRunViewProps, 'onRetry' | 'onKeywordsAdded'> {
   item: KeywordResearchItem;
   isExpanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
-  onRetry?: (job: KeywordResearchItem) => void;
-  onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
 const HistoryItem = ({
@@ -152,12 +149,12 @@ const HistoryItem = ({
   const itemTitle = getItemTitle(item);
   const panelId = `research-history-keywords-${item.id}`;
 
-  const promotion = usePromoteKeywords(keywords, onKeywordsAdded);
-  const { clearSelection } = promotion;
-
-  useEffect(() => {
-    clearSelection();
-  }, [isExpanded, keywords, clearSelection]);
+  // A new identity whenever the row expands, collapses or gets new keywords.
+  const shown = useMemo(() => ({
+    isExpanded,
+    keywords,
+  }), [isExpanded, keywords]);
+  const promotion = useRunPromotion(keywords, onKeywordsAdded, shown);
 
   return (
     <div>
@@ -195,7 +192,7 @@ const HistoryItem = ({
                 )}
               </div>
 
-              <FailureMessage message={item.error_message} />
+              <JobFailureMessage message={item.error_message} spacingClassName="mt-2 " />
             </div>
           </div>
 
@@ -293,23 +290,6 @@ const StatusBadge = ({ status }: { status?: ResearchStatus }) => {
 };
 
 /**
- * The raw text stays on `title`: it carries the untranslated second count and
- * any provider detail, which is what you want when debugging a stranded run.
- */
-const FailureMessage = ({ message }: { message?: string }) => {
-  if (message === undefined || message === '') return null;
-
-  return (
-    <p
-      className="mt-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1"
-      title={message}
-    >
-      {formatResearchFailureMessage(message)}
-    </p>
-  );
-};
-
-/**
  * Providers finished out of providers planned. Jobs from before 2.2.0 have
  * no steps and render nothing here.
  */
@@ -329,15 +309,18 @@ const StepSummary = ({ item }: { item: KeywordResearchItem }) => {
   );
 };
 
-interface RetryButtonProps {onClick: () => void;}
+interface RowActionProps {onClick: () => void;}
+
+/** Runs a row action without also toggling the row it sits in. */
+const withoutRowToggle = (action: () => void) => (event: MouseEvent) => {
+  event.stopPropagation();
+  action();
+};
 
 /** Re-runs only the failed steps; the completed providers' results are kept. */
-const RetryButton = ({ onClick }: RetryButtonProps) => (
+const RetryButton = ({ onClick }: RowActionProps) => (
   <button
-    onClick={(event) => {
-      event.stopPropagation();
-      onClick();
-    }}
+    onClick={withoutRowToggle(onClick)}
     className="p-2 text-gray-400 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
     title="Retry failed providers"
     aria-label="Retry failed providers"
@@ -346,14 +329,9 @@ const RetryButton = ({ onClick }: RetryButtonProps) => (
   </button>
 );
 
-interface DeleteButtonProps {onClick: () => void;}
-
-const DeleteButton = ({ onClick }: DeleteButtonProps) => (
+const DeleteButton = ({ onClick }: RowActionProps) => (
   <button
-    onClick={(event) => {
-      event.stopPropagation();
-      onClick();
-    }}
+    onClick={withoutRowToggle(onClick)}
     className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
     title="Delete"
   >

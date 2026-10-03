@@ -13,6 +13,7 @@ import { FirstPartyBrandsSection } from './FirstPartyBrandsSection';
 import { CompetitorBrandsSection } from './CompetitorBrandsSection';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import { CHECK_PATHS } from '../ui/iconPaths';
+import { CenteredMessage } from '../ui/CenteredState';
 
 interface BrandConfigContentProps {
   readonly config: BrandConfig | null;
@@ -121,7 +122,7 @@ export const BrandConfigContent = ({
   const cancelExpansion = () => { setExpansionAllResult(null); setCompetitorDiscoveryResult(null); setPendingExpansionBrands([]); setExpansionTarget(null); setSelectedFirstPartyBrand(null); setSelectedCompetitorBrand(null); };
   const togglePendingBrand = (brand: string) => setPendingExpansionBrands(expansion.pendingExpansionBrands.includes(brand) ? expansion.pendingExpansionBrands.filter(b => b !== brand) : [...expansion.pendingExpansionBrands, brand]);
 
-  if (loading) return <div className="text-center py-12 text-gray-500">Loading configuration...</div>;
+  if (loading) return <CenteredMessage>Loading configuration...</CenteredMessage>;
 
   // Saving and the three Bedrock-backed suggestion routes are Admin-only
   // server-side. Read access stays open, so a non-admin sees the configured

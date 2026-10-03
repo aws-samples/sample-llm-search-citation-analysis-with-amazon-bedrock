@@ -109,14 +109,20 @@ export const KeywordsManager = ({
   // Keywords added while a group is selected land in that group.
   const targetGroupIds = typeof filter === 'object' ? [filter.groupId] : [];
 
-  const addKeyword = async () => {
-    const trimmed = newKeyword.trim();
-    if (!trimmed) return;
-
-    if (isDuplicateKeyword(trimmed, keywords)) {
+  /** The trimmed entry, or null when it is blank or (after an alert) a duplicate. */
+  const acceptedKeyword = (entry: string, editingKeywordId?: string): string | null => {
+    const trimmed = entry.trim();
+    if (!trimmed) return null;
+    if (isDuplicateKeyword(trimmed, keywords, editingKeywordId)) {
       showAlert('Duplicate Keyword', `"${trimmed}" already exists`, 'error');
-      return;
+      return null;
     }
+    return trimmed;
+  };
+
+  const addKeyword = async () => {
+    const trimmed = acceptedKeyword(newKeyword);
+    if (trimmed === null) return;
 
     setSaving(true);
     try {
@@ -178,13 +184,8 @@ export const KeywordsManager = ({
   };
 
   const updateKeyword = async (id: string) => {
-    const trimmed = editText.trim();
-    if (!trimmed) return;
-
-    if (isDuplicateKeyword(trimmed, keywords, id)) {
-      showAlert('Duplicate Keyword', `"${trimmed}" already exists`, 'error');
-      return;
-    }
+    const trimmed = acceptedKeyword(editText, id);
+    if (trimmed === null) return;
 
     setSaving(true);
     try {

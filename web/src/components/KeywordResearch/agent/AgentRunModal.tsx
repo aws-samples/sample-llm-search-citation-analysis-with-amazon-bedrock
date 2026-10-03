@@ -1,16 +1,12 @@
-import type {
-  Keyword, KeywordGroup, KeywordResearchItem
-} from '../../../types';
+import type { ComponentProps } from 'react';
+import type { KeywordResearchItem } from '../../../types';
 import { Modal } from '../../ui/Modal';
 import { AgentRunDetail } from './AgentRunDetail';
 
-interface AgentRunModalProps {
+interface AgentRunModalProps extends Omit<ComponentProps<typeof AgentRunDetail>, 'job'> {
   /** The opened run, or null when no run is open. Keeps updating while the run is active. */
   readonly job: KeywordResearchItem | null;
-  readonly groups: KeywordGroup[];
   readonly onClose: () => void;
-  readonly onRetry: (job: KeywordResearchItem) => void;
-  readonly onKeywordsAdded?: (created: Keyword[]) => void;
 }
 
 /** "Hotels · started 18/09/2026, 12:00:00 by ana" */

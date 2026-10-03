@@ -61,11 +61,8 @@ type KeywordIdPickerProps = SharedKeywordScopePickerProps & {
   readonly capHint?: string;
 };
 
-type GroupIdPickerProps = {
+type GroupIdPickerProps = Pick<KeywordIdPickerProps, 'selectedIds' | 'onChange' | 'maxSelected'> & {
   readonly groups: KeywordGroup[];
-  readonly selectedIds: readonly string[];
-  readonly onChange: (selectedIds: string[]) => void;
-  readonly maxSelected?: number;
   readonly disabled: boolean;
 };
 
