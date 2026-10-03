@@ -3,14 +3,12 @@ import type { EngineKpis } from '../../../types/domain/visibility';
 import {
   PROVIDER_NAMES, type ProviderId
 } from '../../../constants/providers';
-import {
-  themedAxis, type ChartTheme
-} from '../../ui/chartTheme';
+import type { ChartTheme } from '../../ui/chartTheme';
 import {
   kpiLabelsInWords, kpiSeries, kpiValuesInWords, type ChartKpiId
 } from './chartKpis';
 import {
-  barSeries, chartOptions, percentAxis
+  barChartConfiguration, percentChartOptions
 } from './chartOptions';
 import {
   seriesLabels, type ChartSeries
@@ -42,14 +40,7 @@ export function buildEngineKpiChartConfiguration(
   theme: ChartTheme,
   isDark: boolean,
 ): ChartConfiguration<'bar'> {
-  return {
-    type: 'bar',
-    data: barSeries(series, isDark),
-    options: chartOptions(theme, {
-      x: themedAxis(theme),
-      y: percentAxis(theme),
-    }),
-  };
+  return barChartConfiguration(series, isDark, percentChartOptions(theme));
 }
 
 /** "Mention rate and Visibility score per AI engine, on a 0–100 scale. OpenAI: Mention rate 70.0%, Visibility score 58.0." */

@@ -1,26 +1,20 @@
-import {
-  Link, useParams
-} from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { SectionPlaceholder } from '../layout';
 import { ReportDraftEditor } from './builder/ReportDraftEditor';
-import { useCustomReports } from './useCustomReports';
+import {
+  BackToReportsLink, useSavedReport
+} from './savedReport';
 
 function EditableReport({ id }: { readonly id: string }) {
-  const {
-    reports, loading, error
-  } = useCustomReports();
-  if (loading) return <SectionPlaceholder variant="loading" message="Loading the report…" />;
-  if (error !== null) return <SectionPlaceholder variant="error" message={error} />;
-  const saved = reports.find((report) => report.id === id);
-  if (saved === undefined) {
-    return (
-      <div className="space-y-3">
-        <SectionPlaceholder variant="empty" message="This report no longer exists. It may have been deleted." />
-        <Link to="/reports" className="text-sm font-medium text-gray-700 underline hover:text-gray-900">Back to Reports</Link>
-      </div>
-    );
-  }
-  return <ReportDraftEditor key={saved.id} saved={saved} />;
+  const saved = useSavedReport(id);
+  if (saved.report !== undefined) return <ReportDraftEditor key={saved.report.id} saved={saved.report} />;
+  if (saved.variant !== 'empty') return <SectionPlaceholder variant={saved.variant} message={saved.message} />;
+  return (
+    <div className="space-y-3">
+      <SectionPlaceholder variant="empty" message={saved.message} />
+      <BackToReportsLink />
+    </div>
+  );
 }
 
 /**

@@ -5,29 +5,25 @@ import type {
 import { ReportSection } from '../layout/ReportSection';
 import { ReportSectionPlaceholder } from '../layout/ReportSectionPlaceholder';
 import { ReportStatGrid } from '../layout/ReportStatGrid';
+import type { SectionGate } from '../layout/sectionGate';
 import { latestRunsSubtitle } from './KpiChangeCard';
 import {
   gateLatestRuns, gateTrend
 } from './scopeSectionGate';
 import type { ScopeReportData } from './useScopeReportData';
 
-interface LatestRunSectionProps {
-  readonly report: ScopeReportData;
+interface SectionFrameProps<T> {
   readonly title: string;
   readonly subtitle: string;
-  /** Why the section has nothing to show although the scope has runs (no brand named, no source cited); `null` when it has. */
-  readonly emptyMessage?: (visibility: VisibilityResponse) => string | null;
-  readonly children: (visibility: VisibilityResponse) => ReactNode;
+  /** Why the section has nothing to show although its payload arrived; `null` when it has. */
+  readonly emptyMessage?: (value: T) => string | null;
+  readonly children: (value: T) => ReactNode;
 }
 
-/**
- * A section drawn from the latest runs (`/visibility`): its loading, error
- * and empty placeholders, then its heading around `children`.
- */
-export function LatestRunSection({
-  report, title, subtitle, emptyMessage, children
-}: LatestRunSectionProps) {
-  const gate = gateLatestRuns(report, title);
+/** A gated section: its placeholder until the payload arrives, its empty state, then its heading around `children`. */
+function GatedSection<T>({
+  gate, title, subtitle, emptyMessage, children
+}: SectionFrameProps<T> & { readonly gate: SectionGate<T> }) {
   if (!gate.ready) return gate.placeholder;
 
   const empty = emptyMessage?.(gate.value) ?? null;
@@ -39,25 +35,24 @@ export function LatestRunSection({
   );
 }
 
-interface TrendSectionProps {
-  readonly report: ScopeReportData;
-  readonly title: string;
-  readonly subtitle: string;
-  readonly children: (trends: HistoricalTrendsResponse) => ReactNode;
+interface ScopeSectionFrameProps<T> extends SectionFrameProps<T> {readonly report: ScopeReportData;}
+
+/**
+ * A section drawn from the latest runs (`/visibility`): its loading, error
+ * and empty placeholders (no brand named, no source cited), then its heading
+ * around `children`.
+ */
+export function LatestRunSection({
+  report, ...frame
+}: ScopeSectionFrameProps<VisibilityResponse>) {
+  return <GatedSection gate={gateLatestRuns(report, frame.title)} {...frame} />;
 }
 
 /** A section drawn from the trend (`/trends`): its loading, error and empty placeholders, then its heading around `children`. */
 export function TrendSection({
-  report, title, subtitle, children
-}: TrendSectionProps) {
-  const gate = gateTrend(report, title);
-  if (!gate.ready) return gate.placeholder;
-
-  return (
-    <ReportSection title={title} subtitle={subtitle}>
-      {children(gate.value)}
-    </ReportSection>
-  );
+  report, ...frame
+}: Omit<ScopeSectionFrameProps<HistoricalTrendsResponse>, 'emptyMessage'>) {
+  return <GatedSection gate={gateTrend(report, frame.title)} {...frame} />;
 }
 
 interface HeadlineProps {

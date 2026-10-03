@@ -1,9 +1,10 @@
 import type { SourceRow } from '../../types';
-import { formatKpi } from '../../formatting/kpiFormatter';
 import {
   ReportTable, type ReportTableColumn
 } from '../Reports/layout';
-import { engineName } from '../Reports/charts';
+import {
+  domainFigureColumns, type DomainColumnInfo
+} from '../Reports/layout/domainColumns';
 
 /** What each figure of a cited domain counts, in its column tooltip. */
 export const DOMAIN_COLUMN_INFO = {
@@ -12,7 +13,7 @@ export const DOMAIN_COLUMN_INFO = {
   citationShare: 'The domain\'s share of every domain citation in the answers.',
   engines: 'The AI engines whose answers cite the domain.',
   keywords: 'How many keywords\' answers cite the domain.',
-} as const;
+} as const satisfies DomainColumnInfo;
 
 function DomainCell({ source }: { readonly source: SourceRow }) {
   return (
@@ -28,31 +29,7 @@ const COLUMNS: ReadonlyArray<ReportTableColumn<SourceRow>> = [
     header: 'Domain',
     render: (source) => <DomainCell source={source} />,
   },
-  {
-    header: 'Citations',
-    info: DOMAIN_COLUMN_INFO.citations,
-    render: (source) => source.citations,
-  },
-  {
-    header: 'Citation rate',
-    info: DOMAIN_COLUMN_INFO.citationRate,
-    render: (source) => formatKpi('citation_rate', source.citation_rate),
-  },
-  {
-    header: 'Citation share',
-    info: DOMAIN_COLUMN_INFO.citationShare,
-    render: (source) => formatKpi('citation_share', source.citation_share),
-  },
-  {
-    header: 'Engines',
-    info: DOMAIN_COLUMN_INFO.engines,
-    render: (source) => source.engines.map(engineName).join(', '),
-  },
-  {
-    header: 'Keywords',
-    info: DOMAIN_COLUMN_INFO.keywords,
-    render: (source) => source.keywords,
-  },
+  ...domainFigureColumns(DOMAIN_COLUMN_INFO),
 ];
 
 function ownedRowClass(source: SourceRow): string {

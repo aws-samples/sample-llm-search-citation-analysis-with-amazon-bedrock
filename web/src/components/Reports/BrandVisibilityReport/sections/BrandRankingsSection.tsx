@@ -3,11 +3,8 @@ import type {
   BrandLeaderboardRow,
   BrandTrends,
 } from '../../../../types';
-import type { KpiId } from '../../../../constants/kpiDefinitions';
-import { formatKpi } from '../../../../formatting/kpiFormatter';
 import {
   emphasisColumn,
-  kpiColumn,
   ReportSection,
   ReportSectionPlaceholder,
   ReportTable,
@@ -17,6 +14,9 @@ import {
   type VisibilitySectionProps,
   gateSection,
 } from '../../layout';
+import {
+  brandKpiColumns, brandReachColumns
+} from '../../layout/brandColumns';
 import {
   ShareOfVoicePanel, ShareOfVoiceTrendPanel
 } from './ReportChartPanels';
@@ -40,30 +40,18 @@ const KEYWORD_RANKINGS_EMPTY = 'No brand mentions extracted for this keyword.';
 /** The most brands a printed leaderboard lists; the API sorts them by visibility score. */
 export const MAX_BRANDS = 15;
 
-/** The KPIs of each brand, in column order. */
-const BRAND_KPIS = ['visibility_score', 'mention_rate', 'share_of_voice', 'average_position'] as const satisfies readonly KpiId[];
-
 /** Built per render (not at import) so every column is exercised by the tests that render the table. */
 function rankingColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>> {
   return [
     emphasisColumn('Brand', (brand) => brand.name),
-    ...BRAND_KPIS.map((id) => kpiColumn<BrandLeaderboardRow>(id, (brand) => formatKpi(id, brand[id]))),
+    ...brandKpiColumns(),
     {
       header: 'Best position',
       info: 'The best place the brand reached in any answer (1 = named first). '
         + 'Answers where its place is unknown are left out.',
       render: (brand) => brand.best_position ?? '—',
     },
-    {
-      header: 'Engines',
-      info: 'The AI engines whose answers name the brand.',
-      render: (brand) => brand.engines.join(', '),
-    },
-    {
-      header: 'Keywords',
-      info: 'How many keywords\' answers name the brand.',
-      render: (brand) => brand.keywords,
-    },
+    ...brandReachColumns((brand) => brand.engines.join(', ')),
     {
       header: 'Type',
       render: (brand) => <ClassificationBadge classification={brand.classification} />,

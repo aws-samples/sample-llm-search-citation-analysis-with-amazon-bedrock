@@ -1,5 +1,5 @@
 import {
-  Link, useNavigate, useParams, useSearchParams
+  useNavigate, useParams, useSearchParams
 } from 'react-router-dom';
 import type { CustomReport } from '../../../api/customReports';
 import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
@@ -27,7 +27,9 @@ import { ReportBlockView } from './ReportBlockView';
 import {
   ReportSourcesProvider, sourcesReady, useReportSources, type CompetitorSource
 } from './reportSources';
-import { useCustomReports } from './useCustomReports';
+import {
+  BackToReportsLink, useSavedReport
+} from './savedReport';
 
 interface Props {readonly keywords: ReadonlyArray<Keyword>;}
 
@@ -42,11 +44,7 @@ function MissingReport({
   return (
     <ReportLayout title="Custom report">
       <SectionPlaceholder variant={variant} message={message} />
-      {variant !== 'loading' && (
-        <Link to="/reports" className="text-sm font-medium text-gray-700 underline hover:text-gray-900">
-          Back to Reports
-        </Link>
-      )}
+      {variant !== 'loading' && <BackToReportsLink />}
     </ReportLayout>
   );
 }
@@ -57,16 +55,11 @@ function MissingReport({
  * the saved period and the first configured competitor by default).
  */
 export function CustomReportView({ keywords }: Props) {
-  const { id } = useParams<{ id: string }>();
-  const {
-    reports, loading, error
-  } = useCustomReports();
-  const report = reports.find((saved) => saved.id === id);
+  const { id = '' } = useParams<{ id: string }>();
+  const saved = useSavedReport(id);
 
-  if (loading) return <MissingReport variant="loading" message="Loading the report…" />;
-  if (error !== null) return <MissingReport variant="error" message={error} />;
-  if (report === undefined) return <MissingReport variant="empty" message="This report no longer exists. It may have been deleted." />;
-  return <SavedReport report={report} keywords={keywords} />;
+  if (saved.report === undefined) return <MissingReport variant={saved.variant} message={saved.message} />;
+  return <SavedReport report={saved.report} keywords={keywords} />;
 }
 
 interface SavedReportProps {
