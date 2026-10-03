@@ -15,7 +15,7 @@ import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
 import { renderedScopeOptionLabels } from '../ui/KeywordScopeSelector-fixtures';
 import {
-  MARRIOTT_ARTICLE_GAP, buildCitationGapsHookResult, buildCitationGapsResponse, buildProps 
+  MARRIOTT_ARTICLE_GAP, MARRIOTT_GAP_RESPONSE, buildCitationGapsHookResult, buildCitationGapsResponse, buildProps 
 } from './CitationGaps-fixtures';
 
 const mockUseCitationGaps = vi.mocked(useCitationGaps);
@@ -62,27 +62,17 @@ describe('CitationGaps', () => {
     });
   });
 
-  describe('loading state', () => {
-    it('shows only loading feedback when earlier results still exist', () => {
+  describe('loading and error states', () => {
+    it.each([
+      ['loading feedback', { loading: true }, 'Analyzing citation gaps...'],
+      ['the failure', { error: 'Failed to load citation gaps' }, 'Failed to load citation gaps'],
+    ])('shows only %s when earlier results still exist', (_shown, state, message) => {
       renderWithGaps({
-        data: buildCitationGapsResponse({ gaps: [MARRIOTT_ARTICLE_GAP] }),
-        loading: true,
+        data: MARRIOTT_GAP_RESPONSE,
+        ...state,
       });
 
-      expect(screen.getByText('Analyzing citation gaps...')).toBeInTheDocument();
-      expect(screen.queryByText('Test Article')).not.toBeInTheDocument();
-      expect(screen.queryByText('Total Gaps')).not.toBeInTheDocument();
-    });
-  });
-
-  describe('error state', () => {
-    it('shows only the failure when earlier results still exist', () => {
-      renderWithGaps({
-        data: buildCitationGapsResponse({ gaps: [MARRIOTT_ARTICLE_GAP] }),
-        error: 'Failed to load citation gaps',
-      });
-
-      expect(screen.getByText('Failed to load citation gaps')).toBeInTheDocument();
+      expect(screen.getByText(message)).toBeInTheDocument();
       expect(screen.queryByText('Test Article')).not.toBeInTheDocument();
       expect(screen.queryByText('Total Gaps')).not.toBeInTheDocument();
       expect(screen.queryByText(/Great coverage/)).not.toBeInTheDocument();
@@ -116,7 +106,7 @@ describe('CitationGaps', () => {
     });
 
     it('renders a gap card when a successful response contains a gap', () => {
-      renderWithGaps({ data: buildCitationGapsResponse({ gaps: [MARRIOTT_ARTICLE_GAP] }) });
+      renderWithGaps({ data: MARRIOTT_GAP_RESPONSE });
 
       expect(screen.getByText('Test Article')).toBeInTheDocument();
     });
@@ -164,7 +154,7 @@ describe('CitationGaps', () => {
     it('hides the previous scope while the selected scope remains pending', async () => {
       const pendingFetch = vi.fn().mockImplementation(() => new Promise<null>(vi.fn()));
       renderWithGaps({
-        data: buildCitationGapsResponse({ gaps: [MARRIOTT_ARTICLE_GAP] }),
+        data: MARRIOTT_GAP_RESPONSE,
         fetchCitationGaps: pendingFetch,
       });
       expect(screen.getByText('Test Article')).toBeInTheDocument();

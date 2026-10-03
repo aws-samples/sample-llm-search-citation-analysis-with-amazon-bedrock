@@ -62,3 +62,6 @@ export const MARRIOTT_ARTICLE_GAP: CitationGap = {
   competitor_brands: ['Marriott'],
   providers: ['openai'],
 };
+
+/** A successful answer whose only gap is the Marriott article. */
+export const MARRIOTT_GAP_RESPONSE: CitationGapsResponse = buildCitationGapsResponse({ gaps: [MARRIOTT_ARTICLE_GAP] });

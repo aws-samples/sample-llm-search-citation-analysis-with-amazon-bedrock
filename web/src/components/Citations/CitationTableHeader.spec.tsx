@@ -16,54 +16,43 @@ const DESC_KEYWORDS = {
   direction: 'desc' 
 } satisfies SortConfig;
 
-describe('CitationTableHeader', () => {
-  const renderInTable = (ui: React.ReactElement) => render(<table>{ui}</table>);
+/** Renders the header inside a table, sorted by `sort`; returns its `onSort` spy. */
+function renderHeader(sort: SortConfig = DESC_CITATIONS) {
+  const onSort = vi.fn();
+  render(<table><CitationTableHeader sort={sort} onSort={onSort} /></table>);
+  return onSort;
+}
 
+describe('CitationTableHeader', () => {
   it('displays #, URL, and Domain column headers', () => {
-    const onSort = vi.fn();
-    renderInTable(<CitationTableHeader sort={DESC_CITATIONS} onSort={onSort} />);
-    
+    renderHeader();
+
     expect(screen.getByText('#')).toBeInTheDocument();
     expect(screen.getByText('URL')).toBeInTheDocument();
     expect(screen.getByText('Domain')).toBeInTheDocument();
   });
 
   it('displays Keywords and Citations column headers', () => {
-    const onSort = vi.fn();
-    renderInTable(<CitationTableHeader sort={DESC_CITATIONS} onSort={onSort} />);
-    
+    renderHeader();
+
     expect(screen.getByText('Keywords')).toBeInTheDocument();
     expect(screen.getByText('Citations')).toBeInTheDocument();
   });
 
-  it('calls onSort with keywords when Keywords header clicked', () => {
-    const onSort = vi.fn();
-    renderInTable(<CitationTableHeader sort={DESC_CITATIONS} onSort={onSort} />);
-    
-    fireEvent.click(screen.getByText('Keywords'));
-    expect(onSort).toHaveBeenCalledWith('keywords');
-  });
+  it.each([
+    ['keywords', 'Keywords', DESC_CITATIONS],
+    ['citations', 'Citations', DESC_KEYWORDS],
+    ['domain', 'Domain', DESC_CITATIONS],
+  ])('calls onSort with %s when %s header clicked', (column, header, sort) => {
+    const onSort = renderHeader(sort);
 
-  it('calls onSort with citations when Citations header clicked', () => {
-    const onSort = vi.fn();
-    renderInTable(<CitationTableHeader sort={DESC_KEYWORDS} onSort={onSort} />);
-    
-    fireEvent.click(screen.getByText('Citations'));
-    expect(onSort).toHaveBeenCalledWith('citations');
-  });
-
-  it('calls onSort with domain when Domain header clicked', () => {
-    const onSort = vi.fn();
-    renderInTable(<CitationTableHeader sort={DESC_CITATIONS} onSort={onSort} />);
-    
-    fireEvent.click(screen.getByText('Domain'));
-    expect(onSort).toHaveBeenCalledWith('domain');
+    fireEvent.click(screen.getByText(header));
+    expect(onSort).toHaveBeenCalledWith(column);
   });
 
   it('shows sort indicator for active sort column', () => {
-    const onSort = vi.fn();
-    renderInTable(<CitationTableHeader sort={DESC_KEYWORDS} onSort={onSort} />);
-    
+    renderHeader(DESC_KEYWORDS);
+
     const keywordsHeader = screen.getByText('Keywords').closest('th');
     expect(keywordsHeader?.querySelector('svg')).toBeInTheDocument();
   });
