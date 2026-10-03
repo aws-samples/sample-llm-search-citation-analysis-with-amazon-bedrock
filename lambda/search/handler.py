@@ -63,8 +63,8 @@ def get_extraction_config() -> dict[str, Any]:
     return _extraction_config
 
 # Environment variables
-DYNAMODB_TABLE_SEARCH_RESULTS = os.environ.get('DYNAMODB_TABLE_SEARCH_RESULTS')
-RAW_RESPONSES_BUCKET = os.environ.get('RAW_RESPONSES_BUCKET')
+DYNAMODB_TABLE_SEARCH_RESULTS = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+RAW_RESPONSES_BUCKET = os.environ['RAW_RESPONSES_BUCKET']
 # Provider config table. Default mirrors the CDK resource name so a bootstrap
 # deploy works even before env vars flow through. Audit #12.
 PROVIDER_CONFIG_TABLE = (
@@ -96,10 +96,6 @@ def store_raw_response_to_s3(
 
     Returns S3 URI if successful, None otherwise.
     """
-    if not RAW_RESPONSES_BUCKET:
-        logger.warning("RAW_RESPONSES_BUCKET not set, skipping S3 storage")
-        return None
-
     try:
         # Parse date from timestamp
         date_str = timestamp[:10]  # YYYY-MM-DD
@@ -616,10 +612,6 @@ def execute_all_providers(keyword: str, providers: list[str], query_template: st
 
 def store_search_results(keyword: str, timestamp: str, results: list[dict[str, Any]]) -> bool:
     """Store search results in DynamoDB and raw responses to S3."""
-    if not DYNAMODB_TABLE_SEARCH_RESULTS:
-        logger.error("DYNAMODB_TABLE_SEARCH_RESULTS not set")
-        return False
-
     try:
         table = dynamodb.Table(DYNAMODB_TABLE_SEARCH_RESULTS)
 

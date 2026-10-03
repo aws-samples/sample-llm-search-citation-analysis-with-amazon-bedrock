@@ -36,9 +36,8 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-# The results table is required; the Keywords table is optional (no table -> no keywords).
 SEARCH_RESULTS_TABLE = search_results_table_name()
-KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')
+KEYWORDS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORDS']
 
 # Rank sentinel for a brand side that was never mentioned; reported as `best_rank: None`.
 _UNRANKED = 999
@@ -52,8 +51,6 @@ def get_all_keywords() -> list[str]:
     Any failure of the scan is logged with its traceback and reported as "no
     keywords", which the handler turns into a 400.
     """
-    if not KEYWORDS_TABLE:
-        return []
     try:
         # Keywords table is small (typically <100 items); the projected scan
         # is capped so it cannot run away.
