@@ -18,9 +18,8 @@ from collections.abc import Mapping
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from botocore.exceptions import ClientError
-
 from shared.config import PROVIDERS
+from testing.client_errors import throttled
 from testing.dynamodb_stubs import fake_table
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
@@ -42,10 +41,6 @@ _OLDER = '2026-05-01T08:00:00Z'
 _LATEST = '2026-05-02T08:00:00Z'
 _STAMP = '2026-05-03T09:00:00Z'
 _NO_ROWS: dict[str, Any] = {'Items': []}
-
-
-def _throttled(operation: str) -> ClientError:
-    return ClientError({'Error': {'Code': 'ProvisionedThroughputExceededException', 'Message': 'throttled'}}, operation)
 
 
 def _newest(timestamp: str) -> dict[str, Any]:
@@ -131,11 +126,18 @@ class TestTableCounts:
 
     def test_reports_zero_when_the_scan_fails_with_nothing_cached(self, stats_module):
         table = fake_table()
-        table.scan.side_effect = _throttled('Scan')
+        table.scan.side_effect = throttled('Scan')
 
         status, body = _get_stats(stats_module, _tables() | {'citations_table': table})
 
         assert (status, body['total_citations']) == (200, 0)
+
+
+def _count_past_an_expired_cache(module: Any, table: MagicMock, *, cached_count: int) -> int:
+    """``_get_table_item_count`` of ``table`` while its cached ``cached_count`` is past the five-minute TTL."""
+    expired = time.time() - module._count_cache_ttl - 1
+    with patch.object(module, '_count_cache', {'search_results': {'count': cached_count, 'timestamp': expired}}):
+        return module._get_table_item_count(table, 'search_results')
 
 
 class TestCountCache:
@@ -150,23 +152,17 @@ class TestCountCache:
 
     def test_rereads_a_count_cached_more_than_five_minutes_ago(self, stats_module):
         table = fake_table(scan={'Count': 12})
-        expired = time.time() - stats_module._count_cache_ttl - 1
 
-        with patch.object(stats_module, '_count_cache', {'search_results': {'count': 1, 'timestamp': expired}}):
-            count = stats_module._get_table_item_count(table, 'search_results')
+        count = _count_past_an_expired_cache(stats_module, table, cached_count=1)
 
         assert count == 12
         table.scan.assert_called_once_with(Select='COUNT')
 
     def test_falls_back_to_the_expired_count_when_the_scan_fails(self, stats_module):
         table = fake_table()
-        table.scan.side_effect = _throttled('Scan')
-        expired = time.time() - stats_module._count_cache_ttl - 1
+        table.scan.side_effect = throttled('Scan')
 
-        with patch.object(stats_module, '_count_cache', {'search_results': {'count': 9, 'timestamp': expired}}):
-            count = stats_module._get_table_item_count(table, 'search_results')
-
-        assert count == 9
+        assert _count_past_an_expired_cache(stats_module, table, cached_count=9) == 9
 
 
 class TestLastExecution:
@@ -205,7 +201,7 @@ class TestLastExecution:
         assert body['last_execution'] == _LATEST
 
     def test_ignores_a_provider_whose_query_fails(self, stats_module):
-        search = _search_table(0, {'openai': _throttled('Query'), 'gemini': _newest(_LATEST)})
+        search = _search_table(0, {'openai': throttled('Query'), 'gemini': _newest(_LATEST)})
 
         status, body = _get_stats(stats_module, _tables(search))
 

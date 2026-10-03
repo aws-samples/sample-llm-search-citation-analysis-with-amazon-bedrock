@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, call
 
+import pytest
 from boto3.dynamodb.conditions import Key
 
 from shared.bounded_reads import collect_capped_items, newest_items
@@ -22,10 +23,11 @@ def _pages(*pages: dict) -> MagicMock:
 
 
 class TestCollectCappedItems:
-    def test_concatenates_the_pages_until_one_has_no_last_evaluated_key(self) -> None:
+    @pytest.mark.parametrize('max_pages', [pytest.param(5, id='under-the-cap'), pytest.param(2, id='exactly-at-the-cap')])
+    def test_concatenates_the_pages_until_one_has_no_last_evaluated_key(self, max_pages: int) -> None:
         operation = _pages({'Items': [{'id': 1}], 'LastEvaluatedKey': {'id': 1}}, {'Items': [{'id': 2}]})
 
-        assert collect_capped_items(operation, 5, IndexName='UrlIndex') == ([{'id': 1}, {'id': 2}], False)
+        assert collect_capped_items(operation, max_pages) == ([{'id': 1}, {'id': 2}], False)
 
     def test_feeds_each_last_evaluated_key_into_the_next_request(self) -> None:
         operation = _pages({'Items': [], 'LastEvaluatedKey': {'id': 1}}, {'Items': []})
@@ -40,11 +42,6 @@ class TestCollectCappedItems:
         items, truncated = collect_capped_items(operation, 3)
 
         assert (operation.call_count, len(items), truncated) == (3, 3, True)
-
-    def test_a_last_page_exactly_at_the_cap_is_not_truncated(self) -> None:
-        operation = _pages({'Items': [{'id': 1}], 'LastEvaluatedKey': {'id': 1}}, {'Items': [{'id': 2}]})
-
-        assert collect_capped_items(operation, 2) == ([{'id': 1}, {'id': 2}], False)
 
     def test_reads_a_page_without_items_as_empty(self) -> None:
         assert collect_capped_items(_pages({}), 1) == ([], False)
