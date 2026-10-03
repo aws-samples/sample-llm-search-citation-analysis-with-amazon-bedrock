@@ -18,14 +18,13 @@ Usage:
 
 from __future__ import annotations
 
-import importlib.util
 import logging
 import os
-import sys
 from collections.abc import Callable, Mapping
 from typing import Any
 
 from shared.api_response import not_found_response
+from shared.module_files import exec_module_file
 
 
 class HandlerLoader:
@@ -62,14 +61,9 @@ class HandlerLoader:
             return cached
 
         filepath = os.path.join(self._dir, filename)
-        module_name = filename.replace('-', '_').replace('.py', '')
-        spec = importlib.util.spec_from_file_location(module_name, filepath)
-        if spec is None or spec.loader is None:
+        module = exec_module_file(filename.replace('-', '_').replace('.py', ''), filepath)
+        if module is None:
             raise ImportError(f"Could not load handler spec for {filepath!r}")
-
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[module_name] = module
-        spec.loader.exec_module(module)
 
         handler_fn = getattr(module, 'handler', None)
         if handler_fn is None:

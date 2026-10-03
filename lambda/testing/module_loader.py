@@ -2,14 +2,17 @@
 
 Handler files are named after their API resource (``get-reports-overview.py``),
 so they cannot be imported with an ``import`` statement. Tests load them
-through ``importlib`` instead; this module is the single copy of that dance.
+through ``shared.module_files.exec_module_file``, wrapped here with test names
+and boto3 stubs.
 """
 
-import importlib.util
 import os
-import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from types import ModuleType
 from unittest.mock import MagicMock, patch
+
+from shared.module_files import exec_module_file
 
 
 def module_name_for(filename: str, suffix: str = '_under_test') -> str:
@@ -25,14 +28,20 @@ def load_handler_module(directory: str, filename: str, module_name: str | None =
     a new module object; callers that want a shared instance cache it in a
     module-scoped fixture.
     """
-    name = module_name or module_name_for(filename)
-    spec = importlib.util.spec_from_file_location(name, os.path.join(directory, filename))
-    if spec is None or spec.loader is None:
+    module = exec_module_file(module_name or module_name_for(filename), os.path.join(directory, filename))
+    if module is None:
         raise ImportError(f'Cannot build an import spec for {filename} in {directory}')
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    spec.loader.exec_module(module)
     return module
+
+
+@contextmanager
+def stubbed_boto3() -> Iterator[None]:
+    """While active, ``boto3.resource`` / ``boto3.client`` return inert ``MagicMock`` clients."""
+    with (
+        patch('boto3.resource', MagicMock(name='boto3.resource')),
+        patch('boto3.client', MagicMock(name='boto3.client')),
+    ):
+        yield
 
 
 def load_handler_module_offline(directory: str, filename: str, module_name: str | None = None) -> ModuleType:
@@ -42,8 +51,5 @@ def load_handler_module_offline(directory: str, filename: str, module_name: str 
     swap the module-level clients afterwards with ``patch.object``; the stubs
     are inert ``MagicMock`` objects and the patches end when the load does.
     """
-    with (
-        patch('boto3.resource', MagicMock(name='boto3.resource')),
-        patch('boto3.client', MagicMock(name='boto3.client')),
-    ):
+    with stubbed_boto3():
         return load_handler_module(directory, filename, module_name)
