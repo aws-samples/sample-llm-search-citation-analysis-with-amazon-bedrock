@@ -45,22 +45,18 @@ export function KpiTrendPanel({
 }
 
 /** The share-of-voice donut of a leaderboard in a titled panel. */
-export function ShareOfVoicePanel({
-  brands, className
-}: PanelProps & { readonly brands: readonly BrandLeaderboardRow[] }) {
+export function ShareOfVoicePanel({ brands }: { readonly brands: readonly BrandLeaderboardRow[] }) {
   return (
-    <ChartPanel title={SHARE_OF_VOICE_TITLE} subtitle={KPI_DEFINITIONS.share_of_voice.definition} className={className}>
+    <ChartPanel title={SHARE_OF_VOICE_TITLE} subtitle={KPI_DEFINITIONS.share_of_voice.definition}>
       <ShareOfVoiceChart brands={brands} />
     </ChartPanel>
   );
 }
 
 /** The share of voice of the tracked brand and its leading competitors per period, in a titled panel. */
-export function ShareOfVoiceTrendPanel({
-  trends, className
-}: PanelProps & { readonly trends: BrandTrends }) {
+export function ShareOfVoiceTrendPanel({ trends }: { readonly trends: BrandTrends }) {
   return (
-    <ChartPanel title={SHARE_OF_VOICE_TREND_TITLE} subtitle={SHARE_OF_VOICE_TREND_SUBTITLE} className={className}>
+    <ChartPanel title={SHARE_OF_VOICE_TREND_TITLE} subtitle={SHARE_OF_VOICE_TREND_SUBTITLE}>
       <BrandTrendChart trends={trends} metric="share_of_voice" />
     </ChartPanel>
   );

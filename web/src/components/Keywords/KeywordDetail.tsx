@@ -47,7 +47,6 @@ ChartJS.register(
 interface KeywordDetailProps {
   keyword: string;
   onClose: () => void;
-  onRerun?: (keyword: string) => void;
   onNavigateToRawResponses?: (path: string) => void;
 }
 
