@@ -30,11 +30,11 @@ export interface EndpointHookState<TResponse> {
 }
 
 /** The URL a fetch must request when called with `args`; `condition` names the case. */
-export type EndpointRequestCase<TArgs extends readonly unknown[]> = [url: string, condition: string, args: TArgs];
+type EndpointRequestCase<TArgs extends readonly unknown[]> = [url: string, condition: string, args: TArgs];
 /** A payload the hook must return and store when fetched with `args`. */
-export type EndpointSuccessCase<TArgs extends readonly unknown[], TResponse> = [payload: string, response: TResponse, args: TArgs];
+type EndpointSuccessCase<TArgs extends readonly unknown[], TResponse> = [payload: string, response: TResponse, args: TArgs];
 /** The error message the hook must report when the mocked endpoint behaves as `options` says. */
-export type EndpointFailureCase<TResponse> = [message: string, failure: string, options: EndpointMockFetchOptions<TResponse>];
+type EndpointFailureCase<TResponse> = [message: string, failure: string, options: EndpointMockFetchOptions<TResponse>];
 
 export interface EndpointHookContract<THook extends EndpointHookState<TResponse>, TArgs extends readonly unknown[], TResponse> {
   /** Noun used in the test names, e.g. 'citation gaps'. */
@@ -61,7 +61,7 @@ export interface EndpointHookContract<THook extends EndpointHookState<TResponse>
 }
 
 /** `authenticatedFetch` arguments of a request made through `useAnalysisEndpoint`. */
-export function abortableRequest(url: string): readonly unknown[] {
+function abortableRequest(url: string): readonly unknown[] {
   const signal: unknown = expect.any(AbortSignal);
   return [url, { signal }];
 }

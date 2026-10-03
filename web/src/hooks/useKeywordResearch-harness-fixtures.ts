@@ -52,7 +52,7 @@ export interface RecordedCall {
   body: string | undefined;
 }
 
-export function recordedCalls(): RecordedCall[] {
+function recordedCalls(): RecordedCall[] {
   return mockAuthenticatedFetch.mock.calls.map((call) => {
     const [url, init] = call as [string, RequestInit | undefined];
     return {

@@ -49,7 +49,7 @@ export function templateListResponse(templates: ContentBriefTemplate[]) {
 
 interface TemplateHookStrictModeProps { readonly children: ReactNode; }
 
-export function templateHookStrictMode({ children }: TemplateHookStrictModeProps) {
+function templateHookStrictMode({ children }: TemplateHookStrictModeProps) {
   return createElement(StrictMode, null, children);
 }
 

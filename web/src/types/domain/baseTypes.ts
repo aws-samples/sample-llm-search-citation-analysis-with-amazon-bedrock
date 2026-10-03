@@ -137,7 +137,7 @@ export interface Execution {
   } | null;
 }
 
-export type ScheduleState = 'ENABLED' | 'DISABLED';
+type ScheduleState = 'ENABLED' | 'DISABLED';
 
 export type ScheduleFrequency = 'daily' | 'weekly' | 'monthly';
 

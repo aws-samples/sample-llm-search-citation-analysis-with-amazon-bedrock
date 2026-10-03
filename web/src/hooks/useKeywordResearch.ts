@@ -22,7 +22,7 @@ import type {
  * a user who closed the browser while a long expansion ran had to dig the
  * result out of History).
  */
-export const ACTIVE_JOB_STORAGE_KEY = 'keywordResearch.activeJob';
+const ACTIVE_JOB_STORAGE_KEY = 'keywordResearch.activeJob';
 
 /** Expansion and competitor runs; agent runs are tracked by `useResearchAgent`. */
 type TrackedResearchType = Exclude<ResearchType, 'agent'>;

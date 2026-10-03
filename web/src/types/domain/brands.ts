@@ -9,7 +9,7 @@ export type BrandClassification = 'first_party' | 'competitor' | 'other';
 /**
  * Individual brand mention extracted from an AI response.
  */
-export interface BrandMention {
+interface BrandMention {
   name: string;
   parent_company: string | null;
   rank: number;

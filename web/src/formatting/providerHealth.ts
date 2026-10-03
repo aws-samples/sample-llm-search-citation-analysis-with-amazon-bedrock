@@ -17,7 +17,7 @@ const PROVIDER_ERROR_CATEGORIES = [
   'unknown',
 ] as const;
 
-export type ProviderErrorCategory = typeof PROVIDER_ERROR_CATEGORIES[number];
+type ProviderErrorCategory = typeof PROVIDER_ERROR_CATEGORIES[number];
 
 /**
  * Health fields `GET /api/providers` reports per provider. All optional: rows

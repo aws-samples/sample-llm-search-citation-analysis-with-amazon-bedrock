@@ -44,7 +44,7 @@ export function parseApiResponse<T>(data: unknown): ApiResponse<T> {
 }
 
 export type SortColumn = 'citations' | 'keywords' | 'domain';
-export type SortDirection = 'asc' | 'desc';
+type SortDirection = 'asc' | 'desc';
 
 export interface SortConfig {
   column: SortColumn;

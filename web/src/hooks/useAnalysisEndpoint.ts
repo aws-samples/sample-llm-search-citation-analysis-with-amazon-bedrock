@@ -13,7 +13,7 @@ import { useLatestRequest } from './useLatestRequest';
  * Error payload the analysis API returns with HTTP 200 for domain
  * errors (missing brand config, unknown keyword, ...).
  */
-export interface BackendErrorResponse {error: string;}
+interface BackendErrorResponse {error: string;}
 
 function isBackendErrorResponse(data: unknown): data is BackendErrorResponse {
   // Optional chaining makes this safe for null, primitives and arrays without
