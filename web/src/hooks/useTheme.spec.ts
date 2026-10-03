@@ -5,6 +5,7 @@ import {
   createMatchMediaMock, renderTheme, renderThemeSetTo, renderThemeToggledOnce
 } from './useTheme-fixtures';
 import { createStorageMock } from '../test/storageMock';
+import { installStorageMock } from '../test/installStorageMock';
 
 describe('useTheme', () => {
   const localStorageMock = createStorageMock();
@@ -12,11 +13,7 @@ describe('useTheme', () => {
   const matchMediaMock = vi.fn().mockImplementation(createMatchMediaMock(false));
 
   beforeEach(() => {
-    Object.keys(localStorageMock.store).forEach(key => delete localStorageMock.store[key]);
-    Object.defineProperty(window, 'localStorage', {
-      value: localStorageMock,
-      writable: true 
-    });
+    installStorageMock(localStorageMock);
     Object.defineProperty(window, 'matchMedia', {
       value: matchMediaMock,
       writable: true 

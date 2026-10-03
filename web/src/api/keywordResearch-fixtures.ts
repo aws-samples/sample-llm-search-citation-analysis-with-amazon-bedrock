@@ -1,9 +1,9 @@
-import { createMockJsonResponse } from '../test/fetchResponses';
+import { answerEveryFetch } from '../test/fetchStubs';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 /** Give every request a fresh response so its body can be read once. */
 export function respondWith(status: number, body: unknown): void {
-  mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(createMockJsonResponse(body, status)));
+  answerEveryFetch(body, status);
 }
 
 /** The JSON body of the last request, parsed. */

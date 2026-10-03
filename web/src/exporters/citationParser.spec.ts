@@ -6,11 +6,8 @@ import {
 } from './citationParser';
 import type { SortConfig } from './citationParser';
 import {
-  ASC_CITATIONS, ASC_DOMAIN, ASC_KEYWORDS, DESC_CITATIONS, DESC_DOMAIN, DESC_KEYWORDS
+  ASC_CITATIONS, ASC_DOMAIN, ASC_KEYWORDS, DESC_CITATIONS, DESC_DOMAIN, DESC_KEYWORDS, buildCitation, buildCitations
 } from './citationParser-fixtures';
-import {
-  buildCitation, buildCitations 
-} from './citationParserFixtures';
 
 /** One row of the count-column sorting table: which column, which way, and the counts in that order. */
 interface CountSortCase {

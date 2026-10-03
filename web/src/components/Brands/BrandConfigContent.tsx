@@ -14,6 +14,7 @@ import { CompetitorBrandsSection } from './CompetitorBrandsSection';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import { CHECK_PATHS } from '../ui/iconPaths';
 import { CenteredMessage } from '../ui/CenteredState';
+import { normalizeDomain } from '../../formatting/domainIdentity';
 
 interface BrandConfigContentProps {
   readonly config: BrandConfig | null;
@@ -84,8 +85,7 @@ export const BrandConfigContent = ({
   const addEntityType = () => { if (inputs.newEntityType.trim() && !form.customEntityTypes.includes(inputs.newEntityType.trim())) { setCustomEntityTypes([...form.customEntityTypes, inputs.newEntityType.trim()]); setNewEntityType(''); } };
 
   const addFirstPartyDomain = () => {
-    const trimmed = inputs.newFirstPartyDomain.trim().toLowerCase();
-    const domain = trimmed.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+    const domain = normalizeDomain(inputs.newFirstPartyDomain);
     if (domain && !form.firstPartyDomains.includes(domain)) { setFirstPartyDomains([...form.firstPartyDomains, domain]); setNewFirstPartyDomain(''); }
   };
 

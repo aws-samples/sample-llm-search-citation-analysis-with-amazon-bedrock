@@ -1,5 +1,5 @@
 {
-  "description": "Canonical domain identity shared by Python and TypeScript. Each case maps an input (a URL, a bare domain, or a configured first-party domain) to its normalized domain: the host, lower-case, without userinfo, port, leading or trailing dots, or a leading 'www.'. 'expected' is null when the input has no host. Python: lambda/shared/kpi_engine.normalize_domain (test: lambda/shared/test_domain_identity.py).",
+  "description": "Canonical domain identity shared by Python and TypeScript. Each case maps an input (a URL, a bare domain, or a configured first-party domain) to its normalized domain: the host, lower-case, without userinfo, port, leading or trailing dots, or a leading 'www.'. 'expected' is null when the input has no host. Python: lambda/shared/kpi_engine.normalize_domain (test: lambda/shared/test_domain_identity.py). TypeScript: web/src/formatting/domainIdentity.normalizeDomain (spec: domainIdentity.spec.ts).",
   "cases": [
     { "description": "URL with path, query and fragment", "input": "https://example.com/path/page?q=1&utm_source=x#top", "expected": "example.com" },
     { "description": "uppercase host", "input": "HTTPS://EXAMPLE.COM/Path", "expected": "example.com" },

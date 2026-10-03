@@ -8,7 +8,7 @@ import { CitationTableHeader } from './CitationTableHeader';
 import type { SortConfig } from '../../exporters/citationParser';
 import {
   DESC_CITATIONS, DESC_KEYWORDS
-} from '../../exporters/citationParserFixtures';
+} from '../../exporters/citationParser-fixtures';
 
 /** Renders the header inside a table, sorted by `sort`; returns its `onSort` spy. */
 function renderHeader(sort: SortConfig = DESC_CITATIONS) {
