@@ -34,7 +34,7 @@ process.
 
 - **Duplicate and dead code sweep.** Clones at the new 25-token / 3-line floor went from about 1,950 to 505, all
   reviewed as incidental and recorded in `.jscpd-baseline/`; together with the dead code removed below, production
-  code shrank by about 1,500 lines. The CDK stack has one factory each for Lambdas, IAM grants and routes, and
+  code shrank by about 2,450 lines. The CDK stack has one factory each for Lambdas, IAM grants and routes, and
   deduplicating it left the synthesized template unchanged; one search flow for every
   search provider; one conditional-write, paginator, timestamp, percent, priority-order and sentiment-label helper in
   `lambda/shared`; one saved-template hook, error factory and icon component in the dashboard; exports nothing
@@ -42,7 +42,7 @@ process.
 - **Duplication gate:** jscpd runs at 25 tokens / 3 lines, ignoring comments and comparing `.ts` with `.tsx`; any
   clone not in the baseline fails `npm run validate`. `npm run duplication:baseline` rewrites the baseline.
 - The lines the sweep changed were mutation-tested (mutmut and Stryker) and the survivors closed with tests or
-  removed as dead code: Python tests went from 3,372 to 3,630 and dashboard tests from 4,600 to 4,855. Contract tests
+  removed as dead code: Python tests went from 3,372 to 3,625 and dashboard tests from 4,600 to 4,800. Contract tests
   now also pin the research state-machine timeout against the stale-job sweep and the Bedrock tier defaults between
   the CDK stack and `shared/models.py`.
 - `npm run contracts` no longer counts fixture modules under `web/src/types` as type declarations.
