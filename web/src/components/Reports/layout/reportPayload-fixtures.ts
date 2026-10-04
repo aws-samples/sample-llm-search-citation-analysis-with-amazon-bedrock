@@ -3,6 +3,7 @@ import type {
   TrendDirection, VisibilityResponse
 } from '../../../types';
 import type { BrandKpis } from '../../../types/domain/groupKpiHistory';
+import type { VisibilityAndTrends } from './reportSlices';
 import type {
   ReportsOverviewMover, ReportsOverviewResponse
 } from '../../../api/reports';
@@ -351,3 +352,13 @@ export function buildOverview(overrides: Partial<ReportsOverviewResponse> = {}):
     ...overrides,
   };
 }
+
+/** Both `/visibility` and `/trends` settled with nothing loaded. */
+export const SETTLED_VISIBILITY_AND_TRENDS: VisibilityAndTrends = {
+  visibility: null,
+  visibilityLoading: false,
+  visibilityError: null,
+  trends: null,
+  trendsLoading: false,
+  trendsError: null,
+};

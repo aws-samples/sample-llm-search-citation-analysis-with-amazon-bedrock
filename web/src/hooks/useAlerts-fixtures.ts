@@ -353,7 +353,6 @@ export function buildContentChangesHookResult(
     error: null,
     recording: false,
     recordOutcome: null,
-    refresh: vi.fn(),
     recordContentChange: vi.fn().mockResolvedValue({
       success: true,
       message: 'Content change recorded.',

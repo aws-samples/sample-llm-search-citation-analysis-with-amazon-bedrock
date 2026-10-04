@@ -83,7 +83,7 @@ describe('executions API', () => {
       expect(mockApiDelete).toHaveBeenCalledWith('/schedules/sch-1', { allowStructured4xx: true });
     });
 
-    it('runs now through POST /schedules/{id}/run and returns the execution', async () => {
+    it('runs now through POST /schedules/{id}/run and returns the run message', async () => {
       mockApiPost.mockResolvedValue({
         execution_arn: 'arn',
         execution_name: 'schedule-run-1',
@@ -95,7 +95,7 @@ describe('executions API', () => {
       const result = await runSchedule('sch-1');
 
       expect(mockApiPost).toHaveBeenCalledWith('/schedules/sch-1/run', {}, { allowStructured4xx: true });
-      expect(result.execution_name).toBe('schedule-run-1');
+      expect(result.message).toBe('started');
     });
   });
 });

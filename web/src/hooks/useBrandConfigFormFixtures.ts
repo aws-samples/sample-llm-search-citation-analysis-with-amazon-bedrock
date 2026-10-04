@@ -44,9 +44,7 @@ export const HOTEL_PRESETS = {
   hotels: {
     name: 'Hotels',
     description: 'Hotel brands',
-    entity_types: ['hotel chains'],
     example_brands: ['Marriott'],
-    extraction_focus: 'hotels',
     default_prompt: 'Extract hotel brands from text.',
   },
 } satisfies IndustryPresets;

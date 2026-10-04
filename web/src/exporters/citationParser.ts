@@ -11,7 +11,6 @@ import type { TopUrl } from '../types';
 interface UrlBreakdown {
   keyword: string;
   provider: string;
-  timestamp: string;
 }
 
 interface ApiResponse<T> {

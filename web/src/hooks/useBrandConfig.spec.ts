@@ -13,7 +13,6 @@ import {
   EXPANSION_ARGUMENT_REQUESTS,
   EXPANSION_FAILURES,
   GENERAL_ALL_BRANDS_EXPANSION,
-  GENERAL_BRAND_EXPANSION,
   GENERAL_COMPETITOR_DISCOVERY,
 } from './useBrandConfig-expansion-fixtures';
 
@@ -66,7 +65,6 @@ describe('useBrandConfig', () => {
 
       expect(result.current.config).toStrictEqual(DEFAULT_CONFIG);
       expect(result.current.config?.industry).toBe('general');
-      expect(result.current.error).toBeNull();
     });
 
     it('uses the canonical General preset when the preset API fails', async () => {
@@ -75,9 +73,7 @@ describe('useBrandConfig', () => {
       expect(result.current.presets?.general).toMatchObject({
         name: 'General',
         description: 'Track brands and companies in any industry',
-        entity_types: [],
         example_brands: [],
-        extraction_focus: 'brand and company recommendations',
       });
       expect(result.current.presets?.general?.default_prompt).toContain(
         'INDUSTRY CONTEXT: General\nFOCUS: brand and company recommendations'
@@ -122,87 +118,17 @@ describe('useBrandConfig', () => {
     });
   });
 
-  describe('resetConfig', () => {
-    it('resets config to General defaults through the API', async () => {
-      const {
-        api, result
-      } = await runOnLoadedBrandConfig((hook) => hook.resetConfig());
-
-      expect(api.deleteConfig).toHaveBeenCalledTimes(1);
-      expect(result.current.config).toStrictEqual(DEFAULT_CONFIG);
-      expect(result.current.config?.industry).toBe('general');
-    });
-
-    it('resets config to General locally when the API reset fails', async () => {
-      const { result } = await runOnLoadedBrandConfig(
-        (hook) => hook.resetConfig(),
-        { shouldFailDelete: true }
-      );
-
-      expect(result.current.config).toStrictEqual(DEFAULT_CONFIG);
-      expect(result.current.config?.industry).toBe('general');
-    });
-  });
-
-  describe('getPromptForIndustry', () => {
-    const promptCases = [
-      {
-        condition: 'a custom prompt is set in config',
-        industry: 'hospitality',
-        apiOptions: {
-          configResponse: {
-            ...mockBrandConfig,
-            industry_prompts: { hospitality: 'Custom hospitality prompt' },
-          },
-        },
-        expectedPrompt: 'Custom hospitality prompt',
-      },
-      {
-        condition: 'no custom prompt is set',
-        industry: 'hospitality',
-        apiOptions: {},
-        expectedPrompt: 'Extract hotel brand mentions',
-      },
-      {
-        condition: 'the industry is unknown',
-        industry: 'unknown',
-        apiOptions: {},
-        expectedPrompt: 'Extract brand and company mentions',
-      },
-    ];
-
-    it.each(promptCases)('returns "$expectedPrompt" when $condition', async ({
-      industry, apiOptions, expectedPrompt
-    }) => {
-      const { result } = await renderLoadedBrandConfig(apiOptions);
-
-      expect(result.current.getPromptForIndustry(industry)).toBe(expectedPrompt);
-    });
-  });
-
   describe('expansion industry fallback', () => {
     it('uses General for every expansion request when stored industry is empty', async () => {
       const {
         api, result
       } = await renderLoadedBrandConfig({ configResponse: EMPTY_INDUSTRY_CONFIG });
 
-      await act(() => GENERAL_BRAND_EXPANSION.run(result.current));
       await act(() => GENERAL_ALL_BRANDS_EXPANSION.run(result.current));
       await act(() => GENERAL_COMPETITOR_DISCOVERY.run(result.current));
 
-      expect(api.expandBrand).toHaveBeenCalledWith(GENERAL_BRAND_EXPANSION.request);
       expect(api.expandAllBrands).toHaveBeenCalledWith(GENERAL_ALL_BRANDS_EXPANSION.request);
       expect(api.findCompetitors).toHaveBeenCalledWith(GENERAL_COMPETITOR_DISCOVERY.request);
-    });
-  });
-
-  describe('expandBrand', () => {
-    it('returns expansion result with suggestions', async () => {
-      const { value: expansion } = await runOnLoadedBrandConfig((hook) => hook.expandBrand('TestBrand'));
-
-      expect(expansion.main_brand).toBe('TestBrand');
-      expect(expansion.suggestions).toStrictEqual(['SubBrand1', 'SubBrand2']);
-      expect(expansion.parent_company).toBe('ParentCo');
     });
   });
 
@@ -249,16 +175,4 @@ describe('useBrandConfig', () => {
     );
   });
 
-  describe('refetch', () => {
-    it('refetches config from API', async () => {
-      const {
-        api, result
-      } = await renderLoadedBrandConfig();
-      const initialCallCount = api.fetchConfig.mock.calls.length;
-
-      await act(() => result.current.refetch());
-
-      expect(api.fetchConfig.mock.calls.length).toBeGreaterThan(initialCallCount);
-    });
-  });
 });

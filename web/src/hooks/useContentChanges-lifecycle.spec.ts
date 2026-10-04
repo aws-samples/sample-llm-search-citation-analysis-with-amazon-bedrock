@@ -21,7 +21,6 @@ import { AlertHookFailure } from './alertHookErrors-fixtures';
 import {
   CONTENT_CHANGE_REQUEST,
   beginContentChangeRecord,
-  beginDeferredRefresh,
   beginRecordThenSwitchGroup,
   deferNextCall,
   rejectDeferredValue,
@@ -30,6 +29,7 @@ import {
   resolveDeferredValue,
 } from './useAlerts-fixtures';
 import { deferNextTwoCalls } from '../test/fetchResponses';
+import { waitForLoaded } from '../test/loadedHook';
 import { useContentChanges } from './useAlerts';
 
 vi.mock('../api/alerts', () => import('./alertsApiMock-fixtures'));
@@ -80,18 +80,22 @@ describe('useContentChanges lifecycle', () => {
     response.resolve(buildContentChangesResponse());
   });
 
-  it('clears the previous marker and record outcome when refresh starts', async () => {
+  it('clears the previous marker and record outcome when the selected group changes', async () => {
     const marker = buildContentChangeMarker();
     mockCreateContentChange.mockResolvedValueOnce(marker);
-    const { result } = await renderLoadedContentChanges();
+    const {
+      result, rerender
+    } = renderContentChangesForGroup();
+    await waitForLoaded(result);
     await beginContentChangeRecord(result.current);
-    const refresh = beginDeferredRefresh(mockFetchContentChanges, result.current, buildContentChangesResponse());
+    const southLoad = deferNextCall<ContentChangesResponse>(mockFetchContentChanges);
+
+    rerender({ selectedGroupId: 'group-south' });
 
     expect(result.current.latestMarker).toBeNull();
     expect(result.current.recordOutcome).toBeNull();
     expect(result.current.recording).toBe(false);
-
-    await refresh.finish();
+    southLoad.resolve(buildContentChangesResponse());
   });
 
   it('aborts marker loading and enters recording state when a record starts', async () => {

@@ -146,7 +146,6 @@ describe('findUnhealthyProviders', () => {
 
     expect(findUnhealthyProviders(providers)).toStrictEqual([{
       id: 'claude',
-      tone: 'critical',
       summary: 'Claude is not returning results: no credit remaining',
     }]);
   });

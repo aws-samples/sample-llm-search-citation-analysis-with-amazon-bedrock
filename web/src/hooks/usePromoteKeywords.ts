@@ -195,7 +195,6 @@ export interface UsePromoteKeywords {
   /** Selection keys (see `keywordSelectionKey`) of the ticked rows, for the tables' checkboxes. */
   selectedKeys: Set<string>;
   selectedCount: number;
-  atLimit: boolean;
   canPromote: boolean;
   canPromoteProposal: boolean;
   submitting: boolean;
@@ -446,7 +445,6 @@ export const usePromoteKeywords = (
   return {
     selectedKeys,
     selectedCount: selected.length,
-    atLimit: selected.length === SELECTION_LIMIT,
     canPromote: selected.length > 0 && !submitting,
     canPromoteProposal: availableUniqueKeywords.length > 0 && !submitting,
     submitting,

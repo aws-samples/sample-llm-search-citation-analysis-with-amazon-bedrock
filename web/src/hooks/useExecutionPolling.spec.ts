@@ -8,10 +8,8 @@ import { useExecutionPolling } from './useExecutionPolling';
 import type { AnalysisScope } from '../types';
 import {
   mockExecutionArn,
-  mockExecutionName,
   createMockStatusResponse,
   createMockFetch,
-  renderExecutionPolling,
   renderTriggeredExecutionPolling,
   mockKeywordProgress,
   triggerWithProgress,
@@ -104,18 +102,6 @@ describe('useExecutionPolling', () => {
 
     expect(result.current.execution?.status).toBe(status);
     expect(result.current.isRunning).toBe(false);
-  });
-
-  it('starts monitoring existing execution via startMonitoring', async () => {
-    const { result } = renderExecutionPolling();
-
-    await act(async () => {
-      result.current.startMonitoring(mockExecutionArn, mockExecutionName);
-    });
-
-    expect(result.current.execution?.arn).toBe(mockExecutionArn);
-    expect(result.current.execution?.name).toBe(mockExecutionName);
-    expect(result.current.isRunning).toBe(true);
   });
 });
 

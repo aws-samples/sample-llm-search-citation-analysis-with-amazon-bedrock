@@ -87,30 +87,6 @@ describe('useProviderConfig', () => {
     );
   });
 
-  it('returns valid true when validateKey succeeds', async () => {
-    const { result } = await renderLoadedProviderConfig({ validationResult: { valid: true } });
-
-    const validation = await act(() => result.current.validateKey('openai', 'test-key'));
-
-    expect(validation).toStrictEqual({ valid: true });
-  });
-
-  it('returns valid false with error when validateKey fails', async () => {
-    const { result } = await renderLoadedProviderConfig({
-      validationResult: {
-        valid: false,
-        error: 'Invalid API key' 
-      },
-    });
-
-    const validation = await act(() => result.current.validateKey('openai', 'bad-key'));
-
-    expect(validation).toStrictEqual({
-      valid: false,
-      error: 'Invalid API key' 
-    });
-  });
-
   it('refreshes providers after successful update', async () => {
     const { result } = await renderLoadedProviderConfig();
     const initialCallCount = countProviderListRequests();

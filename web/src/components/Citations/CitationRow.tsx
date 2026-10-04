@@ -11,7 +11,6 @@ import {
 interface UrlBreakdown {
   keyword: string;
   provider: string;
-  timestamp: string;
 }
 
 interface CitationRowProps {

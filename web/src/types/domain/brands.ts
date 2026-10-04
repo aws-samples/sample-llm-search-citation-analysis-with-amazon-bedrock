@@ -128,9 +128,7 @@ export interface BrandMentionsResponse {
 export interface IndustryPreset {
   name: string;
   description: string;
-  entity_types: string[];
   example_brands: string[];
-  extraction_focus: string;
   default_prompt: string;
 }
 

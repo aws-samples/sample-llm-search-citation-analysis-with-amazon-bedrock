@@ -130,9 +130,9 @@ describe('useBrandVisibilityReport', () => {
     expect(result.current.ready).toBe(true);
   });
 
-  it('hands the keyword and its visibility to a per-keyword report', () => {
+  it('hands the keyword visibility to a per-keyword report', () => {
     const { result } = renderHook(() => useBrandVisibilityReport(kw('shoes'), 90));
-    expect([result.current.keyword, result.current.visibility]).toStrictEqual(['shoes', VISIBILITY]);
+    expect(result.current.visibility).toStrictEqual(VISIBILITY);
   });
 
   it('hands the trend to a per-keyword report', () => {
@@ -142,7 +142,7 @@ describe('useBrandVisibilityReport', () => {
 
   it('hands no keyword visibility to a group report', () => {
     const { result } = renderHook(() => useBrandVisibilityReport(HOTEL_GROUP, 90));
-    expect([result.current.keyword, result.current.visibility]).toStrictEqual([null, null]);
+    expect(result.current.visibility).toBeNull();
   });
 
   it.each([

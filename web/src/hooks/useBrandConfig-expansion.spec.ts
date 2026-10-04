@@ -4,20 +4,13 @@ import {
 import { runOnLoadedBrandConfig } from './useBrandConfig-fixtures';
 import type { BrandConfigMockApiOptions } from './useBrandConfig-fixtures';
 import {
-  expandBrand1, expandTestBrand, findMyBrandCompetitors
+  expandBrand1, findMyBrandCompetitors
 } from './useBrandConfig-expansion-fixtures';
 
-type ExpansionRun = typeof expandTestBrand;
+type ExpansionRun = typeof expandBrand1;
 
 describe('useBrandConfig expansion answers', () => {
   it.each<[action: string, run: ExpansionRun, options: BrandConfigMockApiOptions, expected: unknown]>([
-    ['expandBrand', expandTestBrand, { expandResponse: { main_brand: 'TestBrand' } }, {
-      main_brand: 'TestBrand',
-      parent_company: undefined,
-      suggestions: [],
-      notes: '',
-      error: undefined,
-    }],
     ['expandAllBrands', expandBrand1, { expandAllResponse: {} }, {
       existing_brands: ['Brand1'],
       parent_companies: [],
@@ -39,7 +32,6 @@ describe('useBrandConfig expansion answers', () => {
   });
 
   it.each([
-    ['expandBrand', expandTestBrand, 'Failed to expand brand'],
     ['expandAllBrands', expandBrand1, 'Failed to expand brands'],
     ['findCompetitors', findMyBrandCompetitors, 'Failed to find competitors'],
   ])('%s reports "%s" when the request rejects with a non-Error', async (_action, run, message) => {
@@ -51,7 +43,6 @@ describe('useBrandConfig expansion answers', () => {
   });
 
   it.each([
-    ['expandBrand', expandTestBrand, 'Error expanding brand:'],
     ['expandAllBrands', expandBrand1, 'Error expanding all brands:'],
     ['findCompetitors', findMyBrandCompetitors, 'Error finding competitors:'],
   ])('%s logs "%s" with the rejection', async (_action, run, log) => {

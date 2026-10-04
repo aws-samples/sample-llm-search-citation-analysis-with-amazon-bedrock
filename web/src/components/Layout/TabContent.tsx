@@ -45,8 +45,6 @@ interface TabContentProps {
     success: boolean;
     message: string
   }>;
-  readonly startMonitoring: (arn: string, name: string) => void;
-  readonly isRunning: boolean;
   readonly rawResponsesPath?: string;
   readonly settingsInitialTab?: SettingsTab;
   readonly setActiveTab: (tab: TabType) => void;
@@ -173,8 +171,6 @@ export function TabContent(props: TabContentProps) {
     setSchedules,
     execution,
     triggerAnalysis,
-    startMonitoring,
-    isRunning,
     rawResponsesPath,
     settingsInitialTab,
     setActiveTab,
@@ -200,17 +196,7 @@ export function TabContent(props: TabContentProps) {
     execution: <ExecutionMonitor execution={execution} triggerAnalysis={triggerAnalysis} keywordsCount={keywords.length} keywords={keywords} />,
     schedule: <ScheduleManager schedules={schedules} setSchedules={setSchedules} keywords={keywords} />,
     settings: <SettingsView keywords={keywords} setKeywords={setKeywords} initialTab={settingsInitialTab} />,
-    searches: (
-      <SearchesView
-        searches={searches}
-        isRunning={isRunning}
-        onRerunSuccess={(executionArn, executionName) => {
-          startMonitoring(executionArn, executionName);
-          setActiveTab('execution');
-        }}
-        onNavigateToRawResponses={onNavigateToRawResponses}
-      />
-    ),
+    searches: <SearchesView searches={searches} onNavigateToRawResponses={onNavigateToRawResponses} />,
     'raw-responses': <RawResponsesExplorer initialPath={rawResponsesPath} />,
     'keyword-research': <KeywordResearchView onKeywordsAdded={appendKeywords} />,
   };

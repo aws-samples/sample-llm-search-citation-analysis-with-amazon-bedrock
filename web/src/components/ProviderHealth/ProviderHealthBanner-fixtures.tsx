@@ -20,7 +20,6 @@ interface ProviderConfigHookResult {
   error: string | null;
   refreshProviders: () => Promise<void>;
   updateProvider: () => Promise<boolean>;
-  validateKey: () => Promise<{valid: boolean;}>;
 }
 
 export function buildProviderConfigHookResult(
@@ -32,7 +31,6 @@ export function buildProviderConfigHookResult(
     error: null,
     refreshProviders: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
     updateProvider: vi.fn<() => Promise<boolean>>().mockResolvedValue(true),
-    validateKey: vi.fn<() => Promise<{valid: boolean;}>>().mockResolvedValue({ valid: true }),
     ...overrides,
   };
 }

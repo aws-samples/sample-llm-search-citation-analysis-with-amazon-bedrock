@@ -101,7 +101,6 @@ interface PromptBrandData {
   mentions: number;
   best_rank: number | null;
   provider_coverage: number;
-  providers: string[];
 }
 
 type PromptStatus = 'winning' | 'losing' | 'opportunity' | 'neutral';
@@ -177,12 +176,6 @@ export interface CitationGapsResponse {
   total_high_priority?: number;
 }
 
-export type RecommendationStatus =
-  | 'new'
-  | 'in_progress'
-  | 'done'
-  | 'wontfix';
-
 export interface Recommendation {
   type: string;
   priority: GapPriority;
@@ -191,19 +184,6 @@ export interface Recommendation {
   action: string;
   impact: string;
   keywords?: string[];
-  /**
-   * Server-computed deterministic id (SHA-1 of type+title+sorted keywords,
-   * truncated to 16 chars). Stable across list regenerations so it can
-   * be used to track per-recommendation action status.
-   */
-  id?: string;
-  /** Persisted action-tracking state. Defaults to 'new' if untouched. */
-  status?: RecommendationStatus;
-  notes?: string;
-  related_keyword?: string;
-  related_content_id?: string;
-  updated_at?: string;
-  completed_at?: string;
 }
 
 export interface RecommendationsResponse {
@@ -281,11 +261,7 @@ export interface HistoricalTrendsResponse {
 }
 
 interface PersonaBrandRanking {
-  name: string;
   rank: number;
-  mention_count: number;
-  sentiment: string;
-  visibility_score: number;
   classification: BrandClassification;
 }
 
@@ -318,16 +294,12 @@ export interface ContentRecommendation {
 export interface SelfReflectionResult {
   keyword: string;
   brand: string;
-  query_prompt_id: string;
-  query_prompt_name: string;
   current_rank: number | null;
   explanation: string;
   content_contributions: string;
   competitor_advantages: string;
   missing_data_points: string;
   recommendations: ContentRecommendation[];
-  industry: string;
-  created_at: string;
 }
 
 export type SelfReflectionResponse = SelfReflectionResult;

@@ -101,7 +101,6 @@ export const ContentHistory = ({
         title="Delete Content"
         message="Are you sure you want to delete this content? This action cannot be undone."
         confirmText="Delete"
-        cancelText="Cancel"
         confirmVariant="danger"
       />
     </>

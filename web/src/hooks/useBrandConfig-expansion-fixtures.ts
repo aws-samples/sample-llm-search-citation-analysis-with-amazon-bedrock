@@ -4,21 +4,11 @@ import type { useBrandConfig } from './useBrandConfig';
 type BrandConfigHook = ReturnType<typeof useBrandConfig>;
 
 interface GeneralFallbackExpansion {
-  action: 'expandBrand' | 'expandAllBrands' | 'findCompetitors';
+  action: 'expandAllBrands' | 'findCompetitors';
   run: (hook: BrandConfigHook) => Promise<unknown>;
   /** Request body the API receives for `run`. */
   request: Record<string, unknown>;
 }
-
-export const GENERAL_BRAND_EXPANSION = {
-  action: 'expandBrand',
-  run: (hook) => hook.expandBrand('TestBrand'),
-  request: {
-    brand_name: 'TestBrand',
-    industry: 'general',
-    existing_brands: [],
-  },
-} satisfies GeneralFallbackExpansion;
 
 export const GENERAL_ALL_BRANDS_EXPANSION = {
   action: 'expandAllBrands',
@@ -42,7 +32,6 @@ export const GENERAL_COMPETITOR_DISCOVERY = {
 
 /** Every expansion action, each falling back to the General industry. */
 export const GENERAL_FALLBACK_EXPANSIONS: GeneralFallbackExpansion[] = [
-  GENERAL_BRAND_EXPANSION,
   GENERAL_ALL_BRANDS_EXPANSION,
   GENERAL_COMPETITOR_DISCOVERY,
 ];
@@ -51,16 +40,6 @@ interface ExpansionArgumentRequest extends GeneralFallbackExpansion { argument: 
 
 /** Each expansion action called with its optional argument, and the request the API receives. */
 export const EXPANSION_ARGUMENT_REQUESTS: ExpansionArgumentRequest[] = [
-  {
-    action: 'expandBrand',
-    argument: 'existing brands',
-    run: (hook) => hook.expandBrand('TestBrand', ['ExistingBrand']),
-    request: {
-      brand_name: 'TestBrand',
-      industry: 'hospitality',
-      existing_brands: ['ExistingBrand'],
-    },
-  },
   {
     action: 'expandAllBrands',
     argument: 'brand type',
@@ -98,18 +77,11 @@ interface ExpansionFailure {
 
 type ExpansionRun = (hook: BrandConfigHook) => Promise<ExpansionOutcome>;
 
-export const expandTestBrand: ExpansionRun = (hook) => hook.expandBrand('TestBrand');
 export const expandBrand1: ExpansionRun = (hook) => hook.expandAllBrands(['Brand1']);
 export const findMyBrandCompetitors: ExpansionRun = (hook) => hook.findCompetitors(['MyBrand']);
 
 /** Each expansion action against a failing endpoint, and the list it must return empty. */
 export const EXPANSION_FAILURES: ExpansionFailure[] = [
-  {
-    action: 'expandBrand',
-    emptyField: 'suggestions',
-    failure: { shouldFailExpand: true },
-    run: expandTestBrand,
-  },
   {
     action: 'expandAllBrands',
     emptyField: 'suggestions',

@@ -33,8 +33,6 @@ export function buildTabContentProps(
       success: true,
       message: 'started',
     }),
-    startMonitoring: vi.fn(),
-    isRunning: false,
     setActiveTab: vi.fn(),
     onNavigateToRawResponses: vi.fn(),
     ...overrides,

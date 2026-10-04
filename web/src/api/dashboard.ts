@@ -4,10 +4,7 @@
 import { apiGet } from './client';
 import type { CrawledContent } from '../types';
 
-interface CrawledContentResponse {
-  items: CrawledContent[];
-  count: number;
-}
+interface CrawledContentResponse {items: CrawledContent[];}
 
 /**
  * Fetches the 20 latest crawls of a specific URL.

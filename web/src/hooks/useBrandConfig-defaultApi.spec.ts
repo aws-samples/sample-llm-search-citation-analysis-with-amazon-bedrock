@@ -35,12 +35,6 @@ describe('useBrandConfig default API', () => {
 
   it.each<[route: string, run: (hook: BrandConfigHook) => Promise<unknown>, request: readonly unknown[]]>([
     ['saves the config with a POST to', (hook) => hook.saveConfig({ industry: 'travel' }), [BRAND_CONFIG_URL, brandConfigPostInit({ industry: 'travel' })]],
-    ['resets the config with a DELETE to', (hook) => hook.resetConfig(), [BRAND_CONFIG_URL, { method: 'DELETE' }]],
-    ['expands a brand through', (hook) => hook.expandBrand('TestBrand'), [`${BRAND_CONFIG_URL}/expand`, brandConfigPostInit({
-      brand_name: 'TestBrand',
-      industry: 'hospitality',
-      existing_brands: [],
-    })]],
     ['expands every brand through', (hook) => hook.expandAllBrands(['Brand1']), [`${BRAND_CONFIG_URL}/expand-all`, brandConfigPostInit({
       existing_brands: ['Brand1'],
       industry: 'hospitality',

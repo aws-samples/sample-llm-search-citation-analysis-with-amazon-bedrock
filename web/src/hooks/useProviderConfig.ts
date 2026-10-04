@@ -45,10 +45,6 @@ interface UseProviderConfigReturn {
     enabled?: boolean;
     api_key?: string;
   }) => Promise<boolean>;
-  validateKey: (providerId: string, apiKey: string) => Promise<{
-    valid: boolean;
-    error?: string;
-  }>;
 }
 
 class ProviderFetchError extends Error {
@@ -69,21 +65,12 @@ interface ProvidersResponse {providers?: ProviderConfig[];}
 
 interface ErrorResponse {error?: string;}
 
-interface ValidationResponse {
-  valid: boolean;
-  error?: string;
-}
-
 function isProvidersResponse(data: unknown): data is ProvidersResponse {
   return typeof data === 'object' && data !== null;
 }
 
 function isErrorResponse(data: unknown): data is ErrorResponse {
   return typeof data === 'object' && data !== null;
-}
-
-function isValidationResponse(data: unknown): data is ValidationResponse {
-  return typeof data === 'object' && data !== null && 'valid' in data;
 }
 
 /** Defaults shown when the providers API is unreachable: each answer engine with its default model, unconfigured. */
@@ -173,43 +160,11 @@ export function useProviderConfig(): UseProviderConfigReturn {
     }
   }, [fetchProviders]);
 
-  const validateKey = useCallback(async (
-    providerId: string,
-    apiKey: string
-  ): Promise<{
-    valid: boolean;
-    error?: string;
-  }> => {
-    try {
-      const response = await authenticatedFetch(`${API_BASE_URL}/providers/${providerId}/validate`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json',},
-        body: JSON.stringify({api_key: apiKey,}),
-      });
-      
-      const data: unknown = await response.json();
-      if (isValidationResponse(data)) {
-        return data;
-      }
-      return {
-        valid: false,
-        error: 'Invalid response',
-      };
-    } catch (err) {
-      console.error('[providers] Error validating key:', err);
-      return {
-        valid: false,
-        error: getErrorMessage(err, 'providers'),
-      };
-    }
-  }, []);
-
   return {
     providers,
     loading,
     error,
     refreshProviders: fetchProviders,
     updateProvider,
-    validateKey,
   };
 }

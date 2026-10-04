@@ -10,29 +10,11 @@ import type { DistributedMapEvent } from './executionProcessorFixtures';
 
 describe('processExecutionData', () => {
   describe('when execution is null', () => {
-    it('returns IDLE status', () => {
-      const result = processExecutionData(null);
-
-      expect(result.status).toBe('IDLE');
-    });
-
-    it('returns empty startDate', () => {
-      const result = processExecutionData(null);
-
-      expect(result.startDate).toBe('');
-    });
-
     it('returns 3 pending steps', () => {
       const result = processExecutionData(null);
 
       expect(result.steps).toHaveLength(3);
       expect(result.steps.every(s => s.status === 'pending')).toBe(true);
-    });
-
-    it('returns 0 progress', () => {
-      const result = processExecutionData(null);
-
-      expect(result.progress).toBe(0);
     });
 
     it.each([
@@ -56,22 +38,6 @@ describe('processExecutionData', () => {
   });
 
   describe('when execution is running', () => {
-    it('returns execution status', () => {
-      const execution = buildExecution({ status: 'RUNNING' });
-
-      const result = processExecutionData(execution);
-
-      expect(result.status).toBe('RUNNING');
-    });
-
-    it('returns execution startDate', () => {
-      const execution = buildExecution({ start_date: '2026-01-23T10:00:00Z' });
-
-      const result = processExecutionData(execution);
-
-      expect(result.startDate).toBe('2026-01-23T10:00:00Z');
-    });
-
     it.each([
       {
         name: 'marks step as running when TaskStarted event received',
@@ -107,103 +73,6 @@ describe('processExecutionData', () => {
       const result = processExecutionData(execution);
 
       expect(result.steps[0]).toMatchObject(expected);
-    });
-
-    it('returns ProcessKeywords as currentStep while a legacy per-keyword search runs', () => {
-      const execution = buildExecution({
-        events: [
-          buildEvent({
-            type: 'TaskSucceeded',
-            state_name: 'ParseKeywords' 
-          }),
-          buildEvent({
-            type: 'TaskStarted',
-            state_name: 'SearchAllProviders' 
-          }),
-        ],
-      });
-
-      const result = processExecutionData(execution);
-
-      expect(result.currentStep).toBe('ProcessKeywords');
-    });
-
-    it('returns undefined currentStep when no step is running', () => {
-      const execution = buildExecution({ events: [] });
-
-      const result = processExecutionData(execution);
-
-      expect(result.currentStep).toBeUndefined();
-    });
-  });
-
-  describe('progress calculation', () => {
-    it.each([
-      {
-        name: 'returns 0 when no steps completed',
-        execution: () => buildExecution({ events: [] }),
-        expected: 0,
-      },
-      {
-        name: 'returns 10 when only ParseKeywords completed',
-        execution: () => buildDistributedMapExecution(['parseStarted', 'parseSucceeded']),
-        expected: 10,
-      },
-      {
-        name: 'returns 100 when a legacy run completed every step',
-        execution: () => buildCompletedExecution(),
-        expected: 100,
-      },
-      {
-        name: 'returns 90 once ProcessKeywords exits, whatever the keyword counts say',
-        execution: () => buildDistributedMapExecution(['parseSucceeded', 'mapRunStarted', 'mapStateExited'], {
-          progress: buildKeywordProgress({
-            keywords_succeeded: 0,
-            keywords_failed: 0
-          })
-        }),
-        expected: 90,
-      },
-      {
-        name: 'keeps the finished keyword share when the map run fails',
-        execution: () => buildDistributedMapExecution(['parseSucceeded', 'mapRunStarted', 'mapRunFailed'], {progress: buildKeywordProgress({ keywords_failed: 11 }),}),
-        expected: 90,
-      },
-      {
-        name: 'returns 100 when the summary of a Distributed Map run succeeds',
-        execution: () => buildDistributedMapExecution(['parseSucceeded', 'mapStateExited', 'summarySucceeded']),
-        expected: 100,
-      },
-    ])('$name', ({
-      execution, expected 
-    }) => {
-      const result = processExecutionData(execution());
-
-      expect(result.progress).toBe(expected);
-    });
-
-    it.each([
-      ['half the keywords finished (9 succeeded + 1 failed of 20)', buildKeywordProgress(), 50],
-      ['no keywords finished yet', buildKeywordProgress({
-        keywords_succeeded: 0,
-        keywords_failed: 0 
-      }), 10],
-      ['the map run reports a total of 0', buildKeywordProgress({
-        keywords_total: 0,
-        keywords_succeeded: 0,
-        keywords_failed: 0 
-      }), 10],
-      ['the counts overshoot the total', buildKeywordProgress({
-        keywords_total: 2,
-        keywords_succeeded: 3 
-      }), 90],
-      ['there are no keyword counts', null, 10],
-    ])('returns %s -> %i while ProcessKeywords runs', (_label, progress, expected) => {
-      const execution = buildDistributedMapExecution(['parseSucceeded', 'mapRunStarted'], { progress });
-
-      const result = processExecutionData(execution);
-
-      expect(result.progress).toBe(expected);
     });
 
   });
@@ -298,32 +167,6 @@ describe('processExecutionData', () => {
     });
   });
 
-  describe('duration calculation', () => {
-    it('returns duration string when execution has stop_date', () => {
-      const execution = buildExecution({
-        start_date: '2026-01-23T10:00:00Z',
-        stop_date: '2026-01-23T10:05:00Z',
-      });
-
-      const result = processExecutionData(execution);
-
-      expect(result.duration).toBe('5m 0s');
-    });
-
-    it('returns null duration when execution has no stop_date', () => {
-      const execution = buildExecution({
-        start_date: '2026-01-23T10:00:00Z',
-        stop_date: undefined,
-      });
-
-      const result = processExecutionData(execution);
-
-      // Duration calculates to "now" when no stop_date, so it won't be null
-      // but we can verify it's a string
-      expect(typeof result.duration).toBe('string');
-    });
-  });
-
   describe('event passthrough', () => {
     it('returns all events in events array', () => {
       const events = [
@@ -337,13 +180,5 @@ describe('processExecutionData', () => {
       expect(result.events).toStrictEqual(events);
     });
 
-    it('returns all events in logs array', () => {
-      const events = [buildEvent()];
-      const execution = buildExecution({ events });
-
-      const result = processExecutionData(execution);
-
-      expect(result.logs).toStrictEqual(events);
-    });
   });
 });

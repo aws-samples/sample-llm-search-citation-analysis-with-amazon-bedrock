@@ -33,7 +33,6 @@ const ADIDAS_EXCLUSIVE_SOURCE = buildSource({
 });
 
 const POPULATED_DATA = {
-  competitor: 'Adidas',
   rollup: buildRollup({
     outranked_keywords: [
       buildOutrankedKeyword({

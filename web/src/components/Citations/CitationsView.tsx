@@ -37,7 +37,6 @@ interface CitationsViewProps {
 interface UrlBreakdown {
   keyword: string;
   provider: string;
-  timestamp: string;
 }
 
 export const CitationsView = ({
