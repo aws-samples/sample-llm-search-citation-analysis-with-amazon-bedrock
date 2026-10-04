@@ -566,8 +566,6 @@ def _record_provider_outcome(provider_id: str, result: dict[str, Any]) -> None:
             table, provider_id, result.get('error', 'unknown provider error')
         )
         result['error_category'] = outcome['category']
-        if outcome['auto_disabled']:
-            result['provider_auto_disabled'] = True
         return
 
     record_provider_success(table, provider_id)
@@ -742,6 +740,8 @@ def _slim_result(result: dict[str, Any]) -> dict[str, Any]:
     }
     if "error" in result:
         slim_result["error"] = result["error"]
+    if "error_category" in result:
+        slim_result["error_category"] = result["error_category"]
     return slim_result
 
 

@@ -88,3 +88,18 @@ class TestOneProviderInvocation:
         response = search_handler.handler(dict(_EVENT), None)
 
         assert (response, providers.brave_search.call_count) == ({'results': []}, 0)
+
+
+class TestFailedProviderResult:
+    def test_keeps_the_error_category_deduplication_counts(self, search_handler, providers):
+        providers.brave_search.return_value = {
+            **_BRAVE_RESULT, 'status': 'error', 'error': 'HTTP 402: no credit', 'citations': [],
+        }
+
+        with patch.object(
+            search_handler, '_record_provider_outcome',
+            side_effect=lambda _provider_id, result: result.update(error_category='no_credit'),
+        ):
+            response = search_handler.handler(dict(_EVENT), None)
+
+        assert response['results'][0]['error_category'] == 'no_credit'
