@@ -1,6 +1,6 @@
 import type { useBrandVisibilityReport } from './useBrandVisibilityReport';
 import {
-  buildTrendView, buildVisibility, movingKeyword
+  buildTrendView, buildVisibility, movingKeyword, SETTLED_VISIBILITY_AND_TRENDS
 } from '../layout/reportPayload-fixtures';
 import { buildHistory } from './groupKpiHistory-fixtures';
 
@@ -9,12 +9,7 @@ type ReportData = ReturnType<typeof useBrandVisibilityReport>;
 /** Every slice of the report settled and empty, unless overridden. */
 function settledReport(overrides: Partial<ReportData>): ReportData {
   return {
-    visibility: null,
-    visibilityLoading: false,
-    visibilityError: null,
-    trends: null,
-    trendsLoading: false,
-    trendsError: null,
+    ...SETTLED_VISIBILITY_AND_TRENDS,
     groupHistory: null,
     groupHistoryLoading: false,
     groupHistoryError: null,

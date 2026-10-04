@@ -19,10 +19,7 @@ interface ExpandAllBrandsResponse {
   existing_brands?: string[];
   parent_companies?: string[];
   suggestions?: string[];
-  duplicates_found?: Array<{
-    brand: string;
-    duplicate_of: string;
-  }>;
+  duplicates_found?: BrandExpansionAllResult['duplicates_found'];
   notes?: string;
   error?: string;
 }

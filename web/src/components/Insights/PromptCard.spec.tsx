@@ -5,23 +5,7 @@ import {
   describe, it, expect 
 } from 'vitest';
 import { PromptCard } from './PromptCard';
-import type { PromptInsight } from '../../types';
-
-const basePrompt: PromptInsight = {
-  keyword: 'best hotels',
-  timestamp: '2026-01-24T00:00:00Z',
-  status: 'winning',
-  first_party: {
-    mentions: 10,
-    best_rank: 1,
-    provider_coverage: 75,
-  },
-  competitors: {
-    mentions: 5,
-    best_rank: 3,
-    provider_coverage: 50,
-  },
-};
+import { winningPrompt as basePrompt } from '../../hooks/usePromptInsights-fixtures';
 
 describe('PromptCard', () => {
   it('displays keyword', () => {

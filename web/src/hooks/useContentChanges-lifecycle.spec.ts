@@ -29,6 +29,7 @@ import {
   resolveDeferredValue,
 } from './useAlerts-fixtures';
 import { deferNextTwoCalls } from '../test/fetchResponses';
+import { waitForLoaded } from '../test/loadedHook';
 import { useContentChanges } from './useAlerts';
 
 vi.mock('../api/alerts', () => import('./alertsApiMock-fixtures'));
@@ -85,7 +86,7 @@ describe('useContentChanges lifecycle', () => {
     const {
       result, rerender
     } = renderContentChangesForGroup();
-    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitForLoaded(result);
     await beginContentChangeRecord(result.current);
     const southLoad = deferNextCall<ContentChangesResponse>(mockFetchContentChanges);
 

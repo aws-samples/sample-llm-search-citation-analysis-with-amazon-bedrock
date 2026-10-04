@@ -1,18 +1,8 @@
 import {
   describe, expect, it
 } from 'vitest';
-import {
-  headlineSlice, type VisibilityAndTrends
-} from './reportSlices';
-
-const SETTLED: VisibilityAndTrends = {
-  visibility: null,
-  visibilityLoading: false,
-  visibilityError: null,
-  trends: null,
-  trendsLoading: false,
-  trendsError: null,
-};
+import { headlineSlice } from './reportSlices';
+import { SETTLED_VISIBILITY_AND_TRENDS as SETTLED } from './reportPayload-fixtures';
 
 describe('headlineSlice', () => {
   it.each([
