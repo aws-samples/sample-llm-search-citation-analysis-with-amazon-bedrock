@@ -13,6 +13,7 @@ import { idleEndpointState } from '../test/idleEndpointState';
 import { createDeferredValue } from '../test/fetchResponses';
 import { TestError } from '../test/testError';
 import { saveRecommendationStatus } from '../api/recommendations';
+import type { RecommendationStatus } from '../types';
 import {
   INVALID_REQUEST_ON_TYPE_GUARD_FAILURE, UNABLE_TO_LOAD_ON_NON_OK_STATUS
 } from './useAnalysisEndpoint-failure-fixtures';
@@ -28,6 +29,16 @@ const IDLE_STATUS_STATE = {
   updatingIds: [],
   statusError: null,
 };
+
+/** Fetches the fixture list, then saves `status` for its recommendation at `index` with the API storing it. */
+async function renderAfterSavingStatus(index: number, status: RecommendationStatus) {
+  mockSaveStatus.mockResolvedValue(status);
+  const rendered = await renderFetchedRecommendations();
+  await act(async () => {
+    await rendered.result.current.updateStatus(trackedRecommendation(index), status);
+  });
+  return rendered;
+}
 
 describe('useRecommendations', () => {
   it('starts with no data, not loading, no error and no status update in flight', () => {
@@ -65,23 +76,13 @@ describe('useRecommendations', () => {
 
   describe('updateStatus', () => {
     it('shows the status the API saved on that recommendation only', async () => {
-      mockSaveStatus.mockResolvedValue('done');
-      const { result } = await renderFetchedRecommendations();
-
-      await act(async () => {
-        await result.current.updateStatus(trackedRecommendation(0), 'done');
-      });
+      const { result } = await renderAfterSavingStatus(0, 'done');
 
       expect(statusesOf(result.current.data)).toStrictEqual(['done', 'in_progress']);
     });
 
     it('sends the recommendation it was given and the chosen status', async () => {
-      mockSaveStatus.mockResolvedValue('wontfix');
-      const { result } = await renderFetchedRecommendations();
-
-      await act(async () => {
-        await result.current.updateStatus(trackedRecommendation(1), 'wontfix');
-      });
+      await renderAfterSavingStatus(1, 'wontfix');
 
       expect(mockSaveStatus).toHaveBeenCalledWith(trackedRecommendation(1), 'wontfix');
     });

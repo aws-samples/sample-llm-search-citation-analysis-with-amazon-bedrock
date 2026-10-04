@@ -35,6 +35,13 @@ function renderWithTrackedRecommendation(overrides: Parameters<typeof buildRecom
   return hookResult;
 }
 
+/** Renders `TRACKED_RECOMMENDATION` and picks `status` in its status menu; returns the hook result it used. */
+async function renderAndChooseStatus(status: string) {
+  const hookResult = renderWithTrackedRecommendation();
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Status of Improve visibility' }), status);
+  return hookResult;
+}
+
 describe('Recommendations', () => {
   beforeEach(() => {
     mockUseRecommendations.mockReturnValue(buildRecommendationsHookResult());
@@ -126,17 +133,13 @@ describe('Recommendations', () => {
     });
 
     it('saves the chosen status for that recommendation', async () => {
-      const { updateStatus } = renderWithTrackedRecommendation();
-
-      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Status of Improve visibility' }), 'done');
+      const { updateStatus } = await renderAndChooseStatus('done');
 
       expect(updateStatus).toHaveBeenCalledWith(TRACKED_RECOMMENDATION, 'done');
     });
 
     it('does not expand the card when the status is changed', async () => {
-      renderWithTrackedRecommendation();
-
-      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Status of Improve visibility' }), 'done');
+      await renderAndChooseStatus('done');
 
       expect(screen.queryByText('Create content')).not.toBeInTheDocument();
     });
