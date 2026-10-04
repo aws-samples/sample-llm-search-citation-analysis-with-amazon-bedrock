@@ -176,6 +176,9 @@ export interface CitationGapsResponse {
   total_high_priority?: number;
 }
 
+/** Where a recommendation stands in the Action Center; stored by `POST /api/recommendations/{id}/status`. */
+export type RecommendationStatus = 'new' | 'in_progress' | 'done' | 'wontfix';
+
 export interface Recommendation {
   type: string;
   priority: GapPriority;
@@ -184,6 +187,13 @@ export interface Recommendation {
   action: string;
   impact: string;
   keywords?: string[];
+  /** Stable id (hash of type, title and keywords); rule-based recommendations only, AI-enhanced ones have none. */
+  id?: string;
+  /** `new` unless someone changed it. */
+  status?: RecommendationStatus;
+  notes?: string;
+  related_keyword?: string;
+  related_content_id?: string;
 }
 
 export interface RecommendationsResponse {

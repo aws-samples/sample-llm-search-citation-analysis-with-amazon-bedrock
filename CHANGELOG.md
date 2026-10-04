@@ -11,8 +11,20 @@ process.
 
 ## [2.30.0] - 2026-10-03
 
+### Added
+
+- **Recommendation status in the Action Center.** Each rule-based recommendation has a status menu (New, In
+  progress, Done, Won't fix) that saves through `POST /api/recommendations/{id}/status`, so the status survives a
+  reload, a re-run and another user opening the page. The menu is disabled while it saves, done and won't-fix items
+  are dimmed, and a failed save says so and keeps the previous status. Notes and links already stored with a
+  recommendation are sent back with each change, so the endpoint's full-row write does not erase them.
+  AI-enhanced recommendations have no stable id and show no menu.
+
 ### Fixed
 
+- **Provider failures are counted by category.** The search Lambda dropped `error_category` from the result it
+  hands to Step Functions, so the run summary filed every provider failure under `unknown`; it now shows `insufficient_credit`,
+  `invalid_key`, `rate_limited` and `timeout`.
 - **Persona Rankings** show the KPI visibility score (`kpi_engine`, position-weighted). They used a second,
   differently weighted formula, so the same brand scored differently there (for example 85.6 instead of 100.0).
 - **First-party domains are matched one way everywhere.** Citation Gaps now treats `example.com:443`, `example.com.`
@@ -67,8 +79,8 @@ process.
   change that lowers write cost); no reader ever queried it.
 - **Code no entry point reaches** (found by a call graph walked from every handler, route map, Step Functions task
   and `main.tsx`, by member read/write analysis, and by coverage runs): the never-rendered `ContentGenerator`
-  component; dashboard hook actions no screen calls (brand-config reset, expand and refetch, recommendation status
-  updates, provider key validation, execution monitoring start, generating-item refresh) and the response fields,
+  component; dashboard hook actions no screen calls (brand-config reset, expand and refetch, provider key
+  validation, execution monitoring start, generating-item refresh) and the response fields,
   error metadata and execution-progress values nothing displays; unused modal sizes, the never-emitted `critical`
   alert severity and the all-competitors report variant the dashboard never requests; 16 unused barrel re-exports.
   In the Lambdas: the search Lambda's `provider_types` filter and unread output keys, ParseKeywords' never-used

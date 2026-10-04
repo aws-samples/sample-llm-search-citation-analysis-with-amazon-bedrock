@@ -1,8 +1,10 @@
 import {
-  useEffect, useState 
+  useEffect, useState, type ReactNode
 } from 'react';
 import { useRecommendations } from '../../hooks/useRecommendations';
-import { Recommendation } from '../../types';
+import type {
+  Recommendation, RecommendationStatus
+} from '../../types';
 import { Spinner } from '../ui/Spinner';
 import {
   EyeIcon, CogIcon, RefreshIcon 
@@ -12,6 +14,18 @@ import {
   BOLT_PATHS, CHART_BAR_PATHS, CHEVRON_DOWN_PATHS, INFO_CIRCLE_PATHS, LIGHTBULB_PATHS, LINK_PATHS, SORT_ASCENDING_PATHS, SPARKLES_PATHS 
 } from '../ui/iconPaths';
 import { PageHeaderCard } from '../ui/PageHeaderCard';
+import { RecommendationStatusSelect } from './RecommendationStatusSelect';
+
+type TrackedRecommendation = Recommendation & { id: string };
+
+function isTracked(rec: Recommendation): rec is TrackedRecommendation {
+  return typeof rec.id === 'string' && rec.id !== '';
+}
+
+/** Done and won't-fix items stay listed but step back visually. */
+function isSettled(rec: Recommendation): boolean {
+  return rec.status === 'done' || rec.status === 'wontfix';
+}
 
 const getPriorityColor = (priority: string): string => {
   const colors: Record<string, string> = {
@@ -76,13 +90,14 @@ interface RecommendationCardProps {
   rec: Recommendation;
   isExpanded: boolean;
   onClick: () => void;
+  statusControl?: ReactNode;
 }
 
 const RecommendationCard = ({
-  rec, isExpanded, onClick 
+  rec, isExpanded, onClick, statusControl
 }: RecommendationCardProps) => (
   <div 
-    className={`bg-white rounded-lg shadow border-l-4 ${getTypeBorderColor(rec.type)} cursor-pointer transition-all hover:shadow-md ${isExpanded ? 'ring-2 ring-gray-300' : ''}`}
+    className={`bg-white rounded-lg shadow border-l-4 ${getTypeBorderColor(rec.type)} cursor-pointer transition-all hover:shadow-md ${isExpanded ? 'ring-2 ring-gray-300' : ''} ${isSettled(rec) ? 'opacity-60' : ''}`}
     onClick={onClick}
   >
     <div className="p-5">
@@ -92,6 +107,7 @@ const RecommendationCard = ({
           <div className="flex justify-between items-start mb-2">
             <h4 className="font-semibold text-gray-900">{rec.title}</h4>
             <div className="flex items-center gap-2">
+              {statusControl}
               <span className={`w-2.5 h-2.5 rounded-full ${getPriorityColor(rec.priority)}`} />
               <StrokeIcon className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} paths={CHEVRON_DOWN_PATHS} />
             </div>
@@ -266,10 +282,12 @@ interface RecommendationsListProps {
   recommendations: Recommendation[];
   expandedCard: number | null;
   onCardClick: (index: number) => void;
+  updatingIds: readonly string[];
+  onStatusChange: (recommendation: TrackedRecommendation, status: RecommendationStatus) => void;
 }
 
 const RecommendationsList = ({
-  recommendations, expandedCard, onCardClick 
+  recommendations, expandedCard, onCardClick, updatingIds, onStatusChange
 }: RecommendationsListProps) => (
   <div className="space-y-4">
     {recommendations.map((rec, i) => (
@@ -278,6 +296,13 @@ const RecommendationsList = ({
         rec={rec}
         isExpanded={expandedCard === i}
         onClick={() => onCardClick(i)}
+        statusControl={isTracked(rec) && (
+          <RecommendationStatusSelect
+            recommendation={rec}
+            updating={updatingIds.includes(rec.id)}
+            onChange={onStatusChange}
+          />
+        )}
       />
     ))}
   </div>
@@ -290,6 +315,8 @@ interface RecommendationsContentProps {
   expandedCard: number | null;
   onCardClick: (index: number) => void;
   useLlm: boolean;
+  updatingIds: readonly string[];
+  onStatusChange: (recommendation: TrackedRecommendation, status: RecommendationStatus) => void;
 }
 
 const RecommendationsContent = ({
@@ -299,6 +326,8 @@ const RecommendationsContent = ({
   expandedCard,
   onCardClick,
   useLlm,
+  updatingIds,
+  onStatusChange,
 }: RecommendationsContentProps) => {
   const llmEnhanced = data.llm_enhanced ?? [];
   const hasLlmEnhanced = llmEnhanced.length > 0;
@@ -316,6 +345,8 @@ const RecommendationsContent = ({
           recommendations={recommendations}
           expandedCard={expandedCard}
           onCardClick={onCardClick}
+          updatingIds={updatingIds}
+          onStatusChange={onStatusChange}
         />
       )}
 
@@ -337,7 +368,7 @@ export function Recommendations() {
   const [useLlm, setUseLlm] = useState(false);
   const [expandedCard, setExpandedCard] = useState<number | null>(null);
   const {
-    data, loading, error, fetchRecommendations 
+    data, loading, error, fetchRecommendations, updateStatus, updatingIds, statusError
   } = useRecommendations();
 
   useEffect(() => {
@@ -356,6 +387,11 @@ export function Recommendations() {
 
       {loading && <LoadingState useLlm={useLlm} />}
       {error && <ErrorState error={error} />}
+      {statusError && (
+        <div role="alert" className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm">
+          Status not saved: {statusError}
+        </div>
+      )}
 
       {data && (
         <RecommendationsContent
@@ -365,6 +401,8 @@ export function Recommendations() {
           expandedCard={expandedCard}
           onCardClick={handleCardClick}
           useLlm={useLlm}
+          updatingIds={updatingIds}
+          onStatusChange={(recommendation, status) => { void updateStatus(recommendation, status); }}
         />
       )}
     </div>

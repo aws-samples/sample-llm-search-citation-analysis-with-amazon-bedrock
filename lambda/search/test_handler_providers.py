@@ -98,8 +98,8 @@ class TestFailedProviderResult:
 
         with patch.object(
             search_handler, '_record_provider_outcome',
-            side_effect=lambda _provider_id, result: result.update(error_category='no_credit'),
+            side_effect=lambda _provider_id, result: result.update(error_category='insufficient_credit'),
         ):
             response = search_handler.handler(dict(_EVENT), None)
 
-        assert response['results'][0]['error_category'] == 'no_credit'
+        assert response['results'][0]['error_category'] == 'insufficient_credit'

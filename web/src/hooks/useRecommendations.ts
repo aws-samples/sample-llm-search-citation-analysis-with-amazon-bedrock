@@ -4,7 +4,10 @@ import {
 import {
   API_BASE_URL, authenticatedFetch, getErrorMessage,
 } from '../infrastructure';
-import type { RecommendationsResponse } from '../types';
+import { saveRecommendationStatus } from '../api/recommendations';
+import type {
+  Recommendation, RecommendationStatus, RecommendationsResponse
+} from '../types';
 
 class RecommendationsFetchError extends Error {
   constructor(message = 'Failed to fetch recommendations') {
@@ -22,10 +25,26 @@ function isRecommendationsResponse(data: unknown): data is RecommendationsRespon
   );
 }
 
+function withStatus(
+  response: RecommendationsResponse,
+  id: string,
+  status: RecommendationStatus
+): RecommendationsResponse {
+  return {
+    ...response,
+    recommendations: response.recommendations.map((rec) => (rec.id === id ? {
+      ...rec,
+      status 
+    } : rec)),
+  };
+}
+
 export function useRecommendations() {
   const [data, setData] = useState<RecommendationsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [updatingIds, setUpdatingIds] = useState<readonly string[]>([]);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   const fetchRecommendations = useCallback(async (useLlm = false) => {
     setLoading(true);
@@ -54,10 +73,34 @@ export function useRecommendations() {
     }
   }, []);
 
+  /** Saves `status` for `recommendation`; the list shows it once the API has stored it. */
+  const updateStatus = useCallback(async (
+    recommendation: Recommendation & { id: string },
+    status: RecommendationStatus
+  ): Promise<boolean> => {
+    const { id } = recommendation;
+    setStatusError(null);
+    setUpdatingIds((current) => [...current, id]);
+    try {
+      const saved = await saveRecommendationStatus(recommendation, status);
+      setData((current) => (current === null ? current : withStatus(current, id, saved)));
+      return true;
+    } catch (err) {
+      setStatusError(getErrorMessage(err));
+      console.error('[recommendations] Error updating status:', err);
+      return false;
+    } finally {
+      setUpdatingIds((current) => current.filter((updatingId) => updatingId !== id));
+    }
+  }, []);
+
   return {
     data,
     loading,
     error,
     fetchRecommendations,
+    updateStatus,
+    updatingIds,
+    statusError,
   };
 }

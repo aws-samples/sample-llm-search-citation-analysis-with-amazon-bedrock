@@ -46,6 +46,8 @@ export interface EndpointHookContract<THook extends EndpointHookState<TResponse>
   readonly fetch: (hook: THook, ...args: TArgs) => Promise<TResponse | null>;
   /** Functions the hook returns besides `fetchName`, for the exact-state assertions. */
   readonly otherFunctions?: readonly string[];
+  /** Other state the hook returns, as it stays while only the fetch runs. */
+  readonly otherState?: Readonly<Record<string, unknown>>;
   readonly defaultResponse: NoInfer<TResponse>;
   /** Arguments of the single fetch in the loading, failure and error-clearing tests. */
   readonly defaultArgs: NoInfer<TArgs>;
@@ -88,10 +90,12 @@ export function describeEndpointHookContract<THook extends EndpointHookState<TRe
   successes,
   failures,
   loggedHttpError,
+  otherState = {},
 }: EndpointHookContract<THook, TArgs, TResponse>): void {
   const anyFunction: unknown = expect.any(Function);
   const hookState = (state: EndpointHookState<TResponse>): Record<string, unknown> => ({
     ...state,
+    ...otherState,
     ...Object.fromEntries([fetchName, ...otherFunctions].map((name) => [name, anyFunction])),
   });
 
