@@ -1,11 +1,9 @@
-import type {
-  AggregatedBrand, ProviderBrandData 
-} from '../../types';
+import type { AggregatedBrand } from '../../types';
+import {
+  classificationLabel, sentimentTextColor
+} from './brandPresentation';
 
-interface BrandOverviewTabProps {
-  brand: AggregatedBrand;
-  providerData: ProviderBrandData[];
-}
+interface BrandOverviewTabProps {brand: AggregatedBrand;}
 
 export const BrandOverviewTab = ({ brand }: BrandOverviewTabProps) => {
   const getClassificationColor = (classification: string) => {
@@ -16,17 +14,6 @@ export const BrandOverviewTab = ({ brand }: BrandOverviewTabProps) => {
         return 'bg-red-50 text-red-600 border-red-200';
       default:
         return 'bg-gray-50 text-gray-600 border-gray-200';
-    }
-  };
-
-  const getClassificationLabel = (classification: string) => {
-    switch (classification) {
-      case 'first_party':
-        return 'First Party';
-      case 'competitor':
-        return 'Competitor';
-      default:
-        return 'Other';
     }
   };
 
@@ -52,7 +39,7 @@ export const BrandOverviewTab = ({ brand }: BrandOverviewTabProps) => {
         </div>
         <div className={`rounded-lg p-3 sm:p-4 border col-span-2 sm:col-span-1 ${getClassificationColor(brand.classification)}`}>
           <div className="text-xs sm:text-sm font-medium">Classification</div>
-          <div className="text-lg sm:text-xl font-bold mt-1">{getClassificationLabel(brand.classification)}</div>
+          <div className="text-lg sm:text-xl font-bold mt-1">{classificationLabel(brand.classification)}</div>
         </div>
       </div>
 
@@ -61,11 +48,6 @@ export const BrandOverviewTab = ({ brand }: BrandOverviewTabProps) => {
         <h3 className="text-base sm:text-lg font-bold text-gray-900 mb-4">Provider Breakdown</h3>
         <div className="space-y-3">
           {brand.appearances.map((appearance) => {
-            const getSentimentColor = (sentiment: string | undefined) => {
-              if (sentiment === 'positive') return 'text-green-600';
-              if (sentiment === 'negative') return 'text-red-600';
-              return 'text-gray-600';
-            };
             return (
               <div key={`${appearance.provider}-${appearance.rank}-${appearance.mention_count}`} className="flex items-center justify-between p-3 bg-gray-50 rounded">
                 <div className="flex items-center gap-3">
@@ -78,7 +60,7 @@ export const BrandOverviewTab = ({ brand }: BrandOverviewTabProps) => {
                     </div>
                     {appearance.sentiment && (
                       <div className="text-xs text-gray-600 mt-1">
-                        Sentiment: <span className={`font-medium ${getSentimentColor(appearance.sentiment)}`}>{appearance.sentiment}</span>
+                        Sentiment: <span className={`font-medium ${sentimentTextColor(appearance.sentiment)}`}>{appearance.sentiment}</span>
                         {appearance.sentiment_reason ? ` - ${appearance.sentiment_reason}` : ''}
                       </div>
                     )}
@@ -113,12 +95,7 @@ export const BrandOverviewTab = ({ brand }: BrandOverviewTabProps) => {
                 ? Math.round((count / brand.appearances.length) * 100) 
                 : 0;
               
-              const getSentimentSummaryColor = (s: string) => {
-                if (s === 'positive') return 'text-green-600';
-                if (s === 'negative') return 'text-red-600';
-                if (s === 'mixed') return 'text-yellow-600';
-                return 'text-gray-600';
-              };
+              const getSentimentSummaryColor = (s: string) => (s === 'mixed' ? 'text-yellow-600' : sentimentTextColor(s));
               
               return (
                 <div key={sentiment} className="text-center p-3 bg-gray-50 rounded">

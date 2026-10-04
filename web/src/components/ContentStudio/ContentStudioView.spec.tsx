@@ -1,5 +1,5 @@
 import {
-  beforeEach, describe, expect, it, vi
+  describe, expect, it, vi
 } from 'vitest';
 import {
   render, screen, waitFor
@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event';
 import type {
   ContentBriefBatchRequest, ContentIdea, GroupBriefIdea, Keyword
 } from '../../types';
+import { buildTabContentKeyword } from '../Layout/TabContent-fixtures';
 import { ContentStudioView } from './ContentStudioView';
 import {
   buildActionableIdea,
@@ -16,6 +17,8 @@ import {
   buildContentStudioHookResult,
   buildGroupBriefIdea,
   buildMissingActiveBatch,
+  buildPendingGenerateContentResponse,
+  confirmIdeaGeneration,
   startMockContentBriefBatch,
 } from './ContentStudioView-fixtures';
 
@@ -69,6 +72,55 @@ import { useContentStudio } from '../../hooks/useContentStudio';
 
 const mockUseContentStudio = vi.mocked(useContentStudio);
 
+function renderContentStudioView(
+  overrides: Partial<ReturnType<typeof useContentStudio>> = {},
+  keywords: Keyword[] = []
+) {
+  mockUseContentStudio.mockReturnValue(buildContentStudioHookResult(overrides));
+  return render(<ContentStudioView keywords={keywords} />);
+}
+
+/** Renders one ordinary idea (built with `overrides`) and opens its confirmation; returns the idea and the generateContent spy. */
+async function renderIdeaConfirmation(overrides: Partial<ContentIdea> = {}) {
+  const idea = buildActionableIdea(overrides);
+  const generateContent = vi.fn().mockResolvedValue(
+    buildPendingGenerateContentResponse('product comparisons')
+  );
+  renderContentStudioView({
+    ideas: [idea],
+    generateContent,
+  });
+  await userEvent.click(screen.getByText('Create content for product comparisons'));
+  return {
+    idea,
+    generateContent,
+  };
+}
+
+async function renderGeneratedContentTab(
+  overrides: Partial<ReturnType<typeof useContentStudio>> = {}
+): Promise<void> {
+  renderContentStudioView(overrides);
+  await userEvent.click(screen.getByText('Generated Content'));
+}
+
+const batchProgressCases = [
+  {
+    testName: 'shows exact progress for a running batch',
+    batch: buildActiveBatch(),
+    settledText: 'Content Brief batch: 1 of 3 jobs settled',
+    countsText: '0 generated, 1 generating, 1 pending, 1 failed, 0 missing',
+    outcomeText: /1 brief has failed/iu,
+  },
+  {
+    testName: 'shows a safe unavailable outcome for a missing tombstone',
+    batch: buildMissingActiveBatch(),
+    settledText: 'Content Brief batch: 2 of 2 jobs settled',
+    countsText: '1 generated, 0 generating, 0 pending, 0 failed, 1 missing',
+    outcomeText: /1 brief is unavailable/iu,
+  },
+];
+
 const batchNavigationCases = [
   {
     testName: 'switches to history when a batch request is accepted',
@@ -95,13 +147,8 @@ const batchNavigationCases = [
 ];
 
 describe('ContentStudioView', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockUseContentStudio.mockReturnValue(buildContentStudioHookResult());
-  });
-
   it('renders Content Ideas, Content Brief, and Generated Content tabs', () => {
-    render(<ContentStudioView keywords={[]} />);
+    renderContentStudioView();
 
     expect(screen.getByText('Content Ideas')).toBeInTheDocument();
     expect(screen.getByText('Content Brief')).toBeInTheDocument();
@@ -109,38 +156,25 @@ describe('ContentStudioView', () => {
   });
 
   it('shows the loading outcome when ideas are loading', () => {
-    mockUseContentStudio.mockReturnValue(buildContentStudioHookResult({ loading: true }));
-
-    render(<ContentStudioView keywords={[]} />);
+    renderContentStudioView({ loading: true });
 
     expect(screen.getByText(/Analyzing your data/u)).toBeInTheDocument();
   });
 
   it('renders actionable idea cards when ideas are available', () => {
-    mockUseContentStudio.mockReturnValue(
-      buildContentStudioHookResult({ ideas: [buildActionableIdea()] })
-    );
-
-    render(<ContentStudioView keywords={[]} />);
+    renderContentStudioView({ ideas: [buildActionableIdea()] });
 
     expect(screen.getByText('Create content for product comparisons')).toBeInTheDocument();
   });
 
   it('shows the empty outcome when no actionable ideas exist', () => {
-    render(<ContentStudioView keywords={[]} />);
+    renderContentStudioView();
 
     expect(screen.getByText(/No content ideas available/u)).toBeInTheDocument();
   });
 
   it('passes dashboard keywords through the Content Brief tab', async () => {
-    const keywords: Keyword[] = [{
-      id: 'keyword-1',
-      keyword: 'Alpha keyword',
-      created_at: '2026-01-01T00:00:00Z',
-      status: 'active',
-      group_ids: ['group-1'],
-    }];
-    render(<ContentStudioView keywords={keywords} />);
+    renderContentStudioView({}, [buildTabContentKeyword()]);
 
     await userEvent.click(screen.getByText('Content Brief'));
 
@@ -148,14 +182,10 @@ describe('ContentStudioView', () => {
   });
 
   it('switches to history after a combined brief is accepted', async () => {
-    const generateContent = vi.fn().mockResolvedValue({
-      success: true,
-      id: 'content-1',
-      status: 'pending',
-      keyword: 'Alpha keyword',
-    });
-    mockUseContentStudio.mockReturnValue(buildContentStudioHookResult({ generateContent }));
-    render(<ContentStudioView keywords={[]} />);
+    const generateContent = vi.fn().mockResolvedValue(
+      buildPendingGenerateContentResponse('Alpha keyword')
+    );
+    renderContentStudioView({ generateContent });
     await userEvent.click(screen.getByText('Content Brief'));
 
     await userEvent.click(screen.getByText('Start mock combined brief'));
@@ -168,10 +198,7 @@ describe('ContentStudioView', () => {
 
   it.each(batchNavigationCases)('$testName', async (batchCase) => {
     const generateContentBatch = vi.fn().mockResolvedValue(batchCase.response);
-    mockUseContentStudio.mockReturnValue(
-      buildContentStudioHookResult({ generateContentBatch })
-    );
-    render(<ContentStudioView keywords={[]} />);
+    renderContentStudioView({ generateContentBatch });
 
     await startMockContentBriefBatch();
 
@@ -183,45 +210,23 @@ describe('ContentStudioView', () => {
     });
   });
 
-  it('shows exact progress for a running batch', async () => {
-    mockUseContentStudio.mockReturnValue(
-      buildContentStudioHookResult({ activeBatches: [buildActiveBatch()] })
-    );
-    render(<ContentStudioView keywords={[]} />);
+  it.each(batchProgressCases)('$testName', async ({
+    batch, settledText, countsText, outcomeText
+  }) => {
+    await renderGeneratedContentTab({ activeBatches: [batch] });
 
-    await userEvent.click(screen.getByText('Generated Content'));
-
-    expect(screen.getByText('Content Brief batch: 1 of 3 jobs settled')).toBeInTheDocument();
-    expect(screen.getByText(
-      '0 generated, 1 generating, 1 pending, 1 failed, 0 missing'
-    )).toBeInTheDocument();
-    expect(screen.getByText(/1 brief has failed/iu)).toBeInTheDocument();
-  });
-
-  it('shows a safe unavailable outcome for a missing tombstone', async () => {
-    const activeBatches = [buildMissingActiveBatch()];
-    mockUseContentStudio.mockReturnValue(buildContentStudioHookResult({ activeBatches }));
-    render(<ContentStudioView keywords={[]} />);
-
-    await userEvent.click(screen.getByText('Generated Content'));
-
-    expect(screen.getByText('Content Brief batch: 2 of 2 jobs settled')).toBeInTheDocument();
-    expect(screen.getByText(
-      '1 generated, 0 generating, 0 pending, 0 failed, 1 missing'
-    )).toBeInTheDocument();
-    expect(screen.getByText(/1 brief is unavailable/iu)).toBeInTheDocument();
+    expect(screen.getByText(settledText)).toBeInTheDocument();
+    expect(screen.getByText(countsText)).toBeInTheDocument();
+    expect(screen.getByText(outcomeText)).toBeInTheDocument();
   });
 
   it('renders progress cards for several background batches', async () => {
-    mockUseContentStudio.mockReturnValue(buildContentStudioHookResult({
+    await renderGeneratedContentTab({
       activeBatches: [
         buildActiveBatch({ batch_id: 'batch-newer' }),
         buildMissingActiveBatch('batch-older'),
       ],
-    }));
-    render(<ContentStudioView keywords={[]} />);
-
-    await userEvent.click(screen.getByText('Generated Content'));
+    });
 
     expect(screen.getByText('Batch batch-newer')).toBeInTheDocument();
     expect(screen.getByText('Batch batch-older')).toBeInTheDocument();
@@ -231,13 +236,11 @@ describe('ContentStudioView', () => {
   it('refreshes the current history view without losing its transition behavior', async () => {
     const fetchHistory = vi.fn();
     const fetchIdeas = vi.fn();
-    mockUseContentStudio.mockReturnValue(buildContentStudioHookResult({
+    await renderGeneratedContentTab({
       fetchHistory,
       fetchIdeas,
-    }));
-    render(<ContentStudioView keywords={[]} />);
+    });
 
-    await userEvent.click(screen.getByText('Generated Content'));
     await userEvent.click(screen.getByRole('button', { name: 'Refresh' }));
 
     expect(fetchHistory).toHaveBeenCalledTimes(2);
@@ -245,36 +248,51 @@ describe('ContentStudioView', () => {
   });
 
   it('keeps ordinary ideas behind their existing confirmation flow', async () => {
-    const idea = buildActionableIdea();
-    const generateContent = vi.fn().mockResolvedValue({
-      success: true,
-      id: 'content-1',
-      status: 'pending',
-      keyword: idea.keyword,
-    });
-    mockUseContentStudio.mockReturnValue(buildContentStudioHookResult({
-      ideas: [idea],
-      generateContent,
-    }));
-    render(<ContentStudioView keywords={[]} />);
-
-    await userEvent.click(screen.getByText('Create content for product comparisons'));
+    const { generateContent } = await renderIdeaConfirmation();
 
     expect(screen.getByText('Create Content')).toBeInTheDocument();
     expect(generateContent).not.toHaveBeenCalledWith(expect.anything());
-    await userEvent.click(screen.getByRole('button', { name: 'Generate Content' }));
+  });
+
+  it.each([
+    ['English', 'by default', undefined],
+    ['Spanish', 'when Spanish is picked', 'Spanish'],
+  ])('generates the confirmed idea in %s %s', async (outputLanguage, _condition, picked) => {
+    const {
+      idea, generateContent
+    } = await renderIdeaConfirmation();
+
+    await confirmIdeaGeneration(picked);
+
     await waitFor(() => {
       expect(generateContent).toHaveBeenCalledWith({
         ...idea,
-        output_language: 'English',
+        output_language: outputLanguage,
       });
     });
   });
 
-  it('shows the unviewed count when generated content exists', () => {
-    mockUseContentStudio.mockReturnValue(buildContentStudioHookResult({ unviewedCount: 5 }));
+  it.each([
+    ['says how many competitor sources will be analyzed', ['https://a.example/', 'https://b.example/'], ['2 competitor sources will be analyzed']],
+    ['mentions no competitor sources when the idea has none', [], []],
+  ])('%s', async (_condition, competitorUrls, mentions) => {
+    await renderIdeaConfirmation({ competitor_urls: competitorUrls });
 
+    expect(screen.queryAllByText(/competitor sources will be analyzed/u).map((line) => line.textContent)).toStrictEqual(mentions);
+  });
+
+  it('loads neither ideas nor history when the Content Brief tab opens', async () => {
+    const hookResult = buildContentStudioHookResult();
+    mockUseContentStudio.mockReturnValue(hookResult);
     render(<ContentStudioView keywords={[]} />);
+
+    await userEvent.click(screen.getByText('Content Brief'));
+
+    expect(hookResult.fetchHistory).not.toHaveBeenCalledWith();
+  });
+
+  it('shows the unviewed count when generated content exists', () => {
+    renderContentStudioView({ unviewedCount: 5 });
 
     expect(screen.getByText('5 new')).toBeInTheDocument();
   });

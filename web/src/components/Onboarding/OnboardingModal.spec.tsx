@@ -11,6 +11,7 @@ import {
 import {
   buildProps, buildStatus, localStorageMock
 } from './OnboardingModal-fixtures';
+import { installStorageMock } from '../../test/installStorageMock';
 
 vi.mock('../../hooks/useOnboardingStatus', () => ({useOnboardingStatus: vi.fn(),}));
 
@@ -36,12 +37,18 @@ const REQUIRED_SIGNALS_CONFIGURED = {
   brandConfigured: true,
 };
 
+function renderOnboarding(overrides: Parameters<typeof buildProps>[0] = {}) {
+  return render(<OnboardingModal {...buildProps(overrides)} />);
+}
+
+/** Stores a dismissal or completion flag from an earlier visit, then mounts the modal. */
+function renderOnboardingWithStoredFlag(storageKey: string) {
+  localStorageMock.store[storageKey] = 'true';
+  return renderOnboarding();
+}
+
 beforeEach(() => {
-  Object.keys(localStorageMock.store).forEach((key) => delete localStorageMock.store[key]);
-  Object.defineProperty(window, 'localStorage', {
-    value: localStorageMock,
-    writable: true,
-  });
+  installStorageMock(localStorageMock);
   // Every onboarding step targets an Admin-only route, so the checklist only
   // renders for admins. Non-admin suppression is asserted separately below.
   mockUseIsAdmin.mockReturnValue({
@@ -54,7 +61,7 @@ beforeEach(() => {
 describe('OnboardingModal', () => {
   describe('visibility', () => {
     it('opens the modal when setup is incomplete', () => {
-      render(<OnboardingModal {...buildProps()} />);
+      renderOnboarding();
 
       expect(screen.getByRole('dialog')).toBeInTheDocument();
       expect(screen.getByText('Get started with Citation Analysis')).toBeInTheDocument();
@@ -66,31 +73,25 @@ describe('OnboardingModal', () => {
         loading: true,
       });
 
-      const { container } = render(<OnboardingModal {...buildProps()} />);
+      const { container } = renderOnboarding();
 
       expect(container).toBeEmptyDOMElement();
     });
 
     it('renders nothing when previously skipped', () => {
-      localStorageMock.store[ONBOARDING_DISMISSED_STORAGE_KEY] = 'true';
-
-      const { container } = render(<OnboardingModal {...buildProps()} />);
+      const { container } = renderOnboardingWithStoredFlag(ONBOARDING_DISMISSED_STORAGE_KEY);
 
       expect(container).toBeEmptyDOMElement();
     });
 
     it('disables status fetching when previously skipped', () => {
-      localStorageMock.store[ONBOARDING_DISMISSED_STORAGE_KEY] = 'true';
-
-      render(<OnboardingModal {...buildProps()} />);
+      renderOnboardingWithStoredFlag(ONBOARDING_DISMISSED_STORAGE_KEY);
 
       expect(mockUseOnboardingStatus).toHaveBeenCalledWith(false);
     });
 
     it('disables status fetching when setup was previously completed', () => {
-      localStorageMock.store[ONBOARDING_COMPLETE_STORAGE_KEY] = 'true';
-
-      const { container } = render(<OnboardingModal {...buildProps()} />);
+      const { container } = renderOnboardingWithStoredFlag(ONBOARDING_COMPLETE_STORAGE_KEY);
 
       expect(mockUseOnboardingStatus).toHaveBeenCalledWith(false);
       expect(container).toBeEmptyDOMElement();
@@ -99,7 +100,7 @@ describe('OnboardingModal', () => {
     it('stays open when only optional steps are incomplete and a required step is pending', () => {
       mockStatus(REQUIRED_SIGNALS_CONFIGURED);
 
-      render(<OnboardingModal {...buildProps({ keywordsCount: 3 })} />);
+      renderOnboarding({ keywordsCount: 3 });
 
       expect(screen.getByRole('dialog')).toBeInTheDocument();
     });
@@ -114,7 +115,7 @@ describe('OnboardingModal', () => {
     it('persists the completion flag when all required steps are complete', () => {
       mockStatus(REQUIRED_SIGNALS_CONFIGURED);
 
-      render(<OnboardingModal {...buildProps(allRequiredDone)} />);
+      renderOnboarding(allRequiredDone);
 
       expect(localStorageMock.setItem).toHaveBeenCalledWith(ONBOARDING_COMPLETE_STORAGE_KEY, 'true');
     });
@@ -122,7 +123,7 @@ describe('OnboardingModal', () => {
     it('renders nothing when all required steps are complete', () => {
       mockStatus(REQUIRED_SIGNALS_CONFIGURED);
 
-      const { container } = render(<OnboardingModal {...buildProps(allRequiredDone)} />);
+      const { container } = renderOnboarding(allRequiredDone);
 
       expect(container).toBeEmptyDOMElement();
     });
@@ -130,7 +131,7 @@ describe('OnboardingModal', () => {
 
   describe('step content', () => {
     it('lists the four required steps by title', () => {
-      render(<OnboardingModal {...buildProps()} />);
+      renderOnboarding();
 
       expect(screen.getByText('Add AI provider API keys')).toBeInTheDocument();
       expect(screen.getByText('Add keywords to track')).toBeInTheDocument();
@@ -139,7 +140,7 @@ describe('OnboardingModal', () => {
     });
 
     it('lists the optional schedule and persona steps', () => {
-      render(<OnboardingModal {...buildProps()} />);
+      renderOnboarding();
 
       expect(screen.getByText('Automate runs with a schedule')).toBeInTheDocument();
       expect(screen.getByText('Define user personas')).toBeInTheDocument();
@@ -149,7 +150,7 @@ describe('OnboardingModal', () => {
     it('counts configured signals in the progress badge', () => {
       mockStatus({ providersConfigured: true });
 
-      render(<OnboardingModal {...buildProps({ keywordsCount: 2 })} />);
+      renderOnboarding({ keywordsCount: 2 });
 
       expect(screen.getByText('2 of 4 required steps done')).toBeInTheDocument();
     });
@@ -157,7 +158,7 @@ describe('OnboardingModal', () => {
     it('hides the action button for completed steps', () => {
       mockStatus({ providersConfigured: true });
 
-      render(<OnboardingModal {...buildProps()} />);
+      renderOnboarding();
 
       expect(screen.queryByRole('button', { name: 'Configure providers' })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Add keywords' })).toBeInTheDocument();
@@ -213,7 +214,7 @@ describe('OnboardingModal', () => {
 
   describe('Escape', () => {
     function renderAndPressEscape() {
-      render(<OnboardingModal {...buildProps()} />);
+      renderOnboarding();
       fireEvent.keyDown(document, { key: 'Escape' });
     }
 
@@ -248,16 +249,19 @@ describe('OnboardingModal for non-admin users', () => {
     });
   });
 
-  it('does not render the checklist for a non-admin user', () => {
-    render(<OnboardingModal {...buildProps()} />);
+  it.each([
+    {
+      content: 'the checklist',
+      text: /Get started with Citation Analysis/i,
+    },
+    {
+      content: 'any setup step',
+      text: /Add AI provider API keys/i,
+    },
+  ])('does not render $content for a non-admin user', ({ text }) => {
+    renderOnboarding();
 
-    expect(screen.queryByText(/Get started with Citation Analysis/i)).not.toBeInTheDocument();
-  });
-
-  it('does not render any setup step for a non-admin user', () => {
-    render(<OnboardingModal {...buildProps()} />);
-
-    expect(screen.queryByText(/Add AI provider API keys/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(text)).not.toBeInTheDocument();
   });
 
   it('does not render the checklist while admin membership is still loading', () => {
@@ -266,14 +270,14 @@ describe('OnboardingModal for non-admin users', () => {
       loading: true,
     });
 
-    render(<OnboardingModal {...buildProps()} />);
+    renderOnboarding();
 
     expect(screen.queryByText(/Get started with Citation Analysis/i)).not.toBeInTheDocument();
   });
 
   it('does not query setup status for a non-admin user', () => {
     /** Four API calls the caller could never act on. */
-    render(<OnboardingModal {...buildProps()} />);
+    renderOnboarding();
 
     expect(mockUseOnboardingStatus).toHaveBeenCalledWith(false);
   });

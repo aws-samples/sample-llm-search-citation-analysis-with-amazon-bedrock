@@ -1,13 +1,9 @@
-import {
-  useState, type ReactNode
-} from 'react';
+import type { ReactNode } from 'react';
 import type {
   HistoricalTrendsResponse, VisibilityResponse
 } from '../../types';
 import { formatDate } from '../../formatting/dateFormatter';
-import {
-  KpiHeadline, NO_PREVIOUS_RUN, runComparison
-} from '../Reports/layout';
+import { RunKpiHeadline } from '../Reports/layout';
 import { BrandLeaderboard } from './BrandLeaderboard';
 import { KeywordVisibilityTable } from './KeywordVisibilityTable';
 import { OverviewPanel } from './OverviewPanel';
@@ -19,6 +15,7 @@ import {
   VisibilityHistory, type HistoryRangeDays
 } from './VisibilityHistory';
 import { exportVisibilityOverview } from './visibilityOverviewExport';
+import { useExportAction } from '../ui/useExportAction';
 
 interface Props {
   readonly visibility: VisibilityResponse;
@@ -42,18 +39,9 @@ function scopeSummary(visibility: VisibilityResponse): string {
 function ExportButton({
   visibility, trends, scopeLabel
 }: Pick<Props, 'visibility' | 'trends' | 'scopeLabel'>) {
-  const [exporting, setExporting] = useState(false);
-
-  const handleExport = async () => {
-    setExporting(true);
-    try {
-      await exportVisibilityOverview(visibility, trends, scopeLabel);
-    } catch (error) {
-      console.error('[visibility] Excel export failed:', error);
-    } finally {
-      setExporting(false);
-    }
-  };
+  const {
+    exporting, handleExport
+  } = useExportAction(() => exportVisibilityOverview(visibility, trends, scopeLabel), '[visibility] Excel export failed:');
 
   return (
     <button
@@ -88,12 +76,7 @@ export function VisibilityOverview({
       </div>
 
       <OverviewPanel title="Headline">
-        <KpiHeadline
-          kpis={visibility.kpis}
-          comparison={runComparison(visibility.change)}
-          noComparisonNote={NO_PREVIOUS_RUN}
-          citationsConfigured={visibility.citations_configured}
-        />
+        <RunKpiHeadline visibility={visibility} />
       </OverviewPanel>
 
       <VisibilityHistory trends={trends} error={trendsError} rangeDays={rangeDays} onRangeChange={onRangeChange} />

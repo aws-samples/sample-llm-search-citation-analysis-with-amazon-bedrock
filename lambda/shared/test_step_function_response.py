@@ -47,16 +47,20 @@ def _module_messages(caplog: pytest.LogCaptureFixture) -> list[str]:
     return [record.getMessage() for record in _module_records(caplog)]
 
 
+def _module_levels_and_messages(caplog: pytest.LogCaptureFixture) -> list[tuple[str, str]]:
+    return [(record.levelname, record.getMessage()) for record in _module_records(caplog)]
+
+
 def _fail_inside_handler(message: str) -> None:
     raise ValueError(message)
 
 
-def _log_error_while_handling(message: str, *, include_traceback: bool = True) -> None:
+def _log_error_while_handling(message: str) -> None:
     """Call ``log_error`` from inside the ``except`` block, the way the Step Functions handlers do."""
     try:
         _fail_inside_handler(message)
     except ValueError as error:
-        log_error(error, 'search handler', include_traceback=include_traceback)
+        log_error(error, 'search handler')
 
 
 class TestSanitizeErrorForStepFunction:
@@ -97,21 +101,28 @@ class TestSanitizeErrorForStepFunction:
         assert 'sk-secret-value' not in sanitize_error_for_step_function(error)
 
 
+#: What ``log_error`` logs for ``ValueError('x')`` with no event, outside any ``except`` block.
+_ERROR_AND_EMPTY_TRACEBACK_LINES = [
+    'Error in search handler: ValueError - Invalid input data: ValueError',
+    'Traceback:\nNoneType: None\n',
+]
+
+
 def _messages_logged_for_event(caplog: pytest.LogCaptureFixture, event: dict[str, Any] | None) -> list[str]:
-    """The messages ``log_error`` emits (traceback line off) for a ``ValueError`` with ``event`` attached."""
+    """The messages ``log_error`` emits, outside any ``except`` block, for a ``ValueError`` with ``event`` attached."""
     with caplog.at_level(logging.ERROR, logger=LOGGER_NAME):
-        log_error(ValueError('x'), 'search handler', event, include_traceback=False)
+        log_error(ValueError('x'), 'search handler', event)
     return _module_messages(caplog)
 
 
 class TestLogError:
     def test_logs_the_context_type_and_sanitized_message_at_error_level(self, caplog) -> None:
         with caplog.at_level(logging.ERROR, logger=LOGGER_NAME):
-            log_error(ValueError('Missing keyword'), 'search handler', include_traceback=False)
+            log_error(ValueError('Missing keyword'), 'search handler')
 
-        assert [(record.levelname, record.getMessage()) for record in _module_records(caplog)] == [
-            ('ERROR', 'Error in search handler: ValueError - Invalid input data: ValueError'),
-        ]
+        assert _module_levels_and_messages(caplog)[0] == (
+            'ERROR', 'Error in search handler: ValueError - Invalid input data: ValueError',
+        )
 
     def test_logs_the_event_with_credential_keys_removed(self, caplog) -> None:
         event = {
@@ -138,10 +149,10 @@ class TestLogError:
         assert _messages_logged_for_event(caplog, event)[1] == 'Event context: {"started": "{1, 2}"}'
 
     def test_omits_the_event_line_when_no_event_is_given(self, caplog) -> None:
-        assert len(_messages_logged_for_event(caplog, None)) == 1
+        assert _messages_logged_for_event(caplog, None) == _ERROR_AND_EMPTY_TRACEBACK_LINES
 
     def test_omits_the_event_line_when_only_credential_keys_remain(self, caplog) -> None:
-        assert len(_messages_logged_for_event(caplog, {'api_key': 'sk-live'})) == 1
+        assert _messages_logged_for_event(caplog, {'api_key': 'sk-live'}) == _ERROR_AND_EMPTY_TRACEBACK_LINES
         assert 'sk-live' not in caplog.text
 
     def test_appends_the_active_traceback_by_default(self, caplog) -> None:
@@ -151,12 +162,6 @@ class TestLogError:
         traceback_line = _module_messages(caplog)[-1]
         assert traceback_line.startswith('Traceback:\nTraceback (most recent call last):')
         assert traceback_line.rstrip().endswith("ValueError: inside handler")
-
-    def test_skips_the_traceback_line_when_disabled(self, caplog) -> None:
-        with caplog.at_level(logging.ERROR, logger=LOGGER_NAME):
-            _log_error_while_handling('inside handler', include_traceback=False)
-
-        assert not any(message.startswith('Traceback:') for message in _module_messages(caplog))
 
 
 class TestStepFunctionSuccess:
@@ -176,7 +181,7 @@ class TestStepFunctionSuccess:
         with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
             step_function_success({}, context='deduplication for hotels')
 
-        assert [(record.levelname, record.getMessage()) for record in _module_records(caplog)] == [
+        assert _module_levels_and_messages(caplog) == [
             ('INFO', 'Success: deduplication for hotels'),
         ]
 

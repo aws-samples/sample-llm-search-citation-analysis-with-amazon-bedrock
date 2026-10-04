@@ -31,6 +31,11 @@ const twoOrdinaryPages = [
   },
 ];
 
+const januaryPageBeforePageTwo = {
+  url: KEYWORDS_PAGE_URL,
+  payload: buildKeywordsPage([januaryKeyword], 'page-2'),
+};
+
 describe('fetchAllKeywords', () => {
   it('returns the keywords of every page newest first when the API returns two pages', async () => {
     stubKeywordPages(twoOrdinaryPages);
@@ -116,10 +121,7 @@ describe('fetchAllKeywords', () => {
 
   it('rejects with KeywordPageError after two requests when the API repeats a token', async () => {
     stubKeywordPages([
-      {
-        url: KEYWORDS_PAGE_URL,
-        payload: buildKeywordsPage([januaryKeyword], 'page-2'),
-      },
+      januaryPageBeforePageTwo,
       {
         url: SECOND_PAGE_URL,
         payload: buildKeywordsPage([februaryKeyword], 'page-2'),
@@ -145,10 +147,7 @@ describe('fetchAllKeywords', () => {
 
   it('rejects with ApiRequestError when a later page fails', async () => {
     stubKeywordPages([
-      {
-        url: KEYWORDS_PAGE_URL,
-        payload: buildKeywordsPage([januaryKeyword], 'page-2'),
-      },
+      januaryPageBeforePageTwo,
       {
         url: SECOND_PAGE_URL,
         payload: {},

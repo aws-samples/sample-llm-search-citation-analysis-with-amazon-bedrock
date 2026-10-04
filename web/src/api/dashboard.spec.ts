@@ -11,7 +11,7 @@ const mockApiGet = apiGet as ReturnType<typeof vi.fn>;
 
 describe('dashboard API', () => {
   describe('fetchCrawlHistory', () => {
-    it('requests the crawled-content history for the encoded URL with the default limit', async () => {
+    it('requests the 20 latest crawls of the encoded URL', async () => {
       mockApiGet.mockResolvedValue({
         items: [],
         count: 0 
@@ -20,23 +20,7 @@ describe('dashboard API', () => {
       await fetchCrawlHistory('https://example.com/a b');
 
       expect(mockApiGet).toHaveBeenCalledWith(
-        '/crawled-content?url=https%3A%2F%2Fexample.com%2Fa+b&include_history=true&limit=20',
-        { signal: undefined }
-      );
-    });
-
-    it('passes a custom limit and abort signal through', async () => {
-      const controller = new AbortController();
-      mockApiGet.mockResolvedValue({
-        items: [],
-        count: 0 
-      });
-
-      await fetchCrawlHistory('https://example.com', 5, controller.signal);
-
-      expect(mockApiGet).toHaveBeenCalledWith(
-        '/crawled-content?url=https%3A%2F%2Fexample.com&include_history=true&limit=5',
-        { signal: controller.signal }
+        '/crawled-content?url=https%3A%2F%2Fexample.com%2Fa+b&include_history=true&limit=20'
       );
     });
 

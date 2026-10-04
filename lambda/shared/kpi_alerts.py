@@ -11,11 +11,13 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Iterable, Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 from shared.constants import UNRANKED_SENTINEL
 from shared.kpi_engine import COMPETITOR, Answer, brand_kpis, brand_table
+from shared.string_lists import normalize_string_list
+from shared.utils import parse_timestamp
 from shared.visibility_score import finite_number
 
 RETENTION_DAYS = 365
@@ -58,31 +60,30 @@ def _valid_rank(value: Any) -> float | None:
 
 def normalize_notification_emails(value: Any) -> tuple[list[str] | None, str | None]:
     """Validate, lowercase, and case-insensitively deduplicate SNS emails."""
-    if not isinstance(value, list):
-        return None, 'notification_emails must be an array of email addresses'
-    if len(value) > MAX_NOTIFICATION_EMAILS:
-        return None, f'notification_emails accepts at most {MAX_NOTIFICATION_EMAILS} entries'
+    return normalize_string_list(
+        value,
+        limit=MAX_NOTIFICATION_EMAILS,
+        normalize=_notification_email,
+        type_error='notification_emails must be an array of email addresses',
+        limit_error=f'notification_emails accepts at most {MAX_NOTIFICATION_EMAILS} entries',
+        entry_error='notification_emails contains an invalid email address',
+    )
 
-    normalized: list[str] = []
-    seen: set[str] = set()
-    for entry in value:
-        if not isinstance(entry, str):
-            return None, 'notification_emails must be an array of email addresses'
-        email = entry.strip().lower()
-        local = email.partition('@')[0]
-        if (
-            len(email) > 254
-            or len(local) > 64
-            or local.startswith('.')
-            or local.endswith('.')
-            or '..' in local
-            or _EMAIL_PATTERN.fullmatch(email) is None
-        ):
-            return None, 'notification_emails contains an invalid email address'
-        if email not in seen:
-            seen.add(email)
-            normalized.append(email)
-    return normalized, None
+
+def _notification_email(entry: str) -> str | None:
+    """``entry`` trimmed and lowercased, or ``None`` when it is not a deliverable address."""
+    email = entry.strip().lower()
+    local = email.partition('@')[0]
+    if (
+        len(email) > 254
+        or len(local) > 64
+        or local.startswith('.')
+        or local.endswith('.')
+        or '..' in local
+        or _EMAIL_PATTERN.fullmatch(email) is None
+    ):
+        return None
+    return email
 
 
 def _bounded_number(
@@ -161,9 +162,9 @@ def resolve_settings(item: Any) -> dict[str, Any]:
 
 def ttl_for_timestamp(timestamp: str, days: int = RETENTION_DAYS) -> int:
     """Return a deterministic epoch TTL relative to a canonical run timestamp."""
-    parsed = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
+    parsed = parse_timestamp(timestamp)
+    if parsed is None:
+        raise ValueError(f'Invalid isoformat string: {timestamp!r}')
     return int((parsed + timedelta(days=days)).timestamp())
 
 

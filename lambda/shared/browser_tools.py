@@ -17,15 +17,10 @@ import logging
 import os
 import time
 
+# Both SDKs are pinned in the crawler layer (crawler-layer/requirements.txt),
+# the only layer whose Lambda imports this module.
+from bedrock_agentcore.tools.browser_client import BrowserClient
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
-
-# Import from BedrockAgentCore SDK. The ``None`` fallback makes the "SDK
-# missing" guard visible to the type checker at each use site.
-try:
-    from bedrock_agentcore.tools.browser_client import BrowserClient
-except ImportError:
-    BrowserClient = None
-    logging.warning("BedrockAgentCore SDK not available - browser features will be limited")
 
 from shared.url_validator import validate_url_safe
 from shared.utils import get_timestamp, get_timestamp_compact
@@ -62,9 +57,6 @@ class SimpleBrowserTools:
         it is slower, omits the configured Web Bot Auth identity, and can leak a
         control-plane resource because session cleanup does not delete browsers.
         """
-        if BrowserClient is None:
-            raise RuntimeError("BedrockAgentCore SDK not available")
-
         pre_created_browser_id = os.environ.get("BROWSER_ID")
         if not pre_created_browser_id:
             raise BrowserConfigurationError(
@@ -77,8 +69,6 @@ class SimpleBrowserTools:
 
     def initialize_browser_session(self) -> Page:
         """Initialize an AgentCore session and attach synchronous Playwright."""
-        if BrowserClient is None:
-            raise RuntimeError("BedrockAgentCore SDK not available")
         if not self.browser_id:
             raise BrowserConfigurationError("create_browser must select BROWSER_ID before starting a session")
 

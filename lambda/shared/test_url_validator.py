@@ -7,6 +7,7 @@ Covers:
 - Unit tests for edge cases
 """
 
+import socket
 from unittest.mock import patch
 
 import pytest
@@ -14,6 +15,27 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from shared.url_validator import validate_url_safe
+
+_RESOLVING_HOST = 'https://some-host.example.com'
+_PUBLIC_IP = '93.184.216.34'
+_OCTET = st.integers(min_value=0, max_value=255)
+_HOST_OCTET = st.integers(min_value=1, max_value=254)
+
+
+def _validate_resolving_to(ip, url=_RESOLVING_HOST):
+    """Validate ``url`` with DNS stubbed to resolve its hostname to ``ip``."""
+    addr_info = [(2, 1, 6, '', (ip, 0))]
+    with patch('shared.url_validator.socket.getaddrinfo', return_value=addr_info):
+        return validate_url_safe(url)
+
+
+def _assert_rejected_without_leaking(ip):
+    """Assert a hostname resolving to ``ip`` is rejected without echoing ``ip``; return the error."""
+    is_safe, error = _validate_resolving_to(ip)
+    assert not is_safe, f'Expected rejection for IP {ip}'
+    assert ip not in error, f'Error message should not leak resolved IP {ip}'
+    return error
+
 
 # =============================================================================
 # Property-Based Tests
@@ -42,12 +64,9 @@ class TestURLSchemeProperty:
     @settings(max_examples=20)
     def test_http_schemes_not_rejected_for_scheme(self, scheme):
         """http/https schemes should not be rejected for scheme reasons."""
-        url = f'{scheme}://example.com'
-        # Mock DNS to return a safe public IP so we only test scheme logic
-        safe_addr_info = [(2, 1, 6, '', ('93.184.216.34', 0))]
-        with patch('shared.url_validator.socket.getaddrinfo', return_value=safe_addr_info):
-            is_safe, error = validate_url_safe(url)
-            assert is_safe, f'Expected acceptance for scheme {scheme}, got error: {error}'
+        # DNS resolves to a safe public IP so only the scheme logic is tested
+        is_safe, error = _validate_resolving_to(_PUBLIC_IP, f'{scheme}://example.com')
+        assert is_safe, f'Expected acceptance for scheme {scheme}, got error: {error}'
 
 
 class TestPrivateIPProperty:
@@ -61,50 +80,24 @@ class TestPrivateIPProperty:
     **Validates: Requirements 3.3, 3.4**
     """
 
-    @given(
-        octet2=st.integers(min_value=0, max_value=255),
-        octet3=st.integers(min_value=0, max_value=255),
-        octet4=st.integers(min_value=1, max_value=254),
-    )
+    @given(octet2=_OCTET, octet3=_OCTET, octet4=_HOST_OCTET)
     @settings(max_examples=100)
     def test_10_x_range_rejected(self, octet2, octet3, octet4):
         """10.x.x.x addresses should always be rejected."""
-        ip = f'10.{octet2}.{octet3}.{octet4}'
-        addr_info = [(2, 1, 6, '', (ip, 0))]
-        with patch('shared.url_validator.socket.getaddrinfo', return_value=addr_info):
-            is_safe, error = validate_url_safe('https://some-host.example.com')
-            assert not is_safe, f'Expected rejection for IP {ip}'
-            assert ip not in error, f'Error message should not contain resolved IP {ip}'
-            assert error, 'Error message should not be empty'
+        error = _assert_rejected_without_leaking(f'10.{octet2}.{octet3}.{octet4}')
+        assert error, 'Error message should not be empty'
 
-    @given(
-        octet3=st.integers(min_value=0, max_value=255),
-        octet4=st.integers(min_value=1, max_value=254),
-    )
+    @given(octet3=_OCTET, octet4=_HOST_OCTET)
     @settings(max_examples=50)
     def test_192_168_range_rejected(self, octet3, octet4):
         """192.168.x.x addresses should always be rejected."""
-        ip = f'192.168.{octet3}.{octet4}'
-        addr_info = [(2, 1, 6, '', (ip, 0))]
-        with patch('shared.url_validator.socket.getaddrinfo', return_value=addr_info):
-            is_safe, error = validate_url_safe('https://some-host.example.com')
-            assert not is_safe, f'Expected rejection for IP {ip}'
-            assert ip not in error, f'Error message should not leak IP {ip}'
+        _assert_rejected_without_leaking(f'192.168.{octet3}.{octet4}')
 
-    @given(
-        octet2=st.integers(min_value=16, max_value=31),
-        octet3=st.integers(min_value=0, max_value=255),
-        octet4=st.integers(min_value=1, max_value=254),
-    )
+    @given(octet2=st.integers(min_value=16, max_value=31), octet3=_OCTET, octet4=_HOST_OCTET)
     @settings(max_examples=50)
     def test_172_16_range_rejected(self, octet2, octet3, octet4):
         """172.16-31.x.x addresses should always be rejected."""
-        ip = f'172.{octet2}.{octet3}.{octet4}'
-        addr_info = [(2, 1, 6, '', (ip, 0))]
-        with patch('shared.url_validator.socket.getaddrinfo', return_value=addr_info):
-            is_safe, error = validate_url_safe('https://some-host.example.com')
-            assert not is_safe, f'Expected rejection for IP {ip}'
-            assert ip not in error, f'Error message should not leak IP {ip}'
+        _assert_rejected_without_leaking(f'172.{octet2}.{octet3}.{octet4}')
 
 
 # =============================================================================
@@ -119,59 +112,47 @@ class TestURLValidatorUnit:
         assert not is_safe
         assert 'restricted' in error.lower()
 
-    def test_127_0_0_1_blocked(self):
-        is_safe, _ = validate_url_safe('http://127.0.0.1/latest/meta-data/')
-        assert not is_safe
-
-    def test_ipv6_loopback_blocked(self):
-        is_safe, _ = validate_url_safe('http://[::1]:8080/')
-        assert not is_safe
-
-    def test_metadata_endpoint_blocked(self):
-        is_safe, _ = validate_url_safe('http://169.254.169.254/latest/meta-data/')
-        assert not is_safe
-
-    def test_zero_address_blocked(self):
-        is_safe, _ = validate_url_safe('http://0.0.0.0/')
+    @pytest.mark.parametrize(
+        'url',
+        [
+            pytest.param('http://127.0.0.1/latest/meta-data/', id='ipv4_loopback'),
+            pytest.param('http://[::1]:8080/', id='ipv6_loopback'),
+            pytest.param('http://169.254.169.254/latest/meta-data/', id='metadata_endpoint'),
+            pytest.param('http://0.0.0.0/', id='zero_address'),
+            pytest.param('', id='empty_string'),
+            pytest.param('javascript:alert(1)', id='javascript_scheme'),
+        ],
+    )
+    def test_rejects_url_without_dns_lookup(self, url):
+        is_safe, _ = validate_url_safe(url)
         assert not is_safe
 
     def test_accepts_public_url_with_empty_error(self):
-        safe_addr_info = [(2, 1, 6, '', ('93.184.216.34', 0))]
-        with patch('shared.url_validator.socket.getaddrinfo', return_value=safe_addr_info):
-            is_safe, error = validate_url_safe('https://example.com/page')
-            assert is_safe is True
-            assert error == ''
+        is_safe, error = _validate_resolving_to(_PUBLIC_IP, 'https://example.com/page')
+        assert is_safe is True
+        assert error == ''
 
-    def test_empty_string_rejected(self):
-        is_safe, _ = validate_url_safe('')
-        assert not is_safe
-
-    def test_missing_scheme_rejected(self):
-        is_safe, error = validate_url_safe('example.com')
+    @pytest.mark.parametrize(
+        'url',
+        [
+            pytest.param('example.com', id='missing_scheme'),
+            pytest.param('ftp://files.example.com/data.csv', id='ftp_scheme'),
+        ],
+    )
+    def test_rejects_url_with_scheme_error(self, url):
+        is_safe, error = validate_url_safe(url)
         assert not is_safe
         assert 'scheme' in error.lower()
 
     def test_dns_failure_rejected(self):
-        import socket as sock_mod
-        with patch('shared.url_validator.socket.getaddrinfo', side_effect=sock_mod.gaierror('Name resolution failed')):
+        with patch('shared.url_validator.socket.getaddrinfo', side_effect=socket.gaierror('Name resolution failed')):
             is_safe, error = validate_url_safe('https://nonexistent.invalid')
-            assert not is_safe
-            assert 'resolve' in error.lower()
-
-    def test_ftp_scheme_rejected(self):
-        is_safe, error = validate_url_safe('ftp://files.example.com/data.csv')
         assert not is_safe
-        assert 'scheme' in error.lower()
-
-    def test_javascript_scheme_rejected(self):
-        is_safe, _ = validate_url_safe('javascript:alert(1)')
-        assert not is_safe
+        assert 'resolve' in error.lower()
 
     def test_link_local_169_254_range_blocked(self):
-        addr_info = [(2, 1, 6, '', ('169.254.1.1', 0))]
-        with patch('shared.url_validator.socket.getaddrinfo', return_value=addr_info):
-            is_safe, _ = validate_url_safe('https://sneaky.example.com')
-            assert not is_safe
+        is_safe, _ = _validate_resolving_to('169.254.1.1', 'https://sneaky.example.com')
+        assert not is_safe
 
 
 
@@ -202,12 +183,10 @@ class TestRangesThatPreviouslyBypassedValidation:
         ],
     )
     def test_rejects_address_and_does_not_leak_it(self, ip, why):
-        addr_info = [(2, 1, 6, '', (ip, 0))]
-        with patch('shared.url_validator.socket.getaddrinfo', return_value=addr_info):
-            is_safe, error = validate_url_safe('https://some-host.example.com')
+        is_safe, error = _validate_resolving_to(ip)
 
-            assert not is_safe, f'Expected rejection: {why}'
-            assert ip not in error, 'Error message must not leak the resolved IP'
+        assert not is_safe, f'Expected rejection: {why}'
+        assert ip not in error, 'Error message must not leak the resolved IP'
 
 
 class TestFailsClosedOnUnparseableAddresses:
@@ -221,11 +200,9 @@ class TestFailsClosedOnUnparseableAddresses:
         ['not-an-ip', '', '999.999.999.999', 'fe80::1%eth0'],
     )
     def test_rejects_when_resolution_yields_an_unparseable_address(self, ip):
-        addr_info = [(2, 1, 6, '', (ip, 0))]
-        with patch('shared.url_validator.socket.getaddrinfo', return_value=addr_info):
-            is_safe, _ = validate_url_safe('https://some-host.example.com')
+        is_safe, _ = _validate_resolving_to(ip)
 
-            assert not is_safe
+        assert not is_safe
 
 
 class TestIpLiteralHostnames:
@@ -234,18 +211,16 @@ class TestIpLiteralHostnames:
     blocklist cannot enumerate every encoding of a restricted address.
     """
 
-    def test_rejects_bracketed_ipv4_mapped_literal(self):
-        is_safe, _ = validate_url_safe('http://[::ffff:169.254.169.254]/latest/meta-data/')
-
-        assert not is_safe
-
-    def test_rejects_ipv6_unique_local_literal(self):
-        is_safe, _ = validate_url_safe('http://[fc00::1]/')
-
-        assert not is_safe
-
-    def test_rejects_cgnat_literal(self):
-        is_safe, _ = validate_url_safe('http://100.64.0.1/')
+    @pytest.mark.parametrize(
+        'url',
+        [
+            pytest.param('http://[::ffff:169.254.169.254]/latest/meta-data/', id='bracketed_ipv4_mapped'),
+            pytest.param('http://[fc00::1]/', id='ipv6_unique_local'),
+            pytest.param('http://100.64.0.1/', id='cgnat'),
+        ],
+    )
+    def test_rejects_restricted_ip_literal(self, url):
+        is_safe, _ = validate_url_safe(url)
 
         assert not is_safe
 
@@ -258,11 +233,9 @@ class TestLegitimateAddressesStillAllowed:
 
     @pytest.mark.parametrize(
         'ip',
-        ['93.184.216.34', '1.1.1.1', '2606:2800:220:1:248:1893:25c8:1946'],
+        [_PUBLIC_IP, '1.1.1.1', '2606:2800:220:1:248:1893:25c8:1946'],
     )
     def test_accepts_public_address(self, ip):
-        addr_info = [(2, 1, 6, '', (ip, 0))]
-        with patch('shared.url_validator.socket.getaddrinfo', return_value=addr_info):
-            is_safe, error = validate_url_safe('https://example.com/page')
+        is_safe, error = _validate_resolving_to(ip, 'https://example.com/page')
 
-            assert is_safe, f'Expected {ip} to be allowed, got: {error}'
+        assert is_safe, f'Expected {ip} to be allowed, got: {error}'

@@ -16,9 +16,7 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
-# Re-exported: DecimalEncoder's canonical home is shared.dynamo_decimal
-# (bugs.md 3.4); existing importers keep using shared.api_response.
-from shared.dynamo_decimal import DecimalEncoder as DecimalEncoder
+from shared.dynamo_decimal import DecimalEncoder
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -134,6 +132,22 @@ def get_cors_headers(request_origin: str | None = None) -> dict[str, str]:
     }
 
 
+def cors_json_headers(event: dict | None) -> dict[str, str]:
+    """JSON content type plus the CORS headers for the request's Origin (any casing of the header)."""
+    request_origin = None
+    if event:
+        request_headers = event.get('headers') or {}
+        request_origin = (
+            request_headers.get('origin') or
+            request_headers.get('Origin') or
+            request_headers.get('ORIGIN')
+        )
+    return {
+        'Content-Type': 'application/json',
+        **get_cors_headers(request_origin),
+    }
+
+
 def sanitize_error_message(error: Exception) -> str:
     """
     Sanitize error message for client response.
@@ -193,22 +207,7 @@ def api_response(
     Returns:
         API Gateway response dictionary
     """
-    # Get request origin from event
-    request_origin = None
-    if event:
-        request_headers = event.get('headers') or {}
-        # Headers can be case-insensitive
-        request_origin = (
-            request_headers.get('origin') or
-            request_headers.get('Origin') or
-            request_headers.get('ORIGIN')
-        )
-
-    # Build response headers
-    response_headers = {
-        'Content-Type': 'application/json',
-        **get_cors_headers(request_origin),
-    }
+    response_headers = cors_json_headers(event)
 
     if headers:
         response_headers.update(headers)

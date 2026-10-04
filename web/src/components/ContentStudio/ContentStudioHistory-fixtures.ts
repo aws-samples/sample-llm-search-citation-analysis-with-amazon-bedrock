@@ -19,6 +19,11 @@ export const incompleteMetadataWarning = {
 
 type HistoryOverrides = Omit<Partial<ContentStudioHistory>, 'generated_content'> & { generated_content?: Partial<GeneratedContent> };
 
+export const whitespaceGeneratedTitleOverrides = {
+  idea_title: '  Useful idea title  ',
+  generated_content: { title: '   ' },
+} satisfies HistoryOverrides;
+
 export function buildContentStudioHistory(
   overrides: HistoryOverrides = {}
 ): ContentStudioHistory {

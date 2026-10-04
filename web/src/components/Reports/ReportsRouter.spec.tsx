@@ -22,13 +22,17 @@ import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 vi.mocked(useScopeReportData).mockReturnValue(buildScopeReport());
 vi.mocked(useKeywordGroups).mockReturnValue(buildKeywordGroupsHookResult([]));
 
+function renderReportsAt(path: string) {
+  return render(
+    <MemoryRouter initialEntries={[path]}>
+      <ReportsRouter keywords={SCOPE_KEYWORDS} />
+    </MemoryRouter>,
+  );
+}
+
 describe('ReportsRouter', () => {
   it.each(SCOPE_REPORTS)('opens the %s report at %s', async (title, path) => {
-    render(
-      <MemoryRouter initialEntries={[path]}>
-        <ReportsRouter keywords={SCOPE_KEYWORDS} />
-      </MemoryRouter>,
-    );
+    renderReportsAt(path);
 
     expect(await screen.findByRole('heading', {
       level: 1,
@@ -37,11 +41,7 @@ describe('ReportsRouter', () => {
   });
 
   it('opens the custom report builder at /reports/custom/new', async () => {
-    render(
-      <MemoryRouter initialEntries={['/reports/custom/new']}>
-        <ReportsRouter keywords={SCOPE_KEYWORDS} />
-      </MemoryRouter>,
-    );
+    renderReportsAt('/reports/custom/new');
 
     expect(await screen.findByRole('heading', { name: 'Create a custom report' })).toBeInTheDocument();
   });

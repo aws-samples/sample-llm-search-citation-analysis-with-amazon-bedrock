@@ -1,14 +1,8 @@
-import type { HistoricalTrendsResponse } from '../../../../types';
 import {
   TrendHeadlineSection,
   gateSection,
+  type TrendSectionProps,
 } from '../../layout';
-
-interface Props {
-  readonly trends: HistoricalTrendsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
 
 /**
  * All-keywords headline: every KPI over each keyword's latest period, its
@@ -17,7 +11,7 @@ interface Props {
  */
 export function CrossKeywordHeadlineSection({
   trends, loading, error 
-}: Props) {
+}: TrendSectionProps) {
   const gate = gateSection({
     title: 'Headline',
     loading,

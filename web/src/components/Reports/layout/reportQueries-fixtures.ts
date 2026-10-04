@@ -1,6 +1,12 @@
 import {
   screen, within
 } from '@testing-library/react';
+import {
+  KPI_DEFINITIONS, VISIBILITY_DEFINITIONS, type KpiId
+} from '../../../constants/kpiDefinitions';
+
+/** What the definitions block of every visibility report lists: each KPI, then the trend rule. */
+export const VISIBILITY_DEFINITION_TERMS = VISIBILITY_DEFINITIONS.map((entry) => entry.label);
 
 /**
  * DOM queries over a rendered report: its sections, headline cards, tables
@@ -104,6 +110,11 @@ export function kpiRowTooltips(): (string | null)[][] {
     button.getAttribute('aria-label'),
     tooltipText(button),
   ]);
+}
+
+/** What `headerTooltips` reads for KPI columns headed by their label: each KPI's label and definition, in the order given. */
+export function kpiColumnTooltips(...ids: readonly KpiId[]): string[][] {
+  return ids.map((id) => [KPI_DEFINITIONS[id].label, KPI_DEFINITIONS[id].definition]);
 }
 
 class MissingRowError extends Error {

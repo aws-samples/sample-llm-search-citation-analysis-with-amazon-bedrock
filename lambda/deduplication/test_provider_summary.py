@@ -26,8 +26,6 @@ _HANDLER_DIR = os.path.dirname(os.path.abspath(__file__))
 
 _TEST_ENV = {
     'DYNAMODB_TABLE_CITATIONS': 'test-citations',
-    'CITATIONS_TABLE_NAME': 'test-citations',
-    'CITATIONS_TABLE': 'test-citations',
 }
 
 

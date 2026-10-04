@@ -6,17 +6,11 @@ import {
   buildShareOfVoiceChartConfiguration, DEFAULT_SHARE_OF_VOICE_LIMIT, describeShareOfVoice, shareOfVoiceSlices
 } from './shareOfVoiceChartConfiguration';
 
-interface Props {
-  readonly brands: readonly BrandLeaderboardRow[];
-  /** How many brands get their own slice; the rest share one "Other brands" slice. */
-  readonly limit?: number;
-}
+interface Props {readonly brands: readonly BrandLeaderboardRow[];}
 
 /** Each brand's share of all brand mentions: your brand emerald, competitors amber, others gray. */
-export function ShareOfVoiceChart({
-  brands, limit = DEFAULT_SHARE_OF_VOICE_LIMIT
-}: Props) {
-  const slices = useMemo(() => shareOfVoiceSlices(brands, limit), [brands, limit]);
+export function ShareOfVoiceChart({ brands }: Props) {
+  const slices = useMemo(() => shareOfVoiceSlices(brands, DEFAULT_SHARE_OF_VOICE_LIMIT), [brands]);
   const {
     canvasRef, hasData
   } = useThemedChart(slices, buildShareOfVoiceChartConfiguration);

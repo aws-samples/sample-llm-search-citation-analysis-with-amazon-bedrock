@@ -4,8 +4,7 @@ Provider selection in the search handler.
 The analysis workflow invokes one search Lambda per provider with
 ``{"keyword", "timestamp", "query_prompts", "providers": ["<id>"]}``. Such an
 invocation must touch only its own provider (one secret, one enablement read)
-and return the slim ``{"keyword", "timestamp", "results": [...]}`` shape the
-merge step reads.
+and return the slim ``{"results": [...]}`` shape the merge step reads.
 """
 
 from __future__ import annotations
@@ -16,15 +15,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from testing.handler_fixtures import handler_fixture
+from testing.search_handler_fixtures import SEARCH_HANDLER_ENV
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_ENV = {
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
-    'DYNAMODB_TABLE_PROVIDER_CONFIG': 'test-providers',
-}
 
 # Unique module name: see test_handler_prompts.py for why `import handler` is contested.
-search_handler = handler_fixture(_HERE, 'handler.py', 'search_handler_providers', env=_ENV)
+search_handler = handler_fixture(_HERE, 'handler.py', 'search_handler_providers', env=SEARCH_HANDLER_ENV)
 
 _BRAVE_RESULT = {
     'provider': 'brave', 'provider_type': 'search', 'response': '', 'status': 'success',
@@ -53,38 +49,35 @@ def providers(search_handler):
 
 
 class TestOneProviderInvocation:
-    def test_reads_only_the_selected_providers_secret(self, search_handler, providers):
+    @pytest.mark.parametrize(
+        ('lookup', 'expected_args'),
+        [
+            pytest.param('get_api_key', [('brave-key',)], id='secret'),
+            pytest.param('is_enabled', [('brave',)], id='enablement'),
+        ],
+    )
+    def test_reads_only_the_selected_providers_configuration(self, search_handler, providers, lookup, expected_args):
         search_handler.execute_all_providers('hotel coruña', providers=['brave'])
 
-        assert [call.args for call in providers.get_api_key.call_args_list] == [('brave-key',)]
+        assert [call.args for call in getattr(providers, lookup).call_args_list] == expected_args
 
-    def test_reads_only_the_selected_providers_enablement(self, search_handler, providers):
-        search_handler.execute_all_providers('hotel coruña', providers=['brave'])
-
-        assert [call.args for call in providers.is_enabled.call_args_list] == [('brave',)]
-
-    def test_reads_every_secret_when_no_provider_is_selected(self, search_handler, providers):
+    def test_reads_the_secret_of_each_selected_provider_in_runner_order(self, search_handler, providers):
         providers.is_enabled.return_value = False
 
-        search_handler.execute_all_providers('hotel coruña', provider_types=['search'])
+        search_handler.execute_all_providers('hotel coruña', providers=['firecrawl', 'openai', 'exa'])
 
         assert [call.args[0] for call in providers.get_api_key.call_args_list] == [
-            'brave-key', 'tavily-key', 'exa-key', 'serpapi-key', 'firecrawl-key',
+            'openai-key', 'exa-key', 'firecrawl-key',
         ]
 
     def test_returns_the_slim_result_shape_the_merge_step_reads(self, search_handler, providers):
         response = search_handler.handler(dict(_EVENT), None)
 
         assert response == {
-            'keyword': 'hotel coruña',
-            'timestamp': '2026-09-30T10:00:00Z',
-            'provider_types': None,
-            'providers': ['brave'],
             'results': [{
                 'provider': 'brave', 'provider_type': 'search', 'status': 'success',
                 'citation_count': 1, 'citations': ['https://hotel.es/riazor'], 'query_prompt_id': 'p1',
             }],
-            'stored': True,
         }
 
     @pytest.mark.parametrize(('api_key', 'enabled'), [('key', False), (None, True)], ids=['disabled', 'no-key'])
@@ -94,4 +87,19 @@ class TestOneProviderInvocation:
 
         response = search_handler.handler(dict(_EVENT), None)
 
-        assert (response['keyword'], response['results'], providers.brave_search.call_count) == ('hotel coruña', [], 0)
+        assert (response, providers.brave_search.call_count) == ({'results': []}, 0)
+
+
+class TestFailedProviderResult:
+    def test_keeps_the_error_category_deduplication_counts(self, search_handler, providers):
+        providers.brave_search.return_value = {
+            **_BRAVE_RESULT, 'status': 'error', 'error': 'HTTP 402: no credit', 'citations': [],
+        }
+
+        with patch.object(
+            search_handler, '_record_provider_outcome',
+            side_effect=lambda _provider_id, result: result.update(error_category='insufficient_credit'),
+        ):
+            response = search_handler.handler(dict(_EVENT), None)
+
+        assert response['results'][0]['error_category'] == 'insufficient_credit'

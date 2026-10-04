@@ -10,6 +10,7 @@ relied on so the consolidation cannot change either of them.
 
 from __future__ import annotations
 
+import functools
 from unittest.mock import MagicMock
 
 import pytest
@@ -76,6 +77,11 @@ def _table_response(items):
     return {'Items': items}
 
 
+def _keyword_rows(*keywords):
+    """A query/scan page holding one row per keyword."""
+    return _table_response([{'keyword': keyword} for keyword in keywords])
+
+
 @pytest.fixture
 def dynamodb():
     """A DynamoDB resource stub whose ``Table(name)`` returns one mock per name."""
@@ -86,56 +92,83 @@ def dynamodb():
     return resource
 
 
-class TestLoadRecentSearchResults:
-    def test_queries_each_explicit_keyword_for_its_most_recent_rows(self, dynamodb, monkeypatch):
-        monkeypatch.delenv('DYNAMODB_TABLE_KEYWORDS', raising=False)
-        search = dynamodb.Table('search')
-        search.query.side_effect = [_table_response([{'keyword': 'a'}]), _table_response([{'keyword': 'b'}])]
+@pytest.fixture
+def search(dynamodb):
+    """The SearchResults table stub every load reads from."""
+    return dynamodb.Table('search')
 
-        items = load_recent_search_results(dynamodb, 'search', max_keywords=20, keywords=['a', 'b'])
+
+@pytest.fixture
+def load_recent(dynamodb):
+    """``load_recent_search_results`` bound to the stub resource and the ``search`` table."""
+    return functools.partial(load_recent_search_results, dynamodb, 'search')
+
+
+@pytest.fixture
+def no_keywords_table(monkeypatch):
+    """No keywords table is configured, so keyword discovery is unavailable."""
+    monkeypatch.delenv('DYNAMODB_TABLE_KEYWORDS', raising=False)
+
+
+@pytest.fixture
+def keywords_table(dynamodb, monkeypatch):
+    """The configured keywords table stub that keyword discovery queries."""
+    monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'keywords')
+    return dynamodb.Table('keywords')
+
+
+@pytest.mark.usefixtures('no_keywords_table')
+class TestLoadRecentSearchResultsWithoutKeywordsTable:
+    def test_queries_each_explicit_keyword_for_its_most_recent_rows(self, load_recent, search):
+        search.query.side_effect = [_keyword_rows('a'), _keyword_rows('b')]
+
+        items = load_recent(max_keywords=20, keywords=['a', 'b'])
 
         assert items == [{'keyword': 'a'}, {'keyword': 'b'}]
         kwargs = search.query.call_args_list[0].kwargs
         assert (kwargs['ScanIndexForward'], kwargs['Limit']) == (False, 20)
 
-    def test_caps_the_number_of_queried_keywords_at_max_keywords(self, dynamodb, monkeypatch):
-        monkeypatch.delenv('DYNAMODB_TABLE_KEYWORDS', raising=False)
-        search = dynamodb.Table('search')
-        search.query.return_value = _table_response([])
+    def test_caps_the_number_of_queried_keywords_at_max_keywords(self, load_recent, search):
+        search.query.return_value = _keyword_rows()
 
-        load_recent_search_results(dynamodb, 'search', max_keywords=2, keywords=['a', 'b', 'c'])
+        load_recent(max_keywords=2, keywords=['a', 'b', 'c'])
 
         assert search.query.call_count == 2
 
-    def test_skips_a_keyword_whose_query_fails_and_keeps_the_rest(self, dynamodb, monkeypatch):
-        monkeypatch.delenv('DYNAMODB_TABLE_KEYWORDS', raising=False)
-        search = dynamodb.Table('search')
-        search.query.side_effect = [RuntimeError('throttled'), _table_response([{'keyword': 'b'}])]
+    def test_skips_a_keyword_whose_query_fails_and_keeps_the_rest(self, load_recent, search):
+        search.query.side_effect = [RuntimeError('throttled'), _keyword_rows('b')]
 
-        items = load_recent_search_results(dynamodb, 'search', max_keywords=20, keywords=['a', 'b'])
+        items = load_recent(max_keywords=20, keywords=['a', 'b'])
 
         assert items == [{'keyword': 'b'}]
 
-    def test_discovers_active_keywords_from_the_status_index_when_none_are_given(self, dynamodb, monkeypatch):
-        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'keywords')
-        dynamodb.Table('keywords').query.return_value = _table_response(
-            [{'keyword': 'hotels'}, {'keyword': ''}, {'other': 'x'}]
-        )
-        search = dynamodb.Table('search')
-        search.query.return_value = _table_response([{'keyword': 'hotels'}])
+    def test_falls_back_to_a_bounded_scan_when_no_keyword_is_known(self, load_recent, search):
+        search.scan.return_value = _keyword_rows('anything')
 
-        items = load_recent_search_results(dynamodb, 'search', max_keywords=20)
+        items = load_recent(max_keywords=20)
+
+        assert items == [{'keyword': 'anything'}]
+        search.scan.assert_called_once_with(Limit=500)
+        search.query.assert_not_called()
+
+
+class TestLoadRecentSearchResultsWithKeywordsTable:
+    def test_discovers_active_keywords_from_the_status_index_when_none_are_given(self, load_recent, search, keywords_table):
+        keywords_table.query.return_value = _table_response([{'keyword': 'hotels'}, {'keyword': ''}, {'other': 'x'}])
+        search.query.return_value = _keyword_rows('hotels')
+
+        items = load_recent(max_keywords=20)
 
         assert items == [{'keyword': 'hotels'}]
         assert search.query.call_args.kwargs['KeyConditionExpression'] == Key('keyword').eq('hotels')
 
-    def test_queries_one_status_index_page_of_max_keywords_when_discovering_keywords(self, dynamodb, monkeypatch):
-        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'keywords')
-        keywords_table = dynamodb.Table('keywords')
-        keywords_table.query.return_value = _table_response([])
-        dynamodb.Table('search').scan.return_value = _table_response([])
+    def test_queries_one_status_index_page_of_max_keywords_when_discovering_keywords(
+        self, load_recent, search, keywords_table
+    ):
+        keywords_table.query.return_value = _keyword_rows()
+        search.scan.return_value = _keyword_rows()
 
-        load_recent_search_results(dynamodb, 'search', max_keywords=30)
+        load_recent(max_keywords=30)
 
         keywords_table.query.assert_called_once_with(
             IndexName='StatusIndex',
@@ -144,31 +177,25 @@ class TestLoadRecentSearchResults:
             Limit=30,
         )
 
-    def test_never_scans_the_keywords_table_when_discovering_keywords(self, dynamodb, monkeypatch):
+    def test_never_scans_the_keywords_table_when_discovering_keywords(self, load_recent, search, keywords_table):
         """REGRESSION: a filtered scan applied Limit before the status filter.
 
         With thousands of keywords the first 100 evaluated rows could hold no
         active keyword at all, so the analysis silently fell back to an
         arbitrary slice of the search table.
         """
-        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'keywords')
-        keywords_table = dynamodb.Table('keywords')
-        keywords_table.query.return_value = _table_response([{'keyword': 'hotels'}])
-        dynamodb.Table('search').query.return_value = _table_response([])
+        keywords_table.query.return_value = _keyword_rows('hotels')
+        search.query.return_value = _keyword_rows()
 
-        load_recent_search_results(dynamodb, 'search', max_keywords=20)
+        load_recent(max_keywords=20)
 
         keywords_table.scan.assert_not_called()
 
-    def test_queries_every_discovered_keyword_in_index_order(self, dynamodb, monkeypatch):
-        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'keywords')
-        dynamodb.Table('keywords').query.return_value = _table_response(
-            [{'keyword': 'alpha'}, {'keyword': 'beta'}, {'keyword': 'gamma'}]
-        )
-        search = dynamodb.Table('search')
-        search.query.return_value = _table_response([])
+    def test_queries_every_discovered_keyword_in_index_order(self, load_recent, search, keywords_table):
+        keywords_table.query.return_value = _keyword_rows('alpha', 'beta', 'gamma')
+        search.query.return_value = _keyword_rows()
 
-        load_recent_search_results(dynamodb, 'search', max_keywords=3)
+        load_recent(max_keywords=3)
 
         assert [call.kwargs['KeyConditionExpression'] for call in search.query.call_args_list] == [
             Key('keyword').eq('alpha'),
@@ -176,41 +203,25 @@ class TestLoadRecentSearchResults:
             Key('keyword').eq('gamma'),
         ]
 
-    def test_skips_discovery_and_falls_back_when_max_keywords_is_zero(self, dynamodb, monkeypatch):
-        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'keywords')
-        search = dynamodb.Table('search')
-        search.scan.return_value = _table_response([])
+    def test_skips_discovery_and_falls_back_when_max_keywords_is_zero(self, load_recent, search, keywords_table):
+        search.scan.return_value = _keyword_rows()
 
-        load_recent_search_results(dynamodb, 'search', max_keywords=0)
+        load_recent(max_keywords=0)
 
-        dynamodb.Table('keywords').query.assert_not_called()
+        keywords_table.query.assert_not_called()
 
-    def test_treats_an_empty_keyword_list_like_no_keywords(self, dynamodb, monkeypatch):
-        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'keywords')
-        dynamodb.Table('keywords').query.return_value = _table_response([{'keyword': 'hotels'}])
-        dynamodb.Table('search').query.return_value = _table_response([{'keyword': 'hotels'}])
+    def test_treats_an_empty_keyword_list_like_no_keywords(self, load_recent, search, keywords_table):
+        keywords_table.query.return_value = _keyword_rows('hotels')
+        search.query.return_value = _keyword_rows('hotels')
 
-        items = load_recent_search_results(dynamodb, 'search', max_keywords=20, keywords=[])
+        items = load_recent(max_keywords=20, keywords=[])
 
         assert items == [{'keyword': 'hotels'}]
 
-    def test_falls_back_to_a_bounded_scan_when_no_keyword_is_known(self, dynamodb, monkeypatch):
-        monkeypatch.delenv('DYNAMODB_TABLE_KEYWORDS', raising=False)
-        search = dynamodb.Table('search')
-        search.scan.return_value = _table_response([{'keyword': 'anything'}])
+    def test_falls_back_to_a_scan_when_the_keywords_table_has_no_active_rows(self, load_recent, search, keywords_table):
+        keywords_table.query.return_value = _keyword_rows()
+        search.scan.return_value = _keyword_rows()
 
-        items = load_recent_search_results(dynamodb, 'search', max_keywords=20)
-
-        assert items == [{'keyword': 'anything'}]
-        search.scan.assert_called_once_with(Limit=500)
-        search.query.assert_not_called()
-
-    def test_falls_back_to_a_scan_when_the_keywords_table_has_no_active_rows(self, dynamodb, monkeypatch):
-        monkeypatch.setenv('DYNAMODB_TABLE_KEYWORDS', 'keywords')
-        dynamodb.Table('keywords').query.return_value = _table_response([])
-        search = dynamodb.Table('search')
-        search.scan.return_value = _table_response([])
-
-        load_recent_search_results(dynamodb, 'search', max_keywords=20)
+        load_recent(max_keywords=20)
 
         search.scan.assert_called_once_with(Limit=500)

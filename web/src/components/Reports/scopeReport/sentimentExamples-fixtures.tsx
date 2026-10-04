@@ -10,7 +10,6 @@ import type {
   SentimentExample, SentimentLabel
 } from '../../../types/domain/sentimentExamples';
 import { buildSentimentExample } from '../../../types/domain/sentimentExamples-fixtures';
-import { createMockJsonResponse } from '../../../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../../../test/infrastructureMock';
 import { buildKpis } from '../BrandVisibilityReport/groupKpiHistory-fixtures';
 import {
@@ -39,7 +38,7 @@ function split(overrides: Partial<SentimentSplit>): SentimentSplit {
 }
 
 /** Every engine: 3 positive, 0 neutral, 1 mixed, 4 negative; OpenAI 1 / 0 / 1 / 3; Gemini 2 / 0 / 0 / 1. */
-export const COUNTED_VISIBILITY: VisibilityResponse = buildVisibility({
+const COUNTED_VISIBILITY: VisibilityResponse = buildVisibility({
   scope: {
     kind: 'group',
     label: 'Hotel Sol',
@@ -70,11 +69,6 @@ export const COUNTED_VISIBILITY: VisibilityResponse = buildVisibility({
 });
 
 export const HOTEL_SOL_SCOPE: ReportScope = groupScope('hotel-sol');
-
-/** Answers every request with `body`. */
-export function stubExamplesAnswer(body: unknown, status = 200): void {
-  mockAuthenticatedFetch.mockImplementation(() => Promise.resolve(createMockJsonResponse(body, status)));
-}
 
 /** The URL of the only request made. */
 export function requestedUrl(): unknown {

@@ -4,13 +4,13 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 const PREFLIGHT_METHOD = 'OPTIONS';
-const COGNITO_AUTH = 'COGNITO_USER_POOLS';
+export const COGNITO_AUTH = 'COGNITO_USER_POOLS';
 
-/** Thrown when lambda/shared/models.py no longer exposes a readable _TIER_MODELS. */
-export class MissingTierModelsError extends Error {
+/** Thrown when a lambda/shared module no longer exposes a constant a contract test reads. */
+class MissingPythonConstantError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = 'MissingTierModelsError';
+    this.name = 'MissingPythonConstantError';
   }
 }
 
@@ -113,14 +113,17 @@ function collectGetAttTargets(node: unknown, found: string[] = []): string[] {
   return found;
 }
 
-/** Logical id of the IAM role a Lambda function executes as. */
-export function findFunctionRoleLogicalId(template: Template, functionName: string): string {
+/** One property (path below `Properties`) of the Lambda function named `functionName`. */
+function functionProperty(template: Template, functionName: string, propertyPath: string[]): unknown {
   const functions = template.findResources('AWS::Lambda::Function', {
     Properties: { FunctionName: functionName },
   });
-  return collectGetAttTargets(
-    resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Role'])
-  )[0] ?? '';
+  return resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', ...propertyPath]);
+}
+
+/** Logical id of the IAM role a Lambda function executes as. */
+export function findFunctionRoleLogicalId(template: Template, functionName: string): string {
+  return collectGetAttTargets(functionProperty(template, functionName, ['Role']))[0] ?? '';
 }
 
 /** Collect every logical ID referenced by a Ref anywhere in a node. */
@@ -136,22 +139,45 @@ export function collectRefTargets(node: unknown, found: string[] = []): string[]
   return found;
 }
 
+/** The string parts of a state machine's `DefinitionString` join, tokens left as they are. */
+function stateMachineDefinitionParts(template: Template, stateMachineName: string): unknown[] {
+  const joinArgs = resolvePath(findStateMachine(template, stateMachineName), ['Properties', 'DefinitionString', 'Fn::Join']);
+  return Array.isArray(joinArgs) && Array.isArray(joinArgs[1]) ? joinArgs[1] : [];
+}
+
 /** Extract a Step Functions definition JSON from the synthesized template. */
 export function extractStateMachineDefinition(template: Template, stateMachineName: string): string {
-  const joinArgs = resolvePath(findStateMachine(template, stateMachineName), ['Properties', 'DefinitionString', 'Fn::Join']);
-  const parts = Array.isArray(joinArgs) && Array.isArray(joinArgs[1]) ? joinArgs[1] : [];
-  return parts
+  return stateMachineDefinitionParts(template, stateMachineName)
     .map((part) => (typeof part === 'string' ? part : '"__REF__"'))
     .join('');
 }
 
 export function extractLambdaEnvVars(template: Template, functionName: string): Record<string, unknown> {
-  const lambdas = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const logicalId = Object.keys(lambdas)[0];
-  const envVars = resolvePath(lambdas[logicalId], ['Properties', 'Environment', 'Variables']);
+  const envVars = functionProperty(template, functionName, ['Environment', 'Variables']);
   return isRecord(envVars) ? envVars : {};
+}
+
+/** The environment variables of every Lambda in the template, one map per function (`{}` when unset). */
+function lambdaEnvironments(template: Template): Record<string, unknown>[] {
+  return Object.values(template.findResources('AWS::Lambda::Function'))
+    .map((resource) => resolvePath(resource, ['Properties', 'Environment', 'Variables']))
+    .map((variables) => (isRecord(variables) ? variables : {}));
+}
+
+/** Env var names on any Lambda that name a table without the canonical `DYNAMODB_TABLE_` prefix (audit #12). */
+export function nonCanonicalTableEnvNames(template: Template): string[] {
+  return lambdaEnvironments(template)
+    .flatMap((variables) => Object.keys(variables))
+    .filter((name) => /_TABLE(_NAME)?$/.test(name) && !name.startsWith('DYNAMODB_TABLE_'));
+}
+
+/** The `BEDROCK_TIER_*` variables of every Lambda that sets any, one map per function. */
+export function bedrockTierEnvironments(template: Template): Record<string, unknown>[] {
+  return lambdaEnvironments(template)
+    .map((variables) => Object.fromEntries(
+      Object.entries(variables).filter(([name]) => name.startsWith('BEDROCK_TIER_'))
+    ))
+    .filter((tierVariables) => Object.keys(tierVariables).length > 0);
 }
 
 /** Map function names to timeouts for every Lambda reachable from API Gateway. */
@@ -182,11 +208,7 @@ export function extractReservedConcurrency(
   template: Template,
   functionName: string
 ): number | undefined {
-  const lambdas = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const logicalId = Object.keys(lambdas)[0];
-  const value = resolvePath(lambdas[logicalId], ['Properties', 'ReservedConcurrentExecutions']);
+  const value = functionProperty(template, functionName, ['ReservedConcurrentExecutions']);
   return typeof value === 'number' ? value : undefined;
 }
 
@@ -198,11 +220,7 @@ export function findLambdaLogicalId(template: Template, functionName: string): s
 }
 
 export function extractLambdaLayerRefs(template: Template, functionName: string): string[] {
-  const functions = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const logicalId = Object.keys(functions)[0];
-  const layers = resolvePath(functions[logicalId], ['Properties', 'Layers']);
+  const layers = functionProperty(template, functionName, ['Layers']);
   if (!Array.isArray(layers)) return [];
   return layers
     .map((layer) => (isRecord(layer) && typeof layer.Ref === 'string' ? layer.Ref : ''))
@@ -226,20 +244,18 @@ export function extractTableKeySchema(template: Template, tableName: string): un
   return extractTableProperty(template, tableName, 'KeySchema');
 }
 
+/** A numeric property of the named function; NaN when it is absent. */
+function numericFunctionProperty(template: Template, functionName: string, property: string): number {
+  const value = functionProperty(template, functionName, [property]);
+  return typeof value === 'number' ? value : Number.NaN;
+}
+
 export function extractFunctionTimeout(template: Template, functionName: string): number {
-  const functions = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const timeout = resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'Timeout']);
-  return typeof timeout === 'number' ? timeout : Number.NaN;
+  return numericFunctionProperty(template, functionName, 'Timeout');
 }
 
 export function extractFunctionMemorySize(template: Template, functionName: string): number {
-  const functions = template.findResources('AWS::Lambda::Function', {
-    Properties: { FunctionName: functionName },
-  });
-  const memory = resolvePath(functions[Object.keys(functions)[0] ?? ''], ['Properties', 'MemorySize']);
-  return typeof memory === 'number' ? memory : Number.NaN;
+  return numericFunctionProperty(template, functionName, 'MemorySize');
 }
 
 export function extractMemorySizesByLogicalIdPrefix(template: Template, prefix: string): number[] {
@@ -360,17 +376,26 @@ function extractFunctionRoleActionsMatching(
   );
 }
 
+/** The role's allow statements that `matches`, as sorted-action snapshots. */
+function roleStatementsMatching(
+  template: Template,
+  roleLogicalId: string,
+  matches: (actions: string[]) => boolean
+): IamPolicyStatementSnapshot[] {
+  return allowStatementsOfRole(template, roleLogicalId)
+    .filter((statement) => matches(statementActions(statement)))
+    .map((statement) => ({
+      actions: sortedUnique(statementActions(statement)),
+      resources: statementResources(statement),
+    }));
+}
+
 function roleStatementsForAction(
   template: Template,
   roleLogicalId: string,
   action: string
 ): IamPolicyStatementSnapshot[] {
-  return allowStatementsOfRole(template, roleLogicalId)
-    .filter((statement) => statementActions(statement).includes(action))
-    .map((statement) => ({
-      actions: sortedUnique(statementActions(statement)),
-      resources: statementResources(statement),
-    }));
+  return roleStatementsMatching(template, roleLogicalId, (actions) => actions.includes(action));
 }
 
 function extractFunctionStatementsForAction(
@@ -423,22 +448,32 @@ function buildResourcePaths(template: Template): Map<string, string> {
   return paths;
 }
 
+/** Every API Gateway method resource except the CORS preflight `OPTIONS` ones. */
+function nonPreflightMethods(template: Template): unknown[] {
+  return Object.values(template.findResources('AWS::ApiGateway::Method'))
+    .filter((method) => resolveString(method, ['Properties', 'HttpMethod']) !== PREFLIGHT_METHOD);
+}
+
 export function extractApiAuthSnapshots(template: Template): ApiMethodAuthSnapshot[] {
   const paths = buildResourcePaths(template);
-  const methods = template.findResources('AWS::ApiGateway::Method');
+  return nonPreflightMethods(template).map((method) => methodAuthSnapshot(method, paths));
+}
 
-  return Object.values(methods).flatMap((method) => {
-    const httpMethod = resolveString(method, ['Properties', 'HttpMethod']);
-    if (httpMethod === PREFLIGHT_METHOD) return [];
+/** A method's route (`paths` maps resource logical ids to their paths) and authorization. */
+function methodAuthSnapshot(method: unknown, paths: Map<string, string>): ApiMethodAuthSnapshot {
+  return {
+    path: paths.get(resolveString(method, ['Properties', 'ResourceId', 'Ref'])) ?? '/',
+    httpMethod: resolveString(method, ['Properties', 'HttpMethod']),
+    ...methodAuthorization(method),
+  };
+}
 
-    const resourceId = resolveString(method, ['Properties', 'ResourceId', 'Ref']);
-    return [{
-      path: paths.get(resourceId) ?? '/',
-      httpMethod,
-      authorizationType: resolveString(method, ['Properties', 'AuthorizationType']),
-      authorizerId: resolveString(method, ['Properties', 'AuthorizerId', 'Ref']),
-    }];
-  });
+/** How an API Gateway method is authorized: its type and authorizer logical id. */
+function methodAuthorization(method: unknown): { authorizationType: string; authorizerId: string } {
+  return {
+    authorizationType: resolveString(method, ['Properties', 'AuthorizationType']),
+    authorizerId: resolveString(method, ['Properties', 'AuthorizerId', 'Ref']),
+  };
 }
 
 export function tokenValidityMinutes(
@@ -474,21 +509,19 @@ export function extractUserPoolGroupNames(template: Template): string[] {
 }
 
 export function extractApiMethods(template: Template, resourceId: string): ApiGatewayMethodSnapshot[] {
-  const methods = template.findResources('AWS::ApiGateway::Method');
-  return Object.values(methods).flatMap((method) => {
-    const httpMethod = resolveString(method, ['Properties', 'HttpMethod']);
-    const methodResourceId = resolveString(method, ['Properties', 'ResourceId', 'Ref']);
-    if (methodResourceId !== resourceId || httpMethod === PREFLIGHT_METHOD) return [];
-
-    const integrationUri = resolvePath(method, ['Properties', 'Integration', 'Uri']);
-    return [{
-      httpMethod,
+  return nonPreflightMethods(template)
+    .filter((method) => resolveString(method, ['Properties', 'ResourceId', 'Ref']) === resourceId)
+    .map((method) => ({
+      httpMethod: resolveString(method, ['Properties', 'HttpMethod']),
       integrationType: resolveString(method, ['Properties', 'Integration', 'Type']),
-      integrationUri: JSON.stringify(integrationUri) ?? '',
-      authorizationType: resolveString(method, ['Properties', 'AuthorizationType']),
-      authorizerId: resolveString(method, ['Properties', 'AuthorizerId', 'Ref']),
-    }];
-  });
+      integrationUri: methodIntegrationUri(method),
+      ...methodAuthorization(method),
+    }));
+}
+
+/** A method's integration URI as JSON, so token references can be matched as text. */
+function methodIntegrationUri(method: unknown): string {
+  return JSON.stringify(resolvePath(method, ['Properties', 'Integration', 'Uri'])) ?? '';
 }
 
 /**
@@ -510,6 +543,29 @@ export function unguardedVerbs(methods: ApiGatewayMethodSnapshot[], functionLogi
 /** The HTTP verbs of `methods`, alphabetically. */
 export function sortedHttpMethods(methods: ApiGatewayMethodSnapshot[]): string[] {
   return methods.map((method) => method.httpMethod).sort((left, right) => left.localeCompare(right));
+}
+
+/** `unguardedVerbs` of a route set where every verb is behind Cognito and the expected function. */
+export const FULLY_GUARDED = { withoutCognitoAuthorizer: [], notIntegratedWithFunction: [] };
+
+/** `"<VERB> <path>"` for each method, the form route assertions report. */
+export function methodRouteLabels(methods: ApiMethodAuthSnapshot[]): string[] {
+  return methods.map((method) => `${method.httpMethod} ${method.path}`);
+}
+
+/** The `Fn::Join` CDK synthesizes for `arn:<partition>:<service>:<region>:<account>:<resource>`. */
+export function regionalArnJoin(service: string, resource: string): unknown {
+  return {
+    'Fn::Join': ['', [
+      'arn:',
+      { Ref: 'AWS::Partition' },
+      `:${service}:`,
+      { Ref: 'AWS::Region' },
+      ':',
+      { Ref: 'AWS::AccountId' },
+      `:${resource}`,
+    ]],
+  };
 }
 
 function retentionDaysOf(logGroups: Record<string, unknown>, logicalId: string): number {
@@ -655,7 +711,7 @@ export function extractRoleTableActions(
   return extractRoleActionsOn(template, roleLogicalId, tableLogicalId);
 }
 
-export interface IamPolicyStatementSnapshot {
+interface IamPolicyStatementSnapshot {
   actions: string[];
   resources: unknown[];
 }
@@ -705,12 +761,11 @@ export function extractCrawlerInfrastructureSnapshot(
   const browserSigningRoles = template.findResources('AWS::IAM::Role', {
     Properties: { RoleName: browserSigningRoleName },
   });
-  const crawlerRoleBrowserStatements = allowStatementsOfRole(template, crawlerRoleId)
-    .filter((statement) => statementActions(statement).some(isCrawlerBrowserAction))
-    .map((statement) => ({
-      actions: sortedUnique(statementActions(statement)),
-      resources: statementResources(statement),
-    }));
+  const crawlerRoleBrowserStatements = roleStatementsMatching(
+    template,
+    crawlerRoleId,
+    (actions) => actions.some(isCrawlerBrowserAction)
+  );
 
   return {
     crawledContentTableIndexes: extractTableProperty(
@@ -737,20 +792,25 @@ export function extractCrawlerInfrastructureSnapshot(
 }
 
 
-export const STATUS_CREATED_INDEX_SCHEMA = {
-  IndexName: 'StatusCreatedIndex',
-  KeySchema: [
-    { AttributeName: 'status', KeyType: 'HASH' },
-    { AttributeName: 'created_at', KeyType: 'RANGE' },
-  ],
-  Projection: { ProjectionType: 'ALL' },
-};
+/** A GSI as synthesized: hash and range key with the default ALL projection. */
+export function allProjectionIndexSchema(indexName: string, hashKey: string, rangeKey: string) {
+  return {
+    IndexName: indexName,
+    KeySchema: [
+      { AttributeName: hashKey, KeyType: 'HASH' },
+      { AttributeName: rangeKey, KeyType: 'RANGE' },
+    ],
+    Projection: { ProjectionType: 'ALL' },
+  };
+}
 
-export interface ContentStudioRouteSnapshot extends ApiMethodAuthSnapshot {
+export const STATUS_CREATED_INDEX_SCHEMA = allProjectionIndexSchema('StatusCreatedIndex', 'status', 'created_at');
+
+interface ContentStudioRouteSnapshot extends ApiMethodAuthSnapshot {
   integrationUri: string;
 }
 
-export interface ContentStudioEventSourceSnapshot {
+interface ContentStudioEventSourceSnapshot {
   batchSize: number | undefined;
   startingPosition: string;
   retryAttempts: number | undefined;
@@ -761,7 +821,7 @@ export interface ContentStudioEventSourceSnapshot {
   onFailureQueueLogicalIds: string[];
 }
 
-export interface ContentStudioStreamDlqSnapshot {
+interface ContentStudioStreamDlqSnapshot {
   logicalId: string;
   queueName: string;
   retentionSeconds: number | undefined;
@@ -771,7 +831,7 @@ export interface ContentStudioStreamDlqSnapshot {
   alarmCount: number;
 }
 
-export interface ContentStudioReconcileRuleSnapshot {
+interface ContentStudioReconcileRuleSnapshot {
   scheduleExpression: string;
   state: string;
   targetInput: string;
@@ -929,25 +989,12 @@ export function extractContentStudioInfrastructureSnapshot(
     ['Properties', 'DestinationConfig', 'OnFailure', 'Destination']
   );
   const resourcePaths = buildResourcePaths(template);
-  const routes = Object.values(
-    template.findResources('AWS::ApiGateway::Method')
-  ).flatMap((method): ContentStudioRouteSnapshot[] => {
-    const httpMethod = resolveString(method, ['Properties', 'HttpMethod']);
-    const resourceId = resolveString(method, ['Properties', 'ResourceId', 'Ref']);
-    const routePath = resourcePaths.get(resourceId) ?? '/';
-    if (httpMethod === PREFLIGHT_METHOD || !routePath.startsWith('/api/content-studio')) {
-      return [];
-    }
-    return [{
-      path: routePath,
-      httpMethod,
-      authorizationType: resolveString(method, ['Properties', 'AuthorizationType']),
-      authorizerId: resolveString(method, ['Properties', 'AuthorizerId', 'Ref']),
-      integrationUri: JSON.stringify(
-        resolvePath(method, ['Properties', 'Integration', 'Uri'])
-      ) ?? '',
-    }];
-  });
+  const routes = nonPreflightMethods(template)
+    .map((method): ContentStudioRouteSnapshot => ({
+      ...methodAuthSnapshot(method, resourcePaths),
+      integrationUri: methodIntegrationUri(method),
+    }))
+    .filter((route) => route.path.startsWith('/api/content-studio'));
   const streamDlqRetention = resolvePath(
     streamDlqResource,
     ['Properties', 'MessageRetentionPeriod']
@@ -1169,40 +1216,96 @@ export function extractContentStudioInfrastructureSnapshot(
  * which fails at runtime with AccessDenied rather than at synth.
  */
 export function pythonTierFoundationModelIds(): string[] {
-  const source = fs.readFileSync(
-    path.join(__dirname, '../lambda/shared/models.py'),
-    'utf8'
-  );
-  const block = /_TIER_MODELS: dict\[ModelTier, str\] = \{([\s\S]*?)\}/.exec(source);
-  if (!block) {
-    throw new MissingTierModelsError('Could not find _TIER_MODELS in lambda/shared/models.py');
-  }
-  return [...block[1].matchAll(/"([^"]+)"/g)]
+  const block = capturedPythonSource('models.py', /_TIER_MODELS: dict\[ModelTier, str\] = \{([\s\S]*?)\}/, '_TIER_MODELS');
+  return [...block.matchAll(/"([^"]+)"/g)]
     .map((match) => match[1].replace(/^global\./, ''))
     .sort((left, right) => left.localeCompare(right));
 }
 
+/**
+ * `BEDROCK_TIER_<ROLE>` → tier for every role in `_ROLE_DEFAULT_TIER` of
+ * `lambda/shared/models.py`: the defaults the stack's `bedrockTierEnv` restates.
+ */
+export function pythonRoleDefaultTierEnv(): Record<string, string> {
+  const roles = pythonStrEnumValues('ModelRole');
+  const tiers = pythonStrEnumValues('ModelTier');
+  const block = capturedPythonSource(
+    'models.py',
+    /_ROLE_DEFAULT_TIER: dict\[ModelRole, ModelTier\] = \{([\s\S]*?)\}/,
+    '_ROLE_DEFAULT_TIER'
+  );
+  return Object.fromEntries(
+    [...block.matchAll(/ModelRole\.(\w+): ModelTier\.(\w+)/g)].map(([, role, tier]) => [
+      `BEDROCK_TIER_${enumValue(roles, role).toUpperCase()}`,
+      enumValue(tiers, tier),
+    ])
+  );
+}
+
+/** `RESEARCH_STALE_AFTER_SECONDS` of `lambda/shared/research_jobs.py`, evaluated (`35 * 60` → 2100). */
+export function pythonResearchStaleAfterSeconds(): number {
+  const expression = capturedPythonSource(
+    'research_jobs.py',
+    /^RESEARCH_STALE_AFTER_SECONDS = ([\d *]+)$/m,
+    'RESEARCH_STALE_AFTER_SECONDS'
+  );
+  return expression.split('*').reduce((product, factor) => product * Number(factor), 1);
+}
+
+function pythonStrEnumValues(className: string): Map<string, string> {
+  const body = capturedPythonSource('models.py', new RegExp(`class ${className}\\(StrEnum\\):([\\s\\S]*?)\\n\\n\\n`), className);
+  return new Map([...body.matchAll(/^ +(\w+) = "([^"]+)"/gm)].map(([, member, value]) => [member, value]));
+}
+
+function enumValue(members: Map<string, string>, member: string): string {
+  const value = members.get(member);
+  if (value === undefined) {
+    throw new MissingPythonConstantError(`Unknown enum member ${member} in lambda/shared/models.py`);
+  }
+  return value;
+}
+
+/** First capture group of `pattern` in `lambda/shared/<fileName>`; throws when the constant is gone. */
+function capturedPythonSource(fileName: string, pattern: RegExp, constantName: string): string {
+  const source = fs.readFileSync(path.join(__dirname, '../lambda/shared', fileName), 'utf8');
+  const match = pattern.exec(source);
+  if (!match) {
+    throw new MissingPythonConstantError(`Could not find ${constantName} in lambda/shared/${fileName}`);
+  }
+  return match[1];
+}
+
+
+interface UseCaseSubmission {
+  parameters?: { formData?: string };
+  region?: string;
+  ignoreErrorCodesMatching?: string;
+}
 
 /**
  * The `Create` payload of the Anthropic use-case submission, parsed. Returns
  * undefined when the stack synthesized no submission at all, which is what
  * `-c skipModelProvisioning=true` is expected to produce.
  */
-export function findUseCaseSubmission(template: Template): {
-  parameters?: { formData?: string };
-  region?: string;
-  ignoreErrorCodesMatching?: string;
-} | undefined {
+export function findUseCaseSubmission(template: Template): UseCaseSubmission | undefined {
   const create = Object.values(template.findResources('Custom::AWS'))
     .map((resource) => resolvePath(resource, ['Properties', 'Create']))
     .find((payload): payload is string => typeof payload === 'string'
       && payload.includes('putUseCaseForModelAccess'));
 
-  return create === undefined ? undefined : JSON.parse(create) as {
-    parameters?: { formData?: string };
-    region?: string;
-    ignoreErrorCodesMatching?: string;
-  };
+  return create === undefined ? undefined : JSON.parse(create) as UseCaseSubmission;
+}
+
+/**
+ * The members of `errorNames` the use-case submission's
+ * `ignoreErrorCodesMatching` pattern tolerates, in order; undefined when no
+ * submission or no pattern was synthesized.
+ */
+export function useCaseToleratedErrorNames(template: Template, errorNames: string[]): string[] | undefined {
+  const pattern = findUseCaseSubmission(template)?.ignoreErrorCodesMatching;
+  if (pattern === undefined) return undefined;
+  const tolerated = new RegExp(pattern);
+  return errorNames.filter((errorName) => tolerated.test(errorName));
 }
 
 /**
@@ -1252,8 +1355,7 @@ export const EMPTY_WORKFLOW_SCALE_SNAPSHOT: WorkflowScaleSnapshot = {
  * text to keep the result valid JSON.
  */
 function parseStateMachineDefinition(template: Template, stateMachineName: string): unknown {
-  const joinArgs = resolvePath(findStateMachine(template, stateMachineName), ['Properties', 'DefinitionString', 'Fn::Join']);
-  const parts = Array.isArray(joinArgs) && Array.isArray(joinArgs[1]) ? joinArgs[1] : [];
+  const parts = stateMachineDefinitionParts(template, stateMachineName);
   const parsed: unknown = JSON.parse(parts.map((part) => (typeof part === 'string' ? part : '__TOKEN__')).join(''));
   return parsed;
 }
@@ -1345,20 +1447,24 @@ export function keywordChildStates(definition: unknown): unknown {
   return resolvePath(definition, ['States', 'ProcessKeywords', 'ItemProcessor', 'States']);
 }
 
+/** Every SearchAllProviders branch of the keyword child workflow, in definition order. */
+function providerSearchBranches(definition: unknown): unknown[] {
+  const branches = resolvePath(keywordChildStates(definition), ['SearchAllProviders', 'Branches']);
+  return Array.isArray(branches) ? branches : [];
+}
+
 /**
  * The SearchAllProviders branch that calls one provider, found by its start
  * state `Search-<id>` so the assertions do not depend on branch order.
  */
 export function providerSearchBranch(definition: unknown, providerId: string): unknown {
-  const branches = resolvePath(keywordChildStates(definition), ['SearchAllProviders', 'Branches']);
-  return (Array.isArray(branches) ? branches : [])
+  return providerSearchBranches(definition)
     .find((branch) => resolvePath(branch, ['StartAt']) === `Search-${providerId}`);
 }
 
 /** Every SearchAllProviders branch's start state, in definition order. */
 export function providerSearchBranchStarts(definition: unknown): unknown[] {
-  const branches = resolvePath(keywordChildStates(definition), ['SearchAllProviders', 'Branches']);
-  return (Array.isArray(branches) ? branches : []).map((branch) => resolvePath(branch, ['StartAt']));
+  return providerSearchBranches(definition).map((branch) => resolvePath(branch, ['StartAt']));
 }
 
 export interface CustomReportsSnapshot {

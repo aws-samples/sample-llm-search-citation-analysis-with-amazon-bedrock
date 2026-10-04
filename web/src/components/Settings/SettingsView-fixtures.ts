@@ -1,7 +1,6 @@
 import { vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import type { BrandConfig } from '../../types';
-import type { useBrandConfig } from '../../hooks/useBrandConfig';
 import type { ProviderConfig } from '../../hooks/useProviderConfig';
 import type { useIsAdmin } from '../../hooks/useIsAdmin';
 import { DEFAULT_CONFIG } from '../../constants/brandConfigDefaults';
@@ -9,32 +8,12 @@ import { existingKeywordFixture } from '../Keywords/KeywordsManager-fixtures';
 import type { SettingsView } from './SettingsView';
 
 type SettingsViewProps = ComponentProps<typeof SettingsView>;
-type BrandConfigHookResult = ReturnType<typeof useBrandConfig>;
 type AdminMembership = ReturnType<typeof useIsAdmin>;
 
 export function buildSettingsViewProps(overrides: Partial<SettingsViewProps> = {}): SettingsViewProps {
   return {
     keywords: [existingKeywordFixture],
     setKeywords: vi.fn(),
-    ...overrides,
-  };
-}
-
-export function buildBrandConfigHookResult(
-  overrides: Partial<BrandConfigHookResult> = {}
-): BrandConfigHookResult {
-  return {
-    config: DEFAULT_CONFIG,
-    presets: {},
-    loading: false,
-    error: null,
-    saveConfig: vi.fn(),
-    resetConfig: vi.fn(),
-    refetch: vi.fn(),
-    getPromptForIndustry: vi.fn(),
-    expandBrand: vi.fn(),
-    expandAllBrands: vi.fn(),
-    findCompetitors: vi.fn(),
     ...overrides,
   };
 }

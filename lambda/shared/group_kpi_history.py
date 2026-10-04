@@ -30,6 +30,7 @@ from shared.kpi_engine import (
     brand_kpis,
     kpi_changes,
     kpi_trends,
+    percent,
 )
 
 #: Coverage (percent of the group's keywords answered) a run needs to count
@@ -159,7 +160,8 @@ def build_group_kpi_history(
     for timestamp in sorted({timestamp for runs in answers.values() for timestamp in runs}):
         answered = [keyword for keyword in keywords if timestamp in answers[keyword]]
         run_answers = [answer for keyword in answered for answer in answers[keyword][timestamp]]
-        coverage = round(len(answered) / len(keywords) * 100, 1)
+        # A run timestamp exists only when some keyword was answered, so `keywords` is never empty here.
+        coverage = percent(len(answered), len(keywords)) or 0.0
         run: dict[str, Any] = {
             'timestamp': timestamp,
             'keywords_with_data': len(answered),

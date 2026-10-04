@@ -17,12 +17,12 @@ from boto3.dynamodb.conditions import Key
 
 from shared.dynamodb_batch import collect_all_items
 from shared.kpi_engine import ANSWER_ATTRIBUTE_NAMES, ANSWER_PROJECTION
+from shared.utils import format_timestamp
 
 
 def history_since(days: int, now: datetime | None = None) -> str:
     """The ISO timestamp ``days`` days before ``now``, in the run timestamps' format (a sort-key prefix)."""
-    moment = (now or datetime.now(UTC)) - timedelta(days=days)
-    return moment.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+    return format_timestamp((now or datetime.now(UTC)) - timedelta(days=days))
 
 
 def query_keyword_rows_since(table: Any, keyword: str, since: str) -> list[dict[str, Any]]:

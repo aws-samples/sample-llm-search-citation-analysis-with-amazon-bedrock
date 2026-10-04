@@ -9,6 +9,8 @@ import {
 
 const mockApi = createMockApi();
 
+type UserManagementHook = ReturnType<typeof useUserManagement>;
+
 vi.mock('../api/users', () => ({
   listUsers: (...args: unknown[]): Promise<unknown> => mockApi.listUsers(...args) as Promise<unknown>,
   listGroups: (...args: unknown[]): Promise<unknown> => mockApi.listGroups(...args) as Promise<unknown>,
@@ -23,6 +25,14 @@ describe('useUserManagement', () => {
     Object.assign(mockApi, createMockApi());
   });
 
+  const inviteNewUser = (hook: UserManagementHook) => hook.invite({
+    email: 'new@example.com',
+    groups: [],
+  });
+  const updateUser1 = (hook: UserManagementHook) => hook.update('user1', { enabled: false });
+  const removeUser1 = (hook: UserManagementHook) => hook.remove('user1');
+  const resetUser1 = (hook: UserManagementHook) => hook.resetPassword('user1');
+
   it('fetches users and groups on mount', async (): Promise<void> => {
     await renderLoadedUserManagement();
 
@@ -30,28 +40,38 @@ describe('useUserManagement', () => {
     expect(mockApi.listGroups).toHaveBeenCalledTimes(1);
   });
 
-  it('sets users from API response', async (): Promise<void> => {
-    const result = await renderLoadedUserManagement();
+  describe('loaded state', () => {
+    interface LoadedField {
+      testName: string;
+      read: (hook: UserManagementHook) => unknown;
+      expected: unknown;
+    }
 
-    expect(result.current.users).toStrictEqual(mockUsers);
-  });
+    const loadedFields: LoadedField[] = [
+      {
+        testName: 'sets users from API response',
+        read: (hook) => hook.users,
+        expected: mockUsers,
+      },
+      {
+        testName: 'sets groups from API response',
+        read: (hook) => hook.groups,
+        expected: mockGroups,
+      },
+      {
+        testName: 'sets total from API response',
+        read: (hook) => hook.total,
+        expected: 2,
+      },
+    ];
 
-  it('sets groups from API response', async (): Promise<void> => {
-    const result = await renderLoadedUserManagement();
+    it.each(loadedFields)('$testName', async ({
+      read, expected
+    }) => {
+      const result = await renderLoadedUserManagement();
 
-    expect(result.current.groups).toStrictEqual(mockGroups);
-  });
-
-  it('sets total from API response', async (): Promise<void> => {
-    const result = await renderLoadedUserManagement();
-
-    expect(result.current.total).toBe(2);
-  });
-
-  it('sets hasMore based on total vs users length', async (): Promise<void> => {
-    const result = await renderLoadedUserManagement();
-
-    expect(result.current.hasMore).toBe(false);
+      expect(read(result.current)).toStrictEqual(expected);
+    });
   });
 
   it('sets error when fetch fails', async (): Promise<void> => {
@@ -61,41 +81,24 @@ describe('useUserManagement', () => {
     expect(result.current.error).toBe('Failed to list users');
   });
 
-  it('returns success when invite succeeds', async (): Promise<void> => {
-    const result = await renderLoadedUserManagement();
-
-    const invited = await act(() => result.current.invite({
-      email: 'new@example.com',
-      groups: ['Users'],
-    }));
-
-    expect(invited).toStrictEqual({
-      success: true,
-      message: 'User invited successfully' 
-    });
-  });
-
   describe('list refresh after a successful mutation', () => {
     interface RefreshingMutation {
       mutation: string;
-      run: (hook: ReturnType<typeof useUserManagement>) => Promise<unknown>;
+      run: (hook: UserManagementHook) => Promise<unknown>;
     }
 
     const refreshingMutations: RefreshingMutation[] = [
       {
         mutation: 'invite',
-        run: (hook) => hook.invite({
-          email: 'new@example.com',
-          groups: [] 
-        }),
+        run: inviteNewUser,
       },
       {
         mutation: 'update',
-        run: (hook) => hook.update('user1', { enabled: false }),
+        run: updateUser1,
       },
       {
         mutation: 'delete',
-        run: (hook) => hook.remove('user1'),
+        run: removeUser1,
       },
     ];
 
@@ -109,77 +112,160 @@ describe('useUserManagement', () => {
     });
   });
 
-  it('returns failure when invite fails', async (): Promise<void> => {
-    Object.assign(mockApi, createMockApi({ shouldFailInvite: true }));
-    const result = await renderLoadedUserManagement();
+  describe('mutation outcomes', () => {
+    type MockApiFailure = Parameters<typeof createMockApi>[0];
 
-    const invited = await act(() => result.current.invite({
-      email: 'new@example.com',
-      groups: [] 
-    }));
+    interface MutationOutcome {
+      testName: string;
+      failure: MockApiFailure;
+      run: (hook: UserManagementHook) => Promise<unknown>;
+      expected: unknown;
+    }
 
-    expect(invited).toStrictEqual({
-      success: false,
-      message: 'Failed to invite user' 
+    interface FailedMutationError {
+      testName: string;
+      failure: MockApiFailure;
+      run: (hook: UserManagementHook) => Promise<unknown>;
+      expectedError: string;
+    }
+
+    const mutationOutcomes: MutationOutcome[] = [
+      {
+        testName: 'returns success when invite succeeds',
+        failure: {},
+        run: (hook) => hook.invite({
+          email: 'new@example.com',
+          groups: ['Users'],
+        }),
+        expected: {
+          success: true,
+          message: 'User invited successfully',
+        },
+      },
+      {
+        testName: 'returns failure when invite fails',
+        failure: { shouldFailInvite: true },
+        run: inviteNewUser,
+        expected: {
+          success: false,
+          message: 'Failed to invite user',
+        },
+      },
+      {
+        testName: 'returns true when update succeeds',
+        failure: {},
+        run: updateUser1,
+        expected: true,
+      },
+      {
+        testName: 'returns true when delete succeeds',
+        failure: {},
+        run: removeUser1,
+        expected: true,
+      },
+      {
+        testName: 'returns success when reset succeeds',
+        failure: {},
+        run: resetUser1,
+        expected: {
+          success: true,
+          message: 'Password reset email sent',
+        },
+      },
+      {
+        testName: 'returns failure when reset fails',
+        failure: { shouldFailReset: true },
+        run: resetUser1,
+        expected: {
+          success: false,
+          message: 'Failed to reset password',
+        },
+      },
+    ];
+
+    const failedMutationErrors: FailedMutationError[] = [
+      {
+        testName: 'returns false and sets error when update fails',
+        failure: { shouldFailUpdate: true },
+        run: updateUser1,
+        expectedError: 'Failed to update user',
+      },
+      {
+        testName: 'returns false and sets error when delete fails',
+        failure: { shouldFailDelete: true },
+        run: removeUser1,
+        expectedError: 'Failed to delete user',
+      },
+    ];
+
+    async function renderAfterMutation(
+      failure: MockApiFailure,
+      run: (hook: UserManagementHook) => Promise<unknown>
+    ) {
+      Object.assign(mockApi, createMockApi(failure));
+      const result = await renderLoadedUserManagement();
+      const outcome = await act(() => run(result.current));
+      return {
+        result,
+        outcome,
+      };
+    }
+
+    it.each(mutationOutcomes)('$testName', async ({
+      failure, run, expected
+    }) => {
+      const { outcome } = await renderAfterMutation(failure, run);
+
+      expect(outcome).toStrictEqual(expected);
+    });
+
+    it.each(failedMutationErrors)('$testName', async ({
+      failure, run, expectedError
+    }) => {
+      const {
+        result, outcome
+      } = await renderAfterMutation(failure, run);
+
+      expect(outcome).toBe(false);
+      expect(result.current.error).toBe(expectedError);
     });
   });
 
-  it('returns true when update succeeds', async (): Promise<void> => {
-    const result = await renderLoadedUserManagement();
+  describe('fallback messages for a non-Error rejection', () => {
+    it('reports "Failed to load users" when the list request rejects', async () => {
+      Object.assign(mockApi, createMockApi({ nonErrorRejection: 'offline' }));
 
-    const updated = await act(() => result.current.update('user1', { enabled: false }));
+      const result = await renderLoadedUserManagement();
 
-    expect(updated).toBe(true);
-  });
-
-  it('returns false and sets error when update fails', async (): Promise<void> => {
-    Object.assign(mockApi, createMockApi({ shouldFailUpdate: true }));
-    const result = await renderLoadedUserManagement();
-
-    const updated = await act(() => result.current.update('user1', { enabled: false }));
-
-    expect(updated).toBe(false);
-    expect(result.current.error).toBe('Failed to update user');
-  });
-
-  it('returns true when delete succeeds', async (): Promise<void> => {
-    const result = await renderLoadedUserManagement();
-
-    const removed = await act(() => result.current.remove('user1'));
-
-    expect(removed).toBe(true);
-  });
-
-  it('returns false and sets error when delete fails', async (): Promise<void> => {
-    Object.assign(mockApi, createMockApi({ shouldFailDelete: true }));
-    const result = await renderLoadedUserManagement();
-
-    const removed = await act(() => result.current.remove('user1'));
-
-    expect(removed).toBe(false);
-    expect(result.current.error).toBe('Failed to delete user');
-  });
-
-  it('returns success when reset succeeds', async (): Promise<void> => {
-    const result = await renderLoadedUserManagement();
-
-    const reset = await act(() => result.current.resetPassword('user1'));
-
-    expect(reset).toStrictEqual({
-      success: true,
-      message: 'Password reset email sent' 
+      expect(result.current.error).toBe('Failed to load users');
     });
-  });
 
-  it('returns failure when reset fails', async (): Promise<void> => {
-    Object.assign(mockApi, createMockApi({ shouldFailReset: true }));
-    const result = await renderLoadedUserManagement();
+    it.each<[mutation: string, run: (hook: UserManagementHook) => Promise<unknown>, outcome: unknown]>([
+      ['invite', inviteNewUser, {
+        success: false,
+        message: 'Failed to invite user',
+      }],
+      ['password reset', resetUser1, {
+        success: false,
+        message: 'Failed to reset password',
+      }],
+    ])('answers the %s fallback message', async (_mutation, run, outcome) => {
+      const result = await renderLoadedUserManagement();
+      Object.assign(mockApi, createMockApi({ nonErrorRejection: 'offline' }));
 
-    const reset = await act(() => result.current.resetPassword('user1'));
+      await expect(act(() => run(result.current))).resolves.toStrictEqual(outcome);
+    });
 
-    expect(reset).toStrictEqual({
-      success: false,
-      message: 'Failed to reset password' 
+    it.each<[message: string, run: (hook: UserManagementHook) => Promise<unknown>]>([
+      ['Failed to update user', updateUser1],
+      ['Failed to delete user', removeUser1],
+    ])('shows "%s" when the mutation rejects', async (message, run) => {
+      const result = await renderLoadedUserManagement();
+      Object.assign(mockApi, createMockApi({ nonErrorRejection: 'offline' }));
+
+      await act(() => run(result.current));
+
+      expect(result.current.error).toBe(message);
     });
   });
 

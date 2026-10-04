@@ -4,24 +4,26 @@ import {
 import {
   screen, within
 } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { renderOverview } from './overviewRender-fixtures';
+import {
+  clickExportToExcel, renderOverview
+} from './overviewRender-fixtures';
 import {
   GROUP_ENGINES_CAPTION, GROUP_SHARE_OF_VOICE_CAPTION, GROUP_SOURCES_CAPTION, GROUP_TREND_CAPTION, buildKeywordRow, buildTrendsResponse,
   buildVisibility
 } from './visibilityOverview-fixtures';
-import { panelTitled } from './visibilityTables-fixtures';
+import {
+  historyPanel, panelTitled, scopeLine
+} from './visibilityTables-fixtures';
 import { HISTORY_TITLE } from './VisibilityHistory';
 import {
   ENGINES_TITLE, SOURCES_TITLE
 } from './VisibilityChartPanels';
 import {
-  definitionTerms, headlineCardLabels, statFigure, statFootnote
+  definitionTerms, VISIBILITY_DEFINITION_TERMS, headlineCardLabels, statFigure, statFootnote
 } from '../Reports/layout/reportQueries-fixtures';
-import { NO_PREVIOUS_RUN } from '../Reports/layout';
+import { NO_PREVIOUS_RUN } from '../Reports/layout/periodComparison';
 import { OWNED_DOMAINS_MISSING } from '../Reports/layout/KpiHeadline';
 import { RUN_2 } from '../Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
-import { VISIBILITY_DEFINITIONS } from '../../constants/kpiDefinitions';
 import { formatDate } from '../../formatting/dateFormatter';
 
 vi.mock('./visibilityOverviewExport', () => ({ exportVisibilityOverview: vi.fn() }));
@@ -38,12 +40,19 @@ class ExportFailure extends Error {
   }
 }
 
+/** Renders the default overview, clicks "Export to Excel" and returns the props it rendered. */
+async function renderOverviewThenExport() {
+  const { props } = renderOverview();
+  await clickExportToExcel();
+  return props;
+}
+
 describe('VisibilityOverview', () => {
   describe('scope line', () => {
     it('names the scope, its keywords with data and the latest run', () => {
       renderOverview();
 
-      expect(screen.getByText(/keywords have analysis data/).textContent).toBe(
+      expect(scopeLine().textContent).toBe(
         `Hotel Sol · 1 of 2 keywords have analysis data · latest run ${formatDate(RUN_2)}`
       );
     });
@@ -56,13 +65,13 @@ describe('VisibilityOverview', () => {
         }),
       });
 
-      expect(screen.getByText(/keywords have analysis data/).textContent).toBe('Hotel Sol · 0 of 2 keywords have analysis data · no analysis run yet');
+      expect(scopeLine().textContent).toBe('Hotel Sol · 0 of 2 keywords have analysis data · no analysis run yet');
     });
 
     it('says how many keywords are included when the scope is truncated', () => {
       renderOverview({ visibility: buildVisibility({ keywords_truncated: true }) });
 
-      expect(screen.getByText(/keywords have analysis data/)).toHaveTextContent('only the first 2 keywords are included');
+      expect(scopeLine()).toHaveTextContent('only the first 2 keywords are included');
     });
   });
 
@@ -139,7 +148,7 @@ describe('VisibilityOverview', () => {
     it('charts the KPI history of the trends', () => {
       renderOverview();
 
-      expect(within(panelTitled(HISTORY_TITLE)).getByRole('figure')).toHaveTextContent(GROUP_TREND_CAPTION);
+      expect(historyPanel().getByRole('figure')).toHaveTextContent(GROUP_TREND_CAPTION);
     });
 
     it('counts every domain the answers cite under the domains table', () => {
@@ -160,7 +169,7 @@ describe('VisibilityOverview', () => {
         trendsError: 'Failed to fetch historical trends',
       });
 
-      expect(within(panelTitled(HISTORY_TITLE)).getByText('History unavailable: Failed to fetch historical trends')).toBeInTheDocument();
+      expect(historyPanel().getByText('History unavailable: Failed to fetch historical trends')).toBeInTheDocument();
     });
 
     it('shows scope-specific panels before the definitions', () => {
@@ -172,25 +181,23 @@ describe('VisibilityOverview', () => {
     it('defines every KPI and the change rule in the definitions block', () => {
       renderOverview();
 
-      expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITIONS.map((entry) => entry.label));
+      expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITION_TERMS);
     });
   });
 
   describe('export', () => {
     it('exports exactly the rendered visibility, trends and scope label', async () => {
       mockExportVisibilityOverview.mockResolvedValue();
-      const { props } = renderOverview();
 
-      await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
+      const props = await renderOverviewThenExport();
 
       expect(mockExportVisibilityOverview).toHaveBeenCalledWith(props.visibility, props.trends, 'Hotel Sol');
     });
 
     it('disables the button while the workbook is written', async () => {
       mockExportVisibilityOverview.mockReturnValue(new Promise(vi.fn()));
-      renderOverview();
 
-      await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
+      await renderOverviewThenExport();
 
       expect(screen.getByRole('button', { name: 'Exporting…' })).toBeDisabled();
     });
@@ -199,9 +206,8 @@ describe('VisibilityOverview', () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
       const failure = new ExportFailure();
       mockExportVisibilityOverview.mockRejectedValue(failure);
-      renderOverview();
 
-      await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
+      await renderOverviewThenExport();
 
       expect(consoleError).toHaveBeenCalledWith('[visibility] Excel export failed:', failure);
       expect(screen.getByRole('button', { name: 'Export to Excel' })).toBeEnabled();

@@ -27,7 +27,6 @@ STATUS_RUNNING = 'running'
 STATUS_COMPLETED = 'completed'
 STATUS_PARTIAL = 'partial'
 STATUS_FAILED = 'failed'
-TERMINAL_STATUSES = frozenset({STATUS_COMPLETED, STATUS_PARTIAL, STATUS_FAILED})
 ACTIVE_STATUSES = frozenset({STATUS_PENDING, STATUS_RUNNING})
 
 STEP_PENDING = 'pending'
@@ -121,8 +120,8 @@ def completed_steps(job: dict[str, Any], *, through_round: int | None = None) ->
     return _steps_with_status(job, STEP_COMPLETED, through_round=through_round)
 
 
-def failed_steps(job: dict[str, Any], *, through_round: int | None = None) -> list[dict[str, Any]]:
-    return _steps_with_status(job, STEP_FAILED, through_round=through_round)
+def failed_steps(job: dict[str, Any]) -> list[dict[str, Any]]:
+    return _steps_with_status(job, STEP_FAILED, through_round=None)
 
 
 def retry_start_round(job: dict[str, Any]) -> int:
@@ -589,14 +588,19 @@ def merge_expansion_keywords(steps: list[dict[str, Any]]) -> list[dict[str, Any]
     )
 
 
-def merge_competitor_analyses(steps: list[dict[str, Any]]) -> dict[str, Any]:
-    """Merge bounded competitor categories without duplicate keywords."""
-    result: dict[str, Any] = {
+def empty_competitor_analysis() -> dict[str, Any]:
+    """A competitor analysis with no domain, an unknown industry and every category empty."""
+    return {
         'domain': '',
         'industry': 'unknown',
         'page_focus': '',
         **{category: [] for category in COMPETITOR_CATEGORIES},
     }
+
+
+def merge_competitor_analyses(steps: list[dict[str, Any]]) -> dict[str, Any]:
+    """Merge bounded competitor categories without duplicate keywords."""
+    result = empty_competitor_analysis()
     seen: set[str] = set()
     for step in steps:
         analysis = step.get('analysis') or {}
@@ -621,10 +625,10 @@ def merge_competitor_analyses(steps: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def summarize_job(job: dict[str, Any], *, through_round: int | None = None) -> dict[str, Any]:
+def summarize_job(job: dict[str, Any]) -> dict[str, Any]:
     """Compute merged checkpoint results and counters without mutating the row."""
-    done = completed_steps(job, through_round=through_round)
-    failed = failed_steps(job, through_round=through_round)
+    done = completed_steps(job)
+    failed = failed_steps(job)
     if job.get('type') == TYPE_COMPETITOR:
         analysis = merge_competitor_analyses(done)
         count = sum(len(analysis.get(category, [])) for category in COMPETITOR_CATEGORIES)
@@ -676,7 +680,7 @@ def checkpoint_terminal_result(job: dict[str, Any]) -> tuple[str, dict[str, Any]
     return status, fields
 
 
-def public_view(job: dict[str, Any], *, include_raw: bool = False) -> dict[str, Any]:
+def public_view(job: dict[str, Any]) -> dict[str, Any]:
     """Shape a row for API responses and expose progressive checkpoint results."""
     private = {'steps', 'raw_response', 'ttl', 'execution_arn', 'execution_id', 'active_round'}
     view = {key: value for key, value in job.items() if key not in private}
@@ -701,8 +705,6 @@ def public_view(job: dict[str, Any], *, include_raw: bool = False) -> dict[str, 
         view['config'] = with_legacy_profile(view['config'])
     if job.get('status') in ACTIVE_STATUSES and steps:
         view.update(summarize_job(job))
-    if include_raw and job.get('raw_response'):
-        view['raw_response'] = job['raw_response']
     return view
 
 

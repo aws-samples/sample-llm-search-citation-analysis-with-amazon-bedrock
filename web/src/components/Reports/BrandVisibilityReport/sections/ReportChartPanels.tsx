@@ -19,7 +19,7 @@ export const KPI_TREND_INFO = 'Mention rate, share of voice, visibility score an
   + 'on a 0–100 scale. A period without answers is a gap in the line.';
 export const SHARE_OF_VOICE_TITLE = 'Share of voice';
 export const SHARE_OF_VOICE_TREND_TITLE = 'Share of voice over time';
-export const SHARE_OF_VOICE_TREND_SUBTITLE = 'Each brand\'s share of voice per period: your brand in the thick emerald line, '
+const SHARE_OF_VOICE_TREND_SUBTITLE = 'Each brand\'s share of voice per period: your brand in the thick emerald line, '
   + 'its leading competitors in thinner lines. A period where no answer names a brand is a gap.';
 
 interface PanelProps {readonly className?: string;}
@@ -45,22 +45,18 @@ export function KpiTrendPanel({
 }
 
 /** The share-of-voice donut of a leaderboard in a titled panel. */
-export function ShareOfVoicePanel({
-  brands, className
-}: PanelProps & { readonly brands: readonly BrandLeaderboardRow[] }) {
+export function ShareOfVoicePanel({ brands }: { readonly brands: readonly BrandLeaderboardRow[] }) {
   return (
-    <ChartPanel title={SHARE_OF_VOICE_TITLE} subtitle={KPI_DEFINITIONS.share_of_voice.definition} className={className}>
+    <ChartPanel title={SHARE_OF_VOICE_TITLE} subtitle={KPI_DEFINITIONS.share_of_voice.definition}>
       <ShareOfVoiceChart brands={brands} />
     </ChartPanel>
   );
 }
 
 /** The share of voice of the tracked brand and its leading competitors per period, in a titled panel. */
-export function ShareOfVoiceTrendPanel({
-  trends, className
-}: PanelProps & { readonly trends: BrandTrends }) {
+export function ShareOfVoiceTrendPanel({ trends }: { readonly trends: BrandTrends }) {
   return (
-    <ChartPanel title={SHARE_OF_VOICE_TREND_TITLE} subtitle={SHARE_OF_VOICE_TREND_SUBTITLE} className={className}>
+    <ChartPanel title={SHARE_OF_VOICE_TREND_TITLE} subtitle={SHARE_OF_VOICE_TREND_SUBTITLE}>
       <BrandTrendChart trends={trends} metric="share_of_voice" />
     </ChartPanel>
   );

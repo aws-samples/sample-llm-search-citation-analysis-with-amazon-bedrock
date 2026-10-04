@@ -5,31 +5,44 @@ import {
   render, screen, waitFor
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ComponentProps } from 'react';
 import { ResearchHistory } from './ResearchHistory';
-import { SELECTION_LIMIT } from '../../hooks/usePromoteKeywords';
 import type {
   ExpandedKeywordWithSource, KeywordResearchItem
 } from '../../types';
 import { buildHistoryItem } from './ResearchHistory-fixtures';
 import {
-  expansionKeywordFixtures, luxuryHotelsFixture, promoteKeyword, selectKeywordCheckbox
+  buildCreatedKeywordItem,
+  buildPromotionWire,
+  expansionKeywordFixtures,
+  luxuryHotelsFixture,
+  promoteKeyword,
+  promotionRequestArguments,
+  selectKeywordCheckbox,
+  selectionCountText,
 } from './expandedKeyword-fixtures';
+import {
+  clickRetryButton, getRetryButtonElement, queryRetryButtonElement
+} from './researchRetry-fixtures';
 
 vi.mock('../../api/client', () => import('./apiClientMock-fixtures'));
 
 import { mockApiPost } from './apiClientMock-fixtures';
 
+const renderHistory = (overrides: Partial<ComponentProps<typeof ResearchHistory>> = {}) => render(
+  <ResearchHistory history={[]} loading={false} onDelete={vi.fn()} onRefresh={vi.fn()} {...overrides} />
+);
+
+/** A finished run without steps or a failure message. */
+const completedHistoryItem = buildHistoryItem({ status: 'completed' });
+
+const renderHistoryWithItems = (history: KeywordResearchItem[]) => renderHistory({ history });
+
 describe('ResearchHistory', () => {
-  const defaultProps = {
-    history: [],
-    loading: false,
-    onDelete: vi.fn(),
-    onRefresh: vi.fn(),
-  };
 
   describe('empty state', () => {
     it('shows empty message when history is empty', () => {
-      render(<ResearchHistory {...defaultProps} />);
+      renderHistory();
 
       expect(screen.getByText(/no research history/i)).toBeInTheDocument();
     });
@@ -37,7 +50,7 @@ describe('ResearchHistory', () => {
 
   describe('loading state', () => {
     it('shows loading state when loading with no history', () => {
-      render(<ResearchHistory {...defaultProps} loading={true} />);
+      renderHistory({ loading: true });
 
       expect(screen.getByText(/loading/i)).toBeInTheDocument();
     });
@@ -45,20 +58,23 @@ describe('ResearchHistory', () => {
 
   describe('with history items', () => {
     it('displays seed keyword from history item', () => {
-      render(<ResearchHistory {...defaultProps} history={[buildHistoryItem()]} />);
+      renderHistoryWithItems([buildHistoryItem()]);
 
       expect(screen.getByText('hotels')).toBeInTheDocument();
     });
 
     it('displays industry badge from history item', () => {
-      render(<ResearchHistory {...defaultProps} history={[buildHistoryItem()]} />);
+      renderHistoryWithItems([buildHistoryItem()]);
 
       expect(screen.getByText('hospitality')).toBeInTheDocument();
     });
 
     it('calls onDelete when delete button clicked', async () => {
       const onDelete = vi.fn();
-      render(<ResearchHistory {...defaultProps} history={[buildHistoryItem()]} onDelete={onDelete} />);
+      renderHistory({
+        history: [buildHistoryItem()],
+        onDelete,
+      });
 
       await userEvent.click(screen.getByRole('button', { name: /delete/i }));
 
@@ -69,14 +85,14 @@ describe('ResearchHistory', () => {
   describe('refresh', () => {
     it('calls onRefresh on mount', () => {
       const onRefresh = vi.fn();
-      render(<ResearchHistory {...defaultProps} onRefresh={onRefresh} />);
+      renderHistory({ onRefresh });
 
       expect(onRefresh).toHaveBeenCalledTimes(1);
     });
 
     it('calls onRefresh when refresh button clicked', async () => {
       const onRefresh = vi.fn();
-      render(<ResearchHistory {...defaultProps} onRefresh={onRefresh} />);
+      renderHistory({ onRefresh });
 
       await userEvent.click(screen.getByRole('button', { name: /refresh/i }));
 
@@ -106,30 +122,12 @@ const competitorHistoryItemFixture: KeywordResearchItem = {
   analysis: { primary_keywords: competitorKeywordFixtures },
 };
 
-/**
- * A `created_keywords` wire entry: the COMPLETE created item as the backend
- * writes it, which is a superset of the `Keyword` fields the active keyword list
- * reads.
- */
-const createdKeywordItemFixture = {
-  id: 'keyword-1',
+const createdKeywordItemFixture = buildCreatedKeywordItem({
   keyword: competitorPrimaryKeywordFixture.keyword,
-  status: 'active',
-  created_at: '2024-01-16T10:30:00Z',
-  updated_at: '2024-01-16T10:30:00Z',
-  region: 'global',
-  language: 'en',
-  category: '',
-  priority: 'normal',
   notes: 'intent: commercial; competition: medium; source: meta_description',
-};
+});
 
-const promotionWireFixture = {
-  created: 1,
-  skipped: 0,
-  created_keywords: [createdKeywordItemFixture],
-  skipped_keywords: [],
-};
+const promotionWireFixture = buildPromotionWire([createdKeywordItemFixture]);
 
 /**
  * The five stranded production rows this covers were failed by the timeout
@@ -147,15 +145,6 @@ const strandedRunFixture: KeywordResearchItem = {
   error_message: 'Research timed out after 4434821 seconds. Please try again.',
 };
 
-const renderHistoryWithItems = (history: KeywordResearchItem[]) => render(
-  <ResearchHistory
-    history={history}
-    loading={false}
-    onDelete={vi.fn()}
-    onRefresh={vi.fn()}
-  />
-);
-
 describe('ResearchHistory promotion UI', () => {
   beforeEach(() => {
     mockApiPost.mockReset();
@@ -169,6 +158,14 @@ describe('ResearchHistory promotion UI', () => {
     expect(screen.getAllByRole('checkbox')).toHaveLength(expansionKeywordFixtures.length);
   });
 
+  it('keeps the row collapsed when its delete button is clicked', async () => {
+    renderHistoryWithItems([buildHistoryItem({ keywords: expansionKeywordFixtures })]);
+
+    await userEvent.click(screen.getByRole('button', { name: /delete/i }));
+
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
   it('clears the selection when a different history item is expanded', async () => {
     renderHistoryWithItems([
       buildHistoryItem({ keywords: expansionKeywordFixtures }),
@@ -180,12 +177,12 @@ describe('ResearchHistory promotion UI', () => {
     ]);
     await userEvent.click(screen.getByText('hotels'));
     await userEvent.click(selectKeywordCheckbox(luxuryHotelsFixture.keyword));
-    expect(screen.getByText(`1 of ${SELECTION_LIMIT} keywords selected`)).toBeInTheDocument();
+    expect(screen.getByText(selectionCountText(1))).toBeInTheDocument();
 
     await userEvent.click(screen.getByText('flights'));
     await userEvent.click(screen.getByText('hotels'));
 
-    expect(screen.getByText(`0 of ${SELECTION_LIMIT} keywords selected`)).toBeInTheDocument();
+    expect(screen.getByText(selectionCountText(0))).toBeInTheDocument();
     expect(selectKeywordCheckbox(luxuryHotelsFixture.keyword)).not.toBeChecked();
   });
 
@@ -197,28 +194,16 @@ describe('ResearchHistory promotion UI', () => {
     await promoteKeyword(competitorPrimaryKeywordFixture.keyword);
 
     expect(mockApiPost).toHaveBeenCalledTimes(1);
-    expect(mockApiPost).toHaveBeenCalledWith(
-      '/keywords/promote',
-      { keywords: [competitorPrimaryKeywordFixture] },
-      {
-        signal: expect.any(AbortSignal),
-        allowStructured4xx: true,
-      }
-    );
+    expect(mockApiPost).toHaveBeenCalledWith(...promotionRequestArguments([competitorPrimaryKeywordFixture]));
   });
 
   it('reports the created keywords of the expanded item to its owner', async () => {
     mockApiPost.mockResolvedValue(promotionWireFixture);
     const onKeywordsAdded = vi.fn();
-    render(
-      <ResearchHistory
-        history={[competitorHistoryItemFixture]}
-        loading={false}
-        onDelete={vi.fn()}
-        onRefresh={vi.fn()}
-        onKeywordsAdded={onKeywordsAdded}
-      />
-    );
+    renderHistory({
+      history: [competitorHistoryItemFixture],
+      onKeywordsAdded,
+    });
     await userEvent.click(screen.getByText('example.com'));
 
     await promoteKeyword(competitorPrimaryKeywordFixture.keyword);
@@ -253,7 +238,7 @@ describe('ResearchHistory run status', () => {
   });
 
   it('marks a finished run as completed', () => {
-    renderHistoryWithItems([buildHistoryItem({ status: 'completed' })]);
+    renderHistoryWithItems([completedHistoryItem]);
 
     expect(screen.getByText('Completed')).toBeInTheDocument();
   });
@@ -304,7 +289,7 @@ describe('ResearchHistory failure message', () => {
   });
 
   it('shows no failure message on a run that carries none', () => {
-    renderHistoryWithItems([buildHistoryItem({ status: 'completed' })]);
+    renderHistoryWithItems([completedHistoryItem]);
 
     expect(screen.queryByText(/timed out/)).not.toBeInTheDocument();
   });
@@ -339,36 +324,44 @@ describe('ResearchHistory retry', () => {
   });
 
   it('shows no provider summary for a legacy row without steps', () => {
-    renderHistoryWithItems([buildHistoryItem({ status: 'completed' })]);
+    renderHistoryWithItems([completedHistoryItem]);
 
     expect(screen.queryByText(/providers/)).not.toBeInTheDocument();
   });
 
   it('offers a retry on a partial run and hands back the job', async () => {
-    const user = userEvent.setup();
     const onRetry = vi.fn();
-    render(<ResearchHistory history={[partialRun]} loading={false} onDelete={vi.fn()} onRefresh={vi.fn()} onRetry={onRetry} />);
+    renderHistory({
+      history: [partialRun],
+      onRetry,
+    });
 
-    await user.click(screen.getByRole('button', { name: 'Retry failed providers' }));
+    await clickRetryButton();
 
     expect(onRetry).toHaveBeenCalledWith(partialRun);
   });
 
   it('offers a retry on a failed run', () => {
-    render(<ResearchHistory history={[strandedRunFixture]} loading={false} onDelete={vi.fn()} onRefresh={vi.fn()} onRetry={vi.fn()} />);
+    renderHistory({
+      history: [strandedRunFixture],
+      onRetry: vi.fn(),
+    });
 
-    expect(screen.getByRole('button', { name: 'Retry failed providers' })).toBeInTheDocument();
+    expect(getRetryButtonElement()).toBeInTheDocument();
   });
 
   it('offers no retry on a completed run', () => {
-    render(<ResearchHistory history={[buildHistoryItem({ status: 'completed' })]} loading={false} onDelete={vi.fn()} onRefresh={vi.fn()} onRetry={vi.fn()} />);
+    renderHistory({
+      history: [completedHistoryItem],
+      onRetry: vi.fn(),
+    });
 
-    expect(screen.queryByRole('button', { name: 'Retry failed providers' })).not.toBeInTheDocument();
+    expect(queryRetryButtonElement()).not.toBeInTheDocument();
   });
 
   it('offers no retry when the caller cannot retry', () => {
     renderHistoryWithItems([partialRun]);
 
-    expect(screen.queryByRole('button', { name: 'Retry failed providers' })).not.toBeInTheDocument();
+    expect(queryRetryButtonElement()).not.toBeInTheDocument();
   });
 });

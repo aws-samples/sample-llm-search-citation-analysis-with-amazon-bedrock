@@ -34,16 +34,11 @@ describe('ProviderHealthBanner', () => {
   });
 
   describe('visibility', () => {
-    it('renders nothing when every enabled provider is healthy', () => {
-      mockProviders([buildBannerProvider()]);
-
-      const { container } = renderBanner();
-
-      expect(container).toBeEmptyDOMElement();
-    });
-
-    it('renders nothing while the provider list is still loading', () => {
-      mockProviders([buildCreditExhaustedProvider()], true);
+    it.each([
+      ['every enabled provider is healthy', [buildBannerProvider()], false],
+      ['the provider list is still loading', [buildCreditExhaustedProvider()], true],
+    ])('renders nothing when %s', (_condition, providers, loading) => {
+      mockProviders(providers, loading);
 
       const { container } = renderBanner();
 

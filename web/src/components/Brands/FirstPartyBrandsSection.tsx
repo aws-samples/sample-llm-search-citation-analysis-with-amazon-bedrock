@@ -1,7 +1,7 @@
-import { Spinner } from '../ui/Spinner';
 import { BrandExpansionPanel } from './BrandExpansionPanel';
 import { BrandTagList } from './BrandTagList';
 import type { BrandListSectionProps } from './brandListSection';
+import { ExpandBrandLabel } from './ExpandBrandLabel';
 
 export function FirstPartyBrandsSection({
   brands, newBrand, selectedBrand, expandingBrand, expansionResult, expansionTarget,
@@ -18,9 +18,7 @@ export function FirstPartyBrandsSection({
             disabled={expandingBrand === 'first_party'}
             className="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-1.5"
           >
-            {expandingBrand === 'first_party' ? <><Spinner size="sm" />Expanding...</> : (
-              <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>Expand Brand</>
-            )}
+            <ExpandBrandLabel expanding={expandingBrand === 'first_party'} />
           </button>
         )}
       </div>

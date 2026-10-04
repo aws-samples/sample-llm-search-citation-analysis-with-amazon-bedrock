@@ -51,15 +51,6 @@ describe('KeywordScopeSelector', () => {
     ]);
   });
 
-  it('hides the all-keywords option when it is not allowed', () => {
-    render(<KeywordScopeSelector keywords={keywords} groups={groups} value={{
-      kind: 'group',
-      groupId: 'g-coruna' 
-    }} onChange={vi.fn()} allowAll={false} />);
-
-    expect(screen.queryByRole('option', { name: 'All keywords' })).not.toBeInTheDocument();
-  });
-
   it('reflects the current scope', () => {
     render(<KeywordScopeSelector keywords={keywords} groups={groups} value={{
       kind: 'keyword',

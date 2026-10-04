@@ -2,26 +2,18 @@ import {
   describe, it, expect, vi, beforeEach 
 } from 'vitest';
 import {
-  renderTheme, renderThemeSetTo, renderThemeToggledOnce 
+  createMatchMediaMock, renderTheme, renderThemeSetTo, renderThemeToggledOnce
 } from './useTheme-fixtures';
 import { createStorageMock } from '../test/storageMock';
+import { installStorageMock } from '../test/installStorageMock';
 
 describe('useTheme', () => {
   const localStorageMock = createStorageMock();
 
-  const matchMediaMock = vi.fn().mockImplementation((query: string) => ({
-    matches: query.includes('dark') ? false : true,
-    media: query,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-  }));
+  const matchMediaMock = vi.fn().mockImplementation(createMatchMediaMock(false));
 
   beforeEach(() => {
-    Object.keys(localStorageMock.store).forEach(key => delete localStorageMock.store[key]);
-    Object.defineProperty(window, 'localStorage', {
-      value: localStorageMock,
-      writable: true 
-    });
+    installStorageMock(localStorageMock);
     Object.defineProperty(window, 'matchMedia', {
       value: matchMediaMock,
       writable: true 
@@ -29,45 +21,66 @@ describe('useTheme', () => {
     document.documentElement.classList.remove('dark');
   });
 
-  describe('initial state', () => {
-    it('returns system theme by default when no stored preference', () => {
-      const { result } = renderTheme();
-      expect(result.current.theme).toBe('system');
-    });
+  describe('theme from the stored preference', () => {
+    it.each([
+      {
+        name: 'returns system theme by default when no stored preference',
+        stored: {},
+        render: renderTheme,
+        expected: 'system',
+      },
+      {
+        name: 'returns stored theme from localStorage',
+        stored: { theme: 'dark' },
+        render: renderTheme,
+        expected: 'dark',
+      },
+      {
+        name: 'returns light theme when stored',
+        stored: { theme: 'light' },
+        render: renderTheme,
+        expected: 'light',
+      },
+      {
+        name: 'ignores invalid stored theme values',
+        stored: { theme: 'invalid' },
+        render: renderTheme,
+        expected: 'system',
+      },
+      {
+        name: 'toggleTheme cycles from light to dark',
+        stored: { theme: 'light' },
+        render: renderThemeToggledOnce,
+        expected: 'dark',
+      },
+      {
+        name: 'toggleTheme cycles from dark to system',
+        stored: { theme: 'dark' },
+        render: renderThemeToggledOnce,
+        expected: 'system',
+      },
+      {
+        name: 'toggleTheme cycles from system to light',
+        stored: {},
+        render: renderThemeToggledOnce,
+        expected: 'light',
+      },
+    ])('$name', ({
+      stored, render, expected
+    }) => {
+      Object.assign(localStorageMock.store, stored);
 
-    it('returns stored theme from localStorage', () => {
-      localStorageMock.store['theme'] = 'dark';
+      const { result } = render();
 
-      const { result } = renderTheme();
-      expect(result.current.theme).toBe('dark');
-    });
-
-    it('returns light theme when stored', () => {
-      localStorageMock.store['theme'] = 'light';
-
-      const { result } = renderTheme();
-      expect(result.current.theme).toBe('light');
-    });
-
-    it('ignores invalid stored theme values', () => {
-      localStorageMock.store['theme'] = 'invalid';
-
-      const { result } = renderTheme();
-      expect(result.current.theme).toBe('system');
+      expect(result.current.theme).toBe(expected);
     });
   });
 
-  describe('setTheme', () => {
-    it('updates theme to dark', () => {
-      const { result } = renderThemeSetTo('dark');
+  describe('selecting a theme', () => {
+    it.each(['dark', 'light'] as const)('updates theme to %s', (theme) => {
+      const { result } = renderThemeSetTo(theme);
 
-      expect(result.current.theme).toBe('dark');
-    });
-
-    it('updates theme to light', () => {
-      const { result } = renderThemeSetTo('light');
-
-      expect(result.current.theme).toBe('light');
+      expect(result.current.theme).toBe(theme);
     });
 
     it('saves theme to localStorage', () => {
@@ -91,54 +104,30 @@ describe('useTheme', () => {
     });
   });
 
-  describe('toggleTheme', () => {
-    it('cycles from light to dark', () => {
-      localStorageMock.store['theme'] = 'light';
-
-      const { result } = renderThemeToggledOnce();
-
-      expect(result.current.theme).toBe('dark');
-    });
-
-    it('cycles from dark to system', () => {
-      localStorageMock.store['theme'] = 'dark';
-
-      const { result } = renderThemeToggledOnce();
-
-      expect(result.current.theme).toBe('system');
-    });
-
-    it('cycles from system to light', () => {
-      const { result } = renderThemeToggledOnce();
-
-      expect(result.current.theme).toBe('light');
-    });
-  });
-
   describe('isDark', () => {
-    it('returns true when theme is dark', () => {
-      localStorageMock.store['theme'] = 'dark';
+    it.each([
+      {
+        name: 'returns true when theme is dark',
+        theme: 'dark',
+        expected: true,
+      },
+      {
+        name: 'returns false when theme is light',
+        theme: 'light',
+        expected: false,
+      },
+    ])('$name', ({
+      theme, expected 
+    }) => {
+      localStorageMock.store['theme'] = theme;
 
       const { result } = renderTheme();
 
-      expect(result.current.isDark).toBe(true);
-    });
-
-    it('returns false when theme is light', () => {
-      localStorageMock.store['theme'] = 'light';
-
-      const { result } = renderTheme();
-
-      expect(result.current.isDark).toBe(false);
+      expect(result.current.isDark).toBe(expected);
     });
 
     it('returns system preference when theme is system', () => {
-      matchMediaMock.mockImplementation((query: string) => ({
-        matches: query.includes('dark'),
-        media: query,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      }));
+      matchMediaMock.mockImplementation(createMatchMediaMock(true));
 
       const { result } = renderTheme();
 
@@ -150,11 +139,7 @@ describe('useTheme', () => {
   describe('system theme listener', () => {
     it('adds event listener for system theme changes', () => {
       const addEventListenerMock = vi.fn();
-      matchMediaMock.mockImplementation(() => ({
-        matches: false,
-        addEventListener: addEventListenerMock,
-        removeEventListener: vi.fn(),
-      }));
+      matchMediaMock.mockImplementation(createMatchMediaMock(false, { addEventListener: addEventListenerMock }));
 
       renderTheme();
 
@@ -163,11 +148,7 @@ describe('useTheme', () => {
 
     it('removes event listener on unmount', () => {
       const removeEventListenerMock = vi.fn();
-      matchMediaMock.mockImplementation(() => ({
-        matches: false,
-        addEventListener: vi.fn(),
-        removeEventListener: removeEventListenerMock,
-      }));
+      matchMediaMock.mockImplementation(createMatchMediaMock(false, { removeEventListener: removeEventListenerMock }));
 
       const { unmount } = renderTheme();
 

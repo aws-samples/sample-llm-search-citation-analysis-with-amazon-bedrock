@@ -8,7 +8,7 @@ import type {
  * overridden.
  */
 
-export const EXAMPLE_ANSWER = '## Spa hotels\n\nHotel Sol is **cheaper**, but guests often mention that the rooms at Hotel Sol feel dated.';
+const EXAMPLE_ANSWER = '## Spa hotels\n\nHotel Sol is **cheaper**, but guests often mention that the rooms at Hotel Sol feel dated.';
 
 export function buildSentimentExample(overrides: Partial<SentimentExample> = {}): SentimentExample {
   return {

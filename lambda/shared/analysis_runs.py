@@ -65,9 +65,14 @@ def fetch_enabled_query_prompts(query_prompts_table: Any) -> list[dict[str, str]
         logger.warning(f"Could not fetch query prompts, proceeding without them: {error}")
         return []
     items: list[dict[str, Any]] = response.get('Items', [])
-    prompts = [{'id': item['id'], 'name': item.get('name', ''), 'template': item.get('template', '')} for item in items]
+    prompts = [query_prompt_from_item(item) for item in items]
     logger.info(f"Found {len(prompts)} enabled query prompts")
     return prompts
+
+
+def query_prompt_from_item(item: dict[str, Any]) -> dict[str, str]:
+    """The ``{'id', 'name', 'template'}`` a run carries for one QueryPrompts row."""
+    return {'id': item['id'], 'name': item.get('name', ''), 'template': item.get('template', '')}
 
 
 def scope_run_input(scope: dict[str, Any], query_prompts: list[dict[str, str]]) -> dict[str, Any]:

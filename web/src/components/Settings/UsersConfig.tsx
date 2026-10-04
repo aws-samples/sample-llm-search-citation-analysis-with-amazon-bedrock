@@ -8,6 +8,11 @@ import {
   getStatusBadgeClass,
   getStatusLabel,
 } from './UserModals';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import { RefreshIcon } from '../ui';
+import { CenteredMessage } from '../ui/CenteredState';
+import { SettingsErrorNotice } from './SettingsErrorNotice';
+import { SettingsSectionHeader } from './SettingsSectionHeader';
 
 class InviteError extends Error {
   constructor(message: string) {
@@ -70,43 +75,31 @@ export function UsersConfig() {
   };
 
   if (loading) {
-    return <div className="text-center py-12 text-gray-500">Loading users...</div>;
+    return <CenteredMessage>Loading users...</CenteredMessage>;
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900">User Management</h3>
-          <p className="text-xs text-gray-500 mt-1">
-            Manage Cognito users: invite, enable/disable, and assign groups
-          </p>
-        </div>
+      <SettingsSectionHeader title="User Management" description="Manage Cognito users: invite, enable/disable, and assign groups">
         <div className="flex items-center gap-2">
           <button
             onClick={refresh}
             className="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
+            <RefreshIcon className="w-4 h-4" />
             Refresh
           </button>
           <button
             onClick={() => setShowInviteModal(true)}
             className="px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-2"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
+            <StrokeIcon className="w-4 h-4" paths={['M12 4.5v15m7.5-7.5h-15']} aria-hidden="true" />
             Invite User
           </button>
         </div>
-      </div>
+      </SettingsSectionHeader>
 
-      {error && (
-        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{error}</div>
-      )}
+      <SettingsErrorNotice error={error} />
 
       {successMessage && (
         <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">{successMessage}</div>
@@ -166,9 +159,7 @@ export function UsersConfig() {
                       className="text-gray-400 hover:text-gray-600 transition-colors"
                       title="View details"
                     >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
-                      </svg>
+                      <StrokeIcon className="w-5 h-5" paths={['M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z']} />
                     </button>
                   </td>
                 </tr>

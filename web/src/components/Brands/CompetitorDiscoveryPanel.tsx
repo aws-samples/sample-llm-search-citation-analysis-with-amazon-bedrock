@@ -1,15 +1,12 @@
 import type { CompetitorDiscoveryResult } from '../../types';
 import { CheckIcon } from '../ui';
 import { SuggestionPanelHeader } from './SuggestionPanelHeader';
+import type { PendingBrandSelectionProps } from './BrandExpansionPanel';
 
-interface CompetitorDiscoveryPanelProps {
+interface CompetitorDiscoveryPanelProps extends PendingBrandSelectionProps {
   readonly result: CompetitorDiscoveryResult;
   readonly existingCompetitors: string[];
-  readonly pendingBrands: string[];
   readonly brandExists: (brand: string, list: string[]) => boolean;
-  readonly onToggleBrand: (brand: string) => void;
-  readonly onAccept: () => void;
-  readonly onCancel: () => void;
 }
 
 export const CompetitorDiscoveryPanel = ({

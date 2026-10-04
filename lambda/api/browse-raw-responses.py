@@ -10,10 +10,11 @@ Endpoints:
     GET /api/raw-responses/download?key=path/to/file.json&bucket=responses|screenshots
 """
 
+import functools
 import json
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 from urllib.parse import unquote
 
@@ -308,37 +309,41 @@ def _resolve_scoped_object(event: dict[str, Any], key: str, bucket: str) -> tupl
     return actual_bucket, scoped_key
 
 
-@validate({
-    'key': {'required': True, 'type': str, 'max_length': 1024},
-    'bucket': {'type': str, 'max_length': 20, 'default': 'responses'}
-})
-def _get_file(event: dict[str, Any], context: Any, key: str, bucket: str) -> dict[str, Any]:
-    """Get file content for the given S3 key, confined to the bucket's root prefix."""
-    target = _resolve_scoped_object(event, key, bucket)
-    if isinstance(target, dict):
-        return target
-    actual_bucket, scoped_key = target
+def _scoped_object_route(answer: Callable[[dict[str, Any], str, str], dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    """A ``key`` / ``bucket`` route that hands ``answer`` the object only once it is confined to the bucket's root prefix.
 
+    ``answer(event, actual_bucket, scoped_key)`` never sees the raw key; a key
+    that fails validation or scoping is answered with its 400.
+    """
+    @validate({
+        'key': {'required': True, 'type': str, 'max_length': 1024},
+        'bucket': {'type': str, 'max_length': 20, 'default': 'responses'}
+    })
+    @functools.wraps(answer)
+    def route(event: dict[str, Any], context: Any, key: str, bucket: str) -> dict[str, Any]:
+        target = _resolve_scoped_object(event, key, bucket)
+        if isinstance(target, dict):
+            return target
+        return answer(event, *target)
+
+    return route
+
+
+@_scoped_object_route
+def _get_file(event: dict[str, Any], actual_bucket: str, scoped_key: str) -> dict[str, Any]:
+    """Get file content for the given S3 key, confined to the bucket's root prefix."""
     result = get_file_content(actual_bucket, scoped_key)
     return success_response(result, event)
 
 
-@validate({
-    'key': {'required': True, 'type': str, 'max_length': 1024},
-    'bucket': {'type': str, 'max_length': 20, 'default': 'responses'}
-})
-def _get_download(event: dict[str, Any], context: Any, key: str, bucket: str) -> dict[str, Any]:
+@_scoped_object_route
+def _get_download(event: dict[str, Any], actual_bucket: str, scoped_key: str) -> dict[str, Any]:
     """Generate a presigned download URL, confined to the bucket's root prefix.
 
     The URL this returns is signed with the Lambda role's credentials and is
     bearer-shareable — no Cognito token is needed to redeem it — so the key must
     be scoped before it is signed, not after.
     """
-    target = _resolve_scoped_object(event, key, bucket)
-    if isinstance(target, dict):
-        return target
-    actual_bucket, scoped_key = target
-
     url = generate_download_url(actual_bucket, scoped_key)
     # Echo the key that was actually signed, not the raw input.
     return success_response({'download_url': url, 'key': scoped_key}, event)

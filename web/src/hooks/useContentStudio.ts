@@ -41,6 +41,13 @@ function isPollableItem(
     && (failureCounts.get(item.id) ?? 0) < MAX_CONSECUTIVE_STATUS_FAILURES;
 }
 
+function pollableItems(
+  history: readonly ContentStudioHistory[],
+  failureCounts: ReadonlyMap<string, number>
+): ContentStudioHistory[] {
+  return history.filter((item) => isPollableItem(item, failureCounts));
+}
+
 function isStructuredBatchRejection(requestError: unknown): boolean {
   return isDefinitiveClientRejection(requestError)
     && requestError.responseMessage !== undefined;
@@ -192,9 +199,7 @@ export function useContentStudio() {
 
   const pollGeneratingItems = useCallback(async () => {
     if (itemStatusPollRef.current !== null) return;
-    const generatingItems = history.filter((item) => (
-      isPollableItem(item, pollingFailureCountsRef.current)
-    ));
+    const generatingItems = pollableItems(history, pollingFailureCountsRef.current);
     if (generatingItems.length === 0) {
       stopItemPolling();
       return;
@@ -209,9 +214,7 @@ export function useContentStudio() {
       if (itemStatusPollRef.current !== itemStatusPoll) return;
       const hasTerminalTransition = processStatusResults(generatingItems, statusResults);
       if (hasTerminalTransition) await fetchHistory();
-      const hasPollableItems = history.some((item) => (
-        isPollableItem(item, pollingFailureCountsRef.current)
-      ));
+      const hasPollableItems = pollableItems(history, pollingFailureCountsRef.current).length > 0;
       if (itemStatusPollRef.current === itemStatusPoll && !hasPollableItems) stopItemPolling();
     } finally {
       if (itemStatusPollRef.current === itemStatusPoll) itemStatusPollRef.current = null;
@@ -220,9 +223,7 @@ export function useContentStudio() {
 
   const startItemPolling = useCallback(() => {
     if (itemPollingRef.current !== null) return;
-    const hasPollableItems = history.some((item) => (
-      isPollableItem(item, pollingFailureCountsRef.current)
-    ));
+    const hasPollableItems = pollableItems(history, pollingFailureCountsRef.current).length > 0;
     if (!hasPollableItems) return;
 
     itemPollingRef.current = setInterval(
@@ -384,15 +385,6 @@ export function useContentStudio() {
     }
   }, [history]);
 
-  const refreshGeneratingItems = useCallback(() => {
-    stopItemPolling();
-    pollingFailureCountsRef.current.clear();
-    if (!mountedRef.current) return;
-    setError(null);
-    setPollingError(null);
-    startItemPolling();
-  }, [startItemPolling, stopItemPolling]);
-
   return {
     ideas,
     history,
@@ -407,6 +399,5 @@ export function useContentStudio() {
     fetchHistory,
     markViewed,
     deleteContent,
-    refreshGeneratingItems,
   };
 }

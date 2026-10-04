@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import {
   renderHook, act 
 } from '@testing-library/react';
@@ -5,15 +6,34 @@ import { useTheme } from './useTheme';
 
 type Theme = ReturnType<typeof useTheme>['theme'];
 
+type MediaQueryListeners = Partial<Pick<MediaQueryList, 'addEventListener' | 'removeEventListener'>>;
+
+/**
+ * A `window.matchMedia` implementation for a system that prefers dark when
+ * `prefersDark`; listener functions default to fresh spies.
+ */
+export function createMatchMediaMock(prefersDark: boolean, listeners: MediaQueryListeners = {}) {
+  return (query: string) => ({
+    matches: query.includes('dark') ? prefersDark : !prefersDark,
+    media: query,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    ...listeners,
+  });
+}
+
 export function renderTheme() {
   return renderHook(() => useTheme());
 }
 
-/** Mounts the hook and selects `theme` through `setTheme`. */
+/** Mounts the hook and selects `theme` by cycling `toggleTheme` (light → dark → system) until it is reached. */
 export function renderThemeSetTo(theme: Theme) {
   const rendered = renderTheme();
-  act(() => {
-    rendered.result.current.setTheme(theme);
+  ['light', 'dark', 'system'].forEach(() => {
+    if (rendered.result.current.theme === theme) return;
+    act(() => {
+      rendered.result.current.toggleTheme();
+    });
   });
   return rendered;
 }

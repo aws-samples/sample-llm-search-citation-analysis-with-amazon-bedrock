@@ -45,7 +45,7 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
-from shared.api_response import error_response, validation_error
+from shared.api_response import cors_json_headers, error_response, validation_error
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.router import path_contains_segment
 
@@ -416,22 +416,9 @@ def cors_preflight(func: Callable) -> Callable:
         method = event.get('httpMethod', '').upper()
 
         if method == 'OPTIONS':
-            from shared.api_response import get_cors_headers
-
-            # Get request origin for CORS
-            request_headers = event.get('headers') or {}
-            request_origin = (
-                request_headers.get('origin') or
-                request_headers.get('Origin') or
-                request_headers.get('ORIGIN')
-            )
-
             return {
                 'statusCode': 200,
-                'headers': {
-                    'Content-Type': 'application/json',
-                    **get_cors_headers(request_origin)
-                },
+                'headers': cors_json_headers(event),
                 'body': ''
             }
 

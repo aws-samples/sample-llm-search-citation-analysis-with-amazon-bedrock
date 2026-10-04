@@ -1,13 +1,19 @@
 import type { RecommendationsResponse } from '../../../../types';
-import { ReportSection } from '../../layout';
-import { SectionPlaceholder } from '../../layout/SectionPlaceholder';
+import {
+  PriorityBadge,
+  ReportSection,
+  ReportSectionNote,
+  ReportSectionPlaceholder,
+  pendingSectionPlaceholder,
+  type SectionFetchState,
+} from '../../layout';
 
-interface Props {
+interface Props extends SectionFetchState {
   readonly recommendations: RecommendationsResponse | null;
   readonly keyword: string;
-  readonly loading: boolean;
-  readonly error: string | null;
 }
+
+const TITLE = 'Recommended actions';
 
 const PRIORITY_ORDER = {
   high: 0,
@@ -26,30 +32,21 @@ const PRIORITY_ORDER = {
 export function RecommendationsSection({
   recommendations, keyword, loading, error,
 }: Props) {
-  if (loading) {
-    return (
-      <ReportSection title="Recommended actions">
-        <SectionPlaceholder variant="loading" message="Loading recommendations…" />
-      </ReportSection>
-    );
-  }
-
-  if (error) {
-    return (
-      <ReportSection title="Recommended actions">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
+  const pending = pendingSectionPlaceholder({
+    title: TITLE,
+    loading,
+    loadingMessage: 'Loading recommendations…',
+    error,
+  });
+  if (pending) return pending;
 
   if (!recommendations || recommendations.recommendations.length === 0) {
     return (
-      <ReportSection title="Recommended actions">
-        <SectionPlaceholder
-          variant="empty"
-          message="No recommendations generated yet. Run an analysis or wait for the next scheduled run."
-        />
-      </ReportSection>
+      <ReportSectionPlaceholder
+        title={TITLE}
+        variant="empty"
+        message="No recommendations generated yet. Run an analysis or wait for the next scheduled run."
+      />
     );
   }
 
@@ -72,23 +69,21 @@ export function RecommendationsSection({
 
   if (relevant.length === 0) {
     return (
-      <ReportSection
-        title="Recommended actions"
+      <ReportSectionNote
+        title={TITLE}
         subtitle="No keyword-specific recommendations from the latest analysis."
       >
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          The Action Center has{' '}
-          <span className="font-medium">{recommendations.total_count}</span>{' '}
-          recommendations across all keywords, but none reference{' '}
-          <span className="font-medium">{keyword}</span> specifically.
-        </p>
-      </ReportSection>
+        The Action Center has{' '}
+        <span className="font-medium">{recommendations.total_count}</span>{' '}
+        recommendations across all keywords, but none reference{' '}
+        <span className="font-medium">{keyword}</span> specifically.
+      </ReportSectionNote>
     );
   }
 
   return (
     <ReportSection
-      title="Recommended actions"
+      title={TITLE}
       subtitle="What to do next, sorted by priority. Pulled from the Action Center; filtered to this keyword."
     >
       <ol className="space-y-3">
@@ -119,21 +114,5 @@ export function RecommendationsSection({
         ))}
       </ol>
     </ReportSection>
-  );
-}
-
-function PriorityBadge({ priority }: { readonly priority: 'high' | 'medium' | 'low' }) {
-  const styles = {
-    high: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300',
-    medium: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300',
-    low: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
-  }[priority];
-
-  return (
-    <span
-      className={`flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold uppercase ${styles}`}
-    >
-      {priority}
-    </span>
   );
 }

@@ -31,6 +31,16 @@ class IndustryPreset(TypedDict):
 
 DEFAULT_INDUSTRY_ID = "general"
 
+# The fields of one extracted brand mention, as both the extraction prompt
+# (search/brand_extractor) and the dashboard's default prompt template
+# (api/manage-brand-config) describe them. The extractor puts its
+# ``classification`` line between the two blocks.
+BRAND_NAME_FIELDS = """- name: Full brand/company name as mentioned
+- parent_company: Parent company if identifiable (or null)"""
+BRAND_POSITION_FIELDS = """- mention_count: Number of times mentioned
+- first_position: Character position of first mention (approximate)
+- rank: Order of first appearance (1 = first mentioned)"""
+
 
 INDUSTRY_PRESETS: dict[str, IndustryPreset] = {
     "general": {

@@ -16,6 +16,14 @@ import { useQueryPrompts } from '../../hooks/useQueryPrompts';
 
 const mockUseQueryPrompts = vi.mocked(useQueryPrompts);
 
+/** Every persona mutation control, with the accessible name of its button. */
+const PERSONA_CONTROLS: [control: string, name: RegExp][] = [
+  ['create', /New Persona/iu],
+  ['per-row edit', /Edit persona/iu],
+  ['per-row delete', /Delete persona/iu],
+  ['per-row enable toggle', /Disable persona/iu],
+];
+
 describe('QueryPromptsManager', () => {
   beforeEach(() => {
     mockUseQueryPrompts.mockReturnValue(
@@ -24,23 +32,10 @@ describe('QueryPromptsManager', () => {
   });
 
   describe('admin users', () => {
-    it('offers the create control', () => {
+    it.each(PERSONA_CONTROLS)('offers the %s control', (_control, name) => {
       render(<QueryPromptsManager isAdmin />);
 
-      expect(screen.getByRole('button', { name: /New Persona/iu })).toBeInTheDocument();
-    });
-
-    it('offers the per-row edit and delete controls', () => {
-      render(<QueryPromptsManager isAdmin />);
-
-      expect(screen.getByRole('button', { name: /Edit persona/iu })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Delete persona/iu })).toBeInTheDocument();
-    });
-
-    it('offers the per-row enable toggle', () => {
-      render(<QueryPromptsManager isAdmin />);
-
-      expect(screen.getByRole('button', { name: /Disable persona/iu })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name })).toBeInTheDocument();
     });
   });
 
@@ -51,23 +46,15 @@ describe('QueryPromptsManager', () => {
      * keywords x providers x personas matrix that produced the dashboard data.
      */
 
-    it('hides the create control', () => {
+    function renderWithoutPersonas() {
+      mockUseQueryPrompts.mockReturnValue(buildQueryPromptsHookResult([]));
+      render(<QueryPromptsManager isAdmin={false} />);
+    }
+
+    it.each(PERSONA_CONTROLS)('hides the %s control', (_control, name) => {
       render(<QueryPromptsManager isAdmin={false} />);
 
-      expect(screen.queryByRole('button', { name: /New Persona/iu })).not.toBeInTheDocument();
-    });
-
-    it('hides the per-row edit and delete controls', () => {
-      render(<QueryPromptsManager isAdmin={false} />);
-
-      expect(screen.queryByRole('button', { name: /Edit persona/iu })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /Delete persona/iu })).not.toBeInTheDocument();
-    });
-
-    it('hides the per-row enable toggle', () => {
-      render(<QueryPromptsManager isAdmin={false} />);
-
-      expect(screen.queryByRole('button', { name: /Disable persona/iu })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
     });
 
     it('still shows the configured personas', () => {
@@ -83,17 +70,13 @@ describe('QueryPromptsManager', () => {
     });
 
     it('points at an administrator when no personas exist', () => {
-      mockUseQueryPrompts.mockReturnValue(buildQueryPromptsHookResult([]));
-
-      render(<QueryPromptsManager isAdmin={false} />);
+      renderWithoutPersonas();
 
       expect(screen.getByText(/An administrator can add personas/iu)).toBeInTheDocument();
     });
 
     it('does not tell non-admin users to create a persona', () => {
-      mockUseQueryPrompts.mockReturnValue(buildQueryPromptsHookResult([]));
-
-      render(<QueryPromptsManager isAdmin={false} />);
+      renderWithoutPersonas();
 
       expect(screen.queryByText(/Create a persona to see how/iu)).not.toBeInTheDocument();
     });

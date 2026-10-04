@@ -3,6 +3,7 @@
  * its fixed-height box, the themed legend and tooltip, and the 0–100 axis
  * of the percentages and scores.
  */
+import type { ChartConfiguration } from 'chart.js';
 import {
   themedAxis, themedLegend, themedTooltip, type ChartTheme
 } from '../../ui/chartTheme';
@@ -35,16 +36,32 @@ export function chartOptions<TScales>(theme: ChartTheme, scales: TScales) {
   };
 }
 
-/** The category labels and one bar dataset per series, in the series' colours. */
-export function barSeries(series: readonly ChartSeries[], isDark: boolean) {
+/** Options of a chart over categories on x and the shared 0–100 scale on y. */
+export function percentChartOptions(theme: ChartTheme) {
+  return chartOptions(theme, {
+    x: themedAxis(theme),
+    y: percentAxis(theme),
+  });
+}
+
+/** A bar chart under `options`: the category labels and one bar dataset per series, in the series' colours. */
+export function barChartConfiguration(
+  series: readonly ChartSeries[],
+  isDark: boolean,
+  options: ChartConfiguration<'bar'>['options'],
+): ChartConfiguration<'bar'> {
   const labels = seriesLabels(series);
   return {
-    labels,
-    datasets: series.map((bar) => ({
-      label: bar.label,
-      data: valuesAt(bar, labels),
-      backgroundColor: resolveColour(bar.colour, isDark),
-    })),
+    type: 'bar',
+    data: {
+      labels,
+      datasets: series.map((bar) => ({
+        label: bar.label,
+        data: valuesAt(bar, labels),
+        backgroundColor: resolveColour(bar.colour, isDark),
+      })),
+    },
+    options,
   };
 }
 

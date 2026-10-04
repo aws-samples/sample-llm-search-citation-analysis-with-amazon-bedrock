@@ -11,7 +11,7 @@ import {
   exportWorkbook, scopedExcelFileName, type ExcelSheet
 } from '../../../exporters/excelGenerator';
 import type {
-  BrandKpis, GroupKpiHistoryResponse, GroupRun, KeywordRunHistory, KpiDeltas, MentionChange
+  GroupKpiHistoryResponse, GroupRun, KeywordRunHistory, KpiDeltas, MentionChange
 } from '../../../types/domain/groupKpiHistory';
 import type { BrandMentionsResponse } from '../../../types';
 import {
@@ -20,19 +20,10 @@ import {
 import {
   BRAND_MENTION_COLUMNS, brandMentionsExcelRows
 } from '../../Brands/brandMentionsExport';
+import {
+  contextRow, definitionsSheet, kpiCells, kpiSummaryRows, sheetWidths, yesNo, type Cell
+} from '../layout/kpiSheets';
 import { runTrend } from './groupKpiView';
-
-type Cell = string | number;
-
-/** Excel column widths, in characters. */
-function widths(...characters: number[]): ExcelSheet['columns'] {
-  // Stryker disable next-line ObjectLiteral,ArrowFunction: column widths are presentation only
-  return characters.map((wch) => ({ wch }));
-}
-
-function yesNo(value: boolean): 'Yes' | 'No' {
-  return value ? 'Yes' : 'No';
-}
 
 const MENTION_CHANGE_LABELS: Record<Exclude<MentionChange, null>, string> = {
   gained: 'Now mentioned',
@@ -47,14 +38,6 @@ function modelsCell(run: GroupRun): string {
   return Object.entries(run.models).map(([provider, models]) => `${provider}: ${models.join(', ')}`).join('; ');
 }
 
-const VALUE_UNITS: Record<KpiUnit, string> = {
-  count: '',
-  percent: ' (%)',
-  position: '',
-  score: ' (0-100)',
-  net: ' (-100 to +100)',
-};
-
 const CHANGE_UNITS: Record<KpiUnit, string> = {
   count: '',
   percent: ' (pts)',
@@ -63,18 +46,9 @@ const CHANGE_UNITS: Record<KpiUnit, string> = {
   net: ' (pts)',
 };
 
-/** The column heading of a KPI value: its label and unit, e.g. "Mention rate (%)". */
-function kpiHeader(spec: KpiSpec): string {
-  return `${spec.label}${VALUE_UNITS[spec.unit]}`;
-}
-
 /** The column heading of a KPI change, e.g. "Mention rate change (pts)". */
 function kpiChangeHeader(spec: KpiSpec): string {
   return `${spec.label} change${CHANGE_UNITS[spec.unit]}`;
-}
-
-function kpiCells(kpis: BrandKpis): Record<string, Cell> {
-  return Object.fromEntries(KPI_SPECS.map((spec) => [kpiHeader(spec), kpis[spec.id] ?? '']));
 }
 
 /** Every KPI change; all empty when there is no comparison. */
@@ -97,32 +71,11 @@ function summarySheet(history: GroupKpiHistoryResponse, scopeLabel: string, run:
   ];
   return {
     name: 'Summary',
-    columns: widths(38, 32, 18, 12),
+    columns: sheetWidths(38, 32, 18, 12),
     data: [
-      ...context.map(([metric, value]) => ({
-        Metric: metric,
-        Value: value,
-        Change: '',
-        Trend: '',
-      })),
-      ...KPI_SPECS.map((spec) => ({
-        Metric: kpiHeader(spec),
-        Value: run.kpis[spec.id] ?? '',
-        Change: run.change?.deltas[spec.id] ?? '',
-        Trend: runTrend(run, spec.id) ?? '',
-      })),
+      ...context.map(([metric, value]) => contextRow(metric, value)),
+      ...kpiSummaryRows(run.kpis, run.change?.deltas, (id) => runTrend(run, id)),
     ],
-  };
-}
-
-function definitionsSheet(): ExcelSheet {
-  return {
-    name: 'Definitions',
-    columns: widths(18, 120),
-    data: GROUP_REPORT_DEFINITIONS.map((entry) => ({
-      KPI: entry.label,
-      'How it is measured': entry.definition,
-    })),
   };
 }
 
@@ -130,7 +83,7 @@ function historySheet(runs: readonly GroupRun[]): ExcelSheet {
   return {
     name: 'KPI history',
     // Stryker disable next-line ArrowFunction: column widths are presentation only
-    columns: widths(28, 10, 12, 12, ...KPI_SPECS.map(() => 16), 28, ...KPI_SPECS.map(() => 20), 60),
+    columns: sheetWidths(28, 10, 12, 12, ...KPI_SPECS.map(() => 16), 28, ...KPI_SPECS.map(() => 20), 60),
     data: runs.map((run) => ({
       Run: run.timestamp,
       'Group run': yesNo(run.is_group_run),
@@ -162,7 +115,7 @@ function driversSheet(runs: readonly GroupRun[]): ExcelSheet {
   return {
     name: 'Drivers',
     // Stryker disable next-line ArrowFunction: column widths are presentation only
-    columns: widths(28, 28, 40, 20, 18, 18, ...KPI_SPECS.map(() => 20)),
+    columns: sheetWidths(28, 28, 40, 20, 18, 18, ...KPI_SPECS.map(() => 20)),
     data: runs.flatMap(driverRows),
   };
 }
@@ -171,7 +124,7 @@ function keywordRunsSheet(keywords: readonly KeywordRunHistory[]): ExcelSheet {
   return {
     name: 'Keyword runs',
     // Stryker disable next-line ArrowFunction: column widths are presentation only
-    columns: widths(40, 28, 20, ...KPI_SPECS.map(() => 16), ...KPI_SPECS.map(() => 20)),
+    columns: sheetWidths(40, 28, 20, ...KPI_SPECS.map(() => 16), ...KPI_SPECS.map(() => 20)),
     data: keywords.flatMap((entry) => entry.runs.map((run) => ({
       Keyword: entry.keyword,
       Run: run.timestamp,
@@ -192,7 +145,7 @@ export function groupKpiReportSheets(
 ): ExcelSheet[] {
   const sheets = [
     summarySheet(history, scopeLabel, run, generatedAt),
-    definitionsSheet(),
+    definitionsSheet(GROUP_REPORT_DEFINITIONS),
     historySheet(history.runs),
     driversSheet(history.runs),
     keywordRunsSheet(history.keywords),

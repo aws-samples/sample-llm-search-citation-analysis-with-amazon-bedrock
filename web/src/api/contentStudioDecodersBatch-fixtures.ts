@@ -1,20 +1,14 @@
-import type {
-  ContentBriefBatchStatus, ContentStatus
-} from '../types';
+import type { ContentBriefBatchStatus } from '../types';
 import {
   apiBatchStartResponse, apiBatchStatusResponse
 } from './contentStudio-fixtures';
 import {
-  invalidIntegerRepresentations, omitDecoderField
+  invalidIntegerRepresentations, omitDecoderField, validContentStatuses
 } from './contentStudioDecoders-fixtures';
 
 export {
-  invalidIntegerRepresentations, omitDecoderField
+  invalidContentStudioResponse, invalidIntegerRepresentations, omitDecoderField, validContentStatuses
 } from './contentStudioDecoders-fixtures';
-
-export const validContentStatuses = [
-  'pending', 'generating', 'generated', 'failed',
-] satisfies readonly ContentStatus[];
 
 export const validContentBriefBatchStatuses = [
   ...validContentStatuses,
@@ -30,11 +24,13 @@ export const requiredBatchStartChildFields = [
   'idempotent_hit',
 ];
 
+/** A copy of the fixture start child at `childIndex` (0: Alpha, 1: Beta) with `overrides` applied. */
 export function buildBatchStartChildDecoderRecord(
-  overrides: Record<string, unknown> = {}
+  overrides: Record<string, unknown> = {},
+  childIndex: 0 | 1 = 0
 ): Record<string, unknown> {
   return {
-    ...apiBatchStartResponse.children[0],
+    ...apiBatchStartResponse.children[childIndex],
     ...overrides,
   };
 }
@@ -66,13 +62,7 @@ export function buildSingleBatchStartDecoderPayload(
 export function buildReversedBatchStartDecoderPayload(): Record<string, unknown> {
   return buildBatchStartDecoderPayload({
     children: [
-      buildBatchStartChildDecoderRecord({
-        id: 'content-2',
-        idea_id: 'idea-2',
-        keyword_id: 'keyword-2',
-        keyword: 'Beta keyword',
-        batch_position: 2,
-      }),
+      buildBatchStartChildDecoderRecord({}, 1),
       buildBatchStartChildDecoderRecord({ batch_position: 1 }),
     ],
   });
@@ -98,11 +88,13 @@ export const requiredBatchStatusChildFields = [
   'has_content',
 ];
 
+/** A copy of the fixture status child at `childIndex` (0: generated Alpha, 1: failed Beta) with `overrides` applied. */
 export function buildBatchStatusChildDecoderRecord(
-  overrides: Record<string, unknown> = {}
+  overrides: Record<string, unknown> = {},
+  childIndex: 0 | 1 = 0
 ): Record<string, unknown> {
   return {
-    ...apiBatchStatusResponse.children[0],
+    ...apiBatchStatusResponse.children[childIndex],
     ...overrides,
   };
 }
@@ -234,16 +226,7 @@ export function buildAllStatusBatchDecoderPayload(): Record<string, unknown> {
 export function buildReversedBatchStatusDecoderPayload(): Record<string, unknown> {
   return buildBatchStatusDecoderPayload({
     children: [
-      buildBatchStatusChildDecoderRecord({
-        id: 'content-2',
-        idea_id: 'idea-2',
-        keyword_id: 'keyword-2',
-        keyword: 'Beta keyword',
-        status: 'failed',
-        batch_position: 2,
-        has_content: false,
-        error_message: 'Generation failed',
-      }),
+      buildBatchStatusChildDecoderRecord({}, 1),
       buildBatchStatusChildDecoderRecord({ batch_position: 1 }),
     ],
   });

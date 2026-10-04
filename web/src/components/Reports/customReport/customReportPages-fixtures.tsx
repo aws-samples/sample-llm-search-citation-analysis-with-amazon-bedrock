@@ -5,6 +5,7 @@ import {
   MemoryRouter, Route, Routes
 } from 'react-router-dom';
 import { vi } from 'vitest';
+import { mockApiGet } from '../../../api/clientMock-fixtures';
 import type { CustomReport } from '../../../api/customReports';
 import { ALL_SCOPE } from '../../ui/reportScope';
 import {
@@ -40,7 +41,6 @@ export function buildCompetitorSource(overrides: Partial<CompetitorSource> = {})
     competitors: [],
     selected: null,
     gap: {
-      competitor: null,
       rollup: null,
       keywordsAnalyzed: 0,
       loading: false,
@@ -75,8 +75,22 @@ export function renderCustomReportRoute(path: string) {
   );
 }
 
+/** What a custom report page says when no saved report has its id. */
+export const REPORT_GONE = 'This report no longer exists. It may have been deleted.';
+
+/** `renderCustomReportRoute(path)` with no report saved. */
+export function renderWithoutSavedReports(path: string) {
+  mockApiGet.mockResolvedValue(reportsListPayload());
+  return renderCustomReportRoute(path);
+}
+
+/** The text of every level-2 heading, top to bottom. */
+export function sectionHeadingTexts(): (string | null)[] {
+  return screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
+}
+
 /** The `dataTransfer` a drag event needs, which jsdom does not provide. */
-export function fakeDataTransfer() {
+function fakeDataTransfer() {
   return {
     setData: vi.fn(),
     effectAllowed: 'none',
@@ -85,7 +99,7 @@ export function fakeDataTransfer() {
 }
 
 /** Starts dragging `element`. */
-export function dragStartOn(element: Element): void {
+function dragStartOn(element: Element): void {
   fireEvent.dragStart(element, { dataTransfer: fakeDataTransfer() });
 }
 
@@ -95,15 +109,22 @@ export function dragStartOn(element: Element): void {
  * negative `clientY` is the top half of the element, a positive one its
  * bottom half.
  */
-export function dragOverAt(element: Element, clientY: number): void {
+function dragOverAt(element: Element, clientY: number): void {
   const event = createEvent.dragOver(element, { dataTransfer: fakeDataTransfer() });
   Object.defineProperty(event, 'clientY', { value: clientY });
   fireEvent(element, event);
 }
 
-/** Drops the dragged block on `element`. */
-export function dropOn(element: Element): void {
-  fireEvent.drop(element, { dataTransfer: fakeDataTransfer() });
+/** Drags `source` over `over` at height `clientY` (see `dragOverAt`), then drops it on `target`. */
+export function dragAndDrop(source: Element, over: Element, clientY: number, target: Element = over): void {
+  dragStartOn(source);
+  dragOverAt(over, clientY);
+  fireEvent.drop(target, { dataTransfer: fakeDataTransfer() });
+}
+
+/** The list of blocks in the report being built. */
+export function reportCanvas(): HTMLElement {
+  return screen.getByRole('list', { name: 'Your report' });
 }
 
 /** The names of the blocks in the report being built, in order. */
@@ -137,7 +158,7 @@ export function dropZone(): HTMLElement {
   return screen.getByText(/^(Drop a block here|Your report is empty)/u);
 }
 
-export class MissingFixtureElementError extends Error {
+class MissingFixtureElementError extends Error {
   constructor(what: string) {
     super(`No ${what} found`);
     this.name = 'MissingFixtureElementError';

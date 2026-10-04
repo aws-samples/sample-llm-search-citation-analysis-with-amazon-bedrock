@@ -27,6 +27,28 @@ def _bedrock_error(code: str, message: str) -> ClientError:
     return ClientError({'Error': {'Code': code, 'Message': message}}, 'Converse')
 
 
+def _converse_reply(*blocks: dict) -> dict:
+    """A ``converse`` response whose message holds ``blocks``."""
+    return {"output": {"message": {"content": list(blocks)}}}
+
+
+def _install_client(models_module, side_effect) -> MagicMock:
+    """Install a Bedrock client whose ``converse`` follows ``side_effect`` (replies and/or errors)."""
+    client = MagicMock()
+    client.converse.side_effect = side_effect
+    models_module._bedrock_client = client
+    return client
+
+
+def _converse_kwargs(models_module, role, **invoke_kwargs) -> dict:
+    """The kwargs ``converse`` received for one ``invoke_bedrock("hi", role, ...)`` call."""
+    client = _install_client(models_module, [_converse_reply({"text": "ok"})])
+
+    models_module.invoke_bedrock("hi", role, **invoke_kwargs)
+
+    return client.converse.call_args.kwargs
+
+
 @pytest.fixture(autouse=True)
 def clear_bedrock_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Isolate each test from env pollution across tier/model overrides."""
@@ -123,26 +145,15 @@ class TestTierResolution:
 # =============================================================================
 
 class TestInvokeBedrockSystemPrompt:
-    def _client(self) -> MagicMock:
-        client = MagicMock()
-        client.converse.return_value = {"output": {"message": {"content": [{"text": "ok"}]}}}
-        return client
-
     def test_sends_the_system_prompt_as_the_converse_system_block(self, models_module) -> None:
-        client = self._client()
-        models_module._bedrock_client = client
+        kwargs = _converse_kwargs(models_module, models_module.ModelRole.RESEARCH_EVALUATION, system="You are a researcher.")
 
-        models_module.invoke_bedrock("hi", models_module.ModelRole.RESEARCH_EVALUATION, system="You are a researcher.")
-
-        assert client.converse.call_args.kwargs["system"] == [{"text": "You are a researcher."}]
+        assert kwargs["system"] == [{"text": "You are a researcher."}]
 
     def test_omits_the_system_block_when_no_system_prompt_is_given(self, models_module) -> None:
-        client = self._client()
-        models_module._bedrock_client = client
+        kwargs = _converse_kwargs(models_module, models_module.ModelRole.RESEARCH_EVALUATION)
 
-        models_module.invoke_bedrock("hi", models_module.ModelRole.RESEARCH_EVALUATION)
-
-        assert "system" not in client.converse.call_args.kwargs
+        assert "system" not in kwargs
 
 
 # =============================================================================
@@ -152,29 +163,14 @@ class TestInvokeBedrockSystemPrompt:
 class TestInvokeBedrockThinkingBudget:
     """Thinking budget wiring for Converse API."""
 
-    def _mock_converse_success(self, text: str = "ok") -> MagicMock:
-        client = MagicMock()
-        client.converse.return_value = {
-            "output": {"message": {"content": [{"text": text}]}}
-        }
-        return client
-
-    def _converse_kwargs(self, models_module, role, **invoke_kwargs) -> dict:
-        """The kwargs ``converse`` received for one ``invoke_bedrock("hi", role, ...)`` call."""
-        client = self._mock_converse_success()
-        models_module._bedrock_client = client
-
-        models_module.invoke_bedrock("hi", role, **invoke_kwargs)
-
-        return client.converse.call_args.kwargs
 
     def test_omits_additional_fields_when_tier_is_fast(self, models_module) -> None:
-        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.GENERATION)
+        kwargs = _converse_kwargs(models_module, models_module.ModelRole.GENERATION)
 
         assert "additionalModelRequestFields" not in kwargs
 
     def test_includes_thinking_budget_when_tier_is_balanced(self, models_module) -> None:
-        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.ANALYSIS)
+        kwargs = _converse_kwargs(models_module, models_module.ModelRole.ANALYSIS)
 
         assert kwargs["additionalModelRequestFields"] == {"thinking": {"type": "enabled", "budget_tokens": 2000}}
 
@@ -184,12 +180,12 @@ class TestInvokeBedrockThinkingBudget:
         budget against maxTokens. With temperature 0 (every ANALYSIS caller)
         the balanced tier answered a ValidationException on every call.
         """
-        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.ANALYSIS, max_tokens=2000, temperature=0)
+        kwargs = _converse_kwargs(models_module, models_module.ModelRole.ANALYSIS, max_tokens=2000, temperature=0)
 
         assert kwargs["inferenceConfig"] == {"maxTokens": 4000, "temperature": 1.0}
 
     def test_keeps_the_callers_temperature_when_thinking_is_off(self, models_module) -> None:
-        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.GENERATION, max_tokens=1200, temperature=0.3)
+        kwargs = _converse_kwargs(models_module, models_module.ModelRole.GENERATION, max_tokens=1200, temperature=0.3)
 
         assert kwargs["inferenceConfig"] == {"maxTokens": 1200, "temperature": 0.3}
 
@@ -198,17 +194,17 @@ class TestInvokeBedrockThinkingBudget:
     ) -> None:
         monkeypatch.setenv("BEDROCK_TIER_ANALYSIS", "deep")
 
-        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.ANALYSIS)
+        kwargs = _converse_kwargs(models_module, models_module.ModelRole.ANALYSIS)
 
         assert kwargs["additionalModelRequestFields"] == {"thinking": {"type": "enabled", "budget_tokens": 8000}}
 
     def test_disables_thinking_when_caller_passes_thinking_false(self, models_module) -> None:
-        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.ANALYSIS, thinking=False)
+        kwargs = _converse_kwargs(models_module, models_module.ModelRole.ANALYSIS, thinking=False)
 
         assert "additionalModelRequestFields" not in kwargs
 
     def test_enables_thinking_when_caller_forces_on_for_fast_tier(self, models_module) -> None:
-        kwargs = self._converse_kwargs(models_module, models_module.ModelRole.GENERATION, thinking=True)
+        kwargs = _converse_kwargs(models_module, models_module.ModelRole.GENERATION, thinking=True)
 
         assert kwargs["additionalModelRequestFields"] == {"thinking": {"type": "enabled", "budget_tokens": 2000}}
 
@@ -218,40 +214,25 @@ class TestInvokeBedrockThinkingBudget:
 # =============================================================================
 
 class TestInvokeBedrockResponseExtraction:
-    def test_returns_text_from_first_text_block(self, models_module) -> None:
-        client = MagicMock()
-        client.converse.return_value = {
-            "output": {"message": {"content": [{"text": "hello world"}]}}
-        }
-        models_module._bedrock_client = client
+    @pytest.mark.parametrize(
+        ('blocks', 'role', 'expected'),
+        [
+            pytest.param([{"text": "hello world"}], 'GENERATION', "hello world", id='first_text_block'),
+            pytest.param(
+                [{"reasoningContent": {"reasoningText": {"text": "thinking..."}}}, {"text": "final answer"}],
+                'ANALYSIS',
+                "final answer",
+                id='reasoning_blocks_skipped',
+            ),
+            pytest.param([], 'GENERATION', "", id='no_content_blocks_empty_string'),
+        ],
+    )
+    def test_returns_the_text_of_the_first_text_block(self, models_module, blocks, role, expected) -> None:
+        _install_client(models_module, [_converse_reply(*blocks)])
 
-        result = models_module.invoke_bedrock("q", models_module.ModelRole.GENERATION)
-        assert result == "hello world"
+        result = models_module.invoke_bedrock("q", models_module.ModelRole[role])
 
-    def test_skips_reasoning_blocks_and_returns_text_block(self, models_module) -> None:
-        client = MagicMock()
-        client.converse.return_value = {
-            "output": {
-                "message": {
-                    "content": [
-                        {"reasoningContent": {"reasoningText": {"text": "thinking..."}}},
-                        {"text": "final answer"},
-                    ]
-                }
-            }
-        }
-        models_module._bedrock_client = client
-
-        result = models_module.invoke_bedrock("q", models_module.ModelRole.ANALYSIS)
-        assert result == "final answer"
-
-    def test_returns_empty_string_when_no_content_blocks(self, models_module) -> None:
-        client = MagicMock()
-        client.converse.return_value = {"output": {"message": {"content": []}}}
-        models_module._bedrock_client = client
-
-        result = models_module.invoke_bedrock("q", models_module.ModelRole.GENERATION)
-        assert result == ""
+        assert result == expected
 
 
 # =============================================================================
@@ -260,12 +241,10 @@ class TestInvokeBedrockResponseExtraction:
 
 class TestInvokeBedrockRetry:
     def test_retries_on_throttling_exception_then_succeeds(self, models_module) -> None:
-        client = MagicMock()
-        client.converse.side_effect = [
+        client = _install_client(models_module, [
             _bedrock_error("ThrottlingException", "slow down"),
-            {"output": {"message": {"content": [{"text": "ok"}]}}},
-        ]
-        models_module._bedrock_client = client
+            _converse_reply({"text": "ok"}),
+        ])
 
         with patch.object(models_module.time, "sleep"):
             result = models_module.invoke_bedrock(
@@ -279,9 +258,7 @@ class TestInvokeBedrockRetry:
         self, models_module,
     ) -> None:
         """The last attempt's raw exception propagates unwrapped, so callers see the provider's code."""
-        client = MagicMock()
-        client.converse.side_effect = _bedrock_error("ThrottlingException", "slow")
-        models_module._bedrock_client = client
+        client = _install_client(models_module, _bedrock_error("ThrottlingException", "slow"))
 
         with (
             patch.object(models_module.time, "sleep"),
@@ -294,9 +271,7 @@ class TestInvokeBedrockRetry:
         assert client.converse.call_count == 2
 
     def test_propagates_non_throttling_errors_without_retry(self, models_module) -> None:
-        client = MagicMock()
-        client.converse.side_effect = _bedrock_error("ValidationException", "bad input")
-        models_module._bedrock_client = client
+        client = _install_client(models_module, _bedrock_error("ValidationException", "bad input"))
 
         with pytest.raises(ClientError, match="ValidationException"):
             models_module.invoke_bedrock(

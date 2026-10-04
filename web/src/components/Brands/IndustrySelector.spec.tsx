@@ -1,11 +1,13 @@
 import {
-  render, screen, fireEvent 
+  render, screen 
 } from '@testing-library/react';
 import {
   describe, it, expect, vi 
 } from 'vitest';
 import { IndustrySelector } from './IndustrySelector';
-import { buildIndustrySelectorProps } from './IndustrySelector-fixtures';
+import {
+  buildIndustrySelectorProps, chooseRetailIndustry 
+} from './IndustrySelector-fixtures';
 
 describe('IndustrySelector', () => {
   it('displays industry options from presets', () => {
@@ -19,21 +21,18 @@ describe('IndustrySelector', () => {
     const onIndustryChange = vi.fn();
     render(<IndustrySelector {...buildIndustrySelectorProps({ onIndustryChange })} />);
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'retail' } });
+    chooseRetailIndustry();
 
     expect(onIndustryChange).toHaveBeenCalledWith('retail');
   });
 
-  it('displays preset description', () => {
+  it.each([
+    ['preset description', 'Hotels and travel'],
+    ['example brands', 'Marriott, Hilton'],
+  ])('displays %s', (_detail, text) => {
     render(<IndustrySelector {...buildIndustrySelectorProps()} />);
 
-    expect(screen.getByText('Hotels and travel')).toBeInTheDocument();
-  });
-
-  it('displays example brands', () => {
-    render(<IndustrySelector {...buildIndustrySelectorProps()} />);
-
-    expect(screen.getByText('Marriott, Hilton')).toBeInTheDocument();
+    expect(screen.getByText(text)).toBeInTheDocument();
   });
 
   it('shows custom prompt indicator when industry has custom prompt', () => {

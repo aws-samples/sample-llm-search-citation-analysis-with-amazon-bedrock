@@ -1,6 +1,6 @@
 {
   "name": "citation-analysis-system",
-  "version": "2.29.0",
+  "version": "2.30.0",
   "description": "Serverless citation analysis system using AWS CDK",
   "scripts": {
     "build": "tsc",
@@ -9,6 +9,7 @@
     "lint:fix": "npx eslint . --fix",
     "duplication": "jscpd bin lib web/src",
     "duplication:tests": "jscpd --config .jscpd.tests.json bin lib web/src",
+    "duplication:baseline": "jscpd --update-baseline bin lib web/src && jscpd --config .jscpd.tests.json --update-baseline bin lib web/src && jscpd --config .jscpd.python.json --update-baseline lambda scripts && jscpd --config .jscpd.python-tests.json --update-baseline lambda",
     "deadcode": "knip",
     "deadcode:prod": "knip --production --strict",
     "contracts": "bash scripts/check-contracts.sh",

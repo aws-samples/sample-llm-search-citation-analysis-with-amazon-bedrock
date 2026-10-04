@@ -10,6 +10,9 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 import boto3
 
+from shared.dynamodb_batch import collect_all_items
+from shared.kpi_engine import normalize_domain
+
 # Set up logging
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -102,28 +105,19 @@ def load_keyword_identities(table: Any) -> set[str]:
     writers converge on one primary key after this legacy check.
     """
     identities: set[str] = set()
-    scan_params: dict[str, Any] = {
-        'ProjectionExpression': '#kw',
-        'ExpressionAttributeNames': {'#kw': 'keyword'},
-        'ConsistentRead': True,
-    }
-
-    while True:
-        response = table.scan(**scan_params)
-
-        for item in response.get('Items', []):
-            stored_keyword = item.get('keyword')
-            if not isinstance(stored_keyword, str):
-                continue
-            identity = normalize_keyword(stored_keyword)
-            if identity:
-                identities.add(identity)
-
-        last_key = response.get('LastEvaluatedKey')
-        if not last_key:
-            return identities
-
-        scan_params['ExclusiveStartKey'] = last_key
+    for item in collect_all_items(
+        table.scan,
+        ProjectionExpression='#kw',
+        ExpressionAttributeNames={'#kw': 'keyword'},
+        ConsistentRead=True,
+    ):
+        stored_keyword = item.get('keyword')
+        if not isinstance(stored_keyword, str):
+            continue
+        identity = normalize_keyword(stored_keyword)
+        if identity:
+            identities.add(identity)
+    return identities
 
 
 def get_brand_config(table_name: str | None = None) -> dict[str, Any]:
@@ -191,8 +185,8 @@ def utc_now() -> datetime:
 
     Use this anywhere the legacy code called `datetime.utcnow()`. The return
     is timezone-aware (tzinfo=UTC), so arithmetic against it must use other
-    timezone-aware datetimes. Use `.replace(tzinfo=None)` only when comparing
-    against naive datetimes parsed from stored ISO strings.
+    timezone-aware datetimes; read stored ISO strings with `parse_timestamp`,
+    which always returns an aware UTC datetime.
     """
     return datetime.now(UTC)
 
@@ -202,10 +196,40 @@ def get_timestamp() -> str:
 
     Wire format: `YYYY-MM-DDTHH:MM:SS.ffffffZ` (microsecond precision). This
     is the canonical wire format for DynamoDB sort keys, API responses, and
-    S3 object metadata in this project. Downstream code parses with either
-    `fromisoformat(s.replace('Z', '+00:00'))` or strict prefix matching.
+    S3 object metadata in this project. Downstream code parses with
+    `parse_timestamp` or strict prefix matching.
     """
     return utc_now().isoformat().replace(_UTC_SUFFIX_NATIVE, _UTC_SUFFIX_WIRE)
+
+
+def format_timestamp(moment: datetime) -> str:
+    """``moment`` in the wire format ``YYYY-MM-DDTHH:MM:SS.ffffffZ``, always with microseconds.
+
+    An aware ``moment`` is converted to UTC first; a naive one is read as UTC.
+    """
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(UTC)
+    return moment.strftime('%Y-%m-%dT%H:%M:%S.%fZ')
+
+
+def parse_timestamp(value: object, *, naive_as_utc: bool = True) -> datetime | None:
+    """An ISO 8601 timestamp as an aware UTC datetime; ``None`` for a non-string or unparseable value.
+
+    A trailing ``Z`` and any offset are honoured. A timestamp without an
+    offset (rows written before timestamps carried one) is read as UTC, or
+    refused (``None``) with ``naive_as_utc=False``.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace(_UTC_SUFFIX_WIRE, _UTC_SUFFIX_NATIVE))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        if not naive_as_utc:
+            return None
+        return parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
 
 
 def get_timestamp_compact() -> str:
@@ -219,39 +243,20 @@ def get_timestamp_compact() -> str:
 
 
 def extract_domain(url: str) -> str:
-    """
-    Extract a normalized domain from a URL.
+    """The domain of ``url`` as ``kpi_engine.normalize_domain`` defines it, as a string.
 
-    Normalization:
-    - Lowercase
-    - Strip leading ``www.`` (matches the convention in every current
-      caller so downstream comparisons like
-      ``domain == first_party_domains[i]`` are predictable)
-
-    Args:
-        url: URL to extract domain from
-
-    Returns:
-        Lowercase domain without leading ``www.``. Returns an empty string
-        when ``urlparse`` finds no ``netloc`` (e.g. ``"not a url"`` or
-        ``""``) or when input is not a string. On the rare ``urlparse``
-        exception, returns ``url`` verbatim if it is a string, else ``""``.
-
-        The previous shared implementation returned the literal string
-        ``'unknown'`` on failure which silently bucketed every parse
-        error into the same domain. Callers that want a sentinel should
-        substitute one at the call site.
+    Callers display the domain next to the URL, so they need a string: ``''``
+    when ``url`` has no host or is not a string. A string ``urlparse`` rejects
+    (an unclosed IPv6 bracket) comes back verbatim, so the dashboard still
+    shows what was cited instead of an empty cell.
     """
     if not isinstance(url, str):
         return ""
     try:
-        parsed = urlparse(url)
+        urlparse(url)
     except ValueError:
         return url
-    domain = parsed.netloc.lower()
-    if domain.startswith('www.'):
-        domain = domain[4:]
-    return domain
+    return normalize_domain(url) or ""
 
 
 def brand_names_match(candidate: str, tracked: str) -> bool:

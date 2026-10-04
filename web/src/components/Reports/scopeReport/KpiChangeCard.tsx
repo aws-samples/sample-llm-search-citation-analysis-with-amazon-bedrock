@@ -21,7 +21,7 @@ const CITATION_KPIS: ReadonlySet<KpiId> = new Set<KpiId>(['citations', 'citation
  * What the card says under a KPI of the latest runs: its change since each
  * keyword's previous run, or why there is none.
  */
-export function latestRunChangeNote(id: KpiId, visibility: VisibilityResponse): string {
+function latestRunChangeNote(id: KpiId, visibility: VisibilityResponse): string {
   if (CITATION_KPIS.has(id) && !visibility.citations_configured) return OWNED_DOMAINS_MISSING;
   const comparison = runComparison(visibility.change);
   if (comparison === null) return NO_PREVIOUS_RUN;

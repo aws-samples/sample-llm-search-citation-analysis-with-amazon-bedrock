@@ -11,7 +11,7 @@ vi.mock('../../hooks/useRecommendations', () => ({useRecommendations: vi.fn(),})
 
 import { useRecommendations } from '../../hooks/useRecommendations';
 import {
-  VISIBILITY_GAP_RECOMMENDATION, buildRecommendationsHookResult, buildRecommendationsResponse 
+  TRACKED_RECOMMENDATION, VISIBILITY_GAP_RECOMMENDATION, buildRecommendationsHookResult, buildRecommendationsResponse 
 } from './Recommendations-fixtures';
 
 const mockUseRecommendations = vi.mocked(useRecommendations);
@@ -22,6 +22,24 @@ function renderWithRecommendations(overrides: Parameters<typeof buildRecommendat
   mockUseRecommendations.mockReturnValue(hookResult);
   render(<Recommendations />);
   return hookResult.fetchRecommendations;
+}
+
+/** Renders the Action Center listing `TRACKED_RECOMMENDATION`; returns the hook result it used. */
+function renderWithTrackedRecommendation(overrides: Parameters<typeof buildRecommendationsHookResult>[0] = {}) {
+  const hookResult = buildRecommendationsHookResult({
+    data: buildRecommendationsResponse({ recommendations: [TRACKED_RECOMMENDATION] }),
+    ...overrides,
+  });
+  mockUseRecommendations.mockReturnValue(hookResult);
+  render(<Recommendations />);
+  return hookResult;
+}
+
+/** Renders `TRACKED_RECOMMENDATION` and picks `status` in its status menu; returns the hook result it used. */
+async function renderAndChooseStatus(status: string) {
+  const hookResult = renderWithTrackedRecommendation();
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Status of Improve visibility' }), status);
+  return hookResult;
 }
 
 describe('Recommendations', () => {
@@ -104,6 +122,44 @@ describe('Recommendations', () => {
       await userEvent.click(screen.getByRole('checkbox'));
 
       expect(fetchRecommendations).toHaveBeenCalledWith(true);
+    });
+  });
+
+  describe('status tracking', () => {
+    it('shows the stored status of a tracked recommendation', () => {
+      renderWithTrackedRecommendation();
+
+      expect(screen.getByRole('combobox', { name: 'Status of Improve visibility' })).toHaveValue('in_progress');
+    });
+
+    it('saves the chosen status for that recommendation', async () => {
+      const { updateStatus } = await renderAndChooseStatus('done');
+
+      expect(updateStatus).toHaveBeenCalledWith(TRACKED_RECOMMENDATION, 'done');
+    });
+
+    it('does not expand the card when the status is changed', async () => {
+      await renderAndChooseStatus('done');
+
+      expect(screen.queryByText('Create content')).not.toBeInTheDocument();
+    });
+
+    it('disables the status while its save is in flight', () => {
+      renderWithTrackedRecommendation({ updatingIds: ['rec-visibility'] });
+
+      expect(screen.getByRole('combobox', { name: 'Status of Improve visibility' })).toBeDisabled();
+    });
+
+    it('offers no status for a recommendation without an id', () => {
+      renderWithRecommendations({ data: buildRecommendationsResponse({ recommendations: [VISIBILITY_GAP_RECOMMENDATION] }) });
+
+      expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+    });
+
+    it('explains that the status was not saved when the save fails', () => {
+      renderWithTrackedRecommendation({ statusError: 'Server error occurred' });
+
+      expect(screen.getByRole('alert')).toHaveTextContent('Status not saved: Server error occurred');
     });
   });
 });

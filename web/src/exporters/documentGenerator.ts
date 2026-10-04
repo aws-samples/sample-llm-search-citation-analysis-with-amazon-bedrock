@@ -15,6 +15,7 @@ import {
   WidthType,
   AlignmentType,
   BorderStyle,
+  type IParagraphOptions,
 } from 'docx';
 import { saveAs } from 'file-saver';
 import { unified } from 'unified';
@@ -152,6 +153,14 @@ function convertTable(node: { children: Array<{ children: MdTableCell[] }> }): T
   });
 }
 
+/** A paragraph of `content`'s inline runs, laid out by `options`. */
+function inlineParagraph(content: PhrasingContent[], options: Omit<IParagraphOptions, 'children'>): Paragraph {
+  return new Paragraph({
+    children: convertInlineContent(content),
+    ...options,
+  });
+}
+
 /**
  * Convert a single MDAST node to docx elements
  */
@@ -168,8 +177,7 @@ function convertNode(node: RootContent, listLevel = 0): DocxChild[] {
         5: HeadingLevel.HEADING_5,
         6: HeadingLevel.HEADING_6,
       };
-      elements.push(new Paragraph({
-        children: convertInlineContent(node.children),
+      elements.push(inlineParagraph(node.children, {
         heading: headingLevels[node.depth] ?? HeadingLevel.HEADING_1,
         spacing: {
           before: 240,
@@ -180,32 +188,26 @@ function convertNode(node: RootContent, listLevel = 0): DocxChild[] {
     }
 
     case 'paragraph':
-      elements.push(new Paragraph({
-        children: convertInlineContent(node.children),
-        spacing: { after: 200 },
-      }));
+      elements.push(inlineParagraph(node.children, { spacing: { after: 200 } }));
       break;
 
     case 'list': {
       const isOrdered = node.ordered ?? false;
       node.children.forEach((item) => {
-        if (item.type === 'listItem') {
-          item.children.forEach(child => {
-            if (child.type === 'paragraph') {
-              elements.push(new Paragraph({
-                children: convertInlineContent(child.children),
-                bullet: isOrdered ? undefined : { level: listLevel },
-                numbering: isOrdered ? {
-                  reference: 'default-numbering',
-                  level: listLevel 
-                } : undefined,
-                spacing: { after: 100 },
-              }));
-            } else if (child.type === 'list') {
-              elements.push(...convertNode(child, listLevel + 1));
-            }
-          });
-        }
+        item.children.forEach(child => {
+          if (child.type === 'paragraph') {
+            elements.push(inlineParagraph(child.children, {
+              bullet: isOrdered ? undefined : { level: listLevel },
+              numbering: isOrdered ? {
+                reference: 'default-numbering',
+                level: listLevel 
+              } : undefined,
+              spacing: { after: 100 },
+            }));
+          } else if (child.type === 'list') {
+            elements.push(...convertNode(child, listLevel + 1));
+          }
+        });
       });
       break;
     }
@@ -213,8 +215,7 @@ function convertNode(node: RootContent, listLevel = 0): DocxChild[] {
     case 'blockquote':
       node.children.forEach(child => {
         if (child.type === 'paragraph') {
-          elements.push(new Paragraph({
-            children: convertInlineContent(child.children),
+          elements.push(inlineParagraph(child.children, {
             indent: { left: 720 },
             border: {
               left: {

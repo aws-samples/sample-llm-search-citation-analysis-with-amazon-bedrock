@@ -6,18 +6,18 @@ import {
   type ScopedPickerOverrides,
 } from './KeywordScopePicker-fixtures';
 
-export const cappedSectionAlphaGroup = buildGroup({
+const cappedSectionAlphaGroup = buildGroup({
   id: 'alpha-group',
   name: 'Alpha group',
   keyword_count: 2,
 });
-export const cappedSectionBetaGroup = buildGroup({
+const cappedSectionBetaGroup = buildGroup({
   id: 'beta-group',
   name: 'Beta group',
   keyword_count: 2,
 });
-export const cappedSectionGroups = [cappedSectionAlphaGroup, cappedSectionBetaGroup];
-export const cappedSectionKeywords = [
+const cappedSectionGroups = [cappedSectionAlphaGroup, cappedSectionBetaGroup];
+const cappedSectionKeywords = [
   buildKeyword({
     id: 'alpha-1',
     keyword: 'Alpha first',

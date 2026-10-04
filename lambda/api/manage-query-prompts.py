@@ -29,9 +29,7 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
-QUERY_PROMPTS_TABLE = resolve_table_env(
-    'DYNAMODB_TABLE_QUERY_PROMPTS', 'QUERY_PROMPTS_TABLE',
-)
+QUERY_PROMPTS_TABLE = resolve_table_env('DYNAMODB_TABLE_QUERY_PROMPTS')
 query_prompts_table = dynamodb.Table(QUERY_PROMPTS_TABLE)
 
 # Soft business cap — bounded per-user prompts. Override with
@@ -80,13 +78,19 @@ def list_prompts(event, context):
     return success_response(items, event)
 
 
+def _prompt_body_rules(*, creating: bool) -> dict[str, dict[str, Any]]:
+    """The ``@validate`` schema of a persona body; a create requires the name and the template."""
+    required = {'required': True} if creating else {}
+    return {
+        'name': {**required, 'type': str, 'max_length': 100, 'source': 'body'},
+        'template': {**required, 'type': str, 'max_length': 2000, 'source': 'body'},
+        'description': {'type': str, 'max_length': 1000, 'source': 'body'},
+    }
+
+
 @require_group(ADMIN_GROUP)
 @parse_json_body
-@validate({
-    'name': {'required': True, 'type': str, 'max_length': 100, 'source': 'body'},
-    'template': {'required': True, 'type': str, 'max_length': 2000, 'source': 'body'},
-    'description': {'type': str, 'max_length': 1000, 'source': 'body'},
-})
+@validate(_prompt_body_rules(creating=True))
 def create_prompt(event, context, body, name, template, description):
     """POST /api/query-prompts - Create a new query prompt (persona).
 
@@ -127,11 +131,7 @@ def create_prompt(event, context, body, name, template, description):
 
 @require_group(ADMIN_GROUP)
 @parse_json_body
-@validate({
-    'name': {'type': str, 'max_length': 100, 'source': 'body'},
-    'template': {'type': str, 'max_length': 2000, 'source': 'body'},
-    'description': {'type': str, 'max_length': 1000, 'source': 'body'},
-})
+@validate(_prompt_body_rules(creating=False))
 def update_prompt(event, context, prompt_id, body, name, template, description):
     """PUT /api/query-prompts/{id} - Update a query prompt (persona)."""
     if not prompt_id:

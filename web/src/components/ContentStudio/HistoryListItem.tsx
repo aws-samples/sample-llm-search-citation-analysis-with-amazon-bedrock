@@ -4,6 +4,10 @@ import { Spinner } from '../ui/Spinner';
 import {
   formatContentWarning, getContentTitle
 } from './contentPresentation';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  CHEVRON_RIGHT_PATHS, DOCUMENT_TEXT_PATHS, HASHTAG_PATHS, TRASH_PATHS 
+} from '../ui/iconPaths';
 
 interface HistoryListItemProps {
   item: ContentStudioHistory;
@@ -19,24 +23,18 @@ const getStatusIcon = (item: ContentStudioHistory) => {
 
   if (item.status === 'failed') {
     return (
-      <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
+      <StrokeIcon className="w-5 h-5 text-red-600" paths={['M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z']} />
     );
   }
 
   if (!item.viewed) {
     return (
-      <svg className="w-5 h-5 text-orange-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
+      <StrokeIcon className="w-5 h-5 text-orange-600" paths={DOCUMENT_TEXT_PATHS} />
     );
   }
 
   return (
-    <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-    </svg>
+    <StrokeIcon className="w-5 h-5 text-gray-600" paths={DOCUMENT_TEXT_PATHS} />
   );
 };
 
@@ -90,9 +88,7 @@ export const HistoryListItem = ({
           deletingId={deletingId}
           onDelete={onDelete}
         />
-        <svg className="w-5 h-5 text-gray-400 hidden sm:block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" />
-        </svg>
+        <StrokeIcon className="w-5 h-5 text-gray-400 hidden sm:block" paths={CHEVRON_RIGHT_PATHS} />
       </div>
     </div>
 
@@ -131,9 +127,7 @@ const StatusBadge = ({ item }: { item: ContentStudioHistory }) => {
 const ItemMetadata = ({ item }: { item: ContentStudioHistory }) => (
   <div className="flex flex-wrap items-center gap-2 sm:gap-3 text-xs text-gray-500 mt-1">
     <span className="flex items-center gap-1">
-      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14" />
-      </svg>
+      <StrokeIcon className="w-3.5 h-3.5" paths={HASHTAG_PATHS} />
       <span className="truncate max-w-[100px] sm:max-w-none">{item.keyword}</span>
     </span>
     <span className="hidden sm:inline">•</span>
@@ -165,9 +159,7 @@ const DeleteButton = ({
     {deletingId === itemId ? (
       <Spinner size="sm" />
     ) : (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-      </svg>
+      <StrokeIcon className="w-4 h-4" paths={TRASH_PATHS} />
     )}
   </button>
 );

@@ -1,15 +1,22 @@
 import {
-  describe, it, expect, vi
+  describe, it, expect, vi, beforeEach
 } from 'vitest';
 import {
   fireEvent, screen, within
 } from '@testing-library/react';
 import { buildSentimentExamplesResponse } from '../../../types/domain/sentimentExamples-fixtures';
 import {
-  renderCountTable, requestedUrl, stubExamplesAnswer
+  renderCountTable, requestedUrl
 } from './sentimentExamples-fixtures';
+import { answerEveryFetch } from '../../../test/fetchStubs';
 
 vi.mock('../../../infrastructure', () => import('../../../test/infrastructureMock'));
+
+/** The count table with the count button named `name` selected. */
+function renderSelectedCount(name: string) {
+  renderCountTable();
+  fireEvent.click(screen.getByRole('button', { name }));
+}
 
 describe('SentimentCountTable', () => {
   it('heads the table as the answers per AI engine and sentiment', () => {
@@ -72,39 +79,34 @@ describe('SentimentCountTable', () => {
 
     expect(screen.queryByRole('dialog')).toBeNull();
   });
+});
+
+describe('SentimentCountTable with a count selected', () => {
+  beforeEach(() => {
+    answerEveryFetch(buildSentimentExamplesResponse());
+  });
 
   it('opens the answers behind a count, titled with its sentiment and engine', () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
-    renderCountTable();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Show the 3 negative answers from OpenAI' }));
+    renderSelectedCount('Show the 3 negative answers from OpenAI');
 
     expect(screen.getByRole('dialog', { name: 'Negative answers · OpenAI' })).toBeInTheDocument();
   });
 
   it('asks for the answers of the report scope behind the selected count', () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
-    renderCountTable();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Show the 3 positive answers from all engines' }));
+    renderSelectedCount('Show the 3 positive answers from all engines');
 
     expect(requestedUrl()).toBe('https://api.test.com/visibility/sentiment-examples?group_id=hotel-sol&sentiment=positive');
   });
 
   it('names the scope of the report under the title', () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
-    renderCountTable();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Show the 1 mixed answer from OpenAI' }));
+    renderSelectedCount('Show the 1 mixed answer from OpenAI');
 
     expect(within(screen.getByRole('dialog')).getByText('Hotel Sol · each keyword\'s latest run')).toBeInTheDocument();
   });
 
   it('closes the answers on Escape', () => {
-    stubExamplesAnswer(buildSentimentExamplesResponse());
-    renderCountTable();
+    renderSelectedCount('Show the 3 negative answers from OpenAI');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Show the 3 negative answers from OpenAI' }));
     fireEvent.keyDown(document, { key: 'Escape' });
 
     expect(screen.queryByRole('dialog')).toBeNull();

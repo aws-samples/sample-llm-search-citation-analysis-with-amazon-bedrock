@@ -9,13 +9,14 @@ import { buildTrendView } from '../../layout/reportPayload-fixtures';
 import {
   cardFigure, plainStatCard, statFigure
 } from '../../layout/reportQueries-fixtures';
+import { settledTrends } from '../../layout/reportSlice-fixtures';
 import { buildKpis } from '../groupKpiHistory-fixtures';
 
 const EMPTY = 'No aggregate trend data yet. Run an analysis to populate.';
 
 describe('CrossKeywordHeadlineSection', () => {
   it('shows the KPIs over each keyword\'s latest period', () => {
-    render(<CrossKeywordHeadlineSection trends={buildTrendView({ latest: buildKpis({ share_of_voice: 33.33 }) })} loading={false} error={null} />);
+    render(<CrossKeywordHeadlineSection {...settledTrends(buildTrendView({ latest: buildKpis({ share_of_voice: 33.33 }) }))} />);
 
     expect(statFigure('Share of voice').textContent).toBe('33.3%');
   });
@@ -26,7 +27,7 @@ describe('CrossKeywordHeadlineSection', () => {
       declining_count: 0,
       stable_count: 2,
     };
-    render(<CrossKeywordHeadlineSection trends={buildTrendView({ overall })} loading={false} error={null} />);
+    render(<CrossKeywordHeadlineSection {...settledTrends(buildTrendView({ overall }))} />);
 
     expect(['Improving', 'Declining', 'Stable'].map((label) => cardFigure(plainStatCard(label)).textContent)).toStrictEqual(['5', '0', '2']);
   });
@@ -35,20 +36,8 @@ describe('CrossKeywordHeadlineSection', () => {
     ['no trend answer yet', null],
     ['no keyword with data', buildTrendView({ keywords_with_data: 0 })],
   ])('asks for an analysis when there is %s', (_label, trends) => {
-    render(<CrossKeywordHeadlineSection trends={trends} loading={false} error={null} />);
+    render(<CrossKeywordHeadlineSection {...settledTrends(trends)} />);
 
     expect(screen.getByText(EMPTY)).toBeInTheDocument();
-  });
-
-  it('shows the loading state', () => {
-    render(<CrossKeywordHeadlineSection trends={null} loading error={null} />);
-
-    expect(screen.getByText('Loading aggregate trends…')).toBeInTheDocument();
-  });
-
-  it('shows the error', () => {
-    render(<CrossKeywordHeadlineSection trends={null} loading={false} error="boom" />);
-
-    expect(screen.getByText('boom')).toBeInTheDocument();
   });
 });

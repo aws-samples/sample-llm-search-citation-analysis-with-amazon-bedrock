@@ -3,13 +3,14 @@ import {
 } from 'vitest';
 import { act } from '@testing-library/react';
 import {
-  createEndpointMockFetch,
   createMockJsonResponse,
   createMockMalformedResponse,
   type EndpointMockFetchOptions,
 } from '../test/fetchResponses';
 import {
   renderProbeEndpoint,
+  renderAnsweringProbeEndpoint,
+  renderFetchedProbeEndpoint,
   renderDeferredProbeEndpoint,
   renderSupersededFetch,
   probeResponse,
@@ -33,17 +34,15 @@ describe('useAnalysisEndpoint', () => {
         loading: false,
         error: null,
         fetchData: expect.any(Function),
-        runRequest: expect.any(Function),
       });
     });
   });
 
   describe('fetchData', () => {
     it('stores and resolves the payload when the response passes the type guard', async () => {
-      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(probeResponse));
-      const { result } = renderProbeEndpoint();
-
-      const returned = await act(() => result.current.fetchData('best hotels'));
+      const {
+        returned, result
+      } = await renderFetchedProbeEndpoint();
 
       expect(returned).toStrictEqual(probeResponse);
       expect(result.current.data).toStrictEqual(probeResponse);
@@ -51,10 +50,7 @@ describe('useAnalysisEndpoint', () => {
     });
 
     it('requests the built path and params against the API base URL', async () => {
-      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(probeResponse));
-      const { result } = renderProbeEndpoint();
-
-      await act(() => result.current.fetchData('best hotels'));
+      await renderFetchedProbeEndpoint();
 
       expect(mockAuthenticatedFetch.mock.calls[0][0]).toBe('https://api.test.com/probe?keyword=best+hotels');
     });
@@ -76,10 +72,9 @@ describe('useAnalysisEndpoint', () => {
       ['the body is a JSON number', createMockJsonResponse(42), 'Invalid visibility request'],
       ['the body is a JSON array', createMockJsonResponse([probeResponse]), 'Invalid visibility request'],
     ])('sets the error state and resolves null when %s', async (_failure, response, errorState) => {
-      mockAuthenticatedFetch.mockResolvedValue(response);
-      const { result } = renderProbeEndpoint();
-
-      const returned = await act(() => result.current.fetchData('best hotels'));
+      const {
+        returned, result
+      } = await renderFetchedProbeEndpoint(response);
 
       expect(returned).toBeNull();
       expect(result.current.error).toBe(errorState);
@@ -91,10 +86,7 @@ describe('useAnalysisEndpoint', () => {
       ['Invalid response format', 'a payload that fails the type guard', { invalidResponse: true }, 'Invalid visibility request'],
     ])('logs a response-factory error reading "%s" when the response is %s', async (message, _body, options, errorState) => {
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(vi.fn());
-      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(probeResponse, options));
-      const { result } = renderProbeEndpoint();
-
-      await act(() => result.current.fetchData('best hotels'));
+      const { result } = await renderFetchedProbeEndpoint(options);
 
       const logged = consoleErrorSpy.mock.calls[0][1] as Error;
       expect(logged).toBeInstanceOf(ProbeRequestError);
@@ -139,12 +131,10 @@ describe('useAnalysisEndpoint', () => {
 
     it('ignores a stale response that resolves after a newer request', async () => {
       const {
-        stale, deferred, result 
+        stale, respondTo, result
       } = await renderSupersededFetch();
 
-      await act(async () => {
-        deferred.requests[0].respond(probeResponse);
-      });
+      await respondTo(0, probeResponse);
 
       await expect(stale).resolves.toBeNull();
       expect(result.current.data).toStrictEqual(newerProbeResponse);
@@ -153,12 +143,10 @@ describe('useAnalysisEndpoint', () => {
     it('ignores a stale failure that lands after a newer request succeeded', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
       const {
-        stale, deferred, result 
+        stale, respondTo, result
       } = await renderSupersededFetch();
 
-      await act(async () => {
-        deferred.requests[0].respond({}, 500);
-      });
+      await respondTo(0, {}, 500);
 
       await expect(stale).resolves.toBeNull();
       expect(result.current.error).toBeNull();
@@ -167,20 +155,16 @@ describe('useAnalysisEndpoint', () => {
 
     it('keeps loading set until the current request settles', async () => {
       const {
-        deferred, result, startFetch 
+        respondTo, result, startFetch
       } = renderDeferredProbeEndpoint();
 
       startFetch('first');
       startFetch('second');
 
-      await act(async () => {
-        deferred.requests[0].respond(probeResponse);
-      });
+      await respondTo(0, probeResponse);
       expect(result.current.loading).toBe(true);
 
-      await act(async () => {
-        deferred.requests[1].respond(newerProbeResponse);
-      });
+      await respondTo(1, newerProbeResponse);
       expect(result.current.loading).toBe(false);
     });
   });
@@ -198,10 +182,9 @@ describe('useAnalysisEndpoint', () => {
     });
 
     it('resolves null without calling the API when fetching after unmount', async () => {
-      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(probeResponse));
       const {
-        result, unmount 
-      } = renderProbeEndpoint();
+        result, unmount
+      } = renderAnsweringProbeEndpoint();
       unmount();
 
       const returned = await result.current.fetchData('best hotels');
@@ -225,42 +208,11 @@ describe('useAnalysisEndpoint', () => {
 
   describe('request shape', () => {
     it('sends no query string when the request has no params', async () => {
-      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(probeResponse));
-      const {
-        result, config 
-      } = renderProbeEndpoint();
+      const { result } = renderAnsweringProbeEndpoint({}, { paramless: true });
 
-      await act(() => result.current.runRequest({ path: '/probe' }, config));
+      await act(() => result.current.fetchData('best hotels'));
 
       expect(mockAuthenticatedFetch.mock.calls[0][0]).toBe('https://api.test.com/probe');
-    });
-  });
-
-  describe('runRequest', () => {
-    it('leaves stored data untouched when a secondary request resolves', async () => {
-      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(probeResponse));
-      const {
-        result, config 
-      } = renderProbeEndpoint();
-
-      const returned = await act(() => result.current.runRequest({
-        path: '/probe',
-        params: new URLSearchParams({ keyword: 'secondary' }),
-      }, config));
-
-      expect(returned).toStrictEqual(probeResponse);
-      expect(result.current.data).toBeNull();
-    });
-
-    it('aborts an in-flight secondary request when a new fetch starts', () => {
-      const {
-        deferred, config, startRequest, startFetch 
-      } = renderDeferredProbeEndpoint();
-
-      startRequest((hook) => hook.runRequest({ path: '/probe' }, config));
-      startFetch('next');
-
-      expect(deferred.requests[0].signal?.aborted).toBe(true);
     });
   });
 });

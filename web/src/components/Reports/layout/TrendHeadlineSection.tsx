@@ -10,7 +10,7 @@ import {
 import { ReportSection } from './ReportSection';
 
 /** What `GET /trends` and `GET /reports/overview` both say about a scope's latest standing. */
-export type TrendStanding = Pick<
+type TrendStanding = Pick<
   HistoricalTrendsResponse,
   'change' | 'citations_configured' | 'days_analyzed' | 'keywords_analyzed' | 'keywords_with_data' | 'period_type'
 >;

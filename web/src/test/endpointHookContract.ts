@@ -9,7 +9,7 @@
  * hook's fixtures and tables, and adds only the tests specific to that hook.
  */
 import {
-  describe, expect, it
+  describe, expect, it, vi
 } from 'vitest';
 import {
   act, renderHook, waitFor
@@ -30,11 +30,11 @@ export interface EndpointHookState<TResponse> {
 }
 
 /** The URL a fetch must request when called with `args`; `condition` names the case. */
-export type EndpointRequestCase<TArgs extends readonly unknown[]> = [url: string, condition: string, args: TArgs];
+type EndpointRequestCase<TArgs extends readonly unknown[]> = [url: string, condition: string, args: TArgs];
 /** A payload the hook must return and store when fetched with `args`. */
-export type EndpointSuccessCase<TArgs extends readonly unknown[], TResponse> = [payload: string, response: TResponse, args: TArgs];
+type EndpointSuccessCase<TArgs extends readonly unknown[], TResponse> = [payload: string, response: TResponse, args: TArgs];
 /** The error message the hook must report when the mocked endpoint behaves as `options` says. */
-export type EndpointFailureCase<TResponse> = [message: string, failure: string, options: EndpointMockFetchOptions<TResponse>];
+type EndpointFailureCase<TResponse> = [message: string, failure: string, options: EndpointMockFetchOptions<TResponse>];
 
 export interface EndpointHookContract<THook extends EndpointHookState<TResponse>, TArgs extends readonly unknown[], TResponse> {
   /** Noun used in the test names, e.g. 'citation gaps'. */
@@ -46,6 +46,8 @@ export interface EndpointHookContract<THook extends EndpointHookState<TResponse>
   readonly fetch: (hook: THook, ...args: TArgs) => Promise<TResponse | null>;
   /** Functions the hook returns besides `fetchName`, for the exact-state assertions. */
   readonly otherFunctions?: readonly string[];
+  /** Other state the hook returns, as it stays while only the fetch runs. */
+  readonly otherState?: Readonly<Record<string, unknown>>;
   readonly defaultResponse: NoInfer<TResponse>;
   /** Arguments of the single fetch in the loading, failure and error-clearing tests. */
   readonly defaultArgs: NoInfer<TArgs>;
@@ -58,10 +60,19 @@ export interface EndpointHookContract<THook extends EndpointHookState<TResponse>
   readonly successes: ReadonlyArray<EndpointSuccessCase<NoInfer<TArgs>, NoInfer<TResponse>>>;
   /** At least one row; the first also drives the error-clearing test. */
   readonly failures: readonly [EndpointFailureCase<NoInfer<TResponse>>, ...EndpointFailureCase<NoInfer<TResponse>>[]];
+  /** What the hook logs, with which error, when the request returns HTTP 500. */
+  readonly loggedHttpError?: LoggedHttpError;
+}
+
+/** The `console.error` call a failed request makes: the hook's log prefix and the error it built. */
+interface LoggedHttpError {
+  readonly logMessage: string;
+  readonly name: string;
+  readonly message: string;
 }
 
 /** `authenticatedFetch` arguments of a request made through `useAnalysisEndpoint`. */
-export function abortableRequest(url: string): readonly unknown[] {
+function abortableRequest(url: string): readonly unknown[] {
   const signal: unknown = expect.any(AbortSignal);
   return [url, { signal }];
 }
@@ -78,12 +89,30 @@ export function describeEndpointHookContract<THook extends EndpointHookState<TRe
   requests,
   successes,
   failures,
+  loggedHttpError,
+  otherState = {},
 }: EndpointHookContract<THook, TArgs, TResponse>): void {
   const anyFunction: unknown = expect.any(Function);
   const hookState = (state: EndpointHookState<TResponse>): Record<string, unknown> => ({
     ...state,
+    ...otherState,
     ...Object.fromEntries([fetchName, ...otherFunctions].map((name) => [name, anyFunction])),
   });
+
+  /** Renders the hook over a mocked endpoint and runs one fetch with `args`. */
+  const fetchOnce = async (
+    response: TResponse,
+    args: TArgs,
+    options?: EndpointMockFetchOptions<TResponse>
+  ) => {
+    mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(response, options));
+    const { result } = renderHook(useHook);
+    const returned = await act(() => fetch(result.current, ...args));
+    return {
+      result,
+      returned,
+    };
+  };
 
   describe(fetchName, () => {
     it(`sets loading true while the ${subject} request is in flight`, async () => {
@@ -102,19 +131,15 @@ export function describeEndpointHookContract<THook extends EndpointHookState<TRe
     });
 
     it.each(requests)('requests %s when %s', async (url, _condition, args) => {
-      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(defaultResponse));
-      const { result } = renderHook(useHook);
-
-      await act(() => fetch(result.current, ...args));
+      await fetchOnce(defaultResponse, args);
 
       expect(mockAuthenticatedFetch).toHaveBeenCalledWith(...expectedRequest(url));
     });
 
     it.each(successes)(`returns and stores the %s when the response passes the ${subject} type guard`, async (_payload, response, args) => {
-      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(response));
-      const { result } = renderHook(useHook);
-
-      const returned = await act(() => fetch(result.current, ...args));
+      const {
+        result, returned
+      } = await fetchOnce(response, args);
 
       expect(returned).toStrictEqual(response);
       expect(result.current).toStrictEqual(hookState({
@@ -125,16 +150,28 @@ export function describeEndpointHookContract<THook extends EndpointHookState<TRe
     });
 
     it.each(failures)(`resolves null and reports "%s" when the ${subject} %s`, async (message, _failure, options) => {
-      mockAuthenticatedFetch.mockImplementation(createEndpointMockFetch(defaultResponse, options));
-      const { result } = renderHook(useHook);
-
-      const returned = await act(() => fetch(result.current, ...defaultArgs));
+      const {
+        result, returned
+      } = await fetchOnce(defaultResponse, defaultArgs, options);
 
       expect(returned).toBeNull();
       expect(result.current).toStrictEqual(hookState({
         data: null,
         loading: false,
         error: message,
+      }));
+    });
+
+    it.each(loggedHttpError ? [loggedHttpError] : [])(`logs a $name "$message" when the ${subject} request returns a non-ok status`, async ({
+      logMessage, name, message
+    }) => {
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(vi.fn());
+
+      await fetchOnce(defaultResponse, defaultArgs, { shouldFail: true });
+
+      expect(consoleError).toHaveBeenCalledWith(logMessage, expect.objectContaining({
+        name,
+        message,
       }));
     });
 

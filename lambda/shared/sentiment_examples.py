@@ -23,9 +23,6 @@ from shared.kpi_engine import (
     sighting_from_brand,
 )
 
-#: The labels a sentiment count is asked for (the KPI engine's sentiment split).
-SENTIMENT_LABELS = ('positive', 'neutral', 'mixed', 'negative')
-
 #: How many examples a request returns by default, and at most.
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 50
@@ -107,6 +104,5 @@ __all__ = [
     'EXAMPLE_ATTRIBUTE_NAMES',
     'EXAMPLE_PROJECTION',
     'MAX_LIMIT',
-    'SENTIMENT_LABELS',
     'sentiment_examples',
 ]

@@ -120,7 +120,6 @@ export function useQueryPrompts() {
     prompts,
     loading,
     error,
-    fetchPrompts,
     createPrompt,
     updatePrompt,
     deletePrompt,

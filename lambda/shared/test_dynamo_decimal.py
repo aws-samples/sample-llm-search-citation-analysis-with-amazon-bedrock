@@ -14,7 +14,7 @@ from decimal import Decimal
 
 import pytest
 
-from shared.dynamo_decimal import DecimalEncoder, convert_floats_to_decimal, to_int
+from shared.dynamo_decimal import DecimalEncoder, convert_floats_to_decimal, positive_int, to_int
 
 
 class TestToInt:
@@ -32,6 +32,22 @@ class TestToInt:
 
     def test_truncates_numeric_strings_via_int_conversion(self):
         assert to_int('41') == 41
+
+
+class TestPositiveInt:
+    @pytest.mark.parametrize(('value', 'expected'), [
+        pytest.param(1, 1, id='one'),
+        pytest.param(42, 42, id='larger-int'),
+        pytest.param(0, None, id='zero'),
+        pytest.param(-3, None, id='negative'),
+        pytest.param(True, None, id='bool'),
+        pytest.param(2.0, None, id='float'),
+        pytest.param('3', None, id='numeric-string'),
+        pytest.param(Decimal('3'), None, id='decimal'),
+        pytest.param(None, None, id='missing'),
+    ])
+    def test_reads_only_ints_of_at_least_one(self, value, expected):
+        assert positive_int(value) == expected
 
 
 class TestConvertFloatsToDecimal:

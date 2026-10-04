@@ -10,12 +10,15 @@ import importlib
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+from botocore.exceptions import ClientError
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-# `shared/__init__.py` re-exports the `api_response` *function*, so
-# `from shared import api_response` would hand back the function rather than
-# the module. Resolve the submodule itself; it is what `importlib.reload` needs.
+from testing.cors_fixtures import configured_cors_origin, credentialed_json_headers
+from testing.env import cleared_env
+
+# The submodule itself is what `importlib.reload` needs.
 cors_module = importlib.import_module('shared.api_response')
 
 
@@ -23,6 +26,32 @@ def _reload_and_get_origin():
     """Reload the module to clear the cached CORS origin, then call get_cors_origin()."""
     importlib.reload(cors_module)
     return cors_module.get_cors_origin()
+
+
+def _origin_without_ssm_param(allow_dev_cors: str | None) -> str:
+    """The fresh-container origin when CORS_ORIGIN_PARAM is unset; ``None`` leaves ALLOW_DEV_CORS unset too."""
+    with cleared_env('CORS_ORIGIN_PARAM', 'ALLOW_DEV_CORS'):
+        if allow_dev_cors is not None:
+            os.environ['ALLOW_DEV_CORS'] = allow_dev_cors
+        return _reload_and_get_origin()
+
+
+def _ssm_client(side_effects):
+    """Build a boto3 stand-in whose get_parameter follows `side_effects`."""
+    client = MagicMock()
+    client.get_parameter.side_effect = side_effects
+    return client
+
+
+def _reload_and_get_origin_from_ssm(client) -> str:
+    """The fresh-container origin when CORS_ORIGIN_PARAM names an SSM parameter served by `client`."""
+    with patch.dict(os.environ, {'CORS_ORIGIN_PARAM': '/citation-analysis/cors-origin'}, clear=False), \
+         patch('boto3.client', return_value=client):
+        return _reload_and_get_origin()
+
+
+def _get_parameter_error(code: str, message: str) -> ClientError:
+    return ClientError({'Error': {'Code': code, 'Message': message}}, 'GetParameter')
 
 
 # =============================================================================
@@ -43,22 +72,15 @@ class TestCORSFallbackProperty:
     @settings(max_examples=100)
     def test_non_true_values_fail_closed(self, allow_dev_cors):
         """Any ALLOW_DEV_CORS value that isn't case-insensitive 'true' should fail closed."""
-        env = {'ALLOW_DEV_CORS': allow_dev_cors}
-        # Ensure CORS_ORIGIN_PARAM is NOT set
-        with patch.dict(os.environ, env, clear=False):
-            os.environ.pop('CORS_ORIGIN_PARAM', None)
-            result = _reload_and_get_origin()
-            assert result == '', f"Expected empty string for ALLOW_DEV_CORS={allow_dev_cors!r}, got {result!r}"
+        result = _origin_without_ssm_param(allow_dev_cors)
+        assert result == '', f"Expected empty string for ALLOW_DEV_CORS={allow_dev_cors!r}, got {result!r}"
 
     @given(true_variant=st.sampled_from(['true', 'True', 'TRUE', 'tRuE', 'trUE']))
     @settings(max_examples=10)
     def test_true_variants_return_wildcard(self, true_variant):
         """Case-insensitive 'true' should return wildcard."""
-        env = {'ALLOW_DEV_CORS': true_variant}
-        with patch.dict(os.environ, env, clear=False):
-            os.environ.pop('CORS_ORIGIN_PARAM', None)
-            result = _reload_and_get_origin()
-            assert result == '*', f"Expected '*' for ALLOW_DEV_CORS={true_variant!r}, got {result!r}"
+        result = _origin_without_ssm_param(true_variant)
+        assert result == '*', f"Expected '*' for ALLOW_DEV_CORS={true_variant!r}, got {result!r}"
 
 
 # =============================================================================
@@ -68,61 +90,32 @@ class TestCORSFallbackProperty:
 class TestCORSFallbackUnit:
     """Unit tests for specific CORS fallback scenarios. Requirements: 2.1, 2.2, 2.3, 2.4"""
 
-    def test_no_env_vars_returns_empty(self):
-        """No env vars set → returns empty string (fail closed)."""
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('CORS_ORIGIN_PARAM', None)
-            os.environ.pop('ALLOW_DEV_CORS', None)
-            result = _reload_and_get_origin()
-            assert result == ''
-
-    def test_allow_dev_cors_true_returns_wildcard(self):
-        """ALLOW_DEV_CORS=true → returns '*'."""
-        with patch.dict(os.environ, {'ALLOW_DEV_CORS': 'true'}, clear=False):
-            os.environ.pop('CORS_ORIGIN_PARAM', None)
-            result = _reload_and_get_origin()
-            assert result == '*'
-
-    def test_allow_dev_cors_TRUE_returns_wildcard(self):
-        """ALLOW_DEV_CORS=TRUE → returns '*' (case insensitive)."""
-        with patch.dict(os.environ, {'ALLOW_DEV_CORS': 'TRUE'}, clear=False):
-            os.environ.pop('CORS_ORIGIN_PARAM', None)
-            result = _reload_and_get_origin()
-            assert result == '*'
-
-    def test_allow_dev_cors_false_returns_empty(self):
-        """ALLOW_DEV_CORS=false → returns empty string."""
-        with patch.dict(os.environ, {'ALLOW_DEV_CORS': 'false'}, clear=False):
-            os.environ.pop('CORS_ORIGIN_PARAM', None)
-            result = _reload_and_get_origin()
-            assert result == ''
+    @pytest.mark.parametrize(
+        ('allow_dev_cors', 'expected'),
+        [
+            pytest.param(None, '', id='no_env_vars_fail_closed'),
+            pytest.param('true', '*', id='allow_dev_cors_true_wildcard'),
+            pytest.param('TRUE', '*', id='allow_dev_cors_TRUE_wildcard_case_insensitive'),
+            pytest.param('false', '', id='allow_dev_cors_false_empty'),
+        ],
+    )
+    def test_returns_dev_fallback_origin_when_ssm_param_is_unset(self, allow_dev_cors, expected):
+        assert _origin_without_ssm_param(allow_dev_cors) == expected
 
     def test_cors_origin_param_set_reads_from_ssm(self):
         """CORS_ORIGIN_PARAM set → reads from SSM."""
-        mock_ssm = MagicMock()
-        mock_ssm.get_parameter.return_value = {
-            'Parameter': {'Value': 'https://d123.cloudfront.net'}
-        }
+        mock_ssm = _ssm_client([{'Parameter': {'Value': 'https://d123.cloudfront.net'}}])
 
-        with patch.dict(os.environ, {'CORS_ORIGIN_PARAM': '/citation-analysis/cors-origin'}, clear=False):
-            with patch('boto3.client', return_value=mock_ssm):
-                result = _reload_and_get_origin()
-                assert result == 'https://d123.cloudfront.net'
-                mock_ssm.get_parameter.assert_called_once_with(Name='/citation-analysis/cors-origin')
+        result = _reload_and_get_origin_from_ssm(mock_ssm)
+
+        assert result == 'https://d123.cloudfront.net'
+        mock_ssm.get_parameter.assert_called_once_with(Name='/citation-analysis/cors-origin')
 
     def test_ssm_failure_returns_empty(self):
         """SSM ClientError → returns empty string (fail secure)."""
-        from botocore.exceptions import ClientError
-        mock_ssm = MagicMock()
-        mock_ssm.get_parameter.side_effect = ClientError(
-            {'Error': {'Code': 'ParameterNotFound', 'Message': 'not found'}},
-            'GetParameter'
-        )
+        mock_ssm = _ssm_client(_get_parameter_error('ParameterNotFound', 'not found'))
 
-        with patch.dict(os.environ, {'CORS_ORIGIN_PARAM': '/citation-analysis/cors-origin'}, clear=False):
-            with patch('boto3.client', return_value=mock_ssm):
-                result = _reload_and_get_origin()
-                assert result == ''
+        assert _reload_and_get_origin_from_ssm(mock_ssm) == ''
 
 
 class TestSsmFailureIsNotCached:
@@ -140,19 +133,8 @@ class TestSsmFailureIsNotCached:
     """
 
     @staticmethod
-    def _ssm_client(side_effects):
-        """Build a boto3 stand-in whose get_parameter follows `side_effects`."""
-        client = MagicMock()
-        client.get_parameter.side_effect = side_effects
-        return client
-
-    @staticmethod
     def _throttling_error():
-        from botocore.exceptions import ClientError
-        return ClientError(
-            {'Error': {'Code': 'ThrottlingException', 'Message': 'Rate exceeded'}},
-            'GetParameter',
-        )
+        return _get_parameter_error('ThrottlingException', 'Rate exceeded')
 
     @staticmethod
     def _origins(client, calls: int) -> list[str]:
@@ -164,7 +146,7 @@ class TestSsmFailureIsNotCached:
     def test_returns_empty_origin_for_the_failing_request(self):
         """Fail closed: the request that hit the error gets no origin."""
         importlib.reload(cors_module)
-        client = self._ssm_client([self._throttling_error()])
+        client = _ssm_client([self._throttling_error()])
 
         assert self._origins(client, calls=1) == ['']
 
@@ -175,7 +157,7 @@ class TestSsmFailureIsNotCached:
         """
         importlib.reload(cors_module)
         configured = 'https://dashboard.example.com'
-        client = self._ssm_client([
+        client = _ssm_client([
             self._throttling_error(),
             {'Parameter': {'Value': configured}},
         ])
@@ -185,7 +167,7 @@ class TestSsmFailureIsNotCached:
     def test_makes_a_second_ssm_call_after_a_failure(self):
         """A cached failure would short-circuit before reaching SSM again."""
         importlib.reload(cors_module)
-        client = self._ssm_client([
+        client = _ssm_client([
             self._throttling_error(),
             {'Parameter': {'Value': 'https://dashboard.example.com'}},
         ])
@@ -198,7 +180,7 @@ class TestSsmFailureIsNotCached:
         """Success must still be cached — this is a per-invocation hot path."""
         importlib.reload(cors_module)
         configured = 'https://dashboard.example.com'
-        client = self._ssm_client([{'Parameter': {'Value': configured}}])
+        client = _ssm_client([{'Parameter': {'Value': configured}}])
 
         assert self._origins(client, calls=2) == [configured, configured]
         assert client.get_parameter.call_count == 1
@@ -208,12 +190,20 @@ class TestSsmFailureIsNotCached:
         An unset CORS_ORIGIN_PARAM is a deploy-time state, not a transient
         error, so caching '' there is correct and must not have regressed.
         """
-        importlib.reload(cors_module)
+        first = _origin_without_ssm_param(None)
 
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('CORS_ORIGIN_PARAM', None)
-            os.environ.pop('ALLOW_DEV_CORS', None)
-            first = cors_module.get_cors_origin()
+        assert first == ''
+        assert cors_module._cors_origin_cache == ''
 
-            assert first == ''
-            assert cors_module._cors_origin_cache == ''
+
+class TestCorsJsonHeaders:
+    """`cors_json_headers` reads the request Origin from the event in any header casing."""
+
+    @pytest.mark.parametrize('header_name', ['origin', 'Origin', 'ORIGIN'])
+    def test_echoes_an_allowed_localhost_origin_given_in_any_header_casing(self, header_name):
+        event = {'headers': {header_name: 'http://localhost:5173'}}
+
+        with configured_cors_origin(allow_localhost=True):
+            headers = cors_module.cors_json_headers(event)
+
+        assert headers == credentialed_json_headers('http://localhost:5173')

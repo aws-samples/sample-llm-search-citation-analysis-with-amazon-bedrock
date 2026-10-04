@@ -1,6 +1,8 @@
-import { expect } from 'vitest';
 import {
-  renderHook, waitFor
+  expect, vi
+} from 'vitest';
+import {
+  act, renderHook, waitFor
 } from '@testing-library/react';
 import type {
   BrandConfig, IndustryPresets
@@ -30,37 +32,21 @@ const mockPresets: IndustryPresets = {
   hospitality: {
     name: 'Hospitality',
     description: 'Hotels and travel',
-    entity_types: ['hotel', 'resort'],
     example_brands: ['Marriott', 'Hilton'],
-    extraction_focus: 'hotel brands',
     default_prompt: 'Extract hotel brand mentions',
   },
   retail: {
     name: 'Retail',
     description: 'Retail stores',
-    entity_types: ['store'],
     example_brands: ['Amazon'],
-    extraction_focus: 'retail brands',
     default_prompt: 'Extract retail brand mentions',
   },
   custom: {
     name: 'Custom Industry',
     description: 'Define your own industry and brand types',
-    entity_types: [],
     example_brands: [],
-    extraction_focus: 'brand and company recommendations',
     default_prompt: 'Extract brand and company mentions',
   },
-};
-
-export const PRESETS_WITHOUT_CUSTOM = { hospitality: mockPresets.hospitality } satisfies IndustryPresets;
-
-/** Payload of `POST /brand-config/expand` for the fixture brand. */
-const mockBrandExpansion = {
-  main_brand: 'TestBrand',
-  parent_company: 'ParentCo',
-  suggestions: ['SubBrand1', 'SubBrand2'],
-  notes: 'Test notes',
 };
 
 /** Payload of `POST /brand-config/expand-all` for the fixture brand list. */
@@ -79,17 +65,27 @@ const mockCompetitorDiscovery = {
   notes: 'Found competitors',
 };
 
-interface BrandConfigMockApiOptions {
+export interface BrandConfigMockApiOptions {
   /** Partial stored config returned by GET and echoed back by POST `/brand-config`. */
   configResponse?: Partial<BrandConfig>;
   presetsResponse?: IndustryPresets;
   shouldFailConfig?: boolean;
   shouldFailPresets?: boolean;
   shouldFailSave?: boolean;
-  shouldFailDelete?: boolean;
-  shouldFailExpand?: boolean;
   shouldFailExpandAll?: boolean;
   shouldFailFindCompetitors?: boolean;
+  /** Bodies of the three expansion routes, replacing the full default answers. */
+  expandAllResponse?: unknown;
+  findCompetitorsResponse?: unknown;
+  /** Makes every expansion request reject with this value instead of answering. */
+  expansionRejection?: unknown;
+}
+
+/** An expansion route: rejects with `options.expansionRejection` when set, else a `createMockEndpoint`. */
+function mockExpansionEndpoint(options: BrandConfigMockApiOptions, shouldFail: boolean | undefined, payload: unknown) {
+  if (options.expansionRejection === undefined) return createMockEndpoint(shouldFail, payload);
+  const rejection: unknown = options.expansionRejection;
+  return vi.fn(() => Promise.reject(rejection));
 }
 
 function createMockApi(options: BrandConfigMockApiOptions = {}) {
@@ -99,11 +95,22 @@ function createMockApi(options: BrandConfigMockApiOptions = {}) {
     fetchConfig: createMockEndpoint(options.shouldFailConfig, storedConfig),
     fetchPresets: createMockEndpoint(options.shouldFailPresets, { presets }),
     saveConfig: createMockEndpoint(options.shouldFailSave, { config: storedConfig }),
-    deleteConfig: createMockEndpoint(options.shouldFailDelete, { config: {} }),
-    expandBrand: createMockEndpoint(options.shouldFailExpand, mockBrandExpansion),
-    expandAllBrands: createMockEndpoint(options.shouldFailExpandAll, mockAllBrandsExpansion),
-    findCompetitors: createMockEndpoint(options.shouldFailFindCompetitors, mockCompetitorDiscovery),
+    expandAllBrands: mockExpansionEndpoint(options, options.shouldFailExpandAll, options.expandAllResponse ?? mockAllBrandsExpansion),
+    findCompetitors: mockExpansionEndpoint(options, options.shouldFailFindCompetitors, options.findCompetitorsResponse ?? mockCompetitorDiscovery),
   } satisfies BrandConfigApi;
+}
+
+/** Renders the hook, waits for the initial load, then runs one hook action inside `act`. */
+export async function runOnLoadedBrandConfig<TValue>(
+  run: (hook: ReturnType<typeof useBrandConfig>) => Promise<TValue>,
+  options: BrandConfigMockApiOptions = {}
+) {
+  const rendered = await renderLoadedBrandConfig(options);
+  const value = await act(() => run(rendered.result.current));
+  return {
+    ...rendered,
+    value,
+  };
 }
 
 /** Renders the hook against a mocked API without waiting for the initial load. */
@@ -121,4 +128,13 @@ export async function renderLoadedBrandConfig(options: BrandConfigMockApiOptions
   const rendered = renderBrandConfig(options);
   await waitFor(() => expect(rendered.result.current.loading).toBe(false));
   return rendered;
+}
+
+/** The init the default API's POST routes send with `body`. */
+export function brandConfigPostInit(body: unknown) {
+  return {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  };
 }

@@ -14,17 +14,23 @@ import type {
 import {
   buildContentHistoryPayload, mockContentHistory
 } from './useContentStudio-fixtures';
+import { requestUrlsContaining } from './useContentStudio-request-fixtures';
 import { useContentStudio } from './useContentStudio';
 
+/**
+ * Queues one reply per upcoming `authenticatedFetch` call, in order: a pending
+ * promise (e.g. a deferred request) is returned as is, a `Response` is resolved
+ * as is, and anything else is resolved as a JSON payload.
+ */
 export function queueContentStudioPayloads(...payloads: readonly unknown[]): void {
   for (const payload of payloads) {
-    mockAuthenticatedFetch.mockResolvedValueOnce(createMockJsonResponse(payload));
-  }
-}
-
-export function queueContentStudioResponses(...responses: readonly Response[]): void {
-  for (const response of responses) {
-    mockAuthenticatedFetch.mockResolvedValueOnce(response);
+    if (payload instanceof Promise) {
+      mockAuthenticatedFetch.mockReturnValueOnce(payload);
+    } else {
+      mockAuthenticatedFetch.mockResolvedValueOnce(
+        payload instanceof Response ? payload : createMockJsonResponse(payload)
+      );
+    }
   }
 }
 
@@ -41,9 +47,7 @@ export function queueTwoDeferredContentStudioRequests() {
 }
 
 export function contentStudioRequestUrls(pathFragment: string): string[] {
-  return mockAuthenticatedFetch.mock.calls
-    .map(([url]) => String(url))
-    .filter((url) => url.includes(pathFragment));
+  return requestUrlsContaining(mockAuthenticatedFetch, pathFragment);
 }
 
 export function contentStatusPayload(id: string, status: ContentStatus) {
@@ -63,7 +67,7 @@ export function historyItemWithStatus(
   };
 }
 
-export async function renderFetchedContentStudio() {
+async function renderFetchedContentStudio() {
   const rendered = renderHook(() => useContentStudio());
   await act(() => rendered.result.current.fetchHistory());
   return rendered;
@@ -75,15 +79,26 @@ export async function waitForContentStudioRequests(expectedCount: number): Promi
   });
 }
 
+/** Queues `payloads`, renders, loads history, then waits for `expectedRequests` fetches. */
+export async function renderQueuedContentStudio(
+  expectedRequests: number,
+  ...payloads: readonly unknown[]
+) {
+  queueContentStudioPayloads(...payloads);
+  const rendered = await renderFetchedContentStudio();
+  await waitForContentStudioRequests(expectedRequests);
+  return rendered;
+}
+
+export const generatingHistoryPayload = buildContentHistoryPayload([mockContentHistory[1]]);
+
 export async function renderPendingItemStatus() {
   const statusRequest = createDeferredResponse();
-  mockAuthenticatedFetch
-    .mockResolvedValueOnce(createMockJsonResponse(
-      buildContentHistoryPayload([mockContentHistory[1]])
-    ))
-    .mockReturnValueOnce(statusRequest.promise);
-  const rendered = await renderFetchedContentStudio();
-  await waitForContentStudioRequests(2);
+  const rendered = await renderQueuedContentStudio(
+    2,
+    generatingHistoryPayload,
+    statusRequest.promise
+  );
   return {
     statusRequest,
     rendered,

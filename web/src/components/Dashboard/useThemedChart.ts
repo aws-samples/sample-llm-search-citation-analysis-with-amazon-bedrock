@@ -33,7 +33,7 @@ export function useThemedChart<TItem, TType extends ChartType>(
   const { isDark } = useTheme();
 
   useEffect(() => {
-    if (!canvasRef.current || !items?.length) return;
+    if (!canvasRef.current || items.length === 0) return;
 
     if (chartRef.current) {
       chartRef.current.destroy();
@@ -51,7 +51,7 @@ export function useThemedChart<TItem, TType extends ChartType>(
     };
   }, [items, isDark, buildConfiguration]);
 
-  const hasData = items && items.length > 0;
+  const hasData = items.length > 0;
 
   return {
     canvasRef,

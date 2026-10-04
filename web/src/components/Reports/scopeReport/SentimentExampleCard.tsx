@@ -5,7 +5,7 @@ import {
   Button, ChevronDownIcon
 } from '../../ui';
 import { formatResponse } from '../../ui/MarkdownProcessor';
-import { engineName } from '../charts';
+import { providerName } from '../../../constants/providers';
 import { SENTIMENT_TONES } from './sentimentTone';
 
 interface Props {readonly example: SentimentExample;}
@@ -59,7 +59,7 @@ export function SentimentExampleCard({ example }: Props) {
       <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
         {[
           `Keyword: ${example.keyword}`,
-          `Engine: ${engineName(example.provider)}`,
+          `Engine: ${providerName(example.provider)}`,
           `Persona: ${example.persona_name ?? example.persona}`,
           `Run: ${formatDateOnly(example.timestamp)}`,
         ].join(' · ')}

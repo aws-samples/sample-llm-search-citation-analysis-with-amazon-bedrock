@@ -2,7 +2,7 @@ import {
   describe, it, expect, vi, beforeEach
 } from 'vitest';
 import {
-  render, screen, within
+  render, screen
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { VisibilityDashboard } from './VisibilityDashboard';
@@ -30,15 +30,16 @@ import {
 import {
   buildTrendsResponse, buildVisibility
 } from './visibilityOverview-fixtures';
-import { panelTitled } from './visibilityTables-fixtures';
-import { HISTORY_TITLE } from './VisibilityHistory';
+import { clickExportToExcel } from './overviewRender-fixtures';
+import {
+  clickRangeButton, historyPanel, scopeLine
+} from './visibilityTables-fixtures';
 import type {
-  Keyword, KeywordGroup
+  HistoricalTrendsResponse, Keyword, KeywordGroup, PersonaRankingsResponse, VisibilityResponse
 } from '../../types';
 
-const mockUseVisibilityMetrics = vi.mocked(useVisibilityMetrics);
-const mockUseHistoricalTrends = vi.mocked(useHistoricalTrends);
-const mockUsePersonaRankings = vi.mocked(usePersonaRankings);
+type HookStateOverrides = Parameters<typeof buildVisibilityHookResult>[1];
+
 const mockUseKeywordGroups = vi.mocked(useKeywordGroups);
 const mockExportVisibilityOverview = vi.mocked(exportVisibilityOverview);
 
@@ -53,52 +54,81 @@ const HOTELS_SCOPE = {
   keyword: 'hotels',
 } as const;
 
+/** Makes `useVisibilityMetrics` return `data` in the given state; returns the hook result. */
+function stubVisibility(data: VisibilityResponse | null, overrides?: HookStateOverrides) {
+  const hook = buildVisibilityHookResult(data, overrides);
+  vi.mocked(useVisibilityMetrics).mockReturnValue(hook);
+  return hook;
+}
+
+/** Makes `useHistoricalTrends` return `data` in the given state; returns the hook result. */
+function stubTrends(data: HistoricalTrendsResponse | null, overrides?: HookStateOverrides) {
+  const hook = buildTrendsHookResult(data, overrides);
+  vi.mocked(useHistoricalTrends).mockReturnValue(hook);
+  return hook;
+}
+
+/** Makes `usePersonaRankings` return `data`; returns the hook result. */
+function stubPersonaRankings(data: PersonaRankingsResponse | null) {
+  const hook = buildPersonaRankingsHookResult(data);
+  vi.mocked(usePersonaRankings).mockReturnValue(hook);
+  return hook;
+}
+
+function renderDashboard(keywords: Keyword[] = SCOPE_KEYWORDS) {
+  return render(<VisibilityDashboard keywords={keywords} />);
+}
+
+/** Renders the dashboard over the scope keywords and picks the scope `option` ("all", "keyword:hotels", "group:<id>"). */
+async function renderDashboardScoped(option: string) {
+  const view = renderDashboard();
+  await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Analyze' }), option);
+  return view;
+}
+
 describe('VisibilityDashboard', () => {
   beforeEach(() => {
-    mockUseVisibilityMetrics.mockReturnValue(buildVisibilityHookResult(null));
-    mockUseHistoricalTrends.mockReturnValue(buildTrendsHookResult(null));
-    mockUsePersonaRankings.mockReturnValue(buildPersonaRankingsHookResult(SINGLE_PERSONA_RANKINGS));
+    stubVisibility(null);
+    stubTrends(null);
+    stubPersonaRankings(SINGLE_PERSONA_RANKINGS);
     mockUseKeywordGroups.mockReturnValue(buildKeywordGroupsHookResult([buildKeywordGroup()]));
   });
 
   describe('initial render', () => {
     it('renders title and description', () => {
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+      renderDashboard();
 
       expect(screen.getByText('Visibility Dashboard')).toBeInTheDocument();
       expect(screen.getByText(/Track how visible your brand is/)).toBeInTheDocument();
     });
 
     it('offers all keywords, every group and every keyword in the scope selector', () => {
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+      renderDashboard();
 
       expect(renderedScopeOptionLabels('Analyze')).toStrictEqual(['All keywords', 'Hotel Coruña (1)', 'hotels', 'resorts']);
     });
 
     it('loads all-keywords visibility and 30 days of daily history by default', () => {
-      const visibilityHook = buildVisibilityHookResult(null);
-      const trendsHook = buildTrendsHookResult(null);
-      mockUseVisibilityMetrics.mockReturnValue(visibilityHook);
-      mockUseHistoricalTrends.mockReturnValue(trendsHook);
+      const visibilityHook = stubVisibility(null);
+      const trendsHook = stubTrends(null);
 
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+      renderDashboard();
 
       expect(visibilityHook.fetchVisibilityMetrics).toHaveBeenCalledWith({ kind: 'all' }, undefined);
       expect(trendsHook.fetchHistoricalTrends).toHaveBeenCalledWith({ kind: 'all' }, 'day', 30);
     });
 
     it('renders without fetching when there are no keywords', () => {
-      const visibilityHook = buildVisibilityHookResult(null);
-      mockUseVisibilityMetrics.mockReturnValue(visibilityHook);
+      const visibilityHook = stubVisibility(null);
 
-      render(<VisibilityDashboard keywords={[]} />);
+      renderDashboard([]);
 
       expect(screen.getByText('Visibility Dashboard')).toBeInTheDocument();
       expect(visibilityHook.fetchVisibilityMetrics).not.toHaveBeenCalled();
     });
 
     it('shows no overview until visibility is loaded', () => {
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+      renderDashboard();
 
       expect(screen.queryByRole('button', { name: 'Export to Excel' })).not.toBeInTheDocument();
     });
@@ -106,76 +136,75 @@ describe('VisibilityDashboard', () => {
 
   describe('loading and errors', () => {
     it.each([
-      ['visibility', buildVisibilityHookResult(null, { loading: true }), buildTrendsHookResult(null)],
-      ['trends', buildVisibilityHookResult(null), buildTrendsHookResult(null, { loading: true })],
-    ])('shows the loading message while %s load', (_request, visibilityHook, trendsHook) => {
-      mockUseVisibilityMetrics.mockReturnValue(visibilityHook);
-      mockUseHistoricalTrends.mockReturnValue(trendsHook);
+      ['visibility', { loading: true }, {}],
+      ['trends', {}, { loading: true }],
+    ])('shows the loading message while %s load', (_request, visibilityState, trendsState) => {
+      stubVisibility(null, visibilityState);
+      stubTrends(null, trendsState);
 
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+      renderDashboard();
 
       expect(screen.getByText('Loading visibility data...')).toBeInTheDocument();
     });
 
     it('hides the loading message once both requests are done', () => {
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+      renderDashboard();
 
       expect(screen.queryByText('Loading visibility data...')).not.toBeInTheDocument();
     });
 
     it('shows the visibility error once loading is over', () => {
-      mockUseVisibilityMetrics.mockReturnValue(buildVisibilityHookResult(null, { error: 'Unable to load visibility metrics' }));
+      stubVisibility(null, { error: 'Unable to load visibility metrics' });
 
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+      renderDashboard();
 
       expect(screen.getByText('Unable to load visibility metrics')).toBeInTheDocument();
     });
 
     it('hides the visibility error while a new request loads', () => {
-      mockUseVisibilityMetrics.mockReturnValue(buildVisibilityHookResult(null, {
+      stubVisibility(null, {
         loading: true,
         error: 'Unable to load visibility metrics',
-      }));
+      });
 
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+      renderDashboard();
 
       expect(screen.queryByText('Unable to load visibility metrics')).not.toBeInTheDocument();
     });
 
     it('shows a trends error in the history panel', () => {
-      mockUseVisibilityMetrics.mockReturnValue(buildVisibilityHookResult(visibility));
-      mockUseHistoricalTrends.mockReturnValue(buildTrendsHookResult(null, { error: 'Failed to fetch historical trends' }));
+      stubVisibility(visibility);
+      stubTrends(null, { error: 'Failed to fetch historical trends' });
 
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+      renderDashboard();
 
-      expect(within(panelTitled(HISTORY_TITLE)).getByText('History unavailable: Failed to fetch historical trends')).toBeInTheDocument();
+      expect(historyPanel().getByText('History unavailable: Failed to fetch historical trends')).toBeInTheDocument();
     });
   });
 
   describe('overview', () => {
+    beforeEach(() => {
+      stubVisibility(visibility);
+    });
+
     it('describes the selected scope above the overview', () => {
-      mockUseVisibilityMetrics.mockReturnValue(buildVisibilityHookResult(visibility));
+      renderDashboard();
 
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
-
-      expect(screen.getByText(/keywords have analysis data/)).toHaveTextContent(/^All keywords · 1 of 2 keywords have analysis data/);
+      expect(scopeLine()).toHaveTextContent(/^All keywords · 1 of 2 keywords have analysis data/);
     });
 
     it('exports the rendered overview under the scope label', async () => {
-      mockUseVisibilityMetrics.mockReturnValue(buildVisibilityHookResult(visibility));
-      mockUseHistoricalTrends.mockReturnValue(buildTrendsHookResult(trends));
+      stubTrends(trends);
       mockExportVisibilityOverview.mockResolvedValue();
 
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
-      await userEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
+      renderDashboard();
+      await clickExportToExcel();
 
       expect(mockExportVisibilityOverview).toHaveBeenCalledWith(visibility, trends, 'All keywords');
     });
 
     it('leaves the persona comparison out of a scope wider than one keyword', () => {
-      mockUseVisibilityMetrics.mockReturnValue(buildVisibilityHookResult(visibility));
-
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+      renderDashboard();
 
       expect(screen.queryByText(TOO_FEW_PERSONAS)).not.toBeInTheDocument();
     });
@@ -183,15 +212,11 @@ describe('VisibilityDashboard', () => {
 
   describe('scope selection', () => {
     it('fetches the selected keyword visibility, history and persona rankings', async () => {
-      const visibilityHook = buildVisibilityHookResult(null);
-      const trendsHook = buildTrendsHookResult(null);
-      const personaHook = buildPersonaRankingsHookResult(null);
-      mockUseVisibilityMetrics.mockReturnValue(visibilityHook);
-      mockUseHistoricalTrends.mockReturnValue(trendsHook);
-      mockUsePersonaRankings.mockReturnValue(personaHook);
+      const visibilityHook = stubVisibility(null);
+      const trendsHook = stubTrends(null);
+      const personaHook = stubPersonaRankings(null);
 
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
-      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Analyze' }), 'keyword:hotels');
+      await renderDashboardScoped('keyword:hotels');
 
       expect(visibilityHook.fetchVisibilityMetrics).toHaveBeenLastCalledWith(HOTELS_SCOPE, undefined);
       expect(trendsHook.fetchHistoricalTrends).toHaveBeenLastCalledWith(HOTELS_SCOPE, 'day', 30);
@@ -199,11 +224,9 @@ describe('VisibilityDashboard', () => {
     });
 
     it('fetches the selected keyword group', async () => {
-      const visibilityHook = buildVisibilityHookResult(null);
-      mockUseVisibilityMetrics.mockReturnValue(visibilityHook);
+      const visibilityHook = stubVisibility(null);
 
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
-      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Analyze' }), 'group:group-coruna');
+      await renderDashboardScoped('group:group-coruna');
 
       expect(visibilityHook.fetchVisibilityMetrics).toHaveBeenLastCalledWith({
         kind: 'group',
@@ -211,52 +234,48 @@ describe('VisibilityDashboard', () => {
       }, undefined);
     });
 
-    it.each([
-      ['all keywords', 'all', { kind: 'all' }, 90],
-      ['a single keyword', 'keyword:hotels', HOTELS_SCOPE, 7],
-    ] as const)('re-fetches the history of %s when the range changes', async (_scope, option, scope, days) => {
-      const trendsHook = buildTrendsHookResult(trends);
-      mockUseVisibilityMetrics.mockReturnValue(buildVisibilityHookResult(visibility));
-      mockUseHistoricalTrends.mockReturnValue(trendsHook);
-
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
-      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Analyze' }), option);
-      await userEvent.click(screen.getByRole('button', { name: `${days} days` }));
-
-      expect(trendsHook.fetchHistoricalTrends).toHaveBeenLastCalledWith(scope, 'day', days);
-    });
-
-    it('adds the persona comparison for a single keyword', async () => {
-      mockUseVisibilityMetrics.mockReturnValue(buildVisibilityHookResult(visibility));
-
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
-      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Analyze' }), 'keyword:hotels');
-
-      expect(screen.getByText(TOO_FEW_PERSONAS)).toBeInTheDocument();
-    });
-
     it('fetches no persona rankings for all keywords', () => {
-      const personaHook = buildPersonaRankingsHookResult(null);
-      mockUsePersonaRankings.mockReturnValue(personaHook);
+      const personaHook = stubPersonaRankings(null);
 
-      render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
+      renderDashboard();
 
       expect(personaHook.fetchPersonaRankings).not.toHaveBeenCalled();
     });
 
-    it.each<[string, string, Keyword[], KeywordGroup[], string]>([
-      ['falls back to all keywords when the selected keyword is deleted', 'keyword:hotels', [SCOPE_KEYWORDS[1]], [], 'All keywords'],
-      ['falls back to all keywords when the selected group is deleted', 'group:group-coruna', [], [OTHER_GROUP], 'All keywords'],
-      ['keeps the selected keyword while keywords and groups are still loading', 'keyword:hotels', [], [], 'hotels'],
-    ])('%s', async (_outcome, option, keywordsAfter, groupsAfter, scopeLabel) => {
-      mockUseVisibilityMetrics.mockReturnValue(buildVisibilityHookResult(visibility));
+    describe('with visibility loaded', () => {
+      beforeEach(() => {
+        stubVisibility(visibility);
+      });
 
-      const { rerender } = render(<VisibilityDashboard keywords={SCOPE_KEYWORDS} />);
-      await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Analyze' }), option);
-      mockUseKeywordGroups.mockReturnValue(buildKeywordGroupsHookResult(groupsAfter));
-      rerender(<VisibilityDashboard keywords={keywordsAfter} />);
+      it.each([
+        ['all keywords', 'all', { kind: 'all' }, 90],
+        ['a single keyword', 'keyword:hotels', HOTELS_SCOPE, 7],
+      ] as const)('re-fetches the history of %s when the range changes', async (_scope, option, scope, days) => {
+        const trendsHook = stubTrends(trends);
 
-      expect(screen.getByText(/keywords have analysis data/).textContent?.split(' · ')[0]).toBe(scopeLabel);
+        await renderDashboardScoped(option);
+        await clickRangeButton(days);
+
+        expect(trendsHook.fetchHistoricalTrends).toHaveBeenLastCalledWith(scope, 'day', days);
+      });
+
+      it('adds the persona comparison for a single keyword', async () => {
+        await renderDashboardScoped('keyword:hotels');
+
+        expect(screen.getByText(TOO_FEW_PERSONAS)).toBeInTheDocument();
+      });
+
+      it.each<[string, string, Keyword[], KeywordGroup[], string]>([
+        ['falls back to all keywords when the selected keyword is deleted', 'keyword:hotels', [SCOPE_KEYWORDS[1]], [], 'All keywords'],
+        ['falls back to all keywords when the selected group is deleted', 'group:group-coruna', [], [OTHER_GROUP], 'All keywords'],
+        ['keeps the selected keyword while keywords and groups are still loading', 'keyword:hotels', [], [], 'hotels'],
+      ])('%s', async (_outcome, option, keywordsAfter, groupsAfter, scopeLabel) => {
+        const { rerender } = await renderDashboardScoped(option);
+        mockUseKeywordGroups.mockReturnValue(buildKeywordGroupsHookResult(groupsAfter));
+        rerender(<VisibilityDashboard keywords={keywordsAfter} />);
+
+        expect(scopeLine().textContent?.split(' · ')[0]).toBe(scopeLabel);
+      });
     });
   });
 });

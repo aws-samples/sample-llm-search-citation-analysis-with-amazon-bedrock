@@ -1,11 +1,7 @@
 import type { ChartConfiguration } from 'chart.js';
-import {
-  themedAxis, type ChartTheme
-} from '../../ui/chartTheme';
+import type { ChartTheme } from '../../ui/chartTheme';
 import { resolveColour } from './chartPalette';
-import {
-  chartOptions, percentAxis
-} from './chartOptions';
+import { percentChartOptions } from './chartOptions';
 import {
   seriesLabels, valuesAt, type ChartSeries
 } from './chartSeries';
@@ -46,9 +42,6 @@ export function lineChartConfiguration(
         };
       }),
     },
-    options: chartOptions(theme, {
-      x: themedAxis(theme),
-      y: percentAxis(theme),
-    }),
+    options: percentChartOptions(theme),
   };
 }

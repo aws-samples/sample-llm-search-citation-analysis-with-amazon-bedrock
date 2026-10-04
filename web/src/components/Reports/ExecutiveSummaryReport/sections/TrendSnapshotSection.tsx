@@ -1,16 +1,10 @@
 import type { ReportsOverviewResponse } from '../../../../api/reports';
 import {
-  ReportSection, gateSection
+  ReportSection, gateSection, type ReportSlice
 } from '../../layout';
 import {
   KpiTrendPanel, ShareOfVoicePanel
 } from '../../BrandVisibilityReport/sections/ReportChartPanels';
-
-interface Props {
-  readonly data: ReportsOverviewResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
 
 /**
  * The headline at a glance: the KPIs per period of the window as lines and
@@ -20,7 +14,7 @@ interface Props {
  */
 export function TrendSnapshotSection({
   data, loading, error
-}: Props) {
+}: ReportSlice<ReportsOverviewResponse>) {
   const gate = gateSection({
     title: 'Trend and share of voice',
     loading,

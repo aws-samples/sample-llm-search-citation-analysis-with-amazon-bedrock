@@ -27,6 +27,14 @@ def _serpapi(search=_SEARCH_PAGE, autocomplete=_AUTOCOMPLETE) -> MagicMock:
     )
 
 
+def _serpapi_calls(api_key: str, **fetch_kwargs: str) -> list:
+    """The ``serpapi_search`` calls one ``fetch_google_signals(api_key, 'hotel coruña', ...)`` makes."""
+    search = _serpapi()
+    with patch.object(keyword_signals, 'serpapi_search', search):
+        keyword_signals.fetch_google_signals(api_key, 'hotel coruña', **fetch_kwargs)
+    return search.call_args_list
+
+
 class TestFetchGoogleSignals:
     def test_collects_related_searches_questions_and_autocomplete_in_order(self):
         with patch.object(keyword_signals, 'serpapi_search', _serpapi()):
@@ -46,42 +54,28 @@ class TestFetchGoogleSignals:
         assert (first['relevance'], first['intent'], first['competition']) == (5, '', '')
 
     def test_sends_the_market_and_language_to_both_engines(self):
-        search = _serpapi()
+        calls = _serpapi_calls('key', country='es', language='gl')
 
-        with patch.object(keyword_signals, 'serpapi_search', search):
-            keyword_signals.fetch_google_signals('key', 'hotel coruña', country='es', language='gl')
-
-        engines = [(call.args[1]['engine'], call.args[1]['gl'], call.args[1]['hl'], call.args[1]['q']) for call in search.call_args_list]
+        engines = [(call.args[1]['engine'], call.args[1]['gl'], call.args[1]['hl'], call.args[1]['q']) for call in calls]
         assert engines == [('google', 'es', 'gl', 'hotel coruña'), ('google_autocomplete', 'es', 'gl', 'hotel coruña')]
 
     def test_passes_the_api_key_separately_from_the_search_parameters(self):
-        search = _serpapi()
+        calls = _serpapi_calls('serp-key')
 
-        with patch.object(keyword_signals, 'serpapi_search', search):
-            keyword_signals.fetch_google_signals('serp-key', 'hotel coruña')
-
-        assert [(call.args[0], 'api_key' in call.args[1]) for call in search.call_args_list] == [
+        assert [(call.args[0], 'api_key' in call.args[1]) for call in calls] == [
             ('serp-key', False), ('serp-key', False),
         ]
 
     def test_waits_for_each_search_at_most_the_signals_deadline(self):
-        search = _serpapi()
+        calls = _serpapi_calls('key')
 
-        with patch.object(keyword_signals, 'serpapi_search', search):
-            keyword_signals.fetch_google_signals('key', 'hotel coruña')
-
-        assert [call.kwargs for call in search.call_args_list] == [
+        assert [call.kwargs for call in calls] == [
             {'deadline_seconds': keyword_signals.SIGNALS_DEADLINE_SECONDS},
             {'deadline_seconds': keyword_signals.SIGNALS_DEADLINE_SECONDS},
         ]
 
     def test_asks_google_for_ten_results(self):
-        search = _serpapi()
-
-        with patch.object(keyword_signals, 'serpapi_search', search):
-            keyword_signals.fetch_google_signals('key', 'hotel coruña')
-
-        assert search.call_args_list[0].args[1]['num'] == 10
+        assert _serpapi_calls('key')[0].args[1]['num'] == 10
 
     def test_tolerates_pages_without_the_signal_blocks(self):
         with patch.object(keyword_signals, 'serpapi_search', _serpapi(search={'organic_results': []}, autocomplete={})):

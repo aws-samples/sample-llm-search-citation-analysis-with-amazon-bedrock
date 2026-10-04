@@ -1,6 +1,7 @@
 import {
-  useCallback, useEffect, useRef, useState
+  useCallback, useEffect, useState
 } from 'react';
+import { useLatestRequest } from './useLatestRequest';
 import {
   getErrorMessage, isAbortError
 } from '../infrastructure';
@@ -58,36 +59,30 @@ export const useKeywordGroups = (options: UseKeywordGroupsOptions = {}): UseKeyw
   const [groups, setGroups] = useState<KeywordGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const mountedRef = useRef(true);
-  const controllerRef = useRef<AbortController | null>(null);
+  const { beginRequest } = useLatestRequest();
 
+  // Stryker disable ArrayDeclaration: React dependency list; beginRequest has a stable identity, so omitting it cannot stale this callback
   const refresh = useCallback(async (): Promise<void> => {
-    controllerRef.current?.abort();
-    const controller = new AbortController();
-    controllerRef.current = controller;
+    const request = beginRequest();
     try {
-      const fetched = await fetchKeywordGroups(controller.signal);
-      if (!mountedRef.current || controllerRef.current !== controller) return;
+      const fetched = await fetchKeywordGroups(request.signal);
+      if (!request.isCurrent()) return;
       setGroups(sortGroups(fetched));
       setError(null);
     } catch (fetchError) {
-      if (isAbortError(fetchError) || !mountedRef.current) return;
+      if (isAbortError(fetchError) || !request.isCurrent()) return;
       console.error('[keyword-groups] Error fetching groups:', fetchError);
       setError(getErrorMessage(fetchError, 'keywords'));
     } finally {
-      if (mountedRef.current && controllerRef.current === controller) {
-        setLoading(false);
-      }
+      if (request.isCurrent()) setLoading(false);
+      // Stryker disable next-line CallExpression: equivalent, finish only stops a later cancel from aborting this settled request's signal, which nothing reads after it settles
+      request.finish();
     }
-  }, []);
+  }, [beginRequest]);
+  // Stryker restore ArrayDeclaration
 
   useEffect(() => {
-    mountedRef.current = true;
     void refresh();
-    return () => {
-      mountedRef.current = false;
-      controllerRef.current?.abort();
-    };
   }, [refresh]);
 
   const runMutation = useCallback(async (

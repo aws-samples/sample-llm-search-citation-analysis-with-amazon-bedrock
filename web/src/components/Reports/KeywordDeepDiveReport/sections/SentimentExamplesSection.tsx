@@ -1,12 +1,12 @@
 import type { BrandMentionsResponse } from '../../../../types';
-import { ReportSection } from '../../layout';
+import {
+  ReportSection,
+  pendingSectionPlaceholder,
+  type SectionFetchState,
+} from '../../layout';
 import { SectionPlaceholder } from '../../layout/SectionPlaceholder';
 
-interface Props {
-  readonly mentions: BrandMentionsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
+interface Props extends SectionFetchState {readonly mentions: BrandMentionsResponse | null;}
 
 interface SentimentExample {
   brand: string;
@@ -38,21 +38,13 @@ const MAX_EXAMPLES_PER_POLARITY = 2;
 export function SentimentExamplesSection({
   mentions, loading, error 
 }: Props) {
-  if (loading) {
-    return (
-      <ReportSection title="Sentiment examples">
-        <SectionPlaceholder variant="loading" message="Loading sentiment data…" />
-      </ReportSection>
-    );
-  }
-
-  if (error) {
-    return (
-      <ReportSection title="Sentiment examples">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
+  const pending = pendingSectionPlaceholder({
+    title: 'Sentiment examples',
+    loading,
+    loadingMessage: 'Loading sentiment data…',
+    error,
+  });
+  if (pending) return pending;
 
   if (!mentions) {
     return null;

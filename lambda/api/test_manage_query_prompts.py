@@ -6,14 +6,14 @@ Covers:
 - Validation ({keyword} placeholder, max prompts, field limits)
 """
 
-import json
 import os
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from testing.admin_authz_fixtures import caller_event, invoke, status_of
 from testing.dynamodb_stubs import fake_dynamodb_resource
-from testing.events import parse_response
 from testing.module_loader import load_handler_module
 
 # Mock the DynamoDB table at module level; boto3.resource is patched before
@@ -22,8 +22,11 @@ mock_table = MagicMock()
 mock_dynamodb = fake_dynamodb_resource(mock_table)
 
 with patch('boto3.resource', return_value=mock_dynamodb):
-    with patch.dict(os.environ, {'QUERY_PROMPTS_TABLE': 'test-table', 'CORS_ORIGIN_PARAM': ''}):
+    with patch.dict(os.environ, {'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-table', 'CORS_ORIGIN_PARAM': ''}):
         _handler_mod = load_handler_module(os.path.dirname(__file__), 'manage-query-prompts.py', 'manage_query_prompts')
+
+PERSONA = {'name': 'Persona', 'template': 'about {keyword}'}
+RENAME = {'name': 'Renamed'}
 
 
 def make_event(method, body=None, path_params=None, groups: str | None = 'Admin'):
@@ -32,17 +35,12 @@ def make_event(method, body=None, path_params=None, groups: str | None = 'Admin'
     Defaults to an Admin caller because every mutating route now requires the
     group (AUDIT-2026-08-19 §0). Pass `groups=None` for an unauthorized caller.
     """
-    claims = {'cognito:username': 'admin@example.com', 'email': 'admin@example.com'}
-    if groups is not None:
-        claims['cognito:groups'] = groups
+    return caller_event(method, '/api/query-prompts', body=body, path_params=path_params, groups=groups)
 
-    return {
-        'httpMethod': method,
-        'pathParameters': path_params,
-        'headers': {'origin': 'http://localhost:3000'},
-        'body': json.dumps(body) if body else None,
-        'requestContext': {'authorizer': {'claims': claims}},
-    }
+
+def prompt_event(method, body=None, groups: str | None = 'Admin'):
+    """An event addressing prompt `abc`."""
+    return make_event(method, body=body, path_params={'id': 'abc'}, groups=groups)
 
 
 @pytest.fixture(autouse=True)
@@ -81,91 +79,106 @@ class TestCreatePrompt:
             'name': 'Family Traveler',
             'template': 'As a family traveler, find me {keyword}',
         })
-        result = handler_module.handler(event, {})
-        status, body = parse_response(result)
+        status, body = invoke(handler_module, event)
         assert status == 201
         assert body['name'] == 'Family Traveler'
         assert body['enabled'] == 'true'
         mock_table.put_item.assert_called_once()
 
-    def test_create_missing_keyword_placeholder(self, handler_module):
-        """Template without {keyword} is rejected."""
-        mock_table.scan.return_value = {'Count': 0}
-        event = make_event('POST', body={
-            'name': 'Bad Prompt',
-            'template': 'Find me the best hotels',
-        })
-        result = handler_module.handler(event, {})
-        status, _ = parse_response(result)
+    @pytest.mark.parametrize(('stored_count', 'body'), [
+        pytest.param(0, {'name': 'Bad Prompt', 'template': 'Find me the best hotels'}, id='template-without-keyword-placeholder'),
+        pytest.param(10, {'name': 'One Too Many', 'template': 'Find {keyword} please'}, id='more-than-ten-prompts'),
+    ])
+    def test_create_is_rejected_with_400(self, handler_module, stored_count, body):
+        mock_table.scan.return_value = {'Count': stored_count}
+
+        status, _ = invoke(handler_module, make_event('POST', body=body))
+
         assert status == 400
 
-    def test_create_exceeds_max_prompts(self, handler_module):
-        """Creating beyond 10 prompts is rejected."""
-        mock_table.scan.return_value = {'Count': 10}
+    @pytest.mark.parametrize(('body', 'field'), [
+        pytest.param({'template': 'about {keyword}'}, 'name', id='name'),
+        pytest.param({'name': 'Persona'}, 'template', id='template'),
+    ])
+    def test_create_without_a_required_field_returns_400_naming_it(self, handler_module, body, field):
+        status, response = invoke(handler_module, make_event('POST', body=body))
+
+        assert (status, response) == (400, {'error': f'Missing required field: {field}', 'field': field})
+        assert mock_table.put_item.call_count == 0
+
+    def test_create_stores_the_trimmed_name_template_and_description(self, handler_module, monkeypatch):
+        monkeypatch.setattr(handler_module, 'uuid', SimpleNamespace(uuid4=lambda: 'prompt-1'))
+        monkeypatch.setattr(handler_module, 'get_timestamp', lambda: '2026-10-03T12:00:00Z')
         event = make_event('POST', body={
-            'name': 'One Too Many',
-            'template': 'Find {keyword} please',
+            'name': '  Family Traveler  ',
+            'template': '  As a family traveler, find me {keyword}  ',
+            'description': '  Parents with young children  ',
         })
-        result = handler_module.handler(event, {})
-        status, _ = parse_response(result)
-        assert status == 400
+
+        handler_module.handler(event, {})
+
+        mock_table.put_item.assert_called_once_with(Item={
+            'id': 'prompt-1',
+            'name': 'Family Traveler',
+            'template': 'As a family traveler, find me {keyword}',
+            'enabled': 'true',
+            'created_at': '2026-10-03T12:00:00Z',
+            'updated_at': '2026-10-03T12:00:00Z',
+            'description': 'Parents with young children',
+        })
+
+    @pytest.mark.parametrize(('field', 'value', 'limit'), [
+        pytest.param('name', 'n' * 101, 100, id='name'),
+        pytest.param('template', '{keyword}' + 't' * 1992, 2000, id='template'),
+        pytest.param('description', 'd' * 1001, 1000, id='description'),
+    ])
+    def test_create_rejects_a_field_one_character_over_its_limit(self, handler_module, field, value, limit):
+        body = {**PERSONA, field: value}
+
+        status, response = invoke(handler_module, make_event('POST', body=body))
+
+        assert (status, response) == (400, {'error': f'{field} too long (max {limit} characters)', 'field': field})
 
 
 class TestListPrompts:
     """Tests for GET /api/query-prompts."""
 
-    def test_list_returns_items(self, handler_module):
-        """Listing prompts returns all items."""
-        mock_table.scan.return_value = {
-            'Items': [
-                {'id': '1', 'name': 'A', 'template': '{keyword}', 'enabled': 'true', 'created_at': '2026-01-01T00:00:00Z'},
-                {'id': '2', 'name': 'B', 'template': '{keyword}', 'enabled': 'false', 'created_at': '2026-01-02T00:00:00Z'},
-            ]
-        }
-        event = make_event('GET')
-        result = handler_module.handler(event, {})
-        status, body = parse_response(result)
-        assert status == 200
-        assert len(body) == 2
+    @pytest.mark.parametrize(('items', 'expected_ids'), [
+        pytest.param([
+            {'id': '1', 'name': 'A', 'template': '{keyword}', 'enabled': 'true', 'created_at': '2026-01-01T00:00:00Z'},
+            {'id': '2', 'name': 'B', 'template': '{keyword}', 'enabled': 'false', 'created_at': '2026-01-02T00:00:00Z'},
+        ], ['2', '1'], id='all-prompts-newest-first'),
+        pytest.param([], [], id='empty-array-without-prompts'),
+    ])
+    def test_list_returns_the_stored_prompts(self, handler_module, items, expected_ids):
+        mock_table.scan.return_value = {'Items': items}
 
-    def test_list_empty(self, handler_module):
-        """Listing with no prompts returns empty array."""
-        mock_table.scan.return_value = {'Items': []}
-        event = make_event('GET')
-        result = handler_module.handler(event, {})
-        status, body = parse_response(result)
+        status, body = invoke(handler_module, make_event('GET'))
+
         assert status == 200
-        assert body == []
+        assert [prompt['id'] for prompt in body] == expected_ids
 
 
 class TestTogglePrompt:
     """Tests for PATCH /api/query-prompts/{id}."""
 
-    def test_toggle_enabled_to_disabled(self, handler_module):
-        """Toggling an enabled prompt disables it."""
-        _stored_prompt('true', toggled_to='false')
-        event = make_event('PATCH', path_params={'id': 'abc'})
-        result = handler_module.handler(event, {})
-        status, _ = parse_response(result)
-        assert status == 200
-        # Verify the update was called with 'false'
-        call_kwargs = mock_table.update_item.call_args
-        assert ':e' in call_kwargs.kwargs.get('ExpressionAttributeValues', {})
+    @pytest.mark.parametrize(('stored', 'toggled'), [
+        pytest.param('true', 'false', id='enabled-to-disabled'),
+        pytest.param('false', 'true', id='disabled-to-enabled'),
+    ])
+    def test_toggle_flips_the_stored_flag(self, handler_module, stored, toggled):
+        _stored_prompt(stored, toggled_to=toggled)
 
-    def test_toggle_disabled_to_enabled(self, handler_module):
-        """Toggling a disabled prompt enables it."""
-        _stored_prompt('false', toggled_to='true')
-        event = make_event('PATCH', path_params={'id': 'abc'})
-        result = handler_module.handler(event, {})
-        status, _ = parse_response(result)
-        assert status == 200
+        status, body = invoke(handler_module, prompt_event('PATCH'))
+
+        assert (status, body['enabled']) == (200, toggled)
+        assert ':e' in mock_table.update_item.call_args.kwargs['ExpressionAttributeValues']
 
     def test_toggle_nonexistent_prompt(self, handler_module):
         """Toggling a prompt that doesn't exist returns 400."""
         mock_table.get_item.return_value = {'Item': None}
         event = make_event('PATCH', path_params={'id': 'nonexistent'})
-        result = handler_module.handler(event, {})
-        status, _ = parse_response(result)
+        status, _ = invoke(handler_module, event)
         assert status == 400
 
 
@@ -174,17 +187,13 @@ class TestDeletePrompt:
 
     def test_delete_prompt(self, handler_module):
         """Deleting a prompt succeeds."""
-        event = make_event('DELETE', path_params={'id': 'abc'})
-        result = handler_module.handler(event, {})
-        status, _ = parse_response(result)
+        status, _ = invoke(handler_module, prompt_event('DELETE'))
         assert status == 200
         mock_table.delete_item.assert_called_once_with(Key={'id': 'abc'})
 
     def test_delete_missing_id(self, handler_module):
         """Deleting without an ID returns 400."""
-        event = make_event('DELETE', path_params={})
-        result = handler_module.handler(event, {})
-        status, _ = parse_response(result)
+        status, _ = invoke(handler_module, make_event('DELETE', path_params={}))
         assert status == 400
 
 
@@ -197,69 +206,22 @@ class TestQueryPromptAuthorization:
     open because the dashboard renders the active set for all users.
     """
 
-    def test_creating_a_prompt_without_the_admin_group_returns_403(self, handler_module):
-        event = make_event(
-            'POST', body={'name': 'Persona', 'template': 'about {keyword}'}, groups='Users'
-        )
+    @pytest.mark.parametrize(('event', 'write'), [
+        pytest.param(make_event('POST', body=PERSONA, groups='Users'), 'put_item', id='creating'),
+        pytest.param(prompt_event('PUT', body=RENAME, groups='Users'), 'update_item', id='updating'),
+        pytest.param(prompt_event('DELETE', groups='Users'), 'delete_item', id='deleting'),
+        pytest.param(prompt_event('PATCH', groups='Users'), 'update_item', id='toggling'),
+        # Fail closed: an invited user in no group is not an administrator.
+        pytest.param(prompt_event('DELETE', groups=None), 'delete_item', id='deleting-without-a-groups-claim'),
+    ])
+    def test_mutating_a_prompt_without_the_admin_group_returns_403_before_writing(self, handler_module, event, write):
+        status = status_of(handler_module, event)
 
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_does_not_write_the_prompt_when_authorization_fails(self, handler_module):
-        event = make_event(
-            'POST', body={'name': 'Persona', 'template': 'about {keyword}'}, groups='Users'
-        )
-
-        handler_module.handler(event, {})
-
-        assert mock_table.put_item.call_count == 0
-
-    def test_updating_a_prompt_without_the_admin_group_returns_403(self, handler_module):
-        event = make_event(
-            'PUT', body={'name': 'Renamed'}, path_params={'id': 'abc'}, groups='Users'
-        )
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_deleting_a_prompt_without_the_admin_group_returns_403(self, handler_module):
-        event = make_event('DELETE', path_params={'id': 'abc'}, groups='Users')
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_does_not_delete_the_prompt_when_authorization_fails(self, handler_module):
-        event = make_event('DELETE', path_params={'id': 'abc'}, groups='Users')
-
-        handler_module.handler(event, {})
-
-        assert mock_table.delete_item.call_count == 0
-
-    def test_toggling_a_prompt_without_the_admin_group_returns_403(self, handler_module):
-        event = make_event('PATCH', path_params={'id': 'abc'}, groups='Users')
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
-
-    def test_returns_403_when_the_groups_claim_is_absent(self, handler_module):
-        """Fail closed: an invited user in no group is not an administrator."""
-        event = make_event('DELETE', path_params={'id': 'abc'}, groups=None)
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 403
+        assert (status, getattr(mock_table, write).call_count) == (403, 0)
 
     def test_listing_prompts_stays_open_to_non_admin_callers(self, handler_module):
         """The gate must not lock non-admins out of read-only dashboard data."""
-        event = make_event('GET', groups='Users')
-
-        status, _ = parse_response(handler_module.handler(event, {}))
-
-        assert status == 200
+        assert status_of(handler_module, make_event('GET', groups='Users')) == 200
 
 
 class TestUpdatePrompt:
@@ -281,67 +243,43 @@ class TestUpdatePrompt:
                 'template': 'about {keyword}',
             }
         }
-        event = make_event('PUT', body={'name': 'Renamed'}, path_params={'id': 'abc'})
 
-        result = handler_module.handler(event, {})
-        status, body = parse_response(result)
+        status, body = invoke(handler_module, prompt_event('PUT', body=RENAME))
 
         assert status == 200
         assert body['name'] == 'Renamed'
 
-    def test_persists_the_update_against_the_path_id(self, handler_module):
-        """The positional prompt_id has to survive the whole decorator stack."""
-        event = make_event('PUT', body={'name': 'Renamed'}, path_params={'id': 'abc'})
-
-        handler_module.handler(event, {})
-
-        assert mock_table.update_item.call_args.kwargs['Key'] == {'id': 'abc'}
-
-    def test_rejects_a_template_without_the_keyword_placeholder(self, handler_module):
-        event = make_event(
-            'PUT', body={'template': 'no placeholder here'}, path_params={'id': 'abc'}
-        )
-
-        status, body = parse_response(handler_module.handler(event, {}))
+    @pytest.mark.parametrize(('event', 'field'), [
+        pytest.param(prompt_event('PUT', body={'template': 'no placeholder here'}), 'template', id='template-without-keyword-placeholder'),
+        pytest.param(make_event('PUT', body=RENAME, path_params={}), 'id', id='missing-path-id'),
+    ])
+    def test_returns_400_naming_the_invalid_field(self, handler_module, event, field):
+        status, body = invoke(handler_module, event)
 
         assert status == 400
-        assert body['field'] == 'template'
-
-    def test_returns_400_when_the_path_id_is_missing(self, handler_module):
-        event = make_event('PUT', body={'name': 'Renamed'}, path_params={})
-
-        status, body = parse_response(handler_module.handler(event, {}))
-
-        assert status == 400
-        assert body['field'] == 'id'
+        assert body['field'] == field
 
     def test_does_not_write_when_the_path_id_is_missing(self, handler_module):
-        event = make_event('PUT', body={'name': 'Renamed'}, path_params={})
-
-        handler_module.handler(event, {})
+        handler_module.handler(make_event('PUT', body=RENAME, path_params={}), {})
 
         assert mock_table.update_item.call_count == 0
 
 
-class TestTogglePromptAdminPath:
+class TestPositionalPromptIdDispatch:
     """
-    PATCH shares the positional-dispatch shape with PUT but has no
-    `parse_json_body` in its stack, so it survived the bug. Pinned so a future
-    body-parsing decorator on this route cannot reintroduce it silently.
+    PUT and PATCH both receive the prompt id positionally. PATCH has no
+    `parse_json_body` in its stack, so it survived the PUT bug; it is pinned
+    here so a future body-parsing decorator on that route cannot reintroduce
+    it silently. The positional prompt_id has to survive the whole decorator
+    stack on both.
     """
 
-    def test_toggles_an_enabled_prompt_to_disabled(self, handler_module):
-        _stored_prompt('true', toggled_to='false')
-        event = make_event('PATCH', path_params={'id': 'abc'})
-
-        status, body = parse_response(handler_module.handler(event, {}))
-
-        assert status == 200
-        assert body['enabled'] == 'false'
-
-    def test_toggles_against_the_path_id(self, handler_module):
+    @pytest.mark.parametrize('event', [
+        pytest.param(prompt_event('PUT', body=RENAME), id='update'),
+        pytest.param(prompt_event('PATCH'), id='toggle'),
+    ])
+    def test_writes_against_the_path_id(self, handler_module, event):
         _stored_prompt('true')
-        event = make_event('PATCH', path_params={'id': 'abc'})
 
         handler_module.handler(event, {})
 

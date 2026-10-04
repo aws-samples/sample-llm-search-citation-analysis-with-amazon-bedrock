@@ -2,7 +2,9 @@ import { exportWorkbook } from '../../../exporters/excelGenerator';
 import type {
   AgentConfig, AgentDimensionOption, KeywordResearchItem, ResearchKeyword
 } from '../../../types';
-import { researchExcelFileName } from '../researchExport';
+import {
+  keywordSignalCells, researchExcelFileName
+} from '../researchExport';
 import {
   AGENT_DEFAULT_TRACKING_COUNT, dimensionLabel, runCatalog
 } from './agentBrief';
@@ -22,9 +24,7 @@ export function proposalExcelRows(keywords: ResearchKeyword[], catalog: readonly
     Tracking: trackingExportLabel(keyword.tracking),
     'Tracking score': keyword.tracking_score ?? '',
     'Tracking reason': keyword.tracking_reason ?? '',
-    Intent: keyword.intent ?? '',
-    Competition: keyword.competition ?? '',
-    Relevance: keyword.relevance ?? '',
+    ...keywordSignalCells(keyword),
     Rationale: keyword.rationale ?? '',
     Sources: (keyword.providers ?? []).join(', '),
   }));

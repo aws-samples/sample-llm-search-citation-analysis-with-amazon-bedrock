@@ -1,12 +1,13 @@
 import type {
   BrandClassification, BrandLeaderboardRow
 } from '../../types';
+import { EMPTY_KPI } from '../../formatting/kpiFormatter';
 import {
-  EMPTY_KPI, formatKpi
-} from '../../formatting/kpiFormatter';
-import {
-  ReportTable, kpiColumn, type ReportTableColumn
+  ReportTable, type ReportTableColumn
 } from '../Reports/layout';
+import {
+  BRAND_CLASSIFICATION_LABELS, brandKpiColumns, brandReachColumns
+} from '../Reports/layout/brandColumns';
 import { OverviewPanel } from './OverviewPanel';
 
 // Stryker disable next-line ObjectLiteral: the badge palette is Tailwind-only; the classification label carries the meaning
@@ -19,12 +20,6 @@ const CLASSIFICATION_BADGES: Readonly<Record<BrandClassification, string>> = {
   other: 'bg-gray-100 text-gray-800',
 };
 
-const CLASSIFICATION_LABELS: Readonly<Record<BrandClassification, string>> = {
-  first_party: 'first party',
-  competitor: 'competitor',
-  other: 'other',
-};
-
 /** Built per render (not at import) so every column is exercised by the tests that render the table. */
 function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>> {
   return [
@@ -34,37 +29,25 @@ function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardR
       cellClassName: 'font-medium text-gray-900',
       render: (brand) => brand.name,
     },
-    kpiColumn('visibility_score', (brand) => formatKpi('visibility_score', brand.visibility_score)),
-    kpiColumn('mention_rate', (brand) => formatKpi('mention_rate', brand.mention_rate)),
-    kpiColumn('share_of_voice', (brand) => formatKpi('share_of_voice', brand.share_of_voice)),
-    kpiColumn('average_position', (brand) => formatKpi('average_position', brand.average_position)),
+    ...brandKpiColumns(),
     {
       header: 'Best position',
       info: 'The best place the brand reached in any answer (1 = named first).',
       render: (brand) => brand.best_position ?? EMPTY_KPI,
     },
-    {
-      header: 'Engines',
-      info: 'The AI engines whose answers name the brand.',
-      render: (brand) => (
-        <div className="flex flex-wrap gap-1">
-          {brand.engines.map((engine) => (
-            <span key={engine} className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs">{engine}</span>
-          ))}
-        </div>
-      ),
-    },
-    {
-      header: 'Keywords',
-      info: 'How many keywords\' answers name the brand.',
-      render: (brand) => brand.keywords,
-    },
+    ...brandReachColumns((brand) => (
+      <div className="flex flex-wrap gap-1">
+        {brand.engines.map((engine) => (
+          <span key={engine} className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-xs">{engine}</span>
+        ))}
+      </div>
+    )),
     {
       header: 'Type',
       render: (brand) => (
         // Stryker disable next-line StringLiteral: Tailwind-only badge styling; the label below names the classification
         <span className={`px-2 py-1 rounded text-xs ${CLASSIFICATION_BADGES[brand.classification]}`}>
-          {CLASSIFICATION_LABELS[brand.classification]}
+          {BRAND_CLASSIFICATION_LABELS[brand.classification]}
         </span>
       ),
     },

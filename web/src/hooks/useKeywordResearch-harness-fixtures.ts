@@ -11,7 +11,7 @@ import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 import { POLL_FAST_INTERVAL_MS } from './researchPolling';
 import { useKeywordResearch } from './useKeywordResearch';
 import {
-  createResearchMockFetch, type ResearchMockFetchOptions 
+  buildCompletedExpansionJob, createResearchMockFetch, type ResearchMockFetchOptions 
 } from './useKeywordResearch-fixtures';
 
 interface ResearchHookResult { current: ReturnType<typeof useKeywordResearch> }
@@ -23,28 +23,44 @@ export function renderResearch(options: ResearchMockFetchOptions = {}) {
 }
 
 /**
- * Starts an expansion of `seedKeyword` and lets `elapsedMs` of fake time pass
- * (one fast poll tick by default), flushing the resulting state updates.
+ * Starts `operation` on the hook without awaiting it and lets `elapsedMs` of
+ * fake time pass (one fast poll tick by default), flushing the resulting
+ * state updates.
  */
+export async function startAndAdvance(
+  result: ResearchHookResult,
+  operation: (hook: ResearchHookResult['current']) => Promise<unknown>,
+  elapsedMs = POLL_FAST_INTERVAL_MS
+): Promise<void> {
+  await act(async () => {
+    void operation(result.current);
+    await vi.advanceTimersByTimeAsync(elapsedMs);
+  });
+}
+
+/** Starts an expansion of `seedKeyword` and lets `elapsedMs` of fake time pass. */
 export async function startExpansion(
   result: ResearchHookResult,
   elapsedMs = POLL_FAST_INTERVAL_MS,
   seedKeyword = 'best hotels'
 ): Promise<void> {
-  await act(async () => {
-    void result.current.expandKeywords(seedKeyword, 'hospitality', 10);
-    await vi.advanceTimersByTimeAsync(elapsedMs);
-  });
+  await startAndAdvance(result, (hook) => hook.expandKeywords(seedKeyword, 'hospitality', 10), elapsedMs);
 }
 
 /** Starts a competitor analysis of `url` and lets one fast poll tick pass. */
 export async function startCompetitorAnalysis(result: ResearchHookResult, url: string): Promise<void> {
-  await act(async () => {
-    void result.current.analyzeCompetitor(url);
-    await vi.advanceTimersByTimeAsync(POLL_FAST_INTERVAL_MS);
-  });
+  await startAndAdvance(result, (hook) => hook.analyzeCompetitor(url));
 }
 
+/** Retries a partial 'best hotels' expansion job-1 and lets `elapsedMs` of fake time pass. */
+export async function retryPartialExpansion(
+  result: ResearchHookResult,
+  elapsedMs = POLL_FAST_INTERVAL_MS
+): Promise<void> {
+  const partial = buildCompletedExpansionJob('job-1', 'best hotels');
+  partial.status = 'partial';
+  await startAndAdvance(result, (hook) => hook.retryResearch(partial), elapsedMs);
+}
 
 export interface RecordedCall {
   url: string;
@@ -52,7 +68,7 @@ export interface RecordedCall {
   body: string | undefined;
 }
 
-export function recordedCalls(): RecordedCall[] {
+function recordedCalls(): RecordedCall[] {
   return mockAuthenticatedFetch.mock.calls.map((call) => {
     const [url, init] = call as [string, RequestInit | undefined];
     return {

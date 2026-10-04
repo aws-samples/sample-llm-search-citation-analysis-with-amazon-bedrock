@@ -2,16 +2,12 @@ import type { ReportsOverviewResponse } from '../../../../api/reports';
 import type { Recommendation } from '../../../../types';
 import {
   PriorityBadge,
+  REPORT_CARD_CLASS,
   ReportSection,
   ReportSectionPlaceholder,
   pendingSectionPlaceholder,
+  type ReportSlice,
 } from '../../layout';
-
-interface Props {
-  readonly data: ReportsOverviewResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
 
 /**
  * The "what to do next" panel — the report's call to action. Top three
@@ -21,7 +17,7 @@ interface Props {
  */
 export function NextActionsSection({
   data, loading, error 
-}: Props) {
+}: ReportSlice<ReportsOverviewResponse>) {
   const pending = pendingSectionPlaceholder({
     title: 'Next actions',
     loading,
@@ -56,7 +52,7 @@ export function NextActionsSection({
 
 function RecommendationCard({ rec }: { readonly rec: Recommendation }) {
   return (
-    <li className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 avoid-break-inside">
+    <li className={REPORT_CARD_CLASS}>
       <div className="flex items-start justify-between gap-3 mb-2">
         <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
           {rec.title}

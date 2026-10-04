@@ -277,7 +277,7 @@ function MainApp() {
     reconcileKeywords,
   } = useDashboardData();
   const {
-    execution, triggerAnalysis, startMonitoring, isRunning
+    execution, triggerAnalysis, isRunning
   } = useExecutionPolling(refetch);
 
   // Print mode: when ?print=1 is in the URL we hide the sidebar/header chrome
@@ -382,8 +382,6 @@ function MainApp() {
                     setSchedules={setSchedules}
                     execution={execution}
                     triggerAnalysis={triggerAnalysis}
-                    startMonitoring={startMonitoring}
-                    isRunning={isRunning}
                     rawResponsesPath={rawResponsesPath}
                     settingsInitialTab={settingsInitialTab}
                     setActiveTab={setActiveTab}

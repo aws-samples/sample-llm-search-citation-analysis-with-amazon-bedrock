@@ -38,10 +38,8 @@ through ``load_sibling_function``.
 
 from __future__ import annotations
 
-import importlib.util
 import logging
 import os
-import sys
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -56,6 +54,7 @@ from shared.constants import MAX_KEYWORD_LENGTH
 from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
+from shared.module_files import exec_module_file
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +78,8 @@ SCOPE_PARAMS = tuple(SCOPE_QUERY_PARAMS)
 
 
 def keywords_table_name() -> str:
-    """The Keywords table scopes resolve against: canonical env name, legacy name, then the stack default."""
-    return resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE', required=False, default='CitationAnalysis-Keywords')
+    """The Keywords table scopes resolve against: the canonical env name, then the stack default."""
+    return resolve_table_env('DYNAMODB_TABLE_KEYWORDS', required=False, default='CitationAnalysis-Keywords')
 
 
 @dataclass(frozen=True)
@@ -233,13 +232,12 @@ def load_sibling_function(anchor_file: str, filename: str, attr: str, alias_suff
     Lambda loads through ``shared.router.HandlerLoader``. Raises ``ImportError``
     when the file cannot be loaded and ``AttributeError`` when it has no ``attr``.
     """
-    module_name = filename.replace('-', '_').replace('.py', alias_suffix)
-    spec = importlib.util.spec_from_file_location(module_name, os.path.join(os.path.dirname(os.path.abspath(anchor_file)), filename))
-    if spec is None or spec.loader is None:
+    module = exec_module_file(
+        filename.replace('-', '_').replace('.py', alias_suffix),
+        os.path.join(os.path.dirname(os.path.abspath(anchor_file)), filename),
+    )
+    if module is None:
         raise ImportError(f"Could not load sibling module {filename!r}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
     fn = getattr(module, attr, None)
     if fn is None:
         raise AttributeError(f"{filename} has no attribute {attr!r}")

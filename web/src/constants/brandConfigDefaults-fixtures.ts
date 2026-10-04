@@ -5,17 +5,13 @@ export const HOTEL_AND_CUSTOM_PRESETS = {
   hotels: {
     name: 'Hotels',
     description: 'Hotel brands',
-    entity_types: ['hotel chains'],
     example_brands: ['Marriott'],
-    extraction_focus: 'hotel recommendations',
     default_prompt: 'Extract hotel brands.',
   },
   custom: {
     name: 'Custom Industry',
     description: 'Custom brands',
-    entity_types: ['brand names'],
     example_brands: [],
-    extraction_focus: 'custom recommendations',
     default_prompt: 'Extract custom brands.',
   },
 } satisfies IndustryPresets;

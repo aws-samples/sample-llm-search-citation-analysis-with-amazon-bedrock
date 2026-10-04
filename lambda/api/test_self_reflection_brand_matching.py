@@ -33,9 +33,8 @@ reflection = handler_fixture(
     env={
         'DYNAMODB_TABLE_SELF_REFLECTION': 'test-self-reflection',
         'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
-        'QUERY_PROMPTS_TABLE': 'test-query-prompts',
+        'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-query-prompts',
         'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brand-config',
-        'BRAND_CONFIG_TABLE': 'test-brand-config',
         'CORS_ORIGIN_PARAM': '',
     },
 )

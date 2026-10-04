@@ -119,7 +119,7 @@ export interface ResearchMockFetchOptions {
   snapshots?: Record<string, KeywordResearchItem[]>;
   /** Replaces the snapshot lookup: script raw poll responses (401s, 404s). */
   pollResponse?: () => Response;
-  /** Makes POST /expand and /competitor fail with this structured 4xx body. */
+  /** Makes POST /expand, /competitor and /retry fail with this structured 4xx body. */
   startError?: { error: string };
 }
 
@@ -178,6 +178,7 @@ export function createResearchMockFetch(options: ResearchMockFetchOptions = {}) 
     }
 
     if (method === 'POST' && url.endsWith('/retry')) {
+      if (options.startError) return Promise.resolve(createMockJsonResponse(options.startError, 400));
       return Promise.resolve(createMockJsonResponse({
         id: 'job-1',
         status: 'pending' 

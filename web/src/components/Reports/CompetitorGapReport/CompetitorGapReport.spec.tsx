@@ -8,6 +8,10 @@ import {
   MemoryRouter, Routes, Route 
 } from 'react-router-dom';
 import { CompetitorGapReport } from './CompetitorGapReport';
+import {
+  buildOutrankedKeyword, buildRollup, buildSource
+} from './sections/rollupSection-fixtures';
+import { buildTrackedBrandsHookResult } from '../../../test/brandConfigHookMock';
 
 vi.mock('./useCompetitorGap', () => ({useCompetitorGap: vi.fn()}));
 vi.mock('../../../hooks/usePrintMode', () => ({usePrintMode: vi.fn(() => ({ isPrintMode: false })),}));
@@ -17,36 +21,28 @@ import { useCompetitorGap } from './useCompetitorGap';
 import { useBrandConfig } from '../../../hooks/useBrandConfig';
 
 const mockGap = useCompetitorGap as ReturnType<typeof vi.fn>;
-const mockBrand = useBrandConfig as ReturnType<typeof vi.fn>;
+const mockBrand = vi.mocked(useBrandConfig);
 
 /** The one source Adidas is cited from that we are not; it is both an exclusive source and an outreach target. */
-const ADIDAS_EXCLUSIVE_SOURCE = {
-  keyword: 'best running shoes',
+const ADIDAS_EXCLUSIVE_SOURCE = buildSource({
   url: 'https://example.com/shoes',
-  domain: 'example.com',
-  priority: 'high' as const,
   citation_count: 9,
   provider_count: 3,
   providers: ['openai', 'perplexity', 'gemini'],
   lift_score: 6.91,
-};
+});
 
 const POPULATED_DATA = {
-  competitor: 'Adidas',
-  rollup: {
-    competitor: 'Adidas',
+  rollup: buildRollup({
     outranked_keywords: [
-      {
+      buildOutrankedKeyword({
         keyword: 'best running shoes',
-        their_best_rank: 1,
-        our_best_rank: 3,
-        rank_delta: 2,
         providers: ['openai', 'perplexity'],
-      },
+      }),
     ],
     exclusive_sources: [ADIDAS_EXCLUSIVE_SOURCE],
     outreach_targets: [ADIDAS_EXCLUSIVE_SOURCE],
-  },
+  }),
   keywordsAnalyzed: 4,
   loading: false,
   error: null,
@@ -54,17 +50,7 @@ const POPULATED_DATA = {
 };
 
 function renderAt(path: string, competitors: string[] = ['Adidas', 'Asics']) {
-  mockBrand.mockReturnValue({
-    config: {
-      tracked_brands: {
-        first_party: ['Nike'],
-        competitors 
-      } 
-    },
-    presets: {},
-    loading: false,
-    error: null,
-  });
+  mockBrand.mockReturnValue(buildTrackedBrandsHookResult(['Nike'], competitors));
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>

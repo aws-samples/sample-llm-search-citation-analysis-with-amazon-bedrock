@@ -14,6 +14,7 @@ import boto3
 from shared.constants import MAX_CITATIONS_PER_KEYWORD_DEFAULT, MAX_KEYWORD_LENGTH
 from shared.env_vars import resolve_table_env
 from shared.prompt_safety import sanitize_user_input
+from shared.provider_counts import add_error_categories, empty_provider_counts
 from shared.step_function_response import log_error, step_function_success
 
 # Import shared utilities
@@ -26,12 +27,8 @@ logger.setLevel(logging.INFO)
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb')
 
-# Fail-fast: Required environment variables. Reads the canonical
-# DYNAMODB_TABLE_CITATIONS name first, falls back to the legacy
-# CITATIONS_TABLE_NAME until the CDK stack stops setting it (audit #12).
-CITATIONS_TABLE = resolve_table_env(
-    'DYNAMODB_TABLE_CITATIONS', 'CITATIONS_TABLE_NAME', 'CITATIONS_TABLE',
-)
+# Fail-fast: Required environment variables (audit #12 canonical naming).
+CITATIONS_TABLE = resolve_table_env('DYNAMODB_TABLE_CITATIONS')
 citations_table = dynamodb.Table(CITATIONS_TABLE)
 
 # Runtime override for the citations-per-keyword cap. Defaults to the shared
@@ -130,23 +127,14 @@ def summarize_providers(results: list[dict[str, Any]]) -> dict[str, Any]:
 
     for result in results:
         provider = result.get('provider', 'unknown')
-        counts = by_provider.setdefault(provider, {
-            'queries': 0,
-            'citations': 0,
-            'failures': 0,
-            'error_categories': [],
-        })
+        counts = by_provider.setdefault(provider, empty_provider_counts())
         counts['queries'] += 1
         counts['citations'] += len(result.get('citations', []))
 
         if result.get('status') == 'error':
             counts['failures'] += 1
-            # Classified upstream by `shared.provider_health`. Kept as a list
-            # so a provider failing two different ways in one run reports both
-            # rather than the last one silently winning.
-            category = result.get('error_category', 'unknown')
-            if category not in counts['error_categories']:
-                counts['error_categories'].append(category)
+            # Classified upstream by `shared.provider_health`.
+            add_error_categories(counts, [result.get('error_category', 'unknown')])
 
     return {
         'result_count': len(results),
@@ -154,23 +142,14 @@ def summarize_providers(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def prioritize_citations(
-    deduplicated: dict[str, dict[str, Any]],
-    max_citations: int | None = None,
-) -> list[dict[str, Any]]:
+def prioritize_citations(deduplicated: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Prioritize citations by citation count and limit to top N.
+    Prioritize citations by citation count and keep the top ``MAX_CITATIONS_PER_KEYWORD``
+    (overridable via env var).
 
     Args:
         deduplicated: Dictionary of deduplicated citations
-        max_citations: Maximum number of citations to return. Defaults to
-            the module-level ``MAX_CITATIONS_PER_KEYWORD`` (overridable via
-            env var). Pass an explicit value for per-call overrides in
-            tests or migration scripts.
     """
-    if max_citations is None:
-        max_citations = MAX_CITATIONS_PER_KEYWORD
-
     # Convert to list and sort by citation count (descending)
     citations_list = []
     for normalized_url, metadata in deduplicated.items():
@@ -186,7 +165,7 @@ def prioritize_citations(
 
     # Limit to top N and assign priority numbers
     prioritized = []
-    for i, citation in enumerate(citations_list[:max_citations]):
+    for i, citation in enumerate(citations_list[:MAX_CITATIONS_PER_KEYWORD]):
         citation['priority'] = i + 1
         prioritized.append(citation)
 

@@ -7,6 +7,8 @@ import {
 } from './mediaLinks';
 
 const IMAGE_URL_PREFIX = 'https://example.com/';
+/** What fills an image link after `IMAGE_URL_PREFIX` up to exactly the length limit. */
+const LIMIT_FILL = 'a'.repeat(MAX_MEDIA_URL_LENGTH - IMAGE_URL_PREFIX.length);
 
 describe('videoEmbedUrl', () => {
   it.each(blockFixtures.videoUrls)('returns $embed for a $description', ({
@@ -82,31 +84,19 @@ describe('videoEmbedUrl', () => {
 });
 
 describe('isHttpsImageUrl', () => {
-  it.each(blockFixtures.imageUrls)('returns $valid for a $description', ({
-    url, valid
-  }) => {
+  it.each([
+    ['accepts a link of exactly the length limit', `${IMAGE_URL_PREFIX}${LIMIT_FILL}`, true],
+    ['rejects a link one character over the length limit', `${IMAGE_URL_PREFIX}${LIMIT_FILL}a`, false],
+    ['measures the length after trimming surrounding whitespace', `  ${IMAGE_URL_PREFIX}${LIMIT_FILL}  `, true],
+  ])('%s', (_outcome, url, valid) => {
     expect(isHttpsImageUrl(url)).toBe(valid);
   });
 
-  it('accepts a link of exactly the length limit', () => {
-    const url = `${IMAGE_URL_PREFIX}${'a'.repeat(MAX_MEDIA_URL_LENGTH - IMAGE_URL_PREFIX.length)}`;
-
-    expect(isHttpsImageUrl(url)).toBe(true);
-  });
-
-  it('rejects a link one character over the length limit', () => {
-    const url = `${IMAGE_URL_PREFIX}${'a'.repeat(MAX_MEDIA_URL_LENGTH - IMAGE_URL_PREFIX.length + 1)}`;
-
-    expect(isHttpsImageUrl(url)).toBe(false);
-  });
-
-  it('measures the length after trimming surrounding whitespace', () => {
-    const url = `  ${IMAGE_URL_PREFIX}${'a'.repeat(MAX_MEDIA_URL_LENGTH - IMAGE_URL_PREFIX.length)}  `;
-
-    expect(isHttpsImageUrl(url)).toBe(true);
-  });
-
   it.each([
+    ...blockFixtures.imageUrls.map((shared) => ({
+      ...shared,
+      description: `a ${shared.description}`,
+    })),
     {
       description: 'an empty credentials prefix',
       url: 'https://@example.com/logo.png',

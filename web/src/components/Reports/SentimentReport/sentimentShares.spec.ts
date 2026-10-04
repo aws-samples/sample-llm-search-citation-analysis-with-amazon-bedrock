@@ -27,6 +27,7 @@ describe('sentimentShareNote', () => {
     [1, 1, '100.0% of 1 mention with a sentiment'],
     [0, 3, '0.0% of 3 mentions with a sentiment'],
     [0, 0, 'No mention with a sentiment yet'],
+    [23, 80, '28.8% of 80 mentions with a sentiment'],
   ])('writes %s of %s labelled mentions as "%s"', (count, labelled, note) => {
     expect(sentimentShareNote(count, labelled)).toBe(note);
   });

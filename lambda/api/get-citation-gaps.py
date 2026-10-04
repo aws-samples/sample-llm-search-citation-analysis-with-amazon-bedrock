@@ -25,8 +25,11 @@ from botocore.config import Config
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
+from shared.brand_visibility import tracked_brand_names
+from shared.constants import priority_rank
 from shared.decorators import api_handler, validate
 from shared.dynamodb_batch import query_latest_per_key
+from shared.kpi_engine import is_owned_domain, normalize_domain, percent
 from shared.scope_params import (
     SCOPE_QUERY_PARAMS,
     ReportScope,
@@ -34,6 +37,7 @@ from shared.scope_params import (
     keywords_table_name,
     scope_from_request,
 )
+from shared.search_results import latest_run
 from shared.utils import extract_domain, get_brand_config
 
 # Classification runs in at most six threads, then final response enrichment
@@ -59,7 +63,6 @@ _KEYWORD_ANALYSIS_WORKERS = 6
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
-CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
 CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 
 
@@ -67,11 +70,9 @@ def is_first_party_domain(domain: object, config: dict[str, Any]) -> bool:
     """
     Check whether `domain` belongs to a first-party brand.
 
-    Uses ONLY the explicit `first_party_domains` allow-list from brand config.
-    Match rules, in order of specificity:
-
-    1. Exact match on the registered hostname (`example.com` == `example.com`)
-    2. Subdomain match (`blog.example.com` ends with `.example.com`)
+    Uses ONLY the explicit `first_party_domains` allow-list from brand config,
+    matched the KPI engine's way (`kpi_engine.is_owned_domain` on
+    `normalize_domain` hosts): the registered domain or a subdomain of it.
 
     The previous implementation also fell back to substring matching against
     tracked brand names ("Inn" matching both "Holiday Inn" and "linkedin.com"),
@@ -79,29 +80,8 @@ def is_first_party_domain(domain: object, config: dict[str, Any]) -> bool:
     the first-party bucket. That fallback is removed — if a deployment wants
     a domain treated as first-party, it must be in the config.
     """
-    if not domain or not isinstance(domain, str):
-        return False
-
-    domain_lower = domain.lower().lstrip('.')
-    if domain_lower.startswith('www.'):
-        domain_lower = domain_lower[4:]
-
-    first_party_domains = config.get('first_party_domains', []) or []
-    for first_party_domain in first_party_domains:
-        if not first_party_domain or not isinstance(first_party_domain, str):
-            continue
-        normalized_first_party = first_party_domain.lower().lstrip('.')
-        if normalized_first_party.startswith('www.'):
-            normalized_first_party = normalized_first_party[4:]
-        if not normalized_first_party:
-            continue
-
-        if domain_lower == normalized_first_party:
-            return True
-        if domain_lower.endswith('.' + normalized_first_party):
-            return True
-
-    return False
+    normalized = normalize_domain(domain)
+    return normalized is not None and is_owned_domain(normalized, config.get('first_party_domains') or [])
 
 
 def _batch_crawled_info(urls: list[str]) -> dict[str, dict[str, Any]]:
@@ -263,9 +243,8 @@ def _gaps_and_covered_sources(
         elif data['first_party']:
             covered_sources.append(source_info)
 
-    priority_order = {'high': 0, 'medium': 1, 'low': 2}
     gaps.sort(key=lambda source: (
-        priority_order.get(source.get('priority', 'low'), 2),
+        priority_rank(source.get('priority')),
         -source['citation_count'],
     ))
     covered_sources.sort(key=lambda source: -source['citation_count'])
@@ -288,9 +267,7 @@ def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str
         return configuration_error
 
     search_table = dynamodb.Table(SEARCH_RESULTS_TABLE)
-    tracked_brands = config.get('tracked_brands', {})
-    first_party_list = [brand.lower() for brand in tracked_brands.get('first_party', [])]
-    competitors_list = [brand.lower() for brand in tracked_brands.get('competitors', [])]
+    first_party_list, competitors_list = tracked_brand_names(config)
 
     response = search_table.query(
         KeyConditionExpression=Key('keyword').eq(keyword),
@@ -304,8 +281,7 @@ def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str
     if not items:
         return {'error': f'No data found for keyword: {keyword}'}
 
-    latest_timestamp = max(item.get('timestamp', '') for item in items)
-    latest_items = [item for item in items if item.get('timestamp') == latest_timestamp]
+    latest_timestamp, latest_items = latest_run(items)
 
     source_brand_map = _map_sources_to_brands(latest_items, first_party_list, competitors_list)
     gaps, covered_sources = _gaps_and_covered_sources(source_brand_map, config)
@@ -333,7 +309,7 @@ def _build_citation_gap_result(keyword: str, config: dict[str, Any]) -> dict[str
             'gap_count': len(gaps),
             'covered_count': len(covered_sources),
             'high_priority_gaps': len(high_priority_gaps),
-            'coverage_rate': round(len(covered_sources) / len(source_brand_map) * 100, 1) if source_brand_map else 0,
+            'coverage_rate': percent(len(covered_sources), len(source_brand_map)) if source_brand_map else 0,
         },
     }
 
@@ -348,7 +324,7 @@ def analyze_citation_gaps(keyword: str, config: dict[str, Any]) -> dict[str, Any
     return result
 
 
-def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10, scope: ReportScope | None = None) -> dict[str, Any]:
+def analyze_all_keywords_gaps(config: dict[str, Any], limit: int, scope: ReportScope | None) -> dict[str, Any]:
     """Analyze citation gaps across the active keywords of a scope."""
     configuration_error = _first_party_brand_error(config)
     if configuration_error is not None:
@@ -386,9 +362,8 @@ def analyze_all_keywords_gaps(config: dict[str, Any], limit: int = 10, scope: Re
                 gap['keyword'] = keyword
                 all_gaps.append(gap)
 
-    priority_order = {'high': 0, 'medium': 1, 'low': 2}
     all_gaps.sort(key=lambda gap: (
-        priority_order.get(gap.get('priority', 'low'), 2),
+        priority_rank(gap.get('priority')),
         -gap['citation_count'],
     ))
     top_gaps = all_gaps[:30]
@@ -408,7 +383,7 @@ def gaps_for_scope(scope: ReportScope | None, config: dict[str, Any], limit: int
     """Return one-keyword analysis or a rollup for the requested scope."""
     if scope is not None and scope.is_single_keyword:
         return analyze_citation_gaps(scope.keywords[0], config)
-    return analyze_all_keywords_gaps(config, limit, scope=scope)
+    return analyze_all_keywords_gaps(config, limit, scope)
 
 
 @api_handler

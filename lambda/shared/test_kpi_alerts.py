@@ -20,9 +20,14 @@ from shared.kpi_alerts import (
     validate_settings,
 )
 from shared.kpi_engine import answers_from_rows
+from testing.search_result_fixtures import successful_answer_row
 
 PREVIOUS_TIMESTAMP = '2026-09-01T10:00:00Z'
 CURRENT_TIMESTAMP = '2026-09-02T10:00:00Z'
+#: 254 characters with a 64-character local part: the longest deliverable address (RFC 5321).
+LONGEST_EMAIL = f'{"a" * 64}@{"b" * 63}.{"c" * 63}.{"d" * 57}.com'
+#: 255 characters, every label within the pattern's 63-character limit.
+TOO_LONG_EMAIL = f'{"a" * 64}@{"b" * 63}.{"c" * 63}.{"d" * 58}.com'
 
 
 def _snapshot() -> dict:
@@ -245,14 +250,13 @@ class TestBaselineAndDisabledSettings:
 
 
 def _row(keyword: str, *brands: tuple[str, str, int], provider: str = 'openai') -> dict:
-    return {
-        'keyword': keyword,
-        'timestamp': CURRENT_TIMESTAMP,
-        'provider': provider,
-        'status': 'success',
-        'brands': [{'name': name, 'classification': classification, 'rank': rank} for name, classification, rank in brands],
-        'citations': ['https://hotel-sol.com/spa'],
-    }
+    return successful_answer_row(
+        keyword=keyword,
+        timestamp=CURRENT_TIMESTAMP,
+        provider=provider,
+        brands=brands,
+        citations=['https://hotel-sol.com/spa'],
+    )
 
 
 class TestSnapshotMetrics:
@@ -361,7 +365,39 @@ class TestSettingsValidation:
         assert error == f'{field_name} must be a finite number'
         assert field == field_name
 
-    @pytest.mark.parametrize('email', ['', 'missing-at.example.com', 'a@localhost', 'two@@example.com'])
+    def test_accepts_an_email_at_the_address_and_local_part_length_limits(self) -> None:
+        settings, error, _field = validate_settings(_settings(notification_emails=[LONGEST_EMAIL]))
+
+        assert (len(LONGEST_EMAIL), len(LONGEST_EMAIL.partition('@')[0])) == (254, 64)
+        assert error is None
+        assert settings is not None
+        assert settings['notification_emails'] == [LONGEST_EMAIL]
+
+    @pytest.mark.parametrize(
+        ('emails', 'message'),
+        [
+            ('ops@example.com', 'notification_emails must be an array of email addresses'),
+            ([7], 'notification_emails must be an array of email addresses'),
+            ([f'ops{index}@example.com' for index in range(101)], 'notification_emails accepts at most 100 entries'),
+        ],
+    )
+    def test_rejects_malformed_email_lists_with_their_message(self, emails: object, message: str) -> None:
+        assert validate_settings(_settings(notification_emails=emails)) == (None, message, 'notification_emails')
+
+    @pytest.mark.parametrize(
+        'email',
+        [
+            '',
+            'missing-at.example.com',
+            'a@localhost',
+            'two@@example.com',
+            '.alice@example.com',
+            'alice.@example.com',
+            'al..ice@example.com',
+            f'{"a" * 65}@example.com',
+            TOO_LONG_EMAIL,
+        ],
+    )
     def test_rejects_invalid_email_addresses(self, email: str) -> None:
         settings, error, field = validate_settings(_settings(notification_emails=[email]))
 
@@ -425,3 +461,7 @@ class TestDurableIdentityAndRetention:
 
     def test_expires_snapshot_exactly_365_days_after_run(self) -> None:
         assert ttl_for_timestamp('2026-01-01T00:00:00Z') == 1798761600
+
+    def test_refuses_a_ttl_for_a_timestamp_that_is_not_iso_8601(self) -> None:
+        with pytest.raises(ValueError, match=r"^Invalid isoformat string: 'yesterday'$"):
+            ttl_for_timestamp('yesterday')

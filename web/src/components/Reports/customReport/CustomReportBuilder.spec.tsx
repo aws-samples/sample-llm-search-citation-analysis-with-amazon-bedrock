@@ -9,9 +9,10 @@ import {
 } from '../../../api/clientMock-fixtures';
 import { buildCustomReport } from '../../../api/customReports-fixtures';
 import { ApiRequestError } from '../../../infrastructure';
+import { changeField } from './customReport-fixtures';
 import {
-  canvasBlockNames, canvasCard, canvasHandle, catalogItem, dragOverAt, dragStartOn, dropOn, dropZone, renderCustomReportRoute,
-  reportsListPayload
+  REPORT_GONE, canvasBlockNames, canvasCard, canvasHandle, catalogItem, dragAndDrop, dropZone, renderCustomReportRoute, renderWithoutSavedReports,
+  reportCanvas, reportsListPayload
 } from './customReportPages-fixtures';
 
 vi.mock('../../../api/client', () => import('../../../api/clientMock-fixtures'));
@@ -32,7 +33,7 @@ const SENTIMENT = 'Sentiment · Headline';
 /** Opens the builder for a new report, names it "Launch recap" and adds `names` with their Add buttons. */
 function setupNewReport(...names: string[]) {
   renderCustomReportRoute('/reports/custom/new');
-  fireEvent.change(screen.getByLabelText('Report name'), { target: { value: 'Launch recap' } });
+  changeField('Report name', 'Launch recap');
   names.forEach((name) => fireEvent.click(screen.getByRole('button', { name: `Add ${name}` })));
 }
 
@@ -81,27 +82,21 @@ describe('Building a new custom report', () => {
 
   it('adds a block dragged from the list onto the drop zone at the end', () => {
     setupNewReport('Heading');
-    dragStartOn(catalogItem(SENTIMENT));
-    dragOverAt(dropZone(), 1);
-    dropOn(dropZone());
+    dragAndDrop(catalogItem(SENTIMENT), dropZone(), 1);
 
     expect(canvasBlockNames()).toStrictEqual(['Heading', SENTIMENT]);
   });
 
   it('adds a block dragged from the list before the block whose top half it is dropped on', () => {
     setupNewReport('Heading');
-    dragStartOn(catalogItem(SENTIMENT));
-    dragOverAt(canvasCard('Heading'), -1);
-    dropOn(screen.getByRole('list', { name: 'Your report' }));
+    dragAndDrop(catalogItem(SENTIMENT), canvasCard('Heading'), -1, reportCanvas());
 
     expect(canvasBlockNames()).toStrictEqual([SENTIMENT, 'Heading']);
   });
 
   it('moves a block dragged by its name after the block whose bottom half it is dropped on', () => {
     setupNewReport(SOURCES, SENTIMENT);
-    dragStartOn(canvasHandle(SOURCES));
-    dragOverAt(canvasCard(SENTIMENT), 1);
-    dropOn(screen.getByRole('list', { name: 'Your report' }));
+    dragAndDrop(canvasHandle(SOURCES), canvasCard(SENTIMENT), 1, reportCanvas());
 
     expect(canvasBlockNames()).toStrictEqual([SENTIMENT, SOURCES]);
   });
@@ -189,10 +184,23 @@ describe('Editing a saved custom report', () => {
     expect(mockApiDelete).toHaveBeenCalledWith('/custom-reports/report-board', WRITE_OPTIONS);
   });
 
-  it('says the report is gone when no saved report has the id', async () => {
-    mockApiGet.mockResolvedValue(reportsListPayload());
-    renderCustomReportRoute('/reports/custom/report-missing/edit');
+  it('offers the way back to Reports when the report is gone', async () => {
+    renderWithoutSavedReports('/reports/custom/report-missing/edit');
 
-    expect(await screen.findByText('This report no longer exists. It may have been deleted.')).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Back to Reports' })).toBeInTheDocument();
+  });
+
+  it('shows the load failure without the way back when the reports cannot be read', async () => {
+    mockApiGet.mockRejectedValue(new ApiRequestError('HTTP 500', 500));
+    renderCustomReportRoute('/reports/custom/report-board/edit');
+
+    expect(await screen.findByText('Server error occurred')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Back to Reports' })).not.toBeInTheDocument();
+  });
+
+  it('says the report is gone when no saved report has the id', async () => {
+    renderWithoutSavedReports('/reports/custom/report-missing/edit');
+
+    expect(await screen.findByText(REPORT_GONE)).toBeInTheDocument();
   });
 });

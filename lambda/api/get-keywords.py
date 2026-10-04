@@ -24,7 +24,7 @@ from shared.keyword_groups import serialize_keyword_item
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
-KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
+KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS')
 keywords_table = dynamodb.Table(KEYWORDS_TABLE)
 
 # Valid values

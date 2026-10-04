@@ -3,7 +3,7 @@ import { fetchKeywordResearch } from '../api/keywordResearch';
 import { isActiveResearchStatus } from '../formatting/researchStatus';
 import type { KeywordResearchItem } from '../types';
 
-export class KeywordResearchError extends Error {
+class KeywordResearchError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'KeywordResearchError';
@@ -16,9 +16,9 @@ export class KeywordResearchError extends Error {
  * the client only gives up after the server necessarily has.
  */
 export const POLL_FAST_INTERVAL_MS = 3000;
-export const POLL_SLOW_INTERVAL_MS = 10_000;
-export const POLL_FAST_ATTEMPTS = 20;
-export const POLL_MAX_ATTEMPTS = 230;
+const POLL_SLOW_INTERVAL_MS = 10_000;
+const POLL_FAST_ATTEMPTS = 20;
+const POLL_MAX_ATTEMPTS = 230;
 
 export interface ResearchPollOptions {
   jobId: string;
@@ -35,7 +35,7 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-export function pollInterval(attempt: number): number {
+function pollInterval(attempt: number): number {
   return attempt < POLL_FAST_ATTEMPTS ? POLL_FAST_INTERVAL_MS : POLL_SLOW_INTERVAL_MS;
 }
 

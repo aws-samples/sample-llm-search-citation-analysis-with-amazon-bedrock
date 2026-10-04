@@ -6,33 +6,8 @@ import {
 } from './citationParser';
 import type { SortConfig } from './citationParser';
 import {
-  buildCitation, buildCitations 
-} from './citationParserFixtures';
-
-const DESC_CITATIONS = {
-  column: 'citations',
-  direction: 'desc' 
-} satisfies SortConfig;
-const DESC_KEYWORDS = {
-  column: 'keywords',
-  direction: 'desc' 
-} satisfies SortConfig;
-const ASC_CITATIONS = {
-  column: 'citations',
-  direction: 'asc' 
-} satisfies SortConfig;
-const ASC_KEYWORDS = {
-  column: 'keywords',
-  direction: 'asc' 
-} satisfies SortConfig;
-const DESC_DOMAIN = {
-  column: 'domain',
-  direction: 'desc' 
-} satisfies SortConfig;
-const ASC_DOMAIN = {
-  column: 'domain',
-  direction: 'asc' 
-} satisfies SortConfig;
+  ASC_CITATIONS, ASC_DOMAIN, ASC_KEYWORDS, DESC_CITATIONS, DESC_DOMAIN, DESC_KEYWORDS, buildCitation, buildCitations
+} from './citationParser-fixtures';
 
 /** One row of the count-column sorting table: which column, which way, and the counts in that order. */
 interface CountSortCase {

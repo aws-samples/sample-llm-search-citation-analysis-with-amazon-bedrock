@@ -13,15 +13,9 @@ import {
 } from './useQueryPrompts-fixtures';
 
 import { mockAuthenticatedFetch as mockFetch } from '../test/infrastructureMock';
+import { TestError } from '../test/testError';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
-
-class TestError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'TestError';
-  }
-}
 
 describe('useQueryPrompts', () => {
   it('fetches prompts on mount', async () => {

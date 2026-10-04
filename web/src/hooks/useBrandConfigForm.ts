@@ -8,7 +8,7 @@ import {
   DEFAULT_BRAND_INDUSTRY, resolveBrandIndustryPreset
 } from '../constants/brandConfigDefaults';
 
-export interface BrandConfigFormState {
+interface BrandConfigFormState {
   industry: string;
   firstPartyBrands: string[];
   firstPartyDomains: string[];
@@ -22,7 +22,7 @@ export interface BrandConfigFormState {
   promptModified: boolean;
 }
 
-export interface BrandConfigFormInputs {
+interface BrandConfigFormInputs {
   newFirstParty: string;
   newFirstPartyDomain: string;
   newCompetitor: string;
@@ -32,7 +32,7 @@ export interface BrandConfigFormInputs {
 type BrandType = 'first_party' | 'competitor';
 export type ConfigTab = 'settings' | 'prompt';
 
-export interface BrandConfigExpansionState {
+interface BrandConfigExpansionState {
   selectedFirstPartyBrand: string | null;
   selectedCompetitorBrand: string | null;
   expandingBrand: BrandType | null;
@@ -89,7 +89,6 @@ export interface UseBrandConfigFormReturn {
   setSaved: (v: boolean) => void;
 
   // Utilities
-  normalizeBrand: (name: string) => string;
   brandExists: (brand: string, brandList: string[]) => boolean;
   currentPreset: IndustryPresets[string] | undefined;
 }
@@ -119,6 +118,11 @@ function trackedBrandsFromConfig(
     firstPartyBrands: config.tracked_brands?.first_party ?? defaults.firstPartyBrands,
     competitorBrands: config.tracked_brands?.competitors ?? defaults.competitorBrands,
   };
+}
+
+/** A brand name compared case-, accent- and surrounding-whitespace-insensitively. */
+function normalizeBrand(name: string): string {
+  return name.normalize('NFD').replaceAll(/[\u0300-\u036F]/gi, '').toLowerCase().trim();
 }
 
 /** Editable values of a stored config; gaps in a partial config fall back to the defaults. */
@@ -177,11 +181,8 @@ export function useBrandConfigForm(
 
   const currentPreset = resolveBrandIndustryPreset(presets, industry);
 
-  const normalizeBrand = useCallback((name: string): string =>
-    name.normalize('NFD').replaceAll(/[\u0300-\u036F]/gi, '').toLowerCase().trim(), []);
-
   const brandExists = useCallback((brand: string, brandList: string[]): boolean =>
-    brandList.some(existing => normalizeBrand(existing) === normalizeBrand(brand)), [normalizeBrand]);
+    brandList.some(existing => normalizeBrand(existing) === normalizeBrand(brand)), []);
 
   // Sync form state when config changes
   useEffect(() => {
@@ -299,7 +300,6 @@ export function useBrandConfigForm(
     handlePromptChange,
     resetPromptToDefault,
     buildConfig,
-    normalizeBrand,
     brandExists,
     currentPreset,
   };

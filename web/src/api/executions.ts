@@ -29,13 +29,7 @@ export interface SchedulePayload {
   scope: AnalysisScope;
 }
 
-export interface ScheduleRunResponse {
-  execution_arn: string;
-  execution_name: string;
-  schedule_id: string;
-  scope_summary: string;
-  message: string;
-}
+export interface ScheduleRunResponse {message: string;}
 
 /**
  * Fetches all schedules.

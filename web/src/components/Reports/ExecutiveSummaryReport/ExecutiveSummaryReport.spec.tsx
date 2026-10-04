@@ -11,10 +11,11 @@ import {
   buildMover, buildOverview
 } from '../layout/reportPayload-fixtures';
 import {
-  definitionTerms, sectionTitled, sectionTitles, statFigure
+  definitionTerms, VISIBILITY_DEFINITION_TERMS, sectionTitled, sectionTitles, statFigure
 } from '../layout/reportQueries-fixtures';
-import { buildRec } from './sections/reportsOverview-fixtures';
-import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
+import {
+  buildRec, loadedOverview
+} from './sections/reportsOverview-fixtures';
 import {
   LATEST_BRANDS_SOV_CAPTION, chartCaption
 } from '../BrandVisibilityReport/sections/reportChartPanels-fixtures';
@@ -34,13 +35,11 @@ import {
 const mockUse = vi.mocked(useExecutiveSummary);
 
 const POPULATED = {
-  data: buildOverview({
+  ...loadedOverview({
     top_improving: [buildMover('best running shoes', 8, 80)],
     top_declining: [buildMover('best hiking boots', -10, 30)],
     top_recommendations: [buildRec('Pitch hiking-gear-focused publishers', 'high')],
   }),
-  loading: false,
-  error: null,
   ready: true,
 };
 
@@ -101,7 +100,7 @@ describe('ExecutiveSummaryReport', () => {
   it('ends with the definition of every KPI and of the trend rule', () => {
     renderReport();
 
-    expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITIONS.map((entry) => entry.label));
+    expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITION_TERMS);
   });
 
   it('names a keyword group as the API describes the scope', () => {

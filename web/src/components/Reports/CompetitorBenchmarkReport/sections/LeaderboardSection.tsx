@@ -1,5 +1,5 @@
 import type { BrandLeaderboardRow } from '../../../../types';
-import { engineName } from '../../charts';
+import { providerName } from '../../../../constants/providers';
 import {
   ReportTable, type ReportTableColumn
 } from '../../layout/ReportTable';
@@ -7,7 +7,7 @@ import {
   BRAND_COLUMN, brandKpiColumn, brandRowKey, firstPartyRowClass, LatestRunSection, noBrandNamed, type ScopeSectionProps
 } from '../../scopeReport';
 
-export const TOP_PLACE_INFO = 'The earliest place the brand reached in any answer (1 = named first); answers without a known place are left out.';
+const TOP_PLACE_INFO = 'The earliest place the brand reached in any answer (1 = named first); answers without a known place are left out.';
 
 /** The leaderboard's columns, built when the table renders rather than when the module loads. */
 function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardRow>> {
@@ -26,7 +26,7 @@ function leaderboardColumns(): ReadonlyArray<ReportTableColumn<BrandLeaderboardR
     {
       header: 'Engines',
       info: 'The AI engines whose answers name the brand.',
-      render: (brand) => brand.engines.map(engineName).join(', '),
+      render: (brand) => brand.engines.map(providerName).join(', '),
     },
     {
       header: 'Keywords',

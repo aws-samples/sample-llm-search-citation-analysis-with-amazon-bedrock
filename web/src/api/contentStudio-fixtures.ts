@@ -2,6 +2,7 @@ import type {
   ContentBriefBatchRequest,
   ContentBriefBatchStartResponse,
   ContentBriefBatchStatusResponse,
+  ContentBriefFields,
   ContentBriefTemplate,
   ContentIdea,
   ContentStudioHistory,
@@ -61,6 +62,15 @@ export function buildApiTemplate(
   };
 }
 
+const apiBriefFields: ContentBriefFields = {
+  content_angle: 'create_new_landing_page',
+  landing_url: '',
+  current_copy: '',
+  template_id: 'builtin-create-new-landing-page',
+  prompt_template: GROUP_BRIEF_DEFAULT_TEMPLATES.create_new_landing_page,
+  output_language: 'English',
+};
+
 export function buildApiGroupBriefIdea(
   overrides: Partial<GroupBriefIdea> = {}
 ): GroupBriefIdea {
@@ -71,12 +81,7 @@ export function buildApiGroupBriefIdea(
       mode: 'keywords',
       keyword_ids: ['keyword-1'],
     },
-    content_angle: 'create_new_landing_page',
-    landing_url: '',
-    current_copy: '',
-    template_id: 'builtin-create-new-landing-page',
-    prompt_template: GROUP_BRIEF_DEFAULT_TEMPLATES.create_new_landing_page,
-    output_language: 'English',
+    ...apiBriefFields,
     ...overrides,
   };
 }
@@ -92,14 +97,7 @@ export function buildApiBatchRequest(
       mode: 'keywords',
       keyword_ids: ['keyword-1', 'keyword-2'],
     },
-    brief: {
-      content_angle: 'create_new_landing_page',
-      landing_url: '',
-      current_copy: '',
-      template_id: 'builtin-create-new-landing-page',
-      prompt_template: GROUP_BRIEF_DEFAULT_TEMPLATES.create_new_landing_page,
-      output_language: 'English',
-    },
+    brief: { ...apiBriefFields },
     ...overrides,
   };
 }
@@ -173,6 +171,16 @@ export const apiBatchStatusResponse: ContentBriefBatchStatusResponse = {
     total: 2,
   },
 };
+
+/** The `authenticatedFetch` init a Content Studio client sends with a JSON body. */
+export function buildJsonRequestInit(method: 'POST' | 'PUT', body: unknown) {
+  return {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: undefined,
+  };
+}
 
 export function buildApiMissingBatchStatusResponse(
   batchId = 'batch/id'

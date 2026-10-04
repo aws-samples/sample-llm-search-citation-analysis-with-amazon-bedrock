@@ -4,12 +4,14 @@ import {
 import {
   render, screen
 } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { ResearchProgress } from './ResearchProgress';
 import {
   buildJob, buildStep
 } from '../../hooks/useKeywordResearch-fixtures';
 import { HOTEL_DIMENSIONS } from './agent/agent-fixtures';
+import {
+  clickRetryButton, queryRetryButtonElement
+} from './researchRetry-fixtures';
 
 const runningJob = buildJob({
   status: 'running',
@@ -64,6 +66,23 @@ describe('ResearchProgress', () => {
     expect(screen.getByText('Waiting')).toBeInTheDocument();
   });
 
+  it('names each provider step by the provider display name', () => {
+    render(<ResearchProgress job={runningJob} />);
+
+    expect(screen.getByText('Google Gemini')).toBeInTheDocument();
+  });
+
+  it('names the SerpAPI step "Google signals"', () => {
+    render(<ResearchProgress job={buildJob({
+      status: 'running',
+      steps_total: 1,
+      steps_done: 0,
+      steps: [buildStep('serpapi', { status: 'running' })],
+    })} />);
+
+    expect(screen.getByText('Google signals')).toBeInTheDocument();
+  });
+
   it('says it is planning while no step exists yet', () => {
     render(<ResearchProgress job={buildJob({ status: 'pending' })} />);
 
@@ -79,11 +98,10 @@ describe('ResearchProgress', () => {
   });
 
   it('offers a retry on a partial job and hands back the job', async () => {
-    const user = userEvent.setup();
     const onRetry = vi.fn();
     render(<ResearchProgress job={partialJob} onRetry={onRetry} />);
 
-    await user.click(screen.getByRole('button', { name: 'Retry failed providers' }));
+    await clickRetryButton();
 
     expect(onRetry).toHaveBeenCalledWith(partialJob);
   });
@@ -91,15 +109,15 @@ describe('ResearchProgress', () => {
   it('hides the retry while a retry is already in flight', () => {
     render(<ResearchProgress job={partialJob} onRetry={vi.fn()} retrying />);
 
-    expect(screen.queryByRole('button', { name: 'Retry failed providers' })).not.toBeInTheDocument();
+    expect(queryRetryButtonElement()).not.toBeInTheDocument();
   });
 
   it('offers no retry on a running or completed job', () => {
     const { rerender } = render(<ResearchProgress job={runningJob} onRetry={vi.fn()} />);
-    expect(screen.queryByRole('button', { name: 'Retry failed providers' })).not.toBeInTheDocument();
+    expect(queryRetryButtonElement()).not.toBeInTheDocument();
 
     rerender(<ResearchProgress job={buildJob({ status: 'completed' })} onRetry={vi.fn()} />);
-    expect(screen.queryByRole('button', { name: 'Retry failed providers' })).not.toBeInTheDocument();
+    expect(queryRetryButtonElement()).not.toBeInTheDocument();
   });
 });
 

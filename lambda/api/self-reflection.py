@@ -16,7 +16,7 @@ import os
 import sys
 import time
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any
 
 import boto3
@@ -29,7 +29,7 @@ from shared.decorators import api_handler, parse_json_body, require_keyword, val
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
 from shared.search_results import latest_run, query_keyword_items, search_results_table_name
-from shared.utils import brand_names_match, get_brand_config, get_timestamp, utc_now
+from shared.utils import brand_names_match, get_brand_config, get_timestamp, parse_timestamp, utc_now
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -38,7 +38,7 @@ dynamodb = boto3.resource('dynamodb')
 
 SEARCH_RESULTS_TABLE = search_results_table_name()
 SELF_REFLECTION_TABLE = os.environ['DYNAMODB_TABLE_SELF_REFLECTION']
-QUERY_PROMPTS_TABLE = os.environ['QUERY_PROMPTS_TABLE']
+QUERY_PROMPTS_TABLE = os.environ['DYNAMODB_TABLE_QUERY_PROMPTS']
 CACHE_TTL_HOURS = 24
 
 SELF_REFLECTION_PROMPT = """You are analysing an AI search response to explain brand ranking decisions.
@@ -131,13 +131,9 @@ def check_cache(keyword: str, brand: str, query_prompt_id: str) -> dict[str, Any
     if not items:
         return None
     item = items[0]
-    created_at = item.get('created_at', '')
-    try:
-        created_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00')).replace(tzinfo=None)
-        if utc_now().replace(tzinfo=None) - created_dt < timedelta(hours=CACHE_TTL_HOURS):
-            return item
-    except (ValueError, TypeError):
-        pass
+    created_at = parse_timestamp(item.get('created_at'))
+    if created_at is not None and utc_now() - created_at < timedelta(hours=CACHE_TTL_HOURS):
+        return item
     return None
 
 

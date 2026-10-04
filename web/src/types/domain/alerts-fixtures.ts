@@ -1,6 +1,7 @@
 import type {
   AlertItem,
   AlertSettings,
+  AlertSettingsUpdate,
   AlertSubscriptionStatus,
   AlertTestNotificationResponse,
   AlertsResponse,
@@ -23,7 +24,6 @@ export const VALID_ALERT_TYPES = [
 export const VALID_ALERT_SEVERITIES = [
   'info',
   'warning',
-  'critical',
 ] satisfies readonly AlertSeverity[];
 
 export const VALID_ALERT_STATUSES = [
@@ -144,6 +144,15 @@ export function buildAlertSettings(overrides: Partial<AlertSettings> = {}): Aler
       status: 'confirmed',
     }],
     ...overrides,
+  };
+}
+
+/** The editable part of `settings`, as a save sends it. */
+export function settingsUpdateFrom(settings: AlertSettings): AlertSettingsUpdate {
+  return {
+    enabled: settings.enabled,
+    notification_emails: settings.notification_emails,
+    thresholds: settings.thresholds,
   };
 }
 

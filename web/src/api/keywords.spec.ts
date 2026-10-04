@@ -29,6 +29,15 @@ const legacyPromotionResponseFixture = {
   }],
 } satisfies PromoteKeywordsResponse;
 
+const legacyPromotionOutcome = {
+  created: 0,
+  skipped: 1,
+  createdKeywords: [],
+  createdItems: [],
+  skippedKeywords: ['hotel coruña'],
+  groupedKeywords: [],
+};
+
 describe('promoteKeywords', () => {
   beforeEach(() => {
     mockApiPost.mockReset();
@@ -39,14 +48,7 @@ describe('promoteKeywords', () => {
 
     const promotionOutcome = await promoteKeywords({ keywords: [researchKeywordFixture] });
 
-    expect(promotionOutcome).toStrictEqual({
-      created: 0,
-      skipped: 1,
-      createdKeywords: [],
-      createdItems: [],
-      skippedKeywords: ['hotel coruña'],
-      groupedKeywords: [],
-    });
+    expect(promotionOutcome).toStrictEqual(legacyPromotionOutcome);
   });
 
   it('returns newly grouped keyword texts when response includes the field', async () => {
@@ -61,11 +63,7 @@ describe('promoteKeywords', () => {
     });
 
     expect(promotionOutcome).toStrictEqual({
-      created: 0,
-      skipped: 1,
-      createdKeywords: [],
-      createdItems: [],
-      skippedKeywords: ['hotel coruña'],
+      ...legacyPromotionOutcome,
       groupedKeywords: ['hotel coruña'],
     });
   });

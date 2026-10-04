@@ -63,14 +63,12 @@ def get_extraction_config() -> dict[str, Any]:
     return _extraction_config
 
 # Environment variables
-DYNAMODB_TABLE_SEARCH_RESULTS = os.environ.get('DYNAMODB_TABLE_SEARCH_RESULTS')
-RAW_RESPONSES_BUCKET = os.environ.get('RAW_RESPONSES_BUCKET')
-# Provider config table — canonical name first, legacy fallback for in-flight
-# deploys. Default mirrors the CDK resource name so a bootstrap deploy works
-# even before env vars flow through. Audit #12.
+DYNAMODB_TABLE_SEARCH_RESULTS = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+RAW_RESPONSES_BUCKET = os.environ['RAW_RESPONSES_BUCKET']
+# Provider config table. Default mirrors the CDK resource name so a bootstrap
+# deploy works even before env vars flow through. Audit #12.
 PROVIDER_CONFIG_TABLE = (
     os.environ.get('DYNAMODB_TABLE_PROVIDER_CONFIG')
-    or os.environ.get('PROVIDER_CONFIG_TABLE')
     or 'CitationAnalysis-ProviderConfig'
 )
 
@@ -98,10 +96,6 @@ def store_raw_response_to_s3(
 
     Returns S3 URI if successful, None otherwise.
     """
-    if not RAW_RESPONSES_BUCKET:
-        logger.warning("RAW_RESPONSES_BUCKET not set, skipping S3 storage")
-        return None
-
     try:
         # Parse date from timestamp
         date_str = timestamp[:10]  # YYYY-MM-DD
@@ -529,19 +523,19 @@ def _search_provider_runner(client_class: type) -> Callable[[str, str, str | Non
 
 
 # Provider execution registry: (provider_id, secret name, log label,
-# provider type, runner). Replaces the nine copy-pasted
+# runner). Replaces the nine copy-pasted
 # enabled/disabled/no-key ladders (bugs.md 3.2); execution order is
 # unchanged.
-PROVIDER_RUNNERS: list[tuple[str, str, str, str, Callable[[str, str, str | None], dict[str, Any]]]] = [
-    (Provider.OPENAI, 'openai-key', 'OpenAI', 'llm', _run_openai_provider),
-    (Provider.PERPLEXITY, 'perplexity-key', 'Perplexity', 'llm', _run_perplexity_provider),
-    (Provider.GEMINI, 'gemini-key', 'Gemini', 'llm', _run_gemini_provider),
-    (Provider.CLAUDE, 'claude-key', 'Claude', 'llm', _run_claude_provider),
-    (Provider.BRAVE, 'brave-key', 'Brave Search', 'search', _search_provider_runner(BraveSearchClient)),
-    (Provider.TAVILY, 'tavily-key', 'Tavily', 'search', _search_provider_runner(TavilySearchClient)),
-    (Provider.EXA, 'exa-key', 'Exa', 'search', _search_provider_runner(ExaSearchClient)),
-    (Provider.SERPAPI, 'serpapi-key', 'SerpAPI', 'search', _search_provider_runner(SerpAPIClient)),
-    (Provider.FIRECRAWL, 'firecrawl-key', 'Firecrawl', 'search', _search_provider_runner(FirecrawlSearchClient)),
+PROVIDER_RUNNERS: list[tuple[str, str, str, Callable[[str, str, str | None], dict[str, Any]]]] = [
+    (Provider.OPENAI, 'openai-key', 'OpenAI', _run_openai_provider),
+    (Provider.PERPLEXITY, 'perplexity-key', 'Perplexity', _run_perplexity_provider),
+    (Provider.GEMINI, 'gemini-key', 'Gemini', _run_gemini_provider),
+    (Provider.CLAUDE, 'claude-key', 'Claude', _run_claude_provider),
+    (Provider.BRAVE, 'brave-key', 'Brave Search', _search_provider_runner(BraveSearchClient)),
+    (Provider.TAVILY, 'tavily-key', 'Tavily', _search_provider_runner(TavilySearchClient)),
+    (Provider.EXA, 'exa-key', 'Exa', _search_provider_runner(ExaSearchClient)),
+    (Provider.SERPAPI, 'serpapi-key', 'SerpAPI', _search_provider_runner(SerpAPIClient)),
+    (Provider.FIRECRAWL, 'firecrawl-key', 'Firecrawl', _search_provider_runner(FirecrawlSearchClient)),
 ]
 
 
@@ -572,44 +566,27 @@ def _record_provider_outcome(provider_id: str, result: dict[str, Any]) -> None:
             table, provider_id, result.get('error', 'unknown provider error')
         )
         result['error_category'] = outcome['category']
-        if outcome['auto_disabled']:
-            result['provider_auto_disabled'] = True
         return
 
     record_provider_success(table, provider_id)
 
 
-def execute_all_providers(keyword: str, provider_types: list[str] | None = None, providers: list[str] | None = None, query_template: str | None = None) -> list[dict[str, Any]]:
+def execute_all_providers(keyword: str, providers: list[str], query_template: str | None = None) -> list[dict[str, Any]]:
     """
-    Execute queries across AI providers.
+    Execute queries across the selected AI and search providers.
 
     Args:
         keyword: Search keyword
-        provider_types: Optional list of provider types to run ("llm", "search", or both).
-                       If None, runs all types.
-        providers: Optional list of specific provider IDs to run.
-                  If None, runs all enabled providers of the specified types.
+        providers: The provider IDs to run (the analysis workflow sends one per invocation).
         query_template: Optional query template with {keyword} placeholder.
                        If None, each provider uses its default query format.
     """
     results = []
 
-    # Determine which types to run
-    run_types = set()
-    if provider_types is None or "llm" in provider_types:
-        run_types.add("llm")
-    if provider_types is None or "search" in provider_types:
-        run_types.add("search")
-
-    def should_run_provider(provider_id: str) -> bool:
-        if providers is not None:
-            return provider_id in providers
-        return True
-
-    for provider_id, secret_name, label, provider_type, run_query in PROVIDER_RUNNERS:
+    for provider_id, secret_name, label, run_query in PROVIDER_RUNNERS:
         # Selection first: a Lambda asked for one provider reads one secret
         # and one enablement row, not all nine.
-        if provider_type not in run_types or not should_run_provider(provider_id):
+        if provider_id not in providers:
             continue
         api_key = get_api_key(secret_name)
         if not api_key:
@@ -633,10 +610,6 @@ def execute_all_providers(keyword: str, provider_types: list[str] | None = None,
 
 def store_search_results(keyword: str, timestamp: str, results: list[dict[str, Any]]) -> bool:
     """Store search results in DynamoDB and raw responses to S3."""
-    if not DYNAMODB_TABLE_SEARCH_RESULTS:
-        logger.error("DYNAMODB_TABLE_SEARCH_RESULTS not set")
-        return False
-
     try:
         table = dynamodb.Table(DYNAMODB_TABLE_SEARCH_RESULTS)
 
@@ -767,6 +740,8 @@ def _slim_result(result: dict[str, Any]) -> dict[str, Any]:
     }
     if "error" in result:
         slim_result["error"] = result["error"]
+    if "error_category" in result:
+        slim_result["error_category"] = result["error_category"]
     return slim_result
 
 
@@ -774,12 +749,11 @@ def _search_keyword(event: dict[str, Any]) -> dict[str, Any]:
     """Run every query prompt across the selected providers and store the results."""
     keyword = _sanitized_keyword(event)
     timestamp = event.get('timestamp', get_timestamp())
-    provider_types = event.get('provider_types')  # Optional: ["llm"], ["search"], or ["llm", "search"]
-    providers = event.get('providers')  # Optional: specific provider IDs
+    providers = event['providers']
     # If no query prompts, use a single default (backward compatible)
     query_prompts = event.get('query_prompts') or [{"id": "default", "name": "Default", "template": None}]
 
-    logger.info(f"Processing keyword: {keyword}, prompts: {len(query_prompts)}, provider_types: {provider_types}")
+    logger.info(f"Processing keyword: {keyword}, prompts: {len(query_prompts)}, providers: {providers}")
 
     all_results: list[dict[str, Any]] = []
     for prompt in query_prompts:
@@ -789,7 +763,6 @@ def _search_keyword(event: dict[str, Any]) -> dict[str, Any]:
         try:
             results = execute_all_providers(
                 keyword,
-                provider_types=provider_types,
                 providers=providers,
                 query_template=prompt.get('template'),
             )
@@ -807,14 +780,8 @@ def _search_keyword(event: dict[str, Any]) -> dict[str, Any]:
     if not store_success:
         logger.warning("Failed to store some results in DynamoDB")
 
-    return {
-        "keyword": keyword,
-        "timestamp": timestamp,
-        "provider_types": provider_types,
-        "providers": providers,
-        "results": [_slim_result(result) for result in all_results],
-        "stored": store_success
-    }
+    # Only `results` is read: the workflow's resultSelector keeps `$.Payload.results`.
+    return {"results": [_slim_result(result) for result in all_results]}
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -826,15 +793,12 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         "keyword": "best hotels in malaga",
         "timestamp": "2025-01-15T10:30:00Z",
         "query_prompts": [{"id": "...", "name": "Family", "template": "As a family traveler, find me {keyword}"}],
-        "provider_types": ["search"],  // Optional: "llm", "search", or both
-        "providers": ["brave", "tavily"]  // Optional: specific provider IDs; the analysis
-                                          // workflow sends one id per invocation
+        "providers": ["brave"]  // the provider IDs to run; the analysis workflow
+                                // sends one id per invocation
     }
 
     Output:
     {
-        "keyword": "best hotels in malaga",
-        "timestamp": "2025-01-15T10:30:00Z",
         "results": [...]  // slim results; [] when the one provider is disabled or has no key
     }
     """

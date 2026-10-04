@@ -8,19 +8,24 @@ vi.mock('../../../hooks/useCompetitorRollup', () => ({useCompetitorRollup: vi.fn
 
 import { useCompetitorRollup } from '../../../hooks/useCompetitorRollup';
 import { mockSingleCompetitorRollup } from '../../../hooks/useCompetitorRollup-fixtures';
+import type { CompetitorReportResponse } from '../../../api/reports';
 
 const mockHook = useCompetitorRollup as ReturnType<typeof vi.fn>;
 
 describe('useCompetitorGap', () => {
   const fetchCompetitorRollup = vi.fn();
 
-  beforeEach(() => {
+  function mockRollupHook(data: CompetitorReportResponse | null, loading = false) {
     mockHook.mockReturnValue({
-      data: mockSingleCompetitorRollup,
-      loading: false,
+      data,
+      loading,
       error: null,
       fetchCompetitorRollup,
     });
+  }
+
+  beforeEach(() => {
+    mockRollupHook(mockSingleCompetitorRollup);
   });
 
   it('fetches the rollup with default keyword limit when competitor is set', () => {
@@ -38,45 +43,19 @@ describe('useCompetitorGap', () => {
     expect(result.current.rollup?.competitor).toBe('Adidas');
   });
 
-  it('returns null rollup for all-competitors response shape', () => {
-    mockHook.mockReturnValue({
-      data: {
-        generated_at: '2026-05-15T07:00:00Z',
-        keywords_analyzed: 4,
-        competitors: ['Adidas'],
-        rollups: [],
-      },
-      loading: false,
-      error: null,
-      fetchCompetitorRollup,
-    });
-    const { result } = renderHook(() => useCompetitorGap('Adidas'));
-    expect(result.current.rollup).toBeNull();
-  });
-
   it('reports ready=true once the rollup has loaded for a competitor', () => {
     const { result } = renderHook(() => useCompetitorGap('Adidas'));
     expect(result.current.ready).toBe(true);
   });
 
   it('reports ready=true even when no competitor is selected (no fetch fires)', () => {
-    mockHook.mockReturnValue({
-      data: null,
-      loading: false,
-      error: null,
-      fetchCompetitorRollup,
-    });
+    mockRollupHook(null);
     const { result } = renderHook(() => useCompetitorGap(null));
     expect(result.current.ready).toBe(true);
   });
 
   it('reports ready=false while the rollup is loading', () => {
-    mockHook.mockReturnValue({
-      data: null,
-      loading: true,
-      error: null,
-      fetchCompetitorRollup,
-    });
+    mockRollupHook(null, true);
     const { result } = renderHook(() => useCompetitorGap('Adidas'));
     expect(result.current.ready).toBe(false);
   });

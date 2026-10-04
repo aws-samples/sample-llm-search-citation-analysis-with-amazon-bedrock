@@ -7,7 +7,7 @@ import {
 import { usePrintMode } from '../../../hooks/usePrintMode';
 import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
 import {
-  KpiDefinitionsSection, ReportLayout, VisibilityHeadlineSection
+  headlineSlice, KpiDefinitionsSection, ReportLayout, trendSlice, visibilitySlice, VisibilityHeadlineSection
 } from '../layout';
 import type {
   Keyword, ReportScope 
@@ -16,7 +16,9 @@ import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import { KeywordScopeSelector } from '../../ui/KeywordScopeSelector';
 import { describeReportScope } from '../../ui/reportScope';
 import { useBrandVisibilityReport } from './useBrandVisibilityReport';
-import { BrandRankingsSection } from './sections/BrandRankingsSection';
+import {
+  LatestRunRankingsSection, PooledRankingsSection
+} from './sections/BrandRankingsSection';
 import { TrendHistorySection } from './sections/TrendHistorySection';
 import { CrossKeywordHeadlineSection } from './sections/CrossKeywordHeadlineSection';
 import { PerKeywordTableSection } from './sections/PerKeywordTableSection';
@@ -25,10 +27,6 @@ import { GroupKpiReport } from './GroupKpiReport';
 
 /** The per-hotel report opens on the last 90 days (the API's default window). */
 const DEFAULT_GROUP_REPORT_DAYS = 90;
-
-/** What the all-keywords leaderboard covers: the latest period of every keyword. */
-export const ALL_KEYWORDS_RANKINGS_SUBTITLE = 'Every brand the AI answers named in each keyword\'s latest period (the leading 10), '
-  + 'by visibility score, and the share of voice of your brand and its leading competitors over time. First-party rows are highlighted.';
 
 interface Props {readonly keywords: ReadonlyArray<Keyword>;}
 
@@ -112,32 +110,12 @@ type ReportData = ReturnType<typeof useBrandVisibilityReport>;
 
 interface SectionsProps {readonly data: ReportData;}
 
-/** The `/trends` slice every trend section of the report reads. */
-function trendSlice(data: ReportData) {
-  return {
-    trends: data.trends,
-    loading: data.trendsLoading,
-    error: data.trendsError,
-  };
-}
-
 /** One keyword: its KPIs and their change, the brand leaderboard, the KPIs per period. */
 function KeywordSections({ data }: SectionsProps) {
-  const headlineLoading = data.visibilityLoading || data.trendsLoading;
   return (
     <>
-      <VisibilityHeadlineSection
-        trends={data.trends}
-        visibility={data.visibility}
-        error={data.visibilityError ?? data.trendsError}
-        loading={headlineLoading}
-        emptyMessage="No visibility data found for this keyword."
-      />
-      <BrandRankingsSection
-        brands={data.visibility?.brands ?? null}
-        loading={data.visibilityLoading}
-        error={data.visibilityError}
-      />
+      <VisibilityHeadlineSection {...headlineSlice(data)} emptyMessage="No visibility data found for this keyword." />
+      <LatestRunRankingsSection {...visibilitySlice(data)} />
       <TrendHistorySection {...trendSlice(data)} />
       <KpiDefinitionsSection definitions={VISIBILITY_DEFINITIONS} />
     </>
@@ -150,14 +128,7 @@ function AllKeywordsSections({ data }: SectionsProps) {
   return (
     <>
       <CrossKeywordHeadlineSection {...slice} />
-      <BrandRankingsSection
-        brands={data.trends?.latest_brands ?? null}
-        brandTrends={data.trends?.brand_trends}
-        loading={data.trendsLoading}
-        error={data.trendsError}
-        subtitle={ALL_KEYWORDS_RANKINGS_SUBTITLE}
-        emptyMessage="No brand mentions extracted in the latest periods."
-      />
+      <PooledRankingsSection {...slice} />
       <TrendHistorySection {...slice} />
       <MoversSection {...slice} />
       <PerKeywordTableSection {...slice} />

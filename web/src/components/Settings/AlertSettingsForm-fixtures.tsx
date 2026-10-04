@@ -3,28 +3,22 @@ import {
   render, screen
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { vi } from 'vitest';
 import { buildAlertSettings } from '../../types/domain/alerts-fixtures';
+import { buildAlertSettingsHookResult } from '../../hooks/useAlerts-fixtures';
 import { AlertSettingsForm } from './AlertSettingsForm';
 
 export function buildAlertSettingsFormProps(
   overrides: Partial<ComponentProps<typeof AlertSettingsForm>> = {}
 ): ComponentProps<typeof AlertSettingsForm> {
+  const hook = buildAlertSettingsHookResult();
   return {
     settings: buildAlertSettings(),
     isAdmin: true,
     loading: false,
     saving: false,
     testing: false,
-    onSave: vi.fn().mockResolvedValue({
-      success: true,
-      message: 'Alert settings saved.',
-      warnings: [],
-    }),
-    onSendTestNotification: vi.fn().mockResolvedValue({
-      success: true,
-      message: 'Test notification accepted for delivery.',
-    }),
+    onSave: hook.saveSettings,
+    onSendTestNotification: hook.sendTestNotification,
     ...overrides,
   };
 }

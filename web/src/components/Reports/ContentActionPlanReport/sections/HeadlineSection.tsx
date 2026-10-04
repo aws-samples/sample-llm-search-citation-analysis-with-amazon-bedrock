@@ -13,17 +13,12 @@ import type { ContentPlanSectionProps } from './ContentPlanSectionProps';
  * and 3 ready briefs, that's the headline".
  */
 export function HeadlineSection({
-  gaps,
-  ideas,
-  history,
-  loading,
-  error,
+  gaps, ideas, history, ...fetch
 }: ContentPlanSectionProps) {
   const pending = pendingSectionPlaceholder({
+    ...fetch,
     title: 'Headline',
-    loading,
     loadingMessage: 'Loading content plan…',
-    error,
   });
   if (pending) return pending;
 

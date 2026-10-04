@@ -9,12 +9,12 @@ import sys
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
+from shared.bounded_reads import newest_items
 from shared.decorators import api_handler, optional_limit, validate
 from shared.env_vars import resolve_table_env
 
@@ -25,9 +25,7 @@ dynamodb = boto3.resource('dynamodb')
 s3_client = boto3.client('s3')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
-CRAWLED_CONTENT_TABLE = resolve_table_env(
-    'DYNAMODB_TABLE_CRAWLED_CONTENT', 'CRAWLED_CONTENT_TABLE',
-)
+CRAWLED_CONTENT_TABLE = resolve_table_env('DYNAMODB_TABLE_CRAWLED_CONTENT')
 
 
 def generate_presigned_url(s3_uri: str, expiration: int = 900) -> str | None:
@@ -81,20 +79,9 @@ def handler(event, context, url=None, keyword=None, limit=50, include_screenshot
     if url:
         # If include_history, get all crawls for this URL; otherwise just the latest
         query_limit = limit if include_history else 1
-        response = table.query(
-            KeyConditionExpression=Key('normalized_url').eq(url),
-            Limit=query_limit,
-            ScanIndexForward=False  # Most recent first
-        )
-        items = response.get('Items', [])
+        items = newest_items(table, 'normalized_url', url, query_limit)
     elif keyword:
-        response = table.query(
-            IndexName='KeywordIndex',
-            KeyConditionExpression=Key('keyword').eq(keyword),
-            ScanIndexForward=False,
-            Limit=limit
-        )
-        items = response.get('Items', [])
+        items = newest_items(table, 'keyword', keyword, limit, index_name='KeywordIndex')
     else:
         response = table.scan(Limit=limit)
         items = response.get('Items', [])

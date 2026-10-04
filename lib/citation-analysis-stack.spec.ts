@@ -10,8 +10,10 @@ import {
   EMPTY_WORKFLOW_SCALE_SNAPSHOT,
   SEARCH_PROVIDER_IDS,
   STATUS_CREATED_INDEX_SCHEMA,
+  allProjectionIndexSchema,
   allowStatementsOfRole,
   allowStatementsOfTemplate,
+  bedrockTierEnvironments,
   collectRefTargets,
   extractApiAuthSnapshots,
   extractApiBackedFunctionTimeouts,
@@ -50,9 +52,14 @@ import {
   findStateMachineLogicalId,
   findUseCaseSubmission,
   keywordChildStates,
+  methodRouteLabels,
+  nonCanonicalTableEnvNames,
   providerSearchBranch,
   providerSearchBranchStarts,
+  pythonResearchStaleAfterSeconds,
+  pythonRoleDefaultTierEnv,
   pythonTierFoundationModelIds,
+  regionalArnJoin,
   resolvePath,
   resolveString,
   retentionForLogGroupName,
@@ -61,11 +68,14 @@ import {
   statementActions,
   tokenValidityMinutes,
   unguardedVerbs,
+  useCaseToleratedErrorNames,
+  COGNITO_AUTH,
+  FULLY_GUARDED,
   type ApiGatewayMethodSnapshot,
   type ApiMethodAuthSnapshot,
   type BucketLifecycleSnapshot,
+  type CrawlerInfrastructureSnapshot,
   type CustomReportsSnapshot,
-  type IamPolicyStatementSnapshot,
   type LambdaLogGroupSnapshot,
   type ProviderSearchSnapshot,
   type StageMethodSettingSnapshot,
@@ -78,12 +88,9 @@ const KEYWORD_MGMT_FUNCTION_NAME = 'CitationAnalysis-API-KeywordMgmt';
 const CONTENT_STUDIO_FUNCTION_NAME = 'CitationAnalysis-API-ContentStudio';
 const CONTENT_STUDIO_WORKER_FUNCTION_NAME = 'CitationAnalysis-ContentStudioWorker';
 const CONTENT_STUDIO_WORKER_CONCURRENCY = 10;
-const CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS = 300;
-const CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY = 10;
 
 const PUBLIC_ROUTE = '/api/health';
 const MUTATING_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
-const COGNITO_AUTH = 'COGNITO_USER_POOLS';
 const ONE_HOUR_IN_MINUTES = 60;
 const SEVEN_DAYS_IN_MINUTES = 7 * 24 * 60;
 
@@ -104,14 +111,13 @@ interface GatewayResponseSnapshot {
   responseParameters: unknown;
 }
 
-const synthesized: {
+const synthesized: CrawlerInfrastructureSnapshot & {
   definitionRaw: string;
   researchDefinitionRaw: string;
   researchStateMachineTimeoutSeconds: number;
   researchWorkerTimeoutSeconds: number;
   researchWorkerLayerRefs: string[];
   keywordResearchTableIndexes: unknown;
-  crawledContentTableIndexes: unknown;
   keywordResearchTableTtl: unknown;
   keywordResearchIdMethods: ApiGatewayMethodSnapshot[];
   keywordResearchRetryMethods: ApiGatewayMethodSnapshot[];
@@ -133,13 +139,8 @@ const synthesized: {
   configMgmtEnvVars: Record<string, unknown>;
   configMgmtStateMachineActions: string[];
   scopedReadFunctionEnvVars: Record<string, Record<string, unknown>>;
-  crawlerEnvVars: Record<string, unknown>;
-  crawlerRoleCrawledContentActions: string[];
-  crawlerBrowserLogicalId: string;
-  crawlerRoleBrowserStatements: IamPolicyStatementSnapshot[];
-  browserSigningRoleActions: string[];
-  browserSigningTrustConditions: unknown;
   parseKeywordsEnvVars: Record<string, unknown>;
+  nonCanonicalTableEnvNames: string[];
   keywordMgmtEnvVars: Record<string, unknown>;
   executionMgmtEnvVars: Record<string, unknown>;
   keywordMgmtFunctionId: string;
@@ -213,6 +214,7 @@ const synthesized: {
   browserSigningRoleActions: [],
   browserSigningTrustConditions: {},
   parseKeywordsEnvVars: {},
+  nonCanonicalTableEnvNames: [],
   keywordMgmtEnvVars: {},
   executionMgmtEnvVars: {},
   keywordMgmtFunctionId: '',
@@ -299,6 +301,7 @@ beforeAll(() => {
   synthesized.keywordResearchTableTtl = extractTableProperty(template, 'CitationAnalysis-KeywordResearch', 'TimeToLiveSpecification');
   Object.assign(synthesized, extractCrawlerInfrastructureSnapshot(template));
   synthesized.parseKeywordsEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-ParseKeywords');
+  synthesized.nonCanonicalTableEnvNames = nonCanonicalTableEnvNames(template);
   synthesized.keywordMgmtEnvVars = extractLambdaEnvVars(template, KEYWORD_MGMT_FUNCTION_NAME);
   synthesized.executionMgmtEnvVars = extractLambdaEnvVars(template, 'CitationAnalysis-API-ExecutionMgmt');
   synthesized.keywordMgmtFunctionId = findLambdaLogicalId(template, KEYWORD_MGMT_FUNCTION_NAME);
@@ -436,10 +439,6 @@ describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
    * a look at the reasoning recorded at its definition.
    */
   const DOCUMENTED_EXCEPTIONS = new Map<string, number>([
-    // First rollout only: Lambda updates configuration before code, so old
-    // self-invoked generations need their original timeout until forwarding
-    // is active and the asynchronous queue has drained.
-    [CONTENT_STUDIO_FUNCTION_NAME, CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS],
     // Persists its Bedrock result as the last step, so a 504 today is still
     // recoverable from the cache it writes. 29s would put the SIGKILL before
     // that write and make a slow keyword permanently broken.
@@ -509,10 +508,8 @@ describe('API-facing Lambda timeouts respect the API Gateway ceiling', () => {
     expect(synthesized.apiBackedFunctionTimeouts[KEYWORD_MGMT_FUNCTION_NAME]).toBe(GATEWAY_CEILING);
   });
 
-  it('retains Content Studio worker timeout while legacy events drain', () => {
-    expect(synthesized.apiBackedFunctionTimeouts[CONTENT_STUDIO_FUNCTION_NAME]).toBe(
-      CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS
-    );
+  it('caps the Content Studio API now that generation runs in its worker', () => {
+    expect(synthesized.apiBackedFunctionTimeouts[CONTENT_STUDIO_FUNCTION_NAME]).toBe(GATEWAY_CEILING);
   });
 });
 
@@ -535,10 +532,8 @@ describe('Content Studio group brief infrastructure', () => {
 });
 
 describe('Content Studio API and worker concurrency separation', () => {
-  it('retains the old API cap while pre-rollout events drain', () => {
-    expect(synthesized.contentStudioConcurrency).toBe(
-      CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY
-    );
+  it('reserves no concurrency for the Content Studio API, which no longer generates', () => {
+    expect(synthesized.contentStudioConcurrency).toBeUndefined();
   });
 
   it('caps the durable generation worker at ten concurrent model calls', () => {
@@ -596,17 +591,15 @@ describe('WAF', () => {
  */
 describe('API authorization invariants', () => {
   it('exposes the health check as the only unauthenticated route', () => {
-    const openRoutes = synthesized.apiAuthSnapshots
-      .filter((method) => method.authorizationType !== COGNITO_AUTH)
-      .map((method) => `${method.httpMethod} ${method.path}`);
+    const openRoutes = methodRouteLabels(synthesized.apiAuthSnapshots
+      .filter((method) => method.authorizationType !== COGNITO_AUTH));
 
     expect(openRoutes).toStrictEqual([`GET ${PUBLIC_ROUTE}`]);
   });
 
   it('requires the Cognito authorizer on every other route', () => {
-    const unauthorized = synthesized.apiAuthSnapshots
-      .filter((method) => method.path !== PUBLIC_ROUTE && method.authorizerId === '')
-      .map((method) => `${method.httpMethod} ${method.path}`);
+    const unauthorized = methodRouteLabels(synthesized.apiAuthSnapshots
+      .filter((method) => method.path !== PUBLIC_ROUTE && method.authorizerId === ''));
 
     expect(unauthorized).toStrictEqual([]);
   });
@@ -622,10 +615,9 @@ describe('API authorization invariants', () => {
   });
 
   it('requires authorization on every state-changing method', () => {
-    const openMutations = synthesized.apiAuthSnapshots
+    const openMutations = methodRouteLabels(synthesized.apiAuthSnapshots
       .filter((method) => MUTATING_METHODS.includes(method.httpMethod))
-      .filter((method) => method.authorizationType !== COGNITO_AUTH)
-      .map((method) => `${method.httpMethod} ${method.path}`);
+      .filter((method) => method.authorizationType !== COGNITO_AUTH));
 
     expect(openMutations).toStrictEqual([]);
   });
@@ -1035,7 +1027,7 @@ describe('Keyword research state machine', () => {
    * dedicated state machine. One execution per job, one parallel step per
    * web-search provider, every step checkpointed into the job row.
    */
-  const SWEEP_THRESHOLD_SECONDS = 35 * 60;
+  const SWEEP_THRESHOLD_SECONDS = pythonResearchStaleAfterSeconds();
 
   it('fans out one step per provider through a Map that fails steps, not the job', () => {
     expect(synthesized.researchDefinitionRaw).toContain('"ItemsPath":"$.steps"');
@@ -1086,10 +1078,10 @@ describe('Keyword research state machine', () => {
 
   it('times out below the API sweep threshold so a live job is never swept', () => {
     /**
-     * `shared/research_jobs.RESEARCH_STALE_AFTER_SECONDS` marks jobs failed
-     * after 35 minutes. An execution allowed to outlive that could finish
-     * after being failed and flip the row back — the inversion the sweep
-     * exists to avoid.
+     * `shared/research_jobs.RESEARCH_STALE_AFTER_SECONDS` (read from the
+     * Python source) marks jobs failed after 35 minutes. An execution allowed
+     * to outlive that could finish after being failed and flip the row back —
+     * the inversion the sweep exists to avoid.
      */
     expect(synthesized.researchStateMachineTimeoutSeconds).toBe(30 * 60);
     expect(synthesized.researchStateMachineTimeoutSeconds).toBeLessThan(SWEEP_THRESHOLD_SECONDS);
@@ -1119,14 +1111,9 @@ describe('Keyword research state machine', () => {
 
 describe('Keyword research table', () => {
   it('indexes jobs by type and creation time so history is a query, not a scan', () => {
-    expect(synthesized.keywordResearchTableIndexes).toStrictEqual([{
-      IndexName: 'TypeCreatedIndex',
-      KeySchema: [
-        { AttributeName: 'type', KeyType: 'HASH' },
-        { AttributeName: 'created_at', KeyType: 'RANGE' },
-      ],
-      Projection: { ProjectionType: 'ALL' },
-    }]);
+    expect(synthesized.keywordResearchTableIndexes).toStrictEqual([
+      allProjectionIndexSchema('TypeCreatedIndex', 'type', 'created_at'),
+    ]);
   });
 
   it('expires rows through the ttl attribute the job writer sets', () => {
@@ -1136,23 +1123,11 @@ describe('Keyword research table', () => {
 
 describe('Keyword research routes', () => {
   it('exposes GET and DELETE on the job id resource', () => {
-    const verbs = synthesized.keywordResearchIdMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
-
-    expect(verbs).toStrictEqual(['DELETE', 'GET']);
+    expect(sortedHttpMethods(synthesized.keywordResearchIdMethods)).toStrictEqual(['DELETE', 'GET']);
   });
 
   it('exposes POST only on the retry sub-resource', () => {
-    expect(synthesized.keywordResearchRetryMethods.map((method) => method.httpMethod)).toStrictEqual(['POST']);
-  });
-
-  it('requires the Cognito authorizer on every job route', () => {
-    const all = [...synthesized.keywordResearchIdMethods, ...synthesized.keywordResearchRetryMethods];
-
-    expect(all).toHaveLength(3);
-    expect(unguardedVerbs(all, synthesized.keywordMgmtFunctionId)).toStrictEqual({
-      withoutCognitoAuthorizer: [],
-      notIntegratedWithFunction: [],
-    });
+    expect(sortedHttpMethods(synthesized.keywordResearchRetryMethods)).toStrictEqual(['POST']);
   });
 });
 
@@ -1185,25 +1160,12 @@ describe('Research agent (2.5.0)', () => {
   });
 
   it('exposes POST on the agent resource', () => {
-    expect(synthesized.keywordResearchAgentMethods.map((method) => method.httpMethod)).toStrictEqual(['POST']);
+    expect(sortedHttpMethods(synthesized.keywordResearchAgentMethods)).toStrictEqual(['POST']);
   });
 
   it('exposes GET and POST on the templates collection and PUT and DELETE on a template', () => {
-    const collection = synthesized.researchTemplatesMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
-    const single = synthesized.researchTemplateIdMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
-
-    expect(collection).toStrictEqual(['GET', 'POST']);
-    expect(single).toStrictEqual(['DELETE', 'PUT']);
-  });
-
-  it('requires the Cognito authorizer and the KeywordMgmt integration on every agent route', () => {
-    const all = [...synthesized.keywordResearchAgentMethods, ...synthesized.researchTemplatesMethods, ...synthesized.researchTemplateIdMethods];
-
-    expect(all).toHaveLength(5);
-    expect(unguardedVerbs(all, synthesized.keywordMgmtFunctionId)).toStrictEqual({
-      withoutCognitoAuthorizer: [],
-      notIntegratedWithFunction: [],
-    });
+    expect(sortedHttpMethods(synthesized.researchTemplatesMethods)).toStrictEqual(['GET', 'POST']);
+    expect(sortedHttpMethods(synthesized.researchTemplateIdMethods)).toStrictEqual(['DELETE', 'PUT']);
   });
 });
 
@@ -1235,27 +1197,16 @@ describe('Schedule routes (Schedules v2)', () => {
    * definition is editable in place (PUT) and runnable on demand.
    */
   it('exposes GET and POST on the collection through the ConfigMgmt function', () => {
-    const verbs = synthesized.schedulesMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
-
-    expect(verbs).toStrictEqual(['GET', 'POST']);
+    expect(sortedHttpMethods(synthesized.schedulesMethods)).toStrictEqual(['GET', 'POST']);
     expect(synthesized.schedulesMethods.every((method) => method.integrationUri.includes(synthesized.configMgmtFunctionId))).toBe(true);
   });
 
   it('exposes GET, PUT and DELETE on the schedule id resource', () => {
-    const verbs = synthesized.scheduleIdMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
-
-    expect(verbs).toStrictEqual(['DELETE', 'GET', 'PUT']);
+    expect(sortedHttpMethods(synthesized.scheduleIdMethods)).toStrictEqual(['DELETE', 'GET', 'PUT']);
   });
 
   it('exposes POST only on the run sub-resource', () => {
-    expect(synthesized.scheduleRunMethods.map((method) => method.httpMethod)).toStrictEqual(['POST']);
-  });
-
-  it('requires the Cognito authorizer on every schedule route', () => {
-    const all = [...synthesized.schedulesMethods, ...synthesized.scheduleIdMethods, ...synthesized.scheduleRunMethods];
-
-    expect(all).toHaveLength(6);
-    expect(all.every((method) => method.authorizationType === COGNITO_AUTH)).toBe(true);
+    expect(sortedHttpMethods(synthesized.scheduleRunMethods)).toStrictEqual(['POST']);
   });
 
   it('lets ConfigMgmt start workflow executions for run-now and read the groups table for scope checks', () => {
@@ -1266,14 +1217,7 @@ describe('Schedule routes (Schedules v2)', () => {
 
 describe('Sentiment examples route', () => {
   it('exposes GET only on /api/visibility/sentiment-examples', () => {
-    expect(synthesized.sentimentExamplesMethods.map((method) => method.httpMethod)).toStrictEqual(['GET']);
-  });
-
-  it('puts the route behind the Cognito authorizer on the stats and insights function', () => {
-    expect(unguardedVerbs(synthesized.sentimentExamplesMethods, synthesized.statsInsightsFunctionId)).toStrictEqual({
-      withoutCognitoAuthorizer: [],
-      notIntegratedWithFunction: [],
-    });
+    expect(sortedHttpMethods(synthesized.sentimentExamplesMethods)).toStrictEqual(['GET']);
   });
 });
 
@@ -1287,10 +1231,15 @@ describe('Report scope resolution (group KPIs)', () => {
   });
 });
 
+describe('Lambda table environment names', () => {
+  it('names every table through a DYNAMODB_TABLE_ variable on every function', () => {
+    expect(synthesized.nonCanonicalTableEnvNames).toStrictEqual([]);
+  });
+});
+
 describe('ParseKeywords Lambda environment', () => {
   it('includes the query prompts table for execution-time prompt resolution', () => {
     expect(synthesized.parseKeywordsEnvVars).toHaveProperty('DYNAMODB_TABLE_QUERY_PROMPTS');
-    expect(synthesized.parseKeywordsEnvVars).toHaveProperty('QUERY_PROMPTS_TABLE');
   });
 
   it('names the keywords bucket the run manifest is written to', () => {
@@ -1307,14 +1256,14 @@ describe('Keyword promotion route', () => {
   });
 
   it('requires the shared Cognito authorizer', () => {
-    expect(synthesized.promoteMethods[0]?.authorizationType).toBe('COGNITO_USER_POOLS');
+    expect(synthesized.promoteMethods[0]?.authorizationType).toBe(COGNITO_AUTH);
     expect(synthesized.promoteMethods[0]?.authorizerId).not.toBe('');
   });
 
   it('keeps PUT and DELETE on the sibling keyword id resource', () => {
-    const idVerbs = synthesized.keywordIdMethods.map((method) => method.httpMethod);
+    const idVerbs = sortedHttpMethods(synthesized.keywordIdMethods);
 
-    expect([...idVerbs].sort((left, right) => left.localeCompare(right))).toStrictEqual(['DELETE', 'PUT']);
+    expect(idVerbs).toStrictEqual(['DELETE', 'PUT']);
     expect(idVerbs).not.toContain('POST');
   });
 });
@@ -1333,31 +1282,16 @@ describe('Keyword groups', () => {
   });
 
   it('exposes GET and POST on the collection through the KeywordMgmt function', () => {
-    const verbs = synthesized.keywordGroupsMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
-
-    expect(verbs).toStrictEqual(['GET', 'POST']);
+    expect(sortedHttpMethods(synthesized.keywordGroupsMethods)).toStrictEqual(['GET', 'POST']);
     expect(synthesized.keywordGroupsMethods.every((method) => method.integrationUri.includes(synthesized.keywordMgmtFunctionId))).toBe(true);
   });
 
   it('exposes PUT and DELETE on the group id resource', () => {
-    const verbs = synthesized.keywordGroupIdMethods.map((method) => method.httpMethod).sort((a, b) => a.localeCompare(b));
-
-    expect(verbs).toStrictEqual(['DELETE', 'PUT']);
+    expect(sortedHttpMethods(synthesized.keywordGroupIdMethods)).toStrictEqual(['DELETE', 'PUT']);
   });
 
   it('exposes PUT only on the membership sub-resource', () => {
-    expect(synthesized.keywordGroupMembersMethods.map((method) => method.httpMethod)).toStrictEqual(['PUT']);
-  });
-
-  it('requires the Cognito authorizer on every keyword-group route', () => {
-    const all = [
-      ...synthesized.keywordGroupsMethods,
-      ...synthesized.keywordGroupIdMethods,
-      ...synthesized.keywordGroupMembersMethods,
-    ];
-
-    expect(all).toHaveLength(5);
-    expect(all.every((method) => method.authorizationType === 'COGNITO_USER_POOLS')).toBe(true);
+    expect(sortedHttpMethods(synthesized.keywordGroupMembersMethods)).toStrictEqual(['PUT']);
   });
 
   it('hands the groups table name to the functions that resolve scopes', () => {
@@ -1412,15 +1346,57 @@ describe('Custom reports', () => {
     expect(sortedHttpMethods(synthesized.customReports.collectionMethods)).toStrictEqual(['GET', 'POST']);
     expect(sortedHttpMethods(synthesized.customReports.itemMethods)).toStrictEqual(['DELETE', 'PUT']);
   });
+});
 
-  it('puts all four verbs behind the Cognito authorizer on the ConfigMgmt function', () => {
-    const all = [...synthesized.customReports.collectionMethods, ...synthesized.customReports.itemMethods];
-
-    expect(all).toHaveLength(4);
-    expect(unguardedVerbs(all, synthesized.customReports.configMgmtFunctionLogicalId)).toStrictEqual({
-      withoutCognitoAuthorizer: [],
-      notIntegratedWithFunction: [],
-    });
+describe('Cognito-guarded route families', () => {
+  it.each([
+    {
+      family: 'keyword research job',
+      routes: () => [...synthesized.keywordResearchIdMethods, ...synthesized.keywordResearchRetryMethods],
+      verbCount: 3,
+      functionId: () => synthesized.keywordMgmtFunctionId,
+    },
+    {
+      family: 'research agent',
+      routes: () => [
+        ...synthesized.keywordResearchAgentMethods,
+        ...synthesized.researchTemplatesMethods,
+        ...synthesized.researchTemplateIdMethods,
+      ],
+      verbCount: 5,
+      functionId: () => synthesized.keywordMgmtFunctionId,
+    },
+    {
+      family: 'schedule',
+      routes: () => [...synthesized.schedulesMethods, ...synthesized.scheduleIdMethods, ...synthesized.scheduleRunMethods],
+      verbCount: 6,
+      functionId: () => synthesized.configMgmtFunctionId,
+    },
+    {
+      family: 'keyword-group',
+      routes: () => [
+        ...synthesized.keywordGroupsMethods,
+        ...synthesized.keywordGroupIdMethods,
+        ...synthesized.keywordGroupMembersMethods,
+      ],
+      verbCount: 5,
+      functionId: () => synthesized.keywordMgmtFunctionId,
+    },
+    {
+      family: 'custom report',
+      routes: () => [...synthesized.customReports.collectionMethods, ...synthesized.customReports.itemMethods],
+      verbCount: 4,
+      functionId: () => synthesized.customReports.configMgmtFunctionLogicalId,
+    },
+    {
+      family: 'sentiment examples',
+      routes: () => synthesized.sentimentExamplesMethods,
+      verbCount: 1,
+      functionId: () => synthesized.statsInsightsFunctionId,
+    },
+  ])('puts every $family verb behind the Cognito authorizer on its API function', ({ routes, verbCount, functionId }) => {
+    expect(routes()).toHaveLength(verbCount);
+    expect(unguardedVerbs(routes(), functionId())).toStrictEqual(FULLY_GUARDED);
   });
 });
 
@@ -1751,17 +1727,7 @@ describe('AgentCore browser signing role', () => {
         'aws:SourceAccount': { Ref: 'AWS::AccountId' },
       },
       ArnLike: {
-        'aws:SourceArn': {
-          'Fn::Join': ['', [
-            'arn:',
-            { Ref: 'AWS::Partition' },
-            ':bedrock-agentcore:',
-            { Ref: 'AWS::Region' },
-            ':',
-            { Ref: 'AWS::AccountId' },
-            ':*',
-          ]],
-        },
+        'aws:SourceArn': regionalArnJoin('bedrock-agentcore', '*'),
       },
     });
   });
@@ -1777,6 +1743,10 @@ describe('KPI alert backend infrastructure', () => {
     'CitationAnalysis-AlertSettings',
     'CitationAnalysis-ContentChanges',
   ];
+  const alertTopics = template.findResources('AWS::SNS::Topic', {
+    Properties: { TopicName: 'CitationAnalysis-KpiAlerts' },
+  });
+  const alertTopicId = findLogicalIdByName(template, 'AWS::SNS::Topic', 'TopicName', 'CitationAnalysis-KpiAlerts');
 
   it('creates the four tables with their exact key schemas', () => {
     const schemas = Object.fromEntries(
@@ -1836,19 +1806,12 @@ describe('KPI alert backend infrastructure', () => {
   });
 
   it('creates one named SNS topic without static subscriptions', () => {
-    const topics = template.findResources('AWS::SNS::Topic', {
-      Properties: { TopicName: 'CitationAnalysis-KpiAlerts' },
-    });
-
-    expect(Object.keys(topics)).toHaveLength(1);
+    expect(Object.keys(alertTopics)).toHaveLength(1);
     expect(template.findResources('AWS::SNS::Subscription')).toStrictEqual({});
   });
 
   it('encrypts the topic with the request-priced AWS-managed SNS key', () => {
-    const topics = template.findResources('AWS::SNS::Topic', {
-      Properties: { TopicName: 'CitationAnalysis-KpiAlerts' },
-    });
-    const topic = Object.values(topics)[0];
+    const topic = Object.values(alertTopics)[0];
 
     expect(JSON.stringify(resolvePath(topic, ['Properties', 'KmsMasterKeyId'])))
       .toContain('alias/aws/sns');
@@ -1877,14 +1840,7 @@ describe('KPI alert backend infrastructure', () => {
   });
 
   it('grants the KPI worker publish only on the alert topic', () => {
-    const topicId = findLogicalIdByName(
-      template,
-      'AWS::SNS::Topic',
-      'TopicName',
-      'CitationAnalysis-KpiAlerts'
-    );
-
-    expect(extractFunctionRoleActionsOn(template, 'CitationAnalysis-KpiAlerts', topicId))
+    expect(extractFunctionRoleActionsOn(template, 'CitationAnalysis-KpiAlerts', alertTopicId))
       .toStrictEqual(['sns:Publish']);
   });
 
@@ -1956,14 +1912,7 @@ describe('KPI alert backend infrastructure', () => {
   });
 
   it('grants ConfigMgmt only subscription management and publishing on this topic', () => {
-    const topicId = findLogicalIdByName(
-      template,
-      'AWS::SNS::Topic',
-      'TopicName',
-      'CitationAnalysis-KpiAlerts'
-    );
-
-    expect(extractFunctionRoleActionsOn(template, CONFIG_MGMT_FUNCTION_NAME, topicId))
+    expect(extractFunctionRoleActionsOn(template, CONFIG_MGMT_FUNCTION_NAME, alertTopicId))
       .toStrictEqual([
         'sns:ListSubscriptionsByTopic',
         'sns:Publish',
@@ -1973,18 +1922,12 @@ describe('KPI alert backend infrastructure', () => {
   });
 
   it('scopes the sole ConfigMgmt publish statement to the alert topic', () => {
-    const topicId = findLogicalIdByName(
-      template,
-      'AWS::SNS::Topic',
-      'TopicName',
-      'CitationAnalysis-KpiAlerts'
-    );
     const roleId = findFunctionRoleLogicalId(template, CONFIG_MGMT_FUNCTION_NAME);
     const publishResources = allowStatementsOfRole(template, roleId)
       .filter((statement) => statementActions(statement).includes('sns:Publish'))
       .map((statement) => resolvePath(statement, ['Resource']));
 
-    expect(publishResources).toStrictEqual([{ Ref: topicId }]);
+    expect(publishResources).toStrictEqual([{ Ref: alertTopicId }]);
   });
 
   it('restricts unsubscribe to subscription ARNs under the alert topic', () => {
@@ -2187,12 +2130,12 @@ describe('Content Studio scopes batches and saved templates', () => {
     expect(snapshot.routes.every((route) => route.integrationUri.includes(snapshot.functionLogicalId))).toBe(true);
   });
 
-  it('retains API worker timeout while pre-rollout events drain', () => {
-    expect(snapshot.apiTimeout).toBe(CONTENT_STUDIO_LEGACY_DRAIN_TIMEOUT_SECONDS);
+  it('caps the API at the gateway integration timeout', () => {
+    expect(snapshot.apiTimeout).toBe(29);
   });
 
-  it('retains API concurrency cap while pre-rollout events drain', () => {
-    expect(snapshot.reservedConcurrency).toBe(CONTENT_STUDIO_LEGACY_DRAIN_CONCURRENCY);
+  it('reserves no API concurrency', () => {
+    expect(snapshot.reservedConcurrency).toBeUndefined();
   });
 
   it('creates a five-minute worker with reserved concurrency ten', () => {
@@ -2301,17 +2244,14 @@ describe('Content Studio scopes batches and saved templates', () => {
         'dynamodb:DeleteItem',
         'dynamodb:GetItem',
         'dynamodb:PutItem',
-        'dynamodb:Scan',
         'dynamodb:UpdateItem',
       ],
       statusIndex: ['dynamodb:Query'],
     });
   });
 
-  it('retains API crawled-source query while pre-rollout events drain', () => {
-    expect(snapshot.apiCrawledContentTableActions).toStrictEqual([
-      'dynamodb:Query',
-    ]);
+  it('grants the API no crawled-source access', () => {
+    expect(snapshot.apiCrawledContentTableActions).toStrictEqual([]);
   });
 
   it('grants the worker exact source-table read access', () => {
@@ -2338,48 +2278,18 @@ describe('Content Studio scopes batches and saved templates', () => {
     expect(snapshot.workerRoleActions).toContain('bedrock:InvokeModel');
   });
 
-  it('retains API Bedrock permission while pre-rollout events drain', () => {
-    expect(snapshot.apiRoleActions).toContain('bedrock:InvokeModel');
+  it('grants the API no Bedrock permission', () => {
+    expect(snapshot.apiRoleActions).not.toContain('bedrock:InvokeModel');
   });
 
-  it('scopes every Content Studio invoke to its compatibility targets', () => {
-    const apiArn = {
-      'Fn::Join': [
-        '',
-        [
-          'arn:',
-          { Ref: 'AWS::Partition' },
-          ':lambda:',
-          { Ref: 'AWS::Region' },
-          ':',
-          { Ref: 'AWS::AccountId' },
-          ':function:CitationAnalysis-API-ContentStudio',
-        ],
-      ],
-    };
-    const workerArn = {
-      'Fn::Join': [
-        '',
-        [
-          'arn:',
-          { Ref: 'AWS::Partition' },
-          ':lambda:',
-          { Ref: 'AWS::Region' },
-          ':',
-          { Ref: 'AWS::AccountId' },
-          ':function:CitationAnalysis-ContentStudioWorker',
-        ],
-      ],
-    };
+  it('lets only the worker invoke a Lambda, and only itself', () => {
+    const workerArn = regionalArnJoin('lambda', 'function:CitationAnalysis-ContentStudioWorker');
 
     expect({
       api: snapshot.apiInvokeStatements,
       worker: snapshot.workerInvokeStatements,
     }).toStrictEqual({
-      api: [{
-        actions: ['lambda:InvokeFunction'],
-        resources: [apiArn, workerArn],
-      }],
+      api: [],
       worker: [{
         actions: ['lambda:InvokeFunction'],
         resources: [workerArn],
@@ -2406,6 +2316,13 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
       .sort((left, right) => left.localeCompare(right));
 
     expect(subscribed).toStrictEqual(pythonTierFoundationModelIds());
+  });
+
+  it('gives every Bedrock-calling Lambda the role tiers lambda/shared/models.py defaults to', () => {
+    const tierEnvironments = bedrockTierEnvironments(template);
+
+    expect(tierEnvironments).toHaveLength(15);
+    expect(tierEnvironments).toStrictEqual(tierEnvironments.map(() => pythonRoleDefaultTierEnv()));
   });
 
   it('creates the agreements in the stack region, where the Lambdas call Bedrock', () => {
@@ -2492,27 +2409,20 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
    * `name`, so both sides of the split are asserted by name.
    */
   it('tolerates every refusal of the use-case form, including names it cannot predict', () => {
-    const pattern = findUseCaseSubmission(template)?.ignoreErrorCodesMatching;
-
-    expect(pattern).toBeDefined();
-    const unmatched = [
+    const refusals = [
       'ValidationException',
       'AccessDeniedException',
       'ConflictException',
       'SomeUnannouncedRefusalException',
-    ].filter((errorName) => !new RegExp(pattern ?? '(?!)').test(errorName));
+    ];
 
-    expect(unmatched).toStrictEqual([]);
+    expect(useCaseToleratedErrorNames(template, refusals)).toStrictEqual(refusals);
   });
 
   it('still fails the deployment on a transient error, which is never retried', () => {
-    const pattern = findUseCaseSubmission(template)?.ignoreErrorCodesMatching;
+    const transient = ['ThrottlingException', 'InternalServerException'];
 
-    expect(pattern).toBeDefined();
-    const wronglyTolerated = ['ThrottlingException', 'InternalServerException']
-      .filter((errorName) => new RegExp(pattern ?? '(?!)').test(errorName));
-
-    expect(wronglyTolerated).toStrictEqual([]);
+    expect(useCaseToleratedErrorNames(template, transient)).toStrictEqual([]);
   });
 });
 

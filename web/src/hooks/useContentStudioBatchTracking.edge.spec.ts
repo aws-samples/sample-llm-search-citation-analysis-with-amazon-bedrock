@@ -5,13 +5,16 @@ import {
   act, renderHook, waitFor
 } from '@testing-library/react';
 import { LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY } from '../api/contentStudioBatchStorage';
-import { buildBatchCandidate } from '../api/contentStudioBatchStorage-fixtures';
 import {
-  createDeferredResponse, createMockJsonResponse
-} from '../test/fetchResponses';
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+  buildBatchCandidate, storeLegacyBatchIdsValue
+} from '../api/contentStudioBatchStorage-fixtures';
+import { createMockJsonResponse } from '../test/fetchResponses';
+import {
+  deferNextTwoAuthenticatedFetches, mockAuthenticatedFetch
+} from '../test/infrastructureMock';
 import {
   advanceContentStudioPoll,
+  buildRunningBatchStatusesFor,
   dispatchBatchCandidateStorageEvent,
   flushContentStudioPromises,
   newestTrackedBatchIdsAfterElevenStarts,
@@ -25,10 +28,8 @@ import {
   buildRunningBatchStatusFor,
   buildRunningBatchStatusResponse,
   createMockFetch,
-  mockBatchRequest,
   mockBatchStartResponse,
   renderContentStudio,
-  renderRunningBatchContentStudio,
   storeActiveContentStudioBatchCandidates,
   storeActiveContentStudioBatchIds,
   storedActiveContentStudioBatchCandidates,
@@ -37,67 +38,63 @@ import {
 import {
   prepareContentStudioHookTest, restoreContentStudioHookTest
 } from './useContentStudio-test-fixtures';
+import {
+  activeBatchIds,
+  batchStatusRequestCounts,
+  renderPendingBatchStart,
+  startRunningBatch,
+} from './useContentStudio-scenario-fixtures';
 import { useContentStudio } from './useContentStudio';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-beforeEach(() => {
-  prepareContentStudioHookTest();
-});
-afterEach(() => {
-  restoreContentStudioHookTest();
-});
+const expiredRegistration = 1_000_000 - CONTENT_STUDIO_BATCH_NOT_FOUND_GRACE_MS;
 
-describe('useContentStudioBatchTracking recovery boundaries', () => {
-  it('retains a not-found candidate that is one minute old', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(1_000_000);
-    storeActiveContentStudioBatchIds(['young-batch'], 940_000);
-    const fetch = createMockFetch({ missingBatchIds: ['young-batch'] });
-
-    renderContentStudio(fetch);
-    await flushContentStudioPromises();
-    await flushContentStudioPromises();
-
-    expect(storedActiveContentStudioBatchIds()).toStrictEqual(['young-batch']);
-    expect(batchStatusRequestUrls(fetch, 'young-batch')).toHaveLength(1);
-  });
-
-  it('removes a not-found candidate at the exact five-minute boundary', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(1_000_000);
-    storeActiveContentStudioBatchIds(
-      ['expired-batch'],
-      1_000_000 - CONTENT_STUDIO_BATCH_NOT_FOUND_GRACE_MS
-    );
-    const fetch = createMockFetch({
+const notFoundRecoveryCases = [
+  {
+    name: 'retains a not-found candidate that is one minute old',
+    batchId: 'young-batch',
+    registeredAt: 940_000,
+    fetchOptions: { missingBatchIds: ['young-batch'] },
+    expectedStoredIds: ['young-batch'],
+  },
+  {
+    name: 'removes a not-found candidate at the exact five-minute boundary',
+    batchId: 'expired-batch',
+    registeredAt: expiredRegistration,
+    fetchOptions: {
       historyResponse: buildContentHistoryPayload([]),
       missingBatchIds: ['expired-batch'],
-    });
+    },
+    expectedStoredIds: [],
+  },
+  {
+    name: 'retains an expired candidate when status fails with a server response',
+    batchId: 'ambiguous-batch',
+    registeredAt: expiredRegistration,
+    fetchOptions: { shouldFailBatchStatus: true },
+    expectedStoredIds: ['ambiguous-batch'],
+  },
+];
 
-    renderContentStudio(fetch);
-    await flushContentStudioPromises();
-    await flushContentStudioPromises();
+beforeEach(prepareContentStudioHookTest);
+afterEach(restoreContentStudioHookTest);
 
-    expect(storedActiveContentStudioBatchIds()).toStrictEqual([]);
-    expect(batchStatusRequestUrls(fetch, 'expired-batch')).toHaveLength(1);
-  });
-
-  it('retains an expired candidate when status fails with a server response', async () => {
+describe('useContentStudioBatchTracking recovery boundaries', () => {
+  it.each(notFoundRecoveryCases)('$name', async ({
+    batchId, registeredAt, fetchOptions, expectedStoredIds
+  }) => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000_000);
-    storeActiveContentStudioBatchIds(
-      ['ambiguous-batch'],
-      1_000_000 - CONTENT_STUDIO_BATCH_NOT_FOUND_GRACE_MS
-    );
-    const fetch = createMockFetch({ shouldFailBatchStatus: true });
+    storeActiveContentStudioBatchIds([batchId], registeredAt);
+    const fetch = createMockFetch(fetchOptions);
 
     renderContentStudio(fetch);
     await flushContentStudioPromises();
     await flushContentStudioPromises();
 
-    expect(storedActiveContentStudioBatchIds()).toStrictEqual(['ambiguous-batch']);
-    expect(batchStatusRequestUrls(fetch, 'ambiguous-batch')).toHaveLength(1);
+    expect(storedActiveContentStudioBatchIds()).toStrictEqual(expectedStoredIds);
+    expect(batchStatusRequestUrls(fetch, batchId)).toHaveLength(1);
   });
 
   it('polls only the candidate whose timestamp changed in another tab', async () => {
@@ -105,12 +102,8 @@ describe('useContentStudioBatchTracking recovery boundaries', () => {
       buildBatchCandidate('batch-1', 900),
       buildBatchCandidate('batch-2', 800),
     ]);
-    const fetch = createMockFetch({
-      batchStatusResponses: {
-        'batch-1': buildRunningBatchStatusFor('batch-1'),
-        'batch-2': buildRunningBatchStatusFor('batch-2'),
-      },
-    });
+    const batchStatusResponses = buildRunningBatchStatusesFor(['batch-1', 'batch-2']);
+    const fetch = createMockFetch({ batchStatusResponses });
     renderContentStudio(fetch);
     await flushContentStudioPromises();
 
@@ -120,30 +113,26 @@ describe('useContentStudioBatchTracking recovery boundaries', () => {
     ]);
     await flushContentStudioPromises();
 
-    expect(batchStatusRequestUrls(fetch, 'batch-1')).toHaveLength(1);
-    expect(batchStatusRequestUrls(fetch, 'batch-2')).toHaveLength(2);
+    expect(batchStatusRequestCounts(fetch, ['batch-1', 'batch-2'])).toStrictEqual({
+      'batch-1': 1,
+      'batch-2': 2,
+    });
   });
 
   it('recovers legacy IDs when another tab writes the v1 key', async () => {
-    const batchStatusResponses = Object.fromEntries([[
-      'legacy-batch', buildRunningBatchStatusFor('legacy-batch')
-    ]]);
+    const batchStatusResponses = buildRunningBatchStatusesFor(['legacy-batch']);
     const fetch = createMockFetch({ batchStatusResponses });
     const { result } = renderContentStudio(fetch);
 
     act(() => {
-      localStorage.setItem(
-        LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY,
-        JSON.stringify(['legacy-batch'])
-      );
+      storeLegacyBatchIdsValue(JSON.stringify(['legacy-batch']));
       globalThis.dispatchEvent(new StorageEvent(
         'storage',
         { key: LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY }
       ));
     });
     await waitFor(() => {
-      expect(result.current.activeBatches.map((batch) => batch.batch_id))
-        .toStrictEqual(['legacy-batch']);
+      expect(activeBatchIds(result.current)).toStrictEqual(['legacy-batch']);
     });
 
     expect(batchStatusRequestUrls(fetch, 'legacy-batch')).toHaveLength(1);
@@ -152,18 +141,10 @@ describe('useContentStudioBatchTracking recovery boundaries', () => {
   it('replaces acknowledged pending counts with the found running status', async () => {
     const {
       result, unmount
-    } = renderRunningBatchContentStudio();
-
-    await act(() => result.current.generateContentBatch(mockBatchRequest));
+    } = await startRunningBatch();
     await waitFor(() => {
-      expect(result.current.activeBatches[0]?.counts).toStrictEqual({
-        pending: 0,
-        generating: 2,
-        generated: 0,
-        failed: 0,
-        missing: 0,
-        total: 2,
-      });
+      expect(result.current.activeBatches[0]?.counts)
+        .toStrictEqual(buildRunningBatchStatusResponse().counts);
     });
 
     unmount();
@@ -181,8 +162,7 @@ describe('useContentStudioBatchTracking active batch bounds', () => {
 
     await startContentStudioBatches(result.current, batchIds);
 
-    const visibleBatchIds = result.current.activeBatches.map((batch) => batch.batch_id);
-    expect(visibleBatchIds).toStrictEqual(newestTrackedBatchIdsAfterElevenStarts);
+    expect(activeBatchIds(result.current)).toStrictEqual(newestTrackedBatchIdsAfterElevenStarts);
   });
 
   it('keeps only ten cards when recovered status joins terminal outcomes', async () => {
@@ -203,7 +183,7 @@ describe('useContentStudioBatchTracking active batch bounds', () => {
       expect(result.current.activeBatches[0]?.batch_id).toBe('recovered-batch');
     });
 
-    expect(result.current.activeBatches.map((batch) => batch.batch_id)).toStrictEqual([
+    expect(activeBatchIds(result.current)).toStrictEqual([
       'recovered-batch',
       'terminal-10',
       'terminal-9',
@@ -224,11 +204,7 @@ describe('useContentStudioBatchTracking stale response ownership', () => {
     storeActiveContentStudioBatchCandidates([
       buildBatchCandidate('batch-1', 100)
     ]);
-    const staleStatus = createDeferredResponse();
-    const currentStatus = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockReturnValueOnce(staleStatus.promise)
-      .mockReturnValueOnce(currentStatus.promise);
+    const [staleStatus, currentStatus] = deferNextTwoAuthenticatedFetches();
     const rendered = renderHook(() => useContentStudio());
     await flushContentStudioPromises();
 
@@ -248,25 +224,17 @@ describe('useContentStudioBatchTracking stale response ownership', () => {
   it('ignores an accepted start for a candidate replaced while POST was pending', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(100);
-    const startRequest = createDeferredResponse();
-    const currentStatus = createDeferredResponse();
-    mockAuthenticatedFetch
-      .mockReturnValueOnce(startRequest.promise)
-      .mockReturnValueOnce(currentStatus.promise);
+    const [startRequest, currentStatus] = deferNextTwoAuthenticatedFetches();
     const {
-      result, unmount
-    } = renderHook(() => useContentStudio());
-    const pendingStarts = new Set<ReturnType<typeof result.current.generateContentBatch>>();
-    act(() => {
-      pendingStarts.add(result.current.generateContentBatch(mockBatchRequest));
-    });
+      pendingStart, result, unmount
+    } = renderPendingBatchStart();
     vi.setSystemTime(200);
 
     dispatchBatchCandidateStorageEvent([
       buildBatchCandidate('batch-1', 200)
     ]);
     startRequest.resolve(createMockJsonResponse(mockBatchStartResponse));
-    await act(() => Promise.all(pendingStarts));
+    await act(() => pendingStart);
 
     expect(result.current.activeBatches).toStrictEqual([]);
     expect(storedActiveContentStudioBatchCandidates()).toStrictEqual([

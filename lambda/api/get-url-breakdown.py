@@ -15,12 +15,12 @@ from typing import Any
 from urllib.parse import unquote
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
+from shared.bounded_reads import collect_capped_partition
 from shared.decorators import api_handler, validate
 from shared.env_vars import resolve_table_env
 from shared.utils import normalize_url
@@ -31,9 +31,7 @@ logger.setLevel(logging.INFO)
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
-CITATIONS_TABLE = resolve_table_env(
-    'DYNAMODB_TABLE_CITATIONS', 'CITATIONS_TABLE',
-)
+CITATIONS_TABLE = resolve_table_env('DYNAMODB_TABLE_CITATIONS')
 citations_table = dynamodb.Table(CITATIONS_TABLE)
 
 # Inverse index GSI: PK=normalized_url, SK=keyword, projection=ALL.
@@ -51,27 +49,10 @@ def _query_url_index(target_normalized: str) -> list[dict[str, Any]]:
     matches the target. Returns the raw items so the caller can shape the
     response.
     """
-    items: list[dict[str, Any]] = []
-    pages = 0
-    last_evaluated_key: dict[str, Any] | None = None
-
-    while pages < _MAX_QUERY_PAGES:
-        query_kwargs: dict[str, Any] = {
-            'IndexName': URL_INDEX_NAME,
-            'KeyConditionExpression': Key('normalized_url').eq(target_normalized),
-        }
-        if last_evaluated_key:
-            query_kwargs['ExclusiveStartKey'] = last_evaluated_key
-
-        response = citations_table.query(**query_kwargs)
-        items.extend(response.get('Items', []))
-        pages += 1
-
-        last_evaluated_key = response.get('LastEvaluatedKey')
-        if not last_evaluated_key:
-            break
-
-    if last_evaluated_key:
+    items, truncated = collect_capped_partition(
+        citations_table, 'normalized_url', target_normalized, _MAX_QUERY_PAGES, index_name=URL_INDEX_NAME,
+    )
+    if truncated:
         logger.warning(
             "UrlIndex query hit the %d-page cap (url=%s, items=%d). "
             "Results are truncated.",

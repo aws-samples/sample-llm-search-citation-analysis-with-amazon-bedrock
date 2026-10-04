@@ -1,10 +1,10 @@
 import {
-  describe, expect, it, vi
+  describe, expect, it
 } from 'vitest';
 import { screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import {
   buildSelectedCappedKeywordScopePickerProps,
+  clickLegacyPickerControl,
   renderLegacyKeywordScopePicker,
   renderScopedKeywordScopePicker,
 } from './KeywordScopePicker-fixtures';
@@ -34,13 +34,10 @@ describe('KeywordScopePicker server scope cap', () => {
   });
 
   it('emits the first 1000 keyword ids when legacy select-all runs over 1001 keywords', async () => {
-    const onChange = vi.fn();
-    renderLegacyKeywordScopePicker([], {
-      ...overCapLists,
-      onChange,
-    });
-
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Select first 1000' }));
+    const onChange = await clickLegacyPickerControl([], {
+      role: 'button',
+      name: 'Select first 1000',
+    }, overCapLists);
 
     expect(onChange).toHaveBeenCalledWith(firstCapKeywordIds);
   });

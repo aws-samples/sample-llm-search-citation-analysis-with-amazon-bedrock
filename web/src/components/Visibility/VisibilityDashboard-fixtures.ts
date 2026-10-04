@@ -53,11 +53,7 @@ export const SINGLE_PERSONA_RANKINGS: PersonaRankingsResponse = {
   personas: [{
     persona_name: 'Business traveller',
     brands: [{
-      name: 'Hotel Sol',
       rank: 1,
-      mention_count: 3,
-      sentiment: 'positive',
-      visibility_score: 90,
       classification: 'first_party',
     }],
   }],

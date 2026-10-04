@@ -8,10 +8,10 @@ import {
 import { getDomain } from '../formatting/urlFormatter';
 import type { TopUrl } from '../types';
 
-interface UrlBreakdown {
+/** One keyword/provider pair that cited a URL (`GET /api/url-breakdown`). */
+export interface UrlBreakdown {
   keyword: string;
   provider: string;
-  timestamp: string;
 }
 
 interface ApiResponse<T> {
@@ -44,7 +44,7 @@ export function parseApiResponse<T>(data: unknown): ApiResponse<T> {
 }
 
 export type SortColumn = 'citations' | 'keywords' | 'domain';
-export type SortDirection = 'asc' | 'desc';
+type SortDirection = 'asc' | 'desc';
 
 export interface SortConfig {
   column: SortColumn;

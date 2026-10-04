@@ -86,4 +86,4 @@ class TestUnparseableInputIsTreatedAsHealthy:
         with caplog.at_level('WARNING', logger='shared.stale_jobs'):
             stale_elapsed_seconds('not-a-date', 360, now=NOW)
 
-        assert 'not-a-date' in caplog.text
+        assert caplog.messages == ["Could not parse created_at 'not-a-date'"]

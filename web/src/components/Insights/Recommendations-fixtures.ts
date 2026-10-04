@@ -15,7 +15,9 @@ export function buildRecommendationsHookResult(
     loading: false,
     error: null,
     fetchRecommendations: vi.fn(),
-    updateRecommendationStatus: vi.fn(),
+    updateStatus: vi.fn(),
+    updatingIds: [],
+    statusError: null,
     ...overrides,
   };
 }
@@ -45,3 +47,10 @@ export const VISIBILITY_GAP_RECOMMENDATION: Recommendation = {
   action: 'Create content',
   impact: 'High',
 };
+
+/** A rule-based recommendation the API tracks: it carries an id and a status. */
+export const TRACKED_RECOMMENDATION = {
+  ...VISIBILITY_GAP_RECOMMENDATION,
+  id: 'rec-visibility',
+  status: 'in_progress',
+} satisfies Recommendation & { id: string };

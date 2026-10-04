@@ -1,68 +1,72 @@
 import {
-  afterEach, beforeEach, describe, expect, it, vi
+  beforeEach, describe, expect, it, vi
 } from 'vitest';
 import { act } from '@testing-library/react';
 import { renderReplayedTemplateCreate } from './useGroupBriefTemplateDraft-strict-fixtures';
 import {
+  buildTemplateSavedOutcome,
   createdGroupBriefTemplate,
   prepareGroupBriefTemplateDraftMocks,
-  renderGroupBriefTemplateDraftWithHooksInStrictMode,
-  renderSelectedSavedTemplateDraftInStrictMode,
+  renderSelectedTemplateDraftForDeletion,
+  renderSelectedTemplateDraftWithUpdateOutcome,
+  renderTemplateDraftWithCreateOutcome,
   savedGroupBriefTemplate,
 } from './useGroupBriefTemplateDraft-fixtures';
 
 vi.mock('../../hooks/useContentBriefTemplates', () => ({ useContentBriefTemplates: vi.fn() }));
 
+const strictMutationSettlementCases = [
+  {
+    testName: 'settles a saved template create after setup-cleanup-setup replay',
+    message: 'Template saved',
+    settle: async () => {
+      const { result } = renderTemplateDraftWithCreateOutcome(
+        buildTemplateSavedOutcome(createdGroupBriefTemplate),
+        { strict: true }
+      );
+      await act(() => result.current.saveAsNew());
+      return result;
+    },
+  },
+  {
+    testName: 'settles a saved template update after setup-cleanup-setup replay',
+    message: 'Template updated',
+    settle: async () => {
+      const { result } = renderSelectedTemplateDraftWithUpdateOutcome(
+        {
+          success: true,
+          message: 'Template updated',
+          template: createdGroupBriefTemplate,
+        },
+        { strict: true }
+      );
+      await act(() => result.current.updateSelected());
+      return result;
+    },
+  },
+];
+
 beforeEach(prepareGroupBriefTemplateDraftMocks);
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
-
 describe('useGroupBriefTemplateDraft StrictMode lifecycle', () => {
-  it('settles a saved template create after setup-cleanup-setup replay', async () => {
-    const create = vi.fn().mockResolvedValue({
-      success: true,
-      message: 'Template saved',
-      template: createdGroupBriefTemplate,
-    });
-    const { result } = renderGroupBriefTemplateDraftWithHooksInStrictMode({ create });
-
-    await act(() => result.current.saveAsNew());
+  it.each(strictMutationSettlementCases)('$testName', async ({
+    message, settle
+  }) => {
+    const result = await settle();
 
     expect(result.current.selectedTemplateId).toBe(createdGroupBriefTemplate.id);
     expect(result.current.notice).toStrictEqual({
       success: true,
-      message: 'Template saved',
-    });
-    expect(result.current.saving).toBe(false);
-  });
-
-  it('settles a saved template update after setup-cleanup-setup replay', async () => {
-    const update = vi.fn().mockResolvedValue({
-      success: true,
-      message: 'Template updated',
-      template: createdGroupBriefTemplate,
-    });
-    const { result } = renderSelectedSavedTemplateDraftInStrictMode({ update });
-
-    await act(() => result.current.updateSelected());
-
-    expect(result.current.selectedTemplateId).toBe(createdGroupBriefTemplate.id);
-    expect(result.current.notice).toStrictEqual({
-      success: true,
-      message: 'Template updated',
+      message,
     });
     expect(result.current.saving).toBe(false);
   });
 
   it('returns to the built-in after delete settles through effect replay', async () => {
-    const remove = vi.fn().mockResolvedValue({
-      success: true,
-      message: 'Template deleted',
+    const { result } = renderSelectedTemplateDraftForDeletion({
+      confirmed: true,
+      strict: true,
     });
-    vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
-    const { result } = renderSelectedSavedTemplateDraftInStrictMode({ remove });
 
     await act(() => result.current.deleteSelected());
 

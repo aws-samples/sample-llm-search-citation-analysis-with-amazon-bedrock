@@ -238,10 +238,18 @@ class TestRequireGroupDenies:
     Admin membership, and each must produce a 403 without running the handler.
     """
 
-    def test_returns_403_when_caller_is_in_a_different_group(self) -> None:
+    @pytest.mark.parametrize(
+        'event_kwargs',
+        [
+            pytest.param({'groups': 'Users'}, id='caller_in_a_different_group'),
+            pytest.param({'include_groups_claim': False}, id='groups_claim_absent'),
+            pytest.param({'groups': ''}, id='groups_claim_empty'),
+        ],
+    )
+    def test_returns_403_when_the_groups_claim_lacks_admin(self, event_kwargs) -> None:
         gated = require_group(ADMIN_GROUP)(allow_all)
 
-        status, _ = parse_response(gated(authenticated_event(groups='Users'), None))
+        status, _ = parse_response(gated(authenticated_event(**event_kwargs), None))
 
         assert status == 403
 
@@ -260,20 +268,6 @@ class TestRequireGroupDenies:
         gated(authenticated_event(groups='Users'), None)
 
         assert calls == []
-
-    def test_returns_403_when_groups_claim_is_absent(self) -> None:
-        gated = require_group(ADMIN_GROUP)(allow_all)
-
-        status, _ = parse_response(gated(authenticated_event(include_groups_claim=False), None))
-
-        assert status == 403
-
-    def test_returns_403_when_groups_claim_is_empty(self) -> None:
-        gated = require_group(ADMIN_GROUP)(allow_all)
-
-        status, _ = parse_response(gated(authenticated_event(groups=''), None))
-
-        assert status == 403
 
     def test_returns_403_for_a_direct_lambda_invoke_with_no_request_context(self) -> None:
         gated = require_group(ADMIN_GROUP)(allow_all)

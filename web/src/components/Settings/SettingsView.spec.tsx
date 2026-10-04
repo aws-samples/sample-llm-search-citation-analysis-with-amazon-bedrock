@@ -9,11 +9,11 @@ import type { ComponentProps } from 'react';
 import { SettingsView } from './SettingsView';
 import {
   buildAdminMembership,
-  buildBrandConfigHookResult,
   buildConfiguredOpenAiProvider,
   buildSettingsViewProps,
   HOSPITALITY_BRAND_CONFIG,
 } from './SettingsView-fixtures';
+import { buildBrandConfigHookResult } from '../../test/brandConfigHookMock';
 import { buildProviderConfigHookResult } from '../ProviderHealth/ProviderHealthBanner-fixtures';
 import {
   createdKeywordFixture, existingKeywordFixture
@@ -45,9 +45,20 @@ const NON_ADMIN = buildAdminMembership({ isAdmin: false });
 type SettingsViewProps = ComponentProps<typeof SettingsView>;
 
 /** Mounts the view for the given member (an admin by default) with the given props. */
-function renderSettingsView(membership = buildAdminMembership(), props: Partial<SettingsViewProps> = {}) {
+function renderSettingsView(props: Partial<SettingsViewProps> = {}, membership = buildAdminMembership()) {
   mockUseIsAdmin.mockReturnValue(membership);
   render(<SettingsView {...buildSettingsViewProps(props)} />);
+}
+
+async function renderAndOpenTab(tabName: RegExp, membership = buildAdminMembership()) {
+  renderSettingsView({}, membership);
+  await userEvent.click(screen.getByRole('button', { name: tabName }));
+}
+
+function mockConfiguredProviders() {
+  mockUseProviderConfig.mockReturnValue(
+    buildProviderConfigHookResult({ providers: [buildConfiguredOpenAiProvider()] })
+  );
 }
 
 beforeEach(() => {
@@ -65,37 +76,31 @@ describe('SettingsView', () => {
     });
 
     it('shows keywords tab by default', () => {
-      render(<SettingsView {...buildSettingsViewProps()} />);
+      renderSettingsView();
 
       expect(screen.getByTestId('keywords-manager')).toBeInTheDocument();
     });
 
     it('switches to brand config tab when clicked', async () => {
-      render(<SettingsView {...buildSettingsViewProps()} />);
-
-      await userEvent.click(screen.getByRole('button', { name: /brand/i }));
+      await renderAndOpenTab(/brand/i);
 
       expect(screen.getByTestId('brand-config')).toBeInTheDocument();
     });
 
     it('switches to alerts config tab when clicked', async () => {
-      render(<SettingsView {...buildSettingsViewProps()} />);
-
-      await userEvent.click(screen.getByRole('button', { name: /alerts/i }));
+      await renderAndOpenTab(/alerts/i);
 
       expect(screen.getByTestId('alerts-config')).toHaveTextContent('Alerts Config admin: true');
     });
 
     it('marks the alerts tab as current when alerts are selected', () => {
-      render(<SettingsView {...buildSettingsViewProps({ initialTab: 'alerts' })} />);
+      renderSettingsView({ initialTab: 'alerts' });
 
       expect(screen.getByRole('button', { name: /alerts/i })).toHaveAttribute('aria-current', 'page');
     });
 
     it('switches to users tab when clicked', async () => {
-      render(<SettingsView {...buildSettingsViewProps()} />);
-
-      await userEvent.click(screen.getByRole('button', { name: /users/i }));
+      await renderAndOpenTab(/users/i);
 
       expect(screen.getByTestId('users-config')).toBeInTheDocument();
     });
@@ -103,7 +108,7 @@ describe('SettingsView', () => {
 
   describe('keywords count badge', () => {
     it('shows keyword count in badge', () => {
-      render(<SettingsView {...buildSettingsViewProps({ keywords: [existingKeywordFixture, createdKeywordFixture] })} />);
+      renderSettingsView({ keywords: [existingKeywordFixture, createdKeywordFixture] });
 
       expect(screen.getByText('2')).toBeInTheDocument();
     });
@@ -111,24 +116,22 @@ describe('SettingsView', () => {
 
   describe('attention bubbles', () => {
     it('shows attention dots for unconfigured brand and providers', () => {
-      render(<SettingsView {...buildSettingsViewProps()} />);
+      renderSettingsView();
 
       expect(screen.getAllByRole('status', { name: 'Needs configuration' })).toHaveLength(2);
     });
 
     it('shows a keywords attention dot when no keywords exist', () => {
-      render(<SettingsView {...buildSettingsViewProps({ keywords: [] })} />);
+      renderSettingsView({ keywords: [] });
 
       expect(screen.getAllByRole('status', { name: 'Needs configuration' })).toHaveLength(3);
     });
 
     it('hides all attention dots when everything is configured', () => {
       mockUseBrandConfig.mockReturnValue(buildBrandConfigHookResult({ config: HOSPITALITY_BRAND_CONFIG }));
-      mockUseProviderConfig.mockReturnValue(
-        buildProviderConfigHookResult({ providers: [buildConfiguredOpenAiProvider()] })
-      );
+      mockConfiguredProviders();
 
-      render(<SettingsView {...buildSettingsViewProps()} />);
+      renderSettingsView();
 
       expect(screen.queryByRole('status', { name: 'Needs configuration' })).not.toBeInTheDocument();
     });
@@ -136,7 +139,7 @@ describe('SettingsView', () => {
 
   describe('app version', () => {
     it('displays the deployed application version', () => {
-      render(<SettingsView {...buildSettingsViewProps()} />);
+      renderSettingsView();
 
       expect(screen.getByText(/^Version \d+\.\d+\.\d+$/)).toBeInTheDocument();
     });
@@ -144,60 +147,53 @@ describe('SettingsView', () => {
 
   describe('providers tab', () => {
     it('switches to providers tab when clicked', async () => {
-      mockUseProviderConfig.mockReturnValue(
-        buildProviderConfigHookResult({ providers: [buildConfiguredOpenAiProvider()] })
-      );
+      mockConfiguredProviders();
 
-      render(<SettingsView {...buildSettingsViewProps()} />);
-
-      await userEvent.click(screen.getByRole('button', { name: /providers/i }));
+      await renderAndOpenTab(/providers/i);
 
       expect(screen.getByText(/AI Providers/i)).toBeInTheDocument();
     });
   });
 
   describe('users tab visibility', () => {
-    it('hides the users tab from non-admin users', () => {
-      renderSettingsView(NON_ADMIN);
-
-      expect(screen.queryByRole('button', { name: /users/i })).not.toBeInTheDocument();
-    });
-
-    it('hides the users tab while admin membership is still loading', () => {
-      renderSettingsView(buildAdminMembership({
+    it.each([
+      ['from non-admin users', NON_ADMIN],
+      ['while admin membership is still loading', buildAdminMembership({
         isAdmin: false,
         loading: true,
-      }));
+      })],
+    ])('hides the users tab %s', (_condition, membership) => {
+      renderSettingsView({}, membership);
 
       expect(screen.queryByRole('button', { name: /users/i })).not.toBeInTheDocument();
     });
 
     it.each(NON_ADMIN_TABS)('keeps the %s tab available to non-admin users', (tab) => {
-      renderSettingsView(NON_ADMIN);
+      renderSettingsView({}, NON_ADMIN);
 
       expect(screen.getByRole('button', { name: new RegExp(tab, 'i') })).toBeInTheDocument();
     });
 
     it('passes read-only membership to alerts for non-admin users', () => {
-      renderSettingsView(NON_ADMIN, { initialTab: 'alerts' });
+      renderSettingsView({ initialTab: 'alerts' }, NON_ADMIN);
 
       expect(screen.getByTestId('alerts-config')).toHaveTextContent('Alerts Config admin: false');
     });
 
     it('falls back to keywords when a non-admin deep-links to the users tab', () => {
-      renderSettingsView(NON_ADMIN, { initialTab: 'users' });
+      renderSettingsView({ initialTab: 'users' }, NON_ADMIN);
 
       expect(screen.getByTestId('keywords-manager')).toBeInTheDocument();
     });
 
     it('does not render user management for a non-admin deep link', () => {
-      renderSettingsView(NON_ADMIN, { initialTab: 'users' });
+      renderSettingsView({ initialTab: 'users' }, NON_ADMIN);
 
       expect(screen.queryByTestId('users-config')).not.toBeInTheDocument();
     });
 
     it('honours an admin deep link straight to the users tab', () => {
-      renderSettingsView(buildAdminMembership(), { initialTab: 'users' });
+      renderSettingsView({ initialTab: 'users' });
 
       expect(screen.getByTestId('users-config')).toBeInTheDocument();
     });
@@ -206,14 +202,11 @@ describe('SettingsView', () => {
 
 describe('SettingsView admin-only provider controls', () => {
   beforeEach(() => {
-    mockUseProviderConfig.mockReturnValue(
-      buildProviderConfigHookResult({ providers: [buildConfiguredOpenAiProvider()] })
-    );
+    mockConfiguredProviders();
   });
 
-  async function renderProvidersTab(membership = buildAdminMembership()) {
-    renderSettingsView(membership);
-    await userEvent.click(screen.getByRole('button', { name: /providers/i }));
+  function renderProvidersTab(membership = buildAdminMembership()) {
+    return renderAndOpenTab(/providers/i, membership);
   }
 
   it('hides the provider enable toggle from non-admin users', async () => {

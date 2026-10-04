@@ -1,14 +1,11 @@
 import {
   beforeEach, describe, expect, it, vi
 } from 'vitest';
-import {
-  act, waitFor
-} from '@testing-library/react';
+import { waitFor } from '@testing-library/react';
 import type {
-  AlertSettings, AlertsResponse, ContentChangeMarker
+  AlertSettings, ContentChangeMarker
 } from '../types';
 import {
-  buildAlertItem,
   buildAlertSettings,
   buildAlertTestNotificationResponse,
   buildAlertsResponse,
@@ -20,66 +17,58 @@ import {
   ALERT_SETTINGS_UPDATE,
   CONTENT_CHANGE_REQUEST,
   beginContentChangeRecord,
-  beginHookRequest,
-  createDeferredValue,
+  beginDeferredRefresh,
+  beginSettingsSave,
+  callAfterUnmount,
+  completeAcknowledgement,
+  completeSettingsSave,
+  completeTestNotification,
+  deferNextCall,
   renderContentChangesForGroup,
   renderLoadedAlertSettings,
   renderLoadedContentChanges,
   renderLoadedOpenAlerts,
   resolveDeferredValue,
+  resolveSavedSettings,
 } from './useAlerts-fixtures';
 
 vi.mock('../api/alerts', () => import('./alertsApiMock-fixtures'));
 
-beforeEach(() => {
-  vi.spyOn(console, 'error').mockImplementation(vi.fn());
-  alertApiMocks.resetAlertsApiMocks();
-});
+beforeEach(alertApiMocks.prepareAlertHookTest);
 
 describe('alert hook state resets', () => {
   it('clears an acknowledgement error when alerts refresh starts', async () => {
     alertApiMocks.acknowledgeAlert.mockRejectedValueOnce(new AlertHookFailure());
     const { result } = await renderLoadedOpenAlerts();
-    await act(() => result.current.acknowledge(buildAlertItem().id));
-    const response = createDeferredValue<AlertsResponse>();
-    alertApiMocks.fetchAlerts.mockReturnValueOnce(response.promise);
-
-    const pending = beginHookRequest(result.current.refresh);
+    await completeAcknowledgement(result.current);
+    const refresh = beginDeferredRefresh(alertApiMocks.fetchAlerts, result.current, buildAlertsResponse());
 
     expect(result.current.actionError).toBeNull();
 
-    await resolveDeferredValue(response, buildAlertsResponse(), pending);
+    await refresh.finish();
   });
 
   it('clears a completed test outcome when settings refresh starts', async () => {
     alertApiMocks.sendTestNotification.mockResolvedValueOnce(buildAlertTestNotificationResponse());
     const { result } = await renderLoadedAlertSettings();
-    await act(() => result.current.sendTestNotification());
-    const response = createDeferredValue<AlertSettings>();
-    alertApiMocks.fetchAlertSettings.mockReturnValueOnce(response.promise);
-
-    const pending = beginHookRequest(result.current.refresh);
+    await completeTestNotification(result.current);
+    const refresh = beginDeferredRefresh(alertApiMocks.fetchAlertSettings, result.current, buildAlertSettings());
 
     expect(result.current.testOutcome).toBeNull();
 
-    await resolveDeferredValue(response, buildAlertSettings(), pending);
+    await refresh.finish();
   });
 
   it('clears a completed save outcome while the next save is pending', async () => {
     const { result } = await renderLoadedAlertSettings();
-    await act(() => result.current.saveSettings(ALERT_SETTINGS_UPDATE));
-    const response = createDeferredValue<AlertSettings>();
-    alertApiMocks.updateAlertSettings.mockReturnValueOnce(response.promise);
+    await completeSettingsSave(result.current);
+    const response = deferNextCall<AlertSettings>(alertApiMocks.updateAlertSettings);
 
-    const pending = beginHookRequest(() => result.current.saveSettings(ALERT_SETTINGS_UPDATE));
+    const pending = beginSettingsSave(result.current);
 
     expect(result.current.saveOutcome).toBeNull();
 
-    await resolveDeferredValue(
-      response,
-      buildAlertSettings(ALERT_SETTINGS_UPDATE),
-      pending
-    );
+    await resolveSavedSettings(response, pending);
   });
 
   it('clears a content-change load error when group selection is removed', async () => {
@@ -98,8 +87,7 @@ describe('alert hook state resets', () => {
     alertApiMocks.createContentChange.mockRejectedValueOnce(new AlertHookFailure());
     const { result } = await renderLoadedContentChanges();
     await beginContentChangeRecord(result.current);
-    const response = createDeferredValue<ContentChangeMarker>();
-    alertApiMocks.createContentChange.mockReturnValueOnce(response.promise);
+    const response = deferNextCall<ContentChangeMarker>(alertApiMocks.createContentChange);
 
     const pending = beginContentChangeRecord(result.current);
 
@@ -109,14 +97,11 @@ describe('alert hook state resets', () => {
   });
 
   it('returns cancellation without saving when invoked after unmount', async () => {
-    const {
-      result, unmount
-    } = await renderLoadedAlertSettings();
-    const saveAfterUnmount = result.current.saveSettings;
-    alertApiMocks.updateAlertSettings.mockClear();
-    unmount();
-
-    const outcome = await saveAfterUnmount(ALERT_SETTINGS_UPDATE);
+    const outcome = await callAfterUnmount(
+      renderLoadedAlertSettings,
+      alertApiMocks.updateAlertSettings,
+      (hook) => hook.saveSettings(ALERT_SETTINGS_UPDATE)
+    );
 
     expect(outcome).toStrictEqual({
       success: false,
@@ -127,14 +112,11 @@ describe('alert hook state resets', () => {
   });
 
   it('returns cancellation without recording when invoked after unmount', async () => {
-    const {
-      result, unmount
-    } = await renderLoadedContentChanges();
-    const recordAfterUnmount = result.current.recordContentChange;
-    alertApiMocks.createContentChange.mockClear();
-    unmount();
-
-    const outcome = await recordAfterUnmount(CONTENT_CHANGE_REQUEST);
+    const outcome = await callAfterUnmount(
+      renderLoadedContentChanges,
+      alertApiMocks.createContentChange,
+      (hook) => hook.recordContentChange(CONTENT_CHANGE_REQUEST)
+    );
 
     expect(outcome).toStrictEqual({
       success: false,

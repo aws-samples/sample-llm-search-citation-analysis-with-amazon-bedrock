@@ -55,6 +55,7 @@ import boto3
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response, validation_error
+from shared.constants import priority_rank
 from shared.decorators import api_handler, validate
 from shared.scope_params import load_sibling_function
 from shared.search_results import latest_run, query_keyword_items, scan_keyword_texts
@@ -65,8 +66,8 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-SEARCH_RESULTS_TABLE = os.environ.get('DYNAMODB_TABLE_SEARCH_RESULTS')
-KEYWORDS_TABLE = os.environ.get('DYNAMODB_TABLE_KEYWORDS')
+SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
+KEYWORDS_TABLE = os.environ['DYNAMODB_TABLE_KEYWORDS']
 
 
 # ----------------------------------------------------------------------
@@ -96,17 +97,8 @@ def _gap_helper() -> Callable:
 # ----------------------------------------------------------------------
 
 def _list_tracked_keywords(limit: int) -> list[str]:
-    """
-    Pull tracked keywords from the Keywords table when available, else
-    fall back to a search-results scan. Same trick `get-historical-trends`
-    uses to keep cold-start latency low.
-    """
-    if KEYWORDS_TABLE:
-        names = scan_keyword_texts(dynamodb.Table(KEYWORDS_TABLE))
-    elif SEARCH_RESULTS_TABLE:
-        names = scan_keyword_texts(dynamodb.Table(SEARCH_RESULTS_TABLE))
-    else:
-        return []
+    """The first ``limit`` distinct tracked keywords, from the Keywords table."""
+    names = scan_keyword_texts(dynamodb.Table(KEYWORDS_TABLE))
     return list(dict.fromkeys(names))[:limit]
 
 
@@ -115,8 +107,6 @@ def _latest_brand_ranks(keyword: str) -> dict[str, dict[str, Any]]:
     For a keyword, return the latest snapshot's brand ranks indexed by
     lower-cased brand name. Returns empty dict if no data.
     """
-    if not SEARCH_RESULTS_TABLE:
-        return {}
     items = query_keyword_items(dynamodb.Table(SEARCH_RESULTS_TABLE), keyword)
     if not items:
         return {}
@@ -237,9 +227,8 @@ def _build_competitor_rollup(
         key=lambda r: (r['rank_delta'] if r['rank_delta'] is not None else -1),
         reverse=True,
     )
-    priority_order = {'high': 0, 'medium': 1, 'low': 2}
     exclusive_sources.sort(
-        key=lambda s: (-s['lift_score'], priority_order.get(s['priority'], 2)),
+        key=lambda s: (-s['lift_score'], priority_rank(s['priority'])),
     )
 
     return {

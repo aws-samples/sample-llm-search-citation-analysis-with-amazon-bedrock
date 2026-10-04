@@ -2,17 +2,16 @@ import type {
   CrossPersonaBrandSummary, PersonaRankingsResponse 
 } from '../../../../types';
 import {
+  emphasisColumn,
   ReportSection,
+  ReportSectionNote,
   ReportTable,
   type ReportTableColumn,
+  type SectionFetchState,
   gateSection,
 } from '../../layout';
 
-interface Props {
-  readonly personas: PersonaRankingsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
+interface Props extends SectionFetchState {readonly personas: PersonaRankingsResponse | null;}
 
 /**
  * Persona impact only earns a slot in the report when persona choice
@@ -27,11 +26,7 @@ interface Props {
 const MEANINGFUL_DELTA = 3;
 
 const COLUMNS: ReadonlyArray<ReportTableColumn<CrossPersonaBrandSummary>> = [
-  {
-    header: 'First-party brand',
-    cellClassName: 'font-medium',
-    render: (brand) => brand.name,
-  },
+  emphasisColumn('First-party brand', (brand) => brand.name),
   {
     header: 'Best rank',
     render: (brand) => brand.best_rank,
@@ -80,17 +75,15 @@ export function PersonaImpactSection({
 
   if (!meaningful) {
     return (
-      <ReportSection
+      <ReportSectionNote
         title="Persona impact"
         subtitle="Persona choice does not materially change ranking for this keyword."
       >
-        <p className="text-sm text-gray-600 dark:text-gray-300">
-          First-party brands rank within{' '}
-          <span className="font-medium">{MEANINGFUL_DELTA}</span>{' '}
-          positions across all configured personas — persona-specific
-          optimisation is unlikely to move the needle here.
-        </p>
-      </ReportSection>
+        First-party brands rank within{' '}
+        <span className="font-medium">{MEANINGFUL_DELTA}</span>{' '}
+        positions across all configured personas — persona-specific
+        optimisation is unlikely to move the needle here.
+      </ReportSectionNote>
     );
   }
 

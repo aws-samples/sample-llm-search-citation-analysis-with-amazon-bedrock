@@ -25,14 +25,13 @@ from shared.api_response import success_response
 from shared.decorators import api_handler, validate
 from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
 from shared.scope_params import (
-    SCOPE_KEYWORDS_CAP,
     SCOPE_QUERY_PARAMS,
     ReportScope,
     keywords_table_name,
     map_scope_keywords,
-    scope_from_request,
     scoped_dynamodb_resource,
 )
+from shared.scoped_reports import capped_scope, required_report_scope
 from shared.utils import get_brand_config
 from shared.visibility_views import visibility_view
 
@@ -68,16 +67,15 @@ def scope_visibility(
     scope: ReportScope,
     owned_domains: list[str],
     *,
-    persona: str | None = None,
-    brand: str | None = None,
+    persona: str | None,
+    brand: str | None,
 ) -> dict[str, Any]:
     """The visibility view of ``scope``, capped at ``SCOPE_KEYWORDS_CAP`` keywords."""
-    keywords = list(scope.keywords)[:SCOPE_KEYWORDS_CAP]
+    keywords, scope_fields = capped_scope(scope)
     latest, previous = load_last_two_runs(keywords)
     view = visibility_view(keywords, latest, owned_domains, previous_by_keyword=previous, persona=persona, brand=brand)
     return {
-        'scope': scope.describe(),
-        'keywords_truncated': len(scope.keywords) > len(keywords),
+        **scope_fields,
         'citations_configured': bool(owned_domains),
         **view,
     }
@@ -89,13 +87,9 @@ def scope_visibility(
     'brand': {'type': str, 'max_length': 200},
     'query_prompt_id': {'type': str, 'max_length': 100},
 })
-def handler(event, context, brand=None, query_prompt_id=None, **scope_params):
+@required_report_scope(lambda: dynamodb.Table(KEYWORDS_TABLE))
+def handler(event, context, report_scope, brand=None, query_prompt_id=None):
     """GET /api/visibility — the KPIs of a scope's latest runs (see the module docstring)."""
-    report_scope, rejected = scope_from_request(event, scope_params, dynamodb.Table(KEYWORDS_TABLE), required=True)
-    if report_scope is None:
-        # A required scope resolves to exactly one of (scope, None) / (None, rejection).
-        return rejected
-
     owned_domains = owned_domains_from(get_brand_config())
     return success_response(
         scope_visibility(report_scope, owned_domains, persona=query_prompt_id, brand=brand),

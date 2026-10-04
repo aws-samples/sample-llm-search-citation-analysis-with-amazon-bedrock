@@ -25,6 +25,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from shared.answer_queries import query_keyword_run_rows
 from shared.dynamo_decimal import convert_floats_to_decimal
 from shared.dynamodb_batch import collect_all_items
+from shared.dynamodb_conditions import applied_conditionally
 from shared.keyword_groups import keyword_group_ids, query_active_keywords
 from shared.kpi_alerts import (
     build_alert_item,
@@ -316,16 +317,10 @@ def _content_change(
 
 
 def _put_new_alert(item: dict[str, Any]) -> bool:
-    try:
-        dynamodb.Table(ALERTS_TABLE).put_item(
-            Item=convert_floats_to_decimal(item),
-            ConditionExpression='attribute_not_exists(id)',
-        )
-    except ClientError as exc:
-        if exc.response.get('Error', {}).get('Code') == 'ConditionalCheckFailedException':
-            return False
-        raise
-    return True
+    return applied_conditionally(lambda: dynamodb.Table(ALERTS_TABLE).put_item(
+        Item=convert_floats_to_decimal(item),
+        ConditionExpression='attribute_not_exists(id)',
+    ))
 
 
 def _settings() -> dict[str, Any]:

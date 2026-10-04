@@ -117,26 +117,17 @@ def cleanup_runtime(tools_with_page):
     )
 
 
-def test_detects_slide_to_verify_when_page_contains_slider_challenge(tools_with_page):
-    tools_with_page.page.evaluate.return_value = "Welcome. Please slide to verify before continuing."
-
-    assert tools_with_page._detect_captcha_block() is True
-
-
-def test_detects_drag_slider_when_page_contains_drag_challenge(tools_with_page):
-    tools_with_page.page.evaluate.return_value = "Bot check: drag the slider to confirm."
-
-    assert tools_with_page._detect_captcha_block() is True
-
-
-def test_detects_human_verification_when_page_contains_recaptcha_wording(tools_with_page):
-    tools_with_page.page.evaluate.return_value = "Verify you are human to access the next page."
-
-    assert tools_with_page._detect_captcha_block() is True
-
-
-def test_detects_robot_checkbox_when_page_uses_mixed_case(tools_with_page):
-    tools_with_page.page.evaluate.return_value = "Please tick: I AM NOT A ROBOT."
+@pytest.mark.parametrize(
+    "body_text",
+    [
+        pytest.param("Welcome. Please slide to verify before continuing.", id="slider_challenge"),
+        pytest.param("Bot check: drag the slider to confirm.", id="drag_challenge"),
+        pytest.param("Verify you are human to access the next page.", id="recaptcha_wording"),
+        pytest.param("Please tick: I AM NOT A ROBOT.", id="robot_checkbox_mixed_case"),
+    ],
+)
+def test_detects_captcha_when_page_contains_a_challenge(tools_with_page, body_text):
+    tools_with_page.page.evaluate.return_value = body_text
 
     assert tools_with_page._detect_captcha_block() is True
 
@@ -168,9 +159,26 @@ def test_returns_not_blocked_when_document_body_is_missing(tools_with_page):
     tools_with_page.page.evaluate.assert_called_once_with(_BODY_TEXT_JAVASCRIPT)
 
 
-def test_returns_blocked_result_when_navigation_finds_captcha(tools_with_page, monkeypatch):
+_NAVIGATED_AT = "2026-09-19T12:00:00Z"
+
+
+@pytest.fixture
+def frozen_timestamp(monkeypatch):
+    """Stamp every navigation result with `_NAVIGATED_AT`."""
+    monkeypatch.setattr(browser_tools, "get_timestamp", MagicMock(return_value=_NAVIGATED_AT))
+
+
+@pytest.fixture
+def normal_page(tools_with_page):
+    """A page with ordinary article text and title, so navigation succeeds."""
+    tools_with_page.page.evaluate.return_value = "Normal article content here."
+    tools_with_page.page.title.return_value = "A regular page"
+    return tools_with_page
+
+
+@pytest.mark.usefixtures("frozen_timestamp")
+def test_returns_blocked_result_when_navigation_finds_captcha(tools_with_page):
     tools_with_page.page.evaluate.return_value = "slide to verify and continue"
-    monkeypatch.setattr(browser_tools, "get_timestamp", MagicMock(return_value="2026-09-19T12:00:00Z"))
 
     result = tools_with_page.navigate_to_url("https://example.com/blocked")
 
@@ -178,34 +186,29 @@ def test_returns_blocked_result_when_navigation_finds_captcha(tools_with_page, m
         "status": "blocked",
         "url": "https://example.com/blocked",
         "block_reason": "captcha",
-        "timestamp": "2026-09-19T12:00:00Z",
+        "timestamp": _NAVIGATED_AT,
     }
 
 
-def test_returns_success_result_when_navigation_finds_normal_page(tools_with_page, monkeypatch):
-    tools_with_page.page.evaluate.return_value = "Normal article content here."
-    tools_with_page.page.title.return_value = "A regular page"
-    monkeypatch.setattr(browser_tools, "get_timestamp", MagicMock(return_value="2026-09-19T12:00:00Z"))
-
-    result = tools_with_page.navigate_to_url("https://example.com/article")
+@pytest.mark.usefixtures("frozen_timestamp")
+def test_returns_success_result_when_navigation_finds_normal_page(normal_page):
+    result = normal_page.navigate_to_url("https://example.com/article")
 
     assert result == {
         "status": "success",
         "url": "https://example.com/article",
         "title": "A regular page",
-        "timestamp": "2026-09-19T12:00:00Z",
+        "timestamp": _NAVIGATED_AT,
     }
 
 
-def test_installs_context_redirect_guard_before_navigation(tools_with_page, monkeypatch):
+@pytest.mark.usefixtures("frozen_timestamp")
+def test_installs_context_redirect_guard_before_navigation(normal_page):
     events: list[str] = []
-    tools_with_page.context.route.side_effect = lambda *_args: events.append("route")
-    tools_with_page.page.goto.side_effect = lambda *_args, **_kwargs: events.append("goto")
-    tools_with_page.page.evaluate.return_value = "Normal article content here."
-    tools_with_page.page.title.return_value = "A regular page"
-    monkeypatch.setattr(browser_tools, "get_timestamp", MagicMock(return_value="2026-09-19T12:00:00Z"))
+    normal_page.context.route.side_effect = lambda *_args: events.append("route")
+    normal_page.page.goto.side_effect = lambda *_args, **_kwargs: events.append("goto")
 
-    tools_with_page.navigate_to_url("https://example.com/article")
+    normal_page.navigate_to_url("https://example.com/article")
 
     assert events == ["route", "goto"]
 

@@ -2,17 +2,15 @@ import {
   afterEach, beforeEach, describe, expect, it, vi
 } from 'vitest';
 import {
-  act, renderHook, waitFor
+  act, waitFor
 } from '@testing-library/react';
 import { buildBatchCandidate } from '../api/contentStudioBatchStorage-fixtures';
 import {
   createDeferredResponse, createMockJsonResponse
 } from '../test/fetchResponses';
-import { useContentStudio } from './useContentStudio';
 import {
   batchStatusRequestUrls,
   buildGeneratingBatchStartResponse,
-  buildMockBatchRequest,
   buildRunningBatchStatusResponse,
   buildTerminalBatchStartResponse,
   createMockFetch,
@@ -21,73 +19,41 @@ import {
   renderConcurrentBatchStarts,
   renderContentStudio,
   renderContentStudioInStrictMode,
-  renderRunningBatchContentStudio,
   storedActiveContentStudioBatchCandidates,
   storedActiveContentStudioBatchIds,
 } from './useContentStudio-fixtures';
 import {
-  prepareContentStudioHookTest, restoreContentStudioHookTest
+  prepareContentStudioHookTest, restoreContentStudioHookTest, settleDeferredJson
 } from './useContentStudio-test-fixtures';
+import { requestUrlsContaining } from './useContentStudio-request-fixtures';
+import {
+  activeBatchIds,
+  buildTerminalStartBatchStatus,
+  generationState,
+  renderPendingBatchStart,
+  startRunningBatch,
+  startTerminalBatch,
+} from './useContentStudio-scenario-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
 import {
   deferAuthenticatedFetch, mockAuthenticatedFetch
 } from '../test/infrastructureMock';
-import type { ContentBriefBatchStartResponse } from '../types';
 
 beforeEach(prepareContentStudioHookTest);
 afterEach(restoreContentStudioHookTest);
 
 describe('useContentStudio accepted batch state', () => {
   it('maps every terminal start child field before any status poll', async () => {
-    const terminalStart = buildTerminalBatchStartResponse('terminal-batch');
-    const fetch = createMockFetch({ batchStartResponse: terminalStart });
-    const { result } = renderContentStudio(fetch);
-
-    const received = await act(() => result.current.generateContentBatch(
-      buildMockBatchRequest('terminal-batch')
-    ));
+    const {
+      fetch, received, result, terminalStart
+    } = await startTerminalBatch('terminal-batch');
 
     expect(received).toStrictEqual(terminalStart);
-    expect(result.current.activeBatches).toStrictEqual([{
-      batch_id: 'terminal-batch',
-      batch_size: 2,
-      counts: {
-        pending: 0,
-        generating: 0,
-        generated: 1,
-        failed: 1,
-        missing: 0,
-        total: 2,
-      },
-      children: [
-        {
-          id: 'content-1',
-          idea_id: 'idea-1',
-          keyword_id: 'keyword-1',
-          keyword: 'Alpha keyword',
-          status: 'generated',
-          batch_position: 1,
-          created_at: null,
-          updated_at: null,
-          has_content: true,
-          error_message: null,
-        },
-        {
-          id: 'content-2',
-          idea_id: 'idea-2',
-          keyword_id: 'keyword-2',
-          keyword: 'Beta keyword',
-          status: 'failed',
-          batch_position: 2,
-          created_at: null,
-          updated_at: null,
-          has_content: false,
-          error_message: null,
-        },
-      ],
-    }]);
+    expect(result.current.activeBatches).toStrictEqual([
+      buildTerminalStartBatchStatus('terminal-batch')
+    ]);
     expect(batchStatusRequestUrls(fetch, 'terminal-batch')).toStrictEqual([]);
   });
 
@@ -100,26 +66,19 @@ describe('useContentStudio accepted batch state', () => {
       candidatesAtPost.push(storedActiveContentStudioBatchCandidates());
       return startRequest.promise;
     });
-    const {
-      result, unmount
-    } = renderHook(() => useContentStudio());
-
-    act(() => { void result.current.generateContentBatch(mockBatchRequest); });
+    const { unmount } = renderPendingBatchStart();
 
     expect(candidatesAtPost).toStrictEqual([[
       buildBatchCandidate('batch-1', 1_234)
     ]]);
     unmount();
-    startRequest.resolve(createMockJsonResponse(mockBatchStartResponse));
-    await startRequest.promise;
+    await settleDeferredJson(startRequest, mockBatchStartResponse);
   });
 
   it('retains an accepted running batch while polling its status', async () => {
     const {
       result, unmount
-    } = renderRunningBatchContentStudio();
-
-    await act(() => result.current.generateContentBatch(mockBatchRequest));
+    } = await startRunningBatch();
 
     expect(storedActiveContentStudioBatchIds()).toStrictEqual(['batch-1']);
     expect(result.current.activeBatches[0]?.batch_id).toBe('batch-1');
@@ -140,17 +99,13 @@ describe('useContentStudio accepted batch state', () => {
 
   it('posts one exact batch request without child status requests', async () => {
     const {
-      fetch, result, unmount
-    } = renderRunningBatchContentStudio();
-
-    await act(() => result.current.generateContentBatch(mockBatchRequest));
+      fetch, unmount
+    } = await startRunningBatch();
 
     const batchPosts = fetch.mock.calls.filter(([url, init]) => (
       String(url).endsWith('/generate-batch') && init?.method === 'POST'
     ));
-    const childStatusRequests = fetch.mock.calls.filter(([url]) => (
-      String(url).includes('/status/')
-    ));
+    const childStatusRequests = requestUrlsContaining(fetch, '/status/');
     expect(batchPosts).toHaveLength(1);
     expect(batchPosts[0]?.[1]?.body).toBe(JSON.stringify(mockBatchRequest));
     expect(childStatusRequests).toStrictEqual([]);
@@ -170,16 +125,12 @@ describe('useContentStudio batch races', () => {
 
     act(() => { void result.current.generateContentBatch(mockBatchRequest); });
 
-    expect({
-      error: result.current.error,
-      generating: result.current.generating,
-    }).toStrictEqual({
+    expect(generationState(result.current)).toStrictEqual({
       error: null,
       generating: true,
     });
     unmount();
-    deferred.resolve(createMockJsonResponse(mockBatchStartResponse));
-    await deferred.promise;
+    await settleDeferredJson(deferred, mockBatchStartResponse);
   });
 
   it('preserves both batches when start responses settle out of order', async () => {
@@ -195,9 +146,7 @@ describe('useContentStudio batch races', () => {
     firstStart.resolve(createMockJsonResponse(buildTerminalBatchStartResponse('batch-1')));
     await act(() => pendingBatches.first);
 
-    expect(result.current.activeBatches.map((batch) => batch.batch_id)).toStrictEqual([
-      'batch-1', 'batch-2'
-    ]);
+    expect(activeBatchIds(result.current)).toStrictEqual(['batch-1', 'batch-2']);
     expect(result.current.generating).toBe(false);
   });
 
@@ -213,10 +162,7 @@ describe('useContentStudio batch races', () => {
     firstStart.resolve(createMockJsonResponse({ error: 'Older failure' }, 500));
     await act(() => pendingBatches.first);
 
-    expect({
-      generating: result.current.generating,
-      error: result.current.error,
-    }).toStrictEqual({
+    expect(generationState(result.current)).toStrictEqual({
       generating: true,
       error: null,
     });
@@ -227,16 +173,12 @@ describe('useContentStudio batch races', () => {
   it('does not apply a batch start response that settles after unmount', async () => {
     const deferred = deferAuthenticatedFetch();
     const {
-      result, unmount
-    } = renderHook(() => useContentStudio());
-    const pendingStarts: Promise<ContentBriefBatchStartResponse | null>[] = [];
-    act(() => {
-      pendingStarts.push(result.current.generateContentBatch(mockBatchRequest));
-    });
+      pendingStart, result, unmount
+    } = renderPendingBatchStart();
 
     unmount();
     deferred.resolve(createMockJsonResponse(mockBatchStartResponse));
-    const received = await pendingStarts[0];
+    const received = await pendingStart;
 
     expect(received?.batch_id).toBe('batch-1');
     expect(result.current.activeBatches).toStrictEqual([]);

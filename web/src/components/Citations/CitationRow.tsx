@@ -3,12 +3,11 @@ import type { TopUrl } from '../../types';
 import { getDomain } from '../../formatting/urlFormatter';
 import { safeHref } from '../../infrastructure';
 import { Spinner } from '../ui/Spinner';
-
-interface UrlBreakdown {
-  keyword: string;
-  provider: string;
-  timestamp: string;
-}
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  CHEVRON_DOWN_PATHS, CHEVRON_RIGHT_PATHS 
+} from '../ui/iconPaths';
+import type { UrlBreakdown } from '../../exporters/citationParser';
 
 interface CitationRowProps {
   citation: TopUrl;
@@ -86,9 +85,7 @@ export const CitationRow = ({
         <td className="px-6 py-4">
           <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium inline-flex items-center gap-1">
             {citation.citation_count}
-            <svg className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
+            <StrokeIcon className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} paths={CHEVRON_DOWN_PATHS} strokeWidth={2} />
           </span>
         </td>
       </tr>
@@ -135,9 +132,7 @@ export const CitationRow = ({
                               <span className="text-xs text-gray-500">
                                 {providerCount} provider{providerText}
                               </span>
-                              <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 5l7 7-7 7" />
-                              </svg>
+                              <StrokeIcon className="w-4 h-4 text-gray-400" paths={CHEVRON_RIGHT_PATHS} />
                             </div>
                           </div>
                         );

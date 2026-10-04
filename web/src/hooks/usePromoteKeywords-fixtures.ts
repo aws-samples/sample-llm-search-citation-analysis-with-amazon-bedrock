@@ -1,7 +1,10 @@
-import { expect } from 'vitest';
+import {
+  expect, vi
+} from 'vitest';
 import {
   act, renderHook, type RenderOptions 
 } from '@testing-library/react';
+import { apiPost } from '../api/client';
 import type {
   Keyword, ResearchKeyword 
 } from '../types';
@@ -48,7 +51,7 @@ export const successfulPromotionResponseFixture = {
   skipped_keywords: [],
 };
 
-export const inactiveKeywordItemFixture = {
+const inactiveKeywordItemFixture = {
   ...createdKeywordItemFixture,
   id: 'keyword-2',
   keyword: 'beta',
@@ -64,7 +67,7 @@ export const successfulFullProposalResponseFixture = {
 
 interface PromotionRequestResolution { resolve: ((response: typeof successfulPromotionResponseFixture) => void) | null; }
 
-export function createMockPromotionRequest() {
+function createMockPromotionRequest() {
   const requestResolution: PromotionRequestResolution = { resolve: null };
   const promise = new Promise<typeof successfulPromotionResponseFixture>((resolve) => {
     requestResolution.resolve = resolve;
@@ -126,6 +129,29 @@ export function startPromotion(readHook: PromotionHookReader): void {
   act(() => {
     void readHook().promote();
   });
+}
+
+/** Scripts the mocked `apiPost` with a promotion request that never settles. */
+export function setupNeverSettlingPromotion(): void {
+  vi.mocked(apiPost).mockReturnValue(new Promise(vi.fn()));
+}
+
+/**
+ * Renders a pending promotion, then cancels it by replacing the available
+ * keywords. `settle` resolves the abandoned request afterwards.
+ */
+export function renderCancelledPromotion(options: PromotionRenderOptions = {}) {
+  const promotionRequest = createMockPromotionRequest();
+  vi.mocked(apiPost).mockReturnValue(promotionRequest.promise);
+  const rendered = renderPendingPromotion(options);
+  rendered.rerender({ availableKeywords: replacementAvailableKeywordFixtures });
+  return {
+    ...rendered,
+    settle: () => act(async () => {
+      promotionRequest.resolve();
+      await promotionRequest.promise;
+    }),
+  };
 }
 
 /**

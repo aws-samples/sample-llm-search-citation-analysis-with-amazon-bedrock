@@ -4,6 +4,8 @@ import type {
 import { formatDate } from '../../formatting/dateFormatter';
 import { useOpenAlerts } from '../../hooks/useAlerts';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
+import { ErrorAlert } from '../ui/ErrorAlert';
+import { RefreshTextButton } from '../ui/RefreshTextButton';
 
 const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   mention_rate_drop: 'Mention-rate drop',
@@ -17,13 +19,11 @@ const ALERT_TYPE_LABELS: Record<AlertType, string> = {
 const SEVERITY_LABELS: Record<AlertSeverity, string> = {
   info: 'Info',
   warning: 'Warning',
-  critical: 'Critical',
 };
 
 const SEVERITY_CLASSES: Record<AlertSeverity, string> = {
   info: 'border-blue-200 bg-blue-50 text-blue-800',
   warning: 'border-amber-200 bg-amber-50 text-amber-800',
-  critical: 'border-red-300 bg-red-50 text-red-800',
 };
 
 function countLabel(count: number): string {
@@ -127,26 +127,11 @@ export function AlertsPanel() {
           </h3>
           <p className="mt-1 text-xs text-gray-500">{countLabel(count)}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => { void refresh(); }}
-          disabled={loading}
-          className="rounded-lg bg-gray-100 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Refresh
-        </button>
+        <RefreshTextButton onRefresh={refresh} disabled={loading} />
       </div>
 
-      {error !== null && (
-        <p role="alert" className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {error}
-        </p>
-      )}
-      {actionError !== null && (
-        <p role="alert" className="m-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {actionError}
-        </p>
-      )}
+      <ErrorAlert message={error} spacingClassName="m-4 " />
+      <ErrorAlert message={actionError} spacingClassName="m-4 " />
 
       {loading && items.length === 0 && (
         <output className="block p-6 text-center text-sm text-gray-500">Loading alerts…</output>

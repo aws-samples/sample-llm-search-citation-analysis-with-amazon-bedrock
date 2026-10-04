@@ -1,15 +1,13 @@
-import type { ChartConfiguration } from 'chart.js';
 import type {
   BrandTrendPoint, BrandTrends
 } from '../../../types/domain/visibility';
 import { KPI_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import { formatKpi } from '../../../formatting/kpiFormatter';
-import type { ChartTheme } from '../../ui/chartTheme';
 import {
   COMPETITOR_LINE_COLOURS, EMERALD, paletteColour
 } from './chartPalette';
 import {
-  listInWords, periodsInWords, seriesLabels, type ChartSeries
+  listInWords, trendCaption, type ChartSeries
 } from './chartSeries';
 import { lineChartConfiguration } from './lineChartConfiguration';
 
@@ -60,21 +58,14 @@ export function brandTrendSeries(trends: BrandTrends, options: BrandTrendOptions
 }
 
 /** A line per brand on a 0–100 axis, the tracked brand thicker; unknown values are gaps. */
-export function buildBrandTrendChartConfiguration(
-  series: readonly ChartSeries[],
-  theme: ChartTheme,
-  isDark: boolean,
-): ChartConfiguration<'line'> {
-  return lineChartConfiguration(series, theme, isDark);
-}
+export const buildBrandTrendChartConfiguration = lineChartConfiguration;
 
 /** "Share of voice of Your brand, Adidas and Puma over 2 periods from A to B, on a 0–100 scale. Latest (B): Your brand 25.0%, …." */
 export function describeBrandTrend(series: readonly ChartSeries[], metric: BrandTrendMetric): string {
-  const periods = seriesLabels(series);
-  if (periods.length === 0) return '';
-  const latest = periods.length - 1;
   const names = series.map((line) => line.label);
-  const values = series.map((line) => `${line.label} ${formatKpi(metric, line.points[latest].value)}`);
-  return `${KPI_DEFINITIONS[metric].label} of ${listInWords(names)} over ${periodsInWords(periods)}, on a 0–100 scale. `
-    + `Latest (${periods[latest]}): ${values.join(', ')}.`;
+  return trendCaption(series, (periods, latest) => {
+    const values = series.map((line) => `${line.label} ${formatKpi(metric, line.points[latest.index].value)}`);
+    return `${KPI_DEFINITIONS[metric].label} of ${listInWords(names)} over ${periods}, on a 0–100 scale. `
+      + `Latest (${latest.label}): ${values.join(', ')}.`;
+  });
 }

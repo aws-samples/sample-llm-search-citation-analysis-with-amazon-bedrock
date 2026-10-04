@@ -10,13 +10,12 @@ import {
   unansweredScopeReport
 } from './scopeReport-fixtures';
 import {
-  definitionTerms, sectionTitles
+  definitionTerms, VISIBILITY_DEFINITION_TERMS, sectionTitles
 } from '../layout/reportQueries-fixtures';
 import {
   ALL_SCOPE, groupScope, keywordScope
 } from '../../ui/reportScope-fixtures';
 import { buildKeywordGroupsHookResult } from '../../../hooks/useKeywordGroups-fixtures';
-import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import {
   NO_ANSWERED_RUN, noTrendMessage
 } from './scopeSectionGate';
@@ -44,7 +43,11 @@ describe.each(SCOPE_REPORTS)('%s report', (title, path, report, sections) => {
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(title);
   });
 
-  it('lists its sections in order and ends with the definitions', () => {
+  it.each([
+    ['once the data settled', buildScopeReport],
+    ['while the data loads', loadingScopeReport],
+  ])('lists its sections in order and ends with the definitions %s', (_when, data) => {
+    mockReportData.mockReturnValue(data());
     renderScopeReport(report, path);
 
     expect(sectionTitles()).toStrictEqual([...sections, 'How these KPIs are measured']);
@@ -53,7 +56,7 @@ describe.each(SCOPE_REPORTS)('%s report', (title, path, report, sections) => {
   it('defines every KPI and the trend rule at the end', () => {
     renderScopeReport(report, path);
 
-    expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITIONS.map((entry) => entry.label));
+    expect(definitionTerms()).toStrictEqual(VISIBILITY_DEFINITION_TERMS);
   });
 
   it('covers every keyword over the last 30 days at its bare path', () => {
@@ -135,13 +138,6 @@ describe.each(SCOPE_REPORTS)('%s report', (title, path, report, sections) => {
     renderScopeReport(report, path);
 
     expect(usePrintMode).toHaveBeenLastCalledWith({ ready: false });
-  });
-
-  it('keeps every section heading while the data loads', () => {
-    mockReportData.mockReturnValue(loadingScopeReport());
-    renderScopeReport(report, path);
-
-    expect(sectionTitles()).toStrictEqual([...sections, 'How these KPIs are measured']);
   });
 
   it('shows a loading message in every section while the data loads', () => {

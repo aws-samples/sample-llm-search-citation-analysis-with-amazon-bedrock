@@ -10,12 +10,12 @@ import sys
 from typing import Any
 
 import boto3
-from boto3.dynamodb.conditions import Key
 
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
+from shared.bounded_reads import newest_items
 from shared.config import PROVIDERS
 from shared.decorators import api_handler, optional_limit, validate
 
@@ -27,6 +27,7 @@ dynamodb = boto3.resource('dynamodb')
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
 table = dynamodb.Table(SEARCH_RESULTS_TABLE)
+_PROVIDER_INDEX = 'ProviderIndex'
 
 
 @api_handler
@@ -46,12 +47,7 @@ def handler(event, context, keyword=None, provider=None, query_prompt_id=None, l
 
     if keyword:
         # Query by keyword (partition key) - most efficient
-        response = table.query(
-            KeyConditionExpression=Key('keyword').eq(keyword),
-            ScanIndexForward=False,
-            Limit=limit
-        )
-        items = response.get('Items', [])
+        items = newest_items(table, 'keyword', keyword, limit)
 
         # Apply provider filter if also specified
         if provider:
@@ -59,13 +55,7 @@ def handler(event, context, keyword=None, provider=None, query_prompt_id=None, l
 
     elif provider:
         # Query by provider using ProviderIndex GSI
-        response = table.query(
-            IndexName='ProviderIndex',
-            KeyConditionExpression=Key('provider').eq(provider.lower()),
-            ScanIndexForward=False,
-            Limit=limit
-        )
-        items = response.get('Items', [])
+        items = newest_items(table, 'provider', provider.lower(), limit, index_name=_PROVIDER_INDEX)
 
     else:
         # No filter - query using ProviderIndex GSI for each provider.
@@ -75,13 +65,7 @@ def handler(event, context, keyword=None, provider=None, query_prompt_id=None, l
 
         for p in PROVIDERS:
             try:
-                response = table.query(
-                    IndexName='ProviderIndex',
-                    KeyConditionExpression=Key('provider').eq(p),
-                    ScanIndexForward=False,
-                    Limit=items_per_provider
-                )
-                items.extend(response.get('Items', []))
+                items.extend(newest_items(table, 'provider', p, items_per_provider, index_name=_PROVIDER_INDEX))
             except Exception:
                 logger.exception(f"Error querying provider {p}")
                 continue

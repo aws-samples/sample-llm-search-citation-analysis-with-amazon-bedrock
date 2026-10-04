@@ -2,7 +2,7 @@ import {
   describe, it, expect,
 } from 'vitest';
 import {
-  render, screen, within 
+  render, within 
 } from '@testing-library/react';
 import type { KeywordTrend } from '../../../../types';
 import { expectRendersNothing } from '../../../../test/renderNothing';
@@ -13,9 +13,10 @@ import {
 import {
   moverColumn, moverKeywords
 } from '../../layout/reportQueries-fixtures';
+import { settledTrends } from '../../layout/reportSlice-fixtures';
 
 function renderMovers(rows: KeywordTrend[]): void {
-  render(<MoversSection trends={trendViewOf(rows)} loading={false} error={null} />);
+  render(<MoversSection {...settledTrends(trendViewOf(rows))} />);
 }
 
 describe('MoversSection columns', () => {
@@ -52,28 +53,6 @@ describe('MoversSection columns', () => {
 
 describe('MoversSection states', () => {
   it('drops out of the report when no keyword\'s visibility score moved by the trend rule', () => {
-    expectRendersNothing(
-      <MoversSection
-        trends={trendViewOf([movingKeyword('flat', 1.9, 'stable'), buildKeywordTrend('new')])}
-        loading={false}
-        error={null}
-      />,
-    );
-  });
-
-  it('drops out of the report when there is no keyword', () => {
-    expectRendersNothing(<MoversSection trends={trendViewOf([])} loading={false} error={null} />);
-  });
-
-  it('shows the loading state', () => {
-    render(<MoversSection trends={null} loading error={null} />);
-
-    expect(screen.getByText('Loading movers…')).toBeInTheDocument();
-  });
-
-  it('shows the error', () => {
-    render(<MoversSection trends={null} loading={false} error="boom" />);
-
-    expect(screen.getByText('boom')).toBeInTheDocument();
+    expectRendersNothing(<MoversSection {...settledTrends(trendViewOf([movingKeyword('flat', 1.9, 'stable'), buildKeywordTrend('new')]))} />);
   });
 });

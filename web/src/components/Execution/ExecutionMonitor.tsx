@@ -135,7 +135,7 @@ export const ExecutionMonitor = ({
           keywordsCount={keywordsCount}
           activeKeywords={activeKeywords}
           groups={groups}
-          isRunning={isRunning ?? false}
+          isRunning={isRunning}
           isStarting={isStarting}
           onSelectionChange={setSelectedIds}
           onTriggerAnalysis={() => { void handleTriggerAnalysis(); }}
@@ -143,12 +143,12 @@ export const ExecutionMonitor = ({
           isAdmin={isAdmin}
         />
 
-        {execution && processedExecution && (
+        {execution && (
           <ExecutionStatus
             execution={execution}
             processedExecution={processedExecution}
             duration={duration}
-            isRunning={isRunning ?? false}
+            isRunning={isRunning}
           />
         )}
       </div>

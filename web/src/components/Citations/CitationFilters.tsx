@@ -1,3 +1,5 @@
+import { StrokeIcon } from '../ui/StrokeIcon';
+import { DOWNLOAD_PATHS } from '../ui/iconPaths';
 
 
 interface CitationFiltersProps {
@@ -68,9 +70,7 @@ export const CitationFilters = ({
             onClick={onDownloadExcel}
             className="flex-1 sm:flex-none px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-            </svg>
+            <StrokeIcon className="w-4 h-4" paths={DOWNLOAD_PATHS} />
             <span className="sr-only sm:not-sr-only">Export</span>
           </button>
         </div>

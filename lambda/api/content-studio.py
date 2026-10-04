@@ -10,6 +10,7 @@ import re
 import sys
 import uuid
 from collections import Counter, defaultdict
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any, cast
@@ -30,7 +31,7 @@ from shared.api_response import (
 )
 from shared.auth import get_caller_identity
 from shared.brand_visibility import classify_brand, load_recent_search_results, tracked_brand_names
-from shared.constants import MAX_KEYWORD_LENGTH
+from shared.constants import MAX_KEYWORD_LENGTH, priority_rank
 from shared.content_brief import (
     CONTENT_OUTPUT_CONTRACT,
     GROUP_BRIEF_MODES,
@@ -57,6 +58,7 @@ from shared.dynamodb_batch import (
     batch_get_items,
     query_latest_per_key,
 )
+from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure
 from shared.keyword_groups import MAX_GROUP_ID_LENGTH
 from shared.models import BedrockInvocationError, ModelRole, get_model_tier, invoke_bedrock
 from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_input
@@ -357,6 +359,31 @@ def _analyze_keyword_visibility(
     return visibility
 
 
+def _ranked_keyword_idea(
+    keyword: str,
+    visibility: _KeywordVisibility,
+    *,
+    copy: dict[str, str],
+    competitor_urls: list[str],
+) -> dict[str, Any]:
+    """An idea for a keyword where the brand already ranks; ``copy`` carries the per-kind text fields."""
+    return {
+        "id": str(uuid.uuid4()),
+        "type": copy["type"],
+        "priority": copy["priority"],
+        "title": copy["title"],
+        "description": copy["description"],
+        "keyword": keyword,
+        "source": copy["source"],
+        "current_rank": visibility.fp_best_rank,
+        "competitor_brands": [item["name"] for item in visibility.comp_mentions[:3]],
+        "competitor_urls": competitor_urls,
+        "providers_present": list(visibility.fp_providers),
+        "actionable": True,
+        "content_angle": copy["content_angle"],
+    }
+
+
 def _primary_keyword_idea(keyword: str, visibility: _KeywordVisibility) -> dict[str, Any] | None:
     if not visibility.fp_found and visibility.comp_mentions:
         return {
@@ -374,37 +401,33 @@ def _primary_keyword_idea(keyword: str, visibility: _KeywordVisibility) -> dict[
             "content_angle": "comprehensive_guide",
         }
     if visibility.fp_found and visibility.fp_best_rank > 2 and visibility.comp_mentions:
-        return {
-            "id": str(uuid.uuid4()),
-            "type": "ranking_improvement",
-            "priority": "medium" if visibility.fp_best_rank > 3 else "low",
-            "title": f'Improve Ranking for "{keyword}"',
-            "description": f"Your brand ranks #{visibility.fp_best_rank}. Create better content to reach #1.",
-            "keyword": keyword,
-            "source": "ranking_analysis",
-            "current_rank": visibility.fp_best_rank,
-            "competitor_brands": [item["name"] for item in visibility.comp_mentions[:3]],
-            "competitor_urls": visibility.competitor_citations,
-            "providers_present": list(visibility.fp_providers),
-            "actionable": True,
-            "content_angle": "differentiation",
-        }
+        return _ranked_keyword_idea(
+            keyword,
+            visibility,
+            copy={
+                "type": "ranking_improvement",
+                "priority": "medium" if visibility.fp_best_rank > 3 else "low",
+                "title": f'Improve Ranking for "{keyword}"',
+                "description": f"Your brand ranks #{visibility.fp_best_rank}. Create better content to reach #1.",
+                "source": "ranking_analysis",
+                "content_angle": "differentiation",
+            },
+            competitor_urls=visibility.competitor_citations,
+        )
     if visibility.fp_found and visibility.fp_best_rank <= 2:
-        return {
-            "id": str(uuid.uuid4()),
-            "type": "leadership_maintenance",
-            "priority": "low",
-            "title": f'Maintain Leadership for "{keyword}"',
-            "description": f"You're #{visibility.fp_best_rank}! Create fresh content to stay ahead of {len(visibility.comp_mentions)} competitors.",
-            "keyword": keyword,
-            "source": "leadership_analysis",
-            "current_rank": visibility.fp_best_rank,
-            "competitor_brands": [item["name"] for item in visibility.comp_mentions[:3]],
-            "competitor_urls": visibility.all_citations,
-            "providers_present": list(visibility.fp_providers),
-            "actionable": True,
-            "content_angle": "thought_leadership",
-        }
+        return _ranked_keyword_idea(
+            keyword,
+            visibility,
+            copy={
+                "type": "leadership_maintenance",
+                "priority": "low",
+                "title": f'Maintain Leadership for "{keyword}"',
+                "description": f"You're #{visibility.fp_best_rank}! Create fresh content to stay ahead of {len(visibility.comp_mentions)} competitors.",
+                "source": "leadership_analysis",
+                "content_angle": "thought_leadership",
+            },
+            competitor_urls=visibility.all_citations,
+        )
     return None
 
 
@@ -498,10 +521,9 @@ def generate_content_ideas(config: dict[str, Any]) -> list[dict[str, Any]]:
             visibility = _analyze_keyword_visibility(results, first_party, competitors)
             ideas.extend(_keyword_ideas(keyword, visibility))
     ideas.extend(_get_seasonal_suggestions(list(keyword_data), config))
-    priority_order = {"high": 0, "medium": 1, "low": 2}
     ideas.sort(
         key=lambda idea: (
-            priority_order.get(idea.get("priority", "low"), 2),
+            priority_rank(idea.get("priority")),
             idea.get("keyword", ""),
         )
     )
@@ -1104,9 +1126,9 @@ def _existing_content_row(table: Any, content_id: str, conflict: ClientError) ->
 def create_pending_content(
     idea: dict[str, Any],
     *,
-    include_time_bucket: bool = True,
-    metadata: dict[str, Any] | None = None,
-    content_id: str | None = None,
+    include_time_bucket: bool,
+    metadata: dict[str, Any] | None,
+    content_id: str | None,
 ) -> tuple[dict[str, Any], bool]:
     """Conditionally create one pending row and report whether it was new."""
     table = dynamodb.Table(CONTENT_STUDIO_TABLE)
@@ -1137,7 +1159,7 @@ def create_pending_content(
     try:
         table.put_item(Item=item, ConditionExpression="attribute_not_exists(id)")
     except ClientError as error:
-        if error.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+        if not is_conditional_check_failure(error):
             raise
         return _existing_content_row(table, resolved_content_id, error), False
     return item, True
@@ -1403,10 +1425,6 @@ def _canonical_content_brief(
     return canonical, issue
 
 
-def _is_conditional_failure(error: ClientError) -> bool:
-    return error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException"
-
-
 def _claim_generation(content_id: str, owner: str) -> _GenerationClaim | None:
     """Atomically acquire one paid-model attempt with a bounded lease."""
     now_epoch = int(utc_now().timestamp())
@@ -1445,7 +1463,7 @@ def _claim_generation(content_id: str, owner: str) -> _GenerationClaim | None:
             ReturnValues="ALL_NEW",
         )
     except ClientError as error:
-        if _is_conditional_failure(error):
+        if is_conditional_check_failure(error):
             return None
         raise
     attributes = response.get("Attributes", {})
@@ -1538,10 +1556,9 @@ def _terminalize_unexpected_failure(content_id: str, owner: str) -> None:
 def _process_generation_async(
     content_id: str,
     idea: dict[str, Any],
-    owner: str | None = None,
+    claim_owner: str,
 ) -> bool:
     """Claim and run one generation without exceeding three model attempts."""
-    claim_owner = owner or f"legacy:{content_id}"
     try:
         claim = _claim_generation(content_id, claim_owner)
     except Exception:
@@ -1714,10 +1731,7 @@ def _batch_request_idea(
     ):
         if field_name in brief:
             idea[field_name] = brief[field_name]
-    try:
-        return _canonical_content_brief(idea)
-    except ContentBriefTemplateNotFoundError:
-        raise
+    return _canonical_content_brief(idea)
 
 
 def _batch_children(batch_id: str, canonical: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1737,6 +1751,14 @@ def _batch_content_ids(children: list[dict[str, Any]]) -> list[str]:
     return [_compute_idempotency_key(child, include_time_bucket=False) for child in children]
 
 
+def _numbered_children(
+    children: list[dict[str, Any]],
+    child_ids: list[str],
+) -> Iterator[tuple[int, tuple[dict[str, Any], str]]]:
+    """Each child with its stable row id, at its 1-based batch position."""
+    return enumerate(zip(children, child_ids, strict=True), start=1)
+
+
 def _batch_child_descriptors(
     children: list[dict[str, Any]],
     child_ids: list[str],
@@ -1750,10 +1772,7 @@ def _batch_child_descriptors(
             "keyword": str(child["keyword"]),
             "position": position,
         }
-        for position, (child, content_id) in enumerate(
-            zip(children, child_ids, strict=True),
-            start=1,
-        )
+        for position, (child, content_id) in _numbered_children(children, child_ids)
     ]
 
 
@@ -1838,7 +1857,7 @@ def _register_batch_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
             ConditionExpression="attribute_not_exists(batch_id)",
         )
     except ClientError as error:
-        if not _is_conditional_failure(error):
+        if not is_conditional_check_failure(error):
             raise _BatchManifestStorageError("Could not write batch manifest") from error
         existing = _load_batch_manifest(batch_id)
         if existing is None:
@@ -1877,10 +1896,7 @@ def _queue_batch_children(
     """Queue every missing deterministic child after its manifest is durable."""
     outcomes: list[_QueueResult] = []
     batch_size = len(children)
-    for position, (child, content_id) in enumerate(
-        zip(children, child_ids, strict=True),
-        start=1,
-    ):
+    for position, (child, content_id) in _numbered_children(children, child_ids):
         outcomes.append(
             _queue_canonical_idea(
                 child,
@@ -2129,37 +2145,30 @@ def _template_body_issue(name: str | None, prompt_template: str | None) -> Conte
     return None
 
 
-@parse_json_body
-@validate(
-    {
-        "name": {
-            "required": True,
-            "type": str,
-            "min_length": 1,
-            "max_length": MAX_TEMPLATE_NAME_LENGTH,
-            "source": "body",
-        },
+def _template_body_rules(*, creating: bool) -> dict[str, dict[str, Any]]:
+    """The ``@validate`` schema of a saved template body; a create requires every field but ``description``."""
+    required = {"required": True} if creating else {}
+    return {
+        "name": {**required, "type": str, "min_length": 1, "max_length": MAX_TEMPLATE_NAME_LENGTH, "source": "body"},
         "description": {
             "type": str,
             "max_length": MAX_TEMPLATE_DESCRIPTION_LENGTH,
-            "default": "",
+            **({"default": ""} if creating else {}),
             "source": "body",
         },
-        "content_angle": {
-            "required": True,
-            "type": str,
-            "choices": list(GROUP_BRIEF_MODES),
-            "source": "body",
-        },
+        "content_angle": {**required, "type": str, "choices": list(GROUP_BRIEF_MODES), "source": "body"},
         "prompt_template": {
-            "required": True,
+            **required,
             "type": str,
             "min_length": 1,
             "max_length": MAX_PROMPT_TEMPLATE_LENGTH,
             "source": "body",
         },
     }
-)
+
+
+@parse_json_body
+@validate(_template_body_rules(creating=True))
 def _create_template(
     event: dict[str, Any],
     context: Any,
@@ -2224,32 +2233,7 @@ def _saved_template_target(
 
 
 @parse_json_body
-@validate(
-    {
-        "name": {
-            "type": str,
-            "min_length": 1,
-            "max_length": MAX_TEMPLATE_NAME_LENGTH,
-            "source": "body",
-        },
-        "description": {
-            "type": str,
-            "max_length": MAX_TEMPLATE_DESCRIPTION_LENGTH,
-            "source": "body",
-        },
-        "content_angle": {
-            "type": str,
-            "choices": list(GROUP_BRIEF_MODES),
-            "source": "body",
-        },
-        "prompt_template": {
-            "type": str,
-            "min_length": 1,
-            "max_length": MAX_PROMPT_TEMPLATE_LENGTH,
-            "source": "body",
-        },
-    }
-)
+@validate(_template_body_rules(creating=False))
 def _update_template(
     event: dict[str, Any],
     context: Any,
@@ -2518,35 +2502,15 @@ def _validated_content_and_idea(event: dict[str, Any]) -> tuple[str, dict[str, A
 def _invoke_worker(payload: dict[str, Any]) -> None:
     try:
         response = invoke_self_async(
-            payload,
-            None,
+            CONTENT_STUDIO_WORKER_FUNCTION_NAME,
+            _worker_event_bytes(payload),
             description="Content Studio generation",
-            function_name=CONTENT_STUDIO_WORKER_FUNCTION_NAME,
-            payload_bytes=_worker_event_bytes(payload),
             lambda_client=boto3.client("lambda"),
         )
     except SelfInvokeDispatchError as error:
         raise _WorkerDispatchError("Content Studio worker invocation failed") from error
-    if response is None or to_int(response.get("StatusCode"), 0) != 202:
+    if to_int(response.get("StatusCode"), 0) != 202:
         raise _WorkerDispatchError("Content Studio worker did not accept the event")
-
-
-def _forward_legacy_generation(event: dict[str, Any]) -> dict[str, Any]:
-    """Temporarily bridge already-queued API self-invocations to the worker."""
-    validated = _validated_content_and_idea(event)
-    if validated is None:
-        logger.error("Invalid legacy async generation event")
-        return {"statusCode": 400, "body": "Invalid async event"}
-    content_id, idea = validated
-    _invoke_worker(
-        {
-            "legacy_generation": True,
-            "content_id": content_id,
-            "idea": idea,
-        }
-    )
-    logger.info("Forwarded legacy generation for content_id=%s", content_id)
-    return {"statusCode": 202, "body": "Legacy generation forwarded"}
 
 
 def _load_direct_generation_idea(
@@ -2564,20 +2528,14 @@ def _load_direct_generation_idea(
     return event_idea
 
 
-def _run_direct_generation(
-    event: dict[str, Any],
-    *,
-    legacy: bool,
-) -> dict[str, Any]:
+def _run_direct_generation(event: dict[str, Any]) -> dict[str, Any]:
     validated = _validated_content_and_idea(event)
     owner = event.get("generation_owner")
-    if validated is None or (
-        not legacy
-        and (
-            not isinstance(owner, str)
-            or not owner
-            or len(owner) > _MAX_CONTENT_ID_LENGTH
-        )
+    if (
+        validated is None
+        or not isinstance(owner, str)
+        or not owner
+        or len(owner) > _MAX_CONTENT_ID_LENGTH
     ):
         logger.error("Invalid direct generation event")
         return {"statusCode": 400, "body": "Invalid generation event"}
@@ -2585,8 +2543,7 @@ def _run_direct_generation(
     idea = _load_direct_generation_idea(content_id, event_idea)
     if idea is None:
         return {"statusCode": 400, "body": "Invalid generation event"}
-    claim_owner = f"legacy:{content_id}" if legacy else str(owner)
-    _process_generation_async(content_id, idea, claim_owner)
+    _process_generation_async(content_id, idea, owner)
     return {"statusCode": 200, "body": "Generation processing completed"}
 
 
@@ -2704,19 +2661,13 @@ def _conditional_recovery_update(
     condition_expression: str,
     values: dict[str, Any],
 ) -> bool:
-    try:
-        dynamodb.Table(CONTENT_STUDIO_TABLE).update_item(
-            Key={"id": content_id},
-            UpdateExpression=update_expression,
-            ConditionExpression=condition_expression,
-            ExpressionAttributeNames={"#status": "status"},
-            ExpressionAttributeValues=values,
-        )
-    except ClientError as error:
-        if _is_conditional_failure(error):
-            return False
-        raise
-    return True
+    return applied_conditionally(lambda: dynamodb.Table(CONTENT_STUDIO_TABLE).update_item(
+        Key={"id": content_id},
+        UpdateExpression=update_expression,
+        ConditionExpression=condition_expression,
+        ExpressionAttributeNames={"#status": "status"},
+        ExpressionAttributeValues=values,
+    ))
 
 
 def _terminalize_exhausted_row(row: dict[str, Any], now_epoch: int) -> bool:
@@ -2883,16 +2834,12 @@ def _process_stream_event(event: dict[str, Any]) -> None:
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Handle API, versioned stream, recovery, and temporary rollout events."""
+    """Handle API, versioned stream, and recovery events."""
     if isinstance(event.get("Records"), list):
         _process_stream_event(event)
         return {"batchItemFailures": []}
-    if event.get("async_generation") is True:
-        return _forward_legacy_generation(event)
-    if event.get("legacy_generation") is True:
-        return _run_direct_generation(event, legacy=True)
     if event.get("action") == "generate":
-        return _run_direct_generation(event, legacy=False)
+        return _run_direct_generation(event)
     if event.get("action") == "reconcile":
         return _reconcile_generation()
     return _api_handler(event, context)

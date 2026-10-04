@@ -2,11 +2,10 @@ import {
   describe, expect, it, vi
 } from 'vitest';
 import {
-  render, screen, waitFor
+  screen, waitFor
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { ProvidersConfig } from './ProvidersConfig';
-import { buildProvidersConfigProps } from './ProvidersConfig-fixtures';
+import { renderProvidersConfig } from './ProvidersConfig-fixtures';
 import {
   GEMINI_AT_DEFAULT, mockModelListing, openGeminiModelEditor, typeModelId
 } from './ProviderModelEditor-fixtures';
@@ -16,23 +15,18 @@ vi.mock('../../api/providerModels', () => import('../../api/providerModelsMock-f
 
 describe('ProvidersConfig model editor', () => {
   it('opens the model editor of the provider whose button was pressed', async () => {
-    mockModelListing([]);
-
     await openGeminiModelEditor();
 
     expect(screen.getByLabelText('Google Gemini model')).toHaveValue('gemini-3-flash-preview');
   });
 
   it('opens only that provider editor', async () => {
-    mockModelListing([]);
-
     await openGeminiModelEditor();
 
     expect(screen.queryByLabelText('OpenAI model')).not.toBeInTheDocument();
   });
 
   it('closes the editor on cancel', async () => {
-    mockModelListing([]);
     await openGeminiModelEditor();
 
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
@@ -41,7 +35,6 @@ describe('ProvidersConfig model editor', () => {
   });
 
   it('reloads the providers and closes the editor after a save', async () => {
-    mockModelListing([]);
     mockSaveProviderModel.mockResolvedValue(undefined);
     const { onRefresh } = await openGeminiModelEditor();
 
@@ -55,10 +48,7 @@ describe('ProvidersConfig model editor', () => {
   it('shows the editor to administrators only', () => {
     mockModelListing([]);
 
-    render(<ProvidersConfig {...buildProvidersConfigProps({
-      providers: [GEMINI_AT_DEFAULT],
-      isAdmin: false
-    })} />);
+    renderProvidersConfig([GEMINI_AT_DEFAULT], { isAdmin: false });
 
     expect(screen.queryByRole('button', { name: 'Change model' })).not.toBeInTheDocument();
   });

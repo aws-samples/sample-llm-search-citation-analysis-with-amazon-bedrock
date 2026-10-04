@@ -2,46 +2,19 @@
  * Dashboard API client functions.
  */
 import { apiGet } from './client';
+import type { CrawledContent } from '../types';
 
-interface CrawledContentItem {
-  normalized_url: string;
-  title: string;
-  summary: string;
-  content: string;
-  screenshot_url?: string;
-  seo_analysis?: Record<string, unknown>;
-  crawled_at: string;
-  keyword: string;
-  citation_count: number;
-  citing_providers: string[];
-  page_load_time_ms?: number;
-  content_length?: number;
-  status?: 'success' | 'blocked' | 'error';
-  block_reason?: string;
-  error_message?: string;
-}
-
-interface CrawledContentResponse {
-  items: CrawledContentItem[];
-  count: number;
-}
+interface CrawledContentResponse {items: CrawledContent[];}
 
 /**
- * Fetches crawl history for a specific URL.
+ * Fetches the 20 latest crawls of a specific URL.
  */
-export async function fetchCrawlHistory(
-  url: string,
-  limit = 20,
-  signal?: AbortSignal
-): Promise<CrawledContentItem[]> {
+export async function fetchCrawlHistory(url: string): Promise<CrawledContent[]> {
   const params = new URLSearchParams({
     url,
     include_history: 'true',
-    limit: limit.toString(),
+    limit: '20',
   });
-  const response = await apiGet<CrawledContentResponse>(
-    `/crawled-content?${params.toString()}`,
-    { signal }
-  );
+  const response = await apiGet<CrawledContentResponse>(`/crawled-content?${params.toString()}`);
   return response.items ?? [];
 }

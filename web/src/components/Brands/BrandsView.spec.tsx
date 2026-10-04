@@ -26,16 +26,7 @@ vi.mock('../../hooks/useBrandMentions', () => ({useBrandMentions: mocks.useBrand
 
 vi.mock('./brandMentionsExport', () => ({exportBrandMentions: mocks.exportBrandMentions,}));
 
-vi.mock('../../hooks/useBrandConfig', () => ({
-  useBrandConfig: vi.fn(() => ({
-    config: null,
-    presets: {},
-    loading: false,
-    saveConfig: vi.fn(),
-    expandAllBrands: vi.fn(),
-    findCompetitors: vi.fn(),
-  })),
-}));
+vi.mock('../../hooks/useBrandConfig', () => ({ useBrandConfig: vi.fn() }));
 
 // A bare mock, configured below: the fixtures module renders the real hook in
 // its own helpers, so importing it inside this factory would wait on the very
@@ -44,6 +35,8 @@ vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
 
 import { BrandsView } from './BrandsView';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
+import { useBrandConfig } from '../../hooks/useBrandConfig';
+import { buildBrandConfigHookResult } from '../../test/brandConfigHookMock';
 import { buildKeywordGroupsHookResult } from '../../hooks/useKeywordGroups-fixtures';
 
 vi.mock('../Personas/PersonaSelector', () => ({
@@ -67,10 +60,29 @@ vi.mock('../Personas/PersonaSelector', () => ({
   ),
 }));
 
+/** Renders the view over the fixture keywords and picks `scope` (the keyword by default). */
+function renderWithBrandScope(scope?: string): void {
+  render(<BrandsView keywords={brandKeywordsFixture} />);
+  selectBrandScope(scope);
+}
+
+/** Renders the view with a scope picked and the historical analysis run selected. */
+function renderWithHistoricalRun(scope?: string): void {
+  renderWithBrandScope(scope);
+  selectBrandRun();
+}
+
+/** Renders the keyword scope and presses the export button. */
+function renderAndPressExport(): void {
+  renderWithBrandScope();
+  fireEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
+}
+
 describe('BrandsView', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(useKeywordGroups).mockReturnValue(buildKeywordGroupsHookResult());
+    vi.mocked(useBrandConfig).mockReturnValue(buildBrandConfigHookResult());
     mocks.useBrandMentions.mockReturnValue({
       data: brandMentionsExportResponse,
       loading: false,
@@ -124,8 +136,7 @@ describe('BrandsView', () => {
   });
 
   it('offers Latest and exact run values when a scope is selected', () => {
-    render(<BrandsView keywords={brandKeywordsFixture} />);
-    selectBrandScope();
+    renderWithBrandScope();
 
     const runSelector = screen.getByLabelText('Analysis run');
     const options = within(runSelector).getAllByRole('option').map((option) => ({
@@ -151,8 +162,7 @@ describe('BrandsView', () => {
   });
 
   it('associates the analysis-run label with a brands-specific identity', () => {
-    render(<BrandsView keywords={brandKeywordsFixture} />);
-    selectBrandScope();
+    renderWithBrandScope();
 
     const runSelector = screen.getByLabelText<HTMLSelectElement>('Analysis run');
 
@@ -168,9 +178,7 @@ describe('BrandsView', () => {
   });
 
   it('passes the historical timestamp to the data hook when a run is selected', () => {
-    render(<BrandsView keywords={brandKeywordsFixture} />);
-    selectBrandScope();
-    selectBrandRun();
+    renderWithHistoricalRun();
 
     expect(mocks.useBrandMentions).toHaveBeenLastCalledWith(
       KEYWORD_REPORT_SCOPE,
@@ -180,40 +188,24 @@ describe('BrandsView', () => {
     );
   });
 
-  it('resets the historical run when the report scope changes', () => {
-    render(<BrandsView keywords={brandKeywordsFixture} />);
-    selectBrandScope();
-    selectBrandRun();
-    selectBrandScope(GROUP_SCOPE_VALUE);
-
-    expect(screen.getByLabelText('Analysis run')).toHaveValue('');
-    expect(mocks.useBrandMentions).toHaveBeenLastCalledWith(
-      GROUP_REPORT_SCOPE,
-      null,
-      null,
-      null
-    );
-  });
-
-  it('resets the historical run when the persona changes', () => {
-    render(<BrandsView keywords={brandKeywordsFixture} />);
-    selectBrandScope();
-    selectBrandRun();
-    fireEvent.click(screen.getByRole('button', { name: 'Choose reporting persona' }));
-
-    expect(screen.getByLabelText('Analysis run')).toHaveValue('');
-    expect(mocks.useBrandMentions).toHaveBeenLastCalledWith(
+  it.each([
+    ['report scope', () => selectBrandScope(GROUP_SCOPE_VALUE), GROUP_REPORT_SCOPE, null],
+    [
+      'persona',
+      () => fireEvent.click(screen.getByRole('button', { name: 'Choose reporting persona' })),
       KEYWORD_REPORT_SCOPE,
-      null,
       'persona-a',
-      null
-    );
+    ],
+  ])('resets the historical run when the %s changes', (_changed, change, scope, personaId) => {
+    renderWithHistoricalRun();
+    change();
+
+    expect(screen.getByLabelText('Analysis run')).toHaveValue('');
+    expect(mocks.useBrandMentions).toHaveBeenLastCalledWith(scope, null, personaId, null);
   });
 
   it('labels the selected aggregate analysis run with keyword coverage', () => {
-    render(<BrandsView keywords={brandKeywordsFixture} />);
-    selectBrandScope(GROUP_SCOPE_VALUE);
-    selectBrandRun();
+    renderWithHistoricalRun(GROUP_SCOPE_VALUE);
 
     expect(screen.getByText(
       `Analysis run ${HISTORICAL_BRAND_RUN} includes data for 1 of 2 keywords in Hotel Coruña.`
@@ -221,10 +213,7 @@ describe('BrandsView', () => {
   });
 
   it('exports the currently returned server response when the button is pressed', async () => {
-    render(<BrandsView keywords={brandKeywordsFixture} />);
-    selectBrandScope();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
+    renderAndPressExport();
 
     await waitFor(() => {
       expect(mocks.exportBrandMentions).toHaveBeenCalledWith(brandMentionsExportResponse, 'hotels');
@@ -233,10 +222,7 @@ describe('BrandsView', () => {
 
   it('shows the export loading state while the workbook is being generated', () => {
     mocks.exportBrandMentions.mockImplementation(() => new Promise(vi.fn()));
-    render(<BrandsView keywords={brandKeywordsFixture} />);
-    selectBrandScope();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Export to Excel' }));
+    renderAndPressExport();
 
     expect(screen.getByRole('button', { name: 'Exporting…' })).toBeDisabled();
   });

@@ -3,19 +3,13 @@ import type {
 } from '../types';
 import { isRecord } from '../types/domain/keywordDecoders';
 import { reportScopeParams } from '../components/ui/reportScope';
-import { useAnalysisEndpoint } from './useAnalysisEndpoint';
-
-class VisibilityFetchError extends Error {
-  constructor(message = 'Failed to fetch visibility metrics') {
-    super(message);
-    this.name = 'VisibilityFetchError';
-  }
-}
+import {
+  brandFilterParams, fetchErrors, isAnalysisPayload, useAnalysisEndpoint
+} from './useAnalysisEndpoint';
 
 /** The one `/visibility` shape of every scope: its scope, pooled KPIs, brand leaderboard and keyword rows. */
 function isVisibilityResponse(value: unknown): value is VisibilityResponse {
-  return isRecord(value)
-    && !('error' in value)
+  return isAnalysisPayload(value)
     && isRecord(value.scope)
     && isRecord(value.kpis)
     && Array.isArray(value.brands)
@@ -26,12 +20,9 @@ const visibilityMetricsEndpoint = {
   errorContext: 'visibility',
   logMessage: '[visibility] Error fetching metrics:',
   isValidResponse: isVisibilityResponse,
-  createHttpError: () => new VisibilityFetchError(),
-  createResponseError: (message: string) => new VisibilityFetchError(message),
+  ...fetchErrors('VisibilityFetchError', 'Failed to fetch visibility metrics'),
   buildRequest: (scope: ReportScope, queryPromptId?: string, brand?: string) => {
-    const params = new URLSearchParams(reportScopeParams(scope));
-    if (brand) params.append('brand', brand);
-    if (queryPromptId) params.append('query_prompt_id', queryPromptId);
+    const params = brandFilterParams(reportScopeParams(scope), brand, queryPromptId);
     return {
       path: '/visibility',
       params,

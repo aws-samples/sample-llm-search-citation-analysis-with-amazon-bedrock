@@ -12,6 +12,7 @@ import type { HistoryRangeDays } from './VisibilityHistory';
 import { PersonaComparisonChart } from './PersonaComparisonChart';
 import { PersonaSelector } from '../Personas/PersonaSelector';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
+import { PageHeaderCard } from '../ui/PageHeaderCard';
 import {
   ALL_SCOPE, decodeReportScope, describeReportScope, encodeReportScope, isReportScopeAvailable
 } from '../ui/reportScope';
@@ -65,27 +66,24 @@ export function VisibilityDashboard({ keywords }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
-        <div className="flex flex-col gap-4">
-          <div className="flex-1">
-            <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Visibility Dashboard</h2>
-            <p className="text-sm text-gray-500 mt-2 leading-relaxed">Track how visible your brand is across AI search engines compared to competitors — for one keyword, a keyword group, or everything.</p>
-          </div>
-          <KeywordScopeSelector
-            keywords={activeKeywords}
-            groups={groups}
-            value={scope}
-            onChange={setScope}
-            label="Analyze"
-          />
-          <PersonaSelector
-            id="visibility-persona-filter"
-            name="visibility-persona-filter"
-            selectedPersonaId={selectedPersonaId}
-            onPersonaChange={setSelectedPersonaId}
-          />
-        </div>
-      </div>
+      <PageHeaderCard
+        title="Visibility Dashboard"
+        description="Track how visible your brand is across AI search engines compared to competitors — for one keyword, a keyword group, or everything."
+      >
+        <KeywordScopeSelector
+          keywords={activeKeywords}
+          groups={groups}
+          value={scope}
+          onChange={setScope}
+          label="Analyze"
+        />
+        <PersonaSelector
+          id="visibility-persona-filter"
+          name="visibility-persona-filter"
+          selectedPersonaId={selectedPersonaId}
+          onPersonaChange={setSelectedPersonaId}
+        />
+      </PageHeaderCard>
 
       {(visLoading || trendsLoading) && <div className="text-center py-8 text-gray-500">Loading visibility data...</div>}
 

@@ -1,6 +1,14 @@
+import {
+  fireEvent, screen
+} from '@testing-library/react';
 import type {
   HeadingBlock, ImageBlock, TextBlock, VideoBlock
 } from './content/contentBlocks';
+
+/** Types `value` into the field labelled `label`. */
+export function changeField(label: string, value: string): void {
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+}
 
 /** A large heading that would save; every field can be overridden. */
 export function buildHeadingBlock(overrides: Partial<HeadingBlock> = {}): HeadingBlock {

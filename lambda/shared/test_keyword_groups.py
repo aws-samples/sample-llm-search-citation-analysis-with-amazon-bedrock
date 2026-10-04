@@ -61,6 +61,13 @@ class TestValidateIdList:
 
         assert error == 'add entries must be non-empty ids of at most 64 characters'
 
+    @pytest.mark.parametrize(('entry', 'expected'), [
+        pytest.param('g' * 64, (['g' * 64], None), id='exactly-64-characters'),
+        pytest.param('g' * 65, (None, 'add entries must be non-empty ids of at most 64 characters'), id='65-characters'),
+    ])
+    def test_accepts_ids_up_to_64_characters_and_rejects_longer_ones(self, entry: str, expected: tuple) -> None:
+        assert keyword_groups.validate_id_list([entry], field='add', limit=10) == expected
+
     def test_rejects_lists_over_the_limit(self) -> None:
         _, error = keyword_groups.validate_id_list(['a', 'b', 'c'], field='group_ids', limit=2)
 

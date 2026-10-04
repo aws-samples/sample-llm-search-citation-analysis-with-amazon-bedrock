@@ -1,19 +1,23 @@
 import {
-  describe, it, expect, vi, beforeEach, afterEach 
+  describe, it, expect, vi
 } from 'vitest';
 import {
   renderHook, act 
 } from '@testing-library/react';
 import { useExecutionPolling } from './useExecutionPolling';
+import type { AnalysisScope } from '../types';
 import {
   mockExecutionArn,
-  mockExecutionName,
   createMockStatusResponse,
   createMockFetch,
-  renderExecutionPolling,
+  renderTriggeredExecutionPolling,
   mockKeywordProgress,
   triggerWithProgress,
 } from './useExecutionPolling-fixtures';
+
+import {
+  advanceFakeTime, runEachTestWithFakeTimers
+} from '../test/fakeTime';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
@@ -28,88 +32,76 @@ describe('useExecutionPolling', () => {
     expect(result.current.isRunning).toBe(false);
   });
 
-  it('resolves a success result naming the keyword count when triggerAnalysis succeeds', async () => {
-    const { result } = renderExecutionPolling();
+  it.each([
+    {
+      name: 'resolves a success result naming the keyword count when triggerAnalysis succeeds',
+      fetch: createMockFetch(),
+      expected: {
+        success: true,
+        message: 'Analysis started with 5 keywords!',
+      },
+    },
+    {
+      name: 'resolves a failure result carrying the backend error when triggerAnalysis fails',
+      fetch: createMockFetch({ triggerSuccess: false }),
+      expected: {
+        success: false,
+        message: 'Trigger failed',
+      },
+    },
+  ])('$name', async ({
+    fetch, expected 
+  }) => {
+    const { triggerResult } = await renderTriggeredExecutionPolling(fetch);
 
-    const triggerResult = await act(() => result.current.triggerAnalysis());
-
-    expect(triggerResult).toStrictEqual({
-      success: true,
-      message: 'Analysis started with 5 keywords!',
-    });
+    expect(triggerResult).toStrictEqual(expected);
   });
 
   it('starts monitoring the new execution after triggering analysis', async () => {
-    const { result } = renderExecutionPolling();
-
-    await act(() => result.current.triggerAnalysis());
+    const { result } = await renderTriggeredExecutionPolling();
 
     expect(result.current.execution?.arn).toBe(mockExecutionArn);
     expect(result.current.isRunning).toBe(true);
   });
 
-  it('resolves a failure result carrying the backend error when triggerAnalysis fails', async () => {
-    const { result } = renderExecutionPolling(createMockFetch({ triggerSuccess: false }));
-
-    const triggerResult = await act(() => result.current.triggerAnalysis());
-
-    expect(triggerResult).toStrictEqual({
-      success: false,
-      message: 'Trigger failed',
-    });
-  });
-
-  it('posts the scope to the keyword-specific endpoint when a scope is provided', async () => {
-    const { result } = renderExecutionPolling();
-
-    await act(async () => {
-      await result.current.triggerAnalysis({
+  it.each([
+    {
+      name: 'posts the scope to the keyword-specific endpoint when a scope is provided',
+      scope: {
         mode: 'groups',
-        group_ids: ['hotel-coruna'] 
-      });
-    });
+        group_ids: ['hotel-coruna']
+      } satisfies AnalysisScope,
+      url: 'https://api.test.com/trigger-keyword-analysis',
+      init: {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope: {
+            mode: 'groups',
+            group_ids: ['hotel-coruna']
+          }
+        }),
+      },
+    },
+    {
+      name: 'posts to the classic all-keywords endpoint with no body when no scope is provided',
+      scope: undefined,
+      url: 'https://api.test.com/trigger-analysis',
+      init: { method: 'POST' },
+    },
+  ])('$name', async ({
+    scope, url, init 
+  }) => {
+    await renderTriggeredExecutionPolling(createMockFetch(), scope);
 
-    expect(mockAuthenticatedFetch).toHaveBeenCalledWith('https://api.test.com/trigger-keyword-analysis', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        scope: {
-          mode: 'groups',
-          group_ids: ['hotel-coruna'] 
-        } 
-      }),
-    });
-  });
-
-  it('posts to the classic all-keywords endpoint with no body when no scope is provided', async () => {
-    const { result } = renderExecutionPolling();
-
-    await act(async () => {
-      await result.current.triggerAnalysis();
-    });
-
-    expect(mockAuthenticatedFetch).toHaveBeenCalledWith('https://api.test.com/trigger-analysis', { method: 'POST' });
+    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(url, init);
   });
 
   it.each(['SUCCEEDED', 'FAILED'])('stops running and mirrors the status when the API reports %s', async (status) => {
-    const { result } = renderExecutionPolling(createMockFetch({ statusResponse: createMockStatusResponse(status) }));
-
-    await act(() => result.current.triggerAnalysis());
+    const { result } = await renderTriggeredExecutionPolling(createMockFetch({ statusResponse: createMockStatusResponse(status) }));
 
     expect(result.current.execution?.status).toBe(status);
     expect(result.current.isRunning).toBe(false);
-  });
-
-  it('starts monitoring existing execution via startMonitoring', async () => {
-    const { result } = renderExecutionPolling();
-
-    await act(async () => {
-      result.current.startMonitoring(mockExecutionArn, mockExecutionName);
-    });
-
-    expect(result.current.execution?.arn).toBe(mockExecutionArn);
-    expect(result.current.execution?.name).toBe(mockExecutionName);
-    expect(result.current.isRunning).toBe(true);
   });
 });
 
@@ -158,13 +150,7 @@ describe('useExecutionPolling keyword progress', () => {
 });
 
 describe('useExecutionPolling polling lifecycle', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+  runEachTestWithFakeTimers();
 
   it('stops polling and fires onComplete exactly once after a terminal status', async () => {
     // Regression for AUDIT-2026-08-19 2.16: the interval handle lived in
@@ -180,25 +166,17 @@ describe('useExecutionPolling polling lifecycle', () => {
     });
     const fetchCallsAfterCompletion = mockAuthenticatedFetch.mock.calls.length;
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(9000);
-    });
+    await advanceFakeTime(9000);
 
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(mockAuthenticatedFetch.mock.calls).toHaveLength(fetchCallsAfterCompletion);
   });
 
   it('keeps polling on the interval while the execution is running', async () => {
-    const { result } = renderExecutionPolling(createMockFetch({statusResponse: createMockStatusResponse('RUNNING'),}));
-
-    await act(async () => {
-      await result.current.triggerAnalysis();
-    });
+    await renderTriggeredExecutionPolling(createMockFetch({statusResponse: createMockStatusResponse('RUNNING'),}));
     const fetchCallsAfterTrigger = mockAuthenticatedFetch.mock.calls.length;
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(6000);
-    });
+    await advanceFakeTime(6000);
 
     expect(mockAuthenticatedFetch.mock.calls).toHaveLength(fetchCallsAfterTrigger + 2);
   });

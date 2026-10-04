@@ -7,11 +7,11 @@ import sys
 from collections.abc import Iterator, Mapping
 from types import ModuleType
 from typing import Literal
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from testing.module_loader import load_handler_module
+from testing.module_loader import load_handler_module, stubbed_boto3
 
 
 def handler_fixture(
@@ -30,6 +30,11 @@ def handler_fixture(
     clients they care about with ``patch.object``. The module is unregistered
     from ``sys.modules`` on teardown so a later load starts clean.
 
+    ``directory`` is at the front of ``sys.path`` while the file executes, as
+    in the Lambda runtime, so a handler's bare sibling imports
+    (``from map_run_results import ...``) resolve even when no test from that
+    directory was collected first.
+
     Assign the result to a module attribute -- pytest registers the fixture
     under that name::
 
@@ -38,12 +43,10 @@ def handler_fixture(
 
     @pytest.fixture(scope=scope)
     def _loaded_handler() -> Iterator[ModuleType]:
-        with (
-            patch.dict(os.environ, env),
-            patch('boto3.resource', MagicMock(name='boto3.resource')),
-            patch('boto3.client', MagicMock(name='boto3.client')),
-        ):
-            yield load_handler_module(directory, filename, module_name)
+        with patch.dict(os.environ, env), stubbed_boto3():
+            with patch.object(sys, 'path', [directory, *sys.path]):
+                module = load_handler_module(directory, filename, module_name)
+            yield module
         sys.modules.pop(module_name, None)
 
     return _loaded_handler

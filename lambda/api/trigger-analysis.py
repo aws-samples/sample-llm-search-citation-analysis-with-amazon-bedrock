@@ -21,6 +21,7 @@ from shared.analysis_runs import fetch_enabled_query_prompts, scope_run_input, s
 from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler
+from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import query_active_keywords
 
@@ -32,13 +33,12 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
 STATE_MACHINE_ARN = os.environ['STATE_MACHINE_ARN']
-KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
+KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS')
 # Query prompts table is optional — the analysis flow has a no-prompt fallback
 # for deployments that haven't enabled the feature yet. Default mirrors the
 # CDK stack's resource name for bootstrap deploys.
 QUERY_PROMPTS_TABLE = resolve_table_env(
-    'DYNAMODB_TABLE_QUERY_PROMPTS', 'QUERY_PROMPTS_TABLE',
-    required=False, default='CitationAnalysis-QueryPrompts',
+    'DYNAMODB_TABLE_QUERY_PROMPTS', required=False, default='CitationAnalysis-QueryPrompts',
 )
 
 keywords_table = dynamodb.Table(KEYWORDS_TABLE)
@@ -47,19 +47,12 @@ query_prompts_table = dynamodb.Table(QUERY_PROMPTS_TABLE)
 
 def _scan_active_keywords() -> list[dict[str, Any]]:
     """Every active keyword item by filtered Scan, following pagination (pre-StatusIndex deployments)."""
-    keywords: list[dict[str, Any]] = []
-    scan_params: dict[str, Any] = {
-        'FilterExpression': '#status = :status',
-        'ExpressionAttributeNames': {'#status': 'status'},
-        'ExpressionAttributeValues': {':status': 'active'},
-    }
-    while True:
-        response = keywords_table.scan(**scan_params)
-        keywords.extend(response.get('Items', []))
-        last_key = response.get('LastEvaluatedKey')
-        if not last_key:
-            return keywords
-        scan_params['ExclusiveStartKey'] = last_key
+    return collect_all_items(
+        keywords_table.scan,
+        FilterExpression='#status = :status',
+        ExpressionAttributeNames={'#status': 'status'},
+        ExpressionAttributeValues={':status': 'active'},
+    )
 
 
 def _active_keywords() -> list[dict[str, Any]]:

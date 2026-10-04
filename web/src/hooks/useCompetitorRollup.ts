@@ -1,25 +1,25 @@
-import { ApiRequestError } from '../infrastructure';
 import type { CompetitorReportResponse } from '../api/reports';
-import { useAnalysisEndpoint } from './useAnalysisEndpoint';
+import {
+  apiRequestErrors, isAnalysisPayload, useAnalysisEndpoint 
+} from './useAnalysisEndpoint';
 
 function isCompetitorReportResponse(
   data: unknown,
 ): data is CompetitorReportResponse {
-  if (typeof data !== 'object' || data === null) return false;
-  if ('error' in data) return false;
-  // Single-competitor variant has `rollup`; all-competitors has `rollups`.
-  return 'rollup' in data || 'rollups' in data;
+  if (!isAnalysisPayload(data)) return false;
+  return 'rollup' in data;
 }
 
 const competitorRollupEndpoint = {
   errorContext: 'visibility',
   logMessage: '[competitorRollup] Error:',
   isValidResponse: isCompetitorReportResponse,
-  createHttpError: (status: number) => new ApiRequestError('Failed to fetch competitor rollup', status),
-  createResponseError: (message: string) => new ApiRequestError(message),
-  buildRequest: (competitor?: string, keywordLimit = 50) => {
-    const params = new URLSearchParams({ keyword_limit: keywordLimit.toString() });
-    if (competitor) params.append('competitor', competitor);
+  ...apiRequestErrors('Failed to fetch competitor rollup'),
+  buildRequest: (competitor: string, keywordLimit = 50) => {
+    const params = new URLSearchParams({
+      keyword_limit: keywordLimit.toString(),
+      competitor,
+    });
     return {
       path: '/reports/competitor',
       params,

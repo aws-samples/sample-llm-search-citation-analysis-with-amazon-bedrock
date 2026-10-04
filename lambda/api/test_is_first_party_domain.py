@@ -17,20 +17,11 @@ These tests would FAIL if the substring fallback were reintroduced.
 
 from __future__ import annotations
 
-import os
+import pytest
 
-from testing.env import setdefault_env
-from testing.module_loader import load_handler_module
+from testing.citation_gaps_fixtures import load_citation_gaps
 
-# Table names the module reads at import time, so it loads without touching AWS.
-setdefault_env({
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search',
-    'DYNAMODB_TABLE_CITATIONS': 'test-citations',
-    'DYNAMODB_TABLE_CRAWLED_CONTENT': 'test-crawled',
-})
-is_first_party_domain = load_handler_module(
-    os.path.dirname(__file__), 'get-citation-gaps.py', 'get_citation_gaps_under_test'
-).is_first_party_domain
+is_first_party_domain = load_citation_gaps('get_citation_gaps_under_test').is_first_party_domain
 
 
 class TestExactDomainMatch:
@@ -46,6 +37,18 @@ class TestExactDomainMatch:
         config = {'first_party_domains': ['www.example.com']}
         assert is_first_party_domain('example.com', config) is True
         assert is_first_party_domain('www.example.com', config) is True
+
+
+class TestKpiEngineDomainIdentity:
+    """Citation Gaps counts as first-party exactly what the KPI engine's ``is_owned_domain`` owns."""
+
+    @pytest.mark.parametrize('domain', ['example.com:443', 'example.com.', 'Blog.Example.com.:8443'])
+    def test_owns_a_cited_domain_whatever_its_port_or_trailing_dot(self, domain: str) -> None:
+        assert is_first_party_domain(domain, {'first_party_domains': ['example.com']}) is True
+
+    @pytest.mark.parametrize('configured', ['https://www.example.com/', 'example.com:443', 'example.com.'])
+    def test_owns_the_domain_of_a_configured_url_port_or_trailing_dot(self, configured: str) -> None:
+        assert is_first_party_domain('example.com', {'first_party_domains': [configured]}) is True
 
 
 class TestSubdomainMatch:

@@ -6,6 +6,7 @@ import {
 } from '@testing-library/react';
 import { useContentStudio } from './useContentStudio';
 import {
+  buildContentHistoryPayload,
   createMockFetch,
   mockContentIdea,
   renderContentStudio,
@@ -13,11 +14,13 @@ import {
   renderInitialHistoryInStrictMode,
 } from './useContentStudio-fixtures';
 import {
+  advanceContentStudioTimersAsync,
   buildPollingHistoryItem,
+  contentHistoryStatuses,
   countContentHistoryRequests,
   countContentStatusRequests,
-  createPollingMockFetch,
   renderContentStudioAfterStatusFailureLimit,
+  renderPollingContentStudio,
   renderContentStudioWithDeferredPolling,
   settleDeferredStatusBatch,
   setupContentStudioConsoleErrorMock,
@@ -25,12 +28,16 @@ import {
   unmountContentStudioWithActiveStatusRequest,
 } from './useContentStudio-polling-fixtures';
 import { createMockJsonResponse } from '../test/fetchResponses';
+import { contentStatusPayload } from './useContentStudio-test-fixtures';
+import {
+  buildStartedGenerationResponse,
+  renderInFlightContentStudioAction,
+  runContentStudioAction,
+} from './useContentStudio-scenario-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
 
-import {
-  deferAuthenticatedFetch, mockAuthenticatedFetch
-} from '../test/infrastructureMock';
+import { mockAuthenticatedFetch } from '../test/infrastructureMock';
 
 type ContentStudioHook = ReturnType<typeof useContentStudio>;
 
@@ -80,19 +87,19 @@ describe('useContentStudio initial state', () => {
 
 describe('useContentStudio reads', () => {
   it('stores exact content ideas when the ideas response is valid', async () => {
-    const { result } = renderContentStudio();
-
-    const received = await act(() => result.current.fetchIdeas());
+    const {
+      received, result
+    } = await runContentStudioAction((hook) => hook.fetchIdeas());
 
     expect(received).toStrictEqual([mockContentIdea]);
     expect(result.current.ideas).toStrictEqual([mockContentIdea]);
   });
 
   it('keeps loading true until the ideas request settles', async () => {
-    const deferred = deferAuthenticatedFetch();
-    const { result } = renderHook(() => useContentStudio());
+    const {
+      deferred, result
+    } = renderInFlightContentStudioAction((hook) => hook.fetchIdeas());
 
-    act(() => { void result.current.fetchIdeas(); });
     expect(result.current.loading).toBe(true);
     deferred.resolve(createMockJsonResponse({
       ideas: [],
@@ -116,9 +123,9 @@ describe('useContentStudio reads', () => {
   });
 
   it('stores exact history identity status and viewed state when history is fetched', async () => {
-    const { result } = renderContentStudio();
-
-    const received = await act(() => result.current.fetchHistory());
+    const {
+      received, result
+    } = await runContentStudioAction((hook) => hook.fetchHistory());
     const receivedSummary = received.map((item) => [
       item.id,
       item.status,
@@ -157,26 +164,21 @@ describe('useContentStudio reads', () => {
 
 describe('useContentStudio generation starts', () => {
   it('returns the accepted result when one generation starts', async () => {
-    const { result } = renderContentStudio();
-
-    const received = await act(() => result.current.generateContent(mockContentIdea));
+    const { received } = await runContentStudioAction(
+      (hook) => hook.generateContent(mockContentIdea)
+    );
 
     expect(received?.success).toBe(true);
     expect(received?.id).toBe('new-content-1');
   });
 
   it('tracks generating only while the start request is in flight', async () => {
-    const deferred = deferAuthenticatedFetch();
-    const { result } = renderHook(() => useContentStudio());
+    const {
+      deferred, result
+    } = renderInFlightContentStudioAction((hook) => hook.generateContent(mockContentIdea));
 
-    act(() => { void result.current.generateContent(mockContentIdea); });
     expect(result.current.generating).toBe(true);
-    deferred.resolve(createMockJsonResponse({
-      success: true,
-      id: 'content-new',
-      status: 'pending',
-      keyword: 'best hotels',
-    }));
+    deferred.resolve(createMockJsonResponse(buildStartedGenerationResponse('content-new')));
 
     await waitFor(() => {
       expect(result.current.generating).toBe(false);
@@ -199,9 +201,7 @@ describe('useContentStudio history mutations', () => {
     _operation,
     run
   ) => {
-    const { result } = renderContentStudio();
-
-    const success = await act(() => run(result.current));
+    const { received: success } = await runContentStudioAction(run);
 
     expect(success).toBe(true);
   });
@@ -211,11 +211,10 @@ describe('useContentStudio history mutations', () => {
     run
   ) => {
     vi.spyOn(console, 'error').mockImplementation(vi.fn());
-    const { result } = renderContentStudio(
-      vi.fn().mockResolvedValue(createMockJsonResponse({}, 500))
+    const { received: success } = await runContentStudioAction(
+      run,
+      createMockFetch({ shouldFail: true })
     );
-
-    const success = await act(() => run(result.current));
 
     expect(success).toBe(false);
   });
@@ -260,12 +259,17 @@ describe('useContentStudio status polling', () => {
     const { unmount } = await renderContentStudioAfterStatusFailureLimit('network');
     const callsAtFailureLimit = countContentStatusRequests();
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
-    });
+    await advanceContentStudioTimersAsync(30_000);
 
     expect(callsAtFailureLimit).toBe(3);
     expect(countContentStatusRequests()).toBe(3);
+    unmount();
+  });
+
+  it('leaves no polling timer behind once the only generating item reaches three consecutive failures', async () => {
+    const { unmount } = await renderContentStudioAfterStatusFailureLimit('network');
+
+    expect(vi.getTimerCount()).toBe(0);
     unmount();
   });
 
@@ -277,86 +281,33 @@ describe('useContentStudio status polling', () => {
     ]]);
     expect(deferredStatusFetch.statusRequests).toHaveLength(1);
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_000);
-    });
+    await advanceContentStudioTimersAsync(30_000);
 
     expect(deferredStatusFetch.statusRequests).toHaveLength(1);
     unmount();
   });
 
-  it('preserves newer successful status when a superseded request fails later', async () => {
-    const generatingItem = buildPollingHistoryItem('content-a');
-    const generatedItem = buildPollingHistoryItem('content-a', 'generated');
-    const {
-      deferredStatusFetch, result, unmount
-    } = await renderContentStudioWithDeferredPolling([
-      [generatingItem],
-      [generatedItem],
-    ]);
-    const initialRequest = deferredStatusFetch.statusRequests[0];
-    act(() => result.current.refreshGeneratingItems());
-    const replacementRequest = deferredStatusFetch.statusRequests[1];
-
-    await act(async () => {
-      replacementRequest.response.resolve(createMockJsonResponse({
-        id: 'content-a',
-        status: 'generated',
-      }));
-      await vi.advanceTimersByTimeAsync(0);
-    });
-    await act(async () => {
-      initialRequest.response.reject(new TypeError('Stale network failure'));
-      await vi.advanceTimersByTimeAsync(0);
-    });
-
-    expect(initialRequest.signal?.aborted).toBe(true);
-    expect(result.current.history.map((item) => item.status)).toStrictEqual(['generated']);
-    expect(result.current.error).toBeNull();
-    expect(deferredStatusFetch.statusRequests).toHaveLength(2);
-    unmount();
-  });
-
   it('stops polling with exact local terminal state when terminal history refresh fails', async () => {
-    vi.useFakeTimers();
-    const generatingItem = buildPollingHistoryItem('content-a');
     const {
       result, unmount
-    } = renderContentStudio(createPollingMockFetch({
-      historyResponse: {
-        history: [generatingItem],
-        total_count: 1,
-        unviewed_count: 0,
-      },
-      statusResponses: {
-        'content-a': {
-          id: 'content-a',
-          status: 'generated'
-        },
-      },
+    } = await renderPollingContentStudio({
+      historyResponse: buildContentHistoryPayload([buildPollingHistoryItem('content-a')]),
+      statusResponses: { 'content-a': contentStatusPayload('content-a', 'generated') },
       historyRefreshFailureDelayMs: 1,
-    }));
-
-    await act(async () => {
-      await result.current.fetchHistory();
     });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
+    await advanceContentStudioTimersAsync(0);
     const beforeRefreshFailure = {
-      history: result.current.history.map((item) => [item.id, item.status]),
+      history: contentHistoryStatuses(result.current),
       statusRequests: countContentStatusRequests(),
       historyRequests: countContentHistoryRequests(),
     };
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(30_001);
-    });
+    await advanceContentStudioTimersAsync(30_001);
 
     expect({
       beforeRefreshFailure,
       afterRefreshFailure: {
-        history: result.current.history.map((item) => [item.id, item.status]),
+        history: contentHistoryStatuses(result.current),
         error: result.current.error,
         statusRequests: countContentStatusRequests(),
         historyRequests: countContentHistoryRequests(),
@@ -393,7 +344,7 @@ describe('useContentStudio status polling', () => {
       ['generated', 'network-failure']
     );
 
-    expect(result.current.history.map((item) => [item.id, item.status])).toStrictEqual([
+    expect(contentHistoryStatuses(result.current)).toStrictEqual([
       ['content-a', 'generated'],
       ['content-b', 'generating'],
     ]);
@@ -417,12 +368,12 @@ describe('useContentStudio status polling', () => {
       deferredStatusFetch.statusRequests.slice(0, 2),
       ['network-failure', 'generating']
     );
-    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    await advanceContentStudioTimersAsync(10_000);
     await settleDeferredStatusBatch(
       deferredStatusFetch.statusRequests.slice(2, 4),
       ['network-failure', 'generating']
     );
-    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    await advanceContentStudioTimersAsync(10_000);
     await settleDeferredStatusBatch(
       deferredStatusFetch.statusRequests.slice(4, 6),
       ['network-failure', 'generated']
@@ -441,32 +392,15 @@ describe('useContentStudio status polling', () => {
   });
 
   it('continues polling healthy items when another item reaches its failure limit', async () => {
-    vi.useFakeTimers();
-    const firstItem = buildPollingHistoryItem('content-a');
-    const secondItem = buildPollingHistoryItem('content-b');
-    const {
-      result, unmount
-    } = renderContentStudio(createPollingMockFetch({
-      historyResponse: {
-        history: [firstItem, secondItem],
-        total_count: 2,
-        unviewed_count: 0,
-      },
+    const { unmount } = await renderPollingContentStudio({
+      historyResponse: buildContentHistoryPayload([
+        buildPollingHistoryItem('content-a'),
+        buildPollingHistoryItem('content-b'),
+      ]),
       statusFailures: { 'content-a': 'network' },
-      statusResponses: {
-        'content-b': {
-          id: 'content-b',
-          status: 'generating'
-        },
-      },
-    }));
-
-    await act(async () => {
-      await result.current.fetchHistory();
+      statusResponses: { 'content-b': contentStatusPayload('content-b', 'generating') },
     });
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(40_000);
-    });
+    await advanceContentStudioTimersAsync(40_000);
 
     expect(countContentStatusRequests('content-a')).toBe(3);
     expect(countContentStatusRequests('content-b')).toBe(5);
@@ -483,13 +417,7 @@ describe('useContentStudio status polling', () => {
     const {
       activeRequest, deferredStatusFetch
     } = await unmountContentStudioWithActiveStatusRequest();
-    await act(async () => {
-      activeRequest.response.resolve(createMockJsonResponse({
-        id: 'content-a',
-        status: 'generated',
-      }));
-      await vi.advanceTimersByTimeAsync(30_000);
-    });
+    await settleDeferredStatusBatch([activeRequest], ['generated'], 30_000);
 
     expect(countContentHistoryRequests()).toBe(1);
     expect(deferredStatusFetch.statusRequests).toHaveLength(1);
@@ -506,22 +434,5 @@ describe('useContentStudio status polling', () => {
 
     expect(clearIntervalSpy).toHaveBeenCalledTimes(callsBeforeUnmount + 1);
     clearIntervalSpy.mockRestore();
-  });
-});
-
-describe('useContentStudio refreshGeneratingItems', () => {
-  it('retries an exhausted item when manual refresh resets failure accounting', async () => {
-    const {
-      result, unmount
-    } = await renderContentStudioAfterStatusFailureLimit('network');
-
-    act(() => result.current.refreshGeneratingItems());
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-
-    expect(countContentStatusRequests()).toBe(4);
-    expect(result.current.error).toBeNull();
-    unmount();
   });
 });

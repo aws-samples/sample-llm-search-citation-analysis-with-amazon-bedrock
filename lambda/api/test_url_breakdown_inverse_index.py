@@ -24,7 +24,10 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Any
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from testing.module_loader import load_handler_module
 
@@ -168,31 +171,17 @@ class TestExpandToBreakdown:
         breakdown = _mod._expand_to_breakdown(items)
         assert breakdown[0]['timestamp'] == '2025-12-01T00:00:00Z'
 
-    def test_empty_citing_providers_yields_one_entry_with_blank_provider(
-        self,
+    @pytest.mark.parametrize('providers', [
+        pytest.param({'citing_providers': []}, id='empty-citing-providers'),
+        pytest.param({}, id='missing-citing-providers-field'),
+    ])
+    def test_rows_without_citing_providers_yield_one_entry_with_blank_provider(
+        self, providers: dict[str, Any],
     ) -> None:
-        """A Citations row should never have empty providers in practice,
-        but if one slips in, surface it (blank provider) rather than drop
-        the keyword silently."""
-        items = [
-            {
-                'keyword': 'kw',
-                'citing_providers': [],
-                'last_updated': '2026-04-17T12:00:00Z',
-            }
-        ]
-        breakdown = _mod._expand_to_breakdown(items)
-
-        assert breakdown == [
-            {'keyword': 'kw', 'provider': '',
-             'timestamp': '2026-04-17T12:00:00Z'},
-        ]
-
-    def test_missing_citing_providers_field_yields_blank_provider_entry(
-        self,
-    ) -> None:
-        """Same defensive contract when the field is absent entirely."""
-        items = [{'keyword': 'kw', 'last_updated': '2026-04-17T12:00:00Z'}]
+        """A Citations row should never have empty (or absent) providers in
+        practice, but if one slips in, surface it (blank provider) rather
+        than drop the keyword silently."""
+        items = [{'keyword': 'kw', **providers, 'last_updated': '2026-04-17T12:00:00Z'}]
         breakdown = _mod._expand_to_breakdown(items)
 
         assert breakdown == [

@@ -1,4 +1,4 @@
-"""Stored SearchResults rows and a SearchResults table stub for the sentiment-examples tests.
+"""Stored SearchResults rows for the sentiment-examples tests.
 
 Shared by ``shared/test_sentiment_examples.py`` (the selection) and
 ``api/test_get_sentiment_examples.py`` (the endpoint).
@@ -6,13 +6,12 @@ Shared by ``shared/test_sentiment_examples.py`` (the selection) and
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import functools
 from typing import Any
-from unittest.mock import MagicMock
 
 from hypothesis import strategies as st
 
-from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
+from testing.search_results_fixtures import search_result_row
 
 RUN = '2026-09-28T10:00:00.000000Z'
 OLDER_RUN = '2026-09-21T10:00:00.000000Z'
@@ -30,72 +29,8 @@ def stored_brand(
     return {'name': name, 'classification': classification, 'rank': rank, 'sentiment': sentiment, **fields}
 
 
-def stored_answer(
-    keyword: str,
-    provider: str,
-    brands: Sequence[Mapping[str, Any]],
-    *,
-    timestamp: str = RUN,
-    **fields: object,
-) -> dict[str, Any]:
-    """One SearchResults row of a successful answer; ``fields`` adds or overrides attributes (``response`` ...)."""
-    persona = str(fields.get('query_prompt_id', 'default'))
-    return {
-        'keyword': keyword,
-        'timestamp': timestamp,
-        'timestamp_provider': f'{timestamp}#{provider}#{persona}',
-        'provider': provider,
-        'status': 'success',
-        'query_prompt_id': persona,
-        'brands': [dict(brand) for brand in brands],
-        'citations': [],
-        **fields,
-    }
-
-
-class PartitionReadFailure(Exception):
-    """A SearchResults partition that cannot be read."""
-
-
-def search_results_stub(rows_by_keyword: Mapping[str, Sequence[Mapping[str, Any]] | Exception]) -> MagicMock:
-    """A SearchResults ``Table`` answering the latest-run lookup and the run read from ``rows_by_keyword``.
-
-    A keyword mapped to an exception raises it on every read. The sort-key
-    condition, when present, is read as a prefix (``begins_with``); newest-first
-    reads with ``Limit`` return the newest rows.
-    """
-
-    def query(**kwargs: Any) -> dict[str, Any]:
-        expression = kwargs['KeyConditionExpression'].get_expression()
-        conditions = expression['values'] if expression['operator'] == 'AND' else (kwargs['KeyConditionExpression'],)
-        keyword = conditions[0].get_expression()['values'][1]
-        prefix = conditions[1].get_expression()['values'][1] if len(conditions) > 1 else ''
-        stored = rows_by_keyword.get(keyword, [])
-        if isinstance(stored, Exception):
-            raise stored
-        rows = sorted(
-            (dict(row) for row in stored if row['timestamp_provider'].startswith(prefix)),
-            key=lambda row: row['timestamp_provider'],
-            reverse=not kwargs.get('ScanIndexForward', True),
-        )
-        return {'Items': rows[:kwargs.get('Limit', len(rows))]}
-
-    table = MagicMock(name='search-results')
-    table.query.side_effect = query
-    return table
-
-
-def examples_dynamodb(search_table: MagicMock, active_keywords: Sequence[Mapping[str, Any]] = ()) -> MagicMock:
-    """A DynamoDB resource: ``test-search-results`` is ``search_table``, ``test-keywords`` lists ``active_keywords``.
-
-    Every other table name answers empty pages, so a handler reading the
-    wrong table finds nothing instead of paginating a bare ``MagicMock`` forever.
-    """
-    return fake_dynamodb_resource(
-        fake_table(query={'Items': []}),
-        by_name={'test-search-results': search_table, 'test-keywords': fake_table(query={'Items': list(active_keywords)})},
-    )
-
+#: One SearchResults row of a successful answer from ``RUN``; keywords add or override attributes (``response`` ...).
+stored_answer = functools.partial(search_result_row, timestamp=RUN, status='success')
 
 
 # Brand dicts as models write them: names that collide across case, every

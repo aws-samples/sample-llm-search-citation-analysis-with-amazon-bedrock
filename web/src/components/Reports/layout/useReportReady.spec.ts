@@ -1,8 +1,11 @@
 import {
-  describe, it, expect 
+  describe, it, expect
 } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { useReportReady } from './useReportReady';
+import {
+  failedSlice, LOADING_SLICE, settledSlice
+} from './reportSlice-fixtures';
 
 /**
  * `useReportReady` is the single source of truth for "all the report's data
@@ -18,75 +21,15 @@ import { useReportReady } from './useReportReady';
  *   when `loading` is still false but `data` is still null
  */
 describe('useReportReady', () => {
-  it('returns true when slice list is empty', () => {
-    const { result } = renderHook(() => useReportReady([]));
-    expect(result.current).toBe(true);
-  });
+  it.each([
+    ['returns true when slice list is empty', [], true],
+    ['returns false when any slice is loading', [settledSlice({ ok: true }), LOADING_SLICE], false],
+    ['returns true when every slice has resolved data', [settledSlice({ a: 1 }), settledSlice({ b: 2 })], true],
+    ['treats a settled error as ready (so print is not blocked by a failed fetch)', [failedSlice('boom'), settledSlice({ ok: true })], true],
+    ['returns false when a slice is settled but has no data and no error', [settledSlice(null)], false],
+  ])('%s', (_name, slices, ready) => {
+    const { result } = renderHook(() => useReportReady(slices));
 
-  it('returns false when any slice is loading', () => {
-    const { result } = renderHook(() =>
-      useReportReady([
-        {
-          loading: false,
-          data: { ok: true },
-          error: null 
-        },
-        {
-          loading: true,
-          data: null,
-          error: null 
-        },
-      ]),
-    );
-    expect(result.current).toBe(false);
-  });
-
-  it('returns true when every slice has resolved data', () => {
-    const { result } = renderHook(() =>
-      useReportReady([
-        {
-          loading: false,
-          data: { a: 1 },
-          error: null 
-        },
-        {
-          loading: false,
-          data: { b: 2 },
-          error: null 
-        },
-      ]),
-    );
-    expect(result.current).toBe(true);
-  });
-
-  it('treats a settled error as ready (so print is not blocked by a failed fetch)', () => {
-    const { result } = renderHook(() =>
-      useReportReady([
-        {
-          loading: false,
-          data: null,
-          error: 'boom' 
-        },
-        {
-          loading: false,
-          data: { ok: true },
-          error: null 
-        },
-      ]),
-    );
-    expect(result.current).toBe(true);
-  });
-
-  it('returns false when a slice is settled but has no data and no error', () => {
-    const { result } = renderHook(() =>
-      useReportReady([
-        {
-          loading: false,
-          data: null,
-          error: null 
-        },
-      ]),
-    );
-    expect(result.current).toBe(false);
+    expect(result.current).toBe(ready);
   });
 });

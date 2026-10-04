@@ -9,6 +9,84 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.30.0] - 2026-10-03
+
+### Added
+
+- **Recommendation status in the Action Center.** Each rule-based recommendation has a status menu (New, In
+  progress, Done, Won't fix) that saves through `POST /api/recommendations/{id}/status`, so the status survives a
+  reload, a re-run and another user opening the page. The menu is disabled while it saves, done and won't-fix items
+  are dimmed, and a failed save says so and keeps the previous status. Notes and links already stored with a
+  recommendation are sent back with each change, so the endpoint's full-row write does not erase them.
+  AI-enhanced recommendations have no stable id and show no menu.
+
+### Fixed
+
+- **Provider failures are counted by category.** The search Lambda dropped `error_category` from the result it
+  hands to Step Functions, so the run summary filed every provider failure under `unknown`; it now shows `insufficient_credit`,
+  `invalid_key`, `rate_limited` and `timeout`.
+- **Persona Rankings** show the KPI visibility score (`kpi_engine`, position-weighted). They used a second,
+  differently weighted formula, so the same brand scored differently there (for example 85.6 instead of 100.0).
+- **First-party domains are matched one way everywhere.** Citation Gaps now treats `example.com:443`, `example.com.`
+  and bare-domain citations as first-party, as the KPIs already did, and a malformed citation URL no longer breaks
+  the KPI calculation. Adding an owned domain in Brand Tracking stores the same canonical domain (no port, query,
+  credentials or edge dots). `test-fixtures/domain-identity.json` pins the rules for Python and TypeScript.
+- Adding a keyword flags full-width, decomposed-accent and other Unicode variants of an existing keyword as
+  duplicates, matching what the API already rejected.
+- Provider names read "OpenAI", "Google Gemini" and "Anthropic Claude" everywhere (keyword details showed
+  "Openai"); provider badges use the chart colours. A contract test pins provider ids, names and default models
+  between the dashboard and the Lambdas.
+- The Visibility leaderboard says "first-party", like the KPI guide and the reports.
+- A sentiment share note rounds like its chart (28.8%, not 28.7%).
+- The self-reflection 24-hour cache is measured in UTC; a stored timestamp with an offset is converted instead of
+  having its offset dropped, and a malformed one is a cache miss instead of a 500.
+- The decorative Refresh and Invite icons in Settings › Users are hidden from screen readers.
+
+### Changed
+
+- **Duplicate and dead code sweep.** Clones at the new 25-token / 3-line floor went from about 1,950 to 501, all
+  reviewed as incidental and recorded in `.jscpd-baseline/`; together with the dead code removed below, production
+  code shrank by about 2,450 lines. The CDK stack has one factory each for Lambdas, IAM grants and routes, and
+  deduplicating it left the synthesized template unchanged; one search flow for every
+  search provider; one conditional-write, paginator, timestamp, percent, priority-order and sentiment-label helper in
+  `lambda/shared`; one saved-template hook, error factory and icon component in the dashboard; exports nothing
+  imports were removed.
+- **Duplication gate:** jscpd runs at 25 tokens / 3 lines, ignoring comments and comparing `.ts` with `.tsx`; any
+  clone not in the baseline fails `npm run validate`. `npm run duplication:baseline` rewrites the baseline.
+- The lines the sweep changed were mutation-tested (mutmut and Stryker) and the survivors closed with tests or
+  removed as dead code: Python tests went from 3,372 to 3,626 and dashboard tests from 4,600 to 4,816. Contract tests
+  now also pin the research state-machine timeout against the stale-job sweep and the Bedrock tier defaults between
+  the CDK stack and `shared/models.py`.
+- `npm run contracts` no longer counts fixture modules under `web/src/types` as type declarations.
+
+### Removed
+
+- **Dead code** no production path reaches: unused shared helpers and constants (`provider_health.describe_category`,
+  `auth.USERS_GROUP`, fail-fast table names nothing read), parameters and defaults every caller overrides, a
+  never-used raw-response option of research job views, a re-raise-only `try`, `lambda/layer/test-layer.py`, and on
+  the dashboard about 20 component props and hook return members no caller passes or reads, two unused `export`s,
+  51 dark-mode CSS overrides for classes nothing uses, and Tailwind animation settings that restated the defaults.
+  Config entries that matched nothing (vulture exemptions, five ruff ignores) are gone, so those gates are stricter.
+- **Legacy table env-var aliases (audit #12).** Every Lambda reads only the canonical `DYNAMODB_TABLE_*` name;
+  `KEYWORDS_TABLE`, `SEARCH_RESULTS_TABLE`, `CITATIONS_TABLE`, `CRAWLED_CONTENT_TABLE`, `CITATIONS_TABLE_NAME`,
+  `PROVIDER_CONFIG_TABLE`, `QUERY_PROMPTS_TABLE`, `KEYWORD_RESEARCH_TABLE` and `RECOMMENDATION_STATUS_TABLE` are no
+  longer set, and `resolve_table_env` has no fallback. Code and configuration change in the same deployment.
+- **The 2.14.0 Content Studio drain.** Generation has run only in ContentStudioWorker since 2.14.0, so the API Lambda
+  drops its temporary 300 s timeout (now the 29 s API Gateway ceiling), its reserved concurrency, and its Bedrock,
+  crawled-content, table-scan and Lambda-invoke permissions; the handler drops the pre-rollout `async_generation`
+  forwarder. A stack still on a release before 2.14.0 should deploy 2.14.0–2.29.0 first.
+- **The unused `CitationCountIndex` GSI** on `CitationAnalysis-Citations`. Deploying deletes the index (an online
+  change that lowers write cost); no reader ever queried it.
+- **Code no entry point reaches** (found by a call graph walked from every handler, route map, Step Functions task
+  and `main.tsx`, by member read/write analysis, and by coverage runs): the never-rendered `ContentGenerator`
+  component; dashboard hook actions no screen calls (brand-config reset, expand and refetch, provider key
+  validation, execution monitoring start, generating-item refresh) and the response fields,
+  error metadata and execution-progress values nothing displays; unused modal sizes, the never-emitted `critical`
+  alert severity and the all-competitors report variant the dashboard never requests; 16 unused barrel re-exports.
+  In the Lambdas: the search Lambda's `provider_types` filter and unread output keys, ParseKeywords' never-used
+  `keywords_file` input (and its S3 read permission), fallbacks for table and bucket env vars CDK always sets,
+  retry and model options no caller passes, and the `shared` package's unused re-exports.
+
 ## [2.29.0] - 2026-10-03
 
 ### Added

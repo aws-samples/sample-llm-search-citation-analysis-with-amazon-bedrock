@@ -4,7 +4,6 @@ import {
 import {
   ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY,
   CONTENT_STUDIO_BATCH_STORAGE_VERSION,
-  LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY,
   addStoredContentStudioBatchCandidate,
   boundedContentStudioBatchCandidates,
   readStoredContentStudioBatchCandidates,
@@ -12,8 +11,15 @@ import {
 } from './contentStudioBatchStorage';
 import {
   buildBatchCandidate,
+  buildBatchCandidateState,
+  mockRejectedStorageWrites,
+  spyOnStorageMutations,
   storeBatchCandidateEntries,
+  storeBatchCandidateValue,
+  storeLegacyBatchIdsValue,
   storedBatchCandidateState,
+  storedBatchCandidateValue,
+  storedLegacyBatchIdsValue,
 } from './contentStudioBatchStorage-fixtures';
 
 class TestStorageError extends Error {
@@ -47,8 +53,9 @@ describe('Content Studio active batch candidate storage', () => {
   });
 
   it('returns no candidates without mutating storage when both keys are absent', () => {
-    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
-    const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem');
+    const {
+      removeItemSpy, setItemSpy
+    } = spyOnStorageMutations();
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([]);
     expect(setItemSpy).toHaveBeenCalledTimes(0);
@@ -56,23 +63,16 @@ describe('Content Studio active batch candidate storage', () => {
   });
 
   it('migrates legacy string IDs once with expired-safe timestamps', () => {
-    localStorage.setItem(
-      LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY,
-      JSON.stringify(['batch-1', 'batch-1', 'batch-2'])
-    );
+    storeLegacyBatchIdsValue(JSON.stringify(['batch-1', 'batch-1', 'batch-2']));
 
-    expect(readStoredContentStudioBatchCandidates()).toStrictEqual([
+    const migrated = [
       buildBatchCandidate('batch-1', 0),
       buildBatchCandidate('batch-2', 0),
-    ]);
-    expect(localStorage.getItem(LEGACY_CONTENT_STUDIO_BATCH_IDS_STORAGE_KEY)).toBeNull();
-    expect(storedBatchCandidateState()).toStrictEqual({
-      version: 2,
-      entries: [
-        buildBatchCandidate('batch-1', 0),
-        buildBatchCandidate('batch-2', 0),
-      ],
-    });
+    ];
+
+    expect(readStoredContentStudioBatchCandidates()).toStrictEqual(migrated);
+    expect(storedLegacyBatchIdsValue()).toBeNull();
+    expect(storedBatchCandidateState()).toStrictEqual(buildBatchCandidateState(migrated));
   });
 
   it.each([
@@ -83,14 +83,10 @@ describe('Content Studio active batch candidate storage', () => {
     }),
     JSON.stringify(['batch-1']),
   ])('clears malformed v2 candidate state when value is %s', (storedState) => {
-    localStorage.setItem(
-      ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY,
-      storedState
-    );
+    storeBatchCandidateValue(storedState);
 
     expect(readStoredContentStudioBatchCandidates()).toStrictEqual([]);
-    expect(localStorage.getItem(ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY))
-      .toBeNull();
+    expect(storedBatchCandidateValue()).toBeNull();
   });
 
   it('bounds malformed and future timestamps when candidate entries are recovered', () => {
@@ -115,19 +111,14 @@ describe('Content Studio active batch candidate storage', () => {
       },
     ]);
 
-    expect(readStoredContentStudioBatchCandidates()).toStrictEqual([
+    const bounded = [
       buildBatchCandidate('future', 1_000),
       buildBatchCandidate('malformed', 0),
       buildBatchCandidate('negative', 0),
-    ]);
-    expect(storedBatchCandidateState()).toStrictEqual({
-      version: 2,
-      entries: [
-        buildBatchCandidate('future', 1_000),
-        buildBatchCandidate('malformed', 0),
-        buildBatchCandidate('negative', 0),
-      ],
-    });
+    ];
+
+    expect(readStoredContentStudioBatchCandidates()).toStrictEqual(bounded);
+    expect(storedBatchCandidateState()).toStrictEqual(buildBatchCandidateState(bounded));
   });
 
   it('keeps the newest registration when duplicate IDs are bounded', () => {
@@ -191,14 +182,11 @@ describe('Content Studio active batch candidate storage', () => {
     expect(removeStoredContentStudioBatchCandidates([
       buildBatchCandidate('batch-1', 100),
     ])).toStrictEqual([]);
-    expect(localStorage.getItem(ACTIVE_CONTENT_STUDIO_BATCH_CANDIDATES_STORAGE_KEY))
-      .toBeNull();
+    expect(storedBatchCandidateValue()).toBeNull();
   });
 
   it('keeps in-memory candidates bounded when browser writes are unavailable', () => {
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new TestStorageError();
-    });
+    mockRejectedStorageWrites(new TestStorageError());
 
     expect(addStoredContentStudioBatchCandidate(
       buildBatchCandidate('batch-1', 100)

@@ -52,15 +52,17 @@ describe('describeRunProgress', () => {
   });
 });
 
+const RUN_ACTION_LABELS: [ResearchStatus, string][] = [
+  ['pending', 'View progress'],
+  ['running', 'View progress'],
+  ['processing', 'View progress'],
+  ['completed', 'View results'],
+  ['partial', 'View results'],
+  ['failed', 'View details'],
+];
+
 describe('runActionLabel', () => {
-  it.each<[ResearchStatus, string]>([
-    ['pending', 'View progress'],
-    ['running', 'View progress'],
-    ['processing', 'View progress'],
-    ['completed', 'View results'],
-    ['partial', 'View results'],
-    ['failed', 'View details'],
-  ])('offers "%s" → %s', (status, label) => {
+  it.each(RUN_ACTION_LABELS)('offers "%s" → %s', (status, label) => {
     expect(runActionLabel(status)).toBe(label);
   });
 });
@@ -75,23 +77,31 @@ describe('AgentRunList', () => {
     expect(screen.getByText(/^2 rounds · 41 candidates · 3 proposed · /)).toBeInTheDocument();
   });
 
-  it.each<[ResearchStatus, string]>([
-    ['running', 'View progress'],
-    ['completed', 'View results'],
-    ['partial', 'View results'],
-    ['failed', 'View details'],
-  ])('labels the primary button for a %s run "%s"', (status, label) => {
+  it.each(RUN_ACTION_LABELS)('labels the primary button for a %s run "%s"', (status, label) => {
     renderRunList([buildAgentJob({ status })]);
 
     expect(screen.getByRole('button', { name: `${label} of Hotel Gran Marino` })).toBeInTheDocument();
   });
 
-  it('opens the run from its primary button', async () => {
+  it.each([
+    {
+      outcome: 'opens the run from its primary button',
+      button: /^View results/,
+      handler: 'onSelect',
+    },
+    {
+      outcome: 'deletes a finished run from its Delete button',
+      button: 'Delete run Hotel Gran Marino',
+      handler: 'onDelete',
+    },
+  ] as const)('$outcome', async ({
+    button, handler
+  }) => {
     const handlers = renderRunList([buildAgentJob()]);
 
-    await userEvent.click(screen.getByRole('button', { name: /^View results/ }));
+    await userEvent.click(screen.getByRole('button', { name: button }));
 
-    expect(handlers.onSelect).toHaveBeenCalledWith('job-a');
+    expect(handlers[handler]).toHaveBeenCalledWith('job-a');
   });
 
   it('offers a retry only for failed or partial runs', () => {
@@ -119,14 +129,6 @@ describe('AgentRunList', () => {
     renderRunList([buildAgentJob({ status: 'running' })]);
 
     expect(screen.queryByRole('button', { name: /delete run/i })).toBeNull();
-  });
-
-  it('deletes a finished run from its Delete button', async () => {
-    const handlers = renderRunList([buildAgentJob()]);
-
-    await userEvent.click(screen.getByRole('button', { name: 'Delete run Hotel Gran Marino' }));
-
-    expect(handlers.onDelete).toHaveBeenCalledWith('job-a');
   });
 
   it('tells the user how to start when there are no runs', () => {

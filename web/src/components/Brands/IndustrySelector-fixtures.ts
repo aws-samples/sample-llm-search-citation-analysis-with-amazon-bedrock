@@ -1,3 +1,6 @@
+import {
+  fireEvent, screen 
+} from '@testing-library/react';
 import { vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import type { IndustryPresets } from '../../types';
@@ -10,16 +13,12 @@ export const INDUSTRY_PRESETS = {
     name: 'Hospitality',
     description: 'Hotels and travel',
     example_brands: ['Marriott', 'Hilton'],
-    entity_types: ['hotel'],
-    extraction_focus: 'brands',
     default_prompt: 'test',
   },
   retail: {
     name: 'Retail',
     description: 'Retail stores',
     example_brands: ['Amazon', 'Walmart'],
-    entity_types: ['store'],
-    extraction_focus: 'brands',
     default_prompt: 'test',
   },
 } satisfies IndustryPresets;
@@ -36,4 +35,9 @@ export function buildIndustrySelectorProps(
     onIndustryChange: vi.fn(),
     ...overrides,
   };
+}
+
+/** Picks the retail preset in the (only) industry combobox. */
+export function chooseRetailIndustry(): void {
+  fireEvent.change(screen.getByRole('combobox'), { target: { value: 'retail' } });
 }

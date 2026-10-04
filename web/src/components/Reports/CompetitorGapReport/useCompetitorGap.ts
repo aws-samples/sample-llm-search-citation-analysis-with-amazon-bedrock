@@ -1,10 +1,7 @@
 import { useEffect } from 'react';
 import { useCompetitorRollup } from '../../../hooks/useCompetitorRollup';
 import { useReportReady } from '../layout/useReportReady';
-import {
-  isSingleCompetitorResponse,
-  type CompetitorRollup,
-} from '../../../api/reports';
+import type { CompetitorRollup } from '../../../api/reports';
 
 const DEFAULT_KEYWORD_LIMIT = 50;
 
@@ -29,13 +26,7 @@ export function useCompetitorGap(competitor: string | null) {
     }
   }, [competitor, fetchCompetitorRollup]);
 
-  // Translate the discriminated union into a single, ergonomic
-  // `currentRollup` field so report sections don't have to re-narrow
-  // the union themselves.
-  const currentRollup: CompetitorRollup | null
-    = rollup.data && isSingleCompetitorResponse(rollup.data)
-      ? rollup.data.rollup
-      : null;
+  const currentRollup: CompetitorRollup | null = rollup.data?.rollup ?? null;
 
   // When the selected competitor is unset we don't fetch, so the slice
   // is trivially "ready" — gating only matters once a target is picked.
@@ -49,7 +40,6 @@ export function useCompetitorGap(competitor: string | null) {
   const ready = useReportReady([slice]);
 
   return {
-    competitor,
     rollup: currentRollup,
     keywordsAnalyzed: rollup.data?.keywords_analyzed ?? 0,
     loading: rollup.loading,

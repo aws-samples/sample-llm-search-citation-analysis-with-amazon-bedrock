@@ -3,6 +3,7 @@ import { ReportSectionPlaceholder } from '../../layout';
 import { HeadlineSection as CompetitorHeadlineSection } from '../../CompetitorGapReport/sections/HeadlineSection';
 import { OutrankedKeywordsSection } from '../../CompetitorGapReport/sections/OutrankedKeywordsSection';
 import { OutreachTargetsSection } from '../../CompetitorGapReport/sections/OutreachTargetsSection';
+import { rollupSlice } from '../../CompetitorGapReport/sections/rollupSection';
 import { BriefsReadySection } from '../../ContentActionPlanReport/sections/BriefsReadySection';
 import { joinedContentPlan } from '../../ContentActionPlanReport/sections/ContentPlanSectionProps';
 import { CoverageMapSection } from '../../ContentActionPlanReport/sections/CoverageMapSection';
@@ -78,17 +79,15 @@ const COMPETITOR_BLOCKS: readonly DataBlockDefinition[] = [
   competitorBlock('competitor_headline', 'Headline', 'Where the competitor stands against you.', ({ gap }, selected) => (
     <CompetitorHeadlineSection
       competitor={selected}
-      rollup={gap.rollup}
       keywordsAnalyzed={gap.keywordsAnalyzed}
-      loading={gap.loading}
-      error={gap.error}
+      {...rollupSlice(gap)}
     />
   )),
   competitorBlock('competitor_outranked_keywords', 'Outranked keywords', 'The keywords where the competitor ranks above you.', ({ gap }) => (
-    <OutrankedKeywordsSection rollup={gap.rollup} loading={gap.loading} error={gap.error} />
+    <OutrankedKeywordsSection {...rollupSlice(gap)} />
   )),
   competitorBlock('competitor_outreach_targets', 'Top outreach targets', 'Who cites the competitor but not you, by visibility lift.', ({ gap }) => (
-    <OutreachTargetsSection rollup={gap.rollup} loading={gap.loading} error={gap.error} />
+    <OutreachTargetsSection {...rollupSlice(gap)} />
   )),
 ];
 

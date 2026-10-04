@@ -7,12 +7,14 @@ import json
 import logging
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, NotRequired, TypedDict
 
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
+
+from shared.utils import parse_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -54,18 +56,6 @@ def success_cache_scope(normalized_url: str, keyword: str) -> str:
 def blocked_cache_scope(normalized_url: str) -> str:
     """Return the non-sensitive GSI key for a URL-wide blocked verdict."""
     return f"blocked#{_scope_digest(normalized_url)}"
-
-
-def _parse_timestamp(value: object) -> datetime | None:
-    if not isinstance(value, str):
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return None
-    return parsed.astimezone(UTC)
 
 
 def _error_code(exc: Exception) -> str:
@@ -146,45 +136,30 @@ def _load_candidates(
     normalized_url: str,
     keyword: str,
     *,
-    success_freshness_days: int,
-    blocked_freshness_days: int,
+    want_success: bool,
+    want_blocked: bool,
 ) -> list[_Candidate]:
-    """Query each scope whose freshness window is open and keep the rows worth comparing."""
+    """Query each wanted scope (its freshness window is open) and keep the rows worth comparing."""
     candidates: list[_Candidate] = []
-    if success_freshness_days > 0:
+    if want_success:
         keyword_candidate = _keyword_candidate(table, index_name, normalized_url, keyword)
         if keyword_candidate is not None:
             candidates.append(keyword_candidate)
-    if blocked_freshness_days > 0:
+    if want_blocked:
         blocked_candidate = _blocked_candidate(table, index_name, normalized_url)
         if blocked_candidate is not None:
             candidates.append(blocked_candidate)
     return candidates
 
 
-def _read_candidates(
-    table: Any,
-    index_name: str,
-    normalized_url: str,
-    keyword: str,
-    *,
-    success_freshness_days: int,
-    blocked_freshness_days: int,
-) -> list[_Candidate]:
-    """Load the candidate rows, degrading transient read failures to a cache miss.
+def _read_candidates(load: Callable[[], list[_Candidate]]) -> list[_Candidate]:
+    """Run ``load``, degrading transient read failures to a cache miss.
 
     Permanent IAM/schema failures are re-raised as ``CrawlCacheConfigurationError``
     so a broken cache cannot silently multiply paid browser sessions.
     """
     try:
-        return _load_candidates(
-            table,
-            index_name,
-            normalized_url,
-            keyword,
-            success_freshness_days=success_freshness_days,
-            blocked_freshness_days=blocked_freshness_days,
-        )
+        return load()
     except Exception as exc:
         error_code = _error_code(exc)
         _emit_read_failure(error_code)
@@ -205,7 +180,7 @@ def _newest_candidate(
     """Return the candidate with the latest valid timestamp, ignoring unparseable rows."""
     timestamped: list[tuple[_Verdict, Mapping[str, object], datetime]] = []
     for status, item in candidates:
-        crawled_at = _parse_timestamp(item.get('crawled_at'))
+        crawled_at = parse_timestamp(item.get('crawled_at'), naive_as_utc=False)
         if crawled_at is not None:
             timestamped.append((status, item, crawled_at))
     return max(timestamped, key=lambda entry: entry[2], default=None)
@@ -257,14 +232,14 @@ def find_fresh_crawl(
     if success_freshness_days <= 0 and blocked_freshness_days <= 0:
         return None
 
-    newest = _newest_candidate(_read_candidates(
+    newest = _newest_candidate(_read_candidates(lambda: _load_candidates(
         table,
         index_name,
         normalized_url,
         keyword,
-        success_freshness_days=success_freshness_days,
-        blocked_freshness_days=blocked_freshness_days,
-    ))
+        want_success=success_freshness_days > 0,
+        want_blocked=blocked_freshness_days > 0,
+    )))
     if newest is None:
         return None
 

@@ -1,9 +1,7 @@
 import {
   beforeEach, describe, expect, it, vi
 } from 'vitest';
-import {
-  act, renderHook
-} from '@testing-library/react';
+import { renderHook } from '@testing-library/react';
 import { ApiRequestError } from '../infrastructure';
 import type {
   AlertSettings, AlertTestNotificationResponse
@@ -23,9 +21,14 @@ import {
 } from './alertHookErrors-fixtures';
 import {
   ALERT_SETTINGS_UPDATE,
+  beginDeferredRefresh,
   beginHookRequest,
-  createDeferredValue,
+  beginSettingsSave,
+  completeSettingsSave,
+  completeTestNotification,
+  deferNextCall,
   renderLoadedAlertSettings,
+  renderSettingsWithPendingTest,
   resolveDeferredValue,
   resolveSavedSettings,
 } from './useAlerts-fixtures';
@@ -37,8 +40,7 @@ beforeEach(prepareAlertHookTest);
 
 describe('useAlertSettings lifecycle', () => {
   it('starts loading without save or test activity while settings are pending', () => {
-    const deferred = createDeferredValue<AlertSettings>();
-    mockFetchAlertSettings.mockReturnValue(deferred.promise);
+    deferNextCall(mockFetchAlertSettings);
 
     const { result } = renderHook(() => useAlertSettings());
 
@@ -60,13 +62,10 @@ describe('useAlertSettings lifecycle', () => {
   });
 
   it('aborts a pending test and clears test state when settings refresh starts', async () => {
-    const testResponse = createDeferredValue<AlertTestNotificationResponse>();
-    const refreshResponse = createDeferredValue<AlertSettings>();
-    mockSendTestNotification.mockReturnValueOnce(testResponse.promise);
-    const { result } = await renderLoadedAlertSettings();
-    const pendingTest = beginHookRequest(result.current.sendTestNotification);
-    const testSignal = mockSendTestNotification.mock.calls[0][0];
-    mockFetchAlertSettings.mockReturnValueOnce(refreshResponse.promise);
+    const {
+      result, testResponse, pendingTest, testSignal
+    } = await renderSettingsWithPendingTest();
+    const refreshResponse = deferNextCall<AlertSettings>(mockFetchAlertSettings);
 
     const pendingRefresh = beginHookRequest(result.current.refresh);
 
@@ -84,23 +83,19 @@ describe('useAlertSettings lifecycle', () => {
 
   it('clears the previous save outcome when settings refresh starts', async () => {
     const { result } = await renderLoadedAlertSettings();
-    await act(() => result.current.saveSettings(ALERT_SETTINGS_UPDATE));
-    const refreshResponse = createDeferredValue<AlertSettings>();
-    mockFetchAlertSettings.mockReturnValueOnce(refreshResponse.promise);
-
-    const pendingRefresh = beginHookRequest(result.current.refresh);
+    await completeSettingsSave(result.current);
+    const refresh = beginDeferredRefresh(mockFetchAlertSettings, result.current, buildAlertSettings());
 
     expect(result.current.saveOutcome).toBeNull();
 
-    await resolveDeferredValue(refreshResponse, buildAlertSettings(), pendingRefresh);
+    await refresh.finish();
   });
 
   it('does not abort a completed test request when another test starts', async () => {
     const { result } = await renderLoadedAlertSettings();
-    await act(() => result.current.sendTestNotification());
+    await completeTestNotification(result.current);
     const completedSignal = mockSendTestNotification.mock.calls[0][0];
-    const nextResponse = createDeferredValue<AlertTestNotificationResponse>();
-    mockSendTestNotification.mockReturnValueOnce(nextResponse.promise);
+    const nextResponse = deferNextCall<AlertTestNotificationResponse>(mockSendTestNotification);
 
     const pending = beginHookRequest(result.current.sendTestNotification);
 
@@ -111,14 +106,12 @@ describe('useAlertSettings lifecycle', () => {
 
   it('aborts a pending settings load when saving starts', async () => {
     const { result } = await renderLoadedAlertSettings();
-    const refreshResponse = createDeferredValue<AlertSettings>();
-    const saveResponse = createDeferredValue<AlertSettings>();
-    mockFetchAlertSettings.mockReturnValueOnce(refreshResponse.promise);
-    mockUpdateAlertSettings.mockReturnValueOnce(saveResponse.promise);
+    const refreshResponse = deferNextCall<AlertSettings>(mockFetchAlertSettings);
+    const saveResponse = deferNextCall<AlertSettings>(mockUpdateAlertSettings);
     const pendingRefresh = beginHookRequest(result.current.refresh);
     const refreshSignal = mockFetchAlertSettings.mock.calls[1][0];
 
-    const pendingSave = beginHookRequest(() => result.current.saveSettings(ALERT_SETTINGS_UPDATE));
+    const pendingSave = beginSettingsSave(result.current);
 
     expect(refreshSignal?.aborted).toBe(true);
     expect(result.current.loading).toBe(false);
@@ -129,15 +122,12 @@ describe('useAlertSettings lifecycle', () => {
   });
 
   it('aborts a pending test request when saving starts', async () => {
-    const testResponse = createDeferredValue<AlertTestNotificationResponse>();
-    const saveResponse = createDeferredValue<AlertSettings>();
-    mockSendTestNotification.mockReturnValueOnce(testResponse.promise);
-    mockUpdateAlertSettings.mockReturnValueOnce(saveResponse.promise);
-    const { result } = await renderLoadedAlertSettings();
-    const pendingTest = beginHookRequest(result.current.sendTestNotification);
-    const testSignal = mockSendTestNotification.mock.calls[0][0];
+    const saveResponse = deferNextCall<AlertSettings>(mockUpdateAlertSettings);
+    const {
+      result, testResponse, pendingTest, testSignal
+    } = await renderSettingsWithPendingTest();
 
-    const pendingSave = beginHookRequest(() => result.current.saveSettings(ALERT_SETTINGS_UPDATE));
+    const pendingSave = beginSettingsSave(result.current);
 
     expect(testSignal?.aborted).toBe(true);
     expect(result.current.testing).toBe(false);
@@ -148,11 +138,10 @@ describe('useAlertSettings lifecycle', () => {
 
   it('clears prior outcomes while a save request is pending', async () => {
     const { result } = await renderLoadedAlertSettings();
-    await act(() => result.current.sendTestNotification());
-    const saveResponse = createDeferredValue<AlertSettings>();
-    mockUpdateAlertSettings.mockReturnValueOnce(saveResponse.promise);
+    await completeTestNotification(result.current);
+    const saveResponse = deferNextCall<AlertSettings>(mockUpdateAlertSettings);
 
-    const pendingSave = beginHookRequest(() => result.current.saveSettings(ALERT_SETTINGS_UPDATE));
+    const pendingSave = beginSettingsSave(result.current);
 
     expect(result.current.saving).toBe(true);
     expect(result.current.testing).toBe(false);
@@ -170,7 +159,7 @@ describe('useAlertSettings lifecycle', () => {
     mockUpdateAlertSettings.mockResolvedValueOnce(savedSettings);
     const { result } = await renderLoadedAlertSettings();
 
-    const outcome = await act(() => result.current.saveSettings(ALERT_SETTINGS_UPDATE));
+    const outcome = await completeSettingsSave(result.current);
 
     expect(outcome.warnings).toStrictEqual([]);
   });
@@ -181,7 +170,7 @@ describe('useAlertSettings lifecycle', () => {
     const savedSettings = buildAlertSettings(ALERT_SETTINGS_UPDATE);
     mockUpdateAlertSettings.mockResolvedValueOnce(savedSettings);
 
-    await act(() => result.current.saveSettings(ALERT_SETTINGS_UPDATE));
+    await completeSettingsSave(result.current);
 
     expect(result.current.error).toBeNull();
     expect(result.current.settings).toStrictEqual(savedSettings);
@@ -191,7 +180,7 @@ describe('useAlertSettings lifecycle', () => {
     mockUpdateAlertSettings.mockRejectedValueOnce(new AlertHookFailure());
     const { result } = await renderLoadedAlertSettings();
 
-    const outcome = await act(() => result.current.saveSettings(ALERT_SETTINGS_UPDATE));
+    const outcome = await completeSettingsSave(result.current);
 
     expect(outcome).toStrictEqual({
       success: false,

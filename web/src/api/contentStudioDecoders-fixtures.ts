@@ -1,3 +1,4 @@
+import { expect } from 'vitest';
 import type {
   ContentAngle,
   ContentIdeaType,
@@ -85,6 +86,109 @@ export function omitDecoderField(
   return omitted;
 }
 
+/** Matches the error a Content Studio decoder throws for an invalid `subject`. */
+export function invalidContentStudioResponse(subject: string): unknown {
+  return expect.objectContaining({
+    name: 'InvalidContentStudioResponseError',
+    message: `Content Studio API returned an invalid ${subject}`,
+  });
+}
+
+/** Optional idea fields, each with a valid value. */
+export const completeOptionalIdeaFields: Record<string, unknown> = {
+  competitor_brands: ['Competitor'],
+  competitor_urls: ['https://competitor.example'],
+  providers_missing: ['openai'],
+  providers_present: ['perplexity'],
+  current_rank: 2.5,
+  content_angle: 'differentiation',
+  persona_name: 'Buyer',
+  seasonal_theme: 'Summer',
+  trending_topic: 'Launch',
+  output_language: 'Spanish',
+};
+
+const OPTIONAL_IDEA_ARRAYS = ['competitor_brands', 'competitor_urls', 'providers_missing', 'providers_present'];
+
+type DecoderRecordCase = [string, Record<string, unknown>];
+type DecoderRecordBuilder = (overrides?: Record<string, unknown>) => Record<string, unknown>;
+
+function missingRequiredFieldCases(
+  fields: readonly string[],
+  buildRecord: DecoderRecordBuilder
+): DecoderRecordCase[] {
+  return fields.map((field) => [
+    `required field ${field} is missing`,
+    omitDecoderField(buildRecord(), field),
+  ]);
+}
+
+function nullOptionalStringCases(
+  fields: readonly string[],
+  buildRecord: DecoderRecordBuilder
+): DecoderRecordCase[] {
+  return fields.map((field) => [
+    `optional string ${field} is null`,
+    buildRecord({ [field]: null }),
+  ]);
+}
+
+function buildSingleItemDecoderPayload(
+  listKey: string,
+  item: object,
+  summary: Record<string, unknown>,
+  overrides: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    [listKey]: [item],
+    total_count: 1,
+    ...summary,
+    ...overrides,
+  };
+}
+
+/** Content idea records the decoder must reject, named by what is wrong with them. */
+export const invalidContentIdeaCases: ReadonlyArray<[string, Record<string, unknown>]> = [
+  ...missingRequiredFieldCases(
+    ['id', 'type', 'priority', 'title', 'description', 'keyword', 'source', 'actionable'],
+    buildContentIdeaDecoderRecord
+  ),
+  ...([
+    ['id', 1],
+    ['title', null],
+    ['description', false],
+    ['keyword', 1],
+    ['source', []],
+    ['actionable', 'true'],
+    ['type', 'unknown_type'],
+    ['type', 1],
+    ['priority', 'urgent'],
+    ['priority', null],
+    ['content_angle', 'unknown_angle'],
+    ['content_angle', 1],
+  ] satisfies Array<[string, unknown]>).map(([field, value]): [string, Record<string, unknown>] => [
+    `field ${field} is ${JSON.stringify(value)}`,
+    buildContentIdeaDecoderRecord({ [field]: value }),
+  ]),
+  ...([
+    ['is not an array', 'provider'],
+    ['contains a non-string', ['valid', 1]],
+  ] satisfies Array<[string, unknown]>).flatMap(([problem, value]) => OPTIONAL_IDEA_ARRAYS.map(
+    (field): DecoderRecordCase => [
+      `optional array ${field} ${problem}`,
+      buildContentIdeaDecoderRecord({ [field]: value }),
+    ]
+  )),
+  ...nullOptionalStringCases(
+    ['persona_name', 'seasonal_theme', 'trending_topic', 'output_language'],
+    buildContentIdeaDecoderRecord
+  ),
+  ...[null, 'first', Number.NaN].map((currentRank): [string, Record<string, unknown>] => [
+    `optional current_rank is ${String(currentRank)}`,
+    buildContentIdeaDecoderRecord({ current_rank: currentRank }),
+  ]),
+];
+
 export function buildContentIdeaDecoderRecord(
   overrides: Record<string, unknown> = {}
 ): Record<string, unknown> {
@@ -95,15 +199,15 @@ export function buildContentIdeaDecoderRecord(
 }
 
 export function buildIdeasDecoderPayload(
-  idea: Record<string, unknown> = buildContentIdeaDecoderRecord(),
+  idea: object = buildContentIdeaDecoderRecord(),
   overrides: Record<string, unknown> = {}
 ): Record<string, unknown> {
-  return {
-    ideas: [idea],
-    total_count: 1,
-    generated_at: '2026-01-01T00:00:00Z',
-    ...overrides,
-  };
+  return buildSingleItemDecoderPayload(
+    'ideas',
+    idea,
+    { generated_at: '2026-01-01T00:00:00Z' },
+    overrides
+  );
 }
 
 export function buildGeneratedContentDecoderRecord(
@@ -191,16 +295,37 @@ export function buildHistoryItemWithGeneratedContent(
   return buildHistoryItemDecoderRecord({ generated_content: generatedContent });
 }
 
+/** History item records the decoder must reject, named by what is wrong with them. */
+export const invalidHistoryItemCases: ReadonlyArray<[string, Record<string, unknown>]> = [
+  ...missingRequiredFieldCases(
+    ['id', 'keyword', 'status', 'created_at', 'updated_at'],
+    buildHistoryItemDecoderRecord
+  ),
+  ...([
+    ['id', 1],
+    ['keyword', null],
+    ['status', 'unknown'],
+    ['created_at', 1],
+    ['updated_at', false],
+  ] satisfies Array<[string, unknown]>).map(([field, value]): [string, Record<string, unknown>] => [
+    `required field ${field} is ${JSON.stringify(value)}`,
+    buildHistoryItemDecoderRecord({ [field]: value }),
+  ]),
+  ...nullOptionalStringCases(
+    ['idea_title', 'content_angle', 'error_message', 'batch_id', 'keyword_id'],
+    buildHistoryItemDecoderRecord
+  ),
+  ...[null, 'true', 1].map((viewed): [string, Record<string, unknown>] => [
+    `optional viewed is ${JSON.stringify(viewed)}`,
+    buildHistoryItemDecoderRecord({ viewed }),
+  ]),
+];
+
 export function buildHistoryDecoderPayload(
-  historyItem: Record<string, unknown> = buildHistoryItemDecoderRecord(),
+  historyItem: object = buildHistoryItemDecoderRecord(),
   overrides: Record<string, unknown> = {}
 ): Record<string, unknown> {
-  return {
-    history: [historyItem],
-    total_count: 1,
-    unviewed_count: 0,
-    ...overrides,
-  };
+  return buildSingleItemDecoderPayload('history', historyItem, { unviewed_count: 0 }, overrides);
 }
 
 export function buildGenerationDecoderPayload(
@@ -215,6 +340,28 @@ export function buildGenerationDecoderPayload(
   };
 }
 
+/** What the history decoder returns for a legacy row that carries only the required fields. */
+export function buildDecodedLegacyHistoryItem(updatedAt: string): Record<string, unknown> {
+  return {
+    id: 'legacy',
+    keyword: 'Legacy keyword',
+    idea_title: 'Legacy keyword',
+    content_angle: '',
+    competitor_sources_used: 0,
+    status: 'generated',
+    viewed: false,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: updatedAt,
+    generated_content: undefined,
+    content_warning: undefined,
+    error_message: undefined,
+    batch_id: undefined,
+    batch_size: undefined,
+    batch_position: undefined,
+    keyword_id: undefined,
+  };
+}
+
 export function buildTemplateDecoderRecord(
   overrides: Record<string, unknown> = {}
 ): Record<string, unknown> {
@@ -225,7 +372,7 @@ export function buildTemplateDecoderRecord(
 }
 
 export function buildTemplateListDecoderPayload(
-  templates: readonly Record<string, unknown>[] = [buildTemplateDecoderRecord()],
+  templates: readonly object[] = [buildTemplateDecoderRecord()],
   overrides: Record<string, unknown> = {}
 ): Record<string, unknown> {
   return {

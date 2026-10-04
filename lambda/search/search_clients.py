@@ -6,8 +6,10 @@ These providers return search results directly (not LLM-generated responses).
 import logging
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Mapping
+from copy import copy
+from types import MappingProxyType
+from typing import Any, ClassVar
 
 import requests
 
@@ -17,44 +19,105 @@ from shared.serpapi import serpapi_search
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+#: Output field -> (source key, default when the key is missing).
+FieldTable = Mapping[str, tuple[str, Any]]
+
 
 def _elapsed_ms(start_time: float) -> int:
     """Milliseconds elapsed since ``start_time`` (a ``time.time()`` reading)."""
     return int((time.time() - start_time) * 1000)
 
 
+def _copy_fields(source: Mapping[str, Any], table: FieldTable) -> dict[str, Any]:
+    """``{field: source.get(key, default)}`` for every row of ``table``."""
+    return {field: source.get(key, copy(default)) for field, (key, default) in table.items()}
+
+
+def _fields(**rows: tuple[str, Any]) -> FieldTable:
+    """A read-only ``FieldTable``; a mutable default is copied per use, never shared."""
+    return MappingProxyType(rows)
+
+
 class BaseSearchClient(ABC):
-    """Base class for search provider clients."""
+    """Base class for search provider clients.
+
+    ``search`` is the one flow every provider shares: fetch the provider's
+    answer, normalize its hits, and return the standardized result (or the
+    standardized error result, with the latency so far). A provider supplies
+    the fetch and describes its answer with the class attributes below.
+    """
 
     provider_id: str
     provider_type: str = "search"
+    #: Name used in the error log line ("<log_label> error").
+    log_label: str
+    #: Key of the hit list in the provider's answer.
+    hits_key: str = "results"
+    #: Key of the hit text in each raw hit.
+    snippet_key: str
+    #: Key of the hit URL in each raw hit.
+    url_key: str = "url"
+    #: Provider-specific attributes copied from each hit into its search result.
+    hit_fields: ClassVar[FieldTable] = _fields()
+    #: Provider-specific attributes copied from the answer into the metadata.
+    answer_fields: ClassVar[FieldTable] = _fields()
+
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+
+    def search(self, query: str) -> dict[str, Any]:
+        """Execute the search and return the standardized result."""
+        start_time = time.time()
+        try:
+            raw_response = self._fetch(query)
+            latency_ms = _elapsed_ms(start_time)
+            citations, results = self._collect_results(self._hits(raw_response))
+            return self._build_result(
+                citations=citations,
+                results=results,
+                raw_response=raw_response,
+                metadata={
+                    "latency_ms": latency_ms,
+                    "result_count": len(results),
+                    **self._answer_metadata(raw_response),
+                },
+            )
+        except Exception as e:
+            logger.exception("%s error", self.log_label)
+            return self._build_result(
+                citations=[],
+                results=[],
+                status="error",
+                error=str(e),
+                metadata={"latency_ms": _elapsed_ms(start_time)}
+            )
 
     @abstractmethod
-    def search(self, query: str) -> dict[str, Any]:
-        """Execute search and return standardized result."""
-        pass
+    def _fetch(self, query: str) -> dict[str, Any]:
+        """Ask the provider for ``query`` and return its decoded answer."""
 
-    def _collect_results(
-        self,
-        items: list[dict[str, Any]],
-        *,
-        snippet_key: str,
-        url_key: str = "url",
-        extra_fields: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
-    ) -> tuple[list[str], list[dict[str, Any]]]:
+    def _hits(self, raw_response: dict[str, Any]) -> list[dict[str, Any]]:
+        """The raw hits in the provider's answer."""
+        return raw_response.get(self.hits_key, [])
+
+    def _answer_metadata(self, raw_response: dict[str, Any]) -> dict[str, Any]:
+        """Provider-specific metadata of one answer."""
+        return _copy_fields(raw_response, self.answer_fields)
+
+    def _collect_results(self, items: list[dict[str, Any]]) -> tuple[list[str], list[dict[str, Any]]]:
         """Normalize raw provider hits into ``(citations, search_results)``.
 
         Hits without a URL are dropped before cleaning (``clean_url('')``
         is ``'://'``, which is truthy), and so are hits whose URL cleans to
         nothing. Each kept
-        hit becomes ``{"url", "title", "snippet", *extra_fields, "source"}``,
-        where ``extra_fields`` adds the provider-specific attributes and
+        hit becomes ``{"url", "title", "snippet", *hit_fields, "source"}``,
+        where ``hit_fields`` adds the provider-specific attributes and
         ``source`` is this client's ``provider_id``.
         """
         citations: list[str] = []
         results: list[dict[str, Any]] = []
         for item in items:
-            raw_url = item.get(url_key)
+            raw_url = item.get(self.url_key)
             url = clean_url(raw_url) if isinstance(raw_url, str) and raw_url.strip() else ""
             if not url:
                 continue
@@ -62,11 +125,10 @@ class BaseSearchClient(ABC):
             result = {
                 "url": url,
                 "title": item.get("title", ""),
-                "snippet": item.get(snippet_key, ""),
+                "snippet": item.get(self.snippet_key, ""),
+                **_copy_fields(item, self.hit_fields),
+                "source": self.provider_id,
             }
-            if extra_fields is not None:
-                result.update(extra_fields(item))
-            result["source"] = self.provider_id
             results.append(result)
         return citations, results
 
@@ -95,326 +157,151 @@ class BaseSearchClient(ABC):
         return result
 
 
-class BraveSearchClient(BaseSearchClient):
+class _HttpSearchClient(BaseSearchClient):
+    """A provider answering one JSON request at ``search_url``, retried with backoff."""
+
+    search_url: str
+    #: Request timeout in seconds (also the retry decorator's timeout).
+    timeout: int = 30
+    #: Headers sent with every request.
+    base_headers: ClassVar[Mapping[str, str]] = MappingProxyType({"Content-Type": "application/json"})
+    #: ``(header, template)`` carrying the API key (``{key}`` in the template), or ``None`` when it travels in the body.
+    credential_header: ClassVar[tuple[str, str] | None] = None
+
+    def _fetch(self, query: str) -> dict[str, Any]:
+        send = retry_with_backoff(provider_name=self.provider_id.upper(), timeout=self.timeout)(self._send)
+        return send(self._request_body(query))
+
+    @abstractmethod
+    def _request_body(self, query: str) -> dict[str, Any]:
+        """The JSON body (or, for a GET, the query parameters) for ``query``."""
+
+    def _headers(self) -> dict[str, str]:
+        """The request headers, including the provider's credential."""
+        headers = dict(self.base_headers)
+        if self.credential_header is not None:
+            name, template = self.credential_header
+            headers[name] = template.format(key=self.api_key)
+        return headers
+
+    def _send(self, body: dict[str, Any], timeout: int) -> requests.Response:
+        """POST ``body`` as JSON to the provider."""
+        return requests.post(self.search_url, headers=self._headers(), json=body, timeout=timeout)
+
+
+class BraveSearchClient(_HttpSearchClient):
     """Brave Search API client."""
 
     provider_id = "brave"
+    log_label = "Brave Search"
+    snippet_key = "description"
+    search_url = "https://api.search.brave.com/res/v1/web/search"
+    base_headers = MappingProxyType({"Accept": "application/json"})
+    credential_header = ("X-Subscription-Token", "{key}")
 
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://api.search.brave.com/res/v1"
+    def _send(self, body: dict[str, Any], timeout: int) -> requests.Response:
+        """Brave searches with a GET and query parameters."""
+        return requests.get(self.search_url, headers=self._headers(), params=body, timeout=timeout)
 
-    @retry_with_backoff(provider_name="BRAVE", timeout=30)
-    def _make_request(self, params: dict, timeout: int = 30) -> requests.Response:
-        """Make HTTP request to Brave Search API."""
-        headers = {
-            "Accept": "application/json",
-            "X-Subscription-Token": self.api_key
-        }
-        return requests.get(
-            f"{self.base_url}/web/search",
-            headers=headers,
-            params=params,
-            timeout=timeout
-        )
+    def _request_body(self, query: str) -> dict[str, Any]:
+        return {"q": query, "count": 10, "text_decorations": False, "search_lang": "en"}
 
-    def search(self, query: str, count: int = 10) -> dict[str, Any]:
-        """Execute Brave web search."""
-        start_time = time.time()
-        try:
-            params = {
-                "q": query,
-                "count": count,
-                "text_decorations": False,
-                "search_lang": "en"
-            }
-            raw_response = self._make_request(params)
-            latency_ms = _elapsed_ms(start_time)
-
-            web_results = raw_response.get("web", {}).get("results", [])
-            citations, results = self._collect_results(web_results, snippet_key="description")
-
-            return self._build_result(
-                citations=citations,
-                results=results,
-                raw_response=raw_response,
-                metadata={"latency_ms": latency_ms, "result_count": len(results)}
-            )
-        except Exception as e:
-            logger.exception("Brave Search error")
-            return self._build_result(
-                citations=[],
-                results=[],
-                status="error",
-                error=str(e),
-                metadata={"latency_ms": _elapsed_ms(start_time)}
-            )
+    def _hits(self, raw_response: dict[str, Any]) -> list[dict[str, Any]]:
+        return raw_response.get("web", {}).get("results", [])
 
 
-class TavilySearchClient(BaseSearchClient):
-    """Tavily Search API client."""
+class TavilySearchClient(_HttpSearchClient):
+    """Tavily Search API client (the API key travels in the body)."""
 
     provider_id = "tavily"
+    log_label = "Tavily Search"
+    snippet_key = "content"
+    search_url = "https://api.tavily.com/search"
+    hit_fields = _fields(score=("score", 0))
+    # Tavily can provide an answer - store it in metadata
+    answer_fields = _fields(answer=("answer", ""), response_time=("response_time", None))
 
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://api.tavily.com"
-
-    @retry_with_backoff(provider_name="TAVILY", timeout=30)
-    def _make_request(self, payload: dict, timeout: int = 30) -> requests.Response:
-        """Make HTTP request to Tavily API."""
-        headers = {"Content-Type": "application/json"}
-        return requests.post(
-            f"{self.base_url}/search",
-            headers=headers,
-            json=payload,
-            timeout=timeout
-        )
-
-    def search(self, query: str, search_depth: str = "basic") -> dict[str, Any]:
-        """Execute Tavily search."""
-        start_time = time.time()
-        try:
-            payload = {
-                "api_key": self.api_key,
-                "query": query,
-                "search_depth": search_depth,
-                "include_answer": True,
-                "include_raw_content": False,
-                "max_results": 10
-            }
-            raw_response = self._make_request(payload)
-            latency_ms = _elapsed_ms(start_time)
-
-            citations, results = self._collect_results(
-                raw_response.get("results", []),
-                snippet_key="content",
-                extra_fields=lambda item: {"score": item.get("score", 0)},
-            )
-
-            # Tavily can provide an answer - store it in metadata
-            answer = raw_response.get("answer", "")
-
-            return self._build_result(
-                citations=citations,
-                results=results,
-                raw_response=raw_response,
-                metadata={
-                    "latency_ms": latency_ms,
-                    "result_count": len(results),
-                    "answer": answer,
-                    "response_time": raw_response.get("response_time")
-                }
-            )
-        except Exception as e:
-            logger.exception("Tavily Search error")
-            return self._build_result(
-                citations=[],
-                results=[],
-                status="error",
-                error=str(e),
-                metadata={"latency_ms": _elapsed_ms(start_time)}
-            )
+    def _request_body(self, query: str) -> dict[str, Any]:
+        return {
+            "api_key": self.api_key,
+            "query": query,
+            "search_depth": "basic",
+            "include_answer": True,
+            "include_raw_content": False,
+            "max_results": 10
+        }
 
 
-class ExaSearchClient(BaseSearchClient):
+class ExaSearchClient(_HttpSearchClient):
     """Exa AI Search API client."""
 
     provider_id = "exa"
+    log_label = "Exa Search"
+    snippet_key = "text"
+    search_url = "https://api.exa.ai/search"
+    credential_header = ("x-api-key", "{key}")
+    #: Exa's search type: "neural", "keyword", or "auto".
+    search_type = "auto"
+    hit_fields = _fields(
+        published_date=("publishedDate", None),
+        author=("author", None),
+        highlights=("highlights", []),
+    )
+    answer_fields = _fields(search_type=("searchType", search_type), request_id=("requestId", None))
 
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://api.exa.ai"
-
-    @retry_with_backoff(provider_name="EXA", timeout=30)
-    def _make_request(self, payload: dict, timeout: int = 30) -> requests.Response:
-        """Make HTTP request to Exa API."""
-        headers = {
-            "Content-Type": "application/json",
-            "x-api-key": self.api_key
-        }
-        return requests.post(
-            f"{self.base_url}/search",
-            headers=headers,
-            json=payload,
-            timeout=timeout
-        )
-
-    def search(self, query: str, search_type: str = "auto", num_results: int = 10) -> dict[str, Any]:
-        """Execute Exa neural search."""
-        start_time = time.time()
-        try:
-            payload = {
-                "query": query,
-                "type": search_type,  # "neural", "keyword", or "auto"
-                "numResults": num_results,
-                "contents": {
-                    "text": {"maxCharacters": 500},
-                    "highlights": True
-                }
+    def _request_body(self, query: str) -> dict[str, Any]:
+        return {
+            "query": query,
+            "type": self.search_type,
+            "numResults": 10,
+            "contents": {
+                "text": {"maxCharacters": 500},
+                "highlights": True
             }
-            raw_response = self._make_request(payload)
-            latency_ms = _elapsed_ms(start_time)
-
-            citations, results = self._collect_results(
-                raw_response.get("results", []),
-                snippet_key="text",
-                extra_fields=lambda item: {
-                    "published_date": item.get("publishedDate"),
-                    "author": item.get("author"),
-                    "highlights": item.get("highlights", []),
-                },
-            )
-
-            return self._build_result(
-                citations=citations,
-                results=results,
-                raw_response=raw_response,
-                metadata={
-                    "latency_ms": latency_ms,
-                    "result_count": len(results),
-                    "search_type": raw_response.get("searchType", search_type),
-                    "request_id": raw_response.get("requestId")
-                }
-            )
-        except Exception as e:
-            logger.exception("Exa Search error")
-            return self._build_result(
-                citations=[],
-                results=[],
-                status="error",
-                error=str(e),
-                metadata={"latency_ms": _elapsed_ms(start_time)}
-            )
+        }
 
 
 class SerpAPIClient(BaseSearchClient):
     """SerpAPI Google Search client (async submit + Search Archive, see ``shared.serpapi``)."""
 
     provider_id = "serpapi"
+    log_label = "SerpAPI"
+    # Organic results only; the knowledge graph is flagged in metadata
+    hits_key = "organic_results"
+    snippet_key = "snippet"
+    url_key = "link"
+    hit_fields = _fields(position=("position", None), displayed_link=("displayed_link", None))
 
-    def __init__(self, api_key: str):
-        self.api_key = api_key
+    def _fetch(self, query: str) -> dict[str, Any]:
+        return serpapi_search(self.api_key, {"q": query, "engine": "google", "num": 10, "hl": "en", "gl": "us"})
 
-    def search(self, query: str, num_results: int = 10) -> dict[str, Any]:
-        """Execute Google search via SerpAPI."""
-        start_time = time.time()
-        try:
-            params = {
-                "q": query,
-                "engine": "google",
-                "num": num_results,
-                "hl": "en",
-                "gl": "us"
-            }
-            raw_response = serpapi_search(self.api_key, params)
-            latency_ms = _elapsed_ms(start_time)
-
-            # Extract organic results
-            citations, results = self._collect_results(
-                raw_response.get("organic_results", []),
-                snippet_key="snippet",
-                url_key="link",
-                extra_fields=lambda item: {
-                    "position": item.get("position"),
-                    "displayed_link": item.get("displayed_link"),
-                },
-            )
-
-            # Also extract knowledge graph if available
-            knowledge_graph = raw_response.get("knowledge_graph", {})
-
-            return self._build_result(
-                citations=citations,
-                results=results,
-                raw_response=raw_response,
-                metadata={
-                    "latency_ms": latency_ms,
-                    "result_count": len(results),
-                    "search_id": raw_response.get("search_metadata", {}).get("id"),
-                    "has_knowledge_graph": bool(knowledge_graph)
-                }
-            )
-        except Exception as e:
-            logger.exception("SerpAPI error")
-            return self._build_result(
-                citations=[],
-                results=[],
-                status="error",
-                error=str(e),
-                metadata={"latency_ms": _elapsed_ms(start_time)}
-            )
+    def _answer_metadata(self, raw_response: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "search_id": raw_response.get("search_metadata", {}).get("id"),
+            "has_knowledge_graph": bool(raw_response.get("knowledge_graph", {})),
+        }
 
 
-class FirecrawlSearchClient(BaseSearchClient):
+class FirecrawlSearchClient(_HttpSearchClient):
     """Firecrawl Search API client."""
 
     provider_id = "firecrawl"
+    log_label = "Firecrawl Search"
+    snippet_key = "description"
+    search_url = "https://api.firecrawl.dev/v1/search"
+    timeout = 60
+    credential_header = ("Authorization", "Bearer {key}")
+    hit_fields = _fields(category=("category", None))
+    answer_fields = _fields(job_id=("id", None), credits_used=("creditsUsed", None))
 
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://api.firecrawl.dev/v1"
+    def _request_body(self, query: str) -> dict[str, Any]:
+        return {"query": query, "limit": 10}
 
-    @retry_with_backoff(provider_name="FIRECRAWL", timeout=60)
-    def _make_request(self, payload: dict, timeout: int = 60) -> requests.Response:
-        """Make HTTP request to Firecrawl API."""
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-        return requests.post(
-            f"{self.base_url}/search",
-            headers=headers,
-            json=payload,
-            timeout=timeout
-        )
-
-    def search(self, query: str, limit: int = 10) -> dict[str, Any]:
-        """Execute Firecrawl search."""
-        start_time = time.time()
-        try:
-            payload = {
-                "query": query,
-                "limit": limit
-            }
-
-            raw_response = self._make_request(payload)
-            latency_ms = _elapsed_ms(start_time)
-
-            # Extract results - data can be an array directly or have a 'web' key
-            data = raw_response.get("data", [])
-            if isinstance(data, dict):
-                # If data is a dict, look for 'web' array
-                web_results = data.get("web", [])
-            elif isinstance(data, list):
-                # If data is already an array, use it directly
-                web_results = data
-            else:
-                web_results = []
-
-            citations, results = self._collect_results(
-                web_results,
-                snippet_key="description",
-                extra_fields=lambda item: {"category": item.get("category")},
-            )
-
-            return self._build_result(
-                citations=citations,
-                results=results,
-                raw_response=raw_response,
-                metadata={
-                    "latency_ms": latency_ms,
-                    "result_count": len(results),
-                    "job_id": raw_response.get("id"),
-                    "credits_used": raw_response.get("creditsUsed")
-                }
-            )
-        except Exception as e:
-            logger.exception("Firecrawl Search error")
-            return self._build_result(
-                citations=[],
-                results=[],
-                status="error",
-                error=str(e),
-                metadata={"latency_ms": _elapsed_ms(start_time)}
-            )
+    def _hits(self, raw_response: dict[str, Any]) -> list[dict[str, Any]]:
+        # Data can be an array directly or have a 'web' key
+        data = raw_response.get("data", [])
+        if isinstance(data, dict):
+            return data.get("web", [])
+        if isinstance(data, list):
+            return data
+        return []

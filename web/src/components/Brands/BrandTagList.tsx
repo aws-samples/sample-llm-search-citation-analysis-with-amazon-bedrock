@@ -4,7 +4,6 @@ interface BrandTagListProps {
   readonly colorScheme: 'emerald' | 'amber';
   readonly onSelect: (brand: string | null) => void;
   readonly onRemove: (brand: string) => void;
-  readonly emptyMessage?: string;
 }
 
 export const BrandTagList = ({
@@ -13,7 +12,6 @@ export const BrandTagList = ({
   colorScheme,
   onSelect,
   onRemove,
-  emptyMessage = 'None added',
 }: BrandTagListProps) => {
   const colors = colorScheme === 'emerald'
     ? {
@@ -32,7 +30,7 @@ export const BrandTagList = ({
     };
 
   if (brands.length === 0) {
-    return <span className={`text-sm ${colors.empty} italic`}>{emptyMessage}</span>;
+    return <span className={`text-sm ${colors.empty} italic`}>None added</span>;
   }
 
   return (

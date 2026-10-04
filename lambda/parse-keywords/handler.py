@@ -1,7 +1,7 @@
 """
 ParseKeywords Lambda Function
 
-Reads keywords from a scope, S3 or direct input, validates them, writes the
+Reads keywords from a scope or direct input, validates them, writes the
 run's keyword list (with one run timestamp) to S3 and returns a pointer to it
 for the ProcessKeywords Distributed Map. There is no per-execution cap: the
 former silent truncation to 100 dropped keywords for multi-group installations.
@@ -13,12 +13,12 @@ import json
 import logging
 import os
 from typing import Any
-from urllib.parse import urlparse
 
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
+from shared.analysis_runs import query_prompt_from_item
 from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
 from shared.step_function_response import log_error
 
@@ -39,13 +39,11 @@ RUNS_PREFIX = 'runs/'
 
 KEYWORDS_TABLE = (
     os.environ.get('DYNAMODB_TABLE_KEYWORDS')
-    or os.environ.get('KEYWORDS_TABLE')
     or 'CitationAnalysis-Keywords'
 )
 
 QUERY_PROMPTS_TABLE = (
     os.environ.get('DYNAMODB_TABLE_QUERY_PROMPTS')
-    or os.environ.get('QUERY_PROMPTS_TABLE')
     or 'CitationAnalysis-QueryPrompts'
 )
 
@@ -104,14 +102,7 @@ def read_enabled_query_prompts() -> list[dict[str, Any]]:
             f"Could not read enabled query prompts from {QUERY_PROMPTS_TABLE}"
         ) from e
 
-    prompts = [
-        {
-            'id': item['id'],
-            'name': item.get('name', ''),
-            'template': item.get('template', ''),
-        }
-        for item in response.get('Items', [])
-    ]
+    prompts = [query_prompt_from_item(item) for item in response.get('Items', [])]
     logger.info(f"Read {len(prompts)} enabled query prompts from DynamoDB")
     return prompts
 
@@ -144,28 +135,6 @@ def read_keywords_for_scope(scope: dict[str, Any]) -> list[str]:
     keywords = [item['keyword'] for item in items]
     logger.info(f"Resolved {len(keywords)} active keywords for {describe_scope(scope)}")
     return keywords
-
-
-def parse_s3_uri(s3_uri: str) -> tuple:
-    """Parse S3 URI into bucket and key."""
-    parsed = urlparse(s3_uri)
-    bucket = parsed.netloc
-    key = parsed.path.lstrip('/')
-    return bucket, key
-
-
-def read_keywords_from_s3(s3_uri: str) -> list[str]:
-    """Read keywords from S3 file (one per line)."""
-    bucket, key = parse_s3_uri(s3_uri)
-
-    try:
-        response = s3_client.get_object(Bucket=bucket, Key=key)
-        content = response['Body'].read().decode('utf-8')
-
-        # Parse keywords (one per line)
-        return [line.strip() for line in content.split('\n')]
-    except Exception as e:
-        raise RuntimeError(f"Failed to read keywords from S3: {s3_uri}. Error: {e!s}") from e
 
 
 def validate_keywords(keywords: list) -> list[str]:
@@ -218,23 +187,17 @@ def _keywords_from_event(event: dict[str, Any]) -> list:
         logger.info("Reading active keywords from DynamoDB (scheduled run)")
         return read_keywords_from_dynamodb()
 
-    # Case 2: Keywords from S3 file
-    if 'keywords_file' in event:
-        s3_uri = event['keywords_file']
-        logger.info(f"Reading keywords from S3: {s3_uri}")
-        return read_keywords_from_s3(s3_uri)
-
-    # Case 3: Direct keywords array
+    # Case 2: Direct keywords array
     if 'keywords' in event and isinstance(event['keywords'], list):
         logger.info("Using keywords from direct array input")
         return event['keywords']
 
-    # Case 4: Direct keywords string (newline-separated)
+    # Case 3: Direct keywords string (newline-separated)
     if 'keywords' in event and isinstance(event['keywords'], str):
         logger.info("Parsing keywords from string input")
         return event['keywords'].split('\n')
 
-    error = ValueError("Invalid input: must provide 'scope', 'source': 'dynamodb', 'keywords_file' (S3 URI), or 'keywords' (array/string)")
+    error = ValueError("Invalid input: must provide 'scope', 'source': 'dynamodb', or 'keywords' (array/string)")
     log_error(error, "parse keywords handler", event)
     raise error
 
@@ -294,9 +257,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     1. Scope descriptor (trigger APIs, schedules; run-time resolution):
        {"scope": {"mode": "all" | "groups" | "keywords", ...}}
     2. Legacy scheduled runs: {"source": "dynamodb"} (all active keywords)
-    3. S3 URI: {"keywords_file": "s3://bucket/path/keywords.txt"}
-    4. Direct array: {"keywords": ["keyword1", "keyword2"]}
-    5. Direct string: {"keywords": "keyword1\nkeyword2"}
+    3. Direct array: {"keywords": ["keyword1", "keyword2"]}
+    4. Direct string: {"keywords": "keyword1\nkeyword2"}
 
     An optional "query_prompts" list in the input is passed through to the
     output. When absent (scheduled runs), enabled prompts are loaded from

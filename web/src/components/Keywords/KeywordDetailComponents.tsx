@@ -3,35 +3,33 @@ import { safeHref } from '../../infrastructure';
 import {
   ChevronDownIcon, CloseIcon 
 } from '../ui';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import { EXTERNAL_LINK_PATHS } from '../ui/iconPaths';
+import {
+  PROVIDER, providerColor, providerName
+} from '../../constants/providers';
 
-const providerColors: Record<string, {
+interface ChartColors {
   border: string;
-  bg: string 
-}> = {
-  claude: {
-    border: 'rgb(168, 85, 247)',
-    bg: 'rgba(168, 85, 247, 0.5)' 
-  },
-  gemini: {
-    border: 'rgb(59, 130, 246)',
-    bg: 'rgba(59, 130, 246, 0.5)' 
-  },
-  openai: {
-    border: 'rgb(16, 185, 129)',
-    bg: 'rgba(16, 185, 129, 0.5)' 
-  },
-  perplexity: {
-    border: 'rgb(249, 115, 22)',
-    bg: 'rgba(249, 115, 22, 0.5)' 
-  },
-};
+  bg: string;
+}
 
-const defaultProviderColor = {
+const defaultProviderColor: ChartColors = {
   border: 'rgb(107, 114, 128)',
   bg: 'rgba(107, 114, 128, 0.1)',
 };
 
-const providers = ['claude', 'gemini', 'openai', 'perplexity'];
+/** A provider's line/border colour and its half-transparent fill. */
+function chartColors(provider: string): ChartColors {
+  const color = providerColor(provider);
+  return color === undefined ? defaultProviderColor : {
+    border: `rgb(${color.rgb})`,
+    bg: `rgba(${color.rgb}, 0.5)`,
+  };
+}
+
+/** Every engine, in alphabetical id order (the chart legend order). */
+const providers = Object.values(PROVIDER).sort((a, b) => a.localeCompare(b));
 
 export interface KeywordStats {
   totalRuns: number;
@@ -64,9 +62,9 @@ export const buildChartData = (searches: Search[], runBatches: Record<string, Se
       return providerSearch?.citations?.length ?? 0;
     });
 
-    const colors = providerColors[provider] ?? defaultProviderColor;
+    const colors = chartColors(provider);
     return {
-      label: provider.charAt(0).toUpperCase() + provider.slice(1),
+      label: providerName(provider),
       data,
       borderColor: colors.border,
       backgroundColor: colors.bg,
@@ -85,9 +83,9 @@ export const buildChartData = (searches: Search[], runBatches: Record<string, Se
     c.url.length > 40 ? c.url.slice(0, 40) + '...' : c.url
   );
   const barDatasets = providers.map((provider) => {
-    const colors = providerColors[provider] ?? defaultProviderColor;
+    const colors = chartColors(provider);
     return {
-      label: provider.charAt(0).toUpperCase() + provider.slice(1),
+      label: providerName(provider),
       data: citationFrequency.map((c) => c.providerCounts[provider] ?? 0),
       backgroundColor: colors.bg,
       borderColor: colors.border,
@@ -202,7 +200,7 @@ export const SearchItem = ({
   buildRawResponsesPath,
 }: SearchItemProps) => {
   const provider = search.provider.toLowerCase();
-  const colors = providerColors[provider] ?? defaultProviderColor;
+  const colors = chartColors(provider);
 
   return (
     <div className="border rounded-lg" style={{
@@ -370,14 +368,7 @@ const RawResponseLink = ({
       }}
       className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
     >
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={1.5}
-          d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
-        />
-      </svg>
+      <StrokeIcon className="w-4 h-4" paths={EXTERNAL_LINK_PATHS} />
       View Raw Response
     </button>
   </div>

@@ -14,24 +14,23 @@ from shared.scope_params import SCOPE_KEYWORDS_CAP
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
 from testing.module_loader import load_handler_module
+from testing.report_scope_fixtures import REPORT_TABLES_ENV
+from testing.search_results_fixtures import (
+    PartitionReadFailure,
+    active_keywords_table,
+    report_dynamodb,
+    search_results_table,
+)
 from testing.sentiment_examples_fixtures import (
     OLDER_RUN,
     RUN,
-    PartitionReadFailure,
-    examples_dynamodb,
-    search_results_stub,
     stored_answer,
     stored_brand,
 )
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
-_ENV = {
-    'DYNAMODB_TABLE_SEARCH_RESULTS': 'test-search-results',
-    'DYNAMODB_TABLE_KEYWORDS': 'test-keywords',
-    'CORS_ORIGIN_PARAM': '',
-}
 
-sentiment_handler = handler_fixture(_API_DIR, 'get-sentiment-examples.py', 'get_sentiment_examples_under_test', env=_ENV)
+sentiment_handler = handler_fixture(_API_DIR, 'get-sentiment-examples.py', 'get_sentiment_examples_under_test', env=REPORT_TABLES_ENV)
 
 
 class KeywordsReadFailure(Exception):
@@ -56,13 +55,13 @@ SEARCH_ROWS: dict[str, Any] = {
 
 @pytest.fixture
 def search_table() -> MagicMock:
-    return search_results_stub(SEARCH_ROWS)
+    return search_results_table(SEARCH_ROWS)
 
 
 @pytest.fixture
 def endpoint(sentiment_handler, search_table):
     """The handler reading ``SEARCH_ROWS`` and ``ACTIVE_KEYWORDS``."""
-    with patch.object(sentiment_handler, 'dynamodb', examples_dynamodb(search_table, ACTIVE_KEYWORDS)):
+    with patch.object(sentiment_handler, 'dynamodb', report_dynamodb(search_table, active_keywords_table(ACTIVE_KEYWORDS))):
         yield sentiment_handler
 
 
@@ -72,12 +71,14 @@ def call(module: Any, query: dict[str, str] | None) -> tuple[int, Any]:
 
 
 class TestSelection:
-    def test_lists_the_sightings_of_each_keywords_latest_run(self, endpoint) -> None:
-        _status, body = call(endpoint, {'group_id': 'sol', 'sentiment': 'negative'})
+    @pytest.fixture
+    def sol_negative_body(self, endpoint) -> Any:
+        """The answer to the negative sightings of the 'sol' group."""
+        return call(endpoint, {'group_id': 'sol', 'sentiment': 'negative'})[1]
 
-        assert (body['total'], [(example['keyword'], example['provider']) for example in body['examples']]) == (
-            2, [('hotel sol beach', 'claude'), ('hotel sol spa', 'openai')],
-        )
+    def test_lists_the_sightings_of_each_keywords_latest_run(self, sol_negative_body) -> None:
+        sightings = [(example['keyword'], example['provider']) for example in sol_negative_body['examples']]
+        assert (sol_negative_body['total'], sightings) == (2, [('hotel sol beach', 'claude'), ('hotel sol spa', 'openai')])
 
     def test_keeps_one_engine_when_a_provider_is_given(self, endpoint) -> None:
         _status, body = call(endpoint, {'group_id': 'sol', 'sentiment': 'negative', 'provider': 'openai'})
@@ -101,19 +102,18 @@ class TestSelection:
 
     def test_returns_twenty_examples_by_default(self, sentiment_handler) -> None:
         rows = {'hotel sol spa': [stored_answer('hotel sol spa', 'openai', [stored_brand(f'Brand {index:02}') for index in range(25)])]}
-        with patch.object(sentiment_handler, 'dynamodb', examples_dynamodb(search_results_stub(rows))):
+        with patch.object(sentiment_handler, 'dynamodb', report_dynamodb(search_results_table(rows))):
             _status, body = call(sentiment_handler, {'keyword': 'hotel sol spa', 'sentiment': 'negative'})
 
         assert (body['total'], len(body['examples'])) == (25, 20)
 
-    def test_describes_the_scope_like_the_visibility_endpoint(self, endpoint) -> None:
-        _status, body = call(endpoint, {'group_id': 'sol', 'sentiment': 'negative'})
-
-        assert (body['scope']['kind'], body['scope']['keyword_count'], body['keywords_truncated']) == ('group', 2, False)
+    def test_describes_the_scope_like_the_visibility_endpoint(self, sol_negative_body) -> None:
+        scope = sol_negative_body['scope']
+        assert (scope['kind'], scope['keyword_count'], sol_negative_body['keywords_truncated']) == ('group', 2, False)
 
     def test_answers_no_examples_for_a_keyword_whose_read_fails(self, sentiment_handler) -> None:
         rows = {**SEARCH_ROWS, 'hotel sol spa': PartitionReadFailure('throttled')}
-        with patch.object(sentiment_handler, 'dynamodb', examples_dynamodb(search_results_stub(rows), ACTIVE_KEYWORDS)):
+        with patch.object(sentiment_handler, 'dynamodb', report_dynamodb(search_results_table(rows), active_keywords_table(ACTIVE_KEYWORDS))):
             status, body = call(sentiment_handler, {'group_id': 'sol', 'sentiment': 'negative'})
 
         assert (status, [example['keyword'] for example in body['examples']]) == (200, ['hotel sol beach'])
@@ -136,15 +136,15 @@ class TestReads:
 
     def test_caps_the_scope_at_the_scope_keyword_cap(self, sentiment_handler) -> None:
         many = [{'id': f'k{index}', 'keyword': f'kw {index:03}', 'status': 'active'} for index in range(SCOPE_KEYWORDS_CAP + 1)]
-        search = search_results_stub({})
-        with patch.object(sentiment_handler, 'dynamodb', examples_dynamodb(search, many)):
+        search = search_results_table({})
+        with patch.object(sentiment_handler, 'dynamodb', report_dynamodb(search, active_keywords_table(many))):
             _status, body = call(sentiment_handler, {'scope': 'all', 'sentiment': 'negative'})
 
         assert (body['keywords_truncated'], search.query.call_count) == (True, SCOPE_KEYWORDS_CAP)
 
     def test_builds_its_dynamodb_resource_with_the_pooled_scope_helper(self) -> None:
         pooled = MagicMock(name='pooled-scope-resource')
-        with patch.dict(os.environ, _ENV), patch.object(scope_params, 'scoped_dynamodb_resource', return_value=pooled):
+        with patch.dict(os.environ, REPORT_TABLES_ENV), patch.object(scope_params, 'scoped_dynamodb_resource', return_value=pooled):
             loaded = load_handler_module(_API_DIR, 'get-sentiment-examples.py', 'get_sentiment_examples_pooled_under_test')
         sys.modules.pop('get_sentiment_examples_pooled_under_test', None)
 
@@ -181,7 +181,7 @@ class TestValidation:
     def test_answers_a_server_error_when_the_scope_cannot_be_resolved(self, sentiment_handler) -> None:
         keywords_table = MagicMock(name='keywords')
         keywords_table.query.side_effect = KeywordsReadFailure('throttled')
-        resource = examples_dynamodb(search_results_stub(SEARCH_ROWS))
+        resource = report_dynamodb(search_results_table(SEARCH_ROWS))
         resource.Table.side_effect = lambda name: keywords_table
         with patch.object(sentiment_handler, 'dynamodb', resource):
             status, _body = call(sentiment_handler, {'group_id': 'sol', 'sentiment': 'negative'})

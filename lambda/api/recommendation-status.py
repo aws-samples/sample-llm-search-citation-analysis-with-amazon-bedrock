@@ -35,7 +35,7 @@ regeneration.
 
 Storage
 
-  RECOMMENDATION_STATUS_TABLE — DynamoDB
+  DYNAMODB_TABLE_RECOMMENDATION_STATUS — DynamoDB
   PK: recommendation_id (string)
   Attributes:
     status            : 'new' | 'in_progress' | 'done' | 'wontfix'
@@ -53,9 +53,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
+from collections.abc import Callable
 from datetime import datetime, timedelta
+from functools import wraps
 from typing import Any
 
 import boto3
@@ -70,6 +71,7 @@ from shared.api_response import (
     validation_error,
 )
 from shared.decorators import api_handler
+from shared.env_vars import resolve_table_env
 from shared.utils import get_timestamp, utc_now
 
 logger = logging.getLogger(__name__)
@@ -77,7 +79,8 @@ logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 
-RECOMMENDATION_STATUS_TABLE = os.environ.get('RECOMMENDATION_STATUS_TABLE')
+# Fail-fast: Required environment variables (audit #12 canonical naming).
+RECOMMENDATION_STATUS_TABLE = resolve_table_env('DYNAMODB_TABLE_RECOMMENDATION_STATUS')
 
 VALID_STATUSES = {'new', 'in_progress', 'done', 'wontfix'}
 TTL_DAYS = 90
@@ -90,11 +93,6 @@ def _ttl_for(now: datetime) -> int:
 
 
 def _table():
-    if not RECOMMENDATION_STATUS_TABLE:
-        raise RuntimeError(
-            'RECOMMENDATION_STATUS_TABLE env var is not set. The status '
-            'feature must be deployed via CDK before this handler runs.'
-        )
     return dynamodb.Table(RECOMMENDATION_STATUS_TABLE)
 
 
@@ -102,6 +100,17 @@ def _path_id(event: dict[str, Any]) -> str:
     """Pull the {id} path parameter from the API Gateway event."""
     params = event.get('pathParameters') or {}
     return (params.get('id') or '').strip()
+
+
+def _with_rec_id(route: Callable[[dict[str, Any], str], dict[str, Any]]) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Call ``route`` with the path's recommendation id; a path without one is a 400."""
+    @wraps(route)
+    def wrapper(event: dict[str, Any]) -> dict[str, Any]:
+        rec_id = _path_id(event)
+        if not rec_id:
+            return validation_error('Missing recommendation id', event, 'id')
+        return route(event, rec_id)
+    return wrapper
 
 
 def _validate_post_body(body: dict[str, Any]) -> dict[str, Any] | None:
@@ -136,11 +145,8 @@ def _validate_post_body(body: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _post_status(event: dict[str, Any]) -> dict[str, Any]:
-    rec_id = _path_id(event)
-    if not rec_id:
-        return validation_error('Missing recommendation id', event, 'id')
-
+@_with_rec_id
+def _post_status(event: dict[str, Any], rec_id: str) -> dict[str, Any]:
     raw_body = event.get('body') or '{}'
     try:
         body = json.loads(raw_body)
@@ -176,11 +182,8 @@ def _post_status(event: dict[str, Any]) -> dict[str, Any]:
     return success_response(item, event)
 
 
-def _get_status(event: dict[str, Any]) -> dict[str, Any]:
-    rec_id = _path_id(event)
-    if not rec_id:
-        return validation_error('Missing recommendation id', event, 'id')
-
+@_with_rec_id
+def _get_status(event: dict[str, Any], rec_id: str) -> dict[str, Any]:
     response = _table().get_item(Key={'recommendation_id': rec_id})
     item = response.get('Item')
     if not item:
@@ -213,12 +216,10 @@ def list_statuses(rec_ids: list[str]) -> dict[str, dict[str, Any]]:
     Bulk look up status rows for many recommendation ids.
 
     Used by `get-recommendations.py` to left-join status onto each
-    recommendation it returns. Falls back to an empty dict if the
-    table isn't configured (so the legacy /recommendations response
-    keeps working in local dev without the status table). DynamoDB
-    BatchGet has a 100-item limit; we chunk to stay under it.
+    recommendation it returns. DynamoDB BatchGet has a 100-item limit;
+    we chunk to stay under it.
     """
-    if not RECOMMENDATION_STATUS_TABLE or not rec_ids:
+    if not rec_ids:
         return {}
     table = _table()
     deduped = list({rid for rid in rec_ids if rid})

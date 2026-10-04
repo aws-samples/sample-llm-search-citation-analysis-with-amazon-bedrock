@@ -16,14 +16,14 @@ import {
 import { LATE_KEYWORD_RECONCILIATION_MS } from './useDashboardData';
 import {
   availableKeywordFixtures,
-  renderPendingPromotion,
   replacementAvailableKeywordFixtures,
+  setupNeverSettlingPromotion,
   successfulPromotionResponseFixture,
 } from './usePromoteKeywords-fixtures';
 import {
-  buildReconciliationWrapper,
   PendingPromotionOwnerHarness,
   promoteWithReconciliation,
+  renderPendingReconciledPromotion,
 } from './usePromoteKeywords-reconciliation-fixtures';
 
 // useDashboardData (rendered by the reconciliation harness) imports the pure
@@ -122,8 +122,7 @@ describe('promotion keyword reconciliation', () => {
 
   it('requests authoritative refresh when pending promotion is abandoned', async () => {
     const reconcileKeywords = vi.fn();
-    mockApiPost.mockReturnValue(new Promise(vi.fn()));
-    const { rerender } = renderPendingPromotion({ wrapper: buildReconciliationWrapper(reconcileKeywords) });
+    const { rerender } = renderPendingReconciledPromotion(reconcileKeywords);
 
     rerender({ availableKeywords: replacementAvailableKeywordFixtures });
 
@@ -132,8 +131,7 @@ describe('promotion keyword reconciliation', () => {
 
   it('requests one authoritative refresh when pending promotion hook unmounts', () => {
     const reconcileKeywords = vi.fn();
-    mockApiPost.mockReturnValue(new Promise(vi.fn()));
-    const { unmount } = renderPendingPromotion({ wrapper: buildReconciliationWrapper(reconcileKeywords) });
+    const { unmount } = renderPendingReconciledPromotion(reconcileKeywords);
 
     unmount();
 
@@ -143,7 +141,7 @@ describe('promotion keyword reconciliation', () => {
 
   it('runs the two-phase authoritative refresh when a pending promotion child unmounts under StrictMode', async () => {
     mockAuthenticatedFetch.mockImplementation(createMockFetch());
-    mockApiPost.mockReturnValue(new Promise(vi.fn()));
+    setupNeverSettlingPromotion();
     const view = render(
       <StrictMode>
         <PendingPromotionOwnerHarness

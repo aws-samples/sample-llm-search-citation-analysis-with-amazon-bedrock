@@ -2,34 +2,51 @@ import {
   describe, it, expect, vi 
 } from 'vitest';
 import {
-  renderHook, act 
+  act, renderHook
 } from '@testing-library/react';
 import { useRecommendations } from './useRecommendations';
 import {
-  mockRecommendationsResponse,
-  buildRecommendationStatusRow,
-  renderLoadedRecommendations,
+  mockRecommendationsResponse, renderFetchedRecommendations, statusesOf, trackedRecommendation
 } from './useRecommendations-fixtures';
-import { createMockJsonResponse } from '../test/fetchResponses';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
+import { idleEndpointState } from '../test/idleEndpointState';
+import { createDeferredValue } from '../test/fetchResponses';
+import { TestError } from '../test/testError';
+import { saveRecommendationStatus } from '../api/recommendations';
 import type { RecommendationStatus } from '../types';
+import {
+  INVALID_REQUEST_ON_TYPE_GUARD_FAILURE, UNABLE_TO_LOAD_ON_NON_OK_STATUS
+} from './useAnalysisEndpoint-failure-fixtures';
 
 vi.mock('../infrastructure', () => import('../test/infrastructureMock'));
+vi.mock('../api/recommendations', () => ({ saveRecommendationStatus: vi.fn() }));
 
-import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+const mockSaveStatus = vi.mocked(saveRecommendationStatus);
 
 type FetchRecommendationsArgs = Parameters<ReturnType<typeof useRecommendations>['fetchRecommendations']>;
 
+const IDLE_STATUS_STATE = {
+  updatingIds: [],
+  statusError: null,
+};
+
+/** Fetches the fixture list, then saves `status` for its recommendation at `index` with the API storing it. */
+async function renderAfterSavingStatus(index: number, status: RecommendationStatus) {
+  mockSaveStatus.mockResolvedValue(status);
+  const rendered = await renderFetchedRecommendations();
+  await act(async () => {
+    await rendered.result.current.updateStatus(trackedRecommendation(index), status);
+  });
+  return rendered;
+}
+
 describe('useRecommendations', () => {
-  it('starts with no data, not loading, and no error', () => {
+  it('starts with no data, not loading, no error and no status update in flight', () => {
     const { result } = renderHook(() => useRecommendations());
 
     expect(result.current).toStrictEqual({
-      data: null,
-      loading: false,
-      error: null,
-      fetchRecommendations: expect.any(Function),
-      updateRecommendationStatus: expect.any(Function),
+      ...idleEndpointState('fetchRecommendations', 'updateStatus'),
+      ...IDLE_STATUS_STATE,
     });
   });
 
@@ -37,8 +54,9 @@ describe('useRecommendations', () => {
     subject: 'recommendations',
     useHook: useRecommendations,
     fetchName: 'fetchRecommendations',
-    otherFunctions: ['updateRecommendationStatus'],
     fetch: (hook, ...args: FetchRecommendationsArgs) => hook.fetchRecommendations(...args),
+    otherFunctions: ['updateStatus'],
+    otherState: IDLE_STATUS_STATE,
     defaultResponse: mockRecommendationsResponse,
     defaultArgs: [],
     // The recommendations fetch is not abortable: it passes only the URL.
@@ -51,71 +69,59 @@ describe('useRecommendations', () => {
       ['recommendations', mockRecommendationsResponse, []],
     ],
     failures: [
-      ['Unable to load visibility metrics', 'request returns a non-ok status', { shouldFail: true }],
-      ['Invalid visibility request', 'payload fails the type guard', { invalidResponse: true }],
+      UNABLE_TO_LOAD_ON_NON_OK_STATUS,
+      INVALID_REQUEST_ON_TYPE_GUARD_FAILURE,
     ],
   });
 
-  describe('updateRecommendationStatus', () => {
-    it('posts the new status to /recommendations/{id}/status', async () => {
-      const { result } = await renderLoadedRecommendations(
-        createMockJsonResponse(buildRecommendationStatusRow('in_progress')),
-      );
+  describe('updateStatus', () => {
+    it('shows the status the API saved on that recommendation only', async () => {
+      const { result } = await renderAfterSavingStatus(0, 'done');
 
-      await act(() => result.current.updateRecommendationStatus('rec-001', { status: 'in_progress' }));
-
-      expect(mockAuthenticatedFetch).toHaveBeenLastCalledWith(
-        'https://api.test.com/recommendations/rec-001/status',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'in_progress' }),
-        },
-      );
+      expect(statusesOf(result.current.data)).toStrictEqual(['done', 'in_progress']);
     });
 
-    it('serialises notes and relationship pointers in the request body', async () => {
-      const { result } = await renderLoadedRecommendations(
-        createMockJsonResponse(buildRecommendationStatusRow('done')),
-      );
+    it('sends the recommendation it was given and the chosen status', async () => {
+      await renderAfterSavingStatus(1, 'wontfix');
 
-      await act(() => result.current.updateRecommendationStatus('rec-001', {
-        status: 'done',
-        notes: 'pitched outdoor pubs',
-        relatedKeyword: 'best running shoes',
-        relatedContentId: 'content-42',
-      }));
+      expect(mockSaveStatus).toHaveBeenCalledWith(trackedRecommendation(1), 'wontfix');
+    });
 
-      const statusRequest = mockAuthenticatedFetch.mock.calls[1][1];
-      expect(JSON.parse(String(statusRequest?.body))).toStrictEqual({
-        status: 'done',
-        notes: 'pitched outdoor pubs',
-        related_keyword: 'best running shoes',
-        related_content_id: 'content-42',
+    it('keeps the previous status and reports the error when the save fails', async () => {
+      vi.spyOn(console, 'error').mockImplementation(vi.fn());
+      mockSaveStatus.mockRejectedValue(new TestError('Server unavailable'));
+      const { result } = await renderFetchedRecommendations();
+
+      const saved = await act(() => result.current.updateStatus(trackedRecommendation(0), 'done'));
+
+      expect({
+        saved,
+        statuses: statusesOf(result.current.data),
+        statusError: result.current.statusError,
+      }).toStrictEqual({
+        saved: false,
+        statuses: ['new', 'in_progress'],
+        statusError: 'Server error occurred',
       });
     });
 
-    it.each<[status: RecommendationStatus, server: string, statusResponse: Response]>([
-      ['done', 'accepts the update', createMockJsonResponse(buildRecommendationStatusRow('done'))],
-      ['new', 'rejects the update', createMockJsonResponse({}, 500)],
-    ])('shows status "%s" for the recommendation when the server %s', async (status, _server, statusResponse) => {
-      const { result } = await renderLoadedRecommendations(statusResponse);
+    it('marks the recommendation as updating until the save settles', async () => {
+      const pending = createDeferredValue<'done'>();
+      mockSaveStatus.mockReturnValue(pending.promise);
+      const { result } = await renderFetchedRecommendations();
 
-      await act(() => result.current.updateRecommendationStatus('rec-001', { status: 'done' }));
+      const update = { settled: Promise.resolve(false) };
+      act(() => {
+        update.settled = result.current.updateStatus(trackedRecommendation(0), 'done');
+      });
+      const whileSaving = result.current.updatingIds;
+      await act(async () => {
+        pending.resolve('done');
+        await update.settled;
+      });
 
-      const updated = result.current.data?.recommendations.find((rec) => rec.id === 'rec-001');
-      expect(updated?.status).toBe(status);
-    });
-
-    it('returns null and skips the fetch when id is empty', async () => {
-      const { result } = renderHook(() => useRecommendations());
-
-      const ret = await act(
-        () => result.current.updateRecommendationStatus('', { status: 'done' }),
-      );
-
-      expect(ret).toBeNull();
-      expect(mockAuthenticatedFetch).not.toHaveBeenCalled();
+      expect([whileSaving, result.current.updatingIds]).toStrictEqual([['rec-001'], []]);
     });
   });
+
 });

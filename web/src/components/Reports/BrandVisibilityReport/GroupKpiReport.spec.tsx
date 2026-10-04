@@ -4,51 +4,29 @@ import {
 import {
   screen, within
 } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { renderGroupKpiReport } from './GroupKpiReport-fixtures';
 import {
-  headlineCardLabels, sectionTable, sectionTitled, statCard, statFigure, statFootnote
+  groupRunFootnote, renderGroupKpiReport, renderGroupKpiReportAt
+} from './GroupKpiReport-fixtures';
+import {
+  headlineCardLabels, sectionTable, sectionTitled, statFigure
 } from '../layout/reportQueries-fixtures';
 import {
   buildChange, buildHistory, buildRun, historyWithDriverMention, historyWithoutOwnedDomains, RUN_1, RUN_2, RUN_3
 } from './groupKpiHistory-fixtures';
-import { KPI_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import {
-  HEADLINE_CARDS, HEADLINE_LABELS
+  itAsksForOwnedDomains, itShowsHeadlineCards, itShowsNoComparison
 } from '../layout/kpiHeadline-fixtures';
 
 vi.mock('chart.js', () => import('../../Dashboard/chartJs-fixtures'));
 
-describe('GroupKpiReport headline cards', () => {
+describe('GroupKpiReport headline cards of the latest group run, not of a newer partial run', () => {
   it('shows four cards: mention rate, share of voice, visibility score and citation rate', () => {
     renderGroupKpiReport();
 
     expect(headlineCardLabels()).toStrictEqual(['Mention rate', 'Share of voice', 'Visibility score', 'Citation rate']);
   });
 
-  it.each(HEADLINE_CARDS)('shows the %s of the latest group run, not of a newer partial run, as %s', (_id, label, value) => {
-    renderGroupKpiReport();
-
-    expect(statFigure(label).textContent).toBe(value);
-  });
-
-  it.each(HEADLINE_CARDS)('shows the %s change since the previous group run', (_id, label, _value, change) => {
-    renderGroupKpiReport();
-
-    expect(statFootnote(label)).toBe(`${change} since ${new Date(RUN_1).toLocaleString()}`);
-  });
-
-  it.each(HEADLINE_CARDS)('colours the %s figure by its trend', (_id, label, _value, _change, colour) => {
-    renderGroupKpiReport();
-
-    expect(statFigure(label)).toHaveClass(colour);
-  });
-
-  it.each(HEADLINE_CARDS)('explains how %s is measured in the card tooltip', (id, label) => {
-    renderGroupKpiReport();
-
-    expect(within(statCard(label)).getByRole('button')).toHaveAccessibleDescription(KPI_DEFINITIONS[id].definition);
-  });
+  itShowsHeadlineCards(renderGroupKpiReport, groupRunFootnote);
 
   it('names the run, its answers, engines and keyword coverage', () => {
     renderGroupKpiReport();
@@ -58,49 +36,23 @@ describe('GroupKpiReport headline cards', () => {
   });
 });
 
-describe('GroupKpiReport headline without a comparison', () => {
+describe('GroupKpiReport headline of the first group run, without a comparison', () => {
   it('switches every card to the run the reader picks', async () => {
-    renderGroupKpiReport();
-
-    await userEvent.selectOptions(screen.getByLabelText('Run'), RUN_1);
+    await renderGroupKpiReportAt(RUN_1);
 
     expect(statFigure('Mention rate').textContent).toBe('70.0%');
   });
 
-  it('says on every card that the first group run has nothing to compare with', async () => {
-    renderGroupKpiReport();
-
-    await userEvent.selectOptions(screen.getByLabelText('Run'), RUN_1);
-
-    expect(HEADLINE_LABELS.map(statFootnote)).toStrictEqual(HEADLINE_LABELS.map(() => 'No earlier group run to compare with'));
-  });
-
-  it('colours every card neutral when there is no trend', async () => {
-    renderGroupKpiReport();
-
-    await userEvent.selectOptions(screen.getByLabelText('Run'), RUN_1);
-
-    expect(HEADLINE_LABELS.map((label) => statFigure(label).classList.contains('text-gray-900'))).toStrictEqual([true, true, true, true]);
-  });
+  itShowsNoComparison(() => renderGroupKpiReportAt(RUN_1), 'No earlier group run to compare with');
 });
 
 describe('GroupKpiReport headline without owned domains', () => {
-  it('asks for owned domains under the citation rate', () => {
-    renderGroupKpiReport({ history: historyWithoutOwnedDomains() });
-
-    expect(statFootnote('Citation rate')).toBe('Set owned domains in Settings › Brand Tracking to measure citations');
-  });
+  itAsksForOwnedDomains(() => renderGroupKpiReport({ history: historyWithoutOwnedDomains() }), groupRunFootnote);
 
   it('shows the unmeasured citation rate as a dash', () => {
     renderGroupKpiReport({ history: historyWithoutOwnedDomains() });
 
     expect(statFigure('Citation rate').textContent).toBe('—');
-  });
-
-  it('keeps the change footnote of the other cards', () => {
-    renderGroupKpiReport({ history: historyWithoutOwnedDomains() });
-
-    expect(statFootnote('Mention rate')).toBe(`-10.0 pts since ${new Date(RUN_1).toLocaleString()}`);
   });
 });
 
@@ -164,17 +116,13 @@ describe('GroupKpiReport drivers', () => {
   });
 
   it('explains that a partial run is not compared', async () => {
-    renderGroupKpiReport();
-
-    await userEvent.selectOptions(screen.getByLabelText('Run'), RUN_3);
+    await renderGroupKpiReportAt(RUN_3);
 
     expect(screen.getByText(/This is a partial run/)).toBeInTheDocument();
   });
 
   it('explains that the first group run has nothing to compare with', async () => {
-    renderGroupKpiReport();
-
-    await userEvent.selectOptions(screen.getByLabelText('Run'), RUN_1);
+    await renderGroupKpiReportAt(RUN_1);
 
     expect(screen.getByText(/This is the first group run in the selected period/)).toBeInTheDocument();
   });

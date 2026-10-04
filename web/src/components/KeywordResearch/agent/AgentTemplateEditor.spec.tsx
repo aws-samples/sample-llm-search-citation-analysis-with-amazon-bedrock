@@ -1,37 +1,16 @@
 import {
   describe, expect, it, vi
 } from 'vitest';
-import {
-  render, screen
-} from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { AgentTemplateEditor } from './AgentTemplateEditor';
 import {
   buildCafeTemplate, buildSavedTemplate, buildTemplate
 } from './agent-fixtures';
-import type { ResearchTemplate } from '../../../types';
+import {
+  addDimensionRow, clickButton, renderEditor
+} from './AgentTemplateEditor-fixtures';
 
 const SAVED = buildSavedTemplate();
-
-function renderEditor(template: ResearchTemplate, systemPrompt = template.system_prompt) {
-  const handlers = {
-    onPromptChange: vi.fn(),
-    onSaveAsNew: vi.fn(() => Promise.resolve({
-      success: true,
-      message: 'saved',
-    })),
-    onUpdate: vi.fn(() => Promise.resolve({
-      success: true,
-      message: 'updated',
-    })),
-    onDelete: vi.fn(() => Promise.resolve({
-      success: true,
-      message: 'deleted',
-    })),
-  };
-  render(<AgentTemplateEditor template={template} systemPrompt={systemPrompt} {...handlers} />);
-  return handlers;
-}
 
 describe('AgentTemplateEditor', () => {
   it('starts from the template profile with a copy name when the template is built-in', () => {
@@ -66,7 +45,7 @@ describe('AgentTemplateEditor', () => {
 
     await userEvent.clear(screen.getByLabelText(/^Audience/));
     await userEvent.type(screen.getByLabelText(/^Audience/), 'business travellers');
-    await userEvent.click(screen.getByRole('button', { name: 'Update template' }));
+    await clickButton('Update template');
 
     expect(handlers.onUpdate).toHaveBeenCalledWith({ audience: 'business travellers' });
   });
@@ -74,10 +53,9 @@ describe('AgentTemplateEditor', () => {
   it('saves a copy derived from the selected template with ids from the labels', async () => {
     const handlers = renderEditor(buildCafeTemplate(), 'An edited prompt for my own café.');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add dimension' }));
-    await userEvent.type(screen.getAllByLabelText('Dimension label')[3], 'Opening hours');
+    await addDimensionRow(3, 'Opening hours');
     await userEvent.type(screen.getAllByLabelText('Dimension description')[3], 'late night, early breakfast');
-    await userEvent.click(screen.getByRole('button', { name: 'Save as new template' }));
+    await clickButton('Save as new template');
 
     expect(handlers.onSaveAsNew).toHaveBeenCalledWith({
       name: 'Cafés (copy)',
@@ -97,8 +75,7 @@ describe('AgentTemplateEditor', () => {
   it('shows the derived id while a label is typed', async () => {
     renderEditor(SAVED);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add dimension' }));
-    await userEvent.type(screen.getAllByLabelText('Dimension label')[6], 'Menú & bebidas');
+    await addDimensionRow(6, 'Menú & bebidas');
 
     expect(screen.getByText('id: menu_bebidas')).toBeInTheDocument();
   });
@@ -106,7 +83,7 @@ describe('AgentTemplateEditor', () => {
   it('removes a dimension row', async () => {
     renderEditor(buildCafeTemplate());
 
-    await userEvent.click(screen.getByRole('button', { name: 'Remove dimension Occasion' }));
+    await clickButton('Remove dimension Occasion');
 
     expect(screen.getAllByLabelText('Dimension label')).toHaveLength(2);
   });
@@ -114,10 +91,10 @@ describe('AgentTemplateEditor', () => {
   it('blocks saving and explains the problems when the draft is invalid', async () => {
     const handlers = renderEditor(buildCafeTemplate());
 
-    await userEvent.click(screen.getByRole('button', { name: 'Remove dimension Occasion' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Remove dimension Location' }));
+    await clickButton('Remove dimension Occasion');
+    await clickButton('Remove dimension Location');
     await userEvent.clear(screen.getByLabelText(/^Subject/));
-    await userEvent.click(screen.getByRole('button', { name: 'Save as new template' }));
+    await clickButton('Save as new template');
 
     expect(handlers.onSaveAsNew).not.toHaveBeenCalled();
     expect(screen.getByText('Add at least 2 dimensions.')).toBeInTheDocument();
@@ -127,9 +104,8 @@ describe('AgentTemplateEditor', () => {
   it('flags a duplicate dimension on its own row', async () => {
     const handlers = renderEditor(SAVED);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Add dimension' }));
-    await userEvent.type(screen.getAllByLabelText('Dimension label')[6], 'Audience');
-    await userEvent.click(screen.getByRole('button', { name: 'Update template' }));
+    await addDimensionRow(6, 'Audience');
+    await clickButton('Update template');
 
     expect(handlers.onUpdate).not.toHaveBeenCalled();
     expect(screen.getByText('Duplicate of another dimension (audience).')).toBeInTheDocument();
@@ -148,7 +124,7 @@ describe('AgentTemplateEditor', () => {
     vi.spyOn(globalThis, 'confirm').mockReturnValue(true);
     const handlers = renderEditor(SAVED);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Delete template' }));
+    await clickButton('Delete template');
 
     expect(globalThis.confirm).toHaveBeenCalledWith('Delete template "Urban hotels"? Runs that used it keep their own copy of the prompt.');
     expect(handlers.onDelete).toHaveBeenCalledWith();
@@ -158,7 +134,7 @@ describe('AgentTemplateEditor', () => {
     vi.spyOn(globalThis, 'confirm').mockReturnValue(false);
     const handlers = renderEditor(SAVED);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Delete template' }));
+    await clickButton('Delete template');
 
     expect(handlers.onDelete).not.toHaveBeenCalled();
   });

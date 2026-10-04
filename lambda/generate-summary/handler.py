@@ -17,6 +17,8 @@ from typing import Any
 import boto3
 from map_run_results import load_keyword_results
 
+from shared.dynamo_decimal import positive_int
+from shared.provider_counts import add_error_categories, empty_provider_counts
 from shared.step_function_response import log_error
 from shared.utils import get_timestamp, get_timestamp_compact
 
@@ -98,12 +100,7 @@ def count_results(keyword_results: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _provider_bucket(stats: dict[str, Any], provider: str) -> dict[str, Any]:
     """Return the mutable per-provider counter bucket, creating it if needed."""
-    return stats['providers_breakdown'].setdefault(provider, {
-        'queries': 0,
-        'citations': 0,
-        'failures': 0,
-        'error_categories': [],
-    })
+    return stats['providers_breakdown'].setdefault(provider, empty_provider_counts())
 
 
 def merge_provider_summary(stats: dict[str, Any], provider_summary: dict[str, Any]) -> None:
@@ -129,9 +126,7 @@ def merge_provider_summary(stats: dict[str, Any], provider_summary: dict[str, An
         bucket['queries'] += counts.get('queries', 0)
         bucket['citations'] += counts.get('citations', 0)
         bucket['failures'] += counts.get('failures', 0)
-        for category in counts.get('error_categories') or []:
-            if category not in bucket['error_categories']:
-                bucket['error_categories'].append(category)
+        add_error_categories(bucket, counts.get('error_categories') or [])
 
 
 def merge_raw_provider_results(stats: dict[str, Any], results: list[dict[str, Any]]) -> None:
@@ -153,7 +148,7 @@ def merge_raw_provider_results(stats: dict[str, Any], results: list[dict[str, An
 
 def _count(value: Any) -> int:
     """A non-negative integer count from a compact child result; anything else counts as zero."""
-    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+    return positive_int(value) or 0
 
 
 def merge_citation_counts(stats: dict[str, Any], result: dict[str, Any]) -> None:

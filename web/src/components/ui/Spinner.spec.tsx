@@ -1,37 +1,42 @@
+import type { ComponentProps } from 'react';
 import { render } from '@testing-library/react';
 import {
   describe, it, expect 
 } from 'vitest';
 import { Spinner } from './Spinner';
 
+function renderSpinnerSvg(props: ComponentProps<typeof Spinner> = {}) {
+  return render(<Spinner {...props} />).container.querySelector('svg');
+}
+
 describe('Spinner', () => {
-  it('renders with default medium size when no size prop provided', () => {
-    const { container } = render(<Spinner />);
-    const svg = container.querySelector('svg');
-    expect(svg).toHaveClass('h-6', 'w-6');
-  });
-
-  it('renders small size when size is sm', () => {
-    const { container } = render(<Spinner size="sm" />);
-    const svg = container.querySelector('svg');
-    expect(svg).toHaveClass('h-4', 'w-4');
-  });
-
-  it('renders large size when size is lg', () => {
-    const { container } = render(<Spinner size="lg" />);
-    const svg = container.querySelector('svg');
-    expect(svg).toHaveClass('h-8', 'w-8');
+  it.each([
+    {
+      title: 'renders with default medium size when no size prop provided',
+      props: {},
+      classes: ['h-6', 'w-6'],
+    },
+    {
+      title: 'renders small size when size is sm',
+      props: { size: 'sm' },
+      classes: ['h-4', 'w-4'],
+    },
+    {
+      title: 'renders large size when size is lg',
+      props: { size: 'lg' },
+      classes: ['h-8', 'w-8'],
+    },
+  ] as const)('$title', ({
+    props, classes
+  }) => {
+    expect(renderSpinnerSvg(props)).toHaveClass(...classes);
   });
 
   it('applies custom className when provided', () => {
-    const { container } = render(<Spinner className="text-blue-500" />);
-    const svg = container.querySelector('svg');
-    expect(svg).toHaveClass('text-blue-500');
+    expect(renderSpinnerSvg({ className: 'text-blue-500' })).toHaveClass('text-blue-500');
   });
 
   it('has aria-hidden attribute for accessibility', () => {
-    const { container } = render(<Spinner />);
-    const svg = container.querySelector('svg');
-    expect(svg).toHaveAttribute('aria-hidden', 'true');
+    expect(renderSpinnerSvg()).toHaveAttribute('aria-hidden', 'true');
   });
 });

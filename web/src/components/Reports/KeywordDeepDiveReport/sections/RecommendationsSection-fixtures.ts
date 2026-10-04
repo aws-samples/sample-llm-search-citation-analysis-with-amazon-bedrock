@@ -14,3 +14,16 @@ export function buildRecResponse(recommendations: Recommendation[]): Recommendat
     },
   };
 }
+
+/** A high-priority gap recommendation titled `title`, with no keywords (global) unless overridden. */
+export function buildRecommendation(title: string, overrides: Partial<Recommendation> = {}): Recommendation {
+  return {
+    type: 'gap',
+    priority: 'high',
+    title,
+    description: 'd',
+    action: 'a',
+    impact: 'i',
+    ...overrides,
+  };
+}

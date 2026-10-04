@@ -15,11 +15,13 @@ The central test feeds the *real* post-crawl element shape — notably WITHOUT a
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from typing import Any
 
 import pytest
 
 from testing.env import cleared_env
+from testing.map_run_fixtures import compact_keyword_result
 from testing.module_loader import load_handler_module_offline
 from testing.provider_summary_fixtures import provider_bucket, provider_row
 
@@ -32,6 +34,12 @@ def summary():
     with cleared_env('SUMMARY_BUCKET'):
         module = load_handler_module_offline(_HANDLER_DIR, 'handler.py', 'generate_summary_handler_under_test')
     return module, module.s3_client
+
+
+@pytest.fixture
+def module(summary):
+    """The summary module of ``summary``."""
+    return summary[0]
 
 
 def post_crawl_keyword_result(
@@ -83,35 +91,20 @@ def post_crawl_keyword_result(
 class TestProviderStatisticsFromTheStateMachineShape:
     """The shape that actually arrives in production."""
 
-    def test_reports_the_queried_provider_count(self, summary) -> None:
-        module, _ = summary
-
+    def test_reports_the_queried_provider_count(self, module) -> None:
         stats = module.aggregate_statistics([post_crawl_keyword_result()])
 
         assert stats['total_providers_queried'] == 4
 
-    def test_reports_a_populated_provider_breakdown(self, summary) -> None:
-        module, _ = summary
-
+    def test_reports_a_populated_provider_breakdown(self, module) -> None:
         stats = module.aggregate_statistics([post_crawl_keyword_result()])
 
         assert stats['providers_breakdown'] == {
-            'openai': {
-                'queries': 2,
-                'citations': 5,
-                'failures': 0,
-                'error_categories': [],
-            },
-            'perplexity': {
-                'queries': 2,
-                'citations': 3,
-                'failures': 0,
-                'error_categories': [],
-            },
+            'openai': provider_bucket(queries=2, citations=5),
+            'perplexity': provider_bucket(queries=2, citations=3),
         }
 
-    def test_sums_provider_counts_across_keywords(self, summary) -> None:
-        module, _ = summary
+    def test_sums_provider_counts_across_keywords(self, module) -> None:
         keyword_results = [
             post_crawl_keyword_result(keyword='hotels malaga'),
             post_crawl_keyword_result(keyword='hotels madrid'),
@@ -120,30 +113,20 @@ class TestProviderStatisticsFromTheStateMachineShape:
         stats = module.aggregate_statistics(keyword_results)
 
         assert stats['total_providers_queried'] == 8
-        assert stats['providers_breakdown']['openai'] == {
-            'queries': 4,
-            'citations': 10,
-            'failures': 0,
-            'error_categories': [],
-        }
+        assert stats['providers_breakdown']['openai'] == provider_bucket(queries=4, citations=10)
 
-    def test_keeps_counting_unique_citations(self, summary) -> None:
+    def test_keeps_counting_unique_citations(self, module) -> None:
         """These already worked; the fix must not disturb them."""
-        module, _ = summary
-
         stats = module.aggregate_statistics([post_crawl_keyword_result(unique_citations=3)])
 
         assert stats['total_unique_citations'] == 3
 
-    def test_keeps_counting_crawled_pages(self, summary) -> None:
-        module, _ = summary
-
+    def test_keeps_counting_crawled_pages(self, module) -> None:
         stats = module.aggregate_statistics([post_crawl_keyword_result(crawled_success=5)])
 
         assert stats['total_pages_crawled'] == 5
 
-    def test_reports_zero_providers_for_a_keyword_whose_providers_all_failed(self, summary) -> None:
-        module, _ = summary
+    def test_reports_zero_providers_for_a_keyword_whose_providers_all_failed(self, module) -> None:
         empty = post_crawl_keyword_result(result_count=0, by_provider={})
 
         stats = module.aggregate_statistics([empty])
@@ -151,8 +134,7 @@ class TestProviderStatisticsFromTheStateMachineShape:
         assert stats['total_providers_queried'] == 0
         assert stats['providers_breakdown'] == {}
 
-    def test_skips_a_keyword_result_carrying_an_error(self, summary) -> None:
-        module, _ = summary
+    def test_skips_a_keyword_result_carrying_an_error(self, module) -> None:
         keyword_results = [post_crawl_keyword_result(), {'error': 'boom'}]
 
         stats = module.aggregate_statistics(keyword_results)
@@ -164,8 +146,7 @@ class TestProviderStatisticsFromTheStateMachineShape:
 class TestMalformedRollupsAreTolerated:
     """A summary Lambda that raises loses the whole run's report."""
 
-    def test_ignores_a_rollup_with_a_non_dict_breakdown(self, summary) -> None:
-        module, _ = summary
+    def test_ignores_a_rollup_with_a_non_dict_breakdown(self, module) -> None:
         result = post_crawl_keyword_result()
         result['provider_summary']['by_provider'] = 'not-a-dict'
 
@@ -174,22 +155,28 @@ class TestMalformedRollupsAreTolerated:
         assert stats['providers_breakdown'] == {}
         assert stats['total_providers_queried'] == 4
 
-    def test_ignores_a_provider_entry_that_is_not_a_dict(self, summary) -> None:
-        module, _ = summary
+    def test_ignores_a_provider_entry_that_is_not_a_dict(self, module) -> None:
         result = post_crawl_keyword_result(by_provider={'openai': 7})
 
         stats = module.aggregate_statistics([result])
 
         assert stats['providers_breakdown'] == {}
 
-    def test_treats_a_missing_result_count_as_zero(self, summary) -> None:
-        module, _ = summary
+    def test_treats_a_missing_result_count_as_zero(self, module) -> None:
         result = post_crawl_keyword_result()
         del result['provider_summary']['result_count']
 
         stats = module.aggregate_statistics([result])
 
         assert stats['total_providers_queried'] == 0
+
+    @pytest.mark.parametrize('count', [None, 0, -2, '3', True])
+    def test_counts_a_compact_count_that_is_not_a_positive_integer_as_zero(self, module, count: object) -> None:
+        result = compact_keyword_result(unique_citations=count, total_citations_found=count, pages_crawled=count)
+
+        stats = module.aggregate_statistics([result])
+
+        assert (stats['total_unique_citations'], stats['total_citations_found'], stats['total_pages_crawled']) == (0, 0, 0)
 
 
 class TestRawSearchResultsStillSupported:
@@ -198,8 +185,7 @@ class TestRawSearchResultsStillSupported:
     handler stays testable and debuggable outside the state machine.
     """
 
-    def test_counts_raw_provider_rows_when_no_rollup_is_present(self, summary) -> None:
-        module, _ = summary
+    def test_counts_raw_provider_rows_when_no_rollup_is_present(self, module) -> None:
         raw = {
             'keyword': 'hotels malaga',
             'results': [
@@ -213,9 +199,8 @@ class TestRawSearchResultsStillSupported:
         assert stats['total_providers_queried'] == 2
         assert stats['providers_breakdown']['openai']['citations'] == 2
 
-    def test_prefers_the_rollup_when_both_shapes_are_present(self, summary) -> None:
+    def test_prefers_the_rollup_when_both_shapes_are_present(self, module) -> None:
         """Avoids double-counting if a future change reinstates `results`."""
-        module, _ = summary
         both = post_crawl_keyword_result()
         both['results'] = [provider_row('openai', ['https://a.example'])]
 
@@ -227,8 +212,7 @@ class TestRawSearchResultsStillSupported:
 class TestReportIncludesProviderActivity:
     """End-to-end through the handler, since that is what writes to S3."""
 
-    def test_handler_report_carries_non_zero_provider_activity(self, summary) -> None:
-        module, _ = summary
+    def test_handler_report_carries_non_zero_provider_activity(self, module) -> None:
         event = {
             'execution_id': 'exec-123',
             'keyword_results': [post_crawl_keyword_result()],
@@ -269,6 +253,28 @@ def keyword_counts(failed: int = 0, total: int = 1) -> dict[str, Any]:
     }
 
 
+#: A provider that answered with citations.
+_ANSWERING = provider_bucket(citations=7)
+#: A provider whose one query failed with no citations.
+_FAILING = provider_bucket(citations=0, failures=1)
+#: Claude on 2026-08-14: one query, refused for lack of credit.
+_OUT_OF_CREDIT = provider_bucket(citations=0, failures=1, error_categories=['insufficient_credit'])
+
+
+@pytest.fixture
+def assess(module) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """``assess_provider_health`` of a run whose statistics carry only ``breakdown``."""
+    return lambda breakdown: module.assess_provider_health(stats_with(breakdown))
+
+
+@pytest.fixture
+def report_for(module) -> Callable[..., dict[str, Any]]:
+    """``generate_report`` of a run with ``breakdown`` and ``failed`` of ``total`` keywords failed (none of one by default)."""
+    def report(breakdown: dict[str, Any], *, failed: int = 0, total: int = 1) -> dict[str, Any]:
+        return module.generate_report('exec-1', keyword_counts(failed=failed, total=total), stats_with(breakdown))
+    return report
+
+
 class TestAssessProviderHealth:
     """
     Whether a provider actually answered, which nothing used to ask.
@@ -278,13 +284,8 @@ class TestAssessProviderHealth:
     providers answer?", and for Claude the answer had been no for five days.
     """
 
-    def test_reports_a_provider_with_failures_as_failed(self, summary) -> None:
-        module, _ = summary
-        stats = stats_with({'claude': provider_bucket(
-            citations=0, failures=1, error_categories=['insufficient_credit'],
-        )})
-
-        health = module.assess_provider_health(stats)
+    def test_reports_a_provider_with_failures_as_failed(self, assess) -> None:
+        health = assess({'claude': _OUT_OF_CREDIT})
 
         assert health['failed_providers'] == [{
             'provider': 'claude',
@@ -294,64 +295,46 @@ class TestAssessProviderHealth:
             'error_categories': ['insufficient_credit'],
         }]
 
-    def test_marks_the_run_degraded_when_a_provider_failed(self, summary) -> None:
-        module, _ = summary
-        stats = stats_with({'claude': provider_bucket(failures=1)})
-
-        health = module.assess_provider_health(stats)
+    def test_marks_the_run_degraded_when_a_provider_failed(self, assess) -> None:
+        health = assess({'claude': provider_bucket(failures=1)})
 
         assert health['degraded'] is True
 
-    def test_counts_healthy_and_failed_providers_separately(self, summary) -> None:
-        module, _ = summary
-        stats = stats_with({
-            'openai': provider_bucket(citations=7),
+    def test_counts_healthy_and_failed_providers_separately(self, assess) -> None:
+        health = assess({
+            'openai': _ANSWERING,
             'perplexity': provider_bucket(citations=3),
-            'claude': provider_bucket(citations=0, failures=1),
+            'claude': _FAILING,
         })
-
-        health = module.assess_provider_health(stats)
 
         assert (health['providers_total'], health['providers_healthy'], health['providers_failed']) == (3, 2, 1)
 
-    def test_names_only_the_failed_provider(self, summary) -> None:
-        module, _ = summary
-        stats = stats_with({
-            'openai': provider_bucket(citations=7),
-            'claude': provider_bucket(citations=0, failures=1),
-        })
-
-        health = module.assess_provider_health(stats)
+    def test_names_only_the_failed_provider(self, assess) -> None:
+        health = assess({'openai': _ANSWERING, 'claude': _FAILING})
 
         assert [entry['provider'] for entry in health['failed_providers']] == ['claude']
 
-    def test_lists_failed_providers_in_a_stable_order(self, summary) -> None:
+    def test_lists_failed_providers_in_a_stable_order(self, assess) -> None:
         """
         Summaries are written to S3 and compared between runs. Dict-insertion
         order would make two identical outages produce different documents.
         """
-        module, _ = summary
-        stats = stats_with({
+        health = assess({
             'perplexity': provider_bucket(failures=1),
             'claude': provider_bucket(failures=1),
             'gemini': provider_bucket(failures=1),
         })
 
-        health = module.assess_provider_health(stats)
-
         assert [entry['provider'] for entry in health['failed_providers']] == [
             'claude', 'gemini', 'perplexity',
         ]
 
-    def test_falls_back_to_unknown_when_a_failure_carries_no_category(self, summary) -> None:
+    def test_falls_back_to_unknown_when_a_failure_carries_no_category(self, assess) -> None:
         """
         A failure with an empty category list still has to name something, or
         the dashboard renders a failed provider with no stated reason.
         """
-        module, _ = summary
-        stats = stats_with({'claude': provider_bucket(failures=1, error_categories=[])})
-
-        health = module.assess_provider_health(stats)
+        health = assess({'claude': provider_bucket(failures=1, error_categories=[])})
 
         assert health['failed_providers'][0]['error_categories'] == ['unknown']
 
@@ -369,10 +352,9 @@ class TestZeroCitationsIsNotAFailure:
     """
 
     @pytest.fixture
-    def empty_search_health(self, summary) -> dict[str, Any]:
+    def empty_search_health(self, assess) -> dict[str, Any]:
         """Health of a run whose only provider answered its query with no citations and no error."""
-        module, _ = summary
-        return module.assess_provider_health(stats_with({'openai': provider_bucket(queries=1, citations=0, failures=0)}))
+        return assess({'openai': provider_bucket(queries=1, citations=0, failures=0)})
 
     def test_reports_a_provider_with_no_citations_and_no_errors_as_healthy(self, empty_search_health) -> None:
         assert empty_search_health['failed_providers'] == []
@@ -383,18 +365,15 @@ class TestZeroCitationsIsNotAFailure:
     def test_counts_a_provider_that_found_nothing_as_healthy(self, empty_search_health) -> None:
         assert empty_search_health['providers_healthy'] == 1
 
-    def test_distinguishes_an_empty_search_from_a_failed_one(self, summary) -> None:
+    def test_distinguishes_an_empty_search_from_a_failed_one(self, assess) -> None:
         """
         Both providers returned zero citations. Only the one that errored is
         reported — this is precisely the distinction the rollup used to discard.
         """
-        module, _ = summary
-        stats = stats_with({
+        health = assess({
             'openai': provider_bucket(citations=0, failures=0),
-            'claude': provider_bucket(citations=0, failures=1, error_categories=['insufficient_credit']),
+            'claude': _OUT_OF_CREDIT,
         })
-
-        health = module.assess_provider_health(stats)
 
         assert [entry['provider'] for entry in health['failed_providers']] == ['claude']
 
@@ -402,12 +381,8 @@ class TestZeroCitationsIsNotAFailure:
 class TestNoProvidersToAssess:
     """A summary Lambda that raises loses the whole run's report."""
 
-    def test_reports_a_run_with_no_providers_as_not_degraded(self, summary) -> None:
-        module, _ = summary
-
-        health = module.assess_provider_health(stats_with({}))
-
-        assert health == {
+    def test_reports_a_run_with_no_providers_as_not_degraded(self, assess) -> None:
+        assert assess({}) == {
             'providers_total': 0,
             'providers_failed': 0,
             'providers_healthy': 0,
@@ -415,16 +390,10 @@ class TestNoProvidersToAssess:
             'degraded': False,
         }
 
-    def test_ignores_a_breakdown_entry_that_is_not_a_dict(self, summary) -> None:
-        module, _ = summary
+    def test_ignores_a_breakdown_entry_that_is_not_a_dict(self, assess) -> None:
+        assert assess({'openai': 7})['failed_providers'] == []
 
-        health = module.assess_provider_health(stats_with({'openai': 7}))
-
-        assert health['failed_providers'] == []
-
-    def test_reports_not_degraded_when_the_breakdown_key_is_missing(self, summary) -> None:
-        module, _ = summary
-
+    def test_reports_not_degraded_when_the_breakdown_key_is_missing(self, module) -> None:
         health = module.assess_provider_health({})
 
         assert health['degraded'] is False
@@ -437,78 +406,51 @@ class TestReportedStatusReflectsProviderHealth:
     all said `completed`.
     """
 
-    def test_reports_completed_when_no_keyword_and_no_provider_failed(self, summary) -> None:
-        module, _ = summary
-        stats = stats_with({'openai': provider_bucket(citations=7)})
+    def test_reports_completed_when_no_keyword_and_no_provider_failed(self, report_for) -> None:
+        assert report_for({'openai': _ANSWERING})['status'] == 'completed'
 
-        report = module.generate_report('exec-1', keyword_counts(failed=0), stats)
-
-        assert report['status'] == 'completed'
-
-    def test_reports_completed_degraded_when_only_a_provider_failed(self, summary) -> None:
+    def test_reports_completed_degraded_when_only_a_provider_failed(self, report_for) -> None:
         """
         Every keyword finished, so the old rule said `completed`. A provider
         contributed nothing, so the run's numbers are not comparable with a
         clean one and must not claim to be.
         """
-        module, _ = summary
-        stats = stats_with({
-            'openai': provider_bucket(citations=7),
-            'claude': provider_bucket(citations=0, failures=1, error_categories=['insufficient_credit']),
-        })
-
-        report = module.generate_report('exec-1', keyword_counts(failed=0), stats)
+        report = report_for({'openai': _ANSWERING, 'claude': _OUT_OF_CREDIT})
 
         assert report['status'] == 'completed_degraded'
 
-    def test_reports_completed_with_errors_when_a_keyword_failed(self, summary) -> None:
-        module, _ = summary
-        stats = stats_with({'openai': provider_bucket(citations=7)})
-
-        report = module.generate_report('exec-1', keyword_counts(failed=1, total=2), stats)
+    def test_reports_completed_with_errors_when_a_keyword_failed(self, report_for) -> None:
+        report = report_for({'openai': _ANSWERING}, failed=1, total=2)
 
         assert report['status'] == 'completed_with_errors'
 
-    def test_prefers_keyword_failure_over_provider_failure_in_the_status(self, summary) -> None:
+    def test_prefers_keyword_failure_over_provider_failure_in_the_status(self, report_for) -> None:
         """
         A failed keyword is the bigger problem: its data is missing entirely,
         whereas a degraded run has data from fewer providers. Precedence is
         pinned so the two causes cannot be reordered without noticing.
         """
-        module, _ = summary
-        stats = stats_with({'claude': provider_bucket(citations=0, failures=1)})
-
-        report = module.generate_report('exec-1', keyword_counts(failed=1, total=2), stats)
+        report = report_for({'claude': _FAILING}, failed=1, total=2)
 
         assert report['status'] == 'completed_with_errors'
 
-    def test_includes_the_provider_health_block_in_the_summary(self, summary) -> None:
+    def test_includes_the_provider_health_block_in_the_summary(self, report_for) -> None:
         """
         The status alone says something is wrong; this block says which provider
         and why, which is what makes the report actionable.
         """
-        module, _ = summary
-        stats = stats_with({'claude': provider_bucket(
-            citations=0, failures=1, error_categories=['insufficient_credit'],
-        )})
-
-        report = module.generate_report('exec-1', keyword_counts(failed=0), stats)
+        report = report_for({'claude': _OUT_OF_CREDIT})
 
         assert report['summary']['provider_health']['failed_providers'][0]['error_categories'] == [
             'insufficient_credit',
         ]
 
-    def test_reports_a_degraded_run_as_not_completed(self, summary) -> None:
+    def test_reports_a_degraded_run_as_not_completed(self, report_for) -> None:
         """
         Stated as a negative because `completed` is the specific string that
         made the outage invisible — anything but that is an improvement.
         """
-        module, _ = summary
-        stats = stats_with({'claude': provider_bucket(citations=0, failures=1)})
-
-        report = module.generate_report('exec-1', keyword_counts(failed=0), stats)
-
-        assert report['status'] != 'completed'
+        assert report_for({'claude': _FAILING})['status'] != 'completed'
 
 
 #: The nine providers configured in `search/handler.py`'s PROVIDER_RUNNERS.
@@ -539,9 +481,8 @@ class TestTheProductionIncidentEndToEnd:
     """
 
     @pytest.fixture
-    def report(self, summary) -> dict[str, Any]:
+    def report(self, module) -> dict[str, Any]:
         """The 2026-08-14 execution, replayed through the real handler."""
-        module, _ = summary
         event = {
             'execution_id': 'exec-2026-08-14',
             'keyword_results': [post_crawl_keyword_result(

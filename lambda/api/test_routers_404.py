@@ -78,24 +78,24 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch):
 # --- Tests ------------------------------------------------------------------
 
 
-@pytest.mark.parametrize('router_name', ROUTERS)
-def test_returns_404_status_when_no_route_matches(router_name):
-    os.environ['ALLOW_DEV_CORS'] = 'true'
-    mod = _load_router(router_name)
-
-    resp = mod.handler(_unmatched_event(), None)
-
-    assert resp['statusCode'] == 404
+def _unmatched_response(router_name: str, **event_kwargs: str) -> dict:
+    """``router_name``'s answer to a request no route matches."""
+    return _load_router(router_name).handler(_unmatched_event(**event_kwargs), None)
 
 
-@pytest.mark.parametrize('router_name', ROUTERS)
-def test_returns_wildcard_origin_when_dev_cors_enabled(router_name):
-    os.environ['ALLOW_DEV_CORS'] = 'true'
-    mod = _load_router(router_name)
+@pytest.fixture(params=ROUTERS)
+def dev_cors_404(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Each router's unmatched-route answer with ``ALLOW_DEV_CORS`` on."""
+    monkeypatch.setenv('ALLOW_DEV_CORS', 'true')
+    return _unmatched_response(request.param)
 
-    resp = mod.handler(_unmatched_event(), None)
 
-    assert resp['headers']['Access-Control-Allow-Origin'] == '*'
+def test_returns_404_status_when_no_route_matches(dev_cors_404):
+    assert dev_cors_404['statusCode'] == 404
+
+
+def test_returns_wildcard_origin_when_dev_cors_enabled(dev_cors_404):
+    assert dev_cors_404['headers']['Access-Control-Allow-Origin'] == '*'
 
 
 @pytest.mark.parametrize('router_name', ROUTERS)
@@ -106,11 +106,7 @@ def test_fails_closed_when_cors_not_configured(router_name):
     With the fix, an unconfigured environment must yield an empty origin
     header (fail-closed). This test would fail if the fix is reverted.
     """
-    mod = _load_router(router_name)
-
-    resp = mod.handler(_unmatched_event(), None)
-
-    assert resp['headers']['Access-Control-Allow-Origin'] == ''
+    assert _unmatched_response(router_name)['headers']['Access-Control-Allow-Origin'] == ''
 
 
 @pytest.mark.parametrize('router_name', ROUTERS)
@@ -121,22 +117,15 @@ def test_echoes_allowed_request_origin_when_configured(router_name, monkeypatch:
     """
     configured = 'https://dashboard.example.com'
     monkeypatch.setattr(_layer_api_response, '_cors_origin_cache', configured)
-    mod = _load_router(router_name)
 
-    resp = mod.handler(_unmatched_event(origin=configured), None)
+    resp = _unmatched_response(router_name, origin=configured)
 
     assert resp['headers']['Access-Control-Allow-Origin'] == configured
 
 
-@pytest.mark.parametrize('router_name', ROUTERS)
-def test_returns_json_error_body_on_404(router_name):
-    os.environ['ALLOW_DEV_CORS'] = 'true'
-    mod = _load_router(router_name)
-
-    resp = mod.handler(_unmatched_event(), None)
-
-    assert 'not found' in resp['body'].lower()
-    assert resp['headers']['Content-Type'] == 'application/json'
+def test_returns_json_error_body_on_404(dev_cors_404):
+    assert 'not found' in dev_cors_404['body'].lower()
+    assert dev_cors_404['headers']['Content-Type'] == 'application/json'
 
 
 @pytest.mark.parametrize('router_name', ROUTERS)

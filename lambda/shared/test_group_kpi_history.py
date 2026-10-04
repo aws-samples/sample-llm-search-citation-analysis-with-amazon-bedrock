@@ -182,14 +182,22 @@ class TestGroupRunCoverage:
         assert (_run(history, RUN_1)['is_group_run'], GROUP_RUN_MIN_COVERAGE) == (True, 50.0)
 
     def test_does_not_mark_a_run_below_half_as_a_group_run(self):
-        history = _history({'k1': [_hotel_first(RUN_1)], 'k2': [], 'k3': []})
-
-        assert _run(history, RUN_1)['is_group_run'] is False
+        assert _run(_one_of_three_keywords_answered(), RUN_1)['is_group_run'] is False
 
     def test_rounds_coverage_to_one_decimal(self):
-        history = _history({'k1': [_hotel_first(RUN_1)], 'k2': [], 'k3': []})
+        assert _run(_one_of_three_keywords_answered(), RUN_1)['coverage'] == 33.3
 
-        assert _run(history, RUN_1)['coverage'] == 33.3
+    def test_reports_zero_coverage_when_the_answered_share_rounds_below_a_tenth(self):
+        keywords = [f'k{index}' for index in range(1, 2002)]
+
+        history = _history({'k1': [_hotel_first(RUN_1)]}, keywords)
+
+        assert (_run(history, RUN_1)['keywords_total'], _run(history, RUN_1)['coverage']) == (2001, 0.0)
+
+
+def _one_of_three_keywords_answered() -> dict[str, Any]:
+    """History where only one of three keywords answered in `RUN_1`."""
+    return _history({'k1': [_hotel_first(RUN_1)], 'k2': [], 'k3': []})
 
 
 def _two_group_runs() -> dict[str, Any]:

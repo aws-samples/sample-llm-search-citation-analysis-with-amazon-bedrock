@@ -12,7 +12,7 @@ export const FAMILY_TRAVELER_PROMPT = {
   updated_at: '2024-01-01T00:00:00Z',
 } satisfies QueryPrompt;
 
-export const GENERIC_PREVIEW_PROMPT = {
+const GENERIC_PREVIEW_PROMPT = {
   id: 'persona-generic',
   name: 'Software buyer',
   template: 'Compare {keyword}',
@@ -29,7 +29,6 @@ export function buildQueryPromptsHookResult(
     prompts,
     loading: false,
     error: null,
-    fetchPrompts: vi.fn(),
     createPrompt: vi.fn(),
     updatePrompt: vi.fn(),
     deletePrompt: vi.fn(),

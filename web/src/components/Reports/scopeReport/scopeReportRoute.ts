@@ -14,7 +14,7 @@ export const SCOPE_REPORT_PERIODS = [30, 90, 180] as const;
 
 export type ScopeReportDays = (typeof SCOPE_REPORT_PERIODS)[number];
 
-export const DEFAULT_SCOPE_REPORT_DAYS: ScopeReportDays = 30;
+const DEFAULT_SCOPE_REPORT_DAYS: ScopeReportDays = 30;
 
 /** Daily points for a month; weekly ones beyond, so a long trend stays readable. */
 export function trendPeriodFor(days: number): PeriodType {

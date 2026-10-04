@@ -8,7 +8,10 @@ finished search to the standard search-provider result.
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 import search_clients
 from search_clients import SerpAPIClient
@@ -67,6 +70,13 @@ class TestSerpAPIClient:
         assert (result['status'], result['error'], result['citations']) == (
             'error', 'SerpAPI search search-1 timed out: still pending after 300s', [],
         )
+
+    def test_a_serpapi_error_logs_a_serpapi_error_line(self, caplog: pytest.LogCaptureFixture):
+        _search_with(side_effect=SerpApiError('quota'))
+
+        assert [(r.levelno, r.getMessage()) for r in caplog.records if r.name == 'search_clients'] == [
+            (logging.ERROR, 'SerpAPI error'),
+        ]
 
     def test_quota_exhaustion_error_text_classifies_as_insufficient_credit(self):
         spent = MagicMock(status_code=429, text='{"error": "Your account has run out of searches."}', headers={})

@@ -1,13 +1,9 @@
 import type { VisibilityResponse } from '../../../types';
 import { formatDate } from '../../../formatting/dateFormatter';
-import { KpiHeadline } from './KpiHeadline';
-import {
-  NO_PREVIOUS_RUN, runComparison
-} from './periodComparison';
+import type { VisibilityHeadlineProps } from './reportSlices';
 import { ReportSection } from './ReportSection';
-import {
-  gateVisibilityHeadline, type VisibilityHeadlineProps
-} from './visibilityHeadline';
+import { RunKpiHeadline } from './RunKpiHeadline';
+import { gateVisibilityHeadline } from './visibilityHeadline';
 
 interface Props extends VisibilityHeadlineProps {
   /** Shown when the keyword has no answered run yet. */
@@ -34,12 +30,7 @@ export function VisibilityHeadlineSection({
   const visibility = gate.value;
   return (
     <ReportSection title="Headline" subtitle={headlineSubtitle(visibility)}>
-      <KpiHeadline
-        kpis={visibility.kpis}
-        comparison={runComparison(visibility.change)}
-        noComparisonNote={NO_PREVIOUS_RUN}
-        citationsConfigured={visibility.citations_configured}
-      />
+      <RunKpiHeadline visibility={visibility} />
     </ReportSection>
   );
 }

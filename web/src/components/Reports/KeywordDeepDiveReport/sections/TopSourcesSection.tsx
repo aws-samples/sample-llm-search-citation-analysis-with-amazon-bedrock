@@ -2,16 +2,19 @@ import type {
   BrandMentionsResponse,
   CitationGapsResponse,
 } from '../../../../types';
-import { ReportSection } from '../../layout';
-import { SectionPlaceholder } from '../../layout/SectionPlaceholder';
+import {
+  ReportSection,
+  ReportSectionPlaceholder,
+  pendingSectionPlaceholder,
+  type SectionFetchState,
+} from '../../layout';
 
-interface Props {
+interface Props extends SectionFetchState {
   readonly gaps: CitationGapsResponse | null;
   readonly mentions: BrandMentionsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
 }
 
+const TITLE = 'Top sources';
 const MAX_SUPPORTING = 8;
 const MAX_GAPS = 8;
 
@@ -29,21 +32,13 @@ const MAX_GAPS = 8;
 export function TopSourcesSection({
   gaps, mentions, loading, error,
 }: Props) {
-  if (loading) {
-    return (
-      <ReportSection title="Top sources">
-        <SectionPlaceholder variant="loading" message="Loading citation sources…" />
-      </ReportSection>
-    );
-  }
-
-  if (error) {
-    return (
-      <ReportSection title="Top sources">
-        <SectionPlaceholder variant="error" message={error} />
-      </ReportSection>
-    );
-  }
+  const pending = pendingSectionPlaceholder({
+    title: TITLE,
+    loading,
+    loadingMessage: 'Loading citation sources…',
+    error,
+  });
+  if (pending) return pending;
 
   if (!gaps) {
     return null;
@@ -54,18 +49,17 @@ export function TopSourcesSection({
 
   if (supporting.length === 0 && competitorOnly.length === 0) {
     return (
-      <ReportSection title="Top sources">
-        <SectionPlaceholder
-          variant="empty"
-          message="No citation sources have been crawled for this keyword yet."
-        />
-      </ReportSection>
+      <ReportSectionPlaceholder
+        title={TITLE}
+        variant="empty"
+        message="No citation sources have been crawled for this keyword yet."
+      />
     );
   }
 
   return (
     <ReportSection
-      title="Top sources"
+      title={TITLE}
       subtitle="Where citations come from for this keyword — both the wins and the gaps."
     >
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

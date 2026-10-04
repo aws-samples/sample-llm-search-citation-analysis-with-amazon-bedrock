@@ -1,37 +1,18 @@
 import { vi } from 'vitest';
-import type { IndustryPresets } from '../../types';
+import type { ComponentProps } from 'react';
+import { INDUSTRY_PRESETS } from './IndustrySelector-fixtures';
+import type { PromptEditor } from './PromptEditor';
 
-const DEFAULTS = {
-  industry: 'hospitality',
-  presets: {
-    hospitality: {
-      name: 'Hospitality',
-      description: 'Hotels and travel',
-      entity_types: ['hotel'],
-      example_brands: ['Marriott'],
-      extraction_focus: 'hotels',
-      default_prompt: 'Default prompt',
-    },
-    retail: {
-      name: 'Retail',
-      description: 'Retail stores',
-      entity_types: ['store'],
-      example_brands: ['Amazon'],
-      extraction_focus: 'stores',
-      default_prompt: 'Default prompt',
-    },
-  } satisfies IndustryPresets,
-  industryPrompts: { hospitality: 'Custom hospitality prompt' },
-  currentPrompt: 'Test prompt',
-  promptModified: false,
-  onIndustryChange: vi.fn(),
-  onPromptChange: vi.fn(),
-  onResetToDefault: vi.fn(),
-};
+type PromptEditorProps = ComponentProps<typeof PromptEditor>;
 
-export function buildProps(overrides = {}) {
+/** The editor on the hospitality preset with a saved custom prompt; every prop can be overridden. */
+export function buildProps(overrides: Partial<PromptEditorProps> = {}): PromptEditorProps {
   return {
-    ...DEFAULTS,
+    industry: 'hospitality',
+    presets: INDUSTRY_PRESETS,
+    industryPrompts: { hospitality: 'Custom hospitality prompt' },
+    currentPrompt: 'Test prompt',
+    promptModified: false,
     onIndustryChange: vi.fn(),
     onPromptChange: vi.fn(),
     onResetToDefault: vi.fn(),

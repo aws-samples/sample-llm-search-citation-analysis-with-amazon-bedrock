@@ -9,6 +9,12 @@ import { ProviderResponsesTab } from './ProviderResponsesTab';
 import { BrandOverviewTab } from './BrandOverviewTab';
 import { SelfReflectionPanel } from '../SelfReflection/SelfReflectionPanel';
 import { CloseIcon } from '../ui';
+import { classificationLabel } from './brandPresentation';
+import { ModalCloseFooter } from '../ui/ModalCloseFooter';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  CHART_BAR_PATHS, LIGHTBULB_PATHS 
+} from '../ui/iconPaths';
 
 interface BrandDetailModalProps {
   brand: AggregatedBrand;
@@ -46,17 +52,6 @@ export const BrandDetailModal = ({
     }
   };
 
-  const getClassificationLabel = (classification: string) => {
-    switch (classification) {
-      case 'first_party':
-        return 'First Party';
-      case 'competitor':
-        return 'Competitor';
-      default:
-        return 'Other';
-    }
-  };
-
   const modalContent = (
     <div className="fixed inset-0 bg-gray-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-lg border border-gray-200 max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
@@ -70,7 +65,7 @@ export const BrandDetailModal = ({
                   brand.classification
                 )}`}
               >
-                {getClassificationLabel(brand.classification)}
+                {classificationLabel(brand.classification)}
               </span>
             </div>
             <p className="text-xs sm:text-sm text-gray-500 mt-1">
@@ -100,14 +95,7 @@ export const BrandDetailModal = ({
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                />
-              </svg>
+              <StrokeIcon className="w-4 h-4" paths={CHART_BAR_PATHS} />
               Overview
             </button>
             <button
@@ -118,14 +106,7 @@ export const BrandDetailModal = ({
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                />
-              </svg>
+              <StrokeIcon className="w-4 h-4" paths={['M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z']} />
               AI Responses ({providerData.length})
             </button>
             <button
@@ -136,14 +117,7 @@ export const BrandDetailModal = ({
                   : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
               }`}
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={1.5}
-                  d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"
-                />
-              </svg>
+              <StrokeIcon className="w-4 h-4" paths={LIGHTBULB_PATHS} />
               Ranking Analysis
             </button>
           </nav>
@@ -152,10 +126,10 @@ export const BrandDetailModal = ({
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           {activeTab === 'overview' && (
-            <BrandOverviewTab brand={brand} providerData={providerData} />
+            <BrandOverviewTab brand={brand} />
           )}
           {activeTab === 'responses' && (
-            <ProviderResponsesTab brand={brand} providerData={providerData} keyword={keyword} />
+            <ProviderResponsesTab brand={brand} providerData={providerData} />
           )}
           {activeTab === 'ranking-analysis' && (
             <SelfReflectionPanel
@@ -167,14 +141,7 @@ export const BrandDetailModal = ({
         </div>
 
         {/* Footer */}
-        <div className="px-4 sm:px-6 py-4 border-t border-gray-200 flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            Close
-          </button>
-        </div>
+        <ModalCloseFooter onClose={onClose} paddingClassName="px-4 sm:px-6" />
       </div>
     </div>
   );

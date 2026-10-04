@@ -6,7 +6,7 @@ import { SourcesHeadlineSection } from './sections/SourcesHeadlineSection';
 import { TopSourcesSection } from './sections/TopSourcesSection';
 import { DomainsTableSection } from './sections/DomainsTableSection';
 
-export const SOURCES_PATH = '/reports/sources';
+const SOURCES_PATH = '/reports/sources';
 
 /** The sections of the Sources report, in order. */
 export function SourcesSections({ report }: ScopeSectionProps) {

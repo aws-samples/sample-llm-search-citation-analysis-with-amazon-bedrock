@@ -1,18 +1,15 @@
 import { vi } from 'vitest';
+import type { ComponentProps } from 'react';
+import type { CitationFilters } from './CitationFilters';
 
-const DEFAULTS = {
-  searchQuery: '',
-  setSearchQuery: vi.fn(),
-  minCitations: '' as number | '',
-  setMinCitations: vi.fn(),
-  setCurrentPage: vi.fn(),
-  onDownloadExcel: vi.fn(),
-} as const;
+type CitationFiltersProps = ComponentProps<typeof CitationFilters>;
 
-export function buildProps(overrides = {}) {
+/** Empty filters with a fresh spy per callback; every prop can be overridden. */
+export function buildProps(overrides: Partial<CitationFiltersProps> = {}): CitationFiltersProps {
   return {
-    ...DEFAULTS,
+    searchQuery: '',
     setSearchQuery: vi.fn(),
+    minCitations: '',
     setMinCitations: vi.fn(),
     setCurrentPage: vi.fn(),
     onDownloadExcel: vi.fn(),

@@ -3,9 +3,9 @@ Tests for get-recommendations.py.
 
 `_annotate_with_status` — the left-join from generated recommendations to
 the status table. The helper attaches `id` (deterministic hash) and
-`status` to every recommendation. When the status table isn't configured,
-every rec defaults to status='new'. When a status row exists, the row's
-status, notes, etc. override the default.
+`status` to every recommendation. A rec without a status row defaults to
+status='new'. When a status row exists, the row's status, notes, etc.
+override the default.
 
 `generate_rule_based_recommendations` — the rule set over the latest run
 of each keyword: visibility gaps, low rankings, provider gaps, competitor
@@ -18,7 +18,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from shared.utils import recommendation_id
-from testing.env import cleared_env
 from testing.module_loader import load_handler_module
 
 _API_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,8 +29,6 @@ def mod():
     with (
         patch.dict(os.environ, {
             'DYNAMODB_TABLE_SEARCH_RESULTS': 't',
-            'DYNAMODB_TABLE_CITATIONS': 't',
-            'DYNAMODB_TABLE_CRAWLED_CONTENT': 't',
         }),
         patch('boto3.resource', return_value=MagicMock()),
         patch('boto3.client', return_value=MagicMock()),
@@ -51,12 +48,6 @@ def _make_rec(rec_type='gap', title='Pitch outdoor publishers', keywords=None):
     }
 
 
-def _annotate_without_status_table(mod, recs):
-    """Run the join with no status table configured."""
-    with cleared_env('RECOMMENDATION_STATUS_TABLE'):
-        mod._annotate_with_status(recs)
-
-
 def _annotate_with_status_rows(mod, recs, rows_by_id):
     """Run the join against a status module whose `list_statuses` answers `rows_by_id`.
 
@@ -65,10 +56,7 @@ def _annotate_with_status_rows(mod, recs, rows_by_id):
     it hands back.
     """
     list_statuses = MagicMock(return_value=rows_by_id)
-    with (
-        patch.dict(os.environ, {'RECOMMENDATION_STATUS_TABLE': 'test'}),
-        patch.object(mod, 'load_sibling_function', return_value=list_statuses),
-    ):
+    with patch.object(mod, 'load_sibling_function', return_value=list_statuses):
         mod._annotate_with_status(recs)
 
 
@@ -79,13 +67,13 @@ def test_annotate_attaches_deterministic_id_to_each_rec(mod):
     rec = _make_rec()
     expected = recommendation_id(rec)
     recs = [rec]
-    _annotate_without_status_table(mod, recs)
+    _annotate_with_status_rows(mod, recs, {})
     assert recs[0]['id'] == expected
 
 
-def test_annotate_assigns_status_new_when_no_status_table_configured(mod):
+def test_annotate_assigns_status_new_when_no_status_row_exists(mod):
     recs = [_make_rec()]
-    _annotate_without_status_table(mod, recs)
+    _annotate_with_status_rows(mod, recs, {})
     assert recs[0]['status'] == 'new'
 
 
@@ -93,67 +81,59 @@ def test_annotate_assigns_distinct_ids_to_recs_with_distinct_titles(mod):
     a = _make_rec(title='A')
     b = _make_rec(title='B')
     recs = [a, b]
-    _annotate_without_status_table(mod, recs)
+    _annotate_with_status_rows(mod, recs, {})
     assert recs[0]['id'] != recs[1]['id']
 
 
-# --- status join (when table configured) ---------------------------------
+# --- status join ---------------------------------------------------------
 
 
-def test_annotate_joins_status_row_when_table_returns_match(mod):
+def _joined_with_status_row(mod, **row_fields):
+    """The 'Pitch X' recommendation after the join found its status row with ``row_fields``."""
     rec = _make_rec(title='Pitch X')
     rec_id = recommendation_id(rec)
     recs = [rec]
+    _annotate_with_status_rows(mod, recs, {rec_id: {'recommendation_id': rec_id, **row_fields}})
+    return recs[0]
 
-    _annotate_with_status_rows(mod, recs, {
-        rec_id: {
-            'recommendation_id': rec_id,
-            'status': 'in_progress',
-            'notes': 'reaching out next week',
-            'updated_at': '2026-05-15T10:00:00Z',
-        },
-    })
 
-    assert recs[0]['status'] == 'in_progress'
-    assert recs[0]['notes'] == 'reaching out next week'
+def test_annotate_joins_status_row_when_table_returns_match(mod):
+    joined = _joined_with_status_row(
+        mod, status='in_progress', notes='reaching out next week', updated_at='2026-05-15T10:00:00Z',
+    )
+
+    assert joined['status'] == 'in_progress'
+    assert joined['notes'] == 'reaching out next week'
 
 
 def test_annotate_falls_back_to_new_status_when_join_lookup_fails(mod):
     rec = _make_rec()
     recs = [rec]
-    with (
-        patch.dict(os.environ, {'RECOMMENDATION_STATUS_TABLE': 'test'}),
-        patch.object(mod, 'load_sibling_function', side_effect=ImportError('boom')),
-    ):
+    with patch.object(mod, 'load_sibling_function', side_effect=ImportError('boom')):
         mod._annotate_with_status(recs)
-    # Even though the env var is set, the broken loader is non-fatal.
+    # The broken loader is non-fatal.
     assert recs[0]['status'] == 'new'
 
 
 def test_annotate_propagates_optional_fields_from_status_row(mod):
-    rec = _make_rec(title='Pitch X')
-    rec_id = recommendation_id(rec)
-    recs = [rec]
+    joined = _joined_with_status_row(
+        mod,
+        status='done',
+        completed_at='2026-05-15T10:00:00Z',
+        related_keyword='best running shoes',
+        related_content_id='content-42',
+    )
 
-    _annotate_with_status_rows(mod, recs, {
-        rec_id: {
-            'recommendation_id': rec_id,
-            'status': 'done',
-            'completed_at': '2026-05-15T10:00:00Z',
-            'related_keyword': 'best running shoes',
-            'related_content_id': 'content-42',
-        },
-    })
-
-    assert recs[0]['completed_at'] == '2026-05-15T10:00:00Z'
-    assert recs[0]['related_keyword'] == 'best running shoes'
-    assert recs[0]['related_content_id'] == 'content-42'
+    assert joined['completed_at'] == '2026-05-15T10:00:00Z'
+    assert joined['related_keyword'] == 'best running shoes'
+    assert joined['related_content_id'] == 'content-42'
 
 
-def test_annotate_handles_empty_recommendations_list(mod):
+def test_annotate_skips_the_status_lookup_for_an_empty_recommendations_list(mod):
     recs = []
-    _annotate_without_status_table(mod, recs)
-    assert recs == []
+    with patch.object(mod, 'load_sibling_function') as loader:
+        mod._annotate_with_status(recs)
+    loader.assert_not_called()
 
 
 

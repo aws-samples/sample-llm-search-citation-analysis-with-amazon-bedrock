@@ -127,56 +127,40 @@ describe('templateDraftProblems', () => {
     }, PROMPT).audience).toBeUndefined();
   });
 
-  it('flags a row without a label', () => {
+  it.each([
+    {
+      outcome: 'flags a row without a label',
+      label: '  ',
+      problem: 'Enter a label.',
+    },
+    {
+      outcome: 'flags a label whose id duplicates an earlier row',
+      label: 'DESTINATION',
+      problem: 'Duplicate of another dimension (destination).',
+    },
+    {
+      outcome: 'reserves Other for the agent',
+      label: 'Other',
+      problem: '"Other" is reserved for the agent\u2019s catch-all bucket.',
+    },
+    {
+      outcome: 'requires the id to start with a letter',
+      label: '2 for 1',
+      problem: 'The label must start with a letter and contain a letter or digit after it.',
+    },
+  ])('$outcome', ({
+    label, problem
+  }) => {
     const problems = templateDraftProblems({
       ...SAVED_DRAFT,
       rows: [...SAVED_DRAFT.rows, {
         key: 'new-1',
-        label: '  ',
+        label,
         description: '',
       }],
     }, PROMPT);
 
-    expect(problems.rows).toStrictEqual({ 'new-1': 'Enter a label.' });
-  });
-
-  it('flags a label whose id duplicates an earlier row', () => {
-    const problems = templateDraftProblems({
-      ...SAVED_DRAFT,
-      rows: [...SAVED_DRAFT.rows, {
-        key: 'new-1',
-        label: 'DESTINATION',
-        description: '',
-      }],
-    }, PROMPT);
-
-    expect(problems.rows).toStrictEqual({ 'new-1': 'Duplicate of another dimension (destination).' });
-  });
-
-  it('reserves Other for the agent', () => {
-    const problems = templateDraftProblems({
-      ...SAVED_DRAFT,
-      rows: [...SAVED_DRAFT.rows, {
-        key: 'new-1',
-        label: 'Other',
-        description: '',
-      }],
-    }, PROMPT);
-
-    expect(problems.rows['new-1']).toBe('"Other" is reserved for the agent\u2019s catch-all bucket.');
-  });
-
-  it('requires the id to start with a letter', () => {
-    const problems = templateDraftProblems({
-      ...SAVED_DRAFT,
-      rows: [...SAVED_DRAFT.rows, {
-        key: 'new-1',
-        label: '2 for 1',
-        description: '',
-      }],
-    }, PROMPT);
-
-    expect(problems.rows['new-1']).toBe('The label must start with a letter and contain a letter or digit after it.');
+    expect(problems.rows).toStrictEqual({ 'new-1': problem });
   });
 
   it('requires at least two dimensions', () => {

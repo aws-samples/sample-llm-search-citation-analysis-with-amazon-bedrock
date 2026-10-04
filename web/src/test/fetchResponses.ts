@@ -26,10 +26,41 @@ export function createMockMalformedResponse(responseStatus = 200): Response {
   return new Response('not json', { status: responseStatus });
 }
 
-export interface DeferredResponse {
-  promise: Promise<Response>;
-  resolve: (response: Response) => void;
+export interface DeferredValue<TValue> {
+  promise: Promise<TValue>;
+  resolve: (resolvedValue: TValue) => void;
   reject: (reason: unknown) => void;
+}
+
+/** A promise the test settles by hand, for asserting on in-flight state first. */
+export function createDeferredValue<TValue>(): DeferredValue<TValue> {
+  // The Promise executor runs synchronously, so both settlers are real by
+  // the time they are spread into the result.
+  const settlers: Pick<DeferredValue<TValue>, 'resolve' | 'reject'> = {
+    resolve: () => undefined,
+    reject: () => undefined,
+  };
+  const promise = new Promise<TValue>((resolve, reject) => {
+    settlers.resolve = resolve;
+    settlers.reject = reject;
+  });
+  return {
+    promise,
+    ...settlers,
+  };
+}
+
+export type DeferredResponse = DeferredValue<Response>;
+
+/** Queues two hand-settled results for the next two calls of `mock`, in call order. */
+export function deferNextTwoCalls<TValue>(
+  mock: { mockReturnValueOnce: (value: Promise<TValue>) => unknown }
+): [DeferredValue<TValue>, DeferredValue<TValue>] {
+  const first = createDeferredValue<TValue>();
+  const second = createDeferredValue<TValue>();
+  mock.mockReturnValueOnce(first.promise);
+  mock.mockReturnValueOnce(second.promise);
+  return [first, second];
 }
 
 /**
@@ -37,20 +68,7 @@ export interface DeferredResponse {
  * (`loading === true`) state before resolving with `createMockJsonResponse`.
  */
 export function createDeferredResponse(): DeferredResponse {
-  // The Promise executor runs synchronously, so both settlers are real by
-  // the time they are spread into the result.
-  const settlers: Pick<DeferredResponse, 'resolve' | 'reject'> = {
-    resolve: () => undefined,
-    reject: () => undefined,
-  };
-  const promise = new Promise<Response>((resolve, reject) => {
-    settlers.resolve = resolve;
-    settlers.reject = reject;
-  });
-  return {
-    promise,
-    ...settlers 
-  };
+  return createDeferredValue<Response>();
 }
 
 export interface EndpointMockFetchOptions<TResponse> {
@@ -64,12 +82,14 @@ export interface EndpointMockFetchOptions<TResponse> {
   errorResponse?: { error: string };
   /** Resolve OK with a body that does not match the hook's type guard. */
   invalidResponse?: boolean;
+  /** Resolve OK with a JSON `null` body, which no analysis type guard may accept. */
+  nullResponse?: boolean;
 }
 
 /**
  * Mock `authenticatedFetch` for hooks that call a single endpoint: success,
- * HTTP failure, backend `{ error }` body, or a payload that fails the type
- * guard.
+ * HTTP failure, backend `{ error }` body, or a payload (an object or `null`)
+ * that fails the type guard.
  */
 export function createEndpointMockFetch<TResponse>(
   defaultResponse: TResponse,
@@ -84,6 +104,9 @@ export function createEndpointMockFetch<TResponse>(
     }
     if (options.invalidResponse) {
       return Promise.resolve(createMockJsonResponse({ invalid: 'data' }));
+    }
+    if (options.nullResponse) {
+      return Promise.resolve(createMockJsonResponse(null));
     }
     return Promise.resolve(createMockJsonResponse(options.response ?? defaultResponse));
   });

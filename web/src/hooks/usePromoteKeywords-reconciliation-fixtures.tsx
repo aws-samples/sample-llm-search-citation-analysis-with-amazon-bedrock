@@ -9,9 +9,11 @@ import {
   type KeywordReconciliation,
   usePromoteKeywords,
 } from './usePromoteKeywords';
-import { renderSelectedPromotion } from './usePromoteKeywords-fixtures';
+import {
+  renderPendingPromotion, renderSelectedPromotion, setupNeverSettlingPromotion
+} from './usePromoteKeywords-fixtures';
 
-export function buildReconciliationWrapper(reconciliation: KeywordReconciliation) {
+function buildReconciliationWrapper(reconciliation: KeywordReconciliation) {
   return function ReconciliationWrapper({ children }: PropsWithChildren) {
     return (
       <KEYWORD_RECONCILIATION_CONTEXT.Provider value={reconciliation}>
@@ -28,6 +30,12 @@ export function buildReconciliationWrapper(reconciliation: KeywordReconciliation
 export async function promoteWithReconciliation(reconciliation: KeywordReconciliation): Promise<void> {
   const { result } = renderSelectedPromotion({ wrapper: buildReconciliationWrapper(reconciliation) });
   await act(() => result.current.promote());
+}
+
+/** Renders a promotion of 'alpha' that stays in flight under a reconciliation provider. */
+export function renderPendingReconciledPromotion(reconciliation: KeywordReconciliation) {
+  setupNeverSettlingPromotion();
+  return renderPendingPromotion({ wrapper: buildReconciliationWrapper(reconciliation) });
 }
 
 interface PendingPromotionChildProps {

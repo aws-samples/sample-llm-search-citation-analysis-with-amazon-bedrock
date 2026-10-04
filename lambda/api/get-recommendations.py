@@ -28,11 +28,13 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import success_response
 from shared.brand_visibility import classify_brand, load_recent_search_results, tracked_brand_names
+from shared.constants import priority_rank
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
 from shared.scope_params import load_sibling_function
+from shared.search_results import latest_run
 from shared.utils import get_brand_config, get_timestamp, recommendation_id
 
 logger = logging.getLogger(__name__)
@@ -42,8 +44,6 @@ dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables
 SEARCH_RESULTS_TABLE = os.environ['DYNAMODB_TABLE_SEARCH_RESULTS']
-CITATIONS_TABLE = os.environ['DYNAMODB_TABLE_CITATIONS']
-CRAWLED_CONTENT_TABLE = os.environ['DYNAMODB_TABLE_CRAWLED_CONTENT']
 
 
 @dataclass(frozen=True)
@@ -81,8 +81,7 @@ class _KeywordFindings:
 
 def _latest_run_snapshot(results: list[dict[str, Any]], first_party: list[str], competitors: list[str]) -> _KeywordSnapshot:
     """Reduce one keyword's SearchResults rows to what its latest run says about the tracked brands."""
-    latest_ts = max(r.get('timestamp', '') for r in results)
-    latest = [r for r in results if r.get('timestamp') == latest_ts]
+    _latest_ts, latest = latest_run(results)
 
     providers: set[str] = set()
     fp_providers: set[str] = set()
@@ -278,8 +277,7 @@ def generate_rule_based_recommendations(config: dict[str, Any], keywords: list[s
         })
 
     # Sort by priority
-    priority_order = {'high': 0, 'medium': 1, 'low': 2}
-    recommendations.sort(key=lambda x: priority_order.get(x.get('priority', 'low'), 2))
+    recommendations.sort(key=lambda x: priority_rank(x.get('priority')))
 
     return recommendations
 
@@ -335,10 +333,9 @@ def _annotate_with_status(recommendations: list[dict[str, Any]]) -> None:
     Mutate each recommendation in place to add `id` + persisted status.
 
     The id is the same hash that `recommendation-status.py` looks up in
-    DynamoDB. The status fields are merged in only when the status
-    table is configured (production); otherwise every recommendation
-    gets `status: 'new'` so the response shape stays consistent for
-    the frontend.
+    DynamoDB. The status fields are merged in when a status row exists;
+    otherwise the recommendation gets `status: 'new'` so the response
+    shape stays consistent for the frontend.
 
     Failure to load the status table is non-fatal: the recommendations
     are still surfaced, just without per-row tracking. The failure is
@@ -350,12 +347,10 @@ def _annotate_with_status(recommendations: list[dict[str, Any]]) -> None:
     rec_ids = [r['id'] for r in recommendations]
     statuses: dict[str, dict[str, Any]] = {}
 
-    status_table = os.environ.get('RECOMMENDATION_STATUS_TABLE')
-    if status_table and rec_ids:
+    if rec_ids:
         try:
-            # Loaded lazily, and the way the report aggregators load their
-            # sibling KPI functions: recommendation-status.py is hyphen-named,
-            # and this module's other tests run without the status table.
+            # Loaded lazily, the way the report aggregators load their sibling
+            # KPI functions: recommendation-status.py is hyphen-named.
             list_statuses = load_sibling_function(__file__, 'recommendation-status.py', 'list_statuses', '_for_join')
             statuses = list_statuses(rec_ids)
         except Exception:
@@ -389,8 +384,8 @@ def handler(event: dict[str, Any], context: Any, use_llm: bool = False, keyword:
     # Generate rule-based recommendations
     recommendations = generate_rule_based_recommendations(config)
 
-    # Annotate each recommendation with a deterministic id and (when the
-    # status table is configured) the persisted action-tracking state.
+    # Annotate each recommendation with a deterministic id and the
+    # persisted action-tracking state.
     # Done here rather than inside `generate_rule_based_recommendations`
     # so the rule generator stays a pure data shaper. The id is computed
     # from `type + title + sorted keywords` so it survives list

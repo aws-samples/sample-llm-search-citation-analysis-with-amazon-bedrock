@@ -14,8 +14,9 @@ import { useContentActionPlan } from '../ContentActionPlanReport/useContentActio
 import { useExecutiveSummary } from '../ExecutiveSummaryReport/useExecutiveSummary';
 import { useKeywordDeepDive } from '../KeywordDeepDiveReport/useKeywordDeepDive';
 import { useReportReady } from '../layout/useReportReady';
+import type { ReportSlice } from '../layout/sectionGate';
 import {
-  useScopeReportData, type ReportSlice, type ScopeReportData
+  useScopeReportData, type ScopeReportData
 } from '../scopeReport/useScopeReportData';
 
 /**
@@ -28,7 +29,7 @@ import {
 export type SourceId = 'scope' | 'overview' | 'groupKpis' | 'competitor' | 'contentPlan' | 'deepDive';
 
 /** What the reader picked on the report page. */
-export interface ReportInputs {
+interface ReportInputs {
   readonly scope: ReportScope;
   readonly days: CustomReportDays;
   /** The competitor in the URL; the first configured one when it names none or an unknown one. */
@@ -56,7 +57,7 @@ export interface CompetitorSource {
   readonly ready: boolean;
 }
 
-export type DeepDiveSource = ReturnType<typeof useKeywordDeepDive> & { readonly keyword: string };
+type DeepDiveSource = ReturnType<typeof useKeywordDeepDive> & { readonly keyword: string };
 
 export interface ReportSources {
   readonly inputs: ReportInputs;

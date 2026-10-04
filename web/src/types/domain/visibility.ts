@@ -97,14 +97,13 @@ export interface BrandTrends {
   }>;
 }
 
-export interface PromptBrandData {
+interface PromptBrandData {
   mentions: number;
   best_rank: number | null;
   provider_coverage: number;
-  providers: string[];
 }
 
-export type PromptStatus = 'winning' | 'losing' | 'opportunity' | 'neutral';
+type PromptStatus = 'winning' | 'losing' | 'opportunity' | 'neutral';
 
 export interface PromptInsight {
   keyword: string;
@@ -130,7 +129,7 @@ export interface PromptInsightsResponse {
   };
 }
 
-export type GapPriority = 'high' | 'medium' | 'low';
+type GapPriority = 'high' | 'medium' | 'low';
 
 export interface CitationGap {
   url: string;
@@ -146,7 +145,7 @@ export interface CitationGap {
   keyword?: string;
 }
 
-export interface DomainGapSummary {
+interface DomainGapSummary {
   domain: string;
   gap_count: number;
   total_citations: number;
@@ -177,11 +176,8 @@ export interface CitationGapsResponse {
   total_high_priority?: number;
 }
 
-export type RecommendationStatus =
-  | 'new'
-  | 'in_progress'
-  | 'done'
-  | 'wontfix';
+/** Where a recommendation stands in the Action Center; stored by `POST /api/recommendations/{id}/status`. */
+export type RecommendationStatus = 'new' | 'in_progress' | 'done' | 'wontfix';
 
 export interface Recommendation {
   type: string;
@@ -191,19 +187,13 @@ export interface Recommendation {
   action: string;
   impact: string;
   keywords?: string[];
-  /**
-   * Server-computed deterministic id (SHA-1 of type+title+sorted keywords,
-   * truncated to 16 chars). Stable across list regenerations so it can
-   * be used to track per-recommendation action status.
-   */
+  /** Stable id (hash of type, title and keywords); rule-based recommendations only, AI-enhanced ones have none. */
   id?: string;
-  /** Persisted action-tracking state. Defaults to 'new' if untouched. */
+  /** `new` unless someone changed it. */
   status?: RecommendationStatus;
   notes?: string;
   related_keyword?: string;
   related_content_id?: string;
-  updated_at?: string;
-  completed_at?: string;
 }
 
 export interface RecommendationsResponse {
@@ -232,7 +222,7 @@ export interface TrendDataPoint {
 export type PeriodType = 'day' | 'week' | 'month';
 
 /** A change between two periods: every KPI's delta and each rate's trend. */
-export interface PeriodChange {
+interface PeriodChange {
   deltas: KpiDeltas;
   trends: Record<TrendedKpiId, KpiTrend>;
 }
@@ -280,16 +270,12 @@ export interface HistoricalTrendsResponse {
   brand_trends: BrandTrends;
 }
 
-export interface PersonaBrandRanking {
-  name: string;
+interface PersonaBrandRanking {
   rank: number;
-  mention_count: number;
-  sentiment: string;
-  visibility_score: number;
   classification: BrandClassification;
 }
 
-export interface PersonaRankingGroup {
+interface PersonaRankingGroup {
   persona_name: string;
   brands: PersonaBrandRanking[];
 }
@@ -318,16 +304,12 @@ export interface ContentRecommendation {
 export interface SelfReflectionResult {
   keyword: string;
   brand: string;
-  query_prompt_id: string;
-  query_prompt_name: string;
   current_rank: number | null;
   explanation: string;
   content_contributions: string;
   competitor_advantages: string;
   missing_data_points: string;
   recommendations: ContentRecommendation[];
-  industry: string;
-  created_at: string;
 }
 
 export type SelfReflectionResponse = SelfReflectionResult;

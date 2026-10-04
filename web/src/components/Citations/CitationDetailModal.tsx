@@ -9,36 +9,13 @@ import {
 } from './CrawlHistory';
 import { BlockedPageBanner } from './BlockedPageBanner';
 import type {
-  BlockReason, CrawlStatus 
-} from './BlockedPageBanner';
-
-interface SEOAnalysis {
-  relevance_score?: number;
-  keyword_usage?: string;
-  strengths?: string[];
-  weaknesses?: string[];
-  recommendations?: string[];
-  competitive_advantage?: string;
-}
-
-/** A crawled citation page as `GET /crawled-content` returns it; the shape both the table and this modal work from. */
-export interface CrawledContent {
-  normalized_url: string;
-  title: string;
-  summary: string;
-  content: string;
-  screenshot_url?: string;
-  seo_analysis?: SEOAnalysis;
-  crawled_at: string;
-  keyword: string;
-  citation_count: number;
-  citing_providers: string[];
-  page_load_time_ms?: number;
-  content_length?: number;
-  status?: CrawlStatus;
-  block_reason?: BlockReason;
-  error_message?: string;
-}
+  CrawledContent, CrawlStatus, SEOAnalysis
+} from '../../types';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  CHART_BAR_PATHS, CLOCK_PATHS, DOCUMENT_TEXT_PATHS, PHOTO_PATHS 
+} from '../ui/iconPaths';
+import { ModalCloseFooter } from '../ui/ModalCloseFooter';
 
 interface CitationDetailModalProps {
   citation: CrawledContent;
@@ -83,26 +60,24 @@ const TabButton = ({
   </button>
 );
 
-const MetricsGrid = ({ citation }: { citation: CrawledContent }) => (
-  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-    <div className="bg-gray-50 rounded-lg p-4">
-      <div className="text-xs text-gray-600">Load Time</div>
-      <div className="text-lg font-bold text-gray-900">{citation.page_load_time_ms ? `${citation.page_load_time_ms}ms` : 'N/A'}</div>
+const MetricsGrid = ({ citation }: { citation: CrawledContent }) => {
+  const metrics: ReadonlyArray<readonly [string, string | number]> = [
+    ['Load Time', citation.page_load_time_ms ? `${citation.page_load_time_ms}ms` : 'N/A'],
+    ['Content Size', citation.content_length ? `${(citation.content_length / 1000).toFixed(1)}KB` : 'N/A'],
+    ['Citations', citation.citation_count],
+    ['Providers', citation.citing_providers.length],
+  ];
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      {metrics.map(([label, value]) => (
+        <div key={label} className="bg-gray-50 rounded-lg p-4">
+          <div className="text-xs text-gray-600">{label}</div>
+          <div className="text-lg font-bold text-gray-900">{value}</div>
+        </div>
+      ))}
     </div>
-    <div className="bg-gray-50 rounded-lg p-4">
-      <div className="text-xs text-gray-600">Content Size</div>
-      <div className="text-lg font-bold text-gray-900">{citation.content_length ? `${(citation.content_length / 1000).toFixed(1)}KB` : 'N/A'}</div>
-    </div>
-    <div className="bg-gray-50 rounded-lg p-4">
-      <div className="text-xs text-gray-600">Citations</div>
-      <div className="text-lg font-bold text-gray-900">{citation.citation_count}</div>
-    </div>
-    <div className="bg-gray-50 rounded-lg p-4">
-      <div className="text-xs text-gray-600">Providers</div>
-      <div className="text-lg font-bold text-gray-900">{citation.citing_providers.length}</div>
-    </div>
-  </div>
-);
+  );
+};
 
 const CitingProviders = ({ providers }: { providers: string[] }) => (
   <div>
@@ -117,6 +92,28 @@ const CitingProviders = ({ providers }: { providers: string[] }) => (
   </div>
 );
 
+interface SeoPointListProps {
+  title: string;
+  items: string[] | undefined;
+  headingClassName: string;
+  bulletClassName: string;
+}
+
+const SeoPointList = ({
+  title, items, headingClassName, bulletClassName
+}: SeoPointListProps) => (items && items.length > 0 ? (
+  <div>
+    <h3 className={`text-sm font-semibold ${headingClassName} mb-3`}>{title}</h3>
+    <ul className="space-y-2">
+      {items.map((item) => (
+        <li key={item} className="flex items-start gap-2 text-sm text-gray-700">
+          <span className={`${bulletClassName} mt-0.5`}>•</span><span>{item}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+) : null);
+
 const SEOTab = ({ seoAnalysis }: { seoAnalysis: SEOAnalysis }) => (
   <div className="space-y-6">
     {seoAnalysis.relevance_score && (
@@ -130,30 +127,8 @@ const SEOTab = ({ seoAnalysis }: { seoAnalysis: SEOAnalysis }) => (
         </div>
       </div>
     )}
-    {seoAnalysis.strengths && seoAnalysis.strengths.length > 0 && (
-      <div>
-        <h3 className="text-sm font-semibold text-emerald-800 mb-3">Strengths</h3>
-        <ul className="space-y-2">
-          {seoAnalysis.strengths.map((s) => (
-            <li key={s} className="flex items-start gap-2 text-sm text-gray-700">
-              <span className="text-emerald-600 mt-0.5">•</span><span>{s}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    )}
-    {seoAnalysis.weaknesses && seoAnalysis.weaknesses.length > 0 && (
-      <div>
-        <h3 className="text-sm font-semibold text-red-800 mb-3">Weaknesses</h3>
-        <ul className="space-y-2">
-          {seoAnalysis.weaknesses.map((w) => (
-            <li key={w} className="flex items-start gap-2 text-sm text-gray-700">
-              <span className="text-red-600 mt-0.5">•</span><span>{w}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    )}
+    <SeoPointList title="Strengths" items={seoAnalysis.strengths} headingClassName="text-emerald-800" bulletClassName="text-emerald-600" />
+    <SeoPointList title="Weaknesses" items={seoAnalysis.weaknesses} headingClassName="text-red-800" bulletClassName="text-red-600" />
     {seoAnalysis.recommendations && seoAnalysis.recommendations.length > 0 && (
       <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
         <h3 className="text-sm font-semibold text-amber-900 mb-3">Action Items</h3>
@@ -185,29 +160,19 @@ const TabNavigation = ({
   <div className="border-b border-gray-200 px-6">
     <nav className="-mb-px flex space-x-8">
       <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}
-        icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-        </svg>}>Overview</TabButton>
+        icon={<StrokeIcon className="w-4 h-4" paths={CHART_BAR_PATHS} />}>Overview</TabButton>
       {citation.screenshot_url && (
         <TabButton active={activeTab === 'screenshot'} onClick={() => setActiveTab('screenshot')}
-          icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-          </svg>}>Screenshot</TabButton>
+          icon={<StrokeIcon className="w-4 h-4" paths={PHOTO_PATHS} />}>Screenshot</TabButton>
       )}
       {citation.seo_analysis && (
         <TabButton active={activeTab === 'seo'} onClick={() => setActiveTab('seo')}
-          icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-          </svg>}>SEO Analysis</TabButton>
+          icon={<StrokeIcon className="w-4 h-4" paths={['M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z']} />}>SEO Analysis</TabButton>
       )}
       <TabButton active={activeTab === 'content'} onClick={() => setActiveTab('content')}
-        icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-        </svg>}>Full Content</TabButton>
+        icon={<StrokeIcon className="w-4 h-4" paths={DOCUMENT_TEXT_PATHS} />}>Full Content</TabButton>
       <TabButton active={activeTab === 'history'} onClick={() => setActiveTab('history')}
-        icon={<svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>}>History</TabButton>
+        icon={<StrokeIcon className="w-4 h-4" paths={CLOCK_PATHS} />}>History</TabButton>
     </nav>
   </div>
 );
@@ -225,7 +190,7 @@ export const CitationDetailModal = ({
     setHistoryLoading(true);
     setHistoryError(null);
     try {
-      const items = await fetchCrawlHistory(citation.normalized_url, 20);
+      const items = await fetchCrawlHistory(citation.normalized_url);
       setHistory(items);
       setSelectedHistoryIndex(0);
     } catch (err) {
@@ -316,11 +281,7 @@ export const CitationDetailModal = ({
         </div>
         <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} citation={citation} />
         <div className="flex-1 overflow-y-auto p-6">{renderTabContent()}</div>
-        <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
-          <button onClick={onClose} className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 transition-colors">
-            Close
-          </button>
-        </div>
+        <ModalCloseFooter onClose={onClose} />
       </div>
     </div>
   );

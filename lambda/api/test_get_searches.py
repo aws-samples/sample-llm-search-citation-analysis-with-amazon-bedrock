@@ -17,10 +17,11 @@ from collections.abc import Mapping
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from boto3.dynamodb.conditions import Key
-from botocore.exceptions import ClientError
 
 from shared.config import PROVIDERS
+from testing.client_errors import throttled
 from testing.dynamodb_stubs import fake_table
 from testing.events import api_gateway_event, parse_response
 from testing.handler_fixtures import handler_fixture
@@ -44,8 +45,8 @@ def _row(provider: str, timestamp: str, **fields: Any) -> dict[str, Any]:
     return {'keyword': _KEYWORD, 'provider': provider, 'timestamp': timestamp, **fields}
 
 
-def _throttled() -> ClientError:
-    return ClientError({'Error': {'Code': 'ProvisionedThroughputExceededException', 'Message': 'throttled'}}, 'Query')
+_OPENAI_OLDER = _row('openai', _OLDER)
+_GEMINI_LATEST = _row('gemini', _LATEST)
 
 
 def _fan_out_table(answers: Mapping[str, Any]) -> MagicMock:
@@ -66,13 +67,21 @@ def _get_searches(module: Any, table: MagicMock, query: Mapping[str, str] | None
         return parse_response(module.handler(event, None))
 
 
+def _two_provider_fan_out() -> MagicMock:
+    """The unfiltered fan-out where openai has an older row and gemini the newest."""
+    return _fan_out_table({'openai': {'Items': [_OPENAI_OLDER]}, 'gemini': {'Items': [_GEMINI_LATEST]}})
+
+
+@pytest.fixture
+def empty_table() -> MagicMock:
+    return fake_table(query={'Items': []})
+
+
 class TestKeywordReads:
-    def test_queries_the_keyword_partition_newest_first_up_to_the_limit(self, searches_module):
-        table = fake_table(query={'Items': []})
+    def test_queries_the_keyword_partition_newest_first_up_to_the_limit(self, searches_module, empty_table):
+        _get_searches(searches_module, empty_table, {'keyword': _KEYWORD, 'limit': '2'})
 
-        _get_searches(searches_module, table, {'keyword': _KEYWORD, 'limit': '2'})
-
-        table.query.assert_called_once_with(
+        empty_table.query.assert_called_once_with(
             KeyConditionExpression=Key('keyword').eq(_KEYWORD), ScanIndexForward=False, Limit=2
         )
 
@@ -93,12 +102,10 @@ class TestKeywordReads:
 
 
 class TestProviderReads:
-    def test_queries_the_provider_index_with_the_lowercased_provider(self, searches_module):
-        table = fake_table(query={'Items': []})
+    def test_queries_the_provider_index_with_the_lowercased_provider(self, searches_module, empty_table):
+        _get_searches(searches_module, empty_table, {'provider': 'OpenAI', 'limit': '3'})
 
-        _get_searches(searches_module, table, {'provider': 'OpenAI', 'limit': '3'})
-
-        table.query.assert_called_once_with(
+        empty_table.query.assert_called_once_with(
             IndexName='ProviderIndex', KeyConditionExpression=Key('provider').eq('openai'), ScanIndexForward=False, Limit=3
         )
 
@@ -137,28 +144,22 @@ class TestUnfilteredFanOut:
         assert {call.kwargs['Limit'] for call in table.query.call_args_list} == {50}
 
     def test_merges_every_providers_rows_newest_first(self, searches_module):
-        openai_row, gemini_row = _row('openai', _OLDER), _row('gemini', _LATEST)
-        table = _fan_out_table({'openai': {'Items': [openai_row]}, 'gemini': {'Items': [gemini_row]}})
+        _, body = _get_searches(searches_module, _two_provider_fan_out())
 
-        _, body = _get_searches(searches_module, table)
-
-        assert body == {'searches': [gemini_row, openai_row], 'count': 2}
+        assert body == {'searches': [_GEMINI_LATEST, _OPENAI_OLDER], 'count': 2}
 
     def test_skips_a_provider_whose_query_fails_and_returns_the_others(self, searches_module):
         gemini_row = _row('gemini', _LATEST)
-        table = _fan_out_table({'openai': _throttled(), 'gemini': {'Items': [gemini_row]}})
+        table = _fan_out_table({'openai': throttled(), 'gemini': {'Items': [gemini_row]}})
 
         status, body = _get_searches(searches_module, table)
 
         assert (status, body) == (200, {'searches': [gemini_row], 'count': 1})
 
     def test_truncates_the_merged_rows_to_the_limit_while_counting_them_all(self, searches_module):
-        openai_row, gemini_row = _row('openai', _OLDER), _row('gemini', _LATEST)
-        table = _fan_out_table({'openai': {'Items': [openai_row]}, 'gemini': {'Items': [gemini_row]}})
+        _, body = _get_searches(searches_module, _two_provider_fan_out(), {'limit': '1'})
 
-        _, body = _get_searches(searches_module, table, {'limit': '1'})
-
-        assert body == {'searches': [gemini_row], 'count': 2}
+        assert body == {'searches': [_GEMINI_LATEST], 'count': 2}
 
 
 class TestPersonaFilter:

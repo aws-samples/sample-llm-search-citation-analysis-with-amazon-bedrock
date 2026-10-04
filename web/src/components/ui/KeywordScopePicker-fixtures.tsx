@@ -2,7 +2,9 @@ import {
   render, screen
 } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { vi } from 'vitest';
+import {
+  type Mock, vi
+} from 'vitest';
 import {
   buildGroup, buildKeyword
 } from '../../api/keywordGroups-fixtures';
@@ -58,7 +60,7 @@ const CAPPED_SCOPE_GROUP_ID = 'large-group';
 const CAPPED_SCOPE_KEYWORD_COUNT = 51;
 const CAPPED_SCOPE_MAX_KEYWORDS = 50;
 
-export const cappedScopeKeywords = Array.from(
+const cappedScopeKeywords = Array.from(
   { length: CAPPED_SCOPE_KEYWORD_COUNT },
   (_value, index) => buildKeyword({
     id: `capped-keyword-${index + 1}`,
@@ -66,7 +68,7 @@ export const cappedScopeKeywords = Array.from(
     group_ids: [CAPPED_SCOPE_GROUP_ID],
   })
 );
-export const cappedScopeGroup = buildGroup({
+const cappedScopeGroup = buildGroup({
   id: CAPPED_SCOPE_GROUP_ID,
   name: 'Large group',
   keyword_count: cappedScopeKeywords.length,
@@ -74,12 +76,12 @@ export const cappedScopeGroup = buildGroup({
 export const cappedScopeSelectedIds = cappedScopeKeywords
   .slice(0, CAPPED_SCOPE_MAX_KEYWORDS)
   .map((keyword) => keyword.id);
-export const cappedSelectedKeywordScope: AnalysisScope = {
+const cappedSelectedKeywordScope: AnalysisScope = {
   mode: 'keywords',
   keyword_ids: cappedScopeSelectedIds,
 };
 
-export function buildLegacyKeywordScopePickerProps(
+function buildLegacyKeywordScopePickerProps(
   selectedIds: readonly string[],
   overrides: LegacyPickerOverrides = {}
 ): LegacyKeywordScopePickerProps {
@@ -121,6 +123,76 @@ export function renderScopedKeywordScopePicker(
   overrides: Partial<ScopedKeywordScopePickerProps> = {}
 ) {
   return render(<KeywordScopePicker {...buildScopedKeywordScopePickerProps(overrides)} />);
+}
+
+/** The checked / indeterminate state of the section header checkbox with the given label. */
+export function sectionHeaderState(name: string) {
+  const header = screen.getByRole<HTMLInputElement>('checkbox', { name });
+  return {
+    checked: header.checked,
+    indeterminate: header.indeterminate,
+  };
+}
+
+/** The id, label target and form name of a picker input, for asserting its page-specific identity. */
+export function inputIdentity(input: HTMLInputElement) {
+  return {
+    id: input.id,
+    labelFor: input.labels?.[0]?.htmlFor,
+    name: input.name,
+  };
+}
+
+/** `inputIdentity` plus the submitted value, for picker checkboxes. */
+export function checkboxIdentity(checkbox: HTMLInputElement) {
+  return {
+    ...inputIdentity(checkbox),
+    value: checkbox.value,
+  };
+}
+
+export async function typeScopePickerSearch(text: string): Promise<void> {
+  await userEvent.setup().type(screen.getByRole('searchbox', { name: 'Search keywords' }), text);
+}
+
+/** A picker control to click, optionally after typing a keyword search. */
+interface ScopePickerControl {
+  readonly role: 'button' | 'checkbox' | 'radio';
+  readonly name: string;
+  readonly search?: string;
+}
+
+async function clickScopePickerControl({
+  role, name, search,
+}: ScopePickerControl): Promise<void> {
+  if (search !== undefined) await typeScopePickerSearch(search);
+  await userEvent.setup().click(screen.getByRole(role, { name }));
+}
+
+/** Renders a scoped picker with a fresh onChange spy, clicks one control and returns the spy. */
+export async function clickScopedPickerControl(
+  props: ScopedKeywordScopePickerProps,
+  control: ScopePickerControl
+): Promise<Mock<(scope: AnalysisScope) => void>> {
+  const onChange = vi.fn<(scope: AnalysisScope) => void>();
+  render(<KeywordScopePicker {...props} onChange={onChange} />);
+  await clickScopePickerControl(control);
+  return onChange;
+}
+
+/** Renders a legacy picker with a fresh onChange spy, clicks one control and returns the spy. */
+export async function clickLegacyPickerControl(
+  selectedIds: readonly string[],
+  control: ScopePickerControl,
+  overrides: LegacyPickerOverrides = {}
+): Promise<Mock<(selectedIds: string[]) => void>> {
+  const onChange = vi.fn<(selectedIds: string[]) => void>();
+  renderLegacyKeywordScopePicker(selectedIds, {
+    ...overrides,
+    onChange,
+  });
+  await clickScopePickerControl(control);
+  return onChange;
 }
 
 export async function collapseScopePickerSection(): Promise<HTMLElement> {

@@ -76,17 +76,24 @@ interface GenerationModeFieldsProps {
   readonly onCurrentCopyChange: (value: string) => void;
 }
 
-function LandingUrlField({
-  landingUrl,
-  disabled,
-  issue,
-  onChange,
-}: {
-  readonly landingUrl: string;
+interface SourceFieldProps {
+  readonly value: string;
   readonly disabled: boolean;
   readonly issue?: string;
   readonly onChange: (value: string) => void;
-}) {
+}
+
+/** Validation message under a field, announced when it appears. */
+export function FieldIssue({ issue }: { readonly issue?: string }) {
+  return issue ? <p role="alert" className="mt-1 text-sm text-red-600">{issue}</p> : null;
+}
+
+function LandingUrlField({
+  value: landingUrl,
+  disabled,
+  issue,
+  onChange,
+}: SourceFieldProps) {
   return (
     <div>
       <label htmlFor="group-brief-url" className="block text-sm font-medium text-gray-900">
@@ -103,22 +110,17 @@ function LandingUrlField({
         disabled={disabled}
         className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
       />
-      {issue && <p role="alert" className="mt-1 text-sm text-red-600">{issue}</p>}
+      <FieldIssue issue={issue} />
     </div>
   );
 }
 
 function CurrentCopyField({
-  currentCopy,
+  value: currentCopy,
   disabled,
   issue,
   onChange,
-}: {
-  readonly currentCopy: string;
-  readonly disabled: boolean;
-  readonly issue?: string;
-  readonly onChange: (value: string) => void;
-}) {
+}: SourceFieldProps) {
   return (
     <div>
       <label htmlFor="group-brief-copy" className="block text-sm font-medium text-gray-900">
@@ -184,7 +186,7 @@ export function GenerationModeFields({
       </fieldset>
       {mode === 'improve_current_url' && (
         <LandingUrlField
-          landingUrl={landingUrl}
+          value={landingUrl}
           disabled={disabled}
           issue={issueMessage(issues, 'landing_url')}
           onChange={onLandingUrlChange}
@@ -192,7 +194,7 @@ export function GenerationModeFields({
       )}
       {mode === 'rewrite_pasted_copy' && (
         <CurrentCopyField
-          currentCopy={currentCopy}
+          value={currentCopy}
           disabled={disabled}
           issue={issueMessage(issues, 'current_copy')}
           onChange={onCurrentCopyChange}

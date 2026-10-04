@@ -14,9 +14,7 @@
  *
  * Dark mode is handled at the global stylesheet level (see `index.css`),
  * which is why `bg-gray-900 / hover:bg-gray-800` works in both themes
- * without explicit `dark:` variants. The few buttons that sit on dark
- * backgrounds in light mode (e.g. main app rail) still need explicit
- * `dark:` overrides; see `Button.tsx` `invertOnDark` prop.
+ * without explicit `dark:` variants.
  *
  * See `docs/design-system.md` for usage guidance.
  */
@@ -25,26 +23,19 @@ import type {
   ButtonHTMLAttributes, ReactNode 
 } from 'react';
 
-export type ButtonVariant =
+type ButtonVariant =
   | 'primary'
   | 'secondary'
   | 'ghost'
   | 'danger'
   | 'iconOnly';
 
-export type ButtonSize = 'sm' | 'md';
+type ButtonSize = 'sm' | 'md';
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   readonly variant?: ButtonVariant;
   readonly size?: ButtonSize;
   readonly leadingIcon?: ReactNode;
-  readonly trailingIcon?: ReactNode;
-  /**
-   * For `primary` buttons that need explicit dark-mode inversion on
-   * always-dark surfaces (e.g. fallback error screens). Defaults to false
-   * because global CSS overrides handle the common case.
-   */
-  readonly invertOnDark?: boolean;
 }
 
 const baseClasses =
@@ -60,12 +51,10 @@ const iconOnlySizeClasses: Record<ButtonSize, string> = {
   md: 'p-2',
 };
 
-const variantClasses = (variant: ButtonVariant, invertOnDark: boolean): string => {
+const variantClasses = (variant: ButtonVariant): string => {
   switch (variant) {
     case 'primary':
-      return invertOnDark
-        ? 'bg-gray-900 text-white hover:bg-gray-800 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-gray-200'
-        : 'bg-gray-900 text-white hover:bg-gray-800 disabled:bg-gray-300';
+      return 'bg-gray-900 text-white hover:bg-gray-800 disabled:bg-gray-300';
     case 'secondary':
       return 'bg-white text-gray-900 border border-gray-200 hover:bg-gray-50';
     case 'ghost':
@@ -81,26 +70,22 @@ export const Button = ({
   variant = 'primary',
   size = 'md',
   leadingIcon,
-  trailingIcon,
-  invertOnDark = false,
   className = '',
   type = 'button',
   children,
   ...rest
 }: ButtonProps) => {
   const sizing = variant === 'iconOnly' ? iconOnlySizeClasses[size] : sizeClasses[size];
-  const variantStyles = variantClasses(variant, invertOnDark);
+  const variantStyles = variantClasses(variant);
 
   return (
     <button
-       
       type={type}
       className={`${baseClasses} ${sizing} ${variantStyles} ${className}`.trim()}
       {...rest}
     >
       {leadingIcon}
       {children}
-      {trailingIcon}
     </button>
   );
 };

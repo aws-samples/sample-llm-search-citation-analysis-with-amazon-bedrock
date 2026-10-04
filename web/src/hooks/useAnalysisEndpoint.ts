@@ -3,17 +3,19 @@ import {
 } from 'react';
 import {
   API_BASE_URL,
+  ApiRequestError,
   authenticatedFetch,
   getErrorMessage,
   isAbortError,
 } from '../infrastructure';
+import { isRecord } from '../types/domain/keywordDecoders';
 import { useLatestRequest } from './useLatestRequest';
 
 /**
  * Error payload the analysis API returns with HTTP 200 for domain
  * errors (missing brand config, unknown keyword, ...).
  */
-export interface BackendErrorResponse {error: string;}
+interface BackendErrorResponse {error: string;}
 
 function isBackendErrorResponse(data: unknown): data is BackendErrorResponse {
   // Optional chaining makes this safe for null, primitives and arrays without
@@ -50,6 +52,58 @@ export interface AnalysisResponseContract<TResponse> {
 export interface AnalysisEndpointConfig<TArgs extends readonly unknown[], TResponse> extends AnalysisResponseContract<TResponse> {
   buildRequest: (...args: TArgs) => AnalysisRequest;
   errorContext: string;
+}
+
+type ContractErrors = Pick<AnalysisResponseContract<unknown>, 'createHttpError' | 'createResponseError'>;
+
+/** Failures as `ApiRequestError`: a non-OK status gets `httpMessage` and the status code. */
+export function apiRequestErrors(httpMessage: string): ContractErrors {
+  return {
+    createHttpError: (status: number) => new ApiRequestError(httpMessage, status),
+    createResponseError: (message: string) => new ApiRequestError(message),
+  };
+}
+
+/**
+ * A failed-request error class named `name` (`VisibilityFetchError`): the
+ * class is defined under that key, so its constructor name and `name` agree
+ * as the hand-written per-hook classes did.
+ */
+function namedFetchError(name: string) {
+  return {
+    [name]: class extends Error {
+      constructor(message: string) {
+        super(message);
+        this.name = name;
+      }
+    },
+  }[name];
+}
+
+/** Failures named `name`: `defaultMessage` for a non-OK status, the body's message otherwise. */
+export function fetchErrors(name: string, defaultMessage: string): ContractErrors {
+  const errorClass = namedFetchError(name);
+  return {
+    createHttpError: () => new errorClass(defaultMessage),
+    createResponseError: (message: string) => new errorClass(message),
+  };
+}
+
+/** A JSON object that is not an `{error}` body: where every analysis response guard starts. */
+export function isAnalysisPayload(data: unknown): data is Record<string, unknown> {
+  return isRecord(data) && !('error' in data);
+}
+
+/** Query parameters plus the optional brand and persona (query prompt) filters, when set. */
+export function brandFilterParams(
+  base: Record<string, string>,
+  brand?: string,
+  queryPromptId?: string
+): URLSearchParams {
+  const params = new URLSearchParams(base);
+  if (brand) params.append('brand', brand);
+  if (queryPromptId) params.append('query_prompt_id', queryPromptId);
+  return params;
 }
 
 /**
@@ -98,9 +152,7 @@ async function fetchAnalysisResponse<TResult>(
  * Pass a module-level config object so the returned callbacks keep a
  * stable identity across renders (consumers list them in effect deps).
  *
- * @returns `data`, `loading`, `error`, the configured `fetchData`, and
- * `runRequest` for hooks that expose a second operation sharing the
- * same state and abort machinery.
+ * @returns `data`, `loading`, `error` and the configured `fetchData`.
  */
 export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>(config: AnalysisEndpointConfig<TArgs, TResponse>) {
   const [data, setData] = useState<TResponse | null>(null);
@@ -115,7 +167,7 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
   const runRequest = useCallback(async <TResult>(
     request: AnalysisRequest,
     contract: AnalysisResponseContract<TResult>,
-    applyResult?: (result: TResult) => void,
+    applyResult: (result: TResult) => void,
   ): Promise<TResult | null> => {
     if (!isMounted()) return null;
 
@@ -126,7 +178,7 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
     try {
       const json = await fetchAnalysisResponse(request, contract, latestRequest.signal);
       if (!latestRequest.isCurrent()) return null;
-      applyResult?.(json);
+      applyResult(json);
       return json;
     } catch (err) {
       if (isAbortError(err)) return null;
@@ -155,6 +207,5 @@ export function useAnalysisEndpoint<TArgs extends readonly unknown[], TResponse>
     loading,
     error,
     fetchData,
-    runRequest,
   };
 }

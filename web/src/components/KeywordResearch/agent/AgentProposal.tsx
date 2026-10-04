@@ -10,6 +10,7 @@ import {
 import type { UsePromoteKeywords } from '../../../hooks/usePromoteKeywords';
 import { keywordSelectionKey } from '../../../hooks/keywordIdentity';
 import { Button } from '../../ui';
+import { useExportAction } from '../../ui/useExportAction';
 import { Spinner } from '../../ui/Spinner';
 import {
   OTHER_DIMENSION_ID, dimensionLabel, orderedDimensionIds, runCatalog
@@ -68,7 +69,6 @@ export function AgentProposal({
   job, keywords, groups, onKeywordsAdded
 }: AgentProposalProps) {
   const [groupId, setGroupId] = useState(job.config?.group_id ?? '');
-  const [exporting, setExporting] = useState(false);
   const groupIds = useMemo(() => (groupId === '' ? [] : [groupId]), [groupId]);
   const recommendedKeywords = useMemo(
     () => keywords.filter((keyword) => keyword.tracking === true).map((keyword) => keyword.keyword),
@@ -96,16 +96,12 @@ export function AgentProposal({
     }
   };
 
-  const handleExport = async () => {
-    setExporting(true);
-    try {
-      await exportAgentRun(job, keywords);
-    } catch (exportError) {
-      console.error('[research-agent] Error exporting run:', exportError);
-    } finally {
-      setExporting(false);
-    }
-  };
+  const {
+    exporting, handleExport 
+  } = useExportAction(
+    () => exportAgentRun(job, keywords),
+    '[research-agent] Error exporting run:',
+  );
 
   if (keywords.length === 0) return null;
 

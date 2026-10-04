@@ -1,12 +1,31 @@
 import {
-  useEffect, useState 
+  useEffect, useState, type ReactNode
 } from 'react';
 import { useRecommendations } from '../../hooks/useRecommendations';
-import { Recommendation } from '../../types';
+import type {
+  Recommendation, RecommendationStatus
+} from '../../types';
 import { Spinner } from '../ui/Spinner';
 import {
   EyeIcon, CogIcon, RefreshIcon 
 } from '../ui';
+import { StrokeIcon } from '../ui/StrokeIcon';
+import {
+  BOLT_PATHS, CHART_BAR_PATHS, CHEVRON_DOWN_PATHS, INFO_CIRCLE_PATHS, LIGHTBULB_PATHS, LINK_PATHS, SORT_ASCENDING_PATHS, SPARKLES_PATHS 
+} from '../ui/iconPaths';
+import { PageHeaderCard } from '../ui/PageHeaderCard';
+import { RecommendationStatusSelect } from './RecommendationStatusSelect';
+
+type TrackedRecommendation = Recommendation & { id: string };
+
+function isTracked(rec: Recommendation): rec is TrackedRecommendation {
+  return typeof rec.id === 'string' && rec.id !== '';
+}
+
+/** Done and won't-fix items stay listed but step back visually. */
+function isSettled(rec: Recommendation): boolean {
+  return rec.status === 'done' || rec.status === 'wontfix';
+}
 
 const getPriorityColor = (priority: string): string => {
   const colors: Record<string, string> = {
@@ -31,39 +50,27 @@ const getTypeBorderColor = (type: string): string => {
 };
 
 const RankingIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
-  </svg>
+  <StrokeIcon className="w-5 h-5" paths={SORT_ASCENDING_PATHS} />
 );
 
 const ProviderGapIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-  </svg>
+  <StrokeIcon className="w-5 h-5" paths={LINK_PATHS} />
 );
 
 const CompetitiveIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-  </svg>
+  <StrokeIcon className="w-5 h-5" paths={BOLT_PATHS} />
 );
 
 const DataIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-  </svg>
+  <StrokeIcon className="w-5 h-5" paths={CHART_BAR_PATHS} />
 );
 
 const BestPracticeIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-  </svg>
+  <StrokeIcon className="w-5 h-5" paths={SPARKLES_PATHS} />
 );
 
 const DefaultIcon = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-  </svg>
+  <StrokeIcon className="w-5 h-5" paths={LIGHTBULB_PATHS} />
 );
 
 const getTypeIcon = (type: string): JSX.Element => {
@@ -83,13 +90,14 @@ interface RecommendationCardProps {
   rec: Recommendation;
   isExpanded: boolean;
   onClick: () => void;
+  statusControl?: ReactNode;
 }
 
 const RecommendationCard = ({
-  rec, isExpanded, onClick 
+  rec, isExpanded, onClick, statusControl
 }: RecommendationCardProps) => (
   <div 
-    className={`bg-white rounded-lg shadow border-l-4 ${getTypeBorderColor(rec.type)} cursor-pointer transition-all hover:shadow-md ${isExpanded ? 'ring-2 ring-gray-300' : ''}`}
+    className={`bg-white rounded-lg shadow border-l-4 ${getTypeBorderColor(rec.type)} cursor-pointer transition-all hover:shadow-md ${isExpanded ? 'ring-2 ring-gray-300' : ''} ${isSettled(rec) ? 'opacity-60' : ''}`}
     onClick={onClick}
   >
     <div className="p-5">
@@ -99,15 +107,9 @@ const RecommendationCard = ({
           <div className="flex justify-between items-start mb-2">
             <h4 className="font-semibold text-gray-900">{rec.title}</h4>
             <div className="flex items-center gap-2">
+              {statusControl}
               <span className={`w-2.5 h-2.5 rounded-full ${getPriorityColor(rec.priority)}`} />
-              <svg 
-                className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} 
-                fill="none" 
-                stroke="currentColor" 
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 9l-7 7-7-7" />
-              </svg>
+              <StrokeIcon className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} paths={CHEVRON_DOWN_PATHS} />
             </div>
           </div>
           
@@ -180,45 +182,44 @@ interface HeaderProps {
 const Header = ({
   useLlm, setUseLlm, onRefresh 
 }: HeaderProps) => (
-  <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
-    <div className="flex flex-col gap-4">
-      <div className="flex-1">
-        <h2 className="text-lg sm:text-xl font-semibold text-gray-900">Action Center</h2>
-        <p className="text-sm text-gray-500 mt-2 leading-relaxed">
-          Get prioritized, actionable recommendations to improve your AI search visibility. 
-          Each recommendation is based on analysis of your visibility gaps, competitor performance, 
-          and citation patterns. Enable "AI Enhanced" for deeper, LLM-powered insights.
-        </p>
-        <div className="mt-3 flex items-center gap-2 text-sm">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-700 rounded-full text-xs sm:text-sm">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-            <span className="hidden sm:inline">Start with high-priority items for biggest impact</span>
-            <span className="sm:hidden">Start with high-priority items</span>
-          </span>
-        </div>
+  <PageHeaderCard
+    title="Action Center"
+    description={(
+      <>
+        Get prioritized, actionable recommendations to improve your AI search visibility. 
+        Each recommendation is based on analysis of your visibility gaps, competitor performance, 
+        and citation patterns. Enable "AI Enhanced" for deeper, LLM-powered insights.
+      </>
+    )}
+    note={(
+      <div className="mt-3 flex items-center gap-2 text-sm">
+        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-red-50 text-red-700 rounded-full text-xs sm:text-sm">
+          <StrokeIcon className="w-3.5 h-3.5" paths={BOLT_PATHS} strokeWidth={2} />
+          <span className="hidden sm:inline">Start with high-priority items for biggest impact</span>
+          <span className="sm:hidden">Start with high-priority items</span>
+        </span>
       </div>
-      <div className="flex flex-col sm:flex-row gap-3">
-        <label className="flex items-center gap-2 text-sm bg-gray-50 px-3 py-2 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
-          <input
-            type="checkbox"
-            checked={useLlm}
-            onChange={(e) => setUseLlm(e.target.checked)}
-            className="rounded border-gray-300 text-gray-900 focus:ring-gray-900"
-          />
-          <span className="text-gray-700 font-medium">AI Enhanced</span>
-        </label>
-        <button
-          onClick={onRefresh}
-          className="px-4 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 text-sm font-medium transition-colors flex items-center justify-center gap-2"
-        >
-          <RefreshIcon className="w-4 h-4" />
-          Refresh
-        </button>
-      </div>
+    )}
+  >
+    <div className="flex flex-col sm:flex-row gap-3">
+      <label className="flex items-center gap-2 text-sm bg-gray-50 px-3 py-2 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
+        <input
+          type="checkbox"
+          checked={useLlm}
+          onChange={(e) => setUseLlm(e.target.checked)}
+          className="rounded border-gray-300 text-gray-900 focus:ring-gray-900"
+        />
+        <span className="text-gray-700 font-medium">AI Enhanced</span>
+      </label>
+      <button
+        onClick={onRefresh}
+        className="px-4 py-2.5 bg-gray-900 text-white rounded-lg hover:bg-gray-800 text-sm font-medium transition-colors flex items-center justify-center gap-2"
+      >
+        <RefreshIcon className="w-4 h-4" />
+        Refresh
+      </button>
     </div>
-  </div>
+  </PageHeaderCard>
 );
 
 const LlmEnhancedSection = ({ 
@@ -232,9 +233,7 @@ const LlmEnhancedSection = ({
 }) => (
   <div className="mt-8">
     <h3 className="text-lg font-medium mb-4 flex items-center gap-2 text-gray-900">
-      <svg className="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-      </svg>
+      <StrokeIcon className="w-5 h-5 text-indigo-500" paths={SPARKLES_PATHS} />
       AI-Enhanced Recommendations
     </h3>
     <div className="space-y-4">
@@ -256,9 +255,7 @@ const LlmEnhancedSection = ({
 const LlmHint = () => (
   <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4 text-sm text-indigo-700">
     <div className="flex items-center gap-2">
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-      </svg>
+      <StrokeIcon className="w-4 h-4" paths={INFO_CIRCLE_PATHS} />
       AI enhancement is enabled but no additional recommendations were generated.
     </div>
   </div>
@@ -285,10 +282,12 @@ interface RecommendationsListProps {
   recommendations: Recommendation[];
   expandedCard: number | null;
   onCardClick: (index: number) => void;
+  updatingIds: readonly string[];
+  onStatusChange: (recommendation: TrackedRecommendation, status: RecommendationStatus) => void;
 }
 
 const RecommendationsList = ({
-  recommendations, expandedCard, onCardClick 
+  recommendations, expandedCard, onCardClick, updatingIds, onStatusChange
 }: RecommendationsListProps) => (
   <div className="space-y-4">
     {recommendations.map((rec, i) => (
@@ -297,6 +296,13 @@ const RecommendationsList = ({
         rec={rec}
         isExpanded={expandedCard === i}
         onClick={() => onCardClick(i)}
+        statusControl={isTracked(rec) && (
+          <RecommendationStatusSelect
+            recommendation={rec}
+            updating={updatingIds.includes(rec.id)}
+            onChange={onStatusChange}
+          />
+        )}
       />
     ))}
   </div>
@@ -309,6 +315,8 @@ interface RecommendationsContentProps {
   expandedCard: number | null;
   onCardClick: (index: number) => void;
   useLlm: boolean;
+  updatingIds: readonly string[];
+  onStatusChange: (recommendation: TrackedRecommendation, status: RecommendationStatus) => void;
 }
 
 const RecommendationsContent = ({
@@ -318,6 +326,8 @@ const RecommendationsContent = ({
   expandedCard,
   onCardClick,
   useLlm,
+  updatingIds,
+  onStatusChange,
 }: RecommendationsContentProps) => {
   const llmEnhanced = data.llm_enhanced ?? [];
   const hasLlmEnhanced = llmEnhanced.length > 0;
@@ -335,6 +345,8 @@ const RecommendationsContent = ({
           recommendations={recommendations}
           expandedCard={expandedCard}
           onCardClick={onCardClick}
+          updatingIds={updatingIds}
+          onStatusChange={onStatusChange}
         />
       )}
 
@@ -356,7 +368,7 @@ export function Recommendations() {
   const [useLlm, setUseLlm] = useState(false);
   const [expandedCard, setExpandedCard] = useState<number | null>(null);
   const {
-    data, loading, error, fetchRecommendations 
+    data, loading, error, fetchRecommendations, updateStatus, updatingIds, statusError
   } = useRecommendations();
 
   useEffect(() => {
@@ -375,6 +387,11 @@ export function Recommendations() {
 
       {loading && <LoadingState useLlm={useLlm} />}
       {error && <ErrorState error={error} />}
+      {statusError && (
+        <div role="alert" className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm">
+          Status not saved: {statusError}
+        </div>
+      )}
 
       {data && (
         <RecommendationsContent
@@ -384,6 +401,8 @@ export function Recommendations() {
           expandedCard={expandedCard}
           onCardClick={handleCardClick}
           useLlm={useLlm}
+          updatingIds={updatingIds}
+          onStatusChange={(recommendation, status) => { void updateStatus(recommendation, status); }}
         />
       )}
     </div>

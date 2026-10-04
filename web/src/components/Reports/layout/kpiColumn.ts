@@ -19,3 +19,13 @@ export function kpiColumn<Row>(
     render,
   };
 }
+
+/** A column set in medium weight: the one naming each row (a brand, a keyword, an engine), or its key figure. */
+export function emphasisColumn<Row>(header: string, render: (row: Row) => ReactNode): ReportTableColumn<Row> {
+  return {
+    header,
+    // Stryker disable next-line StringLiteral: Tailwind-only cell styling
+    cellClassName: 'font-medium',
+    render,
+  };
+}

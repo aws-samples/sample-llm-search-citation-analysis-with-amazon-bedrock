@@ -39,20 +39,38 @@ describe('useProviderConfig', () => {
     ]);
   });
 
-  it('returns true when updateProvider succeeds', async () => {
-    const { result } = await renderLoadedProviderConfig();
+  it('falls back to enabled, unconfigured providers with no stored key when fetch fails', async () => {
+    const { result } = await renderLoadedProviderConfig({ shouldFail: true });
 
-    const updated = await act(() => result.current.updateProvider('openai', { enabled: false }));
-
-    expect(updated).toBe(true);
+    expect(result.current.providers.map((provider) => [
+      provider.id, provider.model, provider.enabled, provider.configured, provider.masked_key, provider.last_updated,
+    ])).toStrictEqual([
+      ['openai', 'gpt-5-mini', true, false, null, null],
+      ['perplexity', 'sonar', true, false, null, null],
+      ['gemini', 'gemini-3-flash-preview', true, false, null, null],
+      ['claude', 'claude-sonnet-4-5', true, false, null, null],
+    ]);
   });
 
-  it('returns false when updateProvider fails', async () => {
-    const { result } = await renderLoadedProviderConfig({ updateSuccess: false });
+  it.each([
+    {
+      name: 'returns true when updateProvider succeeds',
+      options: {},
+      expected: true,
+    },
+    {
+      name: 'returns false when updateProvider fails',
+      options: { updateSuccess: false },
+      expected: false,
+    },
+  ])('$name', async ({
+    options, expected 
+  }) => {
+    const { result } = await renderLoadedProviderConfig(options);
 
     const updated = await act(() => result.current.updateProvider('openai', { enabled: false }));
 
-    expect(updated).toBe(false);
+    expect(updated).toBe(expected);
   });
 
   it('sends correct payload when updating provider with api_key', async () => {
@@ -67,30 +85,6 @@ describe('useProviderConfig', () => {
         body: JSON.stringify({ api_key: 'new-key-123' }),
       })
     );
-  });
-
-  it('returns valid true when validateKey succeeds', async () => {
-    const { result } = await renderLoadedProviderConfig({ validationResult: { valid: true } });
-
-    const validation = await act(() => result.current.validateKey('openai', 'test-key'));
-
-    expect(validation).toStrictEqual({ valid: true });
-  });
-
-  it('returns valid false with error when validateKey fails', async () => {
-    const { result } = await renderLoadedProviderConfig({
-      validationResult: {
-        valid: false,
-        error: 'Invalid API key' 
-      },
-    });
-
-    const validation = await act(() => result.current.validateKey('openai', 'bad-key'));
-
-    expect(validation).toStrictEqual({
-      valid: false,
-      error: 'Invalid API key' 
-    });
   });
 
   it('refreshes providers after successful update', async () => {

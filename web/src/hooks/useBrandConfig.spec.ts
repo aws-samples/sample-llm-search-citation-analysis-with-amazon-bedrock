@@ -1,13 +1,20 @@
 import {
-  describe, it, expect 
+  describe, it, expect
 } from 'vitest';
 import {
-  waitFor, act 
+  waitFor, act
 } from '@testing-library/react';
 import { DEFAULT_CONFIG } from '../constants/brandConfigDefaults';
 import {
-  mockBrandConfig, renderBrandConfig, renderLoadedBrandConfig 
+  mockBrandConfig, renderBrandConfig, renderLoadedBrandConfig, runOnLoadedBrandConfig
 } from './useBrandConfig-fixtures';
+import { EMPTY_INDUSTRY_CONFIG } from './useBrandConfig-defaults-fixtures';
+import {
+  EXPANSION_ARGUMENT_REQUESTS,
+  EXPANSION_FAILURES,
+  GENERAL_ALL_BRANDS_EXPANSION,
+  GENERAL_COMPETITOR_DISCOVERY,
+} from './useBrandConfig-expansion-fixtures';
 
 describe('useBrandConfig', () => {
   describe('initialization', () => {
@@ -58,7 +65,6 @@ describe('useBrandConfig', () => {
 
       expect(result.current.config).toStrictEqual(DEFAULT_CONFIG);
       expect(result.current.config?.industry).toBe('general');
-      expect(result.current.error).toBeNull();
     });
 
     it('uses the canonical General preset when the preset API fails', async () => {
@@ -67,9 +73,7 @@ describe('useBrandConfig', () => {
       expect(result.current.presets?.general).toMatchObject({
         name: 'General',
         description: 'Track brands and companies in any industry',
-        entity_types: [],
         example_brands: [],
-        extraction_focus: 'brand and company recommendations',
       });
       expect(result.current.presets?.general?.default_prompt).toContain(
         'INDUSTRY CONTEXT: General\nFOCUS: brand and company recommendations'
@@ -78,96 +82,39 @@ describe('useBrandConfig', () => {
   });
 
   describe('saveConfig', () => {
-    it('replaces the local config with the config the API returns', async () => {
-      const { result } = await renderLoadedBrandConfig();
+    it.each([
+      {
+        name: 'replaces the local config with the config the API returns',
+        options: {},
+        expectedIndustry: 'hospitality',
+      },
+      {
+        name: 'keeps the locally saved config when the API save fails',
+        options: { shouldFailSave: true },
+        expectedIndustry: 'retail',
+      },
+    ])('$name', async ({
+      options, expectedIndustry
+    }) => {
+      const { result } = await runOnLoadedBrandConfig(
+        (hook) => hook.saveConfig({ industry: 'retail' }),
+        options
+      );
 
-      await act(() => result.current.saveConfig({ industry: 'retail' }));
-
-      // API returns original config
-      expect(result.current.config?.industry).toBe('hospitality');
+      expect(result.current.config?.industry).toBe(expectedIndustry);
     });
 
     it('calls API saveConfig with new config', async () => {
-      const {
-        api, result
-      } = await renderLoadedBrandConfig();
       const newBrands = {
         tracked_brands: {
           first_party: ['NewBrand'],
-          competitors: [] 
-        } 
+          competitors: []
+        }
       };
 
-      await act(() => result.current.saveConfig(newBrands));
+      const { api } = await runOnLoadedBrandConfig((hook) => hook.saveConfig(newBrands));
 
       expect(api.saveConfig).toHaveBeenCalledWith(newBrands);
-    });
-
-    it('keeps the locally saved config when the API save fails', async () => {
-      const { result } = await renderLoadedBrandConfig({ shouldFailSave: true });
-
-      await act(() => result.current.saveConfig({ industry: 'retail' }));
-
-      expect(result.current.config?.industry).toBe('retail');
-    });
-  });
-
-  describe('resetConfig', () => {
-    it('resets config to General defaults through the API', async () => {
-      const {
-        api, result
-      } = await renderLoadedBrandConfig();
-
-      await act(() => result.current.resetConfig());
-
-      expect(api.deleteConfig).toHaveBeenCalledTimes(1);
-      expect(result.current.config).toStrictEqual(DEFAULT_CONFIG);
-      expect(result.current.config?.industry).toBe('general');
-    });
-
-    it('resets config to General locally when the API reset fails', async () => {
-      const { result } = await renderLoadedBrandConfig({ shouldFailDelete: true });
-
-      await act(() => result.current.resetConfig());
-
-      expect(result.current.config).toStrictEqual(DEFAULT_CONFIG);
-      expect(result.current.config?.industry).toBe('general');
-    });
-  });
-
-  describe('getPromptForIndustry', () => {
-    const promptCases = [
-      {
-        condition: 'a custom prompt is set in config',
-        industry: 'hospitality',
-        apiOptions: {
-          configResponse: {
-            ...mockBrandConfig,
-            industry_prompts: { hospitality: 'Custom hospitality prompt' },
-          },
-        },
-        expectedPrompt: 'Custom hospitality prompt',
-      },
-      {
-        condition: 'no custom prompt is set',
-        industry: 'hospitality',
-        apiOptions: {},
-        expectedPrompt: 'Extract hotel brand mentions',
-      },
-      {
-        condition: 'the industry is unknown',
-        industry: 'unknown',
-        apiOptions: {},
-        expectedPrompt: 'Extract brand and company mentions',
-      },
-    ];
-
-    it.each(promptCases)('returns "$expectedPrompt" when $condition', async ({
-      industry, apiOptions, expectedPrompt 
-    }) => {
-      const { result } = await renderLoadedBrandConfig(apiOptions);
-
-      expect(result.current.getPromptForIndustry(industry)).toBe(expectedPrompt);
     });
   });
 
@@ -175,149 +122,57 @@ describe('useBrandConfig', () => {
     it('uses General for every expansion request when stored industry is empty', async () => {
       const {
         api, result
-      } = await renderLoadedBrandConfig({
-        configResponse: {
-          ...mockBrandConfig,
-          industry: '',
-        },
-      });
+      } = await renderLoadedBrandConfig({ configResponse: EMPTY_INDUSTRY_CONFIG });
 
-      await act(() => result.current.expandBrand('TestBrand'));
-      await act(() => result.current.expandAllBrands(['Brand1']));
-      await act(() => result.current.findCompetitors(['MyBrand']));
+      await act(() => GENERAL_ALL_BRANDS_EXPANSION.run(result.current));
+      await act(() => GENERAL_COMPETITOR_DISCOVERY.run(result.current));
 
-      expect(api.expandBrand).toHaveBeenCalledWith({
-        brand_name: 'TestBrand',
-        industry: 'general',
-        existing_brands: [],
-      });
-      expect(api.expandAllBrands).toHaveBeenCalledWith({
-        existing_brands: ['Brand1'],
-        industry: 'general',
-        brand_type: 'first_party',
-      });
-      expect(api.findCompetitors).toHaveBeenCalledWith({
-        first_party_brands: ['MyBrand'],
-        industry: 'general',
-        existing_competitors: [],
-      });
-    });
-  });
-
-  describe('expandBrand', () => {
-    it('returns expansion result with suggestions', async () => {
-      const { result } = await renderLoadedBrandConfig();
-
-      const expansion = await act(() => result.current.expandBrand('TestBrand'));
-
-      expect(expansion.main_brand).toBe('TestBrand');
-      expect(expansion.suggestions).toStrictEqual(['SubBrand1', 'SubBrand2']);
-      expect(expansion.parent_company).toBe('ParentCo');
-    });
-
-    it('passes existing brands to API', async () => {
-      const {
-        api, result
-      } = await renderLoadedBrandConfig();
-
-      await act(() => result.current.expandBrand('TestBrand', ['ExistingBrand']));
-
-      expect(api.expandBrand).toHaveBeenCalledWith({
-        brand_name: 'TestBrand',
-        industry: 'hospitality',
-        existing_brands: ['ExistingBrand'],
-      });
-    });
-
-    it('returns the HTTP failure as the error with no suggestions when the API fails', async () => {
-      const { result } = await renderLoadedBrandConfig({ shouldFailExpand: true });
-
-      const expansion = await act(() => result.current.expandBrand('TestBrand'));
-
-      expect(expansion.error).toBe('HTTP 500: Request failed');
-      expect(expansion.suggestions).toStrictEqual([]);
+      expect(api.expandAllBrands).toHaveBeenCalledWith(GENERAL_ALL_BRANDS_EXPANSION.request);
+      expect(api.findCompetitors).toHaveBeenCalledWith(GENERAL_COMPETITOR_DISCOVERY.request);
     });
   });
 
   describe('expandAllBrands', () => {
     it('returns expansion result for all brands', async () => {
-      const { result } = await renderLoadedBrandConfig();
-
-      const expansion = await act(() => result.current.expandAllBrands(['Brand1']));
+      const { value: expansion } = await runOnLoadedBrandConfig((hook) => hook.expandAllBrands(['Brand1']));
 
       expect(expansion.existing_brands).toStrictEqual(['Brand1']);
       expect(expansion.suggestions).toStrictEqual(['NewBrand1']);
       expect(expansion.parent_companies).toStrictEqual(['Parent1']);
     });
-
-    it('passes brand type to API', async () => {
-      const {
-        api, result
-      } = await renderLoadedBrandConfig();
-
-      await act(() => result.current.expandAllBrands(['Brand1'], 'competitor'));
-
-      expect(api.expandAllBrands).toHaveBeenCalledWith({
-        existing_brands: ['Brand1'],
-        industry: 'hospitality',
-        brand_type: 'competitor',
-      });
-    });
-
-    it('returns the HTTP failure as the error with no suggestions when the API fails', async () => {
-      const { result } = await renderLoadedBrandConfig({ shouldFailExpandAll: true });
-
-      const expansion = await act(() => result.current.expandAllBrands(['Brand1']));
-
-      expect(expansion.error).toBe('HTTP 500: Request failed');
-      expect(expansion.suggestions).toStrictEqual([]);
-    });
   });
 
   describe('findCompetitors', () => {
     it('returns discovered competitors', async () => {
-      const { result } = await renderLoadedBrandConfig();
-
-      const discovery = await act(() => result.current.findCompetitors(['MyBrand']));
+      const { value: discovery } = await runOnLoadedBrandConfig((hook) => hook.findCompetitors(['MyBrand']));
 
       expect(discovery.competitors).toStrictEqual(['Competitor1', 'Competitor2']);
       expect(discovery.first_party_brands).toStrictEqual(['MyBrand']);
     });
+  });
 
-    it('passes existing competitors to API', async () => {
-      const {
-        api, result
-      } = await renderLoadedBrandConfig();
+  describe('expansion API requests', () => {
+    it.each(EXPANSION_ARGUMENT_REQUESTS)('$action passes $argument to API', async ({
+      action, run, request
+    }) => {
+      const { api } = await runOnLoadedBrandConfig(run);
 
-      await act(() => result.current.findCompetitors(['MyBrand'], ['ExistingCompetitor']));
-
-      expect(api.findCompetitors).toHaveBeenCalledWith({
-        first_party_brands: ['MyBrand'],
-        industry: 'hospitality',
-        existing_competitors: ['ExistingCompetitor'],
-      });
-    });
-
-    it('returns the HTTP failure as the error with no competitors when the API fails', async () => {
-      const { result } = await renderLoadedBrandConfig({ shouldFailFindCompetitors: true });
-
-      const discovery = await act(() => result.current.findCompetitors(['MyBrand']));
-
-      expect(discovery.error).toBe('HTTP 500: Request failed');
-      expect(discovery.competitors).toStrictEqual([]);
+      expect(api[action]).toHaveBeenCalledWith(request);
     });
   });
 
-  describe('refetch', () => {
-    it('refetches config from API', async () => {
-      const {
-        api, result
-      } = await renderLoadedBrandConfig();
-      const initialCallCount = api.fetchConfig.mock.calls.length;
+  describe('expansion API failures', () => {
+    it.each(EXPANSION_FAILURES)(
+      '$action returns the HTTP failure as the error with no $emptyField when the API fails',
+      async ({
+        emptyField, failure, run
+      }) => {
+        const { value } = await runOnLoadedBrandConfig(run, failure);
 
-      await act(() => result.current.refetch());
-
-      expect(api.fetchConfig.mock.calls.length).toBeGreaterThan(initialCallCount);
-    });
+        expect(value.error).toBe('HTTP 500: Request failed');
+        expect(value[emptyField]).toStrictEqual([]);
+      }
+    );
   });
+
 });

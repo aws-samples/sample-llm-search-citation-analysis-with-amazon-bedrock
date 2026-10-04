@@ -39,8 +39,10 @@ stepfunctions = boto3.client('stepfunctions')
 dynamodb = boto3.resource('dynamodb')
 
 STATE_MACHINE_ARN = os.environ['STATE_MACHINE_ARN']
-QUERY_PROMPTS_TABLE = os.environ.get('QUERY_PROMPTS_TABLE', 'CitationAnalysis-QueryPrompts')
-KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS', 'KEYWORDS_TABLE')
+QUERY_PROMPTS_TABLE = resolve_table_env(
+    'DYNAMODB_TABLE_QUERY_PROMPTS', required=False, default='CitationAnalysis-QueryPrompts',
+)
+KEYWORDS_TABLE = resolve_table_env('DYNAMODB_TABLE_KEYWORDS')
 
 query_prompts_table = dynamodb.Table(QUERY_PROMPTS_TABLE)
 keywords_table = dynamodb.Table(KEYWORDS_TABLE)

@@ -1,16 +1,30 @@
-import type { HistoricalTrendsResponse } from '../../../../types';
+import type { TrendDataPoint } from '../../../../types';
 import { formatDateOnly } from '../../../../formatting/dateFormatter';
 import {
   ReportSection,
   TrendPeriodTable,
   gateSection,
+  type TrendSectionProps,
 } from '../../layout';
 import { KpiTrendPanel } from './ReportChartPanels';
 
-interface Props {
-  readonly trends: HistoricalTrendsResponse | null;
-  readonly loading: boolean;
-  readonly error: string | null;
+interface KpiHistoryProps {
+  readonly title: string;
+  readonly subtitle: string;
+  readonly startNewPage?: boolean;
+  readonly points: readonly TrendDataPoint[];
+}
+
+/** A section of the KPIs per period: the line chart of every period over the (sampled) table. */
+export function KpiHistorySection({
+  title, subtitle, startNewPage, points
+}: KpiHistoryProps) {
+  return (
+    <ReportSection title={title} subtitle={subtitle} startNewPage={startNewPage}>
+      <KpiTrendPanel points={points} className="mb-4" />
+      <TrendPeriodTable points={points} />
+    </ReportSection>
+  );
 }
 
 /**
@@ -21,7 +35,7 @@ interface Props {
  */
 export function TrendHistorySection({
   trends, loading, error 
-}: Props) {
+}: TrendSectionProps) {
   const gate = gateSection({
     title: 'Trend history',
     loading,
@@ -37,13 +51,11 @@ export function TrendHistorySection({
   if (points.length === 0) return null;
 
   return (
-    <ReportSection
+    <KpiHistorySection
       title="Trend history"
       subtitle={`Every KPI per ${period} since ${formatDateOnly(since)}, over every answer in the ${period}.`}
       startNewPage
-    >
-      <KpiTrendPanel points={points} className="mb-4" />
-      <TrendPeriodTable points={points} />
-    </ReportSection>
+      points={points}
+    />
   );
 }

@@ -16,6 +16,7 @@ from shared.visibility_views import (
     trend_view,
     visibility_view,
 )
+from testing.search_result_fixtures import ranked_brands
 
 HOTEL = 'Hotel Sol'
 RIVAL = 'Hotel Mar'
@@ -30,7 +31,7 @@ def _answer(keyword: str, timestamp: str, *brands: tuple[str, str, int], provide
         'timestamp': timestamp,
         'provider': provider,
         'query_prompt_id': persona,
-        'brands': [{'name': name, 'classification': classification, 'rank': rank} for name, classification, rank in brands],
+        'brands': ranked_brands(brands),
         'citations': ['https://hotel-sol.com/'] if any(name == HOTEL for name, _classification, _rank in brands) else [],
     }])
     return rows[0]

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -17,6 +18,7 @@ from testing.content_studio_fixtures import (
     content_generation_event,
     content_template_generation_case,
     create_content_template_for_test,
+    create_content_template_without_field,
     load_content_studio_module,
     patched_content_studio,
     queue_content_brief_for_test,
@@ -34,6 +36,23 @@ from testing.content_studio_fixtures import (
 from testing.dynamodb_stubs import fake_table
 
 _mod = load_content_studio_module('content_studio_templates_under_test')
+
+
+def snapshot_queued_without(
+    field: str,
+    saved_item: dict[str, object] | None = None,
+    **idea_overrides: object,
+) -> tuple[dict[str, Any], MagicMock]:
+    """Queue a saved-template request lacking `field`; return the persisted snapshot and template table."""
+    template_table, content_table, idea = content_template_generation_case(saved_item, **idea_overrides)
+    idea.pop(field)
+    queue_content_brief_for_test(
+        _mod,
+        idea,
+        template_table=template_table,
+        content_table=content_table,
+    )
+    return content_table.put_item.call_args.kwargs['Item']['idea_data'], template_table
 
 
 class TestTemplateListing:
@@ -124,6 +143,34 @@ class TestTemplateCreation:
         assert body['field'] == 'content_angle'
         table.put_item.assert_not_called()
 
+    @pytest.mark.parametrize('field_name', ['name', 'content_angle', 'prompt_template'])
+    def test_rejects_creation_naming_the_missing_required_field(self, field_name: str) -> None:
+        status, body, table = create_content_template_without_field(_mod, field_name)
+
+        assert (status, body) == (400, {'error': f'Missing required field: {field_name}', 'field': field_name})
+        table.put_item.assert_not_called()
+
+    @pytest.mark.parametrize('name', ['', '   '], ids=['empty', 'whitespace_only'])
+    def test_rejects_blank_name_as_shorter_than_one_character(self, name: str) -> None:
+        status, body, table = create_content_template_for_test(_mod, name=name)
+
+        assert (status, body) == (400, {'error': 'name too short (min 1 characters)', 'field': 'name'})
+        table.put_item.assert_not_called()
+
+    def test_stores_empty_description_when_creation_omits_it(self) -> None:
+        status, _, table = create_content_template_without_field(_mod, 'description')
+
+        assert status == 201
+        assert table.put_item.call_args.kwargs['Item']['description'] == ''
+
+    def test_stores_content_mode_trimmed_of_surrounding_whitespace(self) -> None:
+        status, body, _table = create_content_template_for_test(
+            _mod, content_angle=f'  {CREATE_NEW_LANDING_PAGE}  '
+        )
+
+        assert status == 201
+        assert body['content_angle'] == CREATE_NEW_LANDING_PAGE
+
 
 class TestTemplateMutation:
     def test_updates_only_supplied_saved_template_fields(self) -> None:
@@ -158,59 +205,45 @@ class TestTemplateMutation:
         assert body == {'message': 'Template deleted successfully'}
         table.delete_item.assert_called_once_with(Key={'id': 'template-1'})
 
-    def test_rejects_editing_builtin_template(self) -> None:
+    @pytest.mark.parametrize(
+        ('method', 'request_body', 'write_method', 'error'),
+        [
+            ('PUT', {'name': 'Changed'}, 'update_item', 'Built-in templates cannot be edited; save a copy instead'),
+            ('DELETE', None, 'delete_item', 'Built-in templates cannot be deleted'),
+        ],
+        ids=['edit', 'delete'],
+    )
+    def test_rejects_changing_builtin_template_without_writing(
+        self, method: str, request_body: dict[str, object] | None, write_method: str, error: str
+    ) -> None:
         builtin_id = builtin_content_brief_templates()[0]['id']
         table = fake_table()
 
         status, body = call_content_template_route(
-            _mod,
-            table,
-            'PUT',
-            body={'name': 'Changed'},
-            template_id=builtin_id,
+            _mod, table, method, body=request_body, template_id=builtin_id
         )
 
         assert status == 400
-        assert body['field'] == 'id'
-        table.update_item.assert_not_called()
+        assert body == {'error': error, 'field': 'id'}
+        getattr(table, write_method).assert_not_called()
 
-    def test_rejects_deleting_builtin_template(self) -> None:
-        builtin_id = builtin_content_brief_templates()[0]['id']
-        table = fake_table()
-
-        status, body = call_content_template_route(
-            _mod, table, 'DELETE', template_id=builtin_id
-        )
-
-        assert status == 400
-        assert body == {'error': 'Built-in templates cannot be deleted', 'field': 'id'}
-        table.delete_item.assert_not_called()
-
-    def test_returns_404_when_updated_template_is_unknown(self) -> None:
+    @pytest.mark.parametrize(
+        ('method', 'request_body', 'write_method'),
+        [('PUT', {'name': 'Changed'}, 'update_item'), ('DELETE', None, 'delete_item')],
+        ids=['update', 'delete'],
+    )
+    def test_returns_404_without_writing_when_changed_template_is_unknown(
+        self, method: str, request_body: dict[str, object] | None, write_method: str
+    ) -> None:
         table = fake_table(get_item={})
 
         status, body = call_content_template_route(
-            _mod,
-            table,
-            'PUT',
-            body={'name': 'Changed'},
-            template_id='missing',
+            _mod, table, method, body=request_body, template_id='missing'
         )
 
         assert status == 404
         assert body == {'error': 'Template not found'}
-        table.update_item.assert_not_called()
-
-    def test_returns_404_when_deleted_template_is_unknown(self) -> None:
-        table = fake_table(get_item={})
-
-        status, body = call_content_template_route(
-            _mod, table, 'DELETE', template_id='missing'
-        )
-
-        assert status == 404
-        assert body == {'error': 'Template not found'}
-        table.delete_item.assert_not_called()
+        getattr(table, write_method).assert_not_called()
 
 
 class TestGenerationTemplateSnapshot:
@@ -238,16 +271,9 @@ class TestGenerationTemplateSnapshot:
         saved = content_brief_template_item(
             prompt_template='Saved prompt for {scope} and {keywords}.'
         )
-        template_table, content_table, idea = content_template_generation_case(saved)
-        idea.pop('prompt_template')
-        queue_content_brief_for_test(
-            _mod,
-            idea,
-            template_table=template_table,
-            content_table=content_table,
-        )
 
-        snapshot = content_table.put_item.call_args.kwargs['Item']['idea_data']
+        snapshot, _ = snapshot_queued_without('prompt_template', saved)
+
         assert snapshot['prompt_template'] == 'Saved prompt for {scope} and {keywords}.'
         assert snapshot['template_modified'] is False
 
@@ -296,18 +322,10 @@ class TestGenerationTemplateSnapshot:
         assert template_table.update_item.call_count == 1
 
     def test_missing_template_id_preserves_custom_prompt_without_provenance(self) -> None:
-        template_table, content_table, idea = content_template_generation_case(
-            prompt_template='Custom {scope} {keywords}'
-        )
-        idea.pop('template_id')
-        queue_content_brief_for_test(
-            _mod,
-            idea,
-            template_table=template_table,
-            content_table=content_table,
+        snapshot, template_table = snapshot_queued_without(
+            'template_id', prompt_template='Custom {scope} {keywords}'
         )
 
-        snapshot = content_table.put_item.call_args.kwargs['Item']['idea_data']
         assert snapshot['prompt_template'] == 'Custom {scope} {keywords}'
         assert 'template_id' not in snapshot
         template_table.get_item.assert_not_called()

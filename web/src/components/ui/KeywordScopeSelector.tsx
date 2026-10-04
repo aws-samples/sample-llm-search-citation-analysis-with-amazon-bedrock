@@ -12,9 +12,6 @@ interface KeywordScopeSelectorProps {
   readonly value: ReportScope;
   readonly onChange: (scope: ReportScope) => void;
   readonly label?: string;
-  /** Hide the "All keywords" option where a whole-account answer makes no sense. */
-  readonly allowAll?: boolean;
-  readonly disabled?: boolean;
   readonly className?: string;
 }
 
@@ -23,7 +20,7 @@ interface KeywordScopeSelectorProps {
  * (a hotel), or a single keyword. Groups are listed with their member counts.
  */
 export function KeywordScopeSelector({
-  keywords, groups, value, onChange, label = 'Scope', allowAll = true, disabled = false, className = ''
+  keywords, groups, value, onChange, label = 'Scope', className = ''
 }: KeywordScopeSelectorProps) {
   const id = useId();
   const sortedGroups = [...groups].sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
@@ -35,11 +32,10 @@ export function KeywordScopeSelector({
       <select
         id={id}
         value={encodeReportScope(value)}
-        disabled={disabled}
         onChange={(event) => onChange(decodeReportScope(event.target.value))}
-        className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 text-sm bg-gray-50 disabled:opacity-50"
+        className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 text-sm bg-gray-50"
       >
-        {allowAll && <option value="all">All keywords</option>}
+        <option value="all">All keywords</option>
         {sortedGroups.length > 0 && (
           <optgroup label="Keyword groups">
             {sortedGroups.map((group) => (

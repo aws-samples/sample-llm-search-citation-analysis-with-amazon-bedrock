@@ -9,43 +9,44 @@ import { PromptInsights } from './PromptInsights';
 vi.mock('../../hooks/usePromptInsights', () => ({usePromptInsights: vi.fn(),}));
 
 import { usePromptInsights } from '../../hooks/usePromptInsights';
+import {
+  HOTELS_WINNING_PROMPT, buildPromptInsightsHookResult, buildPromptInsightsResponse 
+} from './PromptInsights-fixtures';
 
-const mockUsePromptInsights = usePromptInsights as ReturnType<typeof vi.fn>;
+const mockUsePromptInsights = vi.mocked(usePromptInsights);
+
+/** Renders the view with the hook answering `overrides`; returns its `fetchPromptInsights` spy. */
+function renderWithInsights(overrides: Parameters<typeof buildPromptInsightsHookResult>[0] = {}) {
+  const hookResult = buildPromptInsightsHookResult(overrides);
+  mockUsePromptInsights.mockReturnValue(hookResult);
+  render(<PromptInsights />);
+  return hookResult.fetchPromptInsights;
+}
 
 describe('PromptInsights', () => {
   beforeEach(() => {
-    mockUsePromptInsights.mockReturnValue({
-      data: null,
-      loading: false,
-      error: null,
-      fetchPromptInsights: vi.fn(),
-    });
+    mockUsePromptInsights.mockReturnValue(buildPromptInsightsHookResult());
   });
 
   describe('initial render', () => {
     it('renders title', () => {
-      render(<PromptInsights />);
+      renderWithInsights();
 
       expect(screen.getByText('Prompt Insights')).toBeInTheDocument();
     });
 
-    it('renders tab buttons', () => {
-      render(<PromptInsights />);
+    it('renders the three tab buttons with zero counts when no data has loaded', () => {
+      renderWithInsights();
 
-      // Tabs only render when data is available
-      expect(screen.getByText('Prompt Insights')).toBeInTheDocument();
+      expect(screen.getAllByRole('button').map((tab) => tab.textContent)).toStrictEqual([
+        'Winning (0)',
+        'Losing (0)',
+        'Opportunities (0)',
+      ]);
     });
 
     it('fetches insights on mount', () => {
-      const fetchPromptInsights = vi.fn();
-      mockUsePromptInsights.mockReturnValue({
-        data: null,
-        loading: false,
-        error: null,
-        fetchPromptInsights,
-      });
-
-      render(<PromptInsights />);
+      const fetchPromptInsights = renderWithInsights();
 
       expect(fetchPromptInsights).toHaveBeenCalledWith('all', 20);
     });
@@ -53,14 +54,7 @@ describe('PromptInsights', () => {
 
   describe('loading state', () => {
     it('shows loading message when loading', () => {
-      mockUsePromptInsights.mockReturnValue({
-        data: null,
-        loading: true,
-        error: null,
-        fetchPromptInsights: vi.fn(),
-      });
-
-      render(<PromptInsights />);
+      renderWithInsights({ loading: true });
 
       expect(screen.getByText(/Loading/)).toBeInTheDocument();
     });
@@ -68,14 +62,7 @@ describe('PromptInsights', () => {
 
   describe('error state', () => {
     it('shows error message when error occurs', () => {
-      mockUsePromptInsights.mockReturnValue({
-        data: null,
-        loading: false,
-        error: 'Failed to load insights',
-        fetchPromptInsights: vi.fn(),
-      });
-
-      render(<PromptInsights />);
+      renderWithInsights({ error: 'Failed to load insights' });
 
       expect(screen.getByText('Failed to load insights')).toBeInTheDocument();
     });
@@ -83,61 +70,40 @@ describe('PromptInsights', () => {
 
   describe('with data', () => {
     it('renders prompt cards for winning prompts', () => {
-      mockUsePromptInsights.mockReturnValue({
-        data: {
-          winning_prompts: [
-            {
-              prompt_text: 'Best hotels in NYC',
-              keyword: 'hotels',
-              provider: 'openai',
-              first_party: {
-                mentions: 5,
-                best_rank: 1 
-              },
-              competitors: {
-                mentions: 3,
-                best_rank: 2 
-              },
-            },
-          ],
-          losing_prompts: [],
-          opportunity_prompts: [],
+      renderWithInsights({
+        data: buildPromptInsightsResponse({
+          winning_prompts: [HOTELS_WINNING_PROMPT],
           summary: {
             winning_count: 1,
             losing_count: 0,
             opportunity_count: 0,
             win_rate: 100,
           },
-        },
-        loading: false,
-        error: null,
-        fetchPromptInsights: vi.fn(),
+        }),
       });
-
-      render(<PromptInsights />);
 
       expect(screen.getByText('hotels')).toBeInTheDocument();
     });
 
-    it('shows empty state when no prompts in active tab', () => {
-      mockUsePromptInsights.mockReturnValue({
-        data: {
-          winning_prompts: [],
-          losing_prompts: [],
-          opportunity_prompts: [],
+    it('shows the winning, losing and opportunity counts of the summary', () => {
+      renderWithInsights({
+        data: buildPromptInsightsResponse({
           summary: {
-            winning_count: 0,
-            losing_count: 0,
-            opportunity_count: 0,
-            win_rate: 0,
+            winning_count: 7,
+            losing_count: 3,
+            opportunity_count: 5,
+            win_rate: 70,
           },
-        },
-        loading: false,
-        error: null,
-        fetchPromptInsights: vi.fn(),
+        }),
       });
 
-      render(<PromptInsights />);
+      expect(screen.getByText('Winning').nextElementSibling).toHaveTextContent('7');
+      expect(screen.getByText('Losing').nextElementSibling).toHaveTextContent('3');
+      expect(screen.getByText('Opportunities').nextElementSibling).toHaveTextContent('5');
+    });
+
+    it('shows empty state when no prompts in active tab', () => {
+      renderWithInsights({ data: buildPromptInsightsResponse() });
 
       expect(screen.getByText(/No winning prompts found/)).toBeInTheDocument();
     });

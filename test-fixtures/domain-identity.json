@@ -1,0 +1,30 @@
+{
+  "description": "Canonical domain identity shared by Python and TypeScript. Each case maps an input (a URL, a bare domain, or a configured first-party domain) to its normalized domain: the host, lower-case, without userinfo, port, leading or trailing dots, or a leading 'www.'. 'expected' is null when the input has no host. Python: lambda/shared/kpi_engine.normalize_domain (test: lambda/shared/test_domain_identity.py). TypeScript: web/src/formatting/domainIdentity.normalizeDomain (spec: domainIdentity.spec.ts).",
+  "cases": [
+    { "description": "URL with path, query and fragment", "input": "https://example.com/path/page?q=1&utm_source=x#top", "expected": "example.com" },
+    { "description": "uppercase host", "input": "HTTPS://EXAMPLE.COM/Path", "expected": "example.com" },
+    { "description": "www prefix on a URL", "input": "https://www.example.com/", "expected": "example.com" },
+    { "description": "www prefix on a bare domain", "input": "www.example.com", "expected": "example.com" },
+    { "description": "bare domain", "input": "example.com", "expected": "example.com" },
+    { "description": "bare uppercase domain", "input": "Example.COM", "expected": "example.com" },
+    { "description": "bare domain with path and query", "input": "example.com/rooms?view=sea", "expected": "example.com" },
+    { "description": "port on a URL", "input": "https://example.com:443/spa", "expected": "example.com" },
+    { "description": "port on a bare domain", "input": "example.com:8443", "expected": "example.com" },
+    { "description": "trailing dot", "input": "example.com.", "expected": "example.com" },
+    { "description": "trailing dot with www and port", "input": "http://www.example.com.:8080/", "expected": "example.com" },
+    { "description": "leading dot (cookie-style configured domain)", "input": ".example.com", "expected": "example.com" },
+    { "description": "leading dot before www", "input": ".www.example.com", "expected": "example.com" },
+    { "description": "subdomain other than www is kept", "input": "https://blog.example.com/post", "expected": "blog.example.com" },
+    { "description": "www only as a leading label is stripped", "input": "https://shop.www.example.com/", "expected": "shop.www.example.com" },
+    { "description": "userinfo is dropped", "input": "https://user:secret@example.com/", "expected": "example.com" },
+    { "description": "surrounding whitespace", "input": "  https://example.com/  ", "expected": "example.com" },
+    { "description": "empty string", "input": "", "expected": null },
+    { "description": "whitespace only", "input": "   ", "expected": null },
+    { "description": "scheme without host", "input": "https://", "expected": null },
+    { "description": "www label alone", "input": "www.", "expected": null },
+    { "description": "malformed URL (unclosed IPv6 bracket)", "input": "http://[::1", "expected": null },
+    { "description": "a scheme with a digit", "input": "h2://example.com/feed", "expected": "example.com" },
+    { "description": "a scheme-relative URL", "input": "//example.com/rooms", "expected": "example.com" },
+    { "description": "several leading dots on a bare domain", "input": "..example.com", "expected": "example.com" }
+  ]
+}

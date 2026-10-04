@@ -137,8 +137,6 @@ export interface Execution {
   } | null;
 }
 
-export type ScheduleState = 'ENABLED' | 'DISABLED';
-
 export type ScheduleFrequency = 'daily' | 'weekly' | 'monthly';
 
 /** The editable timing of a schedule, as stored in its v2 descriptor. */
@@ -163,23 +161,16 @@ export interface ScheduleForm {
  */
 export interface Schedule {
   id: string;
-  /** Same as `id`; kept for the previous API shape. */
-  name: string;
   display_name: string;
-  state: ScheduleState;
   enabled: boolean;
   /** Raw EventBridge expression, e.g. `cron(0 9 ? * MON *)`. */
   schedule: string;
   timezone: string;
   form: ScheduleForm | null;
   scope: AnalysisScope | null;
-  scope_summary: string;
   /** Legacy keyword-text subset; empty for v2 schedules. */
   keywords?: string[];
   legacy: boolean;
-  description?: string;
-  created_at?: string | null;
-  updated_at?: string | null;
 }
 
 /** Form state for creating or editing a schedule. */

@@ -5,7 +5,6 @@ import {
   ApiRequestError,
   ApiConfigError,
   clientRejectionMessage,
-  parseApiError,
   getErrorMessage,
   isAbortError,
   isDefinitiveClientRejection,
@@ -112,90 +111,55 @@ describe('ApiConfigError', () => {
   });
 });
 
-describe('parseApiError', () => {
-  it('returns network category for fetch TypeError', () => {
-    const error = new TypeError('Failed to fetch');
-
-    const result = parseApiError(error);
-
-    expect(result.category).toBe('network');
-  });
-
-  it('returns timeout category for timeout message', () => {
-    const error = new TimeoutError();
-
-    const result = parseApiError(error);
-
-    expect(result.category).toBe('timeout');
-  });
-
-  it('returns auth category for 401 status code', () => {
-    const error = new UnauthorizedError();
-
-    const result = parseApiError(error, undefined, 401);
-
-    expect(result.category).toBe('auth');
-  });
-
-  it('returns status code embedded in ApiRequestError', () => {
-    const error = new ApiRequestError('HTTP 403: Forbidden', 403);
-
-    const result = parseApiError(error);
-
-    expect(result.statusCode).toBe(403);
-  });
-
-  it('returns category inferred from ApiRequestError status', () => {
-    const error = new ApiRequestError('Request rejected', 429);
-
-    const result = parseApiError(error);
-
-    expect(result.category).toBe('rate_limit');
+describe('getErrorMessage categories', () => {
+  it.each<{
+    name: string;
+    error: Error;
+    expected: string 
+  }>([
+    {
+      name: 'returns the network message for a fetch TypeError',
+      error: new TypeError('Failed to fetch'),
+      expected: 'Unable to connect to the server',
+    },
+    {
+      name: 'returns the timeout message for a timeout error message',
+      error: new TimeoutError(),
+      expected: 'Request timed out',
+    },
+    {
+      name: 'returns the auth message for an unauthorized error message',
+      error: new UnauthorizedError(),
+      expected: 'Authentication required',
+    },
+    {
+      name: 'returns the permission message for the status embedded in an ApiRequestError',
+      error: new ApiRequestError('Request rejected', 403),
+      expected: 'You do not have permission to perform this action',
+    },
+    {
+      name: 'returns the rate-limit message for a 429 ApiRequestError',
+      error: new ApiRequestError('Request rejected', 429),
+      expected: 'Too many requests',
+    },
+    {
+      name: 'returns the rate-limit message for a rate-limit error message',
+      error: new RateLimitError(),
+      expected: 'Too many requests',
+    },
+  ])('$name', ({
+    error, expected
+  }) => {
+    expect(getErrorMessage(error)).toBe(expected);
   });
 
   it('returns context-specific message when context provided', () => {
-    const error = new NetworkError();
-
-    const result = parseApiError(error, 'dashboard');
-
-    expect(result.message).toBe('Unable to load dashboard data');
-  });
-
-  it('returns generic message when no context provided', () => {
-    const error = new TypeError('Failed to fetch');
-
-    const result = parseApiError(error);
-
-    expect(result.message).toBe('Unable to connect to the server');
-  });
-
-  it('sets recoverable to true for network errors', () => {
-    const error = new TypeError('Failed to fetch');
-
-    const result = parseApiError(error);
-
-    expect(result.recoverable).toBe(true);
-  });
-
-  it('sets recoverable to false for auth errors', () => {
-    const error = new UnauthorizedError();
-
-    const result = parseApiError(error, undefined, 401);
-
-    expect(result.recoverable).toBe(false);
-  });
-
-  it('includes suggestion for error category', () => {
-    const error = new RateLimitError();
-
-    const result = parseApiError(error);
-
-    expect(result.suggestion).toBe('Please wait a moment before trying again');
+    expect(getErrorMessage(new NetworkError(), 'dashboard')).toBe('Unable to load dashboard data');
   });
 });
 
 describe('getErrorMessage', () => {
-  it('returns message string from parseApiError', () => {
+  it('returns the context message for a fetch failure', () => {
     const error = new TypeError('Failed to fetch');
 
     const message = getErrorMessage(error, 'brands');
@@ -321,16 +285,14 @@ describe('clientRejectionMessage', () => {
   });
 });
 
-describe('parseApiError server-text gating', () => {
+describe('getErrorMessage server-text gating', () => {
   it('suppresses the response message on a 500 server error', () => {
     const error = new ApiRequestError('server', {
       statusCode: 500,
       responseMessage: 'Traceback: internal details',
     });
 
-    const parsed = parseApiError(error);
-
-    expect(parsed.message).toBe('Server error occurred');
+    expect(getErrorMessage(error)).toBe('Server error occurred');
   });
 
   it('suppresses the response message on a 408 timeout', () => {
@@ -339,6 +301,6 @@ describe('parseApiError server-text gating', () => {
       responseMessage: 'upstream stalled',
     });
 
-    expect(parseApiError(error).message).toBe('Request timed out');
+    expect(getErrorMessage(error)).toBe('Request timed out');
   });
 });

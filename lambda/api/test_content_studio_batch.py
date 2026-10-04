@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -17,10 +18,12 @@ from testing.content_brief_fixtures import (
     mixed_group_keyword_rows,
 )
 from testing.content_studio_fixtures import (
+    TemplateBatchRepairCase,
     active_keyword_rows,
     content_studio_resource,
     failing_batch_manifest_table,
     load_content_studio_module,
+    racing_batch_table,
     selected_keyword_scope,
     stateful_batch_table,
     stateful_content_table,
@@ -52,6 +55,60 @@ def run_batch(
     )
     with patch.object(_mod, "dynamodb", resource):
         return parse_response(_mod._api_handler(batch_event(request), None))
+
+
+def by_batch_position(rows: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Stored child rows in batch order."""
+    return sorted(rows.values(), key=lambda row: row["batch_position"])
+
+
+def outcome_counts(body: dict[str, Any]) -> tuple[int, int, int]:
+    """The (accepted, existing, failed) child counts of one batch response."""
+    return body["accepted_count"], body["existing_count"], body["failed_count"]
+
+
+def run_repair(repair: TemplateBatchRepairCase) -> tuple[int, dict[str, Any]]:
+    """Submit the repair case's template-reference batch against its durable tables."""
+    return run_batch(
+        repair.request,
+        content_table=repair.content_table,
+        batch_table=repair.batch_table,
+        template_table=repair.template_table,
+    )
+
+
+@dataclass(frozen=True)
+class DurableBatchStore:
+    """Stateful content rows and batch manifests shared by repeated submissions."""
+
+    content_table: MagicMock
+    rows: dict[str, dict[str, Any]]
+    batch_table: MagicMock
+    manifests: dict[str, dict[str, Any]]
+
+    def run(self, request: dict[str, object], **options: Any) -> tuple[int, dict[str, Any]]:
+        """Submit `request` against this store; `options` are the other `run_batch` arguments."""
+        return run_batch(
+            request,
+            content_table=self.content_table,
+            batch_table=self.batch_table,
+            **options,
+        )
+
+
+@pytest.fixture
+def store() -> DurableBatchStore:
+    content_table, rows = stateful_content_table()
+    batch_table, manifests = stateful_batch_table()
+    return DurableBatchStore(content_table, rows, batch_table, manifests)
+
+
+@pytest.fixture
+def default_batch_children() -> list[dict[str, Any]]:
+    """Child rows, in batch order, queued by the default two-keyword batch."""
+    table, rows = stateful_content_table()
+    run_batch(build_batch_request(), content_table=table, keywords=active_keyword_rows(2))
+    return by_batch_position(rows)
 
 
 class TestBatchValidation:
@@ -182,10 +239,7 @@ class TestBatchCanonicalChildren:
                 batch_table=batch_table,
             )
 
-        ordered_rows = sorted(
-            content_rows.values(),
-            key=lambda row: row["batch_position"],
-        )
+        ordered_rows = by_batch_position(content_rows)
         child_ids = [row["id"] for row in ordered_rows]
         request_hash = ordered_rows[0]["batch_request_hash"]
         descriptors = [
@@ -243,23 +297,19 @@ class TestBatchCanonicalChildren:
         }
         assert manifest_ids_seen_by_child_put == [child_ids, child_ids]
 
-    def test_stores_batch_dimensions_at_row_top_level(self) -> None:
-        table, rows = stateful_content_table()
+    def test_stores_batch_dimensions_at_row_top_level(self, default_batch_children: list[dict[str, Any]]) -> None:
+        ordered = default_batch_children
 
-        run_batch(build_batch_request(), content_table=table, keywords=active_keyword_rows(2))
-
-        ordered = sorted(rows.values(), key=lambda row: row["batch_position"])
         assert [row["batch_id"] for row in ordered] == ["batch-1", "batch-1"]
         assert [row["batch_size"] for row in ordered] == [2, 2]
         assert [row["batch_position"] for row in ordered] == [1, 2]
         assert [row["keyword_id"] for row in ordered] == ["keyword-1", "keyword-2"]
 
-    def test_gives_each_child_one_authoritative_selected_keyword_scope(self) -> None:
-        table, rows = stateful_content_table()
+    def test_gives_each_child_one_authoritative_selected_keyword_scope(
+        self, default_batch_children: list[dict[str, Any]]
+    ) -> None:
+        ideas = [row["idea_data"] for row in default_batch_children]
 
-        run_batch(build_batch_request(), content_table=table, keywords=active_keyword_rows(2))
-
-        ideas = [row["idea_data"] for row in sorted(rows.values(), key=lambda row: row["batch_position"])]
         assert [idea["scope"] for idea in ideas] == [
             {"mode": "keywords", "keyword_ids": ["keyword-1"]},
             {"mode": "keywords", "keyword_ids": ["keyword-2"]},
@@ -275,7 +325,7 @@ class TestBatchCanonicalChildren:
 
         assert status == 202
         assert body["batch_size"] == 2
-        assert [row["keyword"] for row in sorted(rows.values(), key=lambda row: row["batch_position"])] == [
+        assert [row["keyword"] for row in by_batch_position(rows)] == [
             "Alpha",
             "Beta",
         ]
@@ -303,78 +353,52 @@ class TestBatchManifestFailures:
         assert body == {"error": "Service temporarily unavailable"}
         assert content_rows == {}
 
+    def test_queues_children_from_concurrent_winner_manifest_when_own_write_loses_race(self) -> None:
+        content_table, content_rows = stateful_content_table()
+        batch_table, _ = racing_batch_table()
+
+        status, body = run_batch(build_batch_request(), content_table=content_table, batch_table=batch_table)
+
+        assert (status, outcome_counts(body)) == (202, (2, 0, 0))
+        assert len(content_rows) == 2
+
 
 class TestBatchIdempotency:
-    def test_same_batch_retry_after_five_minutes_returns_existing_children(self) -> None:
-        table, rows = stateful_content_table()
-        batch_table, _ = stateful_batch_table()
+    def test_same_batch_retry_after_five_minutes_returns_existing_children(self, store: DurableBatchStore) -> None:
         request = build_batch_request(batch_id="stable-batch")
         early = datetime(2026, 9, 20, 10, 0, tzinfo=UTC)
         later = datetime(2026, 9, 20, 10, 30, tzinfo=UTC)
-        resource = content_studio_resource(
-            content_table=table,
-            keyword_items=active_keyword_rows(2),
-            batch_table=batch_table,
-        )
 
-        with (
-            patch.object(_mod, "dynamodb", resource),
-            patch.object(_mod, "utc_now", return_value=early),
-        ):
-            first = parse_response(_mod._api_handler(batch_event(request), None))
-        with (
-            patch.object(_mod, "dynamodb", resource),
-            patch.object(_mod, "utc_now", return_value=later),
-        ):
-            second = parse_response(_mod._api_handler(batch_event(request), None))
+        with patch.object(_mod, "utc_now", return_value=early):
+            first = store.run(request)
+        with patch.object(_mod, "utc_now", return_value=later):
+            second = store.run(request)
 
         assert first[1]["accepted_count"] == 2
         assert second[1]["existing_count"] == 2
-        assert len(rows) == 2
+        assert len(store.rows) == 2
 
-    def test_existing_batch_children_are_counted_without_new_rows(self) -> None:
-        table, rows = stateful_content_table()
-        batch_table, _ = stateful_batch_table()
+    def test_existing_batch_children_are_counted_without_new_rows(self, store: DurableBatchStore) -> None:
         request = build_batch_request()
 
-        run_batch(
-            request,
-            content_table=table,
-            batch_table=batch_table,
-        )
-        _, retry_body = run_batch(
-            request,
-            content_table=table,
-            batch_table=batch_table,
-        )
+        store.run(request)
+        _, retry_body = store.run(request)
 
-        assert retry_body["accepted_count"] == 0
-        assert retry_body["existing_count"] == 2
-        assert retry_body["failed_count"] == 0
-        assert len(rows) == 2
+        assert outcome_counts(retry_body) == (0, 2, 0)
+        assert len(store.rows) == 2
 
-    def test_recreates_only_missing_child_when_same_batch_is_retried(self) -> None:
-        table, rows = stateful_content_table()
-        batch_table, manifests = stateful_batch_table()
+    def test_recreates_only_missing_child_when_same_batch_is_retried(self, store: DurableBatchStore) -> None:
         request = build_batch_request()
 
-        _, first = run_batch(
-            request,
-            content_table=table,
-            batch_table=batch_table,
-        )
+        _, first = store.run(request)
         missing_id = first["children"][0]["id"]
-        rows.pop(missing_id)
-        _, retry = run_batch(
-            request,
-            content_table=table,
-            batch_table=batch_table,
-        )
+        store.rows.pop(missing_id)
+        _, retry = store.run(request)
 
-        manifest_ids = [child["id"] for child in manifests["batch-1"]["children"]]
+        manifest_ids = [child["id"] for child in store.manifests["batch-1"]["children"]]
         assert retry["accepted_count"] == 1
         assert retry["existing_count"] == 1
-        assert len(rows) == 2
+        assert len(store.rows) == 2
         assert manifest_ids == [child["id"] for child in first["children"]]
 
 
@@ -410,40 +434,32 @@ class TestBatchDurableAcceptance:
         )
 
         assert status == 202
-        assert (body["accepted_count"], body["existing_count"], body["failed_count"]) == (3, 0, 0)
-        assert [row["status"] for row in sorted(rows.values(), key=lambda row: row["batch_position"])] == [
+        assert outcome_counts(body) == (3, 0, 0)
+        assert [row["status"] for row in by_batch_position(rows)] == [
             "pending",
             "pending",
             "pending",
         ]
 
-    def test_counts_existing_failed_rows_without_dispatch_failure_semantics(self) -> None:
-        table, rows = stateful_content_table()
-        batch_table, _ = stateful_batch_table()
+    def test_counts_existing_failed_rows_without_dispatch_failure_semantics(self, store: DurableBatchStore) -> None:
         request = build_batch_request()
-        run_batch(request, content_table=table, batch_table=batch_table)
-        for row in rows.values():
+        store.run(request)
+        for row in store.rows.values():
             row["status"] = "failed"
             row["error_message"] = "Model failure"
 
-        status, body = run_batch(
-            request,
-            content_table=table,
-            batch_table=batch_table,
-        )
+        status, body = store.run(request)
 
         assert status == 202
-        assert (body["accepted_count"], body["existing_count"], body["failed_count"]) == (0, 2, 0)
+        assert outcome_counts(body) == (0, 2, 0)
         assert [child["status"] for child in body["children"]] == ["failed", "failed"]
 
-    def test_accepted_and_existing_counts_always_equal_batch_size(self) -> None:
-        table, rows = stateful_content_table()
-        batch_table, _ = stateful_batch_table()
+    def test_accepted_and_existing_counts_always_equal_batch_size(self, store: DurableBatchStore) -> None:
         request = build_batch_request()
-        _, first = run_batch(request, content_table=table, batch_table=batch_table)
-        rows.pop(first["children"][0]["id"])
+        _, first = store.run(request)
+        store.rows.pop(first["children"][0]["id"])
 
-        status, body = run_batch(request, content_table=table, batch_table=batch_table)
+        status, body = store.run(request)
 
         assert status == 202
         assert body["accepted_count"] == 1
@@ -503,31 +519,21 @@ class TestBatchRequestIdentity:
         ],
         ids=["changed-prompt", "changed-scope"],
     )
-    def test_rejects_reused_batch_id_when_canonical_request_differs(self, changed_request: dict[str, object]) -> None:
-        table, _ = stateful_content_table()
-        batch_table, _ = stateful_batch_table()
+    def test_rejects_reused_batch_id_when_canonical_request_differs(
+        self, store: DurableBatchStore, changed_request: dict[str, object]
+    ) -> None:
         original = build_batch_request(batch_id="stable-batch")
 
-        run_batch(
-            original,
-            content_table=table,
-            batch_table=batch_table,
-            keywords=active_keyword_rows(3),
-        )
-        child_puts_before_conflict = table.put_item.call_count
-        status, body = run_batch(
-            changed_request,
-            content_table=table,
-            batch_table=batch_table,
-            keywords=active_keyword_rows(3),
-        )
+        store.run(original, keywords=active_keyword_rows(3))
+        child_puts_before_conflict = store.content_table.put_item.call_count
+        status, body = store.run(changed_request, keywords=active_keyword_rows(3))
 
         assert status == 409
         assert body == {
             "error": "batch_id has already been used for a different batch request",
             "field": "batch_id",
         }
-        assert table.put_item.call_count == child_puts_before_conflict
+        assert store.content_table.put_item.call_count == child_puts_before_conflict
 
     @pytest.mark.parametrize(
         ("field_name", "invalid_value"),
@@ -540,29 +546,20 @@ class TestBatchRequestIdentity:
     )
     def test_returns_safe_error_when_matching_hash_manifest_dimensions_differ(
         self,
+        store: DurableBatchStore,
         field_name: str,
         invalid_value: object,
     ) -> None:
-        table, _ = stateful_content_table()
-        batch_table, manifests = stateful_batch_table()
         request = build_batch_request()
-        run_batch(
-            request,
-            content_table=table,
-            batch_table=batch_table,
-        )
-        child_puts_before_retry = table.put_item.call_count
-        manifests["batch-1"][field_name] = invalid_value
+        store.run(request)
+        child_puts_before_retry = store.content_table.put_item.call_count
+        store.manifests["batch-1"][field_name] = invalid_value
 
-        status, body = run_batch(
-            request,
-            content_table=table,
-            batch_table=batch_table,
-        )
+        status, body = store.run(request)
 
         assert status == 500
         assert body == {"error": "Service temporarily unavailable"}
-        assert table.put_item.call_count == child_puts_before_retry
+        assert store.content_table.put_item.call_count == child_puts_before_retry
 
 
 def test_group_batch_child_snapshots_exact_keyword_display_fields() -> None:
@@ -585,23 +582,13 @@ def test_group_batch_child_snapshots_exact_keyword_display_fields() -> None:
 class TestImmutableBatchRepair:
     def test_repairs_missing_child_when_saved_template_was_deleted(self) -> None:
         repair = template_batch_repair_case()
-        _, first = run_batch(
-            repair.request,
-            content_table=repair.content_table,
-            batch_table=repair.batch_table,
-            template_table=repair.template_table,
-        )
+        _, first = run_repair(repair)
         missing_id = first["children"][0]["id"]
         saved_snapshot = repair.rows.pop(missing_id)["idea_data"]
         repair.template_table.get_item.reset_mock()
         repair.template_table.get_item.return_value = {}
 
-        status, retry = run_batch(
-            repair.request,
-            content_table=repair.content_table,
-            batch_table=repair.batch_table,
-            template_table=repair.template_table,
-        )
+        status, retry = run_repair(repair)
 
         assert status == 202
         assert retry["accepted_count"] == 1
@@ -615,12 +602,7 @@ class TestImmutableBatchRepair:
                 prompt_template="Original prompt for {scope} and {keywords}.",
             )
         )
-        _, first = run_batch(
-            repair.request,
-            content_table=repair.content_table,
-            batch_table=repair.batch_table,
-            template_table=repair.template_table,
-        )
+        _, first = run_repair(repair)
         missing_id = first["children"][1]["id"]
         repair.rows.pop(missing_id)
         repair.template_table.get_item.reset_mock()
@@ -631,12 +613,7 @@ class TestImmutableBatchRepair:
             )
         }
 
-        status, _ = run_batch(
-            repair.request,
-            content_table=repair.content_table,
-            batch_table=repair.batch_table,
-            template_table=repair.template_table,
-        )
+        status, _ = run_repair(repair)
 
         assert status == 202
         assert repair.rows[missing_id]["idea_data"]["template_name"] == "Original template"
@@ -645,48 +622,26 @@ class TestImmutableBatchRepair:
         )
         repair.template_table.get_item.assert_not_called()
 
-    def test_repairs_missing_child_when_group_membership_changed(self) -> None:
-        content_table, rows = stateful_content_table()
-        batch_table, _ = stateful_batch_table()
+    def test_repairs_missing_child_when_group_membership_changed(self, store: DurableBatchStore) -> None:
         request = build_batch_request(
             scope={"mode": "groups", "group_ids": ["group-1"]}
         )
-        _, first = run_batch(
-            request,
-            content_table=content_table,
-            batch_table=batch_table,
-            keywords=mixed_group_keyword_rows(),
-        )
+        _, first = store.run(request, keywords=mixed_group_keyword_rows())
         missing_id = first["children"][0]["id"]
-        saved_snapshot = rows.pop(missing_id)["idea_data"]
+        saved_snapshot = store.rows.pop(missing_id)["idea_data"]
 
-        status, retry = run_batch(
-            request,
-            content_table=content_table,
-            batch_table=batch_table,
-            keywords=active_keyword_rows(1),
-        )
+        status, retry = store.run(request, keywords=active_keyword_rows(1))
 
         assert status == 202
         assert retry["accepted_count"] == 1
-        assert rows[missing_id]["idea_data"] == saved_snapshot
-        assert rows[missing_id]["keyword"] == "Alpha"
+        assert store.rows[missing_id]["idea_data"] == saved_snapshot
+        assert store.rows[missing_id]["keyword"] == "Alpha"
 
     def test_rejects_hash_mismatch_without_template_or_child_side_effects(self) -> None:
-        content_table, _ = stateful_content_table()
-        batch_table, _ = stateful_batch_table()
-        template_table = fake_table(get_item={"Item": content_brief_template_item()})
-        original_brief = build_batch_brief(template_id="template-1")
-        original_brief.pop("prompt_template")
-        original = build_batch_request(brief=original_brief)
-        run_batch(
-            original,
-            content_table=content_table,
-            batch_table=batch_table,
-            template_table=template_table,
-        )
-        child_puts_before_conflict = content_table.put_item.call_count
-        template_table.get_item.reset_mock()
+        repair = template_batch_repair_case()
+        run_repair(repair)
+        child_puts_before_conflict = repair.content_table.put_item.call_count
+        repair.template_table.get_item.reset_mock()
         changed = build_batch_request(
             brief=build_batch_brief(
                 template_id="template-1",
@@ -696,19 +651,17 @@ class TestImmutableBatchRepair:
 
         status, body = run_batch(
             changed,
-            content_table=content_table,
-            batch_table=batch_table,
-            template_table=template_table,
+            content_table=repair.content_table,
+            batch_table=repair.batch_table,
+            template_table=repair.template_table,
         )
 
         assert status == 409
         assert body["field"] == "batch_id"
-        assert content_table.put_item.call_count == child_puts_before_conflict
-        template_table.get_item.assert_not_called()
+        assert repair.content_table.put_item.call_count == child_puts_before_conflict
+        repair.template_table.get_item.assert_not_called()
 
-    def test_rejects_canonical_snapshot_when_serialized_size_exceeds_bound(self) -> None:
-        content_table, rows = stateful_content_table()
-        batch_table, _ = stateful_batch_table()
+    def test_rejects_canonical_snapshot_when_serialized_size_exceeds_bound(self, store: DurableBatchStore) -> None:
         oversized = {
             "id": "batch-1",
             "keyword_ids": ["keyword-1"],
@@ -717,16 +670,12 @@ class TestImmutableBatchRepair:
         }
 
         with patch.object(_mod, "_batch_request_idea", return_value=(oversized, None)):
-            status, body = run_batch(
-                build_batch_request(),
-                content_table=content_table,
-                batch_table=batch_table,
-            )
+            status, body = store.run(build_batch_request())
 
         assert status == 400
         assert body == {
             "error": "brief expands beyond the safe batch snapshot limit",
             "field": "brief",
         }
-        assert rows == {}
-        batch_table.put_item.assert_not_called()
+        assert store.rows == {}
+        store.batch_table.put_item.assert_not_called()

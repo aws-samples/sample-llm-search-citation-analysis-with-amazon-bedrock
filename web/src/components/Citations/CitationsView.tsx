@@ -2,15 +2,15 @@ import React, {
   useState,
   useMemo,
 } from 'react';
-import type { TopUrl } from '../../types';
+import type {
+  CrawledContent, TopUrl
+} from '../../types';
 import {
   API_BASE_URL, authenticatedFetch 
 } from '../../infrastructure';
 import { getDomain } from '../../formatting/urlFormatter';
 import { KeywordDetail } from '../Keywords/KeywordDetail';
-import {
-  CitationDetailModal, type CrawledContent
-} from './CitationDetailModal';
+import { CitationDetailModal } from './CitationDetailModal';
 import { CitationFilters } from './CitationFilters';
 import { CitationTableHeader } from './CitationTableHeader';
 import { CitationRow } from './CitationRow';
@@ -24,19 +24,14 @@ import {
   fetchBreakdownData 
 } from '../../exporters/citationParser';
 import type {
-  SortColumn, SortConfig 
+  SortColumn, SortConfig, UrlBreakdown
 } from '../../exporters/citationParser';
 import { exportToExcel } from '../../exporters/excelGenerator';
+import { StrokeIcon } from '../ui/StrokeIcon';
 
 interface CitationsViewProps {
   citations: TopUrl[];
   onNavigateToRawResponses?: (path: string) => void;
-}
-
-interface UrlBreakdown {
-  keyword: string;
-  provider: string;
-  timestamp: string;
 }
 
 export const CitationsView = ({
@@ -167,9 +162,7 @@ export const CitationsView = ({
           </p>
           <div className="mt-3 flex items-center gap-2 text-sm">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 text-gray-700 rounded-full text-xs sm:text-sm">
-              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122" />
-              </svg>
+              <StrokeIcon className="w-3.5 h-3.5" paths={['M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122']} strokeWidth={2} />
               <span className="hidden sm:inline">Click any row to see keyword and provider breakdown</span>
               <span className="sm:hidden">Tap row for details</span>
             </span>
@@ -178,18 +171,16 @@ export const CitationsView = ({
 
         {/* Stats Cards */}
         <div className="grid grid-cols-3 gap-3 sm:gap-4">
-          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
-            <div className="text-xs sm:text-sm text-gray-500">Total URLs</div>
-            <div className="text-lg sm:text-2xl font-semibold text-gray-900">{citations.length.toLocaleString()}</div>
-          </div>
-          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
-            <div className="text-xs sm:text-sm text-gray-500">Citations</div>
-            <div className="text-lg sm:text-2xl font-semibold text-gray-900">{totalCitationCount.toLocaleString()}</div>
-          </div>
-          <div className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
-            <div className="text-xs sm:text-sm text-gray-500">Avg/URL</div>
-            <div className="text-lg sm:text-2xl font-semibold text-gray-900">{avgCitations}</div>
-          </div>
+          {([
+            ['Total URLs', citations.length.toLocaleString()],
+            ['Citations', totalCitationCount.toLocaleString()],
+            ['Avg/URL', avgCitations],
+          ] as const).map(([label, value]) => (
+            <div key={label} className="bg-white rounded-lg border border-gray-200 p-3 sm:p-4">
+              <div className="text-xs sm:text-sm text-gray-500">{label}</div>
+              <div className="text-lg sm:text-2xl font-semibold text-gray-900">{value}</div>
+            </div>
+          ))}
         </div>
 
         {/* Filters */}

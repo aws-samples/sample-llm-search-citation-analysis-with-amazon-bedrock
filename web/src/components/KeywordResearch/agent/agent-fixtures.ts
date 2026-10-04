@@ -61,7 +61,7 @@ export const promotedActiveKeywordFixture = {
   created_at: '2026-09-18T10:07:00Z',
 } satisfies Keyword;
 
-export const promotedInactiveKeywordFixture = {
+const promotedInactiveKeywordFixture = {
   id: 'k2',
   keyword: 'escapada coruña',
   status: 'inactive',

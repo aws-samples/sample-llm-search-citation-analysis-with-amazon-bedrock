@@ -1,8 +1,8 @@
 import {
-  renderHook, act 
+  act, renderHook
 } from '@testing-library/react';
 import type {
-  RecommendationsResponse, RecommendationStatus 
+  Recommendation, RecommendationsResponse
 } from '../types';
 import { createMockJsonResponse } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
@@ -11,8 +11,6 @@ import { useRecommendations } from './useRecommendations';
 export const mockRecommendationsResponse: RecommendationsResponse = {
   recommendations: [
     {
-      id: 'rec-001',
-      status: 'new',
       type: 'content_gap',
       priority: 'high',
       title: 'Create content for high-traffic keyword',
@@ -20,16 +18,19 @@ export const mockRecommendationsResponse: RecommendationsResponse = {
       action: 'Create targeted content',
       impact: 'High visibility increase',
       keywords: ['best hotels'],
+      id: 'rec-001',
+      status: 'new',
     },
     {
-      id: 'rec-002',
-      status: 'new',
       type: 'brand_mention',
       priority: 'medium',
       title: 'Increase brand visibility',
       description: 'Your brand is mentioned less frequently than competitors.',
       action: 'Improve brand presence',
       impact: 'Medium brand awareness boost',
+      id: 'rec-002',
+      status: 'in_progress',
+      notes: 'Owner: brand team',
     },
   ],
   total_count: 2,
@@ -41,25 +42,26 @@ export const mockRecommendationsResponse: RecommendationsResponse = {
   },
 };
 
-/** The row the status endpoint returns after persisting `status` for rec-001. */
-export function buildRecommendationStatusRow(status: RecommendationStatus) {
+/** The first fixture recommendation, narrowed to the tracked (id-carrying) shape `updateStatus` takes. */
+export function trackedRecommendation(index: number): Recommendation & { id: string } {
+  const recommendation = mockRecommendationsResponse.recommendations[index];
   return {
-    recommendation_id: 'rec-001',
-    status,
-    updated_at: '2026-05-15T10:00:00Z',
+    ...recommendation,
+    id: recommendation.id ?? `missing-id-${index}`,
   };
 }
 
-/**
- * Renders the hook with the recommendations already fetched, so a status
- * update has local state to mutate. The next request (the status POST)
- * receives `statusResponse`.
- */
-export async function renderLoadedRecommendations(statusResponse: Response) {
-  mockAuthenticatedFetch
-    .mockResolvedValueOnce(createMockJsonResponse(mockRecommendationsResponse))
-    .mockResolvedValueOnce(statusResponse);
+/** Renders `useRecommendations` with `mockRecommendationsResponse` already fetched. */
+export async function renderFetchedRecommendations() {
+  mockAuthenticatedFetch.mockResolvedValue(createMockJsonResponse(mockRecommendationsResponse));
   const rendered = renderHook(() => useRecommendations());
-  await act(() => rendered.result.current.fetchRecommendations());
+  await act(async () => {
+    await rendered.result.current.fetchRecommendations();
+  });
   return rendered;
+}
+
+/** The status each fixture recommendation shows, in list order. */
+export function statusesOf(response: RecommendationsResponse | null): Array<string | undefined> {
+  return (response?.recommendations ?? []).map((rec) => rec.status);
 }

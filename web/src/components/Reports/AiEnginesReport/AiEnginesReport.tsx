@@ -6,7 +6,7 @@ import { EngineHeadlineSection } from './sections/EngineHeadlineSection';
 import { EngineChartSection } from './sections/EngineChartSection';
 import { EngineTableSection } from './sections/EngineTableSection';
 
-export const ENGINES_PATH = '/reports/engines';
+const ENGINES_PATH = '/reports/engines';
 
 /** The sections of the AI Engines report, in order. */
 export function EngineSections({ report }: ScopeSectionProps) {

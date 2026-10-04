@@ -22,7 +22,7 @@
 import { vi } from 'vitest';
 import type { authenticatedFetch as realAuthenticatedFetch } from '../infrastructure/auth';
 import {
-  createDeferredResponse, type DeferredResponse
+  createDeferredResponse, deferNextTwoCalls, type DeferredResponse
 } from './fetchResponses';
 
 export * from '../infrastructure/errors';
@@ -45,4 +45,12 @@ export function deferAuthenticatedFetch(): DeferredResponse {
   const deferred = createDeferredResponse();
   mockAuthenticatedFetch.mockReturnValue(deferred.promise);
   return deferred;
+}
+
+/**
+ * Queues two responses the spec settles by hand, for the next two
+ * `authenticatedFetch` calls in order.
+ */
+export function deferNextTwoAuthenticatedFetches(): [DeferredResponse, DeferredResponse] {
+  return deferNextTwoCalls(mockAuthenticatedFetch);
 }

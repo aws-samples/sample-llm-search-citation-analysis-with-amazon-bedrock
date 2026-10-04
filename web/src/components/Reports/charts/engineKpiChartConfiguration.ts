@@ -1,16 +1,12 @@
 import type { ChartConfiguration } from 'chart.js';
 import type { EngineKpis } from '../../../types/domain/visibility';
-import {
-  PROVIDER_NAMES, type ProviderId
-} from '../../../constants/providers';
-import {
-  themedAxis, type ChartTheme
-} from '../../ui/chartTheme';
+import { providerName } from '../../../constants/providers';
+import type { ChartTheme } from '../../ui/chartTheme';
 import {
   kpiLabelsInWords, kpiSeries, kpiValuesInWords, type ChartKpiId
 } from './chartKpis';
 import {
-  barSeries, chartOptions, percentAxis
+  barChartConfiguration, percentChartOptions
 } from './chartOptions';
 import {
   seriesLabels, type ChartSeries
@@ -19,19 +15,10 @@ import {
 /** The KPIs the engine chart compares unless told otherwise. */
 export const DEFAULT_ENGINE_KPI_IDS: readonly ChartKpiId[] = ['mention_rate', 'visibility_score', 'citation_rate'];
 
-function isProviderId(engine: string): engine is ProviderId {
-  return Object.keys(PROVIDER_NAMES).includes(engine);
-}
-
-/** An engine's display name ("OpenAI"), or its id for an engine the dashboard does not know. */
-export function engineName(engine: string): string {
-  return isProviderId(engine) ? PROVIDER_NAMES[engine] : engine;
-}
-
 /** One bar series per KPI of `ids`, one category per engine in the given order; none without an engine. */
 export function engineKpiSeries(engines: readonly EngineKpis[], ids: readonly ChartKpiId[]): Array<ChartSeries<ChartKpiId>> {
   return kpiSeries(engines.map((engine) => ({
-    label: engineName(engine.engine),
+    label: providerName(engine.engine),
     kpis: engine.kpis,
   })), ids);
 }
@@ -42,14 +29,7 @@ export function buildEngineKpiChartConfiguration(
   theme: ChartTheme,
   isDark: boolean,
 ): ChartConfiguration<'bar'> {
-  return {
-    type: 'bar',
-    data: barSeries(series, isDark),
-    options: chartOptions(theme, {
-      x: themedAxis(theme),
-      y: percentAxis(theme),
-    }),
-  };
+  return barChartConfiguration(series, isDark, percentChartOptions(theme));
 }
 
 /** "Mention rate and Visibility score per AI engine, on a 0–100 scale. OpenAI: Mention rate 70.0%, Visibility score 58.0." */

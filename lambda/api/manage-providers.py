@@ -49,9 +49,7 @@ secrets_client = boto3.client('secretsmanager')
 dynamodb = boto3.resource('dynamodb')
 
 # Fail-fast: Required environment variables (audit #12 canonical naming).
-PROVIDER_CONFIG_TABLE = resolve_table_env(
-    'DYNAMODB_TABLE_PROVIDER_CONFIG', 'PROVIDER_CONFIG_TABLE',
-)
+PROVIDER_CONFIG_TABLE = resolve_table_env('DYNAMODB_TABLE_PROVIDER_CONFIG')
 SECRETS_PREFIX = os.environ.get('SECRETS_PREFIX', 'citation-analysis/')
 
 # Provider type constants
@@ -341,16 +339,41 @@ def _post(url: str, **kwargs: Any) -> dict[str, Any]:
     return {'method': 'post', 'url': url, **kwargs}
 
 
+def _perplexity_chat(api_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A POST of ``payload`` to Perplexity's chat completions."""
+    return _post(PERPLEXITY_CHAT_URL, headers=_bearer_json_headers(api_key), json=payload)
+
+
+def _claude_messages(api_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A POST of ``payload`` to Anthropic's Messages API."""
+    return _post(f'{ANTHROPIC_API_BASE}/messages', headers=anthropic_headers(api_key), json=payload)
+
+
 # --- Reading a probe response ---------------------------------------------
+
+
+def _auth_verdict(
+    response: Any,
+    *,
+    rejected: str,
+    describe_failure: Callable[[Any], str] | None = None,
+) -> dict:
+    """200 proves the key, 401/403 refute it (``rejected``); any other status is unexpected.
+
+    ``describe_failure`` may name the unexpected failure from the response
+    body; without it, or when it finds nothing, the status code is reported.
+    """
+    if response.status_code == 200:
+        return {'valid': True}
+    if response.status_code in (401, 403):
+        return {'valid': False, 'error': rejected}
+    detail = describe_failure(response) if describe_failure else ''
+    return {'valid': False, 'error': detail or f'Unexpected status {response.status_code}'}
 
 
 def _probe_result(response: Any) -> dict:
     """Interpret a 1-token probe request: 200 proves the key, 401/403 refute it."""
-    if response.status_code == 200:
-        return {'valid': True}
-    if response.status_code in (401, 403):
-        return {'valid': False, 'error': 'Invalid API key'}
-    return {'valid': False, 'error': f'Unexpected status {response.status_code}'}
+    return _auth_verdict(response, rejected='Invalid API key')
 
 
 def _status_result(response: Any) -> dict:
@@ -412,15 +435,11 @@ def _perplexity_request(api_key: str) -> dict[str, Any]:
     # returns 401 for bad keys immediately on a 1-token request.
     # Cost: 1 input token + 1 output token if the key IS valid, so
     # ≤ $0.001 per validation.
-    return _post(
-        PERPLEXITY_CHAT_URL,
-        headers=_bearer_json_headers(api_key),
-        json={
-            'model': 'sonar',
-            'messages': [{'role': 'user', 'content': 'ping'}],
-            'max_tokens': 1,
-        },
-    )
+    return _perplexity_chat(api_key, {
+        'model': 'sonar',
+        'messages': [{'role': 'user', 'content': 'ping'}],
+        'max_tokens': 1,
+    })
 
 
 def _gemini_request(api_key: str) -> dict[str, Any]:
@@ -433,15 +452,11 @@ def _gemini_request(api_key: str) -> dict[str, Any]:
 def _claude_request(api_key: str) -> dict[str, Any]:
     # Anthropic /v1/messages returns 401 immediately on a bad key
     # without consuming meaningful quota for a 1-token request.
-    return _post(
-        f'{ANTHROPIC_API_BASE}/messages',
-        headers=anthropic_headers(api_key),
-        json={
-            'model': 'claude-haiku-4-5',
-            'max_tokens': 1,
-            'messages': [{'role': 'user', 'content': 'ping'}],
-        },
-    )
+    return _claude_messages(api_key, {
+        'model': 'claude-haiku-4-5',
+        'max_tokens': 1,
+        'messages': [{'role': 'user', 'content': 'ping'}],
+    })
 
 
 def _brave_request(api_key: str) -> dict[str, Any]:
@@ -560,11 +575,7 @@ def _openai_model_check(api_key: str, model: str) -> dict[str, Any]:
 
 
 def _perplexity_model_check(api_key: str, model: str) -> dict[str, Any]:
-    return _post(
-        PERPLEXITY_CHAT_URL,
-        headers=_bearer_json_headers(api_key),
-        json=perplexity_chat_payload([{'role': 'user', 'content': _MODEL_CHECK_PROMPT}], model),
-    )
+    return _perplexity_chat(api_key, perplexity_chat_payload([{'role': 'user', 'content': _MODEL_CHECK_PROMPT}], model))
 
 
 def _gemini_model_check(api_key: str, model: str) -> dict[str, Any]:
@@ -577,11 +588,7 @@ def _gemini_model_check(api_key: str, model: str) -> dict[str, Any]:
 
 def _claude_model_check(api_key: str, model: str) -> dict[str, Any]:
     # One search at most and a short reply keep the check to a cent or so.
-    return _post(
-        f'{ANTHROPIC_API_BASE}/messages',
-        headers=anthropic_headers(api_key),
-        json=claude_web_search_payload(_MODEL_CHECK_PROMPT, model, max_tokens=64, max_uses=1),
-    )
+    return _claude_messages(api_key, claude_web_search_payload(_MODEL_CHECK_PROMPT, model, max_tokens=64, max_uses=1))
 
 
 def _claude_listing_request(api_key: str) -> dict[str, Any]:
@@ -609,11 +616,7 @@ def _provider_error_message(response: Any) -> str:
 
 def _model_check_result(response: Any) -> dict:
     """Interpret the model check: 200 means the model answered with web search enabled."""
-    if response.status_code == 200:
-        return {'valid': True}
-    if response.status_code in (401, 403):
-        return {'valid': False, 'error': 'The stored API key was rejected'}
-    return {'valid': False, 'error': _provider_error_message(response) or f'Unexpected status {response.status_code}'}
+    return _auth_verdict(response, rejected='The stored API key was rejected', describe_failure=_provider_error_message)
 
 
 # Listed ids that cannot answer a web-search prompt: audio, realtime, speech,
@@ -782,14 +785,21 @@ def handle_get_providers(event: dict, context: Any) -> dict:
             **_model_fields(provider_id, config),
             'docs_url': info['docs_url'],
             'type': info.get('type', PROVIDER_TYPE_LLM),
-            'enabled': config.get('enabled', True),
-            'configured': secret_status.get('has_value', False),
-            'masked_key': secret_status.get('masked_key'),
+            **_key_state_fields(config, secret_status),
             'last_updated': secret_status.get('last_updated'),
             **provider_health_fields(config),
         })
 
     return success_response({'providers': providers}, event)
+
+
+def _key_state_fields(config: Mapping[str, Any], secret_status: Mapping[str, Any]) -> dict[str, Any]:
+    """Whether the provider is on, and whether (and with which masked key) its secret is set."""
+    return {
+        'enabled': config.get('enabled', True),
+        'configured': secret_status.get('has_value', False),
+        'masked_key': secret_status.get('masked_key'),
+    }
 
 
 def _with_known_provider(route: Callable[..., dict]) -> Callable[..., dict]:
@@ -902,9 +912,7 @@ def handle_update_provider(event: dict, context: Any, provider_id: str, body: di
 
     return success_response({
         'id': provider_id,
-        'enabled': config.get('enabled', True),
-        'configured': secret_status.get('has_value', False),
-        'masked_key': secret_status.get('masked_key'),
+        **_key_state_fields(config, secret_status),
         **_model_fields(provider_id, config),
     }, event)
 

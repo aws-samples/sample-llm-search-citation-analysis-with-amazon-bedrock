@@ -39,7 +39,6 @@ from shared.provider_health import (
     TIMEOUT,
     UNKNOWN,
     classify_provider_error,
-    describe_category,
     record_provider_failure,
     record_provider_success,
 )
@@ -73,19 +72,42 @@ def _table(consecutive_failures: int = 1) -> MagicMock:
     return table
 
 
+def _update_item_error(code: str) -> ClientError:
+    return ClientError({'Error': {'Code': code}}, 'UpdateItem')
+
+
 def _table_whose_disable_write_fails() -> MagicMock:
     """A table that echoes a third terminal failure, then throttles the follow-up `enabled = false` write."""
     table = _table(consecutive_failures=3)
     table.update_item.side_effect = [
         {'Attributes': {'consecutive_failures': Decimal(3)}},
-        ClientError({'Error': {'Code': 'ThrottlingException'}}, 'UpdateItem'),
+        _update_item_error('ThrottlingException'),
     ]
+    return table
+
+
+def _table_whose_writes_fail(code: str) -> MagicMock:
+    """A table on which every `update_item` raises the DynamoDB error `code`."""
+    table = MagicMock()
+    table.update_item.side_effect = _update_item_error(code)
     return table
 
 
 def _write(table: MagicMock, call_index: int = 0) -> dict[str, Any]:
     """The kwargs of one `update_item` call, for asserting on what was written."""
     return table.update_item.call_args_list[call_index].kwargs
+
+
+def _record_credit_failure(table: MagicMock) -> dict[str, Any]:
+    """Record the verbatim Anthropic credit-exhaustion failure for Claude."""
+    return record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+
+
+def _success_write() -> dict[str, Any]:
+    """The `update_item` kwargs a recorded Claude success writes."""
+    table = MagicMock()
+    record_provider_success(table, 'claude', now=NOW)
+    return _write(table)
 
 
 class TestTheAnthropicCreditIncident:
@@ -272,7 +294,7 @@ class TestRecordProviderFailureBookkeeping:
     def test_returns_the_classified_category_for_the_recorded_failure(self):
         table = _table()
 
-        outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        outcome = _record_credit_failure(table)
 
         assert outcome['category'] == INSUFFICIENT_CREDIT
 
@@ -284,14 +306,14 @@ class TestRecordProviderFailureBookkeeping:
         """
         table = _table()
 
-        record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        _record_credit_failure(table)
 
         assert _write(table)['ExpressionAttributeValues'][':cat'] == INSUFFICIENT_CREDIT
 
     def test_stores_the_error_message_on_the_provider_row(self):
         table = _table()
 
-        record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        _record_credit_failure(table)
 
         assert _write(table)['ExpressionAttributeValues'][':err'] == ANTHROPIC_CREDIT_MESSAGE
 
@@ -310,7 +332,7 @@ class TestRecordProviderFailureBookkeeping:
     def test_returns_the_failure_count_dynamodb_echoed_back(self):
         table = _table(consecutive_failures=2)
 
-        outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        outcome = _record_credit_failure(table)
 
         assert outcome['consecutive_failures'] == 2
 
@@ -321,7 +343,7 @@ class TestRecordProviderFailureBookkeeping:
         """
         table = _table(consecutive_failures=2)
 
-        outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        outcome = _record_credit_failure(table)
 
         assert isinstance(outcome['consecutive_failures'], int)
 
@@ -333,7 +355,7 @@ class TestRecordProviderFailureBookkeeping:
         """
         table = _table()
 
-        record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        _record_credit_failure(table)
 
         assert 'ADD consecutive_failures :one' in _write(table)['UpdateExpression']
 
@@ -366,7 +388,7 @@ class TestAutoDisableThreshold:
     def test_does_not_disable_a_provider_on_its_first_terminal_failure(self):
         table = _table(consecutive_failures=1)
 
-        outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        outcome = _record_credit_failure(table)
 
         assert outcome['auto_disabled'] is False
 
@@ -374,21 +396,21 @@ class TestAutoDisableThreshold:
         """One below the threshold — the off-by-one that would disable too soon."""
         table = _table(consecutive_failures=2)
 
-        outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        outcome = _record_credit_failure(table)
 
         assert outcome['auto_disabled'] is False
 
     def test_issues_no_disable_write_below_the_threshold(self):
         table = _table(consecutive_failures=2)
 
-        record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        _record_credit_failure(table)
 
         assert table.update_item.call_count == 1
 
     def test_disables_a_provider_on_its_third_consecutive_terminal_failure(self):
         table = _table(consecutive_failures=3)
 
-        outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        outcome = _record_credit_failure(table)
 
         assert outcome['auto_disabled'] is True
 
@@ -396,7 +418,7 @@ class TestAutoDisableThreshold:
         """The write that actually stops the provider being queried."""
         table = _table(consecutive_failures=3)
 
-        record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        _record_credit_failure(table)
 
         assert _write(table, 1)['ExpressionAttributeValues'][':off'] is False
 
@@ -404,7 +426,7 @@ class TestAutoDisableThreshold:
         """Without the reason the user sees a disabled provider and no cause."""
         table = _table(consecutive_failures=3)
 
-        record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        _record_credit_failure(table)
 
         assert _write(table, 1)['ExpressionAttributeValues'][':cat'] == INSUFFICIENT_CREDIT
 
@@ -412,7 +434,7 @@ class TestAutoDisableThreshold:
         """Settings must not present an automatic action as the user's own choice."""
         table = _table(consecutive_failures=3)
 
-        record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        _record_credit_failure(table)
 
         assert _write(table, 1)['ExpressionAttributeValues'][':true'] is True
 
@@ -432,7 +454,7 @@ class TestAutoDisableThreshold:
         """The comparison is >=, so a missed run cannot let a dead provider through."""
         table = _table(consecutive_failures=7)
 
-        outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        outcome = _record_credit_failure(table)
 
         assert outcome['auto_disabled'] is True
 
@@ -489,12 +511,9 @@ class TestBookkeepingNeverMasksTheOriginalFailure:
     """
 
     def test_returns_normally_when_the_counter_write_fails(self):
-        table = MagicMock()
-        table.update_item.side_effect = ClientError(
-            {'Error': {'Code': 'ProvisionedThroughputExceededException'}}, 'UpdateItem'
-        )
+        table = _table_whose_writes_fail('ProvisionedThroughputExceededException')
 
-        outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        outcome = _record_credit_failure(table)
 
         assert outcome == {
             'category': INSUFFICIENT_CREDIT,
@@ -508,12 +527,9 @@ class TestBookkeepingNeverMasksTheOriginalFailure:
         The caller tags it onto the search result, so the execution summary
         still explains the failure even when persistence is down.
         """
-        table = MagicMock()
-        table.update_item.side_effect = ClientError(
-            {'Error': {'Code': 'ResourceNotFoundException'}}, 'UpdateItem'
-        )
+        table = _table_whose_writes_fail('ResourceNotFoundException')
 
-        outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        outcome = _record_credit_failure(table)
 
         assert outcome['category'] == INSUFFICIENT_CREDIT
 
@@ -522,13 +538,10 @@ class TestBookkeepingNeverMasksTheOriginalFailure:
         A swallowed exception with no log is the exact shape of the bug this
         module was written for. The log line is the only remaining evidence.
         """
-        table = MagicMock()
-        table.update_item.side_effect = ClientError(
-            {'Error': {'Code': 'ResourceNotFoundException'}}, 'UpdateItem'
-        )
+        table = _table_whose_writes_fail('ResourceNotFoundException')
 
         with caplog.at_level('ERROR', logger='shared.provider_health'):
-            record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+            _record_credit_failure(table)
 
         assert 'provider_health_write_failed' in caplog.text
 
@@ -539,14 +552,14 @@ class TestBookkeepingNeverMasksTheOriginalFailure:
         """
         table = _table_whose_disable_write_fails()
 
-        outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        outcome = _record_credit_failure(table)
 
         assert outcome['auto_disabled'] is False
 
     def test_still_reports_the_failure_count_when_the_disable_write_fails(self):
         table = _table_whose_disable_write_fails()
 
-        outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        outcome = _record_credit_failure(table)
 
         assert outcome['consecutive_failures'] == 3
 
@@ -555,7 +568,7 @@ class TestBookkeepingNeverMasksTheOriginalFailure:
         table = MagicMock()
         table.update_item.return_value = {}
 
-        outcome = record_provider_failure(table, 'claude', ANTHROPIC_CREDIT_MESSAGE, now=NOW)
+        outcome = _record_credit_failure(table)
 
         assert outcome['consecutive_failures'] == 0
 
@@ -568,11 +581,7 @@ class TestRecordProviderSuccess:
     """
 
     def test_resets_the_consecutive_failure_count_to_zero(self):
-        table = MagicMock()
-
-        record_provider_success(table, 'claude', now=NOW)
-
-        assert _write(table)['ExpressionAttributeValues'][':zero'] == 0
+        assert _success_write()['ExpressionAttributeValues'][':zero'] == 0
 
     def test_removes_the_stored_error_fields_rather_than_nulling_them(self):
         """
@@ -583,19 +592,11 @@ class TestRecordProviderSuccess:
         provider that had only ever succeeded would wear a warning badge.
         REMOVE is the only clear that both sides read as "nothing wrong".
         """
-        table = MagicMock()
-
-        record_provider_success(table, 'claude', now=NOW)
-
-        assert 'REMOVE last_error, last_error_category' in _write(table)['UpdateExpression']
+        assert 'REMOVE last_error, last_error_category' in _success_write()['UpdateExpression']
 
     def test_writes_no_null_attribute_values_on_success(self):
         """The behavioural half of the test above: no ``None`` ever leaves this function."""
-        table = MagicMock()
-
-        record_provider_success(table, 'claude', now=NOW)
-
-        assert None not in _write(table)['ExpressionAttributeValues'].values()
+        assert None not in _success_write()['ExpressionAttributeValues'].values()
 
     def test_keeps_the_last_failure_timestamp_for_recovery_display(self):
         """
@@ -603,18 +604,10 @@ class TestRecordProviderSuccess:
         failure" apart from "never failed at all", so a success must not
         erase it.
         """
-        table = MagicMock()
-
-        record_provider_success(table, 'claude', now=NOW)
-
-        assert 'last_error_at' not in _write(table)['UpdateExpression']
+        assert 'last_error_at' not in _success_write()['UpdateExpression']
 
     def test_records_when_the_provider_last_answered(self):
-        table = MagicMock()
-
-        record_provider_success(table, 'claude', now=NOW)
-
-        assert _write(table)['ExpressionAttributeValues'][':ts'] == NOW
+        assert _success_write()['ExpressionAttributeValues'][':ts'] == NOW
 
     def test_does_not_re_enable_an_auto_disabled_provider(self):
         """
@@ -623,18 +616,11 @@ class TestRecordProviderSuccess:
         enabled while the underlying billing problem was never addressed. The
         user re-enables it in Settings once they have actually fixed it.
         """
-        table = MagicMock()
-
-        record_provider_success(table, 'claude', now=NOW)
-
-        assert 'enabled' not in _write(table)['UpdateExpression']
+        assert 'enabled' not in _success_write()['UpdateExpression']
 
     def test_returns_normally_when_the_reset_write_fails(self):
         """A failed reset must not turn a successful provider query into an error."""
-        table = MagicMock()
-        table.update_item.side_effect = ClientError(
-            {'Error': {'Code': 'ThrottlingException'}}, 'UpdateItem'
-        )
+        table = _table_whose_writes_fail('ThrottlingException')
 
         assert record_provider_success(table, 'claude', now=NOW) is None
 
@@ -645,24 +631,3 @@ class TestRecordProviderSuccess:
         record_provider_success(table, 'claude')
 
         assert _write(table)['ExpressionAttributeValues'][':ts'].endswith('Z')
-
-
-class TestDescribeCategory:
-    """
-    The strings the dashboard shows. "No credit remaining" is actionable;
-    "error" is what the user got for five days.
-    """
-
-    def test_describes_insufficient_credit_as_a_billing_problem(self):
-        assert describe_category(INSUFFICIENT_CREDIT) == (
-            'No credit remaining on this provider account'
-        )
-
-    def test_describes_invalid_key_as_a_key_problem(self):
-        assert describe_category(INVALID_KEY) == 'API key rejected — check or replace the key'
-
-    def test_describes_an_unrecognised_category_with_the_unknown_text(self):
-        """Guards the `.get` fallback, so a new category never renders as blank."""
-        assert describe_category('not-a-real-category') == (
-            'Provider returned an unrecognised error'
-        )

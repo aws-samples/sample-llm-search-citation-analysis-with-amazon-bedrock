@@ -248,49 +248,54 @@ class TestDispatchRoute:
         monkeypatch.setenv('ALLOW_DEV_CORS', 'true')
         monkeypatch.setattr(api_response, '_cors_origin_cache', None)
 
-    def test_dispatches_to_the_first_route_whose_prefix_matches(self, loader, route_map):
-        event = {'resource': '/api/things/{id}/status', 'path': '/api/things/42/status'}
+    @pytest.fixture
+    def dispatch(self, loader, route_map):
+        """`dispatch_route` over the two-route map, taking just the event and context."""
+        def run(event, context=None):
+            return router_mod.dispatch_route(event, context, route_map, loader, logging.getLogger('t'))
+        return run
 
-        result = router_mod.dispatch_route(event, None, route_map, loader, logging.getLogger('t'))
+    @pytest.mark.parametrize(
+        ('event', 'expected_handler'),
+        [
+            pytest.param(
+                {'resource': '/api/things/{id}/status', 'path': '/api/things/42/status'},
+                'status-handler',
+                id='first_matching_prefix_wins',
+            ),
+            pytest.param(
+                {'resource': '/api/things/{id}', 'path': '/api/things/42'},
+                'generic-handler',
+                id='plain_child_path_falls_through_to_generic',
+            ),
+            pytest.param(
+                {'path': '/api/things/7'},
+                'generic-handler',
+                id='concrete_path_used_when_resource_missing',
+            ),
+        ],
+    )
+    def test_dispatches_to_the_sub_handler_of_the_first_matching_route(self, dispatch, event, expected_handler):
+        assert dispatch(event)['handled_by'] == expected_handler
 
-        assert result['handled_by'] == 'status-handler'
-
-    def test_falls_through_to_the_generic_route_for_a_plain_child_path(self, loader, route_map):
-        event = {'resource': '/api/things/{id}', 'path': '/api/things/42'}
-
-        result = router_mod.dispatch_route(event, None, route_map, loader, logging.getLogger('t'))
-
-        assert result['handled_by'] == 'generic-handler'
-
-    def test_passes_event_and_context_through_to_the_sub_handler(self, loader, route_map):
+    def test_passes_event_and_context_through_to_the_sub_handler(self, dispatch):
         event = {'resource': '/api/things', 'path': '/api/things', 'httpMethod': 'GET'}
         context = object()
 
-        result = router_mod.dispatch_route(event, context, route_map, loader, logging.getLogger('t'))
+        result = dispatch(event, context)
 
         assert result['event'] is event
         assert result['context'] is context
 
-    def test_matches_on_the_concrete_path_when_the_resource_is_missing(self, loader, route_map):
-        event = {'path': '/api/things/7'}
-
-        result = router_mod.dispatch_route(event, None, route_map, loader, logging.getLogger('t'))
-
-        assert result['handled_by'] == 'generic-handler'
-
-    def test_returns_404_through_not_found_response_when_no_route_matches(self, loader, route_map):
-        event = {'resource': '/api/other', 'path': '/api/other', 'headers': {}}
-
-        result = router_mod.dispatch_route(event, None, route_map, loader, logging.getLogger('t'))
+    def test_returns_404_through_not_found_response_when_no_route_matches(self, dispatch):
+        result = dispatch({'resource': '/api/other', 'path': '/api/other', 'headers': {}})
 
         assert result['statusCode'] == 404
         assert 'Route not found' in result['body']
         assert result['headers']['Access-Control-Allow-Origin'] == '*'
 
-    def test_does_not_match_a_sibling_route_sharing_a_prefix(self, loader, route_map):
+    def test_does_not_match_a_sibling_route_sharing_a_prefix(self, dispatch):
         """REGRESSION GUARD: `/api/things-archive` is not under `/api/things`."""
-        event = {'resource': '/api/things-archive', 'path': '/api/things-archive', 'headers': {}}
-
-        result = router_mod.dispatch_route(event, None, route_map, loader, logging.getLogger('t'))
+        result = dispatch({'resource': '/api/things-archive', 'path': '/api/things-archive', 'headers': {}})
 
         assert result['statusCode'] == 404

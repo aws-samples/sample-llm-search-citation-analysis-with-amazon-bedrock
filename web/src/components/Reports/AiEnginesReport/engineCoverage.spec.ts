@@ -17,30 +17,36 @@ describe('engineCoverage', () => {
     expect(engineCoverage(engines).naming).toBe(1);
   });
 
-  it('picks the engine with the highest visibility score as the strongest', () => {
-    expect(engineCoverage(buildEngines()).strongest?.engine).toBe('gemini');
-  });
-
-  it('keeps the first engine as the strongest on a tied score', () => {
-    const engines = [buildEngineKpis('gemini'), buildEngineKpis('openai')];
-
-    expect(engineCoverage(engines).strongest?.engine).toBe('gemini');
-  });
-
-  it('picks a later engine as the strongest when its score is higher', () => {
-    const engines = [buildEngineKpis('openai', { visibility_score: 3 }), buildEngineKpis('gemini', { visibility_score: 5 })];
-
-    expect(engineCoverage(engines).strongest?.engine).toBe('gemini');
-  });
-
-  it('picks an engine scoring 0 as the strongest when no other engine is scored', () => {
-    expect(engineCoverage([buildEngineKpis('gemini', { visibility_score: 0 })]).strongest?.engine).toBe('gemini');
-  });
-
-  it('skips engines without a visibility score', () => {
-    const engines = [buildEngineKpis('gemini', { visibility_score: null }), buildEngineKpis('openai', { visibility_score: 3 })];
-
-    expect(engineCoverage(engines).strongest?.engine).toBe('openai');
+  it.each([
+    {
+      name: 'picks the engine with the highest visibility score as the strongest',
+      engines: buildEngines(),
+      strongest: 'gemini',
+    },
+    {
+      name: 'keeps the first engine as the strongest on a tied score',
+      engines: [buildEngineKpis('gemini'), buildEngineKpis('openai')],
+      strongest: 'gemini',
+    },
+    {
+      name: 'picks a later engine as the strongest when its score is higher',
+      engines: [buildEngineKpis('openai', { visibility_score: 3 }), buildEngineKpis('gemini', { visibility_score: 5 })],
+      strongest: 'gemini',
+    },
+    {
+      name: 'picks an engine scoring 0 as the strongest when no other engine is scored',
+      engines: [buildEngineKpis('gemini', { visibility_score: 0 })],
+      strongest: 'gemini',
+    },
+    {
+      name: 'skips engines without a visibility score',
+      engines: [buildEngineKpis('gemini', { visibility_score: null }), buildEngineKpis('openai', { visibility_score: 3 })],
+      strongest: 'openai',
+    },
+  ])('$name', ({
+    engines, strongest,
+  }) => {
+    expect(engineCoverage(engines).strongest?.engine).toBe(strongest);
   });
 
   it('has no strongest engine without a score', () => {

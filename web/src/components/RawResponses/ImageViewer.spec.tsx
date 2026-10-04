@@ -4,68 +4,56 @@ import {
 import {
   render, screen, fireEvent 
 } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { ImageViewer } from './ImageViewer';
-import { clickDownloadButton } from './DownloadButton-fixtures';
-import { buildFile } from './ImageViewer-fixtures';
+import { describeViewerContract } from './ViewerHeader-fixtures';
+import { buildImageFile } from './ImageViewer-fixtures';
+
+/** Renders the viewer on the fixture screenshot, idle, with `overrides` applied. */
+function renderImageViewer(overrides: Partial<ComponentProps<typeof ImageViewer>> = {}): void {
+  render(
+    <ImageViewer
+      file={buildImageFile()}
+      imageUrl="https://example.com/image.png"
+      onDownload={vi.fn()}
+      loading={false}
+      {...overrides}
+    />
+  );
+}
 
 describe('ImageViewer', () => {
-  const defaultProps = {
-    file: buildFile(),
-    imageUrl: 'https://example.com/image.png',
-    onDownload: vi.fn(),
-    loading: false,
-  };
-
-  describe('loading state', () => {
-    it('shows loading spinner when loading is true', () => {
-      render(<ImageViewer {...defaultProps} loading={true} />);
-
-      expect(screen.getByText(/loading image/i)).toBeInTheDocument();
-    });
+  describeViewerContract({
+    loadingText: /loading image/i,
+    fileName: 'screenshot.png',
+    renderViewer: renderImageViewer,
   });
 
   describe('image header', () => {
-    it('displays file name', () => {
-      render(<ImageViewer {...defaultProps} />);
-
-      expect(screen.getByText('screenshot.png')).toBeInTheDocument();
-    });
-
     it('displays file size', () => {
-      render(<ImageViewer {...defaultProps} />);
+      renderImageViewer();
 
       expect(screen.getByText(/50\.0 KB/)).toBeInTheDocument();
-    });
-
-    it('calls onDownload when download button clicked', async () => {
-      const onDownload = vi.fn();
-      render(<ImageViewer {...defaultProps} onDownload={onDownload} />);
-
-      await clickDownloadButton();
-
-      expect(onDownload).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('image display', () => {
     it('renders image with correct src', () => {
-      render(<ImageViewer {...defaultProps} />);
+      renderImageViewer();
 
-      const img = screen.getByRole('img');
-      expect(img).toHaveAttribute('src', 'https://example.com/image.png');
+      expect(screen.getByRole('img')).toHaveAttribute('src', 'https://example.com/image.png');
     });
 
     it('renders image with alt text from file name', () => {
-      render(<ImageViewer {...defaultProps} />);
+      renderImageViewer();
 
       expect(screen.getByAltText('screenshot.png')).toBeInTheDocument();
     });
 
     it('shows error message when image fails to load', () => {
-      render(<ImageViewer {...defaultProps} />);
+      renderImageViewer();
 
-      const img = screen.getByRole('img');
-      fireEvent.error(img);
+      fireEvent.error(screen.getByRole('img'));
 
       expect(screen.getByText(/failed to load image/i)).toBeInTheDocument();
     });
@@ -73,7 +61,7 @@ describe('ImageViewer', () => {
 
   describe('no image state', () => {
     it('shows no image message when imageUrl is null', () => {
-      render(<ImageViewer {...defaultProps} imageUrl={null} />);
+      renderImageViewer({ imageUrl: null });
 
       expect(screen.getByText(/no image available/i)).toBeInTheDocument();
     });

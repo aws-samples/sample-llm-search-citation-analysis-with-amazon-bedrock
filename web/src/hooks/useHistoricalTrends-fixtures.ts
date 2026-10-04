@@ -2,6 +2,7 @@ import type { HistoricalTrendsResponse } from '../types';
 import {
   KEYWORD_SCOPE_INFO, buildTrendPoint, buildTrendsResponse
 } from '../components/Visibility/visibilityOverview-fixtures';
+import { rejectedBodiesFor } from './useAnalysisEndpoint-failure-fixtures';
 
 /** `/trends` of the "Hotel Sol" group: two days, compared over one keyword. */
 export const mockGroupTrendsResponse: HistoricalTrendsResponse = buildTrendsResponse();
@@ -22,11 +23,7 @@ export const mockFirstPeriodTrendsResponse: HistoricalTrendsResponse = buildTren
  * missing `latest`.
  */
 export const REJECTED_TRENDS_BODIES: ReadonlyArray<[description: string, body: unknown]> = [
-  ['a null body', null],
-  ['a full body flagged with a structured error', {
-    ...mockGroupTrendsResponse,
-    error: { message: 'No data' },
-  }],
+  ...rejectedBodiesFor(mockGroupTrendsResponse, 'No data'),
   ['a body without its scope', {
     ...mockGroupTrendsResponse,
     scope: null,

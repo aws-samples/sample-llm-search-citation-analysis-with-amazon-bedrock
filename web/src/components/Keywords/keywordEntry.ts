@@ -10,6 +10,7 @@ import { isDefinitiveClientRejection } from '../../infrastructure';
 import type { Keyword } from '../../types';
 import { isKeyword } from '../../types/domain/keywordDecoders';
 import type { AlertState } from '../../hooks/useAlertModal';
+import { keywordSelectionKey } from '../../hooks/keywordIdentity';
 
 export interface BulkFailure {
   keyword: string;
@@ -80,7 +81,8 @@ export function getSafeErrorMessage(error: unknown, fallback: string): string {
 }
 
 /**
- * Case-insensitive duplicate check against the current keyword list.
+ * Duplicate check against the current keyword list, by the keyword identity
+ * the API dedupes on (`keywordSelectionKey`: trim, NFKC, lowercase).
  * `excludeId` skips the keyword being edited so renames don't match themselves.
  */
 export function isDuplicateKeyword(
@@ -88,12 +90,13 @@ export function isDuplicateKeyword(
   existing: Keyword[],
   excludeId?: string
 ): boolean {
-  const normalized = candidate.trim().toLowerCase();
+  const identity = keywordSelectionKey(candidate);
   return existing.some(
-    (item) => item.id !== excludeId && item.keyword.toLowerCase() === normalized
+    (item) => item.id !== excludeId && keywordSelectionKey(item.keyword) === identity
   );
 }
 
+/** One trimmed keyword per non-empty line, keeping the first line of each keyword identity. */
 export function parseBulkKeywords(input: string): string[] {
   const seen = new Set<string>();
   return input
@@ -101,9 +104,9 @@ export function parseBulkKeywords(input: string): string[] {
     .map((keyword) => keyword.trim())
     .filter((keyword) => {
       if (keyword.length === 0) return false;
-      const normalized = keyword.toLowerCase();
-      if (seen.has(normalized)) return false;
-      seen.add(normalized);
+      const identity = keywordSelectionKey(keyword);
+      if (seen.has(identity)) return false;
+      seen.add(identity);
       return true;
     });
 }

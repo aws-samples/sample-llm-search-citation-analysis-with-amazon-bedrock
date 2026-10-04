@@ -1,15 +1,18 @@
 import { useState } from 'react';
+import type { ReactNode } from 'react';
 import type {
   S3Item, RawResponseContent, RawResponseDocument 
 } from '../../types';
 import { formatDate } from '../../formatting/dateFormatter';
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
 import { safeHref } from '../../infrastructure';
-import { Spinner } from '../ui/Spinner';
 import { ClipboardIcon } from '../ui/ClipboardIcon';
 import { DownloadButton } from './DownloadButton';
-import { ViewerHeader } from './ViewerHeader';
+import {
+  ViewerHeader, ViewerLoading
+} from './ViewerHeader';
 import { formatSize } from './fileSizeFormatter';
+import { providerColor } from '../../constants/providers';
 
 interface FileViewerProps {
   file: S3Item;
@@ -20,15 +23,8 @@ interface FileViewerProps {
 
 type ViewTab = 'overview' | 'raw' | 'extracted' | 'metadata';
 
-const getProviderColor = (provider: string): string => {
-  const colors: Record<string, string> = {
-    openai: 'bg-green-100 text-green-800',
-    perplexity: 'bg-blue-100 text-blue-800',
-    gemini: 'bg-purple-100 text-purple-800',
-    claude: 'bg-orange-100 text-orange-800',
-  };
-  return colors[provider?.toLowerCase()] ?? 'bg-gray-100 text-gray-800';
-};
+const getProviderColor = (provider: string): string =>
+  providerColor(provider.toLowerCase())?.badge ?? 'bg-gray-100 text-gray-800';
 
 const hasDocumentContent = (
   content: RawResponseContent
@@ -53,12 +49,7 @@ export const FileViewer = ({
   const { copy } = useClipboardCopy();
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Spinner size="lg" className="text-blue-600" />
-        <span className="ml-3 text-gray-600">Loading file...</span>
-      </div>
-    );
+    return <ViewerLoading label="Loading file..." />;
   }
 
   return (
@@ -118,34 +109,42 @@ const FileHeader = ({
 
 interface QuickInfoCardsProps {doc: RawResponseDocument;}
 
+const InfoCard = ({
+  label, children
+}: {
+  label: string;
+  children: ReactNode 
+}) => (
+  <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4">
+    <p className="text-xs sm:text-sm text-gray-500">{label}</p>
+    {children}
+  </div>
+);
+
 const QuickInfoCards = ({ doc }: QuickInfoCardsProps) => (
   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-    <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4">
-      <p className="text-xs sm:text-sm text-gray-500">Provider</p>
+    <InfoCard label="Provider">
       <p
         className={`mt-1 inline-block px-2 py-1 rounded text-xs sm:text-sm font-medium ${getProviderColor(doc.provider)}`}
       >
         {doc.provider}
       </p>
-    </div>
-    <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4">
-      <p className="text-xs sm:text-sm text-gray-500">Keyword</p>
+    </InfoCard>
+    <InfoCard label="Keyword">
       <p className="mt-1 font-medium text-gray-900 text-sm truncate" title={doc.keyword}>
         {doc.keyword}
       </p>
-    </div>
-    <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4">
-      <p className="text-xs sm:text-sm text-gray-500">Timestamp</p>
+    </InfoCard>
+    <InfoCard label="Timestamp">
       <p className="mt-1 font-medium text-gray-900 text-xs sm:text-sm">
         {formatDate(doc.timestamp)}
       </p>
-    </div>
-    <div className="bg-white border border-gray-200 rounded-lg p-3 sm:p-4">
-      <p className="text-xs sm:text-sm text-gray-500">Latency</p>
+    </InfoCard>
+    <InfoCard label="Latency">
       <p className="mt-1 font-medium text-gray-900 text-sm">
         {doc.metadata?.latency_ms ? `${doc.metadata.latency_ms}ms` : 'N/A'}
       </p>
-    </div>
+    </InfoCard>
   </div>
 );
 

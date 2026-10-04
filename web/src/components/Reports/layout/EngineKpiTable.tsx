@@ -1,7 +1,7 @@
 import type { EngineKpis } from '../../../types';
 import { KPI_SPECS } from '../../../constants/kpiDefinitions';
 import { formatKpi } from '../../../formatting/kpiFormatter';
-import { engineName } from '../charts/engineKpiChartConfiguration';
+import { providerName } from '../../../constants/providers';
 import { kpiColumn } from './kpiColumn';
 import {
   ReportTable, type ReportTableColumn
@@ -14,7 +14,7 @@ function engineColumns(): ReadonlyArray<ReportTableColumn<EngineKpis>> {
       header: 'AI engine',
       // Stryker disable next-line StringLiteral: Tailwind-only cell styling
       cellClassName: 'font-medium whitespace-nowrap',
-      render: (engine) => engineName(engine.engine),
+      render: (engine) => providerName(engine.engine),
     },
     ...KPI_SPECS.map((spec) => kpiColumn<EngineKpis>(spec.id, (engine) => formatKpi(spec.id, engine.kpis[spec.id]))),
   ];

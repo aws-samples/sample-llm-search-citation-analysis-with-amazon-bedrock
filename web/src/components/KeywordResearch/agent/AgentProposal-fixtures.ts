@@ -1,4 +1,5 @@
 import type { KeywordGroup } from '../../../types';
+import { mockAuthenticatedFetch } from '../../../test/infrastructureMock';
 
 export const AGENT_PROPOSAL_GROUPS = [
   {
@@ -18,3 +19,9 @@ export const AGENT_PROPOSAL_GROUPS = [
     updated_at: '',
   },
 ] satisfies KeywordGroup[];
+
+/** The parsed JSON body of the first request sent through `authenticatedFetch`. */
+export function firstRequestBody(): unknown {
+  const [, init] = mockAuthenticatedFetch.mock.calls[0];
+  return JSON.parse(String(init?.body));
+}

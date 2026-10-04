@@ -13,7 +13,6 @@
 import type {
   Execution, ExecutionEvent 
 } from '../types';
-import { calculateDuration } from './dateFormatter';
 
 /** Keyword counts of a run's ProcessKeywords map run. */
 export type KeywordProgress = NonNullable<Execution['progress']>;
@@ -31,16 +30,8 @@ export interface StepState {
 }
 
 export interface ProcessedExecution {
-  status: string;
-  startDate: string;
-  endDate?: string;
-  duration?: string | null;
   steps: StepState[];
   events: ExecutionEvent[];
-  logs: ExecutionEvent[];
-  currentStep?: string;
-  /** Overall completion, 0-100. */
-  progress: number;
 }
 
 const PROCESS_KEYWORDS = 'ProcessKeywords';
@@ -50,16 +41,6 @@ const WORKFLOW_STEPS = [
   PROCESS_KEYWORDS,
   'GenerateSummary',
 ];
-
-/**
- * Share of the overall progress each step is worth (sums to 100). The keyword
- * step is the bulk of a run and fills in keyword by keyword.
- */
-const STEP_WEIGHTS: Record<string, number> = {
-  ParseKeywords: 10,
-  [PROCESS_KEYWORDS]: 80,
-  GenerateSummary: 10,
-};
 
 const STEP_DESCRIPTIONS: Record<string, string> = {[PROCESS_KEYWORDS]: 'Search, dedupe and crawl per keyword',};
 
@@ -79,7 +60,6 @@ const PER_KEYWORD_STATES = new Set([
 
 interface StepEvent {
   type?: string;
-  timestamp?: string;
   error?: string;
 }
 
@@ -123,28 +103,6 @@ function pendingSteps(): StepState[] {
     status: 'pending',
     ...(STEP_DESCRIPTIONS[name] ? { description: STEP_DESCRIPTIONS[name] } : {}),
   }));
-}
-
-/** Share of the keywords that finished (succeeded or failed), 0-1; 0 when there are none to count. */
-function keywordFraction(keywords: KeywordProgress | null | undefined): number {
-  if (!keywords || keywords.keywords_total <= 0) return 0;
-  const done = keywords.keywords_succeeded + keywords.keywords_failed;
-  return Math.min(1, done / keywords.keywords_total);
-}
-
-/**
- * Overall completion: every completed step's weight, plus the finished share
- * of the keyword step while it runs (or after it failed). Never goes down as
- * a run advances: the keyword step is worth its full weight once completed.
- */
-function progressPercent(steps: StepState[], keywords: KeywordProgress | null | undefined): number {
-  const total = steps.reduce((sum, step) => {
-    const weight = STEP_WEIGHTS[step.name] ?? 0;
-    if (step.status === 'completed') return sum + weight;
-    if (step.name === PROCESS_KEYWORDS && step.status !== 'pending') return sum + weight * keywordFraction(keywords);
-    return sum;
-  }, 0);
-  return Math.round(total);
 }
 
 function applyEvents(steps: StepState[], events: ExecutionEvent[]): void {
@@ -200,12 +158,8 @@ function applyEvents(steps: StepState[], events: ExecutionEvent[]): void {
 export function processExecutionData(execution: Execution | null): ProcessedExecution {
   if (!execution) {
     return {
-      status: 'IDLE',
-      startDate: '',
       steps: pendingSteps(),
       events: [],
-      logs: [],
-      progress: 0,
     };
   }
 
@@ -215,17 +169,8 @@ export function processExecutionData(execution: Execution | null): ProcessedExec
   const keywords = execution.progress;
   if (keywords) steps[WORKFLOW_STEPS.indexOf(PROCESS_KEYWORDS)].keywords = keywords;
 
-  const runningStepIndex = steps.findIndex(s => s.status === 'running');
-
   return {
-    status: execution.status,
-    startDate: execution.start_date,
-    endDate: execution.stop_date,
-    duration: calculateDuration(execution.start_date, execution.stop_date),
     steps,
     events: execution.events,
-    logs: execution.events,
-    currentStep: runningStepIndex >= 0 ? WORKFLOW_STEPS[runningStepIndex] : undefined,
-    progress: progressPercent(steps, keywords),
   };
 }
