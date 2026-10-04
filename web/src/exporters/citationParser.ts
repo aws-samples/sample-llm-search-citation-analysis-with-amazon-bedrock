@@ -8,7 +8,8 @@ import {
 import { getDomain } from '../formatting/urlFormatter';
 import type { TopUrl } from '../types';
 
-interface UrlBreakdown {
+/** One keyword/provider pair that cited a URL (`GET /api/url-breakdown`). */
+export interface UrlBreakdown {
   keyword: string;
   provider: string;
 }

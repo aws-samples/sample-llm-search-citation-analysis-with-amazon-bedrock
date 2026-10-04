@@ -7,11 +7,7 @@ import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   CHEVRON_DOWN_PATHS, CHEVRON_RIGHT_PATHS 
 } from '../ui/iconPaths';
-
-interface UrlBreakdown {
-  keyword: string;
-  provider: string;
-}
+import type { UrlBreakdown } from '../../exporters/citationParser';
 
 interface CitationRowProps {
   citation: TopUrl;

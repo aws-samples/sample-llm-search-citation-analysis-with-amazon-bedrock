@@ -1222,9 +1222,9 @@ export class CitationAnalysisStack extends cdk.Stack {
       },
     });
 
-    // Grant ParseKeywords Lambda read access to keywords bucket and tables,
-    // and write access to the run-scratch prefix only (its keyword manifests).
-    keywordsBucket.grantRead(parseKeywordsFunction);
+    // Grant ParseKeywords Lambda read access to the tables it resolves keywords
+    // from, and write access to the run-scratch prefix only (its keyword
+    // manifests; the Distributed Map reads them through the state machine role).
     keywordsBucket.grantPut(parseKeywordsFunction, `${WORKFLOW_RUNS_PREFIX}*`);
     keywordGroupsTable.grantReadData(parseKeywordsFunction);
     keywordsTable.grantReadData(parseKeywordsFunction);

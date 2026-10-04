@@ -65,6 +65,15 @@ process.
   forwarder. A stack still on a release before 2.14.0 should deploy 2.14.0–2.29.0 first.
 - **The unused `CitationCountIndex` GSI** on `CitationAnalysis-Citations`. Deploying deletes the index (an online
   change that lowers write cost); no reader ever queried it.
+- **Code no entry point reaches** (found by a call graph walked from every handler, route map, Step Functions task
+  and `main.tsx`, by member read/write analysis, and by coverage runs): the never-rendered `ContentGenerator`
+  component; dashboard hook actions no screen calls (brand-config reset, expand and refetch, recommendation status
+  updates, provider key validation, execution monitoring start, generating-item refresh) and the response fields,
+  error metadata and execution-progress values nothing displays; unused modal sizes, the never-emitted `critical`
+  alert severity and the all-competitors report variant the dashboard never requests; 16 unused barrel re-exports.
+  In the Lambdas: the search Lambda's `provider_types` filter and unread output keys, ParseKeywords' never-used
+  `keywords_file` input (and its S3 read permission), fallbacks for table and bucket env vars CDK always sets,
+  retry and model options no caller passes, and the `shared` package's unused re-exports.
 
 ## [2.29.0] - 2026-10-03
 

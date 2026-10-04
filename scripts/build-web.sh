@@ -54,17 +54,6 @@ if command -v aws &> /dev/null; then
         echo "Found User Pool Client ID: $USER_POOL_CLIENT_ID"
         export VITE_USER_POOL_CLIENT_ID="$USER_POOL_CLIENT_ID"
     fi
-    
-    # Get Cognito Identity Pool ID
-    IDENTITY_POOL_ID=$(aws cloudformation describe-stacks \
-        --stack-name CitationAnalysisStack \
-        --query 'Stacks[0].Outputs[?OutputKey==`IdentityPoolId`].OutputValue' \
-        --output text 2>/dev/null || echo "")
-    
-    if [ -n "$IDENTITY_POOL_ID" ] && [ "$IDENTITY_POOL_ID" != "None" ]; then
-        echo "Found Identity Pool ID: $IDENTITY_POOL_ID"
-        export VITE_IDENTITY_POOL_ID="$IDENTITY_POOL_ID"
-    fi
 else
     echo "⚠️  AWS CLI not found, using fallback configuration"
 fi

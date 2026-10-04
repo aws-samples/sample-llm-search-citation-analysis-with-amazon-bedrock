@@ -24,7 +24,7 @@ import {
   fetchBreakdownData 
 } from '../../exporters/citationParser';
 import type {
-  SortColumn, SortConfig 
+  SortColumn, SortConfig, UrlBreakdown
 } from '../../exporters/citationParser';
 import { exportToExcel } from '../../exporters/excelGenerator';
 import { StrokeIcon } from '../ui/StrokeIcon';
@@ -32,11 +32,6 @@ import { StrokeIcon } from '../ui/StrokeIcon';
 interface CitationsViewProps {
   citations: TopUrl[];
   onNavigateToRawResponses?: (path: string) => void;
-}
-
-interface UrlBreakdown {
-  keyword: string;
-  provider: string;
 }
 
 export const CitationsView = ({
