@@ -16,9 +16,7 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
-# Re-exported: DecimalEncoder's canonical home is shared.dynamo_decimal
-# (bugs.md 3.4); existing importers keep using shared.api_response.
-from shared.dynamo_decimal import DecimalEncoder as DecimalEncoder
+from shared.dynamo_decimal import DecimalEncoder
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

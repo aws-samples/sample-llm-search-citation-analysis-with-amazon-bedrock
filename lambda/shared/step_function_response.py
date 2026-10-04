@@ -56,7 +56,6 @@ def log_error(
     error: Exception,
     context: str,
     event: dict[str, Any] | None = None,
-    include_traceback: bool = True
 ) -> None:
     """
     Log an error with consistent formatting.
@@ -65,7 +64,6 @@ def log_error(
         error: The exception that occurred
         context: Description of what was being attempted
         event: Original event (will be sanitized)
-        include_traceback: Whether to include full traceback
     """
     error_type = type(error).__name__
 
@@ -79,8 +77,7 @@ def log_error(
     if safe_event:
         logger.error(f"Event context: {json.dumps(safe_event, default=str)[:500]}")
 
-    if include_traceback:
-        logger.error(f"Traceback:\n{traceback.format_exc()}")
+    logger.error(f"Traceback:\n{traceback.format_exc()}")
 
 
 def step_function_success(

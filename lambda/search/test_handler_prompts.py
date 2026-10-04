@@ -400,8 +400,8 @@ def _prompt(prompt_id: str, name: str) -> dict:
 
 
 def _search_event(*prompts: dict) -> dict:
-    """A search event for keyword ``test``; ``prompts`` become its query_prompts, none leaves the key out."""
-    event: dict[str, Any] = {'keyword': 'test', 'timestamp': '2026-01-01T00:00:00Z'}
+    """A search event for keyword ``test`` and OpenAI; ``prompts`` become its query_prompts, none leaves the key out."""
+    event: dict[str, Any] = {'keyword': 'test', 'timestamp': '2026-01-01T00:00:00Z', 'providers': ['openai']}
     if prompts:
         event['query_prompts'] = list(prompts)
     return event

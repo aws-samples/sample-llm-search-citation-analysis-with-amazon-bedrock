@@ -18,9 +18,7 @@ from hypothesis import strategies as st
 from testing.cors_fixtures import configured_cors_origin, credentialed_json_headers
 from testing.env import cleared_env
 
-# `shared/__init__.py` re-exports the `api_response` *function*, so
-# `from shared import api_response` would hand back the function rather than
-# the module. Resolve the submodule itself; it is what `importlib.reload` needs.
+# The submodule itself is what `importlib.reload` needs.
 cors_module = importlib.import_module('shared.api_response')
 
 

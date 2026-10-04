@@ -142,23 +142,14 @@ def summarize_providers(results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def prioritize_citations(
-    deduplicated: dict[str, dict[str, Any]],
-    max_citations: int | None = None,
-) -> list[dict[str, Any]]:
+def prioritize_citations(deduplicated: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Prioritize citations by citation count and limit to top N.
+    Prioritize citations by citation count and keep the top ``MAX_CITATIONS_PER_KEYWORD``
+    (overridable via env var).
 
     Args:
         deduplicated: Dictionary of deduplicated citations
-        max_citations: Maximum number of citations to return. Defaults to
-            the module-level ``MAX_CITATIONS_PER_KEYWORD`` (overridable via
-            env var). Pass an explicit value for per-call overrides in
-            tests or migration scripts.
     """
-    if max_citations is None:
-        max_citations = MAX_CITATIONS_PER_KEYWORD
-
     # Convert to list and sort by citation count (descending)
     citations_list = []
     for normalized_url, metadata in deduplicated.items():
@@ -174,7 +165,7 @@ def prioritize_citations(
 
     # Limit to top N and assign priority numbers
     prioritized = []
-    for i, citation in enumerate(citations_list[:max_citations]):
+    for i, citation in enumerate(citations_list[:MAX_CITATIONS_PER_KEYWORD]):
         citation['priority'] = i + 1
         prioritized.append(citation)
 

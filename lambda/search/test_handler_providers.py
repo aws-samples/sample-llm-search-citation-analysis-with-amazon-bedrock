@@ -4,8 +4,7 @@ Provider selection in the search handler.
 The analysis workflow invokes one search Lambda per provider with
 ``{"keyword", "timestamp", "query_prompts", "providers": ["<id>"]}``. Such an
 invocation must touch only its own provider (one secret, one enablement read)
-and return the slim ``{"keyword", "timestamp", "results": [...]}`` shape the
-merge step reads.
+and return the slim ``{"results": [...]}`` shape the merge step reads.
 """
 
 from __future__ import annotations
@@ -62,28 +61,23 @@ class TestOneProviderInvocation:
 
         assert [call.args for call in getattr(providers, lookup).call_args_list] == expected_args
 
-    def test_reads_every_secret_when_no_provider_is_selected(self, search_handler, providers):
+    def test_reads_the_secret_of_each_selected_provider_in_runner_order(self, search_handler, providers):
         providers.is_enabled.return_value = False
 
-        search_handler.execute_all_providers('hotel coruña', provider_types=['search'])
+        search_handler.execute_all_providers('hotel coruña', providers=['firecrawl', 'openai', 'exa'])
 
         assert [call.args[0] for call in providers.get_api_key.call_args_list] == [
-            'brave-key', 'tavily-key', 'exa-key', 'serpapi-key', 'firecrawl-key',
+            'openai-key', 'exa-key', 'firecrawl-key',
         ]
 
     def test_returns_the_slim_result_shape_the_merge_step_reads(self, search_handler, providers):
         response = search_handler.handler(dict(_EVENT), None)
 
         assert response == {
-            'keyword': 'hotel coruña',
-            'timestamp': '2026-09-30T10:00:00Z',
-            'provider_types': None,
-            'providers': ['brave'],
             'results': [{
                 'provider': 'brave', 'provider_type': 'search', 'status': 'success',
                 'citation_count': 1, 'citations': ['https://hotel.es/riazor'], 'query_prompt_id': 'p1',
             }],
-            'stored': True,
         }
 
     @pytest.mark.parametrize(('api_key', 'enabled'), [('key', False), (None, True)], ids=['disabled', 'no-key'])
@@ -93,4 +87,4 @@ class TestOneProviderInvocation:
 
         response = search_handler.handler(dict(_EVENT), None)
 
-        assert (response['keyword'], response['results'], providers.brave_search.call_count) == ('hotel coruña', [], 0)
+        assert (response, providers.brave_search.call_count) == ({'results': []}, 0)

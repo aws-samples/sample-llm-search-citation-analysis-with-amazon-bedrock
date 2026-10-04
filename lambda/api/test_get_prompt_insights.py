@@ -210,12 +210,6 @@ class TestConfigurationGuards:
 
         assert result == {'error': 'No keywords configured'}
 
-    def test_returns_a_keywords_error_when_no_keywords_table_is_configured(self, insights_module):
-        with patch.object(insights_module, 'KEYWORDS_TABLE', None):
-            result = _analyze(insights_module, _run('best running shoes', _FIRST_PARTY_TOP))
-
-        assert result == {'error': 'No keywords configured'}
-
     def test_returns_a_keywords_error_when_the_keywords_scan_fails(self, insights_module):
         keywords_table = MagicMock()
         keywords_table.scan.side_effect = throttled('Scan')

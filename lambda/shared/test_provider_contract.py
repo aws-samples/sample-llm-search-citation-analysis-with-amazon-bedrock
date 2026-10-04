@@ -69,8 +69,8 @@ def _run_llm_provider_ids() -> list[str]:
     name, which only resolve with ``lambda/search`` on ``sys.path``.
     """
     source = _SEARCH_HANDLER.read_text(encoding='utf-8')
-    names = re.findall(r"^    \(Provider\.([A-Z]+), '[^']+', '[^']+', 'llm', ", source, flags=re.MULTILINE)
-    return [getattr(Provider, name) for name in names]
+    names = re.findall(r"^    \(Provider\.([A-Z]+), '[^']+', '[^']+', ", source, flags=re.MULTILINE)
+    return [provider_id for provider_id in (getattr(Provider, name) for name in names) if provider_id in LLM_PROVIDERS]
 
 
 def _api_llm_providers(module: ModuleType, field: str) -> dict[str, str]:
