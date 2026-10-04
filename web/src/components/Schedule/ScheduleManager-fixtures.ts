@@ -44,9 +44,7 @@ export const mockKeywords: Keyword[] = [
 export function buildSchedule(overrides: Partial<Schedule> = {}): Schedule {
   return {
     id: 'sch-1a2b3c4d',
-    name: 'sch-1a2b3c4d',
     display_name: 'Hotel Coruña — weekly',
-    state: 'ENABLED',
     enabled: true,
     schedule: 'cron(0 9 ? * MON *)',
     timezone: 'Europe/Madrid',
@@ -61,11 +59,8 @@ export function buildSchedule(overrides: Partial<Schedule> = {}): Schedule {
       mode: 'groups',
       group_ids: ['group-coruna']
     },
-    scope_summary: '1 group(s)',
     keywords: [],
     legacy: false,
-    created_at: '2026-09-18T10:00:00Z',
-    updated_at: '2026-09-18T10:00:00Z',
     ...overrides,
   };
 }
@@ -73,7 +68,6 @@ export function buildSchedule(overrides: Partial<Schedule> = {}): Schedule {
 /** A schedule created before 2.3.0 that listed its keywords by text. */
 export const legacyKeywordSchedule: Schedule = buildSchedule({
   id: 'priority-daily',
-  name: 'priority-daily',
   display_name: 'priority-daily',
   schedule: 'cron(0 7 * * ? *)',
   timezone: 'UTC',
@@ -85,7 +79,6 @@ export const legacyKeywordSchedule: Schedule = buildSchedule({
     day_of_month: 1,
   },
   scope: null,
-  scope_summary: '2 keyword(s)',
   keywords: ['best hotels malaga', 'boutique hotels madrid'],
   legacy: true,
 });

@@ -133,10 +133,7 @@ describe('ScheduleManager', () => {
     });
 
     it('shows a disabled badge for a disabled schedule', () => {
-      renderManager([buildSchedule({
-        enabled: false,
-        state: 'DISABLED',
-      })]);
+      renderManager([buildSchedule({ enabled: false })]);
 
       expect(screen.getByText('Disabled')).toBeInTheDocument();
     });

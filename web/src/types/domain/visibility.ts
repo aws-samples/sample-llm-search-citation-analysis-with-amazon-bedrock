@@ -176,12 +176,6 @@ export interface CitationGapsResponse {
   total_high_priority?: number;
 }
 
-type RecommendationStatus =
-  | 'new'
-  | 'in_progress'
-  | 'done'
-  | 'wontfix';
-
 export interface Recommendation {
   type: string;
   priority: GapPriority;
@@ -190,19 +184,6 @@ export interface Recommendation {
   action: string;
   impact: string;
   keywords?: string[];
-  /**
-   * Server-computed deterministic id (SHA-1 of type+title+sorted keywords,
-   * truncated to 16 chars). Stable across list regenerations so it can
-   * be used to track per-recommendation action status.
-   */
-  id?: string;
-  /** Persisted action-tracking state. Defaults to 'new' if untouched. */
-  status?: RecommendationStatus;
-  notes?: string;
-  related_keyword?: string;
-  related_content_id?: string;
-  updated_at?: string;
-  completed_at?: string;
 }
 
 export interface RecommendationsResponse {
