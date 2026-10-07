@@ -4,17 +4,20 @@ The `CitationAnalysisMcpStack` stack serves the Citation Analysis API as an MCP 
 
 The endpoint speaks MCP over Streamable HTTP (JSON responses, no SSE stream) and is protected with OAuth 2.1 + PKCE by the deployment's Cognito user pool. Dynamic client registration is not offered. Every client uses the pre-registered public client id (no secret).
 
+The server sits behind its own CloudFront distribution (`https://<dist>.cloudfront.net`), which maps the host root onto the API Gateway stage. Clients discover the authorization server from well-known URLs at the host root: RFC 9728's `/.well-known/oauth-protected-resource/mcp`, RFC 8414's `/.well-known/oauth-authorization-server` and OIDC's `/.well-known/openid-configuration`. On an execute-api URL the stage (`/prod`) is a path segment, so none of those locations exist and clients such as Claude Code fail to sign in. The distribution caches nothing and passes every request through to the API, `Authorization` header included.
+
 ## What you need
 
 From the `CitationAnalysisMcpStack` outputs (`aws cloudformation describe-stacks --stack-name CitationAnalysisMcpStack`):
 
 | Output | Use |
 |---|---|
-| `McpUrl` | The server URL (`https://<api-id>.execute-api.<region>.amazonaws.com/prod/mcp`) |
+| `McpUrl` | The server URL (`https://<dist>.cloudfront.net/mcp`) |
 | `McpClientId` | OAuth client id (public client, leave the secret empty) |
 | `McpAuthorizeUrl` | Authorization URL (`https://citation-analysis-<account>.auth.<region>.amazoncognito.com/oauth2/authorize`) |
 | `McpTokenUrl` | Token URL (same host, `/oauth2/token`) |
-| `McpResourceMetadataUrl` | RFC 9728 protected resource metadata; clients find it on their own from the `401` |
+| `McpResourceMetadataUrl` | RFC 9728 protected resource metadata (`https://<dist>.cloudfront.net/.well-known/oauth-protected-resource/mcp`); clients find it on their own from the `401` |
+| `McpApiUrl` | The API Gateway stage behind CloudFront, for debugging only; don't give it to clients |
 
 Scopes are named after the server URL:
 
@@ -25,11 +28,11 @@ Scopes are named after the server URL:
 | `<McpUrl>/write` | Keyword and group changes; keyword research and Content Studio (estimate and start) |
 | `<McpUrl>/run` | Analysis runs (estimate and start), which are also admin-only |
 
-Cognito matches callback URLs exactly. Allow each client's callback when you deploy, as a JSON array or a comma-separated list. The value replaces the default (`http://localhost:5173/oauth/callback`), so keep that entry if you use Kiro:
+Cognito matches callback URLs exactly. Allow each client's callback when you deploy, as a JSON array or a comma-separated list. The value replaces the defaults (`http://localhost:5173/oauth/callback` for Kiro, `http://localhost:5173/callback` for Claude Code), so keep those entries if you use them:
 
 ```bash
 npx cdk deploy CitationAnalysisMcpStack \
-  -c mcpRedirectUris='["http://localhost:5173/oauth/callback","https://claude.ai/api/mcp/auth_callback","https://claude.com/api/mcp/auth_callback","https://chatgpt.com/connector_platform_oauth_redirect"]'
+  -c mcpRedirectUris='["http://localhost:5173/oauth/callback","http://localhost:5173/callback","https://claude.ai/api/mcp/auth_callback","https://claude.com/api/mcp/auth_callback","https://chatgpt.com/connector_platform_oauth_redirect"]'
 ```
 
 Vendors change their callback URLs. Copy the one your client shows on its connection form whenever it shows one.
@@ -47,8 +50,7 @@ Add a remote server to `.kiro/settings/mcp.json` (or to an agent's `mcpServers`)
       "url": "<McpUrl>",
       "oauth": {
         "clientId": "<McpClientId>",
-        "redirectUri": "http://localhost:5173/oauth/callback",
-        "oauthScopes": ["openid", "<McpUrl>/read", "<McpUrl>/write", "<McpUrl>/run"]
+        "redirectUri": "http://localhost:5173/oauth/callback"
       }
     }
   }
@@ -65,7 +67,7 @@ Settings › Connectors › Add custom connector: name, `<McpUrl>`, then under A
 claude mcp add --transport http citation-analysis <McpUrl> --client-id <McpClientId> --callback-port 5173
 ```
 
-Then run `/mcp` in Claude Code to sign in. The callback is a loopback URL on port 5173. Add the exact URL Claude Code opens (for example `http://localhost:5173/callback`) to `mcpRedirectUris`.
+Then run `/mcp` in Claude Code (or `claude mcp login citation-analysis`) to sign in. With `--callback-port 5173` the callback is `http://localhost:5173/callback`, which the stack allows by default. Claude Code finds the authorization server through host-root discovery, so you don't need to set `oauth.authServerMetadataUrl`. Remove it if you set it for an earlier execute-api URL.
 
 ### ChatGPT (developer mode)
 

@@ -1,5 +1,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
+import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as cognito from 'aws-cdk-lib/aws-cognito';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
@@ -26,10 +28,21 @@ import { lambdaSourceCode } from './python-layer';
  * Discovery does not point clients at Cognito's own metadata: it omits
  * `code_challenge_methods_supported`, and MCP clients must then refuse the
  * server (Claude Code and the ChatGPT connector do). The protected resource
- * metadata names the stage URL as the authorization server instead, and the
- * API serves a complete metadata document for it at
+ * metadata names the server's base URL as the authorization server instead,
+ * and the API serves a complete metadata document for it at
  * `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`,
  * whose endpoints are the managed-login domain's. Tokens are still Cognito's.
+ *
+ * The server's public URLs are a CloudFront distribution's, not the
+ * execute-api stage URL's. On a stage URL the stage (`/prod`) is a path
+ * segment, so the host-root locations clients probe — RFC 9728's
+ * `/.well-known/oauth-protected-resource[/mcp]`, RFC 8414's
+ * `/.well-known/oauth-authorization-server`, OIDC's
+ * `/.well-known/openid-configuration` — all answer API Gateway's 403 "Missing
+ * Authentication Token", and Claude Code then falls back to a non-existent
+ * `<host>/authorize` (checked 7 October 2026). The distribution maps its host
+ * root onto the stage, so the server is `https://<distribution>/mcp` and every
+ * discovery document sits where the RFCs put it.
  *
  * The resource server's identifier is the MCP endpoint URL itself, so the
  * access-token scopes read `<McpUrl>/read` and so on. MCP clients send the
@@ -70,33 +83,74 @@ const MCP_PATH = 'mcp';
 const WELL_KNOWN_PATH = '.well-known';
 const PROTECTED_RESOURCE_METADATA_PATH = 'oauth-protected-resource';
 /**
- * Where clients look for the authorization server metadata of the issuer
- * `<stage URL>`: appended to it, because the stage is a path segment and the
- * RFC 8414 path-inserted location falls outside the API (see
- * `AUTHORIZATION_SERVER_METADATA_PATHS` in `lambda/mcp/auth.py`).
+ * The authorization server metadata of the issuer `<base URL>` (no path): at
+ * the host root, so RFC 8414's and OIDC's locations coincide with the
+ * appended forms (see `AUTHORIZATION_SERVER_METADATA_PATHS` in `lambda/mcp/auth.py`).
  */
 const AUTHORIZATION_SERVER_METADATA_PATHS = ['openid-configuration', 'oauth-authorization-server'];
 
+/** The stage name `RestApi` gives its deployment stage; CDK's own default is 'prod' when it names none. */
+function stageName(api: apigateway.RestApi): string {
+  const stage = api.deploymentStage.node.defaultChild as apigateway.CfnStage;
+  return stage.stageName ?? 'prod';
+}
+
+/** The REST API's execute-api host, from its id: no reference to the stage (see `stageUrl`). */
+function executeApiDomain(api: apigateway.RestApi): string {
+  const { region, urlSuffix } = cdk.Stack.of(api);
+  return `${api.restApiId}.execute-api.${region}.${urlSuffix}`;
+}
+
 /**
  * `api.url` without its trailing slash and without the dependency cycle.
- * `api.url` is a `Ref` to the
- * deployment stage; the stage depends on the deployment, the deployment on the
- * methods and the methods on this function, so the function's environment
- * cannot name the stage. The REST API id and the stage's configured name are
- * known before any method exists and resolve to the same URL. Without the
- * slash it is also the authorization server issuer, which clients compare
- * character by character with the PRM's `authorization_servers` entry.
+ * `api.url` is a `Ref` to the deployment stage; the stage depends on the
+ * deployment, the deployment on the methods and the methods on the function,
+ * so nothing the function depends on may name the stage. The REST API id and
+ * the stage's configured name are known before any method exists and resolve
+ * to the same URL.
  */
 function stageUrl(api: apigateway.RestApi): string {
-  const stage = api.deploymentStage.node.defaultChild as apigateway.CfnStage;
-  const { region, urlSuffix } = cdk.Stack.of(api);
-  // `Stage` always names its CfnStage; 'prod' is CDK's own default when it does not.
-  return `https://${api.restApiId}.execute-api.${region}.${urlSuffix}/${stage.stageName ?? 'prod'}`;
+  return `https://${executeApiDomain(api)}/${stageName(api)}`;
 }
 
 /** The Cognito managed-login domain of `domainPrefix`, which serves `/oauth2/authorize`, `/oauth2/token` and `/oauth2/revoke`. */
 function hostedLoginUrl(scope: Construct, domainPrefix: string): string {
   return `https://${domainPrefix}.auth.${cdk.Stack.of(scope).region}.amazoncognito.com`;
+}
+
+/**
+ * A distribution whose host root is the API's `prod` stage: every path and
+ * method passes through uncached, so `https://<distribution>/mcp` is the stage's
+ * `/mcp` and `https://<distribution>/.well-known/...` its discovery routes.
+ *
+ * The origin names the execute-api host from the API id, not `api.url`
+ * (`RestApiOrigin` would), which is a `Ref` to the stage and would close a
+ * cycle through the function's environment, which names the distribution.
+ *
+ * Headers: API Gateway refuses a foreign `Host`, so all viewer headers but
+ * `Host` go to the origin. With caching disabled that includes `Authorization`
+ * on every method, GET too ("If caching is turned off, then you can use
+ * AllViewer and AllViewerExceptHostHeader origin request policies to forward an
+ * authorization header",
+ * https://repost.aws/knowledge-center/cloudfront-authorization-header).
+ * No WAF and no access-log bucket: the sample stays pay-per-use, and API
+ * Gateway's stage throttle and the Lambda's limits still apply behind it.
+ */
+function edgeDistribution(scope: Construct, api: apigateway.RestApi): cloudfront.Distribution {
+  return new cloudfront.Distribution(scope, 'Edge', {
+    comment: 'Citation Analysis MCP server (host root for OAuth discovery)',
+    priceClass: cloudfront.PriceClass.PRICE_CLASS_100,
+    defaultBehavior: {
+      origin: new origins.HttpOrigin(executeApiDomain(api), {
+        originPath: `/${stageName(api)}`,
+        protocolPolicy: cloudfront.OriginProtocolPolicy.HTTPS_ONLY,
+      }),
+      allowedMethods: cloudfront.AllowedMethods.ALLOW_ALL,
+      cachePolicy: cloudfront.CachePolicy.CACHING_DISABLED,
+      originRequestPolicy: cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+      viewerProtocolPolicy: cloudfront.ViewerProtocolPolicy.HTTPS_ONLY,
+    },
+  });
 }
 
 /**
@@ -146,9 +200,14 @@ export interface McpServerProps extends McpServerInputs {
 export class McpServer extends Construct {
   /** The MCP server's own REST API (stage `prod`). */
   public readonly api: apigateway.RestApi;
+  /** The CloudFront distribution in front of `api`, which gives the server a host root. */
+  public readonly distribution: cloudfront.Distribution;
+  /** `https://<distribution domain>`, no trailing slash: the server's base URL and the authorization server issuer. */
+  public readonly url: string;
   /**
-   * `<stage URL>/.well-known/oauth-protected-resource`, advertised by the API's
-   * `UNAUTHORIZED` gateway response in a `WWW-Authenticate: Bearer
+   * `<url>/.well-known/oauth-protected-resource/mcp` (RFC 9728 §3.1: the
+   * well-known segment inserted before the resource's path), advertised by the
+   * API's `UNAUTHORIZED` gateway response in a `WWW-Authenticate: Bearer
    * resource_metadata="<url>"` header so clients discover the authorization
    * server from a 401.
    */
@@ -168,10 +227,11 @@ export class McpServer extends Construct {
         throttlingBurstLimit: STAGE_BURST_LIMIT,
       },
     });
-    const apiUrl = stageUrl(this.api);
+    this.distribution = edgeDistribution(this, this.api);
+    this.url = `https://${this.distribution.distributionDomainName}`;
     // Also the resource server identifier and the `aud` the Lambda expects; one value, three roles.
-    const resourceUrl = `${apiUrl}/${MCP_PATH}`;
-    this.resourceMetadataUrl = `${apiUrl}/${WELL_KNOWN_PATH}/${PROTECTED_RESOURCE_METADATA_PATH}`;
+    const resourceUrl = `${this.url}/${MCP_PATH}`;
+    this.resourceMetadataUrl = `${this.url}/${WELL_KNOWN_PATH}/${PROTECTED_RESOURCE_METADATA_PATH}/${MCP_PATH}`;
     // RFC 9728: a 401 tells the client where the protected resource metadata is.
     this.api.addGatewayResponse('Unauthorized', {
       type: apigateway.ResponseType.UNAUTHORIZED,
@@ -209,7 +269,7 @@ export class McpServer extends Construct {
     });
     branding.node.addDependency(domain);
 
-    const serverFunction = this.serverFunction(props, client, { resourceUrl, authorizationServerUrl: apiUrl });
+    const serverFunction = this.serverFunction(props, client, { resourceUrl, authorizationServerUrl: this.url });
     this.addRoutes(props, serverFunction, resourceUrl);
     this.addOutputs(props.domainPrefix, client, resourceUrl);
   }
@@ -280,6 +340,7 @@ export class McpServer extends Construct {
       logGroup,
       environment: {
         MCP_ISSUER: `https://cognito-idp.${stack.region}.amazonaws.com/${props.userPool.userPoolId}`,
+        MCP_USER_POOL_ID: props.userPool.userPoolId,
         MCP_CLIENT_ID: client.userPoolClientId,
         MCP_RESOURCE_URL: urls.resourceUrl,
         MCP_RESOURCE_METADATA_URL: this.resourceMetadataUrl,
@@ -292,6 +353,11 @@ export class McpServer extends Construct {
     serverFunction.addToRolePolicy(new iam.PolicyStatement({
       actions: ['lambda:InvokeFunction'],
       resources: Object.values(props.apiFunctions).map((routerFunction) => routerFunction.functionArn),
+    }));
+    // The caller's groups are read from the pool (`lambda/mcp/directory.py`): tokens carry them only with `openid`.
+    serverFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['cognito-idp:AdminListGroupsForUser'],
+      resources: [props.userPool.userPoolArn],
     }));
     props.state.grantTo(serverFunction);
     return serverFunction;
@@ -323,11 +389,20 @@ export class McpServer extends Construct {
 
     // Public by design: clients fetch these discovery documents before they
     // have a token, and they carry nothing but the authorization server's
-    // location and capabilities.
+    // location and capabilities. The PRM is served both at its RFC 9728
+    // path-inserted location (`/oauth-protected-resource/mcp`, the one the
+    // 401 advertises) and at the bare one clients that ignore the resource
+    // path try.
     const wellKnown = this.api.root.addResource(WELL_KNOWN_PATH);
-    for (const path of [PROTECTED_RESOURCE_METADATA_PATH, ...AUTHORIZATION_SERVER_METADATA_PATHS]) {
+    const protectedResourceMetadata = wellKnown.addResource(PROTECTED_RESOURCE_METADATA_PATH);
+    const discoveryResources = [
+      protectedResourceMetadata,
+      protectedResourceMetadata.addResource(MCP_PATH),
+      ...AUTHORIZATION_SERVER_METADATA_PATHS.map((path) => wellKnown.addResource(path)),
+    ];
+    for (const resource of discoveryResources) {
       // NOSONAR: the discovery documents must be readable without authentication
-      wellKnown.addResource(path).addMethod('GET', integration, { authorizationType: apigateway.AuthorizationType.NONE }); // NOSONAR
+      resource.addMethod('GET', integration, { authorizationType: apigateway.AuthorizationType.NONE }); // NOSONAR
     }
   }
 
@@ -340,6 +415,7 @@ export class McpServer extends Construct {
       McpAuthorizeUrl: [`${loginUrl}/oauth2/authorize`, 'OAuth 2.0 authorization endpoint'],
       McpTokenUrl: [`${loginUrl}/oauth2/token`, 'OAuth 2.0 token endpoint'],
       McpResourceMetadataUrl: [this.resourceMetadataUrl, 'RFC 9728 protected resource metadata'],
+      McpApiUrl: [stageUrl(this.api), 'The MCP REST API stage behind CloudFront (debugging only; clients use McpUrl)'],
     };
     for (const [id, [value, description]] of Object.entries(outputs)) {
       new cdk.CfnOutput(this, id, { value, description }).overrideLogicalId(id);

@@ -293,15 +293,15 @@ def _is_running(caller: Caller, run: JsonObject) -> bool:
     return (body.get('execution') or {}).get('status') == _RUNNING
 
 
-def _runs_in_flight(caller: Caller, limit: int) -> int:
-    """How many of the caller's started runs still run, counting up to ``limit``."""
-    running = 0
+def _runs_in_flight(caller: Caller, limit: int) -> list[str]:
+    """The execution ARNs of the caller's started runs that still run, up to ``limit`` of them."""
+    running: list[str] = []
     for run in state.unfinished_runs(caller.sub):
         if not _is_running(caller, run):
             state.mark_finished(run)
             continue
-        running += 1
-        if running >= limit:
+        running.append(str(run.get('execution_arn') or ''))
+        if len(running) >= limit:
             break
     return running
 
@@ -313,8 +313,12 @@ def _run_refusal(caller: Caller, scope: JsonObject) -> str | None:
     if not complete or keywords > limits.max_run_keywords:
         return f'The scope has more than {limits.max_run_keywords} keywords, the MCP keyword cap per run'
     allowed = limits.runs_in_flight
-    if allowed < 1 or _runs_in_flight(caller, allowed) >= allowed:
-        return f'Limit reached: {allowed} analysis run(s) in flight per caller; wait until it finishes (get_run_status)'
+    running = _runs_in_flight(caller, allowed) if allowed >= 1 else []
+    if allowed < 1 or len(running) >= allowed:
+        # Name the runs, so the assistant can follow them with get_run_status.
+        names = ', '.join(arn for arn in running if arn)
+        follow = f' (get_run_status with execution_arn {names})' if names else ' (get_run_status)'
+        return f'Limit reached: {allowed} analysis run(s) in flight per caller; wait until it finishes{follow}'
     return None
 
 

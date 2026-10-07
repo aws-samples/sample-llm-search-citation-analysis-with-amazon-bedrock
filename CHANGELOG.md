@@ -9,7 +9,29 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
-## [2.33.0] - 2026-10-08
+## [2.33.1] - 2026-10-07
+
+### Fixed
+
+- **MCP clients find the OAuth configuration on their own.** The MCP server now sits behind its own CloudFront
+  distribution (caching off, every method and header passed through), so it has a host root: `McpUrl` is
+  `https://<dist>.cloudfront.net/mcp`, the protected resource metadata is at
+  `/.well-known/oauth-protected-resource/mcp` (RFC 9728) and the authorization server metadata at the host root's
+  `/.well-known/oauth-authorization-server` and `/.well-known/openid-configuration`. On the execute-api URL those
+  locations returned API Gateway's 403, so Claude Code fell back to a non-existent `/authorize`. Claude Code now
+  connects with only `--client-id` and `--callback-port 5173`, whose callback the stack allows by default. A new
+  output, `McpApiUrl`, gives the API stage URL for debugging. **Reconnect MCP clients after upgrading:** `McpUrl`,
+  the scope names (`<McpUrl>/read|write|run`) and the Cognito resource server change.
+- **Admin MCP tools work for admins whatever scopes the client requested.** Cognito writes `cognito:groups` into an
+  access token only when the client asked for `openid`, which the metadata no longer offers, so every caller looked
+  like a non-admin. The server now reads the caller's groups from the user pool (`AdminListGroupsForUser`, cached a
+  minute per container); a removed admin also loses access within that minute instead of at the token's expiry.
+- The MCP run limit's refusal names the run still in flight, so an assistant can follow it with `get_run_status`.
+- **Written insights say what each number is measured against**, in plain words: a sub-brand's position and
+  sentiment gaps are against the best sub-brand, not the brand's overall KPIs, which the first narrative on real data
+  had confused.
+
+## [2.33.0] - 2026-10-07
 
 ### Added
 
@@ -56,7 +78,7 @@ process.
 - MCP audit log lines carry the refusal reason. The main stack is at 490 of CloudFormation's 500 resources; the next
   sizeable addition has to go into another stack.
 
-## [2.32.0] - 2026-10-08
+## [2.32.0] - 2026-10-07
 
 ### Fixed
 

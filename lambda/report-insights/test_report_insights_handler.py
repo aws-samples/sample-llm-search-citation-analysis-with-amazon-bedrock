@@ -203,3 +203,9 @@ class TestPrompt:
 
     def test_passes_no_cited_answer_url(self, prompt: str) -> None:
         assert 'https://borealis.example/fares' not in prompt
+
+    def test_says_a_sub_brand_gap_is_measured_against_the_best_sub_brand(self, prompt: str) -> None:
+        assert 'measured against the best of the brand\'s own sub-brands, not against the KPIs' in prompt
+
+    def test_asks_for_plain_words_instead_of_field_names(self, prompt: str) -> None:
+        assert 'in plain words (never the evidence\'s field names)' in prompt

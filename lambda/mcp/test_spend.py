@@ -299,13 +299,16 @@ class TestStartRun:
 
 
 class TestStartRunLimits:
-    def test_refuses_while_the_previous_run_is_still_running(self, spend, routers):
+    def test_refuses_while_the_previous_run_is_still_running_and_names_it(self, spend, routers):
         spend('start_run', GROUP_SCOPE)
         routers.answer('GET', STATUS_PATH, 200, execution('RUNNING'))
 
         result = spend('start_run', GROUP_SCOPE)
 
-        assert structured_error(result).startswith('Limit reached: 1 analysis run(s) in flight per caller')
+        assert structured_error(result) == (
+            'Limit reached: 1 analysis run(s) in flight per caller; wait until it finishes '
+            f'(get_run_status with execution_arn {EXECUTION_ARN})'
+        )
         assert len(routers.requests(*TRIGGER)) == 1
 
     def test_starts_again_once_the_previous_run_succeeded(self, spend, routers):
