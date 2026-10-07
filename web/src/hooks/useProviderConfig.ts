@@ -2,7 +2,7 @@ import {
   useState, useEffect, useCallback 
 } from 'react';
 import {
-  API_BASE_URL, authenticatedFetch, getErrorMessage 
+  API_BASE_URL, ApiRequestError, authenticatedFetch, getErrorMessage 
 } from '../infrastructure';
 import { 
   PROVIDER,
@@ -54,16 +54,12 @@ class ProviderFetchError extends Error {
   }
 }
 
-class ProviderUpdateError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ProviderUpdateError';
-  }
-}
-
 interface ProvidersResponse {providers?: ProviderConfig[];}
 
-interface ErrorResponse {error?: string;}
+interface ErrorResponse {
+  error?: string;
+  details?: string;
+}
 
 function isProvidersResponse(data: unknown): data is ProvidersResponse {
   return typeof data === 'object' && data !== null;
@@ -145,10 +141,16 @@ export function useProviderConfig(): UseProviderConfigReturn {
       
       if (!response.ok) {
         const data: unknown = await response.json();
-        const errorMsg = isErrorResponse(data) 
-          ? data.error ?? `Failed to update provider: ${response.status}` 
+        // The server's own words for a rejected change ("Provider check
+        // failed: Your credit balance is too low…") are the only way the
+        // administrator learns what still needs fixing.
+        const errorMsg = isErrorResponse(data)
+          ? [data.error, data.details].filter(Boolean).join(': ') || `Failed to update provider: ${response.status}`
           : `Failed to update provider: ${response.status}`;
-        throw new ProviderUpdateError(errorMsg);
+        throw new ApiRequestError(errorMsg, {
+          statusCode: response.status,
+          responseMessage: errorMsg 
+        });
       }
       
       await fetchProviders();

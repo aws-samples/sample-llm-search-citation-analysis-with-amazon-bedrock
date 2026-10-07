@@ -9,6 +9,19 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.30.1] - 2026-10-07
+
+### Fixed
+
+- **Switching a provider on proves it first.** `PUT /api/providers/{id}` with `enabled: true` now runs one real call
+  with the stored key before the flag is saved: for the AI engines a one-line answer from the configured (or default)
+  model, which is the only probe that surfaces an exhausted credit balance (Anthropic reports it as a 400 the key probe
+  reads as "key accepted"); for the search providers the key probe. A passing probe records a fresh success on the
+  provider row, so the Settings card stops showing the failure that caused the auto-disable weeks earlier; a failing
+  probe leaves the provider off, records the failure as of now, and the card and an error notice show the provider's
+  own reason ("Provider check failed: Your credit balance is too low…"). `validate: false` skips the probe, as for a
+  key or a model. A model that passed its check on save also records the success it just proved.
+
 ## [2.30.0] - 2026-10-03
 
 ### Added

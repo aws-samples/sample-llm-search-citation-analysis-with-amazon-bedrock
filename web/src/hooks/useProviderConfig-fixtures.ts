@@ -50,7 +50,10 @@ function createMockFetch(options: ProviderConfigMockFetchOptions = {}) {
 
     if (url.includes('/providers/') && init?.method === 'PUT') {
       if (options.updateSuccess === false) {
-        return Promise.resolve(createMockJsonResponse({ error: 'Update failed' }, 400));
+        return Promise.resolve(createMockJsonResponse({
+          error: 'Provider check failed',
+          details: 'Your credit balance is too low to access the Anthropic API.',
+        }, 400));
       }
       return Promise.resolve(createMockJsonResponse({ success: true }));
     }
