@@ -1,20 +1,20 @@
 # Pending work
 
-State as of 8 October 2026, with versions 2.32.0 and 2.33.0 built. Report insights Phases 1–3 and the MCP server
+State as of 7 October 2026, with version 2.33.1 deployed to a test account and proven from Kiro and Claude Code. Report insights Phases 1–3 and the MCP server
 (discovery, read, write and spend tools, limits, audit, prompts) are implemented; what is left needs an account owner,
 real data over time, or a client that has not been tried yet. Delete a line when it is done; the list is meant to
 reach zero.
 
 ## 1. Needs the account owner
 
-- **Connect the vendor clients to the MCP server**: Claude.ai, ChatGPT, Amazon Quick (web), Amazon Quick Desktop. Each
-  needs the owner's account. Steps per client are in [mcp.md](mcp.md): take the stack outputs, add the client's
-  redirect URL to `-c mcpRedirectUris` (the default `http://localhost:5173/oauth/callback` must stay for Kiro and
-  Claude Code), redeploy the MCP stack only, enter the client id as a public client, and prove one read tool and one
-  scoped read. Since 2.32.0 the server publishes its own authorization server metadata with
-  `code_challenge_methods_supported`, so the PKCE check that made these clients refuse Cognito's metadata passes.
-  Things to watch: Amazon Quick's manual OAuth form has no scope field (confirm it reads `scopes_supported`); Quick
-  Desktop's OAuth support is unverified (if it cannot do OAuth, build the personal-key route in §3).
+- **Connect the web vendor clients to the MCP server**: Claude.ai, ChatGPT, Amazon Quick (web), Amazon Quick
+  Desktop. Each needs the owner's account. Steps per client are in [mcp.md](mcp.md): take the stack outputs, add the
+  client's redirect URL to `-c mcpRedirectUris` (keep the defaults for Kiro and Claude Code), redeploy the MCP stack
+  only, enter the client id as a public client, and prove one read tool and one scoped read. Since 2.33.1 discovery
+  works the way these clients expect (host-root metadata behind CloudFront, PKCE advertised); Kiro and Claude Code
+  already connect this way. Things to watch: Amazon Quick's manual OAuth form has no scope field (confirm it reads
+  `scopes_supported`); Quick Desktop's OAuth support is unverified (if it cannot do OAuth, build the personal-key
+  route in §3).
 - **Decide the demo brand configuration.** The global brand configuration was swapped for the demo brand on 7 October;
   the pre-demo configuration is backed up locally (path recorded in `docs/geo-insights-roadmap.md`). Restore it with a
   `put-item` of the backup's `Item`, or keep the demo configuration while the demo runs.

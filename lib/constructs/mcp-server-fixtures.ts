@@ -74,8 +74,10 @@ export interface McpTemplateIds {
   functionId: string;
   clientId: string;
   authorizerId: string;
+  restApiId: string;
   sharedLayerId: string;
   stubFunctionIds: string[];
+  userPoolId: string;
 }
 
 function soleLogicalId(template: Template, resourceType: string): string {
@@ -88,8 +90,10 @@ export function extractMcpTemplateIds(template: Template): McpTemplateIds {
     functionId: findLambdaLogicalId(template, MCP_FUNCTION_NAME),
     clientId: soleLogicalId(template, 'AWS::Cognito::UserPoolClient'),
     authorizerId: soleLogicalId(template, 'AWS::ApiGateway::Authorizer'),
+    restApiId: soleLogicalId(template, 'AWS::ApiGateway::RestApi'),
     sharedLayerId: soleLogicalId(template, 'AWS::Lambda::LayerVersion'),
     stubFunctionIds: Object.values(STUB_ROUTER_FUNCTIONS).map((name) => findLambdaLogicalId(template, name)),
+    userPoolId: soleLogicalId(template, 'AWS::Cognito::UserPool'),
   };
 }
 
@@ -108,6 +112,31 @@ export function renderString(value: unknown, placeholder = REF): string {
 
 /** The deployed stage URL as `renderString` shows it: API id and URL suffix are references, the stage name is literal. */
 export const RENDERED_STAGE_URL = `https://${REF}.execute-api.${TEST_REGION}.${REF}/prod/`;
+/** The server's base URL as `renderString` shows it: the distribution's `DomainName` attribute, no path. */
+export const RENDERED_BASE_URL = `https://${REF}`;
+
+/** Every two-part `Fn::GetAtt` anywhere in `node`, as `<logical id>.<attribute>`. */
+export function collectGetAttTargets(node: unknown): string[] {
+  const getAtts = JSON.stringify(node ?? null).matchAll(/"Fn::GetAtt":\["([^"]+)","([^"]+)"\]/g);
+  return [...getAtts].map(([, logicalId, attribute]) => `${logicalId}.${attribute}`);
+}
+
+/** The one distribution's logical id and its `DistributionConfig`. */
+export function extractDistribution(template: Template): { distributionId: string; config: unknown } {
+  const distributionId = soleLogicalId(template, 'AWS::CloudFront::Distribution');
+  return {
+    distributionId,
+    config: resolvePath(soleResourceProperties(template, 'AWS::CloudFront::Distribution'), ['DistributionConfig']),
+  };
+}
+
+/** The API resource with path part `pathPart` directly under the REST API's root (its parent is `RootResourceId`, not a `Ref`). */
+export function findTopLevelApiResourceId(template: Template, pathPart: string): string {
+  const resources = template.findResources('AWS::ApiGateway::Resource');
+  return Object.entries(resources).find(([, resource]) =>
+    resolveString(resource, ['Properties', 'PathPart']) === pathPart
+    && resolveString(resource, ['Properties', 'ParentId', 'Fn::GetAtt', '1']) === 'RootResourceId')?.[0] ?? '';
+}
 
 function soleResourceProperties(template: Template, resourceType: string): unknown {
   return resolvePath(Object.values(template.findResources(resourceType))[0], ['Properties']);
@@ -154,15 +183,20 @@ export function extractRenderedEnvVars(template: Template): Record<string, strin
  * What the MCP role's `lambda:InvokeFunction` statements name: the logical id
  * of each function ARN, or the raw entry (for example `*`) when it is not one.
  */
-export function extractInvocableFunctionIds(template: Template): unknown[] {
+/** The `Resource` entries of the MCP function role's statements allowing `action`, each `Fn::GetAtt` reduced to its logical id. */
+export function extractAllowedResourceIds(template: Template, action: string): unknown[] {
   const roleId = findFunctionRoleLogicalId(template, MCP_FUNCTION_NAME);
   return allowStatementsOfRole(template, roleId)
-    .filter((statement) => statementActions(statement).includes('lambda:InvokeFunction'))
+    .filter((statement) => statementActions(statement).includes(action))
     .flatMap((statement): unknown[] => {
       const resource = resolvePath(statement, ['Resource']);
       return Array.isArray(resource) ? resource : [resource];
     })
     .map((resource) => resolvePath(resource, ['Fn::GetAtt', '0']) ?? resource);
+}
+
+export function extractInvocableFunctionIds(template: Template): unknown[] {
+  return extractAllowedResourceIds(template, 'lambda:InvokeFunction');
 }
 
 /**

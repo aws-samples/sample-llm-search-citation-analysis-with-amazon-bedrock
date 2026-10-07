@@ -18,8 +18,11 @@ resource server is identified by the MCP endpoint URL (see
 ``resource`` parameter only for scopes of a resource server with that very
 identifier, and MCP clients send the endpoint as the resource.
 
-Discovery: the protected resource metadata names this API's stage URL as the
-authorization server, and the API serves a complete authorization server
+Discovery: the server sits behind a CloudFront distribution whose host root is
+the API stage, so its URL is ``https://<distribution>/mcp`` and every
+well-known location the RFCs define lies inside the API. The protected
+resource metadata names the base URL ``https://<distribution>`` (no path) as
+the authorization server, and the API serves a complete authorization server
 metadata document for it (``authorization_server_metadata``) whose endpoints
 are Cognito's managed login.
 """
@@ -36,15 +39,18 @@ from urllib.parse import urlsplit, urlunsplit
 from shared.auth import ADMIN_GROUP, GROUPS_CLAIM, get_caller_groups
 
 METADATA_PATH = '/.well-known/oauth-protected-resource'
-# Appended to the issuer (the stage URL), not inserted after the host: on an
-# execute-api URL the stage is a path segment, so the RFC 8414 path-inserted
-# location (`<host>/.well-known/oauth-authorization-server/prod`) lies outside
-# the API. The MCP authorization spec (2025-11-25, "Authorization Server
-# Metadata Discovery", https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
-# makes clients try OIDC discovery path appending
-# (`<issuer>/.well-known/openid-configuration`) after the two path-inserted
-# forms; the appended `oauth-authorization-server` form is not in the spec but
-# is what several clients and SDK versions try first, so it is served too.
+# Served at both PRM locations. RFC 9728 §3.1 inserts the well-known segment
+# before the resource's path, so the metadata of `<base>/mcp` lives at
+# `<base>/.well-known/oauth-protected-resource/mcp`: what the 401 advertises and
+# what spec-following clients derive. Clients that ignore the resource path
+# (and the MCP spec's own fallback) try the bare one at the host root.
+METADATA_PATHS = (f'{METADATA_PATH}/mcp', METADATA_PATH)
+# The issuer is the base URL with no path, so RFC 8414's
+# `/.well-known/oauth-authorization-server` and OIDC's
+# `/.well-known/openid-configuration` (the forms the MCP authorization spec,
+# 2025-11-25, "Authorization Server Metadata Discovery",
+# https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization,
+# has clients try) both sit at the host root.
 AUTHORIZATION_SERVER_METADATA_PATHS = ('/.well-known/openid-configuration', '/.well-known/oauth-authorization-server')
 SCOPE_NAMES = ('read', 'write', 'run')
 RESOURCE_NAME = 'Citation Analysis MCP'
@@ -122,7 +128,7 @@ def unauthorized_response(error: AuthError) -> dict[str, Any]:
 
 
 def protected_resource_metadata() -> dict[str, Any]:
-    """The RFC 9728 document served at ``METADATA_PATH``.
+    """The RFC 9728 document served at ``METADATA_PATHS``.
 
     ``authorization_servers`` names this API's own metadata issuer, not
     Cognito's: see ``authorization_server_metadata``. ``openid`` is left out of
@@ -146,7 +152,7 @@ def authorization_server_metadata() -> dict[str, Any]:
     ``code_challenge_methods_supported``, and MCP clients must refuse an
     authorization server that does not advertise it (Claude Code, the ChatGPT
     connector), so the PRM points at this one instead. Endpoints are the
-    managed-login domain's; ``issuer`` is the stage URL, string-identical to
+    managed-login domain's; ``issuer`` is the server's base URL, string-identical to
     the PRM's ``authorization_servers`` entry, which clients compare.
 
     Access tokens still carry Cognito's ``iss``; ``verify_claims`` checks that
@@ -171,7 +177,7 @@ def authorization_server_metadata() -> dict[str, Any]:
 
 def discovery_document(path: str) -> DiscoveryDocument | None:
     """The builder of the public metadata document ``path`` names (matched by suffix, whatever the stage prefix), or ``None``."""
-    if path.endswith(METADATA_PATH):
+    if path.endswith(METADATA_PATHS):
         return protected_resource_metadata
     if path.endswith(AUTHORIZATION_SERVER_METADATA_PATHS):
         return authorization_server_metadata

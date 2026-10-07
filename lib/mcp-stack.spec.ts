@@ -5,9 +5,9 @@ import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import { CitationAnalysisStack } from './citation-analysis-stack';
 import {
-  extractLambdaLayerRefs, resolveString
+  extractLambdaLayerRefs, extractUserPoolClientProps, resolveString
 } from './citation-analysis-stack-fixtures';
-import { CitationAnalysisMcpStack } from './mcp-stack';
+import { CitationAnalysisMcpStack, DEFAULT_REDIRECT_URIS } from './mcp-stack';
 
 /**
  * The app wires `CitationAnalysisMcpStack` to the main stack's `mcpInputs`.
@@ -21,24 +21,24 @@ describe('CitationAnalysisMcpStack', () => {
   const mcpStack = new CitationAnalysisMcpStack(app, 'McpStack', { env, inputs: main.mcpInputs });
   const template = Template.fromStack(mcpStack);
 
-  it('holds the MCP server, its own REST API and its Cognito client', () => {
-    const counts = ['AWS::ApiGateway::RestApi', 'AWS::Cognito::UserPoolClient', 'AWS::ApiGateway::Authorizer']
+  it('holds the MCP server, its own REST API, its CloudFront edge and its Cognito client', () => {
+    const counts = ['AWS::ApiGateway::RestApi', 'AWS::CloudFront::Distribution', 'AWS::Cognito::UserPoolClient', 'AWS::ApiGateway::Authorizer']
       .map((type) => Object.keys(template.findResources(type)).length);
 
-    expect(counts).toStrictEqual([1, 1, 1]);
+    expect(counts).toStrictEqual([1, 1, 1, 1]);
     expect(mcpStack.server.api.restApiName).toBe('CitationAnalysis-McpApi');
     template.hasResourceProperties('AWS::Lambda::Function', { FunctionName: 'CitationAnalysis-Mcp' });
   });
 
-  it('calls exactly the eight API router Lambdas of the main stack', () => {
+  it('calls exactly the nine API router Lambdas of the main stack', () => {
     const environment = Object.values(template.findResources('AWS::Lambda::Function', {
       Properties: { FunctionName: 'CitationAnalysis-Mcp' },
     }))[0];
     // Cross-stack function names arrive as `Fn::Join` fragments, so match the router names themselves.
     const routers = JSON.stringify(environment)
-      .match(/keyword-mgmt|config-mgmt|execution-mgmt|stats-insights|citations-content|brand-config|brand-mentions|persona-rankings/g) ?? [];
+      .match(/keyword-mgmt|config-mgmt|execution-mgmt|stats-insights|citations-content|brand-config|brand-mentions|persona-rankings|content-studio/g) ?? [];
 
-    expect(new Set(routers).size).toBe(8);
+    expect(new Set(routers).size).toBe(9);
   });
 
   it('leaves the main stack without MCP resources', () => {
@@ -46,6 +46,11 @@ describe('CitationAnalysisMcpStack', () => {
 
     expect(mainTemplate.findResources('AWS::Cognito::UserPoolResourceServer')).toStrictEqual({});
     expect(mainTemplate.findResources('AWS::Cognito::UserPoolDomain')).toStrictEqual({});
+  });
+
+  it('allows the Kiro and Claude Code local callbacks when mcpRedirectUris is not set', () => {
+    expect(extractUserPoolClientProps(template).CallbackURLs).toStrictEqual(DEFAULT_REDIRECT_URIS);
+    expect(DEFAULT_REDIRECT_URIS).toStrictEqual(['http://localhost:5173/oauth/callback', 'http://localhost:5173/callback']);
   });
 
   it('builds its own shared layer version instead of importing the main stack layer', () => {

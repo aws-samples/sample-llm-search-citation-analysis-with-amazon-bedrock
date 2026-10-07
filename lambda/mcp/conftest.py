@@ -19,11 +19,12 @@ from types import ModuleType
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import directory
 import invoke
 import pytest
 from auth import Caller, verify_claims
 
-from testing.mcp_result_fixtures import HOSTED_LOGIN_URL, READ_SCOPE, RESOURCE_URL, STAGE_URL, WRITE_SCOPE
+from testing.mcp_result_fixtures import BASE_URL, HOSTED_LOGIN_URL, METADATA_URL, READ_SCOPE, RESOURCE_URL, WRITE_SCOPE
 from testing.mcp_state_fixtures import FakeStateTable, install_fake_table
 from testing.module_loader import load_handler_module
 
@@ -32,7 +33,6 @@ _HANDLER_MODULE = 'mcp_handler_under_test'
 
 ISSUER = 'https://cognito-idp.eu-west-1.amazonaws.com/eu-west-1_TestPool'
 CLIENT_ID = 'mcp-app-client-1234'
-METADATA_URL = f'{STAGE_URL}/.well-known/oauth-protected-resource'
 CALLER_SUB = '11111111-2222-3333-4444-555555555555'
 API_FUNCTIONS = {
     'keyword-mgmt': 'CitationAnalysis-KeywordMgmt',
@@ -47,10 +47,11 @@ API_FUNCTIONS = {
 }
 MCP_ENV = {
     'MCP_ISSUER': ISSUER,
+    'MCP_USER_POOL_ID': 'eu-west-1_TestPool',
     'MCP_CLIENT_ID': CLIENT_ID,
     'MCP_RESOURCE_URL': RESOURCE_URL,
     'MCP_RESOURCE_METADATA_URL': METADATA_URL,
-    'MCP_AUTHORIZATION_SERVER': STAGE_URL,
+    'MCP_AUTHORIZATION_SERVER': BASE_URL,
     'MCP_HOSTED_LOGIN_URL': HOSTED_LOGIN_URL,
     'MCP_API_FUNCTIONS': json.dumps(API_FUNCTIONS),
     'MCP_PINNED_TOOLS': '',
@@ -67,6 +68,12 @@ def mcp_env() -> Iterator[dict[str, str]]:
     """The contract variables, as CDK sets them."""
     with patch.dict(os.environ, MCP_ENV):
         yield MCP_ENV
+
+
+@pytest.fixture(autouse=True)
+def token_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep each caller's groups as the token states them; ``test_directory.py`` covers the user-pool lookup."""
+    monkeypatch.setattr(directory, 'with_directory_groups', lambda caller: caller)
 
 
 @pytest.fixture(autouse=True)

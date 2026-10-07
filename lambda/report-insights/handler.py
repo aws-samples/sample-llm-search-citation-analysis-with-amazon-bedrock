@@ -188,6 +188,10 @@ Rules:
 - Write every number in digits, exactly as it appears in the KPIs or in the evidence of the insights the item cites;
   you may round it to fewer decimals. Never compute a new number (no differences, sums or ratios) and never write
   numbers as words.
+- Say what each number measures and against what, in plain words (never the evidence's field names): a position or
+  sentiment gap is measured against the best of the brand's own sub-brands, not against the KPIs; a competitor's
+  caveat share is the percent of its mentions worded mixed or negative; an engine's top-1 share and citation rate
+  are that engine's own.
 - An insight says what the facts show and why it matters. A recommendation is one concrete action, with a short title.
 """
 

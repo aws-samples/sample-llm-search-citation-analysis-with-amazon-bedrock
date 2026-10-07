@@ -38,9 +38,10 @@ class TestClaimChecks:
         {'iss': OTHER_POOL},
         {'client_id': 'dashboard-client'},
         {'token_use': 'id'},
-        {'aud': 'https://abc123.execute-api.eu-west-1.amazonaws.com/prod/other'},
-        {'aud': 'https://evil.example.com/prod/mcp'},
-    ], ids=['issuer', 'client_id', 'token_use', 'aud_other_path', 'aud_other_host'])
+        {'aud': 'https://d111111abcdef8.cloudfront.net/other'},
+        {'aud': 'https://abc123.execute-api.eu-west-1.amazonaws.com/prod/mcp'},
+        {'aud': 'https://evil.example.com/mcp'},
+    ], ids=['issuer', 'client_id', 'token_use', 'aud_other_path', 'aud_stage_url', 'aud_other_host'])
     def test_answers_401_with_the_resource_metadata_challenge_when_a_claim_does_not_fit(self, post, claims, mcp_env, override):
         response = post(PING, claims_override=claims(**override))
 
@@ -62,7 +63,7 @@ class TestClaimChecks:
         assert 'jsonrpc' not in body
 
     def test_accepts_an_audience_that_differs_only_in_case_query_string_and_trailing_slash(self, post, claims):
-        audience = 'HTTPS://ABC123.EXECUTE-API.eu-west-1.amazonaws.com/prod/mcp/?client=claude'
+        audience = 'HTTPS://D111111ABCDEF8.CLOUDFRONT.NET/mcp/?client=claude'
 
         assert post(PING, claims_override=claims(aud=audience))['statusCode'] == 200
 

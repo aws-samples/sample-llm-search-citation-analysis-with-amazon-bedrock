@@ -12,8 +12,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-STAGE_URL = 'https://abc123.execute-api.eu-west-1.amazonaws.com/prod'
-RESOURCE_URL = f'{STAGE_URL}/mcp'
+#: The server's base URL (a CloudFront distribution's host root) and the authorization server issuer.
+BASE_URL = 'https://d111111abcdef8.cloudfront.net'
+RESOURCE_URL = f'{BASE_URL}/mcp'
+#: RFC 9728 §3.1: the well-known segment inserted before the resource's path; what the 401 advertises.
+METADATA_URL = f'{BASE_URL}/.well-known/oauth-protected-resource/mcp'
 #: The Cognito managed-login domain the authorization server metadata points at.
 HOSTED_LOGIN_URL = 'https://citation-analysis-test.auth.eu-west-1.amazoncognito.com'
 READ_SCOPE = f'{RESOURCE_URL}/read'

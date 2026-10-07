@@ -6,14 +6,22 @@ import {
 import { McpState, readMcpLimits } from './constructs/mcp-state';
 import { pythonLayer } from './constructs/python-layer';
 
+/**
+ * The local callbacks allowed when `mcpRedirectUris` is not set: Kiro's pinned
+ * `oauth.redirectUri` and Claude Code's `--callback-port 5173`
+ * (`http://localhost:<port>/callback`). Web clients' callbacks are added per deployment.
+ */
+export const DEFAULT_REDIRECT_URIS = ['http://localhost:5173/oauth/callback', 'http://localhost:5173/callback'];
+
 export interface CitationAnalysisMcpStackProps extends cdk.StackProps {
   /** The main stack's `mcpInputs`. */
   readonly inputs: McpServerInputs;
 }
 
 /**
- * A sibling of `CitationAnalysisStack` holding the MCP server and its own REST
- * API. Separate because the main stack sits at CloudFormation's 500-resource
+ * A sibling of `CitationAnalysisStack` holding the MCP server, its own REST
+ * API and the CloudFront distribution in front of it (the server's host root
+ * for OAuth discovery). Separate because the main stack sits at CloudFormation's 500-resource
  * limit, and because the server's API, authorizer and Cognito client are a
  * self-contained unit that can be removed without touching the dashboard.
  *
@@ -45,7 +53,7 @@ export class CitationAnalysisMcpStack extends cdk.Stack {
       ...props.inputs,
       sharedLayer,
       state,
-      redirectUris: readMcpContextList(this, 'mcpRedirectUris', ['http://localhost:5173/oauth/callback']),
+      redirectUris: readMcpContextList(this, 'mcpRedirectUris', DEFAULT_REDIRECT_URIS),
       pinnedTools: readMcpContextList(this, 'mcpPinnedTools', []),
       domainPrefix: `citation-analysis-${this.account}`,
     });
