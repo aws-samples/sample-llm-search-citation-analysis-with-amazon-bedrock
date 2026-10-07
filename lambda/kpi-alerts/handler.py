@@ -7,6 +7,10 @@ The report in the payload is GenerateSummary's compact one; the per-keyword
 run identity is read back from the full report at its ``s3_location``.
 Executions started before scope-only trigger inputs carry ``requested_scope``
 next to (or instead of) ``scope``; both are honoured.
+
+A completed evaluation names the run (``run_timestamp``) and the groups it
+snapshotted (``snapshot_group_ids``): exactly the groups the run fully
+covers, for which the GenerateInsights step writes a narrative.
 """
 
 from __future__ import annotations
@@ -390,8 +394,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if not complete:
         return {
             'status': 'completed',
+            'run_timestamp': run_timestamp,
             'groups_evaluated': 0,
             'snapshots_recorded': 0,
+            'snapshot_group_ids': [],
             'alerts_created': 0,
             'skipped_partial': skipped_partial,
             'notification': {'status': 'not_sent', 'reason': 'no_new_alerts'},
@@ -407,7 +413,8 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     owned_domains = owned_domains_from(get_brand_config(BRAND_CONFIG_TABLE))
     answers_by_keyword = _load_run_answers(unique_keywords, run_timestamp)
 
-    snapshots_recorded = 0
+    # The groups snapshotted, in group id order: exactly the groups this run fully covers.
+    snapshot_group_ids: list[str] = []
     groups_evaluated = 0
     new_alerts: list[dict[str, Any]] = []
     for group_id in complete:
@@ -435,7 +442,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             else None
         )
         dynamodb.Table(SNAPSHOTS_TABLE).put_item(Item=convert_floats_to_decimal(snapshot))
-        snapshots_recorded += 1
+        snapshot_group_ids.append(group_id)
         groups_evaluated += 1
 
         for specification in compare_snapshots(
@@ -458,8 +465,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     notification = _notify(new_alerts, execution_id, settings)
     return {
         'status': 'completed',
+        'run_timestamp': run_timestamp,
         'groups_evaluated': groups_evaluated,
-        'snapshots_recorded': snapshots_recorded,
+        'snapshots_recorded': len(snapshot_group_ids),
+        'snapshot_group_ids': snapshot_group_ids,
         'alerts_created': len(new_alerts),
         'skipped_partial': skipped_partial,
         'notification': notification,

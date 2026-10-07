@@ -9,6 +9,53 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.33.0] - 2026-10-08
+
+### Added
+
+- **More insights.** `GET /api/reports/insights` adds, for any scope: the brand's best position per keyword and AI
+  engine, who the engines cite (your domains, each competitor's domains, third parties, per engine), your most-cited
+  pages grouped by section with documents (PDFs and other downloads) told apart from web pages, and the competitors the
+  answers word mixed or negative with up to three of the reasons they give. New insights: a competitor's sites cited
+  more than yours on an engine, documents cited more than your web pages, a competitor worded mixed or negative in at
+  least 30% of 5 or more mentions, and a keyword every answering engine places outside the top 3 (a prompt gap). Each
+  shows the figures it rests on; the thresholds are named constants in `lambda/shared/insights_engine.py`.
+- **Insight report blocks.** *Top insights*, *Prompts by engine* (cells below the top 3 highlighted, with text for
+  screen readers; the 50 weakest keywords shown with a count of the rest), *Who the engines cite*, *Your most-cited
+  pages* and *Competitor caveats*.
+- **Written insights after each run.** For every keyword group a run fully covers, a new workflow step
+  (GenerateInsights, after KpiAlerts) asks Bedrock for up to three insights and six recommendations written from the
+  group's computed insights and KPIs only, in the language of the group's keywords. Each item names the insights it
+  rests on; an item citing an unknown insight or a number not in their evidence is dropped. The narrative is stored in
+  the new on-demand `CitationAnalysis-ReportInsights` table (kept as long as the KPI snapshots), so opening or printing
+  a report never calls Bedrock, and a failure in this step never fails the run. The *Written insights* block shows it
+  with the insights behind each item, the model and when it was written; admins can regenerate a group's narrative
+  after a confirmation (`POST /api/reports/insights/regenerate`).
+- **Competitor domains in Brand Tracking.** Each competitor can list up to 10 website domains. **Find Competitors**
+  suggests them, shown unticked and saved only once you tick them and save; you can also type them. `POST
+  /api/brand-config` validates `competitor_domains` (normalised like Owned Domains; a 400 names the field for an
+  unknown competitor, a value that is not a domain or a limit exceeded); configs saved earlier read as having none.
+- `GET /api/visibility/sentiment-examples` accepts `classification=competitor` to list competitors' passages; the
+  default is still your own brands.
+- **MCP spend tools in two steps.** `estimate_run` / `start_run` (admin only, as on the dashboard),
+  `estimate_research` / `start_research` and `estimate_content_brief` / `generate_content_brief`: the estimate counts
+  the provider and Bedrock calls and returns a single-use confirmation token valid for 5 minutes, bound to the caller
+  and the exact request; the start refuses without it. Per-caller limits (1 run in flight, 5 runs and 20 research or
+  content jobs per UTC day, 50 keywords per run), configurable with `-c mcpLimits`; refusals name the limit and when it
+  resets. Tokens, counters and an audit record of every write and spend call (365 days) live in the new on-demand
+  `CitationAnalysis-McpState` table.
+- **More MCP tools and prompts.** Catalogue reads for report insights (`get_report_insights`), schedules, KPI alerts,
+  run status, research jobs and templates, Content Studio items and one custom report; `get_sentiment_examples` takes
+  `classification`; prompts `geo_audit` and `setup_brand_tracking`. User management, provider keys, brand-configuration
+  and schedule writes and deletes stay out of reach.
+- `docs/mcp.md`: connecting Kiro, Claude.ai / Desktop, Claude Code, ChatGPT and Amazon Quick, and how the
+  estimate-then-confirm flow and the limits work.
+
+### Changed
+
+- MCP audit log lines carry the refusal reason. The main stack is at 490 of CloudFormation's 500 resources; the next
+  sizeable addition has to go into another stack.
+
 ## [2.32.0] - 2026-10-08
 
 ### Fixed

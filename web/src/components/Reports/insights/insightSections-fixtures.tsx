@@ -6,7 +6,10 @@ import {
   render, screen, within
 } from '@testing-library/react';
 import type { ReportInsightsResponse } from '../../../types/domain/insights';
-import { buildReportInsights } from '../../../types/domain/insights-fixtures';
+import {
+  buildInsights, buildReportInsights
+} from '../../../types/domain/insights-fixtures';
+import { buildPhase2Insights } from '../../../types/domain/insightFacts-fixtures';
 import { expectRendersNothing } from '../../../test/renderNothing';
 import { settledSlice } from '../layout/reportSlice-fixtures';
 import { sectionTitled } from '../layout/reportQueries-fixtures';
@@ -16,9 +19,12 @@ import {
 } from '../../Visibility/visibilityTables-fixtures';
 import type { InsightsSectionProps } from './InsightsTableSection';
 
-/** The insights slice of a block section once `buildReportInsights(overrides)` has loaded. */
+/** The insights slice of a block section once `buildReportInsights(overrides)` has loaded, with every insight kind by default. */
 export function loadedInsights(overrides: Partial<ReportInsightsResponse> = {}): InsightsSectionProps {
-  return settledSlice(buildReportInsights(overrides));
+  return settledSlice(buildReportInsights({
+    insights: [...buildInsights(), ...buildPhase2Insights()],
+    ...overrides,
+  }));
 }
 
 /** `buildReportInsights()` with its facts replaced by `facts`; the insights stay. */
@@ -46,9 +52,11 @@ export function sectionRows(title: string): string[][] {
   return bodyRowCells(sectionTable(title));
 }
 
-/** The insight sentences read out above the section's table, top to bottom. */
+/** The insight sentences read out above the section's table, top to bottom (list items inside the table left out). */
 export function insightLines(title: string): string[] {
-  return within(sectionTitled(title)).queryAllByRole('listitem').map((item) => item.textContent ?? '');
+  return within(sectionTitled(title)).queryAllByRole('listitem')
+    .filter((item) => item.closest('table') === null)
+    .map((item) => item.textContent ?? '');
 }
 
 /** The tooltip explaining the column headed `header`. */

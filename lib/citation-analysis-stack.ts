@@ -851,6 +851,16 @@ export class CitationAnalysisStack extends cdk.Stack {
       timeToLiveAttribute: 'ttl',
     });
 
+    // The written narrative of each keyword group's run (GenerateInsights),
+    // read back by GET /api/reports/insights so no report read calls Bedrock.
+    // Kept as long as the run's KPI snapshot.
+    const reportInsightsTable = citationAnalysisTable(this, 'ReportInsightsTable', {
+      tableName: 'CitationAnalysis-ReportInsights',
+      partitionKey: { name: 'scope_key', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'run_timestamp', type: dynamodb.AttributeType.STRING },
+      timeToLiveAttribute: 'ttl',
+    });
+
     // Durable alert instances, queried newest-first by their open or
     // acknowledged lifecycle state rather than through a table scan.
     const kpiAlertsTable = citationAnalysisTable(this, 'KpiAlertsTable', {
@@ -1312,6 +1322,31 @@ export class CitationAnalysisStack extends cdk.Stack {
     // run identity is read back from the full report it stored.
     keywordsBucket.grantRead(kpiAlertsFunction, 'execution-summaries/*');
 
+    // GenerateInsights: one Bedrock call per group the run fully covers (four
+    // groups at a time), writing the narrative the insights report reads.
+    // POST /api/reports/insights/regenerate invokes it asynchronously too.
+    const reportInsightsFunction = workerFunction(this, 'ReportInsights', {
+      functionName: 'CitationAnalysis-ReportInsights',
+      code: lambdaSourceCode('report-insights'),
+      layers: [sharedLayer],
+      timeout: cdk.Duration.seconds(120),
+      memorySize: 512,
+      description: 'Write, validate and store the narrative of each fully covered keyword group',
+      environment: {
+        DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
+        DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
+        DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
+        DYNAMODB_TABLE_REPORT_INSIGHTS: reportInsightsTable.tableName,
+        ...bedrockTierEnv,
+      },
+    });
+
+    searchResultsTable.grantReadData(reportInsightsFunction);
+    keywordsTable.grantReadData(reportInsightsFunction);
+    brandConfigTable.grantReadData(reportInsightsFunction);
+    allow(reportInsightsFunction, ['dynamodb:PutItem'], [reportInsightsTable.tableArn]);
+    reportInsightsFunction.addToRolePolicy(claudeInvokeModelStatement(this));
+
     // ========================================
     // Step Functions State Machine
     // ========================================
@@ -1472,14 +1507,42 @@ export class CitationAnalysisStack extends cdk.Stack {
       resultPath: stepfunctions.JsonPath.DISCARD,
     });
 
-    // 11. Define the complete workflow. Both alert branches retain every
-    // GenerateSummary field and add only the top-level alerts block.
+    // 11. Write each fully covered group's narrative from KpiAlerts' result
+    // (`snapshot_group_ids`, `run_timestamp`); a failed KpiAlerts step names
+    // no group, so nothing is written. Like KpiAlerts, a failure here keeps
+    // the report.
+    const generateInsightsTask = new tasks.LambdaInvoke(this, 'GenerateInsights', {
+      lambdaFunction: reportInsightsFunction,
+      payload: stepfunctions.TaskInput.fromObject({ 'alerts.$': '$.alerts' }),
+      payloadResponseOnly: true,
+      resultPath: '$.narratives',
+      retryOnServiceExceptions: true,
+    });
+
+    const generateInsightsFailed = new stepfunctions.Pass(this, 'GenerateInsightsFailed', {
+      result: stepfunctions.Result.fromObject({
+        status: 'failed',
+        message: 'Narrative generation failed; the analysis report is preserved.',
+      }),
+      resultPath: '$.narratives',
+    });
+
+    generateInsightsTask.addCatch(generateInsightsFailed, {
+      errors: ['States.ALL'],
+      resultPath: stepfunctions.JsonPath.DISCARD,
+    });
+
+    // 12. Define the complete workflow. Both alert branches retain every
+    // GenerateSummary field and add only the top-level alerts block; the
+    // insights step adds only `narratives`.
     const definition = parseKeywordsTask
       .next(processKeywordsMap)
       .next(generateSummaryTask)
       .next(kpiAlertsTask);
+    kpiAlertsFailed.next(generateInsightsTask);
+    kpiAlertsTask.next(generateInsightsTask);
 
-    // 12. Create the State Machine (log group and logging rationale at
+    // 13. Create the State Machine (log group and logging rationale at
     // `loggedStateMachine`).
     const stateMachine = loggedStateMachine(this, 'CitationAnalysisStateMachine', {
       logGroupId: 'StateMachineLogGroup',
@@ -1755,6 +1818,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         'get-reports-competitor.py',
         'get-group-kpi-history.py',
         'get-reports-insights.py',
+        'regenerate-report-insights.py',
       ],
       // Every route here is read-only bar a millisecond-scale put_item on
       // POST /recommendations/{id}/status, and recommendations are regenerated
@@ -1773,6 +1837,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         // recommendation status (read for left-join, write for the
         // POST /recommendations/{id}/status route)
         DYNAMODB_TABLE_RECOMMENDATION_STATUS: recommendationStatusTable.tableName,
+        // Stored narratives, read by GET /reports/insights; the worker that
+        // POST /reports/insights/regenerate (Admin) starts asynchronously.
+        DYNAMODB_TABLE_REPORT_INSIGHTS: reportInsightsTable.tableName,
+        REPORT_INSIGHTS_FUNCTION_NAME: reportInsightsFunction.functionName,
       },
     });
 
@@ -1917,6 +1985,8 @@ export class CitationAnalysisStack extends cdk.Stack {
     recommendationStatusTable.grantReadWriteData(statsInsightsFunction);
     // Grant Bedrock access for LLM-enhanced recommendations (get-recommendations.py)
     statsInsightsFunction.addToRolePolicy(claudeInvokeModelStatement(this));
+    allow(statsInsightsFunction, ['dynamodb:GetItem'], [reportInsightsTable.tableArn]);
+    reportInsightsFunction.grantInvoke(statsInsightsFunction);
     // Grant consolidated citations-content function access to all required tables and buckets
     citationsTable.grantReadData(citationsContentFunction);
     searchResultsTable.grantReadData(citationsContentFunction);
@@ -2298,7 +2368,10 @@ export class CitationAnalysisStack extends cdk.Stack {
     route(reportsResource.addResource('competitor'), statsInsightsFunction, 'GET');
     // Per-run KPI history of a keyword group (the per-hotel report).
     route(reportsResource.addResource('group-kpis'), statsInsightsFunction, 'GET');
-    route(reportsResource.addResource('insights'), statsInsightsFunction, 'GET');
+    const reportInsightsResource = reportsResource.addResource('insights');
+    route(reportInsightsResource, statsInsightsFunction, 'GET');
+    // Admin only, enforced in the handler (`@require_group`): spends one Bedrock call.
+    route(reportInsightsResource.addResource('regenerate'), statsInsightsFunction, 'POST');
 
     // Persona Rankings API Route
     route(apiResource.addResource('persona-rankings'), getPersonaRankingsFunction, 'GET');
@@ -2647,6 +2720,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         'brand-config': manageBrandConfigFunction,
         'brand-mentions': getBrandMentionsFunction,
         'persona-rankings': getPersonaRankingsFunction,
+        'content-studio': contentStudioFunction,
       },
     };
 

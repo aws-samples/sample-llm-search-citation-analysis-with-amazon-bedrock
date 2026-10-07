@@ -77,10 +77,49 @@ function unstableKeywordSentence(insight: Insight): string {
     + `, a swing of ${formatGap(numberOf(evidence, 'position_range'), 2)} places, with ${plural(numberOf(evidence, 'flips'), 'mention flip')}.`;
 }
 
+function textOf(evidence: InsightEvidence, key: string): string {
+  const value = evidence[key];
+  return typeof value === 'string' ? value : EMPTY_KPI;
+}
+
+function competitorSitesSentence(insight: Insight): string {
+  const { evidence } = insight;
+  return `${providerName(insight.subject)}: cites ${textOf(evidence, 'competitor')}'s site ${plural(numberOf(evidence, 'competitor_citations'), 'time')}`
+    + `, yours ${plural(numberOf(evidence, 'owned_citations'), 'time')}.`;
+}
+
+function documentsCitedSentence(insight: Insight): string {
+  const { evidence } = insight;
+  return `${providerName(insight.subject)}: cites your documents ${plural(numberOf(evidence, 'document_citations'), 'time')}`
+    + `, your web pages ${plural(numberOf(evidence, 'page_citations'), 'time')}.`;
+}
+
+function competitorCaveatSentence(insight: Insight): string {
+  const { evidence } = insight;
+  return `${insight.subject}: worded mixed or negative in ${formatKpi('mention_rate', numberOf(evidence, 'caveat_share'))}`
+    + ` of ${plural(numberOf(evidence, 'mentions'), 'mention')} (${numberOf(evidence, 'mixed') ?? EMPTY_KPI} mixed,`
+    + ` ${numberOf(evidence, 'negative') ?? EMPTY_KPI} negative).`;
+}
+
+/** "best position 5, named by 1 of 2 engines" or "named by none of 2 engines". */
+function namedClause(evidence: InsightEvidence): string {
+  const engines = plural(numberOf(evidence, 'engines'), 'engine');
+  const best = numberOf(evidence, 'best_position');
+  return best === null ? `named by none of ${engines}` : `best position ${best}, named by ${numberOf(evidence, 'named_engines') ?? EMPTY_KPI} of ${engines}`;
+}
+
+function promptGapSentence(insight: Insight): string {
+  return `${insight.subject}: outside the top 3 on every AI engine that answered; ${namedClause(insight.evidence)}.`;
+}
+
 const SENTENCES: Readonly<Record<Insight['kind'], (insight: Insight) => string>> = {
   engine_play: enginePlaySentence,
   weak_subbrand: weakSubbrandSentence,
   unstable_keyword: unstableKeywordSentence,
+  competitor_sites: competitorSitesSentence,
+  documents_cited: documentsCitedSentence,
+  competitor_caveat: competitorCaveatSentence,
+  prompt_gap: promptGapSentence,
 };
 
 /** The one-line reading of an insight, every figure quoted from its evidence. */

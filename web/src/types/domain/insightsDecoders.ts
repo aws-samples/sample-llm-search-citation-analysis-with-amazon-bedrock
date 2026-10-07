@@ -1,26 +1,31 @@
 /**
  * Runtime guards for `GET /reports/insights` (`./insights`): the facts per
- * engine, brand and keyword, the typed insights and the (still null)
- * narrative. A payload failing any of them is reported as an invalid
- * response rather than rendered half-right.
+ * engine, keyword, cited site, owned page, competitor and brand, the typed
+ * insights and the stored narrative (or null). A payload failing any of them is
+ * reported as an invalid response rather than rendered half-right.
  */
 import type {
   EnginePlay, EnginePlayRow, Insight, InsightBlock, InsightFacts, InsightKind, InsightSeverity, KeywordStabilityRow, PortfolioBrandRow,
   ReportInsightsResponse
 } from './insights';
+import { isInsightsNarrative } from './insightsNarrativeDecoders';
 import { isRecord } from './keywordDecoders';
+import {
+  isCitationOwnershipFacts, isCompetitorCaveatRow, isNullableNumber, isOwnedPagesFacts, isPromptEngineFacts
+} from './insightFactDecoders';
 
 const ENGINE_PLAYS: ReadonlySet<unknown> = new Set<EnginePlay>(['get_cited', 'get_ranked_first', 'get_mentioned_and_cited', 'defend']);
-const INSIGHT_KINDS: ReadonlySet<unknown> = new Set<InsightKind>(['engine_play', 'weak_subbrand', 'unstable_keyword']);
+const INSIGHT_KINDS: ReadonlySet<unknown> = new Set<InsightKind>([
+  'engine_play', 'weak_subbrand', 'unstable_keyword', 'competitor_sites', 'documents_cited', 'competitor_caveat', 'prompt_gap',
+]);
 const INSIGHT_SEVERITIES: ReadonlySet<unknown> = new Set<InsightSeverity>(['high', 'medium', 'low']);
-const INSIGHT_BLOCKS: ReadonlySet<unknown> = new Set<InsightBlock>(['insights_engine_playbook', 'insights_brand_portfolio', 'insights_run_stability']);
+const INSIGHT_BLOCKS: ReadonlySet<unknown> = new Set<InsightBlock>([
+  'insights_engine_playbook', 'insights_brand_portfolio', 'insights_run_stability', 'insights_citation_ownership', 'insights_owned_pages',
+  'insights_competitor_caveats', 'insights_prompt_engine',
+]);
 
 export function isEnginePlay(value: unknown): value is EnginePlay {
   return ENGINE_PLAYS.has(value);
-}
-
-function isNullableNumber(value: unknown): value is number | null {
-  return value === null || typeof value === 'number';
 }
 
 function isEnginePlayRow(value: unknown): value is EnginePlayRow {
@@ -57,6 +62,11 @@ function isInsightFacts(value: unknown): value is InsightFacts {
   return isRecord(value)
     && Array.isArray(value.engines)
     && value.engines.every(isEnginePlayRow)
+    && isPromptEngineFacts(value.prompt_engine)
+    && isCitationOwnershipFacts(value.citation_ownership)
+    && isOwnedPagesFacts(value.owned_pages)
+    && Array.isArray(value.competitor_caveats)
+    && value.competitor_caveats.every(isCompetitorCaveatRow)
     && Array.isArray(value.portfolio)
     && value.portfolio.every(isPortfolioBrandRow)
     && Array.isArray(value.stability)
@@ -94,5 +104,5 @@ export function isReportInsightsResponse(value: unknown): value is ReportInsight
     && isInsightFacts(value.facts)
     && Array.isArray(value.insights)
     && value.insights.every(isInsight)
-    && (value.narrative === null || isRecord(value.narrative));
+    && (value.narrative === null || isInsightsNarrative(value.narrative));
 }

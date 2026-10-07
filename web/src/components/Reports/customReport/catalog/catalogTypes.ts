@@ -19,7 +19,7 @@ export const BLOCK_CATEGORIES = [
   {
     id: 'insights',
     label: 'Insights',
-    description: 'What to do per AI engine, which of your brands trail, and which keywords swing between runs.',
+    description: 'What to do per AI engine, where you lose, who gets cited, what competitors are criticised for, which brands trail.',
   },
   {
     id: 'visibility',

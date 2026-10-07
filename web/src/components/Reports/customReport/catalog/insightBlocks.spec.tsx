@@ -28,16 +28,27 @@ function renderBlock(type: string, overrides: Partial<ReportSources> = {}) {
 }
 
 describe('INSIGHT_BLOCKS', () => {
-  it('offers the playbook and the portfolio to every scope, and the run stability to a group alone, all from the insights source', () => {
+  it('offers every insights block to every scope but the run stability and the narrative, which a group alone shows, all from the insights source', () => {
     expect(INSIGHT_BLOCKS.map((block) => [block.type, block.category, [...block.scopes], [...block.sources]])).toStrictEqual([
+      ['insights_summary', 'insights', ['all', 'group', 'keyword'], ['insights']],
       ['insights_engine_playbook', 'insights', ['all', 'group', 'keyword'], ['insights']],
+      ['insights_prompt_engine', 'insights', ['all', 'group', 'keyword'], ['insights']],
+      ['insights_citation_ownership', 'insights', ['all', 'group', 'keyword'], ['insights']],
+      ['insights_owned_pages', 'insights', ['all', 'group', 'keyword'], ['insights']],
+      ['insights_competitor_caveats', 'insights', ['all', 'group', 'keyword'], ['insights']],
       ['insights_brand_portfolio', 'insights', ['all', 'group', 'keyword'], ['insights']],
       ['insights_run_stability', 'insights', ['group'], ['insights']],
+      ['insights_narrative', 'insights', ['group'], ['insights']],
     ]);
   });
 
   it.each([
+    ['insights_summary', 'Top insights'],
     ['insights_engine_playbook', 'Engine playbook'],
+    ['insights_prompt_engine', 'Prompts by engine'],
+    ['insights_citation_ownership', 'Who the engines cite'],
+    ['insights_owned_pages', 'Your most-cited pages'],
+    ['insights_competitor_caveats', 'Competitor caveats'],
     ['insights_brand_portfolio', 'Brand portfolio'],
   ])('renders %s as the %s section of the insights source, labelled Insights', (type, title) => {
     renderBlock(type);

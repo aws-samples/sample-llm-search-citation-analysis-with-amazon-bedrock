@@ -1539,3 +1539,62 @@ export function extractContentSecurityPolicy(template: Template): Record<string,
       .map(([name, ...sources]) => [name, sources])
   );
 }
+
+/** Every stack table a function's role grants something on, with the sorted actions, by table name. */
+function functionTableActions(template: Template, functionName: string): Record<string, string[]> {
+  return Object.fromEntries(
+    Object.entries(template.findResources('AWS::DynamoDB::Table'))
+      .map(([logicalId, table]) => [
+        resolveString(table, ['Properties', 'TableName']),
+        extractFunctionRoleActionsOn(template, functionName, logicalId),
+      ] as const)
+      .filter(([, actions]) => actions.length > 0)
+  );
+}
+
+/** The narrative pieces (2.32.0): GenerateInsights, its worker and table, and the regenerate route. */
+export interface ReportInsightsSnapshot {
+  /** The workflow's states, tokens replaced by `__TOKEN__`. */
+  states: unknown;
+  table: {
+    keySchema: unknown;
+    billingMode: unknown;
+    timeToLive: unknown;
+  };
+  workerTimeoutSeconds: number;
+  workerLayerCount: number;
+  workerEnvironmentNames: string[];
+  workerTableActions: Record<string, string[]>;
+  workerActions: string[];
+  statsInsightsEnvironment: Record<string, unknown>;
+  statsInsightsReportInsightsActions: string[];
+  statsInsightsWorkerActions: string[];
+  regenerateMethods: ApiGatewayMethodSnapshot[];
+  statsInsightsFunctionLogicalId: string;
+}
+
+export function extractReportInsightsSnapshot(template: Template): ReportInsightsSnapshot {
+  const worker = 'CitationAnalysis-ReportInsights';
+  const statsInsights = 'CitationAnalysis-API-StatsInsights';
+  const tableName = 'CitationAnalysis-ReportInsights';
+  const tableLogicalId = findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', tableName);
+  const insightsResourceId = findApiResourceId(template, 'insights', findApiResourceId(template, 'reports'));
+  return {
+    states: resolvePath(parseStateMachineDefinition(template, 'CitationAnalysis-Workflow'), ['States']),
+    table: {
+      keySchema: extractTableKeySchema(template, tableName),
+      billingMode: extractTableProperty(template, tableName, 'BillingMode'),
+      timeToLive: extractTableProperty(template, tableName, 'TimeToLiveSpecification'),
+    },
+    workerTimeoutSeconds: extractFunctionTimeout(template, worker),
+    workerLayerCount: extractLambdaLayerRefs(template, worker).length,
+    workerEnvironmentNames: Object.keys(extractLambdaEnvVars(template, worker)).sort((left, right) => left.localeCompare(right)),
+    workerTableActions: functionTableActions(template, worker),
+    workerActions: extractFunctionRoleActions(template, worker),
+    statsInsightsEnvironment: extractLambdaEnvVars(template, statsInsights),
+    statsInsightsReportInsightsActions: extractFunctionRoleActionsOn(template, statsInsights, tableLogicalId),
+    statsInsightsWorkerActions: extractFunctionRoleActionsOn(template, statsInsights, findLambdaLogicalId(template, worker)),
+    regenerateMethods: extractApiMethods(template, findApiResourceId(template, 'regenerate', insightsResourceId)),
+    statsInsightsFunctionLogicalId: findLambdaLogicalId(template, statsInsights),
+  };
+}

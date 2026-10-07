@@ -3,6 +3,10 @@ import type {
   EnginePlay, EnginePlayRow, Insight, KeywordStabilityRow, PortfolioBrandRow, ReportInsightsResponse
 } from './insights';
 import { buildKpis } from '../../components/Reports/BrandVisibilityReport/groupKpiHistory-fixtures';
+import {
+  buildCaveatRow, buildCitationOwnership, buildCompetitorCaveats, buildOwnedPage, buildOwnedPages, buildOwnershipRow, emptyOwnedPages, buildPromptEngine,
+  buildPromptEngineRow
+} from './insightFacts-fixtures';
 
 /**
  * Payloads of `GET /reports/insights` for the specs: the airline group of the
@@ -186,6 +190,10 @@ export function buildReportInsights(overrides: Partial<ReportInsightsResponse> =
     citations_configured: true,
     facts: {
       engines: buildEngineRows(),
+      prompt_engine: buildPromptEngine(),
+      citation_ownership: buildCitationOwnership(),
+      owned_pages: buildOwnedPages(),
+      competitor_caveats: buildCompetitorCaveats(),
       portfolio: buildPortfolio(),
       stability: buildStability(),
     },
@@ -195,11 +203,18 @@ export function buildReportInsights(overrides: Partial<ReportInsightsResponse> =
   };
 }
 
-/** The payload of a scope with nothing to say: no engine, one qualifying brand at most, no group history. */
+/** The payload of a scope with nothing to say: no engine, no citation, no competitor, one qualifying brand at most, no group history. */
 export function emptyReportInsights(): ReportInsightsResponse {
   return buildReportInsights({
     facts: {
       engines: [],
+      prompt_engine: buildPromptEngine({
+        keywords: [],
+        engines: [] 
+      }),
+      citation_ownership: buildCitationOwnership({ engines: [] }),
+      owned_pages: emptyOwnedPages(),
+      competitor_caveats: [],
       portfolio: [],
       stability: [],
     },
@@ -209,13 +224,27 @@ export function emptyReportInsights(): ReportInsightsResponse {
 
 const VALID = buildReportInsights();
 
-/** `VALID` with one of its facts replaced by `row`. */
-function withFact(list: 'engines' | 'portfolio' | 'stability', row: unknown): unknown {
+/** `VALID` with one of its fact lists replaced by `[row]`. */
+function withFact(list: 'engines' | 'competitor_caveats' | 'portfolio' | 'stability', row: unknown): unknown {
   return {
     ...VALID,
     facts: {
       ...VALID.facts,
       [list]: [row],
+    },
+  };
+}
+
+/** `VALID` with one of its fact objects replaced by `VALID`'s own with `fields` overridden. */
+function withFactFields(fact: 'prompt_engine' | 'citation_ownership' | 'owned_pages', fields: Record<string, unknown>): unknown {
+  return {
+    ...VALID,
+    facts: {
+      ...VALID.facts,
+      [fact]: {
+        ...VALID.facts[fact],
+        ...fields,
+      },
     },
   };
 }
@@ -277,6 +306,54 @@ export const REJECTED_REPORT_INSIGHTS_BODIES: ReadonlyArray<[description: string
   ['a keyword whose position range is null', withFact('stability', {
     ...buildStabilityRow(),
     position_range: null,
+  })],
+  ['facts without the prompt-by-engine positions', withFactFields('prompt_engine', { keywords: undefined })],
+  ['a keyword whose position is a string', withFactFields('prompt_engine', {
+    keywords: [{
+      ...buildPromptEngineRow(),
+      positions: { openai: '5' } 
+    }] 
+  })],
+  ['a keyword whose lost engines are not strings', withFactFields('prompt_engine', {
+    keywords: [{
+      ...buildPromptEngineRow(),
+      lost_engines: [5] 
+    }] 
+  })],
+  ['citation ownership without its competitor flag', withFactFields('citation_ownership', { competitors_configured: undefined })],
+  ['an engine whose competitor count is a string', withFactFields('citation_ownership', {
+    engines: [{
+      ...buildOwnershipRow(),
+      competitors: { 'Borealis Air': '52' } 
+    }],
+  })],
+  ['owned pages without the document total', withFactFields('owned_pages', { document_citations: undefined })],
+  ['an owned page without its document flag', withFactFields('owned_pages', {
+    pages: [{
+      ...buildOwnedPage(),
+      is_document: 'yes' 
+    }] 
+  })],
+  ['an owned section without its page count', withFactFields('owned_pages', {
+    sections: [{
+      section: 'aurora-airways.com/fares',
+      citations: 1,
+      document_citations: 0 
+    }] 
+  })],
+  ['an owned-pages engine without its page citations', withFactFields('owned_pages', {
+    engines: [{
+      engine: 'openai',
+      document_citations: 1 
+    }] 
+  })],
+  ['a competitor whose reasons are not strings', withFact('competitor_caveats', {
+    ...buildCaveatRow(),
+    reasons: [1] 
+  })],
+  ['a competitor whose caveat share is a string', withFact('competitor_caveats', {
+    ...buildCaveatRow(),
+    caveat_share: '61.3' 
   })],
   ['insights that are not a list', {
     ...VALID,

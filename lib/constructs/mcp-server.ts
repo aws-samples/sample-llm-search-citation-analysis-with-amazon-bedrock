@@ -5,6 +5,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
+import type { McpState } from './mcp-state';
 import { lambdaSourceCode } from './python-layer';
 
 /**
@@ -46,8 +47,8 @@ interface McpScope {
 
 const MCP_SCOPES: readonly McpScope[] = [
   { name: 'read', description: 'Read keywords, groups, brand configuration, visibility and reports' },
-  { name: 'write', description: 'Create and update keywords and keyword groups' },
-  { name: 'run', description: 'Start analysis runs' },
+  { name: 'write', description: 'Create and update keywords and groups; start keyword research and Content Studio briefs' },
+  { name: 'run', description: 'Start analysis runs (admin)' },
 ];
 
 const FUNCTION_NAME = 'CitationAnalysis-Mcp';
@@ -138,6 +139,8 @@ export interface McpServerProps extends McpServerInputs {
   readonly pinnedTools?: string[];
   /** Cognito domain prefix, e.g. `citation-analysis-<account>`. */
   readonly domainPrefix: string;
+  /** Spend-guard state table and per-caller limits (`McpState`). */
+  readonly state: McpState;
 }
 
 export class McpServer extends Construct {
@@ -290,6 +293,7 @@ export class McpServer extends Construct {
       actions: ['lambda:InvokeFunction'],
       resources: Object.values(props.apiFunctions).map((routerFunction) => routerFunction.functionArn),
     }));
+    props.state.grantTo(serverFunction);
     return serverFunction;
   }
 

@@ -5,6 +5,9 @@ import {
   buildInsight, GEMINI_INSIGHT, UNSTABLE_KEYWORD_INSIGHT, WEAK_SUBBRAND_INSIGHT
 } from '../../../types/domain/insights-fixtures';
 import {
+  COMPETITOR_CAVEAT_INSIGHT, COMPETITOR_SITES_INSIGHT, DOCUMENTS_CITED_INSIGHT, PROMPT_GAP_INSIGHT
+} from '../../../types/domain/insightFacts-fixtures';
+import {
   formatGap, insightSentence, PLAY_LABELS
 } from './insightWording';
 
@@ -105,6 +108,58 @@ describe('insightSentence', () => {
     });
 
     expect(insightSentence(insight)).toBe('cheap flights to Lima: placed between — and — over 2 runs, a swing of — places, with — mention flips.');
+  });
+});
+
+describe('insightSentence for the citation, caveat and prompt insights', () => {
+  it('reads a competitor-sites insight from the competitor and both citation counts', () => {
+    expect(insightSentence(COMPETITOR_SITES_INSIGHT)).toBe('OpenAI: cites Borealis Air\'s site 52 times, yours 28 times.');
+  });
+
+  it('reads a documents-cited insight from the document and web-page citations', () => {
+    expect(insightSentence(DOCUMENTS_CITED_INSIGHT)).toBe('OpenAI: cites your documents 36 times, your web pages 26 times.');
+  });
+
+  it('reads a competitor caveat from its share, mentions and the mixed and negative counts', () => {
+    expect(insightSentence(COMPETITOR_CAVEAT_INSIGHT)).toBe('Borealis Air: worded mixed or negative in 61.3% of 31 mentions (17 mixed, 2 negative).');
+  });
+
+  it('reads a prompt gap from the best position and the engines naming the brand', () => {
+    expect(insightSentence(PROMPT_GAP_INSIGHT)).toBe(
+      'cheap flights to Lima: outside the top 3 on every AI engine that answered; best position 5, named by 1 of 2 engines.',
+    );
+  });
+
+  it('says no engine names the brand when a prompt gap has no best position', () => {
+    const insight = buildInsight({
+      ...PROMPT_GAP_INSIGHT,
+      evidence: {
+        engines: 1,
+        named_engines: 0,
+        best_position: null,
+        visibility_score: 0,
+      },
+    });
+
+    expect(insightSentence(insight)).toBe('cheap flights to Lima: outside the top 3 on every AI engine that answered; named by none of 1 engine.');
+  });
+
+  it('writes a missing competitor name and counts as dashes', () => {
+    const insight = buildInsight({
+      ...COMPETITOR_SITES_INSIGHT,
+      evidence: { answers: 10 },
+    });
+
+    expect(insightSentence(insight)).toBe('OpenAI: cites —\'s site — times, yours — times.');
+  });
+
+  it('writes the missing counts of a caveat as dashes', () => {
+    const insight = buildInsight({
+      ...COMPETITOR_CAVEAT_INSIGHT,
+      evidence: { mentions: 1 },
+    });
+
+    expect(insightSentence(insight)).toBe('Borealis Air: worded mixed or negative in — of 1 mention (— mixed, — negative).');
   });
 });
 

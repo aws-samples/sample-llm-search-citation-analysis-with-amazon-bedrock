@@ -56,6 +56,14 @@ class TestDescribeTool:
 
         assert (described['scope'], described['admin'], described['readOnlyHint']) == ('write', False, False)
 
+    def test_describes_a_spend_start_with_its_family_step_scope_and_admin_flag(self, rpc):
+        described = _call(rpc, 'describe_tool', {'name': 'start_run'})['result']['structuredContent']
+
+        assert (described['spend'], described['scope'], described['admin']) == ({'family': 'run', 'step': 'start'}, 'run', True)
+
+    def test_describes_a_read_without_a_spend_entry(self, rpc):
+        assert 'spend' not in _call(rpc, 'describe_tool', {'name': 'list_schedules'})['result']['structuredContent']
+
     def test_rejects_an_unknown_operation_with_invalid_params(self, rpc):
         assert _call(rpc, 'describe_tool', {'name': 'launch_rockets'})['error'] == {'code': -32602, 'message': 'Unknown tool: launch_rockets'}
 

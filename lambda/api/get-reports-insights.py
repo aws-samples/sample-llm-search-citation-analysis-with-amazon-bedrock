@@ -3,13 +3,20 @@ Insights API — GET /api/reports/insights
 
 The facts behind the Insights report and the typed insights they support
 (``shared.insights_engine``): the tracked brand's KPIs per AI engine with the
-play each engine calls for, the first-party brands measured against the best
-of them and, for a keyword group, how far each keyword's position swung
-across the runs of the last ``days`` days. The engine and portfolio facts
-rest on the scope's latest runs, read as ``GET /api/visibility`` reads them;
+play each engine calls for, its position per keyword and engine, who the
+engines cite (the brand's domains, each competitor's ``competitor_domains``
+from the brand configuration, third parties) and which owned pages, the
+caveats the answers word competitors with, the first-party brands measured
+against the best of them and, for a keyword group, how far each keyword's
+position swung across the runs of the last ``days`` days. All but the
+stability facts rest on the scope's latest runs, read as
+``GET /api/visibility`` reads them;
 the stability facts on the per-run history ``GET /api/reports/group-kpis``
-reports, so every number agrees with those pages. ``narrative`` is reserved
-for a later phase and always ``null``.
+reports, so every number agrees with those pages. ``narrative`` is the
+written narrative stored for a keyword group's latest run
+(``shared.insights_narrative``, written by the GenerateInsights step after each
+complete group run, or on demand by ``POST /api/reports/insights/regenerate``);
+``null`` for any other scope and while none is stored.
 
 Takes the scope every KPI endpoint takes — one of ``group_id``,
 ``keyword_ids``, ``scope=all`` or ``keyword`` — plus ``days``
@@ -25,7 +32,9 @@ from shared.answer_queries import history_since, query_keyword_rows_since, query
 from shared.api_response import success_response, validation_error
 from shared.decorators import api_handler, validate
 from shared.group_kpi_history import build_group_kpi_history
+from shared.insights_citations import competitor_domains_from
 from shared.insights_engine import compute_insights
+from shared.insights_narrative import group_scope_key, load_narrative
 from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, map_scope_keywords, scoped_dynamodb_resource
 from shared.scoped_reports import TREND_WINDOW_PARAMS, capped_scope, required_report_scope
@@ -80,6 +89,13 @@ def load_history(keywords: list[str], days: int, owned_domains: list[str]) -> li
     return build_group_kpi_history(keywords, rows, owned_domains)['keywords']
 
 
+def group_narrative(report_scope: Any, run_timestamp: str | None) -> dict[str, Any] | None:
+    """The narrative stored for a keyword group's latest run (``run_timestamp``); ``None`` for any other scope."""
+    if report_scope.kind != GROUP_SCOPE:
+        return None
+    return load_narrative(group_scope_key(report_scope.scope['group_ids'][0]), run_timestamp)
+
+
 @api_handler
 @validate({**SCOPE_QUERY_PARAMS, **HISTORY_WINDOW_PARAMS})
 @required_report_scope(keywords_table)
@@ -88,17 +104,20 @@ def handler(event, context, report_scope, *, days):
     if not report_scope.keywords:
         return validation_error(f'No active keywords match the selected scope ({report_scope.label}).', event, 'scope')
     keywords, scope_fields = capped_scope(report_scope)
-    owned_domains = owned_domains_from(get_brand_config())
+    brand_config = get_brand_config()
+    owned_domains = owned_domains_from(brand_config)
     latest = load_latest_answers(keywords)
     # Only a keyword group has a run history to compare; elsewhere the stability facts stay empty.
     history = load_history(keywords, days, owned_domains) if report_scope.kind == GROUP_SCOPE else None
     # The latest-run coverage, computed by the view behind /visibility so both pages say the same.
     coverage = visibility_view(keywords, latest)
-    insights = compute_insights((answer for answers in latest.values() for answer in answers), owned_domains, history)
+    insights = compute_insights(
+        (answer for answers in latest.values() for answer in answers), owned_domains, history, competitor_domains_from(brand_config),
+    )
     return success_response({
         **scope_fields,
         **{key: coverage[key] for key in COVERAGE_FIELDS},
         'citations_configured': bool(owned_domains),
         **insights,
-        'narrative': None,
+        'narrative': group_narrative(report_scope, coverage['timestamp']),
     }, event)

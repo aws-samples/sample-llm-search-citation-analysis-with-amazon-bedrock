@@ -34,6 +34,7 @@ import {
   extractMemorySizesByLogicalIdPrefix,
   extractProdStageMethodSettings,
   extractProviderSearchSnapshot,
+  extractReportInsightsSnapshot,
   extractReservedConcurrency,
   extractRoleTableActions,
   extractStateMachineDefinition,
@@ -268,6 +269,7 @@ const WORKER_LOG_GROUP_NAMES = [
   '/aws/lambda/CitationAnalysis-Crawler',
   '/aws/lambda/CitationAnalysis-GenerateSummary',
   '/aws/lambda/CitationAnalysis-KpiAlerts',
+  '/aws/lambda/CitationAnalysis-ReportInsights',
   '/aws/lambda/CitationAnalysis-ResearchWorker',
   '/aws/lambda/CitationAnalysis-ContentStudioWorker',
 ];
@@ -2321,7 +2323,7 @@ describe('Bedrock model access (Anthropic account enablement)', () => {
   it('gives every Bedrock-calling Lambda the role tiers lambda/shared/models.py defaults to', () => {
     const tierEnvironments = bedrockTierEnvironments(template);
 
-    expect(tierEnvironments).toHaveLength(15);
+    expect(tierEnvironments).toHaveLength(16);
     expect(tierEnvironments).toStrictEqual(tierEnvironments.map(() => pythonRoleDefaultTierEnv()));
   });
 
@@ -2454,5 +2456,94 @@ describe('Bedrock model access opt-out (-c skipModelProvisioning=true)', () => {
 
     expect(resolvePath(outputs, ['BedrockModelsEnabled', 'Value']))
       .toBe('none (skipModelProvisioning)');
+  });
+});
+
+/**
+ * Report insights narrative (requirements 9 and 11.2): GenerateInsights runs
+ * after KpiAlerts, keeps the report when it fails, and its worker reads only
+ * what it needs; the stored narrative is read by the insights endpoint and
+ * regenerated through an Admin route.
+ */
+describe('Report insights narrative', () => {
+  const snapshot = extractReportInsightsSnapshot(
+    Template.fromStack(new CitationAnalysisStack(new cdk.App(), 'ReportInsightsTestStack'))
+  );
+  const state = (name: string): unknown => resolvePath(snapshot.states, [name]);
+
+  it('runs GenerateInsights after KpiAlerts on both of its branches', () => {
+    expect(resolvePath(state('KpiAlerts'), ['Next'])).toBe('GenerateInsights');
+    expect(resolvePath(state('KpiAlertsFailed'), ['Next'])).toBe('GenerateInsights');
+  });
+
+  it('hands GenerateInsights only the KpiAlerts result and keeps its own under narratives', () => {
+    expect(resolvePath(state('GenerateInsights'), ['Parameters'])).toStrictEqual({ 'alerts.$': '$.alerts' });
+    expect(resolvePath(state('GenerateInsights'), ['ResultPath'])).toBe('$.narratives');
+  });
+
+  it('catches every GenerateInsights failure into a Pass that keeps the report', () => {
+    expect(resolvePath(state('GenerateInsights'), ['Catch'])).toStrictEqual([
+      { ErrorEquals: ['States.ALL'], ResultPath: null, Next: 'GenerateInsightsFailed' },
+    ]);
+    expect(resolvePath(state('GenerateInsightsFailed'), ['Type'])).toBe('Pass');
+    expect(resolvePath(state('GenerateInsightsFailed'), ['ResultPath'])).toBe('$.narratives');
+    expect(resolvePath(state('GenerateInsightsFailed'), ['End'])).toBe(true);
+  });
+
+  it('keys the narrative table by scope and run', () => {
+    expect(snapshot.table.keySchema).toStrictEqual([
+      { AttributeName: 'scope_key', KeyType: 'HASH' },
+      { AttributeName: 'run_timestamp', KeyType: 'RANGE' },
+    ]);
+  });
+
+  it('bills the narrative table on demand and expires it through ttl like the KPI snapshots', () => {
+    expect(snapshot.table.billingMode).toBe('PAY_PER_REQUEST');
+    expect(snapshot.table.timeToLive).toStrictEqual({ AttributeName: 'ttl', Enabled: true });
+  });
+
+  it('bounds the worker at 120 seconds on the shared layer', () => {
+    expect(snapshot.workerTimeoutSeconds).toBe(120);
+    expect(snapshot.workerLayerCount).toBe(1);
+  });
+
+  it('hands the worker the tables it reads and writes', () => {
+    expect(snapshot.workerEnvironmentNames.filter((name) => name.startsWith('DYNAMODB_TABLE_'))).toStrictEqual([
+      'DYNAMODB_TABLE_BRAND_CONFIG',
+      'DYNAMODB_TABLE_KEYWORDS',
+      'DYNAMODB_TABLE_REPORT_INSIGHTS',
+      'DYNAMODB_TABLE_SEARCH_RESULTS',
+    ]);
+  });
+
+  it('lets the worker read its source tables and only put narratives', () => {
+    const read = ['dynamodb:BatchGetItem', 'dynamodb:ConditionCheckItem', 'dynamodb:DescribeTable', 'dynamodb:GetItem',
+      'dynamodb:GetRecords', 'dynamodb:GetShardIterator', 'dynamodb:Query', 'dynamodb:Scan'];
+
+    expect(snapshot.workerTableActions).toStrictEqual({
+      'CitationAnalysis-SearchResults': read,
+      'CitationAnalysis-Keywords': read,
+      'CitationAnalysis-BrandConfig': read,
+      'CitationAnalysis-ReportInsights': ['dynamodb:PutItem'],
+    });
+  });
+
+  it('lets the worker invoke Bedrock models and nothing outside DynamoDB and Bedrock', () => {
+    expect(snapshot.workerActions.filter((action) => !action.startsWith('dynamodb:'))).toStrictEqual(['bedrock:InvokeModel']);
+  });
+
+  it('lets StatsInsights read stored narratives without writing them', () => {
+    expect(snapshot.statsInsightsReportInsightsActions).toStrictEqual(['dynamodb:GetItem']);
+    expect(snapshot.statsInsightsEnvironment).toHaveProperty('DYNAMODB_TABLE_REPORT_INSIGHTS');
+  });
+
+  it('lets StatsInsights start the worker it is told the name of', () => {
+    expect(snapshot.statsInsightsWorkerActions).toStrictEqual(['lambda:InvokeFunction']);
+    expect(snapshot.statsInsightsEnvironment).toHaveProperty('REPORT_INSIGHTS_FUNCTION_NAME');
+  });
+
+  it('routes POST regenerate to StatsInsights behind the Cognito authorizer', () => {
+    expect(sortedHttpMethods(snapshot.regenerateMethods)).toStrictEqual(['POST']);
+    expect(unguardedVerbs(snapshot.regenerateMethods, snapshot.statsInsightsFunctionLogicalId)).toStrictEqual(FULLY_GUARDED);
   });
 });

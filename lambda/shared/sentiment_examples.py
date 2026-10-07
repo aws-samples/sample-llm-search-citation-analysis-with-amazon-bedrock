@@ -3,7 +3,8 @@ The answers behind one sentiment count of the Sentiment report.
 
 The report's per-engine sentiment split counts, over each keyword's latest
 run, every first-party sighting ``shared.kpi_engine`` builds (one per brand
-per answer, at its best rank) by its label. ``sentiment_examples`` lists the
+per answer, at its best rank) by its label; the competitor caveats count the
+competitor sightings the same way. ``sentiment_examples`` lists the
 sightings behind one of those counts, so its ``total`` is that count: the
 sightings come from ``answer_from_row`` itself, and the quote, reason and
 ranking context from the stored brand dict that sighting was built from.
@@ -12,16 +13,22 @@ ranking context from the stored brand dict that sighting was built from.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import Any, Literal
 
 from shared.kpi_engine import (
     ANSWER_ATTRIBUTE_NAMES,
     ANSWER_PROJECTION,
+    COMPETITOR,
+    FIRST_PARTY,
     Answer,
     Sighting,
     answer_from_row,
     sighting_from_brand,
 )
+
+#: The brand classifications an example can be read for; first-party by default.
+ExampleClassification = Literal['first_party', 'competitor']
+EXAMPLE_CLASSIFICATIONS: tuple[ExampleClassification, ...] = (FIRST_PARTY, COMPETITOR)
 
 #: How many examples a request returns by default, and at most.
 DEFAULT_LIMIT = 20
@@ -71,12 +78,21 @@ def _example(row: Mapping[str, Any], answer: Answer, sighting: Sighting) -> dict
     }
 
 
-def _row_examples(row: Mapping[str, Any], sentiment: str, provider: str | None) -> list[dict[str, Any]]:
-    """The first-party sightings labelled ``sentiment`` in the answer ``row`` holds (none when it is no answer)."""
+def _row_examples(
+    row: Mapping[str, Any],
+    sentiment: str,
+    provider: str | None,
+    classification: ExampleClassification,
+) -> list[dict[str, Any]]:
+    """The ``classification`` sightings labelled ``sentiment`` in the answer ``row`` holds (none when it is no answer)."""
     answer = answer_from_row(row)
     if answer is None or provider not in (None, answer.provider):
         return []
-    return [_example(row, answer, sighting) for sighting in answer.first_party() if sighting.sentiment == sentiment]
+    return [
+        _example(row, answer, sighting)
+        for sighting in answer.sightings
+        if sighting.classification == classification and sighting.sentiment == sentiment
+    ]
 
 
 def sentiment_examples(
@@ -84,15 +100,17 @@ def sentiment_examples(
     sentiment: str,
     *,
     provider: str | None = None,
+    classification: ExampleClassification = FIRST_PARTY,
     limit: int = DEFAULT_LIMIT,
 ) -> tuple[int, list[dict[str, Any]]]:
-    """How many first-party sightings in ``rows`` are labelled ``sentiment``, and the first ``limit`` of them.
+    """How many ``classification`` sightings in ``rows`` are labelled ``sentiment``, and the first ``limit`` of them.
 
-    ``provider`` keeps one AI engine's answers. Examples are ordered newest
+    ``classification`` is each sighting's stored classification, first-party
+    by default. ``provider`` keeps one AI engine's answers. Examples are ordered newest
     run first, then by keyword, provider and brand (keyword and brand
     case-insensitively).
     """
-    examples = [example for row in rows for example in _row_examples(row, sentiment, provider)]
+    examples = [example for row in rows for example in _row_examples(row, sentiment, provider, classification)]
     examples.sort(key=lambda example: (example['keyword'].lower(), example['provider'], example['brand'].lower()))
     examples.sort(key=lambda example: example['timestamp'], reverse=True)
     return len(examples), examples[:limit]
@@ -102,7 +120,9 @@ __all__ = [
     'ANSWER_TEXT_CAP',
     'DEFAULT_LIMIT',
     'EXAMPLE_ATTRIBUTE_NAMES',
+    'EXAMPLE_CLASSIFICATIONS',
     'EXAMPLE_PROJECTION',
     'MAX_LIMIT',
+    'ExampleClassification',
     'sentiment_examples',
 ]

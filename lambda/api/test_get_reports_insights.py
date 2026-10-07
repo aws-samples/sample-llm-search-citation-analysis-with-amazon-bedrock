@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from decimal import Decimal
@@ -159,7 +160,44 @@ class TestWindow:
 
 class TestFacts:
     def test_groups_the_facts_by_kind(self, report: ScopedReport):
-        assert list(report.body(FARO)['facts']) == ['engines', 'portfolio', 'stability']
+        assert list(report.body(FARO)['facts']) == [
+            'engines', 'prompt_engine', 'citation_ownership', 'owned_pages', 'competitor_caveats', 'portfolio', 'stability',
+        ]
+
+    def test_places_the_brand_per_keyword_and_engine_of_the_latest_runs(self, report: ScopedReport):
+        prompt_engine = report.body(FARO)['facts']['prompt_engine']
+
+        assert [(row['keyword'], row['positions'], row['lost_engines']) for row in prompt_engine['keywords']] == [
+            ('faro spa weekend', {'gemini': None, 'openai': 1}, ['gemini']),
+            ('faro lighthouse hotel', {'openai': 1}, []),
+        ]
+
+    def test_splits_the_citations_by_the_competitor_domains_of_the_brand_config(self, insights: ModuleType, history_since: MagicMock):
+        config = {**OWNED, 'competitor_domains': {'Rival Inn': ['rival-inn.com']}}
+        rows = {**SEARCH_ROWS, 'faro lighthouse hotel': [
+            result('faro lighthouse hotel', 'openai', [brand('Hotel Faro', 'first_party')], citations=['https://rival-inn.com/spa', 'https://guide.pt/faro']),
+        ]}
+        with _wired(insights, brand_config=config, search_rows=rows) as wired:
+            ownership = wired.body(FARO)['facts']['citation_ownership']
+
+        assert ownership['engines'][1] == {
+            'engine': 'openai', 'answers': 2, 'citations': 3, 'owned': 1, 'competitors': {'Rival Inn': 1}, 'third_party': 1,
+        }
+
+    def test_counts_every_non_owned_citation_as_third_party_without_competitor_domains(self, report: ScopedReport):
+        ownership = report.body(FARO)['facts']['citation_ownership']
+
+        assert (ownership['competitors_configured'], [(row['engine'], row['owned'], row['third_party']) for row in ownership['engines']]) == (
+            False, [('gemini', 0, 0), ('openai', 2, 0)],
+        )
+
+    def test_lists_the_most_cited_owned_page(self, report: ScopedReport):
+        pages = report.body(FARO)['facts']['owned_pages']['pages']
+
+        assert pages == [{'url': 'hotel-faro.com/rooms', 'section': 'hotel-faro.com/rooms', 'is_document': False, 'citations': 2, 'engines': ['openai']}]
+
+    def test_counts_the_caveats_of_each_competitor(self, report: ScopedReport):
+        assert [(row['name'], row['mentions']) for row in report.body(FARO)['facts']['competitor_caveats']] == [('Rival Inn', 1)]
 
     def test_names_the_play_each_engine_calls_for(self, report: ScopedReport):
         engines = report.body(FARO)['facts']['engines']
@@ -217,8 +255,31 @@ class TestInsights:
             'insights_engine_playbook',
         )
 
-    def test_reserves_the_narrative(self, report: ScopedReport):
+    def test_has_no_narrative_while_none_is_stored(self, report: ScopedReport):
         assert report.body(FARO)['narrative'] is None
+
+
+class TestNarrative:
+    def test_reads_the_narrative_stored_for_the_groups_latest_run(
+        self, report: ScopedReport, insights: ModuleType, monkeypatch: pytest.MonkeyPatch,
+    ):
+        stored = {'run_timestamp': RUN_TS, 'insights': [], 'recommendations': [], 'dropped': 0}
+        loader = MagicMock(return_value=stored)
+        monkeypatch.setattr(insights, 'load_narrative', loader)
+
+        body = report.body(FARO)
+
+        assert (body['narrative'], loader.call_args.args) == (stored, ('group#faro', RUN_TS))
+
+    def test_reads_no_narrative_for_a_scope_that_is_not_a_group(
+        self, report: ScopedReport, insights: ModuleType, monkeypatch: pytest.MonkeyPatch,
+    ):
+        loader = MagicMock(return_value={'run_timestamp': RUN_TS})
+        monkeypatch.setattr(insights, 'load_narrative', loader)
+
+        body = report.body({'keyword': 'faro spa weekend'})
+
+        assert (body['narrative'], loader.call_count) == (None, 0)
 
 
 class TestReads:
@@ -237,3 +298,48 @@ class TestReads:
 
         assert json.loads(json.dumps(body, allow_nan=False)) == body
         assert body['facts']['stability'] == [{**STABILITY[1], 'runs': 1, 'position_min': 2.0, 'position_max': 2.0, 'position_range': 0.0, 'unstable': False}]
+
+
+# ---------------------------------------------------------------------------
+# Budget (requirement 11.3): a group at the 100-keyword report cap, each keyword
+# answered by four engines for three personas in two runs, every answer naming
+# five brands and citing eight URLs.
+# ---------------------------------------------------------------------------
+
+CAP_ENGINES = ('openai', 'perplexity', 'gemini', 'claude')
+CAP_PERSONAS = ('default', 'family', 'business')
+CAP_RUNS = (OLD_TS, '2026-09-18T10:00:00Z')
+#: Seconds the in-memory work may take at the cap: a fraction of API Gateway's 29-second limit, leaving the reads room.
+CAP_BUDGET_SECONDS = 5.0
+CAP_BRANDS = [
+    brand('Hotel Faro', 'first_party', rank=2),
+    brand('Faro Spa', 'first_party', rank=4, sentiment='mixed'),
+    {**brand('Rival Inn', 'competitor', rank=1, sentiment='negative'), 'sentiment_reason': 'Dated rooms'},
+    brand('Casa Mar', 'competitor', rank=3, sentiment='mixed'),
+    brand('Guest House', 'other', rank=5),
+]
+CAP_CITATIONS = [
+    'https://www.hotel-faro.com/rooms', 'https://hotel-faro.com/files/brochure.pdf', 'https://rival-inn.com/spa',
+    'https://casa-mar.pt/', 'https://guide.pt/faro', 'https://booking.example/faro', 'https://blog.example/a', 'https://news.example/b',
+]
+
+
+def _cap_rows(keyword: str) -> list[dict[str, Any]]:
+    return [
+        result(keyword, engine, CAP_BRANDS, timestamp=run, citations=CAP_CITATIONS, query_prompt_id=persona)
+        for run in CAP_RUNS for engine in CAP_ENGINES for persona in CAP_PERSONAS
+    ]
+
+
+class TestBudget:
+    def test_answers_a_group_at_the_keyword_cap_well_inside_the_api_gateway_limit(self, insights: ModuleType, history_since: MagicMock):
+        keywords = [f'faro keyword {index:03}' for index in range(100)]
+        active = [{'id': f'kw-{index}', 'keyword': keyword, 'status': 'active', 'group_ids': {'faro'}} for index, keyword in enumerate(keywords)]
+        config = {**OWNED, 'competitor_domains': {'Rival Inn': ['rival-inn.com'], 'Casa Mar': ['casa-mar.pt']}}
+        with _wired(insights, brand_config=config, search_rows={keyword: _cap_rows(keyword) for keyword in keywords}, active=active) as wired:
+            started = time.perf_counter()
+            body = wired.body(FARO)
+            elapsed = time.perf_counter() - started
+
+        assert (body['keywords_with_data'], len(body['facts']['prompt_engine']['keywords']), body['facts']['prompt_engine']['omitted']) == (100, 50, 50)
+        assert elapsed < CAP_BUDGET_SECONDS

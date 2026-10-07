@@ -24,6 +24,7 @@ import pytest
 from auth import Caller, verify_claims
 
 from testing.mcp_result_fixtures import HOSTED_LOGIN_URL, READ_SCOPE, RESOURCE_URL, STAGE_URL, WRITE_SCOPE
+from testing.mcp_state_fixtures import FakeStateTable, install_fake_table
 from testing.module_loader import load_handler_module
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -42,6 +43,7 @@ API_FUNCTIONS = {
     'brand-config': 'CitationAnalysis-BrandConfig',
     'brand-mentions': 'CitationAnalysis-BrandMentions',
     'persona-rankings': 'CitationAnalysis-PersonaRankings',
+    'content-studio': 'CitationAnalysis-API-ContentStudio',
 }
 MCP_ENV = {
     'MCP_ISSUER': ISSUER,
@@ -52,6 +54,8 @@ MCP_ENV = {
     'MCP_HOSTED_LOGIN_URL': HOSTED_LOGIN_URL,
     'MCP_API_FUNCTIONS': json.dumps(API_FUNCTIONS),
     'MCP_PINNED_TOOLS': '',
+    'MCP_STATE_TABLE': 'test-mcp-state',
+    'MCP_LIMITS': '{}',
 }
 
 ClaimsFactory = Callable[..., dict[str, Any]]
@@ -64,6 +68,11 @@ def mcp_env() -> Iterator[dict[str, str]]:
     with patch.dict(os.environ, MCP_ENV):
         yield MCP_ENV
 
+
+@pytest.fixture(autouse=True)
+def state_table(monkeypatch: pytest.MonkeyPatch) -> FakeStateTable:
+    """An in-memory ``CitationAnalysis-McpState``, so no test reaches DynamoDB once ``MCP_STATE_TABLE`` is set."""
+    return install_fake_table(monkeypatch)
 
 
 @pytest.fixture

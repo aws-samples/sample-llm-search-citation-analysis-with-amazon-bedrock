@@ -11,6 +11,8 @@ import { DomainList } from './DomainList';
 import { PromptEditor } from './PromptEditor';
 import { FirstPartyBrandsSection } from './FirstPartyBrandsSection';
 import { CompetitorBrandsSection } from './CompetitorBrandsSection';
+import { CompetitorDomainsSection } from './CompetitorDomainsSection';
+import { mergeSuggestedDomains } from '../../hooks/competitorDomains';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import { CHECK_PATHS } from '../ui/iconPaths';
 import { CenteredMessage } from '../ui/CenteredState';
@@ -58,6 +60,7 @@ export const BrandConfigContent = ({
   // so a prop would have to be threaded from both to close the gap.
   const { isAdmin } = useIsAdmin();
   const {
+    setCompetitorDomains, setSuggestedCompetitorDomains,
     form, inputs, expansion, ui,
     setIndustry, setFirstPartyBrands, setFirstPartyDomains, setCompetitorBrands, setCustomEntityTypes,
     setIncludeSentiment, setIncludeRankingContext, setMaxBrands,
@@ -108,7 +111,12 @@ export const BrandConfigContent = ({
   const handleFindCompetitors = async () => {
     if (!onFindCompetitors || form.firstPartyBrands.length === 0) return;
     setExpandingBrand('competitor'); setExpansionTarget('competitor'); setExpansionAllResult(null); setCompetitorDiscoveryResult(null);
-    try { setCompetitorDiscoveryResult(await onFindCompetitors(form.firstPartyBrands, form.competitorBrands)); setPendingExpansionBrands([]); }
+    try {
+      const discovery = await onFindCompetitors(form.firstPartyBrands, form.competitorBrands);
+      setCompetitorDiscoveryResult(discovery);
+      setSuggestedCompetitorDomains(mergeSuggestedDomains(expansion.suggestedCompetitorDomains, discovery.suggested_domains));
+      setPendingExpansionBrands([]);
+    }
     catch (err) { console.error('Error finding competitors:', err); }
     finally { setExpandingBrand(null); }
   };
@@ -144,6 +152,7 @@ export const BrandConfigContent = ({
             <FirstPartyBrandsSection brands={form.firstPartyBrands} newBrand={inputs.newFirstParty} selectedBrand={expansion.selectedFirstPartyBrand} expandingBrand={expansion.expandingBrand} expansionResult={expansion.expansionAllResult} expansionTarget={expansion.expansionTarget} pendingBrands={expansion.pendingExpansionBrands} canExpand={!!onExpandAllBrands && canEdit} onNewBrandChange={setNewFirstParty} onAddBrand={addFirstPartyBrand} onRemoveBrand={(b) => setFirstPartyBrands(form.firstPartyBrands.filter(x => x !== b))} onSelectBrand={setSelectedFirstPartyBrand} onExpandAll={handleExpandAllFirstPartyBrands} onTogglePending={togglePendingBrand} onAcceptExpansion={() => acceptExpansionSuggestions('first_party')} onCancelExpansion={cancelExpansion} />
             <DomainList domains={form.firstPartyDomains} newDomain={inputs.newFirstPartyDomain} onNewDomainChange={setNewFirstPartyDomain} onAddDomain={addFirstPartyDomain} onRemoveDomain={(d) => setFirstPartyDomains(form.firstPartyDomains.filter(x => x !== d))} />
             <CompetitorBrandsSection brands={form.competitorBrands} newBrand={inputs.newCompetitor} selectedBrand={expansion.selectedCompetitorBrand} expandingBrand={expansion.expandingBrand} expansionResult={expansion.expansionAllResult} discoveryResult={expansion.competitorDiscoveryResult} expansionTarget={expansion.expansionTarget} pendingBrands={expansion.pendingExpansionBrands} hasFirstPartyBrands={form.firstPartyBrands.length > 0} canExpand={!!onExpandAllBrands && canEdit} canFindCompetitors={!!onFindCompetitors && canEdit} brandExists={brandExists} onNewBrandChange={setNewCompetitor} onAddBrand={addCompetitorBrand} onRemoveBrand={(b) => setCompetitorBrands(form.competitorBrands.filter(x => x !== b))} onSelectBrand={setSelectedCompetitorBrand} onExpandAll={handleExpandAllCompetitorBrands} onFindCompetitors={handleFindCompetitors} onTogglePending={togglePendingBrand} onAcceptExpansion={() => acceptExpansionSuggestions('competitor')} onCancelExpansion={cancelExpansion} />
+            <CompetitorDomainsSection competitors={form.competitorBrands} domains={form.competitorDomains} suggested={expansion.suggestedCompetitorDomains} onChange={setCompetitorDomains} />
             {form.industry === 'custom' && (
               <div className="bg-violet-50 rounded-lg p-4 border border-violet-200">
                 <h3 className="text-sm font-semibold text-violet-800 mb-2">Custom Entity Types</h3>

@@ -175,7 +175,7 @@ class TestGenericIndustryDefaults:
         status, payload = _fetch_config()
 
         assert status == 200
-        assert payload == stored_config
+        assert payload == {**stored_config, 'competitor_domains': {}}
 
     def test_resets_to_general_when_defaults_are_restored(self, monkeypatch) -> None:
         saved_config = {

@@ -86,6 +86,8 @@ export interface BrandConfig {
     competitors: string[];
   };
   first_party_domains?: string[];
+  /** Each tracked competitor's website domains (absent on configs saved before 2026-10). */
+  competitor_domains?: Record<string, string[]>;
   custom_entity_types: string[];
   custom_prompt_additions: string;
   industry_prompts: { [key: string]: string };

@@ -10,6 +10,7 @@ import type {
 import {
   DEFAULT_BRAND_INDUSTRY, DEFAULT_CONFIG, DEFAULT_PRESETS
 } from '../constants/brandConfigDefaults';
+import { decodeSuggestedDomains } from '../api/competitorDomainsDecoders';
 
 interface BrandConfigResponse {config?: BrandConfig;}
 
@@ -27,6 +28,7 @@ interface ExpandAllBrandsResponse {
 interface FindCompetitorsResponse {
   first_party_brands: string[];
   competitors?: string[];
+  competitor_details?: unknown;
   notes?: string;
   error?: string;
 }
@@ -216,6 +218,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
       (data) => ({
         first_party_brands: data.first_party_brands,
         competitors: data.competitors ?? [],
+        suggested_domains: decodeSuggestedDomains(data.competitor_details),
         notes: data.notes ?? '',
         error: data.error,
       }),
@@ -225,6 +228,7 @@ export const useBrandConfig = (api: BrandConfigApi = defaultBrandConfigApi) => {
         fallback: (error) => ({
           first_party_brands: firstPartyBrands,
           competitors: [],
+          suggested_domains: {},
           error,
         }),
       }

@@ -373,6 +373,29 @@ class TestCompleteSnapshotEvaluation:
         }
         assert result['alerts_created'] == 1
 
+    def test_names_the_run_and_the_snapshotted_groups_for_the_insights_step(self, worker_module) -> None:
+        _snapshots, _alerts, resource = _single_group_tables()
+
+        result = _run_complete_group(worker_module, resource, _ALERTS_DISABLED, None)
+
+        assert (result['run_timestamp'], result['snapshot_group_ids']) == (_RUN_TIMESTAMP, ['group-1'])
+
+    def test_names_no_snapshotted_group_when_the_only_group_is_partial(self, worker_module) -> None:
+        with _complete_group_patches(worker_module, fake_dynamodb_resource(), DEFAULT_ALERT_SETTINGS, None):
+            result = worker_module.handler(_event(), None)
+
+        assert result['snapshot_group_ids'] == []
+
+    def test_names_no_snapshotted_group_when_no_touched_group_is_complete(self, worker_module) -> None:
+        with (
+            patch.object(worker_module, 'query_active_keywords', return_value=[]),
+            patch.object(worker_module, '_load_groups', return_value=[{'id': 'group-1', 'name': 'Group One'}]),
+            patch.object(worker_module, 'dynamodb', fake_dynamodb_resource()),
+        ):
+            result = worker_module.handler(_event(), None)
+
+        assert (result['run_timestamp'], result['snapshot_group_ids']) == (_RUN_TIMESTAMP, [])
+
     @pytest.mark.parametrize('answers', [None, []], ids=['read failed', 'no engine answered'])
     def test_skips_group_when_a_keyword_has_no_exact_run_answers(self, worker_module, answers) -> None:
         resource = fake_dynamodb_resource()

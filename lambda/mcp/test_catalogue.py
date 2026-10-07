@@ -8,6 +8,9 @@ import json
 
 import pytest
 from catalogue import (
+    CONFIRMATION_ARGUMENT,
+    CONTENT_ANGLES,
+    GROUP_BRIEF_TYPE,
     META_TOOLS,
     OPERATIONS,
     InvalidArguments,
@@ -18,17 +21,25 @@ from catalogue import (
     validate_arguments,
 )
 
+from shared import content_brief, research_agent
+
 #: ``len(json.dumps(tools)) / 4``: the roadmap's 4,000 leaves this margin for tokenizer variance.
 TOKEN_BUDGET = 3500
 ROUTERS = {
     'keyword-mgmt', 'config-mgmt', 'execution-mgmt', 'stats-insights', 'citations-content',
-    'brand-config', 'brand-mentions', 'persona-rankings',
+    'brand-config', 'brand-mentions', 'persona-rankings', 'content-studio',
 }
 DIRECT_TOOLS = [
     'list_keyword_groups', 'list_keywords', 'get_brand_config', 'get_visibility', 'get_report', 'get_citations',
     'list_recommendations', 'manage_keywords',
 ]
 META_TOOL_NAMES = ['search_tools', 'describe_tool', 'call_tool']
+SPEND_TOOLS = [
+    ('estimate_run', 'run', True), ('start_run', 'run', True),
+    ('estimate_research', 'write', False), ('start_research', 'write', False),
+    ('estimate_content_brief', 'write', False), ('generate_content_brief', 'write', False),
+]
+SPEND_STARTS = ['start_run', 'start_research', 'generate_content_brief']
 
 
 def _names(tools) -> list[str]:
@@ -40,10 +51,17 @@ def _route(name: str, arguments: dict) -> Route:
     return tool.route(validate_arguments(tool.input_schema, arguments))
 
 
+def _idea(arguments: dict) -> dict:
+    """The Content Studio idea ``estimate_content_brief`` would post for ``arguments``."""
+    body = _route('estimate_content_brief', arguments).body
+    assert body is not None
+    return body['idea']
+
+
 @pytest.mark.parametrize('tool', OPERATIONS, ids=lambda tool: tool.name)
 class TestEveryEntry:
-    def test_declares_a_read_or_write_scope(self, tool):
-        assert tool.scope in ('read', 'write')
+    def test_declares_a_read_write_or_run_scope(self, tool):
+        assert tool.scope in ('read', 'write', 'run')
 
     def test_has_an_object_schema_that_rejects_unknown_properties(self, tool):
         assert (tool.input_schema['type'], tool.input_schema['additionalProperties']) == ('object', False)
@@ -68,8 +86,10 @@ class TestEveryEntry:
         assert route.path.startswith('/api/')
         assert route.method in ('GET', 'POST', 'PUT')
 
-    def test_reads_only_when_it_is_not_a_write_tool(self, tool):
-        assert tool.read_only is (tool.scope == 'read')
+    def test_reads_only_when_it_is_a_read_tool_or_an_estimate(self, tool):
+        is_estimate = tool.spend is not None and tool.spend.step == 'estimate'
+
+        assert tool.read_only is (tool.scope == 'read' or is_estimate)
 
 
 class TestToolsList:
@@ -100,10 +120,13 @@ class TestToolsList:
             '{"destructiveHint": false, "openWorldHint": false, "readOnlyHint": false}',
         }
 
-    def test_manage_keywords_and_call_tool_are_the_only_tools_not_marked_read_only(self):
+    def test_manage_keywords_the_spend_starts_and_call_tool_are_the_only_tools_not_marked_read_only(self):
         writers = [tool['name'] for tool in tool_listing(full=True) if tool['annotations']['readOnlyHint'] is False]
 
-        assert writers == ['manage_keywords', 'call_tool']
+        assert writers == ['manage_keywords', *SPEND_STARTS, 'call_tool']
+
+    def test_spend_operations_are_catalogue_only(self):
+        assert [tool.name for tool in OPERATIONS if tool.spend is not None and tool.direct] == []
 
     def test_meta_tools_require_their_lookup_argument(self):
         assert [meta['inputSchema'].get('required') for meta in META_TOOLS] == [['query'], ['name'], ['name']]
@@ -245,8 +268,8 @@ class TestManageKeywordsRouting:
         with pytest.raises(InvalidArguments, match=missing):
             _route('manage_keywords', arguments)
 
-    def test_is_the_only_write_tool_and_is_not_admin_gated(self):
-        writers = [tool for tool in OPERATIONS if tool.scope == 'write']
+    def test_manage_keywords_is_the_only_write_tool_besides_spend_and_is_not_admin_gated(self):
+        writers = [tool for tool in OPERATIONS if tool.scope == 'write' and tool.spend is None]
 
         assert [(tool.name, tool.admin) for tool in writers] == [('manage_keywords', False)]
 
@@ -270,3 +293,165 @@ class TestProviderShape:
         assert shape is not None
 
         assert shape(['not', 'a', 'dict']) == {'providers': []}
+
+
+class TestSpendEntries:
+    @pytest.mark.parametrize(('name', 'scope', 'admin'), SPEND_TOOLS, ids=[entry[0] for entry in SPEND_TOOLS])
+    def test_spend_operations_require_their_scope_and_admin_flag(self, name, scope, admin):
+        tool = find_operation(name)
+
+        assert (tool.scope, tool.admin) == (scope, admin)
+
+    @pytest.mark.parametrize('name', SPEND_STARTS)
+    def test_every_start_requires_the_confirmation_token(self, name):
+        assert CONFIRMATION_ARGUMENT in find_operation(name).input_schema['required']
+
+    @pytest.mark.parametrize('name', ['estimate_run', 'estimate_research', 'estimate_content_brief'])
+    def test_every_estimate_rejects_a_confirmation_token(self, name):
+        with pytest.raises(InvalidArguments, match='Unknown argument\\(s\\): confirmation_token'):
+            validate_arguments(find_operation(name).input_schema, {CONFIRMATION_ARGUMENT: 'x'})
+
+    @pytest.mark.parametrize('name', ['estimate_run', 'estimate_research', 'estimate_content_brief'])
+    def test_every_estimate_tells_the_model_to_wait_for_approval(self, name):
+        assert 'wait for approval' in find_operation(name).description
+
+    @pytest.mark.parametrize(('estimate', 'start'), [
+        ('estimate_run', 'start_run'), ('estimate_research', 'start_research'),
+        ('estimate_content_brief', 'generate_content_brief'),
+    ])
+    def test_an_estimate_and_its_start_build_the_same_api_request(self, estimate, start):
+        arguments = dict(find_operation(estimate).examples[0])
+
+        assert _route(estimate, arguments) == _route(start, {**arguments, CONFIRMATION_ARGUMENT: 'abc'})
+
+
+class TestRunRouting:
+    @pytest.mark.parametrize(('arguments', 'scope'), [
+        ({'group_id': 'grp_1'}, {'mode': 'groups', 'group_ids': ['grp_1']}),
+        ({'keyword_ids': ['kw_1', 'kw_2']}, {'mode': 'keywords', 'keyword_ids': ['kw_1', 'kw_2']}),
+        ({'all': True}, {'mode': 'all'}),
+    ], ids=['group', 'ids', 'all'])
+    def test_posts_the_scope_descriptor_to_trigger_keyword_analysis(self, arguments, scope):
+        route = _route('estimate_run', arguments)
+
+        assert (route.router, route.method, route.path, route.body) == (
+            'execution-mgmt', 'POST', '/api/trigger-keyword-analysis', {'scope': scope},
+        )
+
+    def test_does_not_accept_a_keyword_text_scope(self):
+        with pytest.raises(InvalidArguments, match='Unknown argument\\(s\\): keyword'):
+            _route('estimate_run', {'keyword': 'parador'})
+
+    def test_requires_a_scope(self):
+        with pytest.raises(InvalidArguments, match='Provide one of group_id, keyword_ids, all'):
+            _route('estimate_run', {})
+
+
+class TestResearchRouting:
+    def test_expand_posts_the_seed_industry_and_count(self):
+        route = _route('estimate_research', {'kind': 'expand', 'seed_keyword': 'parador', 'count': 10, 'url': 'ignored'})
+
+        assert (route.path, route.body) == ('/api/keyword-research/expand', {'seed_keyword': 'parador', 'count': 10})
+
+    def test_competitor_posts_the_url(self):
+        route = _route('estimate_research', {'kind': 'competitor', 'url': 'https://borealis.example/hotels'})
+
+        assert (route.path, route.body) == ('/api/keyword-research/competitor', {'url': 'https://borealis.example/hotels'})
+
+    def test_agent_posts_its_brief(self):
+        arguments = {'kind': 'agent', 'seed': 'hotels in galicia', 'dimensions': ['location'], 'max_rounds': 1}
+
+        route = _route('estimate_research', arguments)
+
+        assert (route.path, route.body) == (
+            '/api/keyword-research/agent', {'seed': 'hotels in galicia', 'dimensions': ['location'], 'max_rounds': 1},
+        )
+
+    def test_agent_names_the_arguments_it_is_missing(self):
+        with pytest.raises(InvalidArguments, match='agent needs dimensions'):
+            _route('estimate_research', {'kind': 'agent', 'seed': 'hotels'})
+
+    def test_agent_bounds_match_the_research_agent(self):
+        properties = find_operation('estimate_research').input_schema['properties']
+
+        assert (properties['max_rounds']['maximum'], properties['target_count']['minimum'], properties['target_count']['maximum']) == (
+            research_agent.AGENT_MAX_ROUNDS, research_agent.AGENT_MIN_TARGET_COUNT, research_agent.AGENT_MAX_TARGET_COUNT,
+        )
+
+
+class TestContentBriefRouting:
+    def test_posts_a_group_brief_idea_with_the_angles_built_in_template(self):
+        idea = _idea({'group_id': 'grp_1'})
+
+        assert {key: value for key, value in idea.items() if key != 'id'} == {
+            'type': 'group_brief', 'scope': {'mode': 'groups', 'group_ids': ['grp_1']},
+            'content_angle': 'create_new_landing_page', 'template_id': 'builtin-create-new-landing-page',
+            'output_language': 'English',
+        }
+
+    def test_passes_the_page_to_improve_and_the_chosen_template(self):
+        arguments = {'keyword_ids': ['kw_1'], 'content_angle': 'improve_current_url',
+                     'landing_url': 'https://aurora.example/miles', 'template_id': 'tpl_9'}
+
+        idea = _idea(arguments)
+
+        assert (idea['landing_url'], idea['template_id'], idea['scope']) == (
+            'https://aurora.example/miles', 'tpl_9', {'mode': 'keywords', 'keyword_ids': ['kw_1']},
+        )
+
+    def test_names_the_same_brief_with_the_same_idea_id(self):
+        assert _idea({'group_id': 'grp_1'})['id'] == _idea({'group_id': 'grp_1'})['id']
+
+    def test_names_a_brief_in_another_language_with_another_idea_id(self):
+        assert _idea({'group_id': 'grp_1'})['id'] != _idea({'group_id': 'grp_1', 'output_language': 'Spanish'})['id']
+
+    def test_refuses_the_all_keywords_scope_content_studio_does_not_take(self):
+        with pytest.raises(InvalidArguments, match='Unknown argument\\(s\\): all'):
+            _route('estimate_content_brief', {'all': True})
+
+    def test_type_and_angles_match_content_studio(self):
+        assert (GROUP_BRIEF_TYPE, CONTENT_ANGLES) == (content_brief.GROUP_BRIEF_TYPE, content_brief.GROUP_BRIEF_MODES)
+
+
+class TestReadRouting:
+    @pytest.mark.parametrize(('name', 'arguments', 'request_line'), [
+        ('get_run_status', {'execution_arn': 'arn:aws:states:r:1:execution:wf:run-1'},
+         ('execution-mgmt', '/api/executions/arn:aws:states:r:1:execution:wf:run-1', '/api/executions/{id}')),
+        ('get_research_job', {'job_id': 'job_7'}, ('keyword-mgmt', '/api/keyword-research/job_7', '/api/keyword-research/{id}')),
+        ('get_content_item', {'content_id': 'cs_7'},
+         ('content-studio', '/api/content-studio/status/cs_7', '/api/content-studio/status/{id}')),
+    ], ids=['run', 'research', 'content'])
+    def test_item_reads_put_the_id_in_the_path_and_path_parameters(self, name, arguments, request_line):
+        route = _route(name, arguments)
+
+        assert (route.router, route.path, route.resource) == request_line
+        assert route.path_params == {'id': next(iter(arguments.values()))}
+
+    def test_report_insights_requires_a_scope(self):
+        with pytest.raises(InvalidArguments, match='Provide one of'):
+            _route('get_report_insights', {'days': 30})
+
+    def test_report_insights_passes_scope_and_days(self):
+        route = _route('get_report_insights', {'group_id': 'grp_1', 'days': 30})
+
+        assert (route.path, route.query) == ('/api/reports/insights', {'days': '30', 'group_id': 'grp_1'})
+
+    def test_alerts_pass_status_and_limit(self):
+        assert _route('list_alerts', {'status': 'all', 'limit': 5}).query == {'status': 'all', 'limit': '5'}
+
+
+class TestCustomReportSelection:
+    def test_selects_the_report_with_the_requested_id(self):
+        select = find_operation('get_custom_report').select
+        assert select is not None
+
+        report = select({'reports': [{'id': 'rpt_1', 'title': 'A'}, {'id': 'rpt_2', 'title': 'B'}]}, {'report_id': 'rpt_2'})
+
+        assert report == {'report': {'id': 'rpt_2', 'title': 'B'}}
+
+    def test_raises_not_found_for_an_unknown_id(self):
+        select = find_operation('get_custom_report').select
+        assert select is not None
+
+        with pytest.raises(LookupError, match='No custom report with id rpt_9'):
+            select({'reports': []}, {'report_id': 'rpt_9'})
