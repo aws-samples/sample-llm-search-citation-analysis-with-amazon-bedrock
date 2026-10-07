@@ -1,6 +1,6 @@
 {
   "name": "citation-analysis-system",
-  "version": "2.30.1",
+  "version": "2.31.0",
   "description": "Serverless citation analysis system using AWS CDK",
   "scripts": {
     "build": "tsc",
@@ -19,7 +19,7 @@
     "validate:python": "bash scripts/validate-python.sh",
     "cdk": "cdk",
     "deploy": "./scripts/deploy.sh",
-    "deploy:cdk": "cdk deploy --require-approval never",
+    "deploy:cdk": "cdk deploy --all --require-approval never",
     "deploy:full": "npm run deploy:cdk && npm run clear-cache",
     "clear-cache": "bash scripts/clear-cloudfront-cache.sh",
     "synth": "cdk synth",

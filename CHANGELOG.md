@@ -9,6 +9,62 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.31.0] - 2026-10-07
+
+### Added
+
+- **Insights.** `GET /api/reports/insights` computes, from the same KPI engine as every other page, the facts behind
+  three kinds of finding for a scope (one keyword, a keyword group or every keyword): the *play* each AI engine
+  calls for (get cited, get ranked first, both, or defend, from its top-1 share and citation rate against fixed
+  thresholds), the first-party brands measured against the best of them (positions behind, sentiment points below,
+  marked weak past a gap), and, for a keyword group, how far each keyword's position swung across the runs of the
+  window and how often its mention flipped. Every insight carries its severity and the numbers it rests on, so what
+  it says is what the report shows. Rules and thresholds are named constants in `lambda/shared/insights_engine.py`;
+  the response has a `narrative` field reserved for a later phase (always `null`).
+- **Insight blocks in custom reports.** A new *Insights* category offers *Engine playbook*, *Brand portfolio* and
+  (for a group scope) *Run stability*, each a table of the facts with the derived insights called out above it.
+- **Insights on the Visibility tab.** A panel reads out the scope's three most pressing insights, most severe first,
+  with a link to build a report around them.
+- **Scope for Prompt Insights, Citation Gaps and the Action Center.** The three views share one scope picker (every
+  keyword, a keyword group or one keyword, as on the Visibility tab); `GET /api/prompt-insights` and
+  `GET /api/recommendations` take the scope parameters every KPI endpoint takes (`keyword`, `group_id`,
+  `keyword_ids`, `scope=all`) and, without one, behave as before. A scoped recommendation prompt names the keywords
+  it covers, so the model recommends for that scope only.
+- **MCP server (preview).** A second stack, `CitationAnalysisMcpStack`, exposes the dashboard's data to MCP clients
+  such as Claude.ai, ChatGPT and Amazon Quick: a Streamable HTTP endpoint (`POST /mcp` on its own REST API,
+  `CitationAnalysis-McpApi`) backed by one Lambda that replays each tool call against the existing API handler
+  Lambdas as the signed-in user, so every permission check and every number stays the dashboard's. Eight direct
+  tools (`list_keyword_groups`, `list_keywords`, `get_brand_config`, `get_visibility`, `get_report`,
+  `get_citations`, `list_recommendations`, `manage_keywords`) plus `search_tools` → `describe_tool` → `call_tool` over
+  a catalogue of ten more, so `tools/list` stays small; `-c mcpPinnedTools` promotes catalogue entries. Every tool
+  result carries the data twice, as `structuredContent` and as JSON in the text block, because some hosts (Kiro
+  among them) show the model only the text. Sign-in is OAuth 2.1 with PKCE through a Cognito Managed Login domain
+  (`citation-analysis-<account>`) and a public `mcp` app client, 1-hour access tokens and 90-day refresh tokens.
+  The Cognito resource server is identified by the MCP endpoint URL, so the scopes are `<McpUrl>/read`,
+  `<McpUrl>/write` and `<McpUrl>/run` and an RFC 8707 `resource` parameter naming the endpoint, which MCP clients
+  send, binds the access token's `aud` to it (Cognito refuses custom scopes for a resource bound to any other
+  identifier). The Lambda checks the token's issuer, client, use and audience behind the Cognito authorizer and
+  answers anonymous calls with `401` and the `WWW-Authenticate` resource-metadata pointer (RFC 9728). Register each
+  client's callback URL with `-c mcpRedirectUris`. The stack's outputs (`McpUrl`, `McpClientId`, `McpAuthorizeUrl`,
+  `McpTokenUrl`, `McpResourceMetadataUrl`) are what a client's connection form asks for; Kiro connects with
+  `oauth.clientId` set to `McpClientId` and needs no dynamic client registration. Proven live from Kiro CLI (chat and
+  ACP) on 7 October 2026. Reserved concurrency of 10.
+
+### Changed
+
+- **Two stacks.** `npm run deploy`, `npm run deploy:cdk` and `scripts/deploy.sh` run `cdk deploy --all`; the MCP
+  stack depends on the main stack and can be destroyed on its own. The main stack sits just under CloudFormation's
+  500-resource limit, which is why the MCP server has its own API. Only the user pool and the router Lambdas cross
+  the stack boundary; the MCP stack builds its own version of the shared layer (`CitationAnalysis-McpSharedLayer`)
+  from the same build output, because a layer version's ARN changes with every rebuild and CloudFormation refuses to
+  update an exported value another stack imports.
+
+### Fixed
+
+- **A scope with no active keyword no longer widens the Executive Summary.** The overview endpoint returned the
+  recommendations of every keyword for a group whose keywords are all paused, because an empty keyword list read as
+  "discover the active keywords"; it now returns none, and `GET /api/reports/insights` refuses such a scope.
+
 ## [2.30.1] - 2026-10-07
 
 ### Fixed

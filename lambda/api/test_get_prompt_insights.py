@@ -127,14 +127,26 @@ def _search_table(results_by_keyword: dict[str, list[dict[str, Any]]], failing: 
     return table
 
 
+def _active_keyword(keyword: str) -> dict[str, Any]:
+    """The Keywords-table row of an active keyword; it belongs to the group named by its last word."""
+    return {'id': keyword, 'keyword': keyword, 'status': 'active', 'group_ids': {keyword.split()[-1]}}
+
+
 def _dynamodb(
     module: ModuleType,
     keywords: list[str],
     results_by_keyword: dict[str, list[dict[str, Any]]],
     failing: Collection[str] = (),
 ) -> MagicMock:
-    """A resource whose Keywords table lists `keywords` and whose SearchResults table serves `results_by_keyword`."""
-    keywords_table = fake_table(scan={'Items': [{'keyword': keyword} for keyword in keywords]})
+    """A resource whose Keywords table lists `keywords` and whose SearchResults table serves `results_by_keyword`.
+
+    The Keywords table answers the unscoped `scan` and the `StatusIndex` query a
+    scope resolves through with the same keywords.
+    """
+    keywords_table = fake_table(
+        scan={'Items': [{'keyword': keyword} for keyword in keywords]},
+        query={'Items': [_active_keyword(keyword) for keyword in keywords]},
+    )
     return fake_dynamodb_resource(by_name={
         module.KEYWORDS_TABLE: keywords_table,
         module.SEARCH_RESULTS_TABLE: _search_table(results_by_keyword, failing),
@@ -155,6 +167,13 @@ def _analyze(
         return module.analyze_prompt_brand_correlation(config)
 
 
+def _handle(module: ModuleType, resource: MagicMock, query: dict[str, str] | None, config: dict[str, Any]) -> tuple[int, Any]:
+    """GET /api/prompt-insights with `query` against `resource`: `(status, decoded body)`."""
+    event = api_gateway_event('GET', '/api/prompt-insights', query=query)
+    with patch.object(module, 'dynamodb', resource), patch.object(module, 'get_brand_config', return_value=config):
+        return parse_response(module.handler(event, None))
+
+
 def _get_insights(
     module: ModuleType,
     results_by_keyword: dict[str, list[dict[str, Any]]],
@@ -162,12 +181,7 @@ def _get_insights(
     config: dict[str, Any] = _CONFIG,
 ) -> tuple[int, Any]:
     """GET /api/prompt-insights with `query` against the staged rows: `(status, decoded body)`."""
-    event = api_gateway_event('GET', '/api/prompt-insights', query=query)
-    with (
-        patch.object(module, 'dynamodb', _dynamodb(module, list(results_by_keyword), results_by_keyword)),
-        patch.object(module, 'get_brand_config', return_value=config),
-    ):
-        return parse_response(module.handler(event, None))
+    return _handle(module, _dynamodb(module, list(results_by_keyword), results_by_keyword), query, config)
 
 
 def _search_queries(module: ModuleType, keywords: list[str]) -> list[Any]:
@@ -574,3 +588,81 @@ class TestHandler:
         status, body = _get_insights(insights_module, results, config=config)
 
         assert (status, body) == (400, {'error': message})
+
+
+def _prompt_keywords(body: dict[str, Any]) -> set[str]:
+    """Every keyword any bucket of `body` names."""
+    return {prompt['keyword'] for bucket in _BUCKETS for prompt in body[bucket]}
+
+
+def _tables_read_by(module: ModuleType, query: dict[str, str] | None) -> tuple[MagicMock, MagicMock]:
+    """The `(keywords, search results)` tables after GET /api/prompt-insights with `query` over the mixed results."""
+    results = _mixed_results()
+    resource = _dynamodb(module, list(results), results)
+    _handle(module, resource, query, _CONFIG)
+    return resource.Table(module.KEYWORDS_TABLE), resource.Table(module.SEARCH_RESULTS_TABLE)
+
+
+def _analysis_arguments(module: ModuleType, query: dict[str, str] | None) -> tuple[Any, ...]:
+    """The positional arguments the handler passed `analyze_prompt_brand_correlation` for `query`."""
+    analysis = MagicMock(return_value={'error': 'stubbed'})
+    with patch.object(module, 'analyze_prompt_brand_correlation', analysis):
+        _tables_read_by(module, query)
+    analysis.assert_called_once()
+    return analysis.call_args.args
+
+
+class TestScope:
+    """The report scope (`keyword` | `group_id` | `keyword_ids` | `scope=all`): keywords belong to the group named by their last word."""
+
+    def test_analyzes_only_the_keywords_of_the_requested_group(self, insights_module):
+        _, body = _get_insights(insights_module, _mixed_results(), query={'group_id': 'shoes'})
+
+        assert _prompt_keywords(body) == {'best running shoes', 'trail running shoes'}
+        assert body['total_prompts_analyzed'] == 2
+
+    def test_never_mentions_a_keyword_outside_the_requested_group(self, insights_module):
+        _, body = _get_insights(insights_module, _mixed_results(), query={'group_id': 'plan'})
+
+        assert _prompt_keywords(body) == {'marathon training plan'}
+
+    def test_reads_the_scopes_partitions_without_scanning_the_keywords_table(self, insights_module):
+        keywords_table, search_table = _tables_read_by(insights_module, {'group_id': 'shoes'})
+
+        queried = [_queried_keyword(**query.kwargs) for query in search_table.query.call_args_list]
+        assert queried == ['best running shoes', 'trail running shoes']
+        keywords_table.scan.assert_not_called()
+
+    def test_hands_the_scopes_keywords_to_the_analysis(self, insights_module):
+        arguments = _analysis_arguments(insights_module, {'group_id': 'shoes'})
+
+        assert arguments == (_CONFIG, ['best running shoes', 'trail running shoes'])
+
+    def test_analyzes_one_keyword_for_a_keyword_scope(self, insights_module):
+        _, body = _get_insights(insights_module, _mixed_results(), query={'keyword': 'marathon training plan'})
+
+        assert ([prompt['keyword'] for prompt in body['opportunity_prompts']], body['total_prompts_analyzed']) == (
+            ['marathon training plan'], 1,
+        )
+
+    @pytest.mark.parametrize(('query', 'message'), [
+        pytest.param({'group_id': 'nope'}, 'No active keywords match the selected scope (1 group(s)).', id='unknown group'),
+        pytest.param(
+            {'keyword': 'best running shoes', 'scope': 'all'}, 'Use only one of keyword, group_id, keyword_ids, scope', id='two scopes',
+        ),
+    ])
+    def test_answers_400_on_the_scope_field_when_the_scope_cannot_be_applied(self, insights_module, query, message):
+        status, body = _get_insights(insights_module, _mixed_results(), query=query)
+
+        assert (status, body) == (400, {'error': message, 'field': 'scope'})
+
+    def test_scans_the_keywords_table_once_without_a_scope(self, insights_module):
+        keywords_table, _search_table = _tables_read_by(insights_module, None)
+
+        keywords_table.scan.assert_called_once_with(ProjectionExpression='keyword', Limit=500)
+        keywords_table.query.assert_not_called()
+
+    def test_hands_no_keywords_to_the_analysis_without_a_scope(self, insights_module):
+        arguments = _analysis_arguments(insights_module, None)
+
+        assert arguments == (_CONFIG, None)

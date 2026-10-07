@@ -7,6 +7,7 @@ import { usePersonaRankings } from '../../hooks/usePersonaRankings';
 import type {
   Keyword, ReportScope
 } from '../../types';
+import { InsightsSummary } from './InsightsSummary';
 import { VisibilityOverview } from './VisibilityOverview';
 import type { HistoryRangeDays } from './VisibilityHistory';
 import { PersonaComparisonChart } from './PersonaComparisonChart';
@@ -22,9 +23,9 @@ interface Props { readonly keywords: Array<Keyword>; }
 
 /**
  * Visibility dashboard. The scope selector picks one keyword, a keyword group
- * or every keyword; every scope gets the same overview (KPIs, history,
- * keywords, share of voice, brand leaderboard, AI engines, cited domains),
- * and a single keyword adds how each persona ranks the brands.
+ * or every keyword; every scope gets its top insights and the same overview
+ * (KPIs, history, keywords, share of voice, brand leaderboard, AI engines,
+ * cited domains), and a single keyword adds how each persona ranks the brands.
  */
 export function VisibilityDashboard({ keywords }: Props) {
   const [scope, setScope] = useState<ReportScope>(ALL_SCOPE);
@@ -90,6 +91,8 @@ export function VisibilityDashboard({ keywords }: Props) {
       {visError && !visLoading && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">{visError}</div>
       )}
+
+      {activeKeywords.length > 0 && <InsightsSummary scope={scope} days={rangeDays} />}
 
       {visibility && (
         <VisibilityOverview

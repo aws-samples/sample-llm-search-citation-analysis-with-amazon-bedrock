@@ -39,7 +39,7 @@ export function buildPromptInsightsResponse(
 }
 
 /** A prompt where the first party ranks first, ahead of the competitors. */
-export const HOTELS_WINNING_PROMPT: PromptInsight = {
+const HOTELS_WINNING_PROMPT: PromptInsight = {
   keyword: 'hotels',
   timestamp: '2026-01-01T00:00:00Z',
   status: 'winning',
@@ -54,3 +54,14 @@ export const HOTELS_WINNING_PROMPT: PromptInsight = {
     provider_coverage: 100,
   },
 };
+
+/** An answer whose only prompt is the winning "hotels" prompt. */
+export const WINNING_HOTELS_RESPONSE: PromptInsightsResponse = buildPromptInsightsResponse({
+  winning_prompts: [HOTELS_WINNING_PROMPT],
+  summary: {
+    winning_count: 1,
+    losing_count: 0,
+    opportunity_count: 0,
+    win_rate: 100,
+  },
+});

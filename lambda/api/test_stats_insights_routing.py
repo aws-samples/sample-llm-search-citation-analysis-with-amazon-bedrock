@@ -26,8 +26,9 @@ def router():
 @pytest.mark.parametrize(('resource', 'filename'), [
     ('/api/visibility/sentiment-examples', 'get-sentiment-examples.py'),
     ('/api/visibility', 'get-visibility-metrics.py'),
+    ('/api/reports/insights', 'get-reports-insights.py'),
 ])
-def test_routes_each_visibility_resource_to_its_own_handler(router, resource: str, filename: str) -> None:
+def test_routes_each_resource_to_its_own_handler(router, resource: str, filename: str) -> None:
     loaded: list[str] = []
 
     def load(_loader: HandlerLoader, name: str) -> MagicMock:

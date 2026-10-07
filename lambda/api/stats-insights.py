@@ -11,6 +11,7 @@ Consolidates 6 separate Lambdas into one to reduce CloudFormation resource count
 - GET /api/recommendations -> get-recommendations handler
 - GET /api/trends -> get-historical-trends handler
 - GET /api/reports/group-kpis -> get-group-kpi-history handler
+- GET /api/reports/insights -> get-reports-insights handler
 """
 
 import sys
@@ -36,6 +37,8 @@ ROUTE_MAP = {
     '/api/reports/overview': 'get-reports-overview.py',
     '/api/reports/competitor': 'get-reports-competitor.py',
     '/api/reports/group-kpis': 'get-group-kpi-history.py',
+    # No sibling prefix reaches it: /api/reports itself is not a route.
+    '/api/reports/insights': 'get-reports-insights.py',
 }
 
 handler = route_map_handler(__file__, ROUTE_MAP, __name__)

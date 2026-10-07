@@ -4,8 +4,10 @@ import {
 import type { CustomReportDays } from '../../../api/customReports';
 import { useBrandConfig } from '../../../hooks/useBrandConfig';
 import { useGroupKpiHistory } from '../../../hooks/useGroupKpiHistory';
+import { useReportInsights } from '../../../hooks/useReportInsights';
 import type { ReportScope } from '../../../types';
 import type { GroupKpiHistoryResponse } from '../../../types/domain/groupKpiHistory';
+import type { ReportInsightsResponse } from '../../../types/domain/insights';
 import {
   decodeReportScope, encodeReportScope
 } from '../../ui/reportScope';
@@ -26,7 +28,7 @@ import {
  * however many blocks read it, and not at all when none does.
  */
 
-export type SourceId = 'scope' | 'overview' | 'groupKpis' | 'competitor' | 'contentPlan' | 'deepDive';
+export type SourceId = 'scope' | 'overview' | 'groupKpis' | 'competitor' | 'contentPlan' | 'deepDive' | 'insights';
 
 /** What the reader picked on the report page. */
 interface ReportInputs {
@@ -59,6 +61,9 @@ export interface CompetitorSource {
 
 type DeepDiveSource = ReturnType<typeof useKeywordDeepDive> & { readonly keyword: string };
 
+/** `/reports/insights` for the scope over the report period, as the insights blocks read it. */
+export interface InsightsSource extends ReportSlice<ReportInsightsResponse> {readonly ready: boolean;}
+
 export interface ReportSources {
   readonly inputs: ReportInputs;
   /** `/visibility` and `/trends` for the scope, as the scope reports read them. */
@@ -71,6 +76,8 @@ export interface ReportSources {
   readonly contentPlan: ReturnType<typeof useContentActionPlan> | null;
   /** Everything the Keyword Deep Dive reads for one keyword. */
   readonly deepDive: DeepDiveSource | null;
+  /** The engine plays, brand portfolio and run stability of the scope. */
+  readonly insights: InsightsSource | null;
 }
 
 const ReportSourcesContext = createContext<ReportSources | null>(null);
@@ -208,6 +215,25 @@ function DeepDiveSourceLayer({
   );
 }
 
+function InsightsSourceLayer({
+  inputs, children
+}: SourceProps) {
+  const {
+    data, loading, error
+  } = useReportInsights(inputs.scope, inputs.days);
+  const slice: ReportSlice<ReportInsightsResponse> = {
+    data,
+    loading,
+    error,
+  };
+  const ready = useReportReady([slice]);
+  const insights: InsightsSource = {
+    ...slice,
+    ready,
+  };
+  return <SourceLayer patch={{ insights }}>{children}</SourceLayer>;
+}
+
 const SOURCE_COMPONENTS: Readonly<Record<SourceId, ComponentType<SourceProps>>> = {
   scope: ScopeSource,
   overview: OverviewSource,
@@ -215,6 +241,7 @@ const SOURCE_COMPONENTS: Readonly<Record<SourceId, ComponentType<SourceProps>>> 
   competitor: CompetitorSourceLayer,
   contentPlan: ContentPlanSource,
   deepDive: DeepDiveSourceLayer,
+  insights: InsightsSourceLayer,
 };
 
 /**
@@ -222,7 +249,7 @@ const SOURCE_COMPONENTS: Readonly<Record<SourceId, ComponentType<SourceProps>>> 
  * a new scope, which can add or drop the scoped sources, never remounts and
  * refetches them.
  */
-const SOURCE_ORDER: readonly SourceId[] = ['contentPlan', 'competitor', 'scope', 'overview', 'groupKpis', 'deepDive'];
+const SOURCE_ORDER: readonly SourceId[] = ['contentPlan', 'competitor', 'scope', 'overview', 'groupKpis', 'deepDive', 'insights'];
 
 interface ProviderProps {
   readonly sources: ReadonlySet<SourceId>;
@@ -241,6 +268,7 @@ export function ReportSourcesProvider({
     competitor: null,
     contentPlan: null,
     deepDive: null,
+    insights: null,
   };
   const tree = SOURCE_ORDER
     .filter((id) => sources.has(id))
@@ -253,6 +281,6 @@ export function ReportSourcesProvider({
 
 /** Every mounted source has settled: the page may print. */
 export function sourcesReady(sources: ReportSources): boolean {
-  return [sources.scope, sources.overview, sources.groupKpis, sources.competitor, sources.contentPlan, sources.deepDive]
+  return [sources.scope, sources.overview, sources.groupKpis, sources.competitor, sources.contentPlan, sources.deepDive, sources.insights]
     .every((source) => source === null || source.ready);
 }

@@ -1,5 +1,5 @@
 import {
-  describe, it, expect, vi, beforeEach 
+  describe, it, expect, vi 
 } from 'vitest';
 import {
   render, screen 
@@ -7,10 +7,15 @@ import {
 import { PromptInsights } from './PromptInsights';
 
 vi.mock('../../hooks/usePromptInsights', () => ({usePromptInsights: vi.fn(),}));
+vi.mock('../../hooks/useKeywordGroups');
 
 import { usePromptInsights } from '../../hooks/usePromptInsights';
+import { SCOPE_KEYWORDS } from '../ui/useKeywordScopeOptions-fixtures';
 import {
-  HOTELS_WINNING_PROMPT, buildPromptInsightsHookResult, buildPromptInsightsResponse 
+  describeScopeSelection, mockCorunaKeywordGroups, neverSettlingFetch
+} from './useScopeSelection-fixtures';
+import {
+  WINNING_HOTELS_RESPONSE, buildPromptInsightsHookResult, buildPromptInsightsResponse 
 } from './PromptInsights-fixtures';
 
 const mockUsePromptInsights = vi.mocked(usePromptInsights);
@@ -19,15 +24,12 @@ const mockUsePromptInsights = vi.mocked(usePromptInsights);
 function renderWithInsights(overrides: Parameters<typeof buildPromptInsightsHookResult>[0] = {}) {
   const hookResult = buildPromptInsightsHookResult(overrides);
   mockUsePromptInsights.mockReturnValue(hookResult);
-  render(<PromptInsights />);
+  mockCorunaKeywordGroups();
+  render(<PromptInsights keywords={SCOPE_KEYWORDS} />);
   return hookResult.fetchPromptInsights;
 }
 
 describe('PromptInsights', () => {
-  beforeEach(() => {
-    mockUsePromptInsights.mockReturnValue(buildPromptInsightsHookResult());
-  });
-
   describe('initial render', () => {
     it('renders title', () => {
       renderWithInsights();
@@ -70,19 +72,9 @@ describe('PromptInsights', () => {
 
   describe('with data', () => {
     it('renders prompt cards for winning prompts', () => {
-      renderWithInsights({
-        data: buildPromptInsightsResponse({
-          winning_prompts: [HOTELS_WINNING_PROMPT],
-          summary: {
-            winning_count: 1,
-            losing_count: 0,
-            opportunity_count: 0,
-            win_rate: 100,
-          },
-        }),
-      });
+      renderWithInsights({ data: WINNING_HOTELS_RESPONSE });
 
-      expect(screen.getByText('hotels')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'hotels' })).toBeInTheDocument();
     });
 
     it('shows the winning, losing and opportunity counts of the summary', () => {
@@ -107,5 +99,16 @@ describe('PromptInsights', () => {
 
       expect(screen.getByText(/No winning prompts found/)).toBeInTheDocument();
     });
+  });
+
+  describeScopeSelection({
+    renderIdle: () => renderWithInsights(),
+    renderShowingAnswer: () => renderWithInsights({
+      data: WINNING_HOTELS_RESPONSE,
+      fetchPromptInsights: neverSettlingFetch(),
+    }),
+    scopedHook: mockUsePromptInsights,
+    loadingText: 'Loading insights...',
+    answerMarker: () => screen.queryByText('Win Rate'),
   });
 });

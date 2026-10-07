@@ -17,11 +17,14 @@ import {
   pickCompetitor, ReportSourcesMissingError, ReportSourcesProvider, sourcesReady, type SourceId
 } from './reportSources';
 import {
-  BrandConfigProbe, mockBrandConfigWith, ReportSourcesProbe
+  BrandConfigProbe, buildInsightsSource, loadingInsightsSource, mockBrandConfigWith, ReportSourcesProbe
 } from './reportSources-fixtures';
+import { useReportInsights } from '../../../hooks/useReportInsights';
+import { buildReportInsightsHookResult } from '../../../hooks/useReportInsights-fixtures';
 
 vi.mock('../scopeReport/useScopeReportData', () => ({ useScopeReportData: vi.fn() }));
 vi.mock('../ExecutiveSummaryReport/useExecutiveSummary', () => ({ useExecutiveSummary: vi.fn() }));
+vi.mock('../../../hooks/useReportInsights', () => ({ useReportInsights: vi.fn() }));
 vi.mock('../CompetitorGapReport/useCompetitorGap', () => ({ useCompetitorGap: vi.fn() }));
 vi.mock('../../../hooks/useBrandConfig', () => ({ useBrandConfig: vi.fn() }));
 
@@ -65,6 +68,14 @@ describe('ReportSourcesProvider', () => {
     expect(useCompetitorGap).toHaveBeenCalledWith('Hotel Luna');
   });
 
+  it('feeds the insights source the reader\u2019s scope and period', () => {
+    vi.mocked(useReportInsights).mockReturnValue(buildReportInsightsHookResult(null));
+    const { container } = renderProvider('insights', <ReportSourcesProbe />);
+
+    expect(container).toHaveTextContent('insights');
+    expect(useReportInsights).toHaveBeenCalledWith({ kind: 'all' }, 90);
+  });
+
   it('refuses to be read outside a provider', () => {
     vi.spyOn(console, 'error').mockImplementation(vi.fn());
 
@@ -86,7 +97,12 @@ describe('sourcesReady', () => {
     expect(sourcesReady(buildReportSources({
       scope: buildScopeReport(),
       competitor: buildCompetitorSource(),
+      insights: buildInsightsSource(),
     }))).toBe(true);
+  });
+
+  it('waits while the insights source is loading', () => {
+    expect(sourcesReady(buildReportSources({ insights: loadingInsightsSource() }))).toBe(false);
   });
 });
 

@@ -33,6 +33,7 @@ from shared.scope_params import (
     parse_scope_params,
     query_keyword_rows,
     scope_from_request,
+    scope_keywords_from_request,
     scoped_dynamodb_resource,
 )
 
@@ -248,6 +249,32 @@ class TestScopeFromRequest:
 
         assert scope is None
         assert _rejection(rejected) == (400, {'error': 'Provide keyword, group_id or keyword_ids', 'field': 'keyword'})
+
+
+class TestScopeKeywordsFromRequest:
+    """The keyword-text form of `scope_from_request`, shared by Action Center and Prompt Insights."""
+
+    def test_returns_the_scopes_keyword_texts(self):
+        keywords, rejected = scope_keywords_from_request(EVENT, {'group_id': 'coruna'}, _keywords_table(ACTIVE))
+
+        assert rejected is None
+        assert keywords == ['best hotels galicia', 'hotel coruna spa']
+
+    def test_leaves_the_default_to_the_caller_when_no_scope_is_given(self):
+        assert scope_keywords_from_request(EVENT, {'keyword': None, 'group_id': None}, _keywords_table(ACTIVE)) == (None, None)
+
+    def test_refuses_a_scope_with_no_active_keyword_on_the_scope_field(self):
+        """An empty list would read as "all keywords" to a loader, widening the view instead of narrowing it."""
+        keywords, rejected = scope_keywords_from_request(EVENT, {'group_id': 'no-such-group'}, _keywords_table(ACTIVE))
+
+        assert keywords is None
+        assert _rejection(rejected) == (400, {'error': 'No active keywords match the selected scope (1 group(s)).', 'field': 'scope'})
+
+    def test_passes_a_malformed_scope_rejection_through(self):
+        keywords, rejected = scope_keywords_from_request(EVENT, {'keyword': 'a', 'scope': 'all'}, _keywords_table(ACTIVE))
+
+        assert keywords is None
+        assert _rejection(rejected)[0] == 400
 
 
 class TestQueryKeywordRows:

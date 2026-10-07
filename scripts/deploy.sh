@@ -296,7 +296,7 @@ deploy_stack() {
     print_warning "This may take several minutes..."
     
     # Deploy with auto-approval
-    cdk deploy --require-approval never
+    cdk deploy --all --require-approval never
     
     print_success "CDK stack deployed successfully!"
 }

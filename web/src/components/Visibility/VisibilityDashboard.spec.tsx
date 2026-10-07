@@ -7,12 +7,27 @@ import {
 import userEvent from '@testing-library/user-event';
 import { VisibilityDashboard } from './VisibilityDashboard';
 
+/** What the dashboard gives the Insights panel. */
+interface InsightsSummaryProps {
+  readonly scope: ReportScope;
+  readonly days: number;
+}
+
+/** Records the props the dashboard gives the Insights panel. */
+const mockInsightsSummary = vi.hoisted(() => vi.fn());
+
 vi.mock('../../hooks/useVisibilityMetrics', () => ({ useVisibilityMetrics: vi.fn() }));
 vi.mock('../../hooks/useHistoricalTrends', () => ({ useHistoricalTrends: vi.fn() }));
 vi.mock('../../hooks/usePersonaRankings', () => ({ usePersonaRankings: vi.fn() }));
 vi.mock('../../hooks/useKeywordGroups', () => ({ useKeywordGroups: vi.fn() }));
 vi.mock('./visibilityOverviewExport', () => ({ exportVisibilityOverview: vi.fn() }));
 vi.mock('../Personas/PersonaSelector', () => ({ PersonaSelector: () => <div>Persona selector</div> }));
+vi.mock('./InsightsSummary', () => ({
+  InsightsSummary: (props: InsightsSummaryProps) => {
+    mockInsightsSummary(props);
+    return <div>Insights summary</div>;
+  },
+}));
 
 import { useVisibilityMetrics } from '../../hooks/useVisibilityMetrics';
 import { useHistoricalTrends } from '../../hooks/useHistoricalTrends';
@@ -35,7 +50,7 @@ import {
   clickRangeButton, historyPanel, scopeLine
 } from './visibilityTables-fixtures';
 import type {
-  HistoricalTrendsResponse, Keyword, KeywordGroup, PersonaRankingsResponse, VisibilityResponse
+  HistoricalTrendsResponse, Keyword, KeywordGroup, PersonaRankingsResponse, ReportScope, VisibilityResponse
 } from '../../types';
 
 type HookStateOverrides = Parameters<typeof buildVisibilityHookResult>[1];
@@ -125,6 +140,22 @@ describe('VisibilityDashboard', () => {
 
       expect(screen.getByText('Visibility Dashboard')).toBeInTheDocument();
       expect(visibilityHook.fetchVisibilityMetrics).not.toHaveBeenCalled();
+    });
+
+    it('shows the insights of every keyword over the default 30 days', () => {
+      renderDashboard();
+
+      expect(screen.getByText('Insights summary')).toBeInTheDocument();
+      expect(mockInsightsSummary).toHaveBeenLastCalledWith({
+        scope: { kind: 'all' },
+        days: 30,
+      });
+    });
+
+    it('shows no insights panel when there are no keywords', () => {
+      renderDashboard([]);
+
+      expect(screen.queryByText('Insights summary')).not.toBeInTheDocument();
     });
 
     it('shows no overview until visibility is loaded', () => {
@@ -234,6 +265,18 @@ describe('VisibilityDashboard', () => {
       }, undefined);
     });
 
+    it('shows the insights of the selected keyword group', async () => {
+      await renderDashboardScoped('group:group-coruna');
+
+      expect(mockInsightsSummary).toHaveBeenLastCalledWith({
+        scope: {
+          kind: 'group',
+          groupId: 'group-coruna',
+        },
+        days: 30,
+      });
+    });
+
     it('fetches no persona rankings for all keywords', () => {
       const personaHook = stubPersonaRankings(null);
 
@@ -257,6 +300,18 @@ describe('VisibilityDashboard', () => {
         await clickRangeButton(days);
 
         expect(trendsHook.fetchHistoricalTrends).toHaveBeenLastCalledWith(scope, 'day', days);
+      });
+
+      it('measures the insights over the new range when the range changes', async () => {
+        stubTrends(trends);
+
+        renderDashboard();
+        await clickRangeButton(90);
+
+        expect(mockInsightsSummary).toHaveBeenLastCalledWith({
+          scope: { kind: 'all' },
+          days: 90,
+        });
       });
 
       it('adds the persona comparison for a single keyword', async () => {

@@ -10,7 +10,7 @@ The dashboard sidebar has these sections:
 
 | Section | Pages |
 |---|---|
-| Insights | **Dashboard** (totals, citations by provider, brand mentions, KPI alerts), **Visibility** (the KPIs for one keyword, a keyword group or all keywords, with 7/30/90-day KPI history, brand leaderboard, per-engine KPIs and cited domains; persona filter), **Brand Mentions** (every brand named, with sentiment, rank and a per-brand ranking analysis), **Citations** (cited URLs by frequency, with a per-keyword and per-provider breakdown), **Prompt Insights** (which queries and personas rank you in the top 3), **Citation Gaps** (sources that cite competitors but not you), **Action Center** (prioritised recommendations with a status you can track) |
+| Insights | **Dashboard** (totals, citations by provider, brand mentions, KPI alerts), **Visibility** (the KPIs for one keyword, a keyword group or all keywords, with 7/30/90-day KPI history, brand leaderboard, per-engine KPIs, cited domains and the scope's three most pressing insights; persona filter), **Brand Mentions** (every brand named, with sentiment, rank and a per-brand ranking analysis), **Citations** (cited URLs by frequency, with a per-keyword and per-provider breakdown), **Prompt Insights** (which queries and personas rank you in the top 3), **Citation Gaps** (sources that cite competitors but not you), **Action Center** (prioritised recommendations with a status you can track); the last three take the same keyword, group or all-keywords scope as Visibility |
 | Research | **Keyword Research**: Expand, Competitor (analyse a competitor website), Agent (a Bedrock research agent that plans web-search queries over up to three rounds, with saved prompt templates) and History |
 | Content | **Content Studio**: content ideas and briefs from citation gaps and ranking analyses, single or per keyword group, in any output language, exportable as DOCX |
 | Reporting | **Reports**: nine print-ready reports (below), plus custom reports you build from their sections |
@@ -44,7 +44,9 @@ Listed on **Reporting > Reports** (`web/src/components/Reports/ReportsLandingVie
 | Content Action Plan | `/reports/content-action-plan` | Content strategist |
 | Keyword Deep Dive | `/reports/keyword` (`/reports/keyword/:keyword`) | SEO / AI search lead |
 
-**Custom reports** (`/reports/custom/new`, `/reports/custom/:id`, `/reports/custom/:id/edit`; `web/src/components/Reports/customReport/`): any signed-in user can name a report, pick blocks from a list sorted into categories (one per report above, plus their own headings, Markdown text, https images and YouTube or Vimeo videos), drag or add them into one ordered list and save it. Every user sees every saved report (at most 50). A saved report opens on every keyword and its saved period (30, 90 or 180 days); the reader can narrow it to a keyword group or one keyword and change the period in the URL, like the scope reports. Each data source is fetched once however many blocks read it. A block that needs a particular scope (a single keyword for the Keyword Deep Dive blocks, a keyword group for the group KPI blocks) says so instead of showing the wrong data. The catalogue and the stored block types live in `customReport/blockCatalog.ts`.
+**Custom reports** (`/reports/custom/new`, `/reports/custom/:id`, `/reports/custom/:id/edit`; `web/src/components/Reports/customReport/`): any signed-in user can name a report, pick blocks from a list sorted into categories (one per report above, an *Insights* category, plus their own headings, Markdown text, https images and YouTube or Vimeo videos), drag or add them into one ordered list and save it. Every user sees every saved report (at most 50). A saved report opens on every keyword and its saved period (30, 90 or 180 days); the reader can narrow it to a keyword group or one keyword and change the period in the URL, like the scope reports. Each data source is fetched once however many blocks read it. A block that needs a particular scope (a single keyword for the Keyword Deep Dive blocks, a keyword group for the group KPI and Run stability blocks) says so instead of showing the wrong data. The catalogue and the stored block types live in `customReport/blockCatalog.ts`.
+
+**Insights** (`GET /api/reports/insights`, rules in `lambda/shared/insights_engine.py`) are derived from the KPI engine's figures for a scope by fixed rules with named thresholds: the *play* each AI engine calls for (get cited, get ranked first, both, or defend, from its top-1 share and citation rate), the first-party brands measured against the best of them (a brand far enough behind in position or sentiment is weak), and, for a keyword group, how far each keyword's position swung across the runs of the window. Each insight carries a severity and the numbers it rests on. The Visibility tab reads out the top three; the custom-report blocks *Engine playbook*, *Brand portfolio* and *Run stability* show the facts behind them.
 
 ### KPIs
 
@@ -69,6 +71,7 @@ All functions run Python 3.12.
 | ResearchWorker | `lambda/research-worker` | Keyword research steps |
 | API-StatsInsights, API-CitationsContent, API-KeywordMgmt, API-ConfigMgmt, API-ExecutionMgmt, API-GetBrandMentions, API-ManageBrandConfig, API-GetPersonaRankings, API-SelfReflection, API-ContentStudio, API-ManageUsers, API-Health | `lambda/api/*.py` | REST API handlers; the consolidated functions bundle several handler files each |
 | ContentStudioWorker | `lambda/api/content-studio.py` | Content generation, fed by a DynamoDB stream and a 5-minute reconcile rule |
+| Mcp (stack `CitationAnalysisMcpStack`) | `lambda/mcp/` | MCP server: JSON-RPC over Streamable HTTP, tool catalogue, replays tool calls against the API handler Lambdas |
 
 Two layers: the **shared layer** (`lambda/layer/`: `lambda/shared` modules plus `requests`, `bs4` and `tzdata`) used by every function except the crawler, and the **crawler layer** (`lambda/crawler-layer/`: Playwright, Bedrock AgentCore and a copy of the shared modules). Synth fails if either layer is not built or its copy of `lambda/shared` is stale. The crawler uses a pre-created AgentCore browser with Web Bot Auth and reuses a crawl for 30 days.
 
@@ -100,15 +103,38 @@ S3 buckets (`citation-analysis-<name>-<account>`): `keywords` (keyword files and
 
 A REST API (`CitationAnalysis-API`, stage `prod`, all routes under `/api`) with Lambda proxy integrations and a Cognito user pool authorizer on every route except `GET /api/health`. Saved custom reports are `GET`/`POST /api/custom-reports` and `PUT`/`DELETE /api/custom-reports/{id}` on API-ConfigMgmt, open to any signed-in user. The dashboard is a static Vite build in a private S3 bucket served by CloudFront through origin access control; its content security policy allows embedded players from `www.youtube-nocookie.com` and `player.vimeo.com` only (custom report video blocks).
 
+### MCP server (preview)
+
+A second stack, `CitationAnalysisMcpStack`, holds an MCP server for AI assistants (Claude.ai, ChatGPT, Amazon Quick): a Streamable HTTP endpoint, `POST /mcp` on its own REST API (`CitationAnalysis-McpApi`), and one Lambda (`CitationAnalysis-Mcp`, reserved concurrency 10) that replays every tool call against the existing API handler Lambdas as the signed-in user, so permissions and figures are the dashboard's. `tools/list` advertises eight direct tools (keyword groups, keywords, brand configuration, visibility, reports, citations, recommendations, keyword management) plus `search_tools` → `describe_tool` → `call_tool` over a catalogue of ten more (`lambda/mcp/catalogue.py`); `-c mcpPinnedTools` promotes catalogue entries to the direct list. Clients sign in with OAuth 2.1 and PKCE through a Cognito Managed Login domain (`citation-analysis-<account>`) and a public `mcp` app client (1-hour access tokens, 90-day refresh tokens). The Cognito resource server is identified by the MCP endpoint URL, so the scopes are `<McpUrl>/read`, `<McpUrl>/write` and `<McpUrl>/run` (listed in the protected-resource metadata) and a client that sends the endpoint as the RFC 8707 `resource` parameter gets an access token whose `aud` is the endpoint. Behind the Cognito authorizer the Lambda checks the token's issuer, client, use and audience; an anonymous call gets `401` with a `WWW-Authenticate` pointer to the protected-resource metadata (RFC 9728). Register each client's callback URL with `-c mcpRedirectUris`; the stack outputs `McpUrl`, `McpClientId`, `McpAuthorizeUrl`, `McpTokenUrl` and `McpResourceMetadataUrl` are what a client's connection form asks for. The stack lives in `lib/mcp-stack.ts` and can be destroyed on its own. Dynamic client registration is not offered; clients use the pre-registered `McpClientId`.
+
+Kiro CLI connects with a server entry like this (in `.kiro/settings/mcp.json` or an agent's `mcpServers`), after `http://localhost:5173/oauth/callback` (the default `mcpRedirectUris` value) is registered; Kiro opens the Managed Login page in the browser and stores the token:
+
+```json
+{
+  "mcpServers": {
+    "citation-analysis": {
+      "url": "<McpUrl>",
+      "oauth": {
+        "clientId": "<McpClientId>",
+        "redirectUri": "http://localhost:5173/oauth/callback",
+        "oauthScopes": ["openid", "<McpUrl>/read", "<McpUrl>/write", "<McpUrl>/run"]
+      }
+    }
+  }
+}
+```
+
 ## Project structure
 
 ```
-├── bin/                     # CDK app entry point (stack CitationAnalysisStack)
+├── bin/                     # CDK app entry point (stacks CitationAnalysisStack, CitationAnalysisMcpStack)
 ├── lib/
 │   ├── citation-analysis-stack.ts
-│   └── constructs/          # auth.ts (Cognito), bedrock-model-access.ts
+│   ├── mcp-stack.ts         # MCP server stack
+│   └── constructs/          # auth.ts (Cognito), bedrock-model-access.ts, mcp-server.ts
 ├── lambda/
 │   ├── api/                 # API handlers
+│   ├── mcp/                 # MCP server: auth, protocol, catalogue, tool search, invoker
 │   ├── search/              # Provider queries, brand extraction, web-search providers
 │   ├── deduplication/  crawler/  parse-keywords/  generate-summary/  kpi-alerts/
 │   ├── research-worker/     # Keyword research state machine steps
@@ -141,7 +167,7 @@ A REST API (`CitationAnalysis-API`, stage `prod`, all routes under `/api`) with 
 npm run deploy      # same as ./scripts/deploy.sh
 ```
 
-`scripts/deploy.sh` checks the tools and AWS credentials, runs `npm install`, builds both Lambda layers and the dashboard, compiles the CDK app, offers to run `cdk bootstrap` if the account/region is not bootstrapped, deploys the stack, rebuilds the dashboard with the new API and Cognito outputs, syncs it to the web bucket, invalidates CloudFront, verifies the core resources and prints the dashboard URL.
+`scripts/deploy.sh` checks the tools and AWS credentials, runs `npm install`, builds both Lambda layers and the dashboard, compiles the CDK app, offers to run `cdk bootstrap` if the account/region is not bootstrapped, deploys both stacks, rebuilds the dashboard with the new API and Cognito outputs, syncs it to the web bucket, invalidates CloudFront, verifies the core resources and prints the dashboard URL.
 
 <details>
 <summary>Manual deployment</summary>
@@ -155,7 +181,7 @@ bash lambda/crawler-layer/build-layer.sh
 (cd web && npm install && npm run build)   # synth requires web/dist
 npm run build
 cdk bootstrap                              # first time per account/region
-cdk deploy
+cdk deploy --all                           # CitationAnalysisStack, then CitationAnalysisMcpStack
 ./scripts/deploy-web.sh                    # rebuild with the stack outputs, upload, invalidate CloudFront
 ```
 
@@ -165,7 +191,7 @@ Other commands:
 
 | Command | Does |
 |---|---|
-| `npm run deploy:cdk` | `cdk deploy --require-approval never` (layers and `web/dist` must already be built) |
+| `npm run deploy:cdk` | `cdk deploy --all --require-approval never` (layers and `web/dist` must already be built) |
 | `npm run deploy:full` | `deploy:cdk`, then clear the CloudFront cache |
 | `./scripts/deploy-web.sh` | Frontend only: build, sync to S3, invalidate CloudFront |
 | `./scripts/build-web.sh` | Build the dashboard with `VITE_*` values from the stack outputs |
@@ -253,6 +279,8 @@ If model access is managed elsewhere, skip all of this with `cdk deploy -c skipM
 | `skipModelProvisioning` | `false` | Skip the Anthropic form and Marketplace subscriptions |
 | `anthropicCompanyName`, `anthropicCompanyWebsite`, `anthropicIndustry`, `anthropicUseCases` | `Citation Analysis`, `https://aws.amazon.com/bedrock/`, `Technology`, "Summarize content and generate new marketing content." | Details submitted on the Anthropic form |
 | `dev` | off | `-c dev=true` lets `http://localhost:5173` call the API (`cd web && npm run dev`) |
+| `mcpRedirectUris` | `["http://localhost:5173/oauth/callback"]` | OAuth callback URLs of the MCP clients (exact match in Cognito), as a JSON array or a comma-separated string |
+| `mcpPinnedTools` | none | Catalogue operations the MCP server also lists as direct tools, e.g. `-c mcpPinnedTools=get_prompt_insights,list_providers` |
 
 ### Secrets
 
@@ -261,13 +289,14 @@ The stack imports, and never creates, `citation-analysis/{openai,perplexity,gemi
 ## Security
 
 - **Authentication:** Cognito user pool, email sign-in, self sign-up disabled, password policy of 8+ characters with all character classes, 1-hour access and ID tokens and 7-day refresh tokens. MFA is not configured. The API's Cognito authorizer covers every route except `GET /api/health`; user management requires the `Admin` group.
+- **MCP server:** OAuth 2.1 authorization-code flow with PKCE on a public app client (no client secret, no implicit grant), scopes `<McpUrl>/read`, `<McpUrl>/write` and `<McpUrl>/run`, RFC 8707 audience binding, 90-day refresh tokens. Its Cognito authorizer validates access tokens only, and the Lambda rejects a token whose issuer, client id, `token_use` or audience is not this server's. Tool calls run as the token's user with that user's groups, so admin-only routes stay admin-only. The Cognito Managed Login domain is the only hosted sign-in page the sample defines; the dashboard itself does not use it.
 - **Edge:** CloudFront with HTTPS redirect and security headers (CSP, HSTS, frame DENY). There is no WAF, by design, so the sample stays pay-per-use: the API relies on the Cognito authorizer, a 100 rps / 200 burst stage throttle and a 10,000 requests/day usage plan. See [SECURITY.md](SECURITY.md#aws-waf) to add one.
 - **CORS:** API error responses and each Lambda allow only the CloudFront origin (read from SSM `/citation-analysis/cors-origin`).
 - **Data:** S3 buckets block public access and require TLS; DynamoDB and S3 are encrypted at rest; API keys live in Secrets Manager; Lambda logs are kept 30 days.
 
 To allow self sign-up, set `selfSignUpEnabled: true` in `lib/constructs/auth.ts` and remove `hideSignUp` from the `Authenticator` in `web/src/App.tsx`.
 
-**Federated sign-in (for example Microsoft Entra ID)** is not wired up: the stack defines no Cognito domain or identity provider, and the dashboard signs in with the Amplify `Authenticator` (email and password). Adding it means a user pool domain, an OIDC identity provider (issuer `https://login.microsoftonline.com/<tenant-id>/v2.0`, scopes `openid email profile`) and `supportedIdentityProviders` with the authorization-code flow on the client in `lib/constructs/auth.ts` (do this in CDK rather than the console, or the next deploy overwrites it; keep the client secret out of source control), plus the OAuth settings in `Amplify.configure` in `web/src/App.tsx` and a sign-in-with-redirect button. See [adding OIDC identity providers to a user pool](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-oidc-idp.html).
+**Federated sign-in (for example Microsoft Entra ID)** is not wired up: the stack defines no identity provider (the only Cognito domain is the MCP stack's Managed Login domain), and the dashboard signs in with the Amplify `Authenticator` (email and password). Adding it means a user pool domain, an OIDC identity provider (issuer `https://login.microsoftonline.com/<tenant-id>/v2.0`, scopes `openid email profile`) and `supportedIdentityProviders` with the authorization-code flow on the client in `lib/constructs/auth.ts` (do this in CDK rather than the console, or the next deploy overwrites it; keep the client secret out of source control), plus the OAuth settings in `Amplify.configure` in `web/src/App.tsx` and a sign-in-with-redirect button. See [adding OIDC identity providers to a user pool](https://docs.aws.amazon.com/cognito/latest/developerguide/cognito-user-pools-oidc-idp.html).
 
 ## Cost
 

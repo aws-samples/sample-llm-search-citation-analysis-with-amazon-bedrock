@@ -10,6 +10,10 @@ Recommendation Types:
 - Content optimization suggestions
 - Prompt targeting opportunities
 - Competitor insights
+
+Scope: the request takes the report scope every KPI endpoint accepts
+(``keyword`` | ``group_id`` | ``keyword_ids`` | ``scope=all``, see
+``shared.scope_params``); without one the first 20 active keywords are analysed.
 """
 
 import json
@@ -17,7 +21,7 @@ import logging
 import os
 import sys
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -33,7 +37,12 @@ from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.llm_json import parse_llm_json
 from shared.models import ModelRole, invoke_bedrock
-from shared.scope_params import load_sibling_function
+from shared.scope_params import (
+    SCOPE_QUERY_PARAMS,
+    keywords_table_name,
+    load_sibling_function,
+)
+from shared.scoped_reports import optional_scope_keywords
 from shared.search_results import latest_run
 from shared.utils import get_brand_config, get_timestamp, recommendation_id
 
@@ -229,8 +238,10 @@ def generate_rule_based_recommendations(config: dict[str, Any], keywords: list[s
     Generate recommendations based on rule-based analysis.
 
     ``keywords`` restricts the analysis to those keyword texts (a keyword
-    group, for the group-scoped executive summary); by default the active
-    keywords are discovered from the Keywords table.
+    group, for the group-scoped executive summary and the scoped Action
+    Center); by default the active keywords are discovered from the Keywords
+    table. ``load_recent_search_results`` reads an empty list as "discover"
+    too, so ``handler`` refuses an empty scope before getting here.
     """
     first_party, competitors = tracked_brand_names(config)
 
@@ -282,17 +293,28 @@ def generate_rule_based_recommendations(config: dict[str, Any], keywords: list[s
     return recommendations
 
 
-def generate_llm_recommendations(config: dict[str, Any], context: str) -> list[dict[str, Any]]:
+def generate_llm_recommendations(
+    config: dict[str, Any], context: str, keywords: Sequence[str] | None = None
+) -> list[dict[str, Any]]:
     """
     Generate recommendations using LLM for more sophisticated analysis.
+
+    ``keywords`` are the texts a scoped request covers; they are named in the
+    prompt so the model recommends for that scope only. Without a scope the
+    prompt is the unscoped one.
     """
     try:
+        scope_section = ''
+        if keywords:
+            listed = '\n'.join(f'- {keyword}' for keyword in keywords)
+            scope_section = f'Keywords In Scope (recommend for these only):\n{listed}\n\n'
+
         prompt = f"""Analyze this AI visibility data and provide 3-5 specific, actionable recommendations.
 
 Context:
 {context}
 
-Brand Configuration:
+{scope_section}Brand Configuration:
 - First Party Brands: {config.get('tracked_brands', {}).get('first_party', [])}
 - Competitors: {config.get('tracked_brands', {}).get('competitors', [])}
 - Industry: {config.get('industry', 'general')}
@@ -369,20 +391,23 @@ def _annotate_with_status(recommendations: list[dict[str, Any]]) -> None:
 @api_handler
 @validate({
     'use_llm': {'type': bool, 'default': False},
-    'keyword': {'type': str, 'max_length': 500}
+    **SCOPE_QUERY_PARAMS,
 })
-def handler(event: dict[str, Any], context: Any, use_llm: bool = False, keyword: str | None = None) -> dict[str, Any]:
+@optional_scope_keywords(lambda: dynamodb.Table(keywords_table_name()))
+def handler(event: dict[str, Any], context: Any, keywords: list[str] | None, use_llm: bool = False) -> dict[str, Any]:
     """
     API handler for recommendations.
 
     Query params:
         - use_llm: Whether to use LLM for enhanced recommendations (default: false)
-        - keyword: Focus recommendations on specific keyword (optional)
+        - keyword | group_id | keyword_ids | scope=all: the keywords to recommend
+          for (optional; one keyword, a keyword group, a set of keyword ids or
+          every active keyword). Without one the first 20 active keywords are analysed.
     """
     config = get_brand_config()
 
     # Generate rule-based recommendations
-    recommendations = generate_rule_based_recommendations(config)
+    recommendations = generate_rule_based_recommendations(config, keywords)
 
     # Annotate each recommendation with a deterministic id and the
     # persisted action-tracking state.
@@ -396,7 +421,7 @@ def handler(event: dict[str, Any], context: Any, use_llm: bool = False, keyword:
     llm_recommendations = []
     if use_llm and recommendations:
         context_str = json.dumps(recommendations[:5], indent=2)
-        llm_recommendations = generate_llm_recommendations(config, context_str)
+        llm_recommendations = generate_llm_recommendations(config, context_str, keywords)
 
     result = {
         'generated_at': get_timestamp(),

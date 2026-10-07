@@ -14,6 +14,7 @@ const STORED_DATA_BLOCK_TYPES = [
   'engines_chart', 'engines_headline', 'engines_table',
   'executive_headline', 'executive_next_actions', 'executive_trend', 'executive_wins_gaps',
   'group_definitions', 'group_drivers', 'group_headline', 'group_keywords', 'group_kpi_evolution',
+  'insights_brand_portfolio', 'insights_engine_playbook', 'insights_run_stability',
   'keyword_engine_kpis', 'keyword_kpi_history', 'keyword_personas', 'keyword_provider_differences', 'keyword_recommendations',
   'keyword_sentiment_examples', 'keyword_top_sources',
   'kpi_definitions',
@@ -66,6 +67,10 @@ describe('blockName', () => {
     expect(blockName('sentiment_headline')).toBe('Sentiment · Headline');
   });
 
+  it('names an insights block by its category and title', () => {
+    expect(blockName('insights_run_stability')).toBe('Insights · Run stability');
+  });
+
   it('names a content block by its kind', () => {
     expect(blockName('video')).toBe('Video');
   });
@@ -89,6 +94,16 @@ describe('sourcesFor', () => {
       kind: 'keyword',
       keyword: 'beach hotel',
     })]).toStrictEqual(['deepDive']);
+  });
+
+  it('needs the insights source for an insights block', () => {
+    const blocks = [{ type: 'insights_engine_playbook' }, { type: 'insights_brand_portfolio' }];
+
+    expect([...sourcesFor(blocks, { kind: 'all' })]).toStrictEqual(['insights']);
+  });
+
+  it('needs no insights source for the run stability of every keyword, which only a group can show', () => {
+    expect(sourcesFor([{ type: 'insights_run_stability' }], { kind: 'all' }).size).toBe(0);
   });
 
   it('needs no source for content blocks, definitions and unknown types', () => {

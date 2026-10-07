@@ -25,6 +25,10 @@ import * as fs from 'fs';
 import { Auth } from './constructs/auth';
 import { BedrockModelAccess } from './constructs/bedrock-model-access';
 import { ProviderSearch, readProviderConcurrency } from './constructs/provider-search';
+import type { McpServerInputs } from './constructs/mcp-server';
+import {
+  PYTHON_ASSET_EXCLUDES, lambdaSourceCode, pythonLayer
+} from './constructs/python-layer';
 
 /**
  * Bedrock model tier defaults per task role.
@@ -128,64 +132,6 @@ const WORKFLOW_TIMEOUT_DAYS = 7;
  */
 const PROCESS_KEYWORDS_TOLERATED_FAILURE_PERCENTAGE = 10;
 
-/**
- * Thrown at synth time when a Lambda layer's local build output is missing.
- * Layers must be built (scripts/deploy.sh or the per-layer build-layer.sh)
- * before `cdk synth`/`cdk deploy`.
- */
-class LayerNotBuiltError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'LayerNotBuiltError';
-  }
-}
-
-/**
- * Fail synth when the built layer is missing shared modules that exist in
- * source.
- *
- * `lambda/layer/python/` is gitignored build output, and the existence check
- * alone passes against a *stale* build. Every handler imports `shared.*` from
- * this layer, so a module added to `lambda/shared/` without rebuilding
- * deploys cleanly and then ModuleNotFoundErrors on the first invocation of
- * every affected function — with nothing in the CDK output hinting why.
- *
- * This bit for real: `auth.py`, `safe_fetch.py` and `stale_jobs.py` were all
- * added to source while the built layer still held the previous set.
- */
-function assertLayerMatchesSharedModules(
-  builtSharedPath: string,
-  layerName: string,
-  buildCommand: string
-): void {
-  const sourceSharedPath = path.join(__dirname, '../lambda/shared');
-  if (!fs.existsSync(sourceSharedPath)) return;
-
-  const expected = fs
-    .readdirSync(sourceSharedPath)
-    .filter((name) => name.endsWith('.py') && !name.startsWith('test_'));
-  const built = fs.existsSync(builtSharedPath) ? fs.readdirSync(builtSharedPath) : [];
-  const missing = expected.filter((name) => !built.includes(name));
-  const stale = expected.filter((name) => (
-    built.includes(name)
-    && !fs.readFileSync(path.join(sourceSharedPath, name))
-      .equals(fs.readFileSync(path.join(builtSharedPath, name)))
-  ));
-
-  if (missing.length === 0 && stale.length === 0) return;
-
-  const problems = [
-    ...(missing.length > 0 ? [`missing ${missing.join(', ')}`] : []),
-    ...(stale.length > 0 ? [`outdated ${stale.join(', ')}`] : []),
-  ].join('; ');
-  throw new LayerNotBuiltError(
-    `${layerName} layer is stale — ${problems}.\n` +
-    'Every Lambda imports these files from its deployed layer.\n' +
-    `Run: ${buildCommand}\n` +
-    'Or use scripts/deploy.sh which builds all layers automatically.'
-  );
-}
-
 /** A 30-day CloudWatch log group; the removal policy is the only setting that differs between groups. */
 function monthLogGroup(
   scope: Construct,
@@ -222,11 +168,6 @@ function pythonFunction(
     runtime: lambda.Runtime.PYTHON_3_12,
     logGroup,
   });
-}
-
-/** Code of a Lambda source directory under `lambda/`, without volatile bytecode caches. */
-function lambdaSourceCode(directory: string): lambda.AssetCode {
-  return lambda.Code.fromAsset(path.join(__dirname, '../lambda', directory), { exclude: PYTHON_ASSET_EXCLUDES });
 }
 
 /**
@@ -303,40 +244,6 @@ function apiFunction(
     layers: [sharedLayer],
     timeout: timeout ?? cdk.Duration.seconds(API_GATEWAY_MAX_INTEGRATION_TIMEOUT_SECONDS),
   }, cdk.RemovalPolicy.RETAIN);
-}
-
-/** Python layer build output; synth fails when it is missing or stale against `lambda/shared/`. */
-interface PythonLayerSpec {
-  /** Directory under `lambda/` holding `build-layer.sh` and the built `python/`. */
-  directory: string;
-  /** Layer label used in the build error messages ("Shared", "Crawler"). */
-  label: string;
-  layerVersionName: string;
-  description: string;
-}
-
-/**
- * A layer from its local build output, refusing to synthesize when the build
- * is absent (`python/` missing or empty) or stale (see
- * `assertLayerMatchesSharedModules`).
- */
-function pythonLayer(scope: Construct, id: string, spec: PythonLayerSpec): lambda.LayerVersion {
-  const buildCommand = `bash lambda/${spec.directory}/build-layer.sh`;
-  const pythonPath = path.join(__dirname, '../lambda', spec.directory, 'python');
-  if (!fs.existsSync(pythonPath) || fs.readdirSync(pythonPath).length === 0) {
-    throw new LayerNotBuiltError(
-      `${spec.label} layer not built. Run: ${buildCommand}\n` +
-      'Or use scripts/deploy.sh which builds all layers automatically.'
-    );
-  }
-  assertLayerMatchesSharedModules(path.join(pythonPath, 'shared'), spec.label, buildCommand);
-  return new lambda.LayerVersion(scope, id, {
-    layerVersionName: spec.layerVersionName,
-    code: lambdaSourceCode(spec.directory),
-    compatibleRuntimes: [lambda.Runtime.PYTHON_3_12],
-    description: spec.description,
-    removalPolicy: cdk.RemovalPolicy.DESTROY,
-  });
 }
 
 /** A role the Lambda service assumes, with only the basic CloudWatch Logs execution policy attached. */
@@ -486,11 +393,6 @@ function claudeInvokeModelStatement(stack: cdk.Stack): iam.PolicyStatement {
     ],
   });
 }
-
-// Python bytecode caches are volatile local artifacts: running pytest rewrites
-// them inside the lambda/ source trees, which would otherwise change every
-// asset hash and trigger spurious redeploys of unchanged functions.
-const PYTHON_ASSET_EXCLUDES = ['**/__pycache__', '**/*.pyc'];
 
 /** Thrown at synth time when a CDK context tuning value is not usable. */
 class InvalidContextValueError extends Error {
@@ -709,6 +611,9 @@ class WebBuildRequiredError extends Error {
 }
 
 export class CitationAnalysisStack extends cdk.Stack {
+  /** What the MCP stack builds on: the user pool and the API router Lambdas. */
+  public readonly mcpInputs: McpServerInputs;
+
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
@@ -1849,6 +1754,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         'recommendation-status.py',
         'get-reports-competitor.py',
         'get-group-kpi-history.py',
+        'get-reports-insights.py',
       ],
       // Every route here is read-only bar a millisecond-scale put_item on
       // POST /recommendations/{id}/status, and recommendations are regenerated
@@ -2392,6 +2298,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     route(reportsResource.addResource('competitor'), statsInsightsFunction, 'GET');
     // Per-run KPI history of a keyword group (the per-hotel report).
     route(reportsResource.addResource('group-kpis'), statsInsightsFunction, 'GET');
+    route(reportsResource.addResource('insights'), statsInsightsFunction, 'GET');
 
     // Persona Rankings API Route
     route(apiResource.addResource('persona-rankings'), getPersonaRankingsFunction, 'GET');
@@ -2713,6 +2620,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       'Access-Control-Allow-Methods': "'GET,POST,PUT,DELETE,OPTIONS'",
     };
 
+
     // Integration failures (504 timeout, 5XX fallback) never reach the Lambda
     // response helper. They get the same restricted CORS headers as the auth
     // failures so browsers expose their HTTP status instead of masking them
@@ -2728,6 +2636,20 @@ export class CitationAnalysisStack extends cdk.Stack {
       api.addGatewayResponse(id, { type, statusCode, responseHeaders: gatewayResponseCorsHeaders });
     }
     
+    this.mcpInputs = {
+      userPool: auth.userPool,
+      apiFunctions: {
+        'keyword-mgmt': keywordMgmtFunction,
+        'config-mgmt': configMgmtFunction,
+        'execution-mgmt': executionMgmtFunction,
+        'stats-insights': statsInsightsFunction,
+        'citations-content': citationsContentFunction,
+        'brand-config': manageBrandConfigFunction,
+        'brand-mentions': getBrandMentionsFunction,
+        'persona-rankings': getPersonaRankingsFunction,
+      },
+    };
+
     // Update Cognito User Pool Client callback URLs with CloudFront domain
     const cfnUserPoolClient = auth.userPoolClient.node.defaultChild as cdk.aws_cognito.CfnUserPoolClient;
     cfnUserPoolClient.callbackUrLs = [cloudFrontOrigin, 'http://localhost:5173'];
