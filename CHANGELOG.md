@@ -9,6 +9,21 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.32.0] - 2026-10-08
+
+### Fixed
+
+- **MCP clients that check PKCE support can connect.** Cognito's discovery document omits
+  `code_challenge_methods_supported`, and the MCP authorization spec tells clients to refuse such an authorization
+  server; Claude.ai, ChatGPT and Claude Code did. The MCP API now serves its own authorization server metadata at
+  `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`, advertising S256 and Cognito's
+  managed-login endpoints, and the protected-resource metadata names it. Access tokens are still Cognito's and are
+  validated as before. The metadata no longer offers `openid`, so clients do not request an ID token whose issuer
+  differs from the metadata issuer.
+- **A Claude key with no credit left is refused.** Saving or enabling it failed silently before ("key accepted");
+  Settings › AI Providers now shows Anthropic's "Your credit balance is too low…" message.
+- **Keyword Deep Dive recommendations cover the report's keyword**, not every keyword.
+
 ## [2.31.0] - 2026-10-07
 
 ### Added

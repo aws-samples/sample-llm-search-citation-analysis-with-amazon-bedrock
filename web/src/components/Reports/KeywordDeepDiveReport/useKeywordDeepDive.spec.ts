@@ -133,6 +133,22 @@ describe('useKeywordDeepDive', () => {
     expect(fetchRecs).toHaveBeenCalledWith(false);
   });
 
+  it('asks for the recommendations of the report keyword', () => {
+    renderHook(() => useKeywordDeepDive('Hotel Coruña'));
+    expect(mockRecommendations).toHaveBeenLastCalledWith({
+      kind: 'keyword',
+      keyword: 'Hotel Coruña'
+    });
+  });
+
+  it('scopes the recommendations to the new keyword when the keyword changes', () => {
+    renderKeywordChange('Hotel Coruña', 'Aurora Miles');
+    expect(mockRecommendations).toHaveBeenLastCalledWith({
+      kind: 'keyword',
+      keyword: 'Aurora Miles'
+    });
+  });
+
   it('does not refetch when keyword is unchanged across renders', () => {
     renderKeywordChange('stable', 'stable');
     expect(fetchVisibility).not.toHaveBeenCalled();

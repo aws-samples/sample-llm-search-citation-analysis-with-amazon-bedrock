@@ -17,13 +17,18 @@ resource server is identified by the MCP endpoint URL (see
 ``lib/constructs/mcp-server.ts``), because Cognito accepts an RFC 8707
 ``resource`` parameter only for scopes of a resource server with that very
 identifier, and MCP clients send the endpoint as the resource.
+
+Discovery: the protected resource metadata names this API's stage URL as the
+authorization server, and the API serves a complete authorization server
+metadata document for it (``authorization_server_metadata``) whose endpoints
+are Cognito's managed login.
 """
 
 from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -31,8 +36,21 @@ from urllib.parse import urlsplit, urlunsplit
 from shared.auth import ADMIN_GROUP, GROUPS_CLAIM, get_caller_groups
 
 METADATA_PATH = '/.well-known/oauth-protected-resource'
+# Appended to the issuer (the stage URL), not inserted after the host: on an
+# execute-api URL the stage is a path segment, so the RFC 8414 path-inserted
+# location (`<host>/.well-known/oauth-authorization-server/prod`) lies outside
+# the API. The MCP authorization spec (2025-11-25, "Authorization Server
+# Metadata Discovery", https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization)
+# makes clients try OIDC discovery path appending
+# (`<issuer>/.well-known/openid-configuration`) after the two path-inserted
+# forms; the appended `oauth-authorization-server` form is not in the spec but
+# is what several clients and SDK versions try first, so it is served too.
+AUTHORIZATION_SERVER_METADATA_PATHS = ('/.well-known/openid-configuration', '/.well-known/oauth-authorization-server')
 SCOPE_NAMES = ('read', 'write', 'run')
 RESOURCE_NAME = 'Citation Analysis MCP'
+
+DiscoveryDocument = Callable[[], dict[str, Any]]
+"""Builds one of the public metadata documents from the environment."""
 
 
 def scope_for(name: str) -> str:
@@ -104,14 +122,60 @@ def unauthorized_response(error: AuthError) -> dict[str, Any]:
 
 
 def protected_resource_metadata() -> dict[str, Any]:
-    """The RFC 9728 document served at ``METADATA_PATH``."""
+    """The RFC 9728 document served at ``METADATA_PATH``.
+
+    ``authorization_servers`` names this API's own metadata issuer, not
+    Cognito's: see ``authorization_server_metadata``. ``openid`` is left out of
+    ``scopes_supported`` so strict clients do not ask for an ID token, whose
+    ``iss`` (Cognito) would not match that issuer.
+    """
     return {
         'resource': os.environ['MCP_RESOURCE_URL'],
-        'authorization_servers': [os.environ['MCP_ISSUER']],
-        'scopes_supported': ['openid', *(scope_for(name) for name in SCOPE_NAMES)],
+        'authorization_servers': [os.environ['MCP_AUTHORIZATION_SERVER']],
+        'scopes_supported': [scope_for(name) for name in SCOPE_NAMES],
         'bearer_methods_supported': ['header'],
         'resource_name': RESOURCE_NAME,
     }
+
+
+def authorization_server_metadata() -> dict[str, Any]:
+    """The RFC 8414 / OIDC discovery document served at ``AUTHORIZATION_SERVER_METADATA_PATHS``.
+
+    Cognito stays the authorization server; this document only describes it
+    fully. Cognito's own discovery document omits
+    ``code_challenge_methods_supported``, and MCP clients must refuse an
+    authorization server that does not advertise it (Claude Code, the ChatGPT
+    connector), so the PRM points at this one instead. Endpoints are the
+    managed-login domain's; ``issuer`` is the stage URL, string-identical to
+    the PRM's ``authorization_servers`` entry, which clients compare.
+
+    Access tokens still carry Cognito's ``iss``; ``verify_claims`` checks that
+    against ``MCP_ISSUER``, not against this issuer.
+    """
+    login = os.environ['MCP_HOSTED_LOGIN_URL']
+    return {
+        'issuer': os.environ['MCP_AUTHORIZATION_SERVER'],
+        'authorization_endpoint': f'{login}/oauth2/authorize',
+        'token_endpoint': f'{login}/oauth2/token',
+        'revocation_endpoint': f'{login}/oauth2/revoke',
+        'jwks_uri': f'{os.environ["MCP_ISSUER"]}/.well-known/jwks.json',
+        'response_types_supported': ['code'],
+        'grant_types_supported': ['authorization_code', 'refresh_token'],
+        'code_challenge_methods_supported': ['S256'],
+        'token_endpoint_auth_methods_supported': ['none'],
+        'scopes_supported': [scope_for(name) for name in SCOPE_NAMES],
+        'subject_types_supported': ['public'],
+        'id_token_signing_alg_values_supported': ['RS256'],
+    }
+
+
+def discovery_document(path: str) -> DiscoveryDocument | None:
+    """The builder of the public metadata document ``path`` names (matched by suffix, whatever the stage prefix), or ``None``."""
+    if path.endswith(METADATA_PATH):
+        return protected_resource_metadata
+    if path.endswith(AUTHORIZATION_SERVER_METADATA_PATHS):
+        return authorization_server_metadata
+    return None
 
 
 def authorize_tool(caller: Caller, scope: str, admin: bool) -> str | None:

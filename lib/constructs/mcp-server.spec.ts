@@ -41,14 +41,15 @@ const NINETY_DAYS_IN_MINUTES = 90 * 24 * 60;
 const RESERVED_CONCURRENCY = 10;
 const HOSTED_LOGIN_URL = `https://${TEST_DOMAIN_PREFIX}.auth.${TEST_REGION}.amazoncognito.com`;
 const METADATA_PATH = '.well-known/oauth-protected-resource';
+/** The authorization server issuer: the stage URL without its trailing slash. */
+const RENDERED_ISSUER = RENDERED_STAGE_URL.replace(/\/$/, '');
+const AUTHORIZATION_SERVER_METADATA_PATHS = ['openid-configuration', 'oauth-authorization-server'];
 
 const { template, resourceMetadataUrl } = synthesizeMcpServer();
 const ids = extractMcpTemplateIds(template);
 const clientProps = extractUserPoolClientProps(template);
 const mcpResourceId = findApiResourceId(template, 'mcp');
-const metadataResourceId = findApiResourceId(
-  template, 'oauth-protected-resource', findApiResourceId(template, '.well-known')
-);
+const wellKnownId = findApiResourceId(template, '.well-known');
 
 describe('Cognito resource server', () => {
   it('is identified by the MCP endpoint URL, so RFC 8707 resource binding to that URL is accepted', () => {
@@ -131,15 +132,21 @@ describe('/mcp routes', () => {
   });
 });
 
+describe('Discovery routes', () => {
+  it.each(['oauth-protected-resource', ...AUTHORIZATION_SERVER_METADATA_PATHS])(
+    'serves GET /.well-known/%s from the MCP function without authentication or scopes',
+    (path) => {
+      const resourceId = findApiResourceId(template, path, wellKnownId);
+      const methods = extractApiMethods(template, resourceId);
+
+      expect(methods.map((method) => `${method.httpMethod} ${method.authorizationType}`)).toStrictEqual(['GET NONE']);
+      expect(unguardedVerbs(methods, ids.functionId).notIntegratedWithFunction).toStrictEqual([]);
+      expect(extractAuthorizationScopesByVerb(template, resourceId)).toStrictEqual({ GET: undefined });
+    }
+  );
+});
+
 describe('Protected resource metadata route', () => {
-  it(`serves GET /${METADATA_PATH} from the MCP function without authentication`, () => {
-    const methods = extractApiMethods(template, metadataResourceId);
-
-    expect(methods.map((method) => `${method.httpMethod} ${method.authorizationType}`)).toStrictEqual(['GET NONE']);
-    expect(unguardedVerbs(methods, ids.functionId).notIntegratedWithFunction).toStrictEqual([]);
-    expect(extractAuthorizationScopesByVerb(template, metadataResourceId)).toStrictEqual({ GET: undefined });
-  });
-
   it('exposes the metadata URL its 401 response advertises', () => {
     expect(resourceMetadataUrl).toBe(`${RENDERED_STAGE_URL}${METADATA_PATH}`);
   });
@@ -192,6 +199,8 @@ describe('MCP function', () => {
       MCP_CLIENT_ID: REF,
       MCP_RESOURCE_URL: `${RENDERED_STAGE_URL}mcp`,
       MCP_RESOURCE_METADATA_URL: `${RENDERED_STAGE_URL}${METADATA_PATH}`,
+      MCP_AUTHORIZATION_SERVER: RENDERED_ISSUER,
+      MCP_HOSTED_LOGIN_URL: HOSTED_LOGIN_URL,
       MCP_API_FUNCTIONS: `{"keyword-mgmt":"${REF}","config-mgmt":"${REF}"}`,
       MCP_PINNED_TOOLS: 'list_providers,get_dashboard_stats',
     });

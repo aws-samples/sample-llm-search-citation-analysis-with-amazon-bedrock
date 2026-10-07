@@ -22,6 +22,14 @@ import { lambdaSourceCode } from './python-layer';
  * token; `lambda/mcp/handler.py` then checks issuer, client and audience and
  * calls the API router Lambdas with the caller's identity in the event.
  *
+ * Discovery does not point clients at Cognito's own metadata: it omits
+ * `code_challenge_methods_supported`, and MCP clients must then refuse the
+ * server (Claude Code and the ChatGPT connector do). The protected resource
+ * metadata names the stage URL as the authorization server instead, and the
+ * API serves a complete metadata document for it at
+ * `/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server`,
+ * whose endpoints are the managed-login domain's. Tokens are still Cognito's.
+ *
  * The resource server's identifier is the MCP endpoint URL itself, so the
  * access-token scopes read `<McpUrl>/read` and so on. MCP clients send the
  * endpoint as the RFC 8707 `resource` parameter (Kiro does, checked 7 October
@@ -60,19 +68,34 @@ const STAGE_BURST_LIMIT = 40;
 const MCP_PATH = 'mcp';
 const WELL_KNOWN_PATH = '.well-known';
 const PROTECTED_RESOURCE_METADATA_PATH = 'oauth-protected-resource';
+/**
+ * Where clients look for the authorization server metadata of the issuer
+ * `<stage URL>`: appended to it, because the stage is a path segment and the
+ * RFC 8414 path-inserted location falls outside the API (see
+ * `AUTHORIZATION_SERVER_METADATA_PATHS` in `lambda/mcp/auth.py`).
+ */
+const AUTHORIZATION_SERVER_METADATA_PATHS = ['openid-configuration', 'oauth-authorization-server'];
 
 /**
- * `api.url` without the dependency cycle. `api.url` is a `Ref` to the
+ * `api.url` without its trailing slash and without the dependency cycle.
+ * `api.url` is a `Ref` to the
  * deployment stage; the stage depends on the deployment, the deployment on the
  * methods and the methods on this function, so the function's environment
  * cannot name the stage. The REST API id and the stage's configured name are
- * known before any method exists and resolve to the same URL.
+ * known before any method exists and resolve to the same URL. Without the
+ * slash it is also the authorization server issuer, which clients compare
+ * character by character with the PRM's `authorization_servers` entry.
  */
 function stageUrl(api: apigateway.RestApi): string {
   const stage = api.deploymentStage.node.defaultChild as apigateway.CfnStage;
   const { region, urlSuffix } = cdk.Stack.of(api);
   // `Stage` always names its CfnStage; 'prod' is CDK's own default when it does not.
-  return `https://${api.restApiId}.execute-api.${region}.${urlSuffix}/${stage.stageName ?? 'prod'}/`;
+  return `https://${api.restApiId}.execute-api.${region}.${urlSuffix}/${stage.stageName ?? 'prod'}`;
+}
+
+/** The Cognito managed-login domain of `domainPrefix`, which serves `/oauth2/authorize`, `/oauth2/token` and `/oauth2/revoke`. */
+function hostedLoginUrl(scope: Construct, domainPrefix: string): string {
+  return `https://${domainPrefix}.auth.${cdk.Stack.of(scope).region}.amazoncognito.com`;
 }
 
 /**
@@ -144,8 +167,8 @@ export class McpServer extends Construct {
     });
     const apiUrl = stageUrl(this.api);
     // Also the resource server identifier and the `aud` the Lambda expects; one value, three roles.
-    const resourceUrl = `${apiUrl}${MCP_PATH}`;
-    this.resourceMetadataUrl = `${apiUrl}${WELL_KNOWN_PATH}/${PROTECTED_RESOURCE_METADATA_PATH}`;
+    const resourceUrl = `${apiUrl}/${MCP_PATH}`;
+    this.resourceMetadataUrl = `${apiUrl}/${WELL_KNOWN_PATH}/${PROTECTED_RESOURCE_METADATA_PATH}`;
     // RFC 9728: a 401 tells the client where the protected resource metadata is.
     this.api.addGatewayResponse('Unauthorized', {
       type: apigateway.ResponseType.UNAUTHORIZED,
@@ -183,14 +206,15 @@ export class McpServer extends Construct {
     });
     branding.node.addDependency(domain);
 
-    const serverFunction = this.serverFunction(props, client, resourceUrl);
+    const serverFunction = this.serverFunction(props, client, { resourceUrl, authorizationServerUrl: apiUrl });
     this.addRoutes(props, serverFunction, resourceUrl);
     this.addOutputs(props.domainPrefix, client, resourceUrl);
   }
 
   /**
    * The `mcp` app client: authorization code grant only (PKCE, no secret, no
-   * implicit grant), the three resource-server scopes plus `openid`. Access and
+   * implicit grant), the three resource-server scopes plus `openid` (still
+   * allowed for clients that ask, though the metadata no longer offers it). Access and
    * ID tokens live one hour like the dashboard client's; the refresh token
    * lives 90 days so an assistant integration is not re-authorised weekly.
    */
@@ -228,7 +252,7 @@ export class McpServer extends Construct {
   private serverFunction(
     props: McpServerProps,
     client: cognito.UserPoolClient,
-    resourceUrl: string
+    urls: { resourceUrl: string; authorizationServerUrl: string }
   ): lambda.Function {
     const stack = cdk.Stack.of(this);
     const logGroup = new logs.LogGroup(this, 'LogGroup', {
@@ -254,8 +278,10 @@ export class McpServer extends Construct {
       environment: {
         MCP_ISSUER: `https://cognito-idp.${stack.region}.amazonaws.com/${props.userPool.userPoolId}`,
         MCP_CLIENT_ID: client.userPoolClientId,
-        MCP_RESOURCE_URL: resourceUrl,
+        MCP_RESOURCE_URL: urls.resourceUrl,
         MCP_RESOURCE_METADATA_URL: this.resourceMetadataUrl,
+        MCP_AUTHORIZATION_SERVER: urls.authorizationServerUrl,
+        MCP_HOSTED_LOGIN_URL: hostedLoginUrl(this, props.domainPrefix),
         MCP_API_FUNCTIONS: stack.toJsonString(routerFunctionNames),
         MCP_PINNED_TOOLS: (props.pinnedTools ?? []).join(','),
       },
@@ -270,7 +296,7 @@ export class McpServer extends Construct {
   /**
    * `POST /mcp` and `GET /mcp` behind the Cognito authorizer with the MCP
    * scopes (so the authorizer validates an access token, not an ID token), and
-   * the public discovery document.
+   * the public discovery documents.
    */
   private addRoutes(props: McpServerProps, serverFunction: lambda.IFunction, resourceUrl: string): void {
     const integration = new apigateway.LambdaIntegration(serverFunction, { proxy: true });
@@ -291,23 +317,24 @@ export class McpServer extends Construct {
     // authenticated one reaches the Lambda, which answers 405 (no SSE stream).
     mcpResource.addMethod('GET', integration, protectedRoute);
 
-    // Public by design: RFC 9728 clients fetch this document before they have a
-    // token, and it carries nothing but the authorization server's location.
-    // NOSONAR: the discovery document must be readable without authentication
-    this.api.root
-      .addResource(WELL_KNOWN_PATH)
-      .addResource(PROTECTED_RESOURCE_METADATA_PATH)
-      .addMethod('GET', integration, { authorizationType: apigateway.AuthorizationType.NONE }); // NOSONAR
+    // Public by design: clients fetch these discovery documents before they
+    // have a token, and they carry nothing but the authorization server's
+    // location and capabilities.
+    const wellKnown = this.api.root.addResource(WELL_KNOWN_PATH);
+    for (const path of [PROTECTED_RESOURCE_METADATA_PATH, ...AUTHORIZATION_SERVER_METADATA_PATHS]) {
+      // NOSONAR: the discovery documents must be readable without authentication
+      wellKnown.addResource(path).addMethod('GET', integration, { authorizationType: apigateway.AuthorizationType.NONE }); // NOSONAR
+    }
   }
 
   /** Outputs with stable `OutputKey`s (no construct-path hash), so `describe-stacks` queries can name them. */
   private addOutputs(domainPrefix: string, client: cognito.UserPoolClient, resourceUrl: string): void {
-    const hostedLoginUrl = `https://${domainPrefix}.auth.${cdk.Stack.of(this).region}.amazoncognito.com`;
+    const loginUrl = hostedLoginUrl(this, domainPrefix);
     const outputs: Record<string, [value: string, description: string]> = {
       McpUrl: [resourceUrl, 'MCP server endpoint (Streamable HTTP, JSON responses)'],
       McpClientId: [client.userPoolClientId, 'Cognito app client for MCP clients (public, PKCE)'],
-      McpAuthorizeUrl: [`${hostedLoginUrl}/oauth2/authorize`, 'OAuth 2.0 authorization endpoint'],
-      McpTokenUrl: [`${hostedLoginUrl}/oauth2/token`, 'OAuth 2.0 token endpoint'],
+      McpAuthorizeUrl: [`${loginUrl}/oauth2/authorize`, 'OAuth 2.0 authorization endpoint'],
+      McpTokenUrl: [`${loginUrl}/oauth2/token`, 'OAuth 2.0 token endpoint'],
       McpResourceMetadataUrl: [this.resourceMetadataUrl, 'RFC 9728 protected resource metadata'],
     };
     for (const [id, [value, description]] of Object.entries(outputs)) {

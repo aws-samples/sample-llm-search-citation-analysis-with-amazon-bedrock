@@ -310,8 +310,8 @@ class TestEnablingProvesTheProvider:
 
     def test_probes_an_engine_with_the_configured_models_real_answer(self, requests_stub):
         """
-        The key probe reads Anthropic's "credit balance is too low" 400 as
-        "key accepted"; only an answer from the model surfaces it.
+        Enabling an engine proves the configured model answers, not merely
+        that the key authenticates.
         """
         _store_key('sk-stored-key-1234')
         _serve_config_rows({'claude': {'provider_id': 'claude', 'enabled': False, 'model': 'claude-sonnet-4-5'}})
@@ -934,6 +934,39 @@ class TestKeyProbeRequestsAndVerdicts:
         requests_stub.return_value = _reply(500, {'error': {'message': 'overloaded'}})
 
         assert _module.validate_api_key(provider_id, 'pk-1234') == {'valid': False, 'error': 'Unexpected status 500'}
+
+
+class TestClaudeKeyProbeReadsTheCreditBalance:
+    """
+    Anthropic answers the 1-token probe with 400 for a key that authenticated
+    but cannot be served. Every such 400 used to read as "key accepted", so a
+    key with an exhausted credit balance was saved without a word.
+    """
+
+    def test_refuses_a_key_without_credit_with_anthropics_reason(self, requests_stub):
+        requests_stub.return_value = _anthropic_rejection(CREDIT_EXHAUSTED_MESSAGE)
+
+        assert _module.validate_api_key('claude', 'claude-test-key') == {'valid': False, 'error': CREDIT_EXHAUSTED_MESSAGE}
+
+    def test_refuses_to_store_a_key_without_credit(self, requests_stub):
+        requests_stub.return_value = _anthropic_rejection(CREDIT_EXHAUSTED_MESSAGE)
+
+        assert _put_provider('claude', {'api_key': 'claude-test-key'}) == (400, {
+            'error': 'Invalid API key', 'details': CREDIT_EXHAUSTED_MESSAGE,
+        })
+        assert mock_secrets.put_secret_value.call_args_list == []
+
+    def test_still_accepts_a_key_on_an_unrelated_400(self, requests_stub):
+        requests_stub.return_value = _anthropic_rejection('model: claude-haiku-4-5 is not available')
+
+        assert _module.validate_api_key('claude', 'claude-test-key') == {
+            'valid': True, 'note': 'Key accepted (model validation skipped)',
+        }
+
+    def test_names_a_key_anthropic_refuses_with_401_invalid(self, requests_stub):
+        requests_stub.return_value = _reply(401, {'type': 'error', 'error': {'type': 'authentication_error', 'message': 'invalid x-api-key'}})
+
+        assert _module.validate_api_key('claude', 'claude-test-key') == {'valid': False, 'error': 'Invalid API key'}
 
 
 class TestGetProvidersReportsKeyState:

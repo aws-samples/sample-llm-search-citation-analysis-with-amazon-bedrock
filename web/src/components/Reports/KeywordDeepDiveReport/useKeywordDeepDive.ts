@@ -6,6 +6,7 @@ import { useBrandMentions } from '../../../hooks/useBrandMentions';
 import { useCitationGaps } from '../../../hooks/useCitationGaps';
 import { useRecommendations } from '../../../hooks/useRecommendations';
 import { useReportReady } from '../layout/useReportReady';
+import { ALL_SCOPE } from '../../ui/reportScope';
 import type { ReportScope } from '../../../types';
 
 /**
@@ -24,12 +25,14 @@ export function useKeywordDeepDive(keyword: string | null) {
   const trends = useHistoricalTrends();
   const personas = usePersonaRankings();
   const gaps = useCitationGaps();
-  const recommendations = useRecommendations();
-
-  const mentions = useBrandMentions(keyword ? {
+  const keywordScope: ReportScope | null = keyword ? {
     kind: 'keyword',
-    keyword 
-  } : null);
+    keyword
+  } : null;
+  // Scoped to the report's keyword, so the recommendations match the page.
+  const recommendations = useRecommendations(keywordScope ?? ALL_SCOPE);
+
+  const mentions = useBrandMentions(keywordScope);
 
   const fetchVisibility = visibility.fetchVisibilityMetrics;
   const fetchTrends = trends.fetchHistoricalTrends;

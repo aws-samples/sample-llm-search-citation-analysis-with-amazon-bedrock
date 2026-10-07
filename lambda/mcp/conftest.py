@@ -23,7 +23,7 @@ import invoke
 import pytest
 from auth import Caller, verify_claims
 
-from testing.mcp_result_fixtures import READ_SCOPE, RESOURCE_URL, STAGE_URL, WRITE_SCOPE
+from testing.mcp_result_fixtures import HOSTED_LOGIN_URL, READ_SCOPE, RESOURCE_URL, STAGE_URL, WRITE_SCOPE
 from testing.module_loader import load_handler_module
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -48,6 +48,8 @@ MCP_ENV = {
     'MCP_CLIENT_ID': CLIENT_ID,
     'MCP_RESOURCE_URL': RESOURCE_URL,
     'MCP_RESOURCE_METADATA_URL': METADATA_URL,
+    'MCP_AUTHORIZATION_SERVER': STAGE_URL,
+    'MCP_HOSTED_LOGIN_URL': HOSTED_LOGIN_URL,
     'MCP_API_FUNCTIONS': json.dumps(API_FUNCTIONS),
     'MCP_PINNED_TOOLS': '',
 }
@@ -58,9 +60,10 @@ Poster = Callable[..., dict[str, Any]]
 
 @pytest.fixture(autouse=True)
 def mcp_env() -> Iterator[dict[str, str]]:
-    """The six contract variables, as CDK sets them."""
+    """The contract variables, as CDK sets them."""
     with patch.dict(os.environ, MCP_ENV):
         yield MCP_ENV
+
 
 
 @pytest.fixture

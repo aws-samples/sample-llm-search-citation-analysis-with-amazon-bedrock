@@ -33,7 +33,12 @@ from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler
 from shared.dynamo_decimal import to_int
 from shared.env_vars import resolve_table_env
-from shared.provider_health import record_provider_failure, record_provider_success
+from shared.provider_health import (
+    INSUFFICIENT_CREDIT,
+    classify_provider_error,
+    record_provider_failure,
+    record_provider_success,
+)
 from shared.provider_models import (
     CONFIGURABLE_MODEL_PROVIDERS,
     DEFAULT_PROVIDER_MODELS,
@@ -400,7 +405,13 @@ def _listing_result(response: Any, key: str) -> dict:
 
 
 def _claude_result(response: Any) -> dict:
-    """Interpret the Anthropic probe: a 400 on the probe model still proves auth passed."""
+    """Interpret the Anthropic probe: a 400 on the probe model still proves auth passed.
+
+    Except the credit-balance 400: Anthropic reports an exhausted balance as
+    a 400 ``invalid_request_error``, and a key with no credit cannot answer a
+    single run query, so it is refused with Anthropic's own words rather than
+    saved as "accepted".
+    """
     if response.status_code != 400:
         return _probe_result(response)
     try:
@@ -414,6 +425,9 @@ def _claude_result(response: Any) -> dict:
         return {'valid': False, 'error': 'Unexpected 400 response'}
     if error.get('type') == 'authentication_error':
         return {'valid': False, 'error': 'Invalid API key'}
+    message = error.get('message')
+    if isinstance(message, str) and classify_provider_error(message, response.status_code) == INSUFFICIENT_CREDIT:
+        return {'valid': False, 'error': message[:300]}
     return {'valid': True, 'note': 'Key accepted (model validation skipped)'}
 
 
