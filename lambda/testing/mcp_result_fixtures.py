@@ -14,6 +14,8 @@ from typing import Any
 
 STAGE_URL = 'https://abc123.execute-api.eu-west-1.amazonaws.com/prod'
 RESOURCE_URL = f'{STAGE_URL}/mcp'
+#: The Cognito managed-login domain the authorization server metadata points at.
+HOSTED_LOGIN_URL = 'https://citation-analysis-test.auth.eu-west-1.amazoncognito.com'
 READ_SCOPE = f'{RESOURCE_URL}/read'
 WRITE_SCOPE = f'{RESOURCE_URL}/write'
 RUN_SCOPE = f'{RESOURCE_URL}/run'

@@ -8,14 +8,20 @@ import json
 
 import pytest
 
-from testing.mcp_result_fixtures import READ_SCOPE, RUN_SCOPE, WRITE_SCOPE
+from testing.mcp_result_fixtures import HOSTED_LOGIN_URL, READ_SCOPE, RUN_SCOPE, STAGE_URL, WRITE_SCOPE
 
 METADATA_PATH = '/.well-known/oauth-protected-resource'
+AUTHORIZATION_SERVER_PATHS = ('/.well-known/openid-configuration', '/.well-known/oauth-authorization-server')
 
 
 def _request(mcp_handler, method: str, path: str, **extra) -> dict:
     """A proxy event with no authorizer claims, as the unauthenticated metadata route receives it."""
     return mcp_handler.handler({'httpMethod': method, 'path': path, 'headers': {}, 'body': None, **extra}, {})
+
+
+def _document(mcp_handler, path: str) -> dict:
+    """The decoded body of an anonymous GET of ``path``."""
+    return json.loads(_request(mcp_handler, 'GET', path)['body'])
 
 
 class TestProtectedResourceMetadata:
@@ -25,11 +31,20 @@ class TestProtectedResourceMetadata:
         assert response['statusCode'] == 200
         assert json.loads(response['body']) == {
             'resource': mcp_env['MCP_RESOURCE_URL'],
-            'authorization_servers': [mcp_env['MCP_ISSUER']],
-            'scopes_supported': ['openid', READ_SCOPE, WRITE_SCOPE, RUN_SCOPE],
+            'authorization_servers': [STAGE_URL],
+            'scopes_supported': [READ_SCOPE, WRITE_SCOPE, RUN_SCOPE],
             'bearer_methods_supported': ['header'],
             'resource_name': 'Citation Analysis MCP',
         }
+
+    def test_names_the_metadata_issuer_this_api_serves_as_the_authorization_server(self, mcp_handler):
+        """Clients compare the PRM entry and the metadata ``issuer`` character by character."""
+        prm = _document(mcp_handler, METADATA_PATH)
+
+        assert prm['authorization_servers'] == [_document(mcp_handler, AUTHORIZATION_SERVER_PATHS[0])['issuer']]
+
+    def test_does_not_offer_openid_so_clients_ask_for_no_id_token(self, mcp_handler):
+        assert 'openid' not in _document(mcp_handler, METADATA_PATH)['scopes_supported']
 
     def test_names_this_servers_resource_url_from_the_environment(self, mcp_handler, mcp_env):
         body = json.loads(_request(mcp_handler, 'GET', METADATA_PATH)['body'])
@@ -43,10 +58,51 @@ class TestProtectedResourceMetadata:
     def test_answers_as_json(self, mcp_handler):
         assert _request(mcp_handler, 'GET', METADATA_PATH)['headers']['Content-Type'] == 'application/json'
 
-    def test_refuses_a_post_to_the_metadata_route_with_405_allow_get(self, mcp_handler):
-        response = _request(mcp_handler, 'POST', METADATA_PATH, body='{}')
+    @pytest.mark.parametrize('path', [METADATA_PATH, *AUTHORIZATION_SERVER_PATHS])
+    def test_refuses_a_post_to_a_discovery_route_with_405_allow_get(self, mcp_handler, path):
+        response = _request(mcp_handler, 'POST', path, body='{}')
 
         assert (response['statusCode'], response['headers']['Allow']) == (405, 'GET')
+
+
+class TestAuthorizationServerMetadata:
+    """The discovery document that fills the gap in Cognito's (no ``code_challenge_methods_supported``)."""
+
+    @pytest.mark.parametrize('path', AUTHORIZATION_SERVER_PATHS)
+    def test_serves_the_document_at_both_well_known_names_without_claims(self, mcp_handler, path):
+        response = _request(mcp_handler, 'GET', f'/prod{path}')
+
+        assert (response['statusCode'], response['headers']['Content-Type']) == (200, 'application/json')
+
+    def test_describes_cognito_managed_login_as_a_pkce_authorization_server(self, mcp_handler, mcp_env):
+        assert _document(mcp_handler, AUTHORIZATION_SERVER_PATHS[1]) == {
+            'issuer': STAGE_URL,
+            'authorization_endpoint': f'{HOSTED_LOGIN_URL}/oauth2/authorize',
+            'token_endpoint': f'{HOSTED_LOGIN_URL}/oauth2/token',
+            'revocation_endpoint': f'{HOSTED_LOGIN_URL}/oauth2/revoke',
+            'jwks_uri': f'{mcp_env["MCP_ISSUER"]}/.well-known/jwks.json',
+            'response_types_supported': ['code'],
+            'grant_types_supported': ['authorization_code', 'refresh_token'],
+            'code_challenge_methods_supported': ['S256'],
+            'token_endpoint_auth_methods_supported': ['none'],
+            'scopes_supported': [READ_SCOPE, WRITE_SCOPE, RUN_SCOPE],
+            'subject_types_supported': ['public'],
+            'id_token_signing_alg_values_supported': ['RS256'],
+        }
+
+    def test_serves_the_same_document_under_both_names(self, mcp_handler):
+        documents = [_document(mcp_handler, path) for path in AUTHORIZATION_SERVER_PATHS]
+
+        assert documents[0] == documents[1]
+
+    def test_lets_clients_cache_the_document_for_five_minutes(self, mcp_handler):
+        response = _request(mcp_handler, 'GET', AUTHORIZATION_SERVER_PATHS[0])
+
+        assert response['headers']['Cache-Control'] == 'public, max-age=300'
+
+    def test_still_checks_access_tokens_against_cognitos_issuer(self, post, claims):
+        """The metadata issuer is the stage URL, but Cognito signs the tokens: their ``iss`` stays Cognito's."""
+        assert post({'jsonrpc': '2.0', 'id': 1, 'method': 'ping'}, claims_override=claims(iss=STAGE_URL))['statusCode'] == 401
 
 
 class TestMcpRoute:

@@ -1,10 +1,13 @@
 """
 MCP server Lambda: the API Gateway proxy entry point.
 
-One function serves three routes, told apart by method and path suffix:
+One function serves these routes, told apart by method and path suffix:
 
 - ``GET  /.well-known/oauth-protected-resource`` (no authorizer) → the RFC 9728
-  protected resource metadata that points clients at the Cognito user pool.
+  protected resource metadata that names this API as the authorization server.
+- ``GET  /.well-known/openid-configuration`` and
+  ``GET  /.well-known/oauth-authorization-server`` (no authorizer) → the
+  authorization server metadata describing Cognito's managed login.
 - ``GET  /mcp`` → ``405 Allow: POST`` (no SSE stream; the server is stateless).
 - ``POST /mcp`` (Cognito authorizer) → verify the token's claims, then answer
   the JSON-RPC body through ``protocol.respond``.
@@ -24,7 +27,7 @@ from typing import Any
 # Shared layer path (populated by the Lambda layer at /opt/python)
 sys.path.insert(0, '/opt/python')
 
-from auth import METADATA_PATH, AuthError, protected_resource_metadata, unauthorized_response, verify_claims
+from auth import AuthError, DiscoveryDocument, discovery_document, unauthorized_response, verify_claims
 from protocol import SUPPORTED_VERSIONS, RequestContext, http_response, respond
 
 from shared.auth import get_caller_claims
@@ -50,10 +53,17 @@ def _method_not_allowed(allow: str) -> dict[str, Any]:
     return response
 
 
-def _metadata(method: str) -> dict[str, Any]:
+#: Discovery documents change only with a deploy; a few minutes spares clients a refetch per connection.
+DISCOVERY_CACHE_CONTROL = 'public, max-age=300'
+
+
+def _discovery(method: str, document: DiscoveryDocument) -> dict[str, Any]:
+    """A public metadata document on GET, ``405 Allow: GET`` otherwise."""
     if method != 'GET':
         return _method_not_allowed('GET')
-    return http_response(200, protected_resource_metadata())
+    response = http_response(200, document())
+    response['headers']['Cache-Control'] = DISCOVERY_CACHE_CONTROL
+    return response
 
 
 def _unsupported_version(version: str) -> dict[str, Any]:
@@ -62,11 +72,12 @@ def _unsupported_version(version: str) -> dict[str, Any]:
 
 
 def handler(event: dict[str, Any], context: object) -> dict[str, Any]:
-    """Serve the metadata route, refuse non-POST methods, or verify the caller and answer the JSON-RPC body."""
+    """Serve the metadata routes, refuse non-POST methods, or verify the caller and answer the JSON-RPC body."""
     method = str(event.get('httpMethod') or 'GET').upper()
     path = str(event.get('path') or '')
-    if path.endswith(METADATA_PATH):
-        return _metadata(method)
+    document = discovery_document(path)
+    if document is not None:
+        return _discovery(method, document)
     if method != 'POST':
         return _method_not_allowed('POST')
     try:
