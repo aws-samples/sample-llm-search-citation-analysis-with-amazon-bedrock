@@ -90,6 +90,8 @@ class Sighting:
     rank: int | None
     """Order of first appearance among the brands named (1 = first); ``None`` when unknown."""
     sentiment: str | None
+    reason: str | None = None
+    """Why the answer words the brand as it does (the stored ``sentiment_reason``); ``None`` when not given."""
 
 
 @dataclass(frozen=True)
@@ -103,6 +105,8 @@ class Answer:
     sightings: tuple[Sighting, ...]
     cited_domains: frozenset[str]
     model: str | None
+    cited_urls: tuple[str, ...] = ()
+    """The URLs the answer cites, each once, in the order cited (``cited_domains`` are their hosts)."""
 
     def first_party(self) -> tuple[Sighting, ...]:
         return tuple(sighting for sighting in self.sightings if sighting.classification == FIRST_PARTY)
@@ -133,12 +137,14 @@ def sighting_from_brand(brand: object) -> Sighting | None:
     classification = brand.get('classification')
     sentiment = brand.get('sentiment')
     label = sentiment.lower() if isinstance(sentiment, str) else None
+    reason = brand.get('sentiment_reason')
     return Sighting(
         key=name.lower(),
         name=name,
         classification=classification if classification in {FIRST_PARTY, COMPETITOR} else OTHER,
         rank=_rank(brand.get('rank')),
         sentiment=label if label in SENTIMENT_LABELS else None,
+        reason=(reason.strip() or None) if isinstance(reason, str) else None,
     )
 
 
@@ -160,13 +166,18 @@ def normalize_domain(value: object) -> str | None:
     return host or None
 
 
-def is_owned_domain(domain: str, owned_domains: Iterable[str]) -> bool:
-    """Whether ``domain`` is one of ``owned_domains`` or a subdomain of one."""
-    for owned in owned_domains:
-        normalized = normalize_domain(owned)
+def matches_domain(domain: str, domains: Iterable[str]) -> bool:
+    """Whether ``domain`` is one of ``domains`` or a subdomain of one."""
+    for listed in domains:
+        normalized = normalize_domain(listed)
         if normalized and (domain == normalized or domain.endswith(f'.{normalized}')):
             return True
     return False
+
+
+def is_owned_domain(domain: str, owned_domains: Iterable[str]) -> bool:
+    """Whether ``domain`` is one of ``owned_domains`` or a subdomain of one."""
+    return matches_domain(domain, owned_domains)
 
 
 def owned_domains_from(brand_config: Mapping[str, Any]) -> list[str]:
@@ -174,6 +185,13 @@ def owned_domains_from(brand_config: Mapping[str, Any]) -> list[str]:
     configured = brand_config.get('first_party_domains')
     values = configured if isinstance(configured, (list, tuple, set)) else []
     return sorted({domain for domain in map(normalize_domain, values) if domain})
+
+
+def _cited_urls(citations: object) -> tuple[str, ...]:
+    """Every cited URL with a host, stripped and once each, in citation order."""
+    values = citations if isinstance(citations, (list, tuple)) else []
+    urls = (value.strip() for value in values if isinstance(value, str) and normalize_domain(value))
+    return tuple(dict.fromkeys(urls))
 
 
 def _is_answer_row(row: Mapping[str, Any]) -> bool:
@@ -205,6 +223,7 @@ def answer_from_row(row: Mapping[str, Any]) -> Answer | None:
         sightings=tuple(by_key.values()),
         cited_domains=frozenset(filter(None, (normalize_domain(url) for url in row.get('citations') or []))),
         model=model if isinstance(model, str) and model else None,
+        cited_urls=_cited_urls(row.get('citations')),
     )
 
 
@@ -436,6 +455,7 @@ __all__ = [
     'is_owned_domain',
     'kpi_changes',
     'kpi_trends',
+    'matches_domain',
     'normalize_domain',
     'owned_domains_from',
     'percent',

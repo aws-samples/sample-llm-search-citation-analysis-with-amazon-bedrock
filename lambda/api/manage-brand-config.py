@@ -19,6 +19,7 @@ import boto3
 # Add shared module to path
 sys.path.insert(0, '/opt/python')
 
+from shared import kpi_engine
 from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler, validate
@@ -231,6 +232,64 @@ def find_duplicates(brands: list) -> list:
 
 
 BrandPortfolio = Literal["first_party", "competitor"]
+
+#: The most domains one competitor keeps, and the most competitors that keep domains.
+MAX_DOMAINS_PER_COMPETITOR = 10
+MAX_COMPETITORS_WITH_DOMAINS = 50
+
+_COMPETITOR_DOMAINS_FIELD = 'competitor_domains'
+
+
+def _domain(value: object) -> str | None:
+    """``value`` as a hostname normalised like ``first_party_domains``, or ``None`` when it is no hostname."""
+    domain = kpi_engine.normalize_domain(value)
+    if domain is None or any(character.isspace() for character in domain):
+        return None
+    return domain
+
+
+def _unique_domains(values: list) -> list[str]:
+    """The hostnames among ``values``, normalised, without repeats, in first-seen order."""
+    return list(dict.fromkeys(domain for domain in map(_domain, values) if domain))
+
+
+def _competitor_domains_error(brand: object, domains: object, tracked: set[str]) -> str | None:
+    """Why one ``brand: domains`` entry of ``competitor_domains`` is refused, or ``None`` when it is valid."""
+    if not isinstance(brand, str) or brand not in tracked:
+        return f"competitor_domains names {brand!r}, which is not a tracked competitor"
+    if not isinstance(domains, list):
+        return f"competitor_domains for {brand!r} must be a list of domains"
+    if any(_domain(value) is None for value in domains):
+        return f"competitor_domains for {brand!r} contains a value that is not a domain"
+    if len(_unique_domains(domains)) > MAX_DOMAINS_PER_COMPETITOR:
+        return f"competitor_domains for {brand!r} lists more than {MAX_DOMAINS_PER_COMPETITOR} domains"
+    return None
+
+
+def competitor_domains_from(value: object, competitors: object) -> tuple[dict[str, list[str]], str | None]:
+    """The ``competitor_domains`` of a saved config, normalised, and the reason it is refused (``None`` when valid).
+
+    ``value`` maps tracked competitor names (``competitors``) to their domains;
+    a missing value is ``{}``. A competitor left with no domains is dropped.
+    """
+    if value is None:
+        return {}, None
+    if not isinstance(value, dict):
+        return {}, 'competitor_domains must map competitor names to lists of domains'
+    if len(value) > MAX_COMPETITORS_WITH_DOMAINS:
+        return {}, f'competitor_domains lists more than {MAX_COMPETITORS_WITH_DOMAINS} competitors'
+    tracked = {name for name in competitors if isinstance(name, str)} if isinstance(competitors, list) else set()
+    for brand, domains in value.items():
+        error = _competitor_domains_error(brand, domains, tracked)
+        if error:
+            return {}, error
+    return {brand: _unique_domains(domains) for brand, domains in value.items() if domains}, None
+
+
+def _suggested_domains(entry: object) -> list[str]:
+    """The domains the model suggests for one competitor entry: hostnames only, normalised, at most the per-brand cap."""
+    domains = entry.get('domains') if isinstance(entry, dict) else None
+    return _unique_domains(domains)[:MAX_DOMAINS_PER_COMPETITOR] if isinstance(domains, list) else []
 
 _BRAND_PORTFOLIO_PROMPT: dict[BrandPortfolio, tuple[str, str]] = {
     "first_party": (
@@ -457,25 +516,29 @@ Return ONLY a JSON object with this format:
   "competitors": [
     {{
       "name": "Competitor Brand Name",
-      "reason": "Brief reason why they compete (1 sentence)"
+      "reason": "Brief reason why they compete (1 sentence)",
+      "domains": ["competitor-website.com"]
     }}
   ],
   "notes": "Brief overview of the competitive landscape"
 }}
+
+For "domains", list the competitor's own website hostnames (at most {MAX_DOMAINS_PER_COMPETITOR}, without https:// or paths). Use an empty list when you are not sure of a domain; never guess one.
 
 Aim for 10-20 relevant competitors.
 
 JSON OUTPUT:"""
 
     def shape(result: dict[str, Any]) -> dict[str, Any]:
-        # Extract just the competitor names
+        # Extract just the competitor names; each detailed entry carries its suggested domains, normalised
         competitors = result.get("competitors", [])
         competitor_names = [c.get("name") if isinstance(c, dict) else c for c in competitors]
+        details = [{**c, "domains": _suggested_domains(c)} if isinstance(c, dict) else c for c in competitors]
 
         return {
             "first_party_brands": first_party_brands,
             "competitors": competitor_names,
-            "competitor_details": competitors,
+            "competitor_details": details,
         }
 
     return _run_brand_prompt(
@@ -586,6 +649,7 @@ def _default_config() -> dict[str, Any]:
             'competitors': []
         },
         'first_party_domains': [],
+        _COMPETITOR_DOMAINS_FIELD: {},
         'custom_entity_types': [],
         'custom_prompt_additions': '',
         'industry_prompts': {}
@@ -599,6 +663,9 @@ def _get_config(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if not config:
         # Return default config
         config = {'config_id': 'default', **_default_config(), 'created_at': get_timestamp()}
+    else:
+        # A config saved before competitor domains existed has none.
+        config = {_COMPETITOR_DOMAINS_FIELD: {}, **config}
 
     return success_response(config, event)
 
@@ -622,6 +689,11 @@ def _save_config(event: dict[str, Any], context: Any, body: dict, industry: str)
             'industry'
         )
 
+    competitors = body.get('tracked_brands', {}).get('competitors', [])
+    competitor_domains, domains_error = competitor_domains_from(body.get(_COMPETITOR_DOMAINS_FIELD), competitors)
+    if domains_error:
+        return validation_error(domains_error, event, _COMPETITOR_DOMAINS_FIELD)
+
     # Build config object
     config = {
         'industry': industry,
@@ -631,9 +703,10 @@ def _save_config(event: dict[str, Any], context: Any, body: dict, industry: str)
         'max_brands': body.get('max_brands', 20),
         'tracked_brands': {
             'first_party': body.get('tracked_brands', {}).get('first_party', []),
-            'competitors': body.get('tracked_brands', {}).get('competitors', [])
+            'competitors': competitors
         },
         'first_party_domains': body.get('first_party_domains', []),
+        _COMPETITOR_DOMAINS_FIELD: competitor_domains,
         'custom_entity_types': body.get('custom_entity_types', []),
         'custom_prompt_additions': body.get('custom_prompt_additions', ''),
         'industry_prompts': body.get('industry_prompts', {})
@@ -652,7 +725,8 @@ def _reset_config(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """DELETE /brand-config - Reset to defaults.
 
     Admin-only and destructive: it overwrites `tracked_brands`,
-    `first_party_domains`, `custom_entity_types` and `industry_prompts`.
+    `first_party_domains`, `competitor_domains`, `custom_entity_types` and
+    `industry_prompts`.
     """
     saved_config = save_config(_default_config())
 

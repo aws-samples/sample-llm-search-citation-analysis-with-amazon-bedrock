@@ -7,8 +7,10 @@ from __future__ import annotations
 import dataclasses
 import io
 import json
+from unittest.mock import MagicMock
 
 import pytest
+import state
 from auth import verify_claims
 from botocore.exceptions import ClientError
 from catalogue import InvalidArguments, find_operation
@@ -231,3 +233,48 @@ class TestAudit:
         assert audit() != []
         assert 'secret launch keyword' not in caplog.text
         assert 'alice' not in caplog.text
+
+
+class TestRefusalAndAuditRecords:
+    def test_a_denied_call_logs_the_refusal_reason(self, audit, claims):
+        _run('manage_keywords', {'action': 'add', 'keyword': 'parador'}, verify_claims(claims(scope=f'openid {READ_SCOPE}')))
+
+        assert audit()[-1]['reason'] == f'This tool needs the {WRITE_SCOPE} scope'
+
+    def test_an_allowed_call_logs_no_reason(self, api, caller, audit):
+        _run('list_keyword_groups', {}, caller)
+
+        assert 'reason' not in audit()[-1]
+
+    def test_a_write_call_is_recorded_in_the_state_table(self, api, caller, monkeypatch):
+        recorded = MagicMock()
+        monkeypatch.setattr(state, 'record_audit', recorded)
+        api.answer(201, {'id': 'kw_9'})
+
+        _run('manage_keywords', {'action': 'add', 'keyword': 'parador'}, caller)
+
+        recorded.assert_called_once_with(CALLER_SUB, 'manage_keywords', 'manage_keywords', 'http_201', None)
+
+    def test_a_read_call_is_not_recorded_in_the_state_table(self, api, caller, monkeypatch):
+        recorded = MagicMock()
+        monkeypatch.setattr(state, 'record_audit', recorded)
+
+        _run('list_keyword_groups', {}, caller)
+
+        recorded.assert_not_called()
+
+
+class TestSelectedResults:
+    def test_returns_the_custom_report_picked_by_id(self, api, caller):
+        api.answer(200, {'reports': [{'id': 'rpt_1', 'title': 'Aurora Miles monthly'}]})
+
+        result = _run('get_custom_report', {'report_id': 'rpt_1'}, caller)
+
+        assert result['structuredContent'] == {'report': {'id': 'rpt_1', 'title': 'Aurora Miles monthly'}}
+
+    def test_an_unknown_custom_report_is_a_404_tool_error(self, api, caller):
+        api.answer(200, {'reports': []})
+
+        assert _failure(_run('get_custom_report', {'report_id': 'rpt_9'}, caller)) == (
+            True, {'status': 404, 'error': 'No custom report with id rpt_9'},
+        )

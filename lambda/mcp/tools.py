@@ -5,7 +5,8 @@
 the operations that are not advertised directly. ``call_tool`` runs the named
 operation through exactly the same authorization and invoker as a direct
 tool; only the audit line differs (``tool`` names ``call_tool``, ``operation``
-names what ran).
+names what ran). Spend operations (``estimate_*`` / ``start_*``) run through
+``spend.run_spend``, every other operation through ``invoke.run_operation``.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from catalogue import (
     validate_arguments,
 )
 from invoke import run_operation, tool_result
+from spend import run_spend
 from tool_search import search_tools
 
 
@@ -34,7 +36,7 @@ def _search(arguments: Any) -> JsonObject:
 
 
 def _describe(tool: Tool) -> JsonObject:
-    return {
+    described: JsonObject = {
         'name': tool.name,
         'description': tool.description,
         'inputSchema': tool.input_schema,
@@ -43,6 +45,9 @@ def _describe(tool: Tool) -> JsonObject:
         'admin': tool.admin,
         'readOnlyHint': tool.read_only,
     }
+    if tool.spend is not None:
+        described['spend'] = {'family': tool.spend.family, 'step': tool.spend.step}
+    return described
 
 
 def _describe_tool(arguments: Any) -> JsonObject:
@@ -50,9 +55,15 @@ def _describe_tool(arguments: Any) -> JsonObject:
     return tool_result(f'{tool.name}: {tool.description}', _describe(tool))
 
 
+def _run(tool_name: str, operation: Tool, arguments: Any, caller: Caller) -> JsonObject:
+    if operation.spend is not None:
+        return run_spend(tool_name, operation, arguments, caller)
+    return run_operation(tool_name, operation, arguments, caller)
+
+
 def _call_tool(arguments: Any, caller: Caller) -> JsonObject:
     valid = validate_arguments(CALL_TOOL_SCHEMA, arguments)
-    return run_operation('call_tool', find_operation(valid['name']), valid.get('arguments') or {}, caller)
+    return _run('call_tool', find_operation(valid['name']), valid.get('arguments') or {}, caller)
 
 
 def call_tool(name: str, arguments: Any, caller: Caller) -> JsonObject:
@@ -63,4 +74,4 @@ def call_tool(name: str, arguments: Any, caller: Caller) -> JsonObject:
         return _describe_tool(arguments)
     if name == 'call_tool':
         return _call_tool(arguments, caller)
-    return run_operation(name, find_operation(name), arguments, caller)
+    return _run(name, find_operation(name), arguments, caller)

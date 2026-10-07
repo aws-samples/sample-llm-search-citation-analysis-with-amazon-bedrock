@@ -3,10 +3,10 @@ JSON-RPC 2.0 over one HTTP POST: the MCP Streamable HTTP transport with JSON res
 
 The server is stateless and never opens an SSE stream: every POST body (one
 message or a batch) is answered in the same HTTP response. Requests get a
-JSON-RPC result or error; a body holding only notifications gets ``202`` with
+JSON response or error; a body holding only notifications gets ``202`` with
 an empty body. Methods: ``initialize``, ``ping``, ``tools/list``,
-``tools/call``; ``notifications/initialized`` (and any other notification) is
-accepted silently.
+``tools/call``, ``prompts/list``, ``prompts/get``; ``notifications/initialized``
+(and any other notification) is accepted silently.
 
 HTTP status codes follow the transport, JSON-RPC codes the protocol: a body
 that is not JSON (``-32700``) or not a request (``-32600``) is a ``400``; an
@@ -23,6 +23,7 @@ from typing import Any
 
 from auth import Caller
 from catalogue import InvalidArguments, JsonObject, tool_listing
+from prompts import get_prompt, list_prompts
 from tools import call_tool
 
 logger = logging.getLogger(__name__)
@@ -77,7 +78,7 @@ def _error(request_id: Any, code: int, message: str) -> JsonObject:
 def _initialize(params: JsonObject) -> JsonObject:
     return {
         'protocolVersion': negotiate_version(params.get('protocolVersion')),
-        'capabilities': {'tools': {}},
+        'capabilities': {'tools': {}, 'prompts': {}},
         'serverInfo': dict(SERVER_INFO),
     }
 
@@ -106,6 +107,10 @@ def dispatch(method: str, params: Any, context: RequestContext) -> JsonObject:
         return {'tools': tool_listing(context.list_full)}
     if method == 'tools/call':
         return _tools_call(params, context)
+    if method == 'prompts/list':
+        return list_prompts()
+    if method == 'prompts/get':
+        return get_prompt(params)
     raise RpcError(METHOD_NOT_FOUND, f'Method not found: {method}')
 
 

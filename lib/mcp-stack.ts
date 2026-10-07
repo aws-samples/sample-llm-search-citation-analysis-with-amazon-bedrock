@@ -3,6 +3,7 @@ import { Construct } from 'constructs';
 import {
   McpServer, type McpServerInputs, readMcpContextList
 } from './constructs/mcp-server';
+import { McpState, readMcpLimits } from './constructs/mcp-state';
 import { pythonLayer } from './constructs/python-layer';
 
 export interface CitationAnalysisMcpStackProps extends cdk.StackProps {
@@ -22,7 +23,8 @@ export interface CitationAnalysisMcpStackProps extends cdk.StackProps {
  *
  * Context: `mcpRedirectUris` (the MCP clients' OAuth callback URLs, exact match
  * in Cognito) and `mcpPinnedTools` (catalogue operations listed as direct
- * tools), each a JSON array or a comma-separated string.
+ * tools), each a JSON array or a comma-separated string, and `mcpLimits` (the
+ * spend tools' per-caller limits, a JSON object; see `constructs/mcp-state.ts`).
  */
 export class CitationAnalysisMcpStack extends cdk.Stack {
   public readonly server: McpServer;
@@ -37,9 +39,12 @@ export class CitationAnalysisMcpStack extends cdk.Stack {
       description: 'Shared Python code and dependencies for the Citation Analysis MCP server',
     });
 
+    const state = new McpState(this, 'McpState', { limits: readMcpLimits(this) });
+
     this.server = new McpServer(this, 'McpServer', {
       ...props.inputs,
       sharedLayer,
+      state,
       redirectUris: readMcpContextList(this, 'mcpRedirectUris', ['http://localhost:5173/oauth/callback']),
       pinnedTools: readMcpContextList(this, 'mcpPinnedTools', []),
       domainPrefix: `citation-analysis-${this.account}`,

@@ -11,7 +11,9 @@ import { OverviewPanel } from './OverviewPanel';
 
 export const INSIGHTS_TITLE = 'Insights';
 const INSIGHTS_INFO = 'The three most pressing findings about this scope: an AI engine that rarely ranks you first or rarely cites you, '
-  + 'one of your brands trailing the others, or a keyword whose position swings between runs. The custom reports show the detail behind each.';
+  + 'competitors\' sites cited more than yours, documents cited more than your pages, a competitor the answers criticise, '
+  + 'a keyword every engine loses, one of your brands trailing the others, or a keyword whose position swings between runs. '
+  + 'The custom reports show the detail behind each.';
 
 /** What the panel says when the scope yields no insight. */
 export const NO_INSIGHTS = 'No insights yet for this scope.';

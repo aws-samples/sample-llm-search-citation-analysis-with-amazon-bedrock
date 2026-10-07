@@ -7,12 +7,18 @@ import type {
 import {
   DEFAULT_BRAND_INDUSTRY, resolveBrandIndustryPreset
 } from '../constants/brandConfigDefaults';
+import {
+  decodeCompetitorDomains, type CompetitorDomains
+} from '../api/competitorDomainsDecoders';
+import { domainsOfCompetitors } from './competitorDomains';
 
 interface BrandConfigFormState {
   industry: string;
   firstPartyBrands: string[];
   firstPartyDomains: string[];
   competitorBrands: string[];
+  /** Saved (and newly confirmed) domains per competitor. */
+  competitorDomains: CompetitorDomains;
   customEntityTypes: string[];
   includeSentiment: boolean;
   includeRankingContext: boolean;
@@ -38,6 +44,8 @@ interface BrandConfigExpansionState {
   expandingBrand: BrandType | null;
   expansionAllResult: BrandExpansionAllResult | null;
   competitorDiscoveryResult: CompetitorDiscoveryResult | null;
+  /** Domains "Find Competitors" suggested per competitor; offered unchecked until the admin ticks them. */
+  suggestedCompetitorDomains: CompetitorDomains;
   pendingExpansionBrands: string[];
   expansionTarget: BrandType | null;
 }
@@ -58,6 +66,7 @@ export interface UseBrandConfigFormReturn {
   setFirstPartyBrands: (v: string[]) => void;
   setFirstPartyDomains: (v: string[]) => void;
   setCompetitorBrands: (v: string[]) => void;
+  setCompetitorDomains: (v: CompetitorDomains) => void;
   setCustomEntityTypes: (v: string[]) => void;
   setIncludeSentiment: (v: boolean) => void;
   setIncludeRankingContext: (v: boolean) => void;
@@ -78,6 +87,7 @@ export interface UseBrandConfigFormReturn {
   setExpandingBrand: (v: BrandType | null) => void;
   setExpansionAllResult: (v: BrandExpansionAllResult | null) => void;
   setCompetitorDiscoveryResult: (v: CompetitorDiscoveryResult | null) => void;
+  setSuggestedCompetitorDomains: (v: CompetitorDomains) => void;
   setPendingExpansionBrands: (v: string[]) => void;
   setExpansionTarget: (v: BrandType | null) => void;
 
@@ -102,6 +112,7 @@ function defaultFormValues(): BrandConfigFormValues {
     firstPartyBrands: [],
     firstPartyDomains: [],
     competitorBrands: [],
+    competitorDomains: {},
     customEntityTypes: [],
     includeSentiment: true,
     includeRankingContext: true,
@@ -133,6 +144,7 @@ function formValuesFromConfig(config: BrandConfig | null): BrandConfigFormValues
     industry: config.industry || defaults.industry,
     ...trackedBrandsFromConfig(config, defaults),
     firstPartyDomains: config.first_party_domains ?? defaults.firstPartyDomains,
+    competitorDomains: decodeCompetitorDomains(config.competitor_domains),
     customEntityTypes: config.custom_entity_types ?? defaults.customEntityTypes,
     includeSentiment: config.include_sentiment ?? defaults.includeSentiment,
     includeRankingContext: config.include_ranking_context ?? defaults.includeRankingContext,
@@ -156,6 +168,7 @@ export function useBrandConfigForm(
   const [firstPartyBrands, setFirstPartyBrands] = useState(initialValues.firstPartyBrands);
   const [firstPartyDomains, setFirstPartyDomains] = useState(initialValues.firstPartyDomains);
   const [competitorBrands, setCompetitorBrands] = useState(initialValues.competitorBrands);
+  const [competitorDomains, setCompetitorDomains] = useState(initialValues.competitorDomains);
   const [customEntityTypes, setCustomEntityTypes] = useState(initialValues.customEntityTypes);
   const [includeSentiment, setIncludeSentiment] = useState(initialValues.includeSentiment);
   const [includeRankingContext, setIncludeRankingContext] = useState(initialValues.includeRankingContext);
@@ -176,6 +189,7 @@ export function useBrandConfigForm(
   const [expandingBrand, setExpandingBrand] = useState<'first_party' | 'competitor' | null>(null);
   const [expansionAllResult, setExpansionAllResult] = useState<BrandExpansionAllResult | null>(null);
   const [competitorDiscoveryResult, setCompetitorDiscoveryResult] = useState<CompetitorDiscoveryResult | null>(null);
+  const [suggestedCompetitorDomains, setSuggestedCompetitorDomains] = useState<CompetitorDomains>({});
   const [pendingExpansionBrands, setPendingExpansionBrands] = useState<string[]>([]);
   const [expansionTarget, setExpansionTarget] = useState<'first_party' | 'competitor' | null>(null);
 
@@ -192,6 +206,7 @@ export function useBrandConfigForm(
       setFirstPartyBrands(values.firstPartyBrands);
       setFirstPartyDomains(values.firstPartyDomains);
       setCompetitorBrands(values.competitorBrands);
+      setCompetitorDomains(values.competitorDomains);
       setCustomEntityTypes(values.customEntityTypes);
       setIncludeSentiment(values.includeSentiment);
       setIncludeRankingContext(values.includeRankingContext);
@@ -231,6 +246,7 @@ export function useBrandConfigForm(
         competitors: competitorBrands
       },
       first_party_domains: firstPartyDomains,
+      competitor_domains: domainsOfCompetitors(competitorDomains, competitorBrands),
       custom_entity_types: customEntityTypes,
       custom_prompt_additions: '',
       include_sentiment: includeSentiment,
@@ -239,14 +255,17 @@ export function useBrandConfigForm(
       extract_brands: true,
       industry_prompts: finalPrompts,
     };
-  }, [industry, firstPartyBrands, competitorBrands, firstPartyDomains, customEntityTypes, includeSentiment, includeRankingContext, maxBrands, industryPrompts, currentPrompt, presets]);
+  }, [industry, firstPartyBrands, competitorBrands, competitorDomains, firstPartyDomains, customEntityTypes, includeSentiment, includeRankingContext, maxBrands, industryPrompts, currentPrompt, presets]);
 
   return {
+    setCompetitorDomains,
+    setSuggestedCompetitorDomains,
     form: {
       industry,
       firstPartyBrands,
       firstPartyDomains,
       competitorBrands,
+      competitorDomains,
       customEntityTypes,
       includeSentiment,
       includeRankingContext,
@@ -267,6 +286,7 @@ export function useBrandConfigForm(
       expandingBrand,
       expansionAllResult,
       competitorDiscoveryResult,
+      suggestedCompetitorDomains,
       pendingExpansionBrands,
       expansionTarget
     },

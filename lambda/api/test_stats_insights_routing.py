@@ -27,6 +27,7 @@ def router():
     ('/api/visibility/sentiment-examples', 'get-sentiment-examples.py'),
     ('/api/visibility', 'get-visibility-metrics.py'),
     ('/api/reports/insights', 'get-reports-insights.py'),
+    ('/api/reports/insights/regenerate', 'regenerate-report-insights.py'),
 ])
 def test_routes_each_resource_to_its_own_handler(router, resource: str, filename: str) -> None:
     loaded: list[str] = []

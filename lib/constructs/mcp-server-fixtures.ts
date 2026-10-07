@@ -14,6 +14,7 @@ import {
   statementActions,
 } from '../citation-analysis-stack-fixtures';
 import { McpServer } from './mcp-server';
+import { McpState } from './mcp-state';
 
 export const MCP_FUNCTION_NAME = 'CitationAnalysis-Mcp';
 export const TEST_REGION = 'eu-west-1';
@@ -63,6 +64,7 @@ export function synthesizeMcpServer(): SynthesizedMcpServer {
     redirectUris: TEST_REDIRECT_URIS,
     pinnedTools: TEST_PINNED_TOOLS,
     domainPrefix: TEST_DOMAIN_PREFIX,
+    state: new McpState(stack, 'McpState'),
   });
   const resourceMetadataUrl: unknown = stack.resolve(server.resourceMetadataUrl);
   return { template: Template.fromStack(stack), resourceMetadataUrl: renderString(resourceMetadataUrl) };

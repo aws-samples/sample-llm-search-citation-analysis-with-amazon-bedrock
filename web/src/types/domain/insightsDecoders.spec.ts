@@ -4,9 +4,13 @@ import {
 import {
   isEnginePlay, isReportInsightsResponse
 } from './insightsDecoders';
+import { buildNarrative } from './insightsNarrative-fixtures';
 import {
   buildEnginePlayRow, buildPortfolioBrand, buildReportInsights, emptyReportInsights, REJECTED_REPORT_INSIGHTS_BODIES
 } from './insights-fixtures';
+import {
+  buildCaveatRow, buildPhase2Insights, buildPromptEngine, buildPromptEngineRow
+} from './insightFacts-fixtures';
 
 describe('isReportInsightsResponse', () => {
   it('accepts the insights the API answers', () => {
@@ -28,9 +32,8 @@ describe('isReportInsightsResponse', () => {
 
     expect(isReportInsightsResponse(buildReportInsights({
       facts: {
-        engines: [],
+        ...emptyReportInsights().facts,
         portfolio: [buildPortfolioBrand(), unknownBrand],
-        stability: [],
       },
     }))).toBe(true);
   });
@@ -42,16 +45,44 @@ describe('isReportInsightsResponse', () => {
     }))).toBe(true);
   });
 
-  it('accepts a narrative once it is an object', () => {
-    expect(isReportInsightsResponse(buildReportInsights({ narrative: { summary: 'OpenAI rarely ranks you first.' } }))).toBe(true);
+  it('accepts a stored narrative', () => {
+    expect(isReportInsightsResponse(buildReportInsights({ narrative: buildNarrative() }))).toBe(true);
+  });
+
+  it('rejects a narrative that is not a stored narrative', () => {
+    const malformed: unknown = { summary: 'OpenAI rarely ranks you first.' };
+
+    expect(isReportInsightsResponse({
+      ...buildReportInsights(),
+      narrative: malformed
+    })).toBe(false);
   });
 
   it.each(['get_cited', 'get_ranked_first', 'get_mentioned_and_cited', 'defend'] as const)('accepts the %s play', (play) => {
     expect(isReportInsightsResponse(buildReportInsights({
       facts: {
+        ...emptyReportInsights().facts,
         engines: [buildEnginePlayRow('claude', play)],
-        portfolio: [],
-        stability: [],
+      },
+    }))).toBe(true);
+  });
+
+  it('accepts every Phase 2 insight kind, its evidence naming a competitor or an unknown position', () => {
+    expect(isReportInsightsResponse(buildReportInsights({ insights: buildPhase2Insights() }))).toBe(true);
+  });
+
+  it('accepts a keyword no engine places and a competitor whose caveat share is unknown', () => {
+    const unplaced = buildPromptEngineRow({
+      visibility_score: null,
+      positions: { openai: null },
+      lost_engines: ['openai'],
+    });
+
+    expect(isReportInsightsResponse(buildReportInsights({
+      facts: {
+        ...buildReportInsights().facts,
+        prompt_engine: buildPromptEngine({ keywords: [unplaced] }),
+        competitor_caveats: [buildCaveatRow({ caveat_share: null })],
       },
     }))).toBe(true);
   });

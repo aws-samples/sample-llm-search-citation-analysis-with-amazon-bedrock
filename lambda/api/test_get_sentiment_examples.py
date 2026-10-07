@@ -151,6 +151,32 @@ class TestReads:
         assert loaded.dynamodb is pooled
 
 
+class TestClassification:
+    @pytest.fixture
+    def endpoint_with_competitor(self, sentiment_handler):
+        rows = {'hotel sol spa': [stored_answer('hotel sol spa', 'openai', [
+            stored_brand('Hotel Sol'), stored_brand('Rival Inn', classification='competitor'),
+        ])]}
+        with patch.object(sentiment_handler, 'dynamodb', report_dynamodb(search_results_table(rows))):
+            yield sentiment_handler
+
+    def test_lists_competitor_sightings_when_classification_is_competitor(self, endpoint_with_competitor) -> None:
+        _status, body = call(endpoint_with_competitor, {'keyword': 'hotel sol spa', 'sentiment': 'negative', 'classification': 'competitor'})
+
+        assert (body['classification'], [example['brand'] for example in body['examples']]) == ('competitor', ['Rival Inn'])
+
+    def test_lists_first_party_sightings_when_classification_is_omitted(self, endpoint_with_competitor) -> None:
+        _status, body = call(endpoint_with_competitor, {'keyword': 'hotel sol spa', 'sentiment': 'negative'})
+
+        assert (body['classification'], [example['brand'] for example in body['examples']]) == ('first_party', ['Hotel Sol'])
+
+    @pytest.mark.parametrize('value', ['other', 'competitors', 'FIRST_PARTY'])
+    def test_rejects_a_classification_outside_first_party_and_competitor(self, endpoint, value: str) -> None:
+        status, body = call(endpoint, {'keyword': 'hotel sol spa', 'sentiment': 'negative', 'classification': value})
+
+        assert (status, body['field']) == (400, 'classification')
+
+
 class TestValidation:
     @pytest.mark.parametrize(('query', 'field'), [
         pytest.param({'keyword': 'hotel sol spa'}, 'sentiment', id='missing-sentiment'),

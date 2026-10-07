@@ -1,5 +1,4 @@
 import type { KpiId } from '../../../constants/kpiDefinitions';
-import { providerName } from '../../../constants/providers';
 import { formatKpi } from '../../../formatting/kpiFormatter';
 import type {
   EnginePlay, EnginePlayRow, ReportInsightsResponse
@@ -10,6 +9,7 @@ import {
 import {
   InsightChip, type ChipTone
 } from './InsightChip';
+import { engineColumn } from './insightColumns';
 import {
   InsightsTableSection, type InsightsSectionProps
 } from './InsightsTableSection';
@@ -33,12 +33,7 @@ const PLAY_TONES: Readonly<Record<EnginePlay, ChipTone>> = {
 function engineColumns({ citations_configured: citationsConfigured }: ReportInsightsResponse): ReadonlyArray<ReportTableColumn<EnginePlayRow>> {
   const kpiIds = ENGINE_KPI_IDS.filter((id) => citationsConfigured || id !== 'citation_rate');
   return [
-    {
-      header: 'AI engine',
-      // Stryker disable next-line StringLiteral: Tailwind-only cell styling
-      cellClassName: 'font-medium whitespace-nowrap',
-      render: (row) => providerName(row.engine),
-    },
+    engineColumn<EnginePlayRow>(),
     ...kpiIds.map((id) => kpiColumn<EnginePlayRow>(id, (row) => formatKpi(id, row.kpis[id]))),
     {
       header: 'Play',

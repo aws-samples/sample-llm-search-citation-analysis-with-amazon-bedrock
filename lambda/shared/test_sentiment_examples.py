@@ -24,6 +24,13 @@ SOL_NEGATIVE = stored_brand(
     ranking_context='mentioned as a cheaper but dated option',
 )
 
+#: One answer naming a first-party, a competitor and an other brand, all negative.
+EVERY_CLASSIFICATION = [stored_answer('hotel sol spa', 'openai', [
+    SOL_NEGATIVE,
+    stored_brand('Rival Inn', classification='competitor'),
+    stored_brand('Airbnb', classification='other'),
+])]
+
 
 def brands_of(examples: list[dict[str, Any]]) -> list[str]:
     return [example['brand'] for example in examples]
@@ -57,13 +64,21 @@ class TestCounts:
         } == by_engine
 
     def test_counts_only_first_party_brands(self) -> None:
-        rows = [stored_answer('hotel sol spa', 'openai', [
-            SOL_NEGATIVE,
-            stored_brand('Rival Inn', classification='competitor'),
-            stored_brand('Airbnb', classification='other'),
-        ])]
+        assert sentiment_examples(EVERY_CLASSIFICATION, 'negative')[0] == 1
 
-        assert sentiment_examples(rows, 'negative')[0] == 1
+    def test_lists_only_competitor_brands_when_competitor_classification_is_given(self) -> None:
+        assert brands_of(sentiment_examples(EVERY_CLASSIFICATION, 'negative', classification='competitor')[1]) == ['Rival Inn']
+
+    @given(STORED_ROWS)
+    def test_competitor_totals_match_the_competitor_sightings_of_each_label(self, rows: list[dict[str, Any]]) -> None:
+        sightings = [
+            sighting for answer in answers_from_rows(rows) for sighting in answer.sightings
+            if sighting.classification == 'competitor'
+        ]
+
+        assert {label: sentiment_examples(rows, label, classification='competitor')[0] for label in SENTIMENT_LABELS} == {
+            label: sum(1 for sighting in sightings if sighting.sentiment == label) for label in SENTIMENT_LABELS
+        }
 
     def test_counts_only_the_requested_label(self) -> None:
         rows = [stored_answer('hotel sol spa', 'openai', [SOL_NEGATIVE, stored_brand('Hotel Mar', 'positive')])]

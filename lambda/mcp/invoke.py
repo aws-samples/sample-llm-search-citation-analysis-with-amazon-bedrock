@@ -12,7 +12,9 @@ block because several hosts (Kiro among them) show the model only the text
 block; the MCP spec asks servers that return ``structuredContent`` to do so.
 
 Every call emits exactly one structured audit line
-``{caller_sub, tool, operation, outcome, ms}``; tokens and bodies are never logged.
+``{caller_sub, tool, operation, outcome, ms}`` (plus ``reason`` when the call
+was refused); tokens and bodies are never logged. Calls of write and spend
+operations are also recorded in the state table (``state.record_audit``).
 """
 
 from __future__ import annotations
@@ -25,9 +27,10 @@ from time import perf_counter
 from typing import Any
 
 import boto3
+import state
 from auth import Caller, authorize_tool
 from botocore.exceptions import BotoCoreError, ClientError
-from catalogue import InvalidArguments, JsonObject, Route, Tool, validate_arguments
+from catalogue import InvalidArguments, JsonObject, NotFound, Route, Tool, validate_arguments
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -143,8 +146,11 @@ def summarize(operation: str, data: JsonObject) -> str:
     return f'{operation}: {detail}{suffix}'
 
 
-def success_result(tool: Tool, body: Any) -> JsonObject:
+def success_result(tool: Tool, body: Any, arguments: JsonObject | None = None) -> JsonObject:
+    """The handler's 2xx answer, shaped or selected from, truncated, as a tool result."""
     shaped = tool.shape(body) if tool.shape is not None else body
+    if tool.select is not None:
+        shaped = tool.select(shaped, arguments or {})
     data = truncate_result(shaped if isinstance(shaped, dict) else {'items': shaped})
     return tool_result(summarize(tool.name, data), data)
 
@@ -159,16 +165,63 @@ def error_result(operation: str, status: int, body: Any) -> JsonObject:
     return tool_result(text, {'status': status, **details}, is_error=True)
 
 
+def refusal_result(message: str) -> JsonObject:
+    """A tool error the server itself raised (scope, admin, limit, token), before or instead of any API call."""
+    return tool_result(message, {'error': message}, is_error=True)
+
+
 # --- The call -------------------------------------------------------------------
 
-def _audit(caller: Caller, tool_name: str, operation: str, outcome: str, started: float) -> None:
-    logger.info(json.dumps({
+def audit(
+    caller: Caller, tool_name: str, operation: Tool, outcome: str, started: float, reason: str | None = None,
+) -> None:
+    """The structured log line of one call; write and spend calls also get an audit record."""
+    line: JsonObject = {
         'caller_sub': caller.sub,
         'tool': tool_name,
-        'operation': operation,
+        'operation': operation.name,
         'outcome': outcome,
         'ms': round((perf_counter() - started) * 1000),
-    }))
+    }
+    if reason:
+        line['reason'] = reason
+    logger.info(json.dumps(line))
+    if operation.scope != 'read':
+        state.record_audit(caller.sub, tool_name, operation.name, outcome, reason)
+
+
+def checked_route(tool_name: str, operation: Tool, arguments: Any, caller: Caller, started: float) -> tuple[JsonObject, Route]:
+    """``(validated arguments, route)``; audits and re-raises ``InvalidArguments``."""
+    try:
+        valid = validate_arguments(operation.input_schema, arguments)
+        return valid, operation.route(valid)
+    except InvalidArguments:
+        audit(caller, tool_name, operation, 'invalid_arguments', started)
+        raise
+
+
+def replay(tool_name: str, operation: Tool, route: Route, caller: Caller, started: float) -> tuple[int, Any] | None:
+    """``invoke_route`` with the failure audited; ``None`` when the API could not be reached."""
+    try:
+        return invoke_route(route, caller)
+    except (BotoCoreError, ClientError, ValueError):
+        logger.exception('Invoking %s for %s failed', route.router, operation.name)
+        audit(caller, tool_name, operation, 'invoke_failed', started)
+        return None
+
+
+def unreachable_result(operation: Tool) -> JsonObject:
+    return tool_result(f'{operation.name} could not reach the API', {'error': 'upstream_unavailable'}, is_error=True)
+
+
+def answer_result(operation: Tool, status: int, body: Any, arguments: JsonObject) -> JsonObject:
+    """The tool result of the handler's answer: shaped data on a 2xx, its refusal otherwise."""
+    if not 200 <= status < 300:
+        return error_result(operation.name, status, body)
+    try:
+        return success_result(operation, body, arguments)
+    except NotFound as missing:
+        return error_result(operation.name, 404, {'error': str(missing)})
 
 
 def run_operation(tool_name: str, operation: Tool, arguments: Any, caller: Caller) -> JsonObject:
@@ -181,20 +234,12 @@ def run_operation(tool_name: str, operation: Tool, arguments: Any, caller: Calle
     started = perf_counter()
     refusal = authorize_tool(caller, operation.scope, operation.admin)
     if refusal is not None:
-        _audit(caller, tool_name, operation.name, 'denied', started)
-        return tool_result(refusal, {'error': refusal}, is_error=True)
-    try:
-        route = operation.route(validate_arguments(operation.input_schema, arguments))
-    except InvalidArguments:
-        _audit(caller, tool_name, operation.name, 'invalid_arguments', started)
-        raise
-    try:
-        status, body = invoke_route(route, caller)
-    except (BotoCoreError, ClientError, ValueError):
-        logger.exception('Invoking %s for %s failed', route.router, operation.name)
-        _audit(caller, tool_name, operation.name, 'invoke_failed', started)
-        return tool_result(f'{operation.name} could not reach the API', {'error': 'upstream_unavailable'}, is_error=True)
-    _audit(caller, tool_name, operation.name, f'http_{status}', started)
-    if 200 <= status < 300:
-        return success_result(operation, body)
-    return error_result(operation.name, status, body)
+        audit(caller, tool_name, operation, 'denied', started, refusal)
+        return refusal_result(refusal)
+    valid, route = checked_route(tool_name, operation, arguments, caller, started)
+    answer = replay(tool_name, operation, route, caller, started)
+    if answer is None:
+        return unreachable_result(operation)
+    status, body = answer
+    audit(caller, tool_name, operation, f'http_{status}', started)
+    return answer_result(operation, status, body, valid)

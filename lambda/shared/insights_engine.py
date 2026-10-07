@@ -17,6 +17,12 @@ agree with every other page:
 * **stability** — per keyword of a group, how far the brand's average
   position swung across the runs of the window
   (``shared.group_kpi_history``) and how often its mention flipped.
+* **prompt-by-engine** — per keyword of the latest runs, the brand's best
+  position on each AI engine that answered it, the weakest keywords first.
+* **citation ownership** and **owned pages** — who the engines cite and
+  which of the brand's own pages (``shared.insights_citations``).
+* **competitor caveats** — per competitor, how many of its mentions are
+  worded mixed or negative, and the reasons the answers give.
 
 An insight is derived from the facts alone, and its ``evidence`` repeats the
 fact numbers it rests on, so what an insight says is what the report shows.
@@ -26,10 +32,21 @@ Positions are rounded to hundredths and points to tenths, as
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
-from shared.kpi_engine import FIRST_PARTY, Answer, brand_table, engine_breakdown
+from shared.insights_citations import CompetitorDomains, citation_ownership_facts, owned_pages_facts
+from shared.kpi_engine import (
+    COMPETITOR,
+    FIRST_PARTY,
+    Answer,
+    Sighting,
+    brand_kpis,
+    brand_table,
+    engine_breakdown,
+    percent,
+)
 
 #: Top-1 share (percent of answers ranking the brand first) from which an engine already ranks the brand first.
 ENGINE_TOP1_MIN = 50.0
@@ -45,6 +62,22 @@ SUBBRAND_SENTIMENT_GAP = 30.0
 UNSTABLE_POSITION_RANGE = 3.0
 #: Answers an engine needs before its play is a high-severity insight.
 ENGINE_HIGH_MIN_ANSWERS = 10
+#: Share (percent) of a competitor's mentions worded mixed or negative from which its caveats are an insight.
+CAVEAT_SHARE_MIN = 30.0
+#: Mentions a competitor needs before its caveats are an insight.
+CAVEAT_MIN_MENTIONS = 5
+#: Caveat share from which a competitor caveat is high severity.
+CAVEAT_HIGH_SHARE = 50.0
+#: Reasons a competitor caveat lists at most.
+CAVEAT_MAX_REASONS = 3
+#: The worst position a prompt-by-engine cell may hold before it is a lost cell (worse than 3rd, or not named).
+PROMPT_TOP_POSITION = 3
+#: Keywords the prompt-by-engine fact lists at most, lowest visibility score first.
+PROMPT_ENGINE_MAX_KEYWORDS = 50
+#: How many times the trailing count the leading count must be for a competitor-sites or documents insight to be high.
+LEAD_HIGH_RATIO = 2.0
+#: Citations the leading count needs for a competitor-sites or documents insight to be high.
+LEAD_HIGH_MIN_CITATIONS = 10
 
 #: The plays an engine calls for; ``defend`` is the one that raises no insight.
 DEFEND = 'defend'
@@ -61,14 +94,27 @@ SEVERITIES: tuple[str, ...] = (HIGH, MEDIUM, LOW)
 ENGINE_PLAY = 'engine_play'
 WEAK_SUBBRAND = 'weak_subbrand'
 UNSTABLE_KEYWORD = 'unstable_keyword'
+COMPETITOR_SITES = 'competitor_sites'
+DOCUMENTS_CITED = 'documents_cited'
+COMPETITOR_CAVEAT = 'competitor_caveat'
+PROMPT_GAP = 'prompt_gap'
 #: The insight kinds in the order their rules run; insights of equal rank keep it.
-INSIGHT_KINDS: tuple[str, ...] = (ENGINE_PLAY, WEAK_SUBBRAND, UNSTABLE_KEYWORD)
+INSIGHT_KINDS: tuple[str, ...] = (
+    ENGINE_PLAY, WEAK_SUBBRAND, UNSTABLE_KEYWORD, COMPETITOR_SITES, DOCUMENTS_CITED, COMPETITOR_CAVEAT, PROMPT_GAP,
+)
 #: The report block that shows the detail behind each kind of insight.
 BLOCK_BY_KIND: dict[str, str] = {
     ENGINE_PLAY: 'insights_engine_playbook',
     WEAK_SUBBRAND: 'insights_brand_portfolio',
     UNSTABLE_KEYWORD: 'insights_run_stability',
+    COMPETITOR_SITES: 'insights_citation_ownership',
+    DOCUMENTS_CITED: 'insights_owned_pages',
+    COMPETITOR_CAVEAT: 'insights_competitor_caveats',
+    PROMPT_GAP: 'insights_prompt_engine',
 }
+
+#: The sentiment labels that count as a caveat.
+CAVEAT_LABELS = frozenset({'mixed', 'negative'})
 
 #: The mention changes of ``group_kpi_history.mention_change`` that count as a flip.
 MENTION_FLIPS = frozenset({'gained', 'lost'})
@@ -194,6 +240,86 @@ def stability_facts(history_keywords: Iterable[Mapping[str, Any]]) -> list[dict[
 
 
 # ---------------------------------------------------------------------------
+# Prompt-by-engine facts
+# ---------------------------------------------------------------------------
+
+def _best_position(answers: Iterable[Answer]) -> int | None:
+    return min((rank for answer in answers if (rank := answer.best_first_party_rank()) is not None), default=None)
+
+
+def _is_lost(position: int | None) -> bool:
+    return position is None or position > PROMPT_TOP_POSITION
+
+
+def _prompt_row(keyword: str, answers: list[Answer]) -> dict[str, Any]:
+    engines = sorted({answer.provider for answer in answers})
+    positions = {engine: _best_position(answer for answer in answers if answer.provider == engine) for engine in engines}
+    return {
+        'keyword': keyword,
+        'visibility_score': brand_kpis(answers)['visibility_score'],
+        'positions': positions,
+        'lost_engines': [engine for engine in engines if _is_lost(positions[engine])],
+    }
+
+
+def prompt_engine_facts(answers: Iterable[Answer]) -> dict[str, Any]:
+    """Per keyword, the brand's best position on each AI engine that answered it (``None``: not named at a known position).
+
+    ``lost_engines`` are the engines placing the brand worse than
+    ``PROMPT_TOP_POSITION`` or not at all. Keywords are listed lowest
+    visibility score first (then by name), at most
+    ``PROMPT_ENGINE_MAX_KEYWORDS``; ``omitted`` counts the rest. ``engines``
+    are every engine that answered, in name order.
+    """
+    by_keyword: dict[str, list[Answer]] = defaultdict(list)
+    for answer in answers:
+        by_keyword[answer.keyword].append(answer)
+    rows = [_prompt_row(keyword, keyword_answers) for keyword, keyword_answers in by_keyword.items()]
+    rows.sort(key=lambda row: (row['visibility_score'], row['keyword'].lower(), row['keyword']))
+    return {
+        'engines': sorted({engine for row in rows for engine in row['positions']}),
+        'keywords': rows[:PROMPT_ENGINE_MAX_KEYWORDS],
+        'omitted': max(len(rows) - PROMPT_ENGINE_MAX_KEYWORDS, 0),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Competitor caveat facts
+# ---------------------------------------------------------------------------
+
+def _caveat_row(sightings: list[Sighting]) -> dict[str, Any]:
+    caveats = [sighting for sighting in sightings if sighting.sentiment in CAVEAT_LABELS]
+    reasons = list(dict.fromkeys(sighting.reason for sighting in caveats if sighting.reason))
+    return {
+        'name': sightings[0].name,
+        'mentions': len(sightings),
+        'mixed': sum(sighting.sentiment == 'mixed' for sighting in caveats),
+        'negative': sum(sighting.sentiment == 'negative' for sighting in caveats),
+        'caveat_share': percent(len(caveats), len(sightings)),
+        'reasons': reasons[:CAVEAT_MAX_REASONS],
+    }
+
+
+def competitor_caveat_facts(answers: Iterable[Answer]) -> list[dict[str, Any]]:
+    """Per competitor named in the answers, its mentions, how many are worded mixed or negative, and why.
+
+    A mention is one answer naming the competitor (its sighting at its best
+    rank, as every KPI counts it). ``caveat_share`` is the mixed and negative
+    mentions' percent of all its mentions; ``reasons`` the first
+    ``CAVEAT_MAX_REASONS`` distinct stored reasons of those mentions, in
+    answer order. Most-mentioned competitor first, then by name.
+    """
+    by_brand: dict[str, list[Sighting]] = defaultdict(list)
+    for answer in answers:
+        for sighting in answer.sightings:
+            if sighting.classification == COMPETITOR:
+                by_brand[sighting.key].append(sighting)
+    rows = [_caveat_row(sightings) for sightings in by_brand.values()]
+    rows.sort(key=lambda row: (-row['mentions'], row['name'].lower()))
+    return rows
+
+
+# ---------------------------------------------------------------------------
 # Insights
 # ---------------------------------------------------------------------------
 
@@ -226,11 +352,68 @@ def _unstable_keyword_insight(row: Mapping[str, Any]) -> dict[str, Any]:
     return _insight(UNSTABLE_KEYWORD, row['keyword'], MEDIUM if row['flips'] >= 1 else LOW, evidence)
 
 
+def _lead_severity(leading: int, trailing: int) -> str:
+    """High when the leading count is at least ``LEAD_HIGH_RATIO`` times the trailing one and ``LEAD_HIGH_MIN_CITATIONS`` or more."""
+    return HIGH if leading >= LEAD_HIGH_RATIO * trailing and leading >= LEAD_HIGH_MIN_CITATIONS else MEDIUM
+
+
+def _competitor_sites_insights(ownership: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Per engine, the most-cited competitor when its domains are cited more than the owned ones.
+
+    Needs both owned and competitor domains: without either, the comparison
+    is not measured.
+    """
+    if not (ownership['owned_configured'] and ownership['competitors_configured']):
+        return []
+    insights = []
+    for row in ownership['engines']:
+        # Most cited first; on a tie, the first by name.
+        leader = min(row['competitors'].items(), key=lambda item: (-item[1], item[0]), default=None)
+        if leader is not None and leader[1] > row['owned']:
+            evidence = {'competitor': leader[0], 'competitor_citations': leader[1], 'owned_citations': row['owned'], 'answers': row['answers']}
+            insights.append(_insight(COMPETITOR_SITES, row['engine'], _lead_severity(leader[1], row['owned']), evidence))
+    return insights
+
+
+def _documents_cited_insight(row: Mapping[str, Any]) -> dict[str, Any]:
+    evidence = {key: row[key] for key in ('document_citations', 'page_citations')}
+    return _insight(DOCUMENTS_CITED, row['engine'], _lead_severity(row['document_citations'], row['page_citations']), evidence)
+
+
+def _is_caveat(row: Mapping[str, Any]) -> bool:
+    return row['mentions'] >= CAVEAT_MIN_MENTIONS and _meets(row['caveat_share'], CAVEAT_SHARE_MIN)
+
+
+def _competitor_caveat_insight(row: Mapping[str, Any]) -> dict[str, Any]:
+    evidence = {key: row[key] for key in ('mentions', 'mixed', 'negative', 'caveat_share')}
+    return _insight(COMPETITOR_CAVEAT, row['name'], HIGH if _meets(row['caveat_share'], CAVEAT_HIGH_SHARE) else MEDIUM, evidence)
+
+
+def _prompt_gap_insight(row: Mapping[str, Any]) -> dict[str, Any]:
+    named = [position for position in row['positions'].values() if position is not None]
+    evidence = {
+        'engines': len(row['positions']),
+        'named_engines': len(named),
+        'best_position': min(named, default=None),
+        'visibility_score': row['visibility_score'],
+    }
+    return _insight(PROMPT_GAP, row['keyword'], LOW if named else MEDIUM, evidence)
+
+
 #: Each kind's rule: the insights the facts of ``compute_insights`` support.
 _RULES: dict[str, Callable[[Mapping[str, Any]], list[dict[str, Any]]]] = {
     ENGINE_PLAY: lambda facts: [_engine_play_insight(row) for row in facts['engines'] if row['play'] != DEFEND],
     WEAK_SUBBRAND: lambda facts: [_weak_subbrand_insight(row) for row in facts['portfolio'] if row['weak']],
     UNSTABLE_KEYWORD: lambda facts: [_unstable_keyword_insight(row) for row in facts['stability'] if row['unstable']],
+    COMPETITOR_SITES: lambda facts: _competitor_sites_insights(facts['citation_ownership']),
+    DOCUMENTS_CITED: lambda facts: [
+        _documents_cited_insight(row) for row in facts['owned_pages']['engines'] if row['document_citations'] > row['page_citations']
+    ],
+    COMPETITOR_CAVEAT: lambda facts: [_competitor_caveat_insight(row) for row in facts['competitor_caveats'] if _is_caveat(row)],
+    # Pooled over the engines: a prompt gap is a keyword every engine that answered it loses.
+    PROMPT_GAP: lambda facts: [
+        _prompt_gap_insight(row) for row in facts['prompt_engine']['keywords'] if len(row['lost_engines']) == len(row['positions'])
+    ],
 }
 
 
@@ -255,18 +438,27 @@ def compute_insights(
     answers: Iterable[Answer],
     owned_domains: Iterable[str] = (),
     history_keywords: Iterable[Mapping[str, Any]] | None = None,
+    competitor_domains: CompetitorDomains | None = None,
 ) -> dict[str, Any]:
     """The facts of a scope and the insights they support.
 
     ``answers`` are the scope's answers (its latest runs), ``owned_domains``
-    the brand's own domains (without them every citation KPI is ``None`` and
-    the plays rest on the top-1 share alone) and ``history_keywords`` the
-    ``keywords`` of ``build_group_kpi_history`` for a group — ``None`` for
-    any other scope, whose stability is then empty.
+    the brand's own domains (without them every citation KPI is ``None``, the
+    plays rest on the top-1 share alone and no owned page is listed),
+    ``history_keywords`` the ``keywords`` of ``build_group_kpi_history`` for a
+    group — ``None`` for any other scope, whose stability is then empty — and
+    ``competitor_domains`` each tracked competitor's domains
+    (``insights_citations.competitor_domains_from``); without them every
+    non-owned citation is third party.
     """
     pool = list(answers)
+    owned = list(owned_domains)
     facts = {
-        'engines': engine_facts(pool, owned_domains),
+        'engines': engine_facts(pool, owned),
+        'prompt_engine': prompt_engine_facts(pool),
+        'citation_ownership': citation_ownership_facts(pool, owned, competitor_domains),
+        'owned_pages': owned_pages_facts(pool, owned),
+        'competitor_caveats': competitor_caveat_facts(pool),
         'portfolio': portfolio_facts(pool),
         'stability': stability_facts(history_keywords or ()),
     }
@@ -275,16 +467,26 @@ def compute_insights(
 
 __all__ = [
     'BLOCK_BY_KIND',
+    'CAVEAT_HIGH_SHARE',
+    'CAVEAT_MAX_REASONS',
+    'CAVEAT_MIN_MENTIONS',
+    'CAVEAT_SHARE_MIN',
     'ENGINE_CITED_MIN',
     'ENGINE_TOP1_MIN',
     'INSIGHT_KINDS',
+    'LEAD_HIGH_MIN_CITATIONS',
+    'LEAD_HIGH_RATIO',
+    'PROMPT_ENGINE_MAX_KEYWORDS',
+    'PROMPT_TOP_POSITION',
     'SUBBRAND_MIN_MENTIONS',
     'SUBBRAND_POSITION_GAP',
     'SUBBRAND_SENTIMENT_GAP',
     'UNSTABLE_POSITION_RANGE',
+    'competitor_caveat_facts',
     'compute_insights',
     'derive_insights',
     'engine_facts',
     'portfolio_facts',
+    'prompt_engine_facts',
     'stability_facts',
 ]

@@ -65,3 +65,43 @@ def test_never_returns_more_than_the_limit_nor_the_same_tool_twice(query, limit)
 
     assert len(names) <= limit
     assert len(set(names)) == len(names)
+
+
+def test_start_an_analysis_run_finds_the_run_estimate_and_start():
+    assert {tool.name for tool in search_tools('start an analysis run')[:2]} == {'estimate_run', 'start_run'}
+
+
+def test_how_much_would_a_run_cost_finds_estimate_run_first():
+    assert _ranking('how much would a run cost')[0] == 'estimate_run'
+
+
+def test_find_new_keyword_ideas_finds_the_research_operations():
+    assert {tool.name for tool in search_tools('find new keyword ideas')[:2]} == {'estimate_research', 'start_research'}
+
+
+def test_write_a_landing_page_finds_the_content_brief_operations():
+    assert {tool.name for tool in search_tools('write a landing page')[:2]} == {'estimate_content_brief', 'generate_content_brief'}
+
+
+def test_is_my_run_finished_finds_get_run_status_first():
+    assert _ranking('is my run finished')[0] == 'get_run_status'
+
+
+def test_report_insights_finds_get_report_insights_first():
+    assert _ranking('report insights and key takeaways')[0] == 'get_report_insights'
+
+
+def test_scheduled_runs_finds_list_schedules_first():
+    assert _ranking('scheduled runs')[0] == 'list_schedules'
+
+
+def test_kpi_alerts_finds_list_alerts_first():
+    assert _ranking('kpi alerts')[0] == 'list_alerts'
+
+
+def test_research_job_result_finds_get_research_job_first():
+    assert _ranking('research job result')[0] == 'get_research_job'
+
+
+def test_content_studio_history_finds_list_content_items_first():
+    assert _ranking('content studio history')[0] == 'list_content_items'

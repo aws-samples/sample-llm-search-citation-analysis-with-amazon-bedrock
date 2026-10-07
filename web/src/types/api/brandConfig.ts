@@ -35,6 +35,8 @@ export interface CompetitorDiscoveryResult {
   first_party_brands: string[];
   /** Discovered competitor brands */
   competitors: string[];
+  /** Domains the model suggests per discovered competitor; the admin confirms them before they are saved */
+  suggested_domains: Record<string, string[]>;
   /** Additional notes about the discovery */
   notes?: string;
   /** Error message if discovery failed */

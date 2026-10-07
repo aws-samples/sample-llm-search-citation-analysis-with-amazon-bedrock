@@ -22,6 +22,7 @@ describe('useBrandConfig expansion answers', () => {
     ['findCompetitors', findMyBrandCompetitors, { findCompetitorsResponse: { first_party_brands: ['MyBrand'] } }, {
       first_party_brands: ['MyBrand'],
       competitors: [],
+      suggested_domains: {},
       notes: '',
       error: undefined,
     }],
@@ -29,6 +30,22 @@ describe('useBrandConfig expansion answers', () => {
     const { value } = await runOnLoadedBrandConfig(run, options);
 
     expect(value).toStrictEqual(expected);
+  });
+
+  it('findCompetitors returns the suggested domains of each detailed competitor', async () => {
+    const findCompetitorsResponse = {
+      first_party_brands: ['MyBrand'],
+      competitors: ['Borealis Air'],
+      competitor_details: [{
+        name: 'Borealis Air',
+        reason: 'same routes',
+        domains: ['borealis-air.com'] 
+      }],
+    };
+
+    const { value } = await runOnLoadedBrandConfig(findMyBrandCompetitors, { findCompetitorsResponse });
+
+    expect(value).toMatchObject({ suggested_domains: { 'Borealis Air': ['borealis-air.com'] } });
   });
 
   it.each([
