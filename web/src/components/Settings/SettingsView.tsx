@@ -152,7 +152,7 @@ export const SettingsView = ({
   } = brandConfig;
   const providerConfig = useProviderConfig();
   const {
-    providers, loading: providersLoading, updateProvider, refreshProviders
+    providers, loading: providersLoading, error: providersError, updateProvider, refreshProviders
   } = providerConfig;
   // User management is Admin-only server-side; this only hides the entry point
   // so non-admins aren't shown a tab where every action returns 403.
@@ -232,6 +232,7 @@ export const SettingsView = ({
               loading={providersLoading}
               onUpdate={updateProvider}
               onRefresh={refreshProviders}
+              updateError={providersError}
               isAdmin={isAdmin}
             />
           )}

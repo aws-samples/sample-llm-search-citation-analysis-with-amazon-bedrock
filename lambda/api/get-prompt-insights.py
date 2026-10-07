@@ -9,12 +9,18 @@ Features:
 - Winning prompts (high brand visibility)
 - Losing prompts (low/no brand visibility)
 - Prompt opportunities (keywords where competitors appear but you don't)
+
+Scope: the request takes the report scope every KPI endpoint accepts
+(``keyword`` | ``group_id`` | ``keyword_ids`` | ``scope=all``, see
+``shared.scope_params``); without one the tracked keywords (at most 50) are
+analysed, as before.
 """
 
 import logging
 import os
 import sys
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -28,6 +34,8 @@ from shared.brand_visibility import load_recent_search_results, tracked_brand_na
 from shared.decorators import api_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.kpi_engine import percent
+from shared.scope_params import SCOPE_QUERY_PARAMS
+from shared.scoped_reports import optional_scope_keywords
 from shared.search_results import latest_run, scan_keyword_texts, search_results_table_name
 from shared.utils import get_brand_config
 
@@ -192,9 +200,13 @@ def _rank_prompts(prompts: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def analyze_prompt_brand_correlation(config: dict[str, Any]) -> dict[str, Any]:
+def analyze_prompt_brand_correlation(config: dict[str, Any], keywords: Sequence[str] | None = None) -> dict[str, Any]:
     """
     Analyze correlation between prompts and brand mentions.
+
+    ``keywords`` restricts the analysis to those keyword texts (a report
+    scope); by default the tracked keywords are read from the Keywords table.
+    Either way at most ``_MAX_KEYWORDS`` of them are queried.
 
     Returns insights on:
     - Which prompts trigger first-party brand mentions
@@ -208,7 +220,7 @@ def analyze_prompt_brand_correlation(config: dict[str, Any]) -> dict[str, Any]:
         return {"error": "No first-party brands configured"}
 
     # Get keywords from Keywords table (small, efficient) then query SearchResults by keyword
-    keywords = get_all_keywords()
+    keywords = list(keywords) if keywords is not None else get_all_keywords()
 
     if not keywords:
         return {"error": "No keywords configured"}
@@ -224,18 +236,26 @@ def analyze_prompt_brand_correlation(config: dict[str, Any]) -> dict[str, Any]:
 @api_handler
 @validate({
     'type': {'type': str, 'choices': ['winning', 'losing', 'opportunities', 'all'], 'default': 'all'},
-    'limit': {'type': int, 'min': 1, 'max': 100, 'default': 20}
+    'limit': {'type': int, 'min': 1, 'max': 100, 'default': 20},
+    **SCOPE_QUERY_PARAMS,
 })
-def handler(event: dict[str, Any], context: Any, type: str = 'all', limit: int = 20) -> dict[str, Any]:
+@optional_scope_keywords(lambda: dynamodb.Table(KEYWORDS_TABLE))
+def handler(
+    event: dict[str, Any], context: Any, keywords: list[str] | None, type: str = 'all', limit: int = 20
+) -> dict[str, Any]:
     """
     API handler for prompt insights.
 
     Query params:
         - type: 'winning', 'losing', 'opportunities', or 'all' (default: all)
         - limit: Number of results per category (default: 20)
+        - keyword | group_id | keyword_ids | scope=all: the prompts to analyse
+          (optional; one keyword, a keyword group, a set of keyword ids or
+          every active keyword). Without one the tracked keywords (at most 50)
+          are analysed, as before.
     """
     config = get_brand_config()
-    insights = analyze_prompt_brand_correlation(config)
+    insights = analyze_prompt_brand_correlation(config, keywords)
     if 'error' in insights:
         # A missing prerequisite (no first-party brand, no keywords) is the
         # caller's configuration to fix, so it gets 400 with the actual reason.

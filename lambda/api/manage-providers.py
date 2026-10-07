@@ -33,6 +33,7 @@ from shared.auth import ADMIN_GROUP, require_group
 from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler
 from shared.dynamo_decimal import to_int
 from shared.env_vars import resolve_table_env
+from shared.provider_health import record_provider_failure, record_provider_success
 from shared.provider_models import (
     CONFIGURABLE_MODEL_PROVIDERS,
     DEFAULT_PROVIDER_MODELS,
@@ -871,14 +872,71 @@ def _apply_model(provider_id: str, body: dict, event: dict) -> dict | None:
             event, 'model',
         )
     if model is not None and body.get('validate', True):
-        api_key = stored_api_key(PROVIDERS[provider_id]['secret_name'])
-        if not api_key:
-            return validation_error('Configure an API key before choosing a model', event, 'model')
+        api_key = _key_for_proof(provider_id, event, 'model', 'choosing a model')
+        if isinstance(api_key, dict):
+            return api_key
         check = validate_model(provider_id, api_key, model)
         if not check.get('valid'):
             return api_response(400, {'error': 'Model check failed', 'details': check['error']}, event)
+        # The check was a real answer with the stored key, so the provider's
+        # health record now says so; without this a credit failure from weeks
+        # ago stayed on the card after the model was proven to work.
+        record_provider_success(dynamodb.Table(PROVIDER_CONFIG_TABLE), provider_id)
     if not save_provider_model(provider_id, model):
         return api_response(500, {'error': 'Failed to save model'}, event)
+    return None
+
+
+def _key_for_proof(provider_id: str, event: dict, field: str, action: str) -> str | dict:
+    """The stored key a proving call needs, or the 400 to answer when there is none.
+
+    Every change that is proven with a real call (a model, enabling) reads the
+    key the same way and refuses the same way without one.
+    """
+    api_key = stored_api_key(PROVIDERS[provider_id]['secret_name'])
+    if not api_key:
+        return validation_error(f'Configure an API key before {action}', event, field)
+    return api_key
+
+
+def _enable_probe(provider_id: str, api_key: str, config: dict) -> dict:
+    """One real call proving the provider answers with the stored key.
+
+    The AI engines run the model check, a one-line answer from the configured
+    (or default) model. It is the only probe that surfaces an exhausted credit
+    balance: Anthropic reports it as a 400 that the key probe reads as "key
+    accepted". The search providers run the key probe, a one-result search.
+    """
+    if provider_id in CONFIGURABLE_MODEL_PROVIDERS:
+        return validate_model(provider_id, api_key, config.get('model') or default_model(provider_id))
+    return validate_api_key(provider_id, api_key)
+
+
+def _apply_enabled(provider_id: str, body: dict, event: dict) -> dict | None:
+    """Store ``body['enabled']``; an error response, or ``None`` on success.
+
+    Switching a provider on is the administrator saying "I fixed it", so it is
+    proven first (skippable with ``validate: false``, like the key and the
+    model): the probe either records a fresh success, which clears the old
+    failure from the Settings card, or records the fresh failure and leaves
+    the provider off. Before this, re-enabling kept showing the failure that
+    caused the auto-disable, dated weeks back, with no way to tell whether the
+    new credit or key had taken.
+    """
+    enabled = bool(body['enabled'])
+    table = dynamodb.Table(PROVIDER_CONFIG_TABLE)
+    if enabled and body.get('validate', True):
+        api_key = _key_for_proof(provider_id, event, 'enabled', 'enabling this provider')
+        if isinstance(api_key, dict):
+            return api_key
+        probe = _enable_probe(provider_id, api_key, get_provider_config(provider_id))
+        if not probe.get('valid'):
+            record_provider_failure(table, provider_id, probe['error'])
+            return api_response(400, {'error': 'Provider check failed', 'details': probe['error']}, event)
+    if not save_provider_enabled(provider_id, enabled):
+        return api_response(500, {'error': 'Failed to save configuration'}, event)
+    if enabled and body.get('validate', True):
+        record_provider_success(table, provider_id)
     return None
 
 
@@ -896,11 +954,11 @@ def handle_update_provider(event: dict, context: Any, provider_id: str, body: di
     """
     body = body or {}
 
-    # Update enabled status
-    if 'enabled' in body and not save_provider_enabled(provider_id, bool(body['enabled'])):
-        return api_response(500, {'error': 'Failed to save configuration'}, event)
-
+    # The key is applied first so that enabling in the same request is proven
+    # with the key being saved, not the one it replaces.
     error = _apply_api_key(provider_id, body, event) if body.get('api_key') else None
+    if error is None and 'enabled' in body:
+        error = _apply_enabled(provider_id, body, event)
     if error is None and 'model' in body:
         error = _apply_model(provider_id, body, event)
     if error is not None:

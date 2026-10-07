@@ -87,6 +87,16 @@ describe('useProviderConfig', () => {
     );
   });
 
+  it('reports the server reason when the update is refused', async () => {
+    const { result } = await renderLoadedProviderConfig({ updateSuccess: false });
+
+    await act(() => result.current.updateProvider('claude', { enabled: true }));
+
+    expect(result.current.error).toBe(
+      'Provider check failed: Your credit balance is too low to access the Anthropic API.'
+    );
+  });
+
   it('refreshes providers after successful update', async () => {
     const { result } = await renderLoadedProviderConfig();
     const initialCallCount = countProviderListRequests();

@@ -24,6 +24,12 @@ export interface ProvidersConfigProps {
     api_key?: string 
   }) => Promise<boolean>;
   readonly onRefresh: () => Promise<void>;
+  /**
+   * The reason the last update was refused, in the server's words
+   * ("Provider check failed: Your credit balance is too low…"), from the
+   * hook that made the call. Shown in preference to this panel's own message.
+   */
+  readonly updateError?: string | null;
   /** Threaded from the parent, which already resolved membership. */
   readonly isAdmin: boolean;
 }
@@ -185,7 +191,7 @@ const ApiKeyEditor = ({
 );
 
 export const ProvidersConfig = ({
-  providers, loading, onUpdate, onRefresh, isAdmin 
+  providers, loading, onUpdate, onRefresh, updateError = null, isAdmin 
 }: ProvidersConfigProps) => {
   const [editingProvider, setEditingProvider] = useState<string | null>(null);
   const [editingModel, setEditingModel] = useState<string | null>(null);
@@ -198,7 +204,11 @@ export const ProvidersConfig = ({
     setError(null);
     const success = await onUpdate(providerId, { enabled: !currentEnabled });
     if (!success) {
-      setError(`Failed to update ${providerId}`);
+      setError(`Could not update ${providerId}`);
+      // Enabling is proven by a real call, and a failed probe is recorded on
+      // the provider row: refresh so the card shows that fresh failure
+      // rather than the one that caused the auto-disable weeks ago.
+      await onRefresh();
     }
     setSaving(null);
   };
@@ -245,7 +255,7 @@ export const ProvidersConfig = ({
         </button>
       </SettingsSectionHeader>
 
-      <SettingsErrorNotice error={error} />
+      <SettingsErrorNotice error={updateError ?? error} />
 
       <div className="space-y-4">
         {providers.map((provider) => (

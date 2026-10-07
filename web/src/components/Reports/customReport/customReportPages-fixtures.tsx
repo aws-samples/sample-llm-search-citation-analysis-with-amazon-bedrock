@@ -31,6 +31,7 @@ export function buildReportSources(overrides: Partial<ReportSources> = {}): Repo
     competitor: null,
     contentPlan: null,
     deepDive: null,
+    insights: null,
     ...overrides,
   };
 }

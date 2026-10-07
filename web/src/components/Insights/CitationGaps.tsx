@@ -1,16 +1,11 @@
-import {
-  useEffect, useRef, useState
-} from 'react';
+import { useEffect } from 'react';
 import { useCitationGaps } from '../../hooks/useCitationGaps';
 import type {
-  CitationGap, CitationGapsResponse, Keyword, ReportScope
+  CitationGap, CitationGapsResponse, Keyword
 } from '../../types';
-import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
-import {
-  ALL_SCOPE, decodeReportScope, encodeReportScope
-} from '../ui/reportScope';
-import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
 import { GapCard } from './GapCard';
+import { InsightsScopeSelector } from './InsightsScopeSelector';
+import { useScopeSelection } from './useScopeSelection';
 import { PageHeaderCard } from '../ui/PageHeaderCard';
 
 interface Props { readonly keywords: Array<Keyword>; }
@@ -133,53 +128,25 @@ function CitationGapResults({
 }
 
 export function CitationGaps({ keywords }: Props) {
-  const [scope, setScope] = useState<ReportScope>(ALL_SCOPE);
-  const [scopeRequestPending, setScopeRequestPending] = useState(false);
-  const scopeRequestSequence = useRef(0);
-  const {
-    activeKeywords, groups
-  } = useKeywordScopeOptions(keywords);
+  const selection = useScopeSelection();
   const {
     data, loading, error, fetchCitationGaps
   } = useCitationGaps();
-  const scopeKey = encodeReportScope(scope);
 
-  useEffect(() => {
-    const requestSequence = scopeRequestSequence.current;
-    const requestStatus = { active: true };
-    const request = fetchCitationGaps(decodeReportScope(scopeKey), 20);
-    void Promise.resolve(request).finally(() => {
-      if (requestStatus.active && requestSequence > 0 && requestSequence === scopeRequestSequence.current) {
-        setScopeRequestPending(false);
-      }
-    });
-    return () => {
-      requestStatus.active = false;
-    };
-  }, [scopeKey, fetchCitationGaps]);
-
-  const selectScope = (nextScope: ReportScope) => {
-    if (encodeReportScope(nextScope) === scopeKey) return;
-    scopeRequestSequence.current += 1;
-    setScopeRequestPending(true);
-    setScope(nextScope);
-  };
+  useEffect(
+    () => selection.trackScopeRequest(fetchCitationGaps(selection.scope, 20)),
+    [selection.scope, fetchCitationGaps, selection.trackScopeRequest],
+  );
 
   return (
     <div className="space-y-6">
       <PageHeaderCard title="Citation Gap Analysis" description="Discover sources that AI cites for competitors but not you.">
-        <KeywordScopeSelector
-          keywords={activeKeywords}
-          groups={groups}
-          value={scope}
-          onChange={selectScope}
-          label="Filter by keyword or group"
-        />
+        <InsightsScopeSelector keywords={keywords} selection={selection} label="Filter by keyword or group" />
       </PageHeaderCard>
 
       <CitationGapResults
         data={data}
-        loading={loading || scopeRequestPending}
+        loading={loading || selection.scopePending}
         error={error}
       />
     </div>

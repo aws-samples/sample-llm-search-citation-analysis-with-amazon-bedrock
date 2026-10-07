@@ -5,8 +5,11 @@ import {
   API_BASE_URL, authenticatedFetch, getErrorMessage,
 } from '../infrastructure';
 import { saveRecommendationStatus } from '../api/recommendations';
+import {
+  ALL_SCOPE, decodeReportScope, encodeReportScope, reportScopeParams
+} from '../components/ui/reportScope';
 import type {
-  Recommendation, RecommendationStatus, RecommendationsResponse
+  Recommendation, RecommendationStatus, RecommendationsResponse, ReportScope
 } from '../types';
 
 class RecommendationsFetchError extends Error {
@@ -39,19 +42,30 @@ function withStatus(
   };
 }
 
-export function useRecommendations() {
+/**
+ * Recommendations for a report scope (one keyword, a keyword group or, by
+ * default, every keyword), optionally LLM-enhanced, plus the status tracking
+ * of each recommendation the API identifies. `fetchRecommendations` is
+ * rebuilt when the scope changes, so an effect listing it refetches per scope.
+ */
+export function useRecommendations(scope: ReportScope = ALL_SCOPE) {
   const [data, setData] = useState<RecommendationsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [updatingIds, setUpdatingIds] = useState<readonly string[]>([]);
   const [statusError, setStatusError] = useState<string | null>(null);
+  // Keyed on the encoded scope so a caller rebuilding the object each render keeps the same fetch.
+  const scopeKey = encodeReportScope(scope);
 
   const fetchRecommendations = useCallback(async (useLlm = false) => {
     setLoading(true);
     setError(null);
 
     try {
-      const params = new URLSearchParams({ use_llm: useLlm.toString() });
+      const params = new URLSearchParams({
+        ...reportScopeParams(decodeReportScope(scopeKey)),
+        use_llm: useLlm.toString(),
+      });
       const response = await authenticatedFetch(
         `${API_BASE_URL}/recommendations?${params}`,
       );
@@ -71,7 +85,7 @@ export function useRecommendations() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scopeKey]);
 
   /** Saves `status` for `recommendation`; the list shows it once the API has stored it. */
   const updateStatus = useCallback(async (

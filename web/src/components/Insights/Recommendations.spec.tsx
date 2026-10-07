@@ -8,11 +8,16 @@ import userEvent from '@testing-library/user-event';
 import { Recommendations } from './Recommendations';
 
 vi.mock('../../hooks/useRecommendations', () => ({useRecommendations: vi.fn(),}));
+vi.mock('../../hooks/useKeywordGroups');
 
 import { useRecommendations } from '../../hooks/useRecommendations';
+import { SCOPE_KEYWORDS } from '../ui/useKeywordScopeOptions-fixtures';
 import {
   TRACKED_RECOMMENDATION, VISIBILITY_GAP_RECOMMENDATION, buildRecommendationsHookResult, buildRecommendationsResponse 
 } from './Recommendations-fixtures';
+import {
+  describeScopeSelection, mockCorunaKeywordGroups, neverSettlingFetch
+} from './useScopeSelection-fixtures';
 
 const mockUseRecommendations = vi.mocked(useRecommendations);
 
@@ -20,7 +25,7 @@ const mockUseRecommendations = vi.mocked(useRecommendations);
 function renderWithRecommendations(overrides: Parameters<typeof buildRecommendationsHookResult>[0] = {}) {
   const hookResult = buildRecommendationsHookResult(overrides);
   mockUseRecommendations.mockReturnValue(hookResult);
-  render(<Recommendations />);
+  render(<Recommendations keywords={SCOPE_KEYWORDS} />);
   return hookResult.fetchRecommendations;
 }
 
@@ -31,7 +36,7 @@ function renderWithTrackedRecommendation(overrides: Parameters<typeof buildRecom
     ...overrides,
   });
   mockUseRecommendations.mockReturnValue(hookResult);
-  render(<Recommendations />);
+  render(<Recommendations keywords={SCOPE_KEYWORDS} />);
   return hookResult;
 }
 
@@ -45,6 +50,7 @@ async function renderAndChooseStatus(status: string) {
 describe('Recommendations', () => {
   beforeEach(() => {
     mockUseRecommendations.mockReturnValue(buildRecommendationsHookResult());
+    mockCorunaKeywordGroups();
   });
 
   describe('initial render', () => {
@@ -125,6 +131,14 @@ describe('Recommendations', () => {
     });
   });
 
+  describeScopeSelection({
+    renderIdle: () => renderWithRecommendations(),
+    renderShowingAnswer: () => renderWithTrackedRecommendation({ fetchRecommendations: neverSettlingFetch() }),
+    scopedHook: mockUseRecommendations,
+    loadingText: 'Generating recommendations...',
+    answerMarker: () => screen.queryByText('High Priority'),
+  });
+
   describe('status tracking', () => {
     it('shows the stored status of a tracked recommendation', () => {
       renderWithTrackedRecommendation();
@@ -153,7 +167,7 @@ describe('Recommendations', () => {
     it('offers no status for a recommendation without an id', () => {
       renderWithRecommendations({ data: buildRecommendationsResponse({ recommendations: [VISIBILITY_GAP_RECOMMENDATION] }) });
 
-      expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
+      expect(screen.queryByRole('combobox', { name: /^Status of/ })).not.toBeInTheDocument();
     });
 
     it('explains that the status was not saved when the save fails', () => {

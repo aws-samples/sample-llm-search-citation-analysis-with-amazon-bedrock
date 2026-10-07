@@ -9,6 +9,7 @@ import {
   BLOCK_CATEGORIES, type BlockCategoryId, type DataBlockDefinition, type ScopeKind
 } from './catalog/catalogTypes';
 import { FOCUS_BLOCKS } from './catalog/focusBlocks';
+import { INSIGHT_BLOCKS } from './catalog/insightBlocks';
 import { SCOPE_BLOCKS } from './catalog/scopeBlocks';
 import { SUMMARY_BLOCKS } from './catalog/summaryBlocks';
 import {
@@ -45,7 +46,7 @@ const CONTENT_ENTRIES: readonly CatalogEntry[] = CONTENT_ROWS.map(([type, label,
   create: () => newContentBlock(type),
 }));
 
-export const DATA_BLOCKS: readonly DataBlockDefinition[] = [...SUMMARY_BLOCKS, ...SCOPE_BLOCKS, ...FOCUS_BLOCKS];
+export const DATA_BLOCKS: readonly DataBlockDefinition[] = [...SUMMARY_BLOCKS, ...INSIGHT_BLOCKS, ...SCOPE_BLOCKS, ...FOCUS_BLOCKS];
 
 const DATA_BLOCKS_BY_TYPE: ReadonlyMap<string, DataBlockDefinition> = new Map(DATA_BLOCKS.map((block) => [block.type, block]));
 

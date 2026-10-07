@@ -177,6 +177,26 @@ def scope_from_request(
     return scope, None
 
 
+def scope_keywords_from_request(
+    event: dict[str, Any], params: dict[str, Any] | None, keywords_table: Any
+) -> tuple[list[str] | None, dict[str, Any] | None]:
+    """``scope_from_request`` for handlers that only need the keyword texts.
+
+    ``(None, None)`` without a scope (the handler applies its default),
+    ``(keywords, None)`` for a scope with active keywords, and ``(None, 400)``
+    for a malformed scope or one that resolves to no active keyword (an unknown
+    group, or one whose members are all paused), refused on the ``scope`` field
+    the way ``trigger-keyword-analysis`` refuses a run of that scope, rather
+    than handed on as an empty list that a loader would read as "all keywords".
+    """
+    report_scope, rejected = scope_from_request(event, params, keywords_table)
+    if rejected or report_scope is None:
+        return None, rejected
+    if not report_scope.keywords:
+        return None, validation_error(f'No active keywords match the selected scope ({report_scope.label}).', event, 'scope')
+    return list(report_scope.keywords), None
+
+
 def scoped_dynamodb_resource() -> Any:
     """A DynamoDB resource with enough pooled connections for ``map_scope_keywords``' threads."""
     return boto3.resource('dynamodb', config=Config(max_pool_connections=50))

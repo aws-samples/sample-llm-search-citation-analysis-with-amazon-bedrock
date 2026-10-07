@@ -2,7 +2,10 @@ import {
   useEffect, useState 
 } from 'react';
 import { usePromptInsights } from '../../hooks/usePromptInsights';
+import type { Keyword } from '../../types';
 import { PromptCard } from './PromptCard';
+import { InsightsScopeSelector } from './InsightsScopeSelector';
+import { useScopeSelection } from './useScopeSelection';
 import { PageHeaderCard } from '../ui/PageHeaderCard';
 
 const TABS = [
@@ -25,32 +28,39 @@ const TABS = [
 
 type TabId = typeof TABS[number]['id'];
 
-export function PromptInsights() {
+interface Props { readonly keywords: Array<Keyword>; }
+
+export function PromptInsights({ keywords }: Props) {
   const [activeTab, setActiveTab] = useState<TabId>('winning');
+  const selection = useScopeSelection();
   const {
     data, loading, error, fetchPromptInsights 
-  } = usePromptInsights();
+  } = usePromptInsights(selection.scope);
+  const pending = loading || selection.scopePending;
+  // Only an answer for the selected scope is shown; while one is in flight, nothing is.
+  const insights = pending ? null : data;
 
-  useEffect(() => {
-    fetchPromptInsights('all', 20);
-  }, [fetchPromptInsights]);
+  useEffect(
+    () => selection.trackScopeRequest(fetchPromptInsights('all', 20)),
+    [fetchPromptInsights, selection.trackScopeRequest],
+  );
 
   const getPrompts = () => {
-    if (!data) return [];
+    if (!insights) return [];
     const map = {
-      winning: data.winning_prompts,
-      losing: data.losing_prompts,
-      opportunities: data.opportunity_prompts 
+      winning: insights.winning_prompts,
+      losing: insights.losing_prompts,
+      opportunities: insights.opportunity_prompts 
     };
     return map[activeTab] ?? [];
   };
 
   const getCount = (id: TabId) => {
-    if (!data) return 0;
+    if (!insights) return 0;
     const map = {
-      winning: data.summary.winning_count,
-      losing: data.summary.losing_count,
-      opportunities: data.summary.opportunity_count 
+      winning: insights.summary.winning_count,
+      losing: insights.summary.losing_count,
+      opportunities: insights.summary.opportunity_count 
     };
     return map[id] ?? 0;
   };
@@ -68,20 +78,21 @@ export function PromptInsights() {
           </>
         )}
       >
-        {data && (
+        <InsightsScopeSelector keywords={keywords} selection={selection} label="Analyze" />
+        {insights && (
           <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-4 text-center self-start">
-            <div className="text-2xl sm:text-3xl font-bold text-green-600">{data.summary.win_rate}%</div>
+            <div className="text-2xl sm:text-3xl font-bold text-green-600">{insights.summary.win_rate}%</div>
             <div className="text-xs text-green-700 font-medium mt-1">Win Rate</div>
           </div>
         )}
       </PageHeaderCard>
 
-      {data && (
+      {insights && (
         <div className="grid grid-cols-3 gap-3 sm:gap-4">
           {([
-            ['Winning', 'border-green-500', 'text-green-600', data.summary.winning_count],
-            ['Losing', 'border-red-500', 'text-red-600', data.summary.losing_count],
-            ['Opportunities', 'border-yellow-500', 'text-yellow-600', data.summary.opportunity_count],
+            ['Winning', 'border-green-500', 'text-green-600', insights.summary.winning_count],
+            ['Losing', 'border-red-500', 'text-red-600', insights.summary.losing_count],
+            ['Opportunities', 'border-yellow-500', 'text-yellow-600', insights.summary.opportunity_count],
           ] as const).map(([label, borderClass, countClass, count]) => (
             <div key={label} className={`bg-white p-3 sm:p-4 rounded-lg shadow border-l-4 ${borderClass}`}>
               <div className="text-xs sm:text-sm text-gray-500">{label}</div>
@@ -109,14 +120,14 @@ export function PromptInsights() {
         </nav>
       </div>
 
-      {loading && <div className="text-center py-8 text-gray-500">Loading insights...</div>}
+      {pending && <div className="text-center py-8 text-gray-500">Loading insights...</div>}
       {error && <div className="text-center py-8 text-red-500">{error}</div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {prompts.map(prompt => <PromptCard key={prompt.keyword} prompt={prompt} />)}
       </div>
 
-      {prompts.length === 0 && !loading && (
+      {prompts.length === 0 && !pending && (
         <div className="text-center py-8 text-gray-500">
           No {activeTab} prompts found. Run more analyses to gather data.
         </div>
@@ -124,4 +135,3 @@ export function PromptInsights() {
     </div>
   );
 }
-

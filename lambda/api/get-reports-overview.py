@@ -136,7 +136,12 @@ def build_overview(
     """
     trends = _trends_helper()(scope, period, days, owned_domains_from(config))
     top_improving, top_declining = top_movers(trends['keyword_trends'], top)
-    recommendations = _recs_helper()(config, keywords=list(scope.keywords) if scope is not None else None) or []
+    # A scope with no active keyword gets no recommendations: an empty list would
+    # read as "discover the active keywords" to the loader and widen the report.
+    if scope is not None and not scope.keywords:
+        recommendations: list[dict[str, Any]] = []
+    else:
+        recommendations = _recs_helper()(config, keywords=list(scope.keywords) if scope is not None else None) or []
 
     return {
         'generated_at': get_timestamp(),

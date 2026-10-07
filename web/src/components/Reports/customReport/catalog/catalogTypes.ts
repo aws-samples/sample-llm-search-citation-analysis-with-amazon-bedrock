@@ -17,6 +17,11 @@ export const BLOCK_CATEGORIES = [
     description: 'Every KPI with its change, the trend, top wins and gaps, next actions.',
   },
   {
+    id: 'insights',
+    label: 'Insights',
+    description: 'What to do per AI engine, which of your brands trail, and which keywords swing between runs.',
+  },
+  {
     id: 'visibility',
     label: 'Brand Visibility',
     description: 'KPIs, brand rankings, history, movers and the per-keyword leaderboard.',

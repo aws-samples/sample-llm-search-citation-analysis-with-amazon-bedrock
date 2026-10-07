@@ -2,7 +2,7 @@ import {
   describe, it, expect, vi, beforeEach, afterEach 
 } from 'vitest';
 import {
-  render, screen 
+  fireEvent, render, screen, waitFor 
 } from '@testing-library/react';
 import {
   ProvidersConfig, type ProvidersConfigProps
@@ -48,6 +48,30 @@ describe('ProvidersConfig', () => {
 
     expect(screen.getByText('Loading providers...')).toBeInTheDocument();
     expect(screen.queryByText('sk-ant-...xyz')).not.toBeInTheDocument();
+  });
+});
+
+describe('ProvidersConfig refused update', () => {
+  it('shows the server reason instead of its own message', () => {
+    renderProvidersConfig([buildProviderConfig()], {updateError: 'Provider check failed: Your credit balance is too low to access the Anthropic API.',});
+
+    expect(screen.getByText(
+      'Provider check failed: Your credit balance is too low to access the Anthropic API.'
+    )).toBeInTheDocument();
+  });
+
+  it('refreshes the provider cards when a toggle is refused', async () => {
+    const onUpdate = vi.fn<ProvidersConfigProps['onUpdate']>().mockResolvedValue(false);
+    const onRefresh = vi.fn<ProvidersConfigProps['onRefresh']>().mockResolvedValue(undefined);
+    renderProvidersConfig([buildProviderConfig({ enabled: false })], {
+      onUpdate,
+      onRefresh 
+    });
+
+    fireEvent.click(screen.getByTitle('Enable'));
+
+    await waitFor(() => expect(onRefresh).toHaveBeenCalledWith());
+    expect(onUpdate).toHaveBeenCalledWith('claude', { enabled: true });
   });
 });
 

@@ -6,7 +6,7 @@ import {
 } from '@testing-library/react';
 import { useRecommendations } from './useRecommendations';
 import {
-  mockRecommendationsResponse, renderFetchedRecommendations, statusesOf, trackedRecommendation
+  describeScopedRequests, mockRecommendationsResponse, renderFetchedRecommendations, statusesOf, trackedRecommendation
 } from './useRecommendations-fixtures';
 import { describeEndpointHookContract } from '../test/endpointHookContract';
 import { idleEndpointState } from '../test/idleEndpointState';
@@ -62,8 +62,8 @@ describe('useRecommendations', () => {
     // The recommendations fetch is not abortable: it passes only the URL.
     expectedRequest: (url) => [url],
     requests: [
-      ['https://api.test.com/recommendations?use_llm=false', 'no arguments are given', []],
-      ['https://api.test.com/recommendations?use_llm=true', 'LLM generation is requested', [true]],
+      ['https://api.test.com/recommendations?scope=all&use_llm=false', 'no scope and no arguments are given', []],
+      ['https://api.test.com/recommendations?scope=all&use_llm=true', 'LLM generation is requested', [true]],
     ],
     successes: [
       ['recommendations', mockRecommendationsResponse, []],
@@ -72,6 +72,13 @@ describe('useRecommendations', () => {
       UNABLE_TO_LOAD_ON_NON_OK_STATUS,
       INVALID_REQUEST_ON_TYPE_GUARD_FAILURE,
     ],
+  });
+
+  describeScopedRequests({
+    useScopedHook: useRecommendations,
+    fetchOf: (hook) => hook.fetchRecommendations,
+    response: mockRecommendationsResponse,
+    urlFor: (scopeQuery) => `https://api.test.com/recommendations?${scopeQuery}&use_llm=false`,
   });
 
   describe('updateStatus', () => {

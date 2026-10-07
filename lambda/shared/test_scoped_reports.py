@@ -14,7 +14,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 from shared.scope_params import SCOPE_KEYWORDS_CAP, ReportScope
-from shared.scoped_reports import capped_scope, required_report_scope
+from shared.scoped_reports import capped_scope, optional_scope_keywords, required_report_scope
 from testing.assertions import present
 
 _EVENT: dict[str, Any] = {'httpMethod': 'GET', 'path': '/api/x', 'headers': {}}
@@ -65,6 +65,34 @@ class TestRequiredReportScope:
         handler(_EVENT, None, keyword='b')
 
         assert keywords_table.call_count == 2
+
+
+def stub_keywords_handler(event: dict[str, Any], context: Any, keywords: list[str] | None, **params: Any) -> dict[str, Any]:
+    return {'keywords': keywords, 'params': params}
+
+
+def _optional(**query: Any) -> dict[str, Any] | None:
+    """Call a handler under ``optional_scope_keywords`` with the given query parameters."""
+    return optional_scope_keywords(MagicMock)(stub_keywords_handler)(_EVENT, None, **query)
+
+
+def _rejection_field(response: dict[str, Any] | None) -> tuple[int, str]:
+    return present(response)['statusCode'], json.loads(present(response)['body'])['field']
+
+
+class TestOptionalScopeKeywords:
+    """Action Center and Prompt Insights: a scope narrows the keywords, no scope keeps the handler's default."""
+
+    def test_hands_the_scopes_keyword_texts_and_the_other_params_to_the_handler(self) -> None:
+        assert _optional(keyword='hotel coruna', group_id=None, use_llm=False) == {
+            'keywords': ['hotel coruna'], 'params': {'use_llm': False},
+        }
+
+    def test_hands_none_without_a_scope_so_the_handler_applies_its_default(self) -> None:
+        assert _optional(keyword=None, group_id=None, limit=20) == {'keywords': None, 'params': {'limit': 20}}
+
+    def test_answers_400_on_the_scope_field_for_contradictory_scopes_without_calling_the_handler(self) -> None:
+        assert _rejection_field(_optional(keyword='a', group_id='coruna')) == (400, 'scope')
 
 
 class TestCappedScope:

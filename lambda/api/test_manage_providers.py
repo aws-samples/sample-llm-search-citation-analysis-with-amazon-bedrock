@@ -238,17 +238,18 @@ class TestToggleKeepsTheRestOfTheRow:
         """
         Re-enabling is the administrator's "fixed it" decision. Keeping the
         retained streak of 3 would let the next terminal failure switch the
-        provider straight back off.
+        provider straight back off. `validate: false` is the unproven path,
+        which issues this one write and nothing else.
         """
-        _put_provider('claude', {'enabled': True})
+        _put_provider('claude', {'enabled': True, 'validate': False})
 
         assert _only_update()['UpdateExpression'] == (
             'SET enabled = :enabled, updated_at = :ts, consecutive_failures = :zero '
             'REMOVE auto_disabled, disabled_reason, disabled_at'
         )
 
-    def test_enabling_keeps_the_last_error_until_a_success_clears_it(self):
-        _put_provider('claude', {'enabled': True})
+    def test_unproven_enabling_keeps_the_last_error_until_a_success_clears_it(self):
+        _put_provider('claude', {'enabled': True, 'validate': False})
 
         update = _only_update()
         assert 'last_error' not in update['UpdateExpression']
@@ -264,6 +265,98 @@ class TestToggleKeepsTheRestOfTheRow:
 
 class ProbeTimeout(Exception):
     """Stands in for ``requests.Timeout``."""
+
+
+def _update_expressions() -> list[str]:
+    """The `UpdateExpression` of every `update_item` issued, in order."""
+    return [call.kwargs['UpdateExpression'] for call in mock_table.update_item.call_args_list]
+
+
+def _anthropic_rejection(message: str) -> MagicMock:
+    """Anthropic's 400 for a request it understood but will not serve."""
+    return _reply(400, {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': message}})
+
+
+CREDIT_EXHAUSTED_MESSAGE = 'Your credit balance is too low to access the Anthropic API.'
+
+
+class TestEnablingProvesTheProvider:
+    """
+    PUT /providers/{id} with `enabled: true` runs one real call with the
+    stored key before the flag is saved. Re-enabling used to keep the failure
+    that caused the auto-disable on the Settings card, dated weeks back,
+    whether or not the new credit or key had taken.
+    """
+
+    def test_refuses_to_enable_a_provider_without_a_key(self):
+        status, body = _put_provider('claude', {'enabled': True})
+
+        assert status == 400
+        assert body['field'] == 'enabled'
+        assert mock_table.update_item.call_args_list == []
+
+    def test_enables_and_records_the_success_when_the_probe_answers(self, requests_stub):
+        _store_key()
+
+        status, _ = _put_provider('claude', {'enabled': True})
+
+        assert status == 200
+        expressions = _update_expressions()
+        assert expressions[0].startswith('SET enabled = :enabled')
+        assert expressions[1] == (
+            'SET last_success_at = :ts, consecutive_failures = :zero '
+            'REMOVE last_error, last_error_category'
+        )
+
+    def test_probes_an_engine_with_the_configured_models_real_answer(self, requests_stub):
+        """
+        The key probe reads Anthropic's "credit balance is too low" 400 as
+        "key accepted"; only an answer from the model surfaces it.
+        """
+        _store_key('sk-stored-key-1234')
+        _serve_config_rows({'claude': {'provider_id': 'claude', 'enabled': False, 'model': 'claude-sonnet-4-5'}})
+
+        _put_provider('claude', {'enabled': True})
+
+        kwargs = requests_stub.call_args.kwargs
+        assert kwargs['url'] == 'https://api.anthropic.com/v1/messages'
+        assert kwargs['json']['model'] == 'claude-sonnet-4-5'
+        assert kwargs['timeout'] == 20
+
+    def test_probes_a_search_provider_with_its_key_probe(self, requests_stub):
+        _store_key('brave-key-1234')
+
+        _put_provider('brave', {'enabled': True})
+
+        assert requests_stub.call_args.kwargs['timeout'] == 5
+
+    def test_leaves_the_provider_off_and_records_the_failure_when_the_probe_fails(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _anthropic_rejection(CREDIT_EXHAUSTED_MESSAGE)
+
+        status, body = _put_provider('claude', {'enabled': True})
+
+        assert (status, body['error']) == (400, 'Provider check failed')
+        assert 'credit balance is too low' in body['details']
+        expressions = _update_expressions()
+        assert all('enabled = :enabled' not in expression for expression in expressions)
+
+    def test_records_the_fresh_failure_with_its_category(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _anthropic_rejection(CREDIT_EXHAUSTED_MESSAGE)
+
+        _put_provider('claude', {'enabled': True})
+
+        failure = mock_table.update_item.call_args_list[0].kwargs
+        assert failure['UpdateExpression'].startswith('SET last_error = :err, last_error_at = :ts')
+        assert failure['ExpressionAttributeValues'][':cat'] == 'insufficient_credit'
+
+    def test_disabling_never_probes(self, requests_stub):
+        _store_key()
+
+        _put_provider('claude', {'enabled': False})
+
+        assert requests_stub.call_args_list == []
 
 
 @pytest.fixture
@@ -399,11 +492,27 @@ class TestUpdateModel:
             status, _ = _put_provider('gemini', {'model': 'gemini-2.5-pro'})
 
         assert status == 200
-        assert _only_update() == {
+        assert mock_table.update_item.call_args_list[-1].kwargs == {
             'Key': {'provider_id': 'gemini'},
             'UpdateExpression': 'SET model = :model, model_updated_at = :ts, updated_at = :ts',
             'ExpressionAttributeValues': {':model': 'gemini-2.5-pro', ':ts': '2026-09-28T12:00:00Z'},
         }
+
+    def test_a_model_that_answered_the_check_records_a_success(self, requests_stub):
+        """The check was a real answer with the stored key: the health record says so."""
+        _store_key()
+
+        _put_provider('gemini', {'model': 'gemini-2.5-pro'})
+
+        assert _update_expressions()[0] == (
+            'SET last_success_at = :ts, consecutive_failures = :zero '
+            'REMOVE last_error, last_error_category'
+        )
+
+    def test_an_unchecked_model_records_no_success(self, requests_stub):
+        _put_provider('gemini', {'model': 'gemini-2.5-pro', 'validate': False})
+
+        assert all('last_success_at' not in expression for expression in _update_expressions())
 
     def test_checks_openai_with_the_exact_web_search_payload_runs_send(self, requests_stub):
         _store_key('sk-stored-key-1234')
@@ -472,9 +581,7 @@ class TestUpdateModel:
 
     def test_refuses_a_claude_model_without_web_search_and_stores_nothing(self, requests_stub):
         _store_key()
-        requests_stub.return_value = _reply(400, {
-            'type': 'error', 'error': {'type': 'invalid_request_error', 'message': 'web_search is not supported on this model'},
-        })
+        requests_stub.return_value = _anthropic_rejection('web_search is not supported on this model')
 
         status, body = _put_provider('claude', {'model': 'claude-3-haiku-20240307'})
 

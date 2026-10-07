@@ -3,7 +3,7 @@ import {
 } from 'react';
 import { useRecommendations } from '../../hooks/useRecommendations';
 import type {
-  Recommendation, RecommendationStatus
+  Keyword, Recommendation, RecommendationStatus
 } from '../../types';
 import { Spinner } from '../ui/Spinner';
 import {
@@ -14,7 +14,9 @@ import {
   BOLT_PATHS, CHART_BAR_PATHS, CHEVRON_DOWN_PATHS, INFO_CIRCLE_PATHS, LIGHTBULB_PATHS, LINK_PATHS, SORT_ASCENDING_PATHS, SPARKLES_PATHS 
 } from '../ui/iconPaths';
 import { PageHeaderCard } from '../ui/PageHeaderCard';
+import { InsightsScopeSelector } from './InsightsScopeSelector';
 import { RecommendationStatusSelect } from './RecommendationStatusSelect';
+import { useScopeSelection } from './useScopeSelection';
 
 type TrackedRecommendation = Recommendation & { id: string };
 
@@ -177,10 +179,11 @@ interface HeaderProps {
   useLlm: boolean;
   setUseLlm: (value: boolean) => void;
   onRefresh: () => void;
+  scopeSelector: ReactNode;
 }
 
 const Header = ({
-  useLlm, setUseLlm, onRefresh 
+  useLlm, setUseLlm, onRefresh, scopeSelector
 }: HeaderProps) => (
   <PageHeaderCard
     title="Action Center"
@@ -201,6 +204,7 @@ const Header = ({
       </div>
     )}
   >
+    {scopeSelector}
     <div className="flex flex-col sm:flex-row gap-3">
       <label className="flex items-center gap-2 text-sm bg-gray-50 px-3 py-2 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
         <input
@@ -364,16 +368,23 @@ const RecommendationsContent = ({
   );
 };
 
-export function Recommendations() {
+interface Props { readonly keywords: Array<Keyword>; }
+
+export function Recommendations({ keywords }: Props) {
   const [useLlm, setUseLlm] = useState(false);
   const [expandedCard, setExpandedCard] = useState<number | null>(null);
+  const selection = useScopeSelection();
   const {
     data, loading, error, fetchRecommendations, updateStatus, updatingIds, statusError
-  } = useRecommendations();
+  } = useRecommendations(selection.scope);
+  const pending = loading || selection.scopePending;
+  // Only an answer for the selected scope is shown; while one is in flight, nothing is.
+  const recommendations = pending ? null : data;
 
-  useEffect(() => {
-    fetchRecommendations(useLlm);
-  }, [fetchRecommendations, useLlm]);
+  useEffect(
+    () => selection.trackScopeRequest(fetchRecommendations(useLlm)),
+    [fetchRecommendations, useLlm, selection.trackScopeRequest],
+  );
 
   const handleCardClick = (index: number) => {
     setExpandedCard(expandedCard === index ? null : index);
@@ -381,11 +392,16 @@ export function Recommendations() {
 
   return (
     <div className="space-y-6">
-      <Header useLlm={useLlm} setUseLlm={setUseLlm} onRefresh={() => fetchRecommendations(useLlm)} />
+      <Header
+        useLlm={useLlm}
+        setUseLlm={setUseLlm}
+        onRefresh={() => fetchRecommendations(useLlm)}
+        scopeSelector={<InsightsScopeSelector keywords={keywords} selection={selection} label="Analyze" />}
+      />
 
-      {data && <PrioritySummary byPriority={data.by_priority} />}
+      {recommendations && <PrioritySummary byPriority={recommendations.by_priority} />}
 
-      {loading && <LoadingState useLlm={useLlm} />}
+      {pending && <LoadingState useLlm={useLlm} />}
       {error && <ErrorState error={error} />}
       {statusError && (
         <div role="alert" className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm">
@@ -393,10 +409,10 @@ export function Recommendations() {
         </div>
       )}
 
-      {data && (
+      {recommendations && (
         <RecommendationsContent
-          data={data}
-          loading={loading}
+          data={recommendations}
+          loading={pending}
           error={error}
           expandedCard={expandedCard}
           onCardClick={handleCardClick}
