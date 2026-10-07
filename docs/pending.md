@@ -19,6 +19,11 @@ reach zero.
   the pre-demo configuration is backed up locally (path recorded in `docs/geo-insights-roadmap.md`). Restore it with a
   `put-item` of the backup's `Item`, or keep the demo configuration while the demo runs.
 
+- **Codex CLI.** It rewrites the redirect URI with a per-server callback id (`http://127.0.0.1/callback/<id>`,
+  openai/codex#30460), which Cognito's exact callback matching rejects. Either wait for the upstream fix or register
+  the exact URL Codex writes into `~/.codex/config.toml` (`[mcp_servers.<name>.oauth] callback_url`) with
+  `-c mcpRedirectUris`, pinned to a port with `-c mcp_oauth_callback_port=<port>`.
+
 ## 2. Needs data over time
 
 - **Review the insight thresholds** (`ENGINE_TOP1_MIN`, `ENGINE_CITED_MIN`, `SUBBRAND_*`, `UNSTABLE_POSITION_RANGE`,
