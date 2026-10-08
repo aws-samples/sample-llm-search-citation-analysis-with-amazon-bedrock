@@ -7,6 +7,7 @@ import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import { Construct } from 'constructs';
+import { ManagedLoginBranding } from './managed-login-branding';
 import type { McpState } from './mcp-state';
 import { lambdaSourceCode } from './python-layer';
 
@@ -261,15 +262,18 @@ export class McpServer extends Construct {
     const client = this.oauthClient(props, resourceServer, scopes);
 
     // Managed login v2 refuses to render the login page for a client without a
-    // branding style; the Cognito defaults are enough for a login form.
-    const branding = new cognito.CfnManagedLoginBranding(this, 'Branding', {
+    // branding style; this seeds the Cognito default and then themes it to
+    // the Citation Analysis dashboard palette (see `ManagedLoginBranding`).
+    const branding = new ManagedLoginBranding(this, 'Branding', {
       userPoolId: props.userPool.userPoolId,
       clientId: client.userPoolClientId,
-      useCognitoProvidedValues: true,
+      domainDependency: domain,
     });
-    branding.node.addDependency(domain);
 
     const serverFunction = this.serverFunction(props, client, { resourceUrl, authorizationServerUrl: this.url });
+    // The server (and the outputs that advertise its OAuth endpoints) should
+    // not come up before the login pages those endpoints lead to are themed.
+    serverFunction.node.addDependency(branding.resource);
     this.addRoutes(props, serverFunction, resourceUrl);
     this.addOutputs(props.domainPrefix, client, resourceUrl);
   }

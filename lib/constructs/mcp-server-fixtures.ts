@@ -142,6 +142,43 @@ function soleResourceProperties(template: Template, resourceType: string): unkno
   return resolvePath(Object.values(template.findResources(resourceType))[0], ['Properties']);
 }
 
+export interface BrandingCustomResource {
+  clientRef: unknown;
+  theme: Record<string, unknown>;
+  logoLightBase64: string;
+  logoDarkBase64: string;
+}
+
+/**
+ * The one managed-login branding custom resource: the client it themes and
+ * the properties the handler patches onto Cognito's default style. The
+ * construct seeds the default and recolours it at deploy time via its own
+ * Lambda, so this is a `CloudFormation::CustomResource`, not a native
+ * `AWS::Cognito::ManagedLoginBranding`.
+ */
+export function extractBrandingCustomResource(template: Template): BrandingCustomResource {
+  const resources = template.findResources('AWS::CloudFormation::CustomResource');
+  const props = Object.values(resources)
+    .map((resource) => resolvePath(resource, ['Properties']))
+    .find((candidate) => resolvePath(candidate, ['theme']) !== undefined);
+  const theme: unknown = JSON.parse(resolveString(props, ['theme']) || '{}');
+  return {
+    clientRef: resolvePath(props, ['clientId']),
+    theme: (theme && typeof theme === 'object' ? theme : {}) as Record<string, unknown>,
+    logoLightBase64: resolveString(props, ['logoLightBase64']),
+    logoDarkBase64: resolveString(props, ['logoDarkBase64']),
+  };
+}
+
+/** The IAM actions granted to the branding handler Lambda's role, sorted. */
+export function extractBrandingHandlerActions(template: Template): string[] {
+  const roleId = findFunctionRoleLogicalId(template, 'CitationAnalysis-McpBrandingHandler');
+  return allowStatementsOfRole(template, roleId)
+    .flatMap((statement) => statementActions(statement))
+    .filter((action) => action.startsWith('cognito-idp:'))
+    .sort((a, b) => a.localeCompare(b));
+}
+
 /** `ScopeName`s of the one resource server, in declaration order. */
 export function extractResourceServerScopeNames(template: Template): string[] {
   const scopes = resolvePath(soleResourceProperties(template, 'AWS::Cognito::UserPoolResourceServer'), ['Scopes']);
