@@ -13,6 +13,8 @@ describe('settingsPath', () => {
     ['providers', '/settings/providers'],
     ['alerts', '/settings/alerts'],
     ['users', '/settings/users'],
+    ['bedrock-models', '/settings/bedrock-models'],
+    ['ai-assistants', '/settings/ai-assistants'],
   ] as const)('maps %s to %s', (section, path) => {
     expect(settingsPath(section)).toBe(path);
   });
@@ -23,6 +25,8 @@ describe('sectionFromPath', () => {
     ['/settings/brand', 'brand-config'],
     ['/settings/personas', 'query-prompts'],
     ['/settings/users', 'users'],
+    ['/settings/bedrock-models', 'bedrock-models'],
+    ['/settings/ai-assistants', 'ai-assistants'],
     ['/settings/providers/extra', 'providers'],
   ] as const)('opens %s as the %s section', (path, section) => {
     expect(sectionFromPath(path)).toBe(section);

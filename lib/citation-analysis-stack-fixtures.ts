@@ -1598,3 +1598,72 @@ export function extractReportInsightsSnapshot(template: Template): ReportInsight
     statsInsightsFunctionLogicalId: findLambdaLogicalId(template, statsInsights),
   };
 }
+
+/** How one Lambda reaches the Bedrock models saved in Settings: the table variable and its actions on the table. */
+export interface SavedBedrockModelWiring {
+  tableEnv: unknown;
+  tableActions: string[];
+}
+
+/** The Bedrock model picker (2.36.0) as synthesized: ConfigMgmt's permissions and every model caller's wiring. */
+export interface BedrockModelPickerSnapshot {
+  providerConfigTableLogicalId: string;
+  configMgmtActions: string[];
+  configMgmtWildcardStatements: IamPolicyStatementSnapshot[];
+  configMgmtInvokeStatements: IamPolicyStatementSnapshot[];
+  /** Every Lambda whose role may invoke a Claude model, plus `extraCallers`. */
+  callers: Record<string, SavedBedrockModelWiring>;
+  providerIdChildPathParts: string[];
+}
+
+export const EMPTY_BEDROCK_MODEL_PICKER_SNAPSHOT: BedrockModelPickerSnapshot = {
+  providerConfigTableLogicalId: '',
+  configMgmtActions: [],
+  configMgmtWildcardStatements: [],
+  configMgmtInvokeStatements: [],
+  callers: {},
+  providerIdChildPathParts: [],
+};
+
+/** Names of every Lambda whose role may invoke a Claude model. */
+function claudeInvokingFunctionNames(template: Template): string[] {
+  return Object.values(template.findResources('AWS::Lambda::Function'))
+    .map((resource) => resolvePath(resource, ['Properties', 'FunctionName']))
+    .filter((name): name is string => typeof name === 'string')
+    .filter((name) => extractFunctionRoleActions(template, name).includes('bedrock:InvokeModel'));
+}
+
+/** The `PathPart` of every API Gateway resource directly under `parentId`, sorted. */
+function childPathParts(template: Template, parentId: string): string[] {
+  return sortedUnique(
+    Object.values(template.findResources('AWS::ApiGateway::Resource'))
+      .filter((resource) => resolveString(resource, ['Properties', 'ParentId', 'Ref']) === parentId)
+      .map((resource) => resolveString(resource, ['Properties', 'PathPart']))
+  );
+}
+
+/**
+ * ConfigMgmt's model-picker permissions and, for every Claude caller (and the
+ * `extraCallers` that call `shared.models` without invoking a model), the
+ * ProviderConfig variable and actions it reads the saved tier models with.
+ */
+export function extractBedrockModelPickerSnapshot(template: Template, extraCallers: string[]): BedrockModelPickerSnapshot {
+  const configMgmt = 'CitationAnalysis-API-ConfigMgmt';
+  const tableLogicalId = findLogicalIdByName(template, 'AWS::DynamoDB::Table', 'TableName', 'CitationAnalysis-ProviderConfig');
+  const configMgmtRoleId = findFunctionRoleLogicalId(template, configMgmt);
+  const callerNames = sortedUnique([...claudeInvokingFunctionNames(template), ...extraCallers]);
+  const providerId = findApiResourceId(template, '{id}', findApiResourceId(template, 'providers'));
+  return {
+    providerConfigTableLogicalId: tableLogicalId,
+    configMgmtActions: extractFunctionRoleActions(template, configMgmt),
+    configMgmtWildcardStatements: roleStatementsMatching(
+      template, configMgmtRoleId, (actions) => actions.some((action) => /^(bedrock:(List|Get)InferenceProfile|servicequotas:)/.test(action))
+    ),
+    configMgmtInvokeStatements: roleStatementsForAction(template, configMgmtRoleId, 'bedrock:InvokeModel'),
+    callers: Object.fromEntries(callerNames.map((name) => [name, {
+      tableEnv: extractLambdaEnvVars(template, name).DYNAMODB_TABLE_PROVIDER_CONFIG,
+      tableActions: extractFunctionRoleActionsOn(template, name, tableLogicalId),
+    }])),
+    providerIdChildPathParts: childPathParts(template, providerId),
+  };
+}

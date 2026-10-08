@@ -5,6 +5,7 @@ import {
 } from 'vitest';
 import { CitationAnalysisStack } from './citation-analysis-stack';
 import {
+  EMPTY_BEDROCK_MODEL_PICKER_SNAPSHOT,
   EMPTY_CUSTOM_REPORTS_SNAPSHOT,
   EMPTY_PROVIDER_SEARCH_SNAPSHOT,
   EMPTY_WORKFLOW_SCALE_SNAPSHOT,
@@ -18,6 +19,7 @@ import {
   extractApiAuthSnapshots,
   extractApiBackedFunctionTimeouts,
   extractApiMethods,
+  extractBedrockModelPickerSnapshot,
   extractBucketLifecycle,
   extractContentStudioInfrastructureSnapshot,
   extractContentSecurityPolicy,
@@ -74,6 +76,7 @@ import {
   FULLY_GUARDED,
   type ApiGatewayMethodSnapshot,
   type ApiMethodAuthSnapshot,
+  type BedrockModelPickerSnapshot,
   type BucketLifecycleSnapshot,
   type CrawlerInfrastructureSnapshot,
   type CustomReportsSnapshot,
@@ -178,6 +181,7 @@ const synthesized: CrawlerInfrastructureSnapshot & {
   workflowScale: WorkflowScaleSnapshot;
   providerSearch: ProviderSearchSnapshot;
   customReports: CustomReportsSnapshot;
+  bedrockModelPicker: BedrockModelPickerSnapshot;
   contentSecurityPolicy: Record<string, string[]>;
 } = {
   definitionRaw: '',
@@ -255,6 +259,7 @@ const synthesized: CrawlerInfrastructureSnapshot & {
   workflowScale: EMPTY_WORKFLOW_SCALE_SNAPSHOT,
   providerSearch: EMPTY_PROVIDER_SEARCH_SNAPSHOT,
   customReports: EMPTY_CUSTOM_REPORTS_SNAPSHOT,
+  bedrockModelPicker: EMPTY_BEDROCK_MODEL_PICKER_SNAPSHOT,
   contentSecurityPolicy: {},
 };
 
@@ -288,6 +293,27 @@ const SCOPED_READ_FUNCTION_NAMES = [
 ];
 const RESEARCH_STATE_MACHINE = 'CitationAnalysis-KeywordResearch';
 const RESEARCH_WORKER_FUNCTION_NAME = 'CitationAnalysis-ResearchWorker';
+
+/**
+ * Lambdas that resolve a model through `shared.models` (e.g. for response
+ * metadata) without holding `bedrock:InvokeModel`; every Claude caller is
+ * found from its role.
+ */
+const SHARED_MODELS_CALLERS_WITHOUT_INVOKE = ['CitationAnalysis-API-ContentStudio'];
+
+/** Every Lambda that calls `shared.models` (Settings › Bedrock models, 2.36.0). */
+const SAVED_BEDROCK_MODEL_CALLERS = [
+  ...SEARCH_PROVIDER_IDS.map(searchFunctionName),
+  'CitationAnalysis-Crawler',
+  'CitationAnalysis-ReportInsights',
+  'CitationAnalysis-ResearchWorker',
+  'CitationAnalysis-API-StatsInsights',
+  'CitationAnalysis-API-ManageBrandConfig',
+  'CitationAnalysis-API-SelfReflection',
+  'CitationAnalysis-API-ContentStudio',
+  'CitationAnalysis-ContentStudioWorker',
+  'CitationAnalysis-API-ConfigMgmt',
+].sort((left, right) => left.localeCompare(right));
 
 beforeAll(() => {
   const app = new cdk.App();
@@ -423,6 +449,7 @@ beforeAll(() => {
   synthesized.workflowScale = extractWorkflowScaleSnapshot(template);
   synthesized.providerSearch = extractProviderSearchSnapshot(template);
   synthesized.customReports = extractCustomReportsSnapshot(template);
+  synthesized.bedrockModelPicker = extractBedrockModelPickerSnapshot(template, SHARED_MODELS_CALLERS_WITHOUT_INVOKE);
   synthesized.contentSecurityPolicy = extractContentSecurityPolicy(template);
 }, 180_000);
 
@@ -2511,18 +2538,20 @@ describe('Report insights narrative', () => {
     expect(snapshot.workerEnvironmentNames.filter((name) => name.startsWith('DYNAMODB_TABLE_'))).toStrictEqual([
       'DYNAMODB_TABLE_BRAND_CONFIG',
       'DYNAMODB_TABLE_KEYWORDS',
+      'DYNAMODB_TABLE_PROVIDER_CONFIG',
       'DYNAMODB_TABLE_REPORT_INSIGHTS',
       'DYNAMODB_TABLE_SEARCH_RESULTS',
     ]);
   });
 
-  it('lets the worker read its source tables and only put narratives', () => {
+  it('lets the worker read its source tables, the saved Bedrock models, and only put narratives', () => {
     const read = ['dynamodb:BatchGetItem', 'dynamodb:ConditionCheckItem', 'dynamodb:DescribeTable', 'dynamodb:GetItem',
       'dynamodb:GetRecords', 'dynamodb:GetShardIterator', 'dynamodb:Query', 'dynamodb:Scan'];
 
     expect(snapshot.workerTableActions).toStrictEqual({
       'CitationAnalysis-SearchResults': read,
       'CitationAnalysis-Keywords': read,
+      'CitationAnalysis-ProviderConfig': ['dynamodb:GetItem'],
       'CitationAnalysis-BrandConfig': read,
       'CitationAnalysis-ReportInsights': ['dynamodb:PutItem'],
     });
@@ -2545,5 +2574,47 @@ describe('Report insights narrative', () => {
   it('routes POST regenerate to StatsInsights behind the Cognito authorizer', () => {
     expect(sortedHttpMethods(snapshot.regenerateMethods)).toStrictEqual(['POST']);
     expect(unguardedVerbs(snapshot.regenerateMethods, snapshot.statsInsightsFunctionLogicalId)).toStrictEqual(FULLY_GUARDED);
+  });
+});
+
+describe('Bedrock model picker (Settings › Bedrock models, 2.36.0)', () => {
+  const picker = (): BedrockModelPickerSnapshot => synthesized.bedrockModelPicker;
+
+  it('finds exactly the Lambdas that call shared.models', () => {
+    expect(Object.keys(picker().callers)).toStrictEqual(SAVED_BEDROCK_MODEL_CALLERS);
+  });
+
+  it.each(SAVED_BEDROCK_MODEL_CALLERS)('hands %s the ProviderConfig table name', (functionName) => {
+    expect(picker().callers[functionName]?.tableEnv).toStrictEqual({ Ref: picker().providerConfigTableLogicalId });
+  });
+
+  it.each(SAVED_BEDROCK_MODEL_CALLERS)('lets %s read the saved tier models', (functionName) => {
+    expect(picker().callers[functionName]?.tableActions).toContain('dynamodb:GetItem');
+  });
+
+  it('lets ConfigMgmt test a model with the same Claude-only InvokeModel grant the runtime roles hold', () => {
+    expect(picker().configMgmtInvokeStatements).toStrictEqual([{
+      actions: ['bedrock:InvokeModel'],
+      resources: [
+        { 'Fn::Join': ['', ['arn:aws:bedrock:*:', { Ref: 'AWS::AccountId' }, ':inference-profile/global.anthropic.claude-*']] },
+        'arn:aws:bedrock:*::foundation-model/anthropic.claude-*',
+        'arn:aws:bedrock:::foundation-model/anthropic.claude-*',
+      ],
+    }]);
+  });
+
+  it('lets ConfigMgmt list inference profiles and read service quotas, which take no resource ARNs', () => {
+    expect(picker().configMgmtWildcardStatements).toStrictEqual([
+      { actions: ['bedrock:GetInferenceProfile', 'bedrock:ListInferenceProfiles'], resources: ['*'] },
+      { actions: ['servicequotas:GetServiceQuota', 'servicequotas:ListServiceQuotas'], resources: ['*'] },
+    ]);
+  });
+
+  it('gives ConfigMgmt no Marketplace permissions', () => {
+    expect(picker().configMgmtActions.filter((action) => action.startsWith('aws-marketplace:'))).toStrictEqual([]);
+  });
+
+  it('reuses the existing provider routes instead of adding API resources', () => {
+    expect(picker().providerIdChildPathParts).toStrictEqual(['models', 'validate']);
   });
 });

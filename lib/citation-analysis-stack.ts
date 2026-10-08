@@ -39,8 +39,11 @@ import {
  *   deep     -> Opus
  *
  * Lambdas read BEDROCK_TIER_<ROLE> and resolve the model ID via
- * shared.models.get_model_id(). To pin a specific model ID in an incident,
- * set BEDROCK_MODEL_<ROLE> (takes precedence over the tier).
+ * shared.models.get_model_id(). An administrator can replace a tier's model in
+ * Settings › Bedrock models (ProviderConfig rows `bedrock-<tier>`, read through
+ * DYNAMODB_TABLE_PROVIDER_CONFIG; see `allowSavedBedrockModels`). To pin a
+ * specific model ID in an incident, set BEDROCK_MODEL_<ROLE> (takes precedence
+ * over both).
  */
 const bedrockTierEnv = {
   BEDROCK_TIER_SUMMARIZATION: 'fast',
@@ -392,6 +395,17 @@ function claudeInvokeModelStatement(stack: cdk.Stack): iam.PolicyStatement {
       'arn:aws:bedrock:::foundation-model/anthropic.claude-*',
     ],
   });
+}
+
+/**
+ * `dynamodb:GetItem` on the ProviderConfig table for a Lambda that calls
+ * `shared.models`: it reads the model an administrator saved per tier in
+ * Settings › Bedrock models (rows `bedrock-<tier>`). Pair it with the
+ * `DYNAMODB_TABLE_PROVIDER_CONFIG` environment variable; without either the
+ * Lambda falls back to the tier defaults.
+ */
+function allowSavedBedrockModels(grantee: iam.IGrantable, providerConfigTable: dynamodb.ITable): void {
+  allow(grantee, ['dynamodb:GetItem'], [providerConfigTable.tableArn]);
 }
 
 /** Thrown at synth time when a CDK context tuning value is not usable. */
@@ -1266,8 +1280,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         CRAWL_BLOCKED_FRESHNESS_DAYS: '3',
         CRAWL_CACHE_INDEX_NAME: 'CacheScopeIndex',
         ...bedrockTierEnv,
+        DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
       },
     });
+    allowSavedBedrockModels(crawlerLambdaRole, providerConfigTable);
 
     const generateSummaryFunction = workerFunction(this, 'GenerateSummary', {
       functionName: 'CitationAnalysis-GenerateSummary',
@@ -1338,6 +1354,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
         DYNAMODB_TABLE_REPORT_INSIGHTS: reportInsightsTable.tableName,
         ...bedrockTierEnv,
+        DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
       },
     });
 
@@ -1346,6 +1363,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     brandConfigTable.grantReadData(reportInsightsFunction);
     allow(reportInsightsFunction, ['dynamodb:PutItem'], [reportInsightsTable.tableArn]);
     reportInsightsFunction.addToRolePolicy(claudeInvokeModelStatement(this));
+    allowSavedBedrockModels(reportInsightsFunction, providerConfigTable);
 
     // ========================================
     // Step Functions State Machine
@@ -1834,6 +1852,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
         DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
         ...bedrockTierEnv,
+        DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
         // recommendation status (read for left-join, write for the
         // POST /recommendations/{id}/status route)
         DYNAMODB_TABLE_RECOMMENDATION_STATUS: recommendationStatusTable.tableName,
@@ -1893,7 +1912,11 @@ export class CitationAnalysisStack extends cdk.Stack {
       handlerFiles: ['manage-brand-config.py'],
       memorySize: 256,
       description: 'API: Manage brand tracking configuration',
-      environment: {DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName, ...bedrockTierEnv},
+      environment: {
+        DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
+        ...bedrockTierEnv,
+        DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
+      },
     });
 
     // Consolidated Keyword Management Lambda (get-keywords + manage-keywords + keyword-research)
@@ -1931,6 +1954,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         'manage-query-prompts.py',
         'manage-schedule.py',
         'manage-providers.py',
+        'manage-bedrock-models.py',
         'manage-alerts.py',
         'manage-custom-reports.py',
       ],
@@ -1985,6 +2009,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     recommendationStatusTable.grantReadWriteData(statsInsightsFunction);
     // Grant Bedrock access for LLM-enhanced recommendations (get-recommendations.py)
     statsInsightsFunction.addToRolePolicy(claudeInvokeModelStatement(this));
+    allowSavedBedrockModels(statsInsightsFunction, providerConfigTable);
     allow(statsInsightsFunction, ['dynamodb:GetItem'], [reportInsightsTable.tableArn]);
     reportInsightsFunction.grantInvoke(statsInsightsFunction);
     // Grant consolidated citations-content function access to all required tables and buckets
@@ -2019,6 +2044,13 @@ export class CitationAnalysisStack extends cdk.Stack {
     allow(configMgmtFunction, ['sns:ListSubscriptionsByTopic', 'sns:Publish', 'sns:Subscribe'], [kpiAlertsTopic.topicArn]);
     allow(configMgmtFunction, ['sns:Unsubscribe'], [`${kpiAlertsTopic.topicArn}:*`]);
     kpiAlertsKey.grantEncryptDecrypt(configMgmtFunction);
+    // Settings › Bedrock models (manage-bedrock-models.py): list the global
+    // Claude inference profiles, read their quotas, and test a model with a
+    // live Converse call before it is saved. Listing and quota reads take no
+    // resource-level permissions, hence `*`.
+    configMgmtFunction.addToRolePolicy(claudeInvokeModelStatement(this));
+    allow(configMgmtFunction, ['bedrock:ListInferenceProfiles', 'bedrock:GetInferenceProfile'], ['*']);
+    allow(configMgmtFunction, ['servicequotas:ListServiceQuotas', 'servicequotas:GetServiceQuota'], ['*']);
     // POST /api/schedules/{id}/run starts an analysis with the schedule's scope.
     stateMachine.grantStartExecution(configMgmtFunction);
     openaiSecret.grantRead(configMgmtFunction);
@@ -2115,6 +2147,7 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_SEARCH_RESULTS: searchResultsTable.tableName,
         DYNAMODB_TABLE_SELF_REFLECTION: selfReflectionTable.tableName,
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
+        DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
         // NOTE: `shared/models.py` resolves the analysis model from
         // BEDROCK_TIER_<ROLE> (see `bedrockTierEnv`), which this function does
         // not spread, so ModelRole.ANALYSIS falls through to its hardcoded
@@ -2131,11 +2164,13 @@ export class CitationAnalysisStack extends cdk.Stack {
     queryPromptsTable.grantReadData(selfReflectionFunction);
     selfReflectionTable.grantReadWriteData(selfReflectionFunction);
     selfReflectionFunction.addToRolePolicy(claudeInvokeModelStatement(this));
+    allowSavedBedrockModels(selfReflectionFunction, providerConfigTable);
 
     brandConfigTable.grantReadWriteData(manageBrandConfigFunction);
     
     // Grant Bedrock access for brand expansion feature
     manageBrandConfigFunction.addToRolePolicy(claudeInvokeModelStatement(this));
+    allowSavedBedrockModels(manageBrandConfigFunction, providerConfigTable);
     
 
 
@@ -2395,6 +2430,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       CONTENT_STUDIO_WORKER_FUNCTION_NAME: CONTENT_STUDIO_WORKER_FUNCTION_NAME,
       GENERATION_TIMEOUT_SECONDS: '360',
       ...bedrockTierEnv,
+      DYNAMODB_TABLE_PROVIDER_CONFIG: providerConfigTable.tableName,
     };
     const contentStudioStatusIndexArn = `${contentStudioTable.tableArn}/index/StatusCreatedIndex`;
     const keywordsStatusIndexArn = `${keywordsTable.tableArn}/index/StatusIndex`;
@@ -2427,6 +2463,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     ], [contentBriefTemplatesTable.tableArn]);
     allow(contentStudioFunction, ['dynamodb:Scan'], [keywordsTable.tableArn]);
     allow(contentStudioFunction, ['dynamodb:Query'], [keywordsStatusIndexArn]);
+    allowSavedBedrockModels(contentStudioFunction, providerConfigTable);
 
     const contentStudioWorkerFunction = workerFunction(this, 'ContentStudioWorker', {
       functionName: CONTENT_STUDIO_WORKER_FUNCTION_NAME,
@@ -2444,6 +2481,7 @@ export class CitationAnalysisStack extends cdk.Stack {
     allow(contentStudioWorkerFunction, ['dynamodb:GetItem'], [brandConfigTable.tableArn]);
     allow(contentStudioWorkerFunction, ['dynamodb:Query'], [crawledContentTable.tableArn]);
     contentStudioWorkerFunction.addToRolePolicy(claudeInvokeModelStatement(this));
+    allowSavedBedrockModels(contentStudioWorkerFunction, providerConfigTable);
 
     // Reconciliation re-dispatches recovered rows to the worker itself. The
     // API never invokes a Lambda: generation starts from the table stream.

@@ -1,4 +1,4 @@
-"""ConfigMgmt dispatch coverage for the alerts and custom-reports APIs."""
+"""ConfigMgmt dispatch coverage for the alerts, custom-reports and providers (incl. Bedrock models) APIs."""
 
 from __future__ import annotations
 
@@ -22,6 +22,12 @@ _API_DIR = os.path.dirname(os.path.abspath(__file__))
         ('POST', '/api/custom-reports', '/api/custom-reports', 'manage-custom-reports.py'),
         ('PUT', '/api/custom-reports/{id}', '/api/custom-reports/report-1', 'manage-custom-reports.py'),
         ('DELETE', '/api/custom-reports/{id}', '/api/custom-reports/report-1', 'manage-custom-reports.py'),
+        ('GET', '/api/providers/{id}/models', '/api/providers/bedrock/models', 'manage-bedrock-models.py'),
+        ('POST', '/api/providers/{id}/validate', '/api/providers/bedrock/validate', 'manage-bedrock-models.py'),
+        ('PUT', '/api/providers/{id}', '/api/providers/bedrock', 'manage-bedrock-models.py'),
+        ('GET', '/api/providers/{id}/models', '/api/providers/openai/models', 'manage-providers.py'),
+        ('PUT', '/api/providers/{id}', '/api/providers/bedrockx', 'manage-providers.py'),
+        ('GET', '/api/providers', '/api/providers', 'manage-providers.py'),
     ],
 )
 def test_dispatches_each_config_path_to_its_handler_file(

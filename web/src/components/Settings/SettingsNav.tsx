@@ -14,6 +14,8 @@ export interface SettingsNavItem {
    */
   readonly caption: string | null;
   readonly iconPaths: readonly string[];
+  /** Tailwind text colour for the icon: the section's accent tone (docs/design-system.md §2.2). */
+  readonly iconColor: string;
   readonly needsAttention?: boolean;
 }
 
@@ -61,7 +63,7 @@ const NavItemLink = ({
     data-section={item.id}
     className={itemClass(active)}
   >
-    <StrokeIcon className="w-5 h-5 shrink-0 text-gray-400" paths={item.iconPaths} aria-hidden="true" />
+    <StrokeIcon className={`w-5 h-5 shrink-0 ${item.iconColor}`} paths={item.iconPaths} aria-hidden="true" />
     <span className="min-w-0 flex-1">
       <span className="block">{item.label}</span>
       <NavCaption caption={item.caption} />

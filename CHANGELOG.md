@@ -9,6 +9,57 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.36.0] - 2026-10-08
+
+### Added
+
+- **Settings › Bedrock models**: an Admin picks the Bedrock model behind each tier (fast / balanced / deep) from the
+  account's active `global.anthropic.claude-*` inference profiles (names cleaned to e.g. "Claude Sonnet 5.5"), tests
+  it, and saves it. Served by the new `manage-bedrock-models.py` in the ConfigMgmt Lambda on the existing provider
+  routes with `{id} = bedrock` (`GET /api/providers/bedrock/models`, `POST .../validate`, `PUT .../bedrock`); no new
+  API Gateway resources. Admin-only.
+- **Test** makes a live Converse call ("Reply with the single word OK.", low effort) after reading the account's
+  "Global cross-region model inference tokens / requests per minute" quotas for the model (Service Quotas, read in
+  time-boxed slices and kept in the ProviderConfig row `bedrock-quotas`). It answers the request style that worked,
+  the latency and the quotas, or a reason: `not_subscribed`
+  (no Marketplace subscription), `access_denied`, `no_capacity` (a 0 tokens/min quota; the model is not called),
+  `throttled` (capacity exhausted right now), `unsupported` (neither request style accepted, or the account's data
+  retention mode), `unavailable` (legacy or retired) or `error`, with ARNs and account ids removed from messages.
+- **Save** re-tests the model (unless `validate: false`) and stores `model`, `request_style`, `model_updated_at`,
+  `updated_at` and `tested_at` in the ProviderConfig row `bedrock-<tier>`; a failed test is refused with 400 and its
+  reason. Choosing the default model (or none) removes the override. These rows never appear in
+  `GET /api/providers`.
+
+### Changed
+
+- **Runtime Lambdas use the saved model**: `shared/models.get_model_id` resolves `BEDROCK_MODEL_<ROLE>` → the tier's
+  saved model → the tier default, reading the row through `DYNAMODB_TABLE_PROVIDER_CONFIG` (cached 60 s per tier per
+  container; a DynamoDB error or a missing variable falls back to the default with one warning per period). Every
+  Lambda that calls `shared.models` (the per-provider search functions, Crawler, ReportInsights, ResearchWorker,
+  StatsInsights, ManageBrandConfig, SelfReflection, Content Studio API and worker) gets the variable and
+  `dynamodb:GetItem` on the table; ConfigMgmt gets the Claude-only `bedrock:InvokeModel` grant,
+  `bedrock:ListInferenceProfiles` / `GetInferenceProfile` and `servicequotas:ListServiceQuotas` / `GetServiceQuota`.
+- **Request-style detection** replaces the 5.5-only list: a saved model uses the style its test proved; any other
+  model starts from a first guess by family (adaptive for Haiku 5.5, Sonnet 5 / 5.5, Opus 4.7 / 4.8 / 5 / 5.5;
+  budget for the 4.5 and 4.6 models); a refusal naming the other style ("`temperature` is deprecated", "adaptive
+  thinking is not supported", ...) is retried once in that style and remembered per model for the container.
+  `build_converse_request` is the one request builder for runtime calls and the Settings test.
+- **AI assistants moved into Settings** (`/settings/ai-assistants`, under Access) and left the sidebar's
+  Configuration menu; `/ai-assistants` redirects there. Settings nav icons carry the design-system accent colours,
+  like the sidebar.
+
+### Fixed
+
+- The model test no longer times out (HTTP 504) reading the quotas: Service Quotas lists Bedrock's ~1,000 quotas a
+  page at a time (~126 pages and ~41 s at its default page size, rate limited with `TooManyRequestsException` when
+  several tiers were tested at once). The reading is now time-boxed and resumable: each page load reads pages for up
+  to 6 s and each test for up to 5 s (`MaxResults=100`, about 40 quotas a page; a throttled page ends the slice), and
+  the merged global cross-region quotas and the `NextToken` are kept in the ProviderConfig row `bedrock-quotas`, so
+  the next request continues where the last stopped. A complete reading is re-read daily, answering from the previous
+  map meanwhile. Until the first reading completes a missing quota reads "quota still being read" (`quota.complete:
+  false`), afterwards "quota not reported". The test's Converse timeouts drop to 3 s connect / 8 s read, and the
+  second request style is only tried when it can still finish inside a 25 s deadline, under API Gateway's 29 s.
+
 ## [2.35.0] - 2026-10-08
 
 ### Changed

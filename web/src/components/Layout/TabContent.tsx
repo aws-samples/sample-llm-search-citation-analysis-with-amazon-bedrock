@@ -29,7 +29,6 @@ const PromptInsights = lazy(() => import('../Insights').then(module => ({ defaul
 const CitationGaps = lazy(() => import('../Insights').then(module => ({ default: module.CitationGaps })));
 const Recommendations = lazy(() => import('../Insights').then(module => ({ default: module.Recommendations })));
 const ContentStudioView = lazy(() => import('../ContentStudio').then(module => ({ default: module.ContentStudioView })));
-const AiAssistantsView = lazy(() => import('../AiAssistants').then(module => ({ default: module.AiAssistantsView })));
 
 interface TabContentProps {
   readonly activeTab: TabType;
@@ -194,7 +193,6 @@ export function TabContent(props: TabContentProps) {
     execution: <ExecutionMonitor execution={execution} triggerAnalysis={triggerAnalysis} keywordsCount={keywords.length} keywords={keywords} />,
     schedule: <ScheduleManager schedules={schedules} setSchedules={setSchedules} keywords={keywords} />,
     settings: <SettingsView keywords={keywords} setKeywords={setKeywords} />,
-    'ai-assistants': <AiAssistantsView />,
     searches: <SearchesView searches={searches} onNavigateToRawResponses={onNavigateToRawResponses} />,
     'raw-responses': <RawResponsesExplorer initialPath={rawResponsesPath} />,
     'keyword-research': <KeywordResearchView onKeywordsAdded={appendKeywords} />,

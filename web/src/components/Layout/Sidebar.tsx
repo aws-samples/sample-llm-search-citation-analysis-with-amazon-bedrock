@@ -5,7 +5,7 @@ import {
 } from '../ui';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
-  ARCHIVE_PATHS, CHART_BAR_PATHS, CHAT_BUBBLES_PATHS, LIGHTBULB_PATHS, LINK_PATHS, PENCIL_ALT_PATHS, SEARCH_PATHS 
+  ARCHIVE_PATHS, CHART_BAR_PATHS, LIGHTBULB_PATHS, LINK_PATHS, PENCIL_ALT_PATHS, SEARCH_PATHS 
 } from '../ui/iconPaths';
 
 interface NavItem {
@@ -239,15 +239,6 @@ export const Sidebar = ({
           icon: <CogIcon />,
           iconColor: 'text-gray-500',
           badge: keywordsCount 
-        },
-        {
-          // Discovery for the MCP server: how to plug Claude, ChatGPT, Kiro
-          // and other assistants into this dashboard's data.
-          id: 'ai-assistants',
-          path: '/ai-assistants',
-          label: 'AI Assistants',
-          icon: <StrokeIcon className="w-5 h-5" paths={CHAT_BUBBLES_PATHS} aria-hidden="true" />,
-          iconColor: 'text-indigo-500',
         },
       ],
     },

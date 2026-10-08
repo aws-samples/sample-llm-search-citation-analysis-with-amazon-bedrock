@@ -9,7 +9,9 @@ export type SettingsTab =
   | 'query-prompts'
   | 'providers'
   | 'alerts'
-  | 'users';
+  | 'users'
+  | 'bedrock-models'
+  | 'ai-assistants';
 
 export const SETTINGS_BASE_PATH = '/settings';
 
@@ -20,9 +22,11 @@ const SECTION_SLUGS: Record<SettingsTab, string> = {
   'providers': 'providers',
   'alerts': 'alerts',
   'users': 'users',
+  'bedrock-models': 'bedrock-models',
+  'ai-assistants': 'ai-assistants',
 };
 
-const SECTIONS: readonly SettingsTab[] = ['keywords', 'brand-config', 'query-prompts', 'providers', 'alerts', 'users'];
+const SECTIONS: readonly SettingsTab[] = ['keywords', 'brand-config', 'query-prompts', 'providers', 'alerts', 'users', 'bedrock-models', 'ai-assistants'];
 
 const SLUG_TO_SECTION: ReadonlyMap<string, SettingsTab> = new Map(
   SECTIONS.map((section) => [SECTION_SLUGS[section], section])

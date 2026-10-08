@@ -2,7 +2,7 @@ import {
   useState, useEffect, type ReactNode
 } from 'react';
 import {
-  BrowserRouter, Routes, Route, useNavigate, useLocation
+  BrowserRouter, Navigate, Routes, Route, useNavigate, useLocation
 } from 'react-router-dom';
 import { Amplify } from 'aws-amplify';
 import { signOut } from 'aws-amplify/auth';
@@ -58,7 +58,6 @@ const TAB_TO_PATH: Record<TabType, string> = {
   execution: '/execution',
   schedule: '/schedule',
   settings: '/settings',
-  'ai-assistants': '/ai-assistants',
 };
 
 const PATH_TO_TAB: Record<string, TabType> = Object.fromEntries(
@@ -146,7 +145,6 @@ const PAGE_TITLES: Record<TabType, string> = {
   schedule: 'Schedule',
   'keyword-research': 'Keyword Research',
   settings: 'Settings',
-  'ai-assistants': 'AI Assistants',
   searches: 'Recent Searches',
   'raw-responses': 'Raw Responses',
 };
@@ -416,6 +414,8 @@ function MainApp() {
 function AuthenticatedRoutes() {
   return (
     <Routes>
+      {/* The AI assistants guide used to be its own page; old links and bookmarks land on its Settings section. */}
+      <Route path="/ai-assistants" element={<Navigate to={settingsPath('ai-assistants')} replace />} />
       <Route path="/*" element={<MainApp />} />
     </Routes>
   );

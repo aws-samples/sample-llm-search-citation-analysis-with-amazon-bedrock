@@ -32,6 +32,5 @@ export type TabType =
   | 'content-studio'
   | 'reports'
   | 'settings'
-  | 'ai-assistants'
   | 'searches'
   | 'raw-responses';

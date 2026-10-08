@@ -24,11 +24,13 @@ vi.mock('../../hooks/useBrandConfig', () => ({ useBrandConfig: vi.fn() }));
 vi.mock('../../hooks/useProviderConfig', () => ({ useProviderConfig: vi.fn() }));
 vi.mock('../Keywords/KeywordsManager', () => ({ KeywordsManager: () => <div data-testid="keywords-manager">Keywords Manager</div> }));
 vi.mock('../Brands/BrandConfigContent', () => ({ BrandConfigContent: () => <div data-testid="brand-config">Brand Config</div> }));
+vi.mock('../AiAssistants', () => ({ AiAssistantsView: () => <div data-testid="ai-assistants-guide">AI Assistants Guide</div> }));
 vi.mock('./AlertsConfig', () => ({
   AlertsConfig: ({ isAdmin }: { isAdmin: boolean }) => (
     <div data-testid="alerts-config">Alerts Config admin: {String(isAdmin)}</div>
   ),
 }));
+vi.mock('./BedrockModelsConfig', () => ({ BedrockModelsConfig: () => <div data-testid="bedrock-models-config">Bedrock Models Config</div> }));
 vi.mock('./UsersConfig', () => ({ UsersConfig: () => <div data-testid="users-config">Users Config</div> }));
 vi.mock('../../hooks/useIsAdmin', () => ({ useIsAdmin: vi.fn() }));
 
@@ -40,8 +42,13 @@ const mockUseBrandConfig = vi.mocked(useBrandConfig);
 const mockUseProviderConfig = vi.mocked(useProviderConfig);
 const mockUseIsAdmin = vi.mocked(useIsAdmin);
 
-const NON_ADMIN_SECTIONS = ['keywords', 'brand tracking', 'personas', 'ai providers', 'alerts'];
+const NON_ADMIN_SECTIONS = ['keywords', 'brand tracking', 'personas', 'ai providers', 'alerts', 'ai assistants'];
 const NON_ADMIN = buildAdminMembership({ isAdmin: false });
+/** Admin-only sections: name, link name, URL and the test id of their (mocked) content. */
+const ADMIN_SECTIONS = [
+  ['users', /^users/i, '/settings/users', 'users-config'],
+  ['bedrock models', /^bedrock models/i, '/settings/bedrock-models', 'bedrock-models-config'],
+] as const;
 
 type SettingsViewProps = ComponentProps<typeof SettingsView>;
 
@@ -57,6 +64,11 @@ function renderSettingsView(
       <SettingsView {...buildSettingsViewProps(props)} />
     </MemoryRouter>
   );
+}
+
+/** The Settings nav link whose accessible name contains `section` (case-insensitive). */
+function getSectionLinkElement(section: string) {
+  return screen.getByRole('link', { name: new RegExp(section, 'i') });
 }
 
 async function renderAndOpenSection(sectionName: RegExp, membership = buildAdminMembership()) {
@@ -85,11 +97,21 @@ describe('SettingsView', () => {
       ['ai providers', '/settings/providers'],
       ['alerts', '/settings/alerts'],
       ['users', '/settings/users'],
-      ['ai assistants', '/ai-assistants'],
+      ['bedrock models', '/settings/bedrock-models'],
+      ['ai assistants', '/settings/ai-assistants'],
     ])('links the %s entry to %s', (section, href) => {
       renderSettingsView();
 
-      expect(screen.getByRole('link', { name: new RegExp(section, 'i') })).toHaveAttribute('href', href);
+      expect(getSectionLinkElement(section)).toHaveAttribute('href', href);
+    });
+
+    it.each([
+      ['brand tracking', 'text-violet-500'],
+      ['ai assistants', 'text-indigo-500'],
+    ])('tints the %s icon with its accent %s', (section, tone) => {
+      renderSettingsView();
+
+      expect(getSectionLinkElement(section).querySelector('svg')).toHaveClass(tone);
     });
 
     it('shows keywords section by default', () => {
@@ -98,10 +120,14 @@ describe('SettingsView', () => {
       expect(screen.getByTestId('keywords-manager')).toBeInTheDocument();
     });
 
-    it('opens the section named in the URL', () => {
-      renderSettingsView('/settings/brand');
+    it.each<[string, string]>([
+      ['/settings/brand', 'brand-config'],
+      ['/settings/ai-assistants', 'ai-assistants-guide'],
+      ...ADMIN_SECTIONS.map(([, , path, testId]): [string, string] => [path, testId]),
+    ])('opens %s for an admin as the section in the URL', (path, testId) => {
+      renderSettingsView(path);
 
-      expect(screen.getByTestId('brand-config')).toBeInTheDocument();
+      expect(screen.getByTestId(testId)).toBeInTheDocument();
     });
 
     it('falls back to keywords for an unknown section slug', () => {
@@ -216,23 +242,39 @@ describe('SettingsView', () => {
     });
   });
 
-  describe('users section visibility', () => {
-    it.each([
-      ['from non-admin users', NON_ADMIN],
-      ['while admin membership is still loading', buildAdminMembership({
-        isAdmin: false,
-        loading: true,
-      })],
-    ])('hides the users link %s', (_condition, membership) => {
+  describe('admin-only section visibility', () => {
+    const MEMBERSHIP_LOADING = buildAdminMembership({
+      isAdmin: false,
+      loading: true,
+    });
+    const HIDDEN_LINKS = ADMIN_SECTIONS.flatMap(([section, link]) => [
+      [section, 'from non-admin users', link, NON_ADMIN],
+      [section, 'while admin membership is still loading', link, MEMBERSHIP_LOADING],
+    ] as const);
+
+    it.each(HIDDEN_LINKS)('hides the %s link %s', (_section, _condition, link, membership) => {
       renderSettingsView('/settings', {}, membership);
 
-      expect(screen.queryByRole('link', { name: /^users/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('link', { name: link })).not.toBeInTheDocument();
+    });
+
+    it('lists Bedrock models under Processing for admins', () => {
+      renderSettingsView();
+
+      expect(screen.getByText('Processing')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /bedrock models/i })).toHaveTextContent('Claude on Amazon Bedrock');
+    });
+
+    it('drops the Processing group for non-admin users', () => {
+      renderSettingsView('/settings', {}, NON_ADMIN);
+
+      expect(screen.queryByText('Processing')).not.toBeInTheDocument();
     });
 
     it.each(NON_ADMIN_SECTIONS)('keeps the %s section available to non-admin users', (section) => {
       renderSettingsView('/settings', {}, NON_ADMIN);
 
-      expect(screen.getByRole('link', { name: new RegExp(section, 'i') })).toBeInTheDocument();
+      expect(getSectionLinkElement(section)).toBeInTheDocument();
     });
 
     it('passes read-only membership to alerts for non-admin users', () => {
@@ -241,31 +283,22 @@ describe('SettingsView', () => {
       expect(screen.getByTestId('alerts-config')).toHaveTextContent('Alerts Config admin: false');
     });
 
-    it('sends a non-admin who opens the users URL to keywords', () => {
-      renderSettingsView('/settings/users', {}, NON_ADMIN);
+    it.each(ADMIN_SECTIONS)('sends a non-admin who opens the %s URL to keywords', (_section, _link, path) => {
+      renderSettingsView(path, {}, NON_ADMIN);
 
       expect(screen.getByTestId('keywords-manager')).toBeInTheDocument();
     });
 
-    it('does not render user management for a non-admin on the users URL', () => {
-      renderSettingsView('/settings/users', {}, NON_ADMIN);
+    it.each(ADMIN_SECTIONS)('does not render the %s section for a non-admin on its URL', (_section, _link, path, testId) => {
+      renderSettingsView(path, {}, NON_ADMIN);
 
-      expect(screen.queryByTestId('users-config')).not.toBeInTheDocument();
+      expect(screen.queryByTestId(testId)).not.toBeInTheDocument();
     });
 
-    it('shows a placeholder on the users URL while membership is confirmed', () => {
-      renderSettingsView('/settings/users', {}, buildAdminMembership({
-        isAdmin: false,
-        loading: true,
-      }));
+    it.each(ADMIN_SECTIONS)('shows a placeholder on the %s URL while membership is confirmed', (_section, _link, path) => {
+      renderSettingsView(path, {}, MEMBERSHIP_LOADING);
 
       expect(screen.getByText('Checking access')).toBeInTheDocument();
-    });
-
-    it('honours an admin link straight to the users section', () => {
-      renderSettingsView('/settings/users');
-
-      expect(screen.getByTestId('users-config')).toBeInTheDocument();
     });
   });
 });
