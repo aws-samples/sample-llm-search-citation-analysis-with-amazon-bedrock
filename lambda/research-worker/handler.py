@@ -806,13 +806,15 @@ def _run_signals_step(config: dict[str, Any], planned: dict[str, Any]) -> dict[s
         query = item.get('query', '') if isinstance(item, dict) else ''
         dimension = item.get('dimension', OTHER_DIMENSION) if isinstance(item, dict) else OTHER_DIMENSION
         try:
-            for candidate in fetch_google_signals(
-                api_key,
-                query,
-                country=config.get('country', 'us'),
-                language=config.get('language', 'en'),
-            ):
-                keywords.append({**candidate, 'dimension': dimension})
+            keywords.extend(
+                {**candidate, 'dimension': dimension}
+                for candidate in fetch_google_signals(
+                    api_key,
+                    query,
+                    country=config.get('country', 'us'),
+                    language=config.get('language', 'en'),
+                )
+            )
         except Exception as exc:
             logger.exception('Google signals query %r failed', query)
             errors.append(f'{query}: {_error_text(exc)}')

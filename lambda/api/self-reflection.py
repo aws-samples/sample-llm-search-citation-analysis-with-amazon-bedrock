@@ -304,7 +304,7 @@ def post_self_reflection(event, context, body, keyword, brand, query_prompt_id=N
         response_text=response_text[:4000],
         brand_data_json=json.dumps(brands_list, default=str)[:2000],
         brand_name=brand,
-        current_rank=current_rank if current_rank else 'N/A',
+        current_rank=current_rank or 'N/A',
         classification=classification,
         first_party_brands=', '.join(first_party),
         competitor_brands=', '.join(competitors),

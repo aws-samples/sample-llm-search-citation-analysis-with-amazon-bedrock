@@ -557,7 +557,7 @@ def _send(request: dict[str, Any], timeout: int, interpret: Callable[[Any], dict
     except requests.Timeout:
         return {'valid': False, 'error': 'Validation request timed out'}
     except Exception:
-        logger.exception(f"Error during {label}")
+        logger.exception('Error during %s', label)
         return {'valid': False, 'error': 'Validation failed'}
 
 

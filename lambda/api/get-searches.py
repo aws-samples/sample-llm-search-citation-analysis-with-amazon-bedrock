@@ -67,7 +67,7 @@ def handler(event, context, keyword=None, provider=None, query_prompt_id=None, l
             try:
                 items.extend(newest_items(table, 'provider', p, items_per_provider, index_name=_PROVIDER_INDEX))
             except Exception:
-                logger.exception(f"Error querying provider {p}")
+                logger.exception('Error querying provider %s', p)
                 continue
 
     # Sort by timestamp descending

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -132,7 +132,7 @@ def _complete_group_run(
     resource: MagicMock,
     settings: dict,
     previous_snapshot: dict | None = None,
-) -> Iterator[None]:
+) -> Generator[None, None, None]:
     """One complete group whose exact-run answers are `_answers()`, with notification stubbed out."""
     with (
         _complete_group_patches(worker_module, resource, settings, _answers()),

@@ -58,7 +58,7 @@ def get_extraction_config() -> dict[str, Any]:
                 _extraction_config = json.load(f)
             logger.info("Loaded extraction config")
         except (OSError, json.JSONDecodeError) as e:
-            logger.warning(f"Failed to load extraction config: {e!s}, using defaults")
+            logger.warning('Failed to load extraction config: %s, using defaults', e)
             _extraction_config = {"hotel_extraction": {"enabled": True, "config": {}}}
     return _extraction_config
 
@@ -128,7 +128,7 @@ def store_raw_response_to_s3(
         return None
 
     s3_uri = f"s3://{RAW_RESPONSES_BUCKET}/{s3_key}"
-    logger.info(f"Stored raw response to {s3_uri}")
+    logger.info('Stored raw response to %s', s3_uri)
     return s3_uri
 
 
@@ -174,7 +174,7 @@ def get_provider_model(provider_id: str) -> str:
     if provider_id not in _provider_model_cache:
         model = read_provider_model(dynamodb.Table(PROVIDER_CONFIG_TABLE), provider_id)
         _provider_model_cache[provider_id] = model
-        logger.info(f"Provider {provider_id} using model: {model}")
+        logger.info('Provider %s using model: %s', provider_id, model)
     return _provider_model_cache[provider_id]
 
 
@@ -261,10 +261,10 @@ def _query_llm(
         latency_ms = int((time.time() - start_time) * 1000)
         response_text, citations = parse(raw_response)
     except Exception as e:
-        logger.exception(f"{provider} error")
+        logger.exception('%s error', provider)
         return provider_error_result(provider, model, e, start_time)
 
-    logger.info(f"{provider} found {len(citations)} citations for '{keyword}'")
+    logger.info("%s found %s citations for '%s'", provider, len(citations), keyword)
     return {
         "provider": provider,
         "response": response_text,
@@ -380,11 +380,11 @@ def resolve_gemini_redirect(redirect_url: str, timeout: int = 5) -> str:
 
     if fetch_error or not final_url:
         logger.warning(
-            f"Failed to resolve Gemini redirect {redirect_url[:50]}...: {fetch_error}"
+            'Failed to resolve Gemini redirect %s...: %s', redirect_url[:50], fetch_error
         )
         return redirect_url
 
-    logger.info(f"Resolved Gemini redirect: {redirect_url[:50]}... -> {final_url}")
+    logger.info('Resolved Gemini redirect: %s... -> %s', redirect_url[:50], final_url)
     return final_url
 
 
@@ -401,7 +401,7 @@ def _gemini_grounding_citations(grounding: dict[str, Any]) -> list[str]:
             citations.append(cleaned_url)
     # Also check webSearchQueries if available
     if 'webSearchQueries' in grounding:
-        logger.info(f"Gemini search queries: {grounding['webSearchQueries']}")
+        logger.info('Gemini search queries: %s', grounding['webSearchQueries'])
     return citations
 
 
@@ -436,12 +436,12 @@ def _log_claude_tool_block(block_type: str | None, content_block: dict[str, Any]
     """Debug-log Claude's tool invocations; info-log block types this parser does not know."""
     if block_type in ('tool_use', 'server_tool_use'):
         tool_input = content_block.get('input', {})
-        logger.debug(f"Claude {block_type}: {content_block.get('name')}, input: {tool_input}")
+        logger.debug('Claude %s: %s, input: %s', block_type, content_block.get('name'), tool_input)
         # Extract query if present (useful for debugging)
         if block_type == 'server_tool_use' and tool_input and 'query' in tool_input:
-            logger.debug(f"Claude web search query: {tool_input['query']}")
+            logger.debug('Claude web search query: %s', tool_input['query'])
     else:
-        logger.info(f"Claude unhandled block type '{block_type}': {json.dumps(content_block, default=str)[:300]}")
+        logger.info("Claude unhandled block type '%s': %s", block_type, json.dumps(content_block, default=str)[:300])
 
 
 def _claude_search_result_urls(content_block: dict[str, Any], citations: list[str]) -> None:
@@ -450,18 +450,18 @@ def _claude_search_result_urls(content_block: dict[str, Any], citations: list[st
         url = result.get('url') if result.get('type') == 'web_search_result' else None
         if url and url not in citations:
             citations.append(clean_url(url))
-            logger.debug(f"Claude web search result URL: {url}")
+            logger.debug('Claude web search result URL: %s', url)
 
 
 def _parse_claude_response(raw_response: dict[str, Any]) -> tuple[str, list[str]]:
     """Text blocks and web-search result URLs, plus any URLs in the text itself (Claude's primary source)."""
     # Log the full response structure for debugging
-    logger.info(f"Claude raw response structure: {json.dumps(raw_response, default=str)[:1000]}")
+    logger.info('Claude raw response structure: %s', json.dumps(raw_response, default=str)[:1000])
     response_text = ""
     citations: list[str] = []
     for content_block in raw_response.get('content', []):
         block_type = content_block.get('type')
-        logger.debug(f"Claude content block type: {block_type}")
+        logger.debug('Claude content block type: %s', block_type)
         if block_type == 'text':
             response_text += content_block.get('text', '')
         elif block_type == 'web_search_tool_result':
@@ -590,17 +590,17 @@ def execute_all_providers(keyword: str, providers: list[str], query_template: st
             continue
         api_key = get_api_key(secret_name)
         if not api_key:
-            logger.info(f"{label} API key not configured, skipping")
+            logger.info('%s API key not configured, skipping', label)
             continue
         if not is_provider_enabled(provider_id):
-            logger.info(f"{label} is disabled, skipping")
+            logger.info('%s is disabled, skipping', label)
             continue
 
-        logger.info(f"Querying {label}...")
+        logger.info('Querying %s...', label)
         try:
             result = run_query(keyword, api_key, query_template)
         except ProviderConfigUnavailableError:
-            logger.exception(f"{label} provider config unavailable, skipping this run")
+            logger.exception('%s provider config unavailable, skipping this run', label)
             continue
         _record_provider_outcome(provider_id, result)
         results.append(result)
@@ -620,7 +620,7 @@ def store_search_results(keyword: str, timestamp: str, results: list[dict[str, A
         brand_config = None
         if brand_extraction_enabled:
             brand_config = get_brand_config()
-            logger.info(f"Loaded brand config for extraction: industry={brand_config.get('industry') if brand_config else 'default'}")
+            logger.info('Loaded brand config for extraction: industry=%s', brand_config.get('industry') if brand_config else 'default')
 
         for result in results:
             # Every runner sets "provider"; "unknown" mirrors deduplication's rollup for a row without one.
@@ -635,11 +635,11 @@ def store_search_results(keyword: str, timestamp: str, results: list[dict[str, A
             brand_data = {"brands": [], "brand_count": 0}
             if brand_extraction_enabled and response_text and provider_type == "llm":
                 try:
-                    logger.info(f"Starting brand extraction for {provider} (response length: {len(response_text)} chars)")
+                    logger.info('Starting brand extraction for %s (response length: %s chars)', provider, len(response_text))
                     brand_data = extract_brands_from_response(response_text, config=brand_config)
-                    logger.info(f"Brand extraction for {provider}: {brand_data.get('brand_count', 0)} brands found")
+                    logger.info('Brand extraction for %s: %s brands found', provider, brand_data.get('brand_count', 0))
                 except Exception as e:
-                    logger.error(f"Brand extraction failed for {provider}: {e!s}", exc_info=True)
+                    logger.exception('Brand extraction failed for %s: %s', provider, e)
 
             # Store raw response to S3
             raw_response = result.get("raw_response")
@@ -693,7 +693,7 @@ def store_search_results(keyword: str, timestamp: str, results: list[dict[str, A
                 item["error"] = result["error"]
 
             table.put_item(Item=item)
-            logger.info(f"Stored result for {provider} ({provider_type}) with {item['brand_count']} brand mentions, S3: {s3_uri or 'N/A'}")
+            logger.info('Stored result for %s (%s) with %s brand mentions, S3: %s', provider, provider_type, item['brand_count'], s3_uri or 'N/A')
     except Exception:
         logger.exception("Error storing results")
         return False
@@ -753,13 +753,13 @@ def _search_keyword(event: dict[str, Any]) -> dict[str, Any]:
     # If no query prompts, use a single default (backward compatible)
     query_prompts = event.get('query_prompts') or [{"id": "default", "name": "Default", "template": None}]
 
-    logger.info(f"Processing keyword: {keyword}, prompts: {len(query_prompts)}, providers: {providers}")
+    logger.info('Processing keyword: %s, prompts: %s, providers: %s', keyword, len(query_prompts), providers)
 
     all_results: list[dict[str, Any]] = []
     for prompt in query_prompts:
         prompt_id = prompt.get('id', 'default')
         prompt_name = prompt.get('name', 'Default')
-        logger.info(f"Running prompt '{prompt_name}' for keyword '{keyword}'")
+        logger.info("Running prompt '%s' for keyword '%s'", prompt_name, keyword)
         try:
             results = execute_all_providers(
                 keyword,
@@ -767,7 +767,7 @@ def _search_keyword(event: dict[str, Any]) -> dict[str, Any]:
                 query_template=prompt.get('template'),
             )
         except Exception:
-            logger.exception(f"Error running prompt '{prompt_name}' for '{keyword}'")
+            logger.exception("Error running prompt '%s' for '%s'", prompt_name, keyword)
             # Continue with remaining prompts
             continue
         # Tag each result with the query prompt info
@@ -802,7 +802,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         "results": [...]  // slim results; [] when the one provider is disabled or has no key
     }
     """
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info('Received event: %s', json.dumps(event))
     # A model changed in Settings must reach the very next invocation, not
     # wait for this warm container to be recycled.
     _provider_model_cache.clear()

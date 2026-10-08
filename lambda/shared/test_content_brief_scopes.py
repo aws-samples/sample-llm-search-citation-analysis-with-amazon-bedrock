@@ -215,9 +215,7 @@ class TestScopePlaceholder:
             for mode, template in DEFAULT_PROMPT_TEMPLATES.items()
         }
 
-        assert placeholders == {
-            mode: (True, False) for mode in DEFAULT_PROMPT_TEMPLATES
-        }
+        assert placeholders == dict.fromkeys(DEFAULT_PROMPT_TEMPLATES, (True, False))
 
     def test_renders_scope_as_safety_wrapped_authoritative_context(self) -> None:
         idea = build_keyword_scoped_content_brief()

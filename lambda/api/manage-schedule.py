@@ -465,7 +465,7 @@ def _create_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
     else:
         return api_response(409, {'error': 'Could not allocate a schedule id, please retry'}, event)
 
-    logger.info(f"Created schedule {schedule_id} ({display_name!r}, {describe_scope(scope)})")
+    logger.info('Created schedule %s (%r, %s)', schedule_id, display_name, describe_scope(scope))
     return success_response(
         _written_view(schedule_id, display_name, form, scope, enabled, message='Schedule created successfully'),
         event,
@@ -520,7 +520,7 @@ def _update_schedule_handler(event: dict[str, Any], context: Any, body: dict[str
     except scheduler.exceptions.ValidationException as exc:
         return validation_error(_validation_exception_message(exc), event)
 
-    logger.info(f"Updated schedule {schedule_id} ({display_name!r}, {describe_scope(scope)})")
+    logger.info('Updated schedule %s (%r, %s)', schedule_id, display_name, describe_scope(scope))
     return success_response(
         _written_view(schedule_id, display_name, form, scope, enabled, message='Schedule updated successfully'),
         event,
@@ -573,7 +573,7 @@ def _run_schedule_handler(event: dict[str, Any], context: Any) -> dict[str, Any]
         name=execution_name,
         input=json.dumps(execution_input),
     )
-    logger.info(f"Started {execution_name} for schedule {schedule_id} ({schedule['scope_summary']})")
+    logger.info('Started %s for schedule %s (%s)', execution_name, schedule_id, schedule['scope_summary'])
     return success_response({
         'execution_arn': response['executionArn'],
         'execution_name': execution_name,

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from types import ModuleType
@@ -154,7 +154,7 @@ class ScopedReport:
 @contextmanager
 def scoped_report(
     module: ModuleType, brand_config: Mapping[str, Any] | None = None, **fake: Any,
-) -> Iterator[ScopedReport]:
+) -> Generator[ScopedReport, None, None]:
     """``module`` reading ``fake_scope_dynamodb(**fake)``, with ``get_brand_config`` answering ``brand_config``.
 
     ``brand_config=None`` leaves ``get_brand_config`` alone (for handlers that

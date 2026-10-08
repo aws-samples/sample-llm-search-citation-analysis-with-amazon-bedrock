@@ -12,6 +12,7 @@ Requirements: 9.6
 import json
 import logging
 import os
+from collections.abc import Sequence
 from typing import Any
 
 import boto3
@@ -32,7 +33,7 @@ s3_client = boto3.client('s3')
 SUMMARY_BUCKET = os.environ.get('SUMMARY_BUCKET')
 
 
-def build_run_metadata(keyword_results: list[dict[str, Any]]) -> dict[str, Any]:
+def build_run_metadata(keyword_results: Sequence[object]) -> dict[str, Any]:
     """Describe the exact keyword/timestamp pairs delivered by the Map state.
 
     ``timestamp`` is populated only when every named result carries the same
@@ -72,7 +73,7 @@ def build_run_metadata(keyword_results: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def count_results(keyword_results: list[dict[str, Any]]) -> dict[str, Any]:
+def count_results(keyword_results: Sequence[object]) -> dict[str, Any]:
     """Count successful and failed keyword processing."""
     total = len(keyword_results)
     successful = 0
@@ -175,7 +176,7 @@ def merge_citation_counts(stats: dict[str, Any], result: dict[str, Any]) -> None
         stats['total_pages_crawled'] += _count(result.get('pages_crawled'))
 
 
-def aggregate_statistics(keyword_results: list[dict[str, Any]]) -> dict[str, Any]:
+def aggregate_statistics(keyword_results: Sequence[object]) -> dict[str, Any]:
     """Aggregate statistics from all keyword processing."""
     stats = {
         'total_keywords': 0,
@@ -316,7 +317,7 @@ def store_summary_in_s3(report: dict[str, Any], bucket: str) -> str:
         raise SummaryStorageError(f"Failed to store the summary in s3://{bucket}/{key}") from error
 
     s3_uri = f"s3://{bucket}/{key}"
-    logger.info(f"Summary stored in S3: {s3_uri}")
+    logger.info('Summary stored in S3: %s', s3_uri)
     return s3_uri
 
 
@@ -361,10 +362,10 @@ def _event_keyword_results(event: dict[str, Any] | list[Any], context: Any) -> t
 
 def _build_report(execution_id: str, keyword_results: list[Any]) -> dict[str, Any]:
     counts = count_results(keyword_results)
-    logger.info(f"Counts: {json.dumps(counts)}")
+    logger.info('Counts: %s', json.dumps(counts))
 
     stats = aggregate_statistics(keyword_results)
-    logger.info(f"Statistics: {json.dumps({k: v for k, v in stats.items() if k != 'keywords_processed'}, default=str)}")
+    logger.info('Statistics: %s', json.dumps({k: v for k, v in stats.items() if k != 'keywords_processed'}, default=str))
 
     report = generate_report(execution_id, counts, stats)
     # Add the exact Map-state run identity without changing any existing
@@ -442,16 +443,16 @@ def handler(event: dict[str, Any] | list[Any], context: Any) -> dict[str, Any]:
         "s3_location": "s3://bucket/execution-summaries/..."
     }
     """
-    logger.info(f"Received event: {json.dumps(event, default=str)[:2000]}")
+    logger.info('Received event: %s', json.dumps(event, default=str)[:2000])
 
     try:
         execution_id, keyword_results, requested_summary_bucket, from_map_run = _event_keyword_results(event, context)
-        logger.info(f"Processing summary for {len(keyword_results)} keyword results")
+        logger.info('Processing summary for %s keyword results', len(keyword_results))
 
         report = _build_report(execution_id, keyword_results)
         s3_bucket = _summary_bucket(requested_summary_bucket, from_map_run)
         s3_location = store_summary_in_s3(report, s3_bucket) if s3_bucket else None
-        logger.info(f"Execution summary generated: {report['status']}")
+        logger.info('Execution summary generated: %s', report['status'])
     except Exception as e:
         # `log_error` sanitises a dict event; a raw Map list carries nothing to redact.
         log_error(e, "generate summary handler", event if isinstance(event, dict) else None)

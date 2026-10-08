@@ -75,7 +75,7 @@ class HandlerLoader:
         return handler_fn
 
 
-__all__ = ['HandlerLoader', 'dispatch_route', 'path_contains_segment', 'path_matches_route']
+__all__ = ['HandlerLoader', 'dispatch_route', 'path_contains_segment', 'path_matches_route', 'route_not_found']
 
 
 def path_contains_segment(segment: str, request_path: str) -> bool:
@@ -167,12 +167,19 @@ def dispatch_route(
     resource = event.get('resource', '')
     path = event.get('path', '')
 
-    logger.info(f"Routing request: resource={resource}, path={path}")
+    logger.info('Routing request: resource=%s, path=%s', resource, path)
 
     for route_path, filename in route_map.items():
         if path_matches_route(route_path, resource, path):
-            logger.info(f"Matched route {route_path} -> {filename}")
+            logger.info('Matched route %s -> %s', route_path, filename)
             return handlers.get(filename)(event, context)
 
-    logger.error(f"No route matched for resource={resource}, path={path}")
+    return route_not_found(event, logger)
+
+
+def route_not_found(event: dict[str, Any], logger: logging.Logger) -> dict[str, Any]:
+    """The 404 for a request no route claims, logged on the router's ``logger``."""
+    logger.error(
+        'No route matched for resource=%s, path=%s', event.get('resource', ''), event.get('path', ''),
+    )
     return not_found_response(resource='Route', event=event)

@@ -18,6 +18,18 @@ process.
   The ten `@route_handler` handler bodies, which the router never calls, now `raise RouteNotHandledError(__name__)`
   (`shared/decorators.py`): reaching one is a bug, and `@api_handler` answers it with a sanitized 500. Two test
   lambdas that only wrapped `dict` and a double `startswith` were fixed by the same rules.
+- ruff also selects `DTZ`, `LOG`, `G`, `RET`, `C4`, `PERF`, `FLY`, `FURB`, `PGH`, `T10`, `ISC`, `RSE`, `PLW` and `A`,
+  and pyright reports unnecessary `isinstance` calls, unnecessary comparisons and deprecated APIs as errors. The 101
+  logger f-strings are lazy `%s` arguments and `logger.error(..., exc_info=True)` in `except` is `logger.exception`
+  (`@api_handler` included). Guards on untrusted input (request bodies, Step Functions events, the SSRF check, prompt
+  sanitising) are typed `object` so the checks stay; guards on boto3 responses and in-process data were dead and are
+  gone. `_update_request` takes `status: str | None`, `@contextmanager` helpers return `Generator`, and the two
+  routers share `shared.router.route_not_found`. `global` lazy clients (`PLW0603`) and the API's `id` / `type`
+  request parameters (`A002`) are allowed per file.
+- **`npm run validate` runs before every push**, locally: `.githooks/pre-push`, linked into `.git/hooks/` by
+  `npm install` (`prepare`) or `npm run hooks:install` (`scripts/install-git-hooks.sh`, which never changes git
+  config and works under Code Defender's global `core.hooksPath`). Branch/tag deletions skip it;
+  `SKIP_VALIDATE=1 git push` is the documented emergency bypass.
 
 ## [2.36.0] - 2026-10-08
 

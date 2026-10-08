@@ -292,7 +292,7 @@ class TestReads:
         assert 'response' not in run_read['ProjectionExpression']
 
     def test_answers_plain_json_numbers_for_stored_decimals(self, insights: ModuleType, history_since: MagicMock):
-        stored = {**brand('Hotel Faro', 'first_party'), 'rank': Decimal('2'), 'mention_count': Decimal('1')}
+        stored = {**brand('Hotel Faro', 'first_party'), 'rank': Decimal(2), 'mention_count': Decimal(1)}
         with _wired(insights, search_rows={'faro spa weekend': [result('faro spa weekend', 'openai', [stored])]}) as wired:
             body = wired.body(FARO)
 

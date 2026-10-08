@@ -175,13 +175,13 @@ def deterministic_alert_id(
     entity: str,
 ) -> str:
     """Stable alert identity across retries of one execution."""
-    raw = '\0'.join((execution_id, group_id, alert_type, entity.casefold()))
+    raw = f'{execution_id}\0{group_id}\0{alert_type}\0{entity.casefold()}'
     return f"alert-{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]}"
 
 
 def deterministic_content_change_id(group_id: str, changed_at: str) -> str:
     """Stable content-change identity for one group timestamp."""
-    raw = '\0'.join((group_id, changed_at))
+    raw = f'{group_id}\0{changed_at}'
     return f"change-{hashlib.sha256(raw.encode('utf-8')).hexdigest()[:32]}"
 
 

@@ -59,7 +59,7 @@ CREDIT_EXHAUSTED_ROW = {
     'last_error_at': '2026-08-19T10:00:00Z',
     'last_error_category': 'insufficient_credit',
     'last_success_at': '2026-08-13T22:15:00Z',
-    'consecutive_failures': Decimal('3'),
+    'consecutive_failures': Decimal(3),
     'auto_disabled': True,
     'disabled_reason': 'insufficient_credit',
     'updated_at': '2026-08-19T10:00:00Z',

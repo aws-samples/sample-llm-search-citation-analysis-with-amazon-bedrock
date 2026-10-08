@@ -91,7 +91,7 @@ def _run_brand_prompt(
         return {**shape(result), "notes": result.get("notes", ""), "industry": industry}
 
     except Exception as e:
-        logger.exception(f"Error {log_context}")
+        logger.exception('Error %s', log_context)
         return {**error_defaults, "error": str(e)}
 
 # The shape of one extracted mention, rendered into the default prompt as the

@@ -8,7 +8,7 @@ asserted exactly and no test sleeps.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -58,7 +58,7 @@ class _Http:
 
 
 @contextmanager
-def _serpapi_answers(*answers: Any, clock: Any = 0.0) -> Iterator[_Http]:
+def _serpapi_answers(*answers: Any, clock: Any = 0.0) -> Generator[_Http, None, None]:
     """``requests.get`` answers ``answers`` in order (an exception is raised); jitter is x1.
 
     ``clock`` is ``time.monotonic``'s return value, or a list of successive readings.

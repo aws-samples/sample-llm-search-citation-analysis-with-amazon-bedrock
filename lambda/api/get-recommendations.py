@@ -426,7 +426,7 @@ def handler(event: dict[str, Any], context: Any, keywords: list[str] | None, use
     result = {
         'generated_at': get_timestamp(),
         'recommendations': recommendations,
-        'llm_enhanced': llm_recommendations if llm_recommendations else None,
+        'llm_enhanced': llm_recommendations or None,
         'total_count': len(recommendations),
         'by_priority': {
             'high': len([r for r in recommendations if r.get('priority') == 'high']),

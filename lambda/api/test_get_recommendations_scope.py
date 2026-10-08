@@ -15,7 +15,7 @@ and the SearchResults partitions answer from the rows a test stages.
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import contextmanager
 from types import ModuleType
 from typing import Any
@@ -57,7 +57,7 @@ def recommendations() -> ModuleType:
 
 
 @contextmanager
-def action_center(module: ModuleType) -> Iterator[ScopedReport]:
+def action_center(module: ModuleType) -> Generator[ScopedReport, None, None]:
     """The handler over ``GAP_ROWS``, with the status join answering no rows.
 
     The table names stay in the environment for the call: without a scope the

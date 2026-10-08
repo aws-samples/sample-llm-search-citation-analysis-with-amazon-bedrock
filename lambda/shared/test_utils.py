@@ -44,15 +44,15 @@ class TestGetTimestamp:
             ts,
         ), f'Unexpected wire format: {ts!r}'
 
-    def test_parses_back_as_utc_aware_datetime_after_Z_to_offset_swap(self) -> None:
-        """Downstream code does fromisoformat(s.replace('Z', '+00:00')) — ensure that still works."""
+    def test_parses_back_as_utc_aware_datetime(self) -> None:
+        """Downstream code reads the 'Z' suffix with datetime.fromisoformat — ensure that yields UTC."""
         ts = utils.get_timestamp()
-        parsed = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+        parsed = datetime.fromisoformat(ts)
         assert parsed.tzinfo == UTC
 
     def test_returns_current_utc_time_within_a_few_seconds(self) -> None:
         ts = utils.get_timestamp()
-        parsed = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+        parsed = datetime.fromisoformat(ts)
         # Allow 5 seconds of drift for slow CI
         now = datetime.now(UTC)
         delta = abs((now - parsed).total_seconds())
@@ -113,7 +113,7 @@ class TestUtcNow:
         import pytest
 
         aware = utils.utc_now()
-        naive = datetime.now()  # naive local time
+        naive = aware.replace(tzinfo=None)
         with pytest.raises(TypeError):
             _ = aware - naive
 
@@ -149,7 +149,7 @@ class TestFormatTimestamp:
         pytest.param(datetime(2026, 4, 18, 12, 34, 56, 789012, tzinfo=UTC), '2026-04-18T12:34:56.789012Z', id='aware-utc'),
         pytest.param(datetime(2026, 4, 18, 0, 0, tzinfo=UTC), '2026-04-18T00:00:00.000000Z', id='always-microseconds'),
         pytest.param(datetime(2026, 4, 18, 1, 30, tzinfo=timezone(timedelta(hours=2))), '2026-04-17T23:30:00.000000Z', id='offset-to-utc'),
-        pytest.param(datetime(2026, 4, 18, 1, 30), '2026-04-18T01:30:00.000000Z', id='naive-read-as-utc'),
+        pytest.param(datetime(2026, 4, 18, 1, 30, tzinfo=UTC).replace(tzinfo=None), '2026-04-18T01:30:00.000000Z', id='naive-read-as-utc'),
     ])
     def test_formats_the_utc_wire_timestamp(self, moment, expected) -> None:
         assert utils.format_timestamp(moment) == expected

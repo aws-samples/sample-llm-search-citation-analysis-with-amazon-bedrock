@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from types import ModuleType
 from unittest.mock import MagicMock, patch
@@ -55,7 +55,7 @@ _VALID_RECOMMENDATION = recommendation_item('Publish fare pages OpenAI can cite.
 
 
 @contextmanager
-def _worker(module: ModuleType, reply: str | Exception, rows: list[dict] | None = None) -> Iterator[MagicMock]:
+def _worker(module: ModuleType, reply: str | Exception, rows: list[dict] | None = None) -> Generator[MagicMock, None, None]:
     """The worker over `_KEYWORDS` and `rows`, the model answering `reply`; yields the ReportInsights table."""
     search = MagicMock()
     search.query.return_value = {'Items': _ROWS if rows is None else rows}

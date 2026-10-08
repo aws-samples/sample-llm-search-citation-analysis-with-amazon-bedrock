@@ -103,7 +103,7 @@ def read_enabled_query_prompts() -> list[dict[str, Any]]:
         ) from e
 
     prompts = [query_prompt_from_item(item) for item in response.get('Items', [])]
-    logger.info(f"Read {len(prompts)} enabled query prompts from DynamoDB")
+    logger.info('Read %s enabled query prompts from DynamoDB', len(prompts))
     return prompts
 
 
@@ -133,7 +133,7 @@ def read_keywords_for_scope(scope: dict[str, Any]) -> list[str]:
         raise RuntimeError(f"Failed to read keywords from DynamoDB: {e!s}") from e
 
     keywords = [item['keyword'] for item in items]
-    logger.info(f"Resolved {len(keywords)} active keywords for {describe_scope(scope)}")
+    logger.info('Resolved %s active keywords for %s', len(keywords), describe_scope(scope))
     return keywords
 
 
@@ -169,7 +169,7 @@ def _keywords_for_scope_event(event: dict[str, Any]) -> list[str]:
         error = ValueError(f"Invalid scope: {scope_error}")
         log_error(error, "parse keywords handler", event)
         raise error
-    logger.info(f"Resolving keywords for scope {describe_scope(scope)}")
+    logger.info('Resolving keywords for scope %s', describe_scope(scope))
     return read_keywords_for_scope(scope)
 
 
@@ -241,7 +241,7 @@ def write_keywords_manifest(execution_name: str, keywords: list[str], timestamp:
     key = f"{RUNS_PREFIX}{execution_name}/keywords.json"
     body = json.dumps([{'keyword': keyword, 'timestamp': timestamp} for keyword in keywords])
     s3_client.put_object(Bucket=KEYWORDS_BUCKET, Key=key, Body=body, ContentType='application/json')
-    logger.info(f"Wrote {len(keywords)} keywords to s3://{KEYWORDS_BUCKET}/{key}")
+    logger.info('Wrote %s keywords to s3://%s/%s', len(keywords), KEYWORDS_BUCKET, key)
     return {'bucket': KEYWORDS_BUCKET, 'key': key}
 
 
@@ -279,7 +279,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         ]
     }
     """
-    logger.info(f"Received event: {json.dumps(event)}")
+    logger.info('Received event: %s', json.dumps(event))
     execution_input, execution_name = _unwrap_event(event, context)
 
     try:
@@ -297,7 +297,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "query_prompts": resolve_query_prompts(execution_input),
         }
 
-        logger.info(f"Successfully parsed {len(valid_keywords)} keywords")
+        logger.info('Successfully parsed %s keywords', len(valid_keywords))
     except Exception as e:
         log_error(e, "parse keywords handler", execution_input)
         raise

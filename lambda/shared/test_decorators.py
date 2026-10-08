@@ -73,12 +73,12 @@ class TestPositionalArgumentForwarding:
     @pytest.mark.parametrize(
         ('name', 'decorate'),
         [
-            ('api_handler', lambda fn: api_handler(fn)),
-            ('parse_json_body', lambda fn: parse_json_body(fn)),
-            ('validate', lambda fn: validate({})(fn)),
-            ('cors_preflight', lambda fn: cors_preflight(fn)),
-            ('paginate', lambda fn: paginate()(fn)),
-            ('require_group', lambda fn: require_group('Admin')(fn)),
+            ('api_handler', api_handler),
+            ('parse_json_body', parse_json_body),
+            ('validate', validate({})),
+            ('cors_preflight', cors_preflight),
+            ('paginate', paginate()),
+            ('require_group', require_group('Admin')),
         ],
     )
     def test_decorator_forwards_a_positional_argument(self, name, decorate) -> None:

@@ -62,7 +62,7 @@ def deduplicate_citations(results: list[dict[str, Any]]) -> dict[str, dict[str, 
         provider = result.get('provider', 'unknown')
         citations = result.get('citations', [])
 
-        logger.info(f"Processing {len(citations)} citations from {provider}")
+        logger.info('Processing %s citations from %s', len(citations), provider)
 
         for citation_url in citations:
             if not citation_url or not isinstance(citation_url, str):
@@ -76,10 +76,10 @@ def deduplicate_citations(results: list[dict[str, Any]]) -> dict[str, dict[str, 
             deduplicated[normalized]['citing_providers'].add(provider)
 
     # Calculate citation counts
-    for _, metadata in deduplicated.items():
+    for metadata in deduplicated.values():
         metadata['citation_count'] = len(metadata['citing_providers'])
 
-    logger.info(f"Deduplicated {len(deduplicated)} unique citations")
+    logger.info('Deduplicated %s unique citations', len(deduplicated))
 
     return deduplicated
 
@@ -157,7 +157,7 @@ def prioritize_citations(deduplicated: dict[str, dict[str, Any]]) -> list[dict[s
             'normalized_url': normalized_url,
             'original_urls': list(metadata['original_urls']),
             'citation_count': metadata['citation_count'],
-            'citing_providers': sorted(list(metadata['citing_providers']))
+            'citing_providers': sorted(metadata['citing_providers'])
         })
 
     # Sort by citation count (descending), then by URL for consistency
@@ -169,7 +169,7 @@ def prioritize_citations(deduplicated: dict[str, dict[str, Any]]) -> list[dict[s
         citation['priority'] = i + 1
         prioritized.append(citation)
 
-    logger.info(f"Prioritized top {len(prioritized)} citations")
+    logger.info('Prioritized top %s citations', len(prioritized))
 
     return prioritized
 
@@ -244,7 +244,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         ``results`` array cannot reach ``generate-summary`` on its own — see
         :func:`summarize_providers`.
     """
-    logger.info(f"Received event: {json.dumps(event, default=str)}")
+    logger.info('Received event: %s', json.dumps(event, default=str))
 
     # The search step used to hand back its sanitized keyword; the workflow now
     # merges nine per-provider outputs and passes the Map item's keyword, so
@@ -261,7 +261,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         raise error
 
     if not results:
-        logger.warning(f"No results provided for keyword: {keyword}")
+        logger.warning('No results provided for keyword: %s', keyword)
         return step_function_success({
             'keyword': keyword,
             'timestamp': timestamp,
@@ -280,7 +280,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         # Step 3: Store citations in DynamoDB
         store_citations(keyword, prioritized)
 
-        logger.info(f"Successfully processed {len(prioritized)} citations for keyword: {keyword}")
+        logger.info('Successfully processed %s citations for keyword: %s', len(prioritized), keyword)
 
         # Return prioritized citations for Crawler Lambda, plus the provider
         # rollup that would otherwise be dropped with the search output, and

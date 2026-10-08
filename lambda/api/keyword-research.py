@@ -734,8 +734,7 @@ def _retry_research(event: dict[str, Any], context: Any, job: dict[str, Any]) ->
             return validation_error('This research was already retried or changed. Refresh and try again.', event, 'status')
         raise
 
-    attributes = claim.get('Attributes') if isinstance(claim, dict) else None
-    claimed = attributes if isinstance(attributes, dict) else {
+    claimed = claim.get('Attributes') or {
         **job,
         'status': STATUS_PENDING,
         'attempt': next_attempt,
