@@ -31,6 +31,20 @@ process.
   config and works under Code Defender's global `core.hooksPath`). Branch/tag deletions skip it;
   `SKIP_VALIDATE=1 git push` is the documented emergency bypass.
 
+### Security
+
+- Dependency fixes that replace Dependabot PRs #169, #170 and #171:
+  - `@nx/eslint-plugin` ^23.3.0 (nx 23.3.0): local socket exposure and `nx migrate` path traversal.
+  - `undici` pinned to 7.30.0 under nx: two denial-of-service fixes.
+  - knip 6.40.0 and `smol-toml` 1.9.0 (root and web).
+  - `source-map-js` 1.2.2 (root and web).
+  - `postcss-selector-parser` 7.1.6 under Tailwind 3 (web). The built CSS is byte-identical, so Tailwind stays on 3
+    rather than taking #169's major upgrade to Tailwind 4.
+- Still reported: `brace-expansion` 5.0.9 bundled inside `aws-cdk-lib` (bundled dependencies cannot be overridden;
+  still 5.0.9 in the latest 2.272.0; only glob patterns from this repo reach it at synth time), and in `web/` the
+  `braces` advisory with no patched release, reached only through Tailwind 3's file watcher at build time (the fix
+  is the Tailwind 4 migration).
+
 ## [2.36.0] - 2026-10-08
 
 ### Added

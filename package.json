@@ -36,7 +36,7 @@
   "license": "MIT-0",
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "^4.7.1",
-    "@nx/eslint-plugin": "^22.6.3",
+    "@nx/eslint-plugin": "^23.3.0",
     "@stylistic/eslint-plugin": "^5.10.0",
     "@types/node": "^20.17.0",
     "@vitest/eslint-plugin": "^1.6.13",
@@ -49,7 +49,7 @@
     "eslint-plugin-unicorn": "^62.0.0",
     "eslint-plugin-unused-imports": "^4.4.1",
     "jscpd": "5.2.1",
-    "knip": "6.37.0",
+    "knip": "6.40.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.58.0",
@@ -68,6 +68,8 @@
     "minimatch": "^10.2.3",
     "axios": "^1.20.0",
     "follow-redirects": "^1.16.0",
-    "smol-toml@<=1.7.0": "1.7.1"
+    "smol-toml@<1.9.0": "1.9.0",
+    "source-map-js@<1.2.2": "1.2.2",
+    "undici@>=7.0.0 <7.30.0": "7.30.0"
   }
 }

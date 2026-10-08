@@ -44,7 +44,7 @@
     "@vitejs/plugin-react": "^6.0.3",
     "autoprefixer": "^10.4.27",
     "jsdom": "^27.4.0",
-    "knip": "6.37.0",
+    "knip": "6.40.0",
     "postcss": "^8.5.8",
     "tailwindcss": "^3.4.19",
     "typescript": "^5.7.0",
@@ -56,6 +56,9 @@
     "picomatch": "^4.0.4",
     "lodash": "^4.18.0",
     "uuid": "^11.1.1",
-    "qs@<=6.15.3": "6.16.0"
+    "qs@<=6.15.3": "6.16.0",
+    "smol-toml@<1.9.0": "1.9.0",
+    "source-map-js@<1.2.2": "1.2.2",
+    "postcss-selector-parser@<7.1.6": "7.1.6"
   }
 }
