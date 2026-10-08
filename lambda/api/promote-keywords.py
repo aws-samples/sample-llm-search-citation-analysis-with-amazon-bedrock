@@ -95,7 +95,7 @@ def _promote_keywords(event, context, body):
             existing_items = {}
             existing_keys = load_keyword_identities(keywords_table)
     except Exception as error:
-        logger.exception('Failed to read existing keywords for promotion: %s', error)
+        logger.exception('Failed to read existing keywords for promotion')
         return error_response(error, event)
 
     to_create, skipped = partition_keywords(keywords, existing_keys)

@@ -14,10 +14,12 @@ construction.
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Mapping
+from typing import Any, NamedTuple
 
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.dynamodb_conditions import applied_conditionally
+from shared.markets import GLOBAL_MARKET_ID, load_markets, markets_by_id
 from shared.utils import is_unicode_scalar_text, keyword_id, trim_keyword
 
 # Allowed enum values and item defaults. manage-keywords feeds them into its
@@ -73,13 +75,18 @@ def build_keyword_item(
     language: str = DEFAULT_KEYWORD_LANGUAGE,
     category: str = DEFAULT_KEYWORD_CATEGORY,
     notes: str = '',
+    market_id: str | None = None,
+    concept_id: str | None = None,
 ) -> dict[str, Any]:
     """Build the canonical Keywords-table item for validated keyword text.
 
     ``timestamp`` is explicit so batch writers (promote) can stamp every
     item of one request identically — a property their tests pin.
+    ``market_id`` (a configured market; ``None`` = the global market) and
+    ``concept_id`` (the id of the keyword this one localizes) are stored only
+    when set, so a global keyword's item is exactly what it was before markets.
     """
-    return {
+    item: dict[str, Any] = {
         'id': keyword_id(text),
         'keyword': text,
         'status': status,
@@ -91,6 +98,11 @@ def build_keyword_item(
         'priority': priority,
         'notes': notes,
     }
+    if market_id:
+        item['market_id'] = market_id
+    if concept_id:
+        item['concept_id'] = concept_id
+    return item
 
 
 def put_keyword_if_absent(table: Any, item: dict[str, Any]) -> bool:
@@ -104,3 +116,71 @@ def put_keyword_if_absent(table: Any, item: dict[str, Any]) -> bool:
         ConditionExpression='attribute_not_exists(#id)',
         ExpressionAttributeNames={'#id': 'id'},
     ))
+
+
+# ---------------------------------------------------------------------------
+# Market and concept references (2.37.0)
+# ---------------------------------------------------------------------------
+
+MAX_CONCEPT_ID_LENGTH = 64
+
+
+class KeywordReference(NamedTuple):
+    """An optional ``market_id`` / ``concept_id`` field of a create or update body.
+
+    ``given`` is ``False`` when the body omits the field (an update leaves the
+    attribute alone); ``value`` is ``None`` for ``''`` / ``null`` (no market,
+    no concept: the attribute is removed) and the trimmed id otherwise.
+    """
+
+    given: bool
+    value: str | None
+
+
+_ABSENT = KeywordReference(given=False, value=None)
+
+
+def keyword_reference(body: object, field: str) -> tuple[KeywordReference | None, str | None]:
+    """Read the optional reference ``field`` of ``body``: ``(reference, None)`` or ``(None, error)``."""
+    if not isinstance(body, Mapping) or field not in body:
+        return _ABSENT, None
+    raw = body[field]
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return KeywordReference(given=True, value=None), None
+    if not isinstance(raw, str):
+        return None, f'{field} must be a string'
+    return KeywordReference(given=True, value=raw.strip()), None
+
+
+def validate_keyword_market(market_id: str | None, brand_config_table: Any) -> tuple[str | None, str | None]:
+    """A keyword's ``market_id``: ``(id, None)``, ``(None, None)`` for the global market, or ``(None, error)``.
+
+    ``'global'`` names the global market explicitly; any other id must be a
+    configured market (the market list is only read when one is named).
+    """
+    if market_id is None or market_id == GLOBAL_MARKET_ID:
+        return None, None
+    if market_id not in markets_by_id(load_markets(brand_config_table)):
+        return None, f'Unknown market_id: {market_id}'
+    return market_id, None
+
+
+def resolve_concept_id(keywords_table: Any, concept_id: str | None, own_id: str) -> tuple[str | None, str | None]:
+    """The concept a keyword localizes: ``(id, None)``, ``(None, None)`` for none, or ``(None, error)``.
+
+    ``concept_id`` names an existing keyword. Translations of one question all
+    share the *source* keyword's id, so naming a translation resolves to the
+    concept it already localizes.
+    """
+    if concept_id is None:
+        return None, None
+    if len(concept_id) > MAX_CONCEPT_ID_LENGTH:
+        return None, f'concept_id must be at most {MAX_CONCEPT_ID_LENGTH} characters'
+    target = keywords_table.get_item(Key={'id': concept_id}).get('Item')
+    if not target:
+        return None, f'Unknown concept_id: {concept_id}'
+    root = target.get('concept_id')
+    resolved = root if isinstance(root, str) and root else concept_id
+    if resolved == own_id:
+        return None, 'A keyword cannot localize itself'
+    return resolved, None

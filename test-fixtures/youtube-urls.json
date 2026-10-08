@@ -1,0 +1,184 @@
+{
+  "cases": [
+    {
+      "description": "watch link",
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "watch link without www",
+      "url": "https://youtube.com/watch?v=dQw4w9WgXcQ",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "mobile watch link",
+      "url": "https://m.youtube.com/watch?v=dQw4w9WgXcQ",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "watch link with a start time and a share id",
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s&si=AbCdEfGh",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "watch link with the id after other parameters",
+      "url": "https://www.youtube.com/watch?list=PL1234567890&v=dQw4w9WgXcQ&index=3",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "watch link with a fragment",
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ#comments",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "watch link with a trailing slash",
+      "url": "https://www.youtube.com/watch/?v=dQw4w9WgXcQ",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "http watch link",
+      "url": "http://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "upper-case host",
+      "url": "https://WWW.YouTube.com/watch?v=dQw4w9WgXcQ",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "watch link whose first v is blank",
+      "url": "https://www.youtube.com/watch?v=&v=dQw4w9WgXcQ",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "watch link padded with spaces",
+      "url": "  https://www.youtube.com/watch?v=dQw4w9WgXcQ  ",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "share link",
+      "url": "https://youtu.be/dQw4w9WgXcQ",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "share link with a start time and a share id",
+      "url": "https://youtu.be/dQw4w9WgXcQ?t=42&si=AbCdEfGh",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "shorts link",
+      "url": "https://www.youtube.com/shorts/aBcD_eF-123",
+      "videoId": "aBcD_eF-123"
+    },
+    {
+      "description": "mobile shorts link with a trailing slash",
+      "url": "https://m.youtube.com/shorts/aBcD_eF-123/",
+      "videoId": "aBcD_eF-123"
+    },
+    {
+      "description": "embed player link",
+      "url": "https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "live link",
+      "url": "https://www.youtube.com/live/dQw4w9WgXcQ?feature=share",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "privacy-enhanced embed link",
+      "url": "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "privacy-enhanced embed link without www",
+      "url": "https://youtube-nocookie.com/embed/dQw4w9WgXcQ",
+      "videoId": "dQw4w9WgXcQ"
+    },
+    {
+      "description": "channel page",
+      "url": "https://www.youtube.com/@RickAstleyYT",
+      "videoId": null
+    },
+    {
+      "description": "playlist page",
+      "url": "https://www.youtube.com/playlist?list=PL1234567890",
+      "videoId": null
+    },
+    {
+      "description": "search results page",
+      "url": "https://www.youtube.com/results?search_query=paella",
+      "videoId": null
+    },
+    {
+      "description": "watch link without an id",
+      "url": "https://www.youtube.com/watch",
+      "videoId": null
+    },
+    {
+      "description": "watch link with a ten-character id",
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXc",
+      "videoId": null
+    },
+    {
+      "description": "watch link with a twelve-character id",
+      "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQQ",
+      "videoId": null
+    },
+    {
+      "description": "share link with a path after the id",
+      "url": "https://youtu.be/dQw4w9WgXcQ/extra",
+      "videoId": null
+    },
+    {
+      "description": "watch path on the share host",
+      "url": "https://youtu.be/watch?v=dQw4w9WgXcQ",
+      "videoId": null
+    },
+    {
+      "description": "shorts path on the privacy-enhanced host",
+      "url": "https://www.youtube-nocookie.com/shorts/dQw4w9WgXcQ",
+      "videoId": null
+    },
+    {
+      "description": "look-alike host",
+      "url": "https://www.youtube.com.evil.example/watch?v=dQw4w9WgXcQ",
+      "videoId": null
+    },
+    {
+      "description": "host with a youtube subdomain prefix",
+      "url": "https://notyoutube.com/watch?v=dQw4w9WgXcQ",
+      "videoId": null
+    },
+    {
+      "description": "explicit port",
+      "url": "https://www.youtube.com:8443/watch?v=dQw4w9WgXcQ",
+      "videoId": null
+    },
+    {
+      "description": "credentials before the host",
+      "url": "https://user@www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "videoId": null
+    },
+    {
+      "description": "non-http scheme",
+      "url": "ftp://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "videoId": null
+    },
+    {
+      "description": "javascript URI",
+      "url": "javascript:alert('https://youtu.be/dQw4w9WgXcQ')",
+      "videoId": null
+    },
+    {
+      "description": "ordinary page",
+      "url": "https://example.com/watch?v=dQw4w9WgXcQ",
+      "videoId": null
+    },
+    {
+      "description": "empty string",
+      "url": "",
+      "videoId": null
+    }
+  ]
+}

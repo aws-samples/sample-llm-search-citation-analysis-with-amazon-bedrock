@@ -13,6 +13,7 @@ import {
 import {
   GROUP_CORUNA, GROUP_MARINO, buildSchedule, legacyKeywordSchedule 
 } from './ScheduleManager-fixtures';
+import { CHILE } from '../Markets/markets-fixtures';
 
 describe('formDataFromSchedule', () => {
   it('copies the stored form, scope and state into the editor', () => {
@@ -202,6 +203,13 @@ describe('describeScheduleScope', () => {
 
   it('asks for an edit when neither scope nor keywords are known', () => {
     expect(describeScheduleScope(null, groups)).toBe('Scope unknown - edit to choose keywords');
+  });
+
+  it('names the markets a scope is narrowed to', () => {
+    expect(describeScheduleScope({
+      mode: 'all',
+      market_ids: ['cl-es', 'global'],
+    }, groups, [], [CHILE])).toBe('All active keywords · Markets: Chile (Spanish), No market');
   });
 });
 

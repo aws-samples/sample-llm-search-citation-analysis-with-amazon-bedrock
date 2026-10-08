@@ -10,6 +10,7 @@ import pytest
 from shared.kpi_alerts import (
     DEFAULT_ALERT_SETTINGS,
     KPI_VERSION,
+    build_alert_item,
     compare_snapshots,
     deterministic_alert_id,
     deterministic_content_change_id,
@@ -445,6 +446,27 @@ class TestDurableIdentityAndRetention:
         second = deterministic_alert_id('exec-2', 'group-1', 'position_loss', 'hotel spa')
 
         assert first != second
+
+    @pytest.mark.parametrize('market_id', [None, 'global'])
+    def test_keeps_the_pre_markets_alert_id_for_the_global_market(self, market_id) -> None:
+        alert_id = deterministic_alert_id('exec-1', 'group-1', 'position_loss', 'Hotel Spa', market_id=market_id)
+
+        assert alert_id == 'alert-4d1525a29a5b351baf92933801f2400d'
+
+    def test_changes_alert_id_for_another_market(self) -> None:
+        chile = deterministic_alert_id('exec-1', 'group-1', 'position_loss', 'hotel spa', market_id='cl-es')
+        brazil = deterministic_alert_id('exec-1', 'group-1', 'position_loss', 'hotel spa', market_id='br-pt')
+
+        assert len({chile, brazil, deterministic_alert_id('exec-1', 'group-1', 'position_loss', 'hotel spa')}) == 3
+
+    @pytest.mark.parametrize(('market', 'expected'), [({'market_id': 'cl-es'}, 'cl-es'), ({}, 'global')], ids=['market', 'default'])
+    def test_alert_item_carries_its_market_next_to_the_plain_group_id(self, market, expected) -> None:
+        item = build_alert_item(
+            {'type': 'position_loss', 'entity': 'group-1'}, execution_id='exec-1', group_id='group-1',
+            group_name='Group', created_at='2026-10-01T10:00:00Z', run_timestamp='2026-10-01T10:00:00Z', **market,
+        )
+
+        assert (item['group_id'], item['market_id']) == ('group-1', expected)
 
     def test_builds_stable_content_change_id_for_group_timestamp(self) -> None:
         first = deterministic_content_change_id('group-1', '2026-10-01T10:00:00Z')

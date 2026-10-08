@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
-from shared.kpi_alerts import DEFAULT_ALERT_SETTINGS
+from shared.kpi_alerts import DEFAULT_ALERT_SETTINGS, deterministic_alert_id
 from shared.kpi_engine import Answer, answers_from_rows
 from testing.dynamodb_stubs import conditional_check_failure, fake_dynamodb_resource
 from testing.handler_fixtures import handler_fixture
@@ -98,6 +98,16 @@ def _single_group_tables() -> tuple[MagicMock, MagicMock, MagicMock]:
 
 _ALERTS_DISABLED = {**DEFAULT_ALERT_SETTINGS, 'enabled': False}
 _EMAIL_SETTINGS = {**DEFAULT_ALERT_SETTINGS, 'notification_emails': ['ops@example.com']}
+#: A rule result for a group; each test names its ``entity``.
+_MENTION_RATE_DROP = {
+    'type': 'mention_rate_drop',
+    'severity': 'warning',
+    'previous': 64.0,
+    'current': 52.0,
+    'delta': 12.0,
+    'threshold': 10.0,
+    'message': 'Mention rate fell by 12.0 points.',
+}
 _SHARED_KEYWORD_IN_TWO_GROUPS = [{
     'id': 'keyword-1',
     'keyword': 'shared keyword',
@@ -224,7 +234,7 @@ class TestRunEligibility:
 
     def test_counts_touched_group_as_partial_when_active_member_was_not_processed(self, worker_module) -> None:
         members = {
-            'group-1': [
+            worker_module.GroupMarket('group-1', 'global'): [
                 {'keyword': 'processed'},
                 {'keyword': 'not processed'},
             ],
@@ -234,6 +244,7 @@ class TestRunEligibility:
             {'group-1'},
             ['processed'],
             members,
+            None,
         )
 
         assert complete == []
@@ -327,16 +338,7 @@ class TestCompleteSnapshotEvaluation:
 
     def test_persists_exact_alert_shape_with_compared_run_timestamp(self, worker_module) -> None:
         _snapshots, alerts, resource = _single_group_tables()
-        specification = {
-            'type': 'mention_rate_drop',
-            'severity': 'warning',
-            'previous': 64.0,
-            'current': 52.0,
-            'delta': 12.0,
-            'threshold': 10.0,
-            'entity': 'group-1',
-            'message': 'Mention rate fell by 12.0 points.',
-        }
+        specification = {**_MENTION_RATE_DROP, 'entity': 'group-1'}
 
         with (
             patch.object(worker_module, '_content_change', return_value=None),
@@ -354,6 +356,7 @@ class TestCompleteSnapshotEvaluation:
                 'id': 'alert-80dedc654d7f56f1015ec86c395380bd',
                 'group_id': 'group-1',
                 'group_name': 'Group One',
+                'market_id': 'global',
                 'execution_id': 'exec-1',
                 'created_at': _RUN_TIMESTAMP,
                 'run_timestamp': _RUN_TIMESTAMP,
@@ -546,3 +549,128 @@ class TestFullReportFromS3:
 
         assert result['reason'] == 'report_not_comparable'
         s3.get_object.assert_not_called()
+
+
+# --- Markets (2.37.0): snapshots and alerts per (group, market) ---------------------
+
+# One group with a global keyword, a Chilean one and a Brazilian one.
+_MARKET_KEYWORDS = [
+    {'id': 'k1', 'keyword': 'cheap flights', 'group_ids': {'altiplano'}},
+    {'id': 'k2', 'keyword': 'vuelos baratos', 'group_ids': {'altiplano'}, 'market_id': 'cl-es'},
+    {'id': 'k3', 'keyword': 'passagens baratas', 'group_ids': {'altiplano'}, 'market_id': 'br-pt'},
+]
+_ALL_MARKETS_PROCESSED = ['cheap flights', 'vuelos baratos', 'passagens baratas']
+_ALERTS_ENABLED = {**DEFAULT_ALERT_SETTINGS, 'enabled': True}
+
+
+def _market_event(processed: list[str], scope: dict | None = None) -> dict:
+    event = _event()
+    event['execution_input'] = {'scope': scope or {'mode': 'all'}}
+    event['report']['run_metadata']['processed_keywords'] = [{'keyword': keyword, 'timestamp': _RUN_TIMESTAMP} for keyword in processed]
+    return event
+
+
+class MarketRun:
+    """One worker invocation over ``_MARKET_KEYWORDS``, recording snapshots, alerts and the lookups by key."""
+
+    def __init__(self, module, event: dict, *, settings: dict = _ALERTS_DISABLED, specifications: list | None = None) -> None:
+        self.snapshots, self.alerts, resource = _single_group_tables()
+        self.previous = MagicMock(return_value={'snapshot_at': '2026-09-01T10:00:00Z'})
+        self.content_change = MagicMock(return_value=None)
+        answers = {keyword: _answers() for keyword in _ALL_MARKETS_PROCESSED}
+        with patch.multiple(
+            module,
+            query_active_keywords=MagicMock(return_value=_MARKET_KEYWORDS),
+            _load_groups=MagicMock(return_value=[{'id': 'altiplano', 'name': 'Altiplano'}]),
+            _settings=MagicMock(return_value=settings),
+            get_brand_config=MagicMock(return_value={}),
+            _load_run_answers=MagicMock(return_value=answers),
+            _previous_snapshot=self.previous,
+            _content_change=self.content_change,
+            _notify=MagicMock(return_value={'status': 'not_sent'}),
+            compare_snapshots=MagicMock(return_value=specifications or []),
+            dynamodb=resource,
+        ):
+            self.result = module.handler(event, None)
+
+    def snapshot_field(self, name: str) -> list:
+        return [call.kwargs['Item'][name] for call in self.snapshots.put_item.call_args_list]
+
+    def alert_items(self) -> list[dict]:
+        return [call.kwargs['Item'] for call in self.alerts.put_item.call_args_list]
+
+
+class TestSnapshotPerMarket:
+    def test_keys_the_global_snapshot_by_the_plain_group_id_and_others_by_group_and_market(self, worker_module) -> None:
+        run = MarketRun(worker_module, _market_event(_ALL_MARKETS_PROCESSED))
+
+        assert run.snapshot_field('group_id') == ['altiplano#br-pt', 'altiplano#cl-es', 'altiplano']
+        assert run.snapshot_field('market_id') == ['br-pt', 'cl-es', 'global']
+
+    def test_measures_each_market_from_its_own_keywords(self, worker_module) -> None:
+        run = MarketRun(worker_module, _market_event(_ALL_MARKETS_PROCESSED))
+
+        assert [[row['keyword'] for row in keywords] for keywords in run.snapshot_field('keywords')] == [
+            ['passagens baratas'], ['vuelos baratos'], ['cheap flights'],
+        ]
+
+    def test_compares_each_market_with_its_own_previous_snapshot(self, worker_module) -> None:
+        run = MarketRun(worker_module, _market_event(_ALL_MARKETS_PROCESSED))
+
+        assert [call.args[0] for call in run.previous.call_args_list] == ['altiplano#br-pt', 'altiplano#cl-es', 'altiplano']
+
+    def test_names_every_snapshotted_pair_and_each_group_once_for_the_insights_step(self, worker_module) -> None:
+        result = MarketRun(worker_module, _market_event(_ALL_MARKETS_PROCESSED)).result
+
+        assert (result['snapshot_group_ids'], result['snapshots_recorded']) == (['altiplano'], 3)
+        assert result['snapshot_scopes'] == [
+            {'group_id': 'altiplano', 'market_id': market_id} for market_id in ('br-pt', 'cl-es', 'global')
+        ]
+
+    @pytest.mark.parametrize(('scope', 'skipped'), [
+        pytest.param(None, 2, id='every-market'),
+        pytest.param({'mode': 'groups', 'group_ids': ['altiplano'], 'market_ids': ['cl-es']}, 0, id='scope-market'),
+        pytest.param({'mode': 'all', 'market_ids': ['cl-es', 'global']}, 1, id='scope-market-not-run'),
+    ])
+    def test_snapshots_the_covered_market_and_counts_only_scoped_markets_as_partial(self, worker_module, scope, skipped) -> None:
+        run = MarketRun(worker_module, _market_event(['vuelos baratos'], scope))
+
+        assert (run.snapshot_field('group_id'), run.result['skipped_partial']) == (['altiplano#cl-es'], skipped)
+
+    @pytest.mark.parametrize(('execution_input', 'market_ids'), [
+        pytest.param({'scope': {'market_ids': ['cl-es']}, 'requested_scope': {'market_ids': ['global']}}, {'cl-es', 'global'}, id='both'),
+        pytest.param({'scope': {'market_ids': ['cl-es']}, 'requested_scope': {'mode': 'all'}}, None, id='one-unfiltered'),
+        pytest.param({'source': 'dynamodb'}, None, id='no-scope'),
+    ])
+    def test_reads_the_scope_markets_from_every_scope_field(self, worker_module, execution_input, market_ids) -> None:
+        assert worker_module._scope_market_ids(execution_input) == market_ids
+
+
+class TestAlertsPerMarket:
+    def test_stores_the_plain_group_id_and_the_market_with_a_market_aware_id(self, worker_module) -> None:
+        run = MarketRun(worker_module, _market_event(['vuelos baratos']), settings=_ALERTS_ENABLED,
+                        specifications=[{**_MENTION_RATE_DROP, 'entity': 'altiplano'}])
+
+        alert = run.alert_items()[0]
+        assert (alert['group_id'], alert['market_id']) == ('altiplano', 'cl-es')
+        assert alert['id'] == deterministic_alert_id('exec-1', 'altiplano', 'mention_rate_drop', 'altiplano', market_id='cl-es')
+
+    def test_raises_distinct_alerts_for_each_market_of_one_group(self, worker_module) -> None:
+        run = MarketRun(worker_module, _market_event(_ALL_MARKETS_PROCESSED), settings=_ALERTS_ENABLED,
+                        specifications=[{**_MENTION_RATE_DROP, 'entity': 'altiplano'}])
+
+        assert len({alert['id'] for alert in run.alert_items()}) == 3
+
+    def test_reads_content_changes_by_the_plain_group_id(self, worker_module) -> None:
+        run = MarketRun(worker_module, _market_event(['vuelos baratos']), settings=_ALERTS_ENABLED)
+
+        assert run.content_change.call_args.args[0] == 'altiplano'
+
+    @pytest.mark.parametrize(('market_id', 'line'), [
+        ('cl-es', '- [WARNING] [cl-es] Mention rate fell.'),
+        ('global', '- [WARNING] Mention rate fell.'),
+    ])
+    def test_names_the_market_of_a_non_global_alert_in_the_email(self, worker_module, market_id, line) -> None:
+        message = worker_module._message([{'severity': 'warning', 'message': 'Mention rate fell.', 'market_id': market_id}], 'exec-1')
+
+        assert message.splitlines()[1] == line

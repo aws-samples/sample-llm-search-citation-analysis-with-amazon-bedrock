@@ -4,6 +4,7 @@ import { reportScopeParams } from '../components/ui/reportScope';
 import {
   apiRequestErrors, isAnalysisPayload, useAnalysisEndpoint 
 } from './useAnalysisEndpoint';
+import { useMarketScopedFetch } from './useMarketScopedFetch';
 
 function isReportsOverviewResponse(data: unknown): data is ReportsOverviewResponse {
   return isAnalysisPayload(data)
@@ -22,13 +23,14 @@ const reportsOverviewEndpoint = {
   isValidResponse: isReportsOverviewResponse,
   ...apiRequestErrors('Failed to fetch reports overview'),
   buildRequest: (
+    marketId: string | null,
     days = 30,
     period: 'day' | 'week' | 'month' = 'day',
     top = 3,
     scope: ReportScope = { kind: 'all' },
   ) => {
     const params = new URLSearchParams({
-      ...reportScopeParams(scope),
+      ...reportScopeParams(scope, marketId),
       days: days.toString(),
       period,
       top: top.toString(),
@@ -54,8 +56,9 @@ const reportsOverviewEndpoint = {
  */
 export function useReportsOverview() {
   const {
-    data, loading, error, fetchData: fetchReportsOverview,
+    data, loading, error, fetchData,
   } = useAnalysisEndpoint(reportsOverviewEndpoint);
+  const fetchReportsOverview = useMarketScopedFetch(fetchData);
 
   return {
     data,

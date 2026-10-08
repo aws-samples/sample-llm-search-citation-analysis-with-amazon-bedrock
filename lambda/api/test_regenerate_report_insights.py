@@ -72,6 +72,33 @@ class TestAccepted:
         }
 
 
+class TestMarket:
+    def test_starts_the_worker_for_the_groups_keywords_in_the_market(
+        self, regenerate_module, lambda_client, active_keywords,
+    ) -> None:
+        active_keywords[:] = [{**keyword, 'market_id': 'cl-es'} for keyword in active_keywords]
+
+        invoke(regenerate_module, _request({'group_id': 'group-coruna', 'market_id': 'cl-es'}))
+
+        assert lambda_client.invoke.call_args.kwargs['Payload'] == json.dumps(
+            {'group_id': 'group-coruna', 'market_id': 'cl-es'}
+        ).encode()
+
+    def test_answers_400_when_the_group_has_no_active_keyword_in_the_market(
+        self, regenerate_module, lambda_client,
+    ) -> None:
+        status, payload = invoke(regenerate_module, _request({'group_id': 'group-coruna', 'market_id': 'cl-es'}))
+
+        assert (status, payload['field']) == (400, 'group_id')
+        lambda_client.invoke.assert_not_called()
+
+    def test_answers_400_for_a_malformed_market_id(self, regenerate_module, lambda_client) -> None:
+        status, payload = invoke(regenerate_module, _request({'group_id': 'group-coruna', 'market_id': 'Not A Market'}))
+
+        assert (status, payload['field']) == (400, 'market_id')
+        lambda_client.invoke.assert_not_called()
+
+
 class TestRejected:
     @pytest.mark.parametrize('body', [{}, {'group_id': ''}, {'group_id': 'x' * 65}], ids=['missing', 'empty', 'too long'])
     def test_answers_400_without_a_valid_group(self, regenerate_module, lambda_client, body: dict) -> None:

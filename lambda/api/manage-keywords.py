@@ -2,6 +2,12 @@
 Manage Keywords API Lambda
 
 Handles POST, PUT, DELETE operations for keywords.
+
+Create and update take two optional references: ``market_id`` (a configured
+market; ``''``/``null``/``'global'`` = the global market, an unknown id is a
+400) and ``concept_id`` (the id of the keyword this one localizes; every
+translation of one question shares the source keyword's id). On update an
+omitted reference is left alone and ``''``/``null`` removes it.
 """
 
 import sys
@@ -25,12 +31,16 @@ from shared.keyword_groups import (
 from shared.keyword_store import (
     ALLOWED_KEYWORD_PRIORITIES,
     ALLOWED_KEYWORD_STATUSES,
+    KeywordReference,
     build_keyword_item,
+    keyword_reference,
     put_keyword_if_absent,
+    resolve_concept_id,
+    validate_keyword_market,
     validate_keyword_text,
 )
 from shared.requested_group_ids import validate_requested_group_ids
-from shared.utils import get_timestamp, load_keyword_identities, normalize_keyword
+from shared.utils import get_timestamp, keyword_id, load_keyword_identities, normalize_keyword
 
 dynamodb = boto3.resource('dynamodb')
 
@@ -40,6 +50,9 @@ keywords_table = dynamodb.Table(KEYWORDS_TABLE)
 # Optional until every deployment carries the groups table.
 GROUPS_TABLE = resolve_table_env(KEYWORD_GROUPS_TABLE_ENV, required=False)
 groups_table = dynamodb.Table(GROUPS_TABLE) if GROUPS_TABLE else None
+# The market list (BrandConfig item `markets`), read only when a request names a market.
+BRAND_CONFIG_TABLE = resolve_table_env('DYNAMODB_TABLE_BRAND_CONFIG', required=False, default='CitationAnalysis-BrandConfig')
+brand_config_table = dynamodb.Table(BRAND_CONFIG_TABLE)
 
 # The optional metadata fields an update may carry, each with the attribute it
 # is written to -- a ``#`` name placeholder for ``region`` and ``language``,
@@ -77,8 +90,44 @@ def _duplicate_response(event):
     return api_response(409, {'error': 'Keyword already exists'}, event)
 
 
+def _resolved_reference(body, field, resolve):
+    """The ``field`` reference of ``body`` with its value resolved by ``resolve``; ``(reference, error)``."""
+    reference, error = keyword_reference(body, field)
+    if reference is None:
+        return None, error
+    if not reference.given:
+        return reference, None
+    value, error = resolve(reference.value)
+    if error:
+        return None, error
+    return KeywordReference(given=True, value=value), None
+
+
+def _validated_references(body, event, own_id):
+    """The ``market_id`` and ``concept_id`` of a create/update body, checked against the tables.
+
+    Returns ``({'market_id': ref, 'concept_id': ref}, None)`` or ``(None, error_response)``.
+    """
+    resolvers = {
+        'market_id': lambda value: validate_keyword_market(value, brand_config_table),
+        'concept_id': lambda value: resolve_concept_id(keywords_table, value, own_id),
+    }
+    references = {}
+    for field, resolve in resolvers.items():
+        reference, message = _resolved_reference(body, field, resolve)
+        if reference is None:
+            return None, validation_error(str(message), event, field)
+        references[field] = reference
+    return references, None
+
+
 def _update_request(
-    text: str, status: str | None, stored_keyword: str, metadata: dict[str, Any], group_ids: list[str] | None
+    text: str,
+    status: str | None,
+    stored_keyword: str,
+    metadata: dict[str, Any],
+    group_ids: list[str] | None,
+    references: dict[str, KeywordReference],
 ) -> tuple[str, dict[str, str], dict[str, Any]]:
     """The ``UpdateExpression`` and its attribute names and values for one keyword update.
 
@@ -86,7 +135,8 @@ def _update_request(
     ``_OPTIONAL_UPDATE_FIELDS``; ``None`` leaves that attribute untouched.
     ``group_ids`` is a string set, and DynamoDB cannot store an empty set, so
     an empty list clears the attribute instead; ``None`` leaves memberships
-    alone.
+    alone. ``references`` (``market_id``, ``concept_id``) are set, removed
+    (given as ``''``/``null``) or left alone (omitted).
     """
     update_expr = 'SET #kw = :k, updated_at = :u'
     expr_names = {'#id': 'id', '#kw': 'keyword'}
@@ -95,6 +145,7 @@ def _update_request(
         ':k': text,
         ':u': get_timestamp(),
     }
+    removed: list[str] = []
 
     # Omitted means "leave the status alone", like every other optional field
     # below. `status` used to default to 'active' and be written on every
@@ -116,12 +167,21 @@ def _update_request(
             expr_names[attribute] = field
         expr_values[placeholder] = value
 
+    for field, reference in references.items():
+        if reference.value is not None:
+            update_expr += f', {field} = :{field}'
+            expr_values[f':{field}'] = reference.value
+        elif reference.given:
+            removed.append(field)
+
     if group_ids:
         update_expr += ', group_ids = :g'
         expr_values[':g'] = set(group_ids)
     elif group_ids is not None:
-        update_expr += ' REMOVE group_ids'
+        removed.append('group_ids')
 
+    if removed:
+        update_expr += f" REMOVE {', '.join(removed)}"
     return update_expr, expr_names, expr_values
 
 
@@ -143,6 +203,9 @@ def create_keyword(event, context, body, keyword, region, language, category, pr
     identity = normalize_keyword(text)
     if identity in load_keyword_identities(keywords_table):
         return _duplicate_response(event)
+    references, error = _validated_references(body, event, keyword_id(text))
+    if references is None:
+        return error
 
     item = build_keyword_item(
         text,
@@ -152,6 +215,8 @@ def create_keyword(event, context, body, keyword, region, language, category, pr
         category=category,
         priority=priority,
         notes=notes,
+        market_id=references['market_id'].value,
+        concept_id=references['concept_id'].value,
     )
     if group_ids:
         item['group_ids'] = set(group_ids)
@@ -195,6 +260,9 @@ def update_keyword(event, context, body, keyword, status, region, language, cate
             {'error': 'Keyword identity cannot be changed; delete it and create a new keyword instead'},
             event,
         )
+    references, error = _validated_references(body, event, id)
+    if references is None:
+        return error
 
     update_expr, expr_names, expr_values = _update_request(
         text,
@@ -202,6 +270,7 @@ def update_keyword(event, context, body, keyword, status, region, language, cate
         stored_keyword,
         {'region': region, 'language': language, 'category': category, 'priority': priority, 'notes': notes},
         group_ids,
+        references,
     )
     try:
         response = keywords_table.update_item(

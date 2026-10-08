@@ -25,6 +25,10 @@ function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
 }
 
+function isOptionalString(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === 'string';
+}
+
 export function isKeyword(value: unknown): value is Keyword {
   return (
     isRecord(value)
@@ -33,6 +37,8 @@ export function isKeyword(value: unknown): value is Keyword {
     && typeof value.created_at === 'string'
     && isKeywordStatus(value.status)
     && (value.group_ids === undefined || isStringArray(value.group_ids))
+    && isOptionalString(value.market_id)
+    && isOptionalString(value.concept_id)
   );
 }
 

@@ -10,13 +10,13 @@ The dashboard sidebar has these sections:
 
 | Section | Pages |
 |---|---|
-| Insights | **Dashboard** (totals, citations by provider, brand mentions, KPI alerts), **Visibility** (the KPIs for one keyword, a keyword group or all keywords, with 7/30/90-day KPI history, brand leaderboard, per-engine KPIs, cited domains and the scope's three most pressing insights; persona filter), **Brand Mentions** (every brand named, with sentiment, rank and a per-brand ranking analysis), **Citations** (cited URLs by frequency, with a per-keyword and per-provider breakdown), **Prompt Insights** (which queries and personas rank you in the top 3), **Citation Gaps** (sources that cite competitors but not you), **Action Center** (prioritised recommendations with a status you can track); the last three take the same keyword, group or all-keywords scope as Visibility |
+| Insights | **Dashboard** (totals, citations by provider, brand mentions, KPI alerts), **Visibility** (the KPIs for one keyword, a keyword group or all keywords, with 7/30/90-day KPI history, brand leaderboard, per-engine KPIs, cited domains and the scope's three most pressing insights; persona filter), **Brand Mentions** (every brand named, with sentiment, rank and a per-brand ranking analysis), **Citations** (cited URLs by frequency, with a per-keyword and per-provider breakdown; YouTube videos are counted once per video whatever link was cited, tagged *Video* and filterable, and their title, channel and thumbnail come from YouTube oEmbed instead of a browser crawl), **Prompt Insights** (which queries and personas rank you in the top 3), **Citation Gaps** (sources that cite competitors but not you), **Action Center** (prioritised recommendations with a status you can track); the last three take the same keyword, group or all-keywords scope as Visibility |
 | Research | **Keyword Research**: Expand, Competitor (analyse a competitor website), Agent (a Bedrock research agent that plans web-search queries over up to three rounds, with saved prompt templates) and History |
 | Content | **Content Studio**: content ideas and briefs from citation gaps and ranking analyses, single or per keyword group, in any output language, exportable as DOCX |
 | Reporting | **Reports**: nine print-ready reports (below), plus custom reports you build from their sections |
 | Data | **Recent Searches** (analysis history with full answers), **Raw Responses** (raw JSON answers and crawl screenshots from S3) |
 | Operations | **Run Analysis**, **Schedule** (EventBridge Scheduler runs) |
-| Configuration | **Settings**: Keywords (with keyword groups), Brand Tracking, Personas, AI Providers, Alerts, Users (admins only) |
+| Configuration | **Settings**: Keywords (with keyword groups), Markets, Brand Tracking, Personas, AI Providers, Alerts, Users (admins only) |
 
 Most views export to Excel, the header's PDF button prints the current view (print mode, `?print=1`), and the UI has light, dark and system themes. A first-run guide walks through setup, and a banner flags a provider that is failing.
 
@@ -82,14 +82,14 @@ All tables are DynamoDB on-demand with AWS-managed encryption, point-in-time rec
 
 | Table (`CitationAnalysis-…`) | Key | Holds |
 |---|---|---|
-| SearchResults | keyword / timestamp_provider | Every provider answer, with extracted brands |
-| Citations | keyword / normalized_url | Deduplicated citations |
+| SearchResults | keyword / timestamp_provider | Every provider answer, with extracted brands and its `market_id` |
+| Citations | keyword / normalized_url | Every deduplicated citation, with `content_type` (`video` or `page`) |
 | CrawledContent | normalized_url / crawled_at | Crawled page content, summaries and SEO data |
-| Keywords | id | Keywords; `group_ids` holds group membership |
+| Keywords | id | Keywords; `group_ids` holds group membership, `market_id` the market, `concept_id` the keyword a translation localizes |
 | KeywordGroups | id | Keyword groups |
 | KeywordResearch | id | Research jobs and their steps (TTL) |
 | ResearchTemplates | id | Saved research agent prompts |
-| BrandConfig | config_id | Industry, first-party and competitor brands, owned domains |
+| BrandConfig | config_id | Industry, first-party and competitor brands, owned domains (`default`); the market list (`markets`) |
 | ProviderConfig | provider_id | Provider enablement, model override, health |
 | QueryPrompts | id | Personas |
 | ContentStudio, ContentBriefBatches, ContentBriefTemplates | id / batch_id / id | Generated content, batch manifests, saved prompt templates |
@@ -224,18 +224,20 @@ aws cloudformation describe-stacks --stack-name CitationAnalysisStack \
 
    | Provider | Default model | Web search |
    |---|---|---|
-   | OpenAI | `gpt-5-mini` | Responses API `web_search_preview` tool |
-   | Perplexity | `sonar` (or `sonar-pro`, `sonar-reasoning-pro`) | Built in |
-   | Google Gemini | `gemini-3-flash-preview` | Google Search grounding |
-   | Anthropic Claude | `claude-sonnet-4-5` | `web_search` tool, 1,024 output tokens |
+   | OpenAI | `gpt-5-mini` | Responses API `web_search` tool, `tool_choice: required` (every answer searches) |
+   | Perplexity | `perplexity/sonar` | Agent API (`POST /v1/agent`) with the `web_search` tool; the Sonar Chat Completions API it replaced was retired on 2026-09-27 |
+   | Google Gemini | `gemini-3.6-flash` | Google Search grounding (`generateContent`) |
+   | Anthropic Claude | `claude-sonnet-5-5` | `web_search_20260318` tool with dynamic filtering, no cap on searches, 4,096 output tokens |
 
-   **Change model** on each card picks another model: OpenAI, Gemini and Claude list the models your key can use, Perplexity offers its Sonar models, and you can type any id. Before a model is saved it must answer a real web-search request with your key, so a model that cannot search is refused instead of failing the next run.
+   **Change model** on each card picks another model: OpenAI, Gemini and Claude list the models your key can use, Perplexity lists the Agent API models (`perplexity/sonar`, `openai/gpt-6-luna`, ...), and you can type any id. A Perplexity model saved before 2.37.0 (`sonar`, `sonar-pro`, `sonar-reasoning-pro`) is read as `perplexity/sonar`. Before a model is saved it must answer a real web-search request with your key, so a model that cannot search is refused instead of failing the next run.
 
    The same page lists optional web-search providers (Brave, Tavily, Exa, SerpAPI, Firecrawl). They add cited links to a run but write no answer, so they do not count towards the KPIs. A SerpAPI key also enables the research agent's Google signals step.
 
 3. **Settings > Brand Tracking.** Pick an industry preset or Custom, add your **First Party Brands** and competitors (**Expand Brand** and **Find Competitors** suggest more with Bedrock), and add your **Owned Domains**. Each competitor can list its own domains too (**Find Competitors** suggests them, unticked until you confirm), so the insights tell competitor citations from third-party ones. Without first-party brands nothing counts as your mention; without owned domains the citation KPIs stay empty.
 
 4. **Settings > Keywords.** Add the queries your customers ask (for example "best hotels in Barcelona"). Keyword groups work like folders, one per property or product line; a keyword can be in several groups. Tick keywords and use **Add to group**, or filter the list by group. Deleting a group keeps its keywords.
+
+   **Settings > Markets** (optional). A market is one country plus one language (for example Chile / Spanish `es-CL`, Brazil / Portuguese `pt-BR`), with an optional city, region, coordinates, currency and the local competitors and brand names to track there. Give a keyword a market and every run asks it as a user in that market would: each AI engine gets a short instruction (location, answer language, currency) in its system channel plus its native location hint (OpenAI and Claude `user_location`, Perplexity `user_location` with coordinates), and the search providers get their country and language parameters. No engine has an answer-language parameter, so the instruction is what localizes the answer; the location hints steer the search. Write keywords in the market's language: search providers localize their results mostly through the query language. **Add to markets…** on a keyword asks Bedrock how a local user in each chosen market would type it and creates linked translations. A keyword without a market is asked exactly as before. The header's market selector narrows every scoped view, report and the Citations tab to one market; KPI snapshots, alerts and written insights are kept per keyword group and market, so markets are never pooled into one number unless you pick *All markets (combined)*.
 
 5. **Settings > Personas** (optional). Each persona is a prompt template with a `{keyword}` placeholder, for example "As a parent travelling with 3 young kids, what are the best options for {keyword}?". A run sends every enabled persona × keyword × provider. Filter the Visibility and Brand Mentions pages by persona to compare.
 
@@ -336,6 +338,8 @@ For 100 keywords analysed weekly across four providers and three personas (about
 
 Perplexity also charges about $0.005 per request for search context (low-context mode).
 
+2.37.0 changed the defaults (Perplexity `perplexity/sonar` on the Agent API, Gemini `gemini-3.6-flash`, Claude `claude-sonnet-5-5` with uncapped searches and 4,096 output tokens). The rates and the worked example below were measured on the earlier defaults; check the linked pricing pages. On the Agent API Perplexity reports each answer's exact cost (`usage.cost.total_cost`, stored in the answer's metadata as `cost_usd`); a market-tuned test answer (Chile, Spanish) cost about $0.0055.
+
 Bedrock, on your AWS bill:
 
 | Model | Input | Output | Volume driver |
@@ -362,7 +366,7 @@ With the infrastructure above, this workload costs roughly $75–110 a month. An
 
 - Disable providers and personas you do not need: each multiplies the call count.
 - Run weekly rather than daily for about a seventh of the cost.
-- Pick a cheaper model for any engine in **Settings > AI Providers** (for example `sonar` over `sonar-pro`, or Claude Haiku over Sonnet).
+- Pick a cheaper model for any engine in **Settings > AI Providers** (for example Claude Haiku over Sonnet).
 - Lower the crawl concurrency (`CrawlCitations`, `maxConcurrency: 3` in `lib/citation-analysis-stack.ts`) to spread AgentCore usage.
 - `SearchResults`, `Citations` and `CrawledContent` have no TTL; add one if you do not need full history.
 - Track spend in [AWS Cost Explorer](https://aws.amazon.com/aws-cost-management/aws-cost-explorer/) by the `aws:cloudformation:stack-name = CitationAnalysisStack` cost allocation tag once it is activated.

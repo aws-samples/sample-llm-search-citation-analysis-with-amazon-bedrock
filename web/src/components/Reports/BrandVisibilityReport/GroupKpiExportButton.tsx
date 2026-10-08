@@ -7,6 +7,7 @@ import { fetchBrandMentionsAtRun } from '../../../api/brandMentions';
 import { getErrorMessage } from '../../../infrastructure';
 import { exportGroupKpiReport } from './groupKpiExport';
 import { useExportAction } from '../../ui/useExportAction';
+import { useSelectedMarketId } from '../../Markets/marketSelectionContext';
 
 interface Props {
   readonly scope: ReportScope;
@@ -35,12 +36,13 @@ export function GroupKpiExportButton({
   scope, scopeLabel, history, run
 }: Props) {
   const [notice, setNotice] = useState<Notice | null>(null);
+  const marketId = useSelectedMarketId();
 
   const {
     exporting, handleExport
   } = useExportAction(async () => {
     setNotice(null);
-    const mentions = await fetchBrandMentionsAtRun(scope, run.timestamp).catch((error: unknown) => {
+    const mentions = await fetchBrandMentionsAtRun(scope, run.timestamp, marketId).catch((error: unknown) => {
       setNotice({
         tone: 'warning',
         text: `Exported without the brand mentions sheet: ${getErrorMessage(error, 'brands')}`,

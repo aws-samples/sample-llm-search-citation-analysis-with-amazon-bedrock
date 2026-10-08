@@ -90,4 +90,29 @@ describe('CitationRow', () => {
     
     expect(screen.getByText('Loading...')).toBeInTheDocument();
   });
+
+  it('marks a YouTube video citation with a Video badge announced as a YouTube video', () => {
+    renderInTable(<CitationRow {...defaultProps} citation={{
+      ...mockCitation,
+      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      content_type: 'video',
+    }} />);
+
+    expect(screen.getByTitle('YouTube video')).toHaveTextContent('Video (YouTube)');
+  });
+
+  it('shows no Video badge for a page citation', () => {
+    renderInTable(<CitationRow {...defaultProps} citation={{
+      ...mockCitation,
+      content_type: 'page',
+    }} />);
+
+    expect(screen.queryByTitle('YouTube video')).not.toBeInTheDocument();
+  });
+
+  it('shows no Video badge when the API sent no content type', () => {
+    renderInTable(<CitationRow {...defaultProps} />);
+
+    expect(screen.queryByTitle('YouTube video')).not.toBeInTheDocument();
+  });
 });

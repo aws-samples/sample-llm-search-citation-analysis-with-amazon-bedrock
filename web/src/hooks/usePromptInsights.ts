@@ -8,6 +8,7 @@ import {
 import {
   fetchErrors, useAnalysisEndpoint 
 } from './useAnalysisEndpoint';
+import { useSelectedMarketId } from '../components/Markets/marketSelectionContext';
 
 type PromptInsightType = 'all' | 'winning' | 'losing' | 'opportunities';
 
@@ -24,9 +25,9 @@ const promptInsightsEndpoint = {
   // rejects them as an invalid format instead. Kept as-is to preserve
   // the hook's observable error messages.
   rejectBackendErrorBody: false,
-  buildRequest: (scope: ReportScope, type: PromptInsightType, limit: number) => {
+  buildRequest: (scope: ReportScope, marketId: string | null, type: PromptInsightType, limit: number) => {
     const params = new URLSearchParams({
-      ...reportScopeParams(scope),
+      ...reportScopeParams(scope, marketId),
       type,
       limit: limit.toString(),
     });
@@ -49,10 +50,11 @@ export function usePromptInsights(scope: ReportScope) {
   } = useAnalysisEndpoint(promptInsightsEndpoint);
   // Keyed on the encoded scope so a caller rebuilding the object each render keeps the same fetch.
   const scopeKey = encodeReportScope(scope);
+  const marketId = useSelectedMarketId();
 
   const fetchPromptInsights = useCallback(
-    (type: PromptInsightType = 'all', limit = 20) => fetchData(decodeReportScope(scopeKey), type, limit),
-    [fetchData, scopeKey],
+    (type: PromptInsightType = 'all', limit = 20) => fetchData(decodeReportScope(scopeKey), marketId, type, limit),
+    [fetchData, scopeKey, marketId],
   );
 
   return {

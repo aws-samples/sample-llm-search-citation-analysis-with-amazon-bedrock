@@ -70,6 +70,30 @@ describe('reportScopeParams', () => {
   it('sends scope=all for every keyword', () => {
     expect(reportScopeParams(ALL_SCOPE)).toStrictEqual({ scope: 'all' });
   });
+
+  it('adds market_id to every keyword in a market', () => {
+    expect(reportScopeParams(ALL_SCOPE, 'cl-es')).toStrictEqual({
+      scope: 'all',
+      market_id: 'cl-es',
+    });
+  });
+
+  it('adds market_id to a group in a market', () => {
+    expect(reportScopeParams({
+      kind: 'group',
+      groupId: 'g1',
+    }, 'global')).toStrictEqual({
+      group_id: 'g1',
+      market_id: 'global',
+    });
+  });
+
+  it('sends no market_id for a keyword, which has a single market', () => {
+    expect(reportScopeParams({
+      kind: 'keyword',
+      keyword: 'vuelos baratos',
+    }, 'cl-es')).toStrictEqual({ keyword: 'vuelos baratos' });
+  });
 });
 
 describe('describeReportScope', () => {

@@ -9,6 +9,7 @@ import {
 } from '../ui';
 import { Skeleton } from '../ui/Skeleton';
 import { ScheduleListSkeleton } from './ScheduleListSkeleton';
+import { useMarketSelection } from '../Markets/marketSelectionContext';
 
 interface ScheduleHeaderProps {
   showForm: boolean;
@@ -110,6 +111,15 @@ interface ScheduleItemProps extends Pick<ScheduleListProps, 'groups' | 'onEdit' 
   running: boolean;
 }
 
+/** What a schedule runs, with the markets it is narrowed to. */
+const ScheduleScopeLine = ({
+  schedule, groups
+}: Pick<ScheduleItemProps, 'schedule' | 'groups'>) => {
+  const { catalog } = useMarketSelection();
+  const description = describeScheduleScope(schedule.scope, groups, schedule.keywords, catalog.markets);
+  return <p className="text-xs text-gray-500 mt-1 truncate" title={description}>{description}</p>;
+};
+
 /**
  * One schedule card. For admins the title is a button that opens the editor
  * (click-to-edit); run and delete sit beside it.
@@ -146,9 +156,7 @@ const ScheduleItem = ({
         )}
       </div>
       <p className="text-sm text-gray-600 mt-1">{describeScheduleTiming(schedule)}</p>
-      <p className="text-xs text-gray-500 mt-1 truncate" title={describeScheduleScope(schedule.scope, groups, schedule.keywords)}>
-        {describeScheduleScope(schedule.scope, groups, schedule.keywords)}
-      </p>
+      <ScheduleScopeLine schedule={schedule} groups={groups} />
     </div>
     {isAdmin && (
       <div className="flex items-center gap-1 shrink-0">

@@ -71,6 +71,11 @@ def _started_input():
     return json.loads(mock_stepfunctions.start_execution.call_args.kwargs['input'])
 
 
+# The Spanish-market member of the Coruña group, and the Coruña scope narrowed to that market.
+SPANISH_KEYWORD = {**_keyword_row('k2', 'hotel coruña balneario', 'coruna'), 'market_id': 'es-es'}
+SPANISH_SCOPE = {**CORUNA_SCOPE, 'market_ids': ['es-es']}
+
+
 @pytest.fixture(autouse=True)
 def _reset_mocks():
     mock_keywords_table.reset_mock(side_effect=True, return_value=True)
@@ -127,6 +132,25 @@ class TestSubsetTriggerWithScope:
 
         assert status == 400
         assert body['error'] == 'scope.mode must be one of all, groups, keywords'
+
+    def test_runs_only_the_keywords_of_the_scope_markets(self):
+        _stage_active_keywords(_keyword_row('k1', 'hotel coruna spa', 'coruna'), SPANISH_KEYWORD)
+
+        _status, body = _trigger({'scope': SPANISH_SCOPE})
+
+        assert body['keywords'] == ['hotel coruña balneario']
+
+    def test_passes_the_scope_markets_to_the_run(self):
+        _stage_active_keywords(SPANISH_KEYWORD)
+
+        _subset.handler(make_event({'scope': SPANISH_SCOPE}), None)
+
+        assert _started_input()['scope'] == SPANISH_SCOPE
+
+    def test_names_the_market_when_it_matches_no_active_keyword(self):
+        _stage_active_keywords(_keyword_row('k1', 'hotel coruna spa', 'coruna'))
+
+        assert _trigger({'scope': SPANISH_SCOPE})[1]['error'] == 'No active keywords match the selected scope (1 group(s), market es-es).'
 
 
 class TestSubsetTriggerLegacyKeywords:

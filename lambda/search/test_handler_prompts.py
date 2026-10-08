@@ -119,9 +119,9 @@ class TestGetProviderModel:
 
             assert handler.get_provider_model('openai') == 'gpt-5-mini'
             handler._provider_model_cache.clear()
-            assert handler.get_provider_model('perplexity') == 'sonar'
+            assert handler.get_provider_model('perplexity') == 'perplexity/sonar'
             handler._provider_model_cache.clear()
-            assert handler.get_provider_model('gemini') == 'gemini-3-flash-preview'
+            assert handler.get_provider_model('gemini') == 'gemini-3.6-flash'
 
 
 class TestIsProviderEnabled:
@@ -230,7 +230,7 @@ class TestGeminiUsesTheConfiguredModel:
 
         with patch.object(handler, 'dynamodb', mock_db), patch.object(handler, 'query_gemini') as query_gemini:
             handler._provider_model_cache.clear()
-            handler._run_gemini_provider('hotels in malaga', 'fake-key', None)
+            handler._run_gemini_provider('hotels in malaga', 'fake-key', None, None)
 
         assert query_gemini.call_args.kwargs['model'] == 'gemini-2.5-pro'
 
@@ -257,12 +257,12 @@ class TestPerplexityAndClaudeAnswerWithTheConfiguredModel:
 
     def test_perplexity_records_the_model_from_its_answer(self):
         client = MagicMock()
-        client.chat_completion.return_value = {'choices': [{'message': {'content': 'answer'}}], 'model': 'sonar-2026'}
+        client.agent_response.return_value = {'output': [], 'model': 'perplexity/sonar-2026'}
 
         with patch.object(handler, 'PerplexityClient', return_value=client):
             result = handler.query_perplexity('hotels in malaga', 'fake-key')
 
-        assert result['metadata']['model'] == 'sonar-2026'
+        assert result['metadata']['model'] == 'perplexity/sonar-2026'
 
     def test_claude_records_the_model_from_its_answer(self):
         client = MagicMock()
@@ -274,7 +274,7 @@ class TestPerplexityAndClaudeAnswerWithTheConfiguredModel:
         assert result['metadata']['model'] == 'claude-sonnet-4-5-20250929'
 
     @pytest.mark.parametrize(('provider_id', 'runner', 'query', 'model'), [
-        ('perplexity', '_run_perplexity_provider', 'query_perplexity', 'sonar-pro'),
+        ('perplexity', '_run_perplexity_provider', 'query_perplexity', 'openai/gpt-6-luna'),
         ('claude', '_run_claude_provider', 'query_claude', 'claude-opus-4-7'),
     ])
     def test_run_reads_the_configured_model(self, mock_dynamodb, provider_id, runner, query, model):
@@ -283,12 +283,12 @@ class TestPerplexityAndClaudeAnswerWithTheConfiguredModel:
 
         with patch.object(handler, 'dynamodb', mock_db), patch.object(handler, query) as query_provider:
             handler._provider_model_cache.clear()
-            getattr(handler, runner)('hotels in malaga', 'fake-key', None)
+            getattr(handler, runner)('hotels in malaga', 'fake-key', None, None)
 
         assert query_provider.call_args.kwargs['model'] == model
 
     @pytest.mark.parametrize(('client_name', 'query', 'model'), [
-        ('PerplexityClient', 'query_perplexity', 'sonar-pro'),
+        ('PerplexityClient', 'query_perplexity', 'openai/gpt-6-luna'),
         ('ClaudeClient', 'query_claude', 'claude-opus-4-7'),
     ])
     def test_query_builds_the_client_with_the_model(self, client_name, query, model):
@@ -297,14 +297,14 @@ class TestPerplexityAndClaudeAnswerWithTheConfiguredModel:
 
         assert client_class.call_args.kwargs['model'] == model
 
-    def test_perplexity_is_sent_the_query_as_one_user_message(self):
+    def test_perplexity_is_sent_the_query_as_the_agent_input(self):
         client = MagicMock()
-        client.chat_completion.return_value = {'choices': [{'message': {'content': 'answer'}}]}
+        client.agent_response.return_value = {'output': []}
 
         with patch.object(handler, 'PerplexityClient', return_value=client):
-            handler.query_perplexity('hotels in malaga', 'fake-key', model='sonar-pro')
+            handler.query_perplexity('hotels in malaga', 'fake-key', model='perplexity/sonar')
 
-        assert client.chat_completion.call_args.args[0] == [{'role': 'user', 'content': 'hotels in malaga'}]
+        assert client.agent_response.call_args.args[0] == 'hotels in malaga'
 
 
 class TestModelChangesReachAWarmLambda:
@@ -348,11 +348,7 @@ class TestQueryTemplateSubstitution:
         """query_perplexity substitutes {keyword} in template."""
 
         mock_client = MagicMock()
-        mock_client.chat_completion.return_value = {
-            'choices': [{'message': {'content': 'response'}}],
-            'model': 'sonar',
-            'usage': {},
-        }
+        mock_client.agent_response.return_value = {'output': [], 'model': 'perplexity/sonar', 'usage': {}}
 
         with patch.object(handler, 'PerplexityClient', return_value=mock_client):
             handler.query_perplexity(
@@ -360,9 +356,7 @@ class TestQueryTemplateSubstitution:
                 query_template='As a business traveler, find {keyword}'
             )
 
-        call_args = mock_client.chat_completion.call_args
-        messages = call_args.args[0]
-        assert messages[0]['content'] == 'As a business traveler, find hotels in malaga'
+        assert mock_client.agent_response.call_args.args[0] == 'As a business traveler, find hotels in malaga'
 
     def test_gemini_uses_template(self):
         """query_gemini substitutes {keyword} in template."""

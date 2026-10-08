@@ -1,6 +1,12 @@
 """
 Deduplication Lambda Function
 Normalizes URLs, deduplicates citations across providers, and prioritizes by citation count.
+
+Every deduplicated citation is stored in the Citations table (no cap) with its
+``content_type`` (``'video'`` for a YouTube video, else ``'page'``). Only the
+top ``MAX_CRAWLS_PER_KEYWORD`` go back to the workflow as
+``deduplicated_citations``, the list the CrawlCitations Map crawls: it lives in
+the Step Functions state, which is capped at 256 KiB.
 """
 
 import json
@@ -11,6 +17,7 @@ from typing import Any
 
 import boto3
 
+from shared import youtube
 from shared.constants import MAX_CITATIONS_PER_KEYWORD_DEFAULT, MAX_KEYWORD_LENGTH
 from shared.env_vars import resolve_table_env
 from shared.prompt_safety import sanitize_user_input
@@ -31,10 +38,12 @@ dynamodb = boto3.resource('dynamodb')
 CITATIONS_TABLE = resolve_table_env('DYNAMODB_TABLE_CITATIONS')
 citations_table = dynamodb.Table(CITATIONS_TABLE)
 
-# Runtime override for the citations-per-keyword cap. Defaults to the shared
-# constant; setting `MAX_CITATIONS_PER_KEYWORD` in the Lambda environment lets
-# operators tune the cap without redeploying code.
-MAX_CITATIONS_PER_KEYWORD = int(
+# How many of a keyword's citations (highest citation count first) are handed
+# to the crawl Map. It bounds the Step Functions state and the crawl cost, not
+# what is stored: the Citations table keeps every citation. The environment
+# variable keeps its historical name, `MAX_CITATIONS_PER_KEYWORD`, so an
+# operator override set before the rename still applies.
+MAX_CRAWLS_PER_KEYWORD = int(
     os.environ.get('MAX_CITATIONS_PER_KEYWORD', MAX_CITATIONS_PER_KEYWORD_DEFAULT)
 )
 
@@ -144,34 +153,39 @@ def summarize_providers(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 def prioritize_citations(deduplicated: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Prioritize citations by citation count and keep the top ``MAX_CITATIONS_PER_KEYWORD``
-    (overridable via env var).
+    Rank every deduplicated citation by citation count (then URL) and number it.
+
+    Each citation carries its ``priority`` (1 = most cited) and ``content_type``.
+    Nothing is dropped here; :func:`crawl_list` takes the head for the crawl Map.
 
     Args:
         deduplicated: Dictionary of deduplicated citations
     """
-    # Convert to list and sort by citation count (descending)
-    citations_list = []
-    for normalized_url, metadata in deduplicated.items():
-        citations_list.append({
+    citations_list = [
+        {
             'normalized_url': normalized_url,
-            'original_urls': list(metadata['original_urls']),
+            'original_urls': sorted(metadata['original_urls']),
             'citation_count': metadata['citation_count'],
-            'citing_providers': sorted(metadata['citing_providers'])
-        })
+            'citing_providers': sorted(metadata['citing_providers']),
+            'content_type': youtube.content_type_for(normalized_url),
+        }
+        for normalized_url, metadata in deduplicated.items()
+    ]
 
     # Sort by citation count (descending), then by URL for consistency
     citations_list.sort(key=lambda x: (-x['citation_count'], x['normalized_url']))
 
-    # Limit to top N and assign priority numbers
-    prioritized = []
-    for i, citation in enumerate(citations_list[:MAX_CITATIONS_PER_KEYWORD]):
+    for i, citation in enumerate(citations_list):
         citation['priority'] = i + 1
-        prioritized.append(citation)
 
-    logger.info('Prioritized top %s citations', len(prioritized))
+    logger.info('Prioritized %s citations', len(citations_list))
 
-    return prioritized
+    return citations_list
+
+
+def crawl_list(prioritized: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The top ``MAX_CRAWLS_PER_KEYWORD`` prioritized citations: what the crawl Map receives."""
+    return prioritized[:MAX_CRAWLS_PER_KEYWORD]
 
 
 def total_citations_found(citations: list[dict[str, Any]]) -> int:
@@ -209,6 +223,7 @@ def store_citations(keyword: str, citations: list[dict[str, Any]]) -> None:
                     'citation_count = :count, '
                     'citing_providers = :providers, '
                     'priority = :priority, '
+                    'content_type = :content_type, '
                     'last_updated = :updated, '
                     'first_seen = if_not_exists(first_seen, :updated)'
                 ),
@@ -217,6 +232,7 @@ def store_citations(keyword: str, citations: list[dict[str, Any]]) -> None:
                     ':count': citation['citation_count'],
                     ':providers': citation['citing_providers'],
                     ':priority': citation['priority'],
+                    ':content_type': citation['content_type'],
                     ':updated': timestamp,
                 },
             )
@@ -274,22 +290,29 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         # Step 1: Deduplicate citations across all providers
         deduplicated = deduplicate_citations(results)
 
-        # Step 2: Prioritize citations by citation count (top N from shared config)
+        # Step 2: Rank every citation by citation count
         prioritized = prioritize_citations(deduplicated)
 
-        # Step 3: Store citations in DynamoDB
+        # Step 3: Store every citation in DynamoDB
         store_citations(keyword, prioritized)
 
-        logger.info('Successfully processed %s citations for keyword: %s', len(prioritized), keyword)
+        # Step 4: Only the head of the ranking is crawled
+        to_crawl = crawl_list(prioritized)
 
-        # Return prioritized citations for Crawler Lambda, plus the provider
+        logger.info(
+            'Stored %s citations for keyword %s; %s go to the crawler',
+            len(prioritized), keyword, len(to_crawl),
+        )
+
+        # Return the crawl list for the Crawler Lambda, plus the provider
         # rollup that would otherwise be dropped with the search output, and
         # the citation total the workflow's SummarizeKeywordResult keeps once
-        # the citation list itself is dropped (no intrinsic function can sum it).
+        # the citation list itself is dropped (no intrinsic function can sum
+        # it). The total counts every stored citation, not only the crawled ones.
         return step_function_success({
             'keyword': keyword,
             'timestamp': timestamp,
-            'deduplicated_citations': prioritized,
+            'deduplicated_citations': to_crawl,
             'total_citations_found': total_citations_found(prioritized),
             'provider_summary': summarize_providers(results),
         }, f"Processed {len(prioritized)} citations for {keyword}")

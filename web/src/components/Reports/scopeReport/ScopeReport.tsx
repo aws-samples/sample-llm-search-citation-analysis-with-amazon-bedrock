@@ -7,8 +7,12 @@ import {
 import { usePrintMode } from '../../../hooks/usePrintMode';
 import { useKeywordGroups } from '../../../hooks/useKeywordGroups';
 import type {
-  Keyword, KeywordGroup, ReportScope
+  Keyword, KeywordGroup, Market, ReportScope
 } from '../../../types';
+import {
+  MARKET_SEARCH_PARAM, withMarketLabel
+} from '../../Markets/marketSelection';
+import { useMarketSelection } from '../../Markets/marketSelectionContext';
 import { VISIBILITY_DEFINITIONS } from '../../../constants/kpiDefinitions';
 import { KeywordScopeSelector } from '../../ui/KeywordScopeSelector';
 import { describeReportScope } from '../../ui/reportScope';
@@ -32,10 +36,27 @@ interface Props {
   readonly children: (report: ScopeReportData) => ReactNode;
 }
 
-/** The scope's name: the API's once the latest runs answered for it, the group list's before. */
-export function scopeLabelOf(report: ScopeReportData, scope: ReportScope, groups: KeywordGroup[]): string {
+interface MarketLabelInputs {
+  readonly marketId: string | null;
+  readonly markets: readonly Market[];
+}
+
+const NO_MARKET_CHOICE: MarketLabelInputs = {
+  marketId: null,
+  markets: [],
+};
+
+/**
+ * The scope's name: the API's once the latest runs answered for it, the group
+ * list's before; followed by the market the answer covers, when one is chosen.
+ */
+export function scopeLabelOf(
+  report: ScopeReportData, scope: ReportScope, groups: KeywordGroup[], market: MarketLabelInputs = NO_MARKET_CHOICE
+): string {
   const answered = report.visibility.loading ? null : report.visibility.data;
-  return answered?.scope.label ?? describeReportScope(scope, groups);
+  const label = answered?.scope.label ?? describeReportScope(scope, groups);
+  if (scope.kind === 'keyword') return label;
+  return withMarketLabel(label, answered?.scope.market_id ?? market.marketId, market.markets);
 }
 
 interface PeriodSelectorProps {
@@ -82,23 +103,33 @@ export function ScopeReport({
   const scope = scopeFromSearch(searchParams);
   const days = daysFromSearch(searchParams);
   const report = useScopeReportData(scope, days);
+  const {
+    catalog, selectedMarketId
+  } = useMarketSelection();
+  const market = searchParams.get(MARKET_SEARCH_PARAM);
+  // The market a shared link names rides along when the scope or period changes.
+  const showScope = (next: ReportScope) => navigate(scopeReportPath(basePath, next, days, market));
+  const showDays = (next: ScopeReportDays) => navigate(scopeReportPath(basePath, scope, next, market));
 
   usePrintMode({ ready: report.ready });
 
   return (
     <ReportLayout
       title={title}
-      subtitle={subtitle(scopeLabelOf(report, scope, groups))}
+      subtitle={subtitle(scopeLabelOf(report, scope, groups, {
+        marketId: selectedMarketId,
+        markets: catalog.markets,
+      }))}
       actions={(
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <KeywordScopeSelector
             keywords={[...keywords]}
             groups={groups}
             value={scope}
-            onChange={(next) => navigate(scopeReportPath(basePath, next, days))}
+            onChange={showScope}
             className="min-w-[16rem]"
           />
-          <PeriodSelector days={days} onChange={(next) => navigate(scopeReportPath(basePath, scope, next))} />
+          <PeriodSelector days={days} onChange={showDays} />
         </div>
       )}
     >

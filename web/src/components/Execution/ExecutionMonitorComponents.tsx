@@ -6,6 +6,8 @@ import {
 } from '../../formatting/dateFormatter';
 import { Spinner } from '../ui/Spinner';
 import { KeywordScopePicker } from '../ui/KeywordScopePicker';
+import { MarketScopeFilter } from '../Markets/MarketScopeFilter';
+import { keywordsInMarkets } from '../Markets/marketScope';
 import { PlayIcon } from '../ui';
 import type { ProcessedExecution } from '../../formatting/executionProcessor';
 import { WorkflowSteps } from './WorkflowSteps';
@@ -73,6 +75,9 @@ interface TriggerSectionProps {
   isRunning: boolean;
   isStarting: boolean;
   onSelectionChange: (selectedIds: string[]) => void;
+  /** The markets the run is narrowed to (empty = every market). */
+  marketIds?: readonly string[];
+  onMarketIdsChange?: (marketIds: string[]) => void;
   onTriggerAnalysis: () => void;
   onRunGroup: (group: KeywordGroup) => void;
   /** Both trigger routes are Admin-only server-side. */
@@ -82,9 +87,11 @@ interface TriggerSectionProps {
 }
 
 export const TriggerSection = ({
-  selectedIds, keywordsCount, activeKeywords, groups, isRunning, isStarting,
-  onSelectionChange, onTriggerAnalysis, onRunGroup, isAdmin, loading,
+  selectedIds, keywordsCount, activeKeywords: allActiveKeywords, groups, isRunning, isStarting,
+  onSelectionChange, onTriggerAnalysis, onRunGroup, isAdmin, loading, marketIds = [], onMarketIdsChange,
 }: TriggerSectionProps) => {
+  // The market filter narrows what a no-selection run covers and what can be picked.
+  const activeKeywords = keywordsInMarkets(allActiveKeywords, marketIds);
   const getKeywordCountText = (): string => {
     // `activeKeywords`, not `keywordsCount`: the latter is every keyword in the
     // library, so an install with paused keywords was told it would run "All 53
@@ -118,6 +125,11 @@ export const TriggerSection = ({
     <div className="bg-white rounded-lg border border-gray-200 p-4 sm:p-6">
       <h2 className="text-sm font-medium text-gray-900 mb-2">Run Citation Analysis</h2>
       <p className="text-sm text-gray-500 mb-4">{getKeywordCountText()}</p>
+      {onMarketIdsChange && (
+        <div className="mb-4">
+          <MarketScopeFilter idPrefix="execution" selectedIds={marketIds} onChange={onMarketIdsChange} disabled={busy} />
+        </div>
+      )}
       {groups.length > 0 && (
         <GroupQuickRun groups={groups} disabled={busy} onRunGroup={onRunGroup} />
       )}

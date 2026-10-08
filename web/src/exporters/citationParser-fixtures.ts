@@ -43,3 +43,21 @@ export const ASC_DOMAIN = {
   column: 'domain',
   direction: 'asc' 
 } satisfies SortConfig;
+
+/** A YouTube video, an ordinary page and a page from an API build that sent no `content_type`. */
+export const MIXED_TYPE_CITATIONS = [
+  buildCitation({
+    url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    citation_count: 3,
+    content_type: 'video',
+  }),
+  buildCitation({
+    url: 'https://example.com/guide',
+    citation_count: 2,
+    content_type: 'page',
+  }),
+  buildCitation({
+    url: 'https://example.com/legacy',
+    citation_count: 1,
+  }),
+];

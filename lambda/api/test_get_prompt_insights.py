@@ -129,7 +129,7 @@ def _search_table(results_by_keyword: dict[str, list[dict[str, Any]]], failing: 
 
 def _active_keyword(keyword: str) -> dict[str, Any]:
     """The Keywords-table row of an active keyword; it belongs to the group named by its last word."""
-    return {'id': keyword, 'keyword': keyword, 'status': 'active', 'group_ids': {keyword.split()[-1]}}
+    return {'id': keyword, 'keyword': keyword, 'status': 'active', 'group_ids': {keyword.rsplit(maxsplit=1)[-1]}}
 
 
 def _dynamodb(

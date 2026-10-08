@@ -14,6 +14,9 @@ export interface SEOAnalysis {
   competitive_advantage?: string;
 }
 
+/** What a cited URL is: a YouTube video or any other page (`shared/youtube.py` decides). */
+export type CitationContentType = 'video' | 'page';
+
 /** A crawled citation page as `GET /crawled-content` returns it. */
 export interface CrawledContent {
   normalized_url: string;
@@ -31,4 +34,12 @@ export interface CrawledContent {
   status?: CrawlStatus;
   block_reason?: BlockReason;
   error_message?: string;
+  content_type?: CitationContentType;
+  /** `'youtube'` when the details came from YouTube oEmbed instead of a browser crawl. */
+  provider?: string;
+  /** The video's channel name and link (oEmbed `author_name` / `author_url`). */
+  author_name?: string;
+  author_url?: string;
+  /** An https thumbnail of the video, empty when YouTube gave none. */
+  thumbnail_url?: string;
 }

@@ -23,12 +23,17 @@ from botocore.exceptions import ClientError
 
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.keyword_store import (
+    KeywordReference,
     build_keyword_item,
+    keyword_reference,
     put_keyword_if_absent,
+    resolve_concept_id,
+    validate_keyword_market,
     validate_keyword_text,
 )
 from shared.utils import keyword_id
-from testing.dynamodb_stubs import conditional_check_failure
+from testing.dynamodb_stubs import conditional_check_failure, fake_table
+from testing.markets_fixtures import CHILE, markets_item
 
 
 class TestValidateKeywordText:
@@ -156,3 +161,81 @@ class TestPutKeywordIfAbsent:
             put_keyword_if_absent(table, {'id': 'abc', 'keyword': 'alpha'})
 
         assert raised.value is error
+
+
+class TestBuildKeywordItemReferences:
+    def test_stores_the_market_and_concept_when_given(self):
+        item = build_keyword_item('vuelos', timestamp='2026-10-01T00:00:00Z', market_id='cl-es', concept_id='source-id')
+
+        assert (item['market_id'], item['concept_id']) == ('cl-es', 'source-id')
+
+    def test_stores_neither_reference_for_a_global_keyword(self):
+        item = build_keyword_item('flights', timestamp='2026-10-01T00:00:00Z')
+
+        assert {'market_id', 'concept_id'} & item.keys() == set()
+
+
+class TestKeywordReference:
+    def test_reads_an_omitted_field_as_not_given(self):
+        assert keyword_reference({}, 'market_id') == (KeywordReference(given=False, value=None), None)
+
+    @pytest.mark.parametrize('raw', ['', '   ', None], ids=['empty', 'blank', 'null'])
+    def test_reads_an_empty_value_as_given_without_a_value(self, raw):
+        assert keyword_reference({'market_id': raw}, 'market_id') == (KeywordReference(given=True, value=None), None)
+
+    def test_trims_a_given_id(self):
+        assert keyword_reference({'market_id': ' cl-es '}, 'market_id') == (KeywordReference(given=True, value='cl-es'), None)
+
+    def test_rejects_a_non_string_value(self):
+        assert keyword_reference({'concept_id': ['a']}, 'concept_id') == (None, 'concept_id must be a string')
+
+    def test_reads_a_non_object_body_as_not_given(self):
+        assert keyword_reference(['market_id'], 'market_id') == (KeywordReference(given=False, value=None), None)
+
+
+class TestValidateKeywordMarket:
+    def test_accepts_a_configured_market(self):
+        table = fake_table(get_item={'Item': markets_item(CHILE)})
+
+        assert validate_keyword_market('cl-es', table) == ('cl-es', None)
+
+    @pytest.mark.parametrize('market_id', [None, 'global'])
+    def test_answers_the_global_market_without_reading_the_list(self, market_id):
+        table = fake_table()
+
+        assert validate_keyword_market(market_id, table) == (None, None)
+        table.get_item.assert_not_called()
+
+    def test_rejects_an_unconfigured_market(self):
+        table = fake_table(get_item={'Item': markets_item(CHILE)})
+
+        assert validate_keyword_market('br-pt', table) == (None, 'Unknown market_id: br-pt')
+
+    def test_rejects_every_market_when_none_is_configured(self):
+        assert validate_keyword_market('cl-es', fake_table(get_item={})) == (None, 'Unknown market_id: cl-es')
+
+
+class TestResolveConceptId:
+    def test_keeps_the_id_of_a_source_keyword(self):
+        table = fake_table(get_item={'Item': {'id': 'source-id', 'keyword': 'flights'}})
+
+        assert resolve_concept_id(table, 'source-id', 'new-id') == ('source-id', None)
+
+    def test_resolves_a_translation_to_its_concept(self):
+        table = fake_table(get_item={'Item': {'id': 'translation-id', 'concept_id': 'source-id'}})
+
+        assert resolve_concept_id(table, 'translation-id', 'new-id') == ('source-id', None)
+
+    def test_answers_no_concept_for_none(self):
+        table = fake_table()
+
+        assert resolve_concept_id(table, None, 'new-id') == (None, None)
+        table.get_item.assert_not_called()
+
+    def test_rejects_an_unknown_keyword(self):
+        assert resolve_concept_id(fake_table(get_item={}), 'ghost', 'new-id') == (None, 'Unknown concept_id: ghost')
+
+    def test_rejects_a_concept_that_resolves_to_the_keyword_itself(self):
+        table = fake_table(get_item={'Item': {'id': 'translation-id', 'concept_id': 'own-id'}})
+
+        assert resolve_concept_id(table, 'translation-id', 'own-id') == (None, 'A keyword cannot localize itself')

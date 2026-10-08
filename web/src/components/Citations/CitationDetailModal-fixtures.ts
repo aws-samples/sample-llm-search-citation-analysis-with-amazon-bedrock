@@ -16,3 +16,18 @@ export function buildCrawledContent(overrides: Partial<CrawledContent> = {}): Cr
     ...overrides,
   };
 }
+
+/** A YouTube video read through oEmbed: channel, thumbnail and no SEO analysis. */
+export function buildVideoCrawl(overrides: Partial<CrawledContent> = {}): CrawledContent {
+  return buildCrawledContent({
+    normalized_url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+    title: 'Hotel Sol room tour',
+    summary: 'YouTube video "Hotel Sol room tour" by Hotel Sol.',
+    content_type: 'video',
+    provider: 'youtube',
+    author_name: 'Hotel Sol',
+    author_url: 'https://www.youtube.com/@hotelsol',
+    thumbnail_url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg',
+    ...overrides,
+  });
+}

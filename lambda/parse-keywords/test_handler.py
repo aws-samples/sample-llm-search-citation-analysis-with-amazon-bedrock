@@ -16,13 +16,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 from botocore.exceptions import ClientError
 
+from testing.markets_fixtures import BRAZIL, CHILE, markets_item
 from testing.module_loader import load_handler_module
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+MARKETS_ITEM = markets_item(CHILE, BRAZIL)
 
 # Mock DynamoDB tables at module level
 mock_keywords_table = MagicMock()
 mock_prompts_table = MagicMock()
+mock_brand_config_table = MagicMock()
 mock_dynamodb = MagicMock()
 mock_s3 = MagicMock()
 
@@ -30,6 +33,8 @@ mock_s3 = MagicMock()
 def _table_for_name(name):
     if name == 'test-prompts-table':
         return mock_prompts_table
+    if name == 'test-brand-config':
+        return mock_brand_config_table
     return mock_keywords_table
 
 
@@ -48,6 +53,7 @@ _KEYWORDS_BUCKET = 'test-keywords-bucket'
 _test_env = {
     'DYNAMODB_TABLE_KEYWORDS': 'test-keywords-table',
     'DYNAMODB_TABLE_QUERY_PROMPTS': 'test-prompts-table',
+    'DYNAMODB_TABLE_BRAND_CONFIG': 'test-brand-config',
     'KEYWORDS_BUCKET': _KEYWORDS_BUCKET,
 }
 
@@ -96,8 +102,10 @@ CUSTOM_PROMPTS = [{'id': 'p1', 'name': 'Custom', 'template': 'Find {keyword}'}]
 def _reset_mocks():
     """Reset table mocks before each test."""
     mock_s3.reset_mock()
-    mock_keywords_table.reset_mock()
+    mock_keywords_table.reset_mock(side_effect=True)
     mock_prompts_table.reset_mock()
+    mock_brand_config_table.reset_mock(side_effect=True)
+    mock_brand_config_table.get_item.return_value = {'Item': MARKETS_ITEM}
     mock_prompts_table.query.side_effect = None
     mock_keywords_table.query.return_value = {'Items': []}
     mock_prompts_table.query.return_value = {'Items': SAMPLE_PROMPT_ITEMS}
@@ -346,3 +354,73 @@ class TestKeywordManifest:
             handler_module.handler({'execution_input': {'keywords': ['  ']}, 'execution_name': 'analysis-1'}, {})
 
         mock_s3.put_object.assert_not_called()
+
+
+# Active keywords in three markets: global (no market_id), Chile and Brazil.
+MARKET_KEYWORD_ITEMS = [
+    {'id': 'k1', 'keyword': 'cheap flights santiago', 'group_ids': {'altiplano'}},
+    {'id': 'k2', 'keyword': 'vuelos baratos santiago', 'group_ids': {'altiplano'}, 'market_id': 'cl-es'},
+    {'id': 'k3', 'keyword': 'passagens baratas santiago', 'group_ids': {'altiplano'}, 'market_id': 'br-pt'},
+]
+ALL_ACTIVE = {'source': 'dynamodb', 'query_prompts': []}
+
+
+def _run(handler_module, execution_input: dict, items: list[dict] | None = None) -> dict[str, object]:
+    """Run over the active ``items`` (``MARKET_KEYWORD_ITEMS``); the manifest's market per keyword."""
+    mock_keywords_table.query.return_value = {'Items': MARKET_KEYWORD_ITEMS if items is None else items}
+    handler_module.handler(execution_input, {})
+    return {entry['keyword']: entry['market'] for entry in _manifest()}
+
+
+class TestManifestMarkets:
+    """Each manifest entry carries the market its keyword is asked from."""
+
+    @pytest.mark.parametrize(('keyword', 'market'), [
+        ('vuelos baratos santiago', CHILE),
+        ('passagens baratas santiago', BRAZIL),
+        ('cheap flights santiago', None),
+    ])
+    def test_writes_each_keywords_market_as_its_json_form(self, handler_module, keyword, market):
+        assert _run(handler_module, ALL_ACTIVE)[keyword] == market
+
+    def test_writes_the_market_key_on_every_entry_of_a_market_free_run(self, handler_module):
+        handler_module.handler({'keywords': ['best hotels'], 'query_prompts': []}, {})
+
+        assert _manifest()[0] == {'keyword': 'best hotels', 'timestamp': _manifest()[0]['timestamp'], 'market': None}
+
+    def test_reads_the_market_list_only_when_a_keyword_names_a_market(self, handler_module):
+        _run(handler_module, ALL_ACTIVE, MARKET_KEYWORD_ITEMS[:1])
+        mock_brand_config_table.get_item.assert_not_called()
+
+        _run(handler_module, ALL_ACTIVE)
+        mock_brand_config_table.get_item.assert_called_once_with(Key={'config_id': 'markets'})
+
+    def test_keeps_only_the_scopes_markets(self, handler_module):
+        scope = {'mode': 'groups', 'group_ids': ['altiplano'], 'market_ids': ['br-pt', 'global']}
+
+        assert list(_run(handler_module, {'scope': scope, 'query_prompts': []})) == ['cheap flights santiago', 'passagens baratas santiago']
+
+    @pytest.mark.parametrize(('keyword', 'market'), [
+        ('  Vuelos baratos Santiago ', CHILE),
+        ('not a tracked keyword', None),
+    ], ids=['tracked', 'untracked'])
+    def test_looks_up_the_market_of_a_directly_listed_keyword(self, handler_module, keyword, market):
+        assert list(_run(handler_module, {'keywords': [keyword], 'query_prompts': []}).values()) == [market]
+
+    def test_asks_a_keyword_whose_market_is_no_longer_configured_globally(self, handler_module):
+        items = [{'id': 'k9', 'keyword': 'vols pas chers', 'market_id': 'fr-fr'}]
+
+        assert _run(handler_module, ALL_ACTIVE, items) == {'vols pas chers': None}
+
+    def test_fails_the_run_without_a_manifest_when_the_markets_cannot_be_read(self, handler_module):
+        mock_brand_config_table.get_item.side_effect = _query_error('ThrottlingException')
+
+        with pytest.raises(handler_module.MarketReadError):
+            _run(handler_module, ALL_ACTIVE)
+        mock_s3.put_object.assert_not_called()
+
+    def test_fails_the_run_when_a_direct_list_cannot_be_matched_to_keywords(self, handler_module):
+        mock_keywords_table.query.side_effect = _query_error('ThrottlingException')
+
+        with pytest.raises(RuntimeError, match='Failed to read keywords from DynamoDB'):
+            handler_module.handler({'keywords': ['best hotels'], 'query_prompts': []}, {})

@@ -156,6 +156,13 @@ class TestEstimateRun:
 
         assert call('estimate_run', {'all': True})['structuredContent']['keywords'] == 5
 
+    @pytest.mark.parametrize(('market_id', 'count'), [('cl-es', 3), ('global', 2)])
+    def test_counts_only_the_keywords_of_the_market(self, call, routers, market_id, count):
+        page = keyword_page([*keywords(2), *({**item, 'market_id': 'cl-es'} for item in keywords(3, prefix='cl'))])
+        routers.answer_with('GET', '/api/keywords', lambda _event: (200, page))
+
+        assert call('estimate_run', {'all': True, 'market_id': market_id})['structuredContent']['keywords'] == count
+
     def test_reports_the_runs_left_today(self, call, routers):
         assert call('estimate_run', GROUP_SCOPE)['structuredContent']['limits'] == {
             'used_today': 0, 'per_day': 5, 'resets_at': '2026-10-08T00:00:00Z', 'runs_in_flight_allowed': 1,

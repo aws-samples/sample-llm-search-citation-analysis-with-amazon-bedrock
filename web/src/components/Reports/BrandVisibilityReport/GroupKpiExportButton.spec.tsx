@@ -30,7 +30,7 @@ describe('GroupKpiExportButton', () => {
   it('fetches the brand mentions of the selected run', async () => {
     await clickExport();
 
-    expect(fetchBrandMentionsAtRun).toHaveBeenCalledWith(HOTEL_SOL_SCOPE, RUN.timestamp);
+    expect(fetchBrandMentionsAtRun).toHaveBeenCalledWith(HOTEL_SOL_SCOPE, RUN.timestamp, null);
   });
 
   it('exports the history, the run and its brand mentions', async () => {

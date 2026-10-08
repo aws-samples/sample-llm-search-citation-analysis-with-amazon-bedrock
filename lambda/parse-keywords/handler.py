@@ -12,18 +12,19 @@ Requirements: 2.1, 2.2, 2.3, 2.4
 import json
 import logging
 import os
-from typing import Any
+from typing import Any, NamedTuple
 
 import boto3
 from boto3.dynamodb.conditions import Key
 from botocore.exceptions import ClientError
 
 from shared.analysis_runs import query_prompt_from_item
-from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
+from shared.keyword_groups import describe_scope, query_active_keywords, resolve_scope, validate_scope
+from shared.markets import GLOBAL_MARKET_ID, keyword_market_id, load_markets, markets_by_id
 from shared.step_function_response import log_error
 
 # Configure logging
-from shared.utils import get_timestamp, get_timestamp_compact
+from shared.utils import get_timestamp, get_timestamp_compact, normalize_keyword
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -47,9 +48,26 @@ QUERY_PROMPTS_TABLE = (
     or 'CitationAnalysis-QueryPrompts'
 )
 
+# The market list (BrandConfig item `markets`), read only when a keyword names a market.
+BRAND_CONFIG_TABLE = (
+    os.environ.get('DYNAMODB_TABLE_BRAND_CONFIG')
+    or 'CitationAnalysis-BrandConfig'
+)
+
 
 class QueryPromptReadError(Exception):
     """Raised when enabled query prompts cannot be read from DynamoDB."""
+
+
+class MarketReadError(Exception):
+    """Raised when the run's keywords name markets and the market list cannot be read."""
+
+
+class ManifestKeyword(NamedTuple):
+    """One keyword of the run and the market it is asked from (``Market.to_json()``; ``None`` = global)."""
+
+    keyword: str
+    market: dict[str, Any] | None
 
 
 def read_enabled_query_prompts() -> list[dict[str, Any]]:
@@ -115,13 +133,13 @@ def resolve_query_prompts(event: dict[str, Any]) -> list:
     return read_enabled_query_prompts()
 
 
-def read_keywords_from_dynamodb() -> list[str]:
-    """Read active keywords from DynamoDB Keywords table (every page)."""
+def read_keywords_from_dynamodb() -> list[dict[str, Any]]:
+    """Read active keyword items from the DynamoDB Keywords table (every page)."""
     return read_keywords_for_scope({'mode': 'all'})
 
 
-def read_keywords_for_scope(scope: dict[str, Any]) -> list[str]:
-    """Resolve a scope descriptor (all / groups / keyword ids) to active keyword texts.
+def read_keywords_for_scope(scope: dict[str, Any]) -> list[dict[str, Any]]:
+    """Resolve a scope descriptor (all / groups / keyword ids, optional markets) to active keyword items.
 
     Resolution happens at run time, so a schedule that targets a keyword group
     picks up keywords added to the group after the schedule was created.
@@ -132,9 +150,8 @@ def read_keywords_for_scope(scope: dict[str, Any]) -> list[str]:
     except Exception as e:
         raise RuntimeError(f"Failed to read keywords from DynamoDB: {e!s}") from e
 
-    keywords = [item['keyword'] for item in items]
-    logger.info('Resolved %s active keywords for %s', len(keywords), describe_scope(scope))
-    return keywords
+    logger.info('Resolved %s active keywords for %s', len(items), describe_scope(scope))
+    return items
 
 
 def validate_keywords(keywords: list) -> list[str]:
@@ -143,10 +160,7 @@ def validate_keywords(keywords: list) -> list[str]:
 
     for keyword in keywords:
         # Handle dict format (from DynamoDB/API with timestamp)
-        if isinstance(keyword, dict):
-            keyword_text = keyword.get('keyword', '')
-        else:
-            keyword_text = keyword
+        keyword_text = keyword.get('keyword', '') if isinstance(keyword, dict) else keyword
 
         # Skip empty lines and whitespace-only lines
         if not keyword_text or not keyword_text.strip():
@@ -162,7 +176,7 @@ def validate_keywords(keywords: list) -> list[str]:
     return valid_keywords
 
 
-def _keywords_for_scope_event(event: dict[str, Any]) -> list[str]:
+def _keywords_for_scope_event(event: dict[str, Any]) -> list[dict[str, Any]]:
     """Case 0: a scope descriptor (group-aware schedules), resolved at run time."""
     scope, scope_error = validate_scope(event.get('scope'))
     if scope is None:
@@ -171,6 +185,11 @@ def _keywords_for_scope_event(event: dict[str, Any]) -> list[str]:
         raise error
     logger.info('Resolving keywords for scope %s', describe_scope(scope))
     return read_keywords_for_scope(scope)
+
+
+def _resolves_from_table(event: dict[str, Any]) -> bool:
+    """Whether the event's keywords are Keywords-table items (a scope, or every active keyword)."""
+    return 'scope' in event or event.get('source') == 'dynamodb'
 
 
 def _keywords_from_event(event: dict[str, Any]) -> list:
@@ -202,14 +221,64 @@ def _keywords_from_event(event: dict[str, Any]) -> list:
     raise error
 
 
-def _valid_keywords_from_event(event: dict[str, Any]) -> list[str]:
-    """The event's keywords, validated; raises ``ValueError`` when none survive validation."""
-    valid_keywords = validate_keywords(_keywords_from_event(event))
+def _valid_keywords_from_event(event: dict[str, Any]) -> list[ManifestKeyword]:
+    """The event's keywords, validated, each with the market it is asked from.
+
+    Raises ``ValueError`` when none survive validation.
+    """
+    raw_keywords = _keywords_from_event(event)
+    valid_keywords = validate_keywords(raw_keywords)
     if not valid_keywords:
         error = ValueError("No valid keywords found. Keywords must be non-empty strings.")
         log_error(error, "parse keywords validation", event)
         raise error
-    return valid_keywords
+    market_ids = _keyword_market_ids(event, raw_keywords)
+    payloads = _market_payloads(set(market_ids.values()))
+    return [
+        ManifestKeyword(keyword, payloads.get(market_ids.get(normalize_keyword(keyword), GLOBAL_MARKET_ID)))
+        for keyword in valid_keywords
+    ]
+
+
+def _keyword_market_ids(event: dict[str, Any], raw_keywords: list) -> dict[str, str]:
+    """The market of each keyword by identity (``normalize_keyword``).
+
+    A scope (or every active keyword) already resolved to Keywords items; a
+    direct keyword list is looked up among the active keywords, and a text
+    that matches none of them is asked globally.
+    """
+    if _resolves_from_table(event):
+        items = [entry for entry in raw_keywords if isinstance(entry, dict)]
+    else:
+        try:
+            items = query_active_keywords(dynamodb.Table(KEYWORDS_TABLE))
+        except Exception as e:
+            raise RuntimeError(f"Failed to read keywords from DynamoDB: {e!s}") from e
+    return {
+        normalize_keyword(item['keyword']): keyword_market_id(item)
+        for item in items
+        if isinstance(item.get('keyword'), str) and item['keyword'].strip()
+    }
+
+
+def _market_payloads(market_ids: set[str]) -> dict[str, dict[str, Any]]:
+    """``Market.to_json()`` of every configured market in ``market_ids``.
+
+    Fails closed: a run whose keywords name markets must not silently ask
+    them globally because the market list could not be read. A keyword whose
+    market is no longer configured is asked globally, with a warning.
+    """
+    wanted = market_ids - {GLOBAL_MARKET_ID}
+    if not wanted:
+        return {}
+    try:
+        configured = markets_by_id(load_markets(dynamodb.Table(BRAND_CONFIG_TABLE)))
+    except Exception as e:
+        raise MarketReadError(f"Could not read the markets from {BRAND_CONFIG_TABLE}") from e
+    unknown = sorted(wanted - configured.keys())
+    if unknown:
+        logger.warning('Keywords name unconfigured markets %s; they are asked globally', unknown)
+    return {market_id: configured[market_id].to_json() for market_id in wanted & configured.keys()}
 
 
 def _unwrap_event(event: dict[str, Any], context: Any) -> tuple[dict[str, Any], str]:
@@ -230,16 +299,21 @@ def _direct_invocation_name(context: Any) -> str:
     return str(request_id) if request_id else f"direct-{get_timestamp_compact()}"
 
 
-def write_keywords_manifest(execution_name: str, keywords: list[str], timestamp: str) -> dict[str, str]:
+def write_keywords_manifest(execution_name: str, keywords: list[ManifestKeyword], timestamp: str) -> dict[str, str]:
     """Write the run's keyword list to S3 for the ProcessKeywords Distributed Map to read.
 
-    The list lives in S3 rather than in the state because state is capped at
-    256 KiB: at ~100 bytes a keyword (560 at the 500-character maximum) the
-    inline list alone put a ceiling of a few thousand keywords on a run.
-    ``runs/`` objects are scratch and expire through the bucket's lifecycle rule.
+    Each entry is ``{"keyword", "timestamp", "market"}``: ``market`` is the
+    keyword's ``Market.to_json()``, or ``null`` for a global keyword. The list
+    lives in S3 rather than in the state because state is capped at
+    256 KiB: at ~100 bytes a keyword (560 at the 500-character maximum, plus
+    ~400 for a market) the inline list alone put a ceiling of a few thousand
+    keywords on a run. ``runs/`` objects are scratch and expire through the
+    bucket's lifecycle rule.
     """
     key = f"{RUNS_PREFIX}{execution_name}/keywords.json"
-    body = json.dumps([{'keyword': keyword, 'timestamp': timestamp} for keyword in keywords])
+    body = json.dumps([
+        {'keyword': entry.keyword, 'timestamp': timestamp, 'market': entry.market} for entry in keywords
+    ])
     s3_client.put_object(Bucket=KEYWORDS_BUCKET, Key=key, Body=body, ContentType='application/json')
     logger.info('Wrote %s keywords to s3://%s/%s', len(keywords), KEYWORDS_BUCKET, key)
     return {'bucket': KEYWORDS_BUCKET, 'key': key}
@@ -255,7 +329,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     Execution input formats:
     1. Scope descriptor (trigger APIs, schedules; run-time resolution):
-       {"scope": {"mode": "all" | "groups" | "keywords", ...}}
+       {"scope": {"mode": "all" | "groups" | "keywords", ..., "market_ids"?: ["cl-es", "global"]}}
     2. Legacy scheduled runs: {"source": "dynamodb"} (all active keywords)
     3. Direct array: {"keywords": ["keyword1", "keyword2"]}
     4. Direct string: {"keywords": "keyword1\nkeyword2"}
@@ -265,9 +339,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     DynamoDB instead.
 
     The keywords are written to ``runs/<execution name>/keywords.json`` in the
-    keywords bucket as ``[{"keyword", "timestamp"}, ...]``; the output names
-    that object instead of carrying the list, so the state stays the same size
-    however many keywords the run covers.
+    keywords bucket as ``[{"keyword", "timestamp", "market"}, ...]`` (``market``
+    is the keyword's market as ``Market.to_json()``, ``null`` when global); the
+    output names that object instead of carrying the list, so the state stays
+    the same size however many keywords the run covers.
 
     Output:
     {

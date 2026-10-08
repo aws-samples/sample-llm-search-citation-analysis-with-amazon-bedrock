@@ -22,13 +22,15 @@ from api_clients import (
     clean_url,
     extract_citations_from_response,
 )
-from brand_extractor import extract_brands_from_response
+from brand_extractor import DEFAULT_EXTRACTION_CONFIG, extract_brands_from_response
 from search_clients import BraveSearchClient, ExaSearchClient, FirecrawlSearchClient, SerpAPIClient, TavilySearchClient
 
 # Import centralized provider constants and error handling
+from shared.ai_clients import perplexity_agent_text
 from shared.config import Provider
 from shared.constants import MAX_KEYWORD_LENGTH
 from shared.dynamo_decimal import convert_floats_to_decimal
+from shared.markets import GLOBAL_MARKET_ID, Market, brand_config_for_market, market_from_payload
 from shared.prompt_safety import sanitize_user_input
 from shared.provider_health import record_provider_failure, record_provider_success
 from shared.provider_models import DEFAULT_PROVIDER_MODELS, ProviderConfigUnavailableError, read_provider_model
@@ -54,7 +56,7 @@ def get_extraction_config() -> dict[str, Any]:
     if _extraction_config is None:
         try:
             config_path = os.path.join(os.path.dirname(__file__), 'extraction_config.json')
-            with open(config_path) as f:
+            with open(config_path, encoding='utf-8') as f:
                 _extraction_config = json.load(f)
             logger.info("Loaded extraction config")
         except (OSError, json.JSONDecodeError) as e:
@@ -81,36 +83,46 @@ def slugify(text: str) -> str:
     return text[:100]  # Limit length
 
 
+def raw_response_s3_key(keyword: str, provider: str, query_prompt_id: str, timestamp: str) -> str:
+    """``raw-responses/{date}/{keyword-slug}/{provider}/{query_prompt_id}/{timestamp}.json``.
+
+    The query prompt is part of the key: every persona of one keyword and
+    provider shares the run timestamp, so without it each persona's answer
+    overwrote the one before.
+    """
+    date_str = timestamp[:10]  # YYYY-MM-DD
+    prompt_slug = slugify(query_prompt_id) or 'default'
+    # Make timestamp safe for S3 key (replace : with -)
+    safe_timestamp = timestamp.replace(':', '-')
+    return f"raw-responses/{date_str}/{slugify(keyword)}/{provider}/{prompt_slug}/{safe_timestamp}.json"
+
+
 def store_raw_response_to_s3(
     keyword: str,
     provider: str,
     timestamp: str,
     raw_response: dict[str, Any],
     extracted_data: dict[str, Any],
-    metadata: dict[str, Any]
+    metadata: dict[str, Any],
+    *,
+    query_prompt_id: str = 'default',
+    market_id: str = GLOBAL_MARKET_ID,
 ) -> str | None:
     """
-    Store raw API response to S3.
-
-    Structure: raw-responses/{date}/{keyword-slug}/{provider}/{timestamp}.json
+    Store raw API response to S3 (key: ``raw_response_s3_key``).
 
     Returns S3 URI if successful, None otherwise.
     """
     try:
-        # Parse date from timestamp
-        date_str = timestamp[:10]  # YYYY-MM-DD
-
-        # Create S3 key
-        keyword_slug = slugify(keyword)
-        # Make timestamp safe for S3 key (replace : with -)
-        safe_timestamp = timestamp.replace(':', '-')
-        s3_key = f"raw-responses/{date_str}/{keyword_slug}/{provider}/{safe_timestamp}.json"
+        s3_key = raw_response_s3_key(keyword, provider, query_prompt_id, timestamp)
 
         # Build the full document
         document = {
             "keyword": keyword,
             "provider": provider,
             "timestamp": timestamp,
+            "query_prompt_id": query_prompt_id,
+            "market_id": market_id,
             "raw_api_response": raw_response,
             "extracted": extracted_data,
             "metadata": metadata
@@ -214,7 +226,11 @@ CLAUDE_CITATION_SYSTEM_PROMPT = (
 )
 
 
-def provider_error_result(provider: str, model: str, error: Exception, start_time: float) -> dict[str, Any]:
+ProviderResult = dict[str, Any]
+"""One provider's answer to one query: ``provider``, ``response``, ``citations``, ``status``, ``metadata``, ..."""
+
+
+def provider_error_result(provider: str, model: str, error: Exception, start_time: float) -> ProviderResult:
     """The uniform error-result dict every query_* previously duplicated."""
     return {
         "provider": provider,
@@ -245,6 +261,7 @@ def _query_llm(
     model: str,
     usage_key: str = 'usage',
     model_from_response: bool = False,
+    extra_metadata: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The request/parse/error flow every LLM provider shares.
 
@@ -254,6 +271,7 @@ def _query_llm(
     provider cannot take the keyword down and ``_record_provider_outcome`` can
     classify what went wrong. ``model`` labels the metadata (and the error
     result); with ``model_from_response`` the payload's own ``model`` wins.
+    ``extra_metadata`` adds provider-specific fields read from the payload.
     """
     start_time = time.time()
     try:
@@ -274,7 +292,8 @@ def _query_llm(
         "metadata": {
             "model": raw_response.get('model', model) if model_from_response else model,
             "latency_ms": latency_ms,
-            "usage": raw_response.get(usage_key, {})
+            "usage": raw_response.get(usage_key, {}),
+            **(extra_metadata(raw_response) if extra_metadata else {}),
         }
     }
 
@@ -313,36 +332,58 @@ def _parse_openai_response(raw_response: dict[str, Any]) -> tuple[str, list[str]
 
 def query_openai(
     keyword: str, api_key: str, model: str = DEFAULT_PROVIDER_MODELS[Provider.OPENAI], query_template: str | None = None,
-) -> dict[str, Any]:
+    market: Market | None = None,
+) -> ProviderResult:
     """Query OpenAI API with native web search via Responses API."""
     def request(query: str) -> dict[str, Any]:
-        return OpenAIClient(api_key).responses_with_web_search(query=query, model=model)
+        return OpenAIClient(api_key).responses_with_web_search(query=query, model=model, market=market)
 
     return _query_llm(Provider.OPENAI, keyword, query_template, request, _parse_openai_response, model=model)
 
 
+def _perplexity_cited_urls(raw_response: dict[str, Any]) -> list[str]:
+    """The ``search_results`` hit URLs, then any message annotation URLs, of an Agent API response."""
+    urls: list[str] = []
+    for item in raw_response.get('output') or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get('type') == 'search_results':
+            urls.extend(result['url'] for result in item.get('results') or [] if isinstance(result, dict) and result.get('url'))
+        elif item.get('type') == 'message':
+            urls.extend(
+                annotation['url']
+                for part in item.get('content') or [] if isinstance(part, dict)
+                for annotation in part.get('annotations') or [] if isinstance(annotation, dict) and annotation.get('url')
+            )
+    return urls
+
+
 def _parse_perplexity_response(raw_response: dict[str, Any]) -> tuple[str, list[str]]:
-    """Answer text plus citations from ``search_results``, else ``citations``, else the text itself."""
-    response_text = raw_response['choices'][0]['message']['content']
-    search_results = raw_response.get('search_results') or []
-    citations = [clean_url(result['url']) for result in search_results if result.get('url')]
-    if not citations:
-        citations = [clean_url(url) for url in raw_response.get('citations', [])]
+    """Agent API answer text plus the searched and annotated URLs (deduplicated in order), else the text's URLs."""
+    response_text = perplexity_agent_text(raw_response)
+    citations = list(dict.fromkeys(clean_url(url) for url in _perplexity_cited_urls(raw_response)))
     if not citations:
         citations = extract_citations_from_response(response_text)
     return response_text, citations
 
 
+def _perplexity_cost(raw_response: dict[str, Any]) -> dict[str, Any]:
+    """``cost_usd``: the call's total price as Perplexity reports it (``usage.cost.total_cost``), when present."""
+    cost = ((raw_response.get('usage') or {}).get('cost') or {}).get('total_cost')
+    return {'cost_usd': cost} if isinstance(cost, int | float) and not isinstance(cost, bool) else {}
+
+
 def query_perplexity(
     keyword: str, api_key: str, model: str = DEFAULT_PROVIDER_MODELS[Provider.PERPLEXITY], query_template: str | None = None,
-) -> dict[str, Any]:
-    """Query Perplexity API."""
+    market: Market | None = None,
+) -> ProviderResult:
+    """Query Perplexity's Agent API with web search."""
     def request(query: str) -> dict[str, Any]:
-        return PerplexityClient(api_key, model=model).chat_completion([{"role": "user", "content": query}])
+        return PerplexityClient(api_key, model=model).agent_response(query, market=market)
 
     return _query_llm(
         Provider.PERPLEXITY, keyword, query_template, request, _parse_perplexity_response,
-        model=model, model_from_response=True,
+        model=model, model_from_response=True, extra_metadata=_perplexity_cost,
     )
 
 
@@ -421,10 +462,11 @@ def _parse_gemini_response(raw_response: dict[str, Any]) -> tuple[str, list[str]
 
 def query_gemini(
     keyword: str, api_key: str, model: str = DEFAULT_PROVIDER_MODELS[Provider.GEMINI], query_template: str | None = None,
-) -> dict[str, Any]:
+    market: Market | None = None,
+) -> ProviderResult:
     """Query Gemini API with Google Search grounding, using ``model``."""
     def request(query: str) -> dict[str, Any]:
-        return GeminiClient(api_key, model=model).generate_content(query)
+        return GeminiClient(api_key, model=model).generate_content(query, market=market)
 
     return _query_llm(
         Provider.GEMINI, keyword, query_template, request, _parse_gemini_response,
@@ -445,16 +487,33 @@ def _log_claude_tool_block(block_type: str | None, content_block: dict[str, Any]
 
 
 def _claude_search_result_urls(content_block: dict[str, Any], citations: list[str]) -> None:
-    """Append the URLs of a ``web_search_tool_result`` block that are not listed yet."""
-    for result in content_block.get('content', []):
-        url = result.get('url') if result.get('type') == 'web_search_result' else None
-        if url and url not in citations:
-            citations.append(clean_url(url))
+    """Append the URLs of a ``web_search_tool_result`` block that are not listed yet.
+
+    A failed search carries an error object (``{"error_code": ...}``)
+    instead of the result list; it adds nothing.
+    """
+    results = content_block.get('content')
+    if not isinstance(results, list):
+        logger.warning('Claude web search result without results: %s', json.dumps(results, default=str)[:200])
+        return
+    for result in results:
+        url = result.get('url') if isinstance(result, dict) and result.get('type') == 'web_search_result' else None
+        if url:
+            _merge_citations(citations, [clean_url(url)])
             logger.debug('Claude web search result URL: %s', url)
 
 
+def _claude_text_citation_urls(content_block: dict[str, Any]) -> list[str]:
+    """The cleaned URLs a text block cites (``citations[].url``, ``web_search_result_location``)."""
+    return [
+        clean_url(citation['url'])
+        for citation in content_block.get('citations') or []
+        if isinstance(citation, dict) and citation.get('url')
+    ]
+
+
 def _parse_claude_response(raw_response: dict[str, Any]) -> tuple[str, list[str]]:
-    """Text blocks and web-search result URLs, plus any URLs in the text itself (Claude's primary source)."""
+    """Text blocks, their cited URLs and the web-search result URLs, plus any URLs in the text itself."""
     # Log the full response structure for debugging
     logger.info('Claude raw response structure: %s', json.dumps(raw_response, default=str)[:1000])
     response_text = ""
@@ -464,6 +523,7 @@ def _parse_claude_response(raw_response: dict[str, Any]) -> tuple[str, list[str]
         logger.debug('Claude content block type: %s', block_type)
         if block_type == 'text':
             response_text += content_block.get('text', '')
+            _merge_citations(citations, _claude_text_citation_urls(content_block))
         elif block_type == 'web_search_tool_result':
             _claude_search_result_urls(content_block, citations)
         else:
@@ -473,10 +533,13 @@ def _parse_claude_response(raw_response: dict[str, Any]) -> tuple[str, list[str]
 
 def query_claude(
     keyword: str, api_key: str, model: str = DEFAULT_PROVIDER_MODELS[Provider.CLAUDE], query_template: str | None = None,
-) -> dict[str, Any]:
+    market: Market | None = None,
+) -> ProviderResult:
     """Query Claude API with web search."""
     def request(query: str) -> dict[str, Any]:
-        return ClaudeClient(api_key, model=model).generate_content(query, system_prompt=CLAUDE_CITATION_SYSTEM_PROMPT)
+        return ClaudeClient(api_key, model=model).generate_content(
+            query, system_prompt=CLAUDE_CITATION_SYSTEM_PROMPT, market=market,
+        )
 
     return _query_llm(
         Provider.CLAUDE, keyword, query_template, request, _parse_claude_response,
@@ -484,25 +547,25 @@ def query_claude(
     )
 
 
-def _run_openai_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
+def _run_openai_provider(keyword: str, api_key: str, query_template: str | None, market: Market | None) -> dict[str, Any]:
     """OpenAI answers with the model configured in Settings (fail-closed)."""
     model = get_provider_model(Provider.OPENAI)
-    return query_openai(keyword, api_key, model=model, query_template=query_template)
+    return query_openai(keyword, api_key, model=model, query_template=query_template, market=market)
 
 
-def _run_perplexity_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
+def _run_perplexity_provider(keyword: str, api_key: str, query_template: str | None, market: Market | None) -> dict[str, Any]:
     """Perplexity answers with the model configured in Settings (fail-closed)."""
     model = get_provider_model(Provider.PERPLEXITY)
-    return query_perplexity(keyword, api_key, model=model, query_template=query_template)
+    return query_perplexity(keyword, api_key, model=model, query_template=query_template, market=market)
 
 
-def _run_gemini_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
+def _run_gemini_provider(keyword: str, api_key: str, query_template: str | None, market: Market | None) -> dict[str, Any]:
     """Gemini answers with the model configured in Settings (fail-closed)."""
     model = get_provider_model(Provider.GEMINI)
-    return query_gemini(keyword, api_key, model=model, query_template=query_template)
+    return query_gemini(keyword, api_key, model=model, query_template=query_template, market=market)
 
 
-def _run_claude_provider(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
+def _run_claude_provider(keyword: str, api_key: str, query_template: str | None, market: Market | None) -> dict[str, Any]:
     """Claude answers with the model configured in Settings (fail-closed), to the same query as everyone else.
 
     The "include source URLs" instruction moved into Claude's system prompt
@@ -512,13 +575,17 @@ def _run_claude_provider(keyword: str, api_key: str, query_template: str | None)
     `{keyword}` position.
     """
     model = get_provider_model(Provider.CLAUDE)
-    return query_claude(keyword, api_key, model=model, query_template=query_template)
+    return query_claude(keyword, api_key, model=model, query_template=query_template, market=market)
 
 
-def _search_provider_runner(client_class: type) -> Callable[[str, str, str | None], dict[str, Any]]:
-    """Search providers share one shape: build the client, search the keyword."""
-    def run(keyword: str, api_key: str, query_template: str | None) -> dict[str, Any]:
-        return client_class(api_key).search(keyword)
+ProviderRunner = Callable[[str, str, str | None, Market | None], ProviderResult]
+"""``(keyword, api_key, query_template, market) -> result``."""
+
+
+def _search_provider_runner(client_class: type) -> ProviderRunner:
+    """Search providers share one shape: build the client, search the keyword (they take no template)."""
+    def run(keyword: str, api_key: str, query_template: str | None, market: Market | None) -> dict[str, Any]:
+        return client_class(api_key).search(keyword, market)
     return run
 
 
@@ -526,7 +593,7 @@ def _search_provider_runner(client_class: type) -> Callable[[str, str, str | Non
 # runner). Replaces the nine copy-pasted
 # enabled/disabled/no-key ladders (bugs.md 3.2); execution order is
 # unchanged.
-PROVIDER_RUNNERS: list[tuple[str, str, str, Callable[[str, str, str | None], dict[str, Any]]]] = [
+PROVIDER_RUNNERS: list[tuple[str, str, str, ProviderRunner]] = [
     (Provider.OPENAI, 'openai-key', 'OpenAI', _run_openai_provider),
     (Provider.PERPLEXITY, 'perplexity-key', 'Perplexity', _run_perplexity_provider),
     (Provider.GEMINI, 'gemini-key', 'Gemini', _run_gemini_provider),
@@ -571,7 +638,9 @@ def _record_provider_outcome(provider_id: str, result: dict[str, Any]) -> None:
     record_provider_success(table, provider_id)
 
 
-def execute_all_providers(keyword: str, providers: list[str], query_template: str | None = None) -> list[dict[str, Any]]:
+def execute_all_providers(
+    keyword: str, providers: list[str], query_template: str | None = None, market: Market | None = None,
+) -> list[dict[str, Any]]:
     """
     Execute queries across the selected AI and search providers.
 
@@ -580,6 +649,7 @@ def execute_all_providers(keyword: str, providers: list[str], query_template: st
         providers: The provider IDs to run (the analysis workflow sends one per invocation).
         query_template: Optional query template with {keyword} placeholder.
                        If None, each provider uses its default query format.
+        market: The keyword's market (``None``: the global market, asked as before markets existed).
     """
     results = []
 
@@ -598,7 +668,7 @@ def execute_all_providers(keyword: str, providers: list[str], query_template: st
 
         logger.info('Querying %s...', label)
         try:
-            result = run_query(keyword, api_key, query_template)
+            result = run_query(keyword, api_key, query_template, market)
         except ProviderConfigUnavailableError:
             logger.exception('%s provider config unavailable, skipping this run', label)
             continue
@@ -608,92 +678,123 @@ def execute_all_providers(keyword: str, providers: list[str], query_template: st
     return results
 
 
-def store_search_results(keyword: str, timestamp: str, results: list[dict[str, Any]]) -> bool:
-    """Store search results in DynamoDB and raw responses to S3."""
+def _extraction_brand_config(market: Market | None) -> dict[str, Any] | None:
+    """The brand config extraction uses (``market``'s competitors and aliases added), or ``None`` when extraction is off.
+
+    Without a market it is the stored config as is; with one, the stored
+    config (the extractor's defaults when nothing is stored) plus the
+    market's extra names.
+    """
+    extraction_config = get_extraction_config()
+    if not extraction_config.get("brand_extraction", {}).get("enabled", True):
+        return None
+    stored = get_brand_config()
+    brand_config = brand_config_for_market(stored or DEFAULT_EXTRACTION_CONFIG, market) if market else stored
+    logger.info('Loaded brand config for extraction: industry=%s', (brand_config or {}).get('industry') or 'default')
+    return brand_config
+
+
+def _extracted_brands(result: dict[str, Any], brand_config: dict[str, Any] | None) -> dict[str, Any]:
+    """Brand mentions in an LLM result's text (none for search providers, empty answers or extraction off)."""
+    provider = result.get("provider", "unknown")
+    response_text = result.get("response", "")
+    if brand_config is None or not response_text or result.get("provider_type", "llm") != "llm":
+        return {"brands": [], "brand_count": 0}
+    try:
+        logger.info('Starting brand extraction for %s (response length: %s chars)', provider, len(response_text))
+        brand_data = extract_brands_from_response(response_text, config=brand_config)
+    except Exception:
+        logger.exception('Brand extraction failed for %s', provider)
+        return {"brands": [], "brand_count": 0}
+    logger.info('Brand extraction for %s: %s brands found', provider, brand_data.get('brand_count', 0))
+    return brand_data
+
+
+def _result_item(
+    keyword: str, timestamp: str, result: dict[str, Any], brand_data: dict[str, Any], market_id: str, s3_uri: str | None,
+) -> dict[str, Any]:
+    """The SearchResults row of one provider result."""
+    # Every runner sets "provider"; "unknown" mirrors deduplication's rollup for a row without one.
+    provider: str = result.get("provider", "unknown")
+    provider_type = result.get("provider_type", "llm")  # Default to llm for backward compatibility
+    query_prompt_id = result.get("query_prompt_id", "default")
+    item: dict[str, Any] = {
+        "keyword": keyword,
+        "timestamp_provider": f"{timestamp}#{provider}#{query_prompt_id}",
+        "timestamp": timestamp,
+        "provider": provider,
+        "provider_type": provider_type,
+        "query_prompt_id": query_prompt_id,
+        "query_prompt_name": result.get("query_prompt_name", "Default"),
+        "market_id": market_id,
+        "response": result.get("response", ""),
+        "citations": result.get("citations", []),
+        "status": result.get("status", "unknown"),
+        "brands": brand_data.get("brands", []),
+        "brand_count": brand_data.get("brand_count", 0),
+    }
+    # Add search results for search providers (convert floats to Decimal for DynamoDB)
+    if provider_type == "search" and result.get("search_results"):
+        item["search_results"] = convert_floats_to_decimal(result.get("search_results", []))
+    if s3_uri:
+        item["raw_response_s3_uri"] = s3_uri
+    metadata = result.get("metadata", {})
+    if metadata:
+        item["metadata"] = convert_floats_to_decimal(metadata)
+    if "error" in result:
+        item["error"] = result["error"]
+    return item
+
+
+def _store_raw_result(
+    keyword: str, timestamp: str, result: dict[str, Any], brand_data: dict[str, Any], market_id: str,
+) -> str | None:
+    """Store one result's raw provider answer to S3; its URI, or ``None`` when there is none to store."""
+    raw_response = result.get("raw_response")
+    if not raw_response:
+        return None
+    extracted_data = {
+        "response_text": result.get("response", ""),
+        "citations": result.get("citations", []),
+        "brands": brand_data.get("brands", []),
+        "search_results": result.get("search_results", [])  # For search providers
+    }
+    return store_raw_response_to_s3(
+        keyword=keyword,
+        provider=result.get("provider", "unknown"),
+        timestamp=timestamp,
+        raw_response=raw_response,
+        extracted_data=extracted_data,
+        metadata=result.get("metadata", {}),
+        query_prompt_id=result.get("query_prompt_id", "default"),
+        market_id=market_id,
+    )
+
+
+def store_search_results(
+    keyword: str, timestamp: str, results: list[dict[str, Any]], market: Market | None = None,
+) -> bool:
+    """Store search results in DynamoDB and raw responses to S3.
+
+    Every row carries ``market_id`` (``GLOBAL_MARKET_ID`` without a market),
+    and brands are extracted with the market's competitors and local brand
+    names added to the tracked lists.
+    """
+    market_id = market.market_id if market else GLOBAL_MARKET_ID
     try:
         table = dynamodb.Table(DYNAMODB_TABLE_SEARCH_RESULTS)
-
-        # Load extraction config
-        extraction_config = get_extraction_config()
-        brand_extraction_enabled = extraction_config.get("brand_extraction", {}).get("enabled", True)
         # Load brand config once upfront and reuse for all providers (avoids repeated DynamoDB reads)
-        brand_config = None
-        if brand_extraction_enabled:
-            brand_config = get_brand_config()
-            logger.info('Loaded brand config for extraction: industry=%s', brand_config.get('industry') if brand_config else 'default')
+        brand_config = _extraction_brand_config(market)
 
         for result in results:
-            # Every runner sets "provider"; "unknown" mirrors deduplication's rollup for a row without one.
-            provider: str = result.get("provider", "unknown")
-            provider_type = result.get("provider_type", "llm")  # Default to llm for backward compatibility
-            query_prompt_id = result.get("query_prompt_id", "default")
-            query_prompt_name = result.get("query_prompt_name", "Default")
-            timestamp_provider = f"{timestamp}#{provider}#{query_prompt_id}"
-            response_text = result.get("response", "")
-
-            # Extract brand mentions from response if enabled (only for LLM providers with text responses)
-            brand_data = {"brands": [], "brand_count": 0}
-            if brand_extraction_enabled and response_text and provider_type == "llm":
-                try:
-                    logger.info('Starting brand extraction for %s (response length: %s chars)', provider, len(response_text))
-                    brand_data = extract_brands_from_response(response_text, config=brand_config)
-                    logger.info('Brand extraction for %s: %s brands found', provider, brand_data.get('brand_count', 0))
-                except Exception as e:
-                    logger.exception('Brand extraction failed for %s: %s', provider, e)
-
-            # Store raw response to S3
-            raw_response = result.get("raw_response")
-            metadata = result.get("metadata", {})
-            s3_uri = None
-
-            if raw_response:
-                extracted_data = {
-                    "response_text": response_text,
-                    "citations": result.get("citations", []),
-                    "brands": brand_data.get("brands", []),
-                    "search_results": result.get("search_results", [])  # For search providers
-                }
-                s3_uri = store_raw_response_to_s3(
-                    keyword=keyword,
-                    provider=provider,
-                    timestamp=timestamp,
-                    raw_response=raw_response,
-                    extracted_data=extracted_data,
-                    metadata=metadata
-                )
-
-            item = {
-                "keyword": keyword,
-                "timestamp_provider": timestamp_provider,
-                "timestamp": timestamp,
-                "provider": provider,
-                "provider_type": provider_type,
-                "query_prompt_id": query_prompt_id,
-                "query_prompt_name": query_prompt_name,
-                "response": response_text,
-                "citations": result.get("citations", []),
-                "status": result.get("status", "unknown"),
-                "brands": brand_data.get("brands", []),
-                "brand_count": brand_data.get("brand_count", 0),
-            }
-
-            # Add search results for search providers (convert floats to Decimal for DynamoDB)
-            if provider_type == "search" and result.get("search_results"):
-                item["search_results"] = convert_floats_to_decimal(result.get("search_results", []))
-
-            # Add S3 URI if raw response was stored
-            if s3_uri:
-                item["raw_response_s3_uri"] = s3_uri
-
-            # Add metadata (convert floats to Decimal for DynamoDB)
-            if metadata:
-                item["metadata"] = convert_floats_to_decimal(metadata)
-
-            if "error" in result:
-                item["error"] = result["error"]
-
+            brand_data = _extracted_brands(result, brand_config)
+            s3_uri = _store_raw_result(keyword, timestamp, result, brand_data, market_id)
+            item = _result_item(keyword, timestamp, result, brand_data, market_id, s3_uri)
             table.put_item(Item=item)
-            logger.info('Stored result for %s (%s) with %s brand mentions, S3: %s', provider, provider_type, item['brand_count'], s3_uri or 'N/A')
+            logger.info(
+                'Stored result for %s (%s) with %s brand mentions, S3: %s',
+                item['provider'], item['provider_type'], item['brand_count'], s3_uri or 'N/A',
+            )
     except Exception:
         logger.exception("Error storing results")
         return False
@@ -745,15 +846,35 @@ def _slim_result(result: dict[str, Any]) -> dict[str, Any]:
     return slim_result
 
 
+def _event_market(event: dict[str, Any]) -> Market | None:
+    """The event's market, re-validated; ``None`` (the global market) when it carries none.
+
+    A market that fails validation raises ``ValueError`` instead of falling
+    back to the global market: asking the keyword globally would store its
+    answers under the wrong market.
+    """
+    payload = event.get('market')
+    market = market_from_payload(payload)
+    if payload is not None and market is None:
+        error = ValueError("Invalid market in event")
+        log_error(error, "search handler", {'keyword': event.get('keyword')})
+        raise error
+    return market
+
+
 def _search_keyword(event: dict[str, Any]) -> dict[str, Any]:
     """Run every query prompt across the selected providers and store the results."""
     keyword = _sanitized_keyword(event)
+    market = _event_market(event)
     timestamp = event.get('timestamp', get_timestamp())
     providers = event['providers']
     # If no query prompts, use a single default (backward compatible)
     query_prompts = event.get('query_prompts') or [{"id": "default", "name": "Default", "template": None}]
 
-    logger.info('Processing keyword: %s, prompts: %s, providers: %s', keyword, len(query_prompts), providers)
+    logger.info(
+        'Processing keyword: %s, market: %s, prompts: %s, providers: %s',
+        keyword, market.market_id if market else GLOBAL_MARKET_ID, len(query_prompts), providers,
+    )
 
     all_results: list[dict[str, Any]] = []
     for prompt in query_prompts:
@@ -765,6 +886,7 @@ def _search_keyword(event: dict[str, Any]) -> dict[str, Any]:
                 keyword,
                 providers=providers,
                 query_template=prompt.get('template'),
+                market=market,
             )
         except Exception:
             logger.exception("Error running prompt '%s' for '%s'", prompt_name, keyword)
@@ -776,7 +898,7 @@ def _search_keyword(event: dict[str, Any]) -> dict[str, Any]:
             result['query_prompt_name'] = prompt_name
         all_results.extend(results)
 
-    store_success = store_search_results(keyword, timestamp, all_results)
+    store_success = store_search_results(keyword, timestamp, all_results, market)
     if not store_success:
         logger.warning("Failed to store some results in DynamoDB")
 
@@ -793,6 +915,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         "keyword": "best hotels in malaga",
         "timestamp": "2025-01-15T10:30:00Z",
         "query_prompts": [{"id": "...", "name": "Family", "template": "As a family traveler, find me {keyword}"}],
+        "market": {...} | null,  // Market.to_json() of the keyword's market; null/absent = global
         "providers": ["brave"]  // the provider IDs to run; the analysis workflow
                                 // sends one id per invocation
     }

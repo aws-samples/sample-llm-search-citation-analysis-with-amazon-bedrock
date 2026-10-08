@@ -97,6 +97,10 @@ select = [
     "C90", "PLR0911", "PLR0912", "PLR0915", "RET504", "ERA001",
     "S", "BLE001", "TRY002", "TRY300", "TRY301", "TRY400", "T20", "PT", "PIE",
     "DTZ", "LOG", "G", "RET", "C4", "PERF", "FLY", "FURB", "PGH", "T10", "ISC", "RSE", "PLW", "A",
+    # 2.37.0 audit: the exception object repeated in a `logger.exception`
+    # message (the traceback already carries it), `split()` without maxsplit
+    # where only the first/last part is read, and shebang/executable drift.
+    "TRY401", "PLC0207", "EXE",
 ]
 
 ignore = [

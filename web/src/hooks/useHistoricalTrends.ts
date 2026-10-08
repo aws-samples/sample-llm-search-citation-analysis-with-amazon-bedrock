@@ -2,6 +2,7 @@ import type {
   HistoricalTrendsResponse, PeriodType, ReportScope
 } from '../types';
 import { isRecord } from '../types/domain/keywordDecoders';
+import { useMarketScopedFetch } from './useMarketScopedFetch';
 import { reportScopeParams } from '../components/ui/reportScope';
 import {
   apiRequestErrors, isAnalysisPayload, useAnalysisEndpoint 
@@ -22,12 +23,13 @@ const historicalTrendsEndpoint = {
   isValidResponse: isHistoricalTrendsResponse,
   ...apiRequestErrors('Failed to fetch historical trends'),
   buildRequest: (
+    marketId: string | null,
     scope: ReportScope,
     period: PeriodType = 'day',
     days = 30
   ) => {
     const params = new URLSearchParams({
-      ...reportScopeParams(scope),
+      ...reportScopeParams(scope, marketId),
       period,
       days: days.toString(),
     });
@@ -63,8 +65,9 @@ const historicalTrendsEndpoint = {
  */
 export function useHistoricalTrends() {
   const {
-    data, loading, error, fetchData: fetchHistoricalTrends
+    data, loading, error, fetchData
   } = useAnalysisEndpoint(historicalTrendsEndpoint);
+  const fetchHistoricalTrends = useMarketScopedFetch(fetchData);
 
   return {
     data,

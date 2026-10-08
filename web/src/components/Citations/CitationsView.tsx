@@ -8,7 +8,6 @@ import type {
 import {
   API_BASE_URL, authenticatedFetch 
 } from '../../infrastructure';
-import { getDomain } from '../../formatting/urlFormatter';
 import { KeywordDetail } from '../Keywords/KeywordDetail';
 import { CitationDetailModal } from './CitationDetailModal';
 import { CitationFilters } from './CitationFilters';
@@ -21,10 +20,12 @@ import {
   parseApiResponse, 
   filterAndSortCitations, 
   safeJsonParse,
-  fetchBreakdownData 
+  fetchBreakdownData,
+  citationExportRows,
+  CITATION_EXPORT_COLUMNS,
 } from '../../exporters/citationParser';
 import type {
-  SortColumn, SortConfig, UrlBreakdown
+  ContentTypeFilter, SortColumn, SortConfig, UrlBreakdown
 } from '../../exporters/citationParser';
 import { exportToExcel } from '../../exporters/excelGenerator';
 import { StrokeIcon } from '../ui/StrokeIcon';
@@ -44,6 +45,7 @@ export const CitationsView = ({
   const [loadingBreakdown, setLoadingBreakdown] = useState<Record<string, boolean>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [minCitations, setMinCitations] = useState<number | ''>('');
+  const [contentType, setContentType] = useState<ContentTypeFilter>('all');
   const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
   const [selectedCitation, setSelectedCitation] = useState<CrawledContent | null>(null);
   const [loadingCitation, setLoadingCitation] = useState(false);
@@ -69,8 +71,8 @@ export const CitationsView = ({
 
   // Filter and sort citations
   const filteredCitations = useMemo(() => 
-    filterAndSortCitations(citations, searchQuery, minCitations, sortBy),
-  [citations, searchQuery, minCitations, sortBy]
+    filterAndSortCitations(citations, searchQuery, minCitations, sortBy, contentType),
+  [citations, searchQuery, minCitations, sortBy, contentType]
   );
 
   const {
@@ -131,17 +133,9 @@ export const CitationsView = ({
   };
 
   const downloadToExcel = async () => {
-    const excelData = filteredCitations.map((citation, idx) => ({
-      Rank: idx + 1,
-      URL: citation.url,
-      Domain: getDomain(citation.url),
-      Keywords: citation.keyword_count ?? 0,
-      'Citation Count': citation.citation_count,
-      'Keyword List': (citation.keywords ?? []).join(', '),
-    }));
     await exportToExcel({
-      data: excelData,
-      columns: [{ wch: 8 }, { wch: 80 }, { wch: 30 }, { wch: 10 }, { wch: 15 }, { wch: 60 }],
+      data: citationExportRows(filteredCitations),
+      columns: CITATION_EXPORT_COLUMNS,
       sheetName: 'Citations',
       fileName: `citations-${new Date().toISOString().split('T')[0]}.xlsx`,
     });
@@ -189,6 +183,8 @@ export const CitationsView = ({
           setSearchQuery={setSearchQuery}
           minCitations={minCitations}
           setMinCitations={setMinCitations}
+          contentType={contentType}
+          setContentType={setContentType}
           setCurrentPage={setCurrentPage}
           onDownloadExcel={downloadToExcel}
         />
@@ -238,7 +234,7 @@ export const CitationsView = ({
 
           {paginatedCitations.length === 0 && (
             <div className="text-center py-12 text-gray-500">
-              {searchQuery || minCitations ? 'No citations match your filters' : 'No citations yet'}
+              {searchQuery || minCitations || contentType !== 'all' ? 'No citations match your filters' : 'No citations yet'}
             </div>
           )}
         </div>

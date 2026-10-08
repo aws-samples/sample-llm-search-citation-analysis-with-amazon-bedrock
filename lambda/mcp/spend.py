@@ -35,6 +35,7 @@ from invoke import (
 )
 
 from shared.analysis_runs import MAX_QUERY_PROMPTS_PER_RUN
+from shared.markets import keyword_market_id
 from shared.research_agent import AGENT_DEFAULT_ROUNDS, AGENT_MAX_QUERIES_PER_ROUND
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,10 @@ def count_scope_keywords(caller: Caller, scope: JsonObject) -> tuple[int, bool]:
     if scope.get('mode') == 'keywords':
         wanted = set(scope.get('keyword_ids') or [])
         keywords = [item for item in keywords if item.get('id') in wanted]
+    market_ids = scope.get('market_ids')
+    if isinstance(market_ids, list):
+        markets = set(market_ids)
+        keywords = [item for item in keywords if keyword_market_id(item) in markets]
     return len(keywords), complete
 
 

@@ -33,6 +33,7 @@ from botocore.exceptions import ClientError
 
 from testing.admin_authz_fixtures import caller_event, invoke
 from testing.module_loader import load_handler_module
+from testing.provider_response_fixtures import PERPLEXITY_MODELS_LISTING
 
 _ENV = {
     'CORS_ORIGIN_PARAM': '',
@@ -143,8 +144,8 @@ class TestGetProvidersSurfacesHealth:
             'id': 'gemini',
             'name': 'Google Gemini',
             'description': 'Google Search grounding',
-            'model': 'gemini-3-flash-preview',
-            'default_model': 'gemini-3-flash-preview',
+            'model': 'gemini-3.6-flash',
+            'default_model': 'gemini-3.6-flash',
             'model_configurable': True,
             'docs_url': 'https://aistudio.google.com/apikey',
             'type': 'llm',
@@ -387,7 +388,7 @@ class TestKeyProbeTimeouts:
         ('tavily', 5),
         ('exa', 5),
         ('serpapi', 5),
-        ('perplexity', 10),
+        ('perplexity', 5),
         ('claude', 10),
         ('firecrawl', 10),
     ])
@@ -399,14 +400,14 @@ class TestKeyProbeTimeouts:
     def test_covers_every_listed_provider(self):
         assert set(_module._KEY_PROBES) == set(_module.PROVIDERS)
 
-    @pytest.mark.parametrize(('provider_id', 'url'), [
-        ('claude', 'https://api.anthropic.com/v1/messages'),
-        ('perplexity', 'https://api.perplexity.ai/chat/completions'),
+    @pytest.mark.parametrize(('provider_id', 'method', 'url'), [
+        ('claude', 'post', 'https://api.anthropic.com/v1/messages'),
+        ('perplexity', 'get', 'https://api.perplexity.ai/v1/models'),
     ])
-    def test_sends_the_probe_to_the_providers_answer_endpoint(self, requests_stub, provider_id, url):
+    def test_sends_the_probe_to_the_providers_endpoint(self, requests_stub, provider_id, method, url):
         _module.validate_api_key(provider_id, 'test-key-1234')
 
-        assert (requests_stub.call_args.kwargs['method'], requests_stub.call_args.kwargs['url']) == ('post', url)
+        assert (requests_stub.call_args.kwargs['method'], requests_stub.call_args.kwargs['url']) == (method, url)
 
     def test_reports_a_timed_out_probe_as_invalid_without_raising(self, requests_stub):
         requests_stub.side_effect = ProbeTimeout()
@@ -470,7 +471,7 @@ class TestGetProvidersReportsTheModel:
         _, body = _get_providers()
 
         assert (_provider(body, 'perplexity')['model'], _provider(body, 'perplexity')['model_configurable']) == (
-            'sonar', True,
+            'perplexity/sonar', True,
         )
 
     def test_keeps_the_static_label_for_a_search_provider(self):
@@ -526,8 +527,8 @@ class TestUpdateModel:
             'headers': {'Authorization': 'Bearer sk-stored-key-1234', 'Content-Type': 'application/json'},
             'json': {
                 'model': 'gpt-5.2',
-                'tools': [{'type': 'web_search_preview'}],
-                'tool_choice': 'auto',
+                'tools': [{'type': 'web_search'}],
+                'tool_choice': 'required',
                 'include': ['web_search_call.action.sources'],
                 'input': 'Reply with the single word OK.',
             },
@@ -545,19 +546,21 @@ class TestUpdateModel:
             [{'googleSearch': {}}],
         )
 
-    def test_checks_perplexity_with_the_sonar_chat_body_runs_send(self, requests_stub):
+    def test_checks_perplexity_with_the_agent_api_body_runs_send(self, requests_stub):
         _store_key('pplx-stored-key-1234')
 
-        _put_provider('perplexity', {'model': 'sonar-pro'})
+        _put_provider('perplexity', {'model': 'openai/gpt-6-luna'})
 
         assert requests_stub.call_args.kwargs == {
             'timeout': 20,
             'method': 'post',
-            'url': 'https://api.perplexity.ai/chat/completions',
+            'url': 'https://api.perplexity.ai/v1/agent',
             'headers': {'Authorization': 'Bearer pplx-stored-key-1234', 'Content-Type': 'application/json'},
             'json': {
-                'model': 'sonar-pro',
-                'messages': [{'role': 'user', 'content': 'Reply with the single word OK.'}],
+                'model': 'openai/gpt-6-luna',
+                'input': 'Reply with the single word OK.',
+                'tools': [{'type': 'web_search'}],
+                'max_output_tokens': 64,
             },
         }
 
@@ -575,7 +578,7 @@ class TestUpdateModel:
                 'model': 'claude-sonnet-4-6',
                 'max_tokens': 64,
                 'messages': [{'role': 'user', 'content': 'Reply with the single word OK.'}],
-                'tools': [{'type': 'web_search_20250305', 'name': 'web_search', 'max_uses': 1}],
+                'tools': [{'type': 'web_search_20260318', 'name': 'web_search'}],
             },
         }
 
@@ -626,10 +629,15 @@ class TestUpdateModel:
 
         assert (status, body.get('field'), requests_stub.call_args_list) == (400, 'model', [])
 
-    @pytest.mark.parametrize('model', [None, '', '   ', 'gpt-5-mini'])
-    def test_returns_to_the_default_by_removing_the_override(self, requests_stub, model):
-        """Blank, null or the default itself store no id, so a future default moves this provider too."""
-        status, _ = _put_provider('openai', {'model': model})
+    @pytest.mark.parametrize(('provider_id', 'model'), [
+        ('openai', None), ('openai', ''), ('openai', '   '), ('openai', 'gpt-5-mini'),
+        ('perplexity', 'perplexity/sonar'), ('perplexity', 'sonar'), ('perplexity', 'sonar-pro'), ('perplexity', 'sonar-reasoning-pro'),
+    ])
+    def test_returns_to_the_default_by_removing_the_override(self, requests_stub, provider_id, model):
+        """Blank, null, the default itself or a retired id read as the default store no id, so a future default moves this provider too."""
+        _store_key()
+
+        status, _ = _put_provider(provider_id, {'model': model})
 
         assert (status, _only_update()['UpdateExpression'], requests_stub.call_args_list) == (
             200, 'SET model_updated_at = :ts, updated_at = :ts REMOVE model', [],
@@ -787,14 +795,6 @@ class TestListModels:
             {'x-api-key': 'claude-stored-key-1234', 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
         )
 
-    def test_offers_the_sonar_models_without_calling_perplexity(self, requests_stub):
-        _store_key()
-
-        status, body = _list_models('perplexity')
-
-        assert (status, body['models'], requests_stub.call_args_list) == (
-            200, ['sonar', 'sonar-pro', 'sonar-reasoning-pro'], [],
-        )
 
     def test_asks_for_a_key_before_listing(self, requests_stub):
         status, body = _list_models('gemini')
@@ -907,11 +907,6 @@ class TestKeyProbeRequestsAndVerdicts:
     """The 1-token completion probes: what they send, and how their reply is read."""
 
     @pytest.mark.parametrize(('provider_id', 'request_kwargs'), [
-        ('perplexity', {
-            'url': 'https://api.perplexity.ai/chat/completions',
-            'headers': {'Authorization': 'Bearer pk-1234', 'Content-Type': 'application/json'},
-            'json': {'model': 'sonar', 'messages': [{'role': 'user', 'content': 'ping'}], 'max_tokens': 1},
-        }),
         ('claude', {
             'url': 'https://api.anthropic.com/v1/messages',
             'headers': {'x-api-key': 'pk-1234', 'anthropic-version': '2023-06-01', 'content-type': 'application/json'},
@@ -929,7 +924,7 @@ class TestKeyProbeRequestsAndVerdicts:
 
         assert _module.validate_api_key(provider_id, 'pk-1234') == {'valid': False, 'error': 'Invalid API key'}
 
-    @pytest.mark.parametrize('provider_id', ['perplexity', 'claude', 'firecrawl'])
+    @pytest.mark.parametrize('provider_id', ['claude', 'firecrawl'])
     def test_reports_the_status_of_an_unexpected_reply(self, requests_stub, provider_id):
         requests_stub.return_value = _reply(500, {'error': {'message': 'overloaded'}})
 
@@ -1138,3 +1133,136 @@ class TestRefusalDetails:
         _, body = _get_providers()
 
         assert _provider(body, 'openai')['description'] == 'Native web search via the Responses API'
+
+
+# --- Provider refresh (2.37.0): Perplexity Agent API, Claude web_search_20260318 ---
+
+
+class TestPerplexityAgentApiKeyProbe:
+    """The key probe is the Agent API model listing: free, and 401 without a valid key."""
+
+    def test_lists_the_models_with_the_key_as_a_bearer_token(self, requests_stub):
+        _module.validate_api_key('perplexity', 'pplx-1234')
+
+        assert requests_stub.call_args.kwargs == {
+            'timeout': 5, 'method': 'get', 'url': 'https://api.perplexity.ai/v1/models',
+            'headers': {'Authorization': 'Bearer pplx-1234'},
+        }
+
+    def test_accepts_a_key_the_listing_answers(self, requests_stub):
+        requests_stub.return_value = _reply(200, PERPLEXITY_MODELS_LISTING)
+
+        assert _module.validate_api_key('perplexity', 'pplx-1234') == {'valid': True}
+
+    @pytest.mark.parametrize('status', [401, 500])
+    def test_names_a_key_the_listing_refuses_invalid(self, requests_stub, status):
+        requests_stub.return_value = _reply(status, {'error': {'message': 'Invalid API key provided.'}})
+
+        assert _module.validate_api_key('perplexity', 'pplx-1234') == {'valid': False, 'error': 'Invalid API key'}
+
+
+class TestPerplexityAgentApiModels:
+    def test_offers_perplexitys_own_models_first_then_the_others_in_the_apis_order(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _reply(200, PERPLEXITY_MODELS_LISTING)
+
+        assert _list_models('perplexity')[1]['models'] == [
+            'perplexity/kimi-k3', 'perplexity/sonar',
+            'anthropic/claude-sonnet-5-5', 'google/gemini-3.6-flash', 'openai/gpt-6-luna', 'xai/grok-4.7',
+        ]
+
+    def test_asks_the_agent_api_for_its_models_with_the_stored_key(self, requests_stub):
+        _store_key('pplx-stored-key-1234')
+        requests_stub.return_value = _reply(200, PERPLEXITY_MODELS_LISTING)
+
+        _list_models('perplexity')
+
+        kwargs = requests_stub.call_args.kwargs
+        assert (kwargs['method'], kwargs['url'], kwargs['headers']) == (
+            'get', 'https://api.perplexity.ai/v1/models', {'Authorization': 'Bearer pplx-stored-key-1234'},
+        )
+
+    def test_leaves_ids_that_are_not_safe_out_of_the_picker(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _reply(200, {'data': [
+            {'id': 'perplexity/sonar'}, {'id': 'a/b/c'}, {'id': 'bad id'}, {'id': None}, 'not an entry',
+        ]})
+
+        assert _list_models('perplexity')[1]['models'] == ['perplexity/sonar']
+
+    def test_stores_a_third_party_agent_api_model(self, requests_stub):
+        _put_provider('perplexity', {'model': 'openai/gpt-6-luna', 'validate': False})
+
+        assert _only_update()['ExpressionAttributeValues'][':model'] == 'openai/gpt-6-luna'
+
+    def test_reports_a_saved_sonar_model_as_the_agent_api_sonar(self):
+        _serve_config_rows({'perplexity': {'provider_id': 'perplexity', 'model': 'sonar-pro'}})
+
+        _, body = _get_providers()
+
+        assert _provider(body, 'perplexity')['model'] == 'perplexity/sonar'
+
+    def test_proves_enabling_with_the_agent_api_sonar_for_a_saved_sonar_model(self, requests_stub):
+        _store_key()
+        _serve_config_rows({'perplexity': {'provider_id': 'perplexity', 'enabled': False, 'model': 'sonar-reasoning-pro'}})
+
+        _put_provider('perplexity', {'enabled': True})
+
+        assert (requests_stub.call_args.kwargs['url'], requests_stub.call_args.kwargs['json']['model']) == (
+            'https://api.perplexity.ai/v1/agent', 'perplexity/sonar',
+        )
+
+    def test_explains_the_vendor_prefix_of_a_perplexity_model_id(self, requests_stub):
+        assert _put_provider('perplexity', {'model': 'perplexity//sonar'})[1]['error'] == (
+            'Model ids contain only letters, digits, dots, dashes and underscores (100 characters at most)'
+            ', after a vendor prefix such as perplexity/'
+        )
+
+    @pytest.mark.parametrize('provider_id', ['openai', 'gemini', 'claude'])
+    def test_refuses_a_vendor_prefixed_id_for_another_provider(self, requests_stub, provider_id):
+        assert _put_provider(provider_id, {'model': 'google/gemini-3.6-flash'})[1]['field'] == 'model'
+
+
+class TestClaudeModelCheckFallsBackLikeRuns:
+    """A model that refuses dynamic filtering is checked with direct callers, as runs then ask it."""
+
+    def test_checks_again_with_direct_callers_and_stores_the_model(self, requests_stub):
+        _store_key()
+        requests_stub.side_effect = [
+            _anthropic_rejection('tools.0.allowed_callers: dynamic filtering is not supported by this model'),
+            _reply(200, {'content': []}),
+        ]
+
+        status, _ = _put_provider('claude', {'model': 'claude-haiku-4-5'})
+
+        assert (status, [call.kwargs['json']['tools'][0].get('allowed_callers') for call in requests_stub.call_args_list]) == (
+            200, [None, ['direct']],
+        )
+
+    def test_reports_the_fallbacks_failure(self, requests_stub):
+        _store_key()
+        requests_stub.side_effect = [
+            _anthropic_rejection('tools.0.allowed_callers: dynamic filtering is not supported by this model'),
+            _anthropic_rejection('web_search is not supported on this model'),
+        ]
+
+        assert _put_provider('claude', {'model': 'claude-haiku-4-5'})[1]['details'] == 'web_search is not supported on this model'
+
+    def test_checks_once_when_the_model_fails_for_another_reason(self, requests_stub):
+        _store_key()
+        requests_stub.return_value = _anthropic_rejection('web_search is not supported on this model')
+
+        _put_provider('claude', {'model': 'claude-3-haiku-20240307'})
+
+        assert requests_stub.call_count == 1
+
+    @pytest.mark.parametrize(('provider_id', 'model'), [
+        ('openai', 'gpt-5.2'), ('perplexity', 'openai/gpt-6-luna'), ('gemini', 'gemini-2.5-pro'),
+    ])
+    def test_never_falls_back_for_another_engine(self, requests_stub, provider_id, model):
+        _store_key()
+        requests_stub.return_value = _reply(400, {'error': {'message': 'allowed_callers is not a valid field'}})
+
+        _put_provider(provider_id, {'model': model})
+
+        assert requests_stub.call_count == 1

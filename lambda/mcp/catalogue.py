@@ -112,11 +112,14 @@ def _string_list(description: str, max_items: int | None = None) -> JsonObject:
 
 
 SCOPE_ARGUMENTS = ('group_id', 'keyword_ids', 'keyword', 'all')
+MARKET_ARGUMENT = 'market_id'
+_MARKET_PROPERTY: JsonObject = _string("Narrows any scope to one market id ('global' = keywords without a market); alone = all its keywords")
 _SCOPE_PROPERTIES: JsonObject = {
     'group_id': _string('Scope: a keyword group id'),
     'keyword_ids': _string_list('Scope: keyword ids', max_items=100),
     'keyword': _string('Scope: one keyword text'),
     'all': {'type': 'boolean', 'description': 'Scope: true = every active keyword'},
+    MARKET_ARGUMENT: _MARKET_PROPERTY,
 }
 _SCOPE_RULE = 'Scope: one of group_id, keyword_ids, keyword, all.'
 
@@ -161,23 +164,32 @@ def _given_scope(arguments: JsonObject, names: Sequence[str], *, required: bool)
 
 
 def _scope_query(arguments: JsonObject, *, required: bool) -> dict[str, str]:
-    """The scope parameter the report handlers expect, from the tool's scope arguments."""
-    name = _given_scope(arguments, SCOPE_ARGUMENTS, required=required)
+    """The scope parameters the report handlers expect, from the tool's scope arguments.
+
+    ``market_id`` is passed on next to the scope; on its own it is a scope
+    (every active keyword of the market), so it satisfies a required one.
+    """
+    market = {MARKET_ARGUMENT: str(arguments[MARKET_ARGUMENT])} if arguments.get(MARKET_ARGUMENT) else {}
+    name = _given_scope(arguments, SCOPE_ARGUMENTS, required=required and not market)
     if name is None:
-        return {}
+        return market
     if name == 'all':
-        return {'scope': 'all'}
-    return {name: _query_value(arguments[name])}
+        return {'scope': 'all', **market}
+    return {name: _query_value(arguments[name]), **market}
 
 
 def scope_descriptor(arguments: JsonObject, names: Sequence[str]) -> JsonObject:
-    """The ``{"mode": ...}`` scope body the run and Content Studio handlers take (``shared.keyword_groups``)."""
+    """The ``{"mode": ...}`` scope body the run and Content Studio handlers take (``shared.keyword_groups``).
+
+    A ``market_id`` argument becomes the descriptor's ``market_ids``.
+    """
     name = _given_scope(arguments, names, required=True)
+    market = {'market_ids': [arguments[MARKET_ARGUMENT]]} if arguments.get(MARKET_ARGUMENT) else {}
     if name == 'group_id':
-        return {'mode': 'groups', 'group_ids': [arguments['group_id']]}
+        return {'mode': 'groups', 'group_ids': [arguments['group_id']], **market}
     if name == 'keyword_ids':
-        return {'mode': 'keywords', 'keyword_ids': list(arguments['keyword_ids'])}
-    return {'mode': 'all'}
+        return {'mode': 'keywords', 'keyword_ids': list(arguments['keyword_ids']), **market}
+    return {'mode': 'all', **market}
 
 
 def _get_route(router: str, path: str, *params: str, scope: bool | None = None) -> RouteBuilder:
@@ -464,7 +476,7 @@ _CONTENT_STUDIO = 'Content Studio'
 _EXAMPLE_CONFIRMATION = 'value-from-the-estimate'
 
 _RUN_SCOPE_RULE = 'Scope: one of group_id, keyword_ids, all.'
-_RUN_SCHEMA = _schema({name: _SCOPE_PROPERTIES[name] for name in RUN_SCOPE_ARGUMENTS})
+_RUN_SCHEMA = _schema({name: _SCOPE_PROPERTIES[name] for name in (*RUN_SCOPE_ARGUMENTS, MARKET_ARGUMENT)})
 _RUN_TAGS = ('analysis run', 'start', 'trigger', 'launch', 'execute', 'analyse', 'analyze', 'refresh data',
              'new run', 'cost', 'how much', 'estimate', 'price', 'spend', 'credit')
 _RESEARCH_SCHEMA = _schema({

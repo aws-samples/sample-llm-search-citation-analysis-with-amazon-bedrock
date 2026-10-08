@@ -8,7 +8,7 @@ Lambda role holds prefix-wide read *and* write over every provider secret
 (AUDIT-2026-08-19 §0.3).
 
 This file closes that hole with one table. Every mutating admin route across all
-eight handler modules is listed below and must:
+nine handler modules is listed below and must:
 
 1. Return 403 for an authenticated caller in the wrong group.
 2. Return 403 for an authenticated caller with no group claim at all — the
@@ -122,6 +122,10 @@ MUTATING_ADMIN_ROUTES = [
     Route('manage-alerts.py', 'POST', '/api/alerts/alert-1/acknowledge', {'id': 'alert-1'}),
     Route('manage-alerts.py', 'POST', '/api/alerts/content-changes', body={}),
 
+    # manage-markets.py — the market list steers every run; suggestions spend Bedrock.
+    Route('manage-markets.py', 'PUT', '/api/markets', body={'markets': []}),
+    Route('manage-markets.py', 'POST', '/api/markets', body={'keyword': 'hotels', 'market_ids': ['cl-es']}),
+
     # Both trigger handlers — unbounded provider spend per request.
     Route('trigger-analysis.py', 'POST', '/api/trigger-analysis'),
     Route('trigger-keyword-analysis.py', 'POST', '/api/trigger-keyword-analysis',
@@ -193,7 +197,7 @@ def call(route: Route, groups: str | None) -> tuple[int, MagicMock]:
 
 @pytest.mark.parametrize('route', MUTATING_ADMIN_ROUTES, ids=str)
 class TestEveryMutatingRouteRequiresAdmin:
-    """One class, three invariants, applied to all 26 mutating admin routes."""
+    """One class, three invariants, applied to all 28 mutating admin routes."""
 
     def test_denies_a_caller_in_the_wrong_group(self, route: Route) -> None:
         status, _ = call(route, groups='Users')
@@ -224,10 +228,11 @@ class TestSuiteCoversEveryHandlerModule:
     just less coverage. These assertions make that visible.
     """
 
-    def test_covers_all_eight_admin_handler_modules(self) -> None:
+    def test_covers_all_nine_admin_handler_modules(self) -> None:
         assert sorted({route.module for route in MUTATING_ADMIN_ROUTES}) == [
             'manage-alerts.py',
             'manage-brand-config.py',
+            'manage-markets.py',
             'manage-providers.py',
             'manage-query-prompts.py',
             'manage-schedule.py',

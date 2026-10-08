@@ -2,11 +2,11 @@ import {
   describe, it, expect 
 } from 'vitest';
 import {
-  parseApiResponse, filterAndSortCitations 
+  CITATION_EXPORT_COLUMNS, citationExportRows, filterAndSortCitations, isVideoCitation, parseApiResponse
 } from './citationParser';
 import type { SortConfig } from './citationParser';
 import {
-  ASC_CITATIONS, ASC_DOMAIN, ASC_KEYWORDS, DESC_CITATIONS, DESC_DOMAIN, DESC_KEYWORDS, buildCitation, buildCitations
+  ASC_CITATIONS, ASC_DOMAIN, ASC_KEYWORDS, DESC_CITATIONS, DESC_DOMAIN, DESC_KEYWORDS, MIXED_TYPE_CITATIONS, buildCitation, buildCitations
 } from './citationParser-fixtures';
 
 /** One row of the count-column sorting table: which column, which way, and the counts in that order. */
@@ -272,5 +272,80 @@ describe('filterAndSortCitations', () => {
       expect(result).toHaveLength(1);
       expect(result[0].url).toBe('https://a.com/hotels');
     });
+  });
+});
+
+describe('filterAndSortCitations by content type', () => {
+  it('keeps every citation when the type filter is all', () => {
+    const result = filterAndSortCitations(MIXED_TYPE_CITATIONS, '', '', DESC_CITATIONS, 'all');
+
+    expect(result.map((citation) => citation.url)).toStrictEqual([
+      'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      'https://example.com/guide',
+      'https://example.com/legacy',
+    ]);
+  });
+
+  it('keeps only videos when the type filter is video', () => {
+    const result = filterAndSortCitations(MIXED_TYPE_CITATIONS, '', '', DESC_CITATIONS, 'video');
+
+    expect(result.map((citation) => citation.url)).toStrictEqual(['https://www.youtube.com/watch?v=dQw4w9WgXcQ']);
+  });
+
+  it('keeps pages, including citations without a content type, when the type filter is page', () => {
+    const result = filterAndSortCitations(MIXED_TYPE_CITATIONS, '', '', DESC_CITATIONS, 'page');
+
+    expect(result.map((citation) => citation.url)).toStrictEqual(['https://example.com/guide', 'https://example.com/legacy']);
+  });
+
+  it('combines the type filter with the URL search', () => {
+    const result = filterAndSortCitations(MIXED_TYPE_CITATIONS, 'legacy', '', DESC_CITATIONS, 'page');
+
+    expect(result.map((citation) => citation.url)).toStrictEqual(['https://example.com/legacy']);
+  });
+
+  it('keeps every type when no type filter is passed', () => {
+    expect(filterAndSortCitations(MIXED_TYPE_CITATIONS, '', '', DESC_CITATIONS)).toHaveLength(3);
+  });
+});
+
+describe('isVideoCitation', () => {
+  it('is true only for a citation the API tagged as video', () => {
+    expect(MIXED_TYPE_CITATIONS.map(isVideoCitation)).toStrictEqual([true, false, false]);
+  });
+});
+
+describe('citationExportRows', () => {
+  it('writes the Type column after the domain, as Video or Page', () => {
+    const rows = citationExportRows(MIXED_TYPE_CITATIONS);
+
+    expect(rows.map((row) => [row.Domain, row.Type])).toStrictEqual([
+      ['www.youtube.com', 'Video'],
+      ['example.com', 'Page'],
+      ['example.com', 'Page'],
+    ]);
+  });
+
+  it('writes rank, URL, counts and the keyword list of each citation', () => {
+    const [row] = citationExportRows([buildCitation({
+      keyword_count: 2,
+      keywords: ['hotels', 'family hotels'],
+    })]);
+
+    expect(row).toStrictEqual({
+      Rank: 1,
+      URL: 'https://example.com/article',
+      Domain: 'example.com',
+      Type: 'Page',
+      Keywords: 2,
+      'Citation Count': 5,
+      'Keyword List': 'hotels, family hotels',
+    });
+  });
+
+  it('declares one column width per exported column', () => {
+    const [row] = citationExportRows([buildCitation()]);
+
+    expect(CITATION_EXPORT_COLUMNS).toHaveLength(Object.keys(row).length);
   });
 });

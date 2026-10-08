@@ -46,9 +46,9 @@ describe('useProviderConfig', () => {
       provider.id, provider.model, provider.enabled, provider.configured, provider.masked_key, provider.last_updated,
     ])).toStrictEqual([
       ['openai', 'gpt-5-mini', true, false, null, null],
-      ['perplexity', 'sonar', true, false, null, null],
-      ['gemini', 'gemini-3-flash-preview', true, false, null, null],
-      ['claude', 'claude-sonnet-4-5', true, false, null, null],
+      ['perplexity', 'perplexity/sonar', true, false, null, null],
+      ['gemini', 'gemini-3.6-flash', true, false, null, null],
+      ['claude', 'claude-sonnet-5-5', true, false, null, null],
     ]);
   });
 

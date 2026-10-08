@@ -1,7 +1,11 @@
 import type { SchedulePayload } from '../../api/executions';
 import type {
-  AnalysisScope, KeywordGroup, Schedule, ScheduleForm, ScheduleFormData, ScheduleFrequency
+  AnalysisScope, KeywordGroup, Market, Schedule, ScheduleForm, ScheduleFormData, ScheduleFrequency
 } from '../../types';
+import {
+  describeScopeMarkets, scopeMarketIds
+} from '../Markets/marketScope';
+import { marketName } from '../Markets/marketSelection';
 
 /**
  * Pure helpers behind the schedule form: defaults, mapping a schedule into
@@ -165,8 +169,16 @@ export function describeScheduleTiming(schedule: Schedule): string {
   return `Daily ${when}`;
 }
 
-/** "All active keywords" / "Groups: Hotel A, Hotel B" / "3 selected keywords". */
-export function describeScheduleScope(scope: AnalysisScope | null, groups: KeywordGroup[], legacyKeywords: string[] = []): string {
+/** "All active keywords" / "Groups: Hotel A, Hotel B" / "3 selected keyword(s)", then " · Markets: Chile" when narrowed. */
+export function describeScheduleScope(
+  scope: AnalysisScope | null, groups: KeywordGroup[], legacyKeywords: string[] = [], markets: readonly Market[] = []
+): string {
+  const keywords = describeScopeKeywords(scope, groups, legacyKeywords);
+  const narrowed = describeScopeMarkets(scopeMarketIds(scope), (marketId) => marketName(marketId, markets));
+  return narrowed === null ? keywords : `${keywords} · ${narrowed}`;
+}
+
+function describeScopeKeywords(scope: AnalysisScope | null, groups: KeywordGroup[], legacyKeywords: string[]): string {
   if (scope === null) {
     return legacyKeywords.length > 0
       ? `${legacyKeywords.length} keyword(s) from the previous version: ${legacyKeywords.join(', ')}`

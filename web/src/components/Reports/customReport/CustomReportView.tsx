@@ -18,6 +18,8 @@ import {
   PeriodSelector, scopeLabelOf
 } from '../scopeReport/ScopeReport';
 import { scopeFromSearch } from '../scopeReport/scopeReportRoute';
+import { MARKET_SEARCH_PARAM } from '../../Markets/marketSelection';
+import { useMarketSelection } from '../../Markets/marketSelectionContext';
 import { sourcesFor } from './blockCatalog';
 import { keyedBlocks } from './blockOrder';
 import {
@@ -102,7 +104,11 @@ function ReportPage({
   report, keywords
 }: SavedReportProps) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { groups } = useKeywordGroups();
+  const {
+    catalog, selectedMarketId
+  } = useMarketSelection();
   const sources = useReportSources();
   const view = sources.inputs;
   const { competitor } = sources;
@@ -112,8 +118,14 @@ function ReportPage({
   const show = (next: Partial<ReportViewSettings>) => navigate(customReportViewPath(report.id, report.days, {
     ...view,
     ...next,
-  }));
-  const scopeLabel = sources.scope === null ? describeReportScope(view.scope, groups) : scopeLabelOf(sources.scope, view.scope, groups);
+  }, searchParams.get(MARKET_SEARCH_PARAM)));
+  const market = {
+    marketId: selectedMarketId,
+    markets: catalog.markets,
+  };
+  const scopeLabel = sources.scope === null
+    ? describeReportScope(view.scope, groups)
+    : scopeLabelOf(sources.scope, view.scope, groups, market);
 
   return (
     <ReportLayout

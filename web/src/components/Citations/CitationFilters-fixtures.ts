@@ -11,6 +11,8 @@ export function buildProps(overrides: Partial<CitationFiltersProps> = {}): Citat
     setSearchQuery: vi.fn(),
     minCitations: '',
     setMinCitations: vi.fn(),
+    contentType: 'all',
+    setContentType: vi.fn(),
     setCurrentPage: vi.fn(),
     onDownloadExcel: vi.fn(),
     ...overrides,

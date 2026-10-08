@@ -222,6 +222,24 @@ class TestScopeRouting:
             'url': 'https://e.com/p', 'include_history': 'true',
         }
 
+    def test_passes_the_market_next_to_the_scope(self):
+        assert _route('get_visibility', {'group_id': 'grp_1', 'market_id': 'cl-es'}).query == {'group_id': 'grp_1', 'market_id': 'cl-es'}
+
+    def test_passes_the_market_next_to_scope_all(self):
+        assert _route('get_visibility', {'all': True, 'market_id': 'global'}).query == {'scope': 'all', 'market_id': 'global'}
+
+    def test_a_market_alone_satisfies_a_required_scope(self):
+        assert _route('get_visibility', {'market_id': 'cl-es'}).query == {'market_id': 'cl-es'}
+
+    def test_a_market_does_not_count_as_a_second_scope_argument(self):
+        assert _route('get_report', {'kind': 'group_kpis', 'keyword': 'parador', 'market_id': 'cl-es'}).query == {
+            'keyword': 'parador', 'market_id': 'cl-es',
+        }
+
+    @pytest.mark.parametrize('name', ['get_visibility', 'get_report', 'get_citations', 'get_brand_mentions', 'estimate_run', 'start_run'])
+    def test_scope_taking_tools_accept_a_market(self, name):
+        assert find_operation(name).input_schema['properties']['market_id']['type'] == 'string'
+
 
 class TestManageKeywordsRouting:
     def test_update_group_targets_the_group_path_with_its_id_as_path_parameter(self):
@@ -337,6 +355,15 @@ class TestRunRouting:
         assert (route.router, route.method, route.path, route.body) == (
             'execution-mgmt', 'POST', '/api/trigger-keyword-analysis', {'scope': scope},
         )
+
+    def test_adds_the_market_to_the_scope_descriptor(self):
+        route = _route('estimate_run', {'group_id': 'grp_1', 'market_id': 'cl-es'})
+
+        assert route.body == {'scope': {'mode': 'groups', 'group_ids': ['grp_1'], 'market_ids': ['cl-es']}}
+
+    def test_content_briefs_take_no_market(self):
+        with pytest.raises(InvalidArguments, match='Unknown argument'):
+            validate_arguments(find_operation('estimate_content_brief').input_schema, {'group_id': 'grp_1', 'market_id': 'cl-es'})
 
     def test_does_not_accept_a_keyword_text_scope(self):
         with pytest.raises(InvalidArguments, match='Unknown argument\\(s\\): keyword'):

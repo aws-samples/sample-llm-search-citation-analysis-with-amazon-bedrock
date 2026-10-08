@@ -52,6 +52,10 @@ describe('scopeReportPath', () => {
     expect(scopeReportPath('/reports/sources', scope, days)).toBe(path);
   });
 
+  it('keeps the market a report shows in its path', () => {
+    expect(scopeReportPath('/reports/sources', groupScope('hotel-sol'), 90, 'global')).toBe('/reports/sources?group=hotel-sol&days=90&market=global');
+  });
+
   it('reopens the scope and period it links to', () => {
     const [, search] = scopeReportPath('/reports/sources', groupScope('a&b'), 90).split('?');
 

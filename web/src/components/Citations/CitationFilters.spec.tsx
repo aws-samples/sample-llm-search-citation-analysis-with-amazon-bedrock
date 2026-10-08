@@ -73,4 +73,33 @@ describe('CitationFilters', () => {
 
     expect(screen.getByPlaceholderText('Any')).toHaveValue(10);
   });
+
+  it('offers all types, pages and videos in the Type filter', () => {
+    renderCitationFilters();
+
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toStrictEqual(['All types', 'Pages', 'Videos']);
+  });
+
+  it('calls setContentType and resets page when the Type filter changes', () => {
+    const props = renderCitationFilters();
+
+    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'video' } });
+
+    expect(props.setContentType).toHaveBeenCalledWith('video');
+    expect(props.setCurrentPage).toHaveBeenCalledWith(1);
+  });
+
+  it('displays the current Type filter value', () => {
+    renderCitationFilters({ contentType: 'page' });
+
+    expect(screen.getByLabelText('Type')).toHaveValue('page');
+  });
+
+  it('resets the Type filter to all types when Clear button clicked', () => {
+    const props = renderCitationFilters({ contentType: 'video' });
+
+    fireEvent.click(screen.getByText('Clear'));
+
+    expect(props.setContentType).toHaveBeenCalledWith('all');
+  });
 });

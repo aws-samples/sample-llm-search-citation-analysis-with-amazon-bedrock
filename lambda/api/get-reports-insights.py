@@ -36,6 +36,7 @@ from shared.insights_citations import competitor_domains_from
 from shared.insights_engine import compute_insights
 from shared.insights_narrative import group_scope_key, load_narrative
 from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
+from shared.markets import market_scoped_key
 from shared.scope_params import SCOPE_QUERY_PARAMS, keywords_table_name, map_scope_keywords, scoped_dynamodb_resource
 from shared.scoped_reports import TREND_WINDOW_PARAMS, capped_scope, required_report_scope
 from shared.search_results import search_results_table_name
@@ -90,10 +91,16 @@ def load_history(keywords: list[str], days: int, owned_domains: list[str]) -> li
 
 
 def group_narrative(report_scope: Any, run_timestamp: str | None) -> dict[str, Any] | None:
-    """The narrative stored for a keyword group's latest run (``run_timestamp``); ``None`` for any other scope."""
+    """The narrative stored for a keyword group's latest run (``run_timestamp``); ``None`` for any other scope.
+
+    Narratives are written per (group, market): the market filter picks that
+    market's narrative, and no filter the global market's (the group's
+    keywords without a market).
+    """
     if report_scope.kind != GROUP_SCOPE:
         return None
-    return load_narrative(group_scope_key(report_scope.scope['group_ids'][0]), run_timestamp)
+    key = market_scoped_key(group_scope_key(report_scope.scope['group_ids'][0]), report_scope.market_id)
+    return load_narrative(key, run_timestamp)
 
 
 @api_handler
