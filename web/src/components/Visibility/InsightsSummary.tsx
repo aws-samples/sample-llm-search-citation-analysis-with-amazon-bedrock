@@ -8,6 +8,7 @@ import { NEW_CUSTOM_REPORT_PATH } from '../Reports/customReport/customReportRout
 import { insightSentence } from '../Reports/insights/insightWording';
 import { PriorityBadge } from '../Reports/layout';
 import { OverviewPanel } from './OverviewPanel';
+import { InsightsSummarySkeleton } from './VisibilitySkeletons';
 
 export const INSIGHTS_TITLE = 'Insights';
 const INSIGHTS_INFO = 'The three most pressing findings about this scope: an AI engine that rarely ranks you first or rarely cites you, '
@@ -45,7 +46,7 @@ interface BodyProps {
 function SummaryBody({
   insights, loading, error
 }: BodyProps) {
-  if (loading) return <p className="text-sm text-gray-500">Loading insights…</p>;
+  if (loading) return <InsightsSummarySkeleton />;
   if (error !== null) return <p className="text-sm text-amber-800">{`Insights unavailable: ${error}`}</p>;
   if (insights === null || insights.insights.length === 0) return <p className="text-sm text-gray-500">{NO_INSIGHTS}</p>;
   return (

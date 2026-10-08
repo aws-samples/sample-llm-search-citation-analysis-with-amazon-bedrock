@@ -6,6 +6,9 @@ import { useOpenAlerts } from '../../hooks/useAlerts';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { ErrorAlert } from '../ui/ErrorAlert';
 import { RefreshTextButton } from '../ui/RefreshTextButton';
+import {
+  Skeleton, SkeletonRegion
+} from '../ui/Skeleton';
 
 const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   mention_rate_drop: 'Mention-rate drop',
@@ -134,7 +137,14 @@ export function AlertsPanel() {
       <ErrorAlert message={actionError} spacingClassName="m-4 " />
 
       {loading && items.length === 0 && (
-        <output className="block p-6 text-center text-sm text-gray-500">Loading alerts…</output>
+        <SkeletonRegion label="Loading alerts" className="p-4 sm:p-5">
+          <div className="flex h-5 items-center gap-2">
+            <Skeleton className="h-5 w-16 rounded" />
+            <Skeleton className="h-3 w-32" />
+          </div>
+          <div className="mt-2 flex h-5 items-center"><Skeleton className="h-3.5 w-40" /></div>
+          <div className="mt-1 flex h-5 items-center"><Skeleton className="h-3.5 w-2/3" /></div>
+        </SkeletonRegion>
       )}
       {!loading && error === null && items.length === 0 && (
         <p className="p-6 text-center text-sm text-gray-500">No open alerts.</p>

@@ -140,6 +140,6 @@ describe('AgentRunList', () => {
   it('shows a loading state while the first list is fetched', () => {
     render(<AgentRunList jobs={[]} loading onSelect={vi.fn()} onRetry={vi.fn()} onDelete={vi.fn()} />);
 
-    expect(screen.getByText('Loading runs…')).toBeInTheDocument();
+    expect(screen.getByText('Loading runs')).toBeInTheDocument();
   });
 });

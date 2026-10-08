@@ -9,6 +9,41 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.34.0] - 2026-10-08
+
+### Added
+
+- **AI Assistants page (`/ai-assistants`)**: the dashboard now explains how to connect Claude (claude.ai /
+  Desktop), Claude Code, ChatGPT, Kiro, Amazon Quick and other MCP clients to the MCP server. It has the server URL
+  and OAuth client id with Copy buttons, per-client steps and snippets (a downloadable Kiro `mcp.json`), the
+  one-time admin command for clients whose callback isn't allowed by default, example prompts, copyable assistant
+  instructions and the tool list. It's reachable from the sidebar and from Settings › Access. `scripts/build-web.sh`
+  reads `McpUrl` and `McpClientId` from `CitationAnalysisMcpStack`; without them the page says the server isn't
+  deployed.
+- Skeleton placeholders (`components/ui/Skeleton.tsx`) shaped like the content they replace, on the first load of
+  every view, the Settings sections and the app frame (instead of the full-screen "Loading dashboard...").
+
+### Changed
+
+- **Settings is a grouped side navigation with a URL per section** (`/settings/keywords`, `/brand`, `/personas`,
+  `/providers`, `/alerts`, `/users`), so a section can be linked to and bookmarked. Each entry shows its state on a
+  second line ("54 keywords", the tracked industry, "9 of 9 enabled"), with a placeholder while it loads, so the
+  nav no longer jumps from "General" / "0/0" to the real values.
+- **User management redesign.** One role per person (Admin or Member) instead of group checkboxes; plain statuses
+  (Active, Invite pending, Disabled, …); no raw Cognito ids; search and role/status filters; your own row is marked
+  "You" and its role, access and delete controls are locked. The Manage dialog is accessible (dialog role, Escape,
+  focus kept inside and returned), saves role and access separately, confirms disable / password reset / delete,
+  and shows errors inside the dialog. Pending invites get **Resend invite**: `POST /api/users/{username}/reset-password`
+  resends the invitation (`MessageAction=RESEND`) when the user has never signed in, since Cognito can't reset their
+  password. An invite reports only the groups it actually added, with a warning when one failed.
+
+### Fixed
+
+- Layout shift on first load: Run Analysis (CLS 0.22 → 0), Settings › Alerts (0.14 → 0), Prompt Insights and
+  Content Studio tab counts, the Reports landing grid and the Settings tab badges.
+- Stacked dialogs (a confirmation over another dialog) no longer unlock page scrolling when the top one closes, and
+  a dialog rendered inside a `space-y-*` container is no longer pushed 1.5rem down.
+
 ## [2.33.1] - 2026-10-07
 
 ### Fixed

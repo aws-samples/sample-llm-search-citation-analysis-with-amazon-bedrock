@@ -64,7 +64,7 @@ describe('CitationGaps', () => {
 
   describe('loading and error states', () => {
     it.each([
-      ['loading feedback', { loading: true }, 'Analyzing citation gaps...'],
+      ['loading feedback', { loading: true }, 'Analyzing citation gaps'],
       ['the failure', { error: 'Failed to load citation gaps' }, 'Failed to load citation gaps'],
     ])('shows only %s when earlier results still exist', (_shown, state, message) => {
       renderWithGaps({
@@ -161,7 +161,7 @@ describe('CitationGaps', () => {
 
       await userEvent.selectOptions(screen.getByRole('combobox'), 'keyword:hotels');
 
-      expect(screen.getByText('Analyzing citation gaps...')).toBeInTheDocument();
+      expect(screen.getByText('Analyzing citation gaps')).toBeInTheDocument();
       expect(screen.queryByText('Test Article')).not.toBeInTheDocument();
     });
   });

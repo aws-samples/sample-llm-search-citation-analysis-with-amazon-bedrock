@@ -4,7 +4,7 @@ import {
 import {
   lazy, Suspense 
 } from 'react';
-import { CenteredSpinner } from '../ui/CenteredState';
+import { SkeletonPage } from '../ui/Skeleton';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { ReportsLandingView } from './ReportsLandingView';
 import type { Keyword } from '../../types';
@@ -74,7 +74,7 @@ interface Props {readonly keywords: ReadonlyArray<Keyword>;}
 export function ReportsRouter({ keywords }: Props) {
   return (
     <ErrorBoundary>
-      <Suspense fallback={<CenteredSpinner />}>
+      <Suspense fallback={<SkeletonPage label="Loading report" />}>
         <Routes>
           <Route path="/reports" element={<ReportsLandingView />} />
           <Route

@@ -15,7 +15,7 @@ import { CompetitorDomainsSection } from './CompetitorDomainsSection';
 import { mergeSuggestedDomains } from '../../hooks/competitorDomains';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import { CHECK_PATHS } from '../ui/iconPaths';
-import { CenteredMessage } from '../ui/CenteredState';
+import { BrandConfigSkeleton } from './BrandConfigSkeleton';
 import { normalizeDomain } from '../../formatting/domainIdentity';
 
 interface BrandConfigContentProps {
@@ -130,7 +130,7 @@ export const BrandConfigContent = ({
   const cancelExpansion = () => { setExpansionAllResult(null); setCompetitorDiscoveryResult(null); setPendingExpansionBrands([]); setExpansionTarget(null); setSelectedFirstPartyBrand(null); setSelectedCompetitorBrand(null); };
   const togglePendingBrand = (brand: string) => setPendingExpansionBrands(expansion.pendingExpansionBrands.includes(brand) ? expansion.pendingExpansionBrands.filter(b => b !== brand) : [...expansion.pendingExpansionBrands, brand]);
 
-  if (loading) return <CenteredMessage>Loading configuration...</CenteredMessage>;
+  if (loading) return <BrandConfigSkeleton />;
 
   // Saving and the three Bedrock-backed suggestion routes are Admin-only
   // server-side. Read access stays open, so a non-admin sees the configured

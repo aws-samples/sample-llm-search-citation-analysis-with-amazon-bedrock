@@ -31,9 +31,26 @@ describe('TriggerSection', () => {
       onTriggerAnalysis={vi.fn()}
       onRunGroup={vi.fn()}
       isAdmin
+      loading={false}
       {...props}
     />
   );
+
+  it('shows the analysis options placeholder instead of the panel while loading', () => {
+    renderTriggerSection({ loading: true });
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading analysis options');
+    expect(screen.queryByRole('button', { name: /Start Analysis/u })).not.toBeInTheDocument();
+  });
+
+  it('does not tell an administrator that runs need an administrator while membership loads', () => {
+    renderTriggerSection({
+      loading: true,
+      isAdmin: false,
+    });
+
+    expect(screen.queryByText(/requires an administrator/u)).not.toBeInTheDocument();
+  });
 
   it('applies execution-specific identities to the shared keyword picker', () => {
     renderTriggerSection({ keywordsCount: 1 });

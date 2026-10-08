@@ -21,134 +21,34 @@ and the one Cognito error mapping every route shares.
 
 from __future__ import annotations
 
-import os
 from typing import Any
-from unittest.mock import MagicMock, patch
 
 import pytest
-from botocore.exceptions import ClientError
 
-from testing.admin_authz_fixtures import ADMIN_EMAIL, caller_event, invoke, status_of
-from testing.module_loader import load_handler_module
-
-_API_DIR = os.path.dirname(os.path.abspath(__file__))
-
-CALLER = ADMIN_EMAIL
-OTHER_USER = 'victim@example.com'
-
-
-class CognitoUserNotFound(Exception):
-    """Stands in for cognito_client.exceptions.UserNotFoundException."""
-
-
-class CognitoInvalidParameter(Exception):
-    """Stands in for cognito_client.exceptions.InvalidParameterException."""
-
-
-class CognitoUsernameExists(Exception):
-    """Stands in for cognito_client.exceptions.UsernameExistsException."""
-
-
-mock_cognito = MagicMock()
-
-
-def _restore_cognito_exception_classes() -> None:
-    """Real exception classes on the mock: handlers name them in `except` clauses."""
-    mock_cognito.exceptions.UserNotFoundException = CognitoUserNotFound
-    mock_cognito.exceptions.InvalidParameterException = CognitoInvalidParameter
-    mock_cognito.exceptions.UsernameExistsException = CognitoUsernameExists
-
-
-_restore_cognito_exception_classes()
-
-
-def _mock_boto3_client(*args, **kwargs):
-    return mock_cognito
-
-
-_test_env = {
-    'USER_POOL_ID': 'us-east-1_testpool',
-    'CORS_ORIGIN_PARAM': '',
-}
-
-with patch('boto3.client', side_effect=_mock_boto3_client):
-    with patch.dict(os.environ, _test_env):
-        _handler_mod = load_handler_module(_API_DIR, 'manage-users.py', 'manage_users')
-
-
-def make_event(
-    method: str,
-    path: str = '/api/users',
-    body: dict[str, Any] | None = None,
-    groups: str | None = 'Admin',
-) -> dict[str, Any]:
-    """An event addressing a collection route as an Admin unless ``groups`` says otherwise."""
-    return caller_event(method, path, body=body, groups=groups)
-
-
-def user_event(
-    method: str,
-    username: str,
-    body: dict[str, Any] | None = None,
-    groups: str | None = 'Admin',
-    suffix: str = '',
-) -> dict[str, Any]:
-    """An event addressing ``/api/users/{username}`` (plus ``suffix``) as an Admin unless ``groups`` says otherwise."""
-    return caller_event(
-        method,
-        f'/api/users/{username}{suffix}',
-        body=body,
-        path_params={'username': username},
-        groups=groups,
-    )
-
+from testing.admin_authz_fixtures import invoke, status_of
+from testing.manage_users_fixtures import (
+    CALLER,
+    OTHER_USER,
+    CognitoInvalidParameter,
+    CognitoUsernameExists,
+    CognitoUserNotFound,
+    cognito_failure,
+    cognito_user,
+    make_event,
+    mock_cognito,
+    reset_cognito_mock,
+    user_event,
+)
+from testing.manage_users_fixtures import handler_module as _handler_mod
 
 PROMOTE = {'groups': ['Admin']}
 INVITE = {'email': 'new@example.com'}
 
 
-def cognito_user(username: str, enabled: bool = True) -> dict[str, Any]:
-    """Build an admin_get_user-shaped Cognito response."""
-    return {
-        'Username': username,
-        'UserAttributes': [
-            {'Name': 'email', 'Value': username},
-            {'Name': 'email_verified', 'Value': 'true'},
-        ],
-        'UserStatus': 'CONFIRMED',
-        'Enabled': enabled,
-    }
-
-
-def cognito_failure(operation: str) -> ClientError:
-    """A Cognito failure that is neither an unknown user nor a route-specific code."""
-    return ClientError({'Error': {'Code': 'InternalErrorException', 'Message': 'boom'}}, operation)
-
-
-def listed_user(username: str) -> dict[str, Any]:
-    """One list_users entry."""
-    return {
-        'Username': username,
-        'Attributes': [{'Name': 'email', 'Value': username}],
-        'UserStatus': 'CONFIRMED',
-        'Enabled': True,
-    }
-
-
 @pytest.fixture(autouse=True)
 def _reset_mocks():
     """Reset Cognito mocks before each test."""
-    mock_cognito.reset_mock(return_value=True, side_effect=True)
-    _restore_cognito_exception_classes()
-    mock_cognito.list_users.return_value = {'Users': [listed_user(CALLER), listed_user(OTHER_USER)]}
-    mock_cognito.admin_get_user.return_value = cognito_user(OTHER_USER)
-    mock_cognito.admin_list_groups_for_user.return_value = {'Groups': [{'GroupName': 'Users'}]}
-    mock_cognito.list_groups.return_value = {'Groups': [{'GroupName': 'Admin'}, {'GroupName': 'Users'}]}
-    mock_cognito.admin_add_user_to_group.return_value = {}
-    mock_cognito.admin_remove_user_from_group.return_value = {}
-    mock_cognito.admin_delete_user.return_value = {}
-    mock_cognito.admin_disable_user.return_value = {}
-    mock_cognito.admin_enable_user.return_value = {}
+    reset_cognito_mock()
 
 
 @pytest.fixture

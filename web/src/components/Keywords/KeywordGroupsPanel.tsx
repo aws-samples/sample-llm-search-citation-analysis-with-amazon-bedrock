@@ -5,7 +5,12 @@ import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   PENCIL_PATHS, TRASH_PATHS 
 } from '../ui/iconPaths';
+import {
+  Skeleton, SkeletonRegion
+} from '../ui/Skeleton';
 
+/** Placeholder filter buttons while the groups load, so the row does not reflow. */
+const GROUP_PILL_IDS = ['group-pill-a', 'group-pill-b', 'group-pill-c'] as const;
 /** Which keywords the list below shows: everything, the ungrouped ones, or one group. */
 export type GroupFilter = 'all' | 'ungrouped' | { groupId: string };
 
@@ -114,7 +119,11 @@ export const KeywordGroupsPanel = ({
         <button type="button" className={filterButtonClass(filter === 'ungrouped')} onClick={() => onFilterChange('ungrouped')}>
           Ungrouped <span className="text-xs opacity-70">({ungroupedCount})</span>
         </button>
-        {loading && groups.length === 0 && <span className="text-sm text-gray-400">Loading groups...</span>}
+        {loading && groups.length === 0 && (
+          <SkeletonRegion label="Loading groups" className="flex items-center gap-2">
+            {GROUP_PILL_IDS.map((id) => <Skeleton key={id} className="h-[34px] w-28 rounded-lg" />)}
+          </SkeletonRegion>
+        )}
         {groups.map((group) => (
           <div key={group.id} className="flex items-center gap-1">
             {editingId === group.id ? (

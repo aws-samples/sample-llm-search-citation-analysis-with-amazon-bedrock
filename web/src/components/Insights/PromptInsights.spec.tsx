@@ -55,10 +55,16 @@ describe('PromptInsights', () => {
   });
 
   describe('loading state', () => {
-    it('shows loading message when loading', () => {
+    it('holds each tab count with a placeholder while loading', () => {
       renderWithInsights({ loading: true });
 
-      expect(screen.getByText(/Loading/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /^Losing/u }).querySelector('.skeleton')).not.toBeNull();
+    });
+
+    it('shows the insights skeleton when loading', () => {
+      renderWithInsights({ loading: true });
+
+      expect(screen.getByRole('status')).toHaveTextContent('Loading insights');
     });
   });
 
@@ -108,7 +114,7 @@ describe('PromptInsights', () => {
       fetchPromptInsights: neverSettlingFetch(),
     }),
     scopedHook: mockUsePromptInsights,
-    loadingText: 'Loading insights...',
+    loadingText: 'Loading insights',
     answerMarker: () => screen.queryByText('Win Rate'),
   });
 });

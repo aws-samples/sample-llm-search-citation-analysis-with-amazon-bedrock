@@ -72,6 +72,13 @@ describe('CustomReportsPanel', () => {
     expect(await screen.findByText('You do not have permission to perform this action')).toBeInTheDocument();
   });
 
+  it('holds a saved-report row placeholder while the list loads', () => {
+    mockApiGet.mockImplementation(() => new Promise(vi.fn()));
+    renderPanel();
+
+    expect(screen.getByText('Loading your reports')).toBeInTheDocument();
+  });
+
   it('opens the builder from its create button', async () => {
     setupListing();
     renderPanel();

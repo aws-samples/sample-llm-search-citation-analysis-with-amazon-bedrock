@@ -39,6 +39,28 @@ describe('QueryPromptsManager', () => {
     });
   });
 
+  describe('loading', () => {
+    it('shows the persona skeleton while the first persona list loads', () => {
+      mockUseQueryPrompts.mockReturnValue({
+        ...buildQueryPromptsHookResult([]),
+        loading: true,
+      });
+      render(<QueryPromptsManager isAdmin />);
+
+      expect(screen.getByRole('status')).toHaveTextContent('Loading personas');
+    });
+
+    it('keeps the persona rows on screen while the list reloads', () => {
+      mockUseQueryPrompts.mockReturnValue({
+        ...buildQueryPromptsHookResult([FAMILY_TRAVELER_PROMPT]),
+        loading: true,
+      });
+      render(<QueryPromptsManager isAdmin />);
+
+      expect(screen.getByText('Family Traveler')).toBeInTheDocument();
+    });
+  });
+
   describe('non-admin users', () => {
     /**
      * POST/PUT/DELETE/PATCH /api/query-prompts are all Admin-only server-side.

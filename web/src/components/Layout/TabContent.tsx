@@ -2,7 +2,7 @@ import {
   lazy, Suspense, useCallback, type ReactNode
 } from 'react';
 import { ErrorBoundary } from '../ErrorBoundary';
-import { CenteredSpinner } from '../ui/CenteredState';
+import { SkeletonPage } from '../ui/Skeleton';
 import {
   SearchIcon, LinkIcon, GlobeIcon, KeyIcon
 } from '../ui';
@@ -10,7 +10,6 @@ import { AlertsPanel } from '../Dashboard/AlertsPanel';
 import { StatCard } from '../Dashboard/StatCard';
 import { ProviderChart } from '../Dashboard/ProviderChart';
 import { BrandChart } from '../Dashboard/BrandChart';
-import type { SettingsTab } from '../Settings';
 import { keywordSelectionKey } from '../../hooks/keywordIdentity';
 import type {
   TabType, Stats, Citations, Search, Keyword, Execution, Schedule, AnalysisScope
@@ -30,6 +29,7 @@ const PromptInsights = lazy(() => import('../Insights').then(module => ({ defaul
 const CitationGaps = lazy(() => import('../Insights').then(module => ({ default: module.CitationGaps })));
 const Recommendations = lazy(() => import('../Insights').then(module => ({ default: module.Recommendations })));
 const ContentStudioView = lazy(() => import('../ContentStudio').then(module => ({ default: module.ContentStudioView })));
+const AiAssistantsView = lazy(() => import('../AiAssistants').then(module => ({ default: module.AiAssistantsView })));
 
 interface TabContentProps {
   readonly activeTab: TabType;
@@ -46,7 +46,6 @@ interface TabContentProps {
     message: string
   }>;
   readonly rawResponsesPath?: string;
-  readonly settingsInitialTab?: SettingsTab;
   readonly setActiveTab: (tab: TabType) => void;
   readonly onNavigateToRawResponses: (path: string) => void;
 }
@@ -68,7 +67,7 @@ function mergeCreatedKeywords(existing: Keyword[], created: Keyword[]): Keyword[
 function LazyTab({ children }: { readonly children: ReactNode }) {
   return (
     <ErrorBoundary>
-      <Suspense fallback={<CenteredSpinner />}>
+      <Suspense fallback={<SkeletonPage />}>
         {children}
       </Suspense>
     </ErrorBoundary>
@@ -172,7 +171,6 @@ export function TabContent(props: TabContentProps) {
     execution,
     triggerAnalysis,
     rawResponsesPath,
-    settingsInitialTab,
     setActiveTab,
     onNavigateToRawResponses,
   } = props;
@@ -195,7 +193,8 @@ export function TabContent(props: TabContentProps) {
     'content-studio': <ContentStudioView keywords={keywords} />,
     execution: <ExecutionMonitor execution={execution} triggerAnalysis={triggerAnalysis} keywordsCount={keywords.length} keywords={keywords} />,
     schedule: <ScheduleManager schedules={schedules} setSchedules={setSchedules} keywords={keywords} />,
-    settings: <SettingsView keywords={keywords} setKeywords={setKeywords} initialTab={settingsInitialTab} />,
+    settings: <SettingsView keywords={keywords} setKeywords={setKeywords} />,
+    'ai-assistants': <AiAssistantsView />,
     searches: <SearchesView searches={searches} onNavigateToRawResponses={onNavigateToRawResponses} />,
     'raw-responses': <RawResponsesExplorer initialPath={rawResponsesPath} />,
     'keyword-research': <KeywordResearchView onKeywordsAdded={appendKeywords} />,

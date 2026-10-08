@@ -8,6 +8,9 @@ import {
 } from '../../ui';
 import { SectionPlaceholder } from '../layout';
 import {
+  Skeleton, SkeletonRegion
+} from '../../ui/Skeleton';
+import {
   customReportEditPath, customReportPath, NEW_CUSTOM_REPORT_PATH
 } from './customReportRoute';
 import { useCustomReports } from './useCustomReports';
@@ -39,11 +42,30 @@ function SavedReportRow({ report }: { readonly report: CustomReport }) {
   );
 }
 
+/**
+ * One saved-report row's worth of placeholder, in the list's place, so the
+ * report cards below move at most by the rows beyond the first when the list
+ * arrives (and not at all for a single saved report).
+ */
+function SavedReportsSkeleton() {
+  return (
+    <SkeletonRegion label="Loading your reports" className="mt-2">
+      <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex h-5 items-center"><Skeleton className="h-3.5 w-48" /></div>
+          <div className="flex h-4 items-center"><Skeleton className="h-3 w-72 max-w-full" /></div>
+        </div>
+        <Skeleton className="h-4 w-12" />
+      </div>
+    </SkeletonRegion>
+  );
+}
+
 function SavedReports() {
   const {
     reports, loading, error
   } = useCustomReports();
-  if (loading) return <SectionPlaceholder variant="loading" message="Loading your reports…" />;
+  if (loading && reports.length === 0) return <SavedReportsSkeleton />;
   if (error !== null) return <SectionPlaceholder variant="error" message={error} />;
   if (reports.length === 0) {
     return <p className="mt-3 text-sm text-gray-500">No custom report yet. Create one from the sections of every report below.</p>;

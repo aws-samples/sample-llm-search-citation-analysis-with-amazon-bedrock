@@ -7,7 +7,6 @@ import {
   updateUser,
   deleteUser,
   resetUserPassword,
-  listGroups,
 } from './users';
 import {
   mockApiDelete, mockApiGet, mockApiPost, mockApiPut
@@ -110,28 +109,29 @@ describe('users API', () => {
   });
 
   describe('resetUserPassword', () => {
-    it('resets password and returns message', async () => {
-      mockApiPost.mockResolvedValue({ message: 'Password reset' });
+    it('answers which action the server took', async () => {
+      mockApiPost.mockResolvedValue({
+        message: 'Invitation email sent again',
+        action: 'invite_resent',
+      });
 
       const result = await resetUserPassword('test');
 
-      expect(result.message).toBe('Password reset');
-      expect(mockApiPost).toHaveBeenCalledWith('/users/test/reset-password', {});
+      expect(result).toStrictEqual({
+        message: 'Invitation email sent again',
+        action: 'invite_resent',
+      });
     });
-  });
 
-  describe('listGroups', () => {
-    it('returns groups from API', async () => {
-      const mockGroups = [{
-        name: 'admin',
-        description: 'Admins' 
-      }];
-      mockApiGet.mockResolvedValue({ groups: mockGroups });
+    it('posts to the reset-password route of the URL-encoded username', async () => {
+      mockApiPost.mockResolvedValue({
+        message: 'Password reset',
+        action: 'password_reset',
+      });
 
-      const result = await listGroups();
+      await resetUserPassword('a+b@example.com');
 
-      expect(result.groups).toStrictEqual(mockGroups);
-      expect(mockApiGet).toHaveBeenCalledWith('/users/groups');
+      expect(mockApiPost).toHaveBeenCalledWith('/users/a%2Bb%40example.com/reset-password', {});
     });
   });
 });

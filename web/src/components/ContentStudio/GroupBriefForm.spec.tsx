@@ -411,7 +411,7 @@ describe('GroupBriefForm request state', () => {
 
     renderGroupBriefForm();
 
-    expect(screen.getByText('Loading keyword groups...')).toBeInTheDocument();
+    expect(screen.getByText('Loading keyword groups')).toBeInTheDocument();
   });
 
   it('associates always-visible fields with group-brief identities', () => {

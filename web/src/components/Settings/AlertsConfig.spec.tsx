@@ -200,13 +200,22 @@ describe('AlertsConfig', () => {
     expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
   });
 
-  it('shows loading status while initial settings are pending', () => {
+  it('shows the alert settings skeleton while initial settings are pending', () => {
     renderAlertsConfig({
       settings: null,
       loading: true,
     });
 
-    expect(screen.getByText('Loading alert settings…')).toBeInTheDocument();
+    expect(screen.getByText('Loading alert settings')).toBeInTheDocument();
+  });
+
+  it('keeps the content change section on the page while initial settings are pending', () => {
+    renderAlertsConfig({
+      settings: null,
+      loading: true,
+    });
+
+    expect(screen.getByRole('heading', { name: 'Record content change' })).toBeInTheDocument();
   });
 
   it.each([
@@ -218,7 +227,7 @@ describe('AlertsConfig', () => {
   ])('hides loading status %s', (_condition, settingsState) => {
     renderAlertsConfig(settingsState);
 
-    expect(screen.queryByText('Loading alert settings…')).not.toBeInTheDocument();
+    expect(screen.queryByText('Loading alert settings')).not.toBeInTheDocument();
   });
 
   it('disables refresh while settings are being saved', () => {

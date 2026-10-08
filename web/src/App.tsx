@@ -16,6 +16,7 @@ import { usePrintMode } from './hooks/usePrintMode';
 import { KEYWORD_RECONCILIATION_CONTEXT } from './hooks/usePromoteKeywords';
 import { Sidebar } from './components/Layout/Sidebar';
 import { TabContent } from './components/Layout/TabContent';
+import { AppSkeleton } from './components/Layout/AppSkeleton';
 import { ReportsRouter } from './components/Reports/ReportsRouter';
 import { ConfirmModal } from './components/ui/Modal';
 import { AboutModal } from './components/About';
@@ -25,6 +26,9 @@ import { ThemeToggle } from './components/ui/ThemeToggle';
 import { PrintToPdfButton } from './components/ui/PrintToPdfButton';
 import { Spinner } from './components/ui/Spinner';
 import type { SettingsTab } from './components/Settings';
+import {
+  isSettingsPath, settingsPath
+} from './components/Settings/settingsSections';
 import type {
   TabType, Schedule, Stats
 } from './types';
@@ -54,6 +58,7 @@ const TAB_TO_PATH: Record<TabType, string> = {
   execution: '/execution',
   schedule: '/schedule',
   settings: '/settings',
+  'ai-assistants': '/ai-assistants',
 };
 
 const PATH_TO_TAB: Record<string, TabType> = Object.fromEntries(
@@ -67,6 +72,7 @@ const PATH_TO_TAB: Record<string, TabType> = Object.fromEntries(
  */
 function resolveActiveTab(pathname: string): TabType {
   if (pathname.startsWith('/reports')) return 'reports';
+  if (isSettingsPath(pathname)) return 'settings';
   return PATH_TO_TAB[pathname] ?? 'dashboard';
 }
 
@@ -140,6 +146,7 @@ const PAGE_TITLES: Record<TabType, string> = {
   schedule: 'Schedule',
   'keyword-research': 'Keyword Research',
   settings: 'Settings',
+  'ai-assistants': 'AI Assistants',
   searches: 'Recent Searches',
   'raw-responses': 'Raw Responses',
 };
@@ -164,11 +171,7 @@ function DashboardGate({
   loading, stats, error, children 
 }: DashboardGateProps) {
   if (loading && !stats) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-50 dark:bg-gray-900">
-        <div className="text-xl text-gray-600 dark:text-gray-400">Loading dashboard...</div>
-      </div>
-    );
+    return <AppSkeleton />;
   }
 
   if (error) {
@@ -260,7 +263,6 @@ function MainApp() {
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [rawResponsesPath, setRawResponsesPath] = useState<string | undefined>(undefined);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
 
@@ -294,13 +296,6 @@ function MainApp() {
     }
   }, [location.pathname]);
 
-  // Clear the settings deep-link when navigating away from settings
-  useEffect(() => {
-    if (location.pathname !== '/settings') {
-      setSettingsInitialTab(undefined);
-    }
-  }, [location.pathname]);
-
   const handleTabChange = (tab: TabType) => {
     const targetPath = TAB_TO_PATH[tab];
     if (isRunning && activeTab === 'execution') {
@@ -317,8 +312,7 @@ function MainApp() {
   };
 
   const handleNavigateToSettings = (tab: SettingsTab) => {
-    setSettingsInitialTab(tab);
-    navigate('/settings');
+    navigate(settingsPath(tab));
   };
 
   const confirmLeaveExecution = () => {
@@ -383,7 +377,6 @@ function MainApp() {
                     execution={execution}
                     triggerAnalysis={triggerAnalysis}
                     rawResponsesPath={rawResponsesPath}
-                    settingsInitialTab={settingsInitialTab}
                     setActiveTab={setActiveTab}
                     onNavigateToRawResponses={handleNavigateToRawResponses}
                   />

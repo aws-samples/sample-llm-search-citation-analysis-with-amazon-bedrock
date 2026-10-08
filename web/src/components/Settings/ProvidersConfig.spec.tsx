@@ -43,11 +43,21 @@ describe('ProvidersConfig', () => {
     expect(screen.queryByRole('button', { name: 'Change model' })).not.toBeInTheDocument();
   });
 
-  it('shows a loading message instead of the cards while providers load', () => {
+  it('shows the providers skeleton instead of the cards on the first load', () => {
+    render(<ProvidersConfig {...buildProvidersConfigProps({
+      loading: true,
+      providers: [],
+    })} />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading providers');
+    expect(screen.queryByRole('heading', { name: 'AI Provider Configuration' })).not.toBeInTheDocument();
+  });
+
+  it('keeps the provider cards on screen while a refresh loads', () => {
     render(<ProvidersConfig {...buildProvidersConfigProps({ loading: true })} />);
 
-    expect(screen.getByText('Loading providers...')).toBeInTheDocument();
-    expect(screen.queryByText('sk-ant-...xyz')).not.toBeInTheDocument();
+    expect(screen.getByText('sk-ant-...xyz')).toBeInTheDocument();
+    expect(screen.queryByText('Loading providers')).not.toBeInTheDocument();
   });
 });
 

@@ -21,6 +21,8 @@ interface Props {
   readonly visibility: VisibilityResponse;
   readonly trends: HistoricalTrendsResponse | null;
   readonly trendsError: string | null;
+  /** The trends request is in flight. */
+  readonly trendsLoading?: boolean;
   readonly scopeLabel: string;
   readonly rangeDays: HistoryRangeDays;
   readonly onRangeChange: (days: HistoryRangeDays) => void;
@@ -63,7 +65,7 @@ function ExportButton({
  * (`docs/kpi-definitions.md`).
  */
 export function VisibilityOverview({
-  visibility, trends, trendsError, scopeLabel, rangeDays, onRangeChange, children
+  visibility, trends, trendsError, trendsLoading, scopeLabel, rangeDays, onRangeChange, children
 }: Props) {
   return (
     <div className="space-y-6">
@@ -79,7 +81,7 @@ export function VisibilityOverview({
         <RunKpiHeadline visibility={visibility} />
       </OverviewPanel>
 
-      <VisibilityHistory trends={trends} error={trendsError} rangeDays={rangeDays} onRangeChange={onRangeChange} />
+      <VisibilityHistory trends={trends} error={trendsError} loading={trendsLoading} rangeDays={rangeDays} onRangeChange={onRangeChange} />
       <KeywordVisibilityTable rows={visibility.keywords} />
       <BrandShareOfVoicePanel brands={visibility.brands} />
       <BrandLeaderboard brands={visibility.brands} />

@@ -32,7 +32,7 @@ async function renderPanelAndClick(buttonName: string) {
 }
 
 describe('AlertsPanel', () => {
-  it('shows a loading status while the first request is pending', () => {
+  it('shows the alert row skeleton while the first request is pending', () => {
     mockUseOpenAlerts.mockReturnValue(buildAlertsPanelHookResult({
       items: [],
       count: 0,
@@ -41,7 +41,7 @@ describe('AlertsPanel', () => {
 
     render(<AlertsPanel />);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Loading alerts…');
+    expect(screen.getByRole('status')).toHaveTextContent('Loading alerts');
   });
 
   it('shows the empty state when no open alerts exist', () => {

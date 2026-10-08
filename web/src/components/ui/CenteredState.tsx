@@ -3,12 +3,7 @@ import { Spinner } from './Spinner';
 
 const FRAME_CLASS = 'text-center py-12 text-gray-500';
 
-/** Centred grey status line (a plain loading or empty message). */
-export const CenteredMessage = ({ children }: { readonly children: ReactNode }) => (
-  <div className={FRAME_CLASS}>{children}</div>
-);
-
-/** Centred large spinner above a loading message. */
+/** Centred large spinner above a loading message (content of unknown size; prefer a Skeleton otherwise). */
 export const CenteredLoading = ({ label }: { readonly label: string }) => (
   <div className={FRAME_CLASS}>
     <Spinner size="lg" className="mx-auto mb-4" />
@@ -31,12 +26,5 @@ export const CenteredEmpty = ({
     {icon}
     <p>{title}</p>
     {hint && <p className="text-sm mt-1">{hint}</p>}
-  </div>
-);
-
-/** Centred large spinner with no message (a lazy view's Suspense fallback). */
-export const CenteredSpinner = () => (
-  <div className="flex items-center justify-center py-12">
-    <Spinner size="lg" />
   </div>
 );

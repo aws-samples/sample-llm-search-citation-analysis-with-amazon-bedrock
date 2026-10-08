@@ -2,6 +2,7 @@ import { useAlertSettings } from '../../hooks/useAlerts';
 import type { AlertMutationOutcome } from '../../hooks/useAlerts';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { AlertSettingsForm } from './AlertSettingsForm';
+import { AlertSettingsFormSkeleton } from './AlertSettingsFormSkeleton';
 import { ContentChangeForm } from './ContentChangeForm';
 import { ErrorAlert } from '../ui/ErrorAlert';
 import { RefreshTextButton } from '../ui/RefreshTextButton';
@@ -72,9 +73,7 @@ export function AlertsConfig({ isAdmin }: AlertsConfigProps) {
       </div>
 
       <ErrorAlert message={error} />
-      {loading && settings === null && (
-        <output className="block py-6 text-center text-sm text-gray-500">Loading alert settings…</output>
-      )}
+      {loading && settings === null && <AlertSettingsFormSkeleton />}
       {settings !== null && (
         <AlertSettingsForm
           settings={settings}

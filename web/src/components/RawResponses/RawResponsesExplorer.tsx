@@ -7,11 +7,12 @@ import {
 import { FileViewer } from './FileViewer';
 import { ImageViewer } from './ImageViewer';
 import { Breadcrumb } from './Breadcrumb';
+import { FolderListSkeleton } from './FolderListSkeleton';
 import { FolderFileList } from './FolderFileList';
 import type {
   S3Item, S3BrowseResponse, RawResponseContent
 } from '../../types';
-import { Spinner } from '../ui/Spinner';
+import { CenteredLoading } from '../ui/CenteredState';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   DOCUMENT_TEXT_PATHS, PHOTO_PATHS 
@@ -151,7 +152,7 @@ const ExplorerBody = ({
       </div>
     )}
 
-    {loading && !fileContent && !imageUrl && <LoadingState />}
+    {loading && !fileContent && !imageUrl && (selectedFile ? <LoadingState /> : <FolderListSkeleton />)}
 
     <SelectedFileView
       selectedFile={selectedFile}
@@ -272,9 +273,5 @@ const TabButton = ({
   </button>
 );
 
-const LoadingState = () => (
-  <div className="flex items-center justify-center py-12">
-    <Spinner className="text-gray-400" />
-    <span className="ml-3 text-sm text-gray-500">Loading...</span>
-  </div>
-);
+/** A file's size is unknown until it arrives, so it gets a plain centred spinner rather than a skeleton. */
+const LoadingState = () => <CenteredLoading label="Loading file..." />;
