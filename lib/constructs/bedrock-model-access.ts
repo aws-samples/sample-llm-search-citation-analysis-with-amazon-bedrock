@@ -52,7 +52,7 @@ export interface BedrockModelAccessProps {
   /** Anthropic first-time-use form contents. Submitted once per account. */
   useCase: AnthropicUseCase;
   /**
-   * Foundation model IDs to subscribe, e.g. `anthropic.claude-sonnet-4-6`.
+   * Foundation model IDs to subscribe, e.g. `anthropic.claude-sonnet-5-5`.
    * These are the plain model IDs, not the `global.` inference profile IDs the
    * runtime calls: a subscription is per foundation model.
    */

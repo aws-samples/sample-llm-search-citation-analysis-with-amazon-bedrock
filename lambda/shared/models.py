@@ -19,8 +19,15 @@ Resolution order for thinking budget:
 
 Note on inference profile IDs (verified via `aws bedrock list-inference-profiles`):
 AWS uses inconsistent ID formats. Some profiles include the `-YYYYMMDD-v1:0`
-suffix (Haiku 4.5), others do not (Sonnet 4.6, Opus 4.7). Treat the strings
-as opaque identifiers — do not parse or regex over them.
+suffix (Haiku 4.5), others do not (the 5.5 family). Treat the strings as
+opaque identifiers — do not parse or regex over them.
+
+Request shapes (verified with live Converse calls, 2026-10-08): the Claude 5.5
+models refuse `temperature` and `top_p` ("deprecated for this model") and
+`thinking.type.enabled` with a token budget; they think adaptively, steered by
+`output_config.effort` (low | medium | high | xhigh). They also think when no
+`thinking` field is sent at all, so every call names an effort. Older models
+(a `BEDROCK_MODEL_<ROLE>` override such as Sonnet 4.6) keep the budget shape.
 """
 
 import logging
@@ -55,13 +62,21 @@ class ModelTier(StrEnum):
     DEEP = "deep"          # Opus — deep reasoning, higher latency
 
 
-# Current global inference profile IDs (verified 2026-04-17).
+# Current global inference profile IDs (verified 2026-10-08).
 # To upgrade a family, change the single line here and redeploy.
 _TIER_MODELS: dict[ModelTier, str] = {
-    ModelTier.FAST: "global.anthropic.claude-haiku-4-5-20251001-v1:0",
-    ModelTier.BALANCED: "global.anthropic.claude-sonnet-4-6",
-    ModelTier.DEEP: "global.anthropic.claude-opus-4-7",
+    ModelTier.FAST: "global.anthropic.claude-haiku-5-5",
+    ModelTier.BALANCED: "global.anthropic.claude-sonnet-5-5",
+    ModelTier.DEEP: "global.anthropic.claude-opus-5-5",
 }
+
+# Models that think adaptively (effort instead of a token budget, no sampling
+# parameters), in every form a BEDROCK_MODEL_<ROLE> override may name them.
+_ADAPTIVE_THINKING_MODELS: frozenset[str] = frozenset(
+    f"{prefix}anthropic.claude-{family}-5-5"
+    for prefix in ("global.", "us.", "")
+    for family in ("haiku", "sonnet", "opus")
+)
 
 # Role -> default tier. Overridable per-role via BEDROCK_TIER_<ROLE>.
 _ROLE_DEFAULT_TIER: dict[ModelRole, ModelTier] = {
@@ -73,12 +88,29 @@ _ROLE_DEFAULT_TIER: dict[ModelRole, ModelTier] = {
     ModelRole.RESEARCH_EVALUATION: ModelTier.FAST,
 }
 
-# Extended thinking budget (tokens) per tier. 0 disables thinking.
-# Only Sonnet/Opus support extended thinking; Haiku ignores the field.
+# Extended thinking budget (tokens) per tier, for models that take a budget
+# (older overrides). 0 disables thinking.
 _TIER_THINKING_BUDGET: dict[ModelTier, int] = {
     ModelTier.FAST: 0,
     ModelTier.BALANCED: 2000,
     ModelTier.DEEP: 8000,
+}
+
+# Adaptive-thinking effort per tier, and for a call that turns thinking off
+# (the 5.5 models cannot all switch it off; "low" thinks only when needed).
+_THINKING_OFF_EFFORT = "low"
+_TIER_EFFORT: dict[ModelTier, str] = {
+    ModelTier.FAST: _THINKING_OFF_EFFORT,
+    ModelTier.BALANCED: "medium",
+    ModelTier.DEEP: "high",
+}
+
+# Extra maxTokens per effort: adaptive reasoning counts against maxTokens, so
+# the caller's answer budget would otherwise be eaten by the thinking.
+_EFFORT_HEADROOM: dict[str, int] = {
+    "low": 1000,
+    "medium": 4000,
+    "high": 16000,
 }
 
 # Throttling error class names that should trigger retry.
@@ -149,7 +181,8 @@ def invoke_bedrock(
         prompt: User prompt text.
         role: Task role; drives model + default tier.
         max_tokens: Maximum response tokens.
-        temperature: Sampling temperature (0.0 = deterministic).
+        temperature: Sampling temperature (0.0 = deterministic). Not sent to
+                     models that refuse sampling parameters (the 5.5 family).
         max_retries: Total attempts before giving up on throttling.
         thinking: If True, force extended thinking on (uses tier budget).
                   If False, force off. If None (default), use tier budget.
@@ -165,25 +198,12 @@ def invoke_bedrock(
     """
     model_id = get_model_id(role)
     tier = _resolve_tier(role)
-    tier_budget = _TIER_THINKING_BUDGET[tier]
-
-    if thinking is True:
-        budget = tier_budget if tier_budget > 0 else _TIER_THINKING_BUDGET[ModelTier.BALANCED]
-    elif thinking is False:
-        budget = 0
+    if model_id in _ADAPTIVE_THINKING_MODELS:
+        inference_config, extra_fields = _adaptive_request(tier, thinking, max_tokens)
     else:
-        budget = tier_budget
+        inference_config, extra_fields = _budget_request(tier, thinking, max_tokens, temperature)
 
     client = _get_bedrock_client()
-    inference_config = {"maxTokens": max_tokens, "temperature": temperature}
-    if budget > 0:
-        # Anthropic's extended thinking is only accepted with temperature 1
-        # ("`temperature` may only be set to 1 when thinking is enabled" —
-        # a ValidationException otherwise), and the thinking budget counts
-        # against maxTokens, which must exceed it. Every ANALYSIS caller
-        # passed temperature 0, so the balanced tier never answered and each
-        # feature quietly fell back to its no-LLM path.
-        inference_config = {"maxTokens": max_tokens + budget, "temperature": 1.0}
     request_kwargs: dict = {
         "modelId": model_id,
         "messages": [{"role": "user", "content": [{"text": prompt}]}],
@@ -191,10 +211,8 @@ def invoke_bedrock(
     }
     if system:
         request_kwargs["system"] = [{"text": system}]
-    if budget > 0:
-        request_kwargs["additionalModelRequestFields"] = {
-            "thinking": {"type": "enabled", "budget_tokens": budget}
-        }
+    if extra_fields:
+        request_kwargs["additionalModelRequestFields"] = extra_fields
 
     for attempt in range(max_retries):
         try:
@@ -219,6 +237,43 @@ def invoke_bedrock(
     raise BedrockInvocationError(
         f"Bedrock invocation failed after {max_retries} attempts for model {model_id}"
     )
+
+
+def _adaptive_request(tier: ModelTier, thinking: bool | None, max_tokens: int) -> tuple[dict, dict]:
+    """``inferenceConfig`` and extra fields for a model that thinks adaptively.
+
+    No temperature: these models refuse it. Thinking is steered by effort —
+    the tier's by default, the balanced tier's when forced on for a fast-tier
+    role, and ``low`` when forced off.
+    """
+    if thinking is False:
+        effort = _THINKING_OFF_EFFORT
+    elif thinking is True and tier is ModelTier.FAST:
+        effort = _TIER_EFFORT[ModelTier.BALANCED]
+    else:
+        effort = _TIER_EFFORT[tier]
+    inference_config = {"maxTokens": max_tokens + _EFFORT_HEADROOM[effort]}
+    return inference_config, {"thinking": {"type": "adaptive"}, "output_config": {"effort": effort}}
+
+
+def _budget_request(
+    tier: ModelTier, thinking: bool | None, max_tokens: int, temperature: float,
+) -> tuple[dict, dict]:
+    """``inferenceConfig`` and extra fields for a model that takes a thinking token budget."""
+    tier_budget = _TIER_THINKING_BUDGET[tier]
+    if thinking is True:
+        budget = tier_budget if tier_budget > 0 else _TIER_THINKING_BUDGET[ModelTier.BALANCED]
+    elif thinking is False:
+        budget = 0
+    else:
+        budget = tier_budget
+    if budget == 0:
+        return {"maxTokens": max_tokens, "temperature": temperature}, {}
+    # Extended thinking is only accepted with temperature 1 ("`temperature`
+    # may only be set to 1 when thinking is enabled" — a ValidationException
+    # otherwise), and the budget counts against maxTokens, which must exceed it.
+    inference_config = {"maxTokens": max_tokens + budget, "temperature": 1.0}
+    return inference_config, {"thinking": {"type": "enabled", "budget_tokens": budget}}
 
 
 def _first_text_block(response: Mapping[str, Any]) -> str:

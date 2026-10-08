@@ -9,6 +9,24 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.35.0] - 2026-10-08
+
+### Changed
+
+- **Bedrock processing runs on Claude 5.5**: fast = Haiku 5.5, balanced = Sonnet 5.5, deep = Opus 5.5 (global
+  inference profiles; the deploy-time Marketplace subscriptions and `BedrockModelsEnabled` follow). The 5.5 models
+  refuse `temperature`/`top_p` and token-budget thinking, so `shared/models.invoke_bedrock` sends adaptive thinking
+  with an effort per tier (low / medium / high), adds maxTokens headroom for the reasoning, and sends no
+  temperature. Without a `thinking` field they think at full effort, so every call names one. A model pinned with
+  `BEDROCK_MODEL_<ROLE>` that predates them keeps the token-budget request. Checked with live Converse calls for
+  every role.
+
+### Fixed
+
+- CDK unit tests no longer fill the disk: each synthesized test stack left a ~340 MB `cdk.out*` folder in the OS
+  temp directory (24,000 of them had used 199 GB here). A Vitest global teardown
+  (`lib/test-support/cleanup-synth-output.ts`) removes the folders a run created.
+
 ## [2.34.0] - 2026-10-08
 
 ### Added

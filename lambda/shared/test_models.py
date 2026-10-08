@@ -21,6 +21,12 @@ from testing.module_loader import load_handler_module
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
+HAIKU = "global.anthropic.claude-haiku-5-5"
+SONNET = "global.anthropic.claude-sonnet-5-5"
+OPUS = "global.anthropic.claude-opus-5-5"
+# An older model that still takes a thinking token budget and a temperature.
+BUDGET_MODEL = "global.anthropic.claude-sonnet-4-6"
+
 
 def _bedrock_error(code: str, message: str) -> ClientError:
     """The ``ClientError`` boto3 raises when ``converse`` fails with ``code``."""
@@ -72,22 +78,22 @@ class TestModelIdResolution:
 
     def test_returns_haiku_for_summarization_role_by_default(self, models_module) -> None:
         assert models_module.get_model_id(models_module.ModelRole.SUMMARIZATION) == (
-            "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+            HAIKU
         )
 
     def test_returns_haiku_for_extraction_role_by_default(self, models_module) -> None:
         assert models_module.get_model_id(models_module.ModelRole.EXTRACTION) == (
-            "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+            HAIKU
         )
 
     def test_returns_haiku_for_generation_role_by_default(self, models_module) -> None:
         assert models_module.get_model_id(models_module.ModelRole.GENERATION) == (
-            "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+            HAIKU
         )
 
     def test_returns_sonnet_for_analysis_role_by_default(self, models_module) -> None:
         assert models_module.get_model_id(models_module.ModelRole.ANALYSIS) == (
-            "global.anthropic.claude-sonnet-4-6"
+            SONNET
         )
 
     def test_returns_opus_when_tier_env_override_set_to_deep(
@@ -95,7 +101,7 @@ class TestModelIdResolution:
     ) -> None:
         monkeypatch.setenv("BEDROCK_TIER_ANALYSIS", "deep")
         assert models_module.get_model_id(models_module.ModelRole.ANALYSIS) == (
-            "global.anthropic.claude-opus-4-7"
+            OPUS
         )
 
     def test_returns_direct_model_env_override_ignoring_tier(
@@ -110,7 +116,7 @@ class TestModelIdResolution:
     ) -> None:
         monkeypatch.setenv("BEDROCK_TIER_GENERATION", "not-a-real-tier")
         assert models_module.get_model_id(models_module.ModelRole.GENERATION) == (
-            "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+            HAIKU
         )
 
     def test_tier_override_is_case_insensitive(
@@ -118,7 +124,7 @@ class TestModelIdResolution:
     ) -> None:
         monkeypatch.setenv("BEDROCK_TIER_SUMMARIZATION", "DEEP")
         assert models_module.get_model_id(models_module.ModelRole.SUMMARIZATION) == (
-            "global.anthropic.claude-opus-4-7"
+            OPUS
         )
 
 
@@ -157,56 +163,66 @@ class TestInvokeBedrockSystemPrompt:
 
 
 # =============================================================================
-# invoke_bedrock — thinking budget
+# invoke_bedrock — request shape per model generation
 # =============================================================================
 
-class TestInvokeBedrockThinkingBudget:
-    """Thinking budget wiring for Converse API."""
+_ADAPTIVE = {"thinking": {"type": "adaptive"}}
 
 
-    def test_omits_additional_fields_when_tier_is_fast(self, models_module) -> None:
-        kwargs = _converse_kwargs(models_module, models_module.ModelRole.GENERATION)
+def _effort(level: str) -> dict:
+    """The extra fields of an adaptive-thinking call at ``level`` effort."""
+    return {**_ADAPTIVE, "output_config": {"effort": level}}
 
-        assert "additionalModelRequestFields" not in kwargs
 
-    def test_includes_thinking_budget_when_tier_is_balanced(self, models_module) -> None:
-        kwargs = _converse_kwargs(models_module, models_module.ModelRole.ANALYSIS)
+def _budget(tokens: int) -> dict:
+    """The extra fields of a token-budget thinking call."""
+    return {"thinking": {"type": "enabled", "budget_tokens": tokens}}
 
-        assert kwargs["additionalModelRequestFields"] == {"thinking": {"type": "enabled", "budget_tokens": 2000}}
 
-    def test_forces_temperature_one_and_grows_max_tokens_when_thinking_is_on(self, models_module) -> None:
-        """
-        Anthropic rejects thinking with any temperature but 1 and counts the
-        budget against maxTokens. With temperature 0 (every ANALYSIS caller)
-        the balanced tier answered a ValidationException on every call.
-        """
-        kwargs = _converse_kwargs(models_module, models_module.ModelRole.ANALYSIS, max_tokens=2000, temperature=0)
+class TestInvokeBedrockRequestShape:
+    """
+    The 5.5 models refuse ``temperature`` and token budgets and think
+    adaptively, steered by effort; reasoning counts against maxTokens, so each
+    effort adds headroom. Older models pinned with BEDROCK_MODEL_<ROLE> keep
+    the budget shape, which needs temperature 1 while thinking.
+    """
 
-        assert kwargs["inferenceConfig"] == {"maxTokens": 4000, "temperature": 1.0}
-
-    def test_keeps_the_callers_temperature_when_thinking_is_off(self, models_module) -> None:
-        kwargs = _converse_kwargs(models_module, models_module.ModelRole.GENERATION, max_tokens=1200, temperature=0.3)
-
-        assert kwargs["inferenceConfig"] == {"maxTokens": 1200, "temperature": 0.3}
-
-    def test_uses_deep_budget_when_tier_override_set_to_deep(
-        self, models_module, monkeypatch: pytest.MonkeyPatch,
+    @pytest.mark.parametrize(
+        ('env', 'role', 'call', 'inference', 'extra'),
+        [
+            pytest.param({}, 'GENERATION', {'max_tokens': 1200, 'temperature': 0.3},
+                         {"maxTokens": 2200}, _effort("low"), id='fast_tier_low_effort_no_temperature'),
+            pytest.param({}, 'ANALYSIS', {'max_tokens': 2000},
+                         {"maxTokens": 6000}, _effort("medium"), id='balanced_tier_medium_effort'),
+            pytest.param({'BEDROCK_TIER_ANALYSIS': 'deep'}, 'ANALYSIS', {'max_tokens': 2000},
+                         {"maxTokens": 18000}, _effort("high"), id='deep_tier_high_effort'),
+            pytest.param({}, 'ANALYSIS', {'max_tokens': 2000, 'thinking': False},
+                         {"maxTokens": 3000}, _effort("low"), id='thinking_off_is_low_effort'),
+            pytest.param({}, 'GENERATION', {'max_tokens': 2000, 'thinking': True},
+                         {"maxTokens": 6000}, _effort("medium"), id='thinking_forced_on_for_fast_tier'),
+            pytest.param({'BEDROCK_MODEL_ANALYSIS': 'us.anthropic.claude-opus-5-5'}, 'ANALYSIS', {'max_tokens': 2000},
+                         {"maxTokens": 6000}, _effort("medium"), id='regional_5_5_override_is_adaptive'),
+            pytest.param({'BEDROCK_MODEL_GENERATION': BUDGET_MODEL}, 'GENERATION', {'max_tokens': 1200, 'temperature': 0.3},
+                         {"maxTokens": 1200, "temperature": 0.3}, None, id='older_model_fast_tier_keeps_temperature'),
+            pytest.param({'BEDROCK_MODEL_ANALYSIS': BUDGET_MODEL}, 'ANALYSIS', {'max_tokens': 2000, 'temperature': 0},
+                         {"maxTokens": 4000, "temperature": 1.0}, _budget(2000), id='older_model_balanced_budget'),
+            pytest.param({'BEDROCK_MODEL_ANALYSIS': BUDGET_MODEL, 'BEDROCK_TIER_ANALYSIS': 'deep'}, 'ANALYSIS', {'max_tokens': 2000},
+                         {"maxTokens": 10000, "temperature": 1.0}, _budget(8000), id='older_model_deep_budget'),
+            pytest.param({'BEDROCK_MODEL_ANALYSIS': BUDGET_MODEL}, 'ANALYSIS', {'max_tokens': 2000, 'thinking': False},
+                         {"maxTokens": 2000, "temperature": 0.0}, None, id='older_model_thinking_off'),
+            pytest.param({'BEDROCK_MODEL_GENERATION': BUDGET_MODEL}, 'GENERATION', {'max_tokens': 2000, 'thinking': True},
+                         {"maxTokens": 4000, "temperature": 1.0}, _budget(2000), id='older_model_thinking_forced_on'),
+        ],
+    )
+    def test_sends_the_request_shape_the_model_accepts(
+        self, models_module, monkeypatch: pytest.MonkeyPatch, env, role, call, inference, extra,
     ) -> None:
-        monkeypatch.setenv("BEDROCK_TIER_ANALYSIS", "deep")
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
 
-        kwargs = _converse_kwargs(models_module, models_module.ModelRole.ANALYSIS)
+        kwargs = _converse_kwargs(models_module, models_module.ModelRole[role], **call)
 
-        assert kwargs["additionalModelRequestFields"] == {"thinking": {"type": "enabled", "budget_tokens": 8000}}
-
-    def test_disables_thinking_when_caller_passes_thinking_false(self, models_module) -> None:
-        kwargs = _converse_kwargs(models_module, models_module.ModelRole.ANALYSIS, thinking=False)
-
-        assert "additionalModelRequestFields" not in kwargs
-
-    def test_enables_thinking_when_caller_forces_on_for_fast_tier(self, models_module) -> None:
-        kwargs = _converse_kwargs(models_module, models_module.ModelRole.GENERATION, thinking=True)
-
-        assert kwargs["additionalModelRequestFields"] == {"thinking": {"type": "enabled", "budget_tokens": 2000}}
+        assert (kwargs["inferenceConfig"], kwargs.get("additionalModelRequestFields")) == (inference, extra)
 
 
 # =============================================================================

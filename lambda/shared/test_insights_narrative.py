@@ -218,7 +218,7 @@ class TestStorage:
 
         assert narrative == {
             'run_timestamp': RUN_TIMESTAMP,
-            'model': 'global.anthropic.claude-sonnet-4-6',
+            'model': 'global.anthropic.claude-sonnet-5-5',
             'generated_at': '2026-10-07T06:55:00.000000Z',
             'language': 'es',
             'insights': [insight_item('OpenAI ranks Aurora Airways first in 62.5% of answers.')],

@@ -446,9 +446,9 @@ function readFlagContext(scope: Construct, key: string): boolean {
  * test in lib/citation-analysis-stack.spec.ts.
  */
 const CLAUDE_FOUNDATION_MODEL_IDS = [
-  'anthropic.claude-haiku-4-5-20251001-v1:0',
-  'anthropic.claude-sonnet-4-6',
-  'anthropic.claude-opus-4-7',
+  'anthropic.claude-haiku-5-5',
+  'anthropic.claude-sonnet-5-5',
+  'anthropic.claude-opus-5-5',
 ];
 
 /** `BedrockModelsEnabled` output when provisioning was opted out of. */
@@ -2118,8 +2118,8 @@ export class CitationAnalysisStack extends cdk.Stack {
         // NOTE: `shared/models.py` resolves the analysis model from
         // BEDROCK_TIER_<ROLE> (see `bedrockTierEnv`), which this function does
         // not spread, so ModelRole.ANALYSIS falls through to its hardcoded
-        // BALANCED default: Sonnet 4.6 with a 2000-token extended-thinking
-        // budget. That is the root cause of the latency this function's 60s
+        // BALANCED default: Sonnet 5.5 with medium adaptive-thinking effort.
+        // That is the root cause of the latency this function's 60s
         // timeout accommodates. Moving it to Haiku is a product decision
         // (analysis quality and cost) — do it by spreading `bedrockTierEnv`
         // and setting BEDROCK_TIER_ANALYSIS, not by adding an env var nothing

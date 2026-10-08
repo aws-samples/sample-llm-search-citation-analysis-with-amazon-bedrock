@@ -253,19 +253,21 @@ Internal model calls use Amazon Bedrock (global inference profiles) and need no 
 
 | Tier | Model | Used for |
 |---|---|---|
-| fast | Claude Haiku 4.5 | Brand extraction, crawler page summaries, Content Studio, research agent round evaluation |
-| balanced | Claude Sonnet 4.6 (2,000-token thinking budget) | Ranking analysis (self-reflection), Action Center recommendations, brand expansion and competitor discovery, research agent planning |
-| deep | Claude Opus 4.7 | Not used by default |
+| fast | Claude Haiku 5.5 (low effort) | Brand extraction, crawler page summaries, Content Studio, research agent round evaluation |
+| balanced | Claude Sonnet 5.5 (medium effort) | Ranking analysis (self-reflection), Action Center recommendations, brand expansion and competitor discovery, research agent planning, written report insights |
+| deep | Claude Opus 5.5 (high effort) | Not used by default |
+
+The 5.5 models think adaptively: `models.py` sends `thinking: adaptive` with an `output_config.effort` per tier and no `temperature` (they refuse sampling parameters). A model pinned with `BEDROCK_MODEL_<ROLE>` that predates them (for example `global.anthropic.claude-sonnet-4-6`) gets the older token-budget request instead.
 
 A function's tier can be changed with `BEDROCK_TIER_<ROLE>` or a model pinned with `BEDROCK_MODEL_<ROLE>` (roles: `SUMMARIZATION`, `EXTRACTION`, `GENERATION`, `ANALYSIS`, `RESEARCH_PLANNING`, `RESEARCH_EVALUATION`); the stack sets the tiers in `bedrockTierEnv` in `lib/citation-analysis-stack.ts`.
 
 ### Anthropic model access
 
-Anthropic models on Bedrock need three things: `bedrock:InvokeModel` (granted per Lambda role), the one-time Anthropic use-case form (per account) and an AWS Marketplace subscription per model (per account). The `BedrockModelAccess` construct submits the form and subscribes Haiku 4.5, Sonnet 4.6 and Opus 4.7 at deploy time, so a new account needs no console steps; only its deploy-time function holds `aws-marketplace:Subscribe`. The `BedrockModelsEnabled` output lists the subscribed models.
+Anthropic models on Bedrock need three things: `bedrock:InvokeModel` (granted per Lambda role), the one-time Anthropic use-case form (per account) and an AWS Marketplace subscription per model (per account). The `BedrockModelAccess` construct submits the form and subscribes Haiku 5.5, Sonnet 5.5 and Opus 5.5 at deploy time, so a new account needs no console steps; only its deploy-time function holds `aws-marketplace:Subscribe`. The `BedrockModelsEnabled` output lists the subscribed models.
 
 - The account needs a verified payment method and a billing country Anthropic supports. A model that cannot be subscribed is reported as unavailable and the deploy continues. A refused form (already submitted, organization-level grant) is not an error.
 - The form and subscriptions are account state and stay when the stack is deleted.
-- Opus 4.7 is not offered on demand to every account; the default tiers do not use it.
+- Opus may not be offered on demand to every account; the default tiers do not use it.
 
 If model access is managed elsewhere, skip all of this with `cdk deploy -c skipModelProvisioning=true` (`BedrockModelsEnabled` then reads `none (skipModelProvisioning)`); Bedrock calls fail with `AccessDeniedException` until access exists.
 

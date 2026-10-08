@@ -83,7 +83,7 @@ def stored_item(**overrides: Any) -> dict[str, Any]:
             'insights': [insight_item('OpenAI ranks Aurora Airways first in 62.5% of answers.')],
             'recommendations': [recommendation_item('Publish fare pages OpenAI can cite.')],
         },
-        'model': 'global.anthropic.claude-sonnet-4-6',
+        'model': 'global.anthropic.claude-sonnet-5-5',
         'language': 'es',
         'dropped': 1,
         'generated_at': '2026-10-07T06:55:00.000000Z',
