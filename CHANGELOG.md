@@ -9,6 +9,57 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.37.0] - 2026-10-09
+
+### Added
+
+- **Markets** (Settings › Markets, `GET`/`PUT /api/markets`): a market is one country plus one language, with an
+  optional city, region, coordinates, currency, and the competitors and local brand names to track there. The list is
+  one BrandConfig item (`config_id = 'markets'`, `shared/markets.py`); no AWS resource was added for it. A keyword
+  belongs to at most one market (`market_id`); one without is asked exactly as before.
+  - Runs ask a market's keywords as a local user would: every AI engine gets a short instruction (location, answer
+    language, currency) in its system channel (`instructions` / `system` / `systemInstruction`) and its native
+    location hint (OpenAI and Claude `user_location`, Perplexity `user_location` with coordinates); Brave, Tavily,
+    Exa, SerpAPI and Firecrawl get their country and language parameters. Live tests (Chile vs Brazil, all four
+    engines) showed the instruction is what changes the answer's language, currency and competitor set; the
+    location hints only steer the search, and search providers localize mostly through the query language.
+  - **Add to markets…** on a keyword (`POST /api/markets`, Admin) asks Bedrock how a local user in each chosen market
+    would type it and creates linked translations (`concept_id`).
+  - Run Analysis, schedules, the MCP run tools and every scoped read endpoint take a market (`scope.market_ids`, the
+    `market_id` query parameter). The header's market selector narrows every scoped view, report (`?market=`) and the
+    Citations tab; *All markets (combined)* is the default.
+  - KPI snapshots and alerts are kept per (keyword group, market), and written insights per group and market, in the
+    market's language. SearchResults rows carry `market_id`; brand extraction adds the market's competitors and
+    local brand names.
+- **YouTube citations**: every YouTube link (`youtu.be`, `m.`, `/shorts/`, `/embed/`, `/live/`, nocookie, `&t=`/`&si=`)
+  is stored as `https://www.youtube.com/watch?v=<id>`, so a video is one citation (`shared/youtube.py`,
+  `test-fixtures/youtube-urls.json`). Citations carry `content_type` (`video` / `page`); the Citations tab shows a
+  *Video* badge, a type filter, a Type column in the export and, in the detail view, the video's title, channel and
+  thumbnail. The crawler reads videos from YouTube oEmbed (pinned host, no redirects, 64 KB cap) instead of an
+  AgentCore browser session.
+
+### Changed
+
+- **Perplexity runs on the Agent API** (`POST /v1/agent`, `web_search` tool, default model `perplexity/sonar`): the
+  Sonar Chat Completions API was retired on 2026-09-27. Saved `sonar` / `sonar-pro` / `sonar-reasoning-pro` models
+  are read as `perplexity/sonar`; the Settings picker lists the Agent API models. Each answer's vendor-reported cost
+  is stored (`metadata.cost_usd`). Keyword research uses the same client.
+- **OpenAI** uses the `web_search` tool (not the legacy `web_search_preview`) with `tool_choice: required`, so every
+  answer searches; its HTTP timeout is 180 s.
+- **Claude** uses the newest web search tool (`web_search_20260318`, dynamic filtering) with no `max_uses` cap and
+  4,096 output tokens; a model that refuses dynamic filtering is asked again with `allowed_callers: ["direct"]`, and
+  an in-body `too_many_requests` / `unavailable` search error is retried. Default model `claude-sonnet-5-5`.
+- **Gemini** default model `gemini-3.6-flash` (the replacement Google lists for `gemini-3-flash-preview`).
+- Citations are no longer capped: every deduplicated citation is stored; only the crawl list keeps the
+  `MAX_CITATIONS_PER_KEYWORD` cap (Step Functions state size, crawl cost). `total_citations_found` counts every
+  stored citation. The deduplication Lambda's timeout is 120 s.
+- A 4xx answer other than 429 from a provider is no longer retried (it cannot succeed when resent).
+
+### Fixed
+
+- Raw responses of different personas no longer overwrite each other in S3: the key gained the query prompt,
+  `raw-responses/{date}/{keyword}/{provider}/{query_prompt_id}/{timestamp}.json`.
+
 ## [2.36.1] - 2026-10-08
 
 ### Changed

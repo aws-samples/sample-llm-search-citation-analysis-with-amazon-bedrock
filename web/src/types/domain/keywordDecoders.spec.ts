@@ -68,6 +68,35 @@ describe('isKeyword', () => {
       status: 'archived',
     })).toBe(false);
   });
+
+  it('accepts a keyword localizing another one in a market', () => {
+    expect(isKeyword({
+      ...validKeyword,
+      market_id: 'cl-es',
+      concept_id: 'keyword-source',
+    })).toBe(true);
+  });
+
+  it('accepts a null market as the global one', () => {
+    expect(isKeyword({
+      ...validKeyword,
+      market_id: null,
+    })).toBe(true);
+  });
+
+  it('rejects a numeric market', () => {
+    expect(isKeyword({
+      ...validKeyword,
+      market_id: 7,
+    })).toBe(false);
+  });
+
+  it('rejects a numeric concept', () => {
+    expect(isKeyword({
+      ...validKeyword,
+      concept_id: 7,
+    })).toBe(false);
+  });
 });
 
 describe('isKeywordsPage', () => {

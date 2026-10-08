@@ -2,9 +2,10 @@ import {
   describe, it, expect, vi 
 } from 'vitest';
 import {
-  render, screen 
+  fireEvent, render, screen 
 } from '@testing-library/react';
 import { CitationsView } from './CitationsView';
+import type { TopUrl } from '../../types';
 
 vi.mock('../../infrastructure', () => import('../../test/infrastructureMock'));
 
@@ -15,6 +16,12 @@ const mockCitations = [
     keywords: ['hotels'],
   },
 ];
+
+/** Renders the view over `citations` and sets its Type filter to videos. */
+function renderFilteredToVideos(citations: TopUrl[]) {
+  render(<CitationsView citations={citations} />);
+  fireEvent.change(screen.getByRole('combobox', { name: 'Type' }), { target: { value: 'video' } });
+}
 
 describe('CitationsView', () => {
   it('shows the empty state when there are no citations', () => {
@@ -42,5 +49,22 @@ describe('CitationsView', () => {
   it('renders citation domain', () => {
     render(<CitationsView citations={mockCitations} />);
     expect(screen.getByText('example.com')).toBeInTheDocument();
+  });
+
+  it('lists only the video citations when the Type filter is set to videos', () => {
+    renderFilteredToVideos([...mockCitations, {
+      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
+      citation_count: 1,
+      content_type: 'video',
+    }]);
+
+    expect(screen.queryByText('example.com')).not.toBeInTheDocument();
+    expect(screen.getByText('www.youtube.com')).toBeInTheDocument();
+  });
+
+  it('reports that no citation matches when the Type filter excludes them all', () => {
+    renderFilteredToVideos(mockCitations);
+
+    expect(screen.getByText('No citations match your filters')).toBeInTheDocument();
   });
 });

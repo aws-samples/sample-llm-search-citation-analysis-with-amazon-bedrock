@@ -11,6 +11,10 @@ Every read endpoint that reports on keywords accepts exactly one of::
                               answer 400, all-keyword endpoints cover every
                               active keyword
 
+plus, independently, an optional ``market_id=<id>`` (or ``global``) that
+narrows a group, id or ``all`` scope to that market's keywords; on its own it
+means every active keyword of the market, and a single keyword ignores it.
+
 The scope is resolved server-side into keyword *texts* (SearchResults and
 Citations are keyed by keyword text) with ``shared.keyword_groups.resolve_scope``,
 so the KPI formulas stay in one place instead of being re-implemented per
@@ -54,11 +58,15 @@ from shared.constants import MAX_KEYWORD_LENGTH
 from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
 from shared.keyword_groups import describe_scope, resolve_scope, validate_scope
+from shared.markets import GLOBAL_MARKET_ID, is_market_filter_id
 from shared.module_files import exec_module_file
 
 logger = logging.getLogger(__name__)
 
 MAX_KEYWORD_IDS = 100
+
+MARKET_PARAM = 'market_id'
+"""The optional market filter: one market id, or ``global`` for the keywords without one."""
 
 #: The most keywords one scoped report covers, and how many of their
 #: partitions it reads at a time: keeps a group report inside the 29s API budget.
@@ -71,10 +79,12 @@ SCOPE_QUERY_PARAMS: dict[str, dict[str, Any]] = {
     'group_id': {'type': str, 'max_length': 64},
     'keyword_ids': {'type': str, 'max_length': 8000},
     'scope': {'type': str, 'choices': ['all']},
+    MARKET_PARAM: {'type': str, 'max_length': 32},
 }
-"""``@validate`` rules for the scope parameters; handlers spread them into their own schema."""
+"""``@validate`` rules for the scope parameters and the market filter; handlers spread them into their own schema."""
 
-SCOPE_PARAMS = tuple(SCOPE_QUERY_PARAMS)
+SCOPE_PARAMS = ('keyword', 'group_id', 'keyword_ids', 'scope')
+"""The mutually exclusive scope parameters (``market_id`` narrows any of them and is not one)."""
 
 
 def keywords_table_name() -> str:
@@ -97,33 +107,63 @@ class ReportScope:
     scope: dict[str, Any]
     """The canonical scope descriptor (same shape as trigger / schedule scopes)."""
     label: str
+    market_id: str | None = None
+    """The one market the scope is narrowed to (``global`` = keywords without one); ``None`` = every market.
+
+    The only defaulted field: its absence is the pre-markets behaviour, never a wider scope.
+    """
 
     @property
     def is_single_keyword(self) -> bool:
         return self.kind == 'keyword'
 
     def describe(self) -> dict[str, Any]:
-        """The ``scope`` block echoed in responses."""
-        return {**self.scope, 'kind': self.kind, 'label': self.label, 'keyword_count': len(self.keywords)}
+        """The ``scope`` block echoed in responses (``market_id`` only when the scope has one)."""
+        market = {} if self.market_id is None else {MARKET_PARAM: self.market_id}
+        return {**self.scope, 'kind': self.kind, 'label': self.label, 'keyword_count': len(self.keywords), **market}
 
 
 def _split_ids(raw: str) -> list[str]:
     return [part.strip() for part in raw.split(',') if part.strip()]
 
 
+def _market_param(params: dict[str, Any]) -> tuple[str | None, str | None]:
+    """The ``market_id`` filter: ``(id, None)``, ``(None, None)`` when absent, or ``(None, error)``."""
+    value = str(params.get(MARKET_PARAM) or '').strip()
+    if not value:
+        return None, None
+    if not is_market_filter_id(value):
+        return None, f"{MARKET_PARAM} must be a market id or '{GLOBAL_MARKET_ID}'"
+    return value, None
+
+
+def _resolved(kind: str, descriptor: dict[str, Any], keywords_table: Any, market_id: str | None) -> ReportScope:
+    """``descriptor`` narrowed to ``market_id`` (when given) and resolved to its active keywords."""
+    if market_id is not None:
+        descriptor = {**descriptor, 'market_ids': [market_id]}
+    keywords = tuple(item['keyword'] for item in resolve_scope(descriptor, keywords_table))
+    return ReportScope(kind=kind, keywords=keywords, scope=descriptor, label=describe_scope(descriptor), market_id=market_id)
+
+
 def parse_scope_params(params: dict[str, Any] | None, keywords_table: Any) -> tuple[ReportScope | None, str | None]:
     """Turn query-string parameters into a resolved ``ReportScope``.
 
-    Returns ``(scope, None)``, ``(None, None)`` when no scope parameter is
-    present (the caller applies its default), or ``(None, error)`` when the
-    parameters are contradictory or malformed.
+    Returns ``(scope, None)``, ``(None, None)`` when no scope parameter and no
+    ``market_id`` is present (the caller applies its default), or
+    ``(None, error)`` when the parameters are contradictory or malformed.
+    ``market_id`` alone means every active keyword of that market; with a
+    group, id or ``all`` scope it keeps that scope's keywords of the market;
+    a single keyword ignores it (a keyword has exactly one market).
     """
     params = params or {}
+    market_id, market_error = _market_param(params)
+    if market_error:
+        return None, market_error
     present = [name for name in SCOPE_PARAMS if str(params.get(name) or '').strip()]
-    if not present:
-        return None, None
     if len(present) > 1:
         return None, f"Use only one of {', '.join(SCOPE_PARAMS)}"
+    if not present:
+        return (None, None) if market_id is None else (_resolved('all', {'mode': 'all'}, keywords_table, market_id), None)
 
     name = present[0]
     value = str(params[name]).strip()
@@ -134,7 +174,7 @@ def parse_scope_params(params: dict[str, Any] | None, keywords_table: Any) -> tu
     if name == 'scope':
         if value != 'all':
             return None, "scope must be 'all' (use group_id or keyword_ids for a narrower scope)"
-        return all_active_scope(keywords_table), None
+        return _resolved('all', {'mode': 'all'}, keywords_table, market_id), None
 
     if name == 'group_id':
         descriptor, error = validate_scope({'mode': 'groups', 'group_ids': [value]})
@@ -148,17 +188,12 @@ def parse_scope_params(params: dict[str, Any] | None, keywords_table: Any) -> tu
     if descriptor is None:
         # validate_scope returns exactly one of (descriptor, None) / (None, error).
         return None, str(error).replace('scope.', '')
-
-    resolved = resolve_scope(descriptor, keywords_table)
-    keywords = tuple(item['keyword'] for item in resolved)
-    return ReportScope(kind=kind, keywords=keywords, scope=descriptor, label=describe_scope(descriptor)), None
+    return _resolved(kind, descriptor, keywords_table, market_id), None
 
 
 def all_active_scope(keywords_table: Any) -> ReportScope:
     """The default for all-keyword endpoints: every active keyword."""
-    descriptor = {'mode': 'all'}
-    resolved = resolve_scope(descriptor, keywords_table)
-    return ReportScope(kind='all', keywords=tuple(item['keyword'] for item in resolved), scope=descriptor, label=describe_scope(descriptor))
+    return _resolved('all', {'mode': 'all'}, keywords_table, None)
 
 
 def scope_from_request(

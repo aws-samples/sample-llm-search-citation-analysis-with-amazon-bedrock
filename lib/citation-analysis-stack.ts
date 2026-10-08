@@ -1145,6 +1145,8 @@ export class CitationAnalysisStack extends cdk.Stack {
         // Enabled query prompts are resolved here for executions whose input
         // does not carry them (EventBridge schedules).
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
+        // The markets of the run's keywords (BrandConfig item `markets`).
+        DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
         // Every run's keyword list is written here as the ProcessKeywords
         // item source (`runs/<execution>/keywords.json`).
         KEYWORDS_BUCKET: keywordsBucket.bucketName,
@@ -1158,6 +1160,8 @@ export class CitationAnalysisStack extends cdk.Stack {
     keywordGroupsTable.grantReadData(parseKeywordsFunction);
     keywordsTable.grantReadData(parseKeywordsFunction);
     queryPromptsTable.grantReadData(parseKeywordsFunction);
+    // Each manifest entry carries its keyword's market (BrandConfig item `markets`).
+    brandConfigTable.grantReadData(parseKeywordsFunction);
 
     // Search Lambda Functions: one `CitationAnalysis-Search-<id>` per provider,
     // same code, role and environment, each capped by its reserved concurrency
@@ -1196,7 +1200,9 @@ export class CitationAnalysisStack extends cdk.Stack {
       code: lambdaSourceCode('deduplication'),
       role: deduplicationLambdaRole,
       layers: [sharedLayer],
-      timeout: cdk.Duration.seconds(30),
+      // Every citation is stored since 2.37.0, one update_item each: a keyword
+      // with many personas can carry several hundred URLs.
+      timeout: cdk.Duration.seconds(120),
       memorySize: 256,
       description: 'Deduplicate and prioritize citations',
       environment: {
@@ -1486,6 +1492,9 @@ export class CitationAnalysisStack extends cdk.Stack {
         // emits the key. Referencing $$.Execution.Input.query_prompts here
         // would raise States.Runtime for scheduled executions.
         'query_prompts.$': '$.query_prompts',
+        // The keyword's market (`Market.to_json()`, or null for a global
+        // keyword); ParseKeywords writes the key on every manifest entry.
+        'market.$': '$$.Map.Item.Value.market',
       },
     }).itemProcessor(processKeywordChain);
 
@@ -1616,7 +1625,7 @@ export class CitationAnalysisStack extends cdk.Stack {
       code: lambdaSourceCode('research-worker'),
       layers: [sharedLayer],
       // Invoked by Step Functions, not API Gateway. One step is one provider
-      // call: at most two HTTP attempts of up to 90s each plus backoff.
+      // call: at most two HTTP attempts of up to 120s each plus backoff.
       timeout: cdk.Duration.seconds(300),
       memorySize: 512,
       description: 'Keyword research steps: plan, one web-search provider call per step, evaluate, finalize',
@@ -1942,11 +1951,13 @@ export class CitationAnalysisStack extends cdk.Stack {
         DYNAMODB_TABLE_KEYWORD_RESEARCH: keywordResearchTable.tableName,
         DYNAMODB_TABLE_RESEARCH_TEMPLATES: researchTemplatesTable.tableName,
         RESEARCH_STATE_MACHINE_ARN: researchStateMachine.stateMachineArn,
+        // Keyword create/update checks a keyword's market_id against the markets.
+        DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
         SECRETS_PREFIX: 'citation-analysis/',
       },
     });
 
-    // Consolidated Config Management Lambda (query-prompts, schedules, providers, KPI alerts and custom reports)
+    // Consolidated Config Management Lambda (query-prompts, schedules, providers, KPI alerts, custom reports and markets)
     const configMgmtFunction = apiFunction(this, 'ConfigMgmt', sharedLayer, {
       functionName: 'CitationAnalysis-API-ConfigMgmt',
       handlerFiles: [
@@ -1957,9 +1968,10 @@ export class CitationAnalysisStack extends cdk.Stack {
         'manage-bedrock-models.py',
         'manage-alerts.py',
         'manage-custom-reports.py',
+        'manage-markets.py',
       ],
       memorySize: 256,
-      description: 'API: Consolidated query prompts, schedules, providers, KPI alerts and custom reports',
+      description: 'API: Consolidated query prompts, schedules, providers, KPI alerts, custom reports and markets',
       environment: {
         // Audit #12 canonical names.
         DYNAMODB_TABLE_QUERY_PROMPTS: queryPromptsTable.tableName,
@@ -1971,6 +1983,12 @@ export class CitationAnalysisStack extends cdk.Stack {
         KPI_ALERTS_TOPIC_ARN: kpiAlertsTopic.topicArn,
         // Schedules and content-change markers validate group ids.
         DYNAMODB_TABLE_KEYWORD_GROUPS: keywordGroupsTable.tableName,
+        // /api/markets stores the market list (BrandConfig item `markets`) and
+        // refuses to drop a market that keywords still use.
+        DYNAMODB_TABLE_BRAND_CONFIG: brandConfigTable.tableName,
+        DYNAMODB_TABLE_KEYWORDS: keywordsTable.tableName,
+        // POST /api/markets asks Bedrock for each market's local keyword.
+        ...bedrockTierEnv,
         STATE_MACHINE_ARN: stateMachine.stateMachineArn,
         SCHEDULE_ROLE_ARN: schedulerRole.roleArn,
         SECRETS_PREFIX: 'citation-analysis/',
@@ -2032,6 +2050,8 @@ export class CitationAnalysisStack extends cdk.Stack {
     openaiSecret.grantRead(keywordMgmtFunction);
     geminiSecret.grantRead(keywordMgmtFunction);
     researchStateMachine.grantStartExecution(keywordMgmtFunction);
+    // A keyword's market_id must name a configured market.
+    brandConfigTable.grantReadData(keywordMgmtFunction);
 
     // Grant config management function access
     queryPromptsTable.grantReadWriteData(configMgmtFunction);
@@ -2041,6 +2061,9 @@ export class CitationAnalysisStack extends cdk.Stack {
     alertSettingsTable.grantReadWriteData(configMgmtFunction);
     contentChangesTable.grantReadWriteData(configMgmtFunction);
     customReportsTable.grantReadWriteData(configMgmtFunction);
+    // /api/markets: the market list lives in BrandConfig; the in-use check scans Keywords.
+    brandConfigTable.grantReadWriteData(configMgmtFunction);
+    keywordsTable.grantReadData(configMgmtFunction);
     allow(configMgmtFunction, ['sns:ListSubscriptionsByTopic', 'sns:Publish', 'sns:Subscribe'], [kpiAlertsTopic.topicArn]);
     allow(configMgmtFunction, ['sns:Unsubscribe'], [`${kpiAlertsTopic.topicArn}:*`]);
     kpiAlertsKey.grantEncryptDecrypt(configMgmtFunction);
@@ -2576,6 +2599,12 @@ export class CitationAnalysisStack extends cdk.Stack {
     const customReportsResource = apiResource.addResource('custom-reports');
     route(customReportsResource, configMgmtFunction, 'GET', 'POST');
     route(customReportsResource.addResource('{id}'), configMgmtFunction, 'PUT', 'DELETE');
+
+    // Markets (2.37.0): one resource for the whole API. GET for every
+    // signed-in user; PUT (replace the list) and POST (local keyword
+    // suggestions) are Admin-gated in `manage-markets.py`. The main stack is
+    // close to the 500-resource limit, so nothing else goes under it.
+    route(apiResource.addResource('markets'), configMgmtFunction, 'GET', 'PUT', 'POST');
 
     // ========================================
     // User Management API

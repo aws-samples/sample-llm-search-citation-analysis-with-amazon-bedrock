@@ -1,4 +1,4 @@
-"""Crawler Lambda for AgentCore browser extraction and page analysis."""
+"""Crawler Lambda: AgentCore browser extraction and page analysis; YouTube videos through oEmbed."""
 
 import base64
 import json
@@ -25,6 +25,8 @@ from shared.prompt_safety import untrusted_input_system_instruction, wrap_user_i
 from shared.step_function_response import log_error
 from shared.url_validator import validate_url_safe
 from shared.utils import get_timestamp
+from shared.youtube import content_type_for, youtube_video_id
+from shared.youtube_oembed import VideoMetadata, VideoMetadataError, fetch_video_metadata
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -205,8 +207,14 @@ def store_crawled_content(
     seo_analysis: dict[str, Any] | None = None,
     block_reason: str | None = None,
     analysis_status: str | None = None,
+    video: VideoMetadata | None = None,
 ) -> None:
-    """Append a crawl artifact to the URL-partitioned DynamoDB history."""
+    """Append a crawl artifact to the URL-partitioned DynamoDB history.
+
+    Every row carries ``content_type`` (``'video'`` for a YouTube video link,
+    else ``'page'``); a video read through oEmbed adds ``provider: 'youtube'``
+    and its ``author_name``, ``author_url`` and ``thumbnail_url``.
+    """
     logger.info("Storing crawled content")
     table = dynamodb.Table(config.crawled_content_table)
     stored_keyword = keyword if keyword and keyword.strip() else 'unknown'
@@ -220,7 +228,15 @@ def store_crawled_content(
         'citation_count': citation_count,
         'citing_providers': citing_providers,
         'status': status,
+        'content_type': content_type_for(normalized_url),
     }
+    if video is not None:
+        item.update({
+            'provider': 'youtube',
+            'author_name': video.author_name,
+            'author_url': video.author_url,
+            'thumbnail_url': video.thumbnail_url,
+        })
 
     if page_load_time_ms is not None or content_length is not None:
         item['metadata'] = {}
@@ -499,8 +515,46 @@ def _persist_capture(
     }
 
 
+def _crawl_video(target: _CrawlTarget, video_id: str) -> dict[str, Any]:
+    """Read a YouTube video through oEmbed instead of a browser and persist it.
+
+    The oEmbed fields stand in for the page analysis, so the row is a complete
+    success for the crawl cache; no Bedrock call is made.
+    """
+    start_time = time.monotonic()
+    try:
+        video = fetch_video_metadata(video_id)
+    except VideoMetadataError as exc:
+        logger.warning("YouTube video details unavailable: %s", exc)
+        return _error_result(target, str(exc), page_load_time_ms=int((time.monotonic() - start_time) * 1000))
+
+    content = video.content(target.url)
+    store_crawled_content(
+        normalized_url=target.url,
+        keyword=target.keyword,
+        title=video.title,
+        content=content,
+        summary=video.summary(),
+        citation_count=target.citation_count,
+        citing_providers=target.citing_providers,
+        status='success',
+        page_load_time_ms=int((time.monotonic() - start_time) * 1000),
+        content_length=len(content),
+        analysis_status='complete',
+        video=video,
+    )
+    return {
+        'url': target.url,
+        'status': 'success',
+    }
+
+
 def crawl_citation(citation: dict[str, Any]) -> dict[str, Any]:
-    """Return a cached verdict or crawl and persist one citation URL."""
+    """Return a cached verdict or crawl and persist one citation URL.
+
+    A YouTube video is read through oEmbed (``_crawl_video``); every other
+    page through an AgentCore browser session.
+    """
     target = _crawl_target(citation)
     browser_tools: SimpleBrowserTools | None = None
 
@@ -515,6 +569,10 @@ def crawl_citation(citation: dict[str, Any]) -> dict[str, Any]:
         cached = _lookup_cached_crawl(target)
         if cached is not None:
             return cached
+
+        video_id = youtube_video_id(target.url)
+        if video_id is not None:
+            return _crawl_video(target, video_id)
 
         browser_tools = SimpleBrowserTools(config)
         capture = _capture_page(browser_tools, target.url)

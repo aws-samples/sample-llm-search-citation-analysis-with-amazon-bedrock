@@ -19,10 +19,13 @@ import {
   KeywordList,
 } from './KeywordsManagerComponents';
 import {
-  KeywordGroupsPanel, isGroupFilterFor
+  KeywordGroupsPanel, filterKeywords, isGroupFilterFor
 } from './KeywordGroupsPanel';
 import type { GroupFilter } from './KeywordGroupsPanel';
 import { BulkGroupBar } from './KeywordGroupAssignment';
+import { AddToMarketsDialog } from './AddToMarketsDialog';
+import { KeywordMarketSelect } from './KeywordMarketControls';
+import { useKeywordMarketState } from './useKeywordMarketState';
 import {
   CREATE_ERROR_MESSAGE,
   UPDATE_ERROR_MESSAGE,
@@ -59,15 +62,6 @@ type DeleteTarget =
   }
   | null;
 
-/** Keywords visible under the current group filter. */
-function filterKeywords(keywords: Keyword[], filter: GroupFilter, knownGroupIds: ReadonlySet<string>): Keyword[] {
-  if (filter === 'all') return keywords;
-  if (filter === 'ungrouped') {
-    return keywords.filter((keyword) => !(keyword.group_ids ?? []).some((id) => knownGroupIds.has(id)));
-  }
-  return keywords.filter((keyword) => keyword.group_ids?.includes(filter.groupId));
-}
-
 export const KeywordsManager = ({
   keywords, setKeywords
 }: KeywordsManagerProps) => {
@@ -84,6 +78,7 @@ export const KeywordsManager = ({
   const {
     alertModal, showAlert, closeAlert
   } = useAlertModal();
+  const market = useKeywordMarketState(keywords);
 
   // The setter we receive is not guaranteed to accept functional updates, so
   // membership responses are merged against the latest keywords via a ref.
@@ -128,7 +123,7 @@ export const KeywordsManager = ({
     try {
       const response = await apiPost<unknown>(
         '/keywords',
-        buildCreateKeywordBody(trimmed, targetGroupIds),
+        buildCreateKeywordBody(trimmed, targetGroupIds, market.newMarketId),
         { allowStructured4xx: true }
       );
       const data = parseKeywordResponse(response);
@@ -160,7 +155,7 @@ export const KeywordsManager = ({
     try {
       const results: BulkKeywordResult[] = [];
       for (const keyword of newKeywordsToAdd) {
-        results.push(await processBulkKeyword(keyword, targetGroupIds));
+        results.push(await processBulkKeyword(keyword, targetGroupIds, market.newMarketId));
       }
 
       const {
@@ -191,7 +186,10 @@ export const KeywordsManager = ({
     try {
       const response = await apiPut<unknown>(
         `/keywords/${id}`,
-        { keyword: trimmed },
+        market.controls ? {
+          keyword: trimmed,
+          market_id: market.editMarketId,
+        } : { keyword: trimmed },
         { allowStructured4xx: true }
       );
       const data = parseKeywordResponse(response);
@@ -334,6 +332,7 @@ export const KeywordsManager = ({
   const startEdit = (keyword: Keyword) => {
     setEditingId(keyword.id);
     setEditText(keyword.keyword);
+    market.setEditMarketId(keyword.market_id ?? '');
   };
 
   const emptyMessage = filter === 'all'
@@ -368,6 +367,10 @@ export const KeywordsManager = ({
         saving={saving}
         onAddKeyword={addKeyword}
         onAddBulkKeywords={addBulkKeywords}
+        marketPicker={market.controls && (
+          <KeywordMarketSelect id="new-keyword-market" label="Market for new keywords" value={market.newMarketId}
+            markets={market.markets} onChange={market.setNewMarketId} disabled={saving} />
+        )}
       />
 
       <BulkGroupBar
@@ -398,6 +401,7 @@ export const KeywordsManager = ({
           kind: 'keyword',
           id 
         })}
+        marketControls={market.controls}
         groups={groups}
         bulkSelectedIds={bulkSelectedIds}
         onToggleBulkSelect={toggleBulkSelect}
@@ -423,6 +427,10 @@ export const KeywordsManager = ({
       />
 
       <AlertModal {...alertModal} onClose={closeAlert} />
+
+      <AddToMarketsDialog source={market.marketSource} keywords={keywords} markets={market.markets}
+        onClose={() => market.setMarketSource(null)}
+        onCreated={(created) => setKeywords([...created, ...keywordsRef.current])} />
     </div>
   );
 };

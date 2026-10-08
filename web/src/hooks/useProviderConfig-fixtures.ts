@@ -27,7 +27,7 @@ export const mockProviders: ProviderConfig[] = [
     id: 'perplexity',
     name: 'Perplexity',
     description: 'Sonar model',
-    model: 'sonar',
+    model: 'perplexity/sonar',
     docs_url: 'https://perplexity.ai/docs',
     enabled: false,
     configured: false,

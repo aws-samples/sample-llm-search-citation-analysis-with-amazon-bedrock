@@ -87,7 +87,7 @@ def api_handler(func: Callable) -> Callable:
         try:
             return func(event, context, *args, **kwargs)
         except Exception as e:
-            logger.exception('Error in %s: %s', func.__name__, e)
+            logger.exception('Error in %s', func.__name__)
             return error_response(e, event)
     return wrapper
 

@@ -92,9 +92,9 @@ class TestClaudeParity:
         with (
             patch.object(_mod, 'ClaudeClient', MagicMock(return_value=client)),
             patch.object(_mod, 'store_raw_response_to_s3', MagicMock(return_value=None)),
-            patch.object(_mod, 'get_provider_model', MagicMock(return_value='claude-sonnet-4-5')),
+            patch.object(_mod, 'get_provider_model', MagicMock(return_value='claude-sonnet-5-5')),
         ):
-            _mod._run_claude_provider(KEYWORD, 'test-key', query_template)
+            _mod._run_claude_provider(KEYWORD, 'test-key', query_template, None)
 
         call = client.generate_content.call_args
         return {'query': call.args[0], 'system_prompt': call.kwargs.get('system_prompt')}
@@ -135,16 +135,16 @@ class TestClaudeParity:
         same string on the wire.
         """
         perplexity_client = MagicMock()
-        perplexity_client.chat_completion.return_value = {}
+        perplexity_client.agent_response.return_value = {}
 
         with (
             patch.object(_mod, 'PerplexityClient', MagicMock(return_value=perplexity_client)),
             patch.object(_mod, 'store_raw_response_to_s3', MagicMock(return_value=None)),
-            patch.object(_mod, 'get_provider_model', MagicMock(return_value='sonar')),
+            patch.object(_mod, 'get_provider_model', MagicMock(return_value='perplexity/sonar')),
         ):
-            _mod._run_perplexity_provider(KEYWORD, 'test-key', PERSONA)
+            _mod._run_perplexity_provider(KEYWORD, 'test-key', PERSONA, None)
 
-        perplexity_query = perplexity_client.chat_completion.call_args.args[0][0]['content']
+        perplexity_query = perplexity_client.agent_response.call_args.args[0]
         claude_query = self._claude_call(PERSONA)['query']
 
         assert claude_query == perplexity_query

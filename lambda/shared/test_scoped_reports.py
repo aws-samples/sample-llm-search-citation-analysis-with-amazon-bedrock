@@ -66,6 +66,18 @@ class TestRequiredReportScope:
 
         assert keywords_table.call_count == 2
 
+    def test_takes_the_market_filter_out_of_the_handler_params(self) -> None:
+        table = MagicMock()
+        table.query.return_value = {'Items': [
+            {'id': 'k1', 'keyword': 'hotel coruna', 'group_ids': {'g'}},
+            {'id': 'k2', 'keyword': 'hotel coruña', 'group_ids': {'g'}, 'market_id': 'es-es'},
+        ]}
+        handler = required_report_scope(lambda: table)(stub_handler)
+
+        answer = handler(_EVENT, None, group_id='g', market_id='es-es', days=30)
+
+        assert answer == {'kind': 'group', 'keywords': ['hotel coruña'], 'params': {'days': 30}}
+
 
 def stub_keywords_handler(event: dict[str, Any], context: Any, keywords: list[str] | None, **params: Any) -> dict[str, Any]:
     return {'keywords': keywords, 'params': params}

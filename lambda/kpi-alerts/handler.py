@@ -11,6 +11,14 @@ next to (or instead of) ``scope``; both are honoured.
 A completed evaluation names the run (``run_timestamp``) and the groups it
 snapshotted (``snapshot_group_ids``): exactly the groups the run fully
 covers, for which the GenerateInsights step writes a narrative.
+
+Snapshots and alerts are per (group, market) (2.37.0): the active keywords of
+one group in one market (``shared.markets.keyword_market_id``) are compared
+with that pair's previous snapshot. The global market keeps the plain group id
+as the snapshot key, so its history continues; any other market's key is
+``<group_id>#<market_id>``. ``snapshot_scopes`` lists every pair snapshotted
+(``{"group_id", "market_id"}``), ``snapshot_group_ids`` their distinct groups.
+A scope with ``market_ids`` evaluates only those markets.
 """
 
 from __future__ import annotations
@@ -19,7 +27,7 @@ import json
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any
+from typing import Any, NamedTuple
 
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -39,6 +47,7 @@ from shared.kpi_alerts import (
     ttl_for_timestamp,
 )
 from shared.kpi_engine import Answer, answers_from_rows, owned_domains_from
+from shared.markets import GLOBAL_MARKET_ID, keyword_market_id, market_scoped_key
 from shared.utils import get_brand_config
 
 logger = logging.getLogger(__name__)
@@ -59,6 +68,18 @@ ALERTS_TOPIC_ARN = os.environ['KPI_ALERTS_TOPIC_ARN']
 dynamodb = boto3.resource('dynamodb', config=Config(max_pool_connections=50))
 sns = boto3.client('sns')
 s3 = boto3.client('s3')
+
+
+class GroupMarket(NamedTuple):
+    """One keyword group in one market: the unit a snapshot covers."""
+
+    group_id: str
+    market_id: str
+
+    @property
+    def snapshot_key(self) -> str:
+        """The snapshot ``group_id``: the plain group id for the global market, ``<group>#<market>`` otherwise."""
+        return market_scoped_key(self.group_id, self.market_id)
 
 
 def _skipped(reason: str | None) -> dict[str, Any]:
@@ -146,6 +167,11 @@ def _run_identity(report: Any) -> tuple[str | None, list[str], str | None]:
     return timestamp, names, None
 
 
+def _input_scopes(execution_input: dict[str, Any]) -> list[dict[str, Any]]:
+    """The scope descriptors of the execution input (``scope`` and the older ``requested_scope``)."""
+    return [scope for scope in map(execution_input.get, ('scope', 'requested_scope')) if isinstance(scope, dict)]
+
+
 def _scope_group_ids(
     execution_input: dict[str, Any],
     active_keywords: list[dict[str, Any]],
@@ -155,10 +181,7 @@ def _scope_group_ids(
     all_groups = execution_input.get('source') == 'dynamodb'
     active_by_id = {str(item.get('id')): item for item in active_keywords if item.get('id')}
 
-    for field in ('scope', 'requested_scope'):
-        scope = execution_input.get(field)
-        if not isinstance(scope, dict):
-            continue
+    for scope in _input_scopes(execution_input):
         mode = scope.get('mode')
         if mode == 'all':
             all_groups = True
@@ -188,11 +211,22 @@ def _touched_groups(
     return selected & all_group_ids
 
 
-def _members_by_group(active_keywords: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    members: dict[str, list[dict[str, Any]]] = {}
+def _scope_market_ids(execution_input: dict[str, Any]) -> set[str] | None:
+    """The markets the run's scope covers; ``None`` when there is no scope or one covers every market."""
+    scopes = _input_scopes(execution_input)
+    market_lists = [scope.get('market_ids') for scope in scopes]
+    if not scopes or not all(isinstance(market_ids, list) for market_ids in market_lists):
+        return None
+    return {str(value) for market_ids in market_lists if isinstance(market_ids, list) for value in market_ids if value}
+
+
+def _members_by_group(active_keywords: list[dict[str, Any]]) -> dict[GroupMarket, list[dict[str, Any]]]:
+    """The active keywords of each (group, market) pair."""
+    members: dict[GroupMarket, list[dict[str, Any]]] = {}
     for item in active_keywords:
+        market_id = keyword_market_id(item)
         for group_id in keyword_group_ids(item):
-            members.setdefault(group_id, []).append(item)
+            members.setdefault(GroupMarket(group_id, market_id), []).append(item)
     for rows in members.values():
         rows.sort(key=lambda item: str(item.get('keyword', '')).casefold())
     return members
@@ -201,21 +235,26 @@ def _members_by_group(active_keywords: list[dict[str, Any]]) -> dict[str, list[d
 def _complete_groups(
     touched: set[str],
     processed_names: list[str],
-    members: dict[str, list[dict[str, Any]]],
-) -> tuple[list[str], int]:
+    members: dict[GroupMarket, list[dict[str, Any]]],
+    market_ids: set[str] | None,
+) -> tuple[list[GroupMarket], int]:
+    """The (group, market) pairs of the touched groups whose every active keyword the run processed.
+
+    A pair outside the scope's ``market_ids`` is not evaluated at all; a pair
+    inside it that the run did not fully cover counts as partial.
+    """
     processed = set(processed_names)
-    complete: list[str] = []
+    complete: list[GroupMarket] = []
     skipped = 0
-    for group_id in sorted(touched):
-        names = {
-            str(item['keyword'])
-            for item in members.get(group_id, [])
-            if item.get('keyword')
-        }
+    for pair in sorted(members):
+        if pair.group_id not in touched or (market_ids is not None and pair.market_id not in market_ids):
+            continue
+        names = {str(item['keyword']) for item in members[pair] if item.get('keyword')}
         if names and names <= processed:
-            complete.append(group_id)
+            complete.append(pair)
         else:
             skipped += 1
+    skipped += sum(1 for group_id in touched if not any(pair.group_id == group_id for pair in members))
     return complete, skipped
 
 
@@ -263,7 +302,7 @@ def _execution_metadata(
 
 
 def _snapshot(
-    group_id: str,
+    pair: GroupMarket,
     group_name: str,
     execution_id: str,
     execution_input: dict[str, Any],
@@ -272,9 +311,10 @@ def _snapshot(
     metrics: dict[str, Any],
 ) -> dict[str, Any]:
     return {
-        'group_id': group_id,
+        'group_id': pair.snapshot_key,
         'snapshot_at': timestamp,
         'group_name': group_name,
+        'market_id': pair.market_id,
         'execution': _execution_metadata(
             execution_id,
             execution_input,
@@ -337,13 +377,19 @@ def _message(alerts: list[dict[str, Any]], execution_id: str) -> str:
     lines = [
         f'Citation Analysis detected {len(alerts)} new KPI alert(s) for execution {execution_id}.',
         *[
-            f"- [{item['severity'].upper()}] {' '.join(str(item['message']).split())}"
+            f"- [{item['severity'].upper()}] {_market_label(item)}{' '.join(str(item['message']).split())}"
             for item in visible
         ],
     ]
     if len(alerts) > len(visible):
         lines.append(f'- {len(alerts) - len(visible)} additional alert(s) are available in the dashboard.')
     return '\n'.join(lines)
+
+
+def _market_label(item: dict[str, Any]) -> str:
+    """``'[cl-es] '`` for an alert of a non-global market, ``''`` otherwise."""
+    market_id = item.get('market_id')
+    return f'[{market_id}] ' if isinstance(market_id, str) and market_id != GLOBAL_MARKET_ID else ''
 
 
 def _notify(alerts: list[dict[str, Any]], execution_id: str, settings: dict[str, Any]) -> dict[str, Any]:
@@ -390,7 +436,7 @@ def handler(event: object, context: Any) -> dict[str, Any]:
     }
     members = _members_by_group(active_keywords)
     touched = _touched_groups(execution_input, processed_names, active_keywords, groups)
-    complete, skipped_partial = _complete_groups(touched, processed_names, members)
+    complete, skipped_partial = _complete_groups(touched, processed_names, members, _scope_market_ids(execution_input))
     if not complete:
         return {
             'status': 'completed',
@@ -398,14 +444,15 @@ def handler(event: object, context: Any) -> dict[str, Any]:
             'groups_evaluated': 0,
             'snapshots_recorded': 0,
             'snapshot_group_ids': [],
+            'snapshot_scopes': [],
             'alerts_created': 0,
             'skipped_partial': skipped_partial,
             'notification': {'status': 'not_sent', 'reason': 'no_new_alerts'},
         }
     unique_keywords = sorted({
         str(item['keyword'])
-        for group_id in complete
-        for item in members.get(group_id, [])
+        for pair in complete
+        for item in members[pair]
         if item.get('keyword')
     }, key=str.casefold)
 
@@ -413,63 +460,64 @@ def handler(event: object, context: Any) -> dict[str, Any]:
     owned_domains = owned_domains_from(get_brand_config(BRAND_CONFIG_TABLE))
     answers_by_keyword = _load_run_answers(unique_keywords, run_timestamp)
 
-    # The groups snapshotted, in group id order: exactly the groups this run fully covers.
-    snapshot_group_ids: list[str] = []
-    groups_evaluated = 0
+    # The (group, market) pairs snapshotted, in that order: exactly the pairs this run fully covers.
+    snapshotted: list[GroupMarket] = []
     new_alerts: list[dict[str, Any]] = []
-    for group_id in complete:
-        keywords = [str(item['keyword']) for item in members[group_id]]
+    for pair in complete:
+        keywords = [str(item['keyword']) for item in members[pair]]
         group_answers = {keyword: answers for keyword in keywords if (answers := answers_by_keyword[keyword])}
         # A keyword that could not be read, or that no engine answered, leaves the run incomplete.
         if len(group_answers) < len(keywords):
             skipped_partial += 1
             continue
-
-        group = groups_by_id[group_id]
-        snapshot = _snapshot(
-            group_id,
-            str(group.get('name') or group_id),
-            execution_id,
-            execution_input,
-            report,
-            run_timestamp,
-            snapshot_metrics(group_answers, owned_domains),
-        )
-        previous = _previous_snapshot(group_id, run_timestamp)
-        marker = (
-            _content_change(group_id, str(previous['snapshot_at']), run_timestamp)
-            if previous is not None and settings.get('enabled')
-            else None
-        )
-        dynamodb.Table(SNAPSHOTS_TABLE).put_item(Item=convert_floats_to_decimal(snapshot))
-        snapshot_group_ids.append(group_id)
-        groups_evaluated += 1
-
-        for specification in compare_snapshots(
-            previous,
-            snapshot,
-            settings,
-            content_change=marker,
-        ):
-            item = build_alert_item(
-                specification,
-                execution_id=execution_id,
-                group_id=group_id,
-                group_name=str(group.get('name') or group_id),
-                created_at=run_timestamp,
-                run_timestamp=run_timestamp,
-            )
-            if _put_new_alert(item):
-                new_alerts.append(item)
+        group_name = str(groups_by_id[pair.group_id].get('name') or pair.group_id)
+        snapshot = _snapshot(pair, group_name, execution_id, execution_input, report, run_timestamp,
+                             snapshot_metrics(group_answers, owned_domains))
+        new_alerts.extend(_record_snapshot(pair, group_name, snapshot, execution_id, run_timestamp, settings))
+        snapshotted.append(pair)
 
     notification = _notify(new_alerts, execution_id, settings)
     return {
         'status': 'completed',
         'run_timestamp': run_timestamp,
-        'groups_evaluated': groups_evaluated,
-        'snapshots_recorded': len(snapshot_group_ids),
-        'snapshot_group_ids': snapshot_group_ids,
+        'groups_evaluated': len(snapshotted),
+        'snapshots_recorded': len(snapshotted),
+        'snapshot_group_ids': list(dict.fromkeys(pair.group_id for pair in snapshotted)),
+        'snapshot_scopes': [{'group_id': pair.group_id, 'market_id': pair.market_id} for pair in snapshotted],
         'alerts_created': len(new_alerts),
         'skipped_partial': skipped_partial,
         'notification': notification,
     }
+
+
+def _record_snapshot(
+    pair: GroupMarket,
+    group_name: str,
+    snapshot: dict[str, Any],
+    execution_id: str,
+    run_timestamp: str,
+    settings: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Store one (group, market) snapshot and the alerts it raises against the previous one; the new alerts."""
+    previous = _previous_snapshot(pair.snapshot_key, run_timestamp)
+    # Content-change markers are recorded per group, for every market of it.
+    marker = (
+        _content_change(pair.group_id, str(previous['snapshot_at']), run_timestamp)
+        if previous is not None and settings.get('enabled')
+        else None
+    )
+    dynamodb.Table(SNAPSHOTS_TABLE).put_item(Item=convert_floats_to_decimal(snapshot))
+    created: list[dict[str, Any]] = []
+    for specification in compare_snapshots(previous, snapshot, settings, content_change=marker):
+        item = build_alert_item(
+            specification,
+            execution_id=execution_id,
+            group_id=pair.group_id,
+            group_name=group_name,
+            created_at=run_timestamp,
+            run_timestamp=run_timestamp,
+            market_id=pair.market_id,
+        )
+        if _put_new_alert(item):
+            created.append(item)
+    return created

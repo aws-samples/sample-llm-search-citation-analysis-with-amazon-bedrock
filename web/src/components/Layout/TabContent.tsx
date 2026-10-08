@@ -19,7 +19,7 @@ import { StrokeIcon } from '../ui/StrokeIcon';
 const ExecutionMonitor = lazy(() => import('../Execution/ExecutionMonitor').then(module => ({ default: module.ExecutionMonitor })));
 const ScheduleManager = lazy(() => import('../Schedule/ScheduleManager').then(module => ({ default: module.ScheduleManager })));
 const BrandsView = lazy(() => import('../Brands/BrandsView').then(module => ({ default: module.BrandsView })));
-const CitationsView = lazy(() => import('../Citations').then(module => ({ default: module.CitationsView })));
+const CitationsView = lazy(() => import('../Citations').then(module => ({ default: module.MarketCitationsView })));
 const SearchesView = lazy(() => import('../Searches').then(module => ({ default: module.SearchesView })));
 const SettingsView = lazy(() => import('../Settings').then(module => ({ default: module.SettingsView })));
 const RawResponsesExplorer = lazy(() => import('../RawResponses').then(module => ({ default: module.RawResponsesExplorer })));

@@ -8,6 +8,7 @@ import {
   CREATE_ERROR_MESSAGE,
   InvalidKeywordResponseError,
   buildBulkMessage,
+  buildCreateKeywordBody,
   collectBulkResults,
   getBulkAlert,
   getSafeErrorMessage,
@@ -32,6 +33,20 @@ const KEYWORD_FIXTURE: Keyword = {
   created_at: '2026-08-19T00:00:00Z',
   status: 'active',
 };
+
+describe('buildCreateKeywordBody', () => {
+  it('sends the keyword alone without groups or a market', () => {
+    expect(buildCreateKeywordBody('hoteles')).toStrictEqual({ keyword: 'hoteles' });
+  });
+
+  it('sends the market a new keyword is asked from', () => {
+    expect(buildCreateKeywordBody('hoteles', ['g1'], 'cl-es')).toStrictEqual({
+      keyword: 'hoteles',
+      group_ids: ['g1'],
+      market_id: 'cl-es',
+    });
+  });
+});
 
 describe('parseKeywordResponse', () => {
   it('returns the keyword when the payload is a valid keyword', () => {

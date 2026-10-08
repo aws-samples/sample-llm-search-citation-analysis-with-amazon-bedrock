@@ -271,6 +271,17 @@ class TestNarrative:
 
         assert (body['narrative'], loader.call_args.args) == (stored, ('group#faro', RUN_TS))
 
+    def test_reads_the_narrative_of_the_market_the_group_is_narrowed_to(
+        self, insights: ModuleType, history_since: MagicMock, monkeypatch: pytest.MonkeyPatch,
+    ):
+        chilean = [{**keyword, 'market_id': 'cl-es'} for keyword in ACTIVE_KEYWORDS]
+        loader = MagicMock(return_value=None)
+        monkeypatch.setattr(insights, 'load_narrative', loader)
+        with _wired(insights, active=chilean) as report:
+            report.body({**FARO, 'market_id': 'cl-es'})
+
+        assert loader.call_args.args == ('group#faro#cl-es', RUN_TS)
+
     def test_reads_no_narrative_for_a_scope_that_is_not_a_group(
         self, report: ScopedReport, insights: ModuleType, monkeypatch: pytest.MonkeyPatch,
     ):

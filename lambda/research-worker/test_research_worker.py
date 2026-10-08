@@ -1391,15 +1391,27 @@ class TestResearchUsesTheConfiguredModel:
     """Keyword research answers with the model chosen in Settings, like analysis runs do."""
 
     @pytest.mark.parametrize(('provider_id', 'model'), [
-        ('openai', 'gpt-5.2'), ('gemini', 'gemini-2.5-pro'), ('perplexity', 'sonar-pro'),
+        ('openai', 'gpt-5.2'), ('gemini', 'gemini-2.5-pro'), ('perplexity', 'openai/gpt-6-luna'),
     ])
     def test_builds_the_client_with_the_configured_model(self, provider_id, model):
         client = _client_for(provider_id, _config_row({'provider_id': provider_id, 'model': model}))
 
         assert client.model == model
 
+    @pytest.mark.parametrize('legacy', ['sonar', 'sonar-pro', 'sonar-reasoning-pro'])
+    def test_researches_on_the_agent_api_sonar_for_a_saved_sonar_model(self, legacy):
+        client = _client_for('perplexity', _config_row({'provider_id': 'perplexity', 'model': legacy}))
+
+        assert client.model == 'perplexity/sonar'
+
+    @pytest.mark.parametrize('provider_id', ['openai', 'gemini', 'perplexity'])
+    def test_bounds_each_http_attempt_so_two_fit_the_worker(self, provider_id):
+        client = _client_for(provider_id, _config_row({'provider_id': provider_id}))
+
+        assert client.timeout * _mod.STEP_MAX_RETRIES < 300
+
     def test_uses_the_default_when_nothing_is_configured(self):
-        assert _client_for('gemini', _config_row({'provider_id': 'gemini'})).model == 'gemini-3-flash-preview'
+        assert _client_for('gemini', _config_row({'provider_id': 'gemini'})).model == 'gemini-3.6-flash'
 
     def test_fails_the_step_instead_of_guessing_when_the_config_is_unreadable(self):
         table = MagicMock()

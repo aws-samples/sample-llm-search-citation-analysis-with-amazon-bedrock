@@ -133,6 +133,13 @@ class TestSerializeKeywordItem:
 
         assert isinstance(item['group_ids'], set)
 
+    def test_returns_the_market_and_concept_of_a_localized_keyword(self) -> None:
+        item = {**_keyword('k2', 'hoteles'), 'market_id': 'es-es', 'concept_id': 'k1'}
+
+        serialized = keyword_groups.serialize_keyword_item(item)
+
+        assert (serialized['market_id'], serialized['concept_id']) == ('es-es', 'k1')
+
 
 class TestAddKeywordGroups:
     def test_returns_membership_union_when_new_group_is_added(self) -> None:
@@ -231,10 +238,65 @@ class TestDescribeScope:
             ({'mode': 'all'}, 'all active keywords'),
             ({'mode': 'groups', 'group_ids': ['a', 'b']}, '2 group(s)'),
             ({'mode': 'keywords', 'keyword_ids': ['a']}, '1 selected keyword(s)'),
+            ({'mode': 'all', 'market_ids': ['cl-es']}, 'all active keywords, market cl-es'),
+            ({'mode': 'groups', 'group_ids': ['a'], 'market_ids': ['cl-es', 'global']}, '1 group(s), 2 markets'),
         ],
     )
     def test_labels_each_mode(self, scope, expected) -> None:
         assert keyword_groups.describe_scope(scope) == expected
+
+
+def _market_keyword(item_id: str, text: str, market_id: str | None, *, groups: set[str] | None = None) -> dict:
+    item = _keyword(item_id, text, groups=groups)
+    if market_id is not None:
+        item['market_id'] = market_id
+    return item
+
+
+class TestScopeMarkets:
+    @pytest.mark.parametrize('mode', [
+        {'mode': 'all'},
+        {'mode': 'groups', 'group_ids': ['g']},
+        {'mode': 'keywords', 'keyword_ids': ['k1']},
+    ], ids=['all', 'groups', 'keywords'])
+    def test_keeps_the_market_ids_of_every_mode(self, mode) -> None:
+        scope, error = keyword_groups.validate_scope({**mode, 'market_ids': ['cl-es', 'global']})
+
+        assert (error, scope) == (None, {**mode, 'market_ids': ['cl-es', 'global']})
+
+    def test_omits_market_ids_when_absent(self) -> None:
+        assert keyword_groups.validate_scope({'mode': 'all'}) == ({'mode': 'all'}, None)
+
+    def test_deduplicates_market_ids_in_first_occurrence_order(self) -> None:
+        scope, _ = keyword_groups.validate_scope({'mode': 'all', 'market_ids': ['global', 'cl-es', 'global']})
+
+        assert scope == {'mode': 'all', 'market_ids': ['global', 'cl-es']}
+
+    @pytest.mark.parametrize(('market_ids', 'error'), [
+        pytest.param([], 'scope.market_ids must be a non-empty array of market ids', id='empty'),
+        pytest.param('cl-es', 'scope.market_ids must be a non-empty array of market ids', id='string'),
+        pytest.param(['CL-ES'], "scope.market_ids entries must be market ids or 'global'", id='upper-case'),
+        pytest.param([3], "scope.market_ids entries must be market ids or 'global'", id='number'),
+        pytest.param([f'm{index:02d}' for index in range(52)], 'scope.market_ids accepts at most 51 entries', id='too-many'),
+    ])
+    def test_rejects_malformed_market_ids(self, market_ids, error) -> None:
+        assert keyword_groups.validate_scope({'mode': 'all', 'market_ids': market_ids}) == (None, error)
+
+    @pytest.mark.parametrize(('scope', 'ids'), [
+        pytest.param({'mode': 'all', 'market_ids': ['es-es', 'pt-pt']}, ['k2', 'k3'], id='listed-markets'),
+        pytest.param({'mode': 'all', 'market_ids': ['global']}, ['k1', 'k4'], id='global-market'),
+        pytest.param({'mode': 'groups', 'group_ids': ['g'], 'market_ids': ['es-es']}, ['k2'], id='group-and-market'),
+        pytest.param({'mode': 'all'}, ['k1', 'k2', 'k3', 'k4'], id='every-market'),
+    ])
+    def test_resolves_only_keywords_of_the_scope_markets(self, scope, ids) -> None:
+        table = _table_with_active([
+            _market_keyword('k1', 'hotel a', None, groups={'g'}),
+            _market_keyword('k2', 'hotel b', 'es-es', groups={'g'}),
+            _market_keyword('k3', 'hotel c', 'pt-pt'),
+            _market_keyword('k4', 'hotel d', None),
+        ])
+
+        assert [item['id'] for item in keyword_groups.resolve_scope(scope, table)] == ids
 
 
 class TestGroupNameKey:

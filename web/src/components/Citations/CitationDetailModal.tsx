@@ -8,6 +8,9 @@ import {
   HistoryTab, type HistoryCrawl 
 } from './CrawlHistory';
 import { BlockedPageBanner } from './BlockedPageBanner';
+import {
+  VideoDetails, isVideoCrawl
+} from './VideoDetails';
 import type {
   CrawledContent, CrawlStatus, SEOAnalysis
 } from '../../types';
@@ -89,6 +92,21 @@ const CitingProviders = ({ providers }: { providers: string[] }) => (
         </span>
       ))}
     </div>
+  </div>
+);
+
+const OverviewTab = ({ citation }: { citation: CrawledContent }) => (
+  <div className="space-y-6">
+    {citation.status === 'blocked' && <BlockedPageBanner blockReason={citation.block_reason} />}
+    {isVideoCrawl(citation) && <VideoDetails citation={citation} />}
+    <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
+      <h3 className="text-sm font-semibold text-gray-900 mb-2">Summary</h3>
+      <p className="text-sm text-gray-700">
+        {citation.summary || (citation.status === 'blocked' ? 'Content unavailable - page blocked by bot detection' : 'No summary available')}
+      </p>
+    </div>
+    <MetricsGrid citation={citation} />
+    <CitingProviders providers={citation.citing_providers} />
   </div>
 );
 
@@ -210,19 +228,7 @@ export const CitationDetailModal = ({
   const renderTabContent = () => {
     switch (activeTab) {
       case 'overview':
-        return (
-          <div className="space-y-6">
-            {citation.status === 'blocked' && <BlockedPageBanner blockReason={citation.block_reason} />}
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-              <h3 className="text-sm font-semibold text-gray-900 mb-2">Summary</h3>
-              <p className="text-sm text-gray-700">
-                {citation.summary || (citation.status === 'blocked' ? 'Content unavailable - page blocked by bot detection' : 'No summary available')}
-              </p>
-            </div>
-            <MetricsGrid citation={citation} />
-            <CitingProviders providers={citation.citing_providers} />
-          </div>
-        );
+        return <OverviewTab citation={citation} />;
       case 'screenshot':
         return citation.screenshot_url ? (
           <div className="space-y-4">

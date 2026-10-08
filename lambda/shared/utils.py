@@ -12,6 +12,7 @@ import boto3
 
 from shared.dynamodb_batch import collect_all_items
 from shared.kpi_engine import normalize_domain
+from shared.youtube import canonical_youtube_url
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -148,12 +149,21 @@ def normalize_url(url: str) -> str:
     """
     Normalize URL by removing tracking parameters.
 
+    A YouTube video link in any of its shapes (``youtu.be/ID``, ``/shorts/ID``,
+    ``m.youtube.com/watch?v=ID&t=42``, ...) becomes
+    ``https://www.youtube.com/watch?v=ID`` (``shared.youtube``), so one video
+    is one citation.
+
     Args:
         url: Original URL with potential tracking parameters
 
     Returns:
         Normalized URL with tracking parameters removed
     """
+    canonical_video = canonical_youtube_url(url)
+    if canonical_video is not None:
+        return canonical_video
+
     try:
         parsed = urlparse(url)
     except ValueError as e:

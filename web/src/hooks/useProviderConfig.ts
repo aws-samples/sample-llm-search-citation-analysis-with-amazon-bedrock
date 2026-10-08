@@ -72,9 +72,9 @@ function isErrorResponse(data: unknown): data is ErrorResponse {
 /** Defaults shown when the providers API is unreachable: each answer engine with its default model, unconfigured. */
 const FALLBACK_PROVIDER_MODELS = [
   [PROVIDER.OPENAI, 'gpt-5-mini'],
-  [PROVIDER.PERPLEXITY, 'sonar'],
-  [PROVIDER.GEMINI, 'gemini-3-flash-preview'],
-  [PROVIDER.CLAUDE, 'claude-sonnet-4-5'],
+  [PROVIDER.PERPLEXITY, 'perplexity/sonar'],
+  [PROVIDER.GEMINI, 'gemini-3.6-flash'],
+  [PROVIDER.CLAUDE, 'claude-sonnet-5-5'],
 ] as const;
 
 function createDefaultProviders(): ProviderConfig[] {

@@ -286,6 +286,17 @@ class TestCreateSchedule:
         assert body['scope_summary'] == '1 group(s)'
         assert body['legacy'] is False
 
+    def test_bakes_the_scope_markets_into_the_target_input(self, handler_module):
+        self._create(handler_module, {'scope': {'mode': 'all', 'market_ids': ['cl-es', 'global']}})
+
+        assert created_target_input()['scope'] == {'mode': 'all', 'market_ids': ['cl-es', 'global']}
+
+    def test_rejects_a_malformed_scope_market(self, handler_module):
+        status, body = self._create(handler_module, {'scope': {'mode': 'all', 'market_ids': ['Chile']}})
+
+        assert (status, body['field']) == (400, 'scope')
+        mock_scheduler.create_schedule.assert_not_called()
+
     def test_rejects_the_retired_keywords_field(self, handler_module):
         status, body = self._create(handler_module, {'keywords': ['best hotels malaga']})
 

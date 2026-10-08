@@ -13,6 +13,8 @@ import {
   countTrackedBrands, describeIndustry
 } from '../Brands/brandConfigSummary';
 import { AlertsConfig } from './AlertsConfig';
+import { MarketsConfig } from './MarketsConfig';
+import { useMarketSelection } from '../Markets/marketSelectionContext';
 import { ProvidersConfig } from './ProvidersConfig';
 import { UsersConfig } from './UsersConfig';
 import { BedrockModelsConfig } from './BedrockModelsConfig';
@@ -26,7 +28,7 @@ import {
 } from './settingsSections';
 import type { Keyword } from '../../types';
 import {
-  CHAT_BUBBLES_PATHS, KEY_PATHS
+  CHAT_BUBBLES_PATHS, GLOBE_PATHS, KEY_PATHS
 } from '../ui/iconPaths';
 import {
   SkeletonLines, SkeletonRegion 
@@ -42,6 +44,7 @@ interface SettingsViewProps {
 // Heroicons outline path per section (the svg wrapper is identical for all).
 const SECTION_ICON_PATHS: Record<SettingsTab, readonly string[]> = {
   'keywords': KEY_PATHS,
+  'markets': GLOBE_PATHS,
   'brand-config': ['M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4'],
   'query-prompts': ['M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z'],
   'providers': ['M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01'],
@@ -56,6 +59,7 @@ const SECTION_ICON_PATHS: Record<SettingsTab, readonly string[]> = {
 // personas Prompt Insights' fuchsia, alerts the warning amber.
 const SECTION_ICON_COLORS: Record<SettingsTab, string> = {
   'keywords': 'text-blue-500',
+  'markets': 'text-cyan-500',
   'brand-config': 'text-violet-500',
   'query-prompts': 'text-fuchsia-500',
   'providers': 'text-sky-500',
@@ -72,12 +76,20 @@ interface SettingsNavInputs {
   readonly keywords: Keyword[];
   readonly brandConfig: Pick<ReturnType<typeof useBrandConfig>, 'config' | 'presets' | 'loading'>;
   readonly providerConfig: Pick<ReturnType<typeof useProviderConfig>, 'providers' | 'loading'>;
+  /** Configured markets; `null` until they are read. */
+  readonly marketCount: number | null;
   readonly isAdmin: boolean;
 }
 
 function keywordCaption(count: number): string {
   if (count === 0) return 'No keywords yet';
   return count === 1 ? '1 keyword' : `${count} keywords`;
+}
+
+function marketCaption(count: number | null): string | null {
+  if (count === null) return null;
+  if (count === 0) return 'Countries and languages';
+  return count === 1 ? '1 market' : `${count} markets`;
 }
 
 function sectionItem(id: SettingsTab, label: string, caption: string | null, needsAttention = false) {
@@ -99,7 +111,7 @@ function sectionItem(id: SettingsTab, label: string, caption: string | null, nee
  * the data too so they never flash a false alarm.
  */
 function buildSettingsNav({
-  keywords, brandConfig, providerConfig, isAdmin
+  keywords, brandConfig, providerConfig, marketCount, isAdmin
 }: SettingsNavInputs): SettingsNavGroup[] {
   const {
     config, presets, loading: configLoading
@@ -120,6 +132,7 @@ function buildSettingsNav({
       title: 'Tracking',
       items: [
         sectionItem('keywords', 'Keywords', keywordCaption(keywords.length), keywords.length === 0),
+        sectionItem('markets', 'Markets', marketCaption(marketCount)),
         sectionItem(
           'brand-config',
           'Brand tracking',
@@ -214,6 +227,8 @@ function SectionContent({
       );
     case 'alerts':
       return <AlertsConfig isAdmin={isAdmin} />;
+    case 'markets':
+      return <MarketsConfig isAdmin={isAdmin} />;
     case 'users':
       return <AdminOnly isAdmin={isAdmin} isAdminLoading={isAdminLoading}><UsersConfig /></AdminOnly>;
     case 'bedrock-models':
@@ -247,10 +262,12 @@ export const SettingsView = ({
     }
   }, [isAdmin, isAdminLoading, section, navigate]);
 
+  const { catalog: markets } = useMarketSelection();
   const groups = buildSettingsNav({
     keywords,
     brandConfig,
     providerConfig,
+    marketCount: markets.loaded ? markets.markets.length : null,
     isAdmin
   });
 

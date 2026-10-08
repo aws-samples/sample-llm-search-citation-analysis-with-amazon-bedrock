@@ -37,9 +37,9 @@ citations_table = dynamodb.Table(CITATIONS_TABLE)
 # Inverse index GSI: PK=normalized_url, SK=keyword, projection=ALL.
 URL_INDEX_NAME = 'UrlIndex'
 
-# Pagination cap. Each page is up to 1 MB; with the deduplicated Citations
-# rows (a few hundred bytes each) and the cap of MAX_CITATIONS_PER_KEYWORD
-# rows per keyword, even a globally cited URL stays well under this limit.
+# Pagination cap. Each page is up to 1 MB; a deduplicated Citations row is a
+# few hundred bytes and a URL has one row per keyword citing it, so even a
+# globally cited URL stays well under this limit.
 _MAX_QUERY_PAGES = 10
 
 

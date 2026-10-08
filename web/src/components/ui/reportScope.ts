@@ -33,11 +33,17 @@ export function decodeReportScope(value: string): ReportScope {
  * covers every keyword (trends, gaps, citations, overview) get `scope=all`
  * for an explicit group-style answer, which is also what `/visibility` and
  * `/brand-mentions` need since they have no keyword-less default.
+ * `marketId` (the header's market choice, `null` for every market) narrows
+ * a group or all-keywords answer to that market; a keyword belongs to one
+ * market, so a keyword scope never carries it.
  */
-export function reportScopeParams(scope: ReportScope): Record<string, string> {
-  if (scope.kind === 'group') return { group_id: scope.groupId };
+export function reportScopeParams(scope: ReportScope, marketId: string | null = null): Record<string, string> {
   if (scope.kind === 'keyword') return { keyword: scope.keyword };
-  return { scope: 'all' };
+  const scopeParams: Record<string, string> = scope.kind === 'group' ? { group_id: scope.groupId } : { scope: 'all' };
+  return marketId === null ? scopeParams : {
+    ...scopeParams,
+    market_id: marketId,
+  };
 }
 
 export function describeReportScope(scope: ReportScope, groups: KeywordGroup[]): string {

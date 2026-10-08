@@ -36,7 +36,7 @@ def invoke_self_async(
             Payload=payload,
         )
     except (BotoCoreError, ClientError, TypeError, ValueError) as error:
-        logger.exception("Failed to trigger async %s: %s", description, error)
+        logger.exception("Failed to trigger async %s", description)
         raise SelfInvokeDispatchError(
             f"Could not start background {description}"
         ) from error

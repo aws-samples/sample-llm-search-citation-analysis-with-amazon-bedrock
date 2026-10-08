@@ -16,6 +16,11 @@ botocore==1.43.98
 s3transfer==0.19.2
 jmespath==1.1.0
 
+# The crawler reads cited YouTube videos through oEmbed with
+# `shared.safe_fetch` (plain `requests`); the Lambda runtime does not ship
+# requests. Same version as the shared layer.
+requests==2.34.2
+
 # PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 is set by build-layer.sh. Playwright is
 # only a CDP client for AgentCore; no local browser binary belongs in Lambda.
 # Nova Act remains excluded because its dependency set requires a container.

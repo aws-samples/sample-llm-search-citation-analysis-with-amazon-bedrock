@@ -93,6 +93,10 @@ KEYWORD_RESEARCH_TABLE = (
 research_table = dynamodb.Table(KEYWORD_RESEARCH_TABLE)
 
 STEP_MAX_RETRIES = 2
+# Per-attempt HTTP timeout of a provider call: STEP_MAX_RETRIES attempts plus
+# their backoff must fit the worker's 300 s Lambda timeout, which the analysis
+# clients' own timeouts (OpenAI: 180 s) would not.
+STEP_HTTP_TIMEOUT_SECONDS = 120
 ERROR_MESSAGE_LIMIT = 500
 PLAN_MAX_TOKENS = 1500
 EVALUATE_MAX_TOKENS = 1500
@@ -850,7 +854,7 @@ def _provider_client(provider_id: str) -> tuple[WebSearchProvider, Any]:
         model = read_provider_model(_provider_config_table(), provider_id)
     except ProviderConfigUnavailableError as error:
         raise StepFailedError(f'Could not read the configured {provider_id} model') from error
-    return provider, provider.client_class(api_key, model=model)
+    return provider, provider.client_class(api_key, model=model, timeout=STEP_HTTP_TIMEOUT_SECONDS)
 
 
 def _run_agent_step(job: dict[str, Any], planned: dict[str, Any], provider_id: str) -> dict[str, Any]:

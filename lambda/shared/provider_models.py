@@ -9,6 +9,11 @@ search Lambda's OpenAI call honoured an override that nothing could write.
 
 Every AI engine's model is configurable (Perplexity and Claude since 2.26.0);
 an unset or invalid override falls back to the default below.
+
+Perplexity moved from Sonar Chat Completions to the Agent API in 2.37.0 (the
+Sonar endpoint was retired on 2026-09-27). Agent API ids carry a vendor prefix
+(``perplexity/sonar``, ``openai/gpt-6-luna``); the Sonar ids an administrator
+may have saved before (``LEGACY_MODEL_IDS``) are read as the new default.
 """
 
 from __future__ import annotations
@@ -24,29 +29,56 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PROVIDER_MODELS: dict[str, str] = {
     Provider.OPENAI: 'gpt-5-mini',
-    Provider.PERPLEXITY: 'sonar',
-    Provider.GEMINI: 'gemini-3-flash-preview',
-    Provider.CLAUDE: 'claude-sonnet-4-5',
+    Provider.PERPLEXITY: 'perplexity/sonar',
+    Provider.GEMINI: 'gemini-3.6-flash',
+    Provider.CLAUDE: 'claude-sonnet-5-5',
 }
 
 #: Providers whose model an administrator may change in Settings.
 CONFIGURABLE_MODEL_PROVIDERS = frozenset({Provider.OPENAI, Provider.PERPLEXITY, Provider.GEMINI, Provider.CLAUDE})
 
+#: Saved ids a provider no longer serves -> the id they are read as.
+LEGACY_MODEL_IDS: Mapping[str, Mapping[str, str]] = {
+    Provider.PERPLEXITY: {
+        'sonar': 'perplexity/sonar',
+        'sonar-pro': 'perplexity/sonar',
+        'sonar-reasoning-pro': 'perplexity/sonar',
+    },
+}
+
 # Model ids are interpolated into the Gemini URL path
 # (`/models/{model}:generateContent`), so anything beyond letters, digits,
 # dots, dashes and underscores is refused rather than escaped. Every published
-# OpenAI, Perplexity Sonar, Gemini and Claude id (`gpt-5.2`, `o4-mini`,
-# `sonar-reasoning-pro`, `gemini-2.5-flash-lite`, `claude-sonnet-4-6`) fits.
+# OpenAI, Gemini and Claude id (`gpt-5.2`, `o4-mini`, `gemini-2.5-flash-lite`,
+# `claude-sonnet-4-6`) fits.
 _MODEL_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._-]{0,99}')
+# Perplexity's Agent API ids are `<vendor>/<model>` (`perplexity/sonar`,
+# `openai/gpt-6-luna`); they travel only in a JSON body, never in a URL, and
+# exactly one slash is allowed.
+_VENDOR_MODEL_ID = re.compile(r'[a-z0-9][a-z0-9-]{0,29}/[A-Za-z0-9][A-Za-z0-9._-]{0,99}')
 
 
 class ProviderConfigUnavailableError(RuntimeError):
     """The provider's config row could not be read, so its model is unknown."""
 
 
-def is_valid_model_id(value: object) -> bool:
-    """Whether ``value`` is a model id safe to store and send to a provider."""
-    return isinstance(value, str) and _MODEL_ID.fullmatch(value) is not None
+def is_valid_model_id(value: object, provider_id: str | None = None) -> bool:
+    """Whether ``value`` is a model id safe to store and send to ``provider_id``.
+
+    Without a provider only the plain form (no slash) is accepted, the one
+    that is safe in every provider's URL; Perplexity also accepts the
+    ``<vendor>/<model>`` form of the Agent API.
+    """
+    if not isinstance(value, str):
+        return False
+    if _MODEL_ID.fullmatch(value) is not None:
+        return True
+    return provider_id == Provider.PERPLEXITY and _VENDOR_MODEL_ID.fullmatch(value) is not None
+
+
+def current_model_id(provider_id: str, model: str) -> str:
+    """``model`` with a retired id replaced by the one it is read as (``sonar`` -> ``perplexity/sonar``)."""
+    return LEGACY_MODEL_IDS.get(provider_id, {}).get(model, model)
 
 
 def default_model(provider_id: str) -> str:
@@ -58,12 +90,15 @@ def configured_model(provider_id: str, row: Mapping[str, Any]) -> str | None:
     """The administrator's override on a ProviderConfig ``row``, or ``None``.
 
     A blank, malformed or non-configurable-provider value is not an override:
-    it is ignored rather than sent to the provider.
+    it is ignored rather than sent to the provider. A retired id is read as
+    its replacement (``LEGACY_MODEL_IDS``), and is no override when that
+    replacement is the default.
     """
     value = row.get('model')
-    if provider_id in CONFIGURABLE_MODEL_PROVIDERS and is_valid_model_id(value):
-        return value
-    return None
+    if provider_id not in CONFIGURABLE_MODEL_PROVIDERS or not is_valid_model_id(value, provider_id):
+        return None
+    model = current_model_id(provider_id, str(value))
+    return None if model == default_model(provider_id) else model
 
 
 def effective_model(provider_id: str, row: Mapping[str, Any]) -> str:
@@ -94,8 +129,10 @@ def read_provider_model(table: Any, provider_id: str) -> str:
 __all__ = [
     'CONFIGURABLE_MODEL_PROVIDERS',
     'DEFAULT_PROVIDER_MODELS',
+    'LEGACY_MODEL_IDS',
     'ProviderConfigUnavailableError',
     'configured_model',
+    'current_model_id',
     'default_model',
     'effective_model',
     'is_valid_model_id',

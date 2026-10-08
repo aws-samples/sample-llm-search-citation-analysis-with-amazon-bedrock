@@ -11,6 +11,9 @@ import {
 import { isKeywordActive } from './keywordEntry';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import { KEY_PATHS } from '../ui/iconPaths';
+import {
+  AddToMarketsButton, KeywordMarketInfo, KeywordMarketSelect, type KeywordMarketControls
+} from './KeywordMarketControls';
 
 export interface KeywordInputSectionProps {
   isBulkMode: boolean;
@@ -22,19 +25,24 @@ export interface KeywordInputSectionProps {
   saving: boolean;
   onAddKeyword: () => void;
   onAddBulkKeywords: () => void;
+  /** The market new keywords are asked from; absent while no market is configured. */
+  marketPicker?: ReactNode;
 }
 
 export const KeywordInputSection = ({
   isBulkMode, setIsBulkMode, newKeyword, setNewKeyword,
-  bulkKeywords, setBulkKeywords, saving, onAddKeyword, onAddBulkKeywords,
+  bulkKeywords, setBulkKeywords, saving, onAddKeyword, onAddBulkKeywords, marketPicker,
 }: KeywordInputSectionProps) => (
   <div className="p-6 border-b border-gray-200">
-    <div className="flex items-center justify-between mb-4">
+    <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
       <h2 className="text-lg font-semibold text-gray-900">Manage Keywords</h2>
-      <ModeToggleButton
-        isBulkMode={isBulkMode}
-        onClick={() => { setIsBulkMode(!isBulkMode); setNewKeyword(''); setBulkKeywords(''); }}
-      />
+      <div className="flex flex-wrap items-center gap-3">
+        {marketPicker}
+        <ModeToggleButton
+          isBulkMode={isBulkMode}
+          onClick={() => { setIsBulkMode(!isBulkMode); setNewKeyword(''); setBulkKeywords(''); }}
+        />
+      </div>
     </div>
 
     {isBulkMode ? (
@@ -162,6 +170,8 @@ export interface KeywordListProps {
   /** Activate or pause one keyword; omitted hides the per-row control. */
   onSetKeywordStatus?: (keyword: Keyword, active: boolean) => void;
   statusBusy?: boolean;
+  /** Market badges, translations and the market of an edited keyword; absent while no market is configured. */
+  marketControls?: KeywordMarketControls;
 }
 
 export const KeywordList = ({
@@ -169,7 +179,7 @@ export const KeywordList = ({
   onStartEdit, onUpdateKeyword, onCancelEdit, onDeleteKeyword,
   groups = [], bulkSelectedIds, onToggleBulkSelect, groupMenuKeywordId = null,
   onToggleGroupMenu, onToggleMembership, membershipBusy = false, emptyMessage,
-  onSetKeywordStatus, statusBusy = false,
+  onSetKeywordStatus, statusBusy = false, marketControls,
 }: KeywordListProps) => {
   const groupsById = new Map(groups.map((group) => [group.id, group]));
   return (
@@ -204,6 +214,7 @@ export const KeywordList = ({
               onOpenGroups={onToggleGroupMenu ? () => onToggleGroupMenu(keyword.id) : undefined}
               onSetStatus={onSetKeywordStatus ? (active) => onSetKeywordStatus(keyword, active) : undefined}
               statusBusy={statusBusy}
+              marketControls={marketControls}
             />
           ))}
         </div>
@@ -234,7 +245,7 @@ const KeywordItem = ({
   keyword, isEditing, editText, setEditText,
   onStartEdit, onUpdateKeyword, onCancelEdit, onDeleteKeyword,
   groupsById, bulkSelected, onToggleBulkSelect, groupMenu, onOpenGroups,
-  onSetStatus, statusBusy,
+  onSetStatus, statusBusy, marketControls,
 }: KeywordItemProps) => (
   <div className={`flex flex-wrap items-center gap-3 p-3 border rounded-lg hover:bg-gray-50 transition-colors ${bulkSelected ? 'border-gray-900 bg-gray-50' : 'border-gray-200'}`}>
     {onToggleBulkSelect && !isEditing && (
@@ -252,6 +263,8 @@ const KeywordItem = ({
         setEditText={setEditText}
         onUpdateKeyword={onUpdateKeyword}
         onCancelEdit={onCancelEdit}
+        keywordId={keyword.id}
+        marketControls={marketControls}
       />
     ) : (
       <DisplayView
@@ -262,6 +275,7 @@ const KeywordItem = ({
         onOpenGroups={onOpenGroups}
         onSetStatus={onSetStatus}
         statusBusy={statusBusy}
+        marketControls={marketControls}
       />
     )}
     {groupMenu}
@@ -273,20 +287,26 @@ interface EditingViewProps {
   setEditText: (value: string) => void;
   onUpdateKeyword: () => void;
   onCancelEdit: () => void;
+  marketControls?: KeywordMarketControls;
 }
 
 const EditingView = ({
-  editText, setEditText, onUpdateKeyword, onCancelEdit 
-}: EditingViewProps) => (
+  editText, setEditText, onUpdateKeyword, onCancelEdit, keywordId, marketControls,
+}: EditingViewProps & { keywordId: string }) => (
   <>
     <input
       type="text"
+      aria-label="Keyword"
       value={editText}
       onChange={(e) => setEditText(e.target.value)}
       onKeyDown={(e) => e.key === 'Enter' && onUpdateKeyword()}
       className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-900 text-sm"
       autoFocus
     />
+    {marketControls && (
+      <KeywordMarketSelect id={`keyword-market-${keywordId}`} label="Market" hideLabel value={marketControls.editMarketId}
+        markets={marketControls.markets} onChange={marketControls.setEditMarketId} />
+    )}
     <button onClick={onUpdateKeyword} className="px-3 py-1.5 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800">Save</button>
     <button onClick={onCancelEdit} className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200">Cancel</button>
   </>
@@ -300,6 +320,7 @@ interface DisplayViewProps {
   onOpenGroups?: () => void;
   onSetStatus?: (active: boolean) => void;
   statusBusy?: boolean;
+  marketControls?: KeywordMarketControls;
 }
 
 /**
@@ -321,14 +342,16 @@ const PausedBadge = () => (
 );
 
 const DisplayView = ({
-  keyword, groupsById, onStartEdit, onDeleteKeyword, onOpenGroups, onSetStatus, statusBusy = false,
+  keyword, groupsById, onStartEdit, onDeleteKeyword, onOpenGroups, onSetStatus, statusBusy = false, marketControls,
 }: DisplayViewProps) => (
   <>
     <span className="flex-1 flex flex-wrap items-center gap-2 text-sm text-gray-900">
       <span className={isKeywordActive(keyword) ? undefined : 'text-gray-500'}>{keyword.keyword}</span>
       {!isKeywordActive(keyword) && <PausedBadge />}
+      {marketControls && <KeywordMarketInfo keyword={keyword} controls={marketControls} />}
       <KeywordGroupChips keyword={keyword} groupsById={groupsById} />
     </span>
+    {marketControls && <AddToMarketsButton keyword={keyword} controls={marketControls} />}
     <span className="text-xs text-gray-400">{new Date(keyword.created_at).toLocaleDateString()}</span>
     {onSetStatus && (
       <button

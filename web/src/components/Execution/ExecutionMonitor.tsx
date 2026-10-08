@@ -12,6 +12,7 @@ import { useAlertModal } from '../../hooks/useAlertModal';
 import { useIsAdmin } from '../../hooks/useIsAdmin';
 import { useKeywordGroups } from '../../hooks/useKeywordGroups';
 import { isKeywordActive } from '../Keywords/keywordEntry';
+import { withMarketIds } from '../Markets/marketScope';
 import { AlertModal } from '../ui/Modal';
 import { processExecutionData } from '../../formatting/executionProcessor';
 import {
@@ -68,6 +69,7 @@ export const ExecutionMonitor = ({
   keywords,
 }: ExecutionMonitorProps) => {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [marketIds, setMarketIds] = useState<string[]>([]);
   const [isStarting, setIsStarting] = useState(false);
   const {
     alertModal, showAlert, closeAlert
@@ -108,17 +110,20 @@ export const ExecutionMonitor = ({
     }
   };
 
-  const handleTriggerAnalysis = () => runWithPreflight(
-    selectedIds.length > 0 ? {
+  const handleTriggerAnalysis = () => {
+    const keywordScope: AnalysisScope | undefined = selectedIds.length > 0 ? {
       mode: 'keywords',
-      keyword_ids: selectedIds 
-    } : undefined
-  );
+      keyword_ids: selectedIds
+    } : undefined;
+    // A market filter needs a scope; without one the classic run covers every keyword.
+    if (marketIds.length === 0) return runWithPreflight(keywordScope);
+    return runWithPreflight(withMarketIds(keywordScope ?? { mode: 'all' }, marketIds));
+  };
 
-  const handleRunGroup = (group: KeywordGroup) => runWithPreflight({
+  const handleRunGroup = (group: KeywordGroup) => runWithPreflight(withMarketIds({
     mode: 'groups',
     group_ids: [group.id] 
-  });
+  }, marketIds));
 
   const processedExecution = useMemo(
     () => processExecutionData(execution),
@@ -144,6 +149,8 @@ export const ExecutionMonitor = ({
           isRunning={isRunning}
           isStarting={isStarting}
           onSelectionChange={setSelectedIds}
+          marketIds={marketIds}
+          onMarketIdsChange={(next) => { setMarketIds(next); setSelectedIds([]); }}
           onTriggerAnalysis={() => { void handleTriggerAnalysis(); }}
           onRunGroup={(group) => { void handleRunGroup(group); }}
           isAdmin={isAdmin}

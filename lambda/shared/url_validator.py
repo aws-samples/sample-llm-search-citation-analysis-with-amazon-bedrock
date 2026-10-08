@@ -235,8 +235,12 @@ def validate_url_safe(url: object) -> tuple[bool, str]:
 # This gap is knowingly accepted. Pinning the IP while keeping SNI and
 # certificate validation correct is easy to get subtly wrong, and the remaining
 # exposure is narrow: exploiting it requires controlling DNS for a domain AND
-# winning a timing race, and the only server-side fetchers are the keyword
-# research routes. Revisit this if a route ever fetches URLs supplied by an
+# winning a timing race, and the server-side fetchers are narrow: the keyword
+# research routes, the Content Studio landing-page fetch, the Gemini redirect
+# resolution and the crawler's YouTube oEmbed read (`shared.youtube_oembed`,
+# a fixed `https://www.youtube.com/oembed` URL with no redirect followed). The
+# crawler fetches every other cited page inside an AgentCore browser, not from
+# the Lambda. Revisit this if a route ever fetches URLs supplied by an
 # untrusted (non-authenticated) source, or if these Lambdas are placed in a VPC
 # where internal services become reachable.
 # -----------------------------------------------------------------------------

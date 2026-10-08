@@ -8,6 +8,7 @@ import { saveRecommendationStatus } from '../api/recommendations';
 import {
   ALL_SCOPE, decodeReportScope, encodeReportScope, reportScopeParams
 } from '../components/ui/reportScope';
+import { useSelectedMarketId } from '../components/Markets/marketSelectionContext';
 import type {
   Recommendation, RecommendationStatus, RecommendationsResponse, ReportScope
 } from '../types';
@@ -56,6 +57,7 @@ export function useRecommendations(scope: ReportScope = ALL_SCOPE) {
   const [statusError, setStatusError] = useState<string | null>(null);
   // Keyed on the encoded scope so a caller rebuilding the object each render keeps the same fetch.
   const scopeKey = encodeReportScope(scope);
+  const marketId = useSelectedMarketId();
 
   const fetchRecommendations = useCallback(async (useLlm = false) => {
     setLoading(true);
@@ -63,7 +65,7 @@ export function useRecommendations(scope: ReportScope = ALL_SCOPE) {
 
     try {
       const params = new URLSearchParams({
-        ...reportScopeParams(decodeReportScope(scopeKey)),
+        ...reportScopeParams(decodeReportScope(scopeKey), marketId),
         use_llm: useLlm.toString(),
       });
       const response = await authenticatedFetch(
@@ -85,7 +87,7 @@ export function useRecommendations(scope: ReportScope = ALL_SCOPE) {
     } finally {
       setLoading(false);
     }
-  }, [scopeKey]);
+  }, [scopeKey, marketId]);
 
   /** Saves `status` for `recommendation`; the list shows it once the API has stored it. */
   const updateStatus = useCallback(async (

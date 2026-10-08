@@ -2,8 +2,14 @@ import {
   describe, expect, it
 } from 'vitest';
 import {
-  customReportDays, customReportEditPath, customReportPath, customReportViewPath
+  customReportDays, customReportEditPath, customReportPath, customReportViewPath, type ReportViewSettings
 } from './customReportRoute';
+
+const ALL_VIEW = {
+  scope: { kind: 'all' },
+  days: 90,
+  competitor: null,
+} satisfies ReportViewSettings;
 
 describe('custom report paths', () => {
   it('encodes the report id in its path', () => {
@@ -15,11 +21,7 @@ describe('custom report paths', () => {
   });
 
   it('leaves the saved period and every keyword out of the view path', () => {
-    expect(customReportViewPath('report-1', 90, {
-      scope: { kind: 'all' },
-      days: 90,
-      competitor: null,
-    })).toBe('/reports/custom/report-1');
+    expect(customReportViewPath('report-1', 90, ALL_VIEW)).toBe('/reports/custom/report-1');
   });
 
   it('carries a keyword, another period and a competitor in the view path', () => {
@@ -42,6 +44,10 @@ describe('custom report paths', () => {
       days: 90,
       competitor: null,
     })).toBe('/reports/custom/report-1?group=group-coruna');
+  });
+
+  it('keeps the market of the view in its path', () => {
+    expect(customReportViewPath('report-1', 90, ALL_VIEW, 'cl-es')).toBe('/reports/custom/report-1?market=cl-es');
   });
 });
 

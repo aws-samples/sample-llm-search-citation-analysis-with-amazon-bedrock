@@ -5,9 +5,11 @@ import { safeHref } from '../../infrastructure';
 import { Spinner } from '../ui/Spinner';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
-  CHEVRON_DOWN_PATHS, CHEVRON_RIGHT_PATHS 
+  CHEVRON_DOWN_PATHS, CHEVRON_RIGHT_PATHS, PLAY_PATHS
 } from '../ui/iconPaths';
-import type { UrlBreakdown } from '../../exporters/citationParser';
+import {
+  isVideoCitation, type UrlBreakdown
+} from '../../exporters/citationParser';
 
 interface CitationRowProps {
   citation: TopUrl;
@@ -65,6 +67,16 @@ export const CitationRow = ({
             >
               {citation.url.length > 60 ? citation.url.substring(0, 60) + '...' : citation.url}
             </a>
+            {isVideoCitation(citation) && (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium bg-purple-50 text-purple-700 rounded"
+                title="YouTube video"
+              >
+                <StrokeIcon className="w-3 h-3" paths={PLAY_PATHS} aria-hidden="true" />
+                Video
+                <span className="sr-only"> (YouTube)</span>
+              </span>
+            )}
             <button
               onClick={(e) => onViewDetails(citation.url, e)}
               className="px-2 py-1 text-xs bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"

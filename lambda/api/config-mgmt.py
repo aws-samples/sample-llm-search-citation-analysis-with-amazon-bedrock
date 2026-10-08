@@ -8,6 +8,7 @@ Routes:
 - GET/PUT/POST /api/providers/* -> manage-providers handler
 - GET/PUT/POST /api/alerts/* -> manage-alerts handler
 - GET/POST/PUT/DELETE /api/custom-reports/* -> manage-custom-reports handler
+- GET/PUT/POST /api/markets -> manage-markets handler
 """
 
 import sys
@@ -26,6 +27,7 @@ ROUTE_MAP = {
     '/api/providers': 'manage-providers.py',
     '/api/alerts': 'manage-alerts.py',
     '/api/custom-reports': 'manage-custom-reports.py',
+    '/api/markets': 'manage-markets.py',
 }
 
 handler = route_map_handler(__file__, ROUTE_MAP, __name__)

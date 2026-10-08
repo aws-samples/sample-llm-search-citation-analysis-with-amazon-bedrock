@@ -50,6 +50,7 @@ from shared.dynamodb_batch import collect_all_items
 from shared.dynamodb_conditions import delete_existing_item, is_conditional_check_failure
 from shared.env_vars import resolve_table_env
 from shared.utils import get_timestamp
+from shared.youtube import YOUTUBE_VIDEO_ID
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -69,7 +70,7 @@ MAX_REPORT_ID_LENGTH = 64
 MAX_URL_LENGTH = 2048
 
 _BLOCK_TYPE = re.compile(r'[a-z][a-z0-9_]{1,47}')
-_YOUTUBE_ID = r'[A-Za-z0-9_-]{11}'
+_YOUTUBE_ID = YOUTUBE_VIDEO_ID
 _VIMEO_ID = r'[0-9]{1,12}'
 _YOUTUBE_WATCH_ID = re.compile(_YOUTUBE_ID)
 _YOUTUBE_HOSTS = ('youtube.com', 'www.youtube.com', 'm.youtube.com')

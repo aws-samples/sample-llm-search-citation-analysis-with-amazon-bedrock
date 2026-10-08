@@ -1,3 +1,4 @@
+import { useMarketScopedFetch } from './useMarketScopedFetch';
 import type {
   CitationGapsResponse, ReportScope
 } from '../types';
@@ -23,9 +24,9 @@ const citationGapsEndpoint = {
   logMessage: '[citationGaps] Error fetching citation gaps:',
   isValidResponse: isCitationGapsResponse,
   ...apiRequestErrors('Failed to fetch citation gaps'),
-  buildRequest: (scope: ReportScope, limit = 10) => {
+  buildRequest: (marketId: string | null, scope: ReportScope, limit = 10) => {
     const params = new URLSearchParams({
-      ...reportScopeParams(scope),
+      ...reportScopeParams(scope, marketId),
       limit: limit.toString() 
     });
     return {
@@ -58,8 +59,9 @@ const citationGapsEndpoint = {
  */
 export function useCitationGaps() {
   const {
-    data, loading, error, fetchData: fetchCitationGaps 
+    data, loading, error, fetchData
   } = useAnalysisEndpoint(citationGapsEndpoint);
+  const fetchCitationGaps = useMarketScopedFetch(fetchData);
 
   return {
     data,

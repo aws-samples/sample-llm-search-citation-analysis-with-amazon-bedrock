@@ -11,9 +11,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from shared.markets import markets_from_item
 from shared.models import BedrockInvocationError
-from testing.dynamodb_stubs import fake_dynamodb_resource
+from testing.dynamodb_stubs import fake_dynamodb_resource, fake_table
 from testing.handler_fixtures import handler_fixture
+from testing.markets_fixtures import BRAZIL, CHILE, markets_item
 from testing.report_insights_fixtures import (
     REPORT_INSIGHTS_ENV,
     RUN_TIMESTAMP,
@@ -55,17 +57,31 @@ _VALID_RECOMMENDATION = recommendation_item('Publish fare pages OpenAI can cite.
 
 
 @contextmanager
-def _worker(module: ModuleType, reply: str | Exception, rows: list[dict] | None = None) -> Generator[MagicMock, None, None]:
-    """The worker over `_KEYWORDS` and `rows`, the model answering `reply`; yields the ReportInsights table."""
-    search = MagicMock()
-    search.query.return_value = {'Items': _ROWS if rows is None else rows}
+def _worker(
+    module: ModuleType,
+    reply: str | Exception,
+    rows: list[dict] | None = None,
+    *,
+    keywords: list[dict] | None = None,
+    search: MagicMock | None = None,
+    brand_config_table: MagicMock | None = None,
+) -> Generator[MagicMock, None, None]:
+    """The worker over `keywords` (`_KEYWORDS`) and `rows`, the model answering `reply`; yields the ReportInsights table.
+
+    `search` replaces the SearchResults stub that answers `rows`; `brand_config_table` holds the market list.
+    """
+    if search is None:
+        search = MagicMock()
+        search.query.return_value = {'Items': _ROWS if rows is None else rows}
     narratives = MagicMock()
-    resource = fake_dynamodb_resource(by_name={'search': search, 'report-insights': narratives})
+    resource = fake_dynamodb_resource(by_name={
+        'search': search, 'report-insights': narratives, 'brand-config': brand_config_table or MagicMock(),
+    })
     bedrock = MagicMock(side_effect=reply) if isinstance(reply, Exception) else MagicMock(return_value=reply)
     with patch.multiple(
         module,
         dynamodb=resource,
-        query_active_keywords=MagicMock(return_value=_KEYWORDS),
+        query_active_keywords=MagicMock(return_value=_KEYWORDS if keywords is None else keywords),
         get_brand_config=MagicMock(return_value=_BRAND_CONFIG),
         invoke_bedrock=bedrock,
     ):
@@ -209,3 +225,101 @@ class TestPrompt:
 
     def test_asks_for_plain_words_instead_of_field_names(self, prompt: str) -> None:
         assert 'in plain words (never the evidence\'s field names)' in prompt
+
+
+# --- Markets (2.37.0): one narrative per (group, market) ------------------------------
+
+# One group with a keyword per market: global, Chile and Brazil (whose airline goes by a local name).
+_MARKET_KEYWORDS = [
+    {'id': 'k1', 'keyword': 'cheap flights to lima', 'group_ids': {'altiplano'}},
+    {'id': 'k2', 'keyword': 'vuelos baratos a lima', 'group_ids': {'altiplano'}, 'market_id': 'cl-es'},
+    {'id': 'k3', 'keyword': 'passagens baratas para lima', 'group_ids': {'altiplano'}, 'market_id': 'br-pt'},
+]
+_STORED_MARKETS = markets_item(CHILE, {**BRAZIL, 'first_party_aliases': ['Aurora Linhas Aéreas']})
+
+
+def _queried_keyword(condition) -> str:
+    """The keyword a SearchResults ``KeyConditionExpression`` names (``keyword = x`` alone or ANDed)."""
+    expression = condition.get_expression()
+    if expression['operator'] == 'AND':
+        expression = expression['values'][0].get_expression()
+    return expression['values'][1]
+
+
+class MarketWorker:
+    """The worker over `_MARKET_KEYWORDS` answering ``event``: what it read, asked and stored."""
+
+    def __init__(self, module: ModuleType, event: dict) -> None:
+        self.search = MagicMock()
+        self.search.query.side_effect = lambda **kwargs: {
+            'Items': [ranked_answer_row(_queried_keyword(kwargs['KeyConditionExpression']), 'openai', 1)],
+        }
+        self.brand_config = fake_table(get_item={'Item': _STORED_MARKETS})
+        reply = _model_reply(model_narrative([_VALID_INSIGHT]))
+        with _worker(module, reply, keywords=_MARKET_KEYWORDS, search=self.search, brand_config_table=self.brand_config) as narratives:
+            self.result = module.handler(event, None)
+            self.prompts = [call.args[0] for call in module.invoke_bedrock.call_args_list]
+        self.items = [call.kwargs['Item'] for call in narratives.put_item.call_args_list]
+
+    def scope_keys(self) -> list[str]:
+        return sorted(item['scope_key'] for item in self.items)
+
+    def keywords_read(self) -> set[str]:
+        return {_queried_keyword(call.kwargs['KeyConditionExpression']) for call in self.search.query.call_args_list}
+
+
+def _scopes_event(*pairs: tuple[str, str]) -> dict:
+    event = _workflow_event(*sorted({group for group, _market in pairs}))
+    event['alerts']['snapshot_scopes'] = [{'group_id': group, 'market_id': market} for group, market in pairs]
+    return event
+
+
+class TestNarrativePerMarket:
+    def test_writes_one_narrative_per_snapshotted_pair_under_its_market_key(self, worker_module) -> None:
+        worker = MarketWorker(worker_module, _scopes_event(('altiplano', 'global'), ('altiplano', 'cl-es')))
+
+        assert worker.scope_keys() == ['group#altiplano', 'group#altiplano#cl-es']
+
+    @pytest.mark.parametrize(('event', 'keyword'), [
+        pytest.param(_scopes_event(('altiplano', 'cl-es')), 'vuelos baratos a lima', id='market-pair'),
+        pytest.param({'group_id': 'altiplano'}, 'cheap flights to lima', id='regenerate-global'),
+    ])
+    def test_reads_only_the_keywords_of_the_pairs_market(self, worker_module, event, keyword) -> None:
+        assert MarketWorker(worker_module, event).keywords_read() == {keyword}
+
+    def test_writes_in_the_markets_language(self, worker_module) -> None:
+        assert MarketWorker(worker_module, _scopes_event(('altiplano', 'br-pt'))).items[0]['language'] == 'pt'
+
+    @pytest.mark.parametrize(('market_id', 'brands'), [
+        ('br-pt', '<brand>Aurora Airways, Aurora Linhas Aéreas</brand>'),
+        ('global', '<brand>Aurora Airways</brand>'),
+    ])
+    def test_names_the_markets_local_brand_names_in_the_prompt(self, worker_module, market_id, brands) -> None:
+        assert brands in MarketWorker(worker_module, _scopes_event(('altiplano', market_id))).prompts[0]
+
+    def test_does_not_read_the_markets_for_global_pairs_only(self, worker_module) -> None:
+        MarketWorker(worker_module, _scopes_event(('altiplano', 'global'))).brand_config.get_item.assert_not_called()
+
+    def test_skips_a_market_that_is_no_longer_configured(self, worker_module) -> None:
+        worker = MarketWorker(worker_module, _scopes_event(('altiplano', 'fr-fr')))
+
+        assert (worker.result['skipped'], worker.scope_keys()) == (1, [])
+
+    @pytest.mark.parametrize(('event', 'scope_key'), [
+        pytest.param(_workflow_event('altiplano'), 'group#altiplano', id='pre-markets-execution'),
+        pytest.param({'group_id': 'altiplano', 'market_id': 'cl-es'}, 'group#altiplano#cl-es', id='regenerate-market'),
+    ])
+    def test_writes_the_requested_market_narrative(self, worker_module, event, scope_key) -> None:
+        assert MarketWorker(worker_module, event).scope_keys() == [scope_key]
+
+
+class TestOutcome:
+    def test_names_the_market_of_a_non_global_outcome(self, worker_module) -> None:
+        chile = markets_from_item(markets_item(CHILE))[0]
+
+        assert worker_module.GroupRun('altiplano', [], None, chile).outcome(status='failed') == {
+            'group_id': 'altiplano', 'market_id': 'cl-es', 'status': 'failed',
+        }
+
+    def test_omits_the_market_of_a_global_outcome(self, worker_module) -> None:
+        assert worker_module.GroupRun('altiplano', [], None).outcome(status='failed') == {'group_id': 'altiplano', 'status': 'failed'}

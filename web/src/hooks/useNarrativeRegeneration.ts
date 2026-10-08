@@ -5,6 +5,7 @@ import {
   apiGet, apiPost
 } from '../api/client';
 import { reportScopeParams } from '../components/ui/reportScope';
+import { useSelectedMarketId } from '../components/Markets/marketSelectionContext';
 import type { ReportScope } from '../types';
 import type { InsightsNarrative } from '../types/domain/insightsNarrative';
 import { decodeInsightsNarrative } from '../types/domain/insightsNarrativeDecoders';
@@ -35,11 +36,11 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
 }
 
 /** The stored narrative `GET /reports/insights` answers for the scope; `null` when it has none or the read fails. */
-async function readNarrative(scope: ReportScope, days: number, signal: AbortSignal): Promise<InsightsNarrative | null> {
+async function readNarrative(scopeParams: Record<string, string>, days: number, signal: AbortSignal): Promise<InsightsNarrative | null> {
   try {
     const response = await apiGet<unknown>('/reports/insights', {
       params: {
-        ...reportScopeParams(scope),
+        ...scopeParams,
         days: String(days),
       },
       signal,
@@ -56,7 +57,7 @@ async function readNarrative(scope: ReportScope, days: number, signal: AbortSign
  * `previous`; `null` when the window ran out or the poll was aborted.
  */
 async function pollNewNarrative(
-  scope: ReportScope,
+  scopeParams: Record<string, string>,
   days: number,
   previous: string | null,
   signal: AbortSignal,
@@ -64,22 +65,23 @@ async function pollNewNarrative(
 ): Promise<InsightsNarrative | null> {
   if (attempt >= NARRATIVE_POLL_ATTEMPTS || signal.aborted) return null;
   await wait(NARRATIVE_POLL_INTERVAL_MS, signal);
-  const narrative = signal.aborted ? null : await readNarrative(scope, days, signal);
+  const narrative = signal.aborted ? null : await readNarrative(scopeParams, days, signal);
   if (narrative !== null && narrative.generated_at !== previous) return narrative;
-  return pollNewNarrative(scope, days, previous, signal, attempt + 1);
+  return pollNewNarrative(scopeParams, days, previous, signal, attempt + 1);
 }
 
 /**
  * Regenerates a keyword group's narrative (`POST /reports/insights/regenerate`,
- * Admin only) and polls `GET /reports/insights` until the stored narrative's
- * `generated_at` changes from `generatedAt`, the one on screen. `narrative`
- * is the new narrative once it is in, `phase` where the request stands.
- * Unmounting stops the poll.
+ * Admin only) in the header's market and polls `GET /reports/insights` until
+ * the stored narrative's `generated_at` changes from `generatedAt`, the one
+ * on screen. `narrative` is the new narrative once it is in, `phase` where
+ * the request stands. Unmounting stops the poll.
  */
 export function useNarrativeRegeneration(scope: ReportScope, days: number, generatedAt: string | null) {
   const [phase, setPhase] = useState<RegenerationPhase>('idle');
   const [narrative, setNarrative] = useState<InsightsNarrative | null>(null);
   const controller = useRef<AbortController | null>(null);
+  const marketId = useSelectedMarketId();
 
   useEffect(() => () => controller.current?.abort(), []);
 
@@ -90,16 +92,21 @@ export function useNarrativeRegeneration(scope: ReportScope, days: number, gener
     controller.current = current;
     setPhase('regenerating');
     try {
-      await apiPost('/reports/insights/regenerate', { group_id: scope.groupId }, { signal: current.signal });
+      const body = marketId === null ? { group_id: scope.groupId } : {
+        group_id: scope.groupId,
+        market_id: marketId,
+      };
+      await apiPost('/reports/insights/regenerate', body, { signal: current.signal });
     } catch {
       if (!current.signal.aborted) setPhase('failed');
       return;
     }
-    const fresh = await pollNewNarrative(scope, days, narrative?.generated_at ?? generatedAt, current.signal);
+    const scopeParams = reportScopeParams(scope, marketId);
+    const fresh = await pollNewNarrative(scopeParams, days, narrative?.generated_at ?? generatedAt, current.signal);
     if (current.signal.aborted) return;
     if (fresh !== null) setNarrative(fresh);
     setPhase(fresh === null ? 'timed_out' : 'idle');
-  }, [scope, days, narrative, generatedAt]);
+  }, [scope, marketId, days, narrative, generatedAt]);
 
   return {
     phase,

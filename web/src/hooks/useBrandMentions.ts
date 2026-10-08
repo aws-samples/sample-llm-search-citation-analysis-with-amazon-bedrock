@@ -14,6 +14,7 @@ import type {
 import {
   decodeReportScope, encodeReportScope, reportScopeParams
 } from '../components/ui/reportScope';
+import { useSelectedMarketId } from '../components/Markets/marketSelectionContext';
 
 /** The `/brand-mentions` answer: the aggregate and the runs the scope can be read at. */
 export function isBrandMentionsResponse(data: unknown): data is BrandMentionsResponse {
@@ -39,6 +40,7 @@ export const useBrandMentions = (
   // The scope object is rebuilt by callers on every render; key the effect on
   // its encoded form so a same-value scope does not refetch.
   const scopeKey = scope === null ? null : encodeReportScope(scope);
+  const marketId = useSelectedMarketId();
 
   useEffect(() => {
     if (scopeKey === null) {
@@ -53,7 +55,7 @@ export const useBrandMentions = (
       setError(null);
 
       try {
-        const params = new URLSearchParams(reportScopeParams(decodeReportScope(scopeKey)));
+        const params = new URLSearchParams(reportScopeParams(decodeReportScope(scopeKey), marketId));
         if (classificationFilter) params.append('classification', classificationFilter);
         if (queryPromptId) params.append('query_prompt_id', queryPromptId);
         if (selectedTimestamp) params.append('timestamp', selectedTimestamp);
@@ -85,7 +87,7 @@ export const useBrandMentions = (
     fetchBrandMentions();
 
     return () => controller.abort();
-  }, [scopeKey, classificationFilter, queryPromptId, selectedTimestamp]);
+  }, [scopeKey, marketId, classificationFilter, queryPromptId, selectedTimestamp]);
 
   return {
     data,
