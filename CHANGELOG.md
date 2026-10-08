@@ -9,6 +9,110 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.36.0] - 2026-10-08
+
+### Added
+
+- **Settings › Bedrock models**: an Admin picks the Bedrock model behind each tier (fast / balanced / deep) from the
+  account's active `global.anthropic.claude-*` inference profiles (names cleaned to e.g. "Claude Sonnet 5.5"), tests
+  it, and saves it. Served by the new `manage-bedrock-models.py` in the ConfigMgmt Lambda on the existing provider
+  routes with `{id} = bedrock` (`GET /api/providers/bedrock/models`, `POST .../validate`, `PUT .../bedrock`); no new
+  API Gateway resources. Admin-only.
+- **Test** makes a live Converse call ("Reply with the single word OK.", low effort) after reading the account's
+  "Global cross-region model inference tokens / requests per minute" quotas for the model (Service Quotas, read in
+  time-boxed slices and kept in the ProviderConfig row `bedrock-quotas`). It answers the request style that worked,
+  the latency and the quotas, or a reason: `not_subscribed`
+  (no Marketplace subscription), `access_denied`, `no_capacity` (a 0 tokens/min quota; the model is not called),
+  `throttled` (capacity exhausted right now), `unsupported` (neither request style accepted, or the account's data
+  retention mode), `unavailable` (legacy or retired) or `error`, with ARNs and account ids removed from messages.
+- **Save** re-tests the model (unless `validate: false`) and stores `model`, `request_style`, `model_updated_at`,
+  `updated_at` and `tested_at` in the ProviderConfig row `bedrock-<tier>`; a failed test is refused with 400 and its
+  reason. Choosing the default model (or none) removes the override. These rows never appear in
+  `GET /api/providers`.
+
+### Changed
+
+- **Runtime Lambdas use the saved model**: `shared/models.get_model_id` resolves `BEDROCK_MODEL_<ROLE>` → the tier's
+  saved model → the tier default, reading the row through `DYNAMODB_TABLE_PROVIDER_CONFIG` (cached 60 s per tier per
+  container; a DynamoDB error or a missing variable falls back to the default with one warning per period). Every
+  Lambda that calls `shared.models` (the per-provider search functions, Crawler, ReportInsights, ResearchWorker,
+  StatsInsights, ManageBrandConfig, SelfReflection, Content Studio API and worker) gets the variable and
+  `dynamodb:GetItem` on the table; ConfigMgmt gets the Claude-only `bedrock:InvokeModel` grant,
+  `bedrock:ListInferenceProfiles` / `GetInferenceProfile` and `servicequotas:ListServiceQuotas` / `GetServiceQuota`.
+- **Request-style detection** replaces the 5.5-only list: a saved model uses the style its test proved; any other
+  model starts from a first guess by family (adaptive for Haiku 5.5, Sonnet 5 / 5.5, Opus 4.7 / 4.8 / 5 / 5.5;
+  budget for the 4.5 and 4.6 models); a refusal naming the other style ("`temperature` is deprecated", "adaptive
+  thinking is not supported", ...) is retried once in that style and remembered per model for the container.
+  `build_converse_request` is the one request builder for runtime calls and the Settings test.
+- **AI assistants moved into Settings** (`/settings/ai-assistants`, under Access) and left the sidebar's
+  Configuration menu; `/ai-assistants` redirects there. Settings nav icons carry the design-system accent colours,
+  like the sidebar.
+
+### Fixed
+
+- The model test no longer times out (HTTP 504) reading the quotas: Service Quotas lists Bedrock's ~1,000 quotas a
+  page at a time (~126 pages and ~41 s at its default page size, rate limited with `TooManyRequestsException` when
+  several tiers were tested at once). The reading is now time-boxed and resumable: each page load reads pages for up
+  to 6 s and each test for up to 5 s (`MaxResults=100`, about 40 quotas a page; a throttled page ends the slice), and
+  the merged global cross-region quotas and the `NextToken` are kept in the ProviderConfig row `bedrock-quotas`, so
+  the next request continues where the last stopped. A complete reading is re-read daily, answering from the previous
+  map meanwhile. Until the first reading completes a missing quota reads "quota still being read" (`quota.complete:
+  false`), afterwards "quota not reported". The test's Converse timeouts drop to 3 s connect / 8 s read, and the
+  second request style is only tried when it can still finish inside a 25 s deadline, under API Gateway's 29 s.
+
+## [2.35.0] - 2026-10-08
+
+### Changed
+
+- **Bedrock processing runs on Claude 5.5**: fast = Haiku 5.5, balanced = Sonnet 5.5, deep = Opus 5.5 (global
+  inference profiles; the deploy-time Marketplace subscriptions and `BedrockModelsEnabled` follow). The 5.5 models
+  refuse `temperature`/`top_p` and token-budget thinking, so `shared/models.invoke_bedrock` sends adaptive thinking
+  with an effort per tier (low / medium / high), adds maxTokens headroom for the reasoning, and sends no
+  temperature. Without a `thinking` field they think at full effort, so every call names one. A model pinned with
+  `BEDROCK_MODEL_<ROLE>` that predates them keeps the token-budget request. Checked with live Converse calls for
+  every role.
+
+### Fixed
+
+- CDK unit tests no longer fill the disk: each synthesized test stack left a ~340 MB `cdk.out*` folder in the OS
+  temp directory (24,000 of them had used 199 GB here). A Vitest global teardown
+  (`lib/test-support/cleanup-synth-output.ts`) removes the folders a run created.
+
+## [2.34.0] - 2026-10-08
+
+### Added
+
+- **AI Assistants page (`/ai-assistants`)**: the dashboard now explains how to connect Claude (claude.ai /
+  Desktop), Claude Code, ChatGPT, Kiro, Amazon Quick and other MCP clients to the MCP server. It has the server URL
+  and OAuth client id with Copy buttons, per-client steps and snippets (a downloadable Kiro `mcp.json`), the
+  one-time admin command for clients whose callback isn't allowed by default, example prompts, copyable assistant
+  instructions and the tool list. It's reachable from the sidebar and from Settings › Access. `scripts/build-web.sh`
+  reads `McpUrl` and `McpClientId` from `CitationAnalysisMcpStack`; without them the page says the server isn't
+  deployed.
+- Skeleton placeholders (`components/ui/Skeleton.tsx`) shaped like the content they replace, on the first load of
+  every view, the Settings sections and the app frame (instead of the full-screen "Loading dashboard...").
+
+### Changed
+
+- **Settings is a grouped side navigation with a URL per section** (`/settings/keywords`, `/brand`, `/personas`,
+  `/providers`, `/alerts`, `/users`), so a section can be linked to and bookmarked. Each entry shows its state on a
+  second line ("54 keywords", the tracked industry, "9 of 9 enabled"), with a placeholder while it loads, so the
+  nav no longer jumps from "General" / "0/0" to the real values.
+- **User management redesign.** One role per person (Admin or Member) instead of group checkboxes; plain statuses
+  (Active, Invite pending, Disabled, …); no raw Cognito ids; search and role/status filters; your own row is marked
+  "You" and its role, access and delete controls are locked. The Manage dialog is accessible (dialog role, Escape,
+  focus kept inside and returned), saves role and access separately, confirms disable / password reset / delete,
+  and shows errors inside the dialog. Pending invites get **Resend invite**: `POST /api/users/{username}/reset-password`
+  resends the invitation (`MessageAction=RESEND`) when the user has never signed in, since Cognito can't reset their
+  password. An invite reports only the groups it actually added, with a warning when one failed.
+
+### Fixed
+
+- Layout shift on first load: Run Analysis (CLS 0.22 → 0), Settings › Alerts (0.14 → 0), Prompt Insights and
+  Content Studio tab counts, the Reports landing grid and the Settings tab badges.
+- Stacked dialogs (a confirmation over another dialog) no longer unlock page scrolling when the top one closes, and
+  a dialog rendered inside a `space-y-*` container is no longer pushed 1.5rem down.
+
 ## [2.33.1] - 2026-10-07
 
 ### Fixed

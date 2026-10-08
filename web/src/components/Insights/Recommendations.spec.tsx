@@ -68,10 +68,10 @@ describe('Recommendations', () => {
   });
 
   describe('loading state', () => {
-    it('shows loading message when loading', () => {
+    it('shows the recommendations skeleton when loading', () => {
       renderWithRecommendations({ loading: true });
 
-      expect(screen.getByText(/Generating recommendations/)).toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent('Generating recommendations');
     });
   });
 
@@ -135,7 +135,7 @@ describe('Recommendations', () => {
     renderIdle: () => renderWithRecommendations(),
     renderShowingAnswer: () => renderWithTrackedRecommendation({ fetchRecommendations: neverSettlingFetch() }),
     scopedHook: mockUseRecommendations,
-    loadingText: 'Generating recommendations...',
+    loadingText: 'Generating recommendations',
     answerMarker: () => screen.queryByText('High Priority'),
   });
 

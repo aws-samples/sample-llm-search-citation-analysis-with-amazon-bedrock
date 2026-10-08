@@ -7,6 +7,8 @@ import {
 import {
   ClockIcon, PlusIcon, TrashIcon 
 } from '../ui';
+import { Skeleton } from '../ui/Skeleton';
+import { ScheduleListSkeleton } from './ScheduleListSkeleton';
 
 interface ScheduleHeaderProps {
   showForm: boolean;
@@ -14,10 +16,12 @@ interface ScheduleHeaderProps {
   onCancel: () => void;
   /** POST /api/schedules is Admin-only, so non-admins get no create affordance. */
   isAdmin: boolean;
+  /** Membership is still being read; the button's place is held so the header does not grow. */
+  adminLoading?: boolean;
 }
 
 export const ScheduleHeader = ({
-  showForm, onNew, onCancel, isAdmin 
+  showForm, onNew, onCancel, isAdmin, adminLoading = false
 }: ScheduleHeaderProps) => (
   <div className="p-4 sm:p-6 border-b border-gray-200">
     <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
@@ -25,6 +29,7 @@ export const ScheduleHeader = ({
         <h2 className="text-lg font-semibold text-gray-900">Automated Schedules</h2>
         <p className="text-sm text-gray-500 mt-0.5">Click a schedule to edit it. Group scopes are resolved when the schedule runs.</p>
       </div>
+      {adminLoading && <Skeleton className="h-9 w-full sm:w-36 rounded-lg" />}
       {isAdmin && (
         <button
           onClick={showForm ? onCancel : onNew}
@@ -50,14 +55,23 @@ interface ScheduleListProps {
   runningId: string | null;
   /** Reads stay open; edit, run and delete are Admin-only. */
   isAdmin: boolean;
+  /** The first `GET /schedules` has not answered yet. */
+  loading?: boolean;
 }
 
+/** Placeholder rows before the first answer, then the empty state or nothing. */
+const EmptyOrLoading = ({
+  loading, isAdmin
+}: Pick<ScheduleListProps, 'loading' | 'isAdmin'>) => (
+  loading ? <ScheduleListSkeleton /> : <EmptyState isAdmin={isAdmin} />
+);
+
 export const ScheduleList = ({
-  schedules, groups, onEdit, onRun, onDelete, runningId, isAdmin 
+  schedules, groups, onEdit, onRun, onDelete, runningId, isAdmin, loading = false
 }: ScheduleListProps) => (
   <div className="p-4 sm:p-6">
     {schedules.length === 0 ? (
-      <EmptyState isAdmin={isAdmin} />
+      <EmptyOrLoading loading={loading} isAdmin={isAdmin} />
     ) : (
       <div className="space-y-3">
         {schedules.map((schedule) => (

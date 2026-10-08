@@ -1,38 +1,53 @@
 import {
   useState, useEffect, useCallback 
 } from 'react';
+import { fetchAuthSession } from 'aws-amplify/auth';
 import {
   listUsers,
-  listGroups,
   inviteUser,
   updateUser,
   deleteUser,
   resetUserPassword,
+  USERS_PAGE_LIMIT,
   type CognitoUser,
-  type UserGroup,
   type InviteUserRequest,
   type UpdateUserRequest,
 } from '../api/users';
 
-interface MessageOutcome {
+/** What a user action came to; `message` is the server's answer or the error to show. */
+export interface UserActionOutcome {
   success: boolean;
   message?: string;
+  /** A partial success worth telling the admin about (e.g. a group that could not be assigned). */
+  warning?: string;
 }
+
+/** Safety cap on pages followed; the server itself stops at about 3000 users. */
+const MAX_PAGES = 30;
+
+/** The ID-token claims the server compares a target account against to refuse self-changes. */
+const IDENTITY_CLAIMS = ['email', 'cognito:username', 'sub'] as const;
 
 function errorText(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-/** Runs a request that answers with a message; a failure becomes an unsuccessful outcome with the error's text. */
-async function messageOutcome(
-  request: () => Promise<{ message?: string }>,
+/** Runs `request`; a rejection becomes an unsuccessful outcome carrying the error's text. */
+async function outcomeOf(
+  request: () => Promise<{
+    message?: string;
+    warning?: string 
+  }>,
   failure: string
-): Promise<MessageOutcome> {
+): Promise<UserActionOutcome> {
   try {
-    const response = await request();
+    const {
+      message, warning 
+    } = await request();
     return {
       success: true,
-      message: response.message,
+      message,
+      ...(warning ? { warning } : {}),
     };
   } catch (err) {
     return {
@@ -42,94 +57,126 @@ async function messageOutcome(
   }
 }
 
+interface UserListing {
+  users: CognitoUser[];
+  total: number;
+}
+
+/** Every page of `GET /users` from `offset`, followed until the server says there is no more. */
+async function listUsersFrom(offset: number, pagesLeft: number): Promise<UserListing> {
+  const page = await listUsers(USERS_PAGE_LIMIT, offset);
+  if (!page.has_more || page.users.length === 0 || pagesLeft <= 1) {
+    return {
+      users: page.users,
+      total: page.total,
+    };
+  }
+  const rest = await listUsersFrom(offset + page.users.length, pagesLeft - 1);
+  return {
+    users: [...page.users, ...rest.users],
+    total: rest.total,
+  };
+}
+
+function replaceUser(users: CognitoUser[], updated: CognitoUser): CognitoUser[] {
+  return users.map((existing) => (existing.username === updated.username ? updated : existing));
+}
+
+function withoutUser(users: CognitoUser[], username: string): CognitoUser[] {
+  return users.filter((existing) => existing.username !== username);
+}
+
+/** The signed-in account's identifiers, lower-cased; empty when there is no session. */
+async function readSignedInIdentity(): Promise<ReadonlySet<string>> {
+  try {
+    const payload = (await fetchAuthSession()).tokens?.idToken?.payload ?? {};
+    return new Set(IDENTITY_CLAIMS
+      .map((claim) => payload[claim])
+      .filter((value): value is string => typeof value === 'string' && value !== '')
+      .map((value) => value.toLowerCase()));
+  } catch {
+    return new Set();
+  }
+}
+
 interface UseUserManagementReturn {
   users: CognitoUser[];
-  groups: UserGroup[];
+  /** True until the first load settles; later loads set `refreshing` instead. */
   loading: boolean;
+  refreshing: boolean;
+  /** The last load error; action errors come back in each action's outcome. */
   error: string | null;
   total: number;
+  /** Lower-cased identifiers of the signed-in account (email, username, sub). */
+  signedInIdentity: ReadonlySet<string>;
   refresh: () => Promise<void>;
-  invite: (request: InviteUserRequest) => Promise<MessageOutcome>;
-  update: (username: string, request: UpdateUserRequest) => Promise<boolean>;
-  remove: (username: string) => Promise<boolean>;
-  resetPassword: (username: string) => Promise<MessageOutcome>;
+  invite: (request: InviteUserRequest) => Promise<UserActionOutcome>;
+  update: (username: string, request: UpdateUserRequest) => Promise<UserActionOutcome>;
+  remove: (username: string) => Promise<UserActionOutcome>;
+  resetPassword: (username: string) => Promise<UserActionOutcome>;
 }
 
 export function useUserManagement(): UseUserManagementReturn {
   const [users, setUsers] = useState<CognitoUser[]>([]);
-  const [groups, setGroups] = useState<UserGroup[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
+  const [signedInIdentity, setSignedInIdentity] = useState<ReadonlySet<string>>(() => new Set());
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
+    setRefreshing(true);
     setError(null);
     try {
-      const [usersResponse, groupsResponse] = await Promise.all([
-        listUsers(100, 0),
-        listGroups(),
-      ]);
-      setUsers(usersResponse.users);
-      setTotal(usersResponse.total);
-      setGroups(groupsResponse.groups);
+      const listing = await listUsersFrom(0, MAX_PAGES);
+      setUsers(listing.users);
+      setTotal(listing.total);
     } catch (err) {
       setError(errorText(err, 'Failed to load users'));
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchData();
+    void fetchData();
+    void readSignedInIdentity().then(setSignedInIdentity);
   }, [fetchData]);
 
-  // Stryker disable ArrayDeclaration: React dependency list; fetchData has a stable identity, so omitting it cannot stale this callback
-  const invite = useCallback(async (request: InviteUserRequest) => messageOutcome(async () => {
+  const invite = useCallback(async (request: InviteUserRequest) => outcomeOf(async () => {
     const response = await inviteUser(request);
-    await fetchData();
+    void fetchData();
     return response;
   }, 'Failed to invite user'), [fetchData]);
-  // Stryker restore ArrayDeclaration
 
-  const mutateAndRefresh = useCallback(async (mutation: () => Promise<unknown>, failure: string) => {
-    try {
-      await mutation();
-      await fetchData();
-      return true;
-    } catch (err) {
-      setError(errorText(err, failure));
-      return false;
-    }
-  }, [fetchData]);
+  const update = useCallback(async (username: string, request: UpdateUserRequest) => outcomeOf(async () => {
+    const { user } = await updateUser(username, request);
+    setUsers((current) => replaceUser(current, user));
+    void fetchData();
+    return {};
+  }, 'Failed to update user'), [fetchData]);
 
-  const update = useCallback(
-    async (username: string, request: UpdateUserRequest) => mutateAndRefresh(
-      () => updateUser(username, request),
-      'Failed to update user'
-    ),
-    // Stryker disable next-line ArrayDeclaration: React dependency list; mutateAndRefresh has a stable identity, so omitting it cannot stale this callback
-    [mutateAndRefresh]
-  );
+  const remove = useCallback(async (username: string) => outcomeOf(async () => {
+    const response = await deleteUser(username);
+    setUsers((current) => withoutUser(current, username));
+    void fetchData();
+    return response;
+  }, 'Failed to delete user'), [fetchData]);
 
-  const remove = useCallback(
-    async (username: string) => mutateAndRefresh(() => deleteUser(username), 'Failed to delete user'),
-    // Stryker disable next-line ArrayDeclaration: React dependency list; mutateAndRefresh has a stable identity, so omitting it cannot stale this callback
-    [mutateAndRefresh]
-  );
-
-  const resetPassword = useCallback(
-    async (username: string) => messageOutcome(() => resetUserPassword(username), 'Failed to reset password'),
-    // Stryker disable next-line ArrayDeclaration: React dependency list; the callback reads only module functions, so any list keeps it correct
-    []
-  );
+  const resetPassword = useCallback(async (username: string) => outcomeOf(async () => {
+    const response = await resetUserPassword(username);
+    void fetchData();
+    return response;
+  }, 'Failed to reset password'), [fetchData]);
 
   return {
     users,
-    groups,
     loading,
+    refreshing: refreshing && !loading,
     error,
     total,
+    signedInIdentity,
     refresh: fetchData,
     invite,
     update,

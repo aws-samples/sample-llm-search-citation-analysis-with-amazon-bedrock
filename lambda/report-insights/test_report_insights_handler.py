@@ -139,7 +139,7 @@ class TestValidation:
     def test_stores_the_run_model_and_keyword_language(self, worker_module) -> None:
         item = _stored(_narratives_written_for(worker_module, _workflow_event('group-1')))
 
-        assert (item['run_timestamp'], item['model'], item['language']) == (RUN_TIMESTAMP, 'global.anthropic.claude-sonnet-4-6', 'es')
+        assert (item['run_timestamp'], item['model'], item['language']) == (RUN_TIMESTAMP, 'global.anthropic.claude-sonnet-5-5', 'es')
 
 
 class TestFailures:

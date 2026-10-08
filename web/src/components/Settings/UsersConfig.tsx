@@ -1,194 +1,154 @@
-import { useState } from 'react';
-import { useUserManagement } from '../../hooks/useUserManagement';
-import type { CognitoUser } from '../../api/users';
-import { formatDateOnly } from '../../formatting/dateFormatter';
 import {
-  InviteModal,
-  UserDetailsModal,
-  getStatusBadgeClass,
-  getStatusLabel,
+  useEffect, useState
+} from 'react';
+import {
+  useUserManagement, type UserActionOutcome
+} from '../../hooks/useUserManagement';
+import type { CognitoUser } from '../../api/users';
+import { Button } from '../ui/Button';
+import {
+  PlusIcon, RefreshIcon
+} from '../ui/Icons';
+import {
+  INVITE_VALID_DAYS, InviteModal
 } from './UserModals';
-import { StrokeIcon } from '../ui/StrokeIcon';
-import { RefreshIcon } from '../ui';
-import { CenteredMessage } from '../ui/CenteredState';
+import { UserDetailsModal } from './UserDetailsModal';
+import {
+  UsersTable, UsersTableSkeleton
+} from './UsersTable';
+import { UsersToolbar } from './UsersToolbar';
+import {
+  filterUsers, isFiltering, NO_USERS_FILTER, summarizeUsers, type UsersFilter
+} from './UsersFilter';
+import {
+  groupsForRole, isSignedInUser, type UserRole
+} from './UserPresentation';
 import { SettingsErrorNotice } from './SettingsErrorNotice';
 import { SettingsSectionHeader } from './SettingsSectionHeader';
 
-class InviteError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'InviteError';
-  }
+interface PageNotice {
+  readonly tone: 'success' | 'warning';
+  readonly text: string;
 }
 
+const NOTICE_CLASS: Readonly<Record<PageNotice['tone'], string>> = {
+  success: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  warning: 'border-amber-200 bg-amber-50 text-amber-800',
+};
+
+/** How long a page notice stays before it clears itself. */
+const NOTICE_MS = 8000;
+
+function inviteNotice(email: string, outcome: UserActionOutcome): PageNotice {
+  return outcome.warning
+    ? {
+      tone: 'warning',
+      text: `${outcome.warning}. Open Manage for ${email} to check their role.`,
+    }
+    : {
+      tone: 'success',
+      text: `Invitation sent to ${email}. The temporary password expires in ${INVITE_VALID_DAYS} days.`,
+    };
+}
+
+function headCount(users: readonly CognitoUser[], shown: number, total: number, filtering: boolean): string {
+  if (filtering) return `Showing ${shown} of ${users.length}`;
+  const summary = summarizeUsers(users);
+  return total > users.length ? `${summary} · showing ${users.length} of ${total}` : summary;
+}
+
+/** Clears `notice` a while after it was set. */
+function useExpiringNotice() {
+  const [notice, setNotice] = useState<PageNotice | null>(null);
+  useEffect(() => {
+    if (notice === null) return undefined;
+    const timer = setTimeout(() => setNotice(null), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  return [notice, setNotice] as const;
+}
+
+/** Settings › Users: everyone with access, their role and status, and the invite and manage dialogs. */
 export function UsersConfig() {
   const {
-    users,
-    groups,
-    loading,
-    error,
-    total,
-    refresh,
-    invite,
-    update,
-    remove,
-    resetPassword,
+    users, loading, refreshing, error, total, signedInIdentity, refresh, invite, update, remove, resetPassword,
   } = useUserManagement();
+  const [inviting, setInviting] = useState(false);
+  const [managedUsername, setManagedUsername] = useState<string | null>(null);
+  const [filter, setFilter] = useState<UsersFilter>(NO_USERS_FILTER);
+  const [notice, setNotice] = useExpiringNotice();
 
-  const [showInviteModal, setShowInviteModal] = useState(false);
-  const [selectedUser, setSelectedUser] = useState<CognitoUser | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const managed = users.find((user) => user.username === managedUsername) ?? null;
+  const shown = filterUsers(users, filter);
+  const filtering = isFiltering(filter);
 
-  const handleInvite = async (email: string, selectedGroups: string[]) => {
-    const result = await invite({
+  const handleInvite = async (email: string, role: UserRole) => {
+    const outcome = await invite({
       email,
-      groups: selectedGroups 
+      groups: groupsForRole([], role),
     });
-    if (result.success) {
-      setSuccessMessage(result.message ?? 'User invited successfully');
-      setTimeout(() => setSuccessMessage(null), 5000);
-    } else {
-      throw new InviteError(result.message ?? 'Failed to invite user');
+    if (outcome.success) setNotice(inviteNotice(email, outcome));
+    return outcome;
+  };
+
+  const handleDelete = async (user: CognitoUser) => {
+    const outcome = await remove(user.username);
+    if (outcome.success) {
+      setManagedUsername(null);
+      setNotice({
+        tone: 'success',
+        text: `${user.email} was deleted.`,
+      });
     }
+    return outcome;
   };
-
-  const handleUpdate = async (enabled: boolean, selectedGroups: string[]) => {
-    if (!selectedUser) return;
-    await update(selectedUser.username, {
-      enabled,
-      groups: selectedGroups 
-    });
-  };
-
-  const handleResetPassword = async () => {
-    if (!selectedUser) return;
-    const result = await resetPassword(selectedUser.username);
-    if (result.success) {
-      setSuccessMessage(result.message ?? 'Password reset email sent');
-      setTimeout(() => setSuccessMessage(null), 5000);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!selectedUser) return;
-    await remove(selectedUser.username);
-  };
-
-  if (loading) {
-    return <CenteredMessage>Loading users...</CenteredMessage>;
-  }
 
   return (
     <div className="space-y-6">
-      <SettingsSectionHeader title="User Management" description="Manage Cognito users: invite, enable/disable, and assign groups">
+      <SettingsSectionHeader title="Users" description="Invite people and choose who can change settings.">
         <div className="flex items-center gap-2">
-          <button
-            onClick={refresh}
-            className="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
+          <Button
+            variant="secondary"
+            leadingIcon={<RefreshIcon className="w-4 h-4" />}
+            onClick={() => { void refresh(); }}
+            disabled={loading || refreshing}
           >
-            <RefreshIcon className="w-4 h-4" />
-            Refresh
-          </button>
-          <button
-            onClick={() => setShowInviteModal(true)}
-            className="px-3 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors flex items-center gap-2"
-          >
-            <StrokeIcon className="w-4 h-4" paths={['M12 4.5v15m7.5-7.5h-15']} aria-hidden="true" />
-            Invite User
-          </button>
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </Button>
+          <Button leadingIcon={<PlusIcon className="w-4 h-4" />} onClick={() => setInviting(true)}>
+            Invite user
+          </Button>
         </div>
       </SettingsSectionHeader>
 
       <SettingsErrorNotice error={error} />
 
-      {successMessage && (
-        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700">{successMessage}</div>
+      {notice && <output className={`block rounded-lg border p-3 text-sm ${NOTICE_CLASS[notice.tone]}`}>{notice.text}</output>}
+
+      {loading ? <UsersTableSkeleton /> : (
+        <>
+          <UsersToolbar filter={filter} onChange={setFilter} summary={headCount(users, shown.length, total, filtering)} />
+          <UsersTable
+            users={shown}
+            signedInIdentity={signedInIdentity}
+            onManage={(user) => setManagedUsername(user.username)}
+            emptyMessage={filtering ? 'No one matches these filters.' : 'No users yet. Invite someone to get started.'}
+          />
+        </>
       )}
 
-      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Groups</th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
-              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {users.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-sm text-gray-500">
-                  No users found. Invite your first user to get started.
-                </td>
-              </tr>
-            ) : (
-              users.map(user => (
-                <tr key={user.username} className="hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">{user.email}</p>
-                      <p className="text-xs text-gray-500 font-mono truncate max-w-[200px]">{user.username}</p>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(user.status, user.enabled)}`}>
-                      {getStatusLabel(user.status, user.enabled)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {user.groups.length === 0 ? (
-                        <span className="text-xs text-gray-400">No groups</span>
-                      ) : (
-                        user.groups.map(group => (
-                          <span key={group} className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded text-xs">
-                            {group}
-                          </span>
-                        ))
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-500">
-                    {formatDateOnly(user.created_at)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => setSelectedUser(user)}
-                      className="text-gray-400 hover:text-gray-600 transition-colors"
-                      title="View details"
-                    >
-                      <StrokeIcon className="w-5 h-5" paths={['M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z']} />
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      {inviting && <InviteModal onClose={() => setInviting(false)} onInvite={handleInvite} />}
 
-      <div className="text-xs text-gray-500 text-center">
-        Showing {users.length} of {total} users
-      </div>
-
-      {showInviteModal && (
-        <InviteModal
-          groups={groups}
-          onClose={() => setShowInviteModal(false)}
-          onInvite={handleInvite}
-        />
-      )}
-
-      {selectedUser && (
+      {managed && (
         <UserDetailsModal
-          user={selectedUser}
-          groups={groups}
-          onClose={() => setSelectedUser(null)}
-          onUpdate={handleUpdate}
-          onResetPassword={handleResetPassword}
-          onDelete={handleDelete}
+          key={managed.username}
+          user={managed}
+          isSelf={isSignedInUser(managed, signedInIdentity)}
+          onClose={() => setManagedUsername(null)}
+          onSaveRole={(role) => update(managed.username, { groups: groupsForRole(managed.groups, role) })}
+          onSetEnabled={(enabled) => update(managed.username, { enabled })}
+          onResetPassword={() => resetPassword(managed.username)}
+          onDelete={() => handleDelete(managed)}
         />
       )}
     </div>

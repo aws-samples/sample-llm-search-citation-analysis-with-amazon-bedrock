@@ -3,6 +3,12 @@ import { useCitationGaps } from '../../hooks/useCitationGaps';
 import type {
   CitationGap, CitationGapsResponse, Keyword
 } from '../../types';
+import {
+  Skeleton, SkeletonRegion, SkeletonTable
+} from '../ui/Skeleton';
+import {
+  InsightCardGridSkeleton, StatTilesSkeleton
+} from './InsightsSkeletons';
 import { GapCard } from './GapCard';
 import { InsightsScopeSelector } from './InsightsScopeSelector';
 import { useScopeSelection } from './useScopeSelection';
@@ -98,6 +104,23 @@ function GapList({ gaps }: { readonly gaps: CitationGap[] }) {
   );
 }
 
+/** Stand-ins for the stat tiles, the domain summary and the gap cards while the gaps load. */
+function CitationGapsSkeleton() {
+  return (
+    <SkeletonRegion label="Analyzing citation gaps" className="space-y-6">
+      <StatTilesSkeleton count={4} gridClassName="grid-cols-2 lg:grid-cols-4" />
+      <div className="bg-white p-4 rounded-lg shadow">
+        <div className="flex h-7 items-center mb-3"><Skeleton className="h-5 w-48" /></div>
+        <SkeletonTable rows={10} columns={2} rowClassName="h-[41px]" />
+      </div>
+      <div>
+        <div className="flex h-7 items-center mb-3"><Skeleton className="h-5 w-44" /></div>
+        <InsightCardGridSkeleton cardClassName="h-44" />
+      </div>
+    </SkeletonRegion>
+  );
+}
+
 function CitationGapResults({
   data, loading, error
 }: {
@@ -105,9 +128,7 @@ function CitationGapResults({
   readonly loading: boolean;
   readonly error: string | null;
 }) {
-  if (loading) {
-    return <div className="text-center py-8 text-gray-500">Analyzing citation gaps...</div>;
-  }
+  if (loading) return <CitationGapsSkeleton />;
   if (error) {
     return <div className="text-center py-8 text-red-500">{error}</div>;
   }

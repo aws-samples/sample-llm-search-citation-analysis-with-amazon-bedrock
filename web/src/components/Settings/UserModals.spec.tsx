@@ -1,173 +1,86 @@
 import {
-  describe, expect, it, vi
+  describe, expect, it
 } from 'vitest';
 import {
-  act, fireEvent, screen
+  fireEvent, screen
 } from '@testing-library/react';
 import {
-  getAccountSwitchElement, renderInviteModal, renderUserDetailsModal
+  clickAndSettle, mockFailedAction, mockPendingAction, pickRole, renderInviteModal, typeInviteEmail
 } from './UserModals-fixtures';
-import { mockUsers } from '../../hooks/useUserManagement-fixtures';
-
-class InviteRefusedError extends Error {
-  constructor() {
-    super('User already exists');
-    this.name = 'InviteRefusedError';
-  }
-}
 
 describe('InviteModal', () => {
+  const sendButton = () => screen.getByRole('button', { name: 'Send invite' });
+
+  it('is a dialog named "Invite someone"', () => {
+    renderInviteModal();
+
+    expect(screen.getByRole('dialog', { name: 'Invite someone' })).toBeInTheDocument();
+  });
+
+  it('focuses the email field when it opens', () => {
+    renderInviteModal();
+
+    expect(screen.getByLabelText('Email address')).toHaveFocus();
+  });
+
   it.each([
     ['no email is typed', ''],
     ['the email is only whitespace', '   '],
-  ])('keeps Send Invite disabled while %s', (_condition, email) => {
+  ])('keeps Send invite disabled while %s', (_condition, email) => {
     renderInviteModal();
 
-    fireEvent.change(screen.getByPlaceholderText('user@example.com'), { target: { value: email } });
+    typeInviteEmail(email);
 
-    expect(screen.getByRole('button', { name: 'Send Invite' })).toBeDisabled();
+    expect(sendButton()).toBeDisabled();
   });
 
-  it('lists every group with its description', () => {
+  it('picks the Member role by default', () => {
     renderInviteModal();
 
-    expect(screen.getByRole('checkbox', { name: /Admins/u })).toBeInTheDocument();
-    expect(screen.getByText('- Regular users')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /^Member/u })).toBeChecked();
   });
 
-  it('offers no group choice when there are no groups', () => {
-    renderInviteModal({ groups: [] });
+  it('explains that a temporary password is emailed and expires in 7 days', () => {
+    renderInviteModal();
 
-    expect(screen.queryByText('Groups (optional)')).not.toBeInTheDocument();
+    expect(screen.getByText(/temporary password\. It expires after 7 days/u)).toBeInTheDocument();
   });
 
-  it('invites the trimmed email into the ticked groups and closes', async () => {
+  it('invites the trimmed email with the role picked and closes', async () => {
     const props = renderInviteModal();
-    fireEvent.change(screen.getByPlaceholderText('user@example.com'), { target: { value: '  new@example.com ' } });
-    fireEvent.click(screen.getByRole('checkbox', { name: /Users/u }));
+    typeInviteEmail('  new@example.com ');
+    pickRole('Admin');
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Send Invite' }));
-    });
+    await clickAndSettle(sendButton());
 
-    expect(props.onInvite).toHaveBeenCalledWith('new@example.com', ['Users']);
+    expect(props.onInvite).toHaveBeenCalledWith('new@example.com', 'admin');
     expect(props.onClose).toHaveBeenCalledWith();
   });
 
-  it.each([
-    ['the refusal message', new InviteRefusedError(), 'User already exists'],
-    ['the fallback message for a non-Error rejection', 'offline', 'Failed to invite user'],
-  ])('shows %s and stays open when the invite fails', async (_message, rejection, shown) => {
-    const props = renderInviteModal({ onInvite: vi.fn(() => Promise.reject(rejection)) });
-    fireEvent.change(screen.getByPlaceholderText('user@example.com'), { target: { value: 'new@example.com' } });
+  it('says Sending… on the submit button while the invite is in flight', () => {
+    renderInviteModal({ onInvite: mockPendingAction() });
+    typeInviteEmail('new@example.com');
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Send Invite' }));
-    });
+    fireEvent.click(sendButton());
 
-    expect(screen.getByText(shown)).toBeInTheDocument();
-    expect(props.onClose).not.toHaveBeenCalledWith();
-  });
-});
-
-describe('UserDetailsModal', () => {
-  it.each([
-    ['Yes', true],
-    ['No', false],
-  ])('says %s under Email Verified', (answer, verified) => {
-    renderUserDetailsModal({
-      user: {
-        ...mockUsers[0],
-        email_verified: verified,
-      },
-    });
-
-    expect(screen.getByText('Email Verified').nextElementSibling).toHaveTextContent(answer);
+    expect(screen.getByRole('button', { name: 'Sending…' })).toBeDisabled();
   });
 
-  it('labels a disabled account as Disabled', () => {
-    renderUserDetailsModal({
-      user: {
-        ...mockUsers[0],
-        enabled: false,
-      },
-    });
+  it('shows the failure and stays open when the invite fails', async () => {
+    const props = renderInviteModal({ onInvite: mockFailedAction('User with this email already exists') });
+    typeInviteEmail('new@example.com');
 
-    expect(screen.getByText('Disabled')).toBeInTheDocument();
-  });
+    await clickAndSettle(sendButton());
 
-  it('keeps Save Changes disabled until something changes', () => {
-    renderUserDetailsModal();
-
-    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
-  });
-
-  it('disables Save Changes again when the account switch is flipped back', () => {
-    renderUserDetailsModal();
-    fireEvent.click(getAccountSwitchElement());
-    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
-
-    fireEvent.click(getAccountSwitchElement());
-
-    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeDisabled();
-  });
-
-  it('saves the disabled account with its ticked groups and closes', async () => {
-    const props = renderUserDetailsModal();
-    fireEvent.click(getAccountSwitchElement());
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Users' }));
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
-    });
-
-    expect(props.onUpdate).toHaveBeenCalledWith(false, ['Admins', 'Users']);
-    expect(props.onClose).toHaveBeenCalledWith();
-  });
-
-  it('enables Save Changes when only the groups change', () => {
-    renderUserDetailsModal();
-
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Admins' }));
-
-    expect(screen.getByRole('button', { name: 'Save Changes' })).toBeEnabled();
-  });
-
-  it('asks for confirmation on the first delete click without deleting', () => {
-    const props = renderUserDetailsModal();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Delete User' }));
-
-    expect(screen.getByText('Click again to confirm deletion. This cannot be undone.')).toBeInTheDocument();
-    expect(props.onDelete).not.toHaveBeenCalledWith();
-  });
-
-  it('deletes the user and closes on the confirming click', async () => {
-    const props = renderUserDetailsModal();
-    fireEvent.click(screen.getByRole('button', { name: 'Delete User' }));
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Confirm Delete' }));
-    });
-
-    expect(props.onDelete).toHaveBeenCalledWith();
-    expect(props.onClose).toHaveBeenCalledWith();
-  });
-
-  it('sends a password reset without closing', async () => {
-    const props = renderUserDetailsModal();
-
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Reset Password' }));
-    });
-
-    expect(props.onResetPassword).toHaveBeenCalledWith();
+    expect(screen.getByRole('alert')).toHaveTextContent('User with this email already exists');
     expect(props.onClose).not.toHaveBeenCalledWith();
   });
 
-  it('shows no group choice when there are no groups', () => {
-    renderUserDetailsModal({ groups: [] });
+  it('closes from the Cancel button', () => {
+    const props = renderInviteModal();
 
-    expect(screen.queryByText('Groups')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(props.onClose).toHaveBeenCalledWith();
   });
 });

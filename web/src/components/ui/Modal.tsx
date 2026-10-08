@@ -14,6 +14,21 @@ interface ModalProps {
   size?: 'md' | 'xl' | '4xl';
 }
 
+/**
+ * Open dialogs holding the page scroll lock. Dialogs can stack (a confirmation
+ * over a details dialog), so the page scrolls again only when the last one closes.
+ */
+const scrollLock = { holders: 0 };
+
+function lockPageScroll(): () => void {
+  scrollLock.holders += 1;
+  document.body.style.overflow = 'hidden';
+  return () => {
+    scrollLock.holders -= 1;
+    if (scrollLock.holders === 0) document.body.style.overflow = 'unset';
+  };
+}
+
 export const Modal = ({
   isOpen,
   onClose,
@@ -23,18 +38,17 @@ export const Modal = ({
   size = 'md',
 }: ModalProps) => {
   useEffect(() => {
+    if (!isOpen) return undefined;
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
 
-    if (isOpen) {
-      document.addEventListener('keydown', handleEscape);
-      document.body.style.overflow = 'hidden';
-    }
+    document.addEventListener('keydown', handleEscape);
+    const unlockPageScroll = lockPageScroll();
 
     return () => {
       document.removeEventListener('keydown', handleEscape);
-      document.body.style.overflow = 'unset';
+      unlockPageScroll();
     };
   }, [isOpen, onClose]);
 
@@ -47,7 +61,8 @@ export const Modal = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    // `!m-0`: a caller's `space-y-*` wrapper would otherwise push this fixed overlay down.
+    <div className="fixed inset-0 z-50 !m-0 flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
         className="absolute inset-0 bg-gray-900/50 backdrop-blur-sm"

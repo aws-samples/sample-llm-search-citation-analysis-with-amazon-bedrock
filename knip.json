@@ -2,6 +2,6 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignoreExportsUsedInFile": true,
   "entry": ["bin/citation-analysis-system.ts!", "lib/**/*.spec.ts"],
-  "project": ["bin/**/*.ts!", "lib/**/*.ts!", "!lib/**/*.spec.ts!", "!lib/**/*-fixtures.ts!", ".eslint-rules/*.mjs"],
+  "project": ["bin/**/*.ts!", "lib/**/*.ts!", "!lib/**/*.spec.ts!", "!lib/**/*-fixtures.ts!", "!lib/test-support/**!", ".eslint-rules/*.mjs"],
   "ignoreDependencies": ["ts-node"]
 }

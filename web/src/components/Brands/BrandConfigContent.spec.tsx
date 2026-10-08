@@ -54,10 +54,10 @@ describe('BrandConfigContent owned domains', () => {
 });
 
 describe('BrandConfigContent states', () => {
-  it('shows only the loading message while the configuration loads', () => {
+  it('shows only the brand configuration skeleton while the configuration loads', () => {
     render(<BrandConfigContent config={mockBrandConfig} presets={null} loading onSave={vi.fn()} />);
 
-    expect(screen.getByText('Loading configuration...')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Loading brand configuration');
     expect(screen.queryByRole('button', { name: 'Save Configuration' })).not.toBeInTheDocument();
   });
 

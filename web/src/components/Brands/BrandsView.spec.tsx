@@ -135,6 +135,29 @@ describe('BrandsView', () => {
     });
   });
 
+  it('shows the brand mentions skeleton while the first answer for a scope loads', () => {
+    mocks.useBrandMentions.mockReturnValue({
+      data: null,
+      loading: true,
+      error: null,
+    });
+    renderWithBrandScope();
+
+    expect(screen.getByText('Loading brand mentions')).toBeInTheDocument();
+  });
+
+  it('keeps the previous results on screen, marked busy, while a refetch loads', () => {
+    mocks.useBrandMentions.mockReturnValue({
+      data: brandMentionsExportResponse,
+      loading: true,
+      error: null,
+    });
+    renderWithBrandScope();
+    const exportButton = screen.getByRole('button', { name: 'Export to Excel' });
+
+    expect(exportButton.closest('[aria-busy="true"]')).not.toBeNull();
+  });
+
   it('offers Latest and exact run values when a scope is selected', () => {
     renderWithBrandScope();
 

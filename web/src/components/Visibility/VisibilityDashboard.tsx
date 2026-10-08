@@ -9,6 +9,7 @@ import type {
 } from '../../types';
 import { InsightsSummary } from './InsightsSummary';
 import { VisibilityOverview } from './VisibilityOverview';
+import { VisibilityOverviewSkeleton } from './VisibilitySkeletons';
 import type { HistoryRangeDays } from './VisibilityHistory';
 import { PersonaComparisonChart } from './PersonaComparisonChart';
 import { PersonaSelector } from '../Personas/PersonaSelector';
@@ -86,25 +87,31 @@ export function VisibilityDashboard({ keywords }: Props) {
         />
       </PageHeaderCard>
 
-      {(visLoading || trendsLoading) && <div className="text-center py-8 text-gray-500">Loading visibility data...</div>}
-
       {visError && !visLoading && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">{visError}</div>
       )}
 
       {activeKeywords.length > 0 && <InsightsSummary scope={scope} days={rangeDays} />}
 
+      {/* First load: an overview-shaped placeholder where the overview will be.
+          Later requests (scope, persona, range) keep the overview on screen,
+          dimmed and marked busy, instead of inserting a notice above it. */}
+      {!visibility && visLoading && <VisibilityOverviewSkeleton />}
+
       {visibility && (
-        <VisibilityOverview
-          visibility={visibility}
-          trends={trends}
-          trendsError={trendsError}
-          scopeLabel={describeReportScope(scope, groups)}
-          rangeDays={rangeDays}
-          onRangeChange={setRangeDays}
-        >
-          {scope.kind === 'keyword' && <PersonaComparisonChart data={personaRankings} />}
-        </VisibilityOverview>
+        <div aria-busy={visLoading} className={visLoading ? 'opacity-60 transition-opacity' : 'transition-opacity'}>
+          <VisibilityOverview
+            visibility={visibility}
+            trends={trends}
+            trendsError={trendsError}
+            trendsLoading={trendsLoading}
+            scopeLabel={describeReportScope(scope, groups)}
+            rangeDays={rangeDays}
+            onRangeChange={setRangeDays}
+          >
+            {scope.kind === 'keyword' && <PersonaComparisonChart data={personaRankings} />}
+          </VisibilityOverview>
+        </div>
       )}
     </div>
   );

@@ -1,349 +1,80 @@
-import {useState} from 'react';
-import type { ReactNode } from 'react';
-import { createPortal } from 'react-dom';
-import { formatDateOnly } from '../../formatting/dateFormatter';
-import { Spinner } from '../ui/Spinner';
-import type {
-  CognitoUser, UserGroup 
-} from '../../api/users';
-import { SettingsErrorNotice } from './SettingsErrorNotice';
+import {
+  useId, useState
+} from 'react';
+import type { FormEvent } from 'react';
+import { Modal } from '../ui/Modal';
+import { Button } from '../ui/Button';
+import { ErrorAlert } from '../ui/ErrorAlert';
+import type { UserActionOutcome } from '../../hooks/useUserManagement';
+import type { UserRole } from './UserPresentation';
+import { UserRolePicker } from './UserRolePicker';
+import { useDialogFocus } from './UserDialogFocus';
 
-function createGroupToggler(setSelectedGroups: React.Dispatch<React.SetStateAction<string[]>>) {
-  return (groupName: string) => {
-    setSelectedGroups(prev =>
-      prev.includes(groupName)
-        ? prev.filter(g => g !== groupName)
-        : [...prev, groupName]
-    );
-  };
-}
-
-export function getStatusBadgeClass(status: string, enabled: boolean): string {
-  if (!enabled) return 'bg-red-100 text-red-700';
-  switch (status) {
-    case 'CONFIRMED':
-      return 'bg-emerald-100 text-emerald-700';
-    case 'FORCE_CHANGE_PASSWORD':
-      return 'bg-amber-100 text-amber-700';
-    case 'UNCONFIRMED':
-      return 'bg-gray-100 text-gray-600';
-    default:
-      return 'bg-gray-100 text-gray-600';
-  }
-}
-
-export function getStatusLabel(status: string, enabled: boolean): string {
-  if (!enabled) return 'Disabled';
-  switch (status) {
-    case 'CONFIRMED':
-      return 'Active';
-    case 'FORCE_CHANGE_PASSWORD':
-      return 'Pending';
-    case 'UNCONFIRMED':
-      return 'Unconfirmed';
-    case 'RESET_REQUIRED':
-      return 'Reset Required';
-    default:
-      return status;
-  }
-}
-
-/** Dimmed full-screen overlay, portalled to `document.body`, with a white panel. */
-function UserModalShell({
-  panelClassName, children
-}: {
-  readonly panelClassName: string;
-  readonly children: ReactNode 
-}) {
-  return createPortal(
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className={`bg-white rounded-lg shadow-xl ${panelClassName}`}>
-        {children}
-      </div>
-    </div>,
-    document.body
-  );
-}
-
-interface GroupCheckboxesProps {
-  readonly groups: UserGroup[];
-  readonly selected: string[];
-  readonly onToggle: (groupName: string) => void;
-  readonly showDescriptions?: boolean;
-}
-
-function GroupCheckboxes({
-  groups, selected, onToggle, showDescriptions = false
-}: GroupCheckboxesProps) {
-  return (
-    <div className="space-y-2">
-      {groups.map(group => (
-        <label key={group.name} className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={selected.includes(group.name)}
-            onChange={() => onToggle(group.name)}
-            className="rounded border-gray-300 text-gray-900 focus:ring-gray-900"
-          />
-          <span className="text-sm text-gray-700">{group.name}</span>
-          {showDescriptions && group.description && (
-            <span className="text-xs text-gray-500">- {group.description}</span>
-          )}
-        </label>
-      ))}
-    </div>
-  );
-}
+/** Cognito's default `TemporaryPasswordValidityDays`; `lib/constructs/auth.ts` does not override it. */
+export const INVITE_VALID_DAYS = 7;
 
 interface InviteModalProps {
-  readonly groups: UserGroup[];
   readonly onClose: () => void;
-  readonly onInvite: (email: string, groups: string[]) => Promise<void>;
+  /** Sends the invitation; the modal closes on success and shows the failure otherwise. */
+  readonly onInvite: (email: string, role: UserRole) => Promise<UserActionOutcome>;
 }
 
+/** Email + role form that sends a Cognito invitation. */
 export function InviteModal({
-  groups, onClose, onInvite 
+  onClose, onInvite
 }: InviteModalProps) {
+  const emailId = useId();
   const [email, setEmail] = useState('');
-  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [role, setRole] = useState<UserRole>('member');
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useDialogFocus();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim()) return;
-    
-    setLoading(true);
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    const address = email.trim();
+    if (!address) return;
+    setSending(true);
     setError(null);
-    try {
-      await onInvite(email.trim(), selectedGroups);
+    const outcome = await onInvite(address, role);
+    setSending(false);
+    if (outcome.success) {
       onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to invite user');
-    } finally {
-      setLoading(false);
+    } else {
+      setError(outcome.message ?? 'Failed to invite user');
     }
   };
-
-  const toggleGroup = createGroupToggler(setSelectedGroups);
 
   return (
-    <UserModalShell panelClassName="max-w-md w-full mx-4">
-      <div className="p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Invite User</h3>
-          
-        <form onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Email Address
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="user@example.com"
-                className="w-full p-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
-                autoFocus
-                required
-              />
-            </div>
-              
-            {groups.length > 0 && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Groups (optional)
-                </label>
-                <GroupCheckboxes groups={groups} selected={selectedGroups} onToggle={toggleGroup} showDescriptions />
-              </div>
-            )}
-              
-            <SettingsErrorNotice error={error} />
-          </div>
-            
-          <div className="flex justify-end gap-3 mt-6">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading || !email.trim()}
-              className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center gap-2"
-            >
-              {loading && <Spinner size="sm" />}
-              Send Invite
-            </button>
-          </div>
-        </form>
-      </div>
-    </UserModalShell>
-  );
-}
-
-interface UserDetailsModalProps {
-  readonly user: CognitoUser;
-  readonly groups: UserGroup[];
-  readonly onClose: () => void;
-  readonly onUpdate: (enabled: boolean, groups: string[]) => Promise<void>;
-  readonly onResetPassword: () => Promise<void>;
-  readonly onDelete: () => Promise<void>;
-}
-
-export function UserDetailsModal({
-  user, groups, onClose, onUpdate, onResetPassword, onDelete 
-}: UserDetailsModalProps) {
-  const [enabled, setEnabled] = useState(user.enabled);
-  const [selectedGroups, setSelectedGroups] = useState<string[]>(user.groups);
-  const [loading, setLoading] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-
-  const sortedSelected = [...selectedGroups].sort((a, b) => a.localeCompare(b));
-  const sortedUserGroups = [...user.groups].sort((a, b) => a.localeCompare(b));
-  const hasChanges = enabled !== user.enabled || 
-    JSON.stringify(sortedSelected) !== JSON.stringify(sortedUserGroups);
-
-  const handleSave = async () => {
-    setLoading(true);
-    try {
-      await onUpdate(enabled, selectedGroups);
-      onClose();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleResetPassword = async () => {
-    setLoading(true);
-    try {
-      await onResetPassword();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!confirmDelete) {
-      setConfirmDelete(true);
-      return;
-    }
-    setLoading(true);
-    try {
-      await onDelete();
-      onClose();
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const toggleGroup = createGroupToggler(setSelectedGroups);
-
-  return (
-    <UserModalShell panelClassName="max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
-      <div className="p-6">
-        <div className="flex items-start justify-between mb-4">
-          <div>
-            <h3 className="text-lg font-semibold text-gray-900">{user.email}</h3>
-            <p className="text-sm text-gray-500">User Details</p>
-          </div>
-          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClass(user.status, user.enabled)}`}>
-            {getStatusLabel(user.status, user.enabled)}
-          </span>
+    <Modal isOpen onClose={onClose} title="Invite someone">
+      <form onSubmit={(event) => { void handleSubmit(event); }} className="space-y-4">
+        <div>
+          <label htmlFor={emailId} className="block text-sm font-medium text-gray-700 mb-1">Email address</label>
+          <input
+            id={emailId}
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="name@example.com"
+            className="w-full p-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-gray-900"
+            required
+          />
+          <p className="text-xs text-gray-400 mt-1">
+            We&apos;ll email them a temporary password. It expires after {INVITE_VALID_DAYS} days; you can resend the invite from Manage.
+          </p>
         </div>
-          
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span className="text-gray-500">Username</span>
-              <p className="font-mono text-gray-900 truncate">{user.username}</p>
-            </div>
-            <div>
-              <span className="text-gray-500">Email Verified</span>
-              <p className="text-gray-900">{user.email_verified ? 'Yes' : 'No'}</p>
-            </div>
-            <div>
-              <span className="text-gray-500">Created</span>
-              <p className="text-gray-900">{formatDateOnly(user.created_at)}</p>
-            </div>
-            <div>
-              <span className="text-gray-500">Last Updated</span>
-              <p className="text-gray-900">{formatDateOnly(user.updated_at)}</p>
-            </div>
-          </div>
-            
-          <div className="border-t border-gray-200 pt-4">
-            <label className="flex items-center justify-between cursor-pointer">
-              <span className="text-sm font-medium text-gray-700">Account Enabled</span>
-              <button
-                onClick={() => setEnabled(!enabled)}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  enabled ? 'bg-emerald-500' : 'bg-gray-300'
-                }`}
-              >
-                <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  enabled ? 'translate-x-6' : 'translate-x-1'
-                }`} />
-              </button>
-            </label>
-          </div>
-            
-          {groups.length > 0 && (
-            <div className="border-t border-gray-200 pt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Groups</label>
-              <GroupCheckboxes groups={groups} selected={selectedGroups} onToggle={toggleGroup} />
-            </div>
-          )}
-            
-          <div className="border-t border-gray-200 pt-4">
-            <h4 className="text-sm font-medium text-gray-700 mb-3">Actions</h4>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={handleResetPassword}
-                disabled={loading}
-                className="px-3 py-1.5 text-xs bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 transition-colors disabled:opacity-50"
-              >
-                Reset Password
-              </button>
-              <button
-                onClick={handleDelete}
-                disabled={loading}
-                className={`px-3 py-1.5 text-xs rounded-lg transition-colors disabled:opacity-50 ${
-                  confirmDelete 
-                    ? 'bg-red-600 text-white hover:bg-red-700' 
-                    : 'bg-red-100 text-red-700 hover:bg-red-200'
-                }`}
-              >
-                {confirmDelete ? 'Confirm Delete' : 'Delete User'}
-              </button>
-            </div>
-            {confirmDelete && (
-              <p className="text-xs text-red-600 mt-2">
-                Click again to confirm deletion. This cannot be undone.
-              </p>
-            )}
-          </div>
+
+        <UserRolePicker value={role} onChange={setRole} />
+
+        <ErrorAlert message={error} />
+
+        <div className="flex justify-end gap-3 pt-2">
+          <Button type="submit" disabled={sending || !email.trim()}>
+            {sending ? 'Sending…' : 'Send invite'}
+          </Button>
+          <Button variant="ghost" onClick={() => onClose()}>Cancel</Button>
         </div>
-          
-        <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-200">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleSave}
-            disabled={loading || !hasChanges}
-            className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors disabled:opacity-50 flex items-center gap-2"
-          >
-            {loading && <Spinner size="sm" />}
-            Save Changes
-          </button>
-        </div>
-      </div>
-    </UserModalShell>
+      </form>
+    </Modal>
   );
 }

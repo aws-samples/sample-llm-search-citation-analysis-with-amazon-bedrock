@@ -12,7 +12,7 @@ import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   EXCLAMATION_TRIANGLE_PATHS, EXTERNAL_LINK_PATHS 
 } from '../ui/iconPaths';
-import { CenteredMessage } from '../ui/CenteredState';
+import { ProvidersConfigSkeleton } from './ProvidersConfigSkeleton';
 import { SettingsErrorNotice } from './SettingsErrorNotice';
 import { SettingsSectionHeader } from './SettingsSectionHeader';
 
@@ -242,8 +242,9 @@ export const ProvidersConfig = ({
     setError(null);
   };
 
-  if (loading) {
-    return <CenteredMessage>Loading providers...</CenteredMessage>;
+  // Only the first load: a refresh keeps the cards (and any open editor) in place.
+  if (loading && providers.length === 0) {
+    return <ProvidersConfigSkeleton />;
   }
 
   return (

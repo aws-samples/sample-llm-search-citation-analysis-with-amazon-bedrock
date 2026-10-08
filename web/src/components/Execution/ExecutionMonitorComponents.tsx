@@ -9,6 +9,7 @@ import { KeywordScopePicker } from '../ui/KeywordScopePicker';
 import { PlayIcon } from '../ui';
 import type { ProcessedExecution } from '../../formatting/executionProcessor';
 import { WorkflowSteps } from './WorkflowSteps';
+import { TriggerSectionSkeleton } from './TriggerSectionSkeleton';
 
 const getStatusStyle = (status: string): string => {
   const styles: Record<string, string> = {
@@ -76,11 +77,13 @@ interface TriggerSectionProps {
   onRunGroup: (group: KeywordGroup) => void;
   /** Both trigger routes are Admin-only server-side. */
   isAdmin: boolean;
+  /** Admin membership or the keyword groups are still loading for the first time. */
+  loading: boolean;
 }
 
 export const TriggerSection = ({
   selectedIds, keywordsCount, activeKeywords, groups, isRunning, isStarting,
-  onSelectionChange, onTriggerAnalysis, onRunGroup, isAdmin,
+  onSelectionChange, onTriggerAnalysis, onRunGroup, isAdmin, loading,
 }: TriggerSectionProps) => {
   const getKeywordCountText = (): string => {
     // `activeKeywords`, not `keywordsCount`: the latter is every keyword in the
@@ -90,6 +93,10 @@ export const TriggerSection = ({
     const plural = selectedIds.length > 1 ? 's' : '';
     return `${selectedIds.length} keyword${plural} selected`;
   };
+
+  // Membership decides between two different panels and the groups reshape
+  // the picker, so hold a same-sized placeholder until both are known.
+  if (loading) return <TriggerSectionSkeleton keywordCount={activeKeywords.length} />;
 
   // POST /api/trigger-analysis and /api/trigger-keyword-analysis are Admin-only:
   // one request fans out paid provider calls across every keyword and persona.

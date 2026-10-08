@@ -12,7 +12,7 @@ import type {
   Keyword,
 } from '../../types';
 import { KeywordScopePicker } from '../ui/KeywordScopePicker';
-import { Spinner } from '../ui/Spinner';
+import { GroupBriefFormSkeleton } from './ContentStudioSkeletons';
 import {
   GenerationConfirmation,
   GenerationModeFields,
@@ -146,13 +146,7 @@ export function GroupBriefForm({
   const requestDisabled = generating || template.loading || strategyIssue !== undefined;
   const loadError = groupsError ?? template.error;
 
-  if (groupsLoading) {
-    return (
-      <div className="flex items-center justify-center gap-3 py-12 text-sm text-gray-500">
-        <Spinner size="md" /> Loading keyword groups...
-      </div>
-    );
-  }
+  if (groupsLoading) return <GroupBriefFormSkeleton />;
 
   return (
     <>

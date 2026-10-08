@@ -155,10 +155,16 @@ describe('ContentStudioView', () => {
     expect(screen.getByText('Generated Content')).toBeInTheDocument();
   });
 
-  it('shows the loading outcome when ideas are loading', () => {
+  it('shows the content ideas skeleton when ideas are loading', () => {
     renderContentStudioView({ loading: true });
 
-    expect(screen.getByText(/Analyzing your data/u)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Analyzing your data for content opportunities');
+  });
+
+  it('holds the high priority badge slot on the Content Ideas tab while ideas load', () => {
+    renderContentStudioView({ loading: true });
+
+    expect(screen.getByRole('button', { name: 'Content Ideas' }).querySelector('.skeleton')).not.toBeNull();
   });
 
   it('renders actionable idea cards when ideas are available', () => {

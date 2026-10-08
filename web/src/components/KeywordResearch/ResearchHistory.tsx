@@ -18,7 +18,7 @@ import {
   isRetryableResearchStatus,
   resolveResearchStatus
 } from '../../formatting/researchStatus';
-import { Spinner } from '../ui/Spinner';
+import { ResearchListSkeleton } from './ResearchListSkeleton';
 import { StrokeIcon } from '../ui/StrokeIcon';
 import {
   CHEVRON_RIGHT_PATHS, CLOCK_PATHS, REFRESH_PATHS, TRASH_PATHS 
@@ -72,7 +72,7 @@ export const ResearchHistory = ({
     <div className="space-y-4">
       <Header loading={loading} onRefresh={onRefresh} />
 
-      {loading && history.length === 0 && <LoadingState />}
+      {loading && history.length === 0 && <ResearchListSkeleton label="Loading history" detailsGapClassName="mt-2" />}
       {!loading && history.length === 0 && <EmptyState />}
 
       {history.length > 0 && (
@@ -114,13 +114,6 @@ const Header = ({
       <StrokeIcon className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} paths={REFRESH_PATHS} />
       Refresh
     </button>
-  </div>
-);
-
-const LoadingState = () => (
-  <div className="bg-white rounded-lg border border-gray-200 p-8 text-center">
-    <Spinner size="lg" className="mx-auto text-gray-400" />
-    <p className="mt-4 text-sm text-gray-500">Loading history...</p>
   </div>
 );
 

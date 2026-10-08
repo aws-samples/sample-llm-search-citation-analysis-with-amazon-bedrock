@@ -411,7 +411,8 @@ its own file.
 | `Modal.tsx` | `Modal`, `ConfirmModal`, `AlertModal`. |
 | `ModalCloseFooter.tsx` | Bottom bar of a full-size detail dialog: a rule and a right-aligned Close button. |
 | `Spinner.tsx` | Loading indicator (`sm` / `md` / `lg`). |
-| `CenteredState.tsx` | Centred view states: `CenteredMessage` (grey status line), `CenteredLoading` (spinner above a label), `CenteredEmpty` (illustration, message, hint) and `CenteredSpinner` (the Suspense fallback of lazy tabs and reports). |
+| `Skeleton.tsx` | First-load placeholders shaped like the content they stand in for, so nothing shifts when data arrives: `Skeleton` (one block), `SkeletonRegion` (the `<output aria-busy>` wrapper with the screen-reader label every skeleton layout goes in), `SkeletonLines`, `SkeletonTable`, `SkeletonCards`, `SkeletonPage` (the Suspense fallback of lazy tabs and reports). Show them only while there is no data yet; on refresh keep the old data. The `.skeleton` class in `index.css` carries the colour, dark tint and reduced-motion rule. |
+| `CenteredState.tsx` | Centred view states: `CenteredLoading` (spinner above a label, for content of unknown size) and `CenteredEmpty` (illustration, message, hint). |
 | `PageHeaderCard.tsx` | White card at the top of a view: title, description, and the view's controls (scope picker, persona filter, buttons) stacked under it. |
 | `ErrorAlert.tsx` | Announced (`role="alert"`) red error box; renders nothing while the message is `null`. |
 | `RefreshTextButton.tsx` | Grey "Refresh" text button of a panel header. |

@@ -55,7 +55,12 @@ export const ScheduleManager = ({
   } = useAlertModal();
   // Mutations are Admin-only server-side. The list is a read, so non-admins
   // keep visibility of what is scheduled.
-  const { isAdmin } = useIsAdmin();
+  const {
+    isAdmin, loading: adminLoading
+  } = useIsAdmin();
+  // Until the first answer the list is unknown, not empty: hold placeholder
+  // rows rather than flashing "No schedules configured".
+  const [listLoaded, setListLoaded] = useState(schedules.length > 0);
   const {
     activeKeywords, groups 
   } = useKeywordScopeOptions(keywords);
@@ -65,10 +70,14 @@ export const ScheduleManager = ({
   useEffect(() => {
     const controller = new AbortController();
     fetchSchedules(controller.signal)
-      .then(setSchedules)
+      .then((loaded) => {
+        setSchedules(loaded);
+        setListLoaded(true);
+      })
       .catch((err: unknown) => {
         if (!isAbortError(err)) {
           console.error('Error loading schedules:', err);
+          setListLoaded(true);
         }
       });
     return () => controller.abort();
@@ -168,7 +177,7 @@ export const ScheduleManager = ({
 
   return (
     <div className="bg-white rounded-lg border border-gray-200">
-      <ScheduleHeader showForm={editor !== null} onNew={openCreate} onCancel={closeEditor} isAdmin={isAdmin} />
+      <ScheduleHeader showForm={editor !== null} onNew={openCreate} onCancel={closeEditor} isAdmin={isAdmin} adminLoading={adminLoading} />
 
       {isAdmin && editor !== null && (
         <ScheduleForm
@@ -185,6 +194,7 @@ export const ScheduleManager = ({
       )}
 
       <ScheduleList
+        loading={!listLoaded}
         schedules={schedules}
         groups={groups}
         onEdit={openEdit}

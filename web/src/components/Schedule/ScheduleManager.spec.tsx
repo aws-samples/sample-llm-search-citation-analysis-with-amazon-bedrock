@@ -138,10 +138,18 @@ describe('ScheduleManager', () => {
       expect(screen.getByText('Disabled')).toBeInTheDocument();
     });
 
-    it('shows empty state when no schedules', () => {
+    it('shows empty state when no schedules', async () => {
       renderManager();
 
-      expect(screen.getByText(/No schedules/i)).toBeInTheDocument();
+      expect(await screen.findByText(/No schedules/i)).toBeInTheDocument();
+    });
+
+    it('holds placeholder schedule rows instead of the empty state until the first list arrives', () => {
+      mockFetchSchedules.mockImplementation(() => new Promise(vi.fn()));
+      renderManager();
+
+      expect(screen.getByText('Loading schedules')).toBeInTheDocument();
+      expect(screen.queryByText(/No schedules/i)).not.toBeInTheDocument();
     });
   });
 
@@ -426,11 +434,11 @@ describe('ScheduleManager admin-only controls', () => {
     expect(screen.getByText('Hotel Coruña — weekly')).toBeInTheDocument();
   });
 
-  it('tells non-admin users an administrator adds schedules', () => {
+  it('tells non-admin users an administrator adds schedules', async () => {
     /** The admin copy says "Create a schedule", which they cannot do. */
     renderManager();
 
-    expect(screen.getByText(/An administrator can add a schedule/i)).toBeInTheDocument();
+    expect(await screen.findByText(/An administrator can add a schedule/i)).toBeInTheDocument();
   });
 
   it('shows the delete button to admin users', () => {

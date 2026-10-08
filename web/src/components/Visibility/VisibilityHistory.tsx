@@ -4,6 +4,7 @@ import {
   KPI_TREND_INFO, TrendPeriodChart
 } from '../Reports/BrandVisibilityReport/sections/ReportChartPanels';
 import { OverviewPanel } from './OverviewPanel';
+import { HistoryChartSkeleton } from './VisibilitySkeletons';
 
 export type HistoryRangeDays = 7 | 30 | 90;
 const HISTORY_RANGES: readonly HistoryRangeDays[] = [7, 30, 90];
@@ -15,6 +16,8 @@ interface Props {
   readonly error: string | null;
   readonly rangeDays: HistoryRangeDays;
   readonly onRangeChange: (days: HistoryRangeDays) => void;
+  /** The trends request is in flight; with no trends yet, a chart-sized placeholder holds the panel's height. */
+  readonly loading?: boolean;
 }
 
 function RangeButton({
@@ -64,8 +67,9 @@ function TrendChart({ trends }: { readonly trends: HistoricalTrendsResponse }) {
 }
 
 function HistoryBody({
-  trends, error
-}: Pick<Props, 'trends' | 'error'>) {
+  trends, error, loading = false
+}: Pick<Props, 'trends' | 'error' | 'loading'>) {
+  if (loading && trends === null) return <HistoryChartSkeleton />;
   if (error !== null) return <p className="text-sm text-amber-800">{`History unavailable: ${error}`}</p>;
   if (trends === null || trends.trend_data.length === 0) {
     return <p className="text-sm text-gray-500">No analysis runs in this range yet.</p>;
@@ -75,7 +79,7 @@ function HistoryBody({
 
 /** The headline KPIs per period over the chosen range as lines, with how they are drawn in a tooltip. */
 export function VisibilityHistory({
-  trends, error, rangeDays, onRangeChange
+  trends, error, rangeDays, onRangeChange, loading
 }: Props) {
   return (
     <OverviewPanel
@@ -83,7 +87,7 @@ export function VisibilityHistory({
       info={KPI_TREND_INFO}
       actions={<RangeButtons rangeDays={rangeDays} onRangeChange={onRangeChange} />}
     >
-      <HistoryBody trends={trends} error={error} />
+      <HistoryBody trends={trends} error={error} loading={loading} />
     </OverviewPanel>
   );
 }

@@ -9,7 +9,7 @@ import {
   countTrackedBrands, describeIndustry
 } from './brandConfigSummary';
 import { PersonaSelector } from '../Personas/PersonaSelector';
-import { Spinner } from '../ui/Spinner';
+import { BrandMentionsSkeleton } from './BrandMentionsSkeleton';
 import { KeywordScopeSelector } from '../ui/KeywordScopeSelector';
 import { describeReportScope } from '../ui/reportScope';
 import { useKeywordScopeOptions } from '../ui/useKeywordScopeOptions';
@@ -93,13 +93,6 @@ const ClassificationFilter = ({
 const EmptyState = () => (
   <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
     <p className="text-sm text-gray-500">Pick a scope above to view brand mentions</p>
-  </div>
-);
-
-const LoadingState = () => (
-  <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-    <Spinner className="mx-auto mb-3 text-gray-400" />
-    <p className="text-sm text-gray-500">Loading brand mentions...</p>
   </div>
 );
 
@@ -222,7 +215,9 @@ const BrandContent = ({
   onBrandClick: (brand: AggregatedBrand) => void;
   config: BrandConfig | null;
 }) => {
-  if (loading) return <LoadingState />;
+  // The first answer gets a placeholder; a refetch (filter, run, persona)
+  // keeps the previous results on screen, dimmed, so nothing collapses.
+  if (loading && !data) return <BrandMentionsSkeleton />;
   if (error) return <div className="bg-red-50 border border-red-200 rounded-lg p-4"><p className="text-sm text-red-700">{error}</p></div>;
   if (scope === null) return <EmptyState />;
   if (!data) return null;
@@ -230,7 +225,7 @@ const BrandContent = ({
   const counts = getFilterCounts(data);
 
   return (
-    <>
+    <div aria-busy={loading} className={`space-y-6 transition-opacity ${loading ? 'opacity-60' : ''}`}>
       <BrandReportControls
         data={data}
         scopeLabel={scopeLabel}
@@ -244,7 +239,7 @@ const BrandContent = ({
         counts={counts}
       />
       <BrandMentionsTable brands={data.aggregated.brands} keyword={data.keyword ?? scopeLabel} onBrandClick={onBrandClick} config={config} />
-    </>
+    </div>
   );
 };
 

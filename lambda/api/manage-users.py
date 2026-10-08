@@ -114,6 +114,9 @@ _MAX_COGNITO_PAGES = 50
 # so we fan out; 10 threads keeps us well under the 120 RPS soft limit.
 _GROUPS_FANOUT = 10
 
+# Status of an invited user who has not signed in with the temporary password yet.
+_PENDING_INVITE_STATUS = 'FORCE_CHANGE_PASSWORD'
+
 
 def _fetch_user_groups(username: str) -> list[str]:
     """Return the list of Cognito groups for a single user, empty on error."""
@@ -246,24 +249,40 @@ def handle_invite_user(event: dict, context: Any, body: dict | None = None, **kw
         return api_response(409, {'error': 'User with this email already exists'}, event)
 
     user = format_user(response['User'])
+    added, failed = _add_to_groups(email, groups)
+    user['groups'] = added
 
-    # Add to groups if specified
+    payload: dict[str, Any] = {
+        'user': user,
+        'message': 'User invited successfully. They will receive an email with login instructions.',
+    }
+    if failed:
+        payload['groups_failed'] = failed
+        payload['warning'] = f"The invitation was sent, but the user could not be added to: {', '.join(failed)}"
+    return success_response(payload, event)
+
+
+def _add_to_groups(username: str, groups: list[Any]) -> tuple[list[str], list[str]]:
+    """Add ``username`` to each of ``groups``; ``(added, failed)`` in request order.
+
+    The invite has already been sent when this runs, so one failing group must
+    not fail the request: it is reported back instead of claimed as done.
+    """
+    added: list[str] = []
+    failed: list[str] = []
     for group in groups:
         try:
             cognito_client.admin_add_user_to_group(
                 UserPoolId=USER_POOL_ID,
-                Username=email,
+                Username=username,
                 GroupName=group
             )
         except ClientError as e:
-            logger.warning(f"Failed to add user to group {group}: {e!s}")
-
-    user['groups'] = groups
-
-    return success_response({
-        'user': user,
-        'message': 'User invited successfully. They will receive an email with login instructions.'
-    }, event)
+            logger.warning("Failed to add user to group %s: %s", group, e)
+            failed.append(str(group))
+        else:
+            added.append(str(group))
+    return added, failed
 
 
 @parse_json_body
@@ -369,7 +388,26 @@ def handle_delete_user(event: dict, context: Any, username: str, **kwargs) -> di
 @_cognito_errors('Failed to reset password')
 @_for_path_username
 def handle_reset_password(event: dict, context: Any, username: str, body: dict | None = None, **kwargs) -> dict:
-    """POST /users/{username}/reset-password - Reset user password."""
+    """POST /users/{username}/reset-password - Reset a password, or resend a pending invite.
+
+    Cognito refuses ``admin_reset_user_password`` for a user who has never
+    signed in (``FORCE_CHANGE_PASSWORD``), so for them the same route resends
+    the invitation instead, which issues a new temporary password. ``action``
+    in the answer says which of the two happened.
+    """
+    current = cognito_client.admin_get_user(UserPoolId=USER_POOL_ID, Username=username)
+    if current.get('UserStatus') == _PENDING_INVITE_STATUS:
+        cognito_client.admin_create_user(
+            UserPoolId=USER_POOL_ID,
+            Username=username,
+            MessageAction='RESEND',
+            DesiredDeliveryMediums=['EMAIL'],
+        )
+        return success_response({
+            'message': 'Invitation email sent again',
+            'action': 'invite_resent',
+        }, event)
+
     try:
         # This sends a password reset email to the user
         cognito_client.admin_reset_user_password(
@@ -383,7 +421,8 @@ def handle_reset_password(event: dict, context: Any, username: str, body: dict |
         return api_response(400, {'error': sanitize_error_message(e)}, event)
 
     return success_response({
-        'message': 'Password reset email sent to user'
+        'message': 'Password reset email sent to user',
+        'action': 'password_reset',
     }, event)
 
 
@@ -459,7 +498,7 @@ def handler(event: dict, context: Any) -> dict:
     - POST /users - Invite new user
     - PUT /users/{username} - Update user (enable/disable, groups)
     - DELETE /users/{username} - Delete user
-    - POST /users/{username}/reset-password - Reset user password
+    - POST /users/{username}/reset-password - Reset user password (resends the invite while it is pending)
 
     Routes handle everything; this body is never reached.
     """

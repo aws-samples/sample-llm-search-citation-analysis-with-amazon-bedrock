@@ -8,9 +8,10 @@ import { ContentHistory } from './ContentHistory';
 import { GroupBriefForm } from './GroupBriefForm';
 import { GROUP_BRIEF_LANGUAGES } from './GroupBriefForm-source';
 import { Spinner } from '../ui/Spinner';
+import { CenteredEmpty } from '../ui/CenteredState';
 import {
-  CenteredEmpty, CenteredLoading
-} from '../ui/CenteredState';
+  ContentIdeasSkeleton, TabBadgeSkeleton
+} from './ContentStudioSkeletons';
 import type {
   ContentBriefBatchRequest,
   ContentIdea,
@@ -41,7 +42,7 @@ const IdeasTabContent = ({
   loading, ideas, actionableIdeas, generating, selectedIdea, onCreateContent
 }: IdeasTabContentProps) => {
   if (loading && ideas.length === 0) {
-    return <CenteredLoading label="Analyzing your data for content opportunities..." />;
+    return <ContentIdeasSkeleton />;
   }
 
   if (actionableIdeas.length === 0) {
@@ -215,22 +216,41 @@ interface TabsProps {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
   highPriorityCount: number;
+  /** The ideas have not arrived yet, so the high-priority count is unknown. */
+  ideasPending: boolean;
   unviewedCount: number;
   historyLength: number;
 }
 
+/** The Content Ideas badge, or its placeholder while the count is unknown, so the tabs after it stay put. */
+const HighPriorityBadge = ({
+  count, pending
+}: {
+  readonly count: number;
+  readonly pending: boolean
+}) => {
+  if (pending) return <TabBadgeSkeleton />;
+  if (count === 0) return null;
+  return (
+    <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">
+      {count} high priority
+    </span>
+  );
+};
+
+/** The ideas tab is open and its first ideas are still on their way, so their counts are unknown. */
+function ideasPending(activeTab: TabType, loading: boolean, ideas: readonly ContentIdea[]): boolean {
+  return activeTab === 'ideas' && loading && ideas.length === 0;
+}
+
 const Tabs = ({
-  activeTab, setActiveTab, highPriorityCount, unviewedCount, historyLength
+  activeTab, setActiveTab, highPriorityCount, ideasPending, unviewedCount, historyLength
 }: TabsProps) => (
   <div className="border-b border-gray-200">
     <nav className="flex gap-8 overflow-x-auto">
       <TabButton tab="ideas" activeTab={activeTab} setActiveTab={setActiveTab}>
         Content Ideas
-        {highPriorityCount > 0 && (
-          <span className="ml-2 px-2 py-0.5 text-xs bg-red-100 text-red-700 rounded-full">
-            {highPriorityCount} high priority
-          </span>
-        )}
+        <HighPriorityBadge count={highPriorityCount} pending={ideasPending} />
       </TabButton>
       <TabButton tab="brief" activeTab={activeTab} setActiveTab={setActiveTab}>
         Content Brief
@@ -361,6 +381,7 @@ export const ContentStudioView = ({ keywords }: ContentStudioViewProps) => {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         highPriorityCount={highPriorityCount}
+        ideasPending={ideasPending(activeTab, loading, ideas)}
         unviewedCount={unviewedCount}
         historyLength={history.length}
       />

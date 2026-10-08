@@ -72,7 +72,9 @@ export const ExecutionMonitor = ({
   const {
     alertModal, showAlert, closeAlert
   } = useAlertModal();
-  const { groups } = useKeywordGroups();
+  const {
+    groups, loading: groupsLoading
+  } = useKeywordGroups();
 
   // Same rule the keyword list and the API use, kept in one place.
   const activeKeywords = keywords.filter(isKeywordActive);
@@ -125,7 +127,11 @@ export const ExecutionMonitor = ({
 
   const duration = execution ? calculateDuration(execution.start_date, execution.stop_date) : null;
   const isRunning = execution?.status === 'RUNNING';
-  const { isAdmin } = useIsAdmin();
+  const {
+    isAdmin, loading: adminLoading
+  } = useIsAdmin();
+  // Non-admins never see the picker, so only admins wait for the groups.
+  const triggerLoading = adminLoading || (isAdmin && groupsLoading);
 
   return (
     <>
@@ -141,6 +147,7 @@ export const ExecutionMonitor = ({
           onTriggerAnalysis={() => { void handleTriggerAnalysis(); }}
           onRunGroup={(group) => { void handleRunGroup(group); }}
           isAdmin={isAdmin}
+          loading={triggerLoading}
         />
 
         {execution && (

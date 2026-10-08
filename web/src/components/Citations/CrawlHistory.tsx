@@ -1,7 +1,8 @@
 import { formatDate } from '../../formatting/dateFormatter';
-import { Spinner } from '../ui/Spinner';
 import { ClockIcon } from '../ui';
-import { CenteredEmpty } from '../ui/CenteredState';
+import {
+  CenteredEmpty, CenteredLoading
+} from '../ui/CenteredState';
 import {
   BLOCK_REASON_LABELS, BlockedPageBanner, isBlockReason 
 } from './BlockedPageBanner';
@@ -122,17 +123,8 @@ export const HistoryTab = ({
   onSelectHistory,
   onRetry,
 }: HistoryTabProps) => {
-  if (historyLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="flex items-center gap-3 text-gray-500">
-          {/* size="md" is 4px larger than the previous inline h-5 artwork */}
-          <Spinner size="md" />
-          <span>Loading crawl history...</span>
-        </div>
-      </div>
-    );
-  }
+  // How many crawls a page has is unknown until they arrive: a centred spinner, not a skeleton.
+  if (historyLoading) return <CenteredLoading label="Loading crawl history..." />;
 
   if (historyError) {
     return (

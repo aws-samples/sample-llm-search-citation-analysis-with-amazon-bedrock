@@ -10,6 +10,7 @@ import {
 } from '../../../formatting/researchStatus';
 import { Button } from '../../ui';
 import { Spinner } from '../../ui/Spinner';
+import { ResearchListSkeleton } from '../ResearchListSkeleton';
 
 interface AgentRunListProps {
   readonly jobs: KeywordResearchItem[];
@@ -66,12 +67,7 @@ export function AgentRunList({
   jobs, loading, onSelect, onRetry, onDelete
 }: AgentRunListProps) {
   if (loading && jobs.length === 0) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-gray-500 py-4">
-        <Spinner size="sm" className="text-gray-400" />
-        Loading runs…
-      </div>
-    );
+    return <ResearchListSkeleton label="Loading runs" detailsGapClassName="mt-1" />;
   }
   if (jobs.length === 0) {
     return <p className="text-sm text-gray-500 py-4">No research runs yet. Start one with the brief above.</p>;

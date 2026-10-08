@@ -8,6 +8,8 @@ The server sits behind its own CloudFront distribution (`https://<dist>.cloudfro
 
 ## What you need
 
+The dashboard has a page for this: Settings › AI assistants (`/settings/ai-assistants`, "Connect an AI assistant") shows the server URL, per-client steps with copyable snippets (and a `mcp.json` download for Kiro), example questions, instructions to give your assistant, and the tool list. It takes `McpUrl` and `McpClientId` from the stack outputs at build time (`scripts/build-web.sh` exports them as `VITE_MCP_URL` and `VITE_MCP_CLIENT_ID`), so rebuild the dashboard after the first MCP stack deploy (`npm run deploy` deploys both stacks before it builds the dashboard; or run `./scripts/deploy-web.sh`). Without those outputs the page says the MCP server isn't deployed.
+
 From the `CitationAnalysisMcpStack` outputs (`aws cloudformation describe-stacks --stack-name CitationAnalysisMcpStack`):
 
 | Output | Use |

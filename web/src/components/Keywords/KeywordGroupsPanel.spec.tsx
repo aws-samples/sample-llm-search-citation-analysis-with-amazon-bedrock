@@ -37,6 +37,21 @@ async function renderRenamedCoruna(overrides: Partial<ComponentProps<typeof Keyw
 }
 
 describe('KeywordGroupsPanel', () => {
+  it('holds placeholder group buttons while the groups load for the first time', () => {
+    renderKeywordGroupsPanel({
+      groups: [],
+      loading: true,
+    });
+
+    expect(screen.getByRole('status')).toHaveTextContent('Loading groups');
+  });
+
+  it('keeps the group buttons without a placeholder while groups reload', () => {
+    renderKeywordGroupsPanel({ loading: true });
+
+    expect(screen.queryByText('Loading groups')).not.toBeInTheDocument();
+  });
+
   it('describes reusable groups with generic examples', () => {
     renderKeywordGroupsPanel();
 

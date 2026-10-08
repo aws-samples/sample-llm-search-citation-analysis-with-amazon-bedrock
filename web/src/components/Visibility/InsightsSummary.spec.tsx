@@ -71,10 +71,10 @@ describe('InsightsSummary', () => {
     expect(insightItemTexts()).toStrictEqual([]);
   });
 
-  it('says it is loading while the request is in flight', () => {
+  it('holds the insight lines with a skeleton while the request is in flight', () => {
     renderSummary(buildReportInsightsHookResult(null, { loading: true }));
 
-    expect(insightsPanel().getByText('Loading insights…')).toBeInTheDocument();
+    expect(insightsPanel().getByRole('status')).toHaveTextContent('Loading insights');
   });
 
   it('says the insights are unavailable, and why, when the request failed', () => {

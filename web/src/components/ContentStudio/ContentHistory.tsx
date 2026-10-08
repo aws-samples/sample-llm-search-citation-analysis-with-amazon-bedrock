@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import type { ContentStudioHistory } from '../../types';
 import { useClipboardCopy } from '../../hooks/useClipboardCopy';
-import {
-  CenteredEmpty, CenteredLoading
-} from '../ui/CenteredState';
+import { CenteredEmpty } from '../ui/CenteredState';
+import { ContentHistorySkeleton } from './ContentStudioSkeletons';
 import { ConfirmModal } from '../ui/Modal';
 import { CollectionIcon } from '../ui';
 import { ContentDetailModal } from './ContentDetailModal';
@@ -58,7 +57,7 @@ export const ContentHistory = ({
   };
 
   if (loading && history.length === 0) {
-    return <CenteredLoading label="Loading content history..." />;
+    return <ContentHistorySkeleton />;
   }
 
   if (history.length === 0) {

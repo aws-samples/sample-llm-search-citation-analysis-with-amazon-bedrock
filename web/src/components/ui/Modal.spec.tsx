@@ -79,6 +79,19 @@ describe('Modal', () => {
     expect(document.body.style.overflow).toBe('hidden');
   });
 
+  it.each([
+    ['keeps the page scroll locked while a stacked dialog is still open', true, 'hidden'],
+    ['unlocks the page scroll when the last open dialog closes', false, 'unset'],
+  ])('%s', (_title, outerStaysOpen, overflow) => {
+    const { rerender } = render(<>{modalElement()}{modalElement({ title: 'Confirm' })}</>);
+
+    rerender(<>{modalElement({ isOpen: outerStaysOpen })}{modalElement({
+      title: 'Confirm',
+      isOpen: false,
+    })}</>);
+    expect(document.body.style.overflow).toBe(overflow);
+  });
+
   it('removes keydown listener when unmounted', () => {
     const removeEventListenerSpy = vi.spyOn(document, 'removeEventListener');
     const { unmount } = renderModal();

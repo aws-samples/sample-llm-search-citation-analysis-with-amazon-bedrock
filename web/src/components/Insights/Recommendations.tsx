@@ -5,7 +5,7 @@ import { useRecommendations } from '../../hooks/useRecommendations';
 import type {
   Keyword, Recommendation, RecommendationStatus
 } from '../../types';
-import { Spinner } from '../ui/Spinner';
+import { RecommendationsSkeleton } from './InsightsSkeletons';
 import {
   EyeIcon, CogIcon, RefreshIcon 
 } from '../ui';
@@ -265,13 +265,6 @@ const LlmHint = () => (
   </div>
 );
 
-const LoadingState = ({ useLlm }: { useLlm: boolean }) => (
-  <div className="text-center py-8 text-gray-500 flex items-center justify-center gap-2">
-    <Spinner size="sm" />
-    {useLlm ? 'Generating AI-enhanced recommendations...' : 'Generating recommendations...'}
-  </div>
-);
-
 const ErrorState = ({ error }: { error: string }) => (
   <div className="text-center py-8 text-red-500">{error}</div>
 );
@@ -401,7 +394,7 @@ export function Recommendations({ keywords }: Props) {
 
       {recommendations && <PrioritySummary byPriority={recommendations.by_priority} />}
 
-      {pending && <LoadingState useLlm={useLlm} />}
+      {pending && <RecommendationsSkeleton useLlm={useLlm} />}
       {error && <ErrorState error={error} />}
       {statusError && (
         <div role="alert" className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-3 text-sm">

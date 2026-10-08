@@ -32,7 +32,7 @@ export interface ProviderModelListing {
 }
 
 /** `"error: details"` from a refusal body, or `null` when `payload` is not one. */
-function refusalMessage(payload: unknown): string | null {
+export function refusalMessage(payload: unknown): string | null {
   if (!isRecord(payload) || typeof payload.error !== 'string') return null;
   return typeof payload.details === 'string' ? `${payload.error}: ${payload.details}` : payload.error;
 }

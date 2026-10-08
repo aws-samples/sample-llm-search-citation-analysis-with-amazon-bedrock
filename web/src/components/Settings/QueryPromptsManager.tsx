@@ -25,6 +25,7 @@ import {
   TrashIcon,
 } from '../ui';
 import { SettingsErrorNotice } from './SettingsErrorNotice';
+import { PersonaListSkeleton } from './PersonaListSkeleton';
 
 const SAMPLE_KEYWORD = 'best project management software';
 
@@ -310,8 +311,9 @@ interface PersonaListProps extends QueryPromptsManagerProps {
 function PersonaList({
   prompts, loading, creating, isAdmin, onToggle, onUpdate, onDelete 
 }: PersonaListProps) {
-  if (loading) {
-    return <div className="text-sm text-gray-400 py-4 text-center">Loading personas...</div>;
+  // Only the first load; a refetch after a change keeps the rows in place.
+  if (loading && prompts.length === 0) {
+    return <PersonaListSkeleton />;
   }
   if (prompts.length === 0) {
     return creating ? null : <PersonaEmptyState isAdmin={isAdmin} />;

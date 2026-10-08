@@ -166,22 +166,36 @@ describe('VisibilityDashboard', () => {
   });
 
   describe('loading and errors', () => {
-    it.each([
-      ['visibility', { loading: true }, {}],
-      ['trends', {}, { loading: true }],
-    ])('shows the loading message while %s load', (_request, visibilityState, trendsState) => {
-      stubVisibility(null, visibilityState);
-      stubTrends(null, trendsState);
+    it('shows the overview skeleton while visibility loads for the first time', () => {
+      stubVisibility(null, { loading: true });
 
       renderDashboard();
 
-      expect(screen.getByText('Loading visibility data...')).toBeInTheDocument();
+      expect(screen.getByText('Loading visibility data')).toBeInTheDocument();
     });
 
-    it('hides the loading message once both requests are done', () => {
+    it('keeps the overview on screen, marked busy, while visibility reloads', () => {
+      stubVisibility(visibility, { loading: true });
+
       renderDashboard();
 
-      expect(screen.queryByText('Loading visibility data...')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Export to Excel' }).closest('[aria-busy]')).toHaveAttribute('aria-busy', 'true');
+      expect(screen.queryByText('Loading visibility data')).not.toBeInTheDocument();
+    });
+
+    it('holds the history chart with a skeleton while the first trends load', () => {
+      stubVisibility(visibility);
+      stubTrends(null, { loading: true });
+
+      renderDashboard();
+
+      expect(screen.getByText('Loading history')).toBeInTheDocument();
+    });
+
+    it('hides the loading placeholders once both requests are done', () => {
+      renderDashboard();
+
+      expect(screen.queryByText('Loading visibility data')).not.toBeInTheDocument();
     });
 
     it('shows the visibility error once loading is over', () => {
