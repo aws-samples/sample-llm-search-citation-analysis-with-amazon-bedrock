@@ -22,7 +22,14 @@ sys.path.insert(0, '/opt/python')
 from shared import kpi_engine
 from shared.api_response import success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
-from shared.decorators import api_handler, cors_preflight, parse_json_body, route_handler, validate
+from shared.decorators import (
+    RouteNotHandledError,
+    api_handler,
+    cors_preflight,
+    parse_json_body,
+    route_handler,
+    validate,
+)
 from shared.industry_presets import (
     BRAND_NAME_FIELDS,
     BRAND_POSITION_FIELDS,
@@ -765,4 +772,4 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     Routes handle everything; this body is never reached.
     """
-    ...
+    raise RouteNotHandledError(__name__)

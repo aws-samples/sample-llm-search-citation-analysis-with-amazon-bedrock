@@ -32,7 +32,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.api_views import named_item_view
-from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler, validate
 from shared.dynamodb_batch import collect_all_items
 from shared.dynamodb_conditions import is_conditional_check_failure
 from shared.env_vars import resolve_table_env
@@ -326,4 +326,4 @@ def update_memberships(event: dict[str, Any], context: Any, body: dict, id: str,
 }, inject_path_params=True)
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Routed entirely by ``route_handler``; see module docstring. This body is never reached."""
-    ...
+    raise RouteNotHandledError(__name__)

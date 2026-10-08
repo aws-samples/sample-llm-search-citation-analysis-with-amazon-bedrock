@@ -61,6 +61,9 @@ norecursedirs = [
 #         be satisfied by wrapping every message in a custom class.
 #   T20 — no print(); Lambda code logs through `logging`
 #   PT  — flake8-pytest-style
+#   PIE — flake8-pie: no-effect placeholders (`...`/`pass` beside a docstring,
+#         PIE790 — what CodeQL reports as "Statement has no effect"), lambdas
+#         that only wrap a builtin, repeated startswith calls
 #
 # The ceilings below are hard stops. Cyclomatic complexity is capped at 12
 # (both languages: eslint.config.mjs caps TypeScript at the same value); the
@@ -71,7 +74,7 @@ norecursedirs = [
 select = [
     "F", "E", "W", "I", "B", "ARG", "UP", "SIM", "RUF",
     "C90", "PLR0911", "PLR0912", "PLR0915", "RET504", "ERA001",
-    "S", "BLE001", "TRY002", "TRY300", "TRY301", "TRY400", "T20", "PT",
+    "S", "BLE001", "TRY002", "TRY300", "TRY301", "TRY400", "T20", "PT", "PIE",
 ]
 
 ignore = [

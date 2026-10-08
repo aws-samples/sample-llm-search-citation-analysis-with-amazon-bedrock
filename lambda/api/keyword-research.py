@@ -48,7 +48,7 @@ from shared.api_response import api_response, not_found_response, success_respon
 from shared.api_views import named_item_view
 from shared.auth import get_caller_identity
 from shared.constants import MAX_KEYWORD_LENGTH
-from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler, validate
 from shared.dynamodb_conditions import applied_conditionally, is_conditional_check_failure
 from shared.env_vars import resolve_table_env
 from shared.research_agent import (
@@ -836,4 +836,4 @@ def _delete_research(event: dict[str, Any], context: Any) -> dict[str, Any]:
 })
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Route handler for API Gateway requests; routes handle everything, this body is never reached."""
-    ...
+    raise RouteNotHandledError(__name__)

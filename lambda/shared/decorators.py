@@ -58,6 +58,16 @@ ApiEvent = dict[str, Any]
 ApiResponse = dict[str, Any]
 
 
+class RouteNotHandledError(RuntimeError):
+    """
+    Raised by the body of a ``@route_handler`` function, which the router never calls.
+
+    ``route_handler`` dispatches to its routes or answers 405, so reaching the
+    decorated function's own body is a bug; ``@api_handler`` turns it into a
+    sanitized 500.
+    """
+
+
 def api_handler(func: Callable) -> Callable:
     """
     Decorator that wraps an API handler with standardized error handling.
@@ -344,7 +354,8 @@ def route_handler(routes: dict[str | tuple[str, str | None], Callable], inject_p
             'DELETE': delete_item,
         })
         def handler(event, context):
-            pass  # Never reached - routes handle everything
+            '''Never reached - routes handle everything.'''
+            raise RouteNotHandledError(__name__)
 
         # With path-based routing:
         @api_handler
@@ -355,7 +366,8 @@ def route_handler(routes: dict[str | tuple[str, str | None], Callable], inject_p
             ('DELETE', None): delete_item,  # DELETE with path param
         })
         def handler(event, context):
-            pass
+            '''Never reached.'''
+            raise RouteNotHandledError(__name__)
     """
     def decorator(func: Callable) -> Callable[..., dict[str, Any]]:
         @wraps(func)

@@ -51,7 +51,7 @@ from shared.content_brief import (
     single_keyword_brief,
     validate_template_placeholders,
 )
-from shared.decorators import api_handler, parse_json_body, route_handler, validate
+from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler, validate
 from shared.dynamo_decimal import to_int
 from shared.dynamodb_batch import (
     BatchGetUnprocessedError,
@@ -2468,7 +2468,7 @@ def _get_batch(event: dict[str, Any], context: Any) -> dict[str, Any]:
 )
 def _api_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Route API Gateway requests to Content Studio operations."""
-    ...
+    raise RouteNotHandledError(__name__)
 
 
 def _worker_event_bytes(payload: dict[str, Any]) -> bytes:

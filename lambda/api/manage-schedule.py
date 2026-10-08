@@ -47,7 +47,7 @@ sys.path.insert(0, '/opt/python')
 
 from shared.api_response import api_response, not_found_response, success_response, validation_error
 from shared.auth import ADMIN_GROUP, require_group
-from shared.decorators import api_handler, parse_json_body, route_handler
+from shared.decorators import RouteNotHandledError, api_handler, parse_json_body, route_handler
 from shared.keyword_groups import describe_scope, load_existing_group_ids, validate_scope
 from shared.utils import get_timestamp_compact
 
@@ -593,4 +593,4 @@ def _run_schedule_handler(event: dict[str, Any], context: Any) -> dict[str, Any]
 })
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Route handler for API Gateway requests; routes handle everything, this body is never reached."""
-    ...
+    raise RouteNotHandledError(__name__)

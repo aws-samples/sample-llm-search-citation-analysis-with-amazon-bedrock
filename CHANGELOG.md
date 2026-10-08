@@ -9,6 +9,16 @@ shown in the dashboard under Settings and the About modal. See
 [CONTRIBUTING.md](CONTRIBUTING.md#versioning-and-changelog) for the release
 process.
 
+## [2.36.1] - 2026-10-08
+
+### Changed
+
+- ruff now selects `PIE` (flake8-pie). PIE790 reports the no-effect placeholders CodeQL flags as "Statement has
+  no effect" (`...` / `pass` beside a docstring), so they fail `npm run validate` instead of reaching code scanning.
+  The ten `@route_handler` handler bodies, which the router never calls, now `raise RouteNotHandledError(__name__)`
+  (`shared/decorators.py`): reaching one is a bug, and `@api_handler` answers it with a sanitized 500. Two test
+  lambdas that only wrapped `dict` and a double `startswith` were fixed by the same rules.
+
 ## [2.36.0] - 2026-10-08
 
 ### Added
