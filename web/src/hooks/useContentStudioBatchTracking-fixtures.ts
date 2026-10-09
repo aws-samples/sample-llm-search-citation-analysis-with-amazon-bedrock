@@ -9,6 +9,7 @@ import {
   createMockJsonResponse, type DeferredResponse
 } from '../test/fetchResponses';
 import { mockAuthenticatedFetch } from '../test/infrastructureMock';
+import { dispatchStorageEvent } from '../test/storageMock';
 import type { ContentBriefBatchStatusResponse } from '../types';
 import type { useContentStudio } from './useContentStudio';
 import {
@@ -115,7 +116,7 @@ export function dispatchBatchCandidateStorageEvent(
     } else {
       storeActiveContentStudioBatchCandidates(candidates);
     }
-    globalThis.dispatchEvent(new StorageEvent('storage', { key: eventKey }));
+    dispatchStorageEvent(eventKey);
   });
 }
 

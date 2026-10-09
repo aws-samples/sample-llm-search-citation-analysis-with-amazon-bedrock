@@ -39,6 +39,7 @@ from botocore.exceptions import ClientError
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from shared.constants import MAX_KEYWORD_LENGTH
 from testing.dynamodb_stubs import conditional_check_failure
 from testing.keyword_promotion_fixtures import assert_rejected_before_dynamodb, invoke_promotion
 from testing.keyword_strategies import (
@@ -469,11 +470,12 @@ class TestPromotionValidationUnit:
         assert_rejected_before_dynamodb(table)
 
     @pytest.mark.parametrize(
-        ('limit_name', 'build_keywords'),
+        ('limit_of', 'build_keywords'),
         [
-            ('MAX_KEYWORDS', lambda limit: [{'keyword': f'keyword {index}'} for index in range(limit + 1)]),
-            ('MAX_KEYWORD_LENGTH', lambda limit: [{'keyword': 'best running shoes'}, {'keyword': f"  {'a' * (limit + 1)}  "}]),
-            ('MAX_NOTES_LENGTH', lambda limit: [{'keyword': 'running shoes', 'intent': 'x' * limit}]),
+            (lambda handler: handler.MAX_KEYWORDS, lambda limit: [{'keyword': f'keyword {index}'} for index in range(limit + 1)]),
+            # The keyword length limit is the shared one; the other two are the route's own.
+            (lambda _handler: MAX_KEYWORD_LENGTH, lambda limit: [{'keyword': 'best running shoes'}, {'keyword': f"  {'a' * (limit + 1)}  "}]),
+            (lambda handler: handler.MAX_NOTES_LENGTH, lambda limit: [{'keyword': 'running shoes', 'intent': 'x' * limit}]),
         ],
         ids=[
             'keyword-count-exceeds-the-maximum',
@@ -481,9 +483,9 @@ class TestPromotionValidationUnit:
             'generated-notes-exceed-the-keyword-notes-limit',
         ],
     )
-    def test_request_is_rejected_naming_the_limit_it_exceeds(self, promotion_handler, limit_name, build_keywords):
+    def test_request_is_rejected_naming_the_limit_it_exceeds(self, promotion_handler, limit_of, build_keywords):
         table = _mock_table()
-        limit = getattr(promotion_handler, limit_name)
+        limit = limit_of(promotion_handler)
 
         status_code, body = _invoke(promotion_handler, table, build_keywords(limit))
 

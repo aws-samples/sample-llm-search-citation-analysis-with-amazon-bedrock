@@ -14,7 +14,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import search_clients
-from search_clients import SerpAPIClient
 from shared import serpapi
 from shared.provider_health import INSUFFICIENT_CREDIT, classify_provider_error
 from shared.serpapi import SerpApiError
@@ -31,9 +30,9 @@ _FINISHED_SEARCH = {
 
 
 def _search_with(**serpapi_stub) -> tuple[dict, MagicMock]:
-    """Run ``SerpAPIClient('serp-key').search('hotel coruña')`` with ``serpapi_search`` stubbed as given."""
+    """Run ``search_clients.SerpAPIClient('serp-key').search('hotel coruña')`` with ``serpapi_search`` stubbed as given."""
     with patch.object(search_clients, 'serpapi_search', **serpapi_stub) as stub:
-        return SerpAPIClient('serp-key').search('hotel coruña'), stub
+        return search_clients.SerpAPIClient('serp-key').search('hotel coruña'), stub
 
 
 class TestSerpAPIClient:
@@ -82,6 +81,6 @@ class TestSerpAPIClient:
         spent = MagicMock(status_code=429, text='{"error": "Your account has run out of searches."}', headers={})
 
         with patch.object(serpapi.requests, 'get', return_value=spent):
-            result = SerpAPIClient('serp-key').search('hotel coruña')
+            result = search_clients.SerpAPIClient('serp-key').search('hotel coruña')
 
         assert classify_provider_error(result['error']) == INSUFFICIENT_CREDIT

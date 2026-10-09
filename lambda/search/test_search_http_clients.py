@@ -13,14 +13,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import search_clients
-from search_clients import (
-    BaseSearchClient,
-    BraveSearchClient,
-    ExaSearchClient,
-    FirecrawlSearchClient,
-    TavilySearchClient,
-    _HttpSearchClient,
-)
 
 _HIT = {'url': 'https://hotel.es/riazor?utm_source=x', 'title': 'Hotel Riazor'}
 _NO_URL = {'title': 'No url, dropped'}
@@ -42,7 +34,7 @@ class _Case(NamedTuple):
 
 _CASES = [
     pytest.param(_Case(
-        BraveSearchClient, 'brave', 'Brave Search', 'get', 'https://api.search.brave.com/res/v1/web/search',
+        search_clients.BraveSearchClient, 'brave', 'Brave Search', 'get', 'https://api.search.brave.com/res/v1/web/search',
         {'headers': {'Accept': 'application/json', 'X-Subscription-Token': 'key-1'},
          'params': {'q': 'hotel coruña', 'count': 10, 'text_decorations': False, 'search_lang': 'en'}, 'timeout': 30},
         {'web': {'results': [{**_HIT, 'description': 'Frente a la playa'}, _NO_URL]}},
@@ -50,7 +42,7 @@ _CASES = [
         {},
     ), id='brave'),
     pytest.param(_Case(
-        TavilySearchClient, 'tavily', 'Tavily Search', 'post', 'https://api.tavily.com/search',
+        search_clients.TavilySearchClient, 'tavily', 'Tavily Search', 'post', 'https://api.tavily.com/search',
         {'headers': {'Content-Type': 'application/json'},
          'json': {'api_key': 'key-1', 'query': 'hotel coruña', 'search_depth': 'basic', 'include_answer': True,
                   'include_raw_content': False, 'max_results': 10}, 'timeout': 30},
@@ -59,7 +51,7 @@ _CASES = [
         {'answer': 'Hotel Riazor', 'response_time': 1.5},
     ), id='tavily'),
     pytest.param(_Case(
-        ExaSearchClient, 'exa', 'Exa Search', 'post', 'https://api.exa.ai/search',
+        search_clients.ExaSearchClient, 'exa', 'Exa Search', 'post', 'https://api.exa.ai/search',
         {'headers': {'Content-Type': 'application/json', 'x-api-key': 'key-1'},
          'json': {'query': 'hotel coruña', 'type': 'auto', 'numResults': 10,
                   'contents': {'text': {'maxCharacters': 500}, 'highlights': True}}, 'timeout': 30},
@@ -69,7 +61,7 @@ _CASES = [
         {'search_type': 'neural', 'request_id': 'req-1'},
     ), id='exa'),
     pytest.param(_Case(
-        FirecrawlSearchClient, 'firecrawl', 'Firecrawl Search', 'post', 'https://api.firecrawl.dev/v1/search',
+        search_clients.FirecrawlSearchClient, 'firecrawl', 'Firecrawl Search', 'post', 'https://api.firecrawl.dev/v1/search',
         {'headers': {'Authorization': 'Bearer key-1', 'Content-Type': 'application/json'},
          'json': {'query': 'hotel coruña', 'limit': 10}, 'timeout': 60},
         {'data': {'web': [{**_HIT, 'description': 'Frente a la playa', 'category': 'travel'}]}, 'id': 'job-1', 'creditsUsed': 2},
@@ -145,19 +137,19 @@ class TestSearchHttpClients:
 
 class TestTavilyResultShapes:
     def test_gives_a_hit_with_only_a_url_an_empty_title_and_snippet_and_a_zero_score(self):
-        result, _send = _search(TavilySearchClient, 'post', {'results': [{'url': 'https://hotel.es/a'}]})
+        result, _send = _search(search_clients.TavilySearchClient, 'post', {'results': [{'url': 'https://hotel.es/a'}]})
 
         assert result['search_results'] == [
             {'url': 'https://hotel.es/a', 'title': '', 'snippet': '', 'score': 0, 'source': 'tavily'},
         ]
 
     def test_records_an_empty_answer_and_no_response_time_when_the_answer_omits_them(self):
-        result, _send = _search(TavilySearchClient, 'post', {'results': []})
+        result, _send = _search(search_clients.TavilySearchClient, 'post', {'results': []})
 
         assert (result['metadata']['answer'], result['metadata']['response_time']) == ('', None)
 
 
-@pytest.mark.parametrize('client_class', [BaseSearchClient, _HttpSearchClient])
+@pytest.mark.parametrize('client_class', [search_clients.BaseSearchClient, search_clients._HttpSearchClient])
 def test_a_client_without_its_provider_request_cannot_be_created(client_class: type):
     with pytest.raises(TypeError, match='abstract method'):
         client_class('key-1')
@@ -167,7 +159,7 @@ class TestExaResultShapes:
     def test_gives_each_hit_without_highlights_its_own_empty_list(self):
         answer = {'results': [{'url': 'https://hotel.es/a'}, {'url': 'https://hotel.es/b'}]}
 
-        result, _send = _search(ExaSearchClient, 'post', answer)
+        result, _send = _search(search_clients.ExaSearchClient, 'post', answer)
 
         first, second = (hit['highlights'] for hit in result['search_results'])
         assert (first, second, first is second) == ([], [], False)
@@ -177,11 +169,11 @@ class TestFirecrawlResultShapes:
     def test_reads_a_bare_data_list(self):
         answer = {'data': [{**_HIT, 'description': 'Frente a la playa'}]}
 
-        result, _send = _search(FirecrawlSearchClient, 'post', answer)
+        result, _send = _search(search_clients.FirecrawlSearchClient, 'post', answer)
 
         assert result['citations'] == ['https://hotel.es/riazor']
 
     def test_treats_data_of_another_type_as_no_hits(self):
-        result, _send = _search(FirecrawlSearchClient, 'post', {'data': 'unexpected'})
+        result, _send = _search(search_clients.FirecrawlSearchClient, 'post', {'data': 'unexpected'})
 
         assert (result['status'], result['citations']) == ('success', [])

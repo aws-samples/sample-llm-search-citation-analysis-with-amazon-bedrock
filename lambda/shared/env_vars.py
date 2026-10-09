@@ -21,17 +21,20 @@ from typing import Literal, overload
 
 @overload
 def resolve_table_env(canonical_name: str, *,
-                      required: Literal[True] = True) -> str: ...
+                      required: Literal[True] = True) -> str:
+    """Required: the variable's value (``KeyError`` when unset)."""
 
 
 @overload
 def resolve_table_env(canonical_name: str, *,
-                      required: Literal[False], default: str) -> str: ...
+                      required: Literal[False], default: str) -> str:
+    """Optional with a default: the value, else ``default``."""
 
 
 @overload
 def resolve_table_env(canonical_name: str, *,
-                      required: Literal[False], default: None = None) -> str | None: ...
+                      required: Literal[False], default: None = None) -> str | None:
+    """Optional without a default: the value, else ``None``."""
 
 
 def resolve_table_env(canonical_name: str, *,

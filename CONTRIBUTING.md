@@ -54,7 +54,11 @@ bash lambda/crawler-layer/build-layer.sh
 
 - **`npm run validate`** from the repo root runs every gate and stops at the first failure: ESLint, `tsc`, the CDK
   Vitest suite, jscpd, knip, the contract checks (`npm run contracts`), the dashboard gate (`web`: `tsc --noEmit`,
-  Vitest, knip) and the Python gate (`scripts/validate-python.sh`: ruff, pyright, vulture, jscpd, pytest). The
+  Vitest, knip) and the Python gate (`scripts/validate-python.sh`: ruff, pyright, vulture, jscpd, pytest), then
+  **CodeQL** (`npm run quality:codeql`, `scripts/codeql-local.sh`): the same code-quality queries the
+  github-code-quality review comments from, over Python and JavaScript/TypeScript, failing on any result. Install
+  the CLI once with `gh extension install github/gh-codeql` (free for open source; the run is skipped with a notice
+  when no CLI is installed, `CODEQL_REQUIRED=1` makes that a failure). The
   step-by-step table and the limits each gate enforces are in [README.md, "Validation"](README.md#validation).
   Fix findings; never raise a limit or suppress a finding inline.
 - **Pre-push hook.** `npm install` (its `prepare` script) or `npm run hooks:install` links `.githooks/pre-push` into

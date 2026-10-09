@@ -9,10 +9,6 @@ import boto3
 sys.path.insert(0, '/opt/python')
 
 from shared.api_response import error_response, success_response, validation_error
-
-# Redundant-alias form: re-exported for this module's property tests, which
-# derive their over-length fixtures from `promotion_handler.MAX_KEYWORD_LENGTH`.
-from shared.constants import MAX_KEYWORD_LENGTH as MAX_KEYWORD_LENGTH
 from shared.decorators import api_handler, parse_json_body, route_handler
 from shared.dynamodb_batch import collect_all_items
 from shared.env_vars import resolve_table_env
@@ -98,12 +94,9 @@ def _promote_keywords(event, context, body):
         return validation_error(market_error, event, 'market_id')
 
     try:
-        if group_ids:
-            existing_items = load_keyword_items_by_identity(keywords_table)
-            existing_keys = set(existing_items)
-        else:
-            existing_items = {}
-            existing_keys = load_keyword_identities(keywords_table)
+        # Only a grouped promotion needs the stored rows (to group the duplicates).
+        existing_items = load_keyword_items_by_identity(keywords_table) if group_ids else None
+        existing_keys = set(existing_items) if existing_items is not None else load_keyword_identities(keywords_table)
     except Exception as error:
         logger.exception('Failed to read existing keywords for promotion')
         return error_response(error, event)
@@ -118,7 +111,7 @@ def _promote_keywords(event, context, body):
         grouped_keywords.extend(
             group_existing_keywords(
                 keywords_table,
-                existing_items,
+                existing_items or {},
                 skipped,
                 requested_group_ids,
             )

@@ -85,3 +85,5 @@ todo.md
 .mutmut-cache
 web/.stryker-tmp/
 web/reports/
+# Local CodeQL databases and SARIF (scripts/codeql-local.sh)
+.codeql-local/
