@@ -41,6 +41,13 @@ process.
   Gaps show a *Video* badge, the Citations tab a type filter, a Type column in the export and, in the detail view, the video's title, channel and
   thumbnail. The crawler reads videos from YouTube oEmbed (pinned host, no redirects, 64 KB cap) instead of an
   AgentCore browser session.
+- **Themed MCP sign-in**: the Cognito Managed Login pages an MCP client opens (`/oauth2/authorize`, the Allow/Cancel
+  consent screen, the token endpoint's error pages) now carry the dashboard palette instead of Cognito's default —
+  gray-900 header, white / gray-800 surfaces, blue-600 links, 8 px control radius, and the sidebar's bar-chart logo
+  (`lib/constructs/managed-login-branding.ts`). A deploy-time custom resource seeds Cognito's default branding,
+  describes it merged, patches only the known colour / radius / logo keys, and calls `UpdateManagedLoginBranding`;
+  the MCP server depends on it so the OAuth endpoints are not advertised before their login pages are themed. The
+  consent copy and layout remain Cognito's own (branding is colours, radius and logo only).
 
 ### Changed
 
